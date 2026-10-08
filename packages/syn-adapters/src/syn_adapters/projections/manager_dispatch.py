@@ -5,12 +5,14 @@ Extracted from manager.py to reduce module complexity.
 
 from __future__ import annotations
 
+from contextlib import ExitStack
 from typing import TYPE_CHECKING
 
 from syn_adapters.projections.manager_event_map import (
     EventProvenance,
     dispatch_to_handlers,
 )
+from syn_domain.contexts.orchestration._shared.recorded_time import RecordedTimeProjection
 
 if TYPE_CHECKING:
     from event_sourcing import DomainEvent, EventEnvelope
@@ -54,7 +56,13 @@ async def process_event_envelope(
     else:
         event_data = vars(event) if hasattr(event, "__dict__") else {}
 
-    # Dispatch to handlers
-    await dispatch_to_handlers(mgr, provenance.event_type, event_data)
+    # Dispatch to handlers. Projections that date their rows by the envelope
+    # (#959) need it in scope: this path hands them the payload only.
+    mgr._ensure_initialized()  # pyright: ignore[reportPrivateUsage]
+    with ExitStack() as recording:
+        for projection in mgr._projections.values():  # pyright: ignore[reportPrivateUsage]
+            if isinstance(projection, RecordedTimeProjection):
+                recording.enter_context(projection.recording(envelope))
+        await dispatch_to_handlers(mgr, provenance.event_type, event_data)
 
     return provenance
