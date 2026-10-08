@@ -33,6 +33,8 @@ from syn_domain.contexts.orchestration._shared.workflow_definition import (
     is_phase_id,
 )
 from syn_domain.contexts.orchestration._shared.yaml_to_command import build_command_from_definition
+from syn_shared.agents import AgentProvider
+from syn_shared.tools import ToolName
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -342,6 +344,37 @@ def grant_violations(path: Path) -> list[str]:
     return violations
 
 
+def skill_grant_notices(path: Path) -> list[str]:
+    """Phases whose explicit grant the platform will widen with `Skill` (#1269).
+
+    Declaring a skill asks for it to be usable, so `_grant_skill_invocation`
+    appends `Skill` at execution to a claude phase that scopes its tools and
+    declares skills, workflow-scope or its own. Not a failure: the grant is
+    deliberate. But the YAML then lists fewer tools than the agent holds, and
+    the author reading it should be told rather than left to find out. Codex
+    has no Skill tool and refuses a tool list, so it never appears here: its
+    skills land as context only.
+    """
+    definition = WorkflowDefinition.from_file(path)
+    notices: list[str] = []
+    for phase in definition.phases:
+        provider = phase.agent.provider if phase.agent else None
+        if provider == AgentProvider.CODEX or not phase.allowed_tools:
+            continue
+        if ToolName.SKILL in phase.allowed_tools:
+            continue
+        declared = [*definition.skills, *phase.skills]
+        if not declared:
+            continue
+        notices.append(
+            f"phase '{phase.id}' declares {len(declared)} skill(s) and lists "
+            f"allowed_tools [{', '.join(phase.allowed_tools)}] without Skill: "
+            f"the platform adds Skill automatically at execution, so the agent "
+            f"can invoke them."
+        )
+    return notices
+
+
 #: What ends an `artifacts/input/...` reference written in prose.
 #:
 #: Prompts are markdown, so a reference is nearly always fenced in backticks
@@ -542,6 +575,7 @@ def main() -> int:
 
     gates = declared_gates(_ROOT / "AGENTS.md")
     failures: list[tuple[Path, str]] = []
+    notices: list[tuple[Path, str]] = []
     checked = 0
     for path in files:
         try:
@@ -574,6 +608,10 @@ def main() -> int:
         failures.extend((path, why) for why in stale_phase_references(path))
         if path.parent.relative_to(_ROOT).as_posix() not in _GATES_STILL_NAMED:
             failures.extend((path, why) for why in hardcoded_gates(path, gates))
+        notices.extend((path, note) for note in skill_grant_notices(path))
+
+    for path, note in notices:
+        print(f"  NOTE {path.relative_to(_ROOT)}\n       {note}")
 
     for path, why in failures:
         print(f"  FAIL {path.relative_to(_ROOT)}\n       {why}")
