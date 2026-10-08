@@ -203,6 +203,46 @@ async def _pin_started_at(execution_id: str, started_at: str) -> None:
     await store.save("workflow_executions", execution_id, {**row, "started_at": started_at})
 
 
+async def _complete_with_an_unmeasured_phase(execution_id: str, *, verify_seconds: float) -> None:
+    """Rewrite the run's DETAIL record as a completed execution with two phases:
+    ``verify`` took ``verify_seconds``; ``review`` finished with no recorded
+    duration and no timestamps, so nobody knows how long it took (#890).
+
+    Stored exactly as the projection stores phases, so the real ``get_detail``
+    resolves the durations and counts the unknown phase itself.
+    """
+    from syn_adapters.projections.manager import get_projection_manager
+
+    store = get_projection_manager().store
+    row = await store.get("workflow_execution_details", execution_id)
+    assert row is not None
+    [verify] = row["phases"]
+    phases = [
+        {
+            **verify,
+            "status": "completed",
+            "started_at": "2026-10-01T00:00:00+00:00",
+            "completed_at": "2026-10-01T00:05:00+00:00",
+            "duration_seconds": verify_seconds,
+        },
+        {
+            **verify,
+            "workflow_phase_id": "review",
+            "name": "Review",
+            "status": "completed",
+            "session_id": None,
+            "started_at": None,
+            "completed_at": None,
+            "duration_seconds": None,
+        },
+    ]
+    await store.save(
+        "workflow_execution_details",
+        execution_id,
+        {**row, "status": "completed", "phases": phases},
+    )
+
+
 async def _score(client: AsyncClient, eval_id: str, execution_id: str, verdict: str):
     return await client.post(
         f"/evals/{eval_id}/runs/{execution_id}/score",
@@ -431,37 +471,29 @@ class TestSummary:
         assert shown["stats"]["cost_per_pass_display"] == "$3.38"
 
     async def test_a_lower_bound_is_never_shown_as_a_whole_cost_or_duration(
-        self, client: AsyncClient, lane2: _Lane2, monkeypatch: pytest.MonkeyPatch
+        self, client: AsyncClient, lane2: _Lane2
     ) -> None:
         """r1 (PASS, $1.00) had an unpriced observation and a phase of unknown
         duration, so both its figures are lower bounds (#890). They must say so
         on the run, stay out of the medians, and make cost per PASS partial."""
-        from syn_api.routes import eval_runs
-        from syn_api.types import Ok
-
         lane2.unpriced["r1"] = 1
-        real_get_detail = eval_runs.get_detail
-
-        async def r1_missing_a_phase_duration(execution_id: str):
-            detail = await real_get_detail(execution_id)
-            if execution_id == "r1" and isinstance(detail, Ok):
-                return Ok(detail.value.model_copy(update={"unknown_duration_phase_count": 1}))
-            return detail
-
-        monkeypatch.setattr(eval_runs, "get_detail", r1_missing_a_phase_duration)
         eval_id = await _two_by_two(client, lane2)
+        await _complete_with_an_unmeasured_phase("r1", verify_seconds=300.0)
 
         runs = (await client.get(f"/evals/{eval_id}/runs")).json()["items"]
         shown = (await client.get(f"/evals/{eval_id}")).json()
 
         r1 = next(r for r in runs if r["execution_id"] == "r1")
         assert r1["total_cost_display"] == ">=$1.00 (partial)"
-        assert r1["duration_display"].startswith(">=")
+        # The real get_detail folded 300s known + one unmeasured phase.
+        assert r1["duration_seconds"] == 300.0
+        assert r1["duration_display"] == ">=5m (partial)"
         # The four complete costs 3.00, 0.50, 2.00, 0.25: median 1.25, not 1.00.
         assert Decimal(shown["stats"]["median_cost_usd"]) == Decimal("1.25")
         assert shown["stats"]["median_cost_display"] == "$1.25 (excl. 1 incomplete)"
         assert shown["stats"]["incomplete_duration_count"] == 1
-        assert shown["stats"]["median_duration_display"].endswith("(excl. 1 incomplete)")
+        # The other four are still running, so their live durations are the median.
+        assert shown["stats"]["median_duration_display"].endswith(" (excl. 1 incomplete)")
         assert shown["stats"]["cost_per_pass_display"] == ">=$3.38 (partial)"
         [v1_opus] = [
             v
@@ -472,6 +504,8 @@ class TestSummary:
         assert v1_opus["stats"]["median_cost_usd"] is None
         assert v1_opus["avg_cost_usd"] is None
         assert v1_opus["stats"]["cost_per_pass_display"] == ">=$1.00 (partial)"
+        assert v1_opus["stats"]["incomplete_duration_count"] == 1
+        assert v1_opus["stats"]["median_duration_seconds"] is None
 
 
 class TestScore:
