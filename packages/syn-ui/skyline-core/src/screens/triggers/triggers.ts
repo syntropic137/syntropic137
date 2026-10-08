@@ -66,21 +66,30 @@ export function triggerSummary(list: readonly TriggerLike[]): string {
  * plain `{field: value}` object (equality). Anything else is skipped.
  */
 export function normalizeConditions(raw: unknown): RuleCondition[] {
-  const fromList = (items: unknown[]): RuleCondition[] =>
-    items.flatMap((c) => {
-      if (!c || typeof c !== 'object') return []
-      const o = c as Record<string, unknown>
-      if (typeof o.field !== 'string') return []
-      const value = o.value === undefined || o.value === null ? null : typeof o.value === 'string' ? o.value : JSON.stringify(o.value)
-      return [{ field: o.field, operator: typeof o.operator === 'string' ? o.operator : 'eq', value }]
-    })
-  if (Array.isArray(raw)) return fromList(raw)
-  if (raw && typeof raw === 'object') {
-    const o = raw as Record<string, unknown>
-    if (Array.isArray(o.conditions)) return fromList(o.conditions)
-    return Object.entries(o).map(([field, v]) => ({ field, operator: 'eq', value: typeof v === 'string' ? v : JSON.stringify(v) }))
-  }
-  return []
+  if (Array.isArray(raw)) return conditionsFromList(raw)
+  if (!raw || typeof raw !== 'object') return []
+  const o = raw as Record<string, unknown>
+  if (Array.isArray(o.conditions)) return conditionsFromList(o.conditions)
+  return Object.entries(o).map(([field, v]) => ({ field, operator: 'eq', value: typeof v === 'string' ? v : JSON.stringify(v) }))
+}
+
+function conditionsFromList(items: unknown[]): RuleCondition[] {
+  return items.flatMap((c) => {
+    const condition = conditionFromItem(c)
+    return condition ? [condition] : []
+  })
+}
+
+function conditionFromItem(c: unknown): RuleCondition | undefined {
+  if (!c || typeof c !== 'object') return undefined
+  const o = c as Record<string, unknown>
+  if (typeof o.field !== 'string') return undefined
+  return { field: o.field, operator: typeof o.operator === 'string' ? o.operator : 'eq', value: conditionValue(o.value) }
+}
+
+function conditionValue(v: unknown): string | null {
+  if (v === undefined || v === null) return null
+  return typeof v === 'string' ? v : JSON.stringify(v)
 }
 
 const CAP_KEYS: { keys: string[]; label: string; unit?: string }[] = [

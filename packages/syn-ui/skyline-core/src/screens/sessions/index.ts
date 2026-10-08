@@ -93,76 +93,139 @@ export function sessionOperations(ops: readonly SessionOperationInput[], options
   const sorted = [...ops].sort((a, b) => (Date.parse(a.timestamp ?? '') || 0) - (Date.parse(b.timestamp ?? '') || 0))
   const rows: SessionOperation[] = []
   const openByUse = new Map<string, SessionOperation>()
-  const clock = (t: string | null | undefined) => operationClock(t, options)
+  const clock: OperationClock = (t) => operationClock(t, options)
 
   for (const op of sorted) {
-    const type = op.operation_type
-    if (SKIP_TYPES.has(type)) continue
-
-    if (op.tool_name && (START_TYPES.has(type) || FINISH_TYPES.has(type) || type.startsWith('tool'))) {
-      const existing = op.tool_use_id ? openByUse.get(op.tool_use_id) : undefined
-      const failed = !op.success || type === 'tool_blocked' || !!op.error_message
-      const output = op.tool_output ?? op.error_message ?? null
-      if (existing) {
-        existing.status = failed ? 'failed' : 'ok'
-        if (output) existing.output = output
-        const d = durationText(op.duration_seconds)
-        if (d) existing.duration = d
-        if (!existing.input) existing.input = summarizeToolInput(op.tool_input)
-        markDelegation(existing)
-        if (op.tool_use_id) openByUse.delete(op.tool_use_id)
-        continue
-      }
-      const row: SessionOperation = {
-        id: op.operation_id,
-        time: clock(op.timestamp),
-        tool: op.tool_name,
-        kind: op.tool_name.toLowerCase(),
-        isTool: true,
-        input: summarizeToolInput(op.tool_input),
-        output,
-        status: START_TYPES.has(type) ? 'running' : failed ? 'failed' : 'ok',
-      }
-      const d = durationText(op.duration_seconds)
-      if (d) row.duration = d
-      markDelegation(row)
-      rows.push(row)
-      if (START_TYPES.has(type) && op.tool_use_id) openByUse.set(op.tool_use_id, row)
-      continue
-    }
-
-    if (type.startsWith('git') || op.git_sha) {
-      const row: SessionOperation = {
-        id: op.operation_id,
-        time: clock(op.timestamp),
-        tool: type === 'git_push' ? 'Push' : type === 'git_commit' ? 'Commit' : 'Git',
-        kind: 'git',
-        isTool: false,
-        input: [op.git_sha ? op.git_sha.slice(0, 7) : null, op.git_branch, op.git_repo].filter(Boolean).join(' · ') || type,
-        output: op.git_message ?? null,
-        status: op.success ? 'quiet' : 'failed',
-      }
-      const url = commitUrl(op.git_repo, op.git_sha)
-      if (url) row.commitUrl = url
-      rows.push(row)
-      continue
-    }
-
-    if (op.thinking_content) {
-      rows.push({ id: op.operation_id, time: clock(op.timestamp), tool: 'Thinking', kind: 'thinking', isTool: false, input: firstLine(op.thinking_content), output: op.thinking_content, status: 'quiet' })
-      continue
-    }
-    if (op.message_content) {
-      const role = op.message_role === 'user' ? 'Prompt' : op.message_role === 'assistant' ? 'Reply' : 'Message'
-      rows.push({ id: op.operation_id, time: clock(op.timestamp), tool: role, kind: 'message', isTool: false, input: firstLine(op.message_content), output: op.message_content, status: 'quiet' })
-      continue
-    }
-    if (type === 'error' || !op.success) {
-      rows.push({ id: op.operation_id, time: clock(op.timestamp), tool: 'Error', kind: 'error', isTool: false, input: op.error_message ?? type, output: null, status: 'failed' })
-    }
+    if (SKIP_TYPES.has(op.operation_type)) continue
+    const row = isToolEvent(op) ? applyToolEvent(op, openByUse, clock) : quietRow(op, clock)
+    if (row) rows.push(row)
   }
   return rows
 }
+
+type OperationClock = (t: string | null | undefined) => string
+type ToolEvent = SessionOperationInput & { tool_name: string }
+
+function isToolEvent(op: SessionOperationInput): op is ToolEvent {
+  const type = op.operation_type
+  return !!op.tool_name && (START_TYPES.has(type) || FINISH_TYPES.has(type) || type.startsWith('tool'))
+}
+
+function toolFailed(op: SessionOperationInput): boolean {
+  return !op.success || op.operation_type === 'tool_blocked' || !!op.error_message
+}
+
+function toolOutput(op: SessionOperationInput): string | null {
+  return op.tool_output ?? op.error_message ?? null
+}
+
+/** Merges a finish into its open start (returns undefined), or returns a new row. */
+function applyToolEvent(op: ToolEvent, openByUse: Map<string, SessionOperation>, clock: OperationClock): SessionOperation | undefined {
+  const useId = op.tool_use_id
+  const existing = useId ? openByUse.get(useId) : undefined
+  if (useId && existing) {
+    finishToolRow(existing, op)
+    openByUse.delete(useId)
+    return undefined
+  }
+  const row = startToolRow(op, clock)
+  if (START_TYPES.has(op.operation_type) && useId) openByUse.set(useId, row)
+  return row
+}
+
+function finishToolRow(row: SessionOperation, op: SessionOperationInput): void {
+  const output = toolOutput(op)
+  row.status = toolFailed(op) ? 'failed' : 'ok'
+  if (output) row.output = output
+  const d = durationText(op.duration_seconds)
+  if (d) row.duration = d
+  if (!row.input) row.input = summarizeToolInput(op.tool_input)
+  markDelegation(row)
+}
+
+function toolStartStatus(op: SessionOperationInput): OperationStatus {
+  if (START_TYPES.has(op.operation_type)) return 'running'
+  return toolFailed(op) ? 'failed' : 'ok'
+}
+
+function startToolRow(op: ToolEvent, clock: OperationClock): SessionOperation {
+  const row: SessionOperation = {
+    id: op.operation_id,
+    time: clock(op.timestamp),
+    tool: op.tool_name,
+    kind: op.tool_name.toLowerCase(),
+    isTool: true,
+    input: summarizeToolInput(op.tool_input),
+    output: toolOutput(op),
+    status: toolStartStatus(op),
+  }
+  const d = durationText(op.duration_seconds)
+  if (d) row.duration = d
+  markDelegation(row)
+  return row
+}
+
+type QuietRowBuilder = (op: SessionOperationInput, clock: OperationClock) => SessionOperation | undefined
+
+/** Non-tool rows, first match wins: git, thinking, message, error. */
+function quietRow(op: SessionOperationInput, clock: OperationClock): SessionOperation | undefined {
+  for (const build of QUIET_ROW_BUILDERS) {
+    const row = build(op, clock)
+    if (row) return row
+  }
+  return undefined
+}
+
+const GIT_TOOL = new Map([
+  ['git_push', 'Push'],
+  ['git_commit', 'Commit'],
+])
+
+function gitInput(op: SessionOperationInput): string {
+  const sha = op.git_sha ? op.git_sha.slice(0, 7) : null
+  return [sha, op.git_branch, op.git_repo].filter(Boolean).join(' · ') || op.operation_type
+}
+
+const gitRow: QuietRowBuilder = (op, clock) => {
+  const type = op.operation_type
+  if (!type.startsWith('git') && !op.git_sha) return undefined
+  const row: SessionOperation = {
+    id: op.operation_id,
+    time: clock(op.timestamp),
+    tool: GIT_TOOL.get(type) ?? 'Git',
+    kind: 'git',
+    isTool: false,
+    input: gitInput(op),
+    output: op.git_message ?? null,
+    status: op.success ? 'quiet' : 'failed',
+  }
+  const url = commitUrl(op.git_repo, op.git_sha)
+  if (url) row.commitUrl = url
+  return row
+}
+
+const thinkingRow: QuietRowBuilder = (op, clock) => {
+  if (!op.thinking_content) return undefined
+  return { id: op.operation_id, time: clock(op.timestamp), tool: 'Thinking', kind: 'thinking', isTool: false, input: firstLine(op.thinking_content), output: op.thinking_content, status: 'quiet' }
+}
+
+const MESSAGE_ROLE = new Map([
+  ['user', 'Prompt'],
+  ['assistant', 'Reply'],
+])
+
+const messageRow: QuietRowBuilder = (op, clock) => {
+  if (!op.message_content) return undefined
+  const role = MESSAGE_ROLE.get(op.message_role ?? '') ?? 'Message'
+  return { id: op.operation_id, time: clock(op.timestamp), tool: role, kind: 'message', isTool: false, input: firstLine(op.message_content), output: op.message_content, status: 'quiet' }
+}
+
+const errorRow: QuietRowBuilder = (op, clock) => {
+  if (op.operation_type !== 'error' && op.success) return undefined
+  return { id: op.operation_id, time: clock(op.timestamp), tool: 'Error', kind: 'error', isTool: false, input: op.error_message ?? op.operation_type, output: null, status: 'failed' }
+}
+
+const QUIET_ROW_BUILDERS: readonly QuietRowBuilder[] = [gitRow, thinkingRow, messageRow, errorRow]
 
 /** "1:32:22 PM" (Session board); the phone drops the meridiem with `compact`. */
 export function operationClock(value: string | null | undefined, options: { timeZone?: string; compact?: boolean } = {}): string {

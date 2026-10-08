@@ -50,42 +50,52 @@ const split = (fullName: string) => {
 export function repoRows(repos: readonly RegisteredRepo[], systems: readonly SystemRef[], access: AppReach): RepoRow[] {
   const systemNames = new Map(systems.map((s) => [s.system_id, s.name]))
   const app = new Map(access.repos.map((r) => [r.fullName.toLowerCase(), r.isPrivate ? ('private' as const) : ('public' as const)]))
-  const rows: RepoRow[] = []
-  const registeredNames = new Set<string>()
-  for (const repo of repos) {
-    const fullName = repo.full_name || repo.repo_id
-    const provider = (repo.provider || GITHUB).toLowerCase()
-    const appPrivacy = provider === GITHUB ? app.get(fullName.toLowerCase()) : undefined
-    if (provider === GITHUB) registeredNames.add(fullName.toLowerCase())
-    rows.push({
-      key: repo.repo_id,
-      fullName,
-      ...split(fullName),
-      registered: true,
-      system: repo.system_id ? (systemNames.get(repo.system_id) ?? repo.system_id) : null,
-      attachment: appPrivacy ? 'attached' : provider !== GITHUB || access.complete ? 'not-attached' : 'unknown',
-      // Registration always sends is_private=false, so only a stored true is news.
-      privacy: appPrivacy ?? (repo.is_private ? 'private' : 'unknown'),
-      defaultBranch: repo.default_branch ?? null,
-      createdAt: repo.created_at ?? null,
-    })
-  }
-  for (const { fullName, isPrivate } of access.repos) {
-    const lower = fullName.toLowerCase()
-    if (registeredNames.has(lower)) continue
-    rows.push({
-      key: `@github-app|${lower}`,
-      fullName,
-      ...split(fullName),
-      registered: false,
-      system: null,
-      attachment: 'attached',
-      privacy: isPrivate ? 'private' : 'public',
-      defaultBranch: null,
-      createdAt: null,
-    })
+  const rows: RepoRow[] = repos.map((repo) => registeredRow(repo, systemNames, app, access.complete))
+  const registeredNames = new Set(repos.filter((repo) => repoProvider(repo) === GITHUB).map((repo) => repoFullName(repo).toLowerCase()))
+  for (const reach of access.repos) {
+    if (!registeredNames.has(reach.fullName.toLowerCase())) rows.push(appOnlyRow(reach))
   }
   return rows.sort((a, b) => a.fullName.localeCompare(b.fullName) || a.key.localeCompare(b.key))
+}
+
+const repoFullName = (repo: RegisteredRepo): string => repo.full_name || repo.repo_id
+const repoProvider = (repo: RegisteredRepo): string => (repo.provider || GITHUB).toLowerCase()
+
+function repoAttachment(appPrivacy: RepoPrivacy | undefined, provider: string, complete: boolean): RepoAttachment {
+  if (appPrivacy) return 'attached'
+  return provider !== GITHUB || complete ? 'not-attached' : 'unknown'
+}
+
+function registeredRow(repo: RegisteredRepo, systemNames: Map<string, string>, app: Map<string, 'private' | 'public'>, complete: boolean): RepoRow {
+  const fullName = repoFullName(repo)
+  const provider = repoProvider(repo)
+  const appPrivacy = provider === GITHUB ? app.get(fullName.toLowerCase()) : undefined
+  return {
+    key: repo.repo_id,
+    fullName,
+    ...split(fullName),
+    registered: true,
+    system: repo.system_id ? (systemNames.get(repo.system_id) ?? repo.system_id) : null,
+    attachment: repoAttachment(appPrivacy, provider, complete),
+    // Registration always sends is_private=false, so only a stored true is news.
+    privacy: appPrivacy ?? (repo.is_private ? 'private' : 'unknown'),
+    defaultBranch: repo.default_branch ?? null,
+    createdAt: repo.created_at ?? null,
+  }
+}
+
+function appOnlyRow({ fullName, isPrivate }: AppReach['repos'][number]): RepoRow {
+  return {
+    key: `@github-app|${fullName.toLowerCase()}`,
+    fullName,
+    ...split(fullName),
+    registered: false,
+    system: null,
+    attachment: 'attached',
+    privacy: isPrivate ? 'private' : 'public',
+    defaultBranch: null,
+    createdAt: null,
+  }
 }
 
 export interface RepoCounts {

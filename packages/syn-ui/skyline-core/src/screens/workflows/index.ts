@@ -216,44 +216,69 @@ export type PromptBlock =
  * argument slot, everything else paragraphs.
  */
 export function parsePrompt(template: string | null | undefined): PromptBlock[] {
-  const blocks: PromptBlock[] = []
-  let para: string[] = []
-  let list: string[] | null = null
-  const flush = () => {
-    if (para.length) blocks.push({ kind: 'paragraph', text: para.join(' ') })
-    para = []
-    if (list) blocks.push({ kind: 'list', items: list })
-    list = null
-  }
-  for (const raw of (template ?? '').split('\n')) {
-    const line = raw.trim()
+  const acc = new PromptAccumulator()
+  for (const raw of (template ?? '').split('\n')) acc.line(raw.trim())
+  acc.flush()
+  return acc.blocks
+}
+
+const PROMPT_ARGUMENT = /^(\$[A-Z_]+|\{\{\s*[a-z_]+\s*\}\})$/
+const PROMPT_HEADING = /^#{1,6}\s+(.*)$/
+const PROMPT_LIST_ITEM = /^[-*]\s+(.*)$/
+
+/** parsePrompt's line state: the open paragraph and the open list. */
+class PromptAccumulator {
+  readonly blocks: PromptBlock[] = []
+  private para: string[] = []
+  private list: string[] | null = null
+
+  line(line: string): void {
     if (!line) {
-      flush()
-      continue
+      this.flush()
+      return
     }
-    const arg = /^(\$[A-Z_]+|\{\{\s*[a-z_]+\s*\}\})$/.exec(line)
-    const h = /^#{1,6}\s+(.*)$/.exec(line)
-    const li = /^[-*]\s+(.*)$/.exec(line)
+    const arg = PROMPT_ARGUMENT.exec(line)
     if (arg) {
-      flush()
-      blocks.push({ kind: 'argument', name: arg[1]!.replace(/[{}\s]/g, '') })
-    } else if (h) {
-      flush()
-      blocks.push({ kind: 'heading', text: h[1]! })
-    } else if (li) {
-      if (para.length) {
-        blocks.push({ kind: 'paragraph', text: para.join(' ') })
-        para = []
-      }
-      ;(list ??= []).push(li[1]!)
-    } else {
-      if (list) {
-        blocks.push({ kind: 'list', items: list })
-        list = null
-      }
-      para.push(line)
+      this.block({ kind: 'argument', name: arg[1]!.replace(/[{}\s]/g, '') })
+      return
     }
+    const h = PROMPT_HEADING.exec(line)
+    if (h) {
+      this.block({ kind: 'heading', text: h[1]! })
+      return
+    }
+    const li = PROMPT_LIST_ITEM.exec(line)
+    if (li) this.listItem(li[1]!)
+    else this.paragraphLine(line)
   }
-  flush()
-  return blocks
+
+  flush(): void {
+    this.flushParagraph()
+    this.flushList()
+  }
+
+  private block(b: PromptBlock): void {
+    this.flush()
+    this.blocks.push(b)
+  }
+
+  private flushParagraph(): void {
+    if (this.para.length) this.blocks.push({ kind: 'paragraph', text: this.para.join(' ') })
+    this.para = []
+  }
+
+  private flushList(): void {
+    if (this.list) this.blocks.push({ kind: 'list', items: this.list })
+    this.list = null
+  }
+
+  private listItem(text: string): void {
+    this.flushParagraph()
+    ;(this.list ??= []).push(text)
+  }
+
+  private paragraphLine(line: string): void {
+    this.flushList()
+    this.para.push(line)
+  }
 }

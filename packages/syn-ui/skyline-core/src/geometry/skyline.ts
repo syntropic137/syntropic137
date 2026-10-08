@@ -209,70 +209,26 @@ function sessionWord(n: number): string {
 
 export function layoutSkyline(input: SkylineLayoutInput): SkylineLayout {
   const dims = input.dims ?? SKYLINE_YEAR
-  const { week: A, bar: W, rowDx, rowDy, depthX: EX, depthY: EY, originX, groundY } = dims
-  const byDate = new Map<string, SkylineDay>()
-  let maxSeen = 0
-  for (const d of input.days) {
-    if (d.sessions > 0) {
-      byDate.set(d.date.slice(0, 10), d)
-      maxSeen = Math.max(maxSeen, d.sessions)
-    }
-  }
+  const { byDate, maxSeen } = activeDays(input.days)
   const maxSessions = input.maxSessions ?? maxSeen
 
   const start = dayMs(input.range.start)
   const end = dayMs(input.range.end)
-  const today = dayMs(input.today)
   const grid = dayMs(weekStart(input.range.start))
-  const rows: { front: string[]; side: string[]; top: string[] }[] = Array.from({ length: 7 }, () => ({ front: [], side: [], top: [] }))
-  const floor: string[] = []
-  const future: string[] = []
-  const bars: SkylineBar[] = []
-  const months: SkylineLayout['months'] = []
+  const acc: SkylineAccumulator = {
+    rows: Array.from({ length: 7 }, () => ({ front: [], side: [], top: [] })),
+    floor: [],
+    future: [],
+    bars: [],
+    months: [],
+  }
 
   if (Number.isFinite(start) && Number.isFinite(end) && end >= start) {
+    const ctx: SkylinePlacement = { dims, byDate, maxSessions, today: dayMs(input.today) }
     const span = Math.round((end - grid) / DAY_MS)
     for (let idx = 0; idx <= span; idx++) {
       const t = grid + idx * DAY_MS
-      if (t < start) continue
-      const w = Math.floor(idx / 7)
-      const dow = idx % 7
-      const j = 6 - dow
-      const X = originX + w * A + j * rowDx
-      const Y = groundY - j * rowDy
-      const key = dayFromMs(t)
-      const date = new Date(t)
-      if (date.getUTCDate() === 1) months.push({ x: round2(originX + w * A), y: dims.labelY, label: MONTHS[date.getUTCMonth()] ?? '' })
-      const tile = { x: X, y: Y, width: W, dx: EX, dy: EY }
-      const day = byDate.get(key)
-      if (t > today) {
-        future.push(obliqueFloor(tile))
-      } else if (!day) {
-        floor.push(obliqueFloor(tile))
-      } else {
-        const h = sqrtHeight(day.sessions, maxSessions, dims.maxHeight, dims.minHeight)
-        const paths = obliqueBox({ ...tile, height: h })
-        rows[j]!.front.push(paths.front)
-        rows[j]!.side.push(paths.side)
-        rows[j]!.top.push(paths.top)
-        const pad = dims.hitPad
-        const y1 = Y + pad
-        let y0 = Y - h - EY - pad
-        if (y1 - y0 < dims.hitMin) y0 = y1 - dims.hitMin
-        bars.push({
-          date: key,
-          day,
-          index: bars.length,
-          row: j,
-          x: X,
-          y: Y,
-          height: h,
-          paths,
-          anchor: { x: round2(X + (W + EX) / 2), y: round2(Y - h - EY / 2) },
-          hit: { x: round2(X - pad), y: round2(y0), width: round2(W + EX + pad * 2), height: round2(y1 - y0), z: 10 - j },
-          label: `${dayLabel(key)}: ${day.sessions} ${sessionWord(day.sessions)}`,
-        })
-      }
+      if (t >= start) placeSkylineDay(acc, ctx, idx, t)
     }
   }
 
@@ -280,13 +236,83 @@ export function layoutSkyline(input: SkylineLayoutInput): SkylineLayout {
   return {
     dims,
     viewBox: `${vb.x} ${vb.y} ${vb.width} ${vb.height}`,
-    floor: floor.join(''),
-    future: future.join(''),
-    rows: rows.map((r) => ({ front: r.front.join(''), side: r.side.join(''), top: r.top.join('') })),
-    bars,
-    months,
+    floor: acc.floor.join(''),
+    future: acc.future.join(''),
+    rows: acc.rows.map((r) => ({ front: r.front.join(''), side: r.side.join(''), top: r.top.join('') })),
+    bars: acc.bars,
+    months: acc.months,
     maxSessions,
   }
+}
+
+interface SkylineAccumulator {
+  rows: { front: string[]; side: string[]; top: string[] }[]
+  floor: string[]
+  future: string[]
+  bars: SkylineBar[]
+  months: SkylineLayout['months']
+}
+
+interface SkylinePlacement {
+  dims: SkylineDims
+  byDate: Map<string, SkylineDay>
+  maxSessions: number
+  today: number
+}
+
+/** Days with sessions by date, and the busiest count among them. */
+function activeDays(days: readonly SkylineDay[]): { byDate: Map<string, SkylineDay>; maxSeen: number } {
+  const byDate = new Map<string, SkylineDay>()
+  let maxSeen = 0
+  for (const d of days) {
+    if (d.sessions <= 0) continue
+    byDate.set(d.date.slice(0, 10), d)
+    maxSeen = Math.max(maxSeen, d.sessions)
+  }
+  return { byDate, maxSeen }
+}
+
+/** One grid cell `idx` days after the grid's first Sunday: month tick, then a future tile, floor tile or bar. */
+function placeSkylineDay(acc: SkylineAccumulator, ctx: SkylinePlacement, idx: number, t: number): void {
+  const { week: A, bar: W, rowDx, rowDy, depthX: EX, depthY: EY, originX, groundY } = ctx.dims
+  const w = Math.floor(idx / 7)
+  const j = 6 - (idx % 7)
+  const tile = { x: originX + w * A + j * rowDx, y: groundY - j * rowDy, width: W, dx: EX, dy: EY }
+  const date = new Date(t)
+  if (date.getUTCDate() === 1) acc.months.push({ x: round2(originX + w * A), y: ctx.dims.labelY, label: MONTHS[date.getUTCMonth()] ?? '' })
+  const key = dayFromMs(t)
+  const day = ctx.byDate.get(key)
+  if (t > ctx.today) acc.future.push(obliqueFloor(tile))
+  else if (!day) acc.floor.push(obliqueFloor(tile))
+  else addSkylineBar(acc, ctx, { key, day, row: j, tile })
+}
+
+function addSkylineBar(acc: SkylineAccumulator, ctx: SkylinePlacement, at: { key: string; day: SkylineDay; row: number; tile: { x: number; y: number; width: number; dx: number; dy: number } }): void {
+  const { dims } = ctx
+  const { key, day, row: j, tile } = at
+  const { x: X, y: Y, width: W, dx: EX, dy: EY } = tile
+  const h = sqrtHeight(day.sessions, ctx.maxSessions, dims.maxHeight, dims.minHeight)
+  const paths = obliqueBox({ ...tile, height: h })
+  acc.rows[j]!.front.push(paths.front)
+  acc.rows[j]!.side.push(paths.side)
+  acc.rows[j]!.top.push(paths.top)
+  const pad = dims.hitPad
+  const y1 = Y + pad
+  let y0 = Y - h - EY - pad
+  if (y1 - y0 < dims.hitMin) y0 = y1 - dims.hitMin
+  acc.bars.push({
+    date: key,
+    day,
+    index: acc.bars.length,
+    row: j,
+    x: X,
+    y: Y,
+    height: h,
+    paths,
+    anchor: { x: round2(X + (W + EX) / 2), y: round2(Y - h - EY / 2) },
+    hit: { x: round2(X - pad), y: round2(y0), width: round2(W + EX + pad * 2), height: round2(y1 - y0), z: 10 - j },
+    label: `${dayLabel(key)}: ${day.sessions} ${sessionWord(day.sessions)}`,
+  })
 }
 
 /**

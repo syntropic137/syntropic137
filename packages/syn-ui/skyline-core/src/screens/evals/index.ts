@@ -88,48 +88,67 @@ export interface BoardOptions {
  * their earliest run so the column order is stable.
  */
 export function buildEvalBoard(evals: readonly EvalLike[], options: BoardOptions = {}): EvalBoardModel {
-  const cases: VerdictCase[] = []
-  const verifiers: Verifier[] = []
-  const cells: VerdictMatrix = {}
-  const evalIds: Record<string, string> = {}
+  const board: EvalBoardModel = { cases: [], verifiers: [], cells: {}, evalIds: {}, suite: null }
   const winner: Record<string, number> = {}
   const byCase = new Map<string, EvalLike[]>()
   const suites = new Set<string>()
 
   for (const e of evals) {
     const caseId = tagValue(e.tags, 'case')
-    const wf = tagValue(e.tags, 'workflow') ?? e.starting_workflow_id ?? null
+    const wf = evalWorkflow(e)
     if (!caseId || !wf) continue
-    const suite = suiteOf(e.name)
-    suites.add(suite ?? '')
-    if (!byCase.has(caseId)) {
-      byCase.set(caseId, [])
-      cases.push({ id: caseId, name: caseId })
-    }
-    byCase.get(caseId)!.push(e)
-    const variant = e.variants?.find((v) => v.workflow_id === wf) ?? e.variants?.[0]
-    const model = variant?.models[0] ?? wf
-    if (!verifiers.some((v) => v.id === wf)) {
-      const tagged = tagValue(e.tags, 'agent')
-      const kind = tagged === 'claude' || tagged === 'codex' ? tagged : agentOfModel(model)
-      verifiers.push({ id: wf, agent: AGENT_NAME[kind], agentKind: kind, model, short: shortModel(model), workflow: wf })
-    }
-    const key = cellKey(caseId, wf)
-    const t = time(e.last_run_at) ?? 0
-    if (winner[key] !== undefined && winner[key]! > t) continue
-    winner[key] = t
-    evalIds[key] = e.eval_id
-    cells[key] = {
-      verdict: e.run_count > 0 ? normalizeVerdict(e.last_verdict) : 'unscored',
-      costUsd: toNum(variant?.avg_cost_usd),
-      runs: e.run_count,
-      evalHref: options.evalHref?.(e.eval_id),
-    }
+    suites.add(suiteOf(e.name) ?? '')
+    addToCase(board.cases, byCase, caseId, e)
+    const variant = evalVariant(e, wf)
+    addVerifier(board.verifiers, e, wf, variant?.models[0] ?? wf)
+    placeCell(board, winner, cellKey(caseId, wf), e, variant, options)
   }
 
-  if (options.caseSub) for (const c of cases) c.sub = options.caseSub(c.id, byCase.get(c.id) ?? [])
+  if (options.caseSub) for (const c of board.cases) c.sub = options.caseSub(c.id, byCase.get(c.id) ?? [])
   const only = suites.size === 1 ? [...suites][0] : ''
-  return { cases, verifiers, cells, evalIds, suite: only || null }
+  board.suite = only || null
+  return board
+}
+
+type EvalVariant = NonNullable<EvalLike['variants']>[number]
+
+function evalWorkflow(e: EvalLike): string | null {
+  return tagValue(e.tags, 'workflow') ?? e.starting_workflow_id ?? null
+}
+
+function evalVariant(e: EvalLike, wf: string): EvalVariant | undefined {
+  return e.variants?.find((v) => v.workflow_id === wf) ?? e.variants?.[0]
+}
+
+function addToCase(cases: VerdictCase[], byCase: Map<string, EvalLike[]>, caseId: string, e: EvalLike): void {
+  let list = byCase.get(caseId)
+  if (!list) {
+    list = []
+    byCase.set(caseId, list)
+    cases.push({ id: caseId, name: caseId })
+  }
+  list.push(e)
+}
+
+function addVerifier(verifiers: Verifier[], e: EvalLike, wf: string, model: string): void {
+  if (verifiers.some((v) => v.id === wf)) return
+  const tagged = tagValue(e.tags, 'agent')
+  const kind = tagged === 'claude' || tagged === 'codex' ? tagged : agentOfModel(model)
+  verifiers.push({ id: wf, agent: AGENT_NAME[kind], agentKind: kind, model, short: shortModel(model), workflow: wf })
+}
+
+/** The most recently run eval wins a cell. */
+function placeCell(board: EvalBoardModel, winner: Record<string, number>, key: string, e: EvalLike, variant: EvalVariant | undefined, options: BoardOptions): void {
+  const t = time(e.last_run_at) ?? 0
+  if (winner[key] !== undefined && winner[key]! > t) return
+  winner[key] = t
+  board.evalIds[key] = e.eval_id
+  board.cells[key] = {
+    verdict: e.run_count > 0 ? normalizeVerdict(e.last_verdict) : 'unscored',
+    costUsd: toNum(variant?.avg_cost_usd),
+    runs: e.run_count,
+    evalHref: options.evalHref?.(e.eval_id),
+  }
 }
 
 /** "verifier-seed-v1 v2: shared-esp-stream" -> "verifier-seed-v1 · v2". */
@@ -183,22 +202,13 @@ export function runModels(run: EvalRunLike): string[] {
  * sit in the middle.
  */
 export function runsTimeline(runs: readonly EvalRunLike[]): Timeline {
-  const times = runs.map((r) => time(r.started_at)).filter((t): t is number => t !== null)
-  const min = times.length ? Math.min(...times) : null
-  const max = times.length ? Math.max(...times) : null
-  const span = min !== null && max !== null ? max - min : 0
+  const { min, max } = timeBounds(runs)
+  const place = timelinePlacer(min, max)
   const lanes = new Map<string, TimelineLane>()
   for (const r of runs) {
     const models = runModels(r)
-    const wf = r.workflow_id ?? 'unknown workflow'
-    const key = `${wf}@${r.workflow_version ?? ''}|${models.join(',')}`
-    if (!lanes.has(key)) {
-      const version = r.workflow_version && r.workflow_version !== 'v1' ? ` ${r.workflow_version}` : ''
-      lanes.set(key, { key, label: [wf + version, models.join(', ')].filter(Boolean).join(' · '), points: [] })
-    }
-    const t = time(r.started_at)
-    const x = t === null || min === null || span === 0 ? 50 : 4 + ((t - min) / span) * 92
-    lanes.get(key)!.points.push({ executionId: r.execution_id, verdict: normalizeVerdict(r.verdict), x: Math.round(x * 10) / 10, startedAt: r.started_at ?? null })
+    const lane = timelineLane(lanes, r, models)
+    lane.points.push({ executionId: r.execution_id, verdict: normalizeVerdict(r.verdict), x: place(time(r.started_at)), startedAt: r.started_at ?? null })
   }
   for (const lane of lanes.values()) lane.points.sort((a, b) => a.x - b.x)
   return {
@@ -206,6 +216,33 @@ export function runsTimeline(runs: readonly EvalRunLike[]): Timeline {
     start: min === null ? null : new Date(min).toISOString(),
     end: max === null ? null : new Date(max).toISOString(),
   }
+}
+
+function timeBounds(runs: readonly EvalRunLike[]): { min: number | null; max: number | null } {
+  const times = runs.map((r) => time(r.started_at)).filter((t): t is number => t !== null)
+  if (!times.length) return { min: null, max: null }
+  return { min: Math.min(...times), max: Math.max(...times) }
+}
+
+/** x on 4..96, rounded to 0.1; 50 when there is no span to spread over. */
+function timelinePlacer(min: number | null, max: number | null): (t: number | null) => number {
+  const span = min !== null && max !== null ? max - min : 0
+  return (t) => {
+    const x = t === null || min === null || span === 0 ? 50 : 4 + ((t - min) / span) * 92
+    return Math.round(x * 10) / 10
+  }
+}
+
+function timelineLane(lanes: Map<string, TimelineLane>, r: EvalRunLike, models: string[]): TimelineLane {
+  const wf = r.workflow_id ?? 'unknown workflow'
+  const key = `${wf}@${r.workflow_version ?? ''}|${models.join(',')}`
+  let lane = lanes.get(key)
+  if (!lane) {
+    const version = r.workflow_version && r.workflow_version !== 'v1' ? ` ${r.workflow_version}` : ''
+    lane = { key, label: [wf + version, models.join(', ')].filter(Boolean).join(' · '), points: [] }
+    lanes.set(key, lane)
+  }
+  return lane
 }
 
 /** Compare row: "3/5" and the bar fill 0..100 (null when nothing is scored). */

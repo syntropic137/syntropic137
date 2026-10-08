@@ -95,26 +95,22 @@ export function fitLabel(candidates: readonly (string | undefined | null)[], wid
 
 /** Phase status -> block tone. */
 export function phaseTone(status: string | null | undefined): PhaseTone {
-  switch ((status ?? '').toLowerCase()) {
-    case 'completed':
-    case 'succeeded':
-    case 'success':
-      return 'done'
-    case 'running':
-    case 'in_progress':
-    case 'started':
-      return 'running'
-    case 'failed':
-    case 'error':
-      return 'failed'
-    case 'cancelled':
-    case 'canceled':
-    case 'interrupted':
-      return 'cancelled'
-    default:
-      return 'pending'
-  }
+  return PHASE_TONE.get((status ?? '').toLowerCase()) ?? 'pending'
 }
+
+const PHASE_TONE = new Map<string, PhaseTone>([
+  ['completed', 'done'],
+  ['succeeded', 'done'],
+  ['success', 'done'],
+  ['running', 'running'],
+  ['in_progress', 'running'],
+  ['started', 'running'],
+  ['failed', 'failed'],
+  ['error', 'failed'],
+  ['cancelled', 'cancelled'],
+  ['canceled', 'cancelled'],
+  ['interrupted', 'cancelled'],
+])
 
 /** Duration shares with a floor: tiny shares become `min`, the rest split what remains. */
 export function shareWidths(values: readonly number[], available: number, min: number): number[] {
@@ -123,24 +119,27 @@ export function shareWidths(values: readonly number[], available: number, min: n
   if (min * n >= available) return values.map(() => round1(available / n))
   const fixed = new Set<number>()
   for (;;) {
-    const free = values.reduce((s, v, i) => (fixed.has(i) ? s : s + Math.max(0, v)), 0)
-    const room = available - fixed.size * min
-    let changed = false
-    for (let i = 0; i < n; i++) {
-      if (fixed.has(i)) continue
-      const w = free > 0 ? (Math.max(0, values[i]!) / free) * room : room / (n - fixed.size)
-      if (w < min) {
-        fixed.add(i)
-        changed = true
-      }
-    }
-    if (!changed) {
-      return values.map((v, i) => {
-        if (fixed.has(i)) return min
-        return round1(free > 0 ? (Math.max(0, v) / free) * room : room / (n - fixed.size))
-      })
-    }
+    const share = freeShare(values, fixed, available, min)
+    if (!fixUnderMin(values, fixed, share, min)) return values.map((v, i) => (fixed.has(i) ? min : round1(share(v))))
   }
+}
+
+/** Width a not-yet-fixed value gets: its share of the room the fixed ones leave. */
+function freeShare(values: readonly number[], fixed: ReadonlySet<number>, available: number, min: number): (v: number) => number {
+  const free = values.reduce((s, v, i) => (fixed.has(i) ? s : s + Math.max(0, v)), 0)
+  const room = available - fixed.size * min
+  return (v) => (free > 0 ? (Math.max(0, v) / free) * room : room / (values.length - fixed.size))
+}
+
+/** Pins every free value whose share is under `min`; true when any was pinned. */
+function fixUnderMin(values: readonly number[], fixed: Set<number>, share: (v: number) => number, min: number): boolean {
+  let changed = false
+  values.forEach((v, i) => {
+    if (fixed.has(i) || !(share(v) < min)) return
+    fixed.add(i)
+    changed = true
+  })
+  return changed
 }
 
 export function layoutPhaseBlocks(phases: readonly PhaseBlockInput[], dims: PhaseBlocksDims = PHASE_BLOCKS): PhaseBlocksLayout {
