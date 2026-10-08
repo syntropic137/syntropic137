@@ -35,11 +35,14 @@ a="$*"; echo "docker ${a//$'\n'/ } | DOCKER_HOST=${DOCKER_HOST-unset} DOCKER_CON
 case "$1" in
     context) cat "$S/context_host"; exit 0 ;;
     info|cp) exit 0 ;;
-    ps) cat "$S/existing_containers" 2>/dev/null; exit 0 ;;
-    volume) [ "$2" = ls ] && cat "$S/existing_volumes" 2>/dev/null; exit 0 ;;
-    network) [ "$2" = ls ] && cat "$S/existing_networks" 2>/dev/null; exit 0 ;;
+    ps) [ -f "$S/fail_ps" ] && exit 42; cat "$S/existing_containers" 2>/dev/null; exit 0 ;;
+    volume|network)
+        [ "$2" = ls ] || exit 0
+        [ -f "$S/fail_$1" ] && exit 42
+        cat "$S/existing_${1}s" "$S/created_${1}s" 2>/dev/null; exit 0 ;;
     build) [ -f "$S/build_fail" ] && exit 1; exit 0 ;;
     inspect) printf 'PATH=/usr/bin\nANTHROPIC_API_KEY=\nDOCKER_HOST=\nSYN_GITHUB_APP_PRIVATE_KEY_FILE=/run/secrets/k\n'
+             echo "APP_ENVIRONMENT=$(cat "$S/app_env" 2>/dev/null || echo selfhost)"
              cat "$S/container_env_extra" 2>/dev/null; exit 0 ;;
     compose) shift ;;
     *) exit 0 ;;
@@ -52,6 +55,10 @@ case "$1" in
         src=api_logs; [ -f "$S/config_socket" ] && src=/var/run/docker.sock
         printf '{"services":{"api":{"container_name":"%s-api","volumes":[{"source":"%s"}]}},"volumes":{"db_data":{"name":"%s"}},"networks":{"syn-internal":{"name":"%s_internal"}}}\n' \
             "$proj" "$src" "$vol" "$proj" ;;
+    create)  # the project's named resources now exist
+        echo "${proj}_db_data" >> "$S/created_volumes"; echo "${proj}_internal" >> "$S/created_networks" ;;
+    up) [ -f "$S/up_fail" ] && exit 1 ;;
+    run) cat "$S/op_probe" 2>/dev/null || echo op-disabled ;;
     ps) echo "cid-${@: -1}" ;;
     exec)
         sql="${@: -1}"
@@ -274,10 +281,39 @@ def scenario_credential_in_container(rig: Rig) -> None:
     assert "secretvalue" not in res.output, "a credential value was printed"
 
 
+def _inventory_failure(kind: str):
+    def scenario(rig: Rig) -> None:
+        rig.put(f"fail_{kind}", "")
+        res = rig.run()
+        assert_refused_before_acting(res, "namespace is unproven")
+        assert not (rig.root / "work").exists(), "workdir created before the inventory proved anything"
+
+    scenario.__name__ = f"scenario_{kind}_listing_fails"
+    return scenario
+
+
+def scenario_op_resolver_reachable(rig: Rig) -> None:
+    # The image's own op_available() says an authenticated `op` is reachable.
+    rig.put("op_probe", "op-reachable: /usr/local/bin/op\n")
+    res = rig.run()
+    assert_refused_before_acting(res, "1Password resolution is not disabled", allow_create=True)
+
+
+def scenario_in_memory_environment(rig: Rig) -> None:
+    rig.put("app_env", "offline")
+    res = rig.run()
+    assert_refused_before_acting(res, "would not use durable stores", allow_create=True)
+
+
 SCENARIOS = {
     "docker-host-env": [scenario_remote_docker_host],
     "docker-context-env": [scenario_docker_context_env],
     "docker-context-endpoint": [scenario_remote_selected_context],
+    "inventory-containers": [_inventory_failure("ps")],
+    "inventory-volumes": [_inventory_failure("volume")],
+    "inventory-networks": [_inventory_failure("network")],
+    "op-disabled": [scenario_op_resolver_reachable],
+    "durable-env": [scenario_in_memory_environment],
     "existing-resources": [
         scenario_colliding_volume,
         scenario_colliding_network,

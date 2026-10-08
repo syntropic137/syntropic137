@@ -38,6 +38,11 @@
 #     containers' env is checked (names only) before restore and again once
 #     running. No docker socket is reachable from inside the stack, so a
 #     restored queued execution can never start an agent.
+#   - 1Password: APP_ENVIRONMENT stays selfhost (durable stores), so the
+#     resolver would run; instead `op` is shadowed in the API and collector by
+#     a stub that always fails, and each image's own op_available() is probed
+#     in a one-off container before anything starts. A version whose resolver
+#     cannot be shown disabled is refused.
 #   - Workdir: created fresh; an existing path (file, dir or symlink) is refused.
 #   - Cleanup: an EXIT trap removes the git worktree and its registration, the
 #     compose project, and only volumes/networks carrying the generated prefix.
@@ -94,7 +99,11 @@ timeout 20 env -i PATH="$PATH" HOME="$HOME" DOCKER_HOST="$DOCKER_ENDPOINT" docke
 PREFIX="syn137rehearse-"
 PROJECT="${PREFIX}$(date -u +%Y%m%dt%H%M%S)-$$"
 case "$PROJECT" in syn|syn137|syntropic137|syn-rehearsal) refuse "project $PROJECT is reserved" ;; "$PREFIX"*) ;; *) refuse "project $PROJECT lacks the $PREFIX prefix" ;; esac
-existing="$( { dk ps -a --format '{{.Names}}'; dk volume ls --format '{{.Name}}'; dk network ls --format '{{.Name}}'; } | grep "^${PREFIX}" || true)"
+# Each listing must succeed: a failed one proves nothing about the namespace.
+containers="$(dk ps -a --format '{{.Names}}')" || refuse "could not list docker containers; the ${PREFIX}* namespace is unproven"  # guard:inventory-containers
+volumes="$(dk volume ls --format '{{.Name}}')" || refuse "could not list docker volumes; the ${PREFIX}* namespace is unproven"  # guard:inventory-volumes
+networks="$(dk network ls --format '{{.Name}}')" || refuse "could not list docker networks; the ${PREFIX}* namespace is unproven"  # guard:inventory-networks
+existing="$(printf '%s\n%s\n%s\n' "$containers" "$volumes" "$networks" | grep "^${PREFIX}" || true)"
 [ -z "$existing" ] || refuse "docker resources named ${PREFIX}* already exist (an earlier rehearsal?): $(echo $existing)"  # guard:existing-resources
 
 # --- guard: a fresh workdir ---------------------------------------------------
@@ -142,21 +151,59 @@ CRED_VARS="ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN CODEX_AUTH_JSON OPENAI_API_
  SYN_SESSION_INVENTORY_CAPTURE_WRITE_TOKEN SYN_WORKSPACE_CLOUD_API_KEY S3_ACCESS_KEY_ID S3_SECRET_ACCESS_KEY
  COLLECTOR_API_KEY SYN_DISK_PAGE_WEBHOOK_URL OP_SERVICE_ACCOUNT_TOKEN OP_SERVICE_ACCOUNT_TOKEN_SYNTROPIC137
  OP_SERVICE_ACCOUNT_TOKEN_SYN137_DEV OP_SERVICE_ACCOUNT_TOKEN_SYN137_BETA OP_SERVICE_ACCOUNT_TOKEN_SYN137_STAGING
- OP_SERVICE_ACCOUNT_TOKEN_SYN137_PROD OP_CONNECT_TOKEN OP_CONNECT_HOST"
+ OP_SERVICE_ACCOUNT_TOKEN_SYN137_PROD OP_CONNECT_TOKEN OP_CONNECT_HOST OP_SESSION"
 # Names that are a credential when non-empty, whatever the compose calls them.
 CRED_RE="^(OP_[A-Z0-9_]*|[A-Z0-9_]*(_TOKEN|_API_KEY|_SECRET|_SECRET_KEY|_PRIVATE_KEY|_AUTH_JSON)|$(echo $CRED_VARS | tr ' ' '|')|DOCKER_HOST)$"
 
 # Abort if any service container carries a non-empty credential or a docker
 # host. Prints variable names only, never values.
 check_container_env() {  # $1 label
-    local svc cid leaked=""
+    local svc cid env leaked=""
     for svc in api collector; do
         cid="$(dc ps -a -q "$svc")"
         [ -n "$cid" ] || refuse "$1: no $svc container to inspect"
-        leaked="$leaked $(dk inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$cid" \
+        env="$(dk inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$cid")"
+        grep -qx 'APP_ENVIRONMENT=selfhost' <<<"$env" || refuse "$1: $svc is not APP_ENVIRONMENT=selfhost, so it would not use durable stores"  # guard:durable-env
+        leaked="$leaked $(printf '%s\n' "$env" \
             | awk -F= -v re="$CRED_RE" 'NF && $1 ~ re && substr($0, length($1) + 2) != "" {print svc ":" $1}' svc="$svc" | tr '\n' ' ')"
     done
     [ -z "${leaked// /}" ] || refuse "$1: credentials present in rehearsal containers:$leaked"  # guard:container-credentials
+}
+
+# `op` inside the rehearsal: always fails, so op_available() is False even
+# when a cached login would make `op whoami` succeed.
+write_op_stub() {
+    mkdir -p "$WORK/rehearsal-bin"
+    printf '#!/bin/sh\necho "op is disabled in an upgrade rehearsal" >&2\nexit 1\n' > "$WORK/rehearsal-bin/op"
+    cat > "$WORK/rehearsal-bin/op-probe.py" <<'PY'
+import shutil
+try:
+    from syn_shared.settings import op_resolver  # noqa: F401
+except ImportError:
+    op_resolver = None
+try:
+    from syn_shared.settings.op_client import op_available
+except ImportError:
+    op_available = None
+found = shutil.which("op")
+if op_resolver is not None and op_available is None:
+    print("op-unknown: this image resolves 1Password but has no op_available() to probe")
+elif found not in (None, "/rehearsal-bin/op") or (op_available is not None and op_available()):
+    print(f"op-reachable: {found}")
+else:
+    print("op-disabled")
+PY
+    chmod 755 "$WORK/rehearsal-bin/op"
+}
+
+# Run each image's own op_available() in a one-off container with the
+# service's env and mounts, before the service itself ever starts.
+check_op_disabled() {  # $1 label
+    local svc said
+    for svc in api collector; do
+        said="$(dc run --rm --no-deps -T --entrypoint python "$svc" /rehearsal-bin/op-probe.py 2>/dev/null | tail -n1)" || said="probe failed"
+        [ "$said" = op-disabled ] || refuse "$1: 1Password resolution is not disabled in $svc ($said)"  # guard:op-disabled
+    done
 }
 
 # The rendered compose must name nothing outside this project and mount no
@@ -170,8 +217,15 @@ check_rendered() {
 }
 
 # --- override: isolation, names, prod-like limits ---------------------------
-blank_credentials() {  # every credential "", and no docker host to reach
+# python:3.12-slim's PATH behind the venv, with the `op` stub in front.
+REHEARSAL_PATH="/rehearsal-bin:/app/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+blank_credentials() {  # every credential "", no docker host, no usable `op`
+    echo "    volumes:"
+    echo "      - \"$WORK/rehearsal-bin:/rehearsal-bin:ro\""
+    echo "      - \"$WORK/rehearsal-bin/op:/usr/local/bin/op:ro\""
     echo "    environment:"
+    echo "      APP_ENVIRONMENT: selfhost  # durable stores; test/offline would be in-memory"
+    echo "      PATH: \"$REHEARSAL_PATH\""  # guard:op-shadow
     echo "      DOCKER_HOST: \"\""
     for v in $CRED_VARS; do echo "      ${v}: \"\""; done
 }
@@ -219,6 +273,7 @@ git -C "$REPO" show "$TO_REF:docker/docker-compose.syntropic137.yaml" > to/docke
 git -C "$REPO" show "$TO_REF:docker/selfhost-entrypoint.sh" > to/selfhost-entrypoint.sh
 rm -rf init-db; mkdir init-db
 git -C "$REPO" archive "$FROM" docker/init-db | tar -x -C init-db --strip-components=2
+write_op_stub
 for s in db-password redis-password minio-password; do openssl rand -hex 24 > "secrets/$s.secret"; done
 : > secrets/github-app-private-key.pem
 chmod 644 secrets/*
@@ -261,6 +316,7 @@ use_version() {  # $1 from|to
     COMPOSE_USED=1
     dc create --force-recreate api collector >/dev/null
     check_container_env "$1 (created)"
+    check_op_disabled "$1"
 }
 
 health() { curl -sf --max-time 10 "$API/health" || curl -sf --max-time 10 "$API/api/v1/health"; }
