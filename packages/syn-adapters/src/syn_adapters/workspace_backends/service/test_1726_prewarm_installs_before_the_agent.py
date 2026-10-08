@@ -35,9 +35,14 @@ exit 0
 """
 
 TOOL_STUB = """#!/bin/bash
-# `uv python find` is the script probing for an interpreter, not an install.
-[ "$1" = python ] && exit 0
+# `uv python find|install` is the script getting an interpreter, not an install.
+if [ "$1" = python ]; then
+  [ "$2" = install ] && sleep "${FAKE_SLEEP:-0}"
+  var="FAKE_PYTHON_$(echo "$2" | tr a-z A-Z)_EXIT"
+  exit "${!var:-0}"
+fi
 printf 'CALL:%s %s @%s\\n' "$(basename "$0")" "$*" "$PWD" >> "$CALL_LOG"
+sleep "${FAKE_SLEEP:-0}"
 var="FAKE_$(basename "$0" | tr a-z A-Z)_EXIT"
 exit "${!var:-0}"
 """
@@ -67,8 +72,12 @@ def run(tmp_path: Path):
     workspace = tmp_path / "ws"
     log = tmp_path / "calls.log"
 
-    def _run(secrets: SetupPhaseSecrets, locks: str, **exits: int) -> _Run:
+    def _run(
+        secrets: SetupPhaseSecrets, locks: str, *, budget: int | None = None, **exits: int
+    ) -> _Run:
         script = secrets.build_setup_script().replace("/workspace", str(workspace))
+        if budget is not None:
+            script = script.replace(f"timeout {PREWARM_TIMEOUT_SECONDS} ", f"timeout {budget} ")
         (tmp_path / "setup.sh").write_text(script)
         env = {
             "PATH": f"{bindir}:/usr/bin:/bin",
@@ -76,6 +85,7 @@ def run(tmp_path: Path):
             "CALL_LOG": str(log),
             "FAKE_LOCKS": locks,
             **{f"FAKE_{tool.upper()}_EXIT": str(code) for tool, code in exits.items()},
+            "FAKE_SLEEP": "3" if budget is not None else "0",
         }
         proc = subprocess.run(
             ["bash", str(tmp_path / "setup.sh")], capture_output=True, text=True, env=env
@@ -186,3 +196,41 @@ def test_a_failed_install_below_the_checkout_root_is_reported_and_setup_continue
     assert "FAILED for <repo>/lib/sub/uv.lock" in result.proc.stderr.replace(
         str(result.repo), "<repo>"
     )
+
+
+def test_a_root_whose_python_cannot_be_found_or_installed_fails_setup(run) -> None:
+    result = run(_secrets(), "uv.lock", python_find=7, python_install=7)
+
+    assert result.proc.returncode != 0
+    # Setup stopped before installing anything: no agent starts against a
+    # checkout whose own environment was never built.
+    assert result.calls == ["CALL:clone"]
+
+
+def test_a_python_missing_below_the_checkout_root_is_reported_and_setup_continues(run) -> None:
+    result = run(_secrets(), "lib/sub/uv.lock", python_find=7, python_install=7)
+
+    assert result.proc.returncode == 0, result.proc.stderr
+    assert result.calls == ["CALL:clone"]
+    assert "FAILED for <repo>/lib/sub/uv.lock" in result.proc.stderr.replace(
+        str(result.repo), "<repo>"
+    )
+
+
+@pytest.mark.parametrize(
+    ("exits", "calls"),
+    [
+        ({"python_find": 7}, ["CALL:clone"]),
+        ({}, ["CALL:clone", "CALL:uv sync --frozen @<repo>"]),
+    ],
+    ids=["python-install", "uv-sync"],
+)
+def test_a_root_install_that_outlives_its_budget_fails_setup(
+    run, exits: dict[str, int], calls: list[str]
+) -> None:
+    # Every stubbed step takes 3s and would then SUCCEED; only the budget,
+    # cut to 1s here, can make setup fail.
+    result = run(_secrets(), "uv.lock", budget=1, **exits)
+
+    assert result.proc.returncode != 0
+    assert result.calls == calls

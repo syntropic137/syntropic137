@@ -29,10 +29,11 @@ def append_dependency_prewarm(lines: list[str], destinations: Sequence[tuple[str
     included; dependency, build and VCS directories excluded):
 
     - ``uv.lock``: ``uv sync --frozen``, the environment ``uv run`` uses.
-      A project whose requested Python (its ``.python-version``) the image
-      neither has nor can install is skipped like a missing tool: the
-      image's interpreter directory is read-only to the setup user, and the
-      agent could not run that project either.
+      Its interpreter is found or installed first, and failing to is a
+      failed install like any other: below the root it is reported (the
+      image's interpreter directory is read-only to the setup user, and a
+      submodule may ask for a Python it does not ship); at the root it fails
+      setup, because the agent's gates need that environment.
     - ``pnpm-lock.yaml``: ``pnpm install --frozen-lockfile --ignore-scripts``,
       through corepack when pnpm itself is not on PATH. Scripts are not run:
       a project's own ``prepare`` is a build (event-sourcing-platform's runs
@@ -76,8 +77,8 @@ def append_dependency_prewarm(lines: list[str], destinations: Sequence[tuple[str
             "    fi",
             '    if ! (cd "${lock%/*}" && { uv python find >/dev/null 2>&1'
             f" || timeout {budget} uv python install >/dev/null; }}); then",
-            '        echo "prewarm: no Python for ${lock%/*} can be found or installed;'
-            ' not installing $lock" >&2',
+            '        echo "prewarm: no Python for ${lock%/*} can be found or installed" >&2',
+            '        syn_nested "$lock"',
             "        continue",
             "    fi",
             '    echo "prewarm: uv sync --frozen in ${lock%/*}"',
