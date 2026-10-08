@@ -3,7 +3,7 @@ name: "SDLC: Premise, implement + draft PR, verify, fix, re-verify, mark ready (
 description: >
   Take a well-specified issue to a reviewed pull request: check the premise,
   make the change, verify it independently, fix what verification found and
-  confirm the fix (up to three rounds), open the PR. Verification is separate
+  confirm the fix (up to two rounds), open the PR. Verification is separate
   from implementation on purpose, and a defect it finds is repaired rather than
   ending the run.
 type: implementation
@@ -130,6 +130,8 @@ phases:
     # which production does not do yet (#1308, #1342), so this declaration is
     # correct but not yet in effect. See workflows/sdlc/README.md.
     delivers_repo_changes: false
+    # A review: no review_verdict fails the phase instead of advancing by order (PC-116).
+    requires_verdict: true
     # No allowed_tools: this phase runs on codex, which enforces a
     # filesystem sandbox rather than a tool vocabulary. A tool list here
     # would be accepted and never applied, so the validator refuses it.
@@ -192,6 +194,8 @@ phases:
     # which production does not do yet (#1308, #1342), so this declaration is
     # correct but not yet in effect. See workflows/sdlc/README.md.
     delivers_repo_changes: false
+    # A review: no review_verdict fails the phase instead of advancing by order (PC-116).
+    requires_verdict: true
     # No allowed_tools: this phase runs on codex, which enforces a
     # filesystem sandbox rather than a tool vocabulary. A tool list here
     # would be accepted and never applied, so the validator refuses it.
@@ -214,8 +218,8 @@ phases:
   # #1597, #1603) ended with `reverify` BLOCKED on findings one more edit would
   # have closed, and each needed a second round built by hand. The engine
   # advances strictly by `order` and has no loop construct, so the repeat is
-  # written out here instead: two extra fix/reverify pairs, the same prompts
-  # under new ids. That makes the bound part of the definition - three rounds
+  # written out here instead: one extra fix/reverify pair, the same prompts
+  # under new ids. That makes the bound part of the definition - two rounds
   # in total, never more - and every round a phase on the execution, so the
   # round count is visible there. Each round has its own prompt file because a
   # prompt may name only phases that have already run; the files differ only in
@@ -226,11 +230,19 @@ phases:
   # aggregate - not the prompts - picks the next phase from it: `certified`
   # skips every phase before the final one (recorded as `skipped_phase_ids`
   # on NextPhaseReady), `blocked` advances by order. A run that is still
-  # blocked after round 3 completes with `review_verdict: blocked`, i.e. with
-  # unresolved findings, on the execution, and a resume of it re-runs `fix_3`
+  # blocked after round 2 completes with `review_verdict: blocked`, i.e. with
+  # unresolved findings, on the execution, and a resume of it re-runs `fix_2`
   # onward. See review_rounds.py. `finalize_pr` must therefore stay the LAST
-  # phase. `finalize_pr` reads the newest round that ran, of `reverify_3/`,
-  # `reverify_2/`, `reverify/`. Adding a round
+  # phase. `finalize_pr` reads the newest round that ran, of `reverify_2/`,
+  # `reverify/`.
+  #
+  # TWO ROUNDS, NOT THREE (owner decision 2026-10-07). A third round
+  # (`fix_3`/`reverify_3`) was removed to bound token spend: a blocker two
+  # rounds cannot close goes to a person, not to a third agent pass. A server
+  # keeps running three rounds until this definition is reinstalled on it, so
+  # the cutover is the reinstall, not a date. Executions started under the
+  # three-round definition carry those phase ids in their start event and replay unchanged; nothing reads ids from this
+  # file to render history. Adding a round
   # means a pair here, two prompt files, and a line in phases/finalize_pr.md;
   # scripts/tests/test_implement_v3_repair_rounds.py fails if they disagree.
   - <<: *fix_round
@@ -245,21 +257,9 @@ phases:
     order: 7
     prompt_file: phases/reverify_2.md
 
-  - <<: *fix_round
-    id: fix_3
-    name: Address what verification found (round 3)
-    order: 8
-    prompt_file: phases/fix_3.md
-
-  - <<: *reverify_round
-    id: reverify_3
-    name: Confirm the fix closed what verification found (round 3)
-    order: 9
-    prompt_file: phases/reverify_3.md
-
   - id: finalize_pr
     name: Open the pull request
-    order: 10
+    order: 8
     execution_type: sequential
     input_artifacts:
       - markdown

@@ -45,6 +45,7 @@ class ExecutionListReads:
         search: str | None = None,
         tags: Collection[str] | None = None,
         eval_id: str | None = None,
+        in_eval: bool | None = None,
         offset: int = 0,
         limit: int | None = None,
     ) -> Page[WorkflowExecutionSummary]:
@@ -67,11 +68,15 @@ class ExecutionListReads:
         `eval_id` keeps only the Eval's current members (#967), which makes
         this the Eval's runs view too. It is handed to the store as a filter,
         so it is applied in the query rather than over every execution.
+
+        `in_eval` keeps only executions in some Eval (`True`) or in none
+        (`False`), so eval runs can be shown apart from every other run.
         """
         query = PageQuery(
             status=StatusOf.text("status"),
             timestamp_field="started_at",
             equals={} if eval_id is None else {"eval_id": eval_id},
+            present={} if in_eval is None else {"eval_id": in_eval},
             contains_all={"tags": frozenset(tags or ())},
             search=search,
             search_fields=("workflow_execution_id", "workflow_id", "workflow_name"),
@@ -87,6 +92,13 @@ class ExecutionListReads:
             query,
             to_row=lambda record: WorkflowExecutionSummary.from_dict(dict(record)),
         )
+
+    async def get_by_id(self, execution_id: str) -> WorkflowExecutionSummary | None:
+        """One execution's row, or None when the list has not projected it."""
+        data = await self._store.get(WORKFLOW_EXECUTIONS, execution_id)
+        if data:
+            return WorkflowExecutionSummary.from_dict(data)
+        return None
 
     async def run_tallies(self, eval_ids: Collection[str]) -> dict[str, dict[str, int]]:
         """Each Eval's current member executions tallied by status, in one read.

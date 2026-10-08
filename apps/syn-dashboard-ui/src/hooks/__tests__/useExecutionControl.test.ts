@@ -29,7 +29,7 @@ describe('useExecutionControl', () => {
     expect(result.current.canCancel).toBe(false)
   })
 
-  it('canCancel is true only for running and not loading', () => {
+  it('canCancel is true only for running or queued, and not loading', () => {
     const { result: running } = renderHook(() => useExecutionControl('e', 'running'))
     expect(running.current.canCancel).toBe(true)
 
@@ -38,6 +38,24 @@ describe('useExecutionControl', () => {
 
     const { result: failed } = renderHook(() => useExecutionControl('e', 'failed'))
     expect(failed.current.canCancel).toBe(false)
+  })
+
+  it('offers cancel for a queued start, which withdraws it (#1650, PC-124)', async () => {
+    mockCancel.mockResolvedValue({
+      success: true,
+      execution_id: 'exec-q',
+      state: 'cancelled',
+      message: 'Withdrawn before it started: it will not run',
+    })
+    const { result } = renderHook(() => useExecutionControl('exec-q', 'queued'))
+    expect(result.current.canCancel).toBe(true)
+
+    await act(async () => {
+      result.current.cancel()
+    })
+
+    expect(mockCancel).toHaveBeenCalledWith('exec-q', undefined)
+    expect(result.current.state).toBe('cancelling')
   })
 
   it('transitions to cancelling on successful cancel', async () => {

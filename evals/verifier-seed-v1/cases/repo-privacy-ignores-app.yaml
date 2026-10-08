@@ -1,4 +1,5 @@
 id: repo-privacy-ignores-app
+polarity: defect
 source_pr: 1680
 # The fix's first parent: main just before the fix, with the bug and none of
 # the fix. Its useRepoList.ts is byte-identical to the head #1668's verify
@@ -23,3 +24,4 @@ expected:
        discard, "?? false", stale, record, overrid]
     # So a private repo is presented as public.
     - [shown, show, render, display, appear, label, mark, lock, badge, icon, public, listed]
+split: train

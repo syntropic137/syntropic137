@@ -40,6 +40,7 @@ _WRITTEN_ONLY_WHEN_SET = frozenset(
         "eval_id",
         "eval_selection",
         "eval_baseline",
+        "workflow_version",
     }
 )
 
@@ -106,6 +107,13 @@ class WorkflowExecutionStartedEvent(DomainEvent):
     #: eval with no repositories; None for a run in no eval and on events
     #: written before the field existed. Written only when set.
     eval_baseline: list[EvalBaselinePin] | None = None
+
+    #: The installed version of the workflow this run launched from (Evals v2):
+    #: the template's package version, or its source digest when it has no
+    #: version. A launch snapshot - a later install changes future runs only.
+    #: A resume carries its parent's, from the parent's start pins. None for a
+    #: template with neither and before the field existed. Written only when set.
+    workflow_version: str | None = None
 
     #: Set only on a resume: the parent, what it inherited and where it resumes
     #: (ADR-014 s7). The child's own record of "what was this a resume of".

@@ -389,6 +389,10 @@ export interface ExecutionListItem {
   /** Full GitHub URLs of repositories cloned for this execution (ADR-058) */
   repos: string[]
   repos_display: string | null
+  /** The eval this run is a current data point of, with its verdict; null in none. */
+  eval: components['schemas']['ExecutionEvalRunResponse'] | null
+  /** Set exactly when `status` is `queued`: where the start waits, and why (PC-124). */
+  start_queue: ExecutionStartQueueInfo | null
 }
 
 /**
@@ -406,10 +410,18 @@ export interface ExecutionListItem {
  * this alias a drop-in.
  */
 export type ExecutionListResponse = components['schemas']['ExecutionListResponse']
+/** Where an accepted start waits for a slot, and why (#1557, PC-124). */
+export type ExecutionStartQueueInfo = components['schemas']['ExecutionStartQueueInfo']
+/** How full the execution budget is: running, queued and the cap (PC-124). */
+export type ExecutionBudgetInfo = components['schemas']['ExecutionBudgetInfo']
 
 export interface PhaseExecutionDetail {
-  /** Explicit naming for OTel correlation (ADR-028) */
-  workflow_phase_id: string
+  /**
+   * The phase's id, under the name the wire uses (`PhaseExecutionInfo.phase_id`).
+   * This read `workflow_phase_id`, which the server never sent, so the timeline
+   * could not match a phase that ran to its place in `phase_plan`.
+   */
+  phase_id: string
   name: string
   status: string
   session_id: string | null
@@ -465,9 +477,14 @@ export type PhaseStartConfig = components['schemas']['PhaseStartConfig']
 /** Why a phase's start pins are or are not shown; only `not_recorded` reads as "not recorded". */
 export type StartPinsStatus = components['schemas']['PhaseExecutionInfo']['start_pins_status']
 
+/** One declared phase and where it stands, aliased to the generated schema rather than restated. */
+export type PlannedPhaseInfo = components['schemas']['PlannedPhaseInfo']
+
 export interface ExecutionDetailResponse {
   /** Explicit naming for OTel correlation (ADR-028) */
   workflow_execution_id: string
+  /** Whether the execution detail read model is rebuilding, judged by the API. */
+  read_model_status?: components['schemas']['ReadModelStatus'] | null
   workflow_id: string
   workflow_name: string
   status: string
@@ -486,6 +503,12 @@ export interface ExecutionDetailResponse {
   total_phases: number
   completed_phases: number
   phase_progress: PhaseProgressInfo
+  /**
+   * Every phase the run declared, in order, each with its status (feedback
+   * cee46909): what ran, and what is pending, skipped or inherited. Render
+   * `status_display` and style by `status`; never work the status out here.
+   */
+  phase_plan: PlannedPhaseInfo[]
   total_input_tokens: number
   total_output_tokens: number
   total_cache_creation_tokens: number
@@ -536,6 +559,11 @@ export interface ExecutionDetailResponse {
    * dispatched with no task; absent from a server that predates the field.
    */
   task?: string | null
+  /**
+   * The eval this execution is a current run of, with its current verdict
+   * (Evals v2). Null in no eval; absent from a server that predates the field.
+   */
+  eval?: components['schemas']['ExecutionEvalRunResponse'] | null
 }
 
 // =============================================================================

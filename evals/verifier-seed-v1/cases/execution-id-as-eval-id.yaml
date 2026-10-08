@@ -1,4 +1,5 @@
 id: execution-id-as-eval-id
+polarity: defect
 source_pr: 1649
 # The parent of the PR's final head bd302d76, which is the fix.
 commit: 7047b1c3daf1c4057d63eeb478cadd676d712bf5
@@ -30,3 +31,4 @@ expected:
     - [exist, present, evalcreated, eval created, not an eval, no eval, isn't an eval,
        accepted, accept, treated as, mistak, satisf, passes, without, wrong type,
        any aggregate, not checked, never checked, admit, attach]
+split: train

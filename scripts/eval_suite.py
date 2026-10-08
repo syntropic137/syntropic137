@@ -2,17 +2,26 @@
 """Check, launch and score a versioned eval suite (#967 step 8).
 
 A suite lives in ``evals/<suite-id>/``: ``suite.yaml`` names the workflow and
-the models it declares, and ``cases/*.yaml`` holds one case each - a commit
-that carries a known bug and what a report must say to have found it.
+the models it declares, and ``cases/*.yaml`` holds one case each, of one of
+two polarities. A ``defect`` case is a commit that carries a known bug and
+what a report must say to have found it: it passes blocked and named. A
+``clean`` case is a control, a merged PR head with no known defect: it passes
+only certified. ``score`` prints the catch rate over defects and the
+false-block rate over controls for each table, because a catch rate alone
+cannot tell a careful verifier from one that blocks everything.
 
-ONE EVAL PER CASE. A run's commit comes from its eval's Baseline, which holds
-one SHA per repository and is fixed at create. The cases are one repository at
-different commits, so each case is its own eval, and the suite is the set of
-evals carrying the suite's tag.
+ONE STABLE EVAL PER CASE. A run's commit comes from its eval's Baseline, which
+holds one SHA per repository and is fixed at create. The cases are one
+repository at different commits, so each case is its own eval, and the suite
+is a tag on evals: ``suite:<eval_suite>`` plus ``case:<case id>`` names the
+case's eval. ``launch`` finds it and creates it only when it is missing, so
+every version and every verifier adds runs to the same eval - the eval's run
+list is the case's history. What differs between runs goes on the RUN as tags:
+``suite-version:<n>`` and ``verifier:<workflow id>``.
 
     uv run python scripts/eval_suite.py check  [--suite DIR]   # offline dry run
-    uv run python scripts/eval_suite.py launch [--suite DIR] [--workflow ID] [--api-url URL]
-    uv run python scripts/eval_suite.py score  [--suite DIR] [--workflow ID] [--version N] [--api-url URL]
+    uv run python scripts/eval_suite.py launch [--suite DIR] [--workflow ID] [--split S] [--api-url URL]
+    uv run python scripts/eval_suite.py score  [--suite DIR] [--workflow ID] [--version N] [--split S] [--api-url URL]
 
 SAME CASES, DIFFERENT VERIFIER. A suite lists one or more workflows; each
 differs from the others only in who verifies. ``--workflow`` picks one (the
@@ -27,10 +36,21 @@ cases it held. ``score`` prints one table per version the selected workflow
 ran - each version's runs against its own case set, never another's - and
 ``--version N`` scores one. ``launch`` only ever launches the current version.
 
+TRAIN AND HOLDOUT. Every case declares ``split: train`` or ``split: holdout``,
+written once when the case is added. ``--split train`` launches or scores the
+train cases only: anything that tunes a verifier (a prompt, a model, a
+workflow) reads only those, and the holdout cases are run to report the
+result, never to choose it. ``check`` refuses a suite whose holdout share
+falls outside 25-35% (rounded outward to whole cases). A case never moves from holdout to train: it has been
+seen.
+
 ``check`` needs only git. ``launch`` installs the suite's workflow from the
 checked-in file (refusing to go on unless the server then holds exactly that
-definition), creates the evals and starts real agent runs, which cost money:
-never run it from CI. ``score`` only reads.
+definition), creates any missing case eval and starts real agent runs, which
+cost money: never run it from CI. ``score`` reads every run, then records each
+verdict on its eval (``POST /evals/{id}/runs/{run}/score``, scorer
+``eval_suite.py``, scorer_version the suite version); re-scoring replaces the
+eval's current score and the history stays in its events.
 
 INSTALL PROVENANCE. ``launch`` installs with ``version`` = the suite version
 (``<n>.0.0``) and ``source_digest`` = sha256 of the exact YAML document it
@@ -55,7 +75,9 @@ Exit status: 0 on success (for ``score``: every case scored pass), 1 otherwise.
 from __future__ import annotations
 
 import argparse
+import ast
 import hashlib
+import math
 import os
 import re
 import subprocess
@@ -63,11 +85,19 @@ import sys
 import time
 from decimal import Decimal
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
 import httpx
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    TypeAdapter,
+    ValidationError,
+    field_validator,
+)
 
 from syn_domain.contexts.orchestration._shared.workflow_definition import WorkflowDefinition
 from syn_shared.settings.dev_tooling import get_dev_api_url
@@ -75,6 +105,10 @@ from syn_shared.settings.dev_tooling import get_dev_api_url
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_SUITE = ROOT / "evals" / "verifier-seed-v1"
 _SHA = re.compile(r"^[0-9a-f]{40}$")
+
+type Split = Literal["train", "holdout"]
+HOLDOUT_SHARE = (0.25, 0.35)
+"""The bounds `check` holds a suite's holdout fraction to, rounded outward to whole cases."""
 
 
 # ---------------------------------------------------------------------------
@@ -115,6 +149,15 @@ class Suite(_Frozen):
     """The verifiers the same cases run under. The first is the default."""
     history: tuple[PastVersion, ...] = ()
     """Earlier versions, so their recorded runs still score against their own cases."""
+    eval_suite: str | None = Field(default=None, pattern=r"^[a-z0-9._-]+$")
+    """The stable name its case evals are tagged with, ``suite:<eval_suite>``; default `id`.
+
+    Unlike `id` it never carries a version: every version runs into the same evals.
+    """
+
+    @property
+    def suite_tag(self) -> str:
+        return f"suite:{self.eval_suite or self.id}"
 
     @property
     def current_tag_prefix(self) -> str:
@@ -143,33 +186,61 @@ class Expected(_Frozen):
         return groups
 
 
-class Case(_Frozen):
+Polarity = Literal["defect", "clean"]
+"""What a case holds: a known escaped bug the verifier must block, or a clean
+control it must certify. Clean controls are what make blocking cost something:
+without them a verifier that blocks everything is never wrong."""
+
+
+def _full_sha(value: str) -> str:
+    if not _SHA.fullmatch(value):
+        raise ValueError(f"{value!r} is not a full 40-character lowercase SHA")
+    return value
+
+
+FullSha = Annotated[str, AfterValidator(_full_sha)]
+
+
+class _CaseBase(_Frozen):
     id: str = Field(pattern=r"^[a-z0-9-]+$")
     source_pr: int = Field(ge=1)
-    """The PR that shipped the bug. Never put it in `task`: the agent could fetch the fix."""
-    commit: str
-    """Full SHA the run is pinned to. The bug is present here."""
-    fix_commit: str
+    """The PR the case is cut from: the one that shipped the bug, or, for a case mined
+    from a fix, the one that fixed it. Never put it in `task`: the agent could fetch its history."""
+    commit: FullSha
+    """The SHA the run is pinned to."""
+    task: str = Field(min_length=1)
+    split: Split
+    """`train` cases may tune a verifier; `holdout` cases only measure it. Never moved."""
+    retired: str | None = Field(default=None, min_length=1)
+    """Why the case left the suite, and in which version. A retired case is not part
+    of the current version: it is kept so the history versions that held it still
+    score their runs against it, as it was. Never re-polarise a case in place."""
+
+    @property
+    def tag(self) -> str:
+        return f"case:{self.id}"
+
+
+class DefectCase(_CaseBase):
+    """A commit carrying a known bug. Passes when the verifier blocks and names it.
+
+    `source_pr` shipped the bug; `commit` is the tree just before its fix.
+    """
+
+    polarity: Literal["defect"]
+    fix_commit: FullSha
     """Full SHA of the commit that fixed it (the last, when the fix is a series)."""
-    first_fix_commit: str | None = None
+    first_fix_commit: FullSha | None = None
     """When the fix is a series of commits, the first of them; default `fix_commit`.
 
     `commit` must be this commit's first parent: the tree just before the fix,
     so the bug is present and nothing of the fix is.
     """
-    task: str = Field(min_length=1)
     expected: Expected
-
-    @field_validator("commit", "fix_commit", "first_fix_commit")
-    @classmethod
-    def _full_sha(cls, value: str | None) -> str | None:
-        if value is not None and not _SHA.fullmatch(value):
-            raise ValueError(f"{value!r} is not a full 40-character lowercase SHA")
-        return value
-
-    @property
-    def tag(self) -> str:
-        return f"case:{self.id}"
+    reclassified_from: str | None = Field(default=None, min_length=1)
+    """The retired clean control this defect was found in, when the case is that
+    control reclassified. Its pin is then the control's own commit, kept so the
+    reviewed tree does not change: an ancestor of the fix, not its first parent."""
 
     @property
     def fix_start(self) -> str:
@@ -177,9 +248,31 @@ class Case(_Frozen):
         return self.first_fix_commit or self.fix_commit
 
 
+class CleanCase(_CaseBase):
+    """A merged change with no known defect. Passes only when the verifier certifies it.
+
+    `source_pr` is the merged PR; `commit` is its head as merged, the second
+    parent of `merge_commit` on main's first-parent chain.
+    """
+
+    polarity: Literal["clean"]
+    merge_commit: FullSha
+    """The mainline merge that took the PR: its second parent must be `commit`."""
+    clean_through: FullSha
+    """The mainline commit through which later history was read and held no fix of the PR.
+
+    `merge_commit` must be on its first-parent chain, and no commit between
+    them may be a fix or revert that names `#<source_pr>`.
+    """
+
+
+Case = Annotated[DefectCase | CleanCase, Field(discriminator="polarity")]
+_CASE: TypeAdapter[DefectCase | CleanCase] = TypeAdapter(Case)
+
+
 class LoadedSuite(_Frozen):
     suite: Suite
-    cases: tuple[Case, ...]
+    cases: tuple[DefectCase | CleanCase, ...]
     """The cases of the selected version: every case for the current one."""
     workflow: WorkflowRef
     """The one of `suite.workflows` this run of the script launches or scores."""
@@ -196,6 +289,11 @@ class LoadedSuite(_Frozen):
     @property
     def is_current(self) -> bool:
         return self.version == self.suite.version
+
+    @property
+    def run_tags(self) -> list[str]:
+        """What `launch` tags each run with: the eval is shared, so the run says what it was."""
+        return [f"suite-version:{self.version}", f"verifier:{self.workflow.id}"]
 
 
 def versions_run(suite: Suite, workflow: str) -> list[int]:
@@ -228,49 +326,73 @@ def load_suite(
     root: Path = ROOT,
     workflow: str | None = None,
     version: int | None = None,
+    split: Split | None = None,
 ) -> LoadedSuite:
-    """Parse and cross-check a suite, selecting `workflow` and `version`.
+    """Parse and cross-check a suite, selecting `workflow`, `version` and `split`.
 
     `workflow` defaults to the first listed (for a past version: the one it
-    ran), `version` to the current one. Every listed workflow and every
+    ran), `version` to the current one, `split` to every case. Every listed workflow and every
     history entry is checked, not only the selected ones. Raises
     `DefinitionError` naming every problem found.
     """
     try:
         suite = Suite.model_validate(_read_yaml(directory / "suite.yaml"))
         case_files = sorted((directory / "cases").glob("*.yaml"))
-        cases = tuple(Case.model_validate(_read_yaml(p)) for p in case_files)
+        cases = tuple(_CASE.validate_python(_read_yaml(p)) for p in case_files)
     except (OSError, ValidationError, yaml.YAMLError) as exc:
         raise DefinitionError(str(exc)) from exc
 
     problems: list[str] = []
+    retired = {c.id for c in cases if c.retired}
+    if stray := sorted(retired - {i for h in suite.history for i in h.cases}):
+        problems.append(f"retired case(s) {stray} are in no history version: delete them")
+    every_case, cases = cases, tuple(c for c in cases if not c.retired)
     if not cases:
         problems.append(f"{directory}/cases holds no case")
-    for path, case in zip(case_files, cases, strict=True):
+    for path, case in zip(case_files, every_case, strict=True):
         if path.stem != case.id:
             problems.append(f"{path.name}: file name must be the case id {case.id!r}")
         if f"#{case.source_pr}" in case.task:
             problems.append(
                 f"{case.id}: task names #{case.source_pr}; the agent could fetch the fix"
             )
-    ids = [c.id for c in cases]
+    for case in every_case:
+        if isinstance(case, DefectCase) and case.reclassified_from:
+            source = next((c for c in every_case if c.id == case.reclassified_from), None)
+            if not (isinstance(source, CleanCase) and source.retired):
+                problems.append(
+                    f"{case.id}: reclassified_from {case.reclassified_from!r} "
+                    "is not a retired clean case"
+                )
+            elif source.commit != case.commit:
+                problems.append(
+                    f"{case.id}: pins {case.commit[:12]}, but {source.id} pins "
+                    f"{source.commit[:12]}; a reclassified control keeps its pin"
+                )
+    ids = [c.id for c in every_case]
     if len(set(ids)) != len(ids):
         problems.append(f"duplicate case ids: {sorted(ids)}")
+    holdout = sum(c.split == "holdout" for c in cases)
+    low, high = HOLDOUT_SHARE
+    if not math.floor(low * len(cases)) <= holdout <= math.ceil(high * len(cases)):
+        problems.append(
+            f"{holdout} of {len(cases)} cases are holdout; the share must be {low:.0%}-{high:.0%}"
+        )
 
     for ref in suite.workflows:
         problems.extend(_workflow_problems(ref, root))
     problems.extend(_history_problems(suite, set(ids)))
 
-    past = next((h for h in suite.history if h.version == version), None)
-    if version is not None and version != suite.version and past is None:
-        known = sorted([h.version for h in suite.history] + [suite.version])
+    # A past version may have run several workflows, one entry each; with no
+    # `workflow` given, the first entry listed for it is the default.
+    ran = [h for h in suite.history if h.version == version]
+    past = next((h for h in ran if workflow is None or h.workflow == workflow), None)
+    if version is not None and version != suite.version and not ran:
+        known = sorted({h.version for h in suite.history} | {suite.version})
         problems.append(f"version {version} is not one of the suite's {known}")
-    if past is None:
-        chosen = suite.workflows[0].id if workflow is None else workflow
-    else:
-        chosen = past.workflow if workflow is None else workflow
-        if chosen != past.workflow:
-            problems.append(f"version {past.version} ran only {past.workflow!r}, not {chosen!r}")
+    if ran and past is None:
+        problems.append(f"version {version} ran only {[h.workflow for h in ran]}, not {workflow!r}")
+    chosen = past.workflow if past is not None else workflow or suite.workflows[0].id
     selected = next((ref for ref in suite.workflows if ref.id == chosen), None)
     if selected is None:
         problems.append(
@@ -278,6 +400,9 @@ def load_suite(
         )
     if problems or selected is None:
         raise DefinitionError("\n".join(problems))
+    if split is not None:
+        cases = tuple(c for c in cases if c.split == split)
+        every_case = tuple(c for c in every_case if c.split == split)
     if past is None:
         return LoadedSuite(
             suite=suite,
@@ -288,7 +413,7 @@ def load_suite(
         )
     return LoadedSuite(
         suite=suite,
-        cases=tuple(c for c in cases if c.id in past.cases),
+        cases=tuple(c for c in every_case if c.id in past.cases),
         workflow=selected,
         version=past.version,
         tag=past.tag,
@@ -298,9 +423,12 @@ def load_suite(
 def _history_problems(suite: Suite, case_ids: set[str]) -> list[str]:
     """Where `history` contradicts itself, the current version or the case files."""
     problems: list[str] = []
-    versions = [h.version for h in suite.history]
-    if len(set(versions)) != len(versions):
-        problems.append(f"duplicate history versions: {sorted(versions)}")
+    runs = [(h.version, h.workflow) for h in suite.history]
+    if len(set(runs)) != len(runs):
+        problems.append(f"duplicate history version and workflow: {sorted(runs)}")
+    tags = [h.tag for h in suite.history]
+    if len(set(tags)) != len(tags):
+        problems.append(f"duplicate history tags: {sorted(tags)}")
     workflow_ids = {r.id for r in suite.workflows}
     for h in suite.history:
         if h.version >= suite.version:
@@ -342,54 +470,196 @@ def _git_ok(repo: Path, *args: str) -> bool:
     return subprocess.run(["git", "-C", str(repo), *args], capture_output=True).returncode == 0
 
 
-def check_commits(loaded: LoadedSuite, repo: Path) -> list[str]:
-    """Problems with each case's pinned history in `repo`; empty when every case holds.
+def _git_out(repo: Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", "-C", str(repo), *args], capture_output=True, text=True, check=False
+    ).stdout
 
-    For each case: every SHA is a commit here, the pin is the first parent of
-    the fix's first commit (the tree just before the fix, not merely some
-    ancestor of it), that commit leads to the fix, every expected file exists
-    at the pin, and the fix changes at least one of them - so the files are
-    where the bug lived, not a guess.
-    """
+
+def _missing_commits(repo: Path, *shas: str) -> list[str]:
+    return [
+        s for s in dict.fromkeys(shas) if not _git_ok(repo, "cat-file", "-e", f"{s}^{{commit}}")
+    ]
+
+
+def check_commits(loaded: LoadedSuite, repo: Path) -> list[str]:
+    """Problems with each case's pinned history in `repo`; empty when every case holds."""
     problems: list[str] = []
     for case in loaded.cases:
-        missing = [
-            s
-            for s in dict.fromkeys((case.commit, case.fix_start, case.fix_commit))
-            if not _git_ok(repo, "cat-file", "-e", f"{s}^{{commit}}")
-        ]
-        if missing:
+        if isinstance(case, DefectCase):
+            problems.extend(_defect_problems(case, repo))
+        else:
+            problems.extend(_clean_problems(case, repo))
+    return problems
+
+
+def _defect_problems(case: DefectCase, repo: Path) -> list[str]:
+    """Every SHA is a commit here, the pin is the first parent of the fix's first
+    commit (the tree just before the fix, not merely some ancestor of it) - or,
+    for a reclassified control, a strict ancestor of it - that commit leads to
+    the fix, every expected file exists at the pin, and the fix
+    changes at least one of them - so the files are where the bug lived, not a guess.
+    """
+    if missing := _missing_commits(repo, case.commit, case.fix_start, case.fix_commit):
+        return [f"{case.id}: no such commit {', '.join(missing)} (try `git fetch origin`)"]
+    problems: list[str] = []
+    parent = _git_out(repo, "rev-parse", f"{case.fix_start}^1").strip()
+    if case.reclassified_from:
+        if case.commit == case.fix_start or not _git_ok(
+            repo, "merge-base", "--is-ancestor", case.commit, case.fix_start
+        ):
             problems.append(
-                f"{case.id}: no such commit {', '.join(missing)} (try `git fetch origin`)"
+                f"{case.id}: pins {case.commit[:12]}, which is not before the fix "
+                f"{case.fix_start[:12]}; a reclassified control's pin must precede it"
             )
-            continue
-        parent = subprocess.run(
-            ["git", "-C", str(repo), "rev-parse", f"{case.fix_start}^1"],
-            capture_output=True,
-            text=True,
-            check=False,
-        ).stdout.strip()
-        if parent != case.commit:
+    elif parent != case.commit:
+        problems.append(
+            f"{case.id}: pins {case.commit[:12]}, but the fix {case.fix_start[:12]}'s "
+            f"first parent is {parent[:12] or '(none)'}; pin the tree just before the fix"
+        )
+    if not _git_ok(repo, "merge-base", "--is-ancestor", case.fix_start, case.fix_commit):
+        problems.append(
+            f"{case.id}: the fix's first commit {case.fix_start[:12]} is not an ancestor "
+            f"of {case.fix_commit[:12]}"
+        )
+    for path in case.expected.files:
+        if not _git_ok(repo, "cat-file", "-e", f"{case.commit}:{path}"):
+            problems.append(f"{case.id}: {path} does not exist at {case.commit[:12]}")
+    changed = _git_out(repo, "diff", "--name-only", case.commit, case.fix_commit).split()
+    if not set(case.expected.files) & set(changed):
+        problems.append(f"{case.id}: the fix changes none of {list(case.expected.files)}")
+    return problems
+
+
+#: A later commit that undoes or repairs a clean control: its subject says fix
+#: or revert, and its message names the control's PR or one of its SHAs (what
+#: `git revert` writes).
+_FIX_SUBJECT = re.compile(r"^(fix|revert)\b", re.IGNORECASE)
+
+
+QUIET_DAYS = 30
+"""How long after a clean control merged no mainline commit may touch what it changed."""
+
+
+def _functions(repo: Path, commit: str, path: str) -> dict[str, tuple[str, ...]]:
+    """Qualified name (``Class.method``) -> the source of each Python function so named in `path`.
+
+    Every definition is found, wherever it sits (under an ``if``, a ``try``, a
+    ``with``); only classes and functions qualify a name. Same-named definitions,
+    such as a property's getter and setter, are all kept, in order.
+    """
+    text = _git_out(repo, "show", f"{commit}:{path}")
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return {}
+    lines = text.splitlines()
+    found: dict[str, list[str]] = {}
+
+    def visit(node: ast.AST, prefix: str) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+                name = f"{prefix}{child.name}"
+                if not isinstance(child, ast.ClassDef):
+                    first = min([child.lineno, *(d.lineno for d in child.decorator_list)])
+                    last = child.end_lineno or child.lineno
+                    found.setdefault(name, []).append("\n".join(lines[first - 1 : last]))
+                visit(child, f"{name}.")
+            else:
+                visit(child, prefix)
+
+    visit(tree, "")
+    return {name: tuple(sources) for name, sources in found.items()}
+
+
+def _changed_functions(repo: Path, commit: str) -> dict[str, set[str]]:
+    """Python path -> each function whose source `commit` changes against its first parent.
+
+    A function is changed when its source differs, appears or disappears, so a
+    line inserted next to a function is not a change to it and one inserted
+    inside it is.
+    """
+    paths = _git_out(repo, "diff", "--name-only", "--no-renames", f"{commit}^1", commit).split()
+    changed: dict[str, set[str]] = {}
+    for path in (p for p in paths if p.endswith(".py")):
+        before, after = _functions(repo, f"{commit}^1", path), _functions(repo, commit, path)
+        if names := {n for n in before.keys() | after.keys() if before.get(n) != after.get(n)}:
+            changed[path] = names
+    return changed
+
+
+def _touched(repo: Path, merge: str, until: str) -> list[str]:
+    """Each mainline commit after `merge`, up to `until`, that touches what `merge` changed.
+
+    "What it changed" is every Python function whose source the PR changed,
+    found again by qualified name in each later commit, so a function that
+    moves within its file is still followed. Only Python functions can be found
+    again here: a non-Python change is the selector's to read by hand. One line
+    per hit.
+    """
+    functions = _changed_functions(repo, merge)
+    hits: list[str] = []
+    later = _git_out(repo, "rev-list", "--reverse", "--first-parent", f"{merge}..{until}")
+    for commit in later.split():
+        for path, names in _changed_functions(repo, commit).items():
+            hits.extend(
+                f"{commit[:12]} changes {path}:{name}"
+                for name in sorted(names & functions.get(path, set()))
+            )
+    return hits
+
+
+def _clean_problems(case: CleanCase, repo: Path) -> list[str]:
+    """Every SHA is a commit here, the pin is the merge's second parent (the PR
+    head exactly as main took it), the merge is on `clean_through`'s first-parent
+    chain (a mainline merge, not one inside a branch), no commit between the
+    merge and `clean_through` is a fix or revert naming the PR, `clean_through`
+    is at least `QUIET_DAYS` after the merge, and no mainline commit in those
+    days touches a Python function the PR changed.
+    """
+    if missing := _missing_commits(repo, case.commit, case.merge_commit, case.clean_through):
+        return [f"{case.id}: no such commit {', '.join(missing)} (try `git fetch origin`)"]
+    problems: list[str] = []
+    head = _git_out(repo, "rev-parse", "--verify", "-q", f"{case.merge_commit}^2").strip()
+    if head != case.commit:
+        problems.append(
+            f"{case.id}: pins {case.commit[:12]}, but the merge {case.merge_commit[:12]}'s "
+            f"second parent is {head[:12] or '(none)'}; pin the PR head the merge took"
+        )
+    mainline = _git_out(repo, "rev-list", "--first-parent", case.clean_through).split()
+    if case.merge_commit not in mainline:
+        problems.append(
+            f"{case.id}: the merge {case.merge_commit[:12]} is not on the first-parent "
+            f"chain of {case.clean_through[:12]}"
+        )
+        return problems
+    reference = re.compile(rf"#{case.source_pr}\b")
+    log = _git_out(
+        repo, "log", "--format=%H%x00%B%x01", f"{case.merge_commit}..{case.clean_through}"
+    )
+    for entry in log.split("\x01"):
+        sha, _, message = entry.strip().partition("\x00")
+        names = reference.search(message) or case.merge_commit in message or case.commit in message
+        if sha and _FIX_SUBJECT.match(message) and names:
             problems.append(
-                f"{case.id}: pins {case.commit[:12]}, but the fix {case.fix_start[:12]}'s "
-                f"first parent is {parent[:12] or '(none)'}; pin the tree just before the fix"
+                f"{case.id}: {sha[:12]} fixes or reverts #{case.source_pr} after it merged; "
+                "a clean control must have no known defect"
             )
-        if not _git_ok(repo, "merge-base", "--is-ancestor", case.fix_start, case.fix_commit):
-            problems.append(
-                f"{case.id}: the fix's first commit {case.fix_start[:12]} is not an ancestor "
-                f"of {case.fix_commit[:12]}"
-            )
-        for path in case.expected.files:
-            if not _git_ok(repo, "cat-file", "-e", f"{case.commit}:{path}"):
-                problems.append(f"{case.id}: {path} does not exist at {case.commit[:12]}")
-        changed = subprocess.run(
-            ["git", "-C", str(repo), "diff", "--name-only", case.commit, case.fix_commit],
-            capture_output=True,
-            text=True,
-            check=False,
-        ).stdout.split()
-        if not set(case.expected.files) & set(changed):
-            problems.append(f"{case.id}: the fix changes none of {list(case.expected.files)}")
+    merged_at = int(_git_out(repo, "show", "-s", "--format=%ct", case.merge_commit))
+    quiet_until = merged_at + QUIET_DAYS * 86400
+    if int(_git_out(repo, "show", "-s", "--format=%ct", case.clean_through)) < quiet_until:
+        problems.append(
+            f"{case.id}: clean_through {case.clean_through[:12]} is under {QUIET_DAYS} days "
+            "after the merge; a clean control needs that long untouched"
+        )
+    window_end = _git_out(
+        repo, "rev-list", "-1", "--first-parent", f"--before={quiet_until}", case.clean_through
+    ).strip()
+    problems.extend(
+        f"{case.id}: {hit} within {QUIET_DAYS} days of the merge; "
+        "a clean control's code must stay untouched that long"
+        for hit in _touched(repo, case.merge_commit, window_end)
+    )
     return problems
 
 
@@ -398,9 +668,13 @@ def check_commits(loaded: LoadedSuite, repo: Path) -> list[str]:
 # ---------------------------------------------------------------------------
 
 Verdict = Literal["certified", "blocked"]
+RunVerdict = Literal["PASS", "FAIL", "ERROR"]
+"""What `score` records on the eval: the API's verdict, not the review's."""
+SCORER = "eval_suite.py"
 
 
 class Score(_Frozen):
+    polarity: Polarity
     verdict: Verdict | None
     findings: int
     """How many structured blocking findings the report holds."""
@@ -415,7 +689,14 @@ class Score(_Frozen):
 
     @property
     def passed(self) -> bool:
+        """A defect passes blocked and named; a clean control passes only certified."""
+        if self.polarity == "clean":
+            return self.verdict == "certified"
         return self.verdict == "blocked" and self.matched
+
+    @property
+    def false_block(self) -> bool:
+        return self.polarity == "clean" and self.verdict == "blocked"
 
 
 _HEADING = re.compile(r"^(#{1,6})\s+(.*?)\s*#*\s*$")
@@ -538,7 +819,27 @@ def score_report(expected: Expected, verdict: Verdict | None, report: str) -> Sc
         if (named is None, len(missing)) < (best[0] is None, len(best[1])):
             best = (named, missing)
     return Score(
-        verdict=verdict, findings=len(findings), named_file=best[0], missing_keywords=best[1]
+        polarity="defect",
+        verdict=verdict,
+        findings=len(findings),
+        named_file=best[0],
+        missing_keywords=best[1],
+    )
+
+
+def score_case(case: Case, verdict: Verdict | None, report: str) -> Score:
+    """Score one run of `case`: a defect by `score_report`, a clean control by its verdict alone.
+
+    A clean control has no defect to name, so its findings are counted but never matched.
+    """
+    if isinstance(case, DefectCase):
+        return score_report(case.expected, verdict, report)
+    return Score(
+        polarity="clean",
+        verdict=verdict,
+        findings=len(blocking_findings(report)),
+        named_file=None,
+        missing_keywords=(),
     )
 
 
@@ -568,11 +869,12 @@ class _EvalList(_Read):
 
 
 class _RunSummary(_Read):
-    workflow_execution_id: str
+    execution_id: str
 
 
 class _RunList(_Read):
-    executions: list[_RunSummary]
+    items: list[_RunSummary]
+    total: int
 
 
 class _Phase(_Read):
@@ -716,8 +1018,9 @@ def _launch_problem(
     """Why the server no longer backs this ledger line, or None when it does."""
     if launch.run_id not in member_ids:
         return f"not in eval {ev.eval_id} any more"
-    if not {loaded.tag, case.tag} <= set(ev.tags):
-        return f"eval {ev.eval_id} is not tagged {loaded.tag} {case.tag}"
+    # A run not yet moved by the duplicate migration is still in its per-version eval.
+    if case.tag not in ev.tags or not {loaded.suite.suite_tag, loaded.tag} & set(ev.tags):
+        return f"eval {ev.eval_id} is not tagged {loaded.suite.suite_tag} {case.tag}"
     pinned = [(b.repository, b.commit_sha) for b in ev.baseline_repos]
     if pinned != [(loaded.suite.repository, case.commit)]:
         return f"eval {ev.eval_id} pins {pinned}, the case pins {case.commit[:12]}"
@@ -741,18 +1044,17 @@ def score_suite(
         mine = [x for x in launches if x.suite == loaded.tag and x.case == case.id]
         if not mine:
             rows.append(_row(case.id, "-", None, "not launched"))
+        stable = _case_evals(client, loaded, case)
         for launch in mine:
-            ev = _get(client, _Eval, f"/evals/{launch.eval_id}")
-            runs = _get(client, _RunList, f"/evals/{ev.eval_id}/runs", page_size=200).executions
+            ev, runs = _eval_holding(client, launch, stable)
             run = _get(client, _Execution, f"/executions/{launch.run_id}")
             scored_ids.add(launch.run_id)
-            problem = _launch_problem(
-                loaded, case, launch, ev, {r.workflow_execution_id for r in runs}, run
-            )
+            problem = _launch_problem(loaded, case, launch, ev, {r.execution_id for r in runs}, run)
             if problem:
                 rows.append(_row(case.id, ev.eval_id, launch.run_id, f"rejected: {problem}"))
                 continue
-            score = score_report(case.expected, run.review_verdict, _report_of(client, run))
+            score = score_case(case, run.review_verdict, _report_of(client, run))
+            _record_score(client, loaded, case, ev.eval_id, run, score)
             rows.append(
                 ScoredRun(
                     case=case.id,
@@ -766,22 +1068,147 @@ def score_suite(
                 )
             )
 
+    # The case evals are shared by every version and verifier: a run another
+    # ledger line names belongs to another table, not to "unrecorded".
+    ledgered = {x.run_id for x in launches}
     unrecorded: list[str] = []
-    for ev in _get(client, _EvalList, "/evals", tag=loaded.tag, page_size=200).evals:
-        for summary in _get(
-            client, _RunList, f"/evals/{ev.eval_id}/runs", page_size=200
-        ).executions:
-            if summary.workflow_execution_id not in scored_ids:
-                unrecorded.append(
-                    f"{summary.workflow_execution_id} in eval {ev.eval_id}: "
-                    "not in the launch ledger, not scored"
-                )
+    for case in loaded.cases:
+        for ev in _case_evals(client, loaded, case):
+            for summary in _member_runs(client, ev.eval_id):
+                if summary.execution_id not in scored_ids | ledgered:
+                    unrecorded.append(
+                        f"{summary.execution_id} in eval {ev.eval_id}: "
+                        "not in the launch ledger, not scored"
+                    )
     return rows, tuple(unrecorded)
+
+
+def _eval_holding(
+    client: httpx.Client, launch: Launch, stable: list[_Eval]
+) -> tuple[_Eval, list[_RunSummary]]:
+    """The eval a ledgered run is in now: the case's stable eval, else the one it launched into.
+
+    A run launched before evals were stable is moved into the stable eval by
+    scripts/migrate_eval_suite_duplicates.py; its ledger line still names the
+    archived duplicate, and is never edited.
+    """
+    if len(stable) == 1:
+        runs = _member_runs(client, stable[0].eval_id)
+        if launch.run_id in {r.execution_id for r in runs}:
+            return stable[0], runs
+    ev = _get(client, _Eval, f"/evals/{launch.eval_id}")
+    return ev, _member_runs(client, ev.eval_id)
+
+
+def _member_runs(client: httpx.Client, eval_id: str) -> list[_RunSummary]:
+    """Every run of the eval, across pages: `total` is the count at any page size."""
+    runs: list[_RunSummary] = []
+    page = 1
+    while True:
+        batch = _get(client, _RunList, f"/evals/{eval_id}/runs", page=page, page_size=200)
+        runs.extend(batch.items)
+        if not batch.items or len(runs) >= batch.total:
+            return runs
+        page += 1
+
+
+def _case_evals(client: httpx.Client, loaded: LoadedSuite, case: Case) -> list[_Eval]:
+    """The case's stable eval: tagged with the suite and the case (repeated `tag` is AND)."""
+    params = httpx.QueryParams(
+        [("tag", loaded.suite.suite_tag), ("tag", case.tag), ("page_size", 200)]
+    )
+    response = client.get("/evals", params=params)
+    response.raise_for_status()
+    return _EvalList.model_validate(response.json()).evals
+
+
+def run_verdict(run: _Execution, score: Score) -> RunVerdict:
+    """The verdict recorded on the eval. ERROR: the run never finished, so it was not judged."""
+    if run.status != "completed":
+        return "ERROR"
+    return "PASS" if score.passed else "FAIL"
+
+
+def evidence_of(case: Case, run: _Execution, score: Score) -> str:
+    """Why the verdict, as markdown: what the scorer looked for and what it found."""
+    head = [f"## {case.id} ({case.polarity})", "", f"- run status: `{run.status}`"]
+    tail = [f"- models: {_models_of(run) or '-'}"]
+    if isinstance(case, CleanCase):
+        return "\n".join(
+            [
+                *head,
+                f"- review verdict: `{score.verdict or 'none'}` "
+                "(a clean control passes only `certified`)",
+                f"- blocking findings: {score.findings}",
+                *tail,
+            ]
+        )
+    missing = "; ".join("/".join(g) for g in score.missing_keywords) or "none"
+    return "\n".join(
+        [
+            *head,
+            f"- review verdict: `{score.verdict or 'none'}` (a pass needs `blocked`)",
+            f"- blocking findings: {score.findings}",
+            f"- expected file named: {f'`{score.named_file}`' if score.named_file else 'no'}"
+            f" (one of {', '.join(f'`{f}`' for f in case.expected.files)})",
+            f"- keyword groups missing: {missing}",
+            *tail,
+        ]
+    )
+
+
+def _record_score(
+    client: httpx.Client,
+    loaded: LoadedSuite,
+    case: Case,
+    eval_id: str,
+    run: _Execution,
+    score: Score,
+) -> None:
+    response = client.post(
+        f"/evals/{eval_id}/runs/{run.workflow_execution_id}/score",
+        json={
+            "verdict": run_verdict(run, score),
+            "score": 1.0 if score.passed else 0.0,
+            "evidence": evidence_of(case, run, score),
+            "scorer": SCORER,
+            "scorer_version": str(loaded.version),
+        },
+    )
+    if response.is_error:
+        raise RuntimeError(
+            f"scoring {run.workflow_execution_id} in eval {eval_id}: "
+            f"{response.status_code} {_detail(response)}"
+        )
+
+
+def _ratio(part: int, whole: int) -> str:
+    return f"{part}/{whole} ({part / whole:.0%})" if whole else "-"
+
+
+def rates(rows: list[ScoredRun]) -> str:
+    """The catch rate over defect cases and the false-block rate over clean controls.
+
+    Over scored runs only; a run with no verdict is in the denominator and is
+    neither a catch nor a false block. A table with no clean controls says so:
+    its catch rate alone cannot tell a careful verifier from one that blocks all.
+    """
+    scores = [r.score for r in rows if r.score]
+    defects = [s for s in scores if s.polarity == "defect"]
+    clean = [s for s in scores if s.polarity == "clean"]
+    caught = sum(1 for s in defects if s.passed)
+    blocked = sum(1 for s in clean if s.false_block)
+    return f"catch rate (defect cases blocked and named): {_ratio(caught, len(defects))}\n" + (
+        f"false-block rate (clean controls blocked): {_ratio(blocked, len(clean))}"
+        if clean
+        else "false-block rate: not measured, no clean control in this version"
+    )
 
 
 def render(loaded: LoadedSuite, rows: list[ScoredRun], unrecorded: tuple[str, ...] = ()) -> str:
     header = (
         "case",
+        "polarity",
         "run id",
         "status",
         "verdict",
@@ -797,11 +1224,14 @@ def render(loaded: LoadedSuite, rows: list[ScoredRun], unrecorded: tuple[str, ..
         lines.append(
             (
                 r.case,
+                s.polarity if s else "-",
                 r.run_id or "-",
                 r.status,
                 (s.verdict or "none") if s else "-",
                 (
-                    "yes"
+                    "-"
+                    if s.polarity == "clean"
+                    else "yes"
                     if s.matched
                     else f"no{'' if s.findings else ' (no blocking findings)'}"
                     f"{'' if s.named_file or not s.findings else ' (file)'}"
@@ -822,7 +1252,8 @@ def render(loaded: LoadedSuite, rows: list[ScoredRun], unrecorded: tuple[str, ..
     passed = sum(1 for r in rows if r.score and r.score.passed)
     return (
         f"suite {loaded.tag}  version {loaded.version}  workflow {loaded.workflow.id}  "
-        f"declared models {loaded.workflow.models}\n\n{table}\n\n{passed}/{len(rows)} passed"
+        f"declared models {loaded.workflow.models}\n\n{table}\n\n{passed}/{len(rows)} passed\n"
+        + rates(rows)
         + "".join(f"\nignored: {line}" for line in unrecorded)
     )
 
@@ -944,40 +1375,61 @@ def install_workflow(loaded: LoadedSuite, client: httpx.Client, root: Path = ROO
     )
 
 
-def launch_suite(
-    loaded: LoadedSuite, client: httpx.Client, ledger: Path, root: Path = ROOT
-) -> list[str]:
-    """Install the workflow, then create one pinned eval per case and start its run.
+def stable_eval(loaded: LoadedSuite, case: Case, client: httpx.Client) -> _Created:
+    """The case's one eval: found by `suite:` + `case:` tags, created once if missing.
 
-    Each started run is appended to `ledger` as it starts, so a launch that
-    dies part way still records the runs it began.
+    Refuses to go on when two evals carry the tags (run the duplicate
+    migration first) or when the one found pins another commit.
     """
-    s, w = loaded.suite, loaded.workflow
-    out = [install_workflow(loaded, client, root)]
-    for case in loaded.cases:
+    s = loaded.suite
+    found = _case_evals(client, loaded, case)
+    if len(found) > 1:
+        raise RuntimeError(
+            f"{case.id}: {len(found)} evals tagged {s.suite_tag} {case.tag} "
+            f"({', '.join(e.eval_id for e in found)}); run scripts/migrate_eval_suite_duplicates.py"
+        )
+    if found:
+        created = _Created(eval_id=found[0].eval_id, baseline_repos=found[0].baseline_repos)
+    else:
         response = client.post(
             "/evals",
             json={
-                "name": f"{s.id} v{s.version}: {case.id}",
+                "name": f"{s.eval_suite or s.id}: {case.id}",
                 "goal": s.goal,
-                "starting_workflow_id": w.id,
                 "baseline_repos": [{"repository": s.repository, "requested_ref": case.commit}],
-                "tags": [loaded.tag, case.tag, f"workflow:{w.id}"],
+                "tags": [s.suite_tag, case.tag],
             },
         )
         response.raise_for_status()
         created = _Created.model_validate(response.json())
-        pinned = [b.commit_sha for b in created.baseline_repos]
-        if pinned != [case.commit]:
-            raise RuntimeError(
-                f"{case.id}: eval {created.eval_id} pinned {pinned}, expected {case.commit}"
-            )
+    pinned = [b.commit_sha for b in created.baseline_repos]
+    if pinned != [case.commit]:
+        raise RuntimeError(
+            f"{case.id}: eval {created.eval_id} pinned {pinned}, expected {case.commit}"
+        )
+    return created
+
+
+def launch_suite(
+    loaded: LoadedSuite, client: httpx.Client, ledger: Path, root: Path = ROOT
+) -> list[str]:
+    """Install the workflow, then start one run per case in the case's stable eval.
+
+    The eval is found by its tags and created only when missing. Each started
+    run is appended to `ledger` as it starts, so a launch that dies part way
+    still records the runs it began.
+    """
+    s, w = loaded.suite, loaded.workflow
+    out = [install_workflow(loaded, client, root)]
+    for case in loaded.cases:
+        created = stable_eval(loaded, case, client)
         response = client.post(
             f"/workflows/{w.id}/execute",
             json={
                 "task": case.task,
                 "repos": [s.repository],
                 "eval_id": created.eval_id,
+                "tags": loaded.run_tags,
             },
         )
         response.raise_for_status()
@@ -1010,8 +1462,9 @@ def describe_launch(loaded: LoadedSuite) -> list[str]:
         f"{loaded.suite.version}.0.0 with its sha256 digest, then "
         f"GET /workflows/{w.id} must match its phases, prompts and models {w.models}",
     ] + [
-        f"{c.id}: POST /evals baseline {s.repository}@{c.commit} tags [{loaded.tag}, {c.tag}]; "
-        f"then POST /workflows/{w.id}/execute with that eval_id; run recorded in launches.jsonl"
+        f"{c.id}: GET /evals?tag={s.suite_tag}&tag={c.tag}, else POST /evals baseline "
+        f"{s.repository}@{c.commit} with those tags; then POST /workflows/{w.id}/execute "
+        f"with that eval_id and tags {loaded.run_tags}; run recorded in launches.jsonl"
         for c in loaded.cases
     ]
 
@@ -1041,6 +1494,12 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="score this version only (default: every version the workflow ran)",
     )
+    parser.add_argument(
+        "--split",
+        choices=("train", "holdout"),
+        default=None,
+        help="launch or score only these cases (default: all); tune on train only",
+    )
     parser.add_argument("--api-url", default=None, help="defaults to DEV__API_URL / localhost")
     parser.add_argument(
         "--launches",
@@ -1052,7 +1511,7 @@ def main(argv: list[str] | None = None) -> int:
 
     to_score: list[LoadedSuite] = []
     try:
-        loaded = load_suite(args.suite, workflow=args.workflow)
+        loaded = load_suite(args.suite, workflow=args.workflow, split=args.split)
         if args.command == "score":
             versions = (
                 [args.version]
@@ -1060,7 +1519,8 @@ def main(argv: list[str] | None = None) -> int:
                 else versions_run(loaded.suite, loaded.workflow.id)
             )
             to_score = [
-                load_suite(args.suite, workflow=loaded.workflow.id, version=v) for v in versions
+                load_suite(args.suite, workflow=loaded.workflow.id, version=v, split=args.split)
+                for v in versions
             ]
     except DefinitionError as exc:
         print(f"❌ {args.suite}:\n{exc}", file=sys.stderr)

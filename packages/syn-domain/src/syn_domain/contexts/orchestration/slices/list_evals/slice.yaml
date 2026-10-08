@@ -8,6 +8,7 @@ subscribes_to:
   - EvalUpdatedEvent
   - EvalFrozenEvent
   - EvalArchivedEvent
+  - EvalRunScoredEvent
 
 description: >
   Query slice for the eval list (with each Eval's run count and status tally)

@@ -1,4 +1,5 @@
 id: binary-artifact-minio-key
+polarity: defect
 source_pr: 1652
 # The parent of 721a8014c, the commit that fixed it on the PR branch.
 commit: b2f680f00b4e154b94fa4802a92ead30429e7b98
@@ -26,3 +27,4 @@ expected:
        differ, disagree, inconsistent, wrong, another, never read, cannot read,
        "can't read", never retriev, cannot retriev, "can't retriev", cannot be read,
        cannot be retriev, fail, missing, discard, drop, lost, unreachable, orphan]
+split: train
