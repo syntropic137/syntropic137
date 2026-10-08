@@ -343,6 +343,22 @@ class TestDelegation:
             tuple(sorted((OPUS, SONNET))),
         ]
 
+    async def test_an_unpriced_leader_is_not_dropped_by_a_priced_delegate(
+        self, client: AsyncClient, lane2: _Lane2
+    ) -> None:
+        """The cost split holds only priced rows: the leader's own model must not depend on it."""
+        eval_id = await _create(client)
+        await _run(lane2, eval_id, "led", "wf-a", OPUS, "2", "2026-10-02T00:00:00+00:00")
+        lane2.by_phase["led"] = {"verify": {SONNET: Decimal("0.5")}}
+        await _catch_up()
+
+        [run] = (await client.get(f"/evals/{eval_id}/runs")).json()["items"]
+
+        assert run["models"] == [
+            {"phase_id": "verify", "model": OPUS},
+            {"phase_id": "verify", "model": SONNET},
+        ]
+
 
 class TestSummary:
     async def test_variants_and_pass_rate_over_two_workflows_by_two_models(

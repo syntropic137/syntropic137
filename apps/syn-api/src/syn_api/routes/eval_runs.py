@@ -69,14 +69,15 @@ def _cost(value: Decimal | str) -> Decimal | None:
 def _phase_models(phase: PhaseExecution) -> tuple[PhaseModel, ...]:
     """Every model the phase was observed running, sorted: its own and its delegates'.
 
-    ``cost_by_model`` is the per-model split of the phase's Lane 2 cost, so it
-    names a delegate's model too (a codex phase that delegated to claude ran
-    both). Its unknown bucket is not a model and is dropped. A phase with no
-    split yet falls back to the model its harness reported.
+    The phase's own reported model is always in, priced or not. ``cost_by_model``
+    (the per-model split of the phase's Lane 2 cost) adds its delegates' models:
+    a codex phase that delegated to claude ran both. Its unknown bucket is not a
+    model and is dropped. Known limit: the split holds only PRICED rows, so a
+    delegate whose model has no rate and no SDK cost is not seen here (#1743).
     """
     observed = {key for key in phase.cost_by_model if key != UNKNOWN_MODEL_KEY}
-    if not observed and phase.model:
-        observed = {str(phase.model)}
+    if phase.model:
+        observed.add(str(phase.model))
     return tuple(PhaseModel(phase.phase_id, model) for model in sorted(observed))
 
 

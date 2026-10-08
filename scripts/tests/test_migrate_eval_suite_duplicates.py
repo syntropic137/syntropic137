@@ -59,6 +59,9 @@ class _Api:
             rid = path.split("/")[2]
             owner = next((e for e, runs in self.members.items() if rid in runs), None)
             return httpx.Response(200, json={"eval": None if owner is None else {"eval_id": owner}})
+        if method == "GET" and path.startswith("/evals/") and path.count("/") == 2:
+            found = self.evals.get(path.split("/")[2])
+            return httpx.Response(200 if found else 404, json=found or {"detail": path})
         if method == "GET" and path.endswith("/runs"):
             ids = self.members[path.split("/")[2]]
             items = [{"execution_id": i} for i in ids]
@@ -143,3 +146,19 @@ def test_a_stable_eval_pinned_elsewhere_is_never_folded_into(tmp_path: Path) -> 
     assert api.writes == []
     assert any(line.startswith(f"{_CASE.id}: SKIP, stable eval stable pins") for line in lines)
     assert api.members == {"dup-a": ["run-1"], "dup-b": ["run-2"], "stable": []}
+
+
+@pytest.mark.unit
+def test_recovery_never_attaches_into_a_target_whose_baseline_moved(tmp_path: Path) -> None:
+    """Cut after the detach, then the new stable eval is re-pinned before the rerun."""
+    api = _Api()
+    journal = tmp_path / "journal.jsonl"
+    api.fail_attach = 1
+    with pytest.raises(RuntimeError, match="attach run-1"):
+        migrate(_LOADED, api.client(), dry_run=False, journal=journal)
+    api.evals["stable"] = _eval("stable", [_LOADED.suite.suite_tag, _CASE.tag], "e" * 40)
+
+    with pytest.raises(RuntimeError, match="now pins"):
+        migrate(_LOADED, api.client(), dry_run=False, journal=journal)
+
+    assert all("run-1" not in runs for runs in api.members.values())

@@ -70,6 +70,9 @@ class _Move(BaseModel):
     run: str
     source: str
     target: str
+    repository: str
+    commit: str
+    """The case's pin. Recovery re-checks the target still pins it before attaching."""
     state: Literal["detaching", "moved"]
 
 
@@ -114,6 +117,14 @@ def _current_eval(client: httpx.Client, run: str) -> str | None:
     return None if found is None else found.eval_id
 
 
+def _pin(client: httpx.Client, eval_id: str) -> list[tuple[str, str]]:
+    response = client.get(f"/evals/{eval_id}")
+    _check(response, f"read {eval_id}")
+    return [
+        (b.repository, b.commit_sha) for b in _Eval.model_validate(response.json()).baseline_repos
+    ]
+
+
 def recover(client: httpx.Client, journal: Path, *, dry_run: bool) -> list[str]:
     """Finish every move an earlier run left between its detach and its attach."""
     verb = "would " if dry_run else ""
@@ -129,6 +140,13 @@ def recover(client: httpx.Client, journal: Path, *, dry_run: bool) -> list[str]:
                 f"recover: {move.run} was moving {move.source} -> {move.target} but is in {now}; "
                 "resolve it by hand before running again"
             )
+        if now is None:
+            pinned = _pin(client, move.target)
+            if pinned != [(move.repository, move.commit)]:
+                raise RuntimeError(
+                    f"recover: {move.run} was moving to {move.target}, which now pins {pinned}, "
+                    f"not {move.commit[:12]}; resolve it by hand before running again"
+                )
         if not dry_run:
             if now is None:
                 _check(
@@ -224,7 +242,14 @@ def migrate(
                 if not dry_run:
                     assert journal is not None  # checked above
                     rid = run.execution_id
-                    move = _Move(run=rid, source=dup.eval_id, target=keep, state="detaching")
+                    move = _Move(
+                        run=rid,
+                        source=dup.eval_id,
+                        target=keep,
+                        repository=s.repository,
+                        commit=case.commit,
+                        state="detaching",
+                    )
                     _write(journal, move)
                     _check(
                         client.delete(f"/executions/{rid}/eval", params={"eval_id": dup.eval_id}),
