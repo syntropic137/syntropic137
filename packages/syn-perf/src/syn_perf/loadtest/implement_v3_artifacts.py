@@ -2,9 +2,9 @@
 
 Each text carries the sections that phase's prompt requires under "Write to
 ``artifacts/output/<phase-id>.md``", in the same order and with the same first
-line where one is demanded (``Round: N of 3`` for each fix round, ``CERTIFIED``
+line where one is demanded (``Round: N of 2`` for each fix round, ``CERTIFIED``
 or ``BLOCKED`` then the round for each reverify, ``READY`` or ``DRAFT`` then
-``Repair rounds: N of 3`` for finalize_pr, all from the profile's planned
+``Repair rounds: N of 2`` for finalize_pr, all from the profile's planned
 run), so the next phase reads the shape it reads in production.
 ``{execution_id}``, ``{branch}``, ``{head_sha}`` and ``{pull_request}`` (the
 draft implement opened, as number and URL) are filled per execution by
@@ -25,8 +25,10 @@ ReviewVerdictName = Literal["certified", "blocked"]
 
 _STUB = "Load-test stub for execution `{execution_id}`; no agent ran."
 
-_ROUNDS: Final = range(1, 4)
-"""The repair rounds: ``fix``/``reverify``, then ``_2`` and ``_3`` (PC-63)."""
+_ROUNDS: Final = range(1, 3)
+"""The repair rounds: ``fix``/``reverify``, then ``_2`` (PC-63; two since
+2026-10-07). ``ScriptedAgentProfile.for_workflow`` refuses stubs that do not
+cover exactly the workflow's phases, so this cannot drift from the YAML."""
 
 
 def pushed_file(phase_id: str) -> str:
@@ -160,6 +162,6 @@ Branch: `{{branch}}`
 IMPLEMENT_V3_REVIEW_VERDICTS: Final[Mapping[str, ReviewVerdictName]] = MappingProxyType(
     {"reverify": "certified"}
 )
-"""The default run: round one certifies, so the aggregate skips rounds two and
-three and finalize_pr marks the draft ready. Pass other verdicts to
+"""The default run: round one certifies, so the aggregate skips round two and
+finalize_pr marks the draft ready. Pass other verdicts to
 ``ScriptedAgentProfile.for_workflow`` to load-test the repair rounds."""

@@ -85,7 +85,7 @@ def _profile(
     )
 
 
-_ALL_BLOCKED = {"reverify": "blocked", "reverify_2": "blocked", "reverify_3": "blocked"}
+_ALL_BLOCKED = {"reverify": "blocked", "reverify_2": "blocked"}
 
 
 # --- side effects come from the real phase contract -----------------------
@@ -104,8 +104,6 @@ def test_side_effects_follow_the_implement_v3_phase_contracts(
         "reverify": ReportOnly,
         "fix_2": PushBranch,
         "reverify_2": ReportOnly,
-        "fix_3": PushBranch,
-        "reverify_3": ReportOnly,
         "finalize_pr": MarkPullRequestReady,
     }
 
@@ -120,9 +118,9 @@ def test_the_stubs_cover_exactly_the_workflows_phases(workflow: WorkflowDefiniti
 def test_a_stub_for_a_phase_the_workflow_no_longer_has_is_refused(
     workflow: WorkflowDefinition,
 ) -> None:
-    artifacts = {**IMPLEMENT_V3_ARTIFACTS, "fix_4": "Round: 4 of 3"}
+    artifacts = {**IMPLEMENT_V3_ARTIFACTS, "fix_3": "Round: 3 of 2"}
 
-    with pytest.raises(ValueError, match=r"'extra': \['fix_4'\]"):
+    with pytest.raises(ValueError, match=r"'extra': \['fix_3'\]"):
         ScriptedAgentProfile.for_workflow(
             workflow,
             tier="node",
@@ -344,7 +342,7 @@ def test_rendered_artifacts_name_the_execution_and_its_branch(workflow: Workflow
     for pid in _AFTER_PREMISE:
         assert "`loadtest/exec-7f3a`" in rendered[pid], pid
     assert rendered["reverify"].splitlines()[0] == "CERTIFIED"
-    assert rendered["finalize_pr"].splitlines()[:2] == ["READY", "Repair rounds: 1 of 3"]
+    assert rendered["finalize_pr"].splitlines()[:2] == ["READY", "Repair rounds: 1 of 2"]
     assert "## 1. Verdict: Confirmed" in rendered["premise"]
 
 
@@ -390,7 +388,7 @@ def test_a_platform_artifact_says_no_pr_was_opened(workflow: WorkflowDefinition)
 
 @pytest.mark.parametrize(
     ("n", "fix", "reverify"),
-    [(1, "fix", "reverify"), (2, "fix_2", "reverify_2"), (3, "fix_3", "reverify_3")],
+    [(1, "fix", "reverify"), (2, "fix_2", "reverify_2")],
 )
 def test_each_repair_round_reports_which_round_it_is(
     workflow: WorkflowDefinition, n: int, fix: str, reverify: str
@@ -401,13 +399,13 @@ def test_each_repair_round_reports_which_round_it_is(
     fixed = profile.render_artifact(fix, "exec-7f3a", _HEAD).splitlines()
     reviewed = profile.render_artifact(reverify, "exec-7f3a", _HEAD).splitlines()
 
-    assert fixed[0] == f"Round: {n} of 3"
-    assert reviewed[:2] == ["BLOCKED", f"Round: {n} of 3"]
+    assert fixed[0] == f"Round: {n} of 2"
+    assert reviewed[:2] == ["BLOCKED", f"Round: {n} of 2"]
 
 
 # --- the declared verdict is what the engine reads, and the run follows it ---
 
-_ROUNDS = ("fix", "reverify", "fix_2", "reverify_2", "fix_3", "reverify_3")
+_ROUNDS = ("fix", "reverify", "fix_2", "reverify_2")
 
 
 def _engine_run(
@@ -445,8 +443,8 @@ def _engine_run(
             "READY",
             id="blocked-then-certified",
         ),
-        pytest.param(_ALL_BLOCKED, 3, ReviewVerdict.BLOCKED, "DRAFT", id="blocked-at-the-bound"),
-        pytest.param({}, 3, None, "DRAFT", id="no-verdict-reported"),
+        pytest.param(_ALL_BLOCKED, 2, ReviewVerdict.BLOCKED, "DRAFT", id="blocked-at-the-bound"),
+        pytest.param({}, 2, None, "DRAFT", id="no-verdict-reported"),
     ],
 )
 def test_the_final_outcome_is_the_run_the_engine_takes_from_the_emitted_verdicts(
@@ -464,7 +462,7 @@ def test_the_final_outcome_is_the_run_the_engine_takes_from_the_emitted_verdicts
     assert engine_ended_on is ended_on
     assert profile.planned_run().ran == tuple(ran)
     finalized = profile.render_artifact("finalize_pr", "exec-7f3a", _HEAD, _PR_URL)
-    assert finalized.splitlines()[:2] == [outcome, f"Repair rounds: {rounds_run} of 3"]
+    assert finalized.splitlines()[:2] == [outcome, f"Repair rounds: {rounds_run} of 2"]
     readies = isinstance(profile.phases["finalize_pr"].side_effect, MarkPullRequestReady)
     assert readies is (outcome == "READY")
     last_review = _ROUNDS[2 * rounds_run - 1]
@@ -508,7 +506,7 @@ def test_every_pushing_phase_reports_the_file_its_side_effect_commits(
         if isinstance(p.side_effect, PushBranch | OpenDraftPullRequest)
     ]
 
-    assert pushing == ["implement", "fix", "fix_2", "fix_3"]
+    assert pushing == ["implement", "fix", "fix_2"]
     for pid in pushing:
         rendered = profile.render_artifact(pid, "exec-7f3a", _HEAD, _PR_URL)
         assert f"`loadtest/{pid}.txt`" in rendered, pid
