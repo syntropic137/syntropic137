@@ -21,6 +21,7 @@ from syn_api.types import (
     ExecutionDetail,
     ExecutionDetailFull,
     ExecutionError,
+    ExecutionEvalRunResponse,
     ExecutionSummary,
     Ok,
     PhaseExecution,
@@ -173,6 +174,7 @@ def _merge_totals(
 def _build_execution_summary_response(
     e: ExecutionSummary,
     enrichment: _ExecutionEnrichment | None = None,
+    eval_run: ExecutionEvalRunResponse | None = None,
 ) -> ExecutionSummaryResponse:
     """Compose an ExecutionSummaryResponse from a domain summary + enrichment.
 
@@ -217,6 +219,7 @@ def _build_execution_summary_response(
         repos=list(e.repos),
         tags=list(e.tags),
         repos_display=format_repos(e.repos),
+        eval=eval_run,
     )
 
 
@@ -305,6 +308,7 @@ async def _load_execution_list_data(
     search: str | None = None,
     tags: TagSet | None = None,
     eval_id: str | None = None,
+    in_eval: bool | None = None,
 ) -> tuple[Page[WorkflowExecutionSummary], dict[str, _ExecutionEnrichment]]:
     """Fetch one page of domain summaries plus its tool-count and cost enrichment, once.
 
@@ -330,6 +334,7 @@ async def _load_execution_list_data(
             search=search,
             tags=tags,
             eval_id=eval_id,
+            in_eval=in_eval,
             offset=offset,
             limit=limit,
         )
@@ -654,10 +659,19 @@ async def list_executions_endpoint(
             "Matched exactly, never as a prefix."
         ),
     ),
+    in_eval: bool | None = Query(
+        None,
+        description=(
+            "true keeps only executions that are currently a run of some eval; "
+            "false keeps only executions in no eval. Omit for both."
+        ),
+    ),
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(50, ge=1, le=MAX_PAGE_SIZE, description="Items per page"),
 ) -> ExecutionListResponse:
     """List all workflow executions across all workflows."""
+    from syn_api.routes.eval_runs import execution_eval_runs  # eval_runs imports this module
+
     try:
         tags = TagSet(tag or ())
     except InvalidTagsError as exc:
@@ -676,12 +690,15 @@ async def list_executions_endpoint(
         search=q,
         tags=tags,
         eval_id=eval_id,
+        in_eval=in_eval,
     )
+    eval_by_execution = await execution_eval_runs(manager.store, execution_page.rows)
     return ExecutionListResponse(
         executions=[
             _build_execution_summary_response(
                 _to_execution_summary(s, cost_by_execution),
                 cost_by_execution.get(s.workflow_execution_id),
+                eval_by_execution.get(s.workflow_execution_id),
             )
             for s in execution_page.rows
         ],

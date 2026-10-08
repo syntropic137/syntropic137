@@ -509,6 +509,106 @@ class TestExecutionDetailCarriesItsEval:
         assert (await client.get("/executions/r2")).json()["eval"] is None
 
 
+class TestExecutionListCarriesItsEval:
+    """``GET /executions``'s ``eval``: the badge on each row of the execution list."""
+
+    async def _rows(self, client: AsyncClient, **params: str) -> dict[str, dict[str, object]]:
+        response = await client.get("/executions", params=params)
+        assert response.status_code == 200, response.text
+        return {row["workflow_execution_id"]: row for row in response.json()["executions"]}
+
+    async def test_each_row_carries_its_eval_and_verdict_and_an_ordinary_run_none(
+        self, client: AsyncClient, lane2: _Lane2
+    ) -> None:
+        eval_id = await _two_by_two(client, lane2)
+        await _run(lane2, None, "ordinary", "wf-a", OPUS, "1", "2026-10-06T00:00:00+00:00")
+
+        rows = await self._rows(client)
+
+        assert rows["ordinary"]["eval"] is None
+        assert rows["r2"]["eval"] == (await client.get("/executions/r2")).json()["eval"]
+        verdicts = {key: row["eval"]["verdict"] for key, row in rows.items() if row["eval"]}  # type: ignore[index]
+        assert verdicts == {"r1": "PASS", "r2": "FAIL", "r3": "PASS", "r4": "ERROR", "r5": None}
+        assert {row["eval"]["eval_name"] for row in rows.values() if row["eval"]} == {  # type: ignore[index]
+            "verifier-seed: case-1"
+        }
+        assert rows["r5"]["eval"]["eval_id"] == eval_id  # type: ignore[index]
+
+    async def test_a_score_from_an_eval_the_run_left_is_not_its_verdict(
+        self, client: AsyncClient, lane2: _Lane2
+    ) -> None:
+        first = await _two_by_two(client, lane2)
+        created = await client.post("/evals", json={"name": "second", "goal": "Another goal"})
+        assert created.status_code == 201, created.text
+        second = created.json()["eval_id"]
+
+        assert (await client.delete("/executions/r2/eval", params={"eval_id": first})).is_success
+        assert (await client.post("/executions/r2/eval", json={"eval_id": second})).is_success
+        await _project_executions()
+        await _catch_up()
+
+        shown = (await self._rows(client))["r2"]["eval"]
+
+        assert shown == {
+            "eval_id": second,
+            "eval_name": "second",
+            "association_kind": "attached",
+            "verdict": None,
+            "score": None,
+            "scored_at": None,
+        }
+
+    async def test_in_eval_keeps_eval_runs_or_everything_else(
+        self, client: AsyncClient, lane2: _Lane2
+    ) -> None:
+        await _two_by_two(client, lane2)
+        await _run(lane2, None, "ordinary", "wf-a", OPUS, "1", "2026-10-06T00:00:00+00:00")
+
+        evals_only = await client.get("/executions", params={"in_eval": "true"})
+        hide_evals = await client.get("/executions", params={"in_eval": "false"})
+
+        assert sorted(r["workflow_execution_id"] for r in evals_only.json()["executions"]) == [
+            "r1",
+            "r2",
+            "r3",
+            "r4",
+            "r5",
+        ]
+        assert evals_only.json()["total"] == 5
+        assert [r["workflow_execution_id"] for r in hide_evals.json()["executions"]] == ["ordinary"]
+        assert hide_evals.json()["total"] == 1
+        assert len((await self._rows(client))) == 6
+
+    async def test_a_page_of_eval_runs_reads_the_eval_model_twice_not_per_row(
+        self, client: AsyncClient, lane2: _Lane2, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from syn_adapters.projections.manager import get_projection_manager
+
+        await _two_by_two(client, lane2)
+        store = get_projection_manager().store
+        reads: list[str] = []
+        real_get, real_query = store.get, store.query
+
+        async def get(projection: str, key: str):  # noqa: ANN202 - mirrors the store
+            reads.append(projection)
+            return await real_get(projection, key)
+
+        async def query(projection: str, *args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+            reads.append(projection)
+            return await real_query(projection, *args, **kwargs)
+
+        monkeypatch.setattr(store, "get", get)
+        monkeypatch.setattr(store, "query", query)
+
+        rows = await self._rows(client)
+
+        assert len([row for row in rows.values() if row["eval"]]) == 5
+        assert sorted(r for r in reads if r in ("evals", "eval_run_scores")) == [
+            "eval_run_scores",
+            "evals",
+        ]
+
+
 async def _start_resumed_child(
     parent_id: str, child_id: str, *, workflow_version: str | None, reinstall_at: str | None
 ) -> None:

@@ -174,6 +174,40 @@ class EvalListProjection(AutoDispatchProjection):
         document = await self._store.get(self.SCORES, _score_key(eval_id, execution_id))
         return None if document is None else EvalRunScore.model_validate(document)
 
+    async def scores_of(
+        self, runs: Collection[tuple[str, str]]
+    ) -> dict[tuple[str, str], EvalRunScore]:
+        """The current score of each ``(eval_id, execution_id)`` run given, in one read.
+
+        Runs never scored are omitted. Answers what ``score`` answers for each
+        run, without a read per run.
+        """
+        if not runs:
+            return {}
+        documents = await self._store.query(
+            self.SCORES,
+            filters={
+                "eval_id": sorted({eval_id for eval_id, _ in runs}),
+                "execution_id": sorted({execution_id for _, execution_id in runs}),
+            },
+        )
+        # The filter is the product of both id sets, so it can return a score
+        # for a pair that was not asked about; keep only the runs given.
+        wanted = set(runs)
+        scores = (EvalRunScore.model_validate(document) for document in documents)
+        return {
+            key: score for score in scores if (key := (score.eval_id, score.execution_id)) in wanted
+        }
+
+    async def records(self, eval_ids: Collection[str]) -> dict[str, EvalRecord]:
+        """Each Eval's own record, by id, in one read; ids not yet projected are omitted."""
+        if not eval_ids:
+            return {}
+        documents = await self._store.query(
+            self.PROJECTION_NAME, filters={"eval_id": sorted(set(eval_ids))}
+        )
+        return {record.eval_id: record for record in map(_from_document, documents)}
+
     async def record(self, eval_id: str) -> EvalRecord | None:
         """The Eval's own record (name, Goal, Baseline), without its runs."""
         return await self._record(eval_id)
