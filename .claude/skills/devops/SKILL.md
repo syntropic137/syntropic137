@@ -12,6 +12,7 @@ Trunk-based, two-branch model. `main` is the trunk (all work merges here). `rele
 - **`docs/release-process.md`** — release process, branch model, version-bump procedure, npm/GHCR setup, recovery for failed releases. **Read this before any release work.**
 - **`docs/runbooks/001-system-experimentation-runbook.md`** — dogfood / experimentation runbook (separate concern, but referenced when release work intersects with experiment runs).
 - **`AGENTS.md`** + **`CLAUDE.md`** — repo-wide rules. Hard rules around hooks, force-push, rebase, merging are enforced; do not work around them.
+- **`project_board.md`** (this folder) — project board: milestones, priorities, `gh project` commands and field/option IDs.
 - **`.github/workflows/release-create.yml`** — the actual release orchestration. Read this when reasoning about ordering or gate behavior.
 - **`.github/workflows/release-gate.yml`** + **`_check-*.yml`** — pre-merge gate. Read this when reasoning about what blocks a release PR from merging.
 

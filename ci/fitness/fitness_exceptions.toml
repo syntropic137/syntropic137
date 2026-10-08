@@ -153,7 +153,7 @@ allowed_prefixes = [
 #
 # Fix with a @dataclass or a Pydantic BaseModel. NOT a TypedDict: it is read by
 # string key and validates nothing at runtime, so it reproduces both halves of
-# the defect under a name that looks typed (AGENTS.md; PR #1246, #1248).
+# the defect under a name that looks typed (docs/architecture/type-safety-fitness.md; PR #1246, #1248).
 # `annotation` records what is there now, so a diff shows what changed.
 
 

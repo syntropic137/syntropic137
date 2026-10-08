@@ -216,7 +216,7 @@ _AUTO_DISPATCH_PREFIX = "on_"
 
 #: Declarations that name their fields and are read by attribute. ``TypedDict``
 #: is deliberately absent: it names its fields and is still read by string key,
-#: so it reproduces half the defect under a name that looks typed (AGENTS.md;
+#: so it reproduces half the defect under a name that looks typed (docs/architecture/type-safety-fitness.md;
 #: PR #1246, #1248). ``SimpleNamespace`` is absent for the mirror reason - read
 #: by attribute, declares nothing.
 _FIELD_DECLARING_BASES = frozenset({"BaseModel", "NamedTuple", "Enum", "StrEnum", "IntEnum"})
@@ -630,7 +630,7 @@ def test_projection_handler_declares_a_typed_payload(file_path: str, violation: 
     The event class already does. Give the parameter a ``@dataclass`` or a
     Pydantic ``BaseModel`` - not a ``TypedDict``, which validates nothing at
     runtime and is read by string key, so it reproduces both halves of the
-    defect under a name that looks typed (AGENTS.md; PR #1246, #1248).
+    defect under a name that looks typed (docs/architecture/type-safety-fitness.md; PR #1246, #1248).
     """
     assert violation.key(file_path) in _GRANDFATHERED, (
         f"{file_path}:{violation.line} - {violation.qualname} takes "
@@ -788,7 +788,7 @@ def test_a_functional_typed_dict_payload_fails_too() -> None:
     """`X = TypedDict("X", ...)` is the same declaration in one line.
 
     Closing the class spelling alone would leave the number standing still for
-    a rename, which is the #1188 defect one level up (AGENTS.md).
+    a rename, which is the #1188 defect one level up (docs/architecture/type-safety-fitness.md).
     """
     source = """
 from typing import TypedDict
@@ -1139,7 +1139,7 @@ def test_a_dynamic_lookup_spelled_dunder_is_still_a_dynamic_lookup() -> None:
     """Gating on the identifier `getattr` was gating on a spelling.
 
     `self.__getattribute__(name)` is the same operation and the rule must not
-    be leavable by writing it, for the reason AGENTS.md gives about #1188: a
+    be leavable by writing it, for the reason docs/architecture/type-safety-fitness.md gives about #1188: a
     number that does not move for a rename is the same defect as one that does.
     """
     source = """

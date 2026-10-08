@@ -4,615 +4,120 @@ globs:
 alwaysApply: true
 ---
 <!--
-CANONICAL FILE. Edit this one.
-
-CLAUDE.md is a byte-identical generated COPY of this file, committed so a fresh
-clone has it. After editing here, run `just sync-agent-docs`. `just preflight`
-fails if the two differ.
-
-This notice lives in AGENTS.md rather than CLAUDE.md because the two files must
-be identical, so the copy has nowhere of its own to carry a banner.
-
-Why a copy and not a symlink: git for Windows defaults to core.symlinks=false
-and checks a symlink out as a plain text file containing the target path, so
-CLAUDE.md would become a 9-byte file reading "AGENTS.md" and Claude Code would
-silently load that as the entire project context.
-
-Why a copy and not an `@AGENTS.md` import stub: Claude resolves at most 5 files
-deep and the stub spends one hop reaching AGENTS.md. Measured, not assumed: a
-stub bridge leaves this file 3 levels of nested imports, a copy leaves 4.
+CANONICAL FILE. Edit this one. CLAUDE.md is a byte-identical copy: run
+`just sync-agent-docs` after editing; `just preflight` fails if they differ.
+Why a copy (not a symlink or @import stub): see the comment on
+`sync-agent-docs` in the justfile.
+This file loads on EVERY turn of every agent. Keep it to rules every coding
+task needs; put task-specific detail in a linked doc or skill.
 -->
 
 # Syntropic137
 
-## What This Is
+Orchestrates AI agent execution in isolated Docker workspaces and captures every event for observability: **orchestration** (workspace lifecycle, secure tokens, GitHub App) and **observability** (tool use, tokens, costs, errors, streamed to a dashboard). End goal: a `gh`-style CLI (`syn`).
 
-Syntropic137 - orchestrates AI agent execution in isolated Docker workspaces and captures every event for observability. Two capabilities: **orchestration** (workspace lifecycle, secure token handling, GitHub App integration) and **observability** (tool use, tokens, costs, errors - all streamed to a real-time dashboard).
-
-**North star:** 20 concurrent executions now, 100 as soon as possible, 1,000 for production. Judge every design against it: read [docs/north-star.md](docs/north-star.md).
-
-**Purpose:** scale quality development - reach the quality bar first, then make the same bar cheaper and faster. Orchestrating or dogfooding the platform: read [.claude/skills/orchestrating/SKILL.md](.claude/skills/orchestrating/SKILL.md).
-
-The end goal: a `gh`-style CLI (`syn`) that integrates with Claude Code and OpenClaw for agentic workflow automation.
-
-## Architecture
-
-- **Domain-Driven Design** with event sourcing (all state changes are events)
-- **Vertical Slice Architecture** - validated by the `vsa` CLI tool from event-sourcing-platform
-- **Thin API wrapper** around the domain model (FastAPI)
-- **CLI** (`syn`) wraps the API - GitHub CLI-inspired UX
+- **North star:** 20 concurrent executions now, 100 ASAP, 1,000 for production. Judge every design against [docs/north-star.md](docs/north-star.md).
+- **Purpose:** scale quality development - reach the quality bar first, then make it cheaper and faster. Orchestrating or dogfooding the platform: read [.claude/skills/orchestrating/SKILL.md](.claude/skills/orchestrating/SKILL.md).
+- **Architecture:** DDD + event sourcing (all state changes are events), Vertical Slice Architecture (validated by `vsa`), thin FastAPI wrapper, `syn` CLI wraps the API.
 
 ## Repository Structure
 
 ```
-syntropic137/
-├── apps/
-│   ├── syn-api/               # FastAPI HTTP server (routes + v1 application services)
-│   ├── syn-cli-node/          # CLI tool ("syn") - Node.js, HTTP client for syn-api
-│   ├── syn-dashboard-ui/      # Dashboard frontend (Vite + React) - operational UI
-│   ├── syn-docs/              # Public-facing documentation site (Next.js + Fumadocs)
-├── packages/
-│   ├── syn-domain/            # Domain events, aggregates, ports
-│   ├── syn-adapters/          # Orchestration + observability adapters
-│   ├── syn-collector/         # Event ingestion API
-│   └── syn-shared/            # Shared settings, configuration
-├── lib/                       # Git submodules (we manage both - dogfooding)
-│   ├── agentic-workspace/     # Workspace images, isolation providers, agent event recording
-│   └── event-sourcing-platform/ # ES infrastructure, VSA tool, projections
-├── infra/                     # Docker Compose, setup wizard, secrets
-├── docs/                      # Internal/local development docs (ADRs, architecture notes,
-│                              #   deployment guides) - NOT the public docs site
-└── docs/adrs/                 # Architecture Decision Records
+apps/syn-api/           FastAPI server (routes + v1 application services)
+apps/syn-cli-node/      `syn` CLI (Node.js, HTTP client for syn-api)
+apps/syn-dashboard-ui/  Dashboard (Vite + React)
+apps/syn-docs/          PUBLIC docs site (Next.js + Fumadocs); content in apps/syn-docs/content/
+packages/syn-domain/    Domain events, aggregates, ports
+packages/syn-adapters/  Orchestration + observability adapters
+packages/syn-collector/ Event ingestion API
+packages/syn-shared/    Shared settings, configuration
+lib/agentic-workspace/  submodule: workspace images, isolation, harness adapters
+lib/event-sourcing-platform/ submodule: Rust event store, Python SDK, VSA, projections
+infra/                  Docker Compose, setup wizard, secrets
+docs/, docs/adrs/       INTERNAL contributor docs and ADRs (not the public site)
 ```
-
-> **Docs vs syn-docs:** `docs/` is internal - local dev guides, ADRs, architecture references for contributors. `apps/syn-docs/` is the public-facing documentation site deployed externally. Content for the public docs site lives in `apps/syn-docs/content/`.
 
 ### Submodules (`lib/`)
 
-Both are our own projects - we dogfood them. If something needs fixing, push the fix directly to the submodule repo. Don't work around it.
-
-- **agentic-workspace**: Workspace images (claude, omni-agent, toolchain), isolation providers, agent event recording/playback, harness adapters. Publishes and signs every workspace image from its protected `release` branch; Syntropic137 pins those digests. Replaced agentic-primitives on 2026-09-25 - that submodule is gone and nothing here depends on it.
-- **event-sourcing-platform**: Rust event store, Python SDK, VSA validation CLI, projection framework
-
-#### Where does this change belong?
-
-The boundary is harness knowledge vs domain meaning, and there is a test for it:
+Both are ours (dogfooded). If something needs fixing, push the fix to the submodule repo; don't work around it. agentic-primitives is gone; nothing depends on it.
 
 > **If it changes when Anthropic or OpenAI ships a new CLI version, it belongs
 > in agentic-workspace. If it changes when we decide what a cost, a session or
 > an execution IS, it belongs here.**
 
-| agentic-workspace | Syntropic137 |
-|---|---|
-| Stream and transcript formats, where a harness puts its session id | Domain events, aggregates, what a session means |
-| Anything baked into the workspace image, including binaries agents call | Pricing, execution totals, attribution |
-| Workspace isolation, capture capabilities, delegation skills | Projections, the API, the read path |
-
-Harness specifics live beside the existing `harnesses/{claude,codex}` adapters
-in `agentic_isolation`, which already normalize to `HarnessTranscript` and
-`TranscriptExtractionResult`. Extend those rather than adding a parallel path,
-and never reimplement a harness detail here: it will drift the moment that CLI
-changes, and the drift is silent.
-
-**Depend on a port, not on a format.** When this repo needs something
-harness-specific, define a Protocol here and let agentic-workspace satisfy it.
-That keeps the domain testable against a double and stops CLI details leaking
-into the domain model.
-
-**The split has a real delivery cost, so plan for it.** A change in
-agentic-workspace reaches a running workspace only after: merge -> image
-build -> the protected `release` channel -> a `PINNED_DIGESTS` bump here.
-Pushing to `main` publishes `:edge` only, which is explicitly unreviewed and is
-NOT what consumers pull. So put as little in the submodule as genuinely needs
-to be there, and define the contract first so work on both sides can proceed in
-parallel instead of serialising behind the image.
+Depend on a port (Protocol here), not on a format; never reimplement a harness detail here. A submodule change reaches workspaces only after merge -> image build -> `release` channel -> `PINNED_DIGESTS` bump (`main` publishes unreviewed `:edge` only). Full boundary table and delivery plan: [docs/architecture/agentic-workspace-boundary.md](docs/architecture/agentic-workspace-boundary.md).
 
 ## Non-Negotiable Rules
 
 ### Type Safety (ADR-001 s6, ADR-032)
 
-Treat Python like TypeScript. Strict type safety everywhere.
+Treat Python like TypeScript.
 
-- **pyright** - all code must pass (`standard` mode, ratcheting to `strict`)
+- **pyright** - all code must pass (`standard`, ratcheting to `strict`)
 - **No `Any`** without explicit justification
-- **No `dict` for structured state** - use `@dataclass` or Pydantic `BaseModel`
+- **No `dict` for structured state** - use `@dataclass` or Pydantic `BaseModel`. A `TypedDict` or `SimpleNamespace` is NOT a fix; `NamedTuple` is fine
 - **No string-keyed lookups** when attribute access is possible
-- **Pydantic** for all API boundaries, configs, and domain events (`frozen=True`, `extra="forbid"`)
-- **All public interfaces fully typed** - no implicit signatures
-- **API routes MUST use Pydantic response models** - never `-> dict[str, Any]`. FastAPI generates the OpenAPI spec from return type annotations. Untyped routes are invisible to the spec, which breaks the CLI type generation pipeline (`openAPI spec → openapi-typescript → CLI types`). Always define a response model and use it: `async def list_foos() -> FooListResponse:`
+- **Pydantic** for API boundaries, configs, domain events (`frozen=True`, `extra="forbid"`)
+- **All public interfaces fully typed**
+- **API routes MUST return Pydantic response models**, never `dict[str, Any]` (untyped routes break the OpenAPI -> CLI type pipeline)
 
-#### Why the typing ratchets are fitness functions, not lint
+The typing ratchets (`untyped-dicts`, pyright) are fitness functions, not lint: never weaken them, never game them with renames or aliases. Budgets only decrease. Rationale, what the AST gate counts, and its history: [docs/architecture/type-safety-fitness.md](docs/architecture/type-safety-fitness.md). New whole-codebase static check -> `ci/fitness/` + `fitness-exceptions.toml`; behavioural assertion -> a test beside the code.
 
-Type safety is a declared architectural characteristic of this system, not a
-style preference. Python does not enforce it, so it is built in and measured.
-That is exactly what a fitness function is: an objective, whole-codebase
-measure of a characteristic the architecture requires, ratcheted so it can
-only improve.
+### API -> CLI Types
 
-`untyped-dicts` and the pyright gate are therefore in the same category as
-`dependency_direction` and `bounded_context_isolation`, even though the
-subject is typing rather than module structure. Do not reclassify them as
-"just lint" or "just tests" and do not weaken them on that basis.
-
-The distinction that DOES matter when adding a new check:
-
-| Shape | Category |
-|---|---|
-| Static property measured across the whole codebase, ratcheted | fitness function - belongs in `ci/fitness/` + `fitness-exceptions.toml` |
-| Behavioural assertion about one code path | a test - belongs beside the code |
-
-"Does this specific field have a production consumer" is the second, however
-architectural it sounds.
-
-#### `untyped-dicts` counts the AST, not the text
-
-`just check-untyped-dicts` parses every file and counts **declarations of
-dict-shaped structured state**. The logic and the full definition of what
-counts live in `scripts/check_untyped_dicts.py`, pinned by
-`scripts/tests/test_check_untyped_dicts.py`.
-
-Three shapes:
-
-| Shape | Counted where | Why |
-|---|---|---|
-| A str-keyed mapping erased to `Any`/`object` | every written type expression | the structure is gone |
-| A `TypedDict`, class-based or functional | its declaration | read as `value["key"]`, validates nothing at runtime |
-| A `SimpleNamespace` | every written occurrence | declares no fields at all, so says even less than `dict[str, Any]` |
-
-All spellings of each: plain or dotted, quoted, wrapped across lines, or
-renamed — on the import (`from typing import Dict as D`) or by assignment
-(`D = dict`, `D: TypeAlias = dict`, `type D = dict`), chains included. Renames
-are resolved before names are matched, because a rename is the cheapest dodge
-there is: one line, no import, and nothing at the point of use for a reader to
-notice. Docstrings and comments are not code and do not count.
-
-A rename is not an alias. `D = dict` writes no type and spends no budget; the
-erasure arrives at `D[str, Any]` and is counted there. `D = dict[str, Any]` is
-a complete type, so it counts once at that line and not at each use — the same
-rule as a `TypedDict`, and for the same reason: the definition is the one place
-a fix has to happen.
-
-`NamedTuple` is deliberately **not** counted. It names and types every field
-and is read by attribute, so it satisfies both halves of the rule; it is what
-you should be converting *to*, alongside `@dataclass` and Pydantic. Its
-tuple-ness is a separate concern and does not belong to this gate.
-
-Two ways this gate has been wrong, both found the same way — an agent under
-ratchet pressure taking the cheapest green path:
-
-- **It measured spelling** (a regex, until #1188). Renaming `dict[str, object]`
-  to `Mapping[str, object]` moved the number without typing anything (PR
-  #1186). `Mapping` for a read-only parameter is still the better annotation on
-  its merits — it just no longer buys you budget.
-- **It measured one shape** (until #1248). A `dict[str, Any]` that failed the
-  gate was declared a `TypedDict` instead and it went green (PR #1246), while
-  independent review refused the head anyway. So: **a `TypedDict` is not a fix
-  for an untyped dict.** Use a `@dataclass` or a Pydantic `BaseModel`.
-- **It listed one rename** (caught in review on #1248, before merge). Closing
-  the import rename and not `D = dict` would have left every constructor above
-  reachable under a name the gate does not know, which is the #1188 defect one
-  level up: not a number that moves for a rename, but a number that stays
-  still. When you close a spelling, close the class it belongs to.
-
-Both fixes re-baselined the packages rather than raising them — #1188 to 413 /
-205 / 139 / 22 / 11, #1248 to 440 / 208 / 146 / 22 / 16. `syn-api` at #1188 is
-the finding worth remembering: a third of its untyped surface had never been
-visible to the gate. Every one of those is the same debt measured correctly,
-never a relaxed ratchet, and the values may only decrease from there.
-
-### API → CLI Type Pipeline
-
-Single source of truth for the API contract, fully automated:
-
-```
-Pydantic models (syn-api/types.py)
-  → FastAPI generates OpenAPI spec (/openapi.json)
-    → openapi-typescript generates TypeScript types (syn-cli-node/src/generated/api-types.ts)
-      → CLI commands use typed client (compile-time path + response validation)
-```
-
-**Key files:**
-- `apps/syn-api/src/syn_api/types.py` - All response/request models (single source)
-- `apps/syn-cli-node/src/generated/api-types.ts` - Auto-generated, never hand-edit
-- `apps/syn-cli-node/scripts/generate-types.ts` - Regeneration script
-- `apps/syn-cli-node/scripts/check-api-drift.ts` - CI drift detection
-
-**Workflow - adding/changing an endpoint:**
-1. Define Pydantic response model in `apps/syn-api/src/syn_api/types.py`
-2. Use it as the route return type: `async def list_foos() -> FooListResponse:`
-3. Run `just codegen` - regenerates OpenAPI spec, API docs, CLI types, and CLI docs in one step
-4. Use the typed client in CLI commands: `import { api } from "../client/typed.js";`
-
-**Rules:**
-- CLI field names MUST match API response model field names exactly - never use legacy/alias names
-- Domain model field names (e.g. `event`, `repository`) flow through to API responses and CLI - keep them consistent across all three layers
-- CI `check:api-drift` fails if generated types are stale
-- New CLI commands SHOULD use the typed client (`api.GET`, `api.POST`) - existing commands are being migrated incrementally
+Pydantic model in `apps/syn-api/src/syn_api/types.py` -> route return type -> `just codegen` -> typed client (`api.GET`/`api.POST`) in the CLI. Never hand-edit `apps/syn-cli-node/src/generated/api-types.ts`. CLI field names MUST match API model field names. Details: [docs/architecture/api-cli-type-pipeline.md](docs/architecture/api-cli-type-pipeline.md).
 
 ### Bounded Contexts & Aggregates (ADR-020)
 
-> Reference: [ADR-020](lib/event-sourcing-platform/docs/adrs/ADR-020-bounded-context-aggregate-convention.md), [VSA Quick Reference](lib/event-sourcing-platform/vsa/docs/QUICK-REFERENCE.md)
+Aggregates live in `domain/aggregate_<name>/` with specific file names (`WorkspaceAggregate.py`, not `aggregate.py`). Projections go in the owning context's `slices/`, never a top-level context. A context MUST have `aggregate_*/` folders. Refs: [ADR-020](lib/event-sourcing-platform/docs/adrs/ADR-020-bounded-context-aggregate-convention.md), [VSA Quick Reference](lib/event-sourcing-platform/vsa/docs/QUICK-REFERENCE.md).
 
-**Don't:**
-- Create top-level context directories for projections - projections go in `slices/` of the owning context
-- Put aggregate files directly in `domain/` - use `domain/aggregate_<name>/` folders
-- Use generic file names - `WorkspaceAggregate.py` not `aggregate.py`
-
-**Do:**
-- Multiple aggregates in one bounded context when they share domain language
-- Co-locate entities and value objects with their aggregate root
-- A bounded context MUST have `aggregate_*/` folders; projection-only modules are not contexts
-
-| Context | Aggregates | Key Operations | Purpose |
-|---------|------------|----------------|---------|
-| `orchestration` | Workspace, Workflow, WorkflowExecution | Create, archive (soft-delete), execute, resume, cancel | Workflow execution and workspace management |
-| `agent_sessions` | AgentSession | Start, record operations, complete | Agent sessions and observability |
-| `github` | Installation, TriggerRule | Register, configure, fire triggers | GitHub App integration, trigger rules, hybrid event pipeline (webhooks + Events API + Checks API polling with dedup) |
-| `artifacts` | Artifact | Create, upload, retrieve | Artifact storage |
-| `organization` | Organization, System, Repo | CRUD, assign/unassign repos to systems | Organization hierarchy, system/repo management, insights |
+| Context | Aggregates | Purpose |
+|---------|------------|---------|
+| `orchestration` | Workspace, Workflow, WorkflowExecution | Workflow execution, workspace management |
+| `agent_sessions` | AgentSession | Agent sessions and observability |
+| `github` | Installation, TriggerRule | GitHub App, triggers, hybrid event pipeline ([ADR-050](docs/adrs/ADR-050-hybrid-webhook-polling-event-pipeline.md)) |
+| `artifacts` | Artifact | Artifact storage |
+| `organization` | Organization, System, Repo | Org hierarchy, systems/repos, insights |
 
 ### Ubiquitous Language
 
-Every bounded context owns a vocabulary file. This is a DDD requirement, not a
-documentation nicety: a bounded context is defined by the language that holds
-inside it, so a context whose words are not written down has no boundary anyone
-can check.
+Every bounded context owns `docs/architecture/<bounded-context>-ubiquitous-language.md` (segment = directory name under `packages/syn-domain/src/syn_domain/contexts/`; a fitness test enforces it). A term in the code MUST appear in its context's file; rejected/reserved words get their own section (`fork` is reserved in `orchestration`). Full rules: [docs/architecture/ubiquitous-language-convention.md](docs/architecture/ubiquitous-language-convention.md).
 
-**Naming standard (enforced):**
+### Event Sourcing (summary; read [docs/architecture/event-sourcing-rules.md](docs/architecture/event-sourcing-rules.md) before touching aggregates, projections, processors or handlers)
 
-```
-docs/architecture/<bounded-context>-ubiquitous-language.md
-```
+- **Aggregates decide.** State derives from events; no engine/service decides "what's next"; no mutable in-memory execution state.
+- **Two lanes:** domain events (event store) vs telemetry (observability recorder). Telemetry never flows through aggregates.
+- **Long-running processes use Processor To-Do List**, never imperative async loops. Handlers MUST be idempotent.
+- **Consumers:** a `CheckpointedProjection` never has side effects; anything that dispatches commands or calls APIs is a `ProcessManager` (`process_pending()` runs live only).
+- **In-memory adapters** inherit `InMemoryAdapter` and refuse to construct outside test/offline ([ADR-060](docs/adrs/ADR-060-restart-safe-trigger-deduplication.md)). Production wiring fails fast; never fall back to in-memory.
+- **Background tasks:** any `background_tasks.add_task()` closure MUST check `isinstance(result, Err)` and log.
+- If you need it after a restart, it must be an event.
 
-The `<bounded-context>` segment MUST match the directory name under
-`packages/syn-domain/src/syn_domain/contexts/`. The file name alone tells you
-which context it speaks for, so no two vocabularies can be confused and an
-orphaned file is detectable.
+### TODO/FIXME and scratch docs
 
-**Rules:**
+- Every TODO/FIXME references an issue: `# TODO(#55): ...`. Never a bare `# TODO:`.
+- Root-level `.md` files other than `README.md`, `AGENTS.md`, `CLAUDE.md`, `CHANGELOG.md` are scratch; never commit them. Permanent docs go in `docs/` or `docs/adrs/`.
 
-| Rule | Why |
-|------|-----|
-| One file per bounded context, no exceptions | `ci/fitness/code_quality/test_ubiquitous_language.py` fails the build otherwise |
-| The same word MAY mean different things in different contexts | That is the point of a bounded context. `github`'s `resume` is not `orchestration`'s `resume`, and each file says so |
-| A term in the code MUST appear in its context's file | If you cannot name it, you do not understand it well enough to model it |
-| Words we deliberately do NOT use get their own section | A reserved or rejected word is as load-bearing as an adopted one. `fork` is reserved in `orchestration`; `pause` was deleted from it |
-| Genuine uncertainty is written down as **Unclear:**, with an issue | A vocabulary that hides its gaps lies about what the model knows |
+## Testing
 
-**The ESP relationship:** the event-sourcing-platform submodule provides the
-machinery (aggregates, projections, the VSA validator). It does NOT provide the
-vocabulary. Each consuming bounded context owns its own file. ESP's own glossary
-at `lib/event-sourcing-platform/docs/` covers event-sourcing mechanics
-(aggregate, projection, checkpoint), not domain meaning.
+Goal: manual testing finds zero bugs. **Unit** (fast, no infra), **Integration** (recording playback or test stack on ports +10000), **E2E** (real API calls, few). Fixtures auto-detect infra: env vars > test-stack (port 15432) > testcontainers. Test doubles in production code must refuse to construct outside test/offline ([ADR-060 s5](docs/adrs/ADR-060-restart-safe-trigger-deduplication.md#5-inmemoryadapter-base-class-production-guard)).
 
-**Start here:** [docs/architecture/README.md](docs/architecture/README.md) links
-every vocabulary. [docs/architecture/es-glossary.md](docs/architecture/es-glossary.md)
-covers the cross-cutting event-sourcing terms.
+## Tooling and Configuration
 
-### TODO/FIXME Standard
+- **uv** for Python, **pnpm** for Node (never npm/yarn), **just** for tasks, Docker Compose for local/selfhost.
+- Env vars live in Pydantic Settings classes (auto-generated into `.env.example`); read ADR-004 first. Never hardcode ports/URLs: use `syn_shared.settings.constants` / `constants.ts`.
 
-All TODO and FIXME comments MUST reference a GitHub issue:
-- `# TODO(#55): Add integration tests`
-- `# FIXME(#72): Race condition in projection`
-- Never: `# TODO: Add integration tests`
+## Before Opening a PR (mandatory)
 
-### Scratch Documentation Policy
+- `just qa-ci` - every PR-gating CI job runnable locally (~3m30s). Run before pushing.
+- `just preflight` - static half only (~1m); what the pre-push hook runs. Not a CI guarantee.
+- `just preflight-agent` - inside an agent workspace container only.
+- Add a PR-gating CI job -> map it in `scripts/check_ci_parity.py`. Add a static gate -> `preflight`, never CI alone.
 
-Root-level `.md` files (except `README.md`, `AGENTS.md`, `CLAUDE.md`, `CHANGELOG.md`) are scratch - never commit them. Permanent docs go in `docs/` or `docs/adrs/`.
+What each covers and what can never run locally: [docs/development/pre-pr-checklist.md](docs/development/pre-pr-checklist.md).
 
-## Key Concepts
+## Branching, Release, Board, Security
 
-### Containerized Agent Execution
-
-Claude CLI runs INSIDE Docker containers, not on the host. `WorkspaceService` creates isolated workspaces, injects secrets during a setup phase (ADR-024), then clears them before agent execution. Agent stdout (JSONL) is captured externally and flows through the observability pipeline.
-
-### Event Storage
-
-`WorkflowExecutionEngine` is the single owner of event recording. It parses Claude CLI JSONL output and records token usage, tool lifecycle, and subagent lifecycle events. All events keyed by `session_id`.
-
-### Hybrid Event Ingestion (ADR-050, #602)
-
-GitHub events enter the system through a unified `EventPipeline` that accepts events from three sources:
-
-1. **Webhooks** - Real-time delivery (~1s) from GitHub. Primary path when the App is configured with a reachable URL.
-2. **Events API polling** - Background `asyncio.Task` that polls GitHub's Events API for 17 event types (PR, push, etc.). Enabled by default for zero-config onboarding.
-3. **Checks API polling** - Background `asyncio.Task` that polls `GET /repos/{o}/{r}/commits/{sha}/check-runs` for CI results. Triggered when a `pull_request` event registers a head SHA. Enables self-healing without webhooks (#602).
-
-All three sources normalize payloads into `NormalizedEvent` and feed `EventPipeline.ingest()`. Content-based dedup keys (commit SHA, PR number, check run ID - not delivery IDs) ensure the same logical event is processed exactly once regardless of source.
-
-| Source | API | What it gets | Config |
-|--------|-----|-------------|--------|
-| Events API poller | `GET /repos/{o}/{r}/events` | 17 event types (PR, push, etc.) | Always on |
-| Webhooks | Push-based | All 60+ event types including `check_run` | Needs tunnel/public URL |
-| Checks API poller | `GET /repos/{o}/{r}/commits/{sha}/check-runs` | CI results for specific SHAs | Auto when `check_run` triggers exist |
-
-**Mode switching:** Both pollers adapt their interval based on webhook health:
-- **ACTIVE_POLLING** (60s / 30s) - No webhooks received in 30 minutes; poll aggressively
-- **SAFETY_NET** (300s / 120s) - Webhooks healthy; poll infrequently as a catch-up net
-
-**Fail-open dedup:** If Redis is unavailable, events are processed anyway. Trigger safety guards (fire counts, cooldowns) provide second-layer protection against duplicates.
-
-**Key files:**
-- `packages/syn-domain/.../event_pipeline/pipeline.py` - Unified pipeline with dedup
-- `packages/syn-domain/.../event_pipeline/dedup_keys.py` - Content-based dedup key extractors
-- `packages/syn-domain/.../event_pipeline/check_run_synthesizer.py` - Synthesizes check_run events from Checks API
-- `packages/syn-domain/.../event_pipeline/pending_sha_port.py` - PendingSHA domain port
-- `apps/syn-api/src/syn_api/services/github_event_poller.py` - Events API poller
-- `apps/syn-api/src/syn_api/services/check_run_poller.py` - Checks API poller (#602)
-- `packages/syn-shared/src/syn_shared/settings/polling.py` - `SYN_POLLING_*` configuration
-
-### Testing
-
-Goal: manual testing finds zero bugs - everything caught by automated tests.
-
-- **Unit**: Fast, parallel, no infra needed
-- **Integration**: Recording-based playback (no API tokens spent) or ephemeral test stack (ports +10000)
-- **E2E**: Real API calls (expensive, few)
-
-Test fixtures auto-detect infrastructure: env vars > test-stack (port 15432) > testcontainers.
-
-**In-memory adapters and test doubles in production code:** they must refuse to construct outside test/offline, and a fitness test enforces it for the classes it can see. Mocks inside test files are out of scope. Read [ADR-060 s5](docs/adrs/ADR-060-restart-safe-trigger-deduplication.md#5-inmemoryadapter-base-class-production-guard) before adding one.
-
-## Event Sourcing Architecture
-
-### Two-Lane Architecture
-
-All state and telemetry flows through two strictly separated lanes:
-
-1. **Lane 1: Event Sourcing (Domain Truth)** - Aggregates are the sole decision-makers for state transitions. Commands go in, events come out. The aggregate owns the rules. Infrastructure handlers react to events, do work, and report results back via new commands.
-
-2. **Lane 2: Observability (Telemetry)** - Token counts, tool traces, timing, stream chunks. Append-only, never replayed for state. Writes to observability recorder, NOT the event store. No interaction with aggregates.
-
-### Long-Running Process Orchestration
-
-When orchestrating multi-step processes (e.g., workflow execution with multiple phases):
-
-**Do NOT** use imperative async/await orchestration:
-```python
-# WRONG - imperative orchestrator
-async def execute(workflow):
-    for phase in workflow.phases:
-        workspace = await provision_workspace(phase)
-        result = await run_agent(workspace)
-        await collect_artifacts(result)
-```
-
-**DO** use the Processor To-Do List pattern:
-- **Aggregate** handles commands and emits events, enforces rules, decides "what's next"
-- **To-Do List Projection** (read model) builds a list of pending work from events
-- **Processor** reads the to-do list and dispatches commands - zero business logic
-- **Infrastructure Handlers** react to commands, do async work, emit result events
-
-Flow: `Event → Projection updates to-do list → Processor reads list → Dispatches command → Handler does work → Emits event → cycle repeats`
-
-Key properties:
-- Crash-resilient: to-do list persists, processor restarts and picks up where it left off
-- All business logic in aggregates and projections, never in the processor
-- Each handler is single-responsibility, <200 LOC, independently testable
-
-### When to Use Which Pattern
-
-| Scenario | Pattern | Example |
-|----------|---------|---------|
-| Multi-step process with infrastructure work | Processor To-Do List | Workflow execution (provision → run → collect → next phase) |
-| Simple command → event → done | Direct aggregate command | Creating a workspace, pausing an execution |
-| Querying derived state | Projection (read model) | Dashboard metrics, execution list, session tools |
-| Time-based triggers (timeouts, SLA deadlines) | Passage of Time (clock events) | Stale execution detection, phase timeout enforcement |
-
-### Event Consumer Types (Three-Way Split)
-
-> Reference: [CONSUMER-PATTERNS.md](lib/event-sourcing-platform/docs/CONSUMER-PATTERNS.md), [ADR-025](lib/event-sourcing-platform/docs/adrs/ADR-025-process-manager-pattern.md)
-
-Every event consumer must be exactly one of these types. The distinction is critical for restart safety.
-
-| Type | Base class | Side effects? | Replay-safe? | Purpose |
-|------|-----------|---------------|-------------|---------|
-| **Projection** | `CheckpointedProjection` | Never | Yes | Build read models (dashboards, query views, metrics) |
-| **ProcessManager** | `ProcessManager` | Yes (live only) | Yes | React to events with commands (dispatch workflows, call APIs) |
-
-**Projection** builds derived state from events. Pure, idempotent, replay-safe. `SIDE_EFFECTS_ALLOWED = False`. Replaying the entire event store 1000 times must produce the same result with zero external calls.
-
-**ProcessManager** uses the Processor To-Do List pattern with a hard boundary:
-- `handle_event()` -- writes to-do records (pure, runs during replay AND live)
-- `process_pending()` -- executes pending items (idempotent, runs ONLY when live)
-- `SIDE_EFFECTS_ALLOWED = True`
-- The coordinator enforces the boundary: `process_pending()` is never called while `is_catching_up` is True
-
-**The critical anti-pattern:** A projection that dispatches commands or calls external APIs in `handle_event()`. This fires side effects during replay, causing duplicate executions on every restart. Use `ProcessManager` instead.
-
-### In-Memory Adapter Safety (ADR-060)
-
-> Reference: [ADR-060](docs/adrs/ADR-060-restart-safe-trigger-deduplication.md)
-
-In-memory state is dangerous in production -- it's lost on restart, causing duplicate work, lost dedup keys, or orphaned executions. All in-memory adapters inherit from `InMemoryAdapter` (`packages/syn-adapters/src/syn_adapters/in_memory.py`), which raises `InMemoryAdapterError` outside test/offline environments.
-
-**Rules:**
-- All test-only in-memory adapters MUST inherit `InMemoryAdapter` (or call `assert_test_only()` for dataclasses)
-- The canonical check is `settings.uses_in_memory_stores` (= `is_test or is_offline`)
-- Production wiring MUST fail-fast if no durable backend is available -- never silently fall back to in-memory
-- No exceptions -- every in-memory adapter is guarded
-
-**Key files:**
-- `packages/syn-adapters/src/syn_adapters/in_memory.py` -- Base class and standalone check
-- `apps/syn-api/src/syn_api/_wiring.py` -- Adapter selection (Postgres > Redis > fail-fast)
-
-### Projection Consistency in Processor Loops
-
-When a processor needs immediate feedback from its own commands (e.g., "I just completed phase 1, what's the next todo?"), the event subscription pipeline introduces eventual consistency delays. Two strategies:
-
-- **In-process synchronous projection:** The processor maintains a local projection instance. After each `repository.save(aggregate)`, it reads the aggregate's uncommitted events and applies them directly to the local projection. The persistent projection catches up asynchronously for external consumers (dashboard, API). This is the preferred approach for process-local to-do lists.
-- **Never** poll the persistent projection waiting for it to catch up - this creates fragile timing dependencies.
-
-### Crash Recovery and Restart Guarantees
-
-The Processor To-Do List pattern is crash-resilient by design:
-- **Domain state** is in the event store - fully recoverable by replaying events onto the aggregate
-- **To-Do list** is a projection - rebuilt from the event stream on restart (catch-up subscription)
-- **Infrastructure state** (active Docker containers, open connections) is ephemeral and NOT in the event stream. On crash, infrastructure is assumed lost. The processor re-provisions from the last completed domain event.
-- **Key invariant:** If the processor crashes between "handler did work" and "command reported to aggregate," the to-do item still shows as pending. On restart, the handler re-executes. Handlers MUST be idempotent - re-provisioning a workspace or re-collecting artifacts should be safe.
-
-### Handler Idempotency Rule
-
-Infrastructure handlers MUST be idempotent. If called twice with the same todo item:
-- `WorkspaceProvisionHandler`: Creates a new workspace (old one is gone after crash) - safe
-- `AgentExecutionHandler`: Re-runs the agent from scratch - safe (stateless container)
-- `ArtifactCollectionHandler`: Re-collects from workspace - safe (idempotent writes)
-
-The aggregate enforces ordering via command guards (e.g., reject `CompletePhaseCommand` if phase not in RUNNING state).
-
-### What Goes in the Event Store vs. What Doesn't
-
-| In Event Store (Lane 1) | NOT in Event Store |
-|---|---|
-| Phase started/completed | Docker container IDs |
-| Workspace provisioned (fact that it happened) | Active workspace handles |
-| Agent execution completed (tokens, cost, duration) | JSONL stream bytes |
-| Artifacts collected (artifact IDs) | Temporary file paths |
-| Workflow completed/failed | In-memory caches |
-
-Rule: If you need it after a restart, it must be an event. If it's only needed during the current process lifecycle, hold it in the processor.
-
-### Subscription Architecture
-
-Production uses `CoordinatorSubscriptionService` with per-projection checkpoints ([ADR-055](docs/adrs/ADR-055-projection-checkpoint-coordinator-architecture.md)). Legacy `EventSubscriptionService` ([ADR-010](docs/adrs/ADR-010-event-subscription-architecture.md)) is deprecated. See `create_coordinator_service()` in `packages/syn-adapters/src/syn_adapters/subscriptions/coordinator_service.py` for the 12-projection registry.
-
-### Background Task Error Handling
-
-FastAPI `BackgroundTasks` silently swallow exceptions and `Result` errors. Any `background_tasks.add_task()` closure MUST check `isinstance(result, Err)` and log explicitly. Reference pattern: `apps/syn-api/src/syn_api/routes/executions/commands.py:200-217`.
-
-### Object Storage Bucket Initialization
-
-MinIO buckets MUST be created eagerly at startup via `ensure_ready()`, not lazily on first upload. Downloads fail with `NoSuchBucket` before any upload happens. See `lifecycle.py:_init_artifact_storage()` and [ADR-012](docs/adrs/ADR-012-artifact-storage.md).
-
-### Rules
-
-- Aggregates MUST be the decision-makers - never let an engine/service decide "what's next"
-- State MUST be derived from events - no mutable in-memory state (no `ExecutionContext` pattern)
-- Observability MUST be separate from domain - telemetry never flows through aggregates
-- Long-running processes MUST use Processor To-Do List - no imperative async loops
-
-### References
-
-- Martin Dilger, *Understanding Event Sourcing* - Ch. 37: Processor To-Do List pattern
-- Event Modeling specification: https://eventmodeling.org/posts/what-is-event-modeling/
-- To-Do List + Passage of Time patterns: https://event-driven.io/en/to_do_list_and_passage_of_time_patterns_combined/
-
-## Project Board
-
-Work is tracked on the org-level GitHub project board: [Syntropic137 - Launch & Roadmap](https://github.com/orgs/syntropic137/projects/1)
-
-### Structure
-
-- **Milestones** = which phase: `🚀 Open Source Launch` → `🟠 Post-Launch Polish` → `🔵 Scale & Vision`
-- **Priority** = urgency within that phase: P0 (critical) → P1 (high) → P2 (medium) → P3 (low)
-
-### For Agents
-
-```bash
-# List issues by milestone
-gh issue list --repo syntropic137/syntropic137 --milestone "🚀 Open Source Launch"
-
-# Add an issue to the board
-gh project item-add 1 --owner syntropic137 --url <issue-url>
-
-# Set priority (requires project item ID from item-add output)
-gh project item-edit --project-id PVT_kwDOD5uLBM4BPw_5 --id <item-id> \
-  --field-id PVTSSF_lADOD5uLBM4BPw_5zg_Yl2A \
-  --single-select-option-id <priority-option-id>
-```
-
-**Priority option IDs:** P0=`ceb54537`, P1=`beeef7eb`, P2=`89d84138`, P3=`7e44e913`
-
-### Repos on this board
-
-- `syntropic137/syntropic137` - core platform
-- `syntropic137/event-sourcing-platform` - ES foundation
-- `syntropic137/syntropic137-claude-plugin` - Claude Code plugin (onboarding, commands, skills)
-- `syntropic137/syntropic137-landing-page` - public landing page
-
-### Rules
-
-- Every issue must have a milestone and priority
-- P0 = do first, P3 = do last (within each milestone)
-- Launch milestone must be clear before open source release
-
-## Branching & Release Process
-
-The canonical release process lives in [docs/release-process.md](docs/release-process.md) - version bumping, workflow behavior, release steps, failure recovery, and docs deployment.
-
-**Quick reference:**
-
-- **`main`** - development trunk. All PRs target `main`.
-- **`release`** - deployment branch. PRs from `main` only. Merge triggers the full release pipeline.
-- **Betas:** a test deploy creates NO GitHub release. Read [Beta Release](docs/release-process.md#beta-release) before cutting one.
-- **Version management:** `just bump-version 0.20.0` writes every version-carrying file, regenerates `uv.lock`, and re-runs the check. `just check-version` validates consistency on demand.
-- **Docs:** `release` → Vercel production, `main` → preview only.
-- **Poka-yoke rules:** Before touching any release workflow or triggering a publish manually, read [docs/release-process.md](docs/release-process.md). The publish workflows have strict firing rules - wrong entry points are blocked by design.
-
-Submodules (agentic-workspace, event-sourcing-platform) have independent versioning - never bumped by the release script.
-
-## Security
-
-- [Security Practices](docs/security-practices.md) - supply chain hardening, Docker runtime security, credential management
-- [GitHub App Security Model](docs/deployment/github-app-security.md) - PEM handling, token lifecycle, network isolation, token injector architecture
-
-## Tooling
-
-- **uv** for Python package management (workspaces)
-- **pnpm** for Node.js package management (all frontend apps - never npm or yarn)
-- **just** for task running
-- **Docker Compose** for local and selfhost deployment
-- QA: `just qa` runs lint, format, typecheck, test, coverage, vsa-validate
-
-### Configuration (ADR-004)
-
-When working with environment variables or port/URL configuration, review
-ADR-004 first. All env vars are defined in Pydantic Settings classes and
-auto-generated into `.env.example`. Never hardcode ports or URLs - import
-from `syn_shared.settings.constants` (Python) or `constants.ts` (TypeScript).
-
-## Pre-PR Checklist (mandatory before opening any PR)
-
-CI failures that could have been caught locally waste 8–10 minutes per round-trip and block the release chain. Always run these before pushing:
-
-```bash
-just qa-ci           # Every PR-gating CI JOB that CAN run locally, using the
-                     # same commands those jobs use. ~3m30s. This is the check
-                     # to run before pushing.
-                     #
-                     # It is job-level coverage, NOT proof of equivalence. CI
-                     # runs on Ubuntu with pinned toolchains and a clean
-                     # checkout; a step added inside an existing job, a widened
-                     # matrix, or a change inside a reusable workflow is
-                     # invisible to the parity gate. Never local at all:
-                     # osv-scan, pip-audit, dependency-review (remote data),
-                     # e2e-container, and the release-only gates.
-
-just preflight       # The static half only (~1m). Faster inner loop; what the
-                     # pre-push hook runs. A green preflight does NOT mean CI
-                     # will pass - it runs no tests and no builds.
-
-just preflight-agent # The subset of preflight that runs INSIDE an agent
-                     # workspace container. Use this one only there: the image
-                     # ships just, uv and node and nothing else, so vsa,
-                     # cargo, pnpm, docker and registry credentials are all
-                     # absent and seven gates cannot run at all (#1109).
-                     # All of fitness runs: the APS thresholds via
-                     # scripts/agent-fitness.sh (#1498) AND the pytest
-                     # ci/fitness invariants. Docker-backed fitness tests
-                     # skip there as a listed `NOT RUN`; CI runs them.
-                     # On a dev machine run the full `just preflight` instead.
-```
-
-`scripts/check_ci_parity.py` (inside `preflight`) discovers every workflow that
-triggers on `pull_request` and fails when one of their jobs has no entry: either
-a just target that mirrors it, or a stated reason it cannot run locally. Add a
-PR-gating job and you must map it there. Add a new static gate to `preflight`,
-never to CI alone (#931).
-
-`just qa` remains the broader local sweep (it runs non-unit tests too), but it is
-not CI-shaped: some of its targets are deliberately more lenient than CI's.
-
-**Git hooks:** `.githooks/pre-push` runs the fast checks automatically. Wire it up once with `just setup-hooks` after cloning.
-
-**For small fixes on already-merged PRs** (formatting nits, Copilot review comments): push directly to `main` with `git push origin <branch>:main` rather than opening a new PR. Keeps the release chain unblocked.
+- All PRs target `main`. `release` takes PRs from `main` only; merging it publishes. Before any release or publish work read [docs/release-process.md](docs/release-process.md) (betas create NO GitHub release; `just bump-version X.Y.Z`). Submodules version independently.
+- Every issue needs a milestone and priority on the [project board](https://github.com/orgs/syntropic137/projects/1); `gh` commands and field IDs: [.claude/skills/devops/project_board.md](.claude/skills/devops/project_board.md).
+- Security: [docs/security-practices.md](docs/security-practices.md), [docs/deployment/github-app-security.md](docs/deployment/github-app-security.md).

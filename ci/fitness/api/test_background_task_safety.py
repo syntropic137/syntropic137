@@ -4,7 +4,7 @@ Ensures every FastAPI BackgroundTasks.add_task() call has co-located
 error handling. BackgroundTasks silently swallow exceptions — without
 explicit error checking, failures are invisible.
 
-See AGENTS.md § "Background Task Error Handling" for the required pattern.
+See docs/architecture/event-sourcing-rules.md § "Background Task Error Handling" for the required pattern.
 
 The required pattern for any background task closure wrapping a Result-
 returning function:
@@ -47,7 +47,7 @@ _GUIDANCE = (
     "        if isinstance(result, Err):\n"
     '            logger.error("Task failed: %s", result.message)\n'
     "\n"
-    "See AGENTS.md § 'Background Task Error Handling' for the canonical pattern."
+    "See docs/architecture/event-sourcing-rules.md § 'Background Task Error Handling' for the canonical pattern."
 )
 
 
