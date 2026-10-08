@@ -82,6 +82,14 @@ ENDPOINTS: tuple[Endpoint, ...] = (
         {"page": "1", "page_size": "50"},
         LIST_BUDGET_MS,
     ),
+    # The page Executions and Sessions ask for (RUN_LIST_PAGE_SIZE, feedback
+    # 60d9f990), timed beside 50 so the cost of the larger page is a number.
+    Endpoint(
+        "/executions?page_size=100",
+        "/executions",
+        {"page": "1", "page_size": "100"},
+        LIST_BUDGET_MS,
+    ),
     Endpoint(
         "/executions/{id}",
         f"/executions/exec-{DETAIL_EXECUTION:05d}",
@@ -93,6 +101,9 @@ ENDPOINTS: tuple[Endpoint, ...] = (
     ),
     Endpoint(
         "/sessions?page_size=50", "/sessions", {"page": "1", "page_size": "50"}, LIST_BUDGET_MS
+    ),
+    Endpoint(
+        "/sessions?page_size=100", "/sessions", {"page": "1", "page_size": "100"}, LIST_BUDGET_MS
     ),
     Endpoint("/artifacts?page_size=20", "/artifacts", {"page_size": "20"}, LIST_BUDGET_MS),
 )
@@ -396,13 +407,17 @@ async def assert_timing_real_work(client: httpx.AsyncClient) -> None:
     assert executions["executions"][-1]["total_cost_usd"] not in (0, "0", "0.0"), executions[
         "executions"
     ][-1]
-    detail = (await client.get(ENDPOINTS[1].path)).json()
+    detail = (await client.get(f"/executions/{execution_id(DETAIL_EXECUTION)}")).json()
     assert len(detail["phases"]) == PHASES, detail
     assert all(p["operations"] for p in detail["phases"]), detail["phases"]
     assert all(p["agent_session_ids"] for p in detail["phases"]), detail["phases"]
     sessions = (await client.get("/sessions", params={"page_size": "50"})).json()
     assert sessions["total"] == EXECUTIONS * PHASES, sessions["total"]
     assert len(sessions["sessions"]) == 50
+    # The 100-row pages are timed over 100 rows, not a short page.
+    for path, rows in (("/executions", "executions"), ("/sessions", "sessions")):
+        page = (await client.get(path, params={"page_size": "100"})).json()
+        assert len(page[rows]) == 100, (path, len(page[rows]))
     artifacts = (await client.get("/artifacts", params={"page_size": "20"})).json()
     assert artifacts["total"] == EXECUTIONS * PHASES, artifacts["total"]
     assert len(artifacts["artifacts"]) == 20
@@ -421,5 +436,8 @@ async def test_list_and_detail_endpoints_stay_inside_their_p95_budget(
         for e in ENDPOINTS
     )
     print(f"\nE2 latency gate ({RUNS} runs per endpoint):\n{table}")
+    for name in ("/executions", "/sessions"):
+        ratio = measured[f"{name}?page_size=100"] / measured[f"{name}?page_size=50"]
+        print(f"  {name} p95 at 100 rows / at 50 rows: {ratio:.2f}x")
     over = [e.name for e in ENDPOINTS if measured[e.name] > e.budget_ms]
     assert not over, f"p95 over budget for {over}:\n{table}"
