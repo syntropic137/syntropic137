@@ -27,8 +27,8 @@ Before you hand work back, check, test and build must all pass with zero warning
 
 | Package | Path | Holds | Depends on |
 |---|---|---|---|
-| `@syn137/skyline-themes` | `packages/syn-ui/themes` | CSS only: `tokens.css` (structure), `skyline.css` and `syn137.css` (colour), `all.css` (all three) | nothing |
-| `@syn137/skyline-core` | `packages/syn-ui/skyline-core` | Plain TypeScript with no DOM and no Svelte. Holds the contracts shim, formatters, chart geometry, state reducers and pattern prop types | nothing |
+| `@syn137/skyline-themes` | `packages/syn-ui/themes` | CSS only: `tokens.css` (structure), `skyline.css` and `syn137.css` (colour), `all.css` (upstream `@syntropic137/design-tokens` CSS, then all three) | `@syntropic137/design-tokens` (pinned) |
+| `@syn137/skyline-core` | `packages/syn-ui/skyline-core` | Plain TypeScript with no DOM and no Svelte. Holds the contract re-exports, formatters, chart geometry, state reducers and pattern prop types | `@syntropic137/design-contracts` (pinned, types only) |
 | `@syn137/skyline-svelte-v5` | `packages/syn-ui/skyline-svelte-v5` | Svelte 5 components (`.`), patterns (`./patterns`) and `styles.css` | core, themes |
 | `@syn137/syn-ui-data` | `packages/syn-ui/data` | Plain TypeScript: the typed API client, fixtures, live SSE stream and request coalescing | nothing |
 | `syn-ui` | `apps/syn-ui` | The Vite app: shell, router, route pages, data loading | all four |
@@ -91,7 +91,7 @@ If you need a colour that has no token yet, add it to **both** theme files, sinc
 
 ## skyline-core
 
-- `src/contracts/`: a **shim** for `@syntropic137/design-contracts`, which is not published yet. Types only. A component's props extend the contract, for example `interface ButtonProps extends ButtonContract, ...`. Do not add Skyline-only props to the shim.
+- `src/contracts/`: type-only re-exports of `@syntropic137/design-contracts` (pinned exactly), plus aliases for the older Skyline names. A component's props extend the contract, for example `interface ButtonProps extends Omit<ButtonContract, 'variant'>, ...`, and declare Skyline-only props themselves with a `Skyline:` doc comment. Never add Skyline-only props to `src/contracts/`.
 - `src/format/`: `formatCost`, `formatCostPrecise`, `formatCostWithCoverage`, `formatTokens` (`261.7k`, `2.79M`), `formatTokenBreakdown`, `formatDuration` (`3m 47s`), `formatDurationPrecise` (`24.3s`), `formatRelativeTime` (`5d ago`), `formatDate`, `formatDateTime`, `formatClock`, `dayKey`, `formatBytes` (`19.8 KB`), `formatInteger`, `formatPercent` and `shortId`. Unknown values render as `UNKNOWN` (an em dash), never `NaN` or `0`. The API also sends `*_display` strings: render those verbatim where they exist, and format raw numbers only when you have to.
 - `src/geometry/`: `obliqueBox` (Skyline bars, the usage band), `isoBox` (object icons, verdict blocks), `extrudeColors`, `polygonPath`, `scaleLinear` and `sqrtHeight`. Add each chart's layout here as a pure function, for example `skyline.ts` or `phaseBlocks.ts`, and test it in a matching `*.test.ts`.
 - `src/state/`: reducers `(state, event) => state` with no timers. The component owns side effects. `copyFeedback` is the worked example.
