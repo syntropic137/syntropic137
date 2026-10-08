@@ -2,6 +2,8 @@
 
 $ARGUMENTS
 
+**Skills:** invoke them with the Skill tool before you design the change: `architecture` for where it belongs, `principles-and-patterns` for its shape, `types` for any new model, `error-handling` for any failure path.
+
 The premise report is at `artifacts/input/premise.md`. **If it says the task's
 premise is false, stop. Change nothing** and report that. Do not try to salvage
 the task by reinterpreting it.
@@ -100,11 +102,12 @@ git merge origin/main
 Never rebase, and never force push - this repository merges main into feature
 branches, in that direction, always.
 
-This is not hygiene. The gate you are required to run in the next phase lives in
-`main`'s justfile, and a branch that predates it does not have the recipe at all:
+This is not hygiene. The gates the next phase runs are the repository's own,
+declared on `main` (see `## Verification gates` in its `AGENTS.md`), and a
+branch that predates a gate does not have it at all. In syntropic137 its agent
+gate failed with:
 
 ```
-just preflight-agent
 error: Justfile does not contain recipe `preflight-agent`
 ```
 

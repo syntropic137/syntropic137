@@ -38,7 +38,7 @@ sequence, and a certification jumps over the rounds it made unnecessary.
 
 ## Repair rounds in `sdlc-implement-v3`
 
-`sdlc-implement-v3` makes **at most three** fix/re-verify rounds:
+`sdlc-implement-v3` makes **at most two** fix/re-verify rounds:
 
 | Order | Phase id | Role |
 | --- | --- | --- |
@@ -47,19 +47,23 @@ sequence, and a certification jumps over the rounds it made unnecessary.
 | 3 | `verify` | Independent verification |
 | 4, 5 | `fix`, `reverify` | Round 1 |
 | 6, 7 | `fix_2`, `reverify_2` | Round 2 |
-| 8, 9 | `fix_3`, `reverify_3` | Round 3 |
-| 10 | `finalize_pr` | Final phase: mark the PR ready, or leave it a draft with the blocker written on it |
+| 8 | `finalize_pr` | Final phase: mark the PR ready, or leave it a draft with the blocker written on it |
 
 - If `verify` certified, `fix` makes no edits and `reverify` confirms the head
-  is unchanged and certifies. Rounds 2 and 3 are then skipped.
+  is unchanged and certifies. Round 2 is then skipped.
 - A `reverify*` that certifies skips the remaining rounds; `finalize_pr` runs.
 - The PR is marked ready if and only if the last round that ran certified.
 - `sdlc-reverify-pr-v1` uses the same rounds on an existing PR head:
   `syn workflow run sdlc-reverify-pr-v1 -t "#1234"`.
+- Executions started while a server still had the earlier three-round
+  definition installed (`fix_3`, `reverify_3`, then `finalize_pr` at order 10)
+  keep that definition. The cutover is when the workflow is reinstalled on that
+  server, not a calendar date: progress and the phase plan are read from each run's own start
+  event, never from the currently installed workflow.
 
 ## Unresolved findings
 
-If `reverify_3` still reports `blocked`, the execution **completes** (it does
+If `reverify_2` still reports `blocked`, the execution **completes** (it does
 not fail) with `review_verdict: blocked` on the execution detail. That is a
 run with unresolved findings: every phase did its job and the workflow's bound
 was reached.
@@ -71,15 +75,15 @@ was reached.
 | `completed` | `null` | Nothing reviewed it |
 
 Such a run can be resumed: the resume starts at the **repair point**, the fix
-phase of the last round (`fix_3`), and re-runs that round and `finalize_pr`.
-Because `fix_3` already ran and may have pushed, the resume needs
+phase of the last round (`fix_2`), and re-runs that round and `finalize_pr`.
+Because `fix_2` already ran and may have pushed, the resume needs
 `--acknowledge-external-effects`. See
 [Resuming Executions](/docs/guide/resuming-executions#resuming-a-run-with-unresolved-findings).
 
 ## Progress: `phase_progress`
 
 `total_phases` counts every declared phase, so `completed_phases/total_phases`
-reads "6/10" for a run that finished after certifying early. Use
+reads "6/8" for a run that finished after certifying early. Use
 `phase_progress` instead. It is on every item of `GET /executions` and on
 `GET /executions/{id}`:
 
@@ -90,7 +94,7 @@ reads "6/10" for a run that finished after certifying early. Use
 | `possible` | The most phases this run can complete: declared, less skipped |
 | `remaining_possible` | Phases that could still run. `0` once the run has ended |
 | `percent` | `completed` as a share of `possible`, 0-100. A completed run is `100` |
-| `display` | Human text, for example `6 of 6 (4 phases not needed)` or `phase 3 of up to 10` |
+| `display` | Human text, for example `6 of 6 (2 phases not needed)` or `phase 3 of up to 8` |
 
 Render `display` and draw `percent`. Do not divide the raw counts yourself.
 `syn execution list` prints `display`.

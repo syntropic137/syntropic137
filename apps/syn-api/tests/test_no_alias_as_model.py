@@ -149,7 +149,7 @@ def test_a_model_list_rejects_an_alias_after_a_valid_id(alias: str) -> None:
 
 
 def test_eval_run_surfaces_reject_aliases_and_keep_concrete_ids() -> None:
-    from syn_api.types import EvalRunModelResponse, EvalVariantResponse
+    from syn_api.types import EvalRunModelResponse, EvalRunStatsResponse, EvalVariantResponse
 
     variant = EvalVariantResponse(
         workflow_id="wf",
@@ -161,6 +161,17 @@ def test_eval_run_surfaces_reject_aliases_and_keep_concrete_ids() -> None:
         avg_cost_usd=None,
         avg_cost_display="—",
         last_run_at=None,
+        last_verdict=None,
+        stats=EvalRunStatsResponse(
+            median_duration_seconds=None,
+            median_duration_display="—",
+            incomplete_duration_count=0,
+            median_cost_usd=None,
+            median_cost_display="—",
+            incomplete_cost_count=0,
+            cost_per_pass_usd=None,
+            cost_per_pass_display="—",
+        ),
     )
     assert variant.model_dump()["models"] == ["gpt-6-sol", "gpt-6.1-sol"]
     with pytest.raises(ValidationError):

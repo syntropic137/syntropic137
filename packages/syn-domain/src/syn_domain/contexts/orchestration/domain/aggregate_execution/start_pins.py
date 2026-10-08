@@ -32,6 +32,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continu
     ContinuedBranch,
     LeftBranches,
     PhaseCheckout,
+    PushedCommit,
     branches_left_by,
     read_abandoned_branches,
     read_continued_branches,
@@ -247,11 +248,15 @@ def read_start_pins(event: DomainEvent) -> StartPins:
     )
 
 
-def read_left_branches(pins: StartPins, event: DomainEvent) -> LeftBranches:
+def read_left_branches(
+    pins: StartPins, event: DomainEvent, pushed: Sequence[PushedCommit] = ()
+) -> LeftBranches:
     """The branches a replayed `WorkflowFailed`'s failing phase left on origin (#1513).
 
     A run that was itself continuing branches in the phase that failed owns
-    them still, moved or not, so a resume of it continues them in turn.
+    them still, moved or not, so a resume of it continues them in turn. So
+    does every branch the failing phase's own workspace pushed to, from
+    ``pushed`` (PC-128): the only record a run orphaned by a restart has.
     """
     phase_id = evt(event, "failed_phase_id")
     resuming_same_phase = (
@@ -263,6 +268,7 @@ def read_left_branches(pins: StartPins, event: DomainEvent) -> LeftBranches:
             evt(event, "observed_branches"),
             repositories=[c.repository for c in pins.source_commits],
             continued=pins.continued_branches if resuming_same_phase else [],
+            pushed=[p for p in pushed if p.phase_id == phase_id],
         ),
     )
 

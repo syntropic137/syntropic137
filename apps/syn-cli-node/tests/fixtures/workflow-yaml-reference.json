@@ -107,7 +107,7 @@
           "prompt_file": "phases/verify.md"
         }
       ],
-      "document_sha256": "4e44a83d26998ddf1c77340b1ff46ab0747e6ad1db7cade610169f75a4d16571"
+      "document_sha256": "50408de3a9642bdfc7a2a5857df5792c60831a0c6f3b275b4ff6866f7801fa00"
     },
     "workflows/evals/verify-pinned-codex/workflow.yaml": {
       "phases": [
@@ -118,7 +118,40 @@
           "prompt_file": "phases/verify.md"
         }
       ],
-      "document_sha256": "e415b6b2ef430f4d63e526324fff380183ca16e73bd44179c227144132e7024b"
+      "document_sha256": "964e2089edf9c895a51a199eea79ac27fcf2cb2df4e9b047e361084a7de686b6"
+    },
+    "workflows/evals/verify-pinned-codex-gpt-5-6-luna/workflow.yaml": {
+      "phases": [
+        {
+          "id": "verify",
+          "order": 1,
+          "model": null,
+          "prompt_file": "phases/verify.md"
+        }
+      ],
+      "document_sha256": "fa52126f88e327c2457640d3d8cfc5d02d50110a7c6b5b15f802a541ddb0a761"
+    },
+    "workflows/evals/verify-pinned-codex-gpt-5-6-terra/workflow.yaml": {
+      "phases": [
+        {
+          "id": "verify",
+          "order": 1,
+          "model": null,
+          "prompt_file": "phases/verify.md"
+        }
+      ],
+      "document_sha256": "f65bd5f8331c9134d9083df8cde2dae95c6fbaf08614ec20f7cec2c759c8bca7"
+    },
+    "workflows/evals/verify-pinned-codex-gpt-6-luna/workflow.yaml": {
+      "phases": [
+        {
+          "id": "verify",
+          "order": 1,
+          "model": null,
+          "prompt_file": "phases/verify.md"
+        }
+      ],
+      "document_sha256": "292932a20fc3c62cbd155e06c7b6e42771d01d19a74755c1060882ff3eb52ac1"
     },
     "workflows/evals/verify-pinned-sonnet/workflow.yaml": {
       "phases": [
@@ -129,7 +162,7 @@
           "prompt_file": "phases/verify.md"
         }
       ],
-      "document_sha256": "43628b9712172ecc5e36afda5c25d0def2aba3be9ab9d1a4fafefe5e5a0d12fd"
+      "document_sha256": "8aab00511fa58d2856437b01f2f47514a2d98ab84fc93b423f5e105172ea83ef"
     },
     "workflows/examples/claude-delegates-to-codex.yaml": {
       "phases": [
@@ -524,25 +557,13 @@
           "prompt_file": "phases/reverify_2.md"
         },
         {
-          "id": "fix_3",
-          "order": 8,
-          "model": null,
-          "prompt_file": "phases/fix_3.md"
-        },
-        {
-          "id": "reverify_3",
-          "order": 9,
-          "model": null,
-          "prompt_file": "phases/reverify_3.md"
-        },
-        {
           "id": "finalize_pr",
-          "order": 10,
+          "order": 8,
           "model": null,
           "prompt_file": "phases/finalize_pr.md"
         }
       ],
-      "document_sha256": "7a779bd016086fcb005d195633b403dcd0b987a95472bd50e921ba867330e0d6"
+      "document_sha256": "e57605a82bdef04a278703ec3aaff8c982e23d807ce238c334e92b43a9795d8b"
     },
     "workflows/sdlc/pr-review/workflow.yaml": {
       "phases": [
@@ -792,25 +813,13 @@
           "prompt_file": "phases/reverify_2.md"
         },
         {
-          "id": "fix_3",
-          "order": 7,
-          "model": null,
-          "prompt_file": "phases/fix_3.md"
-        },
-        {
-          "id": "reverify_3",
-          "order": 8,
-          "model": null,
-          "prompt_file": "phases/reverify_3.md"
-        },
-        {
           "id": "finalize_pr",
-          "order": 9,
+          "order": 7,
           "model": null,
           "prompt_file": "phases/finalize_pr.md"
         }
       ],
-      "document_sha256": "32c388efab5a35df1c5b7b225303f25ff640801bf8f9b11499200a6f73c4fd1b"
+      "document_sha256": "d59d8a193403cb5ef56b2c049da38a79d1fd4ca623bae04cfd016b60d466309b"
     },
     "workflows/triggers/ci-fix.yaml": {
       "phases": [

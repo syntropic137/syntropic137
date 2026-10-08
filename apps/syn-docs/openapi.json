@@ -2493,7 +2493,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/EvalResponse"
+                  "$ref": "#/components/schemas/EvalDetailResponse"
                 }
               }
             }
@@ -10127,6 +10127,168 @@
         "title": "EvalCreatedResponse",
         "description": "The receipt for a create, read from the Eval aggregate, never a projection (#967).\n\nThe eval list and `GET /evals/{eval_id}` are read models and may not show\nthe eval for a moment after this returns. That is lag, not a failed create:\n`eval_id` is authoritative from here on."
       },
+      "EvalDetailResponse": {
+        "properties": {
+          "eval_id": {
+            "type": "string",
+            "title": "Eval Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "goal": {
+            "type": "string",
+            "title": "Goal"
+          },
+          "starting_workflow_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Starting Workflow Id"
+          },
+          "baseline_repos": {
+            "items": {
+              "$ref": "#/components/schemas/EvalBaselineRepoResponse"
+            },
+            "type": "array",
+            "title": "Baseline Repos"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tags"
+          },
+          "frozen": {
+            "type": "boolean",
+            "title": "Frozen"
+          },
+          "archived": {
+            "type": "boolean",
+            "title": "Archived"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "run_count": {
+            "type": "integer",
+            "title": "Run Count"
+          },
+          "run_status_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Run Status Counts"
+          },
+          "scored_count": {
+            "type": "integer",
+            "title": "Scored Count",
+            "default": 0
+          },
+          "pass_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pass Rate"
+          },
+          "pass_rate_display": {
+            "type": "string",
+            "title": "Pass Rate Display",
+            "default": "\u2014"
+          },
+          "last_run_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Run At"
+          },
+          "last_verdict": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Verdict"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "variants": {
+            "items": {
+              "$ref": "#/components/schemas/EvalVariantResponse"
+            },
+            "type": "array",
+            "title": "Variants"
+          },
+          "stats": {
+            "$ref": "#/components/schemas/EvalRunStatsResponse"
+          },
+          "read_model_status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReadModelStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "eval_id",
+          "name",
+          "goal",
+          "starting_workflow_id",
+          "baseline_repos",
+          "tags",
+          "frozen",
+          "archived",
+          "created_at",
+          "updated_at",
+          "run_count",
+          "run_status_counts",
+          "stats"
+        ],
+        "title": "EvalDetailResponse",
+        "description": "One eval, as `GET /evals/{eval_id}` returns it.\n\nThe row model plus whether the evals read model is rebuilding, so a\nmissing or stale eval can say why. Kept off `EvalResponse` so every list\nrow does not repeat the list's own status."
+      },
       "EvalId": {
         "type": "string",
         "title": "EvalId",
@@ -10159,6 +10321,16 @@
             },
             "type": "object",
             "title": "Status Counts"
+          },
+          "read_model_status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReadModelStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -10300,6 +10472,9 @@
             },
             "type": "array",
             "title": "Variants"
+          },
+          "stats": {
+            "$ref": "#/components/schemas/EvalRunStatsResponse"
           }
         },
         "type": "object",
@@ -10315,7 +10490,8 @@
           "created_at",
           "updated_at",
           "run_count",
-          "run_status_counts"
+          "run_status_counts",
+          "stats"
         ],
         "title": "EvalResponse",
         "description": "An eval as the eval read model holds it, with its run tally (#967)."
@@ -10643,6 +10819,78 @@
         "title": "EvalRunScoreResponse",
         "description": "The run's score as recorded (Evals v2)."
       },
+      "EvalRunStatsResponse": {
+        "properties": {
+          "median_duration_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Median Duration Seconds"
+          },
+          "median_duration_display": {
+            "type": "string",
+            "title": "Median Duration Display"
+          },
+          "incomplete_duration_count": {
+            "type": "integer",
+            "title": "Incomplete Duration Count"
+          },
+          "median_cost_usd": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Median Cost Usd"
+          },
+          "median_cost_display": {
+            "type": "string",
+            "title": "Median Cost Display"
+          },
+          "incomplete_cost_count": {
+            "type": "integer",
+            "title": "Incomplete Cost Count"
+          },
+          "cost_per_pass_usd": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Per Pass Usd"
+          },
+          "cost_per_pass_display": {
+            "type": "string",
+            "title": "Cost Per Pass Display"
+          }
+        },
+        "type": "object",
+        "required": [
+          "median_duration_seconds",
+          "median_duration_display",
+          "incomplete_duration_count",
+          "median_cost_usd",
+          "median_cost_display",
+          "incomplete_cost_count",
+          "cost_per_pass_usd",
+          "cost_per_pass_display"
+        ],
+        "title": "EvalRunStatsResponse",
+        "description": "How long a set of an eval's runs took and what it cost, over EVERY run in the set.\n\nMedians, not means: one runaway run should not make a variant look slow."
+      },
       "EvalVariantResponse": {
         "properties": {
           "workflow_id": {
@@ -10716,6 +10964,19 @@
               }
             ],
             "title": "Last Run At"
+          },
+          "last_verdict": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Verdict"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "stats": {
+            "$ref": "#/components/schemas/EvalRunStatsResponse"
           }
         },
         "type": "object",
@@ -10728,7 +10989,9 @@
           "pass_rate_display",
           "avg_cost_usd",
           "avg_cost_display",
-          "last_run_at"
+          "last_run_at",
+          "last_verdict",
+          "stats"
         ],
         "title": "EvalVariantResponse",
         "description": "Every run of an eval with the same workflow, workflow version and OBSERVED models.\n\n(Evals v2.) Two versions of one workflow are two variants: an edit between\nruns is a different treatment, and pooling them would hide its effect."
@@ -11481,6 +11744,16 @@
                 "type": "null"
               }
             ]
+          },
+          "read_model_status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReadModelStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -11698,6 +11971,16 @@
             },
             "type": "object",
             "title": "Status Counts"
+          },
+          "read_model_status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReadModelStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -14553,6 +14836,25 @@
         ],
         "title": "InventorySnapshot"
       },
+      "InvokedSkillInfo": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "count"
+        ],
+        "title": "InvokedSkillInfo",
+        "description": "One skill the agent invoked through the Skill tool, and how often (#1269)."
+      },
       "LineageEdge": {
         "properties": {
           "parent": {
@@ -15616,6 +15918,11 @@
             "title": "Delivers Repo Changes",
             "default": true
           },
+          "requires_verdict": {
+            "type": "boolean",
+            "title": "Requires Verdict",
+            "default": false
+          },
           "sandbox": {
             "type": "string",
             "title": "Sandbox",
@@ -15919,6 +16226,9 @@
             "title": "Start Pins Status",
             "default": "unavailable"
           },
+          "skill_use": {
+            "$ref": "#/components/schemas/PhaseSkillUseInfo"
+          },
           "operations": {
             "items": {
               "$ref": "#/components/schemas/PhaseOperationInfo"
@@ -16185,6 +16495,49 @@
         "title": "PhaseRefResponse",
         "description": "A plugin or skill reference. Structured, never a joined string.\n\nJoining source and name is not reversible: a ref whose source already\nends in the repo name reparses to a different repository (#1013)."
       },
+      "PhaseSkillUseInfo": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "observed",
+              "not_observable",
+              "unavailable"
+            ],
+            "title": "Status",
+            "default": "unavailable"
+          },
+          "declared": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Declared"
+          },
+          "invoked": {
+            "items": {
+              "$ref": "#/components/schemas/InvokedSkillInfo"
+            },
+            "type": "array",
+            "title": "Invoked"
+          },
+          "declared_not_invoked": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Declared Not Invoked",
+            "description": "Declared skills with no observed invocation. Empty unless status is 'observed': an unobservable use is not a non-use.",
+            "readOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "declared_not_invoked"
+        ],
+        "title": "PhaseSkillUseInfo",
+        "description": "Which declared skills this phase actually used (#1269).\n\nDeclaring a skill installs it; only an invocation shows the agent reached\nfor it. This is the fact that tells the two apart, per phase."
+      },
       "PhaseStartConfig": {
         "properties": {
           "provider": {
@@ -16430,6 +16783,88 @@
         ],
         "title": "QuarantinedRef",
         "description": "Where one repository's unpushed work was saved when its phase ended (#1547).\n\nThe structured half of what `describe_saved_work` writes as prose into\n`error_message`: only work that LANDED, because a ref that does not exist\nis nothing a reviewer can fetch. Travels on ``WorkflowFailedEvent`` so the\nPR the run was working on can be told, by a ProcessManager rather than by\nwhoever happened to read the error."
+      },
+      "ReadModelStatus": {
+        "properties": {
+          "rebuilding": {
+            "type": "boolean",
+            "title": "Rebuilding",
+            "description": "True while this read model is replaying history: it is more than the live-lag threshold (500 events) behind the head. A few events of ordinary live lag is NOT rebuilding, even while another read model replays."
+          },
+          "projection": {
+            "type": "string",
+            "title": "Projection",
+            "description": "Projection name, as in projection_checkpoints."
+          },
+          "label_display": {
+            "type": "string",
+            "title": "Label Display",
+            "description": "What the read model holds, for a sentence, e.g. 'execution history'."
+          },
+          "progress_pct": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Progress Pct",
+            "description": "Checkpoint position as a whole percentage of the store head, 0-99 while rebuilding. Null when not rebuilding."
+          },
+          "progress_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Progress Display",
+            "description": "progress_pct as '72%'."
+          },
+          "events_behind": {
+            "type": "integer",
+            "title": "Events Behind",
+            "description": "Events between the checkpoint and the store head.",
+            "default": 0
+          },
+          "events_behind_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Events Behind Display",
+            "description": "events_behind as '29,476 events behind'."
+          },
+          "summary_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary Display",
+            "description": "One sentence for a banner, e.g. 'Rebuilding execution history - 72% (29,476 events behind).' Null when not rebuilding."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "rebuilding",
+          "projection",
+          "label_display"
+        ],
+        "title": "ReadModelStatus",
+        "description": "Whether one read model is rebuilding, and how far it has got.\n\nCarried on the list and detail responses a read model serves, so a page can\nsay \"this list is incomplete because it is being rebuilt\" instead of\nlooking broken, and listed on ``/health`` for every read model that is\nrebuilding. Judged by ``services.read_model_status``; every number is\nexact (checkpoint position against store head), never estimated."
       },
       "RegisterClaudePluginRequest": {
         "properties": {
@@ -17395,7 +17830,7 @@
           "blocked"
         ],
         "title": "ReviewVerdict",
-        "description": "What a reviewing phase concluded about the change in front of it (PC-63).\n\nTHE AGGREGATE DECIDES ON IT, THE AGENT ONLY REPORTS IT. A phase writes\n``review_verdict`` in its TASK_RESULT block; the aggregate reads it when\nthe phase's artifacts are collected and chooses the next phase from it\n(see `WorkflowExecutionAggregate.artifacts_collected`):\n\n* ``certified`` ends the repair loop. Every phase before the workflow's\n  final phase is skipped, so a run that certifies in round 1 does not pay\n  for rounds 2 and 3.\n* ``blocked`` - or no verdict at all - advances by order, which is the\n  next repair round, or the final phase once the rounds are spent.\n\nThe latest verdict a run reported is also how it ended: a run completed\non ``blocked`` completed with UNRESOLVED FINDINGS, and says so on\n`WorkflowCompleted` rather than looking certified.\n\nA missing or misspelled verdict is never read as ``certified``: skipping\nreview on a word the reader did not recognise is the one mistake here that\ncosts more than a repair round."
+        "description": "What a reviewing phase concluded about the change in front of it (PC-63).\n\nTHE AGGREGATE DECIDES ON IT, THE AGENT ONLY REPORTS IT. A phase writes\n``review_verdict`` in its TASK_RESULT block; the aggregate reads it when\nthe phase's artifacts are collected and chooses the next phase from it\n(see `WorkflowExecutionAggregate.artifacts_collected`):\n\n* ``certified`` ends the repair loop. Every phase before the workflow's\n  final phase is skipped, so a run that certifies in round 1 does not pay\n  for the rounds after it.\n* ``blocked`` - or no verdict at all - advances by order, which is the\n  next repair round, or the final phase once the rounds are spent.\n\nThe latest verdict a run reported is also how it ended: a run completed\non ``blocked`` completed with UNRESOLVED FINDINGS, and says so on\n`WorkflowCompleted` rather than looking certified.\n\nA missing or misspelled verdict is never read as ``certified``: skipping\nreview on a word the reader did not recognise is the one mistake here that\ncosts more than a repair round."
       },
       "RootResponse": {
         "properties": {
@@ -19499,6 +19934,21 @@
             ],
             "title": "Lagging Projections",
             "description": "Every projection short of the head, furthest behind first. Empty when all are at the head; null when lag is unmeasurable."
+          },
+          "rebuilding_read_models": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ReadModelStatus"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rebuilding Read Models",
+            "description": "Every read model that is rebuilding, furthest behind first, with display strings for a banner. Ordinary live lag is excluded. Null when lag is unmeasurable."
           },
           "unapplied_starts": {
             "anyOf": [

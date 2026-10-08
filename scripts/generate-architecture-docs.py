@@ -8,22 +8,40 @@ This script regenerates all auto-generatable architecture diagrams:
 
 Run after updating the VSA manifest to keep docs in sync.
 
+The manifest is rewritten in canonical order before anything reads it. `vsa
+manifest` emits arrays in filesystem-walk order and maps in HashMap order, both
+of which vary between runs and machines; the SVG renderer prints them as given.
+Canonicalising here makes every downstream generator deterministic, which the
+drift check in `just check-architecture-docs` depends on.
+
 Usage:
-    python scripts/generate-architecture-docs.py
-    # or via justfile:
-    just docs-gen
+    python scripts/generate-architecture-docs.py [--manifest PATH] [--out-root DIR]
+    # or via justfile (regenerates the manifest and the SVG too):
+    just docs-regen
 """
 
+import argparse
 import json
 import re
 import sys
 from pathlib import Path
 from typing import Any
 
+DEFAULT_MANIFEST = Path(".topology/syn-manifest.json")
 
-def load_manifest() -> dict[str, Any]:
-    """Load the VSA manifest."""
-    manifest_path = Path(".topology/syn-manifest.json")
+
+def canonicalize(value: object) -> object:
+    """Sort every map by key and every array by content, recursively."""
+    if isinstance(value, dict):
+        return {key: canonicalize(value[key]) for key in sorted(value)}
+    if isinstance(value, list):
+        items = [canonicalize(item) for item in value]
+        return sorted(items, key=lambda item: json.dumps(item, sort_keys=True))
+    return value
+
+
+def load_manifest(manifest_path: Path) -> dict[str, Any]:
+    """Load the VSA manifest, rewriting it in canonical order."""
     if not manifest_path.exists():
         print(f"❌ Error: Manifest not found at {manifest_path}")
         print(
@@ -31,6 +49,9 @@ def load_manifest() -> dict[str, Any]:
         )
         sys.exit(1)
 
+    manifest = json.loads(manifest_path.read_text())
+    canonical = canonicalize(manifest)
+    manifest_path.write_text(json.dumps(canonical, indent=2) + "\n")
     return json.loads(manifest_path.read_text())
 
 
@@ -41,7 +62,7 @@ def generate_projection_subscriptions(manifest: dict[str, Any]) -> str:
 
     # Get top N events by projection count
     event_counts = {event: len(projs) for event, projs in event_to_projections.items()}
-    top_events = sorted(event_counts.items(), key=lambda x: x[1], reverse=True)[:10]
+    top_events = sorted(event_counts.items(), key=lambda x: (-x[1], x[0]))[:10]
 
     # Get unique projections
     unique_projections = set()
@@ -82,7 +103,7 @@ def generate_projection_subscriptions(manifest: dict[str, Any]) -> str:
     # Build full markdown
     content = f"""# Projection Subscriptions
 
-🤖 **Auto-generated from VSA manifest** - Run `just docs-gen` to update
+🤖 **Auto-generated from VSA manifest** - Run `just docs-regen` to update
 
 **Data Source:** `.topology/syn-manifest.json`
 
@@ -135,14 +156,7 @@ This diagram shows which events feed which projections in the Syn137 system.
 🤖 **This file is auto-generated** - Do not edit manually. To regenerate:
 
 ```bash
-just docs-gen
-```
-
-Or regenerate the manifest first:
-
-```bash
-vsa manifest --config vsa.yaml --output .topology/syn-manifest.json --include-domain
-just docs-gen
+just docs-regen
 ```
 """
 
@@ -158,7 +172,7 @@ def generate_event_flow_summary(manifest: dict[str, Any]) -> str:
     # Build flow summary (top 15 by projection count)
     flows = []
     for event, projections in sorted(
-        event_to_projections.items(), key=lambda x: len(x[1]), reverse=True
+        event_to_projections.items(), key=lambda x: (-len(x[1]), x[0])
     )[:15]:
         # Try to find which command creates this event (heuristic: event name starts with command)
         likely_command = "?"
@@ -180,7 +194,7 @@ def generate_event_flow_summary(manifest: dict[str, Any]) -> str:
     # Generate markdown
     content = """# Event Flow Summary
 
-🤖 **Auto-generated from VSA manifest** - Run `just docs-gen` to update
+🤖 **Auto-generated from VSA manifest** - Run `just docs-regen` to update
 
 ---
 
@@ -219,21 +233,98 @@ This table shows the most important event flows in Syn137 (events that feed the 
 🤖 **This file is auto-generated** - Do not edit manually. To regenerate:
 
 ```bash
-just docs-gen
+just docs-regen
 ```
 """
 
     return content
 
 
-def update_readme_counts(manifest: dict[str, Any]) -> bool:
+def manifest_contexts(manifest: dict[str, Any]) -> set[str]:
+    """Every bounded context the manifest knows, with or without aggregates."""
+    contexts = {context["name"] for context in manifest.get("bounded_contexts", [])}
+    contexts.update(a["context"] for a in manifest.get("domain", {}).get("aggregates", []))
+    return contexts
+
+
+README_ROW = re.compile(r"^(\| \*\*`(\w+)`\*\* \|)[^|]*\|", flags=re.M)
+# apps/syn-docs/content/docs/architecture/index.mdx: ``| `<context>` | <aggregates> | ... |``
+DOCS_ROW = re.compile(r"^(\| `(\w+)` \|)[^|]*\|", flags=re.M)
+
+
+def update_readme_aggregates(
+    manifest: dict[str, Any], readme_content: str, row: re.Pattern[str] = README_ROW
+) -> str:
+    """Rewrite the Aggregates column of README's bounded-context table.
+
+    Rows look like ``| **`<context>`** | <aggregates> | <purpose> |``. Only the
+    middle cell is generated; the purpose stays hand-written, so a context the
+    table lacks, or one the manifest no longer has, cannot be generated and is
+    an error rather than a row silently left as it was.
+    """
+    by_context: dict[str, list[str]] = {}
+    for aggregate in manifest.get("domain", {}).get("aggregates", []):
+        name = aggregate["name"].removesuffix("Aggregate")
+        by_context.setdefault(aggregate["context"], []).append(name)
+
+    expected = manifest_contexts(manifest)
+    listed = {match.group(2) for match in row.finditer(readme_content)}
+    missing, unknown = sorted(expected - listed), sorted(listed - expected)
+    if missing or unknown:
+        raise SystemExit(
+            "❌ bounded-context table does not match the manifest:"
+            + (f" missing rows for {', '.join(missing)};" if missing else "")
+            + (f" rows for unknown contexts {', '.join(unknown)};" if unknown else "")
+            + " add or remove the row (the Purpose cell is hand-written)."
+        )
+
+    def replace_row(match: re.Match[str]) -> str:
+        names = sorted(by_context.get(match.group(2), []))
+        return f"{match.group(1)} {', '.join(names) or '-'} |"
+
+    content = row.sub(replace_row, readme_content)
+    return re.sub(
+        r"organized into \d+ bounded contexts",
+        f"organized into {len(expected)} bounded contexts",
+        content,
+    )
+
+
+DOCS_SITE_PAGES = (
+    Path("apps/syn-docs/content/docs/guide/architecture.mdx"),
+    Path("apps/syn-docs/content/docs/architecture/index.mdx"),
+)
+
+
+def update_docs_site(manifest: dict[str, Any], out_root: Path) -> None:
+    """Regenerate the counts and aggregate table on the public docs pages."""
+    domain = manifest.get("domain", {})
+    counts = {
+        "Commands": len(domain.get("commands", [])),
+        "Events": len(domain.get("events", [])),
+        "Projections": len(domain.get("projections", [])),
+    }
+    for page in DOCS_SITE_PAGES:
+        path = out_root / page
+        if not path.exists():
+            print(f"⚠️  {page} not found, skipping")
+            continue
+        content = path.read_text()
+        for label, count in counts.items():
+            content = re.sub(rf"\*\*{label} \(\d+\):\*\*", f"**{label} ({count}):**", content)
+        if DOCS_ROW.search(content):
+            content = update_readme_aggregates(manifest, content, DOCS_ROW)
+        path.write_text(content)
+
+
+def update_readme_counts(manifest: dict[str, Any], out_root: Path) -> bool:
     """Update CQRS component counts in README.md."""
     domain = manifest.get("domain", {})
     commands_count = len(domain.get("commands", []))
     events_count = len(domain.get("events", []))
     projections_count = len(domain.get("projections", []))
 
-    readme_path = Path("README.md")
+    readme_path = out_root / "README.md"
     if not readme_path.exists():
         print("⚠️  README.md not found, skipping count update")
         return False
@@ -245,6 +336,8 @@ def update_readme_counts(manifest: dict[str, Any]) -> bool:
     replacement = f"| CQRS | Commands ({commands_count}) → Events ({events_count}) → Projections ({projections_count}) |"
 
     updated_content = re.sub(pattern, replacement, readme_content)
+
+    updated_content = update_readme_aggregates(manifest, updated_content)
 
     if updated_content != readme_content:
         readme_path.write_text(updated_content)
@@ -277,12 +370,23 @@ def validate_manual_docs() -> list[str]:
 
 def main() -> None:
     """Main execution."""
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
+    parser.add_argument(
+        "--out-root",
+        type=Path,
+        default=Path(),
+        help="Directory standing in for the repo root; README.md is updated in place there",
+    )
+    args = parser.parse_args()
+    out_root: Path = args.out_root
+
     print("🤖 Generating Architecture Documentation...")
     print()
 
     # Load manifest
     print("📖 Reading VSA manifest...")
-    manifest = load_manifest()
+    manifest = load_manifest(args.manifest)
 
     domain = manifest.get("domain", {})
     commands_count = len(domain.get("commands", []))
@@ -300,7 +404,7 @@ def main() -> None:
     # 1. Projection subscriptions
     print("📊 Generating projection subscriptions diagram...")
     proj_sub_content = generate_projection_subscriptions(manifest)
-    proj_sub_path = Path("docs/architecture/projection-subscriptions.md")
+    proj_sub_path = out_root / "docs/architecture/projection-subscriptions.md"
     proj_sub_path.parent.mkdir(parents=True, exist_ok=True)
     proj_sub_path.write_text(proj_sub_content)
     files_generated.append(str(proj_sub_path))
@@ -309,7 +413,7 @@ def main() -> None:
     # 2. Event flow summary
     print("📊 Generating event flow summary...")
     event_flow_content = generate_event_flow_summary(manifest)
-    event_flow_path = Path("docs/architecture/event-flows/README.md")
+    event_flow_path = out_root / "docs/architecture/event-flows/README.md"
     event_flow_path.parent.mkdir(parents=True, exist_ok=True)
     event_flow_path.write_text(event_flow_content)
     files_generated.append(str(event_flow_path))
@@ -317,7 +421,8 @@ def main() -> None:
 
     # 3. Update README counts
     print("📝 Updating README.md component counts...")
-    update_readme_counts(manifest)
+    update_readme_counts(manifest, out_root)
+    update_docs_site(manifest, out_root)
     print()
 
     # Validate manual docs
@@ -351,9 +456,6 @@ def main() -> None:
     print("   • docs/architecture/docker-workspace-lifecycle.md")
     print("   • docs/architecture/infrastructure-data-flow.md")
     print("   • docs/architecture/event-flows/workflow-creation.md")
-    print()
-    print("🏗️  VSA diagram:")
-    print("   • Run `just diagram` to regenerate docs/architecture/vsa-overview.svg")
     print()
 
 

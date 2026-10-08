@@ -3485,6 +3485,61 @@ export interface components {
             tags: string[];
         };
         /**
+         * EvalDetailResponse
+         * @description One eval, as `GET /evals/{eval_id}` returns it.
+         *
+         *     The row model plus whether the evals read model is rebuilding, so a
+         *     missing or stale eval can say why. Kept off `EvalResponse` so every list
+         *     row does not repeat the list's own status.
+         */
+        EvalDetailResponse: {
+            /** Eval Id */
+            eval_id: string;
+            /** Name */
+            name: string;
+            /** Goal */
+            goal: string;
+            /** Starting Workflow Id */
+            starting_workflow_id: string | null;
+            /** Baseline Repos */
+            baseline_repos: components["schemas"]["EvalBaselineRepoResponse"][];
+            /** Tags */
+            tags: string[];
+            /** Frozen */
+            frozen: boolean;
+            /** Archived */
+            archived: boolean;
+            /** Created At */
+            created_at: string | null;
+            /** Updated At */
+            updated_at: string | null;
+            /** Run Count */
+            run_count: number;
+            /** Run Status Counts */
+            run_status_counts: {
+                [key: string]: number;
+            };
+            /**
+             * Scored Count
+             * @default 0
+             */
+            scored_count: number;
+            /** Pass Rate */
+            pass_rate?: number | null;
+            /**
+             * Pass Rate Display
+             * @default —
+             */
+            pass_rate_display: string;
+            /** Last Run At */
+            last_run_at?: string | null;
+            last_verdict?: components["schemas"]["Verdict"] | null;
+            /** Variants */
+            variants?: components["schemas"]["EvalVariantResponse"][];
+            stats: components["schemas"]["EvalRunStatsResponse"];
+            read_model_status?: components["schemas"]["ReadModelStatus"] | null;
+        };
+        /**
          * EvalId
          * @description The identity of one eval, and the id of its stream.
          */
@@ -3506,6 +3561,7 @@ export interface components {
             status_counts: {
                 [key: string]: number;
             };
+            read_model_status?: components["schemas"]["ReadModelStatus"] | null;
         };
         /**
          * EvalResponse
@@ -3555,6 +3611,7 @@ export interface components {
             last_verdict?: components["schemas"]["Verdict"] | null;
             /** Variants */
             variants?: components["schemas"]["EvalVariantResponse"][];
+            stats: components["schemas"]["EvalRunStatsResponse"];
         };
         /**
          * EvalRunListResponse
@@ -3659,6 +3716,30 @@ export interface components {
             scored_at: string;
         };
         /**
+         * EvalRunStatsResponse
+         * @description How long a set of an eval's runs took and what it cost, over EVERY run in the set.
+         *
+         *     Medians, not means: one runaway run should not make a variant look slow.
+         */
+        EvalRunStatsResponse: {
+            /** Median Duration Seconds */
+            median_duration_seconds: number | null;
+            /** Median Duration Display */
+            median_duration_display: string;
+            /** Incomplete Duration Count */
+            incomplete_duration_count: number;
+            /** Median Cost Usd */
+            median_cost_usd: string | null;
+            /** Median Cost Display */
+            median_cost_display: string;
+            /** Incomplete Cost Count */
+            incomplete_cost_count: number;
+            /** Cost Per Pass Usd */
+            cost_per_pass_usd: string | null;
+            /** Cost Per Pass Display */
+            cost_per_pass_display: string;
+        };
+        /**
          * EvalVariantResponse
          * @description Every run of an eval with the same workflow, workflow version and OBSERVED models.
          *
@@ -3686,6 +3767,8 @@ export interface components {
             avg_cost_display: string;
             /** Last Run At */
             last_run_at: string | null;
+            last_verdict: components["schemas"]["Verdict"] | null;
+            stats: components["schemas"]["EvalRunStatsResponse"];
         };
         /**
          * EventListResponse
@@ -4035,6 +4118,7 @@ export interface components {
             eval?: components["schemas"]["ExecutionEvalRunResponse"] | null;
             resume_start?: components["schemas"]["ResumeStartInfo"] | null;
             start_queue?: components["schemas"]["ExecutionStartQueueInfo"] | null;
+            read_model_status?: components["schemas"]["ReadModelStatus"] | null;
         };
         /**
          * ExecutionEvalResponse
@@ -4115,6 +4199,7 @@ export interface components {
             status_counts?: {
                 [key: string]: number;
             };
+            read_model_status?: components["schemas"]["ReadModelStatus"] | null;
         };
         /** ExecutionRunListResponse */
         ExecutionRunListResponse: {
@@ -5382,6 +5467,16 @@ export interface components {
             coverage: components["schemas"]["InventoryCoverage"];
             counts: components["schemas"]["InventoryCounts"];
         };
+        /**
+         * InvokedSkillInfo
+         * @description One skill the agent invoked through the Skill tool, and how often (#1269).
+         */
+        InvokedSkillInfo: {
+            /** Name */
+            name: string;
+            /** Count */
+            count: number;
+        };
         /** LineageEdge */
         LineageEdge: {
             parent: components["schemas"]["InventoryNodeRef"];
@@ -5834,6 +5929,11 @@ export interface components {
              */
             delivers_repo_changes: boolean;
             /**
+             * Requires Verdict
+             * @default false
+             */
+            requires_verdict: boolean;
+            /**
              * Sandbox
              * @default full-access
              */
@@ -5925,6 +6025,7 @@ export interface components {
              * @enum {string}
              */
             start_pins_status: "recorded" | "not_recorded" | "unavailable";
+            skill_use?: components["schemas"]["PhaseSkillUseInfo"];
             /** Operations */
             operations?: components["schemas"]["PhaseOperationInfo"][];
             activity?: components["schemas"]["PhaseActivityInfo"];
@@ -6047,6 +6148,30 @@ export interface components {
             name_overridden: boolean;
             /** Raw */
             raw?: string | null;
+        };
+        /**
+         * PhaseSkillUseInfo
+         * @description Which declared skills this phase actually used (#1269).
+         *
+         *     Declaring a skill installs it; only an invocation shows the agent reached
+         *     for it. This is the fact that tells the two apart, per phase.
+         */
+        PhaseSkillUseInfo: {
+            /**
+             * Status
+             * @default unavailable
+             * @enum {string}
+             */
+            status: "observed" | "not_observable" | "unavailable";
+            /** Declared */
+            declared?: string[];
+            /** Invoked */
+            invoked?: components["schemas"]["InvokedSkillInfo"][];
+            /**
+             * Declared Not Invoked
+             * @description Declared skills with no observed invocation. Empty unless status is 'observed': an unobservable use is not a non-use.
+             */
+            readonly declared_not_invoked: string[];
         };
         /**
          * PhaseStartConfig
@@ -6187,6 +6312,59 @@ export interface components {
             pull_request?: number | null;
             /** Diffstat */
             diffstat?: string | null;
+        };
+        /**
+         * ReadModelStatus
+         * @description Whether one read model is rebuilding, and how far it has got.
+         *
+         *     Carried on the list and detail responses a read model serves, so a page can
+         *     say "this list is incomplete because it is being rebuilt" instead of
+         *     looking broken, and listed on ``/health`` for every read model that is
+         *     rebuilding. Judged by ``services.read_model_status``; every number is
+         *     exact (checkpoint position against store head), never estimated.
+         */
+        ReadModelStatus: {
+            /**
+             * Rebuilding
+             * @description True while this read model is replaying history: it is more than the live-lag threshold (500 events) behind the head. A few events of ordinary live lag is NOT rebuilding, even while another read model replays.
+             */
+            rebuilding: boolean;
+            /**
+             * Projection
+             * @description Projection name, as in projection_checkpoints.
+             */
+            projection: string;
+            /**
+             * Label Display
+             * @description What the read model holds, for a sentence, e.g. 'execution history'.
+             */
+            label_display: string;
+            /**
+             * Progress Pct
+             * @description Checkpoint position as a whole percentage of the store head, 0-99 while rebuilding. Null when not rebuilding.
+             */
+            progress_pct?: number | null;
+            /**
+             * Progress Display
+             * @description progress_pct as '72%'.
+             */
+            progress_display?: string | null;
+            /**
+             * Events Behind
+             * @description Events between the checkpoint and the store head.
+             * @default 0
+             */
+            events_behind: number;
+            /**
+             * Events Behind Display
+             * @description events_behind as '29,476 events behind'.
+             */
+            events_behind_display?: string | null;
+            /**
+             * Summary Display
+             * @description One sentence for a banner, e.g. 'Rebuilding execution history - 72% (29,476 events behind).' Null when not rebuilding.
+             */
+            summary_display?: string | null;
         };
         /**
          * RegisterClaudePluginRequest
@@ -6853,7 +7031,7 @@ export interface components {
          *
          *     * ``certified`` ends the repair loop. Every phase before the workflow's
          *       final phase is skipped, so a run that certifies in round 1 does not pay
-         *       for rounds 2 and 3.
+         *       for the rounds after it.
          *     * ``blocked`` - or no verdict at all - advances by order, which is the
          *       next repair round, or the final phase once the rounds are spent.
          *
@@ -7915,6 +8093,11 @@ export interface components {
              * @description Every projection short of the head, furthest behind first. Empty when all are at the head; null when lag is unmeasurable.
              */
             lagging_projections?: components["schemas"]["ProjectionLag"][] | null;
+            /**
+             * Rebuilding Read Models
+             * @description Every read model that is rebuilding, furthest behind first, with display strings for a banner. Ordinary live lag is excluded. Null when lag is unmeasurable.
+             */
+            rebuilding_read_models?: components["schemas"]["ReadModelStatus"][] | null;
             /**
              * Unapplied Starts
              * @description Executions whose WorkflowExecutionStarted an execution read model's checkpoint passed without applying (#1545). Lag cannot show these: the read model is at the head and wrong. Non-empty sets status 'dropped_events'; repair per docs/runbooks/repair-dropped-execution-start.md. Null when not measured.
@@ -10502,7 +10685,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["EvalResponse"];
+                    "application/json": components["schemas"]["EvalDetailResponse"];
                 };
             };
             /** @description No eval has this id in the eval read model (it may still be catching up) */

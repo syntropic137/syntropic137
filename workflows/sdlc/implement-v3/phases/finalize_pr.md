@@ -2,30 +2,34 @@
 
 $ARGUMENTS
 
+**Skills:** before writing the PR description and release notes, invoke `documentation` with the Skill tool, and `purpose-and-scope` when you decide whether the PR delivers what the task asked.
+
 The final verification report is **the last round's that ran**. A round
 whose predecessor certified never runs: the engine skips straight here, so a
-run certified in round 1 has no `reverify_2` or `reverify_3` input at all, and
-its round-1 report is the final one. A round RAN if anything of it was handed
+run certified in round 1 has no `reverify_2` input at all, and
+its round-1 report is the final one. A run whose first `verify` certified ran
+no round at all, and that first report is the final one (round 0). A round RAN if anything of it was handed
 to you under `artifacts/input/` - its directory `reverify_N/` or its flat
 alias `reverify_N.md` (kept for one release - issue #988). Take the
 newest round that ran, then read its report, the first of its two files that
 exists:
 
-1. `artifacts/input/reverify_3/reverify.md`
-2. `artifacts/input/reverify_3.md`
-3. `artifacts/input/reverify_2/reverify.md`
-4. `artifacts/input/reverify_2.md`
-5. `artifacts/input/reverify/reverify.md`
-6. `artifacts/input/reverify.md`
+1. `artifacts/input/reverify_2/reverify.md`
+2. `artifacts/input/reverify_2.md`
+3. `artifacts/input/reverify/reverify.md`
+4. `artifacts/input/reverify.md`
+5. `artifacts/input/verify/verify.md` - only when no round ran
+6. `artifacts/input/verify.md` - only when no round ran
 
 Never take the verdict from an older round when a newer one ran, even when the
 newer round's report is missing or unreadable: that round handed the open
 findings to a fix and its verdict is the one that says whether the fix closed
 them, so an older verdict is history. Below, `reverify.md` means the report of
-the round you read, and N is that round's number (1 for `reverify`).
+the round you read, and N is that round's number (1 for `reverify`, 0 for the
+first `verify`).
 
 **The report is usable only if its first line is exactly `CERTIFIED` or
-`BLOCKED` and its second line is exactly `Round: N of 3`.** Anything else -
+`BLOCKED` and its second line is exactly `Round: N of 2`.** Anything else -
 no round's report exists, the report was recovered from a transcript (its first
 line is a recovery notice, not a verdict), or the lines do not match - is the
 error `FINAL_REPORT_UNUSABLE`. Treat it as BLOCKED: follow "If BLOCKED" below,
@@ -36,7 +40,7 @@ The implement phase opened a **draft** PR on its first push and recorded its
 number and URL in its artifact. This phase decides what that draft becomes. It
 is the only phase allowed to mark it ready (#1197).
 
-Read `reverify.md`, not `verify.md`. The first pass's findings may describe defects the `fix` phase has
+Read `reverify.md`, not `verify.md`, whenever a round ran. The first pass's findings may describe defects the `fix` phase has
 since closed; treating them as current is how a good branch gets abandoned.
 
 This workspace has no checkout at all. Work from the remote branch and the PR.
@@ -89,10 +93,10 @@ both SHAs, and stop.
 
 Keep it a **draft**. Do not close it. Post one comment (`gh pr comment <n>`)
 that names the blocking finding, quotes what `reverify.md` says would close it,
-gives the head SHA it applies to, and says how many repair rounds ran (`3 of 3`
+gives the head SHA it applies to, and says how many repair rounds ran (`2 of 2`
 means the bound was reached; another round is a person's decision, not this
 run's). The run then completes with unresolved findings, and a person continues
-it by resuming it: the resume re-runs round 3's fix against this comment, then
+it by resuming it: the resume re-runs round 2's fix against this comment, then
 its re-verification and this phase. A draft carrying a known defect with the
 blocker written on it is recoverable; a branch nobody can find is not.
 
@@ -104,6 +108,6 @@ Do not merge. Never push, never force push, never rebase.
 nothing under `artifacts/output/` FAILS - after the work is done, and the
 work is lost with the workspace.** Write the file before you finish.
 
-First line: `READY` or `DRAFT`. Then `Repair rounds: N of 3`, the PR URL, the
+First line: `READY` or `DRAFT`. Then `Repair rounds: N of 2`, the PR URL, the
 branch, the head SHA, and - if it stayed a draft - the blocking finding in one
 sentence (or `FINAL_REPORT_UNUSABLE` and why).

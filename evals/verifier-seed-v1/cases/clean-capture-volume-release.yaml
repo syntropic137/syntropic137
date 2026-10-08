@@ -7,9 +7,13 @@ polarity: clean
 source_pr: 1486
 commit: 36b0db8dba5ef5aec8e9cfc7c54393f6ae8b91fe
 merge_commit: f8b866d63db82cee7f6aee06777ed1aa3f9c7190
-clean_through: 6cb76a7f9aa881aff20ecaa8fefeeb690ce92673
+clean_through: 4108b74fc2f7f74b280aed08a49f6eb91c796a3f
 task: >
   The change under review lets the Docker socket proxy release retained agent
   capture volumes: the proxy policy now allows DELETE as well as GET on a
   capture volume, by its exact generated name only. Review the proxy policy
   in every compose file it is written in, and what it now allows.
+split: train
+# Under QUIET_DAYS old at every clean_through main can give it (main is
+# 4108b74fc, 2026-10-08), so it cannot meet the quiet-window rule yet.
+retired: v5 - under 30 days of quiet history; it scores in v4 as it ran

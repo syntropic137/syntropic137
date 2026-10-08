@@ -179,4 +179,4 @@ ENV SYN_BUILD_COMMIT=${SYN_BUILD_COMMIT}
 
 # Start the API server
 # Use shell form to respect environment variables
-CMD ["sh", "-c", "uvicorn syn_api.main:app --host $SYN_API_HOST --port $SYN_API_PORT"]
+CMD ["sh", "-c", "uvicorn syn_api.main:app --host $SYN_API_HOST --port $SYN_API_PORT --timeout-graceful-shutdown 30"]

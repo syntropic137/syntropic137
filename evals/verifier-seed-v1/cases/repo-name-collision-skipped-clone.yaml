@@ -1,0 +1,22 @@
+id: repo-name-collision-skipped-clone
+polarity: defect
+source_pr: 1225
+# Mined from the fix: the first fix commit's first parent, so the bug is
+# present and nothing of the fix is. Evidence at the pin:
+# clone line `[ -d {dest} ] || git clone {url} {dest}` (line 456) with dest
+# from the bare repo name and no collision check; `RepoNameCollisionError`
+# only after.
+commit: b5ef79107cbd44d4e2b9dd9a1cbee8c57ee1be80
+fix_commit: feb3b20b4fa66b48ce2c6d40522efdd7b273ffb8
+task: >
+  Review the setup-phase script builder that clones each of an execution's
+  repositories into /workspace/repos/<name>, with an idempotency guard so the
+  script is safe to re-run. Executions may list repositories from several
+  organisations.
+expected:
+  files:
+    - packages/syn-adapters/src/syn_adapters/workspace_backends/service/setup_phase_secrets.py
+  keywords:
+    - ["same name", "same bare name", "collision", "collide", "duplicate", "two repos", "two repositories", "different org", "different owner"]
+    - ["skip", "skipped", "silently", "never cloned", "not cloned", "wrong repo", "wrong repository", "idempotency", "guard"]
+split: holdout

@@ -778,7 +778,8 @@ async def _validate_execution_request(
     merged = _merge_inputs(workflow, effective_inputs, request.task)
     _check_missing_declarations(workflow, merged)
 
-    # Repo validation only when the workflow requires repos (ADR-058 #666).
+    # Template repo resolution only when the workflow requires repos (ADR-058 #666);
+    # explicit typed repos are used and access-checked either way (#955).
     # ADR-063: this block fully covers what ExecuteWorkflowHandler._resolve_repos
     # could raise downstream - RepositoryRef.parse runs above for typed repos,
     # _check_repo_url_placeholders catches unresolved {{var}} in workflow.repos,
@@ -789,6 +790,8 @@ async def _validate_execution_request(
         await _preflight_repos_or_reject(
             workflow, workflow_id, typed_repos, effective_inputs, merged, request.task
         )
+    else:
+        await _validate_all_repos_access([r.https_url for r in typed_repos])
 
     return workflow, effective_inputs, typed_repos
 
