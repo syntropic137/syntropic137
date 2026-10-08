@@ -9,8 +9,9 @@
 # TRAIN AND HOLDOUT. Every case carries `split`. Tune a verifier (prompt,
 # model, workflow) on `--split train` only; holdout cases report a result and
 # never choose one. The six earlier cases are train: verifiers were already
-# shaped against them. The v3 holdout is the seven new cases whose sha256(id)
-# sorts lowest - fixed once, recorded in each file, and never moved to train.
+# shaped against them. The v3 holdout is, within each batch of mined cases,
+# the ~30% whose sha256(id) sorts lowest (7 of the first 18, 2 of the next 6):
+# 9 of 30, fixed once, recorded in each file, and never moved to train.
 #
 # What it measures: given a workflow, a prompt and a model, does verification
 # find the defect? Change any of the three and the version goes up - runs of
@@ -27,7 +28,7 @@
 # v1: four cases, eval-verify-pinned-v1 (Opus 5.5) only, scored 4/4.
 # v2: two cases added (#1679, #1680) and the codex verifier. The Sonnet
 #     verifier was added later under v2: a new workflow, no existing table.
-# v3: eighteen cases mined from merged fix PRs (24 in all), and the
+# v3: twenty-four cases mined from merged fix PRs (30 in all), and the
 #     train/holdout split.
 #
 # EVERY VERSION KEEPS ITS SCORE. `history` records each earlier version whose

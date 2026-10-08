@@ -1,0 +1,20 @@
+id: shared-body-expired-by-oldest-capture
+source_pr: 1484
+# Mined from the fix: the first fix commit's first parent, so the bug is
+# present and nothing of the fix is. Evidence at the pin:
+# the age-expiry INSERT selects every catalog row with
+# `c.created_at<=now()-$2...` (line 67), per capture; the fix expires an
+# object only when its newest reference is past the age.
+commit: 26047abf798bcc638d5b4b2e20a7cf8c48bb0e5d
+fix_commit: 77b097d080d2ca0c670f66803ae02f651549794f
+task: >
+  Review session body retention: age-based expiry, the byte quota and owner
+  deletion of archived transcript bodies. Bodies are content-addressed, so
+  several captures can reference the same stored object.
+expected:
+  files:
+    - packages/syn-adapters/src/syn_adapters/session_inventory/body_retention.py
+  keywords:
+    - ["oldest", "any capture", "one capture", "old capture", "per capture", "each capture", "earliest", "newest", "recent capture", "still referenc", "other capture"]
+    - ["expire", "expiry", "tombstone", "delete", "erase", "evict", "retention"]
+split: train

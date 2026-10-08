@@ -1,0 +1,21 @@
+id: executions-enrichment-fetched-twice
+source_pr: 1087
+# Mined from the fix: the first fix commit's first parent, so the bug is
+# present and nothing of the fix is. Evidence at the pin:
+# `_load_execution_enrichment` loops `await
+# manager.execution_cost.get_execution_cost(eid)` per id (line 329) and the
+# list path calls it twice (lines 598, 642); after the fix it is one batched
+# lookup, called once.
+commit: 46b4c127ad4abf0c8ca0dad1cb5cc0c74e44b14d
+fix_commit: a505b15c59bb176f9ed42ce9d5757af3d99de3c7
+task: >
+  Review the execution list endpoint (GET /api/v1/executions) and how it
+  enriches each listed execution with cost data from the execution_cost
+  projection. The endpoint has been reported slow.
+expected:
+  files:
+    - apps/syn-api/src/syn_api/routes/executions/queries.py
+  keywords:
+    - ["twice", "two calls", "called again", "duplicate", "redundant", "double", "n+1", "n + 1", "per execution", "per id", "one at a time", "each id", "loop", "sequential", "round trip"]
+    - ["enrichment", "cost", "fetch", "lookup", "query", "load"]
+split: holdout
