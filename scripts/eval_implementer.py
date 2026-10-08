@@ -169,9 +169,27 @@ def _worktree(repo: Path, sha: str) -> Iterator[Path]:
         if added.returncode != 0:
             raise _EnvironmentFailure(f"git worktree add {sha}: {added.stderr.strip()}")
         try:
+            _check_out_submodules(repo, tree)
             yield tree
         finally:
             _git(repo, "worktree", "remove", "--force", str(tree))
+
+
+def _check_out_submodules(repo: Path, tree: Path) -> None:
+    """Check out each submodule at the commit the pin records, from `repo`'s own clone of it.
+
+    Never from the network: the environment has nothing to fetch, and a
+    submodule commit the local clone lacks is an ERROR, not something to go
+    and get.
+    """
+    paths = _git(tree, "config", "--file", ".gitmodules", "--get-regexp", r"submodule\..*\.path")
+    for line in paths.stdout.splitlines():
+        key, path = line.split(maxsplit=1)
+        name = key.removeprefix("submodule.").removesuffix(".path")
+        _git(tree, "config", f"submodule.{name}.url", str((repo / path).resolve()))
+    updated = _git(tree, "-c", "protocol.file.allow=always", "submodule", "update", "--init", "--quiet")
+    if updated.returncode != 0:
+        raise _EnvironmentFailure(f"submodules at the pin: {updated.stderr.strip()}")
 
 
 class _EnvironmentFailure(Exception):
@@ -182,6 +200,9 @@ def score_patch(case: ImplementerCase, patch: str, repo: Path) -> TestRun:
     """Apply `patch` at the case's pin, restore the hidden tests and run only them."""
     try:
         with _worktree(repo, case.commit) as tree:
+            # The environment is built from the pin, before the patch: a failure
+            # here is the environment's, and the agent's change cannot cause it.
+            _run(tree, ["uv", "sync", "--frozen", "--quiet"], "uv sync at the pin")
             if patch.strip():
                 applied = _git(tree, "apply", "--whitespace=nowarn", "-", stdin=patch)
                 if applied.returncode != 0:
@@ -195,25 +216,45 @@ def score_patch(case: ImplementerCase, patch: str, repo: Path) -> TestRun:
                 target = tree / path
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes(shown.stdout)
-            return _run_hidden_tests(tree, case.hidden_tests)
+            ran = _run(
+                tree,
+                ["uv", "run", "--frozen", "--no-sync", "pytest", "-q", "-p", "no:cacheprovider",
+                 "-n", "0", *case.hidden_tests],
+                None,
+            )
     except _EnvironmentFailure as exc:
         return TestRun(outcome="ERROR", detail=str(exc))
+    tail = "\n".join((ran.stderr + ran.stdout).strip().splitlines()[-15:])
+    return TestRun(outcome=_outcome_of(ran.returncode), detail=f"pytest exit {ran.returncode}\n{tail}")
 
 
-def _run_hidden_tests(tree: Path, tests: tuple[str, ...]) -> TestRun:
-    command = ["uv", "run", "--frozen", "pytest", "-q", "-p", "no:cacheprovider", "-n", "0", *tests]
+def _outcome_of(pytest_exit: int) -> Outcome:
+    """pytest's exit code as a verdict on the change.
+
+    0 every test passed. 1 a test failed. 2 a hidden test could not be
+    collected: with the environment already built at the pin, that is the
+    change failing to provide what the tests import, so it is the agent's.
+    3 (internal error), 4 (usage) and 5 (nothing collected) say nothing about
+    the change.
+    """
+    if pytest_exit == 0:
+        return "PASS"
+    if pytest_exit in (1, 2):
+        return "FAIL"
+    return "ERROR"
+
+
+def _run(tree: Path, command: list[str], step: str | None) -> subprocess.CompletedProcess[str]:
+    """Run `command` in `tree`. A timeout is always ERROR; so is a failure of a named `step`."""
     try:
         ran = subprocess.run(
             command, cwd=tree, capture_output=True, text=True, timeout=TEST_TIMEOUT_SECONDS
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
-        return TestRun(outcome="ERROR", detail=f"{' '.join(command)}: {exc}")
-    tail = "\n".join((ran.stdout + ran.stderr).strip().splitlines()[-15:])
-    # pytest: 0 all passed, 1 some failed. 2-5 (interrupted, internal error,
-    # usage error, nothing collected) and anything uv returns are the
-    # environment, never a verdict on the change.
-    outcome: Outcome = {0: "PASS", 1: "FAIL"}.get(ran.returncode, "ERROR")  # type: ignore[assignment]
-    return TestRun(outcome=outcome, detail=f"exit {ran.returncode}\n{tail}")
+        raise _EnvironmentFailure(f"{' '.join(command)}: {exc}") from exc
+    if step is not None and ran.returncode != 0:
+        raise _EnvironmentFailure(f"{step} exited {ran.returncode}: {ran.stderr.strip()[-2000:]}")
+    return ran
 
 
 def admit(case: ImplementerCase, repo: Path) -> list[str]:
