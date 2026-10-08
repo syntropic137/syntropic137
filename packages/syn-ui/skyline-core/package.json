@@ -11,9 +11,12 @@
     "./format": "./src/format/index.ts",
     "./geometry": "./src/geometry/index.ts",
     "./state": "./src/state/index.ts",
-    "./patterns": "./src/patterns/index.ts"
+    "./patterns": "./src/patterns/index.ts",
+    "./screens/*": "./src/screens/*/index.ts"
   },
-  "files": ["src"],
+  "files": [
+    "src"
+  ],
   "scripts": {
     "check": "tsc -p tsconfig.json",
     "build": "tsc -p tsconfig.json",

@@ -1,0 +1,177 @@
+name: Skyline UI
+
+# Skyline, the Svelte 5 rebuild of the dashboard (apps/syn-ui + packages/syn-ui/*).
+# Conventions: packages/syn-ui/CONVENTIONS.md. The frozen React app keeps its
+# own job in ci.yml; nothing here builds or tests it, except as the gateway
+# image's / that the `gateway` job asserts is unchanged.
+#
+# Every job has a just recipe that runs the same commands locally
+# (just/skyline-serve.just): skyline-ci, skyline-e2e, skyline-gateway-smoke.
+
+on:
+  pull_request:
+    branches: [main, release]
+    paths:
+      - 'packages/syn-ui/**'
+      - 'apps/syn-ui/**'
+      # Install inputs: a lockfile or workspace change can break the build
+      # without touching a Skyline file.
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      # Serving: the gateway image builds Skyline into /next.
+      - 'infra/docker/images/gateway/**'
+      - 'infra/scripts/check_gateway_next.py'
+      - 'just/skyline.just'
+      - 'just/skyline-serve.just'
+      - '.github/workflows/syn-ui.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'packages/syn-ui/**'
+      - 'apps/syn-ui/**'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - 'infra/docker/images/gateway/**'
+      - '.github/workflows/syn-ui.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# ISS-259: least-privilege default, as in ci.yml.
+permissions:
+  contents: read
+
+jobs:
+  #############################################################################
+  # QA - install, check, test, build, size budget (just skyline-ci)
+  #############################################################################
+
+  qa:
+    name: Skyline QA
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      # ISS-259: actions pinned to commit SHAs, same pins as ci.yml.
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: 'pnpm'
+
+      # --frozen-lockfile installs exactly what is locked; --ignore-scripts
+      # blocks postinstall hooks (ISS-259). The filter keeps the install to
+      # Skyline's graph, not the docs site or the React app.
+      - name: Install
+        run: pnpm install --frozen-lockfile --ignore-scripts --filter 'syn-ui...'
+
+      # tsc / svelte-check --fail-on-warnings, the CSS token gate, theme parity.
+      - name: Check
+        run: pnpm --filter syn-ui --filter './packages/syn-ui/*' --workspace-concurrency=1 run check
+
+      - name: Test
+        run: pnpm --filter syn-ui --filter './packages/syn-ui/*' run test
+
+      # `build` runs vite build and then scripts/size-budget.mjs, so a budget
+      # breach fails here. Built for /next/, the path production serves.
+      - name: Build
+        env:
+          SYN_UI_BASE: /next/
+        run: pnpm --filter syn-ui run build
+
+      - name: Size budget (100 KB gzip first load)
+        run: |
+          # Re-reads the manifest the Build step wrote (cheap) to publish the
+          # report; the default shell runs with -eo pipefail, so a breach fails.
+          {
+            echo '### Skyline size budget'
+            echo '```'
+            pnpm --silent --filter syn-ui run size
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+  #############################################################################
+  # E2E - the shared Playwright suite on fixtures data (just skyline-e2e)
+  #############################################################################
+
+  e2e:
+    name: Skyline E2E (fixtures)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: 'pnpm'
+
+      - name: Install just
+        uses: extractions/setup-just@dd310ad5a97d8e7b41793f8ef055398d51ad4de6 # v2
+
+      - name: Install
+        run: pnpm install --frozen-lockfile --ignore-scripts --filter 'syn-ui...'
+
+      # The app's own Playwright, so the browser build matches the runner.
+      # The recipe fails with a clear message if @playwright/test is missing
+      # from apps/syn-ui's devDependencies.
+      - name: Install Chromium
+        working-directory: apps/syn-ui
+        run: |
+          test -f node_modules/@playwright/test/cli.js || {
+            echo '::error::@playwright/test is not a devDependency of apps/syn-ui; add "@playwright/test": "1.59.0"'
+            exit 1
+          }
+          node node_modules/@playwright/test/cli.js install --with-deps chromium
+
+      # Builds a fixtures bundle at /next/, serves it with vite preview and runs
+      # e2e/ against it (E2E_DATA=fixtures). CI=true turns on retries and the
+      # HTML report in playwright.config.ts.
+      - name: E2E suite
+        run: just skyline-e2e
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: skyline-playwright-report
+          path: |
+            apps/syn-ui/e2e/.report
+            apps/syn-ui/e2e/.results
+          retention-days: 7
+          if-no-files-found: ignore
+
+  #############################################################################
+  # GATEWAY - production image serves React at / and Skyline at /next
+  # (just skyline-gateway-smoke)
+  #############################################################################
+
+  gateway:
+    name: Gateway serves /next
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+
+      - name: Install just
+        uses: extractions/setup-just@dd310ad5a97d8e7b41793f8ef055398d51ad4de6 # v2
+
+      # Builds infra/docker/images/gateway (both UI stages, the Skyline size
+      # budget included), runs it with no API behind it, and checks routing,
+      # caching and headers with infra/scripts/check_gateway_next.py.
+      - name: Build gateway and smoke-test routing
+        run: just skyline-gateway-smoke

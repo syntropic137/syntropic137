@@ -16,6 +16,9 @@ import 'just/release.just'
 # Skyline Svelte UI recipes (skyline-check, skyline-test, skyline-build, skyline-qa, skyline-dev).
 import 'just/skyline.just'
 
+# Skyline serving at /next, e2e and CI mirrors (skyline-ci, skyline-e2e, skyline-gateway-smoke, skyline-dev-next).
+import 'just/skyline-serve.just'
+
 # Docker Compose shorthand variables
 compose := "docker compose -f docker/docker-compose.yaml"
 compose_dev := compose + " -f docker/docker-compose.dev.yaml"

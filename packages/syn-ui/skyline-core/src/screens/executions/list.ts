@@ -1,0 +1,128 @@
+/**
+ * Executions list (Executions and PhoneExecutions boards): time windows,
+ * age groups, the hero's lede and the pagination summary.
+ */
+import { toTime } from '../../format/shared'
+
+export type TimeWindow = '15m' | '1h' | '24h' | '7d' | 'all'
+
+export const TIME_WINDOWS: readonly { value: TimeWindow; label: string }[] = [
+  { value: '15m', label: '15m' },
+  { value: '1h', label: '1h' },
+  { value: '24h', label: '24h' },
+  { value: '7d', label: '7d' },
+  { value: 'all', label: 'All' },
+]
+
+const WINDOW_MS: Record<Exclude<TimeWindow, 'all'>, number> = {
+  '15m': 15 * 60_000,
+  '1h': 3_600_000,
+  '24h': 86_400_000,
+  '7d': 7 * 86_400_000,
+}
+
+export function parseTimeWindow(value: string | null | undefined): TimeWindow {
+  return value && (value in WINDOW_MS || value === 'all') ? (value as TimeWindow) : 'all'
+}
+
+/** Inclusive lower bound for `started_after`, ISO 8601 with an offset (the API rejects naive bounds); undefined for "all". */
+export function timeWindowStart(window: TimeWindow, now: number): string | undefined {
+  if (window === 'all') return undefined
+  return new Date(now - WINDOW_MS[window]).toISOString()
+}
+
+/** Statuses the filter chips offer, in board order (desktop). */
+export const EXECUTION_FILTERS: readonly { value: string; label: string }[] = [
+  { value: 'all', label: 'All' },
+  { value: 'running', label: 'Running' },
+  { value: 'queued', label: 'Queued' },
+  { value: 'pending', label: 'Pending' },
+  { value: 'completed', label: 'Completed' },
+  { value: 'failed', label: 'Failed' },
+  { value: 'cancelled', label: 'Cancelled' },
+]
+
+const DAY = 86_400_000
+
+/** Group heading for a run's age: "Today", "Yesterday", "This week", "Last week", "6 weeks ago", "3 months ago". */
+export function ageGroupTitle(startedAt: string | number | null | undefined, now: number): string {
+  const t = toTime(startedAt ?? null)
+  if (t === null) return 'Undated'
+  const days = Math.floor((now - t) / DAY)
+  if (days < 1) return 'Today'
+  if (days < 2) return 'Yesterday'
+  if (days < 7) return 'This week'
+  const weeks = Math.floor(days / 7)
+  if (weeks < 2) return 'Last week'
+  if (weeks < 9) return `${weeks} weeks ago`
+  const months = Math.floor(days / 30)
+  if (months < 12) return `${months} months ago`
+  const years = Math.floor(days / 365)
+  return years < 2 ? 'Last year' : `${years} years ago`
+}
+
+export interface AgeGroup<T> {
+  title: string
+  /** "2 runs". */
+  count: string
+  rows: T[]
+}
+
+/** Consecutive rows with the same age heading, in the order given (newest first). */
+export function groupByAge<T>(rows: readonly T[], startedAt: (row: T) => string | null | undefined, now: number): AgeGroup<T>[] {
+  const groups: AgeGroup<T>[] = []
+  for (const row of rows) {
+    const title = ageGroupTitle(startedAt(row), now)
+    const last = groups[groups.length - 1]
+    if (last && last.title === title) last.rows.push(row)
+    else groups.push({ title, count: '', rows: [row] })
+  }
+  for (const g of groups) g.count = `${g.rows.length} ${g.rows.length === 1 ? 'run' : 'runs'}`
+  return groups
+}
+
+export interface OutcomeTotals {
+  total: number
+  completed: number
+  failed: number
+  cancelled: number
+  running: number
+  queued: number
+  pending: number
+}
+
+/** Fold the server's status counts into the hero's figures. Aliases (canceled, in_progress) count with their kind. */
+export function outcomeTotals(counts: Record<string, number> | null | undefined): OutcomeTotals {
+  const c = counts ?? {}
+  const get = (...keys: string[]) => keys.reduce((n, k) => n + (c[k] ?? 0), 0)
+  return {
+    total: Object.values(c).reduce((n, v) => n + v, 0),
+    completed: get('completed', 'succeeded'),
+    failed: get('failed', 'error'),
+    cancelled: get('cancelled', 'canceled', 'interrupted'),
+    running: get('running', 'in_progress'),
+    queued: get('queued'),
+    pending: get('pending', 'not_started'),
+  }
+}
+
+const runningText = (n: number) => (n === 0 ? 'none running' : `${n} running`)
+
+/** Desktop lede: "Every workflow run, newest first. 75 so far, none running." */
+export function executionsLede(t: Pick<OutcomeTotals, 'total' | 'running'>): string {
+  if (t.total === 0) return 'Every workflow run, newest first. None yet.'
+  return `Every workflow run, newest first. ${t.total} so far, ${runningText(t.running)}.`
+}
+
+/** Phone lede: "75 runs, none running now". */
+export function executionsLedeShort(t: Pick<OutcomeTotals, 'total' | 'running'>): string {
+  return `${t.total} ${t.total === 1 ? 'run' : 'runs'}, ${t.running === 0 ? 'none running now' : `${t.running} running now`}`
+}
+
+/** "Showing 1–19 of 75 executions", "Showing 51–75 of 75 failed executions". */
+export function listSummary(page: number, pageSize: number, shown: number, total: number, status = 'all'): string {
+  const noun = `${status === 'all' ? '' : `${status} `}${total === 1 ? 'execution' : 'executions'}`
+  if (shown === 0) return `No ${noun}`
+  const from = (Math.max(1, page) - 1) * pageSize + 1
+  return `Showing ${from}–${from + shown - 1} of ${total} ${noun}`
+}
