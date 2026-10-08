@@ -11,7 +11,6 @@
 import { formatCostPrecise } from '../../format/cost'
 import { formatDurationPrecise } from '../../format/duration'
 import { UNKNOWN, toNumber } from '../../format/shared'
-import { formatClock } from '../../format/time'
 import { shortId } from '../../format/number'
 import type { TokenBreakdown } from '../../format/tokens'
 import type { Operation, OperationStatus } from '../../patterns/operations'
@@ -94,7 +93,7 @@ export function sessionOperations(ops: readonly SessionOperationInput[], options
   const sorted = [...ops].sort((a, b) => (Date.parse(a.timestamp ?? '') || 0) - (Date.parse(b.timestamp ?? '') || 0))
   const rows: SessionOperation[] = []
   const openByUse = new Map<string, SessionOperation>()
-  const clock = (t: string | null | undefined) => (t ? formatClock(t, options) : UNKNOWN)
+  const clock = (t: string | null | undefined) => operationClock(t, options)
 
   for (const op of sorted) {
     const type = op.operation_type
@@ -163,6 +162,14 @@ export function sessionOperations(ops: readonly SessionOperationInput[], options
     }
   }
   return rows
+}
+
+/** "1:32:22 PM" (Session board); the phone drops the meridiem with `compact`. */
+export function operationClock(value: string | null | undefined, options: { timeZone?: string; compact?: boolean } = {}): string {
+  const t = value ? Date.parse(value) : NaN
+  if (!Number.isFinite(t)) return UNKNOWN
+  const text = new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true, timeZone: options.timeZone }).format(t)
+  return options.compact ? text.replace(/\s?[AP]M$/, '') : text
 }
 
 function firstLine(text: string): string {
