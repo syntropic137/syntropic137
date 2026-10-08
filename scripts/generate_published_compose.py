@@ -45,6 +45,12 @@ SERVICE_IMAGES: dict[str, str] = {
     "token-injector": "ghcr.io/syntropic137/token-injector",
 }
 
+# Services that need files from a repo checkout the published install does
+# not have. db-backup bind-mounts docker/db-backup/syn-db-backup.sh; a missing
+# bind source becomes a directory and the service would crash-loop.
+# TODO(#1791): ship the backup script with the published install.
+REPO_ONLY_SERVICES = frozenset({"db-backup"})
+
 # Service order in the output (readability — matches current published file)
 SERVICE_ORDER = [
     "timescaledb",
@@ -403,7 +409,7 @@ def generate() -> dict:
     selfhost_svcs = selfhost.get("services", {})
 
     # Merge services (base + selfhost overlay)
-    all_names = set(base_svcs) | set(selfhost_svcs)
+    all_names = (set(base_svcs) | set(selfhost_svcs)) - REPO_ONLY_SERVICES
     merged_svcs: dict = {}
     for name in all_names:
         b = base_svcs.get(name, {})

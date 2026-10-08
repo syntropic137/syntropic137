@@ -401,13 +401,76 @@ See `docs/development/1password-secrets.md` for full 1Password documentation.
 
 ### Database Backup
 
-```bash
-# Manual backup
-docker exec ${COMPOSE_PROJECT_NAME:-syntropic137}-timescaledb pg_dump -U ${POSTGRES_USER:-syn} ${POSTGRES_DB:-syn} > backup-$(date +%Y%m%d).sql
+The whole `syn` database (event store tables `events` / `aggregates` /
+`idempotency`, every projection and checkpoint, and the `agent_events`
+hypertable) is backed up with one command:
 
-# Restore
-cat backup-20250101.sql | docker exec -i ${COMPOSE_PROJECT_NAME:-syntropic137}-timescaledb psql -U ${POSTGRES_USER:-syn} ${POSTGRES_DB:-syn}
+```bash
+just selfhost-backup
+# backup ok: /var/backups/syn/syn-20261008T030000Z.dump (48M, 61 tables)
 ```
+
+It writes a compressed `pg_dump --format=custom` archive into `BACKUP_DIR`
+(default `/var/backups/syn`, mode `0600`), and reports `ok` only after
+`pg_restore --list` has read the archive back and found table data in it. A
+dump that fails part way leaves no file behind. The dump runs in the
+`db-backup` service, which uses the same TimescaleDB image as the database, so
+the client tools always match the server. No host PostgreSQL tools are needed.
+
+**Scheduled backups** run in the same `db-backup` service, which `just
+selfhost-up` starts. Three settings in `infra/.env` control it:
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `BACKUP_SCHEDULE` | `0 3 * * *` | Five-field cron, evaluated in **UTC**. Numbers, `*`, lists, ranges and `/step` only; names such as `MON` and `@daily` are rejected at startup |
+| `BACKUP_RETENTION_DAYS` | `7` | After each successful backup, delete `syn-*.dump` files older than this. A failed backup deletes nothing |
+| `BACKUP_DIR` | `/var/backups/syn` | Host directory the archives are written to |
+
+Check it with `just selfhost-logs db-backup`. A failed run logs `scheduled
+backup FAILED` and keeps the previous backups. Copy `BACKUP_DIR` off the host
+as well: a backup on the same disk as the database does not survive the disk.
+
+### Restore
+
+```bash
+just selfhost-restore /var/backups/syn/syn-20261008T030000Z.dump
+```
+
+In order, it:
+
+1. Runs the in-flight execution check (`predeploy_check.py`), as `selfhost-update` does.
+2. **Stops the writers: `api`, `collector`, `event-store` and `gateway`.** This
+   is the same set the [TimescaleDB 2.29 upgrade](../../docs/deployment/timescaledb-2.29-upgrade.md)
+   stops: they reconnect and write the moment Postgres is reachable.
+   `timescaledb`, `redis` and `minio` keep running.
+3. Refuses, changing nothing, if any table in the current database holds a
+   row. It lists those tables. Re-run with `--force` to discard that data;
+   `--force` also overrides the in-flight execution check.
+4. Drops and recreates the `syn` database, then restores between
+   `timescaledb_pre_restore()` and `timescaledb_post_restore()`. Without those
+   calls the hypertables come back broken.
+5. Starts the writers again. If the restore itself failed, they are left
+   stopped so you can inspect the database first. The command prints how to
+   start them.
+
+A stack that has just been seeded (`just selfhost-seed`) already holds rows,
+so restoring onto it needs `--force`.
+
+### When a backup is required before an upgrade
+
+The scheduled backup gives you a daily baseline. Take a fresh one with `just
+selfhost-backup` immediately before an upgrade that **changes stored data in a
+way a restart cannot undo**:
+
+| Required | Why |
+|---|---|
+| An event store or event-sourcing-platform version bump (`git diff HEAD..origin/main -- lib/event-sourcing-platform` is non-empty) | It can migrate the event store tables, and events are the only copy of domain state |
+| A PostgreSQL or TimescaleDB image change | The extension upgrade alters the catalog in place |
+| Running any script that writes events (backfills, data migrations, seed scripts) | Events are append-only: a wrong event cannot be deleted, only compensated |
+
+**Not needed** for a normal application upgrade (`just selfhost-update` that
+changes only `apps/` or `packages/`): the event store is append-only and the
+application never rewrites it, and projections are rebuilt from the events.
 
 ### Configuration Backup
 
