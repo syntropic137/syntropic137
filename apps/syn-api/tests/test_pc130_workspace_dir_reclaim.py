@@ -12,7 +12,7 @@ import asyncio
 import logging
 import subprocess
 import time
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -23,7 +23,11 @@ from syn_adapters.workspace_backends.stale_dirs import (
     scan_workspace_dirs,
 )
 from syn_api.services.workspace_dir_reclaim import WorkspaceDirReclaimer, reclaim_on_a_clock
-from syn_domain.contexts.orchestration import StaleWorkspaceDir
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from syn_domain.contexts.orchestration import StaleWorkspaceDir
 
 pytestmark = pytest.mark.unit
 
@@ -60,7 +64,7 @@ class _Archive:
         self.saved: list[tuple[str | None, bytes]] = []
         self._fail = fail
 
-    async def save(self, stale: StaleWorkspaceDir, repo: str, patch: bytes) -> str:  # noqa: ARG002
+    async def save(self, stale: StaleWorkspaceDir, repo: str, patch: bytes) -> str:
         if self._fail:
             raise OSError("minio down")
         self.saved.append((stale.execution_id, patch))
@@ -127,9 +131,7 @@ async def test_unpushed_commit_keeps_the_dir(base: Path, tmp_path: Path) -> None
     assert archive.saved == []
 
 
-async def test_unpushed_commit_on_a_detached_head_keeps_the_dir(
-    base: Path, tmp_path: Path
-) -> None:
+async def test_unpushed_commit_on_a_detached_head_keeps_the_dir(base: Path, tmp_path: Path) -> None:
     ws = _workspace(base, "ws-detached", tmp_path)
     app = ws / "repos" / "app"
     _git(app, "checkout", "--detach")
