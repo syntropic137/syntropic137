@@ -8,7 +8,7 @@
  * reached by any interaction.
  *
  * Every assertion below therefore rests on the fixture being BIGGER THAN ONE
- * PAGE (120 rows, three pages). At 50 rows or fewer none of them can fail:
+ * PAGE (240 rows, three pages). At 50 rows or fewer none of them can fail:
  * `total` and `rows.length` agree, and page 2 is empty whether or not paging
  * works. See `src/test/listFixtures.ts`.
  *
@@ -25,7 +25,7 @@ import { MemoryRouter } from 'react-router-dom'
 
 import { serveListEndpoint } from '../../test/fakeListServer'
 import { DAY_MS, EXECUTIONS, matchesExecutionSearch, tally, within } from '../../test/listFixtures'
-import { LIST_PAGE_SIZE } from '../useServerList'
+import { RUN_LIST_PAGE_SIZE as PAGE_SIZE } from '../useServerList'
 import { useExecutionList } from '../useExecutionList'
 
 vi.mock('../useActivityStream', () => ({
@@ -52,11 +52,11 @@ function wrapperAt(url: string) {
 
 /** The ids the server should have put on page `page` of the whole collection. */
 function idsOnPage(page: number): string[] {
-  const offset = (page - 1) * LIST_PAGE_SIZE
-  return EXECUTIONS.slice(offset, offset + LIST_PAGE_SIZE).map((e) => e.workflow_execution_id)
+  const offset = (page - 1) * PAGE_SIZE
+  return EXECUTIONS.slice(offset, offset + PAGE_SIZE).map((e) => e.workflow_execution_id)
 }
 
-/** Render over the unbounded window, where the collection is all 120 rows. */
+/** Render over the unbounded window, where the collection is all 240 rows. */
 function renderList(url = '/executions?timeWindow=all') {
   const rendered = renderHook(() => useExecutionList(), { wrapper: wrapperAt(url) })
   const ids = () => rendered.result.current.executions.map((e) => e.workflow_execution_id)
@@ -67,10 +67,10 @@ describe('useExecutionList', () => {
   it('is the fixture the regression needs: more than one page, in both windows', () => {
     // Asserted rather than assumed. Every test in this file is vacuous if the
     // collection ever shrinks to a page, and it would still be green.
-    expect(TOTAL).toBeGreaterThan(LIST_PAGE_SIZE * 2)
-    expect(IN_7D).toBeGreaterThan(LIST_PAGE_SIZE)
+    expect(TOTAL).toBeGreaterThan(PAGE_SIZE * 2)
+    expect(IN_7D).toBeGreaterThan(PAGE_SIZE)
     expect(TOTAL).toBeGreaterThan(IN_7D)
-    expect(COMPLETED).toBeGreaterThan(LIST_PAGE_SIZE)
+    expect(COMPLETED).toBeGreaterThan(PAGE_SIZE)
   })
 
   it('reports the collection total, not the number of rows on the page', async () => {
@@ -79,10 +79,10 @@ describe('useExecutionList', () => {
     await waitFor(() => expect(result.current.loading).toBe(false))
 
     expect(result.current.total).toBe(TOTAL)
-    expect(result.current.executions).toHaveLength(LIST_PAGE_SIZE)
+    expect(result.current.executions).toHaveLength(PAGE_SIZE)
     // The two numbers must not be the same one. This is #1159 exactly.
     expect(result.current.total).not.toBe(result.current.executions.length)
-    expect(result.current.pageSize).toBe(LIST_PAGE_SIZE)
+    expect(result.current.pageSize).toBe(PAGE_SIZE)
     expect(result.current.totalPages).toBe(3)
     expect(ids()).toEqual(idsOnPage(1))
   })
@@ -101,12 +101,12 @@ describe('useExecutionList', () => {
       seenRowCounts.push(result.current.executions.length)
     }
 
-    // `page_size` is not a parameter this hook exposes - `useListQuery`
-    // hardcodes `LIST_PAGE_SIZE` - so the page size cannot be varied from
+    // `page_size` is not a parameter this hook exposes - the surface fixes it
+    // at `RUN_LIST_PAGE_SIZE` - so the page size cannot be varied from
     // here. Varying the PAGE is the same property from the same fixture: a
-    // total computed from the rows in hand would have read 50, 50, 20.
+    // total computed from the rows in hand would have read 100, 100, 40.
     expect(seenTotals).toEqual([TOTAL, TOTAL, TOTAL])
-    expect(seenRowCounts).toEqual([LIST_PAGE_SIZE, LIST_PAGE_SIZE, TOTAL - 2 * LIST_PAGE_SIZE])
+    expect(seenRowCounts).toEqual([PAGE_SIZE, PAGE_SIZE, TOTAL - 2 * PAGE_SIZE])
   })
 
   it('page 2 holds different executions, and is not empty', async () => {
@@ -118,7 +118,7 @@ describe('useExecutionList', () => {
     await waitFor(() => expect(server.lastRequest.params.get('page')).toBe('2'))
     await waitFor(() => expect(ids()).toEqual(idsOnPage(2)))
 
-    expect(ids()).toHaveLength(LIST_PAGE_SIZE)
+    expect(ids()).toHaveLength(PAGE_SIZE)
     expect(ids()).not.toEqual(firstPage)
     expect(firstPage.some((id) => ids().includes(id))).toBe(false)
   })
@@ -151,7 +151,7 @@ describe('useExecutionList', () => {
 
     // Deliberately NOT an assertion that the rows changed. Both windows hold
     // more than a page, and widening a lower bound on a newest-first list
-    // cannot change the newest 50 - so "more rows are visible now" is the
+    // cannot change the newest page - so "more rows are visible now" is the
     // intuitive criterion and it would fail correct software.
     expect(ids()).toEqual(firstPageUnder7d)
     // What widening buys is reach, and it is on the wire: the bound is gone.
@@ -173,10 +173,10 @@ describe('useExecutionList', () => {
     const { result } = renderList()
     await waitFor(() => expect(result.current.loading).toBe(false))
 
-    // Counted over 120 rows while 50 are in hand: a client-side tally of the
+    // Counted over 240 rows while 100 are in hand: a client-side tally of the
     // page could not produce this number at all.
     expect(result.current.statusCounts).toEqual(STATUS_COUNTS)
-    expect(result.current.statusCounts.completed).toBeGreaterThan(LIST_PAGE_SIZE)
+    expect(result.current.statusCounts.completed).toBeGreaterThan(PAGE_SIZE)
   })
 
   it('keeps reporting every status once one of them is selected', async () => {
@@ -198,11 +198,12 @@ describe('useExecutionList', () => {
     const { result } = renderList()
     await waitFor(() => expect(result.current.loading).toBe(false))
 
-    act(() => result.current.setSearchQuery('Run 119'))
+    const oldest = EXECUTIONS[TOTAL - 1].workflow_name
+    act(() => result.current.setSearchQuery(oldest))
 
-    // Row 119 is the oldest execution, three pages from the one in hand, so it
-    // could only ever be found by asking the server for it.
-    await waitFor(() => expect(server.lastRequest.params.get('q')).toBe('Run 119'))
+    // The oldest execution, three pages from the one in hand, so it could only
+    // ever be found by asking the server for it.
+    await waitFor(() => expect(server.lastRequest.params.get('q')).toBe(oldest))
     await waitFor(() => expect(result.current.total).toBe(1))
     expect(result.current.executions.map((e) => e.workflow_execution_id)).toEqual([
       EXECUTIONS[TOTAL - 1].workflow_execution_id,

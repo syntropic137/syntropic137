@@ -31,11 +31,11 @@
 import { useCallback, useEffect, useRef } from 'react'
 import type { ListPage, ListQuery } from '../api/listQuery'
 import type { TimeWindow } from '../types'
-import { LIST_PAGE_SIZE, useListQuery } from './useListQuery'
+import { LIST_PAGE_SIZE, RUN_LIST_PAGE_SIZE, useListQuery } from './useListQuery'
 import { useLatestPage } from './useLatestPage'
 import { listPollIntervalMs, useLiveRefresh } from './useLiveRefresh'
 
-export { LIST_PAGE_SIZE }
+export { LIST_PAGE_SIZE, RUN_LIST_PAGE_SIZE }
 
 export interface UseServerListOptions<TRow> {
   /**
@@ -49,6 +49,8 @@ export interface UseServerListOptions<TRow> {
    * and returns to page 1, exactly as a shared filter does.
    */
   scopeKey?: string
+  /** Rows per page; `LIST_PAGE_SIZE` unless the surface says otherwise. */
+  pageSize?: number
   /** Event types that mean "this list changed". */
   liveEvents: ReadonlySet<string>
   /** False while a row's Lane 2 numbers are still moving, which keeps polling. */
@@ -94,10 +96,11 @@ export interface UseServerListResult<TRow> {
 export function useServerList<TRow>({
   fetchPage,
   scopeKey = '',
+  pageSize = LIST_PAGE_SIZE,
   liveEvents,
   isTerminal,
 }: UseServerListOptions<TRow>): UseServerListResult<TRow> {
-  const { query, ...filters } = useListQuery(scopeKey)
+  const { query, ...filters } = useListQuery(scopeKey, pageSize)
 
   // The stream is subscribed before the page is fetched, because whether it is
   // connected decides how often the page may poll. SSE frames reach the refetch

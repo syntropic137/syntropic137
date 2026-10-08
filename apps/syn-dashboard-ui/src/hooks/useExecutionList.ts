@@ -20,7 +20,7 @@ import {
   type SortConfig,
   type SortState,
 } from './useSortUrlState'
-import { useServerList, type UseServerListResult } from './useServerList'
+import { RUN_LIST_PAGE_SIZE, useServerList, type UseServerListResult } from './useServerList'
 import { isTerminalExecutionStatus } from '../utils/terminalStatus'
 
 const EXECUTION_LIVE_EVENTS: ReadonlySet<string> = new Set([
@@ -127,12 +127,13 @@ export function useExecutionList(): UseExecutionListResult {
   const { rows, isDefaultFilters, ...list } = useServerList({
     fetchPage,
     scopeKey: evalFilter,
+    pageSize: RUN_LIST_PAGE_SIZE,
     liveEvents: EXECUTION_LIVE_EVENTS,
     isTerminal: isTerminalExecution,
   })
 
   // Reorders the page the server sent; the endpoint offers no sort parameter,
-  // so a non-default sort orders these 50 rows and not the collection.
+  // so a non-default sort orders this page's rows and not the collection.
   const executions = useMemo(
     () => sortExecutions(rows, sort.key, sort.dir),
     [rows, sort.key, sort.dir],

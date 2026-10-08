@@ -29,6 +29,13 @@ export const SEARCH_DEBOUNCE_MS = 300
 
 export const LIST_PAGE_SIZE = 50
 
+/**
+ * Executions and Sessions: the two lists an operator scans for a run rather
+ * than pages through, so they hold twice the rows (feedback 60d9f990). The
+ * API caps a page at 200; the cost of 100 over 50 is measured in the PR.
+ */
+export const RUN_LIST_PAGE_SIZE = 100
+
 export interface ListQueryState {
   /**
    * The query to issue now. Referentially stable until something that defines
@@ -95,8 +102,10 @@ export function useCollectionPage(collectionKey: string): CollectionPage {
  * @param scopeKey Identity of any narrowing the caller applies that this hook
  *   cannot see, such as Sessions' `workflow_id`. Changing it selects a
  *   different collection, exactly as a shared filter does.
+ * @param pageSize Rows per page. Fixed per surface, so it is not part of the
+ *   collection's identity.
  */
-export function useListQuery(scopeKey: string): ListQueryState {
+export function useListQuery(scopeKey: string, pageSize: number = LIST_PAGE_SIZE): ListQueryState {
   const { selectedStatuses, timeWindow, toggleStatus, setTimeWindow, clearStatuses } =
     useFilterUrlState()
   const resetView = useResetView()
@@ -125,12 +134,12 @@ export function useListQuery(scopeKey: string): ListQueryState {
   const query = useMemo<ListQuery>(
     () => ({
       page,
-      page_size: LIST_PAGE_SIZE,
+      page_size: pageSize,
       statuses,
       started_after: startedAfter,
       q: search || undefined,
     }),
-    [page, statuses, startedAfter, search],
+    [page, pageSize, statuses, startedAfter, search],
   )
 
   return {
