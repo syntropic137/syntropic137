@@ -385,20 +385,12 @@ def _split_summary(
 
     The summary is the authoritative TOTAL (canonical_usage), so every
     category it reports is conserved exactly; the turn rows only say how it
-    divides, category by category. A category the turns never reported
-    divides like the turns' tokens overall. Cost follows the same rule: a
+    divides, category by category (``_split_tokens``). Cost follows the same rule: a
     vendor-reported total is conserved and divided in proportion to what each
     share costs at its own model's rate, and without one each share is priced
     at its model's rate - what ``price_canonical_row`` does for a whole row.
     """
-    turn_totals = [sum(int(t[c]) for c in _CATEGORIES) for t in turns]
-    split = {
-        c: _apportion(
-            int(summary[c]),
-            [int(t[c]) for t in turns] if any(int(t[c]) for t in turns) else turn_totals,
-        )
-        for c in _CATEGORIES
-    }
+    split = _split_tokens(summary, turns)
     priced = [
         price_canonical_row(
             {**dict(t.items()), **{c: split[c][i] for c in _CATEGORIES}, "vendor_cost_usd": None},
@@ -410,14 +402,7 @@ def _split_summary(
     unpriced = [p.unpriced_tokens for p in priced]
     vendor = price_canonical_row(dict(summary.items()), calculator)
     if vendor.unpriced_tokens == 0 and summary["vendor_cost_usd"] is not None:
-        weights = (
-            costs if not any(unpriced) and sum(costs) > 0 else [Decimal(t) for t in turn_totals]
-        )
-        if not sum(weights):
-            weights = [Decimal(1)] * len(turns)
-        whole = sum(weights, Decimal(0))
-        costs = [vendor.cost * w / whole for w in weights[:-1]]
-        costs.append(vendor.cost - sum(costs, Decimal(0)))
+        costs = _divide_vendor_cost(vendor.cost, costs, unpriced, _turn_totals(turns))
         unpriced = [0] * len(turns)
     return [
         _ModelShare(
@@ -431,6 +416,42 @@ def _split_summary(
         )
         for i, t in enumerate(turns)
     ]
+
+
+def _turn_totals(turns: Sequence[asyncpg.Record]) -> list[int]:
+    return [sum(int(t[c]) for c in _CATEGORIES) for t in turns]
+
+
+def _split_tokens(summary: asyncpg.Record, turns: Sequence[asyncpg.Record]) -> dict[str, list[int]]:
+    """Each category of the summary, divided as the turns divided it.
+
+    A category no turn reported divides like the turns' tokens overall.
+    """
+    split = {}
+    for c in _CATEGORIES:
+        weights = [int(t[c]) for t in turns]
+        split[c] = _apportion(int(summary[c]), weights if any(weights) else _turn_totals(turns))
+    return split
+
+
+def _divide_vendor_cost(
+    total: Decimal, rate_costs: list[Decimal], unpriced: list[int], turn_totals: list[int]
+) -> list[Decimal]:
+    """The vendor's total, conserved, divided by what each share costs at its rate.
+
+    Falls back to token counts when any share could not be rated.
+    """
+    weights = (
+        rate_costs
+        if not any(unpriced) and sum(rate_costs) > 0
+        else [Decimal(t) for t in turn_totals]
+    )
+    if not sum(weights):
+        weights = [Decimal(1)] * len(weights)
+    whole = sum(weights, Decimal(0))
+    costs = [total * w / whole for w in weights[:-1]]
+    costs.append(total - sum(costs, Decimal(0)))
+    return costs
 
 
 def _parse_usage(raw: str | None) -> _WorkspaceUsageRow | None:
