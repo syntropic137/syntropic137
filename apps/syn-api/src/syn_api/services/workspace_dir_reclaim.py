@@ -40,6 +40,7 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration import (
         HostWorkspaceGit,
         PatchArchive,
+        StaleWorkspaceDir,
         WorkspaceDirRemover,
     )
 
@@ -75,12 +76,6 @@ class WorkspaceDirReclaimer:
 
     async def run_once(self) -> ReclaimPass:
         """Guard and reclaim every stale directory. Never raises."""
-        from syn_domain.contexts.orchestration import (
-            StaleWorkspaceDir,
-            guard_stale_workspace_dir,
-            remove_reclaimed_dir,
-        )
-
         try:
             containers = {c.workspace_id: c for c in await self.list_containers()}
             running = await self.running_execution_ids()
@@ -94,29 +89,14 @@ class WorkspaceDirReclaimer:
         kept: list[str] = []
         reclaimed_bytes = 0
         for listing in listings:
-            container = containers.get(listing.workspace_id)
-            if container is not None and container.running:
+            stale = self._stale(listing, containers, running, now)
+            if stale is None:
                 continue
-            execution_id = container.execution_id if container is not None else None
-            if execution_id is not None and execution_id in running:
-                continue
-            if now - listing.last_modified < self.grace_seconds:
-                continue
-            stale = StaleWorkspaceDir(
-                host_dir=listing.host_dir,
-                workspace_id=listing.workspace_id,
-                execution_id=execution_id,
-                size_bytes=listing.size_bytes,
-            )
-            reclaimable = await guard_stale_workspace_dir(stale, self.git, self.archive)
-            removed = reclaimable is not None and await asyncio.to_thread(
-                remove_reclaimed_dir, reclaimable, self.remover
-            )
-            if removed:
-                reclaimed.append(listing.workspace_id)
-                reclaimed_bytes += listing.size_bytes
+            if await self._reclaim(stale):
+                reclaimed.append(stale.workspace_id)
+                reclaimed_bytes += stale.size_bytes
             else:
-                kept.append(listing.workspace_id)
+                kept.append(stale.workspace_id)
         if reclaimed or kept:
             logger.warning(
                 "Workspace reclaim pass: reclaimed %d directory(ies), %d bytes; kept %d: %s",
@@ -128,6 +108,43 @@ class WorkspaceDirReclaimer:
         return ReclaimPass(
             reclaimed=tuple(reclaimed), reclaimed_bytes=reclaimed_bytes, kept=tuple(kept)
         )
+
+    def _stale(
+        self,
+        listing: WorkspaceDirListing,
+        containers: dict[str, WorkspaceContainer],
+        running: set[str],
+        now: float,
+    ) -> StaleWorkspaceDir | None:
+        """The listing as a reclaim candidate, or None while anything may still own it."""
+        from syn_domain.contexts.orchestration import StaleWorkspaceDir
+
+        container = containers.get(listing.workspace_id)
+        if container is not None and container.running:
+            return None
+        execution_id = container.execution_id if container is not None else None
+        if execution_id is not None and execution_id in running:
+            return None
+        if now - listing.last_modified < self.grace_seconds:
+            return None
+        return StaleWorkspaceDir(
+            host_dir=listing.host_dir,
+            workspace_id=listing.workspace_id,
+            execution_id=execution_id,
+            size_bytes=listing.size_bytes,
+        )
+
+    async def _reclaim(self, stale: StaleWorkspaceDir) -> bool:
+        """Guard, then delete. Whether the directory is gone."""
+        from syn_domain.contexts.orchestration import (
+            guard_stale_workspace_dir,
+            remove_reclaimed_dir,
+        )
+
+        reclaimable = await guard_stale_workspace_dir(stale, self.git, self.archive)
+        if reclaimable is None:
+            return False
+        return await asyncio.to_thread(remove_reclaimed_dir, reclaimable, self.remover)
 
 
 async def _running_execution_ids() -> set[str]:
