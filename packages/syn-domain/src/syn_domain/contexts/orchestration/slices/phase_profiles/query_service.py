@@ -32,14 +32,14 @@ if TYPE_CHECKING:
 
     import asyncpg
 
-    from syn_domain.contexts.agent_sessions.canonical_usage import PricingResolver
+    from syn_domain.contexts.agent_sessions import PricingResolver
 
 from syn_domain.contexts.agent_sessions import (
+    CANONICAL_MODEL_COLUMNS,
     price_canonical_row,
     recorded_model_from_row,
     rollup_usage_sources,
 )
-from syn_domain.contexts.agent_sessions.canonical_usage import CANONICAL_MODEL_COLUMNS
 from syn_domain.storable_text import pg_safe
 from syn_shared.events import WORKSPACE_RESOURCE_USAGE
 
@@ -57,45 +57,52 @@ phase_sessions AS (
     WHERE execution_id = ANY($1::text[])
       AND phase_id IS NOT NULL
       AND time >= $2
+      AND time < $3
 )"""
 
-# Canonical usage per (execution, phase, model). Grouped on the model columns
-# canonical usage carries per row, so a phase that fell back to another model
-# mid-phase contributes its tokens to the model that consumed them - not to
-# the workflow's default. Grouped on cost-nullness for the reason every
-# canonical read is (#788).
+_MODEL_COLUMNS = [c.strip() for c in CANONICAL_MODEL_COLUMNS.split(",")]
+
+# Canonical usage per session, tagged by which side of the decision won, plus
+# the per-model turn rows of every session whose SUMMARY won. The canonical
+# decision answers "how much did this session use" and is applied unchanged;
+# the turn rows answer the different question "on which model", which the
+# summary - one row, one model - cannot. A phase that fell back mid-phase is
+# split in Python (``_split_summary``), never double counted: the turn rows
+# only ever apportion the summary's totals, they are not added to them.
 _TOKEN_QUERY = f"""
 WITH {_PHASE_SESSIONS_CTE},
-{rollup_usage_sources("execution_id = ANY($1::text[])")}
-SELECT
-    ps.execution_id,
-    ps.phase_id,
-    {", ".join(f"cu.{c.strip()}" for c in CANONICAL_MODEL_COLUMNS.split(","))},
-    SUM(cu.vendor_cost_usd) AS vendor_cost_usd,
-    SUM(cu.input_tokens) AS input_tokens,
-    SUM(cu.output_tokens) AS output_tokens,
-    SUM(cu.cache_creation_tokens) AS cache_creation_tokens,
-    SUM(cu.cache_read_tokens) AS cache_read_tokens
-FROM canonical_usage cu
-JOIN phase_sessions ps ON ps.session_id = cu.session_id
-GROUP BY ps.execution_id, ps.phase_id,
-    {", ".join(f"cu.{c.strip()}" for c in CANONICAL_MODEL_COLUMNS.split(","))},
-    (cu.vendor_cost_usd IS NULL)
+{rollup_usage_sources("execution_id = ANY($1::text[])")},
+tagged AS (
+    SELECT
+        CASE WHEN cu.session_id IN (SELECT session_id FROM priced_summary)
+            THEN 'summary' ELSE 'turns' END AS role,
+        cu.*
+    FROM canonical_usage cu
+    UNION ALL
+    SELECT 'split' AS role, tu.*
+    FROM turn_usage tu
+    WHERE tu.session_id IN (SELECT session_id FROM priced_summary)
+)
+SELECT ps.execution_id, ps.phase_id, t.*
+FROM tagged t
+JOIN phase_sessions ps ON ps.session_id = t.session_id
 """
 
 # Every phase seen in the window, with its usage row when one was written.
-# The phase's wall time is the span of its own telemetry: WorkspaceUsage
-# carries no duration, and the domain's phase timings are Lane 1.
+# The CPU rate's denominator is the workspace lifetime recorded IN that row:
+# the counters are cumulative over the workspace's whole life, so any span
+# derived from telemetry or from the window would divide a lifetime of CPU by
+# part of it. A row that carries no lifetime has no rate.
 _RESOURCE_QUERY = """
 SELECT
     execution_id,
     phase_id,
-    EXTRACT(EPOCH FROM MAX(time) - MIN(time))::float8 AS wall_seconds,
-    (ARRAY_AGG(data ORDER BY time DESC) FILTER (WHERE event_type = $3))[1] AS usage
+    (ARRAY_AGG(data ORDER BY time DESC) FILTER (WHERE event_type = $4))[1] AS usage
 FROM agent_events
 WHERE execution_id = ANY($1::text[])
   AND phase_id IS NOT NULL
   AND time >= $2
+  AND time < $3
 GROUP BY execution_id, phase_id
 """
 
@@ -166,6 +173,7 @@ class _WorkspaceUsageRow(BaseModel):
     cpu_throttled_seconds: float | None = None
     memory_peak_bytes: int | None = None
     disk_bytes_at_teardown: int | None = None
+    workspace_lifetime_seconds: float | None = None
 
 
 @dataclass(frozen=True)
@@ -243,8 +251,10 @@ class PhaseProfileQueryService:
         if not ids:
             return PhaseProfiles(workflow_id=workflow_id, since=since, until=until, executions=0)
         async with self._pool.acquire() as conn:
-            token_rows = await conn.fetch(_TOKEN_QUERY, ids, since)
-            resource_rows = await conn.fetch(_RESOURCE_QUERY, ids, since, WORKSPACE_RESOURCE_USAGE)
+            token_rows = await conn.fetch(_TOKEN_QUERY, ids, since, until)
+            resource_rows = await conn.fetch(
+                _RESOURCE_QUERY, ids, since, until, WORKSPACE_RESOURCE_USAGE
+            )
         return PhaseProfiles(
             workflow_id=workflow_id,
             since=since,
@@ -258,17 +268,22 @@ class PhaseProfileQueryService:
         samples: dict[tuple[str, str], dict[str, _TokenSample]] = defaultdict(
             lambda: defaultdict(_TokenSample)
         )
+        sessions: dict[str, _SessionRows] = defaultdict(_SessionRows)
         for row in rows:
-            # The model that ran, never the alias requested (ADR-067).
-            model = recorded_model_from_row(row).cost_key
-            sample = samples[(row["phase_id"], model)][row["execution_id"]]
-            sample.input_tokens += int(row["input_tokens"])
-            sample.output_tokens += int(row["output_tokens"])
-            sample.cache_creation_tokens += int(row["cache_creation_tokens"])
-            sample.cache_read_tokens += int(row["cache_read_tokens"])
-            row_cost = price_canonical_row(dict(row.items()), self._cost_calculator)
-            sample.cost += row_cost.cost
-            sample.unpriced_tokens += row_cost.unpriced_tokens
+            session = sessions[row["session_id"]]
+            session.where = (row["phase_id"], row["execution_id"])
+            session.add(row)
+
+        for session in sessions.values():
+            phase_id, execution_id = session.where
+            for share in self._session_shares(session):
+                sample = samples[(phase_id, share.model)][execution_id]
+                sample.input_tokens += share.input_tokens
+                sample.output_tokens += share.output_tokens
+                sample.cache_creation_tokens += share.cache_creation_tokens
+                sample.cache_read_tokens += share.cache_read_tokens
+                sample.cost += share.cost
+                sample.unpriced_tokens += share.unpriced_tokens
 
         profiles = []
         for (phase_id, model), by_execution in sorted(samples.items()):
@@ -287,6 +302,136 @@ class PhaseProfileQueryService:
             )
         return profiles
 
+    def _session_shares(self, session: _SessionRows) -> list[_ModelShare]:
+        """What one session used, per model that consumed it."""
+        if session.summary and len({_model(r) for r in session.split}) > 1:
+            return _split_summary(session.summary[0], session.split, self._cost_calculator)
+        return [
+            _ModelShare.of(row, self._cost_calculator) for row in session.summary or session.turns
+        ]
+
+
+@dataclass
+class _SessionRows:
+    """One session's rows from ``_TOKEN_QUERY``, by role."""
+
+    where: tuple[str, str] = ("", "")
+    summary: list[asyncpg.Record] = field(default_factory=list)
+    turns: list[asyncpg.Record] = field(default_factory=list)
+    split: list[asyncpg.Record] = field(default_factory=list)
+
+    def add(self, row: asyncpg.Record) -> None:
+        role = row["role"]
+        if role == "summary":
+            self.summary.append(row)
+        elif role == "split":
+            self.split.append(row)
+        else:
+            self.turns.append(row)
+
+
+_CATEGORIES = ("input_tokens", "output_tokens", "cache_creation_tokens", "cache_read_tokens")
+
+
+@dataclass(frozen=True)
+class _ModelShare:
+    """The part of one session's usage one model consumed."""
+
+    model: str
+    input_tokens: int
+    output_tokens: int
+    cache_creation_tokens: int
+    cache_read_tokens: int
+    cost: Decimal
+    unpriced_tokens: int
+
+    @classmethod
+    def of(cls, row: asyncpg.Record, calculator: PricingResolver) -> _ModelShare:
+        cost = price_canonical_row(dict(row.items()), calculator)
+        return cls(
+            model=_model(row),
+            input_tokens=int(row["input_tokens"]),
+            output_tokens=int(row["output_tokens"]),
+            cache_creation_tokens=int(row["cache_creation_tokens"]),
+            cache_read_tokens=int(row["cache_read_tokens"]),
+            cost=cost.cost,
+            unpriced_tokens=cost.unpriced_tokens,
+        )
+
+
+def _model(row: asyncpg.Record) -> str:
+    # The model that ran, never the alias requested (ADR-067).
+    return recorded_model_from_row(row).cost_key
+
+
+def _apportion(total: int, weights: Sequence[int]) -> list[int]:
+    """Split ``total`` in proportion to ``weights``, exactly (largest remainder)."""
+    whole = sum(weights)
+    if whole <= 0:
+        weights, whole = [1] * len(weights), len(weights)
+    shares = [total * w // whole for w in weights]
+    by_remainder = sorted(
+        range(len(weights)), key=lambda i: (total * weights[i]) % whole, reverse=True
+    )
+    for i in by_remainder[: total - sum(shares)]:
+        shares[i] += 1
+    return shares
+
+
+def _split_summary(
+    summary: asyncpg.Record, turns: Sequence[asyncpg.Record], calculator: PricingResolver
+) -> list[_ModelShare]:
+    """A mixed-model session's summary, apportioned to the models that ran.
+
+    The summary is the authoritative TOTAL (canonical_usage), so every
+    category it reports is conserved exactly; the turn rows only say how it
+    divides, category by category. A category the turns never reported
+    divides like the turns' tokens overall. Cost follows the same rule: a
+    vendor-reported total is conserved and divided in proportion to what each
+    share costs at its own model's rate, and without one each share is priced
+    at its model's rate - what ``price_canonical_row`` does for a whole row.
+    """
+    turn_totals = [sum(int(t[c]) for c in _CATEGORIES) for t in turns]
+    split = {
+        c: _apportion(
+            int(summary[c]),
+            [int(t[c]) for t in turns] if any(int(t[c]) for t in turns) else turn_totals,
+        )
+        for c in _CATEGORIES
+    }
+    priced = [
+        price_canonical_row(
+            {**dict(t.items()), **{c: split[c][i] for c in _CATEGORIES}, "vendor_cost_usd": None},
+            calculator,
+        )
+        for i, t in enumerate(turns)
+    ]
+    costs = [p.cost for p in priced]
+    unpriced = [p.unpriced_tokens for p in priced]
+    vendor = price_canonical_row(dict(summary.items()), calculator)
+    if vendor.unpriced_tokens == 0 and summary["vendor_cost_usd"] is not None:
+        weights = (
+            costs if not any(unpriced) and sum(costs) > 0 else [Decimal(t) for t in turn_totals]
+        )
+        if not sum(weights):
+            weights = [Decimal(1)] * len(turns)
+        whole = sum(weights, Decimal(0))
+        costs = [vendor.cost * w / whole for w in weights[:-1]]
+        costs.append(vendor.cost - sum(costs, Decimal(0)))
+        unpriced = [0] * len(turns)
+    return [
+        _ModelShare(
+            model=_model(t),
+            input_tokens=split["input_tokens"][i],
+            output_tokens=split["output_tokens"][i],
+            cache_creation_tokens=split["cache_creation_tokens"][i],
+            cache_read_tokens=split["cache_read_tokens"][i],
+            cost=costs[i],
+            unpriced_tokens=unpriced[i],
+        )
+        for i, t in enumerate(turns)
+    ]
+
 
 def _parse_usage(raw: str | None) -> _WorkspaceUsageRow | None:
     """asyncpg hands JSONB back as text unless a codec is registered."""
@@ -296,10 +441,9 @@ def _parse_usage(raw: str | None) -> _WorkspaceUsageRow | None:
 def _resource_profiles(rows: Iterable[asyncpg.Record]) -> list[PhaseResourceProfile]:
     by_phase: dict[str, list[tuple[float | None, _WorkspaceUsageRow | None]]] = defaultdict(list)
     for row in rows:
-        wall = row["wall_seconds"]
-        by_phase[row["phase_id"]].append(
-            (float(wall) if wall else None, _parse_usage(row["usage"]))
-        )
+        usage = _parse_usage(row["usage"])
+        wall = None if usage is None else usage.workspace_lifetime_seconds
+        by_phase[row["phase_id"]].append((wall if wall else None, usage))
 
     profiles = []
     for phase_id, phases in sorted(by_phase.items()):

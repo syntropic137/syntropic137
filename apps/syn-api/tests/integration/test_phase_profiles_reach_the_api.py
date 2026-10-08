@@ -12,10 +12,16 @@ The fixture is built so each expectation could only arise from the change:
   phase spent a billion tokens and one of ANOTHER workflow. ``n == 12`` and a
   p90 in the thousands prove the window and the workflow both filter, over
   every row (12 > any page this API uses for lists of 10).
-* ``build`` falls back from opus to haiku mid-phase: each model must carry
-  only the tokens it consumed.
+* ``build`` falls back from opus to haiku mid-phase and then writes the
+  session summary production writes (AgentExecutionHandler), attributed to
+  opus. Each model must carry only the tokens it consumed, and the summary's
+  totals must be conserved across the two - not handed whole to opus.
 * ``plan`` has a ``workspace_resource_usage`` row in 11 of 12 executions, one
-  of them with no disk figure; ``build`` has none at all.
+  of them with no disk figure; ``build`` has none at all. A twelfth plan row
+  lands an hour in the FUTURE and must be excluded by ``until``.
+* ``soak`` started eight days ago and tore down inside the window, so only its
+  usage row is in a 7-day window. Its CPU rate must be the same under a 7- and
+  a 30-day look-back: the denominator is the recorded workspace lifetime.
 """
 
 from __future__ import annotations
@@ -83,6 +89,7 @@ def _plan_rows(
             "cpu_throttled_seconds": 0.5,
             "memory_peak_bytes": scale * MIB,
             "disk_bytes_at_teardown": 2 * scale * MIB if disk else None,
+            "workspace_lifetime_seconds": 60.0,
         }
         rows.append(
             (
@@ -118,6 +125,41 @@ def _build_rows(execution: str, start: datetime, scale: int) -> list[_Row]:
             "build",
             json.dumps({"model": HAIKU, "input_tokens": 200 * scale, "output_tokens": 1}),
         ),
+        (
+            at + timedelta(seconds=3),
+            "session_summary",
+            session,
+            execution,
+            "build",
+            json.dumps(
+                {
+                    "model": OPUS,
+                    "total_input_tokens": 500 + 200 * scale,
+                    "total_output_tokens": 20 * scale,
+                    "total_cost_usd": 0.1 * scale,
+                }
+            ),
+        ),
+    ]
+
+
+def _soak_rows(execution: str, now: datetime, scale: int) -> list[_Row]:
+    session = f"{execution}-soak"
+    usage = {
+        "cpu_usage_seconds": 60.0 * scale,
+        "memory_peak_bytes": MIB,
+        "workspace_lifetime_seconds": 600.0 * scale,
+    }
+    return [
+        (now - timedelta(days=8), "session_started", session, execution, "soak", "{}"),
+        (
+            now - timedelta(minutes=scale),
+            "workspace_resource_usage",
+            session,
+            execution,
+            "soak",
+            json.dumps(usage),
+        ),
     ]
 
 
@@ -136,6 +178,18 @@ async def _seed(pool: asyncpg.Pool, now: datetime) -> None:
         executions.append((execution, WORKFLOW, start))
         rows += _plan_rows(execution, start, i + 1, usage=i < 11, disk=i != 0)
         rows += _build_rows(execution, start, i + 1)
+        rows += _soak_rows(execution, now, i + 1)
+    future = {"cpu_usage_seconds": 1.0, "workspace_lifetime_seconds": 1.0}
+    rows.append(
+        (
+            now + timedelta(hours=1),
+            "workspace_resource_usage",
+            "exec-11-plan",
+            "exec-11",
+            "plan",
+            json.dumps(future),
+        )
+    )
     old = now - timedelta(days=10)
     executions.append(("exec-old", WORKFLOW, old))
     rows += _plan_rows("exec-old", old, 1_000_000, usage=True, disk=True)
@@ -210,10 +264,19 @@ async def test_phase_profiles_are_read_from_recorded_usage(
     assert plan["cost_usd"]["p50"] == pytest.approx(0.065)
     assert plan["cost_usd"]["p90_display"] == "$0.11"
 
-    # Mid-phase fallback: each model holds only what it consumed.
-    assert tokens[("build", OPUS)]["input_tokens"]["p50"] == pytest.approx(500)
-    assert tokens[("build", HAIKU)]["input_tokens"]["p50"] == pytest.approx(1300)
-    assert tokens[("build", HAIKU)]["input_tokens"]["n"] == 12
+    # Mid-phase fallback, summary present: each model holds only what it
+    # consumed, and every category of the summary is conserved across them.
+    opus, haiku = tokens[("build", OPUS)], tokens[("build", HAIKU)]
+    assert opus["input_tokens"]["n"] == haiku["input_tokens"]["n"] == 12
+    assert opus["input_tokens"]["p50"] == pytest.approx(500)
+    assert haiku["input_tokens"]["p50"] == pytest.approx(1300)
+    # 20 * scale output, split 1:1 as the turns reported it: 65 + 65 at p50.
+    assert opus["output_tokens"]["p50"] == pytest.approx(65)
+    assert haiku["output_tokens"]["p50"] == pytest.approx(65)
+    # The vendor's $0.10 * scale is conserved: $0.65 at p50, split by rate.
+    assert opus["cost_usd"]["p50"] + haiku["cost_usd"]["p50"] == pytest.approx(0.65)
+    assert opus["cost_usd"]["p50"] > 0
+    assert haiku["cost_usd"]["p50"] > 0
 
     resources = {r["phase_id"]: r for r in body["resources"]}
     plan_res = resources["plan"]
@@ -223,6 +286,7 @@ async def test_phase_profiles_are_read_from_recorded_usage(
     assert plan_res["coverage"]["coverage_display"] == "11/12 phases measured"
     # 6s of CPU per unit of scale over a 60s phase: 0.1 .. 1.1.
     assert plan_res["cpu_seconds_per_wall_second"]["n"] == 11
+    assert plan_res["coverage"]["wall_seconds_missing"] == 0
     assert plan_res["cpu_seconds_per_wall_second"]["p50"] == pytest.approx(0.6)
     assert plan_res["memory_peak_bytes"]["p50"] == pytest.approx(6 * MIB)
     assert plan_res["memory_peak_bytes"]["p50_display"] == "6.0 MiB"
@@ -235,3 +299,20 @@ async def test_phase_profiles_are_read_from_recorded_usage(
     assert build_res["memory_peak_bytes"]["n"] == 0
     assert build_res["memory_peak_bytes"]["p50"] is None
     assert build_res["memory_peak_bytes"]["p50_display"] == "insufficient"
+
+
+async def test_a_completed_phase_rate_does_not_depend_on_the_look_back(
+    profiled_client: httpx.AsyncClient,
+) -> None:
+    rates = []
+    for days in (7, 30):
+        response = await profiled_client.get(
+            "/metrics/phase-profiles", params={"workflow_id": WORKFLOW, "window_days": days}
+        )
+        assert response.status_code == 200, response.text
+        (soak,) = [r for r in response.json()["resources"] if r["phase_id"] == "soak"]
+        assert soak["coverage"]["phases"] == 12
+        assert soak["cpu_seconds_per_wall_second"]["n"] == 12
+        rates.append(soak["cpu_seconds_per_wall_second"]["p50"])
+    # 60s of CPU per 600s of workspace life, whatever the window cut off.
+    assert rates == [pytest.approx(0.1), pytest.approx(0.1)]

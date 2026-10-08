@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, cast
 
 import pytest
@@ -46,12 +47,24 @@ USAGE = WorkspaceUsage(
 )
 
 
+LIFETIME_SECONDS = 600.0
+
+
+@dataclass(frozen=True)
+class _Aggregate:
+    """The two lifecycle facts the usage row reads (#1716)."""
+
+    terminated_at: datetime | None = datetime(2026, 10, 8, tzinfo=UTC)
+    lifetime_seconds: float | None = LIFETIME_SECONDS
+
+
 class _Workspace:
     execution_id = "e-usage"
     workspace_id = "w-usage"
 
-    def __init__(self) -> None:
+    def __init__(self, aggregate: _Aggregate | None = None) -> None:
         self.teardown_usage: WorkspaceUsage | None = None
+        self.aggregate = aggregate or _Aggregate()
 
 
 class _WorkspaceCm:
@@ -134,6 +147,7 @@ def _assert_one_row(writer: _Writer) -> None:
                 "delete_failures": ("/ws/.git/objects/pack/locked.pack",),
                 "net_rx_bytes": 1_048_576,
                 "net_tx_bytes": 65_536,
+                "workspace_lifetime_seconds": LIFETIME_SECONDS,
             },
             execution_id="e-usage",
             phase_id=PHASE,
@@ -198,3 +212,16 @@ async def test_nothing_measured_writes_nothing() -> None:
         writer, cast("ManagedWorkspace", _Workspace()), session_id=SESSION, phase_id=PHASE
     )
     assert writer.usage_rows() == []
+
+
+@pytest.mark.asyncio
+async def test_an_unterminated_workspace_records_no_lifetime() -> None:
+    """No termination time, no interval: a rate needs both ends (#1716)."""
+    writer = _Writer()
+    workspace = _Workspace(_Aggregate(terminated_at=None, lifetime_seconds=5.0))
+    workspace.teardown_usage = USAGE
+    await record_workspace_usage(
+        writer, cast("ManagedWorkspace", workspace), session_id=SESSION, phase_id=PHASE
+    )
+    (row,) = writer.usage_rows()
+    assert row.data["workspace_lifetime_seconds"] is None  # type: ignore[index]

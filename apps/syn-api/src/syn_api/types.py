@@ -3871,7 +3871,7 @@ class ResourceCoverageResponse(BaseModel):
     memory_peak_bytes_missing: int
     disk_bytes_at_teardown_missing: int
     wall_seconds_missing: int
-    """Usage rows whose phase spanned no measurable time, so CPU/wall is undefined."""
+    """Usage rows recording no workspace lifetime, so CPU per wall-second is undefined."""
     coverage_display: str
     """e.g. ``"0/42 phases measured"``."""
 
@@ -3883,7 +3883,7 @@ class PhaseResourceProfileResponse(BaseModel):
 
     phase_id: str
     cpu_seconds_per_wall_second: ResourcePercentilesResponse
-    """CPU-seconds over the span of the phase's own telemetry, first to last event."""
+    """CPU-seconds over the workspace lifetime recorded with them, creation to termination."""
     cpu_throttled_seconds: ResourcePercentilesResponse
     memory_peak_bytes: ResourcePercentilesResponse
     disk_bytes_at_teardown: ResourcePercentilesResponse
