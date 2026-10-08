@@ -15,6 +15,9 @@ from syn_shared.settings import get_settings
 
 if TYPE_CHECKING:
     from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
+    from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
+        ExecutionResult,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +48,35 @@ def _is_local_signal_death(exit_code: int, timed_out: bool) -> bool:
     return exit_code < 0 and exit_code != _NO_STATUS_SENTINEL and not timed_out
 
 
+def _is_retryable(result: ExecutionResult, timeouts: int) -> bool:
+    """A signal death always is; a timeout only until it has used its retry (PC-126)."""
+    if result.timed_out:
+        return timeouts < _TIMEOUT_ATTEMPTS
+    return _is_local_signal_death(result.exit_code, result.timed_out)
+
+
+def _failure(
+    result: ExecutionResult, skill_name: str, agent_key: str, timeout_seconds: int, timeouts: int
+) -> Exception:
+    """How the install ended: a transient timeout, or the installer's own failure."""
+    failed = SkillInstallFailed.after_exit(
+        skill_name,
+        agent_key,
+        exit_code=result.exit_code,
+        output=result.stderr or result.stdout or "",
+        timed_out=result.timed_out,
+    )
+    if not result.timed_out:
+        return failed
+    return ProvisionStepTimeoutError(
+        ProvisionStep.SKILL_INSTALL,
+        subject=f"skill {skill_name!r} for agent {agent_key!r}",
+        timeout_seconds=timeout_seconds,
+        attempts=timeouts,
+        detail=str(failed),
+    )
+
+
 async def install_skill(
     workspace: ManagedWorkspace, skill_name: str, source: str, agent_key: str
 ) -> None:
@@ -57,9 +89,8 @@ async def install_skill(
     which records the run as transient and resumable rather than broken.
     """
     timeout_seconds = get_settings().skill_install_timeout_seconds
-    attempts = len(_SKILL_INSTALL_RETRY_BACKOFF_SECONDS) + 1
     timeouts = 0
-    for attempt in range(1, attempts + 1):
+    for attempt, backoff in enumerate((*_SKILL_INSTALL_RETRY_BACKOFF_SECONDS, None), start=1):
         result = await workspace.execute(
             ["skills", "add", source, "--agent", agent_key, "-y"],
             timeout_seconds=timeout_seconds,
@@ -67,40 +98,15 @@ async def install_skill(
         )
         if result.exit_code == 0:
             return
-        if result.timed_out:
-            timeouts += 1
-        if result.timed_out and (timeouts >= _TIMEOUT_ATTEMPTS or attempt == attempts):
-            raise ProvisionStepTimeoutError(
-                ProvisionStep.SKILL_INSTALL,
-                subject=f"skill {skill_name!r} for agent {agent_key!r}",
-                timeout_seconds=timeout_seconds,
-                attempts=timeouts,
-                detail=str(
-                    SkillInstallFailed.after_exit(
-                        skill_name,
-                        agent_key,
-                        exit_code=result.exit_code,
-                        output=result.stderr or result.stdout or "",
-                        timed_out=True,
-                    )
-                ),
-            )
-        retryable = result.timed_out or _is_local_signal_death(result.exit_code, result.timed_out)
-        if attempt < attempts and retryable:
-            logger.warning(
-                "installing skill %r: %s (exit %d), retry %d/%d (#1046, PC-126)",
-                skill_name,
-                f"timed out after {timeout_seconds}s" if result.timed_out else "spawned child died",
-                result.exit_code,
-                attempt,
-                attempts - 1,
-            )
-            await asyncio.sleep(_SKILL_INSTALL_RETRY_BACKOFF_SECONDS[attempt - 1])
-            continue
-        raise SkillInstallFailed.after_exit(
+        timeouts += 1 if result.timed_out else 0
+        if backoff is None or not _is_retryable(result, timeouts):
+            raise _failure(result, skill_name, agent_key, timeout_seconds, timeouts)
+        logger.warning(
+            "installing skill %r: %s (exit %d), retry %d/%d (#1046, PC-126)",
             skill_name,
-            agent_key,
-            exit_code=result.exit_code,
-            output=result.stderr or result.stdout or "",
-            timed_out=result.timed_out,
+            f"timed out after {timeout_seconds}s" if result.timed_out else "spawned child died",
+            result.exit_code,
+            attempt,
+            len(_SKILL_INSTALL_RETRY_BACKOFF_SECONDS),
         )
+        await asyncio.sleep(backoff)
