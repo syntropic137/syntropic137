@@ -388,6 +388,15 @@ class TestOnlyAPushGitAcceptedToTheBranchIsTheRuns:
 
         self._refused(pins)
 
+    async def test_pushing_head_to_another_ref_does_not_claim_the_branch(self) -> None:
+        """`git push origin HEAD:unrelated`: HEAD's commit landed, but on another ref."""
+        pins = await self._resumed_after(
+            f"{_hook_line(FOREIGN)}\nTo github.com:acme/widgets.git\n"
+            f" * [new branch]      HEAD -> {UNRELATED}\n"
+        )
+
+        self._refused(pins)
+
     async def test_an_up_to_date_push_moved_nothing(self) -> None:
         pins = await self._resumed_after(f"{_hook_line(FOREIGN)}\nEverything up-to-date\n")
 
