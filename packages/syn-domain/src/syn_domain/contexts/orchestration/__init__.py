@@ -280,6 +280,11 @@ from syn_domain.contexts.orchestration.slices.notify_quarantine import (
     PullRequestCommenter,
     QuarantineNoticeProcessManager,
 )
+from syn_domain.contexts.orchestration.slices.phase_profiles import (
+    Percentiles,
+    PhaseProfileQueryService,
+    PhaseProfiles,
+)
 from syn_domain.contexts.orchestration.slices.record_eval_run_score import (
     RecordEvalRunScoreHandler,
 )
@@ -411,8 +416,11 @@ __all__ = [
     "IsolationConfig",
     "LaunchEval",
     "OrphanedWorkspace",
+    "Percentiles",
     "PhaseDefinition",
     "PhaseExecutionType",
+    "PhaseProfileQueryService",
+    "PhaseProfiles",
     "PhaseProgress",
     # What a phase spent, as the failure path reports it (#1262)
     "PhaseUsage",

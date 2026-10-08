@@ -18,7 +18,6 @@ same phase definitions, so one phase id across executions is one population.
 
 from __future__ import annotations
 
-import json
 import math
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -289,11 +288,9 @@ class PhaseProfileQueryService:
         return profiles
 
 
-def _parse_usage(raw: object) -> _WorkspaceUsageRow | None:
+def _parse_usage(raw: str | None) -> _WorkspaceUsageRow | None:
     """asyncpg hands JSONB back as text unless a codec is registered."""
-    if raw is None:
-        return None
-    return _WorkspaceUsageRow.model_validate(json.loads(raw) if isinstance(raw, str) else raw)
+    return None if raw is None else _WorkspaceUsageRow.model_validate_json(raw)
 
 
 def _resource_profiles(rows: Iterable[asyncpg.Record]) -> list[PhaseResourceProfile]:

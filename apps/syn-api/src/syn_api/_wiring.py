@@ -810,7 +810,7 @@ def get_phase_profile_query():
         RuntimeError: If the TimescaleDB pool is not yet initialized.
     """
     from syn_domain.contexts.agent_sessions import CostCalculator
-    from syn_domain.contexts.orchestration.slices.phase_profiles import PhaseProfileQueryService
+    from syn_domain.contexts.orchestration import PhaseProfileQueryService
 
     pool = get_event_store_instance().pool
     if pool is None:
