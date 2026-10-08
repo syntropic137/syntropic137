@@ -75,6 +75,15 @@ async def install_skill(
                 subject=f"skill {skill_name!r} for agent {agent_key!r}",
                 timeout_seconds=timeout_seconds,
                 attempts=timeouts,
+                detail=str(
+                    SkillInstallFailed.after_exit(
+                        skill_name,
+                        agent_key,
+                        exit_code=result.exit_code,
+                        output=result.stderr or result.stdout or "",
+                        timed_out=True,
+                    )
+                ),
             )
         retryable = result.timed_out or _is_local_signal_death(result.exit_code, result.timed_out)
         if attempt < attempts and retryable:

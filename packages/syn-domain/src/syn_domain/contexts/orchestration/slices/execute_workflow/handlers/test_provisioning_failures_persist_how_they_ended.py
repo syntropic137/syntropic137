@@ -179,6 +179,23 @@ async def test_a_setup_phase_that_timed_out_says_so_rather_than_quoting_progress
     assert "timed out" in persisted, persisted
     assert "SIGHUP" not in persisted, persisted
     assert persisted.index("timed out") < persisted.index(CLONE_PROGRESS), persisted
+    # PC-126: a timeout is a loaded host, not a broken setup. The record names
+    # the step and says a resume clears it - the sentence `failure_account`'s
+    # upstream kind adds, so this proves the kind reached the failure path.
+    assert "Provision step secret_injection" in persisted, persisted
+    assert "transient; the phase is resumable" in persisted, persisted
+
+
+async def test_a_setup_phase_that_failed_is_not_called_transient() -> None:
+    """Only a timeout is a loaded host; an exit status is the setup's own answer."""
+    persisted = await _persisted_error(
+        _workspace(
+            setup=ExecutionResult(exit_code=1, success=False, duration_ms=900.0, stderr="no")
+        ),
+        _phase(),
+    )
+
+    assert "transient" not in persisted, persisted
 
 
 async def test_a_setup_phase_that_really_failed_still_leads_with_its_reason() -> None:
@@ -275,3 +292,39 @@ async def test_a_skill_install_that_never_ran_invents_no_exit_status() -> None:
     assert "was not attempted" in persisted, persisted
     assert "conflicting versions of skill" in persisted, persisted
     assert "exit" not in persisted, persisted
+
+
+async def test_a_skill_install_that_timed_out_twice_is_recorded_as_transient() -> None:
+    """PC-126 (exec-f4fa08b81ecc): one timeout is retried, the second is resumable."""
+    timed_out = ExecutionResult(
+        exit_code=-1,
+        success=False,
+        duration_ms=240_000.0,
+        stderr="Fetching skill 'code-review' ...",
+        timed_out=True,
+    )
+    workspace = _workspace(setup=ExecutionResult(exit_code=0, success=True, duration_ms=10.0))
+    workspace.execute = AsyncMock(return_value=timed_out)
+    materializer = AsyncMock()
+    materializer.fetch_for_workspace = AsyncMock(return_value=[])
+    skill = ResolvedSkill(
+        skill_name="code-review",
+        source_url="https://github.com/example/code-review",
+        version="1.0.0",
+        resolved_sha="sha-1",
+        tree_storage_prefix="prefix/sha-1",
+    )
+
+    with patch(
+        "syn_domain.contexts.orchestration.slices.execute_workflow.handlers.skill_install.asyncio.sleep",
+        AsyncMock(),
+    ):
+        persisted = await _persisted_error(
+            workspace, _phase(skills=(skill,)), skill_materializer=materializer
+        )
+
+    installs = [c for c in workspace.execute.await_args_list if c.args[0][:2] == ["skills", "add"]]
+    assert len(installs) == 2
+    assert "Provision step skill_install" in persisted, persisted
+    assert "'code-review'" in persisted, persisted
+    assert "transient; the phase is resumable" in persisted, persisted

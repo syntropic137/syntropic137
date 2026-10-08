@@ -150,12 +150,22 @@ class ProvisionStepTimeoutError(UpstreamFailureError):
     this exception exactly as it does for GitHub; `step` says which step.
     """
 
-    def __init__(self, step: ProvisionStep, *, subject: str, timeout_seconds: int, attempts: int) -> None:
-        super().__init__(
+    def __init__(
+        self,
+        step: ProvisionStep,
+        *,
+        subject: str,
+        timeout_seconds: int,
+        attempts: int,
+        detail: str = "",
+    ) -> None:
+        message = (
             f"Provision step {step.value} ({subject}) timed out after {timeout_seconds}s "
             f"on each of {attempts} attempt(s); the host is likely overloaded. "
-            "Transient: the execution is resumable. Raise the step's timeout setting "
-            "if this recurs on an idle host.",
+            "Raise the step's timeout setting if this recurs on an idle host."
+        )
+        super().__init__(
+            f"{message}\n{detail}" if detail else message,
             upstream_kind=UpstreamFailureKind.UNAVAILABLE,
         )
         self.step = step

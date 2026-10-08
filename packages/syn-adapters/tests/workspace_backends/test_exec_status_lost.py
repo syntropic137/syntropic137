@@ -29,6 +29,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -47,6 +48,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects 
     IsolationHandle,
 )
 from syn_shared.process_exit import describe_process_failure
+from syn_shared.settings import reset_settings
 
 pytestmark = [pytest.mark.unit]
 
@@ -107,6 +109,16 @@ def _workspace(docker: _Docker) -> ManagedWorkspace:
         sidecar_handle=None,
         _service=_Service(adapter),  # type: ignore[arg-type]
     )
+
+
+@pytest.fixture
+def _incident_setup_timeout(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """The incident ran under the then-default 120 s setup timeout (PC-126 raised it)."""
+    monkeypatch.setenv("SETUP_PHASE_TIMEOUT_SECONDS", "120")
+    reset_settings()
+    yield
+    monkeypatch.undo()
+    reset_settings()
 
 
 @pytest.fixture(autouse=True)
@@ -170,7 +182,9 @@ class TestTheSetupPhase:
         assert result.exit_code == 1
         assert docker.setup_runs() == 1
 
-    async def test_a_status_lost_twice_says_why(self, _no_real_docker: list[str]) -> None:
+    async def test_a_status_lost_twice_says_why(
+        self, _no_real_docker: list[str], _incident_setup_timeout: None
+    ) -> None:
         docker = _Docker(setup=[_lost(), _lost()])
 
         result = await run_setup_phase(_workspace(docker), _codex_secrets())

@@ -424,6 +424,10 @@ async def test_slow_mint_requests_count_against_the_deadline(
     Request time is on the same clock as the waits; each attempt is cut to
     the time left, and none starts that could not finish in time.
     """
+    # The 120 s the review measured against; the default moved to 240 s
+    # (PC-126), where four 30 s attempts fit and no cap is exercised.
+    monkeypatch.setenv("SETUP_PHASE_TIMEOUT_SECONDS", "120")
+    reset_settings()
     monkeypatch.setattr(random, "uniform", lambda low, _high: low)
     network.mint_seconds = 45.0  # hangs past the client's 30 s read timeout
 
