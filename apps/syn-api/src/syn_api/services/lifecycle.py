@@ -36,6 +36,7 @@ from syn_api.services.admission_announcement import (
 )
 from syn_api.services.credentials import validate_credentials
 from syn_api.services.degraded_reasons import DegradedReason
+from syn_api.services.disk_pager import start_disk_pager, stop_disk_pager
 from syn_api.services.execution_posture import (
     api_memory_limit_mib,
     log_execution_concurrency_posture,
@@ -50,7 +51,6 @@ from syn_api.services.reconciliation import (
 )
 from syn_api.services.seeding import seed_offline_data
 from syn_api.services.subscription_health import render_subscription_health
-from syn_api.services.disk_pager import start_disk_pager, stop_disk_pager
 from syn_api.services.workspace_dir_reclaim import (
     start_workspace_reclaim,
     stop_workspace_reclaim,
