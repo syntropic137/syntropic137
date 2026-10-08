@@ -55,8 +55,20 @@ in the PR that added the suite.
 
    | Result | Exit | When |
    |---|---|---|
-   | PASS | 0 | every hidden test passed |
-   | FAIL | 1 | the patch does not apply, a hidden test failed, or a hidden test could not be collected (the change does not provide what it imports) |
+   | PASS | 0 | every intended hidden test ran and passed |
+   | FAIL | 1 | the patch does not apply, a hidden test failed, a hidden test could not be collected (the change does not provide what it imports), or one was skipped, xfailed, deselected or never reported |
+
+   pytest's exit 0 alone is not a PASS: it also covers skipped, xfailed and
+   deselected tests, so a patch that adds a skip hook would earn it. The
+   intended set is the node ids pytest collects from the hidden files at
+   `fix_commit`, where no agent code exists. A recording plugin loaded from
+   outside the tree reports how each one ended, and each must have a passing
+   `call`. Every `conftest.py` the patch touches is reset to its `fix_commit`
+   content (or removed), as the hidden tests are. What this does not stop:
+   code the tests import runs in the same process as pytest and can tamper
+   with it. The scorer defends the hidden set against configuration, not
+   against an adversarial patch, which is one more reason `score` belongs in
+   a workspace.
    | ERROR | 2 | the environment: the pin, a submodule commit or a hidden file is missing, `uv sync` failed, pytest erred internally or collected nothing, or the run timed out |
 
 `launch` and the score ledger are not wired into `scripts/eval_suite.py` for

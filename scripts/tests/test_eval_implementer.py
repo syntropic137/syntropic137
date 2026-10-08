@@ -18,6 +18,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import eval_implementer
 import yaml
 from eval_implementer import (
     DEFAULT_SUITE,
@@ -28,6 +29,7 @@ from eval_implementer import (
     fix_patch,
     load_suite,
     main,
+    score_patch,
 )
 from eval_suite import DefinitionError
 
@@ -135,3 +137,145 @@ def test_the_reference_patch_leaves_the_hidden_tests_out(case: ImplementerCase) 
 def test_check_passes_on_the_checked_in_suite(capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["check"]) == 0
     assert "5 case(s) OK" in capsys.readouterr().out
+
+
+def _new_file(path: str, *lines: str) -> str:
+    return (
+        f"diff --git a/{path} b/{path}\nnew file mode 100644\n"
+        f"--- /dev/null\n+++ b/{path}\n@@ -0,0 +1,{len(lines)} @@\n"
+        + "".join(f"+{line}\n" for line in lines)
+    )
+
+
+def _addopts(opts: str) -> str:
+    """A patch adding `addopts` to the tiny repository's pytest configuration."""
+    return (
+        "diff --git a/pyproject.toml b/pyproject.toml\n--- a/pyproject.toml\n"
+        "+++ b/pyproject.toml\n@@ -1,2 +1,3 @@\n [tool.pytest.ini_options]\n"
+        f' pythonpath = ["."]\n+addopts = "{opts}"\n'
+    )
+
+
+def _plugin(*body: str) -> str:
+    """The bug left in place, and a pytest plugin outside any conftest loaded by config."""
+    return _new_file("hooks.py", "import pytest", *body) + _addopts("-p hooks")
+
+
+def _conftest(*body: str) -> str:
+    return _new_file("tests/conftest.py", "import pytest", *body)
+
+
+def _mark_second(mark: str) -> tuple[str, ...]:
+    return (
+        "def pytest_collection_modifyitems(items):",
+        "    for item in items:",
+        "        if item.name == 'test_second':",
+        f"            item.add_marker(pytest.mark.{mark}(reason='bug untouched'))",
+    )
+
+
+_SKIP_ALL = (
+    "def pytest_collection_modifyitems(items):",
+    "    for item in items:",
+    "        item.add_marker(pytest.mark.skip(reason='bug untouched'))",
+)
+_REPORT_PASSED = (
+    "@pytest.hookimpl(hookwrapper=True)",
+    "def pytest_runtest_makereport(item, call):",
+    "    outcome = yield",
+    "    outcome.get_result().outcome = 'passed'",
+)
+
+
+@pytest.fixture
+def two_hidden_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[ImplementerCase, Path]:
+    """A repository whose fix adds two hidden files: one passes at the pin, one catches the bug.
+
+    The real worktree, `git apply` and pytest subprocess run; only the uv
+    environment is this interpreter's, so the test needs no lockfile or network.
+    """
+    monkeypatch.setattr(eval_implementer, "SYNC", ("true",))
+    monkeypatch.setattr(eval_implementer, "PYTEST", (sys.executable, "-m", "pytest"))
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    def git(*args: str) -> str:
+        return subprocess.run(
+            ["git", "-C", str(repo), *args], check=True, capture_output=True, text=True
+        ).stdout.strip()
+
+    git("init", "--quiet")
+    git("config", "user.name", "eval test")
+    git("config", "user.email", "eval@example.invalid")
+    (repo / "pyproject.toml").write_text('[tool.pytest.ini_options]\npythonpath = ["."]\n')
+    (repo / "bug.py").write_text("value = 0\n")
+    git("add", ".")
+    git("commit", "--quiet", "-m", "pin")
+    pin = git("rev-parse", "HEAD")
+    (repo / "tests").mkdir()
+    (repo / "tests/test_first.py").write_text("def test_first():\n    assert True\n")
+    (repo / "tests/test_second.py").write_text(
+        "from bug import value\n\ndef test_second():\n    assert value == 1\n"
+    )
+    (repo / "bug.py").write_text("value = 1\n")
+    git("add", ".")
+    git("commit", "--quiet", "-m", "fix")
+    case = ImplementerCase(
+        id="two-hidden-files",
+        source_pr=1,
+        commit=pin,
+        fix_commit=git("rev-parse", "HEAD"),
+        task="value must be one",
+        hidden_tests=("tests/test_first.py", "tests/test_second.py"),
+    )
+    return case, repo
+
+
+def test_the_bug_left_in_place_fails_and_the_fix_passes(
+    two_hidden_files: tuple[ImplementerCase, Path],
+) -> None:
+    case, repo = two_hidden_files
+    assert score_patch(case, "", repo).outcome == "FAIL"
+    fixed = score_patch(case, fix_patch(case, repo), repo)
+    assert fixed.outcome == "PASS", fixed.detail
+
+
+@pytest.mark.parametrize(
+    "patch",
+    [
+        _plugin(*_SKIP_ALL),
+        _plugin(*_mark_second("skip")),
+        _plugin(*_mark_second("xfail")),
+        _addopts("--deselect tests/test_second.py::test_second"),
+        _conftest(*_SKIP_ALL),
+        _conftest(*_mark_second("skip")),
+        _conftest(*_REPORT_PASSED),
+    ],
+    ids=[
+        "plugin-skip-all",
+        "plugin-skip-second",
+        "plugin-xfail-second",
+        "addopts-deselect-second",
+        "conftest-skip-all",
+        "conftest-skip-second",
+        "conftest-report-passed",
+    ],
+)
+def test_a_change_that_hides_the_bug_from_pytest_is_not_a_pass(
+    two_hidden_files: tuple[ImplementerCase, Path], patch: str
+) -> None:
+    # Every one of these leaves the bug in place and, unchecked, exits pytest 0.
+    case, repo = two_hidden_files
+    run = score_patch(case, patch, repo)
+    assert run.outcome == "FAIL", run.detail
+    assert "test_second" in run.detail
+
+
+def test_a_fix_plus_a_harmless_conftest_still_passes(
+    two_hidden_files: tuple[ImplementerCase, Path],
+) -> None:
+    case, repo = two_hidden_files
+    run = score_patch(case, fix_patch(case, repo) + _conftest("FIXTURE = 1"), repo)
+    assert run.outcome == "PASS", run.detail
