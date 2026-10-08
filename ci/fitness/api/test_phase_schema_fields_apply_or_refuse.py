@@ -71,6 +71,10 @@ _APPLIED: dict[str, tuple[str, str]] = {
     # something - and dropping it is not inert, it silently restores the
     # failure the field exists to stop.
     "delivers_repo_changes": ("ExecutablePhase", "delivers_repo_changes"),
+    # Carried to `create_workspace`, where it is the scope of the phase's
+    # platform token (ADR-072, #1744). Applied: `eval` lets the phase launch
+    # runs into a named eval and score them; `read` is the default.
+    "platform_access": ("ExecutablePhase", "platform_access"),
     "claude_plugins": ("ExecutablePhase", "claude_plugins"),
     "skills": ("ExecutablePhase", "skills"),
     "allowed_tools": ("AgentConfiguration", "allowed_tools"),
