@@ -556,6 +556,14 @@ Submodules (agentic-workspace, event-sourcing-platform) have independent version
 - [Security Practices](docs/security-practices.md) - supply chain hardening, Docker runtime security, credential management
 - [GitHub App Security Model](docs/deployment/github-app-security.md) - PEM handling, token lifecycle, network isolation, token injector architecture
 
+## Design
+
+UI work starts at [design/README.md](design/README.md): the boards, the spec and the design-to-code loop. Three rules:
+
+- **Boards are a spec, not code.** Read `design/canvas/*.dc.html` for layout, copy, tokens, data and behaviour; never ship them.
+- **Code is the source of truth after a screen ships.** Its board is frozen history; small tweaks go straight to code.
+- **No Storybook.** The component reference is `/dev/components` and `/dev/patterns` in apps/syn-ui, plus Playwright screenshot tests of both.
+
 ## Tooling
 
 - **uv** for Python package management (workspaces)
