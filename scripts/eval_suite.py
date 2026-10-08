@@ -75,6 +75,7 @@ Exit status: 0 on success (for ``score``: every case scored pass), 1 otherwise.
 from __future__ import annotations
 
 import argparse
+import ast
 import hashlib
 import math
 import os
@@ -210,6 +211,10 @@ class _CaseBase(_Frozen):
     task: str = Field(min_length=1)
     split: Split
     """`train` cases may tune a verifier; `holdout` cases only measure it. Never moved."""
+    retired: str | None = Field(default=None, min_length=1)
+    """Why the case left the suite, and in which version. A retired case is not part
+    of the current version: it is kept so the history versions that held it still
+    score their runs against it, as it was. Never re-polarise a case in place."""
 
     @property
     def tag(self) -> str:
@@ -249,6 +254,9 @@ class CleanCase(_CaseBase):
     polarity: Literal["clean"]
     merge_commit: FullSha
     """The mainline merge that took the PR: its second parent must be `commit`."""
+    added_in: int = Field(ge=1)
+    """The suite version that added the control; from `QUIET_RULE_FROM` it must be
+    `QUIET_DAYS` old at `clean_through`."""
     clean_through: FullSha
     """The mainline commit through which later history was read and held no fix of the PR.
 
@@ -334,16 +342,20 @@ def load_suite(
         raise DefinitionError(str(exc)) from exc
 
     problems: list[str] = []
+    retired = {c.id for c in cases if c.retired}
+    if stray := sorted(retired - {i for h in suite.history for i in h.cases}):
+        problems.append(f"retired case(s) {stray} are in no history version: delete them")
+    every_case, cases = cases, tuple(c for c in cases if not c.retired)
     if not cases:
         problems.append(f"{directory}/cases holds no case")
-    for path, case in zip(case_files, cases, strict=True):
+    for path, case in zip(case_files, every_case, strict=True):
         if path.stem != case.id:
             problems.append(f"{path.name}: file name must be the case id {case.id!r}")
         if f"#{case.source_pr}" in case.task:
             problems.append(
                 f"{case.id}: task names #{case.source_pr}; the agent could fetch the fix"
             )
-    ids = [c.id for c in cases]
+    ids = [c.id for c in every_case]
     if len(set(ids)) != len(ids):
         problems.append(f"duplicate case ids: {sorted(ids)}")
     holdout = sum(c.split == "holdout" for c in cases)
@@ -376,6 +388,7 @@ def load_suite(
         raise DefinitionError("\n".join(problems))
     if split is not None:
         cases = tuple(c for c in cases if c.split == split)
+        every_case = tuple(c for c in every_case if c.split == split)
     if past is None:
         return LoadedSuite(
             suite=suite,
@@ -386,7 +399,7 @@ def load_suite(
         )
     return LoadedSuite(
         suite=suite,
-        cases=tuple(c for c in cases if c.id in past.cases),
+        cases=tuple(c for c in every_case if c.id in past.cases),
         workflow=selected,
         version=past.version,
         tag=past.tag,
@@ -501,11 +514,100 @@ def _defect_problems(case: DefectCase, repo: Path) -> list[str]:
 _FIX_SUBJECT = re.compile(r"^(fix|revert)\b", re.IGNORECASE)
 
 
+QUIET_DAYS = 30
+"""How long after a clean control merged no mainline commit may touch what it changed."""
+QUIET_RULE_FROM = 5
+"""The first suite version whose clean controls must show all `QUIET_DAYS`.
+
+Controls added earlier were chosen before the rule and may be younger: their
+quiet days so far are still checked, and the rest as `clean_through` advances."""
+
+_HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
+
+
+def _hunks(
+    repo: Path, commit: str, side: Literal["old", "new"]
+) -> dict[str, list[tuple[int, int]]]:
+    """Path -> the line spans `commit`'s hunks (against its first parent) cover on `side`.
+
+    Keyed by the path on that side, so a deleted file appears on the old side.
+    A span is (first, last), inclusive; a hunk with no lines on `side` is the
+    one line it sits at.
+    """
+    marker, group = ("--- a/", 1) if side == "old" else ("+++ b/", 3)
+    spans: dict[str, list[tuple[int, int]]] = {}
+    path = ""
+    for line in _git_out(repo, "diff", "-U0", "--no-renames", f"{commit}^1", commit).splitlines():
+        if line.startswith(marker[:4]):
+            path = line[len(marker) :] if line.startswith(marker) else ""
+        elif (m := _HUNK.match(line)) and path:
+            start, count = max(int(m[group]), 1), int(m[group + 1] or 1)
+            spans.setdefault(path, []).append((start, start + max(count, 1) - 1))
+    return spans
+
+
+def _functions(repo: Path, commit: str, path: str) -> dict[str, tuple[int, int]]:
+    """Qualified name (``Class.method``) -> line span of each Python function in `path`."""
+    try:
+        tree = ast.parse(_git_out(repo, "show", f"{commit}:{path}"))
+    except SyntaxError:
+        return {}
+    found: dict[str, tuple[int, int]] = {}
+
+    def visit(node: ast.AST, prefix: str) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+                name = f"{prefix}{child.name}"
+                if not isinstance(child, ast.ClassDef):
+                    first = min([child.lineno, *(d.lineno for d in child.decorator_list)])
+                    found[name] = (first, child.end_lineno or child.lineno)
+                visit(child, f"{name}.")
+
+    visit(tree, "")
+    return found
+
+
+def _overlaps(span: tuple[int, int], spans: list[tuple[int, int]]) -> bool:
+    return any(a <= span[1] and span[0] <= b for a, b in spans)
+
+
+def _touched(repo: Path, merge: str, until: str) -> list[str]:
+    """Each mainline commit after `merge`, up to `until`, that touches what `merge` changed.
+
+    "What it changed" is every Python function a hunk of the PR falls in, found
+    again by qualified name in each later commit's parent, so a function that
+    moves is still followed. Only Python functions can be found again here: a
+    non-Python change is the selector's to read by hand. One line per hit.
+    """
+    changed = _hunks(repo, merge, "new")
+    functions = {
+        path: {
+            name for name, span in _functions(repo, merge, path).items() if _overlaps(span, spans)
+        }
+        for path, spans in changed.items()
+        if path.endswith(".py")
+    }
+    hits: list[str] = []
+    later = _git_out(repo, "rev-list", "--reverse", "--first-parent", f"{merge}..{until}")
+    for commit in later.split():
+        for path, spans in _hunks(repo, commit, "old").items():
+            if path not in functions:
+                continue
+            before = _functions(repo, f"{commit}^1", path)
+            for name in sorted(functions[path]):
+                span = before.get(name)
+                if span is None or _overlaps(span, spans):
+                    hits.append(f"{commit[:12]} changes {path}:{name}")
+    return hits
+
+
 def _clean_problems(case: CleanCase, repo: Path) -> list[str]:
     """Every SHA is a commit here, the pin is the merge's second parent (the PR
     head exactly as main took it), the merge is on `clean_through`'s first-parent
-    chain (a mainline merge, not one inside a branch), and no commit between the
-    merge and `clean_through` is a fix or revert naming the PR.
+    chain (a mainline merge, not one inside a branch), no commit between the
+    merge and `clean_through` is a fix or revert naming the PR, `clean_through`
+    is at least `QUIET_DAYS` after the merge, and no mainline commit in those
+    days touches a Python function the PR changed.
     """
     if missing := _missing_commits(repo, case.commit, case.merge_commit, case.clean_through):
         return [f"{case.id}: no such commit {', '.join(missing)} (try `git fetch origin`)"]
@@ -535,6 +637,22 @@ def _clean_problems(case: CleanCase, repo: Path) -> list[str]:
                 f"{case.id}: {sha[:12]} fixes or reverts #{case.source_pr} after it merged; "
                 "a clean control must have no known defect"
             )
+    merged_at = int(_git_out(repo, "show", "-s", "--format=%ct", case.merge_commit))
+    quiet_until = merged_at + QUIET_DAYS * 86400
+    young = int(_git_out(repo, "show", "-s", "--format=%ct", case.clean_through)) < quiet_until
+    if young and case.added_in >= QUIET_RULE_FROM:
+        problems.append(
+            f"{case.id}: clean_through {case.clean_through[:12]} is under {QUIET_DAYS} days "
+            "after the merge; a clean control needs that long untouched"
+        )
+    window_end = _git_out(
+        repo, "rev-list", "-1", "--first-parent", f"--before={quiet_until}", case.clean_through
+    ).strip()
+    problems.extend(
+        f"{case.id}: {hit} within {QUIET_DAYS} days of the merge; "
+        "a clean control's code must stay untouched that long"
+        for hit in _touched(repo, case.merge_commit, window_end)
+    )
     return problems
 
 

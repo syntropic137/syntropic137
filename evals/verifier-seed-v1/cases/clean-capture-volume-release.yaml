@@ -7,7 +7,8 @@ polarity: clean
 source_pr: 1486
 commit: 36b0db8dba5ef5aec8e9cfc7c54393f6ae8b91fe
 merge_commit: f8b866d63db82cee7f6aee06777ed1aa3f9c7190
-clean_through: 6cb76a7f9aa881aff20ecaa8fefeeb690ce92673
+added_in: 3
+clean_through: 4108b74fc2f7f74b280aed08a49f6eb91c796a3f
 task: >
   The change under review lets the Docker socket proxy release retained agent
   capture volumes: the proxy policy now allows DELETE as well as GET on a
