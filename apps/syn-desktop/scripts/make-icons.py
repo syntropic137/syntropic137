@@ -4,6 +4,7 @@ Placeholder art until the canvas has a real app icon: a dark rounded tile
 with a three-bar skyline. Run: python3 apps/syn-desktop/scripts/make-icons.py
 Needs Pillow. `pnpm tauri icon <1024px png>` replaces these with real art.
 """
+
 from pathlib import Path
 
 from PIL import Image, ImageDraw
@@ -36,7 +37,9 @@ def main() -> None:
     big.resize((128, 128), Image.LANCZOS).save(OUT / "128x128.png")
     big.resize((256, 256), Image.LANCZOS).save(OUT / "128x128@2x.png")
     big.resize((512, 512), Image.LANCZOS).save(OUT / "icon.png")
-    big.save(OUT / "icon.ico", sizes=[(16, 16), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
+    big.save(
+        OUT / "icon.ico", sizes=[(16, 16), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)]
+    )
     big.save(OUT / "icon.icns")
     print(f"wrote icons to {OUT}")
 
