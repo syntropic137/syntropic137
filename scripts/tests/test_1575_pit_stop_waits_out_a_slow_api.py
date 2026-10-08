@@ -128,6 +128,7 @@ run() {{ "$@"; }}
 sleep() {{ :; }}
 {stub}
 {_function("projections_healthy")}
+{_function("start_gateway")}
 {_function("swapped_is_running")}
 {_function("disk_space")}
 """

@@ -545,6 +545,23 @@ swapped_is_running() {  # $1: api|gateway
     [ "$got" = "$want" ] || die "syn137-$svc is not running the image tagged $TAG (has $got, wanted $want)"
 }
 
+# Compose can exit 0 and still leave the gateway `Created`: twice on
+# 2026-10-07/08 an API swap ended that way and the dashboard was down ~4min
+# until someone ran `docker start`. So the gateway is started explicitly after
+# every swap, never left to compose, and the operator is told which it was.
+start_gateway() {
+    local up
+    up="$(remote "docker inspect syn137-gateway --format '{{.State.Running}}'")" \
+        || die "could not inspect syn137-gateway on $HOST"
+    if [ "$up" = true ]; then
+        echo "   syn137-gateway: running after compose up"
+        return 0
+    fi
+    echo "   syn137-gateway: running=$up after compose up (left Created); starting it"
+    remote "docker start syn137-gateway" >/dev/null || die "docker start syn137-gateway failed on $HOST"
+    echo "   syn137-gateway: docker start issued"
+}
+
 if [ "$SERVICE" = gateway ]; then
     # NO GATE AND NO DRAIN, deliberately. The gateway is on syn-internal only,
     # never agent-net (docker/docker-compose.syntropic137.yaml), so no execution
@@ -558,6 +575,7 @@ if [ "$SERVICE" = gateway ]; then
         || die "compose up failed for the gateway"
     step "verify: gateway image, GET /health through it"
     if [ "$DRY" = 0 ]; then
+        start_gateway
         swapped_is_running gateway
         # Not /version: that reports the API's build, which this did not touch.
         # /health through the gateway proves the new one is routing. nginx can
@@ -637,6 +655,8 @@ if ! swap_up; then
     step "swap: syn137-api is healthy; re-running compose up for its dependents"
     swap_up || die "compose up failed again after syn137-api reported healthy"
 fi
+# Started even when compose exited 0: that is exactly how it was left Created.
+[ "$DRY" = 1 ] || start_gateway
 
 step "verify: images, docker CLI, projections, build identity"
 if [ "$DRY" = 0 ]; then

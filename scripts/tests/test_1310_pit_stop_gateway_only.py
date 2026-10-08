@@ -277,11 +277,13 @@ remote() {{
         *"docker image inspect ghcr.io/syntropic137/syn-gateway:"*) echo sha256:new ;;
         *"docker inspect syn137-gateway --format '{{{{.Image}}}}'"*) echo {running_image} ;;
         *"docker inspect syn137-gateway --format '{{{{.State.Running}}}}'"*) echo {running} ;;
+        *"docker start syn137-gateway"*) echo syn137-gateway ;;
         *) echo "unexpected remote: $*" >&2; return 99 ;;
     esac
 }}
 {_function("api_curl")}
 maintenance() {{ echo "maintenance $1" >> {log}; }}
+{_function("start_gateway")}
 {_function("swapped_is_running")}
 """
     proc = subprocess.run(
