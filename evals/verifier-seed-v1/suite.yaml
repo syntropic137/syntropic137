@@ -75,6 +75,10 @@ goal: >
   the defect and the file it lives in, and certify a merged change that has
   no known defect?
 repository: syntropic137/syntropic137
+# `revision` is a workflow's install revision within the suite version
+# (installed as <version>.<revision>.0): an edit outside the experiment, no
+# case, prompt or model. Revision 1 is #1780's `requires_verdict: true`, which
+# changes how a run without an engine verdict is scored, not what is measured.
 workflows:
   - id: eval-verify-pinned-v1
     path: workflows/evals/verify-pinned/workflow.yaml
@@ -83,16 +87,19 @@ workflows:
     # actually reported, which is the one to compare.
     models:
       verify: opus
+    revision: 1
   - id: eval-verify-pinned-codex-v1
     path: workflows/evals/verify-pinned-codex/workflow.yaml
     models:
       verify: gpt-sol
+    revision: 1
   # Sonnet 5.5 against Opus 5.5 at half the price. `sonnet` is the alias the
   # pinned CLI resolves; a run is Sonnet 5.5 only if its reported model says so.
   - id: eval-verify-pinned-sonnet-v1
     path: workflows/evals/verify-pinned-sonnet/workflow.yaml
     models:
       verify: sonnet
+    revision: 1
   # Is there a GPT verifier cheaper per run than gpt-6.1-sol that still
   # catches every case? Each names an explicit codex slug, never an alias, so
   # no retargeting can change what was measured. Per MTok (in / out), from
@@ -104,14 +111,17 @@ workflows:
     path: workflows/evals/verify-pinned-codex-gpt-6-luna/workflow.yaml
     models:
       verify: gpt-6-luna
+    revision: 1
   - id: eval-verify-pinned-codex-gpt-5-6-luna-v1
     path: workflows/evals/verify-pinned-codex-gpt-5-6-luna/workflow.yaml
     models:
       verify: gpt-5.6-luna
+    revision: 1
   - id: eval-verify-pinned-codex-gpt-5-6-terra-v1
     path: workflows/evals/verify-pinned-codex-gpt-5-6-terra/workflow.yaml
     models:
       verify: gpt-5.6-terra
+    revision: 1
 history:
   # v1 predates the workflow suffix in the tag.
   - version: 1

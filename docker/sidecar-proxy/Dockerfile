@@ -24,8 +24,10 @@ EXPOSE 8081
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
   CMD curl -f http://localhost:9901/ready || exit 1
 
-# Run Envoy
-ENTRYPOINT ["/usr/local/bin/envoy"]
+# Run Envoy, after entrypoint.sh has set the platform-access route switch
+# from SYN_PLATFORM_ACCESS_ENABLED (ADR-072; off unless set).
+COPY --chmod=0755 entrypoint.sh /usr/local/bin/syn-envoy-entrypoint.sh
+ENTRYPOINT ["/usr/local/bin/syn-envoy-entrypoint.sh"]
 # concurrency=2 instead of host-CPU default. Single-tenant selfhost does not
 # need 16 worker threads; 2 keeps one free while another is parked on the
 # ext_authz roundtrip. Saves 25-35MB RSS under load on a 16-core host.

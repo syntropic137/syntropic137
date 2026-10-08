@@ -210,7 +210,7 @@ services:
       - api_logs:/app/logs
       - ../workspaces:/workspaces
     entrypoint: ["/bin/sh", "/selfhost-entrypoint.sh"]
-    command: ["sh", "-c", "uvicorn syn_api.main:app --host $$SYN_API_HOST --port $$SYN_API_PORT --root-path /api/v1"]
+    command: ["sh", "-c", "uvicorn syn_api.main:app --host $$SYN_API_HOST --port $$SYN_API_PORT --root-path /api/v1 --timeout-graceful-shutdown 30"]
     environment:
       - LOG_FORMAT=${LOG_FORMAT:-json}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}

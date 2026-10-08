@@ -23,6 +23,15 @@ from syn_shared.env_constants import ENV_SYN_EXECUTION_MAX_CONCURRENT
 #: has not been measured yet (#1552), so the budget did not move with the limit.
 DEFAULT_MAX_CONCURRENT_EXECUTIONS = 4
 
+#: Read as SYN_EXECUTION_INTERRUPT_BUDGET_S. #1310 spells it
+#: SYN_INTERRUPT_BUDGET_S; the env prefix is kept because `.env.example` and the
+#: compose forwarding are generated from prefix + field name, and an alias they
+#: do not see would be a knob documented under a name nothing reads.
+#: How long a shutdown waits, per running execution, to save its work and record
+#: it INTERRUPTED (#1381). Room for the salvage push (bounded at 20 s by
+#: `REMOTE_TIMEOUT_SECONDS`), its workflow-safe retry, and the event append.
+DEFAULT_INTERRUPT_BUDGET_SECONDS = 60.0
+
 #: Rough per-execution and baseline API memory, used to size the budget against
 #: `API_MEMORY_LIMIT` and to warn at startup when the two disagree. Deliberately
 #: pessimistic (measured ~40-55MiB per execution in #1552).
@@ -66,5 +75,19 @@ class ExecutionSettings(BaseSettings):
             "per-run processor state (#865), which is why this was 1; #1311 gave "
             "each execution its own state. Replaces "
             "SYN_POLLING_MAX_CONCURRENT_DISPATCHES, which is now ignored."
+        ),
+    )
+
+    interrupt_budget_s: float = Field(
+        default=DEFAULT_INTERRUPT_BUDGET_SECONDS,
+        gt=0,
+        description=(
+            "Seconds a platform shutdown (deploy, restart, docker stop) waits for "
+            "each running execution to save its unpushed commits to a quarantine "
+            "ref and be recorded 'interrupted', which makes it resumable. Past it "
+            "the execution is left running and the next start reconciles it as "
+            "OrphanedByRestart. The api container's stop_grace_period must exceed "
+            "this plus 95s of salvage settling plus uvicorn's graceful-shutdown "
+            "timeout, or Docker kills the process first (#1381)."
         ),
     )
