@@ -421,11 +421,28 @@ class Settings(BaseSettings):
     )
 
     # Provision-step deadlines (PC-126). The old fixed bounds (120s setup,
-    # 120s skill install, 60s probe) were sized on an idle host; at 10
-    # concurrent runs the host sits at load ~27 on 16 cores, so a runnable
-    # step gets ~16/27 = 0.6 of a core and takes ~1.7x as long. Each bound is
-    # doubled (2x > 1.7x, with margin) rather than fitted to measured step
-    # durations, which were not available when this was set.
+    # 120s skill install, 60s probe) failed runs at 10 concurrent executions
+    # (host load ~27 on 16 cores). Calibrated against the selfhost VPS on
+    # 2026-10-08 (16 cores), measured while it was as loaded as the failure
+    # window (node_load1 21-33 vs 18-30 at 19:00-22:00Z on 10-07):
+    #
+    #   API log, 01:45-04:26Z, load 21-33:            n    p50    p95    max
+    #   setup script, clone included                   83  22.1s  39.9s  61.4s
+    #   workspace create -> setup start, mint included 84   5.0s   8.8s  10.8s
+    #   setup end -> 3-5 skills installed, checkout
+    #     verification included                        69   5.2s   8.1s  41.2s
+    #   docker exec events, 04:33-04:56Z, load 14-20:
+    #   one `skills add`                               63   0.5s   0.7s   0.8s
+    #   credential guard probe / rm -f              12/24   0.2s   0.4s   0.6s
+    #
+    # The two failures (120s skill install at 20:42Z, 120s setup at 21:38Z on
+    # 10-07) were 2-3x beyond the worst observed duration and 15x beyond p95:
+    # stalls, not a host uniformly slower by a load factor. So a step that is
+    # retried gets a deadline of ~2x the worst observed (the retry is the stall
+    # remedy, and a shorter deadline reaches it sooner); a step that is NOT
+    # retried in place (the setup script) keeps ~4x. The codex sandbox probe
+    # and checkout verification ran no sample in the window; they keep their
+    # derived 2x-the-old-bound values.
     setup_phase_timeout_seconds: int = Field(
         default=240,
         ge=10,
@@ -434,17 +451,21 @@ class Settings(BaseSettings):
             "Timeout for the workspace setup phase in seconds. "
             "The setup phase runs the setup script that configures credentials "
             "and clones repositories before the agent starts. "
+            "Measured under load (16 cores, load 21-33): p95 40s, worst 61s; not "
+            "retried in place, so 240s keeps ~4x the worst case. "
             "Increase for workflows with large repositories, or on a loaded host."
         ),
     )
 
     skill_install_timeout_seconds: int = Field(
-        default=240,
+        default=90,
         ge=10,
         le=3600,
         description=(
             "Timeout in seconds for one `skills add` while provisioning a workspace. "
-            "A timed-out install is retried once. Increase on a loaded host."
+            "A timed-out install is retried once. Measured: p95 0.7s per install (load "
+            "14-20 on 16 cores); worst 41s for a phase's 3-5 installs together (load "
+            "21-33). 90s is ~2x that worst case. Increase on a loaded host."
         ),
     )
 
@@ -466,7 +487,7 @@ class Settings(BaseSettings):
             "Timeout in seconds for each exec of the staged-credential cleanup guard "
             "(a `[ -e ]` probe or an `rm -f`) after the setup phase. Each is retried; "
             "exhausting every attempt on timeouts alone fails the run as transient. "
-            "Increase on a loaded host."
+            "Measured worst 0.6s under load, so 15s is ample. Increase on a loaded host."
         ),
     )
 
