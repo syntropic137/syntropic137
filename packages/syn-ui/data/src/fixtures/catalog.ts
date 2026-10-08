@@ -132,36 +132,51 @@ export interface CatalogPhaseRun {
 export function phaseRuns(r: CatalogRun): CatalogPhaseRun[] {
   const wf = workflowOf(r.workflowId)
   if (!wf) return []
-  const started = r.status === 'running' ? r.done + 1 : r.status === 'completed' ? r.done : Math.min(wf.phases.length, r.done + 1)
+  const started = phasesStarted(r, wf.phases.length)
   const share = (v: number) => (started ? v / started : 0)
   let cursor = r.startedAt
   return wf.phases.map((phase, index) => {
-    const ran = index < started
-    let status: CatalogPhaseRun['status'] = 'pending'
-    if (index < r.done) status = 'completed'
-    else if (ran) status = r.status === 'completed' ? 'completed' : r.status
-    const seconds = ran ? Math.max(1, Math.round(share(r.seconds))) : null
-    const startedAt = ran ? cursor : null
-    const completedAt = ran && status !== 'running' && seconds !== null ? after(cursor, seconds * 1000) : null
-    if (completedAt) cursor = completedAt
-    const tokens = ran ? Math.round(share(r.tokens)) : 0
-    return {
-      run: r,
-      phase,
-      index,
-      status,
-      sessionId: ran ? fakeId(`session-${r.id}-${phase.id}`) : null,
-      artifactId: status === 'completed' ? fakeId(`artifact-${r.id}-${phase.id}`) : null,
-      startedAt,
-      completedAt,
-      seconds,
-      tokens: {
-        input: Math.round(tokens * 0.02),
-        output: Math.round(tokens * 0.05),
-        cacheWrite: Math.round(tokens * 0.13),
-        cacheRead: tokens - Math.round(tokens * 0.02) - Math.round(tokens * 0.05) - Math.round(tokens * 0.13),
-      },
-      cost: ran ? share(r.cost) : 0,
-    }
+    const pr = phaseRunAt(r, phase, index, index < started, share, cursor)
+    if (pr.completedAt) cursor = pr.completedAt
+    return pr
   })
+}
+
+/** How many phases of the run have started: a running or failed run includes its current phase. */
+function phasesStarted(r: CatalogRun, phaseCount: number): number {
+  if (r.status === 'running') return r.done + 1
+  if (r.status === 'completed') return r.done
+  return Math.min(phaseCount, r.done + 1)
+}
+
+function phaseStatusAt(r: CatalogRun, index: number, ran: boolean): CatalogPhaseRun['status'] {
+  if (index < r.done) return 'completed'
+  if (!ran) return 'pending'
+  return r.status === 'completed' ? 'completed' : r.status
+}
+
+function splitTokens(tokens: number): CatalogPhaseRun['tokens'] {
+  const input = Math.round(tokens * 0.02)
+  const output = Math.round(tokens * 0.05)
+  const cacheWrite = Math.round(tokens * 0.13)
+  return { input, output, cacheWrite, cacheRead: tokens - input - output - cacheWrite }
+}
+
+function phaseRunAt(r: CatalogRun, phase: CatalogPhase, index: number, ran: boolean, share: (v: number) => number, cursor: string): CatalogPhaseRun {
+  const status = phaseStatusAt(r, index, ran)
+  const seconds = ran ? Math.max(1, Math.round(share(r.seconds))) : null
+  const completedAt = ran && status !== 'running' && seconds !== null ? after(cursor, seconds * 1000) : null
+  return {
+    run: r,
+    phase,
+    index,
+    status,
+    sessionId: ran ? fakeId(`session-${r.id}-${phase.id}`) : null,
+    artifactId: status === 'completed' ? fakeId(`artifact-${r.id}-${phase.id}`) : null,
+    startedAt: ran ? cursor : null,
+    completedAt,
+    seconds,
+    tokens: splitTokens(ran ? Math.round(share(r.tokens)) : 0),
+    cost: ran ? share(r.cost) : 0,
+  }
 }

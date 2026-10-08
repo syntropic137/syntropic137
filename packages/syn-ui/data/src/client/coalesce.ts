@@ -23,49 +23,62 @@ export class Coalescer {
 
   run<T>(key: string, start: (signal: AbortSignal) => Promise<T>, signal?: AbortSignal): Promise<T> {
     if (signal?.aborted) return Promise.reject(abortError())
-    let flight = this.flights.get(key) as Flight<T> | undefined
-    if (!flight) {
-      const controller = new AbortController()
-      const promise = start(controller.signal)
-      const created: Flight<T> = { promise, controller, waiters: 0 }
-      flight = created
-      this.flights.set(key, created as Flight<unknown>)
-      const clear = () => {
-        if (this.flights.get(key) === (created as Flight<unknown>)) this.flights.delete(key)
-      }
-      promise.then(clear, clear)
-    }
-    const shared = flight
+    const shared = this.flightFor(key, start)
     shared.waiters++
     if (!signal) return shared.promise
+    return this.follow(key, shared, signal)
+  }
+
+  /** The in-flight request for `key`, starting one when there is none. */
+  private flightFor<T>(key: string, start: (signal: AbortSignal) => Promise<T>): Flight<T> {
+    const existing = this.flights.get(key) as Flight<T> | undefined
+    if (existing) return existing
+    const controller = new AbortController()
+    const promise = start(controller.signal)
+    const created: Flight<T> = { promise, controller, waiters: 0 }
+    this.flights.set(key, created as Flight<unknown>)
+    const clear = () => this.drop(key, created)
+    promise.then(clear, clear)
+    return created
+  }
+
+  private drop<T>(key: string, flight: Flight<T>): void {
+    if (this.flights.get(key) === (flight as Flight<unknown>)) this.flights.delete(key)
+  }
+
+  /** One caller's view of a shared flight: settles with it, or rejects alone when its signal aborts. */
+  private follow<T>(key: string, shared: Flight<T>, signal: AbortSignal): Promise<T> {
     return new Promise<T>((resolve, reject) => {
       let done = false
-      const onAbort = () => {
-        if (done) return
+      const finish = (): boolean => {
+        if (done) return false
         done = true
-        shared.waiters--
-        if (shared.waiters <= 0) {
-          shared.controller.abort()
-          if (this.flights.get(key) === (shared as Flight<unknown>)) this.flights.delete(key)
-        }
+        return true
+      }
+      const onAbort = () => {
+        if (!finish()) return
+        this.leave(key, shared)
         reject(abortError())
+      }
+      const settle = (fn: () => void) => {
+        if (!finish()) return
+        signal.removeEventListener('abort', onAbort)
+        fn()
       }
       signal.addEventListener('abort', onAbort, { once: true })
       shared.promise.then(
-        (v) => {
-          if (done) return
-          done = true
-          signal.removeEventListener('abort', onAbort)
-          resolve(v)
-        },
-        (e) => {
-          if (done) return
-          done = true
-          signal.removeEventListener('abort', onAbort)
-          reject(e)
-        },
+        (v) => settle(() => resolve(v)),
+        (e: unknown) => settle(() => reject(e)),
       )
     })
+  }
+
+  /** A caller gives up; the shared request is aborted once nobody waits on it. */
+  private leave<T>(key: string, shared: Flight<T>): void {
+    shared.waiters--
+    if (shared.waiters > 0) return
+    shared.controller.abort()
+    this.drop(key, shared)
   }
 }
 

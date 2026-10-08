@@ -77,10 +77,7 @@ function operations(p: CatalogPhaseRun): OperationInfo[] {
   const sid = p.sessionId!
   const t0 = p.startedAt ?? new Date(0).toISOString()
   const delegating = p.run.workflowId.includes('delegates')
-  const base = delegating ? DELEGATE_SCRIPT : GENERIC_SCRIPT
-  // One in seven sessions is a long one, so the timeline's chunked rendering has work to do.
-  const repeats = hash(sid) % 7 === 0 ? 30 : 1
-  const script: Step[] = repeats === 1 ? base : Array.from({ length: repeats }, () => base).flat()
+  const script = sessionScript(sid, delegating)
   const ops: OperationInfo[] = [
     { operation_id: `${sid}-0`, operation_type: 'message_request', timestamp: t0, success: true, message_role: 'user', message_content: `Run the ${p.phase.name} phase of ${p.run.workflowId}.\nRead the inputs in /workspace/artifacts/input and write the deliverable to /workspace/artifacts/output.` },
   ]
@@ -88,21 +85,42 @@ function operations(p: CatalogPhaseRun): OperationInfo[] {
   script.forEach((step, i) => {
     at += step.gap * 1_000
     const failed = !!step.fail || (p.status === 'failed' && i === script.length - 1)
-    const use = `toolu_${sid.slice(0, 6)}_${i}`
-    ops.push({ operation_id: `${sid}-s${i}`, operation_type: 'tool_execution_started', timestamp: after(t0, at), success: true, tool_name: step.tool, tool_use_id: use, tool_input: step.input })
-    ops.push({
+    ops.push(...toolOperations(sid, t0, at, step, i, failed))
+  })
+  if (p.status === 'running') ops.pop()
+  ops.push(...closingOperations(p, sid, t0, at, delegating))
+  return ops
+}
+
+function sessionScript(sid: string, delegating: boolean): Step[] {
+  const base = delegating ? DELEGATE_SCRIPT : GENERIC_SCRIPT
+  // One in seven sessions is a long one, so the timeline's chunked rendering has work to do.
+  const repeats = hash(sid) % 7 === 0 ? 30 : 1
+  return repeats === 1 ? base : Array.from({ length: repeats }, () => base).flat()
+}
+
+function toolOperations(sid: string, t0: string, at: number, step: Step, i: number, failed: boolean): OperationInfo[] {
+  const use = `toolu_${sid.slice(0, 6)}_${i}`
+  const dur = step.dur ?? 0.4
+  return [
+    { operation_id: `${sid}-s${i}`, operation_type: 'tool_execution_started', timestamp: after(t0, at), success: true, tool_name: step.tool, tool_use_id: use, tool_input: step.input },
+    {
       operation_id: `${sid}-c${i}`,
       operation_type: 'tool_execution_completed',
-      timestamp: after(t0, at + (step.dur ?? 0.4) * 1_000),
-      duration_seconds: step.dur ?? 0.4,
+      timestamp: after(t0, at + dur * 1_000),
+      duration_seconds: dur,
       success: !failed,
       tool_name: step.tool,
       tool_use_id: use,
       tool_output: failed && !step.out ? 'Process exited with status 1' : (step.out ?? null),
       error_message: failed ? (step.out ?? 'Process exited with status 1') : null,
-    })
-  })
-  if (p.status === 'running') ops.pop()
+    },
+  ]
+}
+
+/** The git commit (completed non-delegating sessions) and session end (finished sessions). */
+function closingOperations(p: CatalogPhaseRun, sid: string, t0: string, at: number, delegating: boolean): OperationInfo[] {
+  const ops: OperationInfo[] = []
   if (!delegating && p.status === 'completed') {
     ops.push({ operation_id: `${sid}-git`, operation_type: 'git_commit', timestamp: after(t0, at + 2_000), success: true, git_sha: '4f2a9c1e88d07b3a', git_branch: 'main', git_repo: p.run.repo ? p.run.repo.replace('https://github.com/', '') : null, git_message: 'fix: coalesce execution list requests' })
   }
