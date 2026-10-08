@@ -433,6 +433,7 @@ def completed_phase(
     artifact_ids: list[str],
     auth_tokens: tuple[int, int, int, int] | None,
     now: DateTime | None = None,
+    observed: ObservedBranches | None = None,
 ) -> CompletedPhase:
     """Build what a completed phase reports.
 
@@ -498,6 +499,7 @@ def completed_phase(
             cache_read_tokens=cache_read,
             total_tokens=total,
             duration_seconds=elapsed,
+            observed_branches=observed.recorded if observed is not None else None,
         ),
         duration_seconds=elapsed,
         input_tokens=inp,

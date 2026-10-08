@@ -7,7 +7,8 @@ and their cost; it never asks GitHub, so a replay rebuilds identical numbers.
 
 PROJECTION SIDE (handle_event): pure. A run is linked to a PR when it reports
   one: the ``pr_number`` and ``repository`` it was started with, a branch its
-  resume continued, or a branch its failure observed with a PR open from it. A
+  resume continued, or a branch a phase observed with a PR open from it as the
+  phase completed or failed - which is how a run that OPENED a PR links. A
   resume inherits its parent's links and carries its whole chain into every
   link it makes, so a failed run, its resume and an independent reverify of
   the same PR are all contributors. A replayed ``PullRequestMergeRecorded``
@@ -35,6 +36,12 @@ from event_sourcing import (
     ProjectionStore,
 )
 
+from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continuation import (
+    repository_slugs_by_name,
+)
+from syn_domain.contexts.orchestration.domain.events.PhaseCompletedEvent import (
+    PhaseCompletedEvent,
+)
 from syn_domain.contexts.orchestration.domain.events.PullRequestMergeRecordedEvent import (
     PullRequestMergeRecordedEvent,
 )
@@ -53,6 +60,9 @@ from syn_domain.contexts.orchestration.slices.attribute_merged_pull_requests.val
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+        BranchObservation,
+    )
     from syn_domain.contexts.orchestration.slices.attribute_merged_pull_requests.value_objects import (
         MergeRecorder,
         PullRequestMergePort,
@@ -62,6 +72,7 @@ logger = logging.getLogger(__name__)
 
 _STARTED = "WorkflowExecutionStarted"
 _FAILED = "WorkflowFailed"
+_PHASE_COMPLETED = "PhaseCompleted"
 _MERGE_RECORDED = "PullRequestMergeRecorded"
 #: Wakes for the processor side: a run ending, and the platform's durable clock,
 #: which is what asks again after a PR merges on a quiet system.
@@ -83,18 +94,26 @@ def _reported_pull_requests(event: WorkflowExecutionStartedEvent) -> Iterable[tu
             yield branch.repository, branch.pull_request
 
 
-def _observed_pull_requests(event: WorkflowFailedEvent) -> Iterable[tuple[str, int]]:
-    """The PRs open from the branches a failed run's phase observed."""
-    for observed in event.observed_branches or ():
-        if observed.pull_request is not None and "/" in observed.repo:
-            yield observed.repo, observed.pull_request
+def _observed_pull_requests(
+    run: RunLinks, observations: Iterable[BranchObservation] | None
+) -> Iterable[tuple[str, int]]:
+    """The PRs open from the branches a phase observed as it completed or failed.
+
+    An observation names the repository by its workspace directory; the run's
+    own slugs resolve it, and a name two of them share resolves to neither.
+    """
+    slugs = repository_slugs_by_name(run.repositories)
+    for observed in observations or ():
+        repository = observed.repo if "/" in observed.repo else slugs.get(observed.repo)
+        if observed.pull_request is not None and repository is not None:
+            yield repository, observed.pull_request
 
 
 class MergedPullRequestAttributionProcessManager(ProcessManager):
     """Records which executions contributed to each merged PR."""
 
     PROJECTION_NAME = "merged_pr_attribution"
-    VERSION = 1
+    VERSION = 2  # 2: folds PhaseCompleted observations (#1728)
 
     def __init__(
         self,
@@ -113,7 +132,7 @@ class MergedPullRequestAttributionProcessManager(ProcessManager):
         return self.VERSION
 
     def get_subscribed_event_types(self) -> set[str] | None:
-        return {_STARTED, _FAILED, _MERGE_RECORDED, *_RECHECK_EVENTS}
+        return {_STARTED, _PHASE_COMPLETED, _FAILED, _MERGE_RECORDED, *_RECHECK_EVENTS}
 
     async def handle_event(
         self,
@@ -127,9 +146,9 @@ class MergedPullRequestAttributionProcessManager(ProcessManager):
             event = envelope.event
             if isinstance(event, WorkflowExecutionStartedEvent):
                 await self._on_started(event)
-            elif isinstance(event, WorkflowFailedEvent):
+            elif isinstance(event, (PhaseCompletedEvent, WorkflowFailedEvent)):
                 run = await self._run(event.execution_id)
-                await self._link(run, _observed_pull_requests(event))
+                await self._link(run, _observed_pull_requests(run, event.observed_branches))
             elif isinstance(event, PullRequestMergeRecordedEvent):
                 await self._on_merge_recorded(event)
             await checkpoint_store.save_checkpoint(
@@ -148,11 +167,13 @@ class MergedPullRequestAttributionProcessManager(ProcessManager):
     async def _on_started(self, event: WorkflowExecutionStartedEvent) -> None:
         inherited: tuple[str, ...] = ()
         chain: tuple[str, ...] = (event.execution_id,)
+        repositories = tuple(c.repository for c in event.source_commits or ())
         if event.resumed_from is not None:
             parent = await self._run(event.resumed_from.parent_execution_id)
             chain = tuple(dict.fromkeys((*parent.chain, event.execution_id)))
             inherited = parent.pull_requests
-        run = RunLinks(execution_id=event.execution_id, chain=chain)
+            repositories = repositories or parent.repositories
+        run = RunLinks(execution_id=event.execution_id, chain=chain, repositories=repositories)
         for key in inherited:
             pr = await self._pull_request_by_key(key)
             if pr is not None:

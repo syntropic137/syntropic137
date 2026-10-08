@@ -22,6 +22,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
     BranchObservation,
     PhaseDefinition,
     ResumeOrigin,
+    SourceCommit,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     WorkflowExecutionAggregate,
@@ -42,6 +43,11 @@ from syn_domain.contexts.orchestration.slices.attribute_merged_pull_requests imp
     MergedPullRequestAttributionProcessManager,
     PullRequestMergeState,
     RecordPullRequestMergeHandler,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.errors import ObservedBranches
+from syn_domain.contexts.orchestration.slices.execute_workflow.phase_outcome import (
+    completed_execution,
+    completed_phase,
 )
 from syn_domain.contexts.orchestration.slices.scorecard import (
     ExecutionSpend,
@@ -297,3 +303,95 @@ async def test_the_aggregate_records_a_contributor_once_per_pr() -> None:
         (7, "a", "wf"),
         (9, "a", "wf"),
     ]
+
+
+def _run_that_opens_pr_7(execution_id: str) -> list[DomainEvent]:
+    """A run started on no PR whose one phase opened PR 7, through the real producers.
+
+    The processor observes the phase's branches as it completes (with the PR
+    the forge has open from each) and hands them to ``completed_phase``; the
+    aggregate puts them on ``PhaseCompleted``. The observation names the
+    workspace directory, ``widget``, as git does, not the slug.
+    """
+    aggregate = WorkflowExecutionAggregate()
+    aggregate.start_execution(
+        StartExecutionCommand(
+            execution_id=execution_id,
+            workflow_id="wf",
+            workflow_name="implement",
+            total_phases=1,
+            inputs={"task": "build the widget"},
+            phase_definitions=[PhaseDefinition(phase_id="implement", name="Implement", order=1)],
+            source_commits=[SourceCommit(repository=REPO, sha="a" * 40)],
+        )
+    )
+    opened = BranchObservation(
+        repo="widget",
+        branch="feat/widget",
+        remote="origin",
+        remote_commit="b" * 40,
+        remote_commit_at_phase_start=None,
+        unpushed_commits=0,
+        pull_request=7,
+    )
+    phase = completed_phase(
+        execution_id=execution_id,
+        workflow_id="wf",
+        phase_id="implement",
+        session_id="s",
+        started_at=_at(0),
+        artifact_ids=[],
+        auth_tokens=None,
+        now=_at(1),
+        observed=ObservedBranches(branches=(opened,)),
+    )
+    aggregate.complete_phase(phase.command)
+    aggregate.complete_execution(
+        completed_execution([phase.result], []).as_command(execution_id, total_phases=1)
+    )
+    return [e.event for e in aggregate.get_uncommitted_events()]
+
+
+async def _live(
+    log: list[DomainEvent],
+) -> tuple[ScorecardProjection, list[DomainEvent], tuple[int | None, Decimal | None]]:
+    """Deliver ``log`` live, let the manager record, deliver what it recorded."""
+    manager = MergedPullRequestAttributionProcessManager(
+        store=InMemoryProjectionStore(), merges=_Forge(), recorder=_Recorder(log)
+    )
+    scorecard = ScorecardProjection(InMemoryProjectionStore())
+    history = len(log)
+    await _deliver((manager, scorecard), log)
+    await manager.process_pending()
+    recorded = log[history:]
+    await _deliver((manager, scorecard), recorded)
+    return scorecard, recorded, await _score(scorecard)
+
+
+async def test_the_run_that_opened_a_pr_and_its_later_reverify_both_contribute() -> None:
+    log = [*_run_that_opens_pr_7("a"), _started("c", 4, pr=7), _completed("c", 5)]
+    assert not any(isinstance(e, WorkflowFailedEvent) for e in log)  # a succeeded
+
+    scorecard, recorded, live = await _live(log)
+
+    assert sorted(e.execution_id for e in recorded) == ["a", "c"]  # type: ignore[attr-defined]
+    [merged] = await scorecard.merged_pull_requests_for_days(["2026-10-07"])
+    assert (merged.repository, merged.pull_request) == (REPO, 7)
+    assert sorted(merged.execution_ids) == ["a", "c"]
+    assert live == (1, Decimal(5))  # the creator's 1 + the reverify's 4
+
+    replay_recorder = _Recorder([])
+    replayed = MergedPullRequestAttributionProcessManager(
+        store=InMemoryProjectionStore(), merges=_Unreachable(), recorder=replay_recorder
+    )
+    rebuilt = ScorecardProjection(InMemoryProjectionStore())
+    await _deliver((replayed, rebuilt), log)  # catch-up: handle_event only
+    assert await _score(rebuilt) == live
+    assert replay_recorder.log == []
+
+
+async def test_the_run_that_opened_a_merged_pr_counts_it_on_its_own() -> None:
+    _scorecard, recorded, live = await _live(_run_that_opens_pr_7("a"))
+
+    assert [e.execution_id for e in recorded] == ["a"]  # type: ignore[attr-defined]
+    assert live == (1, Decimal(1))

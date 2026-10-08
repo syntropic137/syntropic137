@@ -622,6 +622,9 @@ class WorkflowExecutionAggregate(PullRequestMergeRecording):
             cache_read_tokens=command.cache_read_tokens,
             total_tokens=command.total_tokens,
             duration_seconds=command.duration_seconds,
+            observed_branches=(
+                list(command.observed_branches) if command.observed_branches is not None else None
+            ),
         )
         self._apply(event)
 

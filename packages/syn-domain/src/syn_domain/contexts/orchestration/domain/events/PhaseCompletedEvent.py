@@ -9,6 +9,7 @@ from event_sourcing import DomainEvent, event
 
 # Runtime import needed for the Pydantic field type (noqa: TC001)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    BranchObservation,  # noqa: TC001 - needed at runtime for Pydantic
     SideEffectStatus,  # noqa: TC001 - needed at runtime for Pydantic
 )
 
@@ -50,6 +51,14 @@ class PhaseCompletedEvent(DomainEvent):
     #: refused PR comment beside a finished deliverable. None when the phase
     #: said nothing, which includes every event written before this field.
     reported_side_effects: SideEffectStatus | None = None
+
+    #: Where the phase's branches stood as it completed, with the PR open from
+    #: each - the same reading a failing phase records on `WorkflowFailed`
+    #: (#1200, #1513). It is how a run that OPENED a PR is linked to it for
+    #: merged-PR attribution (#1728): that PR did not exist when the run was
+    #: started, so no input names it. None when nobody looked, which includes
+    #: every event written before this field.
+    observed_branches: list[BranchObservation] | None = None
 
     # Metrics (tokens only — cost lives in Lane 2)
     input_tokens: int = 0

@@ -6,6 +6,7 @@ emits:
 projection: MergedPullRequestAttributionProcessManager
 subscribes_to:
   - WorkflowExecutionStartedEvent
+  - PhaseCompletedEvent
   - WorkflowFailedEvent
   - PullRequestMergeRecordedEvent
 returns: None

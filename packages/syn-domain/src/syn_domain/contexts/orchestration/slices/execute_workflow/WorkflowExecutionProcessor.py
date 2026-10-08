@@ -914,6 +914,10 @@ class WorkflowExecutionProcessor:
             delivers_repo_changes=phase.delivers_repo_changes,
         )
 
+        # While the workspace is still alive: where its branches stand and
+        # which PR is open from each, so a run that opened a PR is linked to
+        # it for merged-PR attribution (#1728). Never raises.
+        observed = await self._observe_branches(await runtime.observe(todo.phase_id), aggregate)
         harvest = runtime.harvest(todo.execution_id, todo.phase_id)
         outcome = completed_phase(
             execution_id=todo.execution_id,
@@ -923,6 +927,7 @@ class WorkflowExecutionProcessor:
             started_at=harvest.started_at,
             artifact_ids=harvest.artifact_ids,
             auth_tokens=harvest.auth_tokens,
+            observed=observed,
         )
         phase_results.append(outcome.result)
         completed_phase_ids.append(todo.phase_id)

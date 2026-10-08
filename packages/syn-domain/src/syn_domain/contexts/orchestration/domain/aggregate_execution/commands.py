@@ -296,6 +296,7 @@ class CompletePhaseCommand:
         cache_read_tokens: int,
         total_tokens: int,
         duration_seconds: float,
+        observed_branches: Sequence[BranchObservation] | None = None,
     ) -> None:
         self.aggregate_id = execution_id
         self.workflow_id = workflow_id
@@ -308,6 +309,7 @@ class CompletePhaseCommand:
         self.cache_read_tokens = cache_read_tokens
         self.total_tokens = total_tokens
         self.duration_seconds = duration_seconds
+        self.observed_branches = observed_branches
 
 
 class CancelExecutionCommand:

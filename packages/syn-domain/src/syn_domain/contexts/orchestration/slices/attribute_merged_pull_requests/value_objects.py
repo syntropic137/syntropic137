@@ -35,13 +35,18 @@ class MergeRecorder(Protocol):
 
 
 class RunLinks(BaseModel):
-    """One execution's resume chain, oldest first, and the PRs it is linked to."""
+    """One execution's resume chain, oldest first, and the PRs it is linked to.
+
+    ``repositories`` are the run's ``owner/name`` slugs, which is how a branch
+    observation's directory name is resolved to the PR's repository.
+    """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     execution_id: str
     chain: tuple[str, ...]
     pull_requests: tuple[str, ...] = ()
+    repositories: tuple[str, ...] = ()
 
 
 class PullRequestContributors(BaseModel):
