@@ -38,7 +38,11 @@ _GOLDEN = _FIXTURES / "dry-run-all.txt"
 #: The same, on a host whose compose already pins both services to the target:
 #: a replayed stage, which the original script answered with its own message.
 _GOLDEN_STAGED = _FIXTURES / "dry-run-all-staged.txt"
-_VERSION = "0.33.2-beta.9"
+#: A version no real pit stop ever ships. The script refuses to run when
+#: <repo>_worktrees/pit-stop-<version> exists, and on the maintainer's machine
+#: every real beta leaves one behind, so a real-looking version failed this
+#: whole file locally (0.33.2-beta.9 did).
+_VERSION = "0.0.0-beta.1310"
 
 _SSH = """#!/usr/bin/env bash
 echo "$*" >> "$PIT_LOG/ssh"
@@ -258,7 +262,7 @@ def _run_branch_against(
 ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
     preamble = f"""
 set -euo pipefail
-TAG=v0.33.2-beta.9; SERVICE=gateway; DRY=0; HOST=fake-host; API={api_url}; SYN_API_PASSWORD=pw
+TAG=v0.0.0-beta.1310; SERVICE=gateway; DRY=0; HOST=fake-host; API={api_url}; SYN_API_PASSWORD=pw
 COMPOSE_DIR=/root/.syntropic137; COMPOSE=docker-compose.syntropic137.yaml; TMP={tmp}
 RECOVERY=""; T0=$(date +%s)
 step() {{ printf '==> %s\\n' "$*"; }}
@@ -301,7 +305,7 @@ class TestGatewayOnlyLive:
     def test_swaps_and_verifies_without_touching_the_api_or_admission(self, tmp_path: Path) -> None:
         proc, calls = _run_branch(tmp_path, health=[502, 503, 200])
         assert proc.returncode == 0, proc.stderr
-        assert "PIT STOP DONE: syn-gateway v0.33.2-beta.9" in proc.stdout
+        assert "PIT STOP DONE: syn-gateway v0.0.0-beta.1310" in proc.stdout
         compose = [c for c in calls if "docker compose" in c]
         assert compose == [
             "remote cd /root/.syntropic137 && docker compose -f "

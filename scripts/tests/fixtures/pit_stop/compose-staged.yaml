@@ -2,9 +2,9 @@
 services:
   api:
     container_name: syn137-api
-    image: ghcr.io/syntropic137/syn-api:v0.33.2-beta.9
+    image: ghcr.io/syntropic137/syn-api:v0.0.0-beta.1310
   gateway:
     container_name: syn137-gateway
-    image: ghcr.io/syntropic137/syn-gateway:v0.33.2-beta.9
+    image: ghcr.io/syntropic137/syn-gateway:v0.0.0-beta.1310
   collector:
     image: ghcr.io/syntropic137/syn-collector:v0.33.1-beta.2
