@@ -474,7 +474,10 @@ def _independent_pnpm_members() -> set[str]:
     honest.
     """
     declared = yaml.safe_load((ROOT / "pnpm-workspace.yaml").read_text())["packages"]
-    return {d for d in declared if d.startswith("lib/")} | {"packages/openclaw-plugin"}
+    # syn-ui and its Skyline library are pre-release (0.0.0) until the cutover
+    # release; apps/syn-ui joins the product version then (#1788).
+    syn_ui = {d for d in declared if d == "apps/syn-ui" or d.startswith("packages/syn-ui/")}
+    return {d for d in declared if d.startswith("lib/")} | {"packages/openclaw-plugin"} | syn_ui
 
 
 class TestNodeManifestList:

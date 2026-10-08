@@ -21,7 +21,7 @@ SKYLINE_MARK = "/next/assets/"
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, *args: object, **kwargs: object) -> None:
+    def redirect_request(self, *_args: object, **_kwargs: object) -> None:
         return None
 
 
@@ -31,9 +31,17 @@ _opener = urllib.request.build_opener(_NoRedirect, urllib.request.ProxyHandler({
 def fetch(base: str, path: str) -> tuple[int, dict[str, str], str]:
     try:
         with _opener.open(base + path, timeout=10) as r:
-            return r.status, {k.lower(): v for k, v in r.headers.items()}, r.read().decode("utf-8", "replace")
+            return (
+                r.status,
+                {k.lower(): v for k, v in r.headers.items()},
+                r.read().decode("utf-8", "replace"),
+            )
     except urllib.error.HTTPError as e:
-        return e.code, {k.lower(): v for k, v in e.headers.items()}, e.read().decode("utf-8", "replace")
+        return (
+            e.code,
+            {k.lower(): v for k, v in e.headers.items()},
+            e.read().decode("utf-8", "replace"),
+        )
 
 
 def main() -> int:
@@ -47,7 +55,10 @@ def main() -> int:
 
     for path in ("/", "/executions/abc", "/nextish"):
         status, _, body = fetch(base, path)
-        check(status == 200 and SKYLINE_MARK not in body, f"{path} -> React index (200, no {SKYLINE_MARK})")
+        check(
+            status == 200 and SKYLINE_MARK not in body,
+            f"{path} -> React index (200, no {SKYLINE_MARK})",
+        )
 
     status, headers, _ = fetch(base, "/next")
     check(status == 301 and headers.get("location") == "/next/", "/next -> 301 /next/")
@@ -64,7 +75,10 @@ def main() -> int:
     check(entry is not None, "Skyline index names an entry chunk")
     if entry:
         status, headers, _ = fetch(base, entry.group(0))
-        check(status == 200 and "javascript" in headers.get("content-type", ""), f"{entry.group(0)} -> 200 JS")
+        check(
+            status == 200 and "javascript" in headers.get("content-type", ""),
+            f"{entry.group(0)} -> 200 JS",
+        )
         check("immutable" in headers.get("cache-control", ""), "Skyline assets -> immutable cache")
 
     status, _, _ = fetch(base, "/next/assets/does-not-exist.js")
