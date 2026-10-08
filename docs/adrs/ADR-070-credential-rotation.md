@@ -9,7 +9,7 @@ Proposed. D4, D5 and the service and credential map revised in place 2026-10-05 
 Credential rotation needs an architecture that changes server credentials,
 moves clients to the new values, verifies the cutover, and preserves a recovery
 path without restarting the application. Earlier setup work was paused after
-identifying this failure mode (syntropic137-npx#56):
+identifying this failure mode (syntropic137-setup#56):
 
 > Rotation updates `.env` and secret files but the event store password is baked
 > in at container init time, so after a stack restart the event store can no
@@ -235,6 +235,6 @@ The following are deliberately unresolved and should not be guessed at:
 - ADR-045: Secrets Management Standard (sourcing; this ADR governs rotation)
 - ADR-024: Setup Phase Secrets
 - `docs/experiments/2026-09-06-driver-credential-rotation.md`
-- syntropic137-npx#56: credential rotation disabled
+- syntropic137-setup#56: credential rotation disabled
 - #1179 / #1181: refuse to act while executions are in flight
 - #1230: Redis CPU cap and the connection churn measurement

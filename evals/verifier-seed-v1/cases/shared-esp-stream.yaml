@@ -33,3 +33,4 @@ expected:
     - [share a stream, share one stream, shared stream, same stream, one stream, duplicate, drop, conflict, collid, collision, clash, contaminat, interleav,
        overwrit, corrupt, mix, reject, version, lost, wrong, fail, concurren,
        optimistic, append, never dispatch, never start, swallow]
+split: train

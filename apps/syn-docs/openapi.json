@@ -15616,6 +15616,11 @@
             "title": "Delivers Repo Changes",
             "default": true
           },
+          "requires_verdict": {
+            "type": "boolean",
+            "title": "Requires Verdict",
+            "default": false
+          },
           "sandbox": {
             "type": "string",
             "title": "Sandbox",

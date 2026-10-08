@@ -130,6 +130,8 @@ phases:
     # which production does not do yet (#1308, #1342), so this declaration is
     # correct but not yet in effect. See workflows/sdlc/README.md.
     delivers_repo_changes: false
+    # A review: no review_verdict fails the phase instead of advancing by order (PC-116).
+    requires_verdict: true
     # No allowed_tools: this phase runs on codex, which enforces a
     # filesystem sandbox rather than a tool vocabulary. A tool list here
     # would be accepted and never applied, so the validator refuses it.
@@ -192,6 +194,8 @@ phases:
     # which production does not do yet (#1308, #1342), so this declaration is
     # correct but not yet in effect. See workflows/sdlc/README.md.
     delivers_repo_changes: false
+    # A review: no review_verdict fails the phase instead of advancing by order (PC-116).
+    requires_verdict: true
     # No allowed_tools: this phase runs on codex, which enforces a
     # filesystem sandbox rather than a tool vocabulary. A tool list here
     # would be accepted and never applied, so the validator refuses it.

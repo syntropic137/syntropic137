@@ -14,6 +14,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
     DelegationFailure,
     DelegationFailureReason,
     FailureClassification,
+    ReviewVerdict,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.upstream_failure import (
     UpstreamFailureError,
@@ -505,6 +506,31 @@ class FailureAccount(NamedTuple):
     delegation_failure: DelegationFailure | None = None
     """Which required delegate did not happen, and why (#894); `None` for
     every failure that is not a failed delegation."""
+
+
+class PhaseReportedNoVerdictError(RuntimeError):
+    """A phase that must report a review verdict reported none (PC-116).
+
+    THE FAILURE THIS EXISTS TO STOP. No verdict advances by order, on purpose,
+    so a verify phase that forgot ``review_verdict`` was read as "found
+    something" and the run spent a repair round on a fix nobody asked for -
+    or, on the last round, finished as though review had happened.
+
+    Classified `PLATFORM` by `failure_account`, like every failure that is
+    not the phase's own readable refusal: the agent claimed success and the
+    platform detected the gap. It fails the phase through the ordinary path,
+    so the execution is FAILED and resumable at this phase.
+    """
+
+    def __init__(self, *, phase_id: str) -> None:
+        super().__init__(
+            f"verify produced no verdict: phase {phase_id} declares requires_verdict, "
+            f"and its TASK_RESULT named no review_verdict this reader knows "
+            f"(exactly one of {', '.join(v.value for v in ReviewVerdict)}). "
+            f"Without one the review rounds cannot tell a certified change from a "
+            f"blocked one, so the phase fails rather than advancing by order."
+        )
+        self.phase_id = phase_id
 
 
 class DelegationFailedError(RuntimeError):

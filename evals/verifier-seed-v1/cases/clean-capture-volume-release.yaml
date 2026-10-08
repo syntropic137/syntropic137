@@ -13,3 +13,4 @@ task: >
   capture volumes: the proxy policy now allows DELETE as well as GET on a
   capture volume, by its exact generated name only. Review the proxy policy
   in every compose file it is written in, and what it now allows.
+split: train

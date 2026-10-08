@@ -13,3 +13,4 @@ task: >
   whether a workflow package source is remote, so that sources with an
   unsupported scheme are no longer treated as live and can be pruned on
   install. Review install and prune for every kind of source a user can give.
+split: train
