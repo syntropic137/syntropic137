@@ -21,9 +21,9 @@ verification might have said edits a certified branch at nobody's request.
 
 ## Which round this is
 
-**Round 1 of 3.** This workflow repairs in up to three rounds (`fix`, `fix_2`,
-`fix_3`, each followed by its own re-verification). In round 1 the verdict you
-act on is `artifacts/input/verify/verify.md`, as above. Write `Round: 1 of 3` as
+**Round 1 of 2.** This workflow repairs in up to two rounds (`fix` and
+`fix_2`, each followed by its own re-verification). In round 1 the verdict you
+act on is `artifacts/input/verify/verify.md`, as above. Write `Round: 1 of 2` as
 the first line of your report.
 
 ## If verification certified the change, stop
@@ -167,7 +167,7 @@ becomes remote red.
 under `artifacts/output/` FAILS.** Write the file before you finish, including
 when the answer is "nothing to do".
 
-1. **`Round: N of 3`** as the first line, from the section above, and which
+1. **`Round: N of 2`** as the first line, from the section above, and which
    report you took as the latest verdict.
 2. **What verification found** - one line per defect.
 3. **What you changed** for each, with `file:line`, or why you did not.

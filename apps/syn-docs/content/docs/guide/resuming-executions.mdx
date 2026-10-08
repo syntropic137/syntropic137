@@ -240,7 +240,8 @@ A workflow with bounded repair rounds (such as `sdlc-implement-v3`) can
 **complete** with `review_verdict: blocked`: every round ran and the last review
 still blocked the change. There is no unfinished phase, but the run is still
 resumable, at its **repair point**: the fix phase of the last round that ran
-(`fix_3` in `sdlc-implement-v3`).
+(`fix_2` in `sdlc-implement-v3`; `fix_3` for a run started under the
+earlier three-round definition).
 
 - The child inherits every phase before the repair point and re-runs that
   round's fix, its review, and everything after (`finalize_pr`).

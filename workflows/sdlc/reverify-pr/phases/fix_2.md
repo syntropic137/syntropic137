@@ -21,7 +21,7 @@ verification might have said edits a certified branch at nobody's request.
 
 ## Which round this is
 
-**Round 2 of 3.** The re-verification after the previous fix round did not
+**Round 2 of 2.** The re-verification after the previous fix round did not
 certify the branch, so the run came back here. The verdict you act on is
 **`artifacts/input/reverify/reverify.md`** (flat alias
 `artifacts/input/reverify.md`): its first line is the verdict, and its blocking
@@ -33,7 +33,19 @@ the SHA it says it checked out is the verified SHA you check out and build on.
 Read the earlier reports in `artifacts/input/` too, so you do not undo a repair
 an earlier round made - but the latest verdict decides what is still open. If
 its first line is `CERTIFIED` there is no blocking defect, which is the next
-section's case. Write `Round: 2 of 3` as the first line of your report.
+section's case. Write `Round: 2 of 2` as the first line of your report.
+
+**If this run is a resume of one that ended with unresolved findings,** round 2
+already ran once, pushed, and was BLOCKED after it. You can tell: the draft PR
+carries a `finalize_pr` comment saying `2 of 2` repair rounds ran. Round 2's
+findings are not in `artifacts/input/`; that comment names the blocking finding
+and the head SHA it applies to. Those findings are your scope too, and **on a
+resume the verified SHA is the head SHA that comment names**, not the one
+`reverify` verified: that older SHA is the head before the previous attempt
+pushed, so checking it out would discard that attempt's commits and the remote
+head can never equal it. Use the comment's SHA wherever the sections below say
+"the verified SHA", including in both `rev-parse` checks, and paste the comment's
+URL into your report beside it.
 
 ## If verification certified the change, stop
 
@@ -176,7 +188,7 @@ becomes remote red.
 under `artifacts/output/` FAILS.** Write the file before you finish, including
 when the answer is "nothing to do".
 
-1. **`Round: N of 3`** as the first line, from the section above, and which
+1. **`Round: N of 2`** as the first line, from the section above, and which
    report you took as the latest verdict.
 2. **What verification found** - one line per defect.
 3. **What you changed** for each, with `file:line`, or why you did not.

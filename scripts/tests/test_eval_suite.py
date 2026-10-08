@@ -61,7 +61,14 @@ from syn_domain.contexts.orchestration import (
     build_command_from_definition,
 )
 from syn_domain.contexts.orchestration._shared.workflow_definition import WorkflowDefinition
-from syn_shared.agents import PhaseModelDefaults
+from syn_shared.agents import (
+    CODEX_MODEL_IDS,
+    ModelId,
+    PhaseModelDefaults,
+    resolve_codex_model_alias,
+    resolve_model_alias,
+)
+from syn_shared.pricing import resolve_model_pricing
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -83,13 +90,20 @@ def _copy_suite(tmp_path: Path) -> Path:
 
 _CODEX_WF = "eval-verify-pinned-codex-v1"
 _SONNET_WF = "eval-verify-pinned-sonnet-v1"
+# Codex verifiers pinned to an explicit slug, never an alias: the model
+# measured is the one written, whatever `gpt-sol` targets later.
+_PINNED_CODEX_WFS = {
+    "eval-verify-pinned-codex-gpt-6-luna-v1": "gpt-6-luna",
+    "eval-verify-pinned-codex-gpt-5-6-luna-v1": "gpt-5.6-luna",
+    "eval-verify-pinned-codex-gpt-5-6-terra-v1": "gpt-5.6-terra",
+}
 
 
 @pytest.mark.unit
 def test_the_seed_suite_loads_and_records_its_workflow_and_models() -> None:
     loaded = load_suite(DEFAULT_SUITE)
 
-    assert loaded.tag == "verifier-seed-v1:v4:eval-verify-pinned-v1"
+    assert loaded.tag == "verifier-seed-v1:v5:eval-verify-pinned-v1"
     assert loaded.workflow.id == "eval-verify-pinned-v1"
     assert loaded.workflow.models == {"verify": "opus"}
     by_polarity = {
@@ -97,9 +111,9 @@ def test_the_seed_suite_loads_and_records_its_workflow_and_models() -> None:
         for polarity in ("defect", "clean")
     }
     assert by_polarity["defect"] >= {1574, 1649, 1652, 1654, 1679, 1680}
-    assert by_polarity["clean"] == {1083, 1130, 1238, 1486, 1643, 1691}
-    assert sum(c.polarity == "defect" for c in loaded.cases) == 30
-    assert sum(c.polarity == "clean" for c in loaded.cases) == 6
+    assert by_polarity["clean"] == {917, 1010}
+    assert sum(c.polarity == "defect" for c in loaded.cases) == 31
+    assert sum(c.polarity == "clean" for c in loaded.cases) == 2
 
 
 @pytest.mark.unit
@@ -109,7 +123,7 @@ def test_the_same_cases_load_under_the_codex_verifier_with_their_own_tag() -> No
 
     assert codex.workflow.id == _CODEX_WF
     assert codex.workflow.models == {"verify": "gpt-sol"}
-    assert codex.tag == f"verifier-seed-v1:v4:{_CODEX_WF}"
+    assert codex.tag == f"verifier-seed-v1:v5:{_CODEX_WF}"
     assert codex.tag != opus.tag
     assert codex.cases == opus.cases
 
@@ -121,8 +135,32 @@ def test_the_same_cases_load_under_the_sonnet_verifier_with_their_own_tag() -> N
 
     assert sonnet.workflow.id == _SONNET_WF
     assert sonnet.workflow.models == {"verify": "sonnet"}
-    assert sonnet.tag == f"verifier-seed-v1:v4:{_SONNET_WF}"
+    assert sonnet.tag == f"verifier-seed-v1:v5:{_SONNET_WF}"
     assert sonnet.cases == opus.cases
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(("variant", "slug"), sorted(_PINNED_CODEX_WFS.items()))
+def test_the_same_cases_load_under_each_pinned_codex_verifier(variant: str, slug: str) -> None:
+    opus = load_suite(DEFAULT_SUITE)
+    pinned = load_suite(DEFAULT_SUITE, workflow=variant)
+
+    assert pinned.workflow.models == {"verify": slug}
+    assert pinned.tag == f"verifier-seed-v1:v5:{variant}"
+    assert pinned.cases == opus.cases
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("slug", sorted(_PINNED_CODEX_WFS.values()))
+def test_each_pinned_codex_slug_is_a_priced_codex_model_and_not_an_alias(slug: str) -> None:
+    """What the variant passes to `codex exec --model` is the slug itself, and
+    it prices as itself: a run is never costed at the gpt-sol target's rate."""
+    assert resolve_model_alias(slug) is None
+    assert resolve_codex_model_alias(slug) == slug
+    assert ModelId(slug) in CODEX_MODEL_IDS
+    pricing = resolve_model_pricing(slug)
+    assert pricing is not None
+    assert pricing.model_id == slug
 
 
 @pytest.mark.unit
@@ -143,6 +181,7 @@ def _workflow_yaml(relative: str) -> dict[str, object]:
     [
         (_CODEX_WF, ("codex", "gpt-sol", "workspace-write")),
         (_SONNET_WF, ("claude", "sonnet", None)),
+        *((wf, ("codex", slug, "workspace-write")) for wf, slug in _PINNED_CODEX_WFS.items()),
     ],
 )
 def test_each_verify_variant_differs_from_opus_only_in_the_agent(
@@ -150,7 +189,7 @@ def test_each_verify_variant_differs_from_opus_only_in_the_agent(
 ) -> None:
     """Same cases, different verifier: a score difference must be the verifier alone."""
     refs = {r.id: r for r in load_suite(DEFAULT_SUITE).suite.workflows}
-    assert set(refs) == {"eval-verify-pinned-v1", _CODEX_WF, _SONNET_WF}
+    assert set(refs) == {"eval-verify-pinned-v1", _CODEX_WF, _SONNET_WF, *_PINNED_CODEX_WFS}
     opus_path, variant_path = refs["eval-verify-pinned-v1"].path, refs[variant].path
 
     # The prompt files, byte for byte, and the prompt each definition resolves.
@@ -348,7 +387,12 @@ def test_check_passes_a_pin_before_the_first_commit_of_a_fix_series(
     ids=lambda c: c.id,
 )
 def test_every_committed_defect_pins_its_fixs_first_parent(case: DefectCase) -> None:
-    assert _git(ROOT, "rev-parse", f"{case.fix_start}^1") == case.commit
+    if case.reclassified_from:
+        # A reclassified control keeps the pin both verifiers reviewed, before the fix.
+        assert eval_suite._git_ok(ROOT, "merge-base", "--is-ancestor", case.commit, case.fix_start)
+        assert case.commit != case.fix_start
+    else:
+        assert _git(ROOT, "rev-parse", f"{case.fix_start}^1") == case.commit
 
 
 @pytest.mark.unit
@@ -881,6 +925,24 @@ _PARAPHRASES: dict[str, tuple[tuple[str, str], ...]] = {
             "skill invocation is unavailable to the agent.",
         ),
     ),
+    "redis-retry-non-idempotent": (
+        (
+            "redis_client.py:32",
+            "retry_on_timeout=True re-sends a command Redis may already have applied; GETDEL "
+            "and SET NX are not idempotent, so the retry loses the signal or reports a duplicate.",
+        ),
+        (
+            "control/adapters/redis_adapter.py:76",
+            "check_signal uses getdel under a client that retries on timeout: if the first "
+            "attempt deleted the key and the reply was lost, the retry returns nothing and the "
+            "cancel signal is dropped.",
+        ),
+        (
+            "dedup/redis_dedup.py",
+            "the SET NX claim is retried after a timeout; the first attempt already set the "
+            "key, so the retry sees it and the first delivery is treated as a duplicate.",
+        ),
+    ),
     "redis-url-password-logged": (
         (
             "_wiring.py:846",
@@ -1089,6 +1151,10 @@ def test_every_seed_has_at_least_three_paraphrases() -> None:
 
 # Blocking findings that name a seed's file but describe a different defect.
 _WRONG_DEFECTS: dict[str, tuple[str, str]] = {
+    "redis-retry-non-idempotent": (
+        "redis_client.py:30",
+        "the socket timeout is read from a hard-coded constant instead of settings.",
+    ),
     "binary-artifact-minio-key": (
         "minio.py:12",
         "the bucket name is read from an unvalidated setting.",
@@ -1413,7 +1479,7 @@ def test_score_reads_verdict_report_cost_and_model_from_the_api() -> None:
     assert unrecorded == ()
 
     table = render(loaded, rows)
-    assert "exec-1" in table and "PASS" in table and "$3.75" in table and "1/36 passed" in table
+    assert "exec-1" in table and "PASS" in table and "$3.75" in table and "1/33 passed" in table
 
 
 @pytest.mark.unit
@@ -1480,7 +1546,7 @@ def test_launch_on_a_fresh_server_installs_the_workflow_before_any_eval(tmp_path
         c.commit for c in loaded.cases
     ]
     assert [c["tags"] for c in creates] == [["suite:verifier-seed", c.tag] for c in loaded.cases]
-    assert all(s["tags"] == ["suite-version:4", f"verifier:{_WF}"] for s in starts)
+    assert all(s["tags"] == ["suite-version:5", f"verifier:{_WF}"] for s in starts)
     assert [s["eval_id"] for s in starts] == [f"eval-{c.commit[:6]}" for c in loaded.cases]
     assert len(lines) == 1 + len(loaded.cases)
 
@@ -1562,13 +1628,13 @@ def test_launch_under_the_codex_verifier_runs_and_records_the_codex_workflow(
     # The case evals are shared by every verifier; the run says which one it was.
     assert all("starting_workflow_id" not in c for c in creates)
     starts = [json.loads(r.content) for r in server.requests if r.url.path.endswith("/execute")]
-    assert {tuple(s["tags"]) for s in starts} == {("suite-version:4", f"verifier:{_CODEX_WF}")}
+    assert {tuple(s["tags"]) for s in starts} == {("suite-version:5", f"verifier:{_CODEX_WF}")}
     assert all(not any(t.startswith("verifier") for t in c["tags"][1:]) for c in creates)
     starts = [r.url.path for r in server.requests if r.url.path.endswith("/execute")]
     assert set(starts) == {f"/workflows/{_CODEX_WF}/execute"}
     recorded = read_launches(ledger)
     assert {(x.suite, x.workflow_id) for x in recorded} == {
-        (f"verifier-seed-v1:v4:{_CODEX_WF}", _CODEX_WF)
+        (f"verifier-seed-v1:v5:{_CODEX_WF}", _CODEX_WF)
     }
 
 
@@ -1766,16 +1832,16 @@ def test_v1_runs_never_count_toward_the_current_version(tmp_path: Path) -> None:
     current = load_suite(DEFAULT_SUITE)
     rows, unrecorded = score_suite(current, _LedgerServer(launches).client(), launches)
 
-    assert len(rows) == 36 and {r.status for r in rows} == {"not launched"}
+    assert len(rows) == 33 and {r.status for r in rows} == {"not launched"}
     assert unrecorded == ()
 
 
 @pytest.mark.unit
 def test_score_prints_every_version_the_workflow_ran() -> None:
     suite = load_suite(DEFAULT_SUITE).suite
-    assert versions_run(suite, _WF) == [1, 3, 4]
-    assert versions_run(suite, _CODEX_WF) == [2, 3, 4]
-    assert versions_run(suite, _SONNET_WF) == [3, 4]
+    assert versions_run(suite, _WF) == [1, 3, 4, 5]
+    assert versions_run(suite, _CODEX_WF) == [2, 3, 4, 5]
+    assert versions_run(suite, _SONNET_WF) == [3, 4, 5]
 
 
 # The twelve cases of #1750's v3: the six v2 defects and the six clean controls.
@@ -1798,6 +1864,39 @@ def test_v3_under_each_verifier_holds_its_twelve_cases_and_its_own_tag(workflow:
     assert v3.workflow.id == workflow
     assert {c.id for c in v3.cases if c.polarity == "defect"} == _V2_CASES
     assert {c.id for c in v3.cases if c.polarity == "clean"} == _V3_CLEAN
+
+
+# Both were blocked by two strong verifiers for a real defect: retired in v5.
+_RETIRED = {"clean-github-token-installation-routing", "clean-redis-signal-queue-fail-open"}
+
+
+@pytest.mark.unit
+def test_a_retired_control_scores_in_the_versions_that_held_it_and_never_launches_again(
+    tmp_path: Path,
+) -> None:
+    v4 = load_suite(DEFAULT_SUITE, version=4)
+    held = {c.id: c for c in v4.cases if c.id in _RETIRED}
+    assert set(held) == _RETIRED and len(v4.cases) == 36
+    # As it ran: still a clean control there, so v4's runs score as they did.
+    assert all(isinstance(c, CleanCase) for c in held.values())
+
+    current = load_suite(DEFAULT_SUITE)
+    assert not {c.id for c in current.cases} & _RETIRED
+    ledger = tmp_path / "launches.jsonl"
+    launch_suite(current, _Server(current).client(), ledger)
+    assert not {x.case for x in read_launches(ledger)} & _RETIRED
+
+
+@pytest.mark.unit
+def test_a_retired_case_no_history_version_holds_is_refused(tmp_path: Path) -> None:
+    suite_dir = _copy_suite(tmp_path)
+    case = suite_dir / "cases" / "redis-retry-non-idempotent.yaml"
+    case.write_text(case.read_text() + "retired: v5 - never ran\n")
+
+    with pytest.raises(
+        DefinitionError, match=r"retired case\(s\) \['redis-retry-non-idempotent'\]"
+    ):
+        load_suite(suite_dir)
 
 
 @pytest.mark.unit
@@ -1858,7 +1957,7 @@ def test_the_holdout_is_new_cases_only_and_within_its_share() -> None:
     cases = load_suite(DEFAULT_SUITE).cases
     holdout = {c.id for c in cases if c.split == "holdout"}
 
-    assert len(holdout) == 11 and len(cases) == 36
+    assert len(holdout) == 10 and len(cases) == 33
     # The pre-v4 defects were already run against the verifiers: never holdout.
     assert not holdout & _V2_CASES
 
@@ -1871,7 +1970,7 @@ def test_a_train_launch_never_starts_a_holdout_case(tmp_path: Path) -> None:
 
     holdout = {c.id for c in load_suite(DEFAULT_SUITE, split="holdout").cases}
     launched = {x.case for x in read_launches(ledger)}
-    assert len(launched) == 25
+    assert len(launched) == 23
     assert not launched & holdout
 
 
@@ -1890,9 +1989,9 @@ def test_the_split_flag_selects_the_cases_check_reports(
 
     monkeypatch.setattr(eval_suite, "check_commits", record)
     assert main(["check", "--split", "holdout"]) == 0
-    assert [c.split for c in checked[0].cases] == ["holdout"] * 11
+    assert [c.split for c in checked[0].cases] == ["holdout"] * 10
     out = capsys.readouterr().out
-    assert ": 11 case(s)" in out
+    assert ": 10 case(s)" in out
     assert "case:binary-artifact-minio-key" not in out
 
 
@@ -1912,7 +2011,7 @@ def test_a_suite_with_too_little_holdout_is_refused(tmp_path: Path) -> None:
     for path in (suite_dir / "cases").glob("*.yaml"):
         path.write_text(path.read_text().replace("split: holdout", "split: train"))
 
-    with pytest.raises(DefinitionError, match="0 of 36 cases are holdout"):
+    with pytest.raises(DefinitionError, match="0 of 33 cases are holdout"):
         load_suite(suite_dir)
 
 
@@ -2024,8 +2123,8 @@ def test_an_identical_relaunch_is_an_unchanged_install(tmp_path: Path) -> None:
     _, client = _provenanced_server(loaded, templates)
     again = launch_suite(loaded, client, ledger)
 
-    assert first[0].startswith(f"workflow {_CODEX_WF}: created as 4.0.0")
-    assert again[0].startswith(f"workflow {_CODEX_WF}: unchanged as 4.0.0")
+    assert first[0].startswith(f"workflow {_CODEX_WF}: created as 5.0.0")
+    assert again[0].startswith(f"workflow {_CODEX_WF}: unchanged as 5.0.0")
 
 
 @pytest.mark.unit
@@ -2072,7 +2171,7 @@ def test_a_cli_installed_archived_record_is_restored_by_launch_without_force(
     lines = launch_suite(loaded, client, tmp_path / "launches.jsonl")
 
     stored = templates.by_id[_CODEX_WF]
-    assert lines[0].startswith(f"workflow {_CODEX_WF}: created as 4.0.0")
+    assert lines[0].startswith(f"workflow {_CODEX_WF}: created as 5.0.0")
     assert not stored.is_archived
     assert stored.source_digest == install_provenance(loaded, document).source_digest
 
@@ -2123,7 +2222,7 @@ def test_an_unchanged_relaunch_restores_an_archived_template(tmp_path: Path) -> 
     _, client = _provenanced_server(loaded, templates)
     lines = launch_suite(loaded, client, tmp_path / "launches.jsonl")
 
-    assert lines[0].startswith(f"workflow {_CODEX_WF}: created as 4.0.0")
+    assert lines[0].startswith(f"workflow {_CODEX_WF}: created as 5.0.0")
     assert not templates.by_id[_CODEX_WF].is_archived
 
 
@@ -2138,7 +2237,7 @@ def test_launch_reuses_each_case_eval_and_creates_none(tmp_path: Path) -> None:
     assert not any(r.method == "POST" and r.url.path == "/evals" for r in server.requests)
     starts = [json.loads(r.content) for r in server.requests if r.url.path.endswith("/execute")]
     assert [s["eval_id"] for s in starts] == [f"eval-{c.commit[:6]}" for c in loaded.cases]
-    assert {tuple(s["tags"]) for s in starts} == {("suite-version:4", f"verifier:{_WF}")}
+    assert {tuple(s["tags"]) for s in starts} == {("suite-version:5", f"verifier:{_WF}")}
 
 
 @pytest.mark.unit
@@ -2152,7 +2251,7 @@ def test_score_records_each_verdict_on_the_eval() -> None:
     assert path == "/evals/eval-1/runs/exec-1/score"
     assert body["verdict"] == "PASS"
     assert body["score"] == 1.0
-    assert (body["scorer"], body["scorer_version"]) == ("eval_suite.py", "4")
+    assert (body["scorer"], body["scorer_version"]) == ("eval_suite.py", "5")
     assert isinstance(body["evidence"], str) and _CASE in body["evidence"]
 
 
@@ -2183,10 +2282,13 @@ def merged(tmp_path: Path) -> tuple[Path, str, str, str]:
 
 
 def _later(repo: Path, message: str) -> str:
-    """Commit `message` on main after the merge, touching a file of its own."""
+    """Commit `message` on main 31 days after HEAD, touching a file of its own, so
+    the control's quiet window has passed."""
     (repo / "later.txt").write_text(message)
     _git(repo, "add", "later.txt")
-    _git(repo, "commit", "-qm", message)
+    when = int(_git(repo, "show", "-s", "--format=%ct", "HEAD")) + 31 * _DAY
+    env = {**os.environ, "GIT_AUTHOR_DATE": f"@{when}", "GIT_COMMITTER_DATE": f"@{when}"}
+    subprocess.run(["git", "-C", str(repo), "commit", "-qm", message], env=env, check=True)
     return _git(repo, "rev-parse", "HEAD")
 
 
@@ -2228,7 +2330,8 @@ def test_check_refuses_a_clean_pin_that_is_not_the_merges_second_parent(
     tmp_path: Path, merged: tuple[Path, str, str, str]
 ) -> None:
     repo, base, _, merge = merged
-    problems = check_commits(load_suite(_clean_suite(tmp_path, base, merge, merge)), repo)
+    through = _later(repo, "chore: later")
+    problems = check_commits(load_suite(_clean_suite(tmp_path, base, merge, through)), repo)
     assert problems == [
         f"control: pins {base[:12]}, but the merge {merge[:12]}'s second parent is "
         f"{_git(repo, 'rev-parse', merge + '^2')[:12]}; pin the PR head the merge took"
@@ -2289,10 +2392,183 @@ def test_check_refuses_a_clean_control_git_revert_undid(
     repo, _, head, merge = merged
     _git(repo, "revert", "--no-edit", "-m", "1", merge)
     revert = _git(repo, "rev-parse", "HEAD")
-    problems = check_commits(load_suite(_clean_suite(tmp_path, head, merge, revert)), repo)
+    through = _later(repo, "chore: later")
+    problems = check_commits(load_suite(_clean_suite(tmp_path, head, merge, through)), repo)
     assert problems == [
         f"control: {revert[:12]} fixes or reverts #7 after it merged; "
         "a clean control must have no known defect"
+    ]
+
+
+_DAY = 86400
+_PR_FILE = "def kept():\n    return 1\n\n\nclass Box:\n    def changed(self):\n        return 2\n"
+
+
+def _commit_at(repo: Path, when: int, message: str, text: str | None = None) -> str:
+    """Commit on the current branch at epoch `when`, writing `text` to m.py if given."""
+    if text is not None:
+        (repo / "m.py").write_text(text)
+    else:
+        (repo / "other.txt").write_text(message)
+    _git(repo, "add", ".")
+    env = {**os.environ, "GIT_AUTHOR_DATE": f"@{when}", "GIT_COMMITTER_DATE": f"@{when}"}
+    subprocess.run(["git", "-C", str(repo), "commit", "-qm", message], env=env, check=True)
+    return _git(repo, "rev-parse", "HEAD")
+
+
+@pytest.fixture
+def quiet(tmp_path: Path) -> tuple[Path, str, str, int]:
+    """A repo whose main merged a PR that changed `Box.changed` in m.py at day 0:
+    (repo, PR head, merge, the merge's epoch)."""
+    repo = tmp_path / "quiet"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    _git(repo, "config", "user.email", "t@example.com")
+    _git(repo, "config", "user.name", "t")
+    day0 = 1_780_000_000
+    _commit_at(repo, day0 - _DAY, "base", _PR_FILE.replace("return 2", "return 0"))
+    _git(repo, "checkout", "-qb", "feature")
+    head = _commit_at(repo, day0 - 60, "feat: box", _PR_FILE)
+    _git(repo, "checkout", "-q", "main")
+    env = {**os.environ, "GIT_AUTHOR_DATE": f"@{day0}", "GIT_COMMITTER_DATE": f"@{day0}"}
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo),
+            "merge",
+            "-q",
+            "--no-ff",
+            "-m",
+            "Merge pull request #7",
+            "feature",
+        ],
+        env=env,
+        check=True,
+    )
+    return repo, head, _git(repo, "rev-parse", "HEAD"), day0
+
+
+@pytest.mark.unit
+def test_check_refuses_a_control_whose_function_a_later_commit_changes_within_30_days(
+    tmp_path: Path, quiet: tuple[Path, str, str, int]
+) -> None:
+    # Moved below a new function first, so only its qualified name finds it.
+    repo, head, merge, day0 = quiet
+    moved = "def added():\n    return 9\n\n\n" + _PR_FILE
+    _commit_at(repo, day0 + _DAY, "feat: added", moved)
+    touch = _commit_at(
+        repo, day0 + 2 * _DAY, "refactor: tidy", moved.replace("return 2", "return 3")
+    )
+    through = _commit_at(repo, day0 + 40 * _DAY, "chore: later")
+
+    problems = check_commits(load_suite(_clean_suite(tmp_path, head, merge, through)), repo)
+    assert problems == [
+        f"control: {touch[:12]} changes m.py:Box.changed within 30 days of the merge; "
+        "a clean control's code must stay untouched that long"
+    ]
+
+
+@pytest.mark.unit
+def test_check_passes_a_control_whose_other_functions_or_later_days_see_the_change(
+    tmp_path: Path, quiet: tuple[Path, str, str, int]
+) -> None:
+    repo, head, merge, day0 = quiet
+    other = _PR_FILE.replace("return 1", "return 5")
+    _commit_at(repo, day0 + _DAY, "feat: kept", other)  # not a function the PR changed
+    _commit_at(repo, day0 + 31 * _DAY, "feat: box", other.replace("return 2", "return 3"))
+    through = _commit_at(repo, day0 + 40 * _DAY, "chore: later")
+
+    loaded = load_suite(_clean_suite(tmp_path, head, merge, through))
+    assert check_commits(loaded, repo) == []
+
+
+@pytest.mark.unit
+def test_check_refuses_a_control_younger_than_30_days_and_spares_an_older_one(
+    tmp_path: Path, quiet: tuple[Path, str, str, int]
+) -> None:
+    repo, head, merge, day0 = quiet
+    young = _commit_at(repo, day0 + 10 * _DAY, "chore: later")
+    old = _commit_at(repo, day0 + 30 * _DAY, "chore: later still")
+
+    assert check_commits(
+        load_suite(_clean_suite(tmp_path / "young", head, merge, young)), repo
+    ) == [
+        f"control: clean_through {young[:12]} is under 30 days after the merge; "
+        "a clean control needs that long untouched"
+    ]
+    assert check_commits(load_suite(_clean_suite(tmp_path / "old", head, merge, old)), repo) == []
+
+
+def _quiet_repo(tmp_path: Path, before: str, after: str) -> tuple[Path, str, str, int]:
+    """Like `quiet`, but the PR changes m.py from `before` to `after`."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    _git(repo, "config", "user.email", "t@example.com")
+    _git(repo, "config", "user.name", "t")
+    day0 = 1_780_000_000
+    _commit_at(repo, day0 - _DAY, "base", before)
+    _git(repo, "checkout", "-qb", "feature")
+    head = _commit_at(repo, day0 - 60, "feat: change", after)
+    _git(repo, "checkout", "-q", "main")
+    env = {**os.environ, "GIT_AUTHOR_DATE": f"@{day0}", "GIT_COMMITTER_DATE": f"@{day0}"}
+    merge = ["git", "-C", str(repo), "merge", "-q", "--no-ff", "-m", "Merge #7", "feature"]
+    subprocess.run(merge, env=env, check=True)
+    return repo, head, _git(repo, "rev-parse", "HEAD"), day0
+
+
+def _touches_after(tmp_path: Path, after: str, later: str) -> tuple[str, list[str]]:
+    """A PR changes `return 0` to `return 2` in `after`; on day 2 main rewrites m.py
+    to `later`. Returns that commit and what `check` says, read through day 40."""
+    repo, head, merge, day0 = _quiet_repo(tmp_path, after.replace("return 2", "return 0"), after)
+    touch = _commit_at(repo, day0 + 2 * _DAY, "refactor: later", later)
+    through = _commit_at(repo, day0 + 40 * _DAY, "chore: later")
+    return touch, check_commits(load_suite(_clean_suite(tmp_path, head, merge, through)), repo)
+
+
+def _untouched(touch: str) -> str:
+    return f"control: {touch[:12]} changes m.py:"
+
+
+@pytest.mark.unit
+def test_check_follows_a_function_defined_under_a_conditional(tmp_path: Path) -> None:
+    source = "if True:\n    def changed():\n        return 2\n"
+    touch, problems = _touches_after(tmp_path, source, source.replace("return 2", "return 3"))
+    assert problems == [
+        f"{_untouched(touch)}changed within 30 days of the merge; "
+        "a clean control's code must stay untouched that long"
+    ]
+
+
+@pytest.mark.unit
+def test_check_follows_a_property_getter_beside_its_same_named_setter(tmp_path: Path) -> None:
+    source = (
+        "class Box:\n    @property\n    def value(self):\n        return 2\n\n"
+        "    @value.setter\n    def value(self, new):\n        self._value = new\n"
+    )
+    touch, problems = _touches_after(tmp_path, source, source.replace("return 2", "return 3"))
+    assert problems == [
+        f"{_untouched(touch)}Box.value within 30 days of the merge; "
+        "a clean control's code must stay untouched that long"
+    ]
+
+
+@pytest.mark.unit
+def test_check_ignores_a_function_added_after_the_changed_one(tmp_path: Path) -> None:
+    source = "def changed():\n    return 2\n"
+    _, problems = _touches_after(tmp_path, source, source + "\n\ndef other():\n    return 9\n")
+    assert problems == []
+
+
+@pytest.mark.unit
+def test_check_refuses_a_line_inserted_inside_the_changed_function(tmp_path: Path) -> None:
+    source = "def changed():\n    return 2\n"
+    later = "def changed():\n    print()\n    return 2\n"
+    touch, problems = _touches_after(tmp_path, source, later)
+    assert problems == [
+        f"{_untouched(touch)}changed within 30 days of the merge; "
+        "a clean control's code must stay untouched that long"
     ]
 
 
@@ -2318,7 +2594,7 @@ def test_a_case_without_a_polarity_is_refused(tmp_path: Path) -> None:
 
 @pytest.mark.unit
 def test_each_split_holds_clean_controls() -> None:
-    # 30 defects outnumber the 6 controls, so a false-block rate is only
+    # 31 defects outnumber the 2 controls, so a false-block rate is only
     # measurable on each side of the split if both sides hold some.
     for split in ("train", "holdout"):
         cases = load_suite(DEFAULT_SUITE, split=split).cases
@@ -2385,7 +2661,7 @@ def test_score_records_a_certified_clean_control_as_a_pass() -> None:
     assert (body["verdict"], body["score"]) == ("PASS", 1.0)
     assert f"{_clean_case().id} (clean)" in str(body["evidence"])
     table = render(loaded, rows)
-    assert "1/36 passed" in table
+    assert "1/33 passed" in table
     assert "false-block rate (clean controls blocked): 0/1 (0%)" in table
     assert "catch rate (defect cases blocked and named): -" in table
 
@@ -2399,7 +2675,7 @@ def test_score_records_a_blocked_clean_control_as_a_false_block() -> None:
     [(_, body)] = server.scores
     assert (body["verdict"], body["score"]) == ("FAIL", 0.0)
     table = render(loaded, rows)
-    assert "0/36 passed" in table
+    assert "0/33 passed" in table
     assert "false-block rate (clean controls blocked): 1/1 (100%)" in table
 
 
