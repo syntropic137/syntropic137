@@ -140,3 +140,38 @@ When a `pull_request` event arrives (already polled via Events API), register th
 
 - **ADR-040** — GitHub Trigger Architecture (trigger rules that this pipeline feeds into)
 - **ADR-042** — Event Type Naming Standard (compound event naming convention used by the pipeline)
+
+## Current implementation summary
+
+> Moved from AGENTS.md (CLAUDE.md diet). Kept current here; AGENTS.md links to this ADR.
+
+
+GitHub events enter the system through a unified `EventPipeline` that accepts events from three sources:
+
+1. **Webhooks** - Real-time delivery (~1s) from GitHub. Primary path when the App is configured with a reachable URL.
+2. **Events API polling** - Background `asyncio.Task` that polls GitHub's Events API for 17 event types (PR, push, etc.). Enabled by default for zero-config onboarding.
+3. **Checks API polling** - Background `asyncio.Task` that polls `GET /repos/{o}/{r}/commits/{sha}/check-runs` for CI results. Triggered when a `pull_request` event registers a head SHA. Enables self-healing without webhooks (#602).
+
+All three sources normalize payloads into `NormalizedEvent` and feed `EventPipeline.ingest()`. Content-based dedup keys (commit SHA, PR number, check run ID - not delivery IDs) ensure the same logical event is processed exactly once regardless of source.
+
+| Source | API | What it gets | Config |
+|--------|-----|-------------|--------|
+| Events API poller | `GET /repos/{o}/{r}/events` | 17 event types (PR, push, etc.) | Always on |
+| Webhooks | Push-based | All 60+ event types including `check_run` | Needs tunnel/public URL |
+| Checks API poller | `GET /repos/{o}/{r}/commits/{sha}/check-runs` | CI results for specific SHAs | Auto when `check_run` triggers exist |
+
+**Mode switching:** Both pollers adapt their interval based on webhook health:
+- **ACTIVE_POLLING** (60s / 30s) - No webhooks received in 30 minutes; poll aggressively
+- **SAFETY_NET** (300s / 120s) - Webhooks healthy; poll infrequently as a catch-up net
+
+**Fail-open dedup:** If Redis is unavailable, events are processed anyway. Trigger safety guards (fire counts, cooldowns) provide second-layer protection against duplicates.
+
+**Key files:**
+- `packages/syn-domain/.../event_pipeline/pipeline.py` - Unified pipeline with dedup
+- `packages/syn-domain/.../event_pipeline/dedup_keys.py` - Content-based dedup key extractors
+- `packages/syn-domain/.../event_pipeline/check_run_synthesizer.py` - Synthesizes check_run events from Checks API
+- `packages/syn-domain/.../event_pipeline/pending_sha_port.py` - PendingSHA domain port
+- `apps/syn-api/src/syn_api/services/github_event_poller.py` - Events API poller
+- `apps/syn-api/src/syn_api/services/check_run_poller.py` - Checks API poller (#602)
+- `packages/syn-shared/src/syn_shared/settings/polling.py` - `SYN_POLLING_*` configuration
+

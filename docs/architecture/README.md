@@ -73,6 +73,16 @@ claude generate-architecture-docs
   - **When to update:** When new patterns are adopted or rules change
   - **Use for:** Onboarding, code review, architectural discussions
 
+#### Contributor Rules (moved out of AGENTS.md)
+
+AGENTS.md loads on every agent turn, so it keeps one-line summaries and links here:
+
+- **[Event Sourcing Rules](./event-sourcing-rules.md)** - two lanes, Processor To-Do List, consumer types, in-memory adapter safety, crash recovery, idempotency
+- **[Type Safety Fitness](./type-safety-fitness.md)** - why typing ratchets are fitness functions; what `untyped-dicts` counts and its history
+- **[Ubiquitous Language Convention](./ubiquitous-language-convention.md)** - naming standard and rules for per-context vocabularies
+- **[API -> CLI Type Pipeline](./api-cli-type-pipeline.md)** - Pydantic -> OpenAPI -> TypeScript workflow
+- **[agentic-workspace Boundary](./agentic-workspace-boundary.md)** - what belongs in the submodule vs here, and its delivery cost
+
 #### Core Concepts
 
 - **[Event Architecture](./event-architecture.md)** 📝 Manual
