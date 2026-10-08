@@ -13,9 +13,9 @@
   },
   "files": ["src"],
   "scripts": {
-    "check": "node ../scripts/check-themes.mjs",
+    "check": "node ../scripts/check-themes.mjs && node ../scripts/check-token-usage.mjs",
     "build": "node ../scripts/check-themes.mjs",
-    "test": "node ../scripts/check-themes.mjs"
+    "test": "node ../scripts/check-themes.mjs && node ../scripts/check-token-usage.mjs"
   },
   "dependencies": {
     "@syntropic137/design-tokens": "0.1.0"
