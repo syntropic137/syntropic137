@@ -68,6 +68,18 @@ refused at install. Not a separate budget from the
 [Execution Budget](#execution-budget), which counts concurrent Executions, not
 money.
 
+## Phase Profile
+
+What a Phase of one type usually uses, read over every Phase of a Workflow in a
+window (#1716): per model, p50/p90 input, output, cache-write and cache-read
+tokens and cost; per Phase, p50/p95 CPU-seconds per wall-second, throttled
+seconds, memory peak and disk at teardown, each with the `n` it stands on and
+coverage counts for Phases that recorded no usage. A "phase type" is a Phase id:
+every Execution of a Workflow runs the same Phase definitions. Lane 2 only:
+read from observations, never from an aggregate. Below ten Phases a percentile
+reads `insufficient`. Sizes the capacity model and the
+[Execution Budget](#execution-budget); it is not itself a limit.
+
 ## Quota Exhaustion
 
 An upstream failure of kind `quota` (PC-83): the provider's usage allowance for
