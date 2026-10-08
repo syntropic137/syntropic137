@@ -8,9 +8,11 @@
  * read models are rebuilding (ordinary live lag excluded), how far along, and
  * the words to show - so nothing here computes a percentage.
  *
- * It asks on mount, then polls while there is something to show or while it
- * has no measured answer yet, and stops as soon as the read path is measured
- * healthy. A failed fetch keeps the last answer.
+ * It asks on mount, then polls every 10s while there is something to show or
+ * while it has no measured answer yet. A read path measured healthy is still
+ * re-read, once a minute: the dashboard stays open across deploys, and a
+ * deploy is exactly when a rebuild starts. A failed fetch keeps the last
+ * answer.
  */
 
 import { createContext, useCallback, useContext, useEffect, useState } from 'react'
@@ -22,6 +24,9 @@ import { useSerialRefresh } from './useSerialRefresh'
 /** How often to re-read `/health` while a rebuild or a hold is on screen. */
 export const READ_PATH_POLL_INTERVAL_MS = 10_000
 
+/** How often to re-read `/health` while the read path is measured healthy, to notice the next rebuild. */
+export const READ_PATH_IDLE_POLL_INTERVAL_MS = 60_000
+
 export interface ReadPathHealth {
   /** Read models replaying history, furthest behind first. */
   rebuilding: ReadModelStatus[]
@@ -29,7 +34,11 @@ export interface ReadPathHealth {
   held: HeldProjectionHealth[]
   /** Global nonce of the undecodable event the subscription halted at, or null. */
   haltedAt: number | null
-  /** False until `/health` has measured the subscription; the lists above are then empty, not healthy. */
+  /**
+   * False until `/health` has measured which read models are rebuilding; `rebuilding` is then
+   * empty, not healthy. A subscription block whose lag probe failed (`rebuilding_read_models`
+   * absent) is not a measurement.
+   */
   measured: boolean
 }
 
@@ -40,7 +49,7 @@ export function readPathHealthOf(health: HealthResponse | null): ReadPathHealth 
   const sub = health?.subscription
   if (!sub) return UNMEASURED_READ_PATH
   return {
-    measured: true,
+    measured: sub.rebuilding_read_models != null,
     rebuilding: sub.rebuilding_read_models ?? [],
     held: sub.held_projections ?? [],
     haltedAt: sub.halted_at ?? null,
@@ -69,7 +78,7 @@ export function useReadPathHealth(): ReadPathHealth {
   const readPath = readPathHealthOf(health)
   const { refetch } = useSerialRefresh({
     fetch: fetchHealth,
-    pollIntervalMs: readPathNeedsWatching(readPath) ? READ_PATH_POLL_INTERVAL_MS : null,
+    pollIntervalMs: readPathNeedsWatching(readPath) ? READ_PATH_POLL_INTERVAL_MS : READ_PATH_IDLE_POLL_INTERVAL_MS,
   })
 
   useEffect(() => {

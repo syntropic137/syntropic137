@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderHook } from '@testing-library/react'
 
 import { CATCHING_UP, HEALTHY, makeHealth, REBUILDING_EXECUTIONS } from '../../test/readPathFixtures'
-import { READ_PATH_POLL_INTERVAL_MS, useReadPathHealth } from '../useReadPathHealth'
+import { READ_PATH_IDLE_POLL_INTERVAL_MS, READ_PATH_POLL_INTERVAL_MS, useReadPathHealth } from '../useReadPathHealth'
 
 vi.mock('../../api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../api')>()),
@@ -24,7 +24,7 @@ describe('useReadPathHealth', () => {
     vi.useRealTimers()
   })
 
-  it('asks once and does not poll while the read path is healthy', async () => {
+  it('asks once and does not poll fast while the read path is healthy', async () => {
     mockGetHealth.mockResolvedValue(HEALTHY)
 
     const { result } = renderHook(() => useReadPathHealth())
@@ -35,7 +35,33 @@ describe('useReadPathHealth', () => {
     expect(result.current.rebuilding).toEqual([])
   })
 
-  it('polls while a read model rebuilds, and stops once it has caught up', async () => {
+  it('still re-reads a healthy read path, so a rebuild a later deploy starts is shown', async () => {
+    mockGetHealth.mockResolvedValue(HEALTHY)
+
+    const { result } = renderHook(() => useReadPathHealth())
+    await vi.waitFor(() => expect(mockGetHealth).toHaveBeenCalledTimes(1))
+
+    mockGetHealth.mockResolvedValue(CATCHING_UP)
+    await vi.advanceTimersByTimeAsync(READ_PATH_IDLE_POLL_INTERVAL_MS)
+    expect(mockGetHealth).toHaveBeenCalledTimes(2)
+    await vi.waitFor(() => expect(result.current.rebuilding).toEqual([REBUILDING_EXECUTIONS]))
+  })
+
+  it('treats a subscription whose lag probe failed as unmeasured and keeps asking', async () => {
+    mockGetHealth
+      .mockResolvedValueOnce(makeHealth({ status: 'unknown', held_projections: [], rebuilding_read_models: null }))
+      .mockResolvedValue(CATCHING_UP)
+
+    const { result } = renderHook(() => useReadPathHealth())
+    await vi.waitFor(() => expect(mockGetHealth).toHaveBeenCalledTimes(1))
+    expect(result.current.measured).toBe(false)
+
+    await vi.advanceTimersByTimeAsync(READ_PATH_POLL_INTERVAL_MS)
+    expect(mockGetHealth).toHaveBeenCalledTimes(2)
+    await vi.waitFor(() => expect(result.current.rebuilding).toEqual([REBUILDING_EXECUTIONS]))
+  })
+
+  it('polls while a read model rebuilds, and slows once it has caught up', async () => {
     mockGetHealth.mockResolvedValue(CATCHING_UP)
 
     const { result } = renderHook(() => useReadPathHealth())
@@ -53,7 +79,7 @@ describe('useReadPathHealth', () => {
     expect(mockGetHealth).toHaveBeenCalledTimes(3)
   })
 
-  it('keeps asking after the startup gate answers without a subscription, then stops once healthy', async () => {
+  it('keeps asking after the startup gate answers without a subscription, then slows once healthy', async () => {
     mockGetHealth
       .mockResolvedValueOnce({ ...HEALTHY, status: 'starting', mode: 'degraded', subscription: null })
       .mockResolvedValueOnce(CATCHING_UP)
@@ -74,7 +100,7 @@ describe('useReadPathHealth', () => {
     expect(mockGetHealth).toHaveBeenCalledTimes(3)
   })
 
-  it('retries a failed first fetch, then stops once healthy', async () => {
+  it('retries a failed first fetch, then slows once healthy', async () => {
     mockGetHealth
       .mockRejectedValueOnce(new TypeError('Failed to fetch'))
       .mockResolvedValueOnce(CATCHING_UP)
