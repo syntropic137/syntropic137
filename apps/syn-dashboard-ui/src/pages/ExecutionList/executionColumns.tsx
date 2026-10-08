@@ -10,10 +10,12 @@
 
 import type { ColumnDef } from '../../components'
 import { StatusBadge } from '../../components'
+import { ExecutionEvalBadge } from '../../components/evals'
 import type { ExecutionSortKey } from '../../hooks/useExecutionList'
 import type { ExecutionListItem } from '../../types'
 import { formatRelativeTime, formatTimestampLocale } from '../../utils/formatters'
 import { ExecutionProgressBar } from './ExecutionProgressBar'
+import { queueLabel } from './queueLabel'
 
 const EM_DASH = '—'
 
@@ -33,7 +35,14 @@ const WORKFLOW: ColumnDef<ExecutionListItem, ExecutionSortKey> = {
   align: 'left',
   sortKey: 'workflow',
   cellClassName: 'text-sm text-[var(--color-text-primary)]',
-  render: (e) => e.workflow_name || e.workflow_id,
+  // An eval run carries its badge under the name, so it reads apart from an
+  // ordinary run at a glance; the width cap is what makes a long name truncate.
+  render: (e) => (
+    <div className="flex min-w-0 max-w-[18rem] flex-col items-start gap-1">
+      <span>{e.workflow_name || e.workflow_id}</span>
+      <ExecutionEvalBadge evalRun={e.eval} />
+    </div>
+  ),
 }
 
 const PROGRESS: ColumnDef<ExecutionListItem, ExecutionSortKey> = {
@@ -87,8 +96,9 @@ const STARTED: ColumnDef<ExecutionListItem, ExecutionSortKey> = {
   align: 'left',
   sortKey: 'started',
   cellClassName: 'text-xs text-[var(--color-text-secondary)]',
-  cellTitle: (e) => formatTimestampLocale(e.started_at) ?? undefined,
-  render: (e) => formatRelativeTime(e.started_at),
+  cellTitle: (e) =>
+    e.start_queue ? queueLabel(e.start_queue) : (formatTimestampLocale(e.started_at) ?? undefined),
+  render: (e) => (e.start_queue ? queueLabel(e.start_queue) : formatRelativeTime(e.started_at)),
 }
 
 export const EXECUTION_COLUMNS: ColumnDef<ExecutionListItem, ExecutionSortKey>[] = [

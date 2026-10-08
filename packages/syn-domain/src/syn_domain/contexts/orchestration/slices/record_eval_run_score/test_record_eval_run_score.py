@@ -237,3 +237,44 @@ class TestSummarize:
 
         assert (summary.run_count, summary.pass_rate, summary.last_verdict) == (0, None, None)
         assert summary.variants == ()
+
+
+class TestBatchReadsForAPageOfRuns:
+    """``scores_of`` and ``records``: what a page of executions reads, once each."""
+
+    async def test_scores_of_answers_exactly_the_runs_asked_about(self) -> None:
+        stream, handler = await _scored_stream()
+        await handler.handle(_score("run-a", Verdict.FAIL))
+        await handler.handle(_score("run-b", Verdict.PASS))
+        evals = await _replayed(stream, times=1)
+
+        # (_EVAL, run-b) is scored and lies inside the product of the ids
+        # asked about, but was not itself asked about.
+        scores = await evals.scores_of({(str(_EVAL), "run-a"), (str(_OTHER), "run-b")})
+
+        assert {key: score.verdict for key, score in scores.items()} == {
+            (str(_EVAL), "run-a"): Verdict.FAIL
+        }
+        assert await evals.scores_of(set()) == {}
+
+    async def test_records_names_each_projected_eval_and_omits_the_rest(self) -> None:
+        stream, _handler = await _scored_stream()
+        evals = await _replayed(stream, times=1)
+
+        records = await evals.records({str(_EVAL), str(_OTHER), "eval-not-projected"})
+
+        assert {eval_id: record.name for eval_id, record in records.items()} == {
+            str(_EVAL): "Refactor quality",
+            str(_OTHER): "Other",
+        }
+
+    async def test_records_leaves_out_a_projected_eval_nobody_asked_about(self) -> None:
+        stream, _handler = await _scored_stream()
+        evals = await _replayed(stream, times=1)
+
+        # _OTHER is projected too; asking for _EVAL alone must not return it.
+        records = await evals.records({str(_EVAL), "eval-not-projected"})
+
+        assert {eval_id: record.name for eval_id, record in records.items()} == {
+            str(_EVAL): "Refactor quality"
+        }

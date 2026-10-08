@@ -1,0 +1,39 @@
+id: pause-not-blocked-by-queue
+source_pr: 1688
+source_issue: 1617
+commit: 6dcbc7e026d3ec69da8bbbc6f193bea5b68e3480
+fix_commit: 5ccb519e85ea9147630f8198510fb8bd921a9e71
+task: |
+  Pausing admission hangs while queued resumes hold admission tickets.
+
+  `PUT /api/v1/maintenance {"active": true}` hangs: it timed out at 30s in the
+  pit stop and again at 180s by hand, and `GET /maintenance` still shows
+  `active: false`.
+
+  From the code: a resume takes an admission ticket
+  (`async with self._maintenance.admitting() as ticket` in
+  `apps/syn-api/src/syn_api/_wiring_admission.py`) and hands it to a task that
+  waits on the resume semaphore; the ticket is spent only when the resumed
+  execution's durable start is written. Resumes run one at a time, so each
+  queued resume holds its ticket for as long as the ones ahead of it run (often
+  30-60 min). Pausing admission waits for every outstanding ticket to settle
+  (so no admitted start slips past a drain). So the pause waits on the whole
+  serialized resume queue: hours.
+
+  What must hold: pausing admission does not wait for work that is queued and
+  not yet started, and still never lets an admitted start slip past it. A
+  request must never outlive its client.
+
+  Interface the scoring tests use: `AdmissionGate` in
+  `syn_domain.contexts._shared.maintenance`, exercised directly through
+  `admitting()`, `set_mode(active=..., reason=..., actor=...)` and the
+  ticket's `mark_visible()`, plus one new ticket method,
+  `async AdmissionTicket.enter_slot()`, which a queued holder awaits when its
+  turn comes to start. Once a pause has returned, entering a slot raises
+  `MaintenancePausedError`. A ticket that has entered its slot and is not yet
+  visible still holds a pause, but only for a bound:
+  `AdmissionGate(port, drain_timeout=<seconds>)`, and a pause that runs out of
+  it raises a new `AdmissionDrainTimeoutError` (exported from the same module)
+  and does not write the flag.
+hidden_tests:
+  - packages/syn-domain/src/syn_domain/contexts/_shared/test_1617_a_queued_ticket_does_not_hold_the_pause.py

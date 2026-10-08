@@ -389,16 +389,18 @@ class WorkflowExecutionProcessor:
         # must not leave a child that exists and can never run its first phase.
         phase_outputs = await inherited_outputs(self._artifact_query, origin)
         record_continuation(phase_outputs, aggregate.start_pins)
-        await self._journal.open(aggregate)
-
-        # #1387: durable, therefore visible. From here the drain counts this
-        # execution and a maintenance transition may proceed over it; before
-        # here it existed only as a queued task, and `set_mode(active=True)`
-        # was waiting on this line. If `open()` raised - a duplicate stream,
-        # a store that is down - the lease is ended by the worker instead,
-        # which is the other honest answer: nothing started.
-        if admitted is not None:
-            admitted.mark_visible()
+        # #1387: durable, therefore visible. From the write the drain counts
+        # this execution and a maintenance transition may proceed over it;
+        # before it, it existed only as a queued task, and `set_mode(active=True)`
+        # was waiting on this line. #1707: the write is also where whoever
+        # queued it learns it started - not later, where an exception would
+        # read as a start that never happened. If `open()` raised before the
+        # write - a duplicate stream, a store that is down - the lease is
+        # ended by the worker instead, which is the other honest answer:
+        # nothing started.
+        await self._journal.open(
+            aggregate, written=admitted.mark_durable if admitted is not None else None
+        )
 
         phase_results: list[PhaseResult] = []
         all_artifact_ids: list[str] = []

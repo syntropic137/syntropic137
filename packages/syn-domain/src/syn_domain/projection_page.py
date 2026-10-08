@@ -65,15 +65,17 @@ class StatusOf:
 class PageQuery:
     """One page of a projection, newest first by ``timestamp_field``.
 
-    Matching: ``equals`` field-for-field, ``contains_all`` (each field is a
-    JSON list holding every value given), and ``search`` as a case-insensitive
-    substring of any ``search_fields``. ``statuses`` and the inclusive
+    Matching: ``equals`` field-for-field, ``present`` (each field holds a
+    value when ``True``, is absent or null when ``False``), ``contains_all``
+    (each field is a JSON list holding every value given), and ``search`` as a
+    case-insensitive substring of any ``search_fields``. ``statuses`` and the inclusive
     ``[after, before]`` window are the two dimensions ``paginate`` reports on.
     """
 
     status: StatusOf
     timestamp_field: str
     equals: Mapping[str, str] = field(default_factory=dict)
+    present: Mapping[str, bool] = field(default_factory=dict)
     contains_all: Mapping[str, frozenset[str]] = field(default_factory=dict)
     search: str | None = None
     search_fields: tuple[str, ...] = ()
@@ -86,6 +88,8 @@ class PageQuery:
     def matches(self, record: ProjectionRecord) -> bool:
         """Whether ``record`` passes every filter except status and the window."""
         if any(record.get(name) != value for name, value in self.equals.items()):
+            return False
+        if any((record.get(name) is not None) != wanted for name, wanted in self.present.items()):
             return False
         for name, required in self.contains_all.items():
             stored = record.get(name)

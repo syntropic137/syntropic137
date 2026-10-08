@@ -5,12 +5,14 @@ import type { ExecutionEvalRun } from '../../api/evals'
 import { VerdictPill } from './VerdictPill'
 
 /**
- * The execution page's Eval badge: which eval this run is a data point of,
- * linked to it, with the run's current verdict ("Unscored" until a scorer
- * records one). Renders nothing for an execution in no eval.
+ * An execution's Eval badge, on its page and on its row in the Executions
+ * list: which eval this run is a data point of, linked to it, with the run's
+ * current verdict ("Unscored" until a scorer records one). Renders nothing for an execution in no eval.
  *
- * Read from `GET /executions/{id}`'s `eval`, which the server derives from the
- * same membership the eval's runs table lists, so the two cannot disagree.
+ * Read from the `eval` of `GET /executions/{id}` or of a `GET /executions`
+ * row: one shape, derived from the same membership the eval's runs table
+ * lists, so none of them can disagree. The name truncates, so the badge fits
+ * whatever width its container gives it.
  */
 export function ExecutionEvalBadge({ evalRun }: { evalRun: ExecutionEvalRun | null | undefined }) {
   if (!evalRun) return null
