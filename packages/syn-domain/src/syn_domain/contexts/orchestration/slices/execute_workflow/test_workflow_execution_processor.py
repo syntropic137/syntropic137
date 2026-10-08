@@ -12,6 +12,9 @@ import pytest
 
 from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
 from syn_domain.contexts.agent_sessions import SessionInvocationState
+from syn_domain.contexts.orchestration.slices.execute_workflow.cancel_teardown import (
+    record_cancel_and_release,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.execution_journal import (
     ExecutionJournal,
 )
@@ -458,7 +461,7 @@ class TestProcessorCancellation:
     async def test_cancel_execution_clears_all_active_state_and_sets_error_message(
         self,
     ) -> None:
-        """_cancel_execution closes workspace CMs, clears all in-memory state, and
+        """record_cancel_and_release closes workspace CMs, clears all in-memory state, and
         propagates the cancel reason into the result's error_message.
         """
         processor = _make_processor()
@@ -499,7 +502,10 @@ class TestProcessorCancellation:
         )
 
         started_at = datetime.now(UTC)
-        result = await processor._cancel_execution(
+        result = await record_cancel_and_release(
+            runtime=processor._runtimes.of("exec-cancel"),
+            workspaces=processor._workspaces_for("exec-cancel", {}),
+            ledger=processor._cancelled_work,
             aggregate=MagicMock(),
             execution_id="exec-cancel",
             workflow_id="wf-cancel",
@@ -507,6 +513,7 @@ class TestProcessorCancellation:
             all_artifact_ids=[],
             started_at=started_at,
             cancel_reason="user requested",
+            phase_id=None,
         )
 
         # Each workspace CM was closed via the async context manager exit.
@@ -558,7 +565,10 @@ class TestProcessorCancellation:
         # that died between provisioning and its first use looks like.
         processor._runtimes.of("exec-cancel")._workspace_cms["phase-b"] = healthy_cm
 
-        result = await processor._cancel_execution(
+        result = await record_cancel_and_release(
+            runtime=processor._runtimes.of("exec-cancel"),
+            workspaces=processor._workspaces_for("exec-cancel", {}),
+            ledger=processor._cancelled_work,
             aggregate=MagicMock(),
             execution_id="exec-cancel",
             workflow_id="wf-cancel",
@@ -566,6 +576,7 @@ class TestProcessorCancellation:
             all_artifact_ids=[],
             started_at=datetime.now(UTC),
             cancel_reason="timeout",
+            phase_id=None,
         )
 
         failing_cm.__aexit__.assert_awaited_once_with(None, None, None)
