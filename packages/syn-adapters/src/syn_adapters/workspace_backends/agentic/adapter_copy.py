@@ -134,7 +134,7 @@ def _try_read_file(
     relative_path: str,
     max_bytes: int,
     results: list[tuple[str, bytes]],
-) -> int:
+) -> None:
     """Read one matched file if it is a regular file inside root.
 
     Workspace contents are written by the agent, so a match is read only when
@@ -152,21 +152,20 @@ def _try_read_file(
             os.close(fd)
     except _SkipFileError as e:
         logger.warning("copy_from: Skipped %s: %s", relative_path, e)
-        return 0
+        return
     except Exception as e:
         logger.warning(
             "copy_from: Failed to read file %s: %s",
             relative_path,
             e,
         )
-        return 0
+        return
     results.append((relative_path, content))
     logger.info(
         "copy_from: Collected file %s (%d bytes)",
         relative_path,
         len(content),
     )
-    return len(content)
 
 
 def collect_matching_files(
@@ -212,7 +211,10 @@ def collect_matching_files(
                 continue
             seen_paths.add(relative_path)
             limit = min(max_bytes, max_total_bytes - used)
-            used += _try_read_file(root, file_path, relative_path, limit, results)
+            collected_before = len(results)
+            _try_read_file(root, file_path, relative_path, limit, results)
+            if len(results) > collected_before:
+                used += len(results[-1][1])
     return results
 
 
