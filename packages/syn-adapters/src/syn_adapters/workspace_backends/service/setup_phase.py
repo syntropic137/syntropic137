@@ -22,10 +22,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Final, NamedTuple
 
 from syn_adapters.workspace_backends.exec_status_lost import is_status_lost
-from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
-    ProvisionStep,
-    ProvisionStepTimeoutError,
-)
+from syn_domain.contexts.orchestration import ProvisionStep, ProvisionStepTimeoutError
 from syn_shared.display import format_exit_code
 from syn_shared.env_constants import (
     ENV_ANTHROPIC_API_KEY,
