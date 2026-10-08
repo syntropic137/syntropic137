@@ -105,4 +105,21 @@ describe('EvalList', () => {
     const pages = fetchMock.mock.calls.map(([u]) => new URL(String(u), 'http://x').searchParams.get('page'))
     expect(pages).toContain('2')
   })
+
+  it('past the last page, says so and keeps a way back instead of claiming there are no evals', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const page = Number(new URL(String(input), 'http://x').searchParams.get('page') ?? '1')
+      const evals = page === 1 ? [evalSummary({ name: 'Back on page 1', run_count: 0 })] : []
+      return json({ evals, total: 51, page, page_size: 50, status_counts: { active: 51 } })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    renderAt('/evals?page=3')
+
+    expect(await screen.findByText('No evals on this page')).toBeInTheDocument()
+    expect(screen.queryByText('No evals yet')).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: /Prev/ }))
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.map(([u]) => new URL(String(u), 'http://x').searchParams.get('page'))).toContain('2'),
+    )
+  })
 })

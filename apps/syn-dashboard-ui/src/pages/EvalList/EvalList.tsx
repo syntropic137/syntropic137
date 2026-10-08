@@ -115,6 +115,18 @@ function EvalListBody({
       </Card>
     )
   }
+  const pagination = (
+    <ListPagination page={state.page} pageSize={state.pageSize} total={state.total} onPageChange={onPage} itemLabel="eval" />
+  )
+  if (state.rows.length === 0 && state.total > 0) {
+    // Past the last page (a stale ?page=): say so, and keep the way back.
+    return (
+      <Card>
+        <EmptyState icon={FlaskConical} title="No evals on this page" description={`There are ${state.total} evals.`} />
+        {pagination}
+      </Card>
+    )
+  }
   if (state.rows.length === 0) {
     return (
       <Card>
@@ -133,13 +145,7 @@ function EvalListBody({
           <EvalRow key={row.eval.eval_id} row={row} onTag={onTag} />
         ))}
       </ul>
-      <ListPagination
-        page={state.page}
-        pageSize={state.pageSize}
-        total={state.total}
-        onPageChange={onPage}
-        itemLabel="eval"
-      />
+      {pagination}
     </Card>
   )
 }
