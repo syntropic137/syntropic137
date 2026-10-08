@@ -207,17 +207,15 @@ async def guard_stale_workspace_dir(
             unpushed = await git.unpushed_commits(repo)
             if unpushed:
                 return _keep(stale, f"{unpushed} unpushed commit(s) in {repo}")
-        saved: list[str] = []
-        for repo in repos:
-            patch = await git.uncommitted_patch(repo)
-            if patch:
-                if stale.execution_id is None:
-                    return _keep(stale, "its authored work has no known execution owner")
-                saved.append(await archive.save(stale, repo, patch))
+        # Read everything that needs archiving before saving any of it, so one
+        # ownership check covers patches and unversioned files alike.
+        patches = [(repo, await git.uncommitted_patch(repo)) for repo in repos]
+        patches = [(repo, patch) for repo, patch in patches if patch]
         files = await git.unversioned_files(stale.host_dir, repos)
+        if (patches or files) and stale.execution_id is None:
+            return _keep(stale, "its authored work has no known execution owner")
+        saved = [await archive.save(stale, repo, patch) for repo, patch in patches]
         if files:
-            if stale.execution_id is None:
-                return _keep(stale, "its unversioned files have no known execution owner")
             saved.append(await archive.save_files(stale, files))
     except Exception as exc:
         return _keep(stale, f"its work could not be shown safe ({type(exc).__name__}: {exc})")
