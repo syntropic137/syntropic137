@@ -28,6 +28,7 @@ import pytest
 
 from syn_api.routes.workflows.commands import _build_phase_defs
 from syn_domain.contexts.orchestration import PhaseDefinition, PhaseExecutionType
+from syn_shared.platform_access import PlatformScope
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -155,6 +156,9 @@ def test_every_field_a_caller_sends_survives_into_the_domain() -> None:
     # default and `PhaseYamlDefinition` all default to True, because a phase
     # nobody has thought about must keep the gate (#1308).
     assert phase.delivers_repo_changes is False
+    # EVAL cannot be produced by any fallback: every hop defaults to READ, so
+    # only the caller's declaration arriving satisfies this (#1744).
+    assert phase.platform_access is PlatformScope.EVAL
     assert phase.argument_hint == "[task]"
     assert phase.model == "claude-opus-5-5"
     assert phase.provider == "claude"
@@ -195,6 +199,12 @@ class TestTheFieldsThatWereActuallyDropped:
     def test_allow_delegation_reaches_the_domain(self) -> None:
         (phase,) = _build_phase_defs([self._phase(allow_delegation=True)])
         assert phase.allow_delegation is True
+
+    def test_an_undeclared_platform_access_stays_read(self) -> None:
+        """The negative control for EVAL above: a phase that declares nothing
+        gets the read-only token, never more (#1744)."""
+        (phase,) = _build_phase_defs([self._phase()])
+        assert phase.platform_access is PlatformScope.READ
 
     def test_an_absent_provider_stays_none(self) -> None:
         """The negative control: mapping must not invent a default. `None`
