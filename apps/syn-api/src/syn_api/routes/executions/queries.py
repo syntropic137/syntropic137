@@ -45,6 +45,7 @@ from syn_shared.display import (
 )
 
 from .models import (
+    ExecutionBudgetInfo,
     ExecutionDetailResponse,
     ExecutionListResponse,
     ExecutionSummaryResponse,
@@ -56,7 +57,7 @@ from .phase_mapping import (
     _map_phase_to_response,
     load_configured_models,
 )
-from .queued_start import not_yet_started, start_queue_info
+from .queued_start import QueuedStart, not_yet_started, queued_starts, start_queue_info
 from .start_config import load_start_configs
 
 if TYPE_CHECKING:
@@ -665,35 +666,102 @@ async def list_executions_endpoint(
     offset = (page - 1) * page_size
     await ensure_connected()
     manager = get_projection_mgr()
+    selected = parse_statuses(statuses, status)
+    all_queued = await queued_starts(manager.store)
+    # A queued start has no read model: no date, tags or eval to judge, so a
+    # request filtering on any of them is not shown one. Search still applies.
+    queued = (
+        []
+        if started_after or started_before or tags or eval_id
+        else [qs for qs in all_queued if _matches(qs, search=q)]
+    )
+    shown = queued if selected is None or QUEUED in selected else []
+    # Queued rows lead the collection: they are the newest starts, and the
+    # ones an operator is waiting on. The projection pages after them.
+    head = shown[offset : offset + page_size]
     execution_page, cost_by_execution = await _load_execution_list_data(
         manager,
         None,
-        parse_statuses(statuses, status),
-        page_size,
-        offset,
+        _read_model_statuses(selected),
+        page_size - len(head) or 1,
+        max(0, offset - len(shown)),
         started_after=started_after,
         started_before=started_before,
         search=q,
         tags=tags,
         eval_id=eval_id,
     )
+    names = await _workflow_names(manager, {qs.workflow_id for qs in head})
     return ExecutionListResponse(
-        executions=[
+        executions=[qs.as_summary(names.get(qs.workflow_id, "")) for qs in head]
+        + [
             _build_execution_summary_response(
                 _to_execution_summary(s, cost_by_execution),
                 cost_by_execution.get(s.workflow_execution_id),
             )
-            for s in execution_page.rows
+            for s in execution_page.rows[: page_size - len(head)]
         ],
         # The size of the filtered COLLECTION, not this page's length (#1119),
         # and counted over every filter above rather than status alone (#1159):
         # a total that ignores the time window describes all of history while
         # the rows describe a day of it.
-        total=execution_page.total,
+        total=execution_page.total + len(shown),
         page=page,
         page_size=page_size,
         excluded_undated=execution_page.excluded_undated,
-        status_counts=execution_page.status_counts,
+        status_counts={**execution_page.status_counts, QUEUED: len(queued)},
+        budget=await _budget_info(len(all_queued)),
+    )
+
+
+QUEUED = "queued"
+"""The list's status for an accepted start with no execution yet (PC-124).
+
+A read-model status, not a domain one: the execution does not exist until its
+stream opens, so `ExecutionStatus` has nothing to say about it."""
+
+
+def _read_model_statuses(selected: list[str] | None) -> list[str] | None:
+    """The statuses to ask the read model for, which never holds a queued row.
+
+    "Only queued" still asks, for the totals and the other chips, with a
+    status no row has, so it pages no rows of its own.
+    """
+    if selected is None:
+        return None
+    return [s for s in selected if s != QUEUED] or [QUEUED]
+
+
+def _matches(start: QueuedStart, *, search: str | None) -> bool:
+    """The list's search, as it applies to a start with no workflow name read yet."""
+    if not search:
+        return True
+    needle = search.lower()
+    return needle in start.execution_id.lower() or needle in start.workflow_id.lower()
+
+
+async def _workflow_names(manager: ProjectionManager, workflow_ids: set[str]) -> dict[str, str]:
+    names: dict[str, str] = {}
+    for workflow_id in workflow_ids:
+        workflow = await manager.workflow_detail.get_by_id(workflow_id)
+        if workflow is not None:
+            names[workflow_id] = workflow.name
+    return names
+
+
+async def _budget_info(queued: int) -> ExecutionBudgetInfo:
+    from syn_api._wiring_admission import get_maintenance_port
+
+    budget = get_execution_budget()
+    try:
+        paused = (await get_maintenance_port().current()).active
+    except Exception:
+        # The list must not fail because the flag could not be read; the
+        # admission paths themselves refuse in that case.
+        logger.warning("could not read maintenance mode for the list", exc_info=True)
+        paused = None
+    return ExecutionBudgetInfo(
+        running=budget.running, queued=queued, limit=budget.limit, admission_paused=paused
     )
 
 
