@@ -1,21 +1,29 @@
 """A resumed run's `WorkflowExecutionStarted` lands in both execution read models (#1696).
 
-On 2026-10-07 two resumes' starts were passed by `workflow_executions` and
-`workflow_execution_details` without being applied: checkpoints above them, no
-row. Both start handlers treat a resume start exactly like a fresh one, and
-the first class here shows it: the events the real resume path writes,
-dispatched through the real coordinator, produce every row, at every depth of
-resume, the same on replay.
+On 2026-10-07 two resumes' starts were missing from `workflow_executions` and
+`workflow_execution_details` while both read models had checkpointed above
+them. That loss was not in these handlers or in the coordinator: the deployed
+event store let a later append commit ahead of an earlier one, so its cursor
+moved past events it had never delivered (#1708, fixed by ESP #337 / event
+store v0.16+). No handler change recovers an event that is never delivered,
+and nothing here reproduces that race.
 
-What did lose them is the coordinator. A handler that failed was logged and
-stepped over, and the projection's next event checkpointed past it. That is
-fixed in event-sourcing-platform (`ProjectionHandlerFailedError`) and pinned
-by its own test; the gitlink bump that brings it in should add the
-store-blip-on-a-resume-start case here, which the pinned version loses.
+What this module pins is the domain side. The first class shows both start
+handlers treat a resume start exactly like a fresh one: the events the real
+resume path writes, dispatched through the real coordinator, produce every
+row, at every depth of resume, the same on replay, and checkpointed
+redelivery applies nothing. The second shows a start naming no execution is a
+dispatch FAILURE rather than a silent SUCCESS checkpointed past.
 
-The event store here is keyed by aggregate id alone and numbers events in
-the order they are saved, which is all a projection sees of the real one
-(ESP #344).
+The coordinator's own guarantee, that a failed event holds its projection
+and is retried rather than stepped over, came in with ESP v0.17.0 (#1737) and
+is covered there by `test_coordinator_never_steps_over_a_failed_event.py`.
+These tests do not re-prove it.
+
+The event store here is a list in memory: keyed by aggregate id alone, it
+numbers events in the order they are saved and every save is visible at
+once. It cannot commit out of order, persist a checkpoint, or survive a
+restart, so it says nothing about any of those (ESP #344).
 """
 
 from __future__ import annotations
