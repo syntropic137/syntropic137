@@ -338,6 +338,18 @@ class RecordCancelledWorkCommand:
         self.quarantined = quarantined
 
 
+class RecordPullRequestMergeCommand:
+    """Command to record that this execution contributed to a merged PR (#1728)."""
+
+    def __init__(
+        self, execution_id: str, repository: str, pull_request: int, merged_at: datetime
+    ) -> None:
+        self.aggregate_id = execution_id
+        self.repository = repository
+        self.pull_request = pull_request
+        self.merged_at = merged_at
+
+
 class InterruptExecutionCommand:
     """Command to forcefully interrupt a workflow execution mid-stream."""
 

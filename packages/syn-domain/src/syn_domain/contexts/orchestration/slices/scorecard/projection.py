@@ -5,7 +5,9 @@ and indexing them by the UTC day they ended means a request reads its window's
 days and the runs in them, never every execution there has been.
 
 Replay-safe: every handler is a pure fold of the event into stored records.
-Merged-PR attribution, which needs GitHub, is deliberately NOT done here.
+Merged-PR attribution, which needs GitHub, is deliberately NOT done here: the
+``MergedPullRequestAttributionProcessManager`` asks GitHub live and records
+``PullRequestMergeRecorded``, which this folds like any other fact.
 """
 
 from __future__ import annotations
@@ -30,6 +32,9 @@ from syn_domain.contexts.orchestration.domain.events.PhaseCompletedEvent import 
 from syn_domain.contexts.orchestration.domain.events.PhaseStartedEvent import (
     PhaseStartedEvent,
 )
+from syn_domain.contexts.orchestration.domain.events.PullRequestMergeRecordedEvent import (
+    PullRequestMergeRecordedEvent,
+)
 from syn_domain.contexts.orchestration.domain.events.WorkflowCompletedEvent import (
     WorkflowCompletedEvent,
 )
@@ -47,6 +52,8 @@ from syn_domain.contexts.orchestration.domain.events.WorkspaceProvisionedForPhas
 )
 from syn_domain.contexts.orchestration.slices.scorecard.run_record import (
     DayIndex,
+    MergedDayIndex,
+    MergedPullRequest,
     RunOutcome,
     ScorecardPhase,
     ScorecardRun,
@@ -63,6 +70,8 @@ if TYPE_CHECKING:
 
 SCORECARD_RUNS = "scorecard_runs"
 SCORECARD_DAYS = "scorecard_days"
+SCORECARD_MERGED_PRS = "scorecard_merged_prs"
+SCORECARD_MERGED_DAYS = "scorecard_merged_days"
 OPEN_RUNS_KEY = "open"
 """The day-index key holding executions that have started and not ended."""
 
@@ -81,7 +90,7 @@ class ScorecardProjection(AutoDispatchProjection):
     """Builds the scorecard's per-execution records from orchestration events."""
 
     PROJECTION_NAME = SCORECARD_RUNS
-    VERSION = 3  # Bumped: phases upsert by id, and a failing phase keeps its session
+    VERSION = 4  # Bumped: folds PullRequestMergeRecorded into merged PRs (#1728)
 
     def __init__(self, store: ProjectionStore) -> None:
         self._store = store
@@ -96,6 +105,8 @@ class ScorecardProjection(AutoDispatchProjection):
         if hasattr(self._store, "delete_all"):
             await self._store.delete_all(SCORECARD_RUNS)
             await self._store.delete_all(SCORECARD_DAYS)
+            await self._store.delete_all(SCORECARD_MERGED_PRS)
+            await self._store.delete_all(SCORECARD_MERGED_DAYS)
 
     # === Reads ===
 
@@ -110,6 +121,18 @@ class ScorecardProjection(AutoDispatchProjection):
             ids.extend((await self._index(key)).execution_ids)
         runs = [await self.get_run(execution_id) for execution_id in dict.fromkeys(ids)]
         return [run for run in runs if run is not None]
+
+    async def merged_pull_requests_for_days(self, days: Sequence[str]) -> list[MergedPullRequest]:
+        """Every PR merged on one of ``days``, with its recorded contributors."""
+        merged: list[MergedPullRequest] = []
+        for key in days:
+            stored = await self._store.get(SCORECARD_MERGED_DAYS, key)
+            index = MergedDayIndex.model_validate(stored) if stored else MergedDayIndex()
+            for pr_key in index.pull_requests:
+                row = await self._store.get(SCORECARD_MERGED_PRS, pr_key)
+                if row:
+                    merged.append(MergedPullRequest.model_validate(row))
+        return merged
 
     # === Helpers ===
 
@@ -295,3 +318,28 @@ class ScorecardProjection(AutoDispatchProjection):
         await self._end(
             event.execution_id, outcome=RunOutcome.CANCELLED, ended_at=event.interrupted_at
         )
+
+    async def on_pull_request_merge_recorded(
+        self, event_data: PullRequestMergeRecordedEvent
+    ) -> None:
+        event = PullRequestMergeRecordedEvent.model_validate(event_data)
+        merged_at = _utc(event.merged_at)
+        key = f"{event.repository}#{event.pull_request}"
+        stored = await self._store.get(SCORECARD_MERGED_PRS, key)
+        pr = (
+            MergedPullRequest.model_validate(stored)
+            if stored
+            else MergedPullRequest(
+                repository=event.repository, pull_request=event.pull_request, merged_at=merged_at
+            )
+        )
+        if event.execution_id not in pr.execution_ids:
+            pr = pr.model_copy(update={"execution_ids": (*pr.execution_ids, event.execution_id)})
+            await self._store.save(SCORECARD_MERGED_PRS, key, pr.model_dump(mode="json"))
+        # Reconciled every time, like a run's end: a redelivery repairs a partial write.
+        day = day_key(pr.merged_at)
+        stored_day = await self._store.get(SCORECARD_MERGED_DAYS, day)
+        index = MergedDayIndex.model_validate(stored_day) if stored_day else MergedDayIndex()
+        if key not in index.pull_requests:
+            updated = MergedDayIndex(pull_requests=(*index.pull_requests, key))
+            await self._store.save(SCORECARD_MERGED_DAYS, day, updated.model_dump(mode="json"))

@@ -92,15 +92,22 @@ async def build_scorecard(
 ) -> ScorecardResponse:
     window_days = parse_window(window)
     moment = now or datetime.now(UTC)
-    runs = await load_runs(ScorecardProjection(store), moment, window_days)
+    projection = ScorecardProjection(store)
+    runs = await load_runs(projection, moment, window_days)
+    today = moment.astimezone(UTC)
+    merged = await projection.merged_pull_requests_for_days(
+        [day_key(today - timedelta(days=i)) for i in range(window_days)]
+    )
+    contributors = {e for pr in merged for e in pr.execution_ids}
     sessions = [p.session_id for r in runs.values() for p in r.phases if p.session_id]
     card = compute_scorecard(
         runs=runs,
-        spend_by_execution=await read_costs(list(runs)),
+        spend_by_execution=await read_costs(list(dict.fromkeys([*runs, *sorted(contributors)]))),
         tool_calls_by_session=await read_tool_calls(sessions),
         cost_by_session_model=await read_session_models(sessions),
         now=moment,
         window_days=window_days,
+        merged_pull_requests=merged,
     )
     return render(card, window)
 

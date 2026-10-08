@@ -117,3 +117,31 @@ class DayIndex(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     execution_ids: tuple[str, ...] = ()
+
+
+class MergedPullRequest(BaseModel):
+    """One merged PR and every execution recorded as contributing to it (#1728).
+
+    Folded from ``PullRequestMergeRecorded``, one per contributor: a failed
+    run, its resume and an independent reverify are each one entry, and a
+    redelivered event adds nobody twice.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    repository: str
+    pull_request: int
+    merged_at: datetime
+    execution_ids: tuple[str, ...] = ()
+
+    @property
+    def key(self) -> str:
+        return f"{self.repository}#{self.pull_request}"
+
+
+class MergedDayIndex(BaseModel):
+    """The PRs merged on one UTC day, keyed ``owner/name#number``."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    pull_requests: tuple[str, ...] = ()

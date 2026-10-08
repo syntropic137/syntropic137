@@ -167,7 +167,7 @@ async def test_the_response_carries_a_resumed_chains_full_cost_and_one_outcome()
     verify_target = next(t for t in response.targets if t.name == "Median verify tokens")
     assert verify_target.status == "on_track"
     assert [row.key for row in response.by_model] == ["claude-opus-5-5-20260901"]
-    assert response.delivery.merged_prs is None
+    assert response.delivery.merged_prs == 0  # none merged in the window, measured (#1728)
     assert response.daily[-1].day == "2026-10-07"
 
 

@@ -19,6 +19,7 @@ if TYPE_CHECKING:
         CompleteExecutionCommand,
         FailExecutionCommand,
         RecordCancelledWorkCommand,
+        RecordPullRequestMergeCommand,
         StartExecutionCommand,
     )
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
@@ -30,6 +31,9 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.orchestration.domain.events.ExecutionCancelledEvent import (
         ExecutionCancelledEvent,
+    )
+    from syn_domain.contexts.orchestration.domain.events.PullRequestMergeRecordedEvent import (
+        PullRequestMergeRecordedEvent,
     )
     from syn_domain.contexts.orchestration.domain.events.WorkflowCompletedEvent import (
         WorkflowCompletedEvent,
@@ -197,6 +201,23 @@ def cancelled_work_event(
         phase_id=command.phase_id,
         quarantined_at=datetime.now(UTC),
         quarantined_refs=list(command.quarantined),
+    )
+
+
+def merge_recorded_event(
+    command: RecordPullRequestMergeCommand, workflow_id: str
+) -> PullRequestMergeRecordedEvent:
+    """The `PullRequestMergeRecorded` a contributing run records for a merged PR (#1728)."""
+    from syn_domain.contexts.orchestration.domain.events.PullRequestMergeRecordedEvent import (
+        PullRequestMergeRecordedEvent,
+    )
+
+    return PullRequestMergeRecordedEvent(
+        execution_id=command.aggregate_id,
+        workflow_id=workflow_id,
+        repository=command.repository,
+        pull_request=command.pull_request,
+        merged_at=command.merged_at,
     )
 
 

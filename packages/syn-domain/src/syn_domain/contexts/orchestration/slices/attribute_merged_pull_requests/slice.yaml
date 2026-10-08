@@ -1,0 +1,11 @@
+name: attribute-merged-pull-requests
+type: command
+aggregate: WorkflowExecution
+emits:
+  - PullRequestMergeRecordedEvent
+projection: MergedPullRequestAttributionProcessManager
+subscribes_to:
+  - WorkflowExecutionStartedEvent
+  - WorkflowFailedEvent
+  - PullRequestMergeRecordedEvent
+returns: None

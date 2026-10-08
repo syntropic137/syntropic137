@@ -31,6 +31,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.commands impor
     InterruptExecutionCommand,
     ProvisionWorkspaceCompletedCommand,
     RecordCancelledWorkCommand,
+    RecordPullRequestMergeCommand,
     ResumeExecutionCommand,
     RetryPhaseCommand,
     StartExecutionCommand,
@@ -51,6 +52,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.lifecycle_even
     cancelled_work_event,
     completed_event,
     failed_event,
+    merge_recorded_event,
     started_event,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.replay import (
@@ -148,6 +150,9 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.events.PhaseStartedEvent import (
         PhaseStartedEvent,
     )
+    from syn_domain.contexts.orchestration.domain.events.PullRequestMergeRecordedEvent import (
+        PullRequestMergeRecordedEvent,
+    )
     from syn_domain.contexts.orchestration.domain.events.WorkflowCompletedEvent import (
         WorkflowCompletedEvent,
     )
@@ -217,6 +222,8 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         self._cancel_reason: str | None = None
         #: Whether this cancel's landed work is already on the stream (#1547).
         self._cancelled_work_recorded = False
+        #: `owner/name#number` of every merged PR this run is recorded against (#1728).
+        self._merged_pull_requests: set[str] = set()
         self._phase_definitions: list[PhaseDefinition] = []
         self._phase_order_map: dict[str, int] = {}
         self._current_phase_workspace_id: str | None = None
@@ -729,6 +736,16 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         if command.quarantined and not self._cancelled_work_recorded:
             self._apply(cancelled_work_event(command, self._workflow_id or ""))
 
+    @command_handler("RecordPullRequestMergeCommand")
+    def record_pull_request_merge(self, command: RecordPullRequestMergeCommand) -> None:
+        """Record that this run contributed to a merged PR (#1728). Once per PR."""
+        if self.id is None:
+            msg = "Execution does not exist"
+            raise ValueError(msg)
+        if f"{command.repository}#{command.pull_request}" in self._merged_pull_requests:
+            return
+        self._apply(merge_recorded_event(command, self._workflow_id or ""))
+
     @command_handler("AddExecutionTagsCommand")
     def add_tags(self, command: AddExecutionTagsCommand) -> None:
         """Add tags to the current set. None new, no event."""
@@ -985,6 +1002,11 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
     def on_cancelled_work_quarantined(self, _event: CancelledWorkQuarantinedEvent) -> None:
         """Apply CancelledWorkQuarantinedEvent. A fact for the PR, recorded once."""
         self._cancelled_work_recorded = True
+
+    @event_sourcing_handler("PullRequestMergeRecorded")
+    def on_pull_request_merge_recorded(self, event: PullRequestMergeRecordedEvent) -> None:
+        """Apply PullRequestMergeRecordedEvent. A fact about the PR, recorded once."""
+        self._merged_pull_requests.add(f"{evt(event, 'repository')}#{evt(event, 'pull_request')}")
 
     @event_sourcing_handler("ExecutionTagsAdded")
     def on_execution_tags_added(self, event: ExecutionTagsAddedEvent) -> None:

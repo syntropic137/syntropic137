@@ -586,6 +586,7 @@ def create_coordinator_service(
     """
     from syn_adapters.github.client import get_github_client
     from syn_adapters.github.pull_request_commenter import GitHubPullRequestCommenter
+    from syn_adapters.github.pull_request_merge_reader import GitHubPullRequestMergeReader
     from syn_adapters.github.remote_branch_reader import GitHubRemoteBranchReader
     from syn_adapters.projections.manager_registry import create_session_cost_projection
     from syn_adapters.projections.trigger_query_projection import TriggerQueryProjection
@@ -627,6 +628,10 @@ def create_coordinator_service(
         QuarantineNoticeProcessManager,
         ResumeStarter,
         ResumeStartProcessManager,
+    )
+    from syn_domain.contexts.orchestration.slices.attribute_merged_pull_requests import (
+        MergedPullRequestAttributionProcessManager,
+        RecordPullRequestMergeHandler,
     )
     from syn_domain.contexts.orchestration.slices.dashboard_metrics import (
         DashboardMetricsProjection,
@@ -720,6 +725,13 @@ def create_coordinator_service(
                     ),
                     projection_store,
                 ),
+            ),
+            # #1728: links merged PRs to every contributing execution and
+            # records the merge on each, live only, for the scorecard to fold.
+            MergedPullRequestAttributionProcessManager(
+                store=projection_store,
+                merges=GitHubPullRequestMergeReader(get_github_client),
+                recorder=RecordPullRequestMergeHandler(get_workflow_execution_repository()),
             ),
             TriggerQueryProjection(projection_store),
             # --- Agent sessions context ---

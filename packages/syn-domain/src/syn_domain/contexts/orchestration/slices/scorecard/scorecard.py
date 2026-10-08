@@ -30,7 +30,10 @@ from syn_domain.contexts.orchestration.slices.scorecard.run_record import (
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
-    from syn_domain.contexts.orchestration.slices.scorecard.run_record import ScorecardPhase
+    from syn_domain.contexts.orchestration.slices.scorecard.run_record import (
+        MergedPullRequest,
+        ScorecardPhase,
+    )
 
 # The owner's one-week go/no-go, 2026-10-07 -> 2026-10-14.
 TARGET_PLATFORM_FAILURE_FREE_RATE = 0.85
@@ -38,9 +41,11 @@ TARGET_MEDIAN_VERIFY_TOKENS = 3_000_000
 TARGET_COST_PER_MERGED_PR_USD = Decimal("5")
 TARGET_CONCURRENCY = 20
 
-MERGED_PR_UNAVAILABLE = (
-    "Not recorded: no event says which PR a run produced, and only failed runs "
-    "record their branches, so merged PRs cannot be attributed yet (#1728)."
+MERGED_PR_SCOPE = (
+    "PRs merged in the window. A PR's cost is every execution recorded as "
+    "contributing to it - failed, resumed and reverify runs included, each once "
+    "- wherever in time it ran. Attributed from the PR a run was started on, "
+    "continued, or had open from a branch its failure observed (#1728)."
 )
 
 
@@ -494,8 +499,38 @@ def _daily(
     return tuple(points)
 
 
+def merged_pull_request_cost(pr: MergedPullRequest, spend: Mapping[str, ExecutionSpend]) -> Decimal:
+    """Every contributing execution's cost, each counted once."""
+    contributors = dict.fromkeys(pr.execution_ids)
+    return sum(
+        (spend[e].total_usd for e in contributors if e in spend),
+        Decimal(0),
+    )
+
+
+def _merged_in(
+    merged: Sequence[MergedPullRequest], start: datetime, end: datetime
+) -> list[MergedPullRequest]:
+    unique = {pr.key: pr for pr in merged}
+    return [pr for pr in unique.values() if start <= pr.merged_at.astimezone(UTC) <= end]
+
+
+def _cost_per_merged_pr(
+    merged: Sequence[MergedPullRequest], spend: Mapping[str, ExecutionSpend]
+) -> Decimal | None:
+    if not merged:
+        return None
+    total = sum((merged_pull_request_cost(pr, spend) for pr in merged), Decimal(0))
+    return total / len(merged)
+
+
 def _targets(
-    counts: OutcomeCounts, verify_median: float | None, throughput: Throughput, *, ran: bool
+    counts: OutcomeCounts,
+    verify_median: float | None,
+    throughput: Throughput,
+    *,
+    ran: bool,
+    cost_per_merged_pr: Decimal | None,
 ) -> tuple[TargetResult, ...]:
     return (
         _target(
@@ -506,7 +541,10 @@ def _targets(
         ),
         _target("Median verify tokens", verify_median, TARGET_MEDIAN_VERIFY_TOKENS, higher=False),
         _target(
-            "Cost per merged PR (USD)", None, float(TARGET_COST_PER_MERGED_PR_USD), higher=False
+            "Cost per merged PR (USD)",
+            None if cost_per_merged_pr is None else float(cost_per_merged_pr),
+            float(TARGET_COST_PER_MERGED_PR_USD),
+            higher=False,
         ),
         _target(
             "Stable concurrency",
@@ -525,6 +563,7 @@ def compute_scorecard(
     cost_by_session_model: Mapping[str, Mapping[str, Decimal]],
     now: datetime,
     window_days: int,
+    merged_pull_requests: Sequence[MergedPullRequest] = (),
 ) -> Scorecard:
     """Score the ``window_days`` UTC days ending now.
 
@@ -532,6 +571,8 @@ def compute_scorecard(
     running, and every member of their resume chains, keyed by execution id.
     ``cost_by_session_model`` is each phase session's Lane-2 cost by the model
     the harness REPORTED; aliases and unknown models must already be excluded.
+    ``merged_pull_requests`` must hold every PR merged in the window, and
+    ``spend_by_execution`` every one of their contributors.
     """
     today = now.astimezone(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
     start = today - timedelta(days=window_days - 1)
@@ -540,6 +581,8 @@ def compute_scorecard(
     started = [run for run in runs.values() if run.started_at is not None]
     counts = _tally(chains)
     throughput = _throughput(started, start, now)
+    merged = _merged_in(merged_pull_requests, start, now)
+    cost_per_merged_pr = _cost_per_merged_pr(merged, spend_by_execution)
 
     return Scorecard(
         window_start=start,
@@ -568,13 +611,14 @@ def compute_scorecard(
         total_cost_usd=sum((_chain_cost(c, spend_by_execution) for c in chains), Decimal(0)),
         executions_costed=sum(1 for m in members if m.execution_id in spend_by_execution),
         executions_in_chains=len(members),
-        merged_prs=None,
-        cost_per_merged_pr_usd=None,
-        merged_pr_scope=MERGED_PR_UNAVAILABLE,
+        merged_prs=len(merged),
+        cost_per_merged_pr_usd=cost_per_merged_pr,
+        merged_pr_scope=MERGED_PR_SCOPE,
         targets=_targets(
             counts,
             _verify_median(members),
             throughput,
             ran=bool(_intervals(started, start, now)),
+            cost_per_merged_pr=cost_per_merged_pr,
         ),
     )
