@@ -8,9 +8,10 @@
  * Steady by the same rule the board used.
  */
 import type { EvalVerdict } from '../resources/evals'
-import type { EvalTrendResponse, EvalTrendRow, WorkflowTrendResponse, WorkflowTrendRow } from '../resources/trends'
+import type { DefinitionChange, EvalTrendResponse, EvalTrendRow, WorkflowTrendResponse, WorkflowTrendRow } from '../resources/trends'
 import { RUNS, WORKFLOWS, type CatalogRun, type CatalogWorkflow } from './catalog'
 import { type FixtureRoute, notFound, route } from './define'
+import { costDisplay, durationDisplay, paginate } from './seed'
 import { EVALS } from './evals'
 import { EXTRA_WORKFLOWS } from './workflowDetails'
 
@@ -37,24 +38,42 @@ const RAW: Raw[] = [
   [23, 3, 'PASS', 0.62, 214, 79], [25, 3, 'FAIL', 0.6, 201, 66], [27, 3, 'PASS', 0.59, 196, 81], [29, 3, 'UNSCORED', 0.61, 190, null],
 ]
 
+const money = (cost: number, seconds: number | null, tokens: number) => ({
+  cost_usd: cost.toFixed(6),
+  cost_is_lower_bound: false,
+  cost_display: costDisplay(cost),
+  duration_seconds: seconds,
+  duration_is_lower_bound: false,
+  duration_display: durationDisplay(seconds),
+  tokens,
+})
+
+const WORKFLOW = ['eval-verify-pinned-v1', 'eval-verify-pinned-sonnet-v1', 'eval-verify-pinned-codex-v1', 'eval-verify-pinned-codex-gpt-5-6-terra-v1']
+
 function evalRow([day, v, verdict, cost, seconds, score]: Raw): EvalTrendRow {
-  const after = day >= CHANGE_DAY
   return {
+    execution_id: `exec-trend-${v + 1}-${day}`,
     // Verifiers run two hours apart on a shared day, in board order.
     date: new Date(DAY0 + day * DAY + (9 + v * 2) * 3_600_000).toISOString(),
+    workflow_id: WORKFLOW[v]!,
+    workflow_version: 'v1',
+    eval_definition_version: day >= CHANGE_DAY ? '2' : '1',
     verifier_model: MODELS[v]!,
+    observed_models: [MODELS[v]!],
     judge_model: score === null ? null : JUDGE,
     score,
     verdict: verdict === 'UNSCORED' ? null : verdict,
-    cost_usd: cost,
-    duration_seconds: seconds,
-    tokens: Math.round((cost / RATE[v]!) * 1e6),
-    definition_version: after ? 'v2' : 'v1',
-    definition_changed_at: after ? new Date(DAY0 + CHANGE_DAY * DAY).toISOString() : null,
+    ...money(cost, seconds, Math.round((cost / RATE[v]!) * 1e6)),
   }
 }
 
-export const EVAL_TREND_ROWS: EvalTrendRow[] = RAW.map(evalRow).sort((a, b) => a.date.localeCompare(b.date))
+/** Newest first, as the API sends them. */
+export const EVAL_TREND_ROWS: EvalTrendRow[] = RAW.map(evalRow).sort((a, b) => (b.date ?? '').localeCompare(a.date ?? ''))
+
+const EVAL_CHANGES: DefinitionChange[] = [
+  { definition_version: '1', changed_at: new Date(DAY0 - 2 * DAY).toISOString(), kind: 'created' },
+  { definition_version: '2', changed_at: new Date(DAY0 + CHANGE_DAY * DAY).toISOString(), kind: 'updated' },
+]
 
 // ---- workflows ------------------------------------------------------------
 
@@ -87,29 +106,39 @@ function shapedDurations(w: CatalogWorkflow, finished: readonly CatalogRun[]): n
 function workflowRows(w: CatalogWorkflow): WorkflowTrendRow[] {
   const runs = RUNS.filter((r) => r.workflowId === w.id).sort((a, b) => a.startedAt.localeCompare(b.startedAt))
   const finished = runs.filter((r) => r.status !== 'running')
-  const shaped = new Map(finished.map((r, j) => [r.id, shapedDurations(w, finished)[j]!]))
-  return runs.map((r) => {
-    const d = shaped.get(r.id) ?? null
-    return {
-      date: r.startedAt,
-      status: r.status,
-      cost_usd: r.cost,
-      duration_seconds: d,
-      tokens: r.tokens,
-      phase_durations: w.phases.map((p) => ({ phase_name: p.name, duration_seconds: d === null ? null : Math.round((d / w.phases.length) * 10) / 10 })),
-      definition_version: 'v1',
-      definition_changed_at: null,
-    }
-  })
+  const durations = shapedDurations(w, finished)
+  const shaped = new Map(finished.map((r, j) => [r.id, durations[j]!]))
+  return runs
+    .map((r): WorkflowTrendRow => {
+      const d = shaped.get(r.id) ?? null
+      return {
+        execution_id: r.id,
+        date: r.startedAt,
+        status: r.status,
+        workflow_version: 'v1',
+        ...money(r.cost, d, r.tokens),
+        phase_durations: w.phases.map((p) => ({ phase_id: p.id, phase_name: p.name, duration_seconds: d === null ? null : Math.round((d / w.phases.length) * 10) / 10 })),
+      }
+    })
+    .reverse()
 }
 
+const definition = (changes: DefinitionChange[]) => ({
+  definition_version: changes.at(-1)?.definition_version ?? null,
+  definition_changed_at: changes.at(-1)?.changed_at ?? null,
+  definition_changes: changes,
+})
+
 export const trendRoutes: FixtureRoute[] = [
-  route('GET', '/evals/:evalId/trend', ({ params }): EvalTrendResponse => {
+  route('GET', '/evals/:evalId/trend', ({ params, query }): EvalTrendResponse => {
     const e = EVALS.find((x) => x.summary.eval_id === params.evalId) ?? notFound('Eval')
-    return { eval_id: e.summary.eval_id, rows: EVAL_TREND_ROWS }
+    const page = paginate(EVAL_TREND_ROWS, query, 50)
+    return { eval_id: e.summary.eval_id, items: page.rows, total: page.total, page: page.page, page_size: page.page_size, ...definition(EVAL_CHANGES) }
   }),
-  route('GET', '/workflows/:workflowId/trend', ({ params }): WorkflowTrendResponse => {
+  route('GET', '/workflows/:workflowId/trend', ({ params, query }): WorkflowTrendResponse => {
     const w = [...WORKFLOWS, ...EXTRA_WORKFLOWS].find((x) => x.id === params.workflowId) ?? notFound('Workflow')
-    return { workflow_id: w.id, rows: workflowRows(w) }
+    const page = paginate(workflowRows(w), query, 50)
+    const created: DefinitionChange = { definition_version: 'v1', changed_at: new Date(DAY0 - 60 * DAY).toISOString(), kind: 'created' }
+    return { workflow_id: w.id, items: page.rows, total: page.total, page: page.page, page_size: page.page_size, ...definition([created]) }
   }),
 ]

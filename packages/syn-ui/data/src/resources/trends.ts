@@ -1,67 +1,95 @@
 /**
  * Run history for the trend charts: GET /evals/{id}/trend and
- * GET /workflows/{id}/trend, one row per run, oldest first.
+ * GET /workflows/{id}/trend (#1788, backend in PR #1800). Items come newest
+ * first; the chart models sort by date themselves.
  *
- * TODO(#624): the endpoints are being built on the api-gaps branch. These
- * types are hand-written to that contract until they reach the OpenAPI spec;
- * then alias the generated schemas here. This file is the only adapter: the
- * screens read rows, never the response envelope.
+ * TODO(#1788): hand-written to the PR #1800 response models
+ * (EvalTrendResponse, WorkflowTrendResponse in syn_api/types.py) until they
+ * reach this package's generated api-types.ts; then alias the schemas here.
+ * This file is the only adapter between the API and the screens.
  */
 import { request, seg } from '../client'
 import type { EvalVerdict } from './evals'
 
-/** Marks a run made after its definition changed (change markers on the charts). */
-export interface TrendDefinitionMark {
-  definition_version?: string | null
-  /** UTC ISO time the definition changed. */
-  definition_changed_at?: string | null
+/** Largest page the API serves (list_query.MAX_PAGE_SIZE). */
+export const TREND_PAGE_SIZE = 200
+
+export type DefinitionChangeKind = 'created' | 'updated' | 'phase_updated'
+
+export interface DefinitionChange {
+  definition_version: string | null
+  /** ISO 8601 UTC. */
+  changed_at: string
+  kind: DefinitionChangeKind
 }
 
-export interface EvalTrendRow extends TrendDefinitionMark {
-  /** UTC ISO start of the run. */
-  date: string
-  verifier_model: string
+/** Current definition, when it last changed, and every change (oldest first). */
+export interface TrendDefinition {
+  definition_version: string | null
+  definition_changed_at: string | null
+  definition_changes: DefinitionChange[]
+}
+
+interface TrendMoney {
+  /** Decimal, sent as a string. */
+  cost_usd: string | number | null
+  cost_is_lower_bound: boolean
+  cost_display: string
+  duration_seconds: number | null
+  duration_is_lower_bound: boolean
+  duration_display: string
+  tokens: number
+}
+
+export interface EvalTrendRow extends TrendMoney {
+  execution_id: string
+  /** Run start, ISO 8601 UTC; null if it never recorded one. */
+  date: string | null
+  workflow_id: string
+  workflow_version: string | null
+  eval_definition_version: string | null
+  verifier_model: string | null
+  observed_models: string[]
+  /** Null for script-scored runs. */
   judge_model: string | null
-  /** Judge's quality score, 0 to 100; null until scored. */
+  /** 0 to 100. */
   score: number | null
   verdict: EvalVerdict | null
-  cost_usd: number
-  duration_seconds: number | null
-  tokens: number | null
-  /** Not in the contract yet: lets the readout link to the run. */
-  execution_id?: string | null
 }
 
 export interface WorkflowTrendPhase {
+  phase_id: string
   phase_name: string
   duration_seconds: number | null
 }
 
-export interface WorkflowTrendRow extends TrendDefinitionMark {
-  date: string
+export interface WorkflowTrendRow extends TrendMoney {
+  execution_id: string
+  date: string | null
   status: string
-  cost_usd: number
-  duration_seconds: number | null
-  tokens: number | null
+  workflow_version: string | null
   phase_durations: WorkflowTrendPhase[]
 }
 
-export interface EvalTrendResponse {
+interface TrendPage<T> extends TrendDefinition {
+  items: T[]
+  total: number
+  page: number
+  page_size: number
+}
+
+export interface EvalTrendResponse extends TrendPage<EvalTrendRow> {
   eval_id: string
-  rows: EvalTrendRow[]
 }
 
-export interface WorkflowTrendResponse {
+export interface WorkflowTrendResponse extends TrendPage<WorkflowTrendRow> {
   workflow_id: string
-  rows: WorkflowTrendRow[]
 }
 
-export async function getEvalTrend(evalId: string, signal?: AbortSignal): Promise<EvalTrendRow[]> {
-  const res = await request<EvalTrendResponse>(`/evals/${seg(evalId)}/trend`, { signal })
-  return res.rows
+export function getEvalTrend(evalId: string, signal?: AbortSignal): Promise<EvalTrendResponse> {
+  return request(`/evals/${seg(evalId)}/trend`, { query: { page_size: TREND_PAGE_SIZE }, signal })
 }
 
-export async function getWorkflowTrend(workflowId: string, signal?: AbortSignal): Promise<WorkflowTrendRow[]> {
-  const res = await request<WorkflowTrendResponse>(`/workflows/${seg(workflowId)}/trend`, { signal })
-  return res.rows
+export function getWorkflowTrend(workflowId: string, params: { page_size?: number } = {}, signal?: AbortSignal): Promise<WorkflowTrendResponse> {
+  return request(`/workflows/${seg(workflowId)}/trend`, { query: { page_size: params.page_size ?? TREND_PAGE_SIZE }, signal })
 }

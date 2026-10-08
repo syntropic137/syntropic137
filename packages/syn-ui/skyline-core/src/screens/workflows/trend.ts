@@ -12,11 +12,13 @@ export const TREND_MIN_RUNS = 3
 /** A fitted change smaller than this, in percent, reads "Steady". */
 export const STEADY_PCT = 5
 
-/** One row of GET /workflows/{id}/trend. Structural: the API type satisfies it. */
+/** One row of GET /workflows/{id}/trend (PR #1800). Structural: the API type satisfies it. */
 export interface WorkflowTrendRowLike {
-  date: string
+  date: string | null
   status?: string | null
   duration_seconds?: number | null
+  /** A floor, not a measurement: left out of the trend. */
+  duration_is_lower_bound?: boolean
 }
 
 export type DurationTrendKind = 'none' | 'few' | 'faster' | 'slower' | 'steady'
@@ -34,11 +36,13 @@ export interface DurationTrend {
   spark: string
 }
 
-/** Durations of finished runs, oldest first, the last `window` of them. */
+const measured = (r: WorkflowTrendRowLike): boolean => !!r.date && !r.duration_is_lower_bound && typeof r.duration_seconds === 'number' && Number.isFinite(r.duration_seconds)
+
+/** Measured durations of dated runs, oldest first (the API sends newest first), the last `window` of them. */
 export function recentDurations(rows: readonly WorkflowTrendRowLike[], window = TREND_WINDOW): number[] {
   return rows
-    .filter((r) => typeof r.duration_seconds === 'number' && Number.isFinite(r.duration_seconds))
-    .map((r) => ({ t: Date.parse(r.date), d: r.duration_seconds as number }))
+    .filter(measured)
+    .map((r) => ({ t: Date.parse(r.date ?? ''), d: r.duration_seconds as number }))
     .sort((a, b) => a.t - b.t)
     .slice(-window)
     .map((r) => r.d)

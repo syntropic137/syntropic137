@@ -40,3 +40,15 @@ describe('workflow duration trend', () => {
     expect(durationTrend(rows([null]))).toMatchObject({ kind: 'none', label: 'No finished runs yet' })
   })
 })
+
+describe('workflow duration trend on API rows', () => {
+  it('skips undated runs and lower-bound durations', () => {
+    const r = [
+      { date: day(0), duration_seconds: 100 },
+      { date: null, duration_seconds: 5 },
+      { date: day(1), duration_seconds: 9, duration_is_lower_bound: true },
+      { date: day(2), duration_seconds: 90 },
+    ]
+    expect(recentDurations(r)).toEqual([100, 90])
+  })
+})

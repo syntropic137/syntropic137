@@ -23,19 +23,27 @@ export const SERIES_COLORS = 4
 
 const DAY = 86_400_000
 
-/** One row of GET /evals/{id}/trend. Structural: the API type satisfies it. */
+/** One row of GET /evals/{id}/trend (PR #1800). Structural: the API type satisfies it. */
 export interface EvalTrendRowLike {
-  date: string
-  verifier_model: string
+  date: string | null
+  verifier_model: string | null
+  /** Null for script-scored runs. */
   judge_model?: string | null
   score?: number | null
   verdict?: string | null
-  cost_usd: number | string
+  cost_usd: number | string | null
+  cost_display?: string
   duration_seconds?: number | null
+  duration_display?: string
   tokens?: number | null
   execution_id?: string | null
-  definition_version?: string | null
-  definition_changed_at?: string | null
+}
+
+/** One entry of the trend envelope's definition_changes. */
+export interface DefinitionChangeLike {
+  definition_version: string | null
+  changed_at: string
+  kind: string
 }
 
 export type TrendMetric = 'cost' | 'speed' | 'tokens'
@@ -61,6 +69,9 @@ export interface TrendRun {
   cost: number
   seconds: number
   tokens: number
+  /** The API's cost_display and duration_display, rendered verbatim. */
+  costDisplay: string
+  speedDisplay: string
   executionId: string | null
 }
 
@@ -97,6 +108,8 @@ export interface MetricDef {
   value: (r: TrendRun) => number
   format: (v: number) => string
   tick: (v: number) => string
+  /** One run's value as text: the API display string where there is one. */
+  display: (r: TrendRun) => string
 }
 
 export interface EvalTrendModel {
@@ -139,7 +152,7 @@ export function compactTokens(n: number): string {
 const dollars = (v: number) => `$${Math.abs(v).toFixed(2)}`
 
 export const TREND_METRICS: Record<TrendMetric, MetricDef> = {
-  cost: { label: 'Cost', unit: 'per run', steps: [0.4, 0.8, 1.2, 1.6, 2, 3.2], tolerance: 0.02, value: (r) => r.cost, format: dollars, tick: dollars },
+  cost: { label: 'Cost', unit: 'per run', steps: [0.4, 0.8, 1.2, 1.6, 2, 3.2], tolerance: 0.02, value: (r) => r.cost, format: dollars, tick: dollars, display: (r) => r.costDisplay },
   speed: {
     label: 'Speed',
     unit: 'time to verdict',
@@ -147,6 +160,7 @@ export const TREND_METRICS: Record<TrendMetric, MetricDef> = {
     tolerance: 10,
     value: (r) => r.seconds,
     format: minutesSeconds,
+    display: (r) => r.speedDisplay,
     tick: (v) => (v === 0 ? '0' : v % 60 ? minutesSeconds(v) : `${v / 60}m`),
   },
   tokens: {
@@ -156,6 +170,7 @@ export const TREND_METRICS: Record<TrendMetric, MetricDef> = {
     tolerance: 5000,
     value: (r) => r.tokens,
     format: compactTokens,
+    display: (r) => compactTokens(r.tokens),
     tick: (v) => (v === 0 ? '0' : compactTokens(v)),
   },
 }
@@ -166,15 +181,26 @@ export function parseTrendMetric(raw: string | null | undefined): TrendMetric {
 
 // ---- rows -> runs ---------------------------------------------------------
 
+/** Who judged a scored run: the judge model, or "script" for a script scorer. */
+export const SCRIPT_JUDGE = 'script'
+const UNKNOWN_MODEL = 'unknown model'
+
+/** A row with a start date and a verifier, the only rows a chart can place. */
+type DatedRow = EvalTrendRowLike & { date: string; verifier_model: string }
+
+function datedRows(rows: readonly EvalTrendRowLike[]): DatedRow[] {
+  return rows.flatMap((r) => (r.date && Number.isFinite(Date.parse(r.date)) ? [{ ...r, date: r.date, verifier_model: r.verifier_model ?? UNKNOWN_MODEL }] : []))
+}
+
 const num = (v: number | string | null | undefined): number => {
   const n = typeof v === 'number' ? v : Number(v ?? NaN)
   return Number.isFinite(n) ? n : 0
 }
 
 /** Series in order of each verifier's first run. */
-export function trendSeries(rows: readonly EvalTrendRowLike[]): TrendSeries[] {
+export function trendSeries(input: readonly EvalTrendRowLike[]): TrendSeries[] {
   const first = new Map<string, number>()
-  for (const r of rows) {
+  for (const r of datedRows(input)) {
     const t = Date.parse(r.date)
     const seen = first.get(r.verifier_model)
     if (seen === undefined || t < seen) first.set(r.verifier_model, t)
@@ -184,7 +210,7 @@ export function trendSeries(rows: readonly EvalTrendRowLike[]): TrendSeries[] {
     .map(([model], k) => ({ key: model, model, short: shortModel(model), color: (k % SERIES_COLORS) + 1 }))
 }
 
-function toRun(r: EvalTrendRowLike, i: number, series: number, t0: number, t1: number): TrendRun {
+function toRun(r: DatedRow, i: number, series: number, t0: number, t1: number): TrendRun {
   const t = Date.parse(r.date)
   const score = typeof r.score === 'number' && Number.isFinite(r.score) ? r.score : null
   return {
@@ -194,15 +220,17 @@ function toRun(r: EvalTrendRowLike, i: number, series: number, t0: number, t1: n
     series,
     verdict: normalizeVerdict(r.verdict),
     score,
-    judge: score === null ? null : (r.judge_model ?? null),
+    judge: score === null ? null : (r.judge_model ?? SCRIPT_JUDGE),
     cost: num(r.cost_usd),
     seconds: num(r.duration_seconds),
     tokens: num(r.tokens),
+    costDisplay: r.cost_display ?? dollars(num(r.cost_usd)),
+    speedDisplay: r.duration_display ?? minutesSeconds(num(r.duration_seconds)),
     executionId: r.execution_id ?? null,
   }
 }
 
-function timeSpan(rows: readonly EvalTrendRowLike[]): [number, number] {
+function timeSpan(rows: readonly DatedRow[]): [number, number] {
   const ts = rows.map((r) => Date.parse(r.date))
   return [Math.min(...ts), Math.max(...ts)]
 }
@@ -236,21 +264,15 @@ function xTicksOf(t0: number, t1: number): TrendTick[] {
   return out
 }
 
-/** Change markers: one where definition_version changes, at definition_changed_at when given. */
-export function changeNotes(rows: readonly EvalTrendRowLike[], t0: number, t1: number): TrendNote[] {
-  const sorted = [...rows].sort((a, b) => Date.parse(a.date) - Date.parse(b.date))
-  const out: TrendNote[] = []
-  let prev: string | null = null
-  for (const r of sorted) {
-    const v = r.definition_version ?? null
-    if (v === null) continue
-    if (prev !== null && v !== prev) {
-      const t = Date.parse(r.definition_changed_at ?? r.date)
-      out.push({ x: timeX(t, t0, t1), label: `Definition ${v} · ${shortDay(t)}` })
-    }
-    prev = v
-  }
-  return out
+/** Change markers from the envelope's definition_changes: every change inside the charted span except the creation. */
+export function changeNotes(changes: readonly DefinitionChangeLike[], t0: number, t1: number): TrendNote[] {
+  return changes.flatMap((c) => {
+    const t = Date.parse(c.changed_at)
+    if (c.kind === 'created' || !Number.isFinite(t) || t < t0 || t > t1) return []
+    const v = c.definition_version
+    const name = v === null ? 'Definition changed' : `Definition ${/^\d+$/.test(v) ? 'v' + v : v}`
+    return [{ x: timeX(t, t0, t1), label: `${name} · ${shortDay(t)}` }]
+  })
 }
 
 // ---- verifier cards -----------------------------------------------------
@@ -381,7 +403,8 @@ function subtitleOf(runs: readonly TrendRun[], series: readonly TrendSeries[], t
   return `${n} ${n === 1 ? 'run' : 'runs'} in ${days} ${days === 1 ? 'day' : 'days'} across ${series.length} ${series.length === 1 ? 'verifier' : 'verifiers'}. Scores come from the judge model; a run passes at ${PASS_SCORE}.`
 }
 
-export function evalTrendModel(rows: readonly EvalTrendRowLike[], metricKey: TrendMetric = 'cost'): EvalTrendModel {
+export function evalTrendModel(input: readonly EvalTrendRowLike[], metricKey: TrendMetric = 'cost', changes: readonly DefinitionChangeLike[] = []): EvalTrendModel {
+  const rows = datedRows(input)
   const metric = TREND_METRICS[metricKey] ?? EMPTY_METRIC
   if (rows.length === 0) return emptyModel(metric)
   const series = trendSeries(rows)
@@ -410,12 +433,12 @@ export function evalTrendModel(rows: readonly EvalTrendRowLike[], metricKey: Tre
     },
     efficiency: {
       lines: seriesLines(runs, series, ey, 150),
-      dots: dotsOf(runs, series, ey, (r, s) => `${shortDay(r.t)}, ${s.model}: ${metric.format(metric.value(r))} ${metric.unit}`),
+      dots: dotsOf(runs, series, ey, (r, s) => `${shortDay(r.t)}, ${s.model}: ${metric.display(r)} ${metric.unit}`),
       ends: seriesEnds(runs, series, ey),
       ticks: axisTicks(max).map((v) => ({ at: 100 - valueY(v, max), label: metric.tick(v) })),
     },
     xTicks: xTicksOf(t0, t1),
-    notes: changeNotes(rows, t0, t1),
+    notes: changeNotes(changes, t0, t1),
     cards: series.map((s, si) => verifierCard(s, runs.filter((r) => r.series === si), metric)),
     lanes: series.map((s, si) => ({
       key: s.key,
@@ -461,8 +484,8 @@ export function trendReadout(model: EvalTrendModel, i: number): TrendReadout | n
     score: r.score === null ? '—' : String(r.score),
     scoreOf: r.score === null ? 'not scored yet' : `of 100 · pass at ${PASS_SCORE}`,
     judge: r.judge ?? 'waiting for the scorer',
-    cost: dollars(r.cost),
-    speed: minutesSeconds(r.seconds),
+    cost: r.costDisplay,
+    speed: r.speedDisplay,
     tokens: compactTokens(r.tokens),
     executionId: r.executionId,
   }

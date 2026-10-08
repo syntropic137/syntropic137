@@ -115,22 +115,25 @@ describe('every screen has data in fixtures mode', () => {
   })
 })
 
-describe('trend fixtures (Eval and Workflows boards)', () => {
-  it('serves the Eval board sample: 28 runs, four verifiers, one judge, v2 from day 18', async () => {
-    const rows = await getEvalTrend('eval-shared-esp-stream-4')
+describe('trend fixtures (Eval and Workflows boards, PR #1800 shape)', () => {
+  it('serves the Eval board sample newest first: 28 runs, four verifiers, one judge, v2 from day 18', async () => {
+    const res = await getEvalTrend('eval-shared-esp-stream-4')
+    expect(res).toMatchObject({ eval_id: 'eval-shared-esp-stream-4', total: 28, definition_version: '2', definition_changed_at: '2026-09-26T00:00:00.000Z' })
+    const rows = res.items
     expect(rows).toHaveLength(28)
     expect(new Set(rows.map((r) => r.verifier_model)).size).toBe(4)
     expect(new Set(rows.flatMap((r) => (r.judge_model ? [r.judge_model] : [])))).toEqual(new Set(['claude-opus-5-5']))
-    expect(rows[0]).toMatchObject({ date: '2026-09-08T09:00:00.000Z', verifier_model: 'claude-opus-5-5', score: 82, verdict: 'PASS', cost_usd: 1.21, duration_seconds: 452, tokens: 134444 })
-    expect(rows.at(-1)).toMatchObject({ verifier_model: 'gpt-5.6-terra', score: null, verdict: null })
-    expect(rows.filter((r) => r.definition_version === 'v2').every((r) => r.definition_changed_at === '2026-09-26T00:00:00.000Z')).toBe(true)
+    expect(rows.at(-1)).toMatchObject({ date: '2026-09-08T09:00:00.000Z', verifier_model: 'claude-opus-5-5', score: 82, verdict: 'PASS', cost_display: '$1.21', duration_seconds: 452, duration_display: '7m 32s', tokens: 134444, eval_definition_version: '1' })
+    expect(rows[0]).toMatchObject({ verifier_model: 'gpt-5.6-terra', score: null, verdict: null, eval_definition_version: '2' })
+    expect(res.definition_changes.map((c) => c.kind)).toEqual(['created', 'updated'])
     await expect(getEvalTrend('missing')).rejects.toMatchObject({ status: 404 })
   })
-  it('serves one workflow row per run with phase durations', async () => {
-    const rows = await getWorkflowTrend('research-workflow')
-    expect(rows).toHaveLength((await listWorkflowRuns('research-workflow')).length)
-    expect(rows[0]!.phase_durations.map((p) => p.phase_name)).toEqual(['Research', 'Synthesize', 'Report'])
-    expect(rows.find((r) => r.status === 'running')?.duration_seconds).toBeNull()
-    expect(await getWorkflowTrend('code-review')).toEqual([])
+  it('serves one workflow row per run, newest first, with phase durations', async () => {
+    const res = await getWorkflowTrend('research-workflow')
+    expect(res.items).toHaveLength((await listWorkflowRuns('research-workflow')).length)
+    expect(res.items[0]!.date! >= res.items.at(-1)!.date!).toBe(true)
+    expect(res.items[0]!.phase_durations.map((p) => p.phase_name)).toEqual(['Research', 'Synthesize', 'Report'])
+    expect(res.items.find((r) => r.status === 'running')?.duration_seconds).toBeNull()
+    expect((await getWorkflowTrend('code-review')).items).toEqual([])
   })
 })

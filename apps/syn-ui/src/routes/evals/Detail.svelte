@@ -107,7 +107,7 @@
     {/if}
   </PageHeader>
 
-  <EvalTrend evalId={e.eval_id} evalName={e.name} rows={trend.data ?? null} error={trend.error} />
+  <EvalTrend evalId={e.eval_id} evalName={e.name} rows={trend.data?.items ?? null} changes={trend.data?.definition_changes ?? []} error={trend.error} />
 
   {#if caseId}
     <section class="sky-eval__section" aria-labelledby="sky-eval-siblings">

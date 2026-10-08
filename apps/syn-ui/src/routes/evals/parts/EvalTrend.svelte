@@ -6,7 +6,7 @@
   this part renders it and keeps the selected run and metric.
 -->
 <script lang="ts">
-  import type { EvalTrendRow } from '@syn137/syn-ui-data'
+  import type { DefinitionChange, EvalTrendRow } from '@syn137/syn-ui-data'
   import { Skeleton, ToggleGroup, Callout, EmptyState } from '@syn137/skyline-svelte-v5'
   import { CopyButton, TrendChart } from '@syn137/skyline-svelte-v5/patterns'
   import { buildEvalTrendPrompt, evalTrendCommand } from '@syn137/skyline-core/patterns'
@@ -17,15 +17,16 @@
     evalId: string
     evalName: string
     rows: EvalTrendRow[] | null
+    changes: DefinitionChange[]
     error: unknown
   }
 
-  let { evalId, evalName, rows, error }: Props = $props()
+  let { evalId, evalName, rows, changes, error }: Props = $props()
 
   let metric = $state<TrendMetric>('cost')
   let picked = $state(-1)
 
-  const model = $derived(evalTrendModel(rows ?? [], metric))
+  const model = $derived(evalTrendModel(rows ?? [], metric, changes))
   const sel = $derived(picked >= 0 && picked < model.runs.length ? picked : model.initial)
   const readout = $derived(trendReadout(model, sel))
   const prompt = $derived(buildEvalTrendPrompt({ evalId, evalName }))

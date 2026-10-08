@@ -24,12 +24,15 @@ const ROWS: EvalTrendRowLike[] = RAW.map(([d, v, verdict, cost, secs, score]) =>
   cost_usd: String(cost),
   duration_seconds: secs,
   tokens: Math.round((cost / RATE[v]!) * 1e6),
-  definition_version: d >= 18 ? 'v2' : 'v1',
-  definition_changed_at: d >= 18 ? new Date(DAY0 + 18 * 86_400_000).toISOString() : null,
+  execution_id: `exec-${v}-${d}`,
 }))
+const CHANGES = [
+  { definition_version: '1', changed_at: new Date(DAY0 - 2 * 86_400_000).toISOString(), kind: 'created' },
+  { definition_version: '2', changed_at: new Date(DAY0 + 18 * 86_400_000).toISOString(), kind: 'updated' },
+]
 
 describe('eval trend model (Eval board sample)', () => {
-  const m = evalTrendModel(ROWS, 'cost')
+  const m = evalTrendModel([...ROWS].reverse(), 'cost', CHANGES)
 
   it('summarises runs, verifiers and the judge', () => {
     expect(m.subtitle).toBe('28 runs in 30 days across 4 verifiers. Scores come from the judge model; a run passes at 70.')
@@ -108,13 +111,32 @@ describe('eval trend helpers', () => {
     expect(verifierVerdict({ fresh: false, q: 'flat', e: 'flat' })).toEqual({ text: 'Holding steady', tone: 'neutral' })
   })
 
-  it('ignores rows without a version and repeats of one', () => {
+  it('marks changes inside the span, never the creation', () => {
+    const t0 = Date.parse('2026-09-01T00:00:00Z')
+    const t1 = Date.parse('2026-09-11T00:00:00Z')
+    const notes = changeNotes(
+      [
+        { definition_version: '1', changed_at: '2026-09-01T00:00:00Z', kind: 'created' },
+        { definition_version: '1.4.0', changed_at: '2026-09-06T00:00:00Z', kind: 'phase_updated' },
+        { definition_version: null, changed_at: '2026-09-08T00:00:00Z', kind: 'updated' },
+        { definition_version: '3', changed_at: '2026-10-01T00:00:00Z', kind: 'updated' },
+      ],
+      t0,
+      t1,
+    )
+    expect(notes.map((n) => n.label)).toEqual(['Definition 1.4.0 · Sep 6', 'Definition changed · Sep 8'])
+    expect(notes[0]!.x).toBe(50)
+  })
+
+  it('shows "script" for a script-scored run, uses display strings, skips undated rows', () => {
     const rows = [
-      { date: '2026-09-01T00:00:00Z', verifier_model: 'a', cost_usd: 1, definition_version: null },
-      { date: '2026-09-02T00:00:00Z', verifier_model: 'a', cost_usd: 1, definition_version: 'v1' },
-      { date: '2026-09-03T00:00:00Z', verifier_model: 'a', cost_usd: 1, definition_version: 'v1' },
+      { date: '2026-09-01T00:00:00Z', verifier_model: null, judge_model: null, score: 80, verdict: 'PASS', cost_usd: '0.5', cost_display: '≥ $0.50', duration_seconds: 61, duration_display: '1m 1s', tokens: 1000 },
+      { date: null, verifier_model: 'a', score: 10, cost_usd: 1 },
     ]
-    expect(changeNotes(rows, Date.parse(rows[0]!.date), Date.parse(rows[2]!.date))).toEqual([])
+    const mm = evalTrendModel(rows)
+    expect(mm.runs).toHaveLength(1)
+    expect(mm.judges).toBe('script')
+    expect(trendReadout(mm, 0)).toMatchObject({ model: 'unknown model', judge: 'script', cost: '≥ $0.50', speed: '1m 1s' })
   })
 
   it('builds the agent prompt around the CLI command', () => {
