@@ -1,0 +1,20 @@
+id: token-injector-get-post-only
+polarity: defect
+source_pr: 1260
+# Mined from the fix: the first fix commit's first parent, so the bug is
+# present and nothing of the fix is. Evidence at the pin:
+# the ext_authz handler defines only `do_GET` and `do_POST` (lines 117/120);
+# the fix answers every method.
+commit: 523829eca8470f9d4fdd422f22c5fb82cf58ea4a
+fix_commit: 51d0d87d87d286776182dc275449802453c63141
+first_fix_commit: 0ed8617140d954ffd366ec2a166f16765b48faf5
+task: >
+  Review the token injector, the ext_authz service the egress proxy consults
+  to inject GitHub credentials into an agent's outbound requests to GitHub.
+expected:
+  files:
+    - docker/token-injector/token_injector.py
+  keywords:
+    - ["put", "patch", "delete", "method", "head", "options", "verb"]
+    - ["get and post", "only get", "get/post", "get or post", "501", "unsupported", "not handled", "unhandled", "rejected", "refused", "fail", "denied"]
+split: train

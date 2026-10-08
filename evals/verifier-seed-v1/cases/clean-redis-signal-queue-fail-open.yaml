@@ -14,3 +14,4 @@ task: >
   the resilient client factory out of the API wiring into syn-adapters.
   Review whether a Redis outage is now survived where it should be, and
   refused where it must be.
+split: train

@@ -17,6 +17,29 @@ This phase exists because a phase that makes a change and then checks it will
 shortchange the checking: the change feels like the deliverable, and the check
 feels like paperwork. You did not write this code. Treat it as suspect.
 
+## Report the verdict to the engine, not only in prose
+
+Read this before you run anything long: it is the one part of this phase the
+engine reads, and a run that ends before you reach the bottom of this prompt
+must still have obeyed it.
+
+Your `TASK_RESULT` block MUST carry `"review_verdict"`, exactly `"certified"`
+or `"blocked"`, matching the first line of your report. The engine reads that
+key, and only that key, to decide what runs next: `certified` skips every
+repair round and goes straight to `finalize_pr`; `blocked` runs the first
+repair round (`fix`, then `reverify`). This phase declares `requires_verdict`,
+so a missing or misspelled verdict FAILS the phase ("verify produced no
+verdict") and the review you did is not acted on; it is never read as
+certified.
+
+`review_verdict` is not `success`. A BLOCKED review you completed is a
+successful phase: write `"success": true, "review_verdict": "blocked"`.
+
+Your report's first line is exactly `CERTIFIED` or `BLOCKED`, and its second
+line is exactly `Round: 0 of 3`: no repair round has run yet. `finalize_pr`
+reads this report as the final one when you certify, and refuses a report
+whose first two lines are anything else.
+
 ## First: check out the code you are verifying
 
 **You are in a fresh workspace with a fresh clone of the default branch.** The
@@ -407,8 +430,9 @@ if the outcome was a refusal: a refusal is a deliverable and is often the
 most valuable one.
 
 The verdict, the gate output, the mutation results, and the exact head you verified.
-A verdict: is the change correct and complete, or not. Which gates you ran,
-where each came from (declared, found, or none), and their output, each
+A verdict: is the change correct and complete, or not. The first two lines are
+the verdict and `Round: 0 of 3`, as the verdict section at the top says. Which
+gates you ran, where each came from (declared, found, or none), and their output, each
 mutation and its result, and anything you could not verify. If you found a
 defect, say exactly what and where; do not fix it silently.
 
@@ -496,8 +520,9 @@ everything you call blocking as required work.
 
 Your task in this phase is to deliver an honest verification report, not to
 make the candidate pass. If you can identify the candidate and write
-`artifacts/output/verify.md`, end with `TASK_RESULT success=true` even when the
-candidate is BLOCKED.
+`artifacts/output/verify.md`, end with `TASK_RESULT success=true` and the
+`review_verdict` the section at the top requires, even when the candidate is
+BLOCKED.
 
 This includes a normal code, test, or design defect; a failing gate; and an
 environment limitation that prevents only part of verification, such as an

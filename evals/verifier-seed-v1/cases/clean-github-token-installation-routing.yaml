@@ -14,3 +14,4 @@ task: >
   GitHub which installation owns each repo instead of matching account
   logins. Review the token routing for every repository shape a workflow can
   run against.
+split: holdout
