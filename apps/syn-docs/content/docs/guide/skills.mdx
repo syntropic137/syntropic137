@@ -186,6 +186,23 @@ A phase that declares skills but cannot install them **fails** rather than
 running without them. Silently proceeding would produce a plausible-looking run
 against the wrong capabilities, which is worse than a clear failure.
 
+## Seeing skills on workflows and executions
+
+- **Workflow detail page** (dashboard): each phase card lists the skills it
+  declares - name, source repo and version, with a link to the source at that
+  version for GitHub sources. A phase with none reads "none". Same data as
+  `GET /workflows/{id}` -> `phases[].skills[]`.
+- **Execution detail page** (dashboard): each phase shows the skills it was
+  **pinned** to when it started - `name`, `version`, `source_url`, and
+  `resolved_sha` (a SHA-256 over the skill's files, shown as `content
+  sha256:<7>`, not a git commit). Same data as `GET /executions/{id}` ->
+  `phases[].pinned_at_start.skills[]`, with `phases[].start_pins_status`
+  (`recorded`, `not_recorded`, `unavailable`) saying why it may be empty.
+
+**Limit:** whether the agent actually **used** a skill is not recorded yet. The
+execution page says "skill use not recorded yet"; it never claims a skill was
+unused.
+
 ## Storage
 
 Skill storage is content-addressed and grows monotonically. Eviction is

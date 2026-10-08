@@ -83,6 +83,34 @@ After creating the GitHub App, install it on your repositories:
 3. Choose **All repositories** or select specific ones
 4. Syntropic137 dynamically resolves installation IDs per repository, no reconfiguration needed when you add new repos
 
+## Installation tokens and transient GitHub failures
+
+Every phase workspace gets a short-lived installation token, minted from the
+App with `POST /app/installations/{id}/access_tokens` during workspace setup.
+GitHub sometimes answers that call with short bursts of 5xx errors, so the mint
+is retried:
+
+| | Token mint | Other GitHub calls during provisioning |
+| --- | --- | --- |
+| Retried on | A dropped or timed-out response, `429`, any `5xx` | A connection that dropped or timed out, `502`, `503`, `504` |
+| Attempts | 5, waiting about 5, 10, 20, 40 s (plus up to 10% jitter), or GitHub's `Retry-After` when sent | 3, with short jittered waits |
+| Deadline | 3/4 of the setup phase timeout (90 s of the default 120 s), waits and requests included | - |
+| Never retried | `4xx` other than `429` (for example 401, 403, 404, 422): GitHub's answer about the request | Any `4xx` |
+
+A non-idempotent call other than the mint is sent again only when the
+connection was never made, so a retry can never post a second comment.
+
+**When retries run out**, the phase fails with upstream kind `unavailable`
+(`Upstream failure: unavailable - transient; the phase is resumable.`), not
+`auth`. Resume the execution; nothing needs reconfiguring. An `auth` failure
+(401/403) still means the App's credentials or permissions need fixing.
+
+**Accepted trade-off:** if GitHub minted a token but the response was lost, the
+retry mints another. The first is an orphan: scoped to the requested repos and
+permissions, live for about an hour, and not revocable by the platform because
+it never received it. Every resend is logged at WARNING saying an orphan may
+exist.
+
 ## Discovering Accessible Repositories
 
 Once the GitHub App is installed, you can list all repositories it has access to:
