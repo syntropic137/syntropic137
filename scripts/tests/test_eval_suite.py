@@ -26,6 +26,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import eval_suite
 import yaml
 from eval_suite import (
     DEFAULT_SUITE,
@@ -1820,9 +1821,20 @@ def test_a_train_launch_never_starts_a_holdout_case(tmp_path: Path) -> None:
 
 @pytest.mark.unit
 def test_the_split_flag_selects_the_cases_check_reports(
-    capsys: pytest.CaptureFixture[str],
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # The pins themselves are checked by the shallow-guarded tests above; this
+    # one is about what the CLI hands to the check, so it runs on a shallow CI
+    # clone too.
+    checked: list[LoadedSuite] = []
+
+    def record(loaded: LoadedSuite, repo: Path) -> list[str]:
+        checked.append(loaded)
+        return []
+
+    monkeypatch.setattr(eval_suite, "check_commits", record)
     assert main(["check", "--split", "holdout"]) == 0
+    assert [c.split for c in checked[0].cases] == ["holdout"] * 9
     out = capsys.readouterr().out
     assert ": 9 case(s)" in out
     assert "case:binary-artifact-minio-key" not in out
