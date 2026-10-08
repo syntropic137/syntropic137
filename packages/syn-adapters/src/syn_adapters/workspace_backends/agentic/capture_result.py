@@ -1,17 +1,15 @@
 """Parse the exporter's own machine-readable result.
 
-WHY THIS EXISTS ALONGSIDE `capture_status`. That module reads the finalizer's
-stderr, which is the DIAGNOSTIC path: the agent and the finalizer run as the
-same Unix user inside the workspace, so anything the finalizer prints the agent
-can print too. A success line read from there is evidence, never proof, and
-recording it as proof would be worse than recording nothing - a confident wrong
-answer about whether a session survived.
+WHY THE HOST ASKS. The finalizer inside the workspace also prints a verdict on
+stderr, but the agent and the finalizer run as the same Unix user, so anything
+the finalizer prints the agent can print too. A success line read from there is
+evidence, never proof, and recording it as proof would be worse than recording
+nothing - a confident wrong answer about whether a session survived. Nothing
+here reads that stream.
 
 This module reads `apss-session-exporter --json`, invoked BY THE HOST over a
 channel the agent has no handle on. That is what makes the verdict
-authoritative. The two are deliberately separate rather than one parser with a
-flag, because the difference between them is trust, and a shared entry point
-would make it easy to forget which one you are holding.
+authoritative.
 
 The exporter's contract (agentic-session-exporter >= 0.3.0):
 
@@ -412,8 +410,7 @@ def _doubt_about_success(
     # v0.3.0 producer cannot emit this, because it derives both the exit code
     # and the boolean FROM these counters. That is exactly why the check is
     # cheap: it costs nothing today and fails closed if the producer ever gains
-    # a bug or this parser drifts from it. capture_status.py already refuses
-    # the same contradiction on its own path.
+    # a bug or this parser drifts from it.
     contradicting = {k: v for k, v in counters.items() if k in LOSS_COUNTERS and v}
     if contradicting:
         named = ", ".join(f"{k}={v}" for k, v in sorted(contradicting.items()))
