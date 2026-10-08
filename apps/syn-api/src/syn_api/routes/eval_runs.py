@@ -21,6 +21,7 @@ from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from typing import TYPE_CHECKING
 
+from syn_api.model_identity import UNKNOWN_MODEL_KEY
 from syn_api.routes.executions.queries import get_detail
 from syn_api.types import (
     EvalRunListResponse,
@@ -43,6 +44,7 @@ from syn_shared.display.formatters import EM_DASH, format_cost, format_duration_
 if TYPE_CHECKING:
     from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
     from syn_adapters.projections.manager import ProjectionManager
+    from syn_api.types import PhaseExecution
     from syn_domain.contexts.orchestration.domain.read_models.eval_runs import EvalRunScore
     from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_summary import (
         WorkflowExecutionSummary,
@@ -64,13 +66,28 @@ def _cost(value: Decimal | str) -> Decimal | None:
         return None
 
 
+def _phase_models(phase: PhaseExecution) -> tuple[PhaseModel, ...]:
+    """Every model the phase was observed running, sorted: its own and its delegates'.
+
+    The phase's own reported model is always in, priced or not. ``cost_by_model``
+    (the per-model split of the phase's Lane 2 cost) adds its delegates' models:
+    a codex phase that delegated to claude ran both. Its unknown bucket is not a
+    model and is dropped. Known limit: the split holds only PRICED rows, so a
+    delegate whose model has no rate and no SDK cost is not seen here (#1743).
+    """
+    observed = {key for key in phase.cost_by_model if key != UNKNOWN_MODEL_KEY}
+    if phase.model:
+        observed.add(str(phase.model))
+    return tuple(PhaseModel(phase.phase_id, model) for model in sorted(observed))
+
+
 async def _facts(row: WorkflowExecutionSummary, scores: dict[str, EvalRunScore]) -> EvalRunFacts:
     """One member row, with what its phases ran and what it cost."""
     execution_id = row.workflow_execution_id
     detail = await get_detail(execution_id)
     if isinstance(detail, Ok):
         full = detail.value
-        models = tuple(PhaseModel(p.phase_id, str(p.model)) for p in full.phases if p.model)
+        models = tuple(m for p in full.phases for m in _phase_models(p))
         cost = _cost(full.total_cost_usd)
         duration = full.total_duration_seconds
     else:
