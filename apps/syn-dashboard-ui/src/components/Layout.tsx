@@ -27,7 +27,9 @@ import {
 import { useEffect, useRef, useState } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
 
+import { ReadPathHealthContext, useReadPathHealth } from '../hooks/useReadPathHealth'
 import { useServerBuild, type ServerBuild } from '../hooks/useServerBuild'
+import { ReadPathBanner } from './ReadPathBanner'
 import { ServerVersion } from './ServerVersion'
 
 const navigation = [
@@ -167,6 +169,7 @@ export function Layout() {
   const [drawerOpen, setDrawerOpen] = useState(false)
   const hamburgerRef = useRef<HTMLButtonElement>(null)
   const serverBuild = useServerBuild()
+  const readPath = useReadPathHealth()
 
   useEffect(() => {
     if (!drawerOpen) return
@@ -244,7 +247,10 @@ export function Layout() {
       {/* Main content */}
       <main className="min-w-0 flex-1 pt-12 md:ml-56 md:pt-0">
         <div className="p-4 md:p-6">
-          <Outlet />
+          <ReadPathHealthContext.Provider value={readPath}>
+            <ReadPathBanner health={readPath} />
+            <Outlet />
+          </ReadPathHealthContext.Provider>
         </div>
       </main>
     </div>

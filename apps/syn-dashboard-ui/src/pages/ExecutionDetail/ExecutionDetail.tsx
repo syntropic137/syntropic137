@@ -15,8 +15,10 @@ import {
 import { TokenBreakdown } from '../../components/TokenBreakdown'
 import type { BreadcrumbItem } from '../../components/Breadcrumbs'
 import { ExecutionControl } from '../../components/ExecutionControl'
+import { ReadModelNotice } from '../../components/ReadPathBanner'
 import { ExecutionEvalBadge } from '../../components/evals'
 import { useExecutionData } from '../../hooks'
+import { useRebuildingReadModel } from '../../hooks/useReadPathHealth'
 import type { ExecutionDetailResponse, FailureClassification, ReportedFailureReason } from '../../types'
 import { type ExactUsd, exactUsdToString, parseExactUsd } from '../../utils/exactUsd'
 import { executionTokenTotals } from '../../utils/executionTokens'
@@ -282,6 +284,8 @@ export function ExecutionDetail() {
   const navigate = useNavigate()
   const { execution, artifactDetails, loading, error, isConnected, now, refreshExecution } =
     useExecutionData(executionId)
+  // From /health, so a 404 while the detail read model replays can say why.
+  const rebuilding = useRebuildingReadModel('workflow_execution_details')
 
   if (loading) return <PageLoader />
 
@@ -291,6 +295,7 @@ export function ExecutionDetail() {
   if (!execution) {
     return (
       <Card>
+        <ReadModelNotice status={rebuilding} />
         <EmptyState
           icon={Play}
           title="Execution not found"
@@ -311,6 +316,7 @@ export function ExecutionDetail() {
   return (
     <div className="space-y-6">
       <Breadcrumbs items={breadcrumbs} />
+      <ReadModelNotice status={execution.read_model_status ?? rebuilding} />
       <ExecutionHeader execution={execution} executionId={executionId} isConnected={isConnected} refreshError={error} now={now} refreshExecution={refreshExecution} />
       {execution.error_message && (
         <ExecutionErrorCard

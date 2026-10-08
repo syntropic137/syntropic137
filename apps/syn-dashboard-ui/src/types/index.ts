@@ -475,6 +475,8 @@ export type PlannedPhaseInfo = components['schemas']['PlannedPhaseInfo']
 export interface ExecutionDetailResponse {
   /** Explicit naming for OTel correlation (ADR-028) */
   workflow_execution_id: string
+  /** Whether the execution detail read model is rebuilding, judged by the API. */
+  read_model_status?: components['schemas']['ReadModelStatus'] | null
   workflow_id: string
   workflow_name: string
   status: string
