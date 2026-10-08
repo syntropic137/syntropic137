@@ -2,8 +2,13 @@
 """Check, launch and score a versioned eval suite (#967 step 8).
 
 A suite lives in ``evals/<suite-id>/``: ``suite.yaml`` names the workflow and
-the models it declares, and ``cases/*.yaml`` holds one case each - a commit
-that carries a known bug and what a report must say to have found it.
+the models it declares, and ``cases/*.yaml`` holds one case each, of one of
+two polarities. A ``defect`` case is a commit that carries a known bug and
+what a report must say to have found it: it passes blocked and named. A
+``clean`` case is a control, a merged PR head with no known defect: it passes
+only certified. ``score`` prints the catch rate over defects and the
+false-block rate over controls for each table, because a catch rate alone
+cannot tell a careful verifier from one that blocks everything.
 
 ONE STABLE EVAL PER CASE. A run's commit comes from its eval's Baseline, which
 holds one SHA per repository and is fixed at create. The cases are one
