@@ -165,8 +165,10 @@ def test_eval_run_surfaces_reject_aliases_and_keep_concrete_ids() -> None:
         stats=EvalRunStatsResponse(
             median_duration_seconds=None,
             median_duration_display="—",
+            incomplete_duration_count=0,
             median_cost_usd=None,
             median_cost_display="—",
+            incomplete_cost_count=0,
             cost_per_pass_usd=None,
             cost_per_pass_display="—",
         ),
