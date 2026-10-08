@@ -1,8 +1,11 @@
 """What the STORED record says when provisioning dies mid-command (#1158).
 
-Every assertion here reads ``WorkflowExecutionResult.error_message`` after
+Most assertions here read ``WorkflowExecutionResult.error_message`` after
 running the real ``WorkflowExecutionProcessor``, because that field is the
-whole of what #1158 is about. The failures it describes cost $0.00 and leave
+whole of what #1158 is about. The PC-126 assertions read the STORED
+``WorkflowFailedEvent`` instead: each save is snapshotted as serialized JSON
+and rehydrated, so a structured field dropped anywhere before the store is
+missing from what these tests read. The failures it describes cost $0.00 and leave
 no agent transcript, so when the container is gone this string is the only
 evidence that the execution ever happened. It said::
 
@@ -32,9 +35,13 @@ from syn_domain.contexts.orchestration._shared.resolved_skill import ResolvedSki
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     AgentConfiguration,
     ExecutablePhase,
+    FailureClassification,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
     ExecutionResult,
+)
+from syn_domain.contexts.orchestration.domain.events.WorkflowFailedEvent import (
+    WorkflowFailedEvent,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor import (
     WorkflowExecutionProcessor,
@@ -42,6 +49,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecution
 from syn_domain.contexts.orchestration.slices.execution_todo.projection import (
     ExecutionTodoProjection,
 )
+from syn_shared.upstream_failure import UpstreamFailureKind
 
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
@@ -94,6 +102,38 @@ async def _persisted_error(
     skill_materializer: AsyncMock | None = None,
 ) -> str:
     """Run the real processor over `phase` and return what an operator reads."""
+    result, _ = await _run(workspace, phase, skill_materializer=skill_materializer)
+    assert result.error_message is not None
+    return result.error_message
+
+
+async def _stored_failure(
+    workspace: AsyncMock,
+    phase: ExecutablePhase,
+    *,
+    skill_materializer: AsyncMock | None = None,
+) -> WorkflowFailedEvent:
+    """Run the real processor over `phase` and return the WorkflowFailed it SAVED.
+
+    Rehydrated from the JSON taken at save time, not read off the aggregate,
+    which keeps mutating after the save.
+    """
+    _, saved = await _run(workspace, phase, skill_materializer=skill_materializer)
+    (failed,) = [
+        WorkflowFailedEvent.model_validate_json(raw)
+        for event_type, raw in saved
+        if event_type is WorkflowFailedEvent
+    ]
+    return failed
+
+
+async def _run(
+    workspace: AsyncMock,
+    phase: ExecutablePhase,
+    *,
+    skill_materializer: AsyncMock | None = None,
+) -> tuple[WorkflowExecutionResult, list[tuple[type, str]]]:
+    """Run the real processor; return its result and every event saved, as JSON."""
     workspace_cm = AsyncMock()
     workspace_cm.__aenter__ = AsyncMock(return_value=workspace)
     workspace_cm.__aexit__ = AsyncMock(return_value=False)
@@ -115,8 +155,14 @@ async def _persisted_error(
         todo_projection=ExecutionTodoProjection(store=InMemoryProjectionStore()),
         skill_materializer=skill_materializer,
     )
+    saved: list[tuple[type, str]] = []
+
+    async def _snapshot(aggregate: object) -> None:
+        for envelope in aggregate.get_uncommitted_events():  # type: ignore[attr-defined]
+            saved.append((type(envelope.event), envelope.event.model_dump_json()))
+
     # Private reach, as the sibling tests do: there is no event store here.
-    processor._journal._repository.save = AsyncMock()
+    processor._journal._repository.save = AsyncMock(side_effect=_snapshot)
 
     with patch("syn_adapters.workspace_backends.service.SetupPhaseSecrets") as mock_secrets:
         mock_secrets.create = AsyncMock(return_value=MagicMock())
@@ -129,8 +175,7 @@ async def _persisted_error(
         )
 
     assert result.status == "failed"
-    assert result.error_message is not None
-    return result.error_message
+    return result, saved
 
 
 async def test_a_setup_phase_killed_mid_clone_is_not_recorded_as_a_clone() -> None:
@@ -328,3 +373,53 @@ async def test_a_skill_install_that_timed_out_twice_is_recorded_as_transient() -
     assert "Provision step skill_install" in persisted, persisted
     assert "'code-review'" in persisted, persisted
     assert "transient; the phase is resumable" in persisted, persisted
+
+
+async def test_a_setup_timeout_stores_a_transient_platform_failure() -> None:
+    """PC-126 (exec-72b96da7a046): the stored event carries the structured kind."""
+    failed = await _stored_failure(
+        _workspace(
+            setup=ExecutionResult(exit_code=-1, success=False, duration_ms=1.0, timed_out=True)
+        ),
+        _phase(),
+    )
+
+    assert failed.failure_classification is FailureClassification.PLATFORM
+    assert failed.upstream_failure_kind is UpstreamFailureKind.UNAVAILABLE
+    assert "Provision step secret_injection" in failed.error_message
+
+
+async def test_a_setup_refusal_stores_no_transient_kind() -> None:
+    failed = await _stored_failure(
+        _workspace(setup=ExecutionResult(exit_code=1, success=False, duration_ms=1.0, stderr="no")),
+        _phase(),
+    )
+
+    assert failed.upstream_failure_kind is None
+
+
+async def test_a_skill_install_timed_out_twice_stores_a_transient_platform_failure() -> None:
+    timed_out = ExecutionResult(exit_code=-1, success=False, duration_ms=1.0, timed_out=True)
+    workspace = _workspace(setup=ExecutionResult(exit_code=0, success=True, duration_ms=10.0))
+    workspace.execute = AsyncMock(return_value=timed_out)
+    materializer = AsyncMock()
+    materializer.fetch_for_workspace = AsyncMock(return_value=[])
+    skill = ResolvedSkill(
+        skill_name="code-review",
+        source_url="https://github.com/example/code-review",
+        version="1.0.0",
+        resolved_sha="sha-1",
+        tree_storage_prefix="prefix/sha-1",
+    )
+
+    with patch(
+        "syn_domain.contexts.orchestration.slices.execute_workflow.handlers.skill_install.asyncio.sleep",
+        AsyncMock(),
+    ):
+        failed = await _stored_failure(
+            workspace, _phase(skills=(skill,)), skill_materializer=materializer
+        )
+
+    assert failed.failure_classification is FailureClassification.PLATFORM
+    assert failed.upstream_failure_kind is UpstreamFailureKind.UNAVAILABLE
+    assert "Provision step skill_install" in failed.error_message
