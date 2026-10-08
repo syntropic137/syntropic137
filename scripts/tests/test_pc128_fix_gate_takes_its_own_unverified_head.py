@@ -54,8 +54,7 @@ def _fix_checkout(prompt: Path, *, remote: str, note_names: str | None) -> str |
     if (
         note_names is not None
         and f"`{OWN_UNVERIFIED_PUSH}`" in checkout
-        and "the verified SHA above is replaced by the head SHA that note names"
-        in _flat(checkout)
+        and "the verified SHA above is replaced by the head SHA that note names" in _flat(checkout)
     ):
         verified = note_names
     block = re.search(r"```\n(.*?)```", checkout, re.S)
