@@ -189,13 +189,16 @@ def branches_left_by(
     owned = {(c.repository, c.branch) for c in continued} | own.keys()
     left = {(c.repository, c.branch): c for c in continued}
     for (slug, branch), shas in own.items():
+        # A run continuing a branch keeps what its predecessors pushed there:
+        # those commits are this chain of resumes' own too.
         earlier = left.get((slug, branch))
+        inherited = earlier.pushed_shas if earlier is not None else []
         left[slug, branch] = ContinuedBranch(
             repository=slug,
             branch=branch,
             head_sha=shas[-1],
             pull_request=earlier.pull_request if earlier is not None else None,
-            pushed_shas=shas,
+            pushed_shas=[*inherited, *(s for s in shas if s not in inherited)],
         )
     for raw in observed or ():
         branch = _left_branch(_observation(raw), slugs, owned, left)

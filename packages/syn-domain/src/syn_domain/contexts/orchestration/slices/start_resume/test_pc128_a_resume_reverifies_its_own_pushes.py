@@ -344,3 +344,27 @@ class TestNoPushIsUnchanged:
         assert pins.abandoned_branches == []
         assert pins.checkout_for("fix").commits[REPO] == VERIFIED
         assert _told(pins) == ""
+
+
+class TestAResumeOfAResumeKeepsEveryOwnPush:
+    def test_the_parents_pushes_and_the_childs_are_both_the_runs_own(self) -> None:
+        from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continuation import (
+            ContinuedBranch,
+            PushedCommit,
+            branches_left_by,
+        )
+
+        continued = ContinuedBranch(
+            repository=REPO, branch=BRANCH, head_sha=FIRST_PUSH, pushed_shas=[FIRST_PUSH]
+        )
+        [left] = branches_left_by(
+            None,
+            repositories=[REPO],
+            continued=[continued],
+            pushed=[
+                PushedCommit(phase_id="fix", repository="widgets", branch=BRANCH, sha=LAST_PUSH)
+            ],
+        )
+
+        assert left.head_sha == LAST_PUSH
+        assert left.pushed_shas == [FIRST_PUSH, LAST_PUSH]
