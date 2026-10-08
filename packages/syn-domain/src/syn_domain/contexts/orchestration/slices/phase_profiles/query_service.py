@@ -247,9 +247,7 @@ class PhaseProfileQueryService:
             return PhaseProfiles(workflow_id=workflow_id, since=since, until=until, executions=0)
         async with self._pool.acquire() as conn:
             token_rows = await conn.fetch(_TOKEN_QUERY, ids, since)
-            resource_rows = await conn.fetch(
-                _RESOURCE_QUERY, ids, since, WORKSPACE_RESOURCE_USAGE
-            )
+            resource_rows = await conn.fetch(_RESOURCE_QUERY, ids, since, WORKSPACE_RESOURCE_USAGE)
         return PhaseProfiles(
             workflow_id=workflow_id,
             since=since,
@@ -270,7 +268,7 @@ class PhaseProfileQueryService:
             sample.output_tokens += int(row["output_tokens"])
             sample.cache_creation_tokens += int(row["cache_creation_tokens"])
             sample.cache_read_tokens += int(row["cache_read_tokens"])
-            row_cost = price_canonical_row(row, self._cost_calculator)
+            row_cost = price_canonical_row(dict(row.items()), self._cost_calculator)
             sample.cost += row_cost.cost
             sample.unpriced_tokens += row_cost.unpriced_tokens
 
@@ -320,7 +318,9 @@ def _resource_profiles(rows: Iterable[asyncpg.Record]) -> list[PhaseResourceProf
                 phase_id=phase_id,
                 cpu_seconds_per_wall_second=Percentiles.of(cpu_rates),
                 cpu_throttled_seconds=Percentiles.of(
-                    u.cpu_throttled_seconds for _, u in measured if u.cpu_throttled_seconds is not None
+                    u.cpu_throttled_seconds
+                    for _, u in measured
+                    if u.cpu_throttled_seconds is not None
                 ),
                 memory_peak_bytes=Percentiles.of(
                     u.memory_peak_bytes for _, u in measured if u.memory_peak_bytes is not None

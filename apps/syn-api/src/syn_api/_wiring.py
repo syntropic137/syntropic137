@@ -803,6 +803,23 @@ def get_canonical_usage_query():
     return CanonicalUsageQueryService(pool=pool, cost_calculator=CostCalculator())
 
 
+def get_phase_profile_query():
+    """Return a PhaseProfileQueryService backed by TimescaleDB (#1716).
+
+    Raises:
+        RuntimeError: If the TimescaleDB pool is not yet initialized.
+    """
+    from syn_domain.contexts.agent_sessions import CostCalculator
+    from syn_domain.contexts.orchestration.slices.phase_profiles import PhaseProfileQueryService
+
+    pool = get_event_store_instance().pool
+    if pool is None:
+        raise RuntimeError(
+            "TimescaleDB pool is not initialized; ensure_connected() must be called first"
+        )
+    return PhaseProfileQueryService(pool=pool, cost_calculator=CostCalculator())
+
+
 async def get_conversation_store() -> MinioConversationStorage:
     """Return the conversation storage (MinIO-backed)."""
     return await get_conversation_storage()

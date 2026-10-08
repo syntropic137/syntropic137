@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
@@ -17,6 +18,7 @@ from syn_api._wiring import (
     ensure_connected,
     get_canonical_usage_query,
     get_execution_cost_query,
+    get_phase_profile_query,
     get_projection_mgr,
 )
 from syn_api.types import (
@@ -24,6 +26,7 @@ from syn_api.types import (
     Err,
     MetricsError,
     Ok,
+    PhaseProfilesResponse,
     Result,
 )
 from syn_domain.pagination import Page
@@ -387,3 +390,31 @@ async def get_metrics_endpoint(
         total_artifact_bytes=m.total_artifact_bytes,
         phases=phases,
     )
+
+
+@router.get("/phase-profiles", response_model=PhaseProfilesResponse)
+async def get_phase_profiles_endpoint(
+    workflow_id: str = Query(..., description="Workflow whose phases to profile"),
+    window_days: int = Query(7, ge=1, le=90, description="Look-back window in days"),
+) -> PhaseProfilesResponse:
+    """Per phase type and model: p50/p90 tokens and cost; per phase type: p50/p95 resources.
+
+    Sizes the capacity model and the execution budget from what phases of
+    this workflow actually used (#1716). Every percentile is over every phase
+    in the window; below ten phases it reads ``insufficient``.
+    """
+    await ensure_connected()
+    try:
+        execution_ids = await _workflow_execution_ids(workflow_id)
+        profiles = await get_phase_profile_query().profiles(
+            workflow_id, execution_ids, timedelta(days=window_days)
+        )
+    except MetricsUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.warning("Failed to read phase profiles for %s", workflow_id, exc_info=True)
+        raise HTTPException(
+            status_code=503,
+            detail="phase profiles are unavailable: the observability store could not be read",
+        ) from exc
+    return PhaseProfilesResponse.from_profiles(profiles, window_days)
