@@ -3451,8 +3451,12 @@ async def test_the_rescue_has_a_deadline_of_its_own_and_not_a_share_of_the_first
     push's bound with nothing wrong at all.
     """
     _a_phase_that_edited_a_workflow(clone)
-    monkeypatch.setattr(unpushed_work_guard, "_CANCELLED_PUSH_SECONDS", 1.0)
-    workspace = _PushesSlowly(clone.workspace, slow_push=2, seconds=1.5)
+    # The first push is a real `git push` that must land inside this bound, so
+    # the bound needs headroom: on a loaded runner it took 1.03s against a 1s
+    # bound and was abandoned before the rescue ran. The second push only has
+    # to outlast the bound, which it does by sleeping past it.
+    monkeypatch.setattr(unpushed_work_guard, "_CANCELLED_PUSH_SECONDS", 5.0)
+    workspace = _PushesSlowly(clone.workspace, slow_push=2, seconds=6.0)
 
     with pytest.raises(asyncio.CancelledError):
         await clone.run_gate(workspace=workspace)
