@@ -61,7 +61,14 @@ from syn_domain.contexts.orchestration import (
     build_command_from_definition,
 )
 from syn_domain.contexts.orchestration._shared.workflow_definition import WorkflowDefinition
-from syn_shared.agents import PhaseModelDefaults
+from syn_shared.agents import (
+    CODEX_MODEL_IDS,
+    ModelId,
+    PhaseModelDefaults,
+    resolve_codex_model_alias,
+    resolve_model_alias,
+)
+from syn_shared.pricing import resolve_model_pricing
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -83,6 +90,13 @@ def _copy_suite(tmp_path: Path) -> Path:
 
 _CODEX_WF = "eval-verify-pinned-codex-v1"
 _SONNET_WF = "eval-verify-pinned-sonnet-v1"
+# Codex verifiers pinned to an explicit slug, never an alias: the model
+# measured is the one written, whatever `gpt-sol` targets later.
+_PINNED_CODEX_WFS = {
+    "eval-verify-pinned-codex-gpt-6-luna-v1": "gpt-6-luna",
+    "eval-verify-pinned-codex-gpt-5-6-luna-v1": "gpt-5.6-luna",
+    "eval-verify-pinned-codex-gpt-5-6-terra-v1": "gpt-5.6-terra",
+}
 
 
 @pytest.mark.unit
@@ -126,6 +140,30 @@ def test_the_same_cases_load_under_the_sonnet_verifier_with_their_own_tag() -> N
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(("variant", "slug"), sorted(_PINNED_CODEX_WFS.items()))
+def test_the_same_cases_load_under_each_pinned_codex_verifier(variant: str, slug: str) -> None:
+    opus = load_suite(DEFAULT_SUITE)
+    pinned = load_suite(DEFAULT_SUITE, workflow=variant)
+
+    assert pinned.workflow.models == {"verify": slug}
+    assert pinned.tag == f"verifier-seed-v1:v5:{variant}"
+    assert pinned.cases == opus.cases
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("slug", sorted(_PINNED_CODEX_WFS.values()))
+def test_each_pinned_codex_slug_is_a_priced_codex_model_and_not_an_alias(slug: str) -> None:
+    """What the variant passes to `codex exec --model` is the slug itself, and
+    it prices as itself: a run is never costed at the gpt-sol target's rate."""
+    assert resolve_model_alias(slug) is None
+    assert resolve_codex_model_alias(slug) == slug
+    assert ModelId(slug) in CODEX_MODEL_IDS
+    pricing = resolve_model_pricing(slug)
+    assert pricing is not None
+    assert pricing.model_id == slug
+
+
+@pytest.mark.unit
 def test_a_workflow_the_suite_does_not_list_is_refused() -> None:
     with pytest.raises(DefinitionError, match="not one of the suite's"):
         load_suite(DEFAULT_SUITE, workflow="sdlc-reverify-pr-v1")
@@ -143,6 +181,7 @@ def _workflow_yaml(relative: str) -> dict[str, object]:
     [
         (_CODEX_WF, ("codex", "gpt-sol", "workspace-write")),
         (_SONNET_WF, ("claude", "sonnet", None)),
+        *((wf, ("codex", slug, "workspace-write")) for wf, slug in _PINNED_CODEX_WFS.items()),
     ],
 )
 def test_each_verify_variant_differs_from_opus_only_in_the_agent(
@@ -150,7 +189,7 @@ def test_each_verify_variant_differs_from_opus_only_in_the_agent(
 ) -> None:
     """Same cases, different verifier: a score difference must be the verifier alone."""
     refs = {r.id: r for r in load_suite(DEFAULT_SUITE).suite.workflows}
-    assert set(refs) == {"eval-verify-pinned-v1", _CODEX_WF, _SONNET_WF}
+    assert set(refs) == {"eval-verify-pinned-v1", _CODEX_WF, _SONNET_WF, *_PINNED_CODEX_WFS}
     opus_path, variant_path = refs["eval-verify-pinned-v1"].path, refs[variant].path
 
     # The prompt files, byte for byte, and the prompt each definition resolves.
