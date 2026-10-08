@@ -1,0 +1,12 @@
+id: implementer-seed-v1
+eval_suite: implementer-seed
+version: 1
+goal: >
+  Given the tree just before a real merged fix and the problem as its issue
+  stated it, does the agent's change make the fix's own hidden tests pass?
+repository: syntropic137/syntropic137
+workflows:
+  - id: eval-implement-pinned-v1
+    path: workflows/evals/implement-pinned/workflow.yaml
+    models:
+      implement: opus

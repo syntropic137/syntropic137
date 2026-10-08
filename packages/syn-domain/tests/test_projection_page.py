@@ -164,6 +164,44 @@ async def test_the_executions_page_hands_every_filter_and_the_page_to_the_store(
     assert page.status_counts == {"completed": 1}
 
 
+@pytest.mark.parametrize(
+    ("in_eval", "expected"),
+    [(True, ["exec-4", "exec-3", "exec-2", "exec-1"]), (False, ["exec-5"])],
+    ids=["evals-only", "hide-evals"],
+)
+async def test_in_eval_reaches_the_store_as_a_presence_filter(
+    in_eval: bool, expected: list[str]
+) -> None:
+    store = _PagingStore({"workflow_executions": EXECUTIONS})
+
+    page = await WorkflowExecutionListProjection(store).page(in_eval=in_eval)  # type: ignore[arg-type]
+
+    assert [query.present for _, query in store.queries] == [{"eval_id": in_eval}]
+    assert [row.workflow_execution_id for row in page.rows] == expected
+    assert page.total == len(expected)
+
+
+@pytest.mark.parametrize(
+    ("document", "present", "expected"),
+    [
+        ({"eval_id": "ev-a"}, True, True),
+        ({"eval_id": "ev-a"}, False, False),
+        ({"eval_id": None}, True, False),
+        ({"eval_id": None}, False, True),
+        ({}, False, True),
+        ({}, True, False),
+    ],
+)
+def test_present_reads_null_and_absent_alike(
+    document: dict[str, JsonValue], present: bool, expected: bool
+) -> None:
+    query = PageQuery(
+        status=StatusOf.text("status"), timestamp_field="at", present={"eval_id": present}
+    )
+
+    assert query.matches(document) is expected
+
+
 async def test_the_eval_page_is_one_store_query_and_one_tally_read_for_all_its_rows() -> None:
     store = _PagingStore({"evals": EVALS, "workflow_executions": EXECUTIONS})
 

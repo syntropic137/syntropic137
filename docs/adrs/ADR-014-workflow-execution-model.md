@@ -1,7 +1,7 @@
 # ADR-014: Workflow Execution Model
 
 ## Status
-Accepted. Revised in place 2026-09-26 (section 7) and 2026-10-02 (section 8).
+Accepted. Revised in place 2026-09-26 (section 7), 2026-10-02 (section 8) and 2026-10-05 (section 9).
 
 ## Date
 2025-12-04
@@ -352,6 +352,25 @@ resumed execution's inherited phases (section 7) are reported on the parent.
 them (`GET /executions/{execution_id}`, `apps/syn-api/src/syn_api/routes/executions/queries.py:685-740`);
 the CLI does not yet render them (#1501 item A).
 
+### 9. Who runs an execution (2026-10-05)
+
+This model says what an execution is; it does not say which process runs one.
+Until #1310 Phase 1 ships, the API process does, so restarting the API either
+waits for every execution to finish or kills them.
+
+[ADR-072](ADR-072-execution-hosting-and-upgrade-without-drain.md) moves that
+job to an **executor**: a separate process role that **claims** admitted
+executions from a durable Postgres **run queue** and holds each under a
+**lease**. Nothing in sections 1-8 changes:
+
+- an execution is still one event stream, and its statuses are unchanged; an
+  admitted execution waiting for a claim is `running` with a `queued` flag on
+  the read path (ADR-072 D11), not a new status;
+- an execution runs in at most one executor. An expired lease is fenced and the
+  execution interrupted, never re-run elsewhere (ADR-072 D5);
+- resuming is still the fork of section 7, started only by a person. A host
+  dying does not resume anything automatically.
+
 ## Consequences
 
 ### Positive
@@ -387,6 +406,8 @@ the CLI does not yet render them (#1501 item A).
 ```
 
 ## Related ADRs
+- **ADR-072: Execution Hosting, Executors, the Run Queue and Upgrade Without Drain** - Which
+  process runs an execution (section 9)
 - **ADR-071: Session Inventory and Discovery** - Which sessions an execution ran, beyond the
   platform-started session linked in section 4
 - ADR-013: Event Sourcing Projection Consistency

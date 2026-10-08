@@ -499,6 +499,11 @@ class ExecutionSummaryResponse(BaseModel):
     tags: list[str] = Field(default_factory=list)
     """The execution's current tags, normalised and sorted (#967)."""
     repos_display: str | None = None
+    eval: ExecutionEvalRunResponse | None = None
+    """The eval this execution is a current run of, with its verdict. Null in no eval.
+
+    The same shape ``GET /executions/{id}`` carries, so a list row and the
+    execution page cannot describe the run differently."""
     start_queue: ExecutionStartQueueInfo | None = None
     """Set exactly when ``status`` is ``queued``: an accepted start with no
     execution yet, and where it stands (PC-124). Same block as on the detail."""

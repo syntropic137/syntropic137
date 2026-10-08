@@ -180,9 +180,14 @@ class _RefusingService:
         task: str | None = None,
         repos: list[RepositoryRef] | None = None,
         on_held: Callable[[Exception], Awaitable[None]] | None = None,
+        on_started: Callable[[], Awaitable[None]] | None = None,
     ) -> AdmissionTicket | None:
-        del workflow_id, inputs, execution_id, task, repos, on_held
+        del workflow_id, inputs, execution_id, task, repos, on_held, on_started
         raise _RoadClosedError("the road is closed")
+
+    def holds_execution(self, execution_id: str) -> bool:
+        del execution_id
+        return False
 
 
 class TestTheNextAdmissionRefusalReason:

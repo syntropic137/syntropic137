@@ -221,6 +221,8 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.cancelled_work_re
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     CredentialRenewalFailedError,
     DuplicateExecutionError,
+    ProvisionStep,
+    ProvisionStepTimeoutError,
     UnsupportedToolPolicyForProviderError,
     WorkflowNotFoundError,
 )
@@ -419,6 +421,8 @@ __all__ = [
     # What a phase spent, as the failure path reports it (#1262)
     "PhaseUsage",
     "PlannedPhase",
+    "ProvisionStep",
+    "ProvisionStepTimeoutError",
     "PullRequestCommenter",
     "QuarantineNoticeProcessManager",
     "QuarantinedRef",

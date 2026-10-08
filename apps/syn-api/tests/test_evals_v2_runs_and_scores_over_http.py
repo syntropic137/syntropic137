@@ -20,6 +20,8 @@ from typing import TYPE_CHECKING
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from syn_api.routes.executions.models import ExecutionListResponse
+from syn_api.types import ExecutionEvalRunResponse
 from syn_domain.contexts.agent_sessions.domain.read_models.session_cost import SessionCost
 from syn_domain.contexts.orchestration import TagSet, WorkflowExecutionAggregate
 from syn_domain.contexts.orchestration._shared.eval_choice import EvalSelection, LaunchEval
@@ -507,6 +509,110 @@ class TestExecutionDetailCarriesItsEval:
 
         assert detached.status_code == 200, detached.text
         assert (await client.get("/executions/r2")).json()["eval"] is None
+
+
+class TestExecutionListCarriesItsEval:
+    """``GET /executions``'s ``eval``: the badge on each row of the execution list."""
+
+    async def _evals(self, client: AsyncClient) -> dict[str, ExecutionEvalRunResponse | None]:
+        """Each listed execution's ``eval``, read back through the response model."""
+        response = await client.get("/executions")
+        assert response.status_code == 200, response.text
+        listed = ExecutionListResponse.model_validate(response.json())
+        return {row.workflow_execution_id: row.eval for row in listed.executions}
+
+    async def test_each_row_carries_its_eval_and_verdict_and_an_ordinary_run_none(
+        self, client: AsyncClient, lane2: _Lane2
+    ) -> None:
+        eval_id = await _two_by_two(client, lane2)
+        await _run(lane2, None, "ordinary", "wf-a", OPUS, "1", "2026-10-06T00:00:00+00:00")
+
+        evals = await self._evals(client)
+
+        assert evals["ordinary"] is None
+        detail = (await client.get("/executions/r2")).json()["eval"]
+        assert evals["r2"] == ExecutionEvalRunResponse.model_validate(detail)
+        verdicts = {key: run.verdict for key, run in evals.items() if run is not None}
+        assert verdicts == {"r1": "PASS", "r2": "FAIL", "r3": "PASS", "r4": "ERROR", "r5": None}
+        assert {run.eval_name for run in evals.values() if run is not None} == {
+            "verifier-seed: case-1"
+        }
+        r5 = evals["r5"]
+        assert r5 is not None and r5.eval_id == eval_id
+
+    async def test_a_score_from_an_eval_the_run_left_is_not_its_verdict(
+        self, client: AsyncClient, lane2: _Lane2
+    ) -> None:
+        first = await _two_by_two(client, lane2)
+        created = await client.post("/evals", json={"name": "second", "goal": "Another goal"})
+        assert created.status_code == 201, created.text
+        second = created.json()["eval_id"]
+
+        assert (await client.delete("/executions/r2/eval", params={"eval_id": first})).is_success
+        assert (await client.post("/executions/r2/eval", json={"eval_id": second})).is_success
+        await _project_executions()
+        await _catch_up()
+
+        shown = (await self._evals(client))["r2"]
+
+        assert shown == ExecutionEvalRunResponse(
+            eval_id=second,
+            eval_name="second",
+            association_kind="attached",
+            verdict=None,
+            score=None,
+            scored_at=None,
+        )
+
+    async def test_in_eval_keeps_eval_runs_or_everything_else(
+        self, client: AsyncClient, lane2: _Lane2
+    ) -> None:
+        await _two_by_two(client, lane2)
+        await _run(lane2, None, "ordinary", "wf-a", OPUS, "1", "2026-10-06T00:00:00+00:00")
+
+        evals_only = await client.get("/executions", params={"in_eval": "true"})
+        hide_evals = await client.get("/executions", params={"in_eval": "false"})
+
+        assert sorted(r["workflow_execution_id"] for r in evals_only.json()["executions"]) == [
+            "r1",
+            "r2",
+            "r3",
+            "r4",
+            "r5",
+        ]
+        assert evals_only.json()["total"] == 5
+        assert [r["workflow_execution_id"] for r in hide_evals.json()["executions"]] == ["ordinary"]
+        assert hide_evals.json()["total"] == 1
+        assert len(await self._evals(client)) == 6
+
+    async def test_a_page_of_eval_runs_reads_the_eval_model_twice_not_per_row(
+        self, client: AsyncClient, lane2: _Lane2, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from syn_adapters.projections.manager import get_projection_manager
+
+        await _two_by_two(client, lane2)
+        store = get_projection_manager().store
+        reads: list[str] = []
+        real_get, real_query = store.get, store.query
+
+        async def get(projection: str, key: str):
+            reads.append(projection)
+            return await real_get(projection, key)
+
+        async def query(projection: str, *args, **kwargs):
+            reads.append(projection)
+            return await real_query(projection, *args, **kwargs)
+
+        monkeypatch.setattr(store, "get", get)
+        monkeypatch.setattr(store, "query", query)
+
+        evals = await self._evals(client)
+
+        assert len([run for run in evals.values() if run is not None]) == 5
+        assert sorted(r for r in reads if r in ("evals", "eval_run_scores")) == [
+            "eval_run_scores",
+            "evals",
+        ]
 
 
 async def _start_resumed_child(
