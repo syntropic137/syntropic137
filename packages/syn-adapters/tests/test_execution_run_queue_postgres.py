@@ -244,6 +244,16 @@ async def test_claim_refuses_stale_heartbeat_draining_host_newer_epoch_and_retry
     assert await queue.heartbeat("h1") is True
     assert await queue.is_draining("h1") is True
 
+    # A host that has left cannot look alive again.
+    await queue.deregister("h1")
+    async with pools[0].acquire() as conn:
+        before = await conn.fetchval("SELECT heartbeat_at FROM execution_budget")
+    with pytest.raises(LookupError):
+        await queue.heartbeat("h1")
+    async with pools[0].acquire() as conn:
+        assert await conn.fetchval("SELECT heartbeat_at FROM execution_budget") == before
+    assert await queue.is_draining("h1") is False
+
 
 async def test_reserve_refuses_a_second_row_and_sweep_never_reads_unknown_as_absent(
     pools: list[asyncpg.Pool],

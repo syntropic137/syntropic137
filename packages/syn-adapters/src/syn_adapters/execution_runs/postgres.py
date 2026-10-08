@@ -72,11 +72,9 @@ class PostgresExecutionRunQueue:
     async def heartbeat(self, host_id: str) -> bool:
         async with self._pool.acquire() as conn:
             draining = await conn.fetchval(
-                """WITH beat AS (
-                    UPDATE execution_budget SET heartbeat_at=now() WHERE executor_id=$1
-                    RETURNING executor_id
-                ) SELECT h.draining::text FROM executor_hosts h JOIN beat b
-                ON b.executor_id=h.host_id""",
+                """UPDATE execution_budget b SET heartbeat_at=now() FROM executor_hosts h
+                WHERE b.executor_id=$1 AND h.host_id=b.executor_id
+                RETURNING h.draining::text""",
                 host_id,
             )
         if draining is None:
