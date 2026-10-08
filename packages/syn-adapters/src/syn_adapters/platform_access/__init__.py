@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import math
 import secrets
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -200,6 +201,27 @@ class PlatformTokenService:
         if self._store is None:
             return None
         return WorkspacePlatformGrant(self._api_url, await self.issue(execution_id))
+
+    async def bound_to_deadline(self, token: str, deadline: datetime) -> None:
+        """Make ``token`` expire no later than ``deadline``. Never extends it.
+
+        The phase deadline is known at launch, after the workspace (and its
+        grant) exists. Bounding here means a token whose teardown revocation
+        fails still dies with its phase, and a retry carrying the same shared
+        deadline changes nothing.
+        """
+        if self._store is None:
+            return
+        token_hash = _hash(token)
+        grant = await self._store.get(token_hash)
+        if grant is None or grant.expires_at <= deadline:
+            return
+        remaining = (deadline - self._now()).total_seconds()
+        if remaining <= 0:
+            await self._store.delete(token_hash)
+            return
+        bounded = grant.model_copy(update={"expires_at": deadline})
+        await self._store.put(token_hash, bounded, math.ceil(remaining))
 
     async def revoke(self, token: str) -> None:
         """Make ``token`` unusable immediately. Idempotent."""
