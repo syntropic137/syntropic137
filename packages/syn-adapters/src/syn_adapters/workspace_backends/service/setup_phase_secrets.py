@@ -557,12 +557,7 @@ class SetupPhaseSecrets:
     branch's head, checked out on the branch instead of detached
     (`StartPins.checkout_for`)."""
     prewarm: bool = False
-    """Install each cloned repository's locked dependencies here, during setup (#1726).
-
-    Setup has network and runs before the agent; the agent may have none (a
-    codex ``workspace-write`` sandbox is all-or-nothing). Only meaningful with
-    ``clone_repos``: without a checkout there is nothing to install into. See
-    `_append_dependency_prewarm` for exactly what runs."""
+    """Install the clones' locked dependencies during setup; see `append_dependency_prewarm`."""
     claude_code_oauth_token: str | None = None
     anthropic_api_key: str | None = None
     codex_auth_json: str | None = None
@@ -750,14 +745,7 @@ class SetupPhaseSecrets:
         return "\n".join(lines) + "\n"
 
     def setup_timeout_seconds(self, configured: int) -> int:
-        """The setup script's time limit: the configured one, plus the installs' (#1726).
-
-        The configured limit is sized for credentials and a clone (120s by
-        default); a dependency install does not fit in it, and raising it for
-        every workspace would loosen the bound on the phases that install
-        nothing. So only a prewarming setup gets the extra budget, and it is
-        the same budget each install step is individually held to.
-        """
+        """The configured setup limit, plus the install budget for a prewarming setup only (#1726)."""
         if self.prewarm and self.clone_repos and self.repositories:
             return configured + PREWARM_TIMEOUT_SECONDS
         return configured
