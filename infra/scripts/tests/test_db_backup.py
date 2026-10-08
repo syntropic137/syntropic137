@@ -123,13 +123,12 @@ class TestBackup:
         assert result.returncode != 0
         assert "does not exist" in result.stderr
 
-
     def test_same_second_backups_each_keep_their_own_archive(self, tmp_path, fake_pg):
         out = tmp_path / "backups"
         out.mkdir()
         bin_dir = tmp_path / "bin"
         # Freeze the clock: both backups get the same second.
-        _stub(bin_dir, "date", 'echo 20261008T030000Z')
+        _stub(bin_dir, "date", "echo 20261008T030000Z")
         env = fake_pg(_LISTING_WITH_DATA)
 
         first = _run("backup", str(out), env={**env, "DUMP_PAYLOAD": "first-archive"})
@@ -150,7 +149,7 @@ class TestBackup:
     def test_simultaneous_backups_each_keep_their_own_archive(self, tmp_path, fake_pg):
         out = tmp_path / "backups"
         out.mkdir()
-        _stub(tmp_path / "bin", "date", 'echo 20261008T030000Z')
+        _stub(tmp_path / "bin", "date", "echo 20261008T030000Z")
         env = fake_pg(_LISTING_WITH_DATA)
         procs = [
             subprocess.Popen(
@@ -328,7 +327,7 @@ class TestJustRecipes:
 
     @pytest.mark.skipif(shutil.which("just") is None, reason="just is not installed")
     @pytest.mark.parametrize(
-        "name", ['literal-$(touch {sentinel}).dump', 'a "quoted" `touch {sentinel}` b.dump']
+        "name", ["literal-$(touch {sentinel}).dump", 'a "quoted" `touch {sentinel}` b.dump']
     )
     def test_restore_file_name_is_data_not_shell(self, tmp_path, name):
         sentinel = tmp_path / "substituted"
@@ -344,3 +343,70 @@ class TestJustRecipes:
         assert result.returncode != 0
         assert f"No such backup: {backup}" in result.stdout
         assert not sentinel.exists(), "the file name was run as a command"
+
+
+@pytest.mark.skipif(shutil.which("just") is None, reason="just is not installed")
+class TestDatabaseIdentity:
+    """Both recipes connect as the running container says, not as the env file says."""
+
+    @staticmethod
+    def _docker(tmp_path: Path) -> tuple[dict[str, str], Path]:
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        calls = tmp_path / "docker-calls"
+        _stub(
+            bin_dir,
+            "docker",
+            f'printf "%s\\n" "$*" >> "{calls}"\n'
+            'case "$*" in\n'
+            '  *"printenv POSTGRES_USER"*) echo container_user ;;\n'
+            '  *"printenv POSTGRES_DB"*) echo container_db ;;\n'
+            "esac",
+        )
+        # What a stale shell / infra/.env would say.
+        env = {
+            **os.environ,
+            "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+            "POSTGRES_USER": "file_user",
+            "POSTGRES_DB": "file_db",
+            "PGUSER": "file_user",
+            "PGDATABASE": "file_db",
+        }
+        return env, calls
+
+    def test_backup_uses_the_container_identity(self, tmp_path):
+        env, calls = self._docker(tmp_path)
+        result = subprocess.run(
+            ["just", "selfhost-backup"],
+            cwd=_ROOT,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        run = next(c for c in calls.read_text().splitlines() if " run " in c)
+        assert "-e PGUSER=container_user -e PGDATABASE=container_db db-backup backup" in run
+        assert "file_" not in run
+
+    def test_restore_uses_the_container_identity(self, tmp_path):
+        env, calls = self._docker(tmp_path)
+        backup = tmp_path / "syn-20261008T030000Z.dump"
+        backup.write_text("x")
+        # The in-flight execution check needs a live API; stand it in.
+        _stub(tmp_path / "bin", "uv", "exit 0")
+        result = subprocess.run(
+            ["just", "selfhost-restore", str(backup)],
+            cwd=_ROOT,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        run = next(c for c in calls.read_text().splitlines() if " run " in c)
+        assert "-e PGUSER=container_user -e PGDATABASE=container_db" in run
+        assert "db-backup restore /restore/syn-20261008T030000Z.dump" in run
+        assert "file_" not in run
