@@ -87,6 +87,14 @@ for this to be automatic:
 
 ## Leakage: NOT prevented today
 
+> **In progress (ADR-073, PR #1760).** The platform can now seal a pinned
+> workspace: every ref, tag, reflog, remote and post-pin object is removed and
+> the GitHub credential deleted after the clone (`SetupPhaseSecrets.sealed_at_pin`).
+> That closes the first two rows below **once a workflow can select it**, which
+> it cannot yet: the per-workflow declaration, the egress row and the
+> credential-renewal path are still open. Until they land, everything below
+> still holds.
+
 The task requires that the workspace cannot fetch commits after the pin or
 read the fix PR. **The platform cannot guarantee that today.** The suite
 relies on the phase prompt's rules, which an agent can break:
