@@ -234,3 +234,8 @@ markdown-explorer/
 
 # One-off eval duplicate migration journal (scripts/migrate_eval_suite_duplicates.py)
 evals/*/migration-journal.jsonl
+
+# syn-ui source is never build output: un-ignore dirs caught by parts/ and artifacts/ above
+!apps/syn-ui/src/**/parts/
+!apps/syn-ui/src/routes/artifacts/
+!packages/syn-ui/**/parts/
