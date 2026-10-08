@@ -24,7 +24,12 @@ import {
   type SortKey,
   type SortState,
 } from './useSortUrlState'
-import { RUN_LIST_PAGE_SIZE, useServerList, type UseServerListResult } from './useServerList'
+import {
+  SESSION_LIST_PAGE_SIZE,
+  RUN_LIST_PAGE_SIZES,
+  useServerList,
+  type UseServerListResult,
+} from './useServerList'
 import { isTerminalSessionStatus } from '../utils/terminalStatus'
 
 const SESSION_SORT_CONFIG: SortConfig<SortKey> = {
@@ -105,7 +110,8 @@ export function useSessionList(): UseSessionListResult {
   const { rows, isDefaultFilters, ...list } = useServerList({
     fetchPage,
     scopeKey: workflowIdFilter,
-    pageSize: RUN_LIST_PAGE_SIZE,
+    pageSize: SESSION_LIST_PAGE_SIZE,
+    pageSizeChoices: RUN_LIST_PAGE_SIZES,
     liveEvents: SESSION_LIVE_EVENTS,
     isTerminal: isTerminalSession,
   })

@@ -25,7 +25,7 @@ import { MemoryRouter } from 'react-router-dom'
 
 import { serveListEndpoint } from '../../test/fakeListServer'
 import { DAY_MS, EXECUTIONS, matchesExecutionSearch, tally, within } from '../../test/listFixtures'
-import { RUN_LIST_PAGE_SIZE as PAGE_SIZE } from '../useServerList'
+import { EXECUTION_LIST_PAGE_SIZE as PAGE_SIZE } from '../useServerList'
 import { useExecutionList } from '../useExecutionList'
 
 vi.mock('../useActivityStream', () => ({
@@ -102,7 +102,7 @@ describe('useExecutionList', () => {
     }
 
     // `page_size` is not a parameter this hook exposes - the surface fixes it
-    // at `RUN_LIST_PAGE_SIZE` - so the page size cannot be varied from
+    // at `SESSION_LIST_PAGE_SIZE` - so the page size cannot be varied from
     // here. Varying the PAGE is the same property from the same fixture: a
     // total computed from the rows in hand would have read 100, 100, 40.
     expect(seenTotals).toEqual([TOTAL, TOTAL, TOTAL])

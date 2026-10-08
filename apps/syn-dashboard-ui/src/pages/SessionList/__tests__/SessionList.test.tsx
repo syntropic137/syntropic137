@@ -14,7 +14,7 @@ import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
 
 import { serveListEndpoint } from '../../../test/fakeListServer'
-import { RUN_LIST_PAGE_SIZE as PAGE_SIZE } from '../../../hooks/useServerList'
+import { SESSION_LIST_PAGE_SIZE as PAGE_SIZE } from '../../../hooks/useServerList'
 import { collectionSize, hoursAgo } from '../../../test/listFixtures'
 import { SessionList } from '../SessionList'
 

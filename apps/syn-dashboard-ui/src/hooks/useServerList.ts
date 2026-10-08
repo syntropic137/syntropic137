@@ -31,11 +31,18 @@
 import { useCallback, useEffect, useRef } from 'react'
 import type { ListPage, ListQuery } from '../api/listQuery'
 import type { TimeWindow } from '../types'
-import { LIST_PAGE_SIZE, RUN_LIST_PAGE_SIZE, useListQuery } from './useListQuery'
+import {
+  EXECUTION_LIST_PAGE_SIZE,
+  LIST_PAGE_SIZE,
+  RUN_LIST_PAGE_SIZES,
+  SESSION_LIST_PAGE_SIZE,
+  useListQuery,
+} from './useListQuery'
+import { usePageSizeUrlState } from './usePageSizeUrlState'
 import { useLatestPage } from './useLatestPage'
 import { listPollIntervalMs, useLiveRefresh } from './useLiveRefresh'
 
-export { LIST_PAGE_SIZE, RUN_LIST_PAGE_SIZE }
+export { EXECUTION_LIST_PAGE_SIZE, LIST_PAGE_SIZE, RUN_LIST_PAGE_SIZES, SESSION_LIST_PAGE_SIZE }
 
 export interface UseServerListOptions<TRow> {
   /**
@@ -51,6 +58,11 @@ export interface UseServerListOptions<TRow> {
   scopeKey?: string
   /** Rows per page; `LIST_PAGE_SIZE` unless the surface says otherwise. */
   pageSize?: number
+  /**
+   * Sizes the operator may switch to (held in the URL). Absent, the page size
+   * is fixed at `pageSize`.
+   */
+  pageSizeChoices?: readonly number[]
   /** Event types that mean "this list changed". */
   liveEvents: ReadonlySet<string>
   /** False while a row's Lane 2 numbers are still moving, which keeps polling. */
@@ -72,6 +84,9 @@ export interface UseServerListResult<TRow> {
   total: number
   page: number
   pageSize: number
+  /** Sizes `setPageSize` accepts; empty when the surface offers no choice. */
+  pageSizeChoices: readonly number[]
+  setPageSize: (size: number) => void
   totalPages: number
   setPage: (page: number) => void
   /** Server-side facet counts, over the collection rather than the page. */
@@ -93,13 +108,17 @@ export interface UseServerListResult<TRow> {
   lastEventAt: number | null
 }
 
+const NO_CHOICES: readonly number[] = []
+
 export function useServerList<TRow>({
   fetchPage,
   scopeKey = '',
-  pageSize = LIST_PAGE_SIZE,
+  pageSize: defaultPageSize = LIST_PAGE_SIZE,
+  pageSizeChoices = NO_CHOICES,
   liveEvents,
   isTerminal,
 }: UseServerListOptions<TRow>): UseServerListResult<TRow> {
+  const [pageSize, setPageSize] = usePageSizeUrlState(defaultPageSize, pageSizeChoices)
   const { query, ...filters } = useListQuery(scopeKey, pageSize)
 
   // The stream is subscribed before the page is fetched, because whether it is
@@ -132,6 +151,8 @@ export function useServerList<TRow>({
     excludedUndated: result.excludedUndated,
     page: query.page,
     pageSize: query.page_size,
+    pageSizeChoices,
+    setPageSize,
     totalPages: Math.max(1, Math.ceil(result.total / query.page_size)),
     connected,
     lastEventAt,

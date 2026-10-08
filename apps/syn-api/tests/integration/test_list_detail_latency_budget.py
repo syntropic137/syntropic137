@@ -60,6 +60,13 @@ WARMUP = 2
 LIST_BUDGET_MS = 200.0
 DETAIL_BUDGET_MS = 300.0
 
+# Feedback 60d9f990: a list opens at 100 rows only if 100 costs at most 1.5x
+# of 50. Sessions does (0.87x, 1.24x); Executions did not (1.59x, 1.76x), so it
+# opens at 50 and 100 is the operator's choice. The pages are in
+# RUN_LIST_PAGE_SIZES / *_LIST_PAGE_SIZE in the dashboard's useListQuery.ts.
+MAX_100_OVER_50 = 1.5
+OPENS_AT_100 = ("/sessions",)
+
 # The execution the detail endpoint is timed on: mid-history, so its rows sit
 # in a compressed chunk like almost every execution an operator opens.
 DETAIL_EXECUTION = 777
@@ -73,6 +80,8 @@ class Endpoint:
     path: str
     params: dict[str, str]
     budget_ms: float
+    #: False for a size no page opens at: timed for its ratio, not gated.
+    gated: bool = True
 
 
 ENDPOINTS: tuple[Endpoint, ...] = (
@@ -82,13 +91,14 @@ ENDPOINTS: tuple[Endpoint, ...] = (
         {"page": "1", "page_size": "50"},
         LIST_BUDGET_MS,
     ),
-    # The page Executions and Sessions ask for (RUN_LIST_PAGE_SIZE, feedback
-    # 60d9f990), timed beside 50 so the cost of the larger page is a number.
+    # 100 rows, timed beside 50 so the cost of the larger page is a number
+    # (feedback 60d9f990). Executions opens at 50, so its 100 is not gated.
     Endpoint(
         "/executions?page_size=100",
         "/executions",
         {"page": "1", "page_size": "100"},
         LIST_BUDGET_MS,
+        gated=False,
     ),
     Endpoint(
         "/executions/{id}",
@@ -436,8 +446,13 @@ async def test_list_and_detail_endpoints_stay_inside_their_p95_budget(
         for e in ENDPOINTS
     )
     print(f"\nE2 latency gate ({RUNS} runs per endpoint):\n{table}")
-    for name in ("/executions", "/sessions"):
-        ratio = measured[f"{name}?page_size=100"] / measured[f"{name}?page_size=50"]
+    ratios = {
+        name: measured[f"{name}?page_size=100"] / measured[f"{name}?page_size=50"]
+        for name in ("/executions", "/sessions")
+    }
+    for name, ratio in ratios.items():
         print(f"  {name} p95 at 100 rows / at 50 rows: {ratio:.2f}x")
-    over = [e.name for e in ENDPOINTS if measured[e.name] > e.budget_ms]
+    over = [e.name for e in ENDPOINTS if e.gated and measured[e.name] > e.budget_ms]
     assert not over, f"p95 over budget for {over}:\n{table}"
+    too_dear = [name for name in OPENS_AT_100 if ratios[name] > MAX_100_OVER_50]
+    assert not too_dear, f"100 rows cost over {MAX_100_OVER_50}x of 50 for {too_dear}: {ratios}"

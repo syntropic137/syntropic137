@@ -17,7 +17,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { ExecutionEvalRun } from '../../../api/evals'
-import { RUN_LIST_PAGE_SIZE as PAGE_SIZE } from '../../../hooks/useServerList'
+import { EXECUTION_LIST_PAGE_SIZE as PAGE_SIZE } from '../../../hooks/useServerList'
 import { serveListEndpoint } from '../../../test/fakeListServer'
 import { EXECUTIONS, matchesExecutionSearch } from '../../../test/listFixtures'
 import { ExecutionCard } from '../ExecutionCard'

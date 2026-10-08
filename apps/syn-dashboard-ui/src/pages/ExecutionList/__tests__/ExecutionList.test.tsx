@@ -17,7 +17,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { serveListEndpoint } from '../../../test/fakeListServer'
 import { EXECUTIONS, matchesExecutionSearch, within } from '../../../test/listFixtures'
-import { RUN_LIST_PAGE_SIZE as PAGE_SIZE } from '../../../hooks/useServerList'
+import { EXECUTION_LIST_PAGE_SIZE as PAGE_SIZE } from '../../../hooks/useServerList'
 import { ExecutionList } from '../ExecutionList'
 
 vi.mock('../../../hooks/useActivityStream', () => ({

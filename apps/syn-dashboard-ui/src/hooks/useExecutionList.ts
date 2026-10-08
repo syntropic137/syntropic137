@@ -20,7 +20,12 @@ import {
   type SortConfig,
   type SortState,
 } from './useSortUrlState'
-import { RUN_LIST_PAGE_SIZE, useServerList, type UseServerListResult } from './useServerList'
+import {
+  EXECUTION_LIST_PAGE_SIZE,
+  RUN_LIST_PAGE_SIZES,
+  useServerList,
+  type UseServerListResult,
+} from './useServerList'
 import { isTerminalExecutionStatus } from '../utils/terminalStatus'
 
 const EXECUTION_LIVE_EVENTS: ReadonlySet<string> = new Set([
@@ -127,7 +132,8 @@ export function useExecutionList(): UseExecutionListResult {
   const { rows, isDefaultFilters, ...list } = useServerList({
     fetchPage,
     scopeKey: evalFilter,
-    pageSize: RUN_LIST_PAGE_SIZE,
+    pageSize: EXECUTION_LIST_PAGE_SIZE,
+    pageSizeChoices: RUN_LIST_PAGE_SIZES,
     liveEvents: EXECUTION_LIVE_EVENTS,
     isTerminal: isTerminalExecution,
   })

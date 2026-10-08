@@ -30,11 +30,19 @@ export const SEARCH_DEBOUNCE_MS = 300
 export const LIST_PAGE_SIZE = 50
 
 /**
- * Executions and Sessions: the two lists an operator scans for a run rather
- * than pages through, so they hold twice the rows (feedback 60d9f990). The
- * API caps a page at 200; the cost of 100 over 50 is measured in the PR.
+ * The sizes an operator can pick on Executions and Sessions (feedback
+ * 60d9f990). The API caps a page at 200.
  */
-export const RUN_LIST_PAGE_SIZE = 100
+export const RUN_LIST_PAGE_SIZES: readonly number[] = [50, 100]
+
+/**
+ * Sessions opens at 100 rows: at p95 on the E2 dataset 100 rows cost 0.87x and
+ * 1.24x of 50 over two runs, inside the owner's 1.5x bound. Executions measured
+ * 1.59x and 1.76x, over it, so it opens at `LIST_PAGE_SIZE` and 100 is a choice
+ * (PR #1785 has the numbers).
+ */
+export const SESSION_LIST_PAGE_SIZE = 100
+export const EXECUTION_LIST_PAGE_SIZE = LIST_PAGE_SIZE
 
 export interface ListQueryState {
   /**
@@ -102,8 +110,8 @@ export function useCollectionPage(collectionKey: string): CollectionPage {
  * @param scopeKey Identity of any narrowing the caller applies that this hook
  *   cannot see, such as Sessions' `workflow_id`. Changing it selects a
  *   different collection, exactly as a shared filter does.
- * @param pageSize Rows per page. Fixed per surface, so it is not part of the
- *   collection's identity.
+ * @param pageSize Rows per page. Changing it returns to page 1, since the
+ *   old page number addresses different rows at a different size.
  */
 export function useListQuery(scopeKey: string, pageSize: number = LIST_PAGE_SIZE): ListQueryState {
   const { selectedStatuses, timeWindow, toggleStatus, setTimeWindow, clearStatuses } =
@@ -128,7 +136,7 @@ export function useListQuery(scopeKey: string, pageSize: number = LIST_PAGE_SIZE
   const startedAfter = useMemo(() => timeWindowToStartedAfter(timeWindow), [timeWindow])
 
   // Which collection is being paged. See useCollectionPage.
-  const collectionKey = [scopeKey, statusesKey, startedAfter ?? '', search].join(' ')
+  const collectionKey = [scopeKey, statusesKey, startedAfter ?? '', search, pageSize].join(' ')
   const { page, setPage } = useCollectionPage(collectionKey)
 
   const query = useMemo<ListQuery>(

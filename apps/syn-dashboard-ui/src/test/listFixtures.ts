@@ -1,4 +1,4 @@
-import { LIST_PAGE_SIZE, RUN_LIST_PAGE_SIZE } from '../hooks/useListQuery'
+import { EXECUTION_LIST_PAGE_SIZE, LIST_PAGE_SIZE } from '../hooks/useListQuery'
 import type { PhaseProgressInfo } from '../types'
 
 /**
@@ -19,7 +19,8 @@ import type { PhaseProgressInfo } from '../types'
  *   030-079   1-7 days old     7d holds 80, more than one page
  *   080-119   older than 7d    All holds 120, also more than one page
  *
- * and at a page of 100 (executions) every band is doubled.
+ * and at a page of 100 (sessions, built in SessionList.test.tsx) every band
+ * is doubled.
  *
  * That last property is the difficult one. Widening a lower bound on a
  * newest-first list CANNOT change the first page, so a fixture whose narrow
@@ -110,7 +111,7 @@ function makeExecution(index: number): FakeExecution {
     // Every status here is terminal, so nothing on screen is still moving and
     // `listPollIntervalMs` returns no poll cadence under the assertions.
     status: index % 5 === 0 ? 'failed' : index % 17 === 0 ? 'cancelled' : 'completed',
-    started_at: isoAgo(hoursAgo(index, RUN_LIST_PAGE_SIZE) * HOUR_MS),
+    started_at: isoAgo(hoursAgo(index, EXECUTION_LIST_PAGE_SIZE) * HOUR_MS),
     completed_at: null,
     completed_phases: 1,
     phase_progress: { completed: 1, skipped: 0, possible: 1, remaining_possible: 0, percent: 100, display: '1 of 1' },
@@ -131,9 +132,9 @@ function makeExecution(index: number): FakeExecution {
   }
 }
 
-/** 240 executions, newest first: three pages at `RUN_LIST_PAGE_SIZE`. */
+/** 120 executions, newest first: three pages at `EXECUTION_LIST_PAGE_SIZE`. */
 export const EXECUTIONS: readonly FakeExecution[] = Array.from(
-  { length: collectionSize(RUN_LIST_PAGE_SIZE) },
+  { length: collectionSize(EXECUTION_LIST_PAGE_SIZE) },
   (_, index) => makeExecution(index),
 )
 

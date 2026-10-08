@@ -27,7 +27,7 @@ import type { ListPage, ListQuery } from '../../api/listQuery'
 import { serveListEndpoint } from '../../test/fakeListServer'
 import { EXECUTIONS, matchesExecutionSearch } from '../../test/listFixtures'
 import type { ExecutionListResponse } from '../../types'
-import { LIST_PAGE_SIZE, RUN_LIST_PAGE_SIZE } from '../useListQuery'
+import { EXECUTION_LIST_PAGE_SIZE, LIST_PAGE_SIZE } from '../useListQuery'
 import { useLatestPage } from '../useLatestPage'
 
 serveListEndpoint({
@@ -131,7 +131,7 @@ describe('useLatestPage', () => {
 
   it('reaches the last page, and the arithmetic closes on the total', async () => {
     // The executions fixture is three pages at the size its surface asks for.
-    const pageSize = RUN_LIST_PAGE_SIZE
+    const pageSize = EXECUTION_LIST_PAGE_SIZE
     const total = EXECUTIONS.length
     const lastPage = Math.ceil(total / pageSize)
     const query: ListQuery = { page: lastPage, page_size: pageSize }
