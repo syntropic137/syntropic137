@@ -20,11 +20,11 @@ This table shows the most important event flows in Syn137 (events that feed the 
 | ? | phase_started | DashboardMetricsProjection, WorkflowExecutionDetailProjection, WorkflowPhaseMetricsProjection | 3 |
 | ? | trigger_fired | RepoCorrelationProjection, TriggerHistoryProjection, TriggerRuleProjection | 3 |
 | ? | workflow_template_created | DashboardMetricsProjection, WorkflowDetailProjection, WorkflowListProjection | 3 |
+| ? | workspace_provisioned_for_phase | ExecutionTodoProjection, WorkflowExecutionDetailProjection, WorkspaceOwnershipProjection | 3 |
 | ? | agent_execution_completed | ExecutionTodoProjection, WorkflowExecutionDetailProjection | 2 |
 | ? | agent_observation | ExecutionCostProjection, SessionCostProjection | 2 |
 | ? | artifact_created | ArtifactListProjection, DashboardMetricsProjection | 2 |
 | ? | execution_tags_added | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection | 2 |
-| ? | execution_tags_removed | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection | 2 |
 
 ---
 
