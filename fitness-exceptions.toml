@@ -44,7 +44,7 @@
 # #934 still owns splitting `run`/`_handle_run_agent` out of this class.
 
 [max-loc-file."apps.syn-api.src.syn_api._wiring"]
-value = 1007
+value = 1000
 issue = "#185"
 
 # ═══════════════════════════════════════════════════════════════════════════════

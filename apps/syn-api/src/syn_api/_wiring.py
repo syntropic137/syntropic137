@@ -12,6 +12,8 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    import asyncpg
+
     from syn_adapters.control import ExecutionController
     from syn_adapters.control.commands import ControlSignal
     from syn_adapters.control.ports import SignalQueuePort
@@ -750,6 +752,20 @@ def get_session_observations() -> SessionObservationPort:
     return get_event_store()
 
 
+def _timescale_pool() -> asyncpg.Pool:
+    """The event store's TimescaleDB pool, shared by the Lane 2 query services.
+
+    Raises:
+        RuntimeError: If the TimescaleDB pool is not yet initialized.
+    """
+    pool = get_event_store_instance().pool
+    if pool is None:
+        raise RuntimeError(
+            "TimescaleDB pool is not initialized; ensure_connected() must be called first"
+        )
+    return pool
+
+
 def get_session_cost_query():
     """Return a SessionCostQueryService backed by TimescaleDB.
 
@@ -761,12 +777,7 @@ def get_session_cost_query():
     """
     from syn_domain.contexts.agent_sessions import SessionCostQueryService
 
-    pool = get_event_store_instance().pool
-    if pool is None:
-        raise RuntimeError(
-            "TimescaleDB pool is not initialized; ensure_connected() must be called first"
-        )
-    return SessionCostQueryService(pool=pool)
+    return SessionCostQueryService(pool=_timescale_pool())
 
 
 def get_execution_cost_query():
@@ -780,12 +791,7 @@ def get_execution_cost_query():
     """
     from syn_domain.contexts.orchestration import ExecutionCostQueryService
 
-    pool = get_event_store_instance().pool
-    if pool is None:
-        raise RuntimeError(
-            "TimescaleDB pool is not initialized; ensure_connected() must be called first"
-        )
-    return ExecutionCostQueryService(pool=pool)
+    return ExecutionCostQueryService(pool=_timescale_pool())
 
 
 def get_canonical_usage_query():
@@ -799,12 +805,19 @@ def get_canonical_usage_query():
     """
     from syn_domain.contexts.agent_sessions import CanonicalUsageQueryService, CostCalculator
 
-    pool = get_event_store_instance().pool
-    if pool is None:
-        raise RuntimeError(
-            "TimescaleDB pool is not initialized; ensure_connected() must be called first"
-        )
-    return CanonicalUsageQueryService(pool=pool, cost_calculator=CostCalculator())
+    return CanonicalUsageQueryService(pool=_timescale_pool(), cost_calculator=CostCalculator())
+
+
+def get_phase_profile_query():
+    """Return a PhaseProfileQueryService backed by TimescaleDB (#1716).
+
+    Raises:
+        RuntimeError: If the TimescaleDB pool is not yet initialized.
+    """
+    from syn_domain.contexts.agent_sessions import CostCalculator
+    from syn_domain.contexts.orchestration import PhaseProfileQueryService
+
+    return PhaseProfileQueryService(pool=_timescale_pool(), cost_calculator=CostCalculator())
 
 
 async def get_conversation_store() -> MinioConversationStorage:
