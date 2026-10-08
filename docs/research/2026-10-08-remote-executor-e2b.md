@@ -1,7 +1,7 @@
 # Remote workspace executor (E2B first): research and build plan
 
 Date: 2026-10-08. Status: research and build plan, input to epic
-[#1612](https://github.com/syntropic137/syntropic137/issues/1612) and
+[#1612](https://github.com/syntropic137/syntropic137/issues/1612) (accessed 2026-10-08) and
 [ADR-072](../adrs/ADR-072-execution-hosting-and-upgrade-without-drain.md).
 Docs only: no production code, no ADR edit, no vocabulary edit, no issues
 filed. Code citations are against `main` at `38d4db687`, with the
@@ -17,12 +17,12 @@ ADR-072**, not a new architecture. It needs three provider capabilities in
 agentic-workspace, one composition point per backend, a credential policy
 enforced by the executor, durable capture routing and a recovery capability
 that is separate from provisioning. It carries no real agent work until
-[#1735](https://github.com/syntropic137/syntropic137/issues/1735) ("no
+[#1735](https://github.com/syntropic137/syntropic137/issues/1735) (accessed 2026-10-08; "no
 credential inside a remote sandbox") is solved. Until then it can carry only
 scripted runs. At 100 concurrent, more owned Docker hosts are the base and a
 remote tier is a burst tier. Both recommendations are conditional on
 measurements that do not exist yet
-([#1716](https://github.com/syntropic137/syntropic137/issues/1716)).
+([#1716](https://github.com/syntropic137/syntropic137/issues/1716), accessed 2026-10-08).
 
 ## 0. Relationship to #1612 and ADR-072
 
@@ -46,12 +46,12 @@ This doc corrects or refines #1612 and the brief in eight places:
 
 | # | Correction | Corrects | Evidence |
 |---|---|---|---|
-| C1 | `agent-net` is not internal in production, so local workspace egress is open. E2B's `allow_out` would be stricter than local, not parity. Tracked in [#1794](https://github.com/syntropic137/syntropic137/issues/1794), "security: agent-net is not internal in production; workspaces have direct internet egress, contrary to the code comment". | #1612 inventory row 15 and Step 9, which say `internal: true` | `docker/docker-compose.syntropic137.yaml:674-676` (`agent-net: null`, while `docker-proxy` is `internal: true`). The comment at `docker/sidecar-proxy/envoy.yaml:106-110` records that the pypi and npm passthrough hosts were removed and agents do not set `HTTP_PROXY`, so Envoy is not an egress gate either. The "cannot reach the internet directly" comment at `packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/adapter.py:219-221` is false. |
+| C1 | `agent-net` is not internal in production, so local workspace egress is open. E2B's `allow_out` would be stricter than local, not parity. Tracked in [#1794](https://github.com/syntropic137/syntropic137/issues/1794) (accessed 2026-10-08), "security: agent-net is not internal in production; workspaces have direct internet egress, contrary to the code comment". | #1612 inventory row 15 and Step 9, which say `internal: true` | `docker/docker-compose.syntropic137.yaml:674-676` (`agent-net: null`, while `docker-proxy` is `internal: true`). The comment at `docker/sidecar-proxy/envoy.yaml:106-110` records that the pypi and npm passthrough hosts were removed and agents do not set `HTTP_PROXY`, so Envoy is not an egress gate either. The "cannot reach the internet directly" comment at `packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/adapter.py:219-221` is false. |
 | C2 | `/spool` is a named volume, not tmpfs. An explicit mount removes the matching `--tmpfs`. | refines #1612 Step 8 | `lib/agentic-workspace/lib/python/agentic_isolation/agentic_isolation/providers/docker.py:49`, `lib/agentic-workspace/lib/python/agentic_isolation/agentic_isolation/providers/docker.py:310-328` |
 | C3 | E2B concurrency add-ons: Pro+ (600) is +$500/mo, Pro++ (1,100) is +$1,000/mo. #1612 says 1,100 costs a $500 add-on. | #1612 cost section (body line 266) | [E2B pricing](https://e2b.dev/pricing), accessed 2026-10-08 |
 | C4 | `read_file` already exists on the provider Protocol, but it takes a path relative to the workspace root and returns text. Artifacts, the spool and the manifest still need a new binary, absolute-path `read_files`. | refines #1612 Step 7 | `lib/agentic-workspace/lib/python/agentic_isolation/agentic_isolation/providers/base.py:201-218` |
 | C5 | Eval verify is not credential-free. It runs a Claude agent and clones repos. | the brief | `workflows/evals/verify-pinned-sonnet/workflow.yaml:11` (`requires_repos: true`), `workflows/evals/verify-pinned-sonnet/workflow.yaml:51-53` (`provider: claude`); `packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/WorkspaceProvisionHandler.py:252-255` |
-| C6 | The credential gate is #1735. [#724](https://github.com/syntropic137/syntropic137/issues/724) is only the Claude API-key sidecar spike. | #1612 and the brief | `docs/north-star.md:182`, `docs/north-star.md:215` |
+| C6 | The credential gate is #1735. [#724](https://github.com/syntropic137/syntropic137/issues/724) (accessed 2026-10-08) is only the Claude API-key sidecar spike. | #1612 and the brief | `docs/north-star.md:182`, `docs/north-star.md:215` |
 | C7 | A Scripted Agent is not a workflow provider. The stub image replaces the CLI, and its profile still names `claude` or `codex`. Nothing in production reads the profile today. | the earlier plan, not #1612 | `packages/syn-perf/src/syn_perf/loadtest/scripted_agent_profile.py:3-8`, `packages/syn-perf/src/syn_perf/loadtest/scripted_agent_profile.py:37-38`, `packages/syn-perf/src/syn_perf/loadtest/scripted_agent_profile.py:130`; `packages/syn-shared/src/syn_shared/agents.py:24`, `packages/syn-shared/src/syn_shared/agents.py:27`, `packages/syn-shared/src/syn_shared/agents.py:253-269` |
 | C8 | Proposed amendment: the ADR-072 D5 fence guard must require the fencing executor to hold recovery access to the dead owner's backend (decision 8). | extends ADR-072 D5 and #1612 | `docs/adrs/ADR-072-execution-hosting-and-upgrade-without-drain.md:268`, `docs/adrs/ADR-072-execution-hosting-and-upgrade-without-drain.md:274-276`: any live executor may fence, and the reap removes containers by `syn.host_id`; nothing checks the backend |
 
@@ -109,7 +109,7 @@ Every row below was fetched for this doc. Sources:
 | Paused-sandbox storage cost | **None published.** "You only pay while a sandbox is actively running. Once a sandbox is paused, killed or times out, billing stops immediately." Paused retention is unlimited, with no TTL | [billing](https://e2b.dev/docs/billing), [persistence](https://e2b.dev/docs/sandbox/persistence), accessed 2026-10-08 |
 | Spending limit | Available on the budget page | [billing](https://e2b.dev/docs/billing), accessed 2026-10-08 |
 | Reattach to a running command | `Sandbox.connect(sandbox_id)` then `sandbox.commands.connect(pid)` from a separate process | [background commands](https://e2b.dev/docs/commands/background), accessed 2026-10-08 |
-| Templates from an image | `template.from_image("...")`; a "Private registries" page exists but was not read, so digest pinning from private GHCR is **not verified** | [base image](https://e2b.dev/docs/template/base-image) |
+| Templates from an image | `template.from_image("...")`; a "Private registries" page exists but was not read, so digest pinning from private GHCR is **not verified** | [base image](https://e2b.dev/docs/template/base-image), accessed 2026-10-08 |
 | Secret injection | Stored secrets referenced from a network rule; the egress proxy injects the value into matching outbound HTTPS requests outside the sandbox. Per-host request transforms are public beta | [secrets](https://e2b.dev/docs/secrets), [internet access](https://e2b.dev/docs/sandbox/internet-access), accessed 2026-10-08 |
 | BYOC | Enterprise only: sandboxes in our own AWS, GCP or Azure account and VPC, operated by E2B | [llms.txt](https://e2b.dev/llms.txt), accessed 2026-10-08 |
 | Regions | **Not verified**: no region list was found in the pages read | |
@@ -132,18 +132,14 @@ Marginal price is for one run at 2 vCPU and 4 GiB for one hour, computed from
 the published per-second rates. "Not verified" means the pages read did not
 state it; the comparison does not rank on those cells.
 
-| | E2B | Modal Sandboxes | Daytona | Fly Machines | Self-hosted Firecracker or Kata on Hetzner AX | More Docker hosts as ADR-072 Executors |
-|---|---|---|---|---|---|---|
-| Isolation boundary | Firecracker microVM ([llms.txt](https://e2b.dev/llms.txt), accessed 2026-10-08) | gVisor, or `runtime="vm"` ([Modal sandboxes](https://modal.com/docs/guide/sandboxes), accessed 2026-10-08) | not verified | not verified | microVM we operate | container, today's hardening |
-| Max concurrency | 100, 600, 1,100 by add-on; Enterprise more | 100 containers (Starter), 5,000 (Team); a sandbox-specific cap not verified ([Modal pricing](https://modal.com/pricing), accessed 2026-10-08) | not verified | not verified | what we buy | what we buy |
-| Max lifetime | 24 h continuous on Pro | 5 min default, up to 24 h ([Modal sandboxes](https://modal.com/docs/guide/sandboxes), accessed 2026-10-08) | not verified | not verified | unbounded | unbounded |
-| Custom image | template from image | yes, `modal.Image` ([Modal sandboxes](https://modal.com/docs/guide/sandboxes), accessed 2026-10-08) | not verified | not verified | yes | yes, today's images unchanged |
-| Egress control | allow and deny lists | `block_network`, CIDR allowlist, domain allowlist on port 443 ([Modal sandbox networking](https://modal.com/docs/guide/sandbox-networking), accessed 2026-10-08) | not verified | not verified | ours to build | ours; open today (C1, #1794) |
-| Marginal price, 2 vCPU / 4 GiB / h | 2 x $0.000014 + 4 x $0.0000045 = $0.000046/s = **$0.166/h** ([pricing](https://e2b.dev/pricing), accessed 2026-10-08) | 1 physical core (2 vCPU) x $0.00003942 + 4 x $0.00000667 = $0.0000661/s = **$0.238/h** (sandbox rates, [Modal pricing](https://modal.com/pricing), accessed 2026-10-08) | 2 x $0.0504 + 4 x $0.0162 = **$0.166/h**, plus $0.000108/GiB/h storage above 5 GiB ([Daytona pricing](https://www.daytona.io/pricing), accessed 2026-10-08) | performance-2x, 4 GB: $66.00/mo always-on = **$0.090/h** in iad ([Fly pricing](https://fly.io/docs/about/pricing/), accessed 2026-10-08) | not verified (the AX matrix renders prices client-side; [Hetzner AX](https://www.hetzner.com/dedicated-rootserver/matrix-ax/), accessed 2026-10-08) | 0 marginal; the host is a fixed cost |
-| Fixed monthly cost | $150 Pro; +$500 or +$1,000 for 600 or 1,100 | $0 Starter, $250 Team | none stated on the pricing page | none stated | the server price, operator to supply | the server price, operator to supply |
-| Retained-storage cost | none while paused, per [billing](https://e2b.dev/docs/billing) | not verified | $0.000108/GiB/h above 5 GiB | $0.15/GB/mo of rootfs while stopped | own disk | own disk |
-| Credential story | none until #1735; vendor secret injection exists | none until #1735 | none until #1735 | none until #1735 | ours, but off the API host: still #1735 | unchanged: Envoy, setup secrets, today's posture |
-| Fit with ADR-072 | one remote Executor per account | one remote Executor | one remote Executor | one remote Executor, or Fly as a host for more Executors | more local Executors on hosts we own, plus a microVM provider | more local Executors (#1734) |
+| Option | Isolation boundary | Max concurrency | Max lifetime | Custom image | Egress control | Marginal price, 2 vCPU / 4 GiB / h | Fixed monthly cost (subscription and add-ons) | Retained-storage cost | Credential story | Fit with ADR-072 | Sources (all accessed 2026-10-08) |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| E2B | Firecracker microVM | 100 on Pro, 600 with Pro+, 1,100 with Pro++; Enterprise more | 24 h continuous on Pro | template from image | `allow_out` and `deny_out` lists | 2 x $0.000014 + 4 x $0.0000045 = $0.000046/s = **$0.166/h** | $150 Pro; +$500 (Pro+) or +$1,000 (Pro++) | none while paused (billing stops on pause) | none until #1735; vendor secret injection exists | one remote Executor per account | [pricing](https://e2b.dev/pricing), [billing](https://e2b.dev/docs/billing), [llms.txt](https://e2b.dev/llms.txt), [internet access](https://e2b.dev/docs/sandbox/internet-access), [base image](https://e2b.dev/docs/template/base-image), accessed 2026-10-08 |
+| Modal Sandboxes | gVisor, or `runtime="vm"` | 100 containers (Starter), 5,000 (Team); a sandbox-specific cap not verified | 5 min default, up to 24 h | yes, `modal.Image` | `block_network`, CIDR allowlist, domain allowlist on port 443 | 1 physical core (2 vCPU) x $0.00003942 + 4 x $0.00000667 = $0.0000661/s = **$0.238/h** (sandbox rates) | $0 Starter, $250 Team | not verified | none until #1735 | one remote Executor | [Modal sandboxes](https://modal.com/docs/guide/sandboxes), [Modal pricing](https://modal.com/pricing), [Modal sandbox networking](https://modal.com/docs/guide/sandbox-networking), accessed 2026-10-08 |
+| Daytona | not verified | not verified | not verified | not verified | not verified | 2 x $0.0504 + 4 x $0.0162 = **$0.166/h** | none stated on the pricing page | $0.000108/GiB/h above the first 5 GiB | none until #1735 | one remote Executor | [Daytona pricing](https://www.daytona.io/pricing), accessed 2026-10-08 |
+| Fly Machines | not verified | not verified | not verified | not verified | not verified | performance-2x, 4 GB: $66.00/mo always-on = **$0.090/h** in iad | none stated | $0.15/GB/mo of rootfs while stopped | none until #1735 | one remote Executor, or Fly as a host for more Executors | [Fly pricing](https://fly.io/docs/about/pricing/), accessed 2026-10-08 |
+| Self-hosted Firecracker or Kata on Hetzner AX | microVM we operate | what we buy | unbounded | yes | ours to build | not verified (the AX matrix renders prices client-side) | the server price, operator to supply | own disk | ours, but off the API host: still #1735 | more local Executors on hosts we own, plus a microVM provider | [Hetzner AX](https://www.hetzner.com/dedicated-rootserver/matrix-ax/), accessed 2026-10-08; prices not verified |
+| More Docker hosts as ADR-072 Executors | container, today's hardening | what we buy | unbounded | yes, today's images unchanged | ours; open today (C1, #1794) | 0 marginal; the host is a fixed cost | the server price, operator to supply | own disk | unchanged: Envoy, setup secrets, today's posture | more local Executors (#1734) | this repo: C1, `docs/north-star.md:180` |
 
 ### Cost is a formula, not a verdict
 
@@ -184,7 +180,7 @@ exactly what #1716 has to measure.
 - **At 1,000:** an owned fleet sized for steady load, plus a remote burst
   tier. The choice between E2B Pro++, Enterprise and self-hosted Firecracker
   depends on the measured burst share. Model-provider quota
-  ([#1718](https://github.com/syntropic137/syntropic137/issues/1718)) is
+  ([#1718](https://github.com/syntropic137/syntropic137/issues/1718), accessed 2026-10-08) is
   hypothesised to bind first (`docs/north-star.md:173`, `docs/north-star.md:184`).
 
 ## 4. Adapter design
@@ -638,7 +634,8 @@ can be filed as is.
 - **Context:** validate the provider before any placement stack exists.
 - **Change:** `E2BWorkspaceProvider`, implementing the base Protocol, A's
   capabilities and `SupportsStagedTeardown`; a template build from a pinned
-  digest, recording the source digest and pinning CPU and RAM.
+  digest, recording the verified source OCI digest, the expected manifest
+  hash for that build (issue C), and pinning CPU and RAM.
 - **Acceptance**, the first remote proof, with no queue, no executor and no
   credentials: against a real E2B account, the A conformance suite passes
   (create, merged stream and outcome, binary file round-trip, list and attach,
@@ -740,8 +737,7 @@ can be filed as is.
 ### J. agent-net has open egress in production (syn137, security)
 
 **Already tracked as
-[#1794](https://github.com/syntropic137/syntropic137/issues/1794)** (accessed
-2026-10-08, OPEN). Not to be filed again. It is written out here in full
+[#1794](https://github.com/syntropic137/syntropic137/issues/1794)**, accessed 2026-10-08, OPEN. Not to be filed again. It is written out here in full
 because it changes what "parity" means for a remote tier, and #1794 names no
 negative control.
 
