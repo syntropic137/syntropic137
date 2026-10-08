@@ -22,8 +22,8 @@ import os
 
 os.environ.setdefault("APP_ENVIRONMENT", "test")
 
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -66,6 +66,16 @@ _WORKFLOW = (
     Path(__file__).resolve().parents[8] / "workflows" / "sdlc" / "quickfix" / "workflow.yaml"
 )
 _SHA = "955955955955955955955955955955955955955a"
+
+
+@dataclass(frozen=True)
+class _Started:
+    """What a stored start event says about the run's repositories."""
+
+    source_repositories: list[str]
+    """One per repository the run recorded a commit for (#1457)."""
+    repos_input: str | None
+    """The ``inputs["repos"]`` the prompt builder reads, or None if unset."""
 
 
 class _Resolver:
@@ -147,7 +157,7 @@ class _World:
             )
         )
 
-    async def started(self, execution_id: str) -> dict[str, Any]:
+    async def started(self, execution_id: str) -> _Started:
         for envelope in await stored_envelopes(self.executions_store):
             event = envelope.event
             data = event.model_dump()
@@ -155,7 +165,10 @@ class _World:
                 event.event_type == "WorkflowExecutionStarted"
                 and data["execution_id"] == execution_id
             ):
-                return data
+                return _Started(
+                    source_repositories=[c["repository"] for c in data["source_commits"] or []],
+                    repos_input=data["inputs"].get("repos"),
+                )
         msg = f"no WorkflowExecutionStarted stored for {execution_id}"
         raise AssertionError(msg)
 
@@ -167,11 +180,8 @@ async def test_explicit_repos_are_on_the_start_event_of_a_workflow_that_needs_no
     await world.run("exec-explicit", "acme/widgets", "acme/gadgets")
 
     started = await world.started("exec-explicit")
-    assert [c["repository"] for c in started["source_commits"]] == [
-        "acme/widgets",
-        "acme/gadgets",
-    ]
-    assert started["inputs"]["repos"] == (
+    assert started.source_repositories == ["acme/widgets", "acme/gadgets"]
+    assert started.repos_input == (
         "https://github.com/acme/widgets,https://github.com/acme/gadgets"
     )
 
@@ -186,5 +196,5 @@ async def test_the_templates_own_repos_still_do_not_apply_when_it_needs_none() -
     await world.run("exec-bare")
 
     started = await world.started("exec-bare")
-    assert not started.get("source_commits")
-    assert "repos" not in started["inputs"]
+    assert started.source_repositories == []
+    assert started.repos_input is None
