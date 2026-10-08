@@ -47,8 +47,6 @@ from syn_shared.events import WORKSPACE_RESOURCE_USAGE
 MIN_SAMPLES = 10
 """Fewer phases than this and no percentile is reported."""
 
-UNKNOWN_MODEL = "unknown"
-
 # Which phase a session ran in. agent_events is the only place a session is
 # joined to its phase: the usage rollup has no phase_id. Narrowed by execution
 # (idx_events_execution) and by the window, so this is bounded by the
@@ -262,7 +260,8 @@ class PhaseProfileQueryService:
             lambda: defaultdict(_TokenSample)
         )
         for row in rows:
-            model = recorded_model_from_row(row).pricing_model or UNKNOWN_MODEL
+            # The model that ran, never the alias requested (ADR-067).
+            model = recorded_model_from_row(row).cost_key
             sample = samples[(row["phase_id"], model)][row["execution_id"]]
             sample.input_tokens += int(row["input_tokens"])
             sample.output_tokens += int(row["output_tokens"])
