@@ -50,7 +50,7 @@ export LC_ALL=C  # sort and join must agree on collation
 DUMP=""; FROM="v0.33.1"; TO_REF="origin/main"
 TO_API=""; TO_COLLECTOR=""; TO_ES=""; TO_SHA="(verify-only)"
 PORT=38000; TIMEOUT=3600; WORK=""; KEEP=0; VERIFY_ONLY=0
-usage() { sed -n '2,52p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+usage() { sed -n '2,46p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 refuse() { echo "REFUSED: $*" >&2; exit 3; }
 while [ $# -gt 0 ]; do
     case "$1" in
