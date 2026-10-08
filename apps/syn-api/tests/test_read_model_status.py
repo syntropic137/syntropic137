@@ -189,3 +189,100 @@ class TestOnTheWire:
             "events_behind_display": None,
             "summary_display": None,
         }
+
+
+class _SwitchableLagStub(_SubscriptionServiceStub):
+    """The coordinator answering with whatever lag the test sets next."""
+
+    def set_lag(self, lag: ReadModelLag) -> None:
+        self._lag = lag
+
+
+@pytest.fixture
+async def eval_detail_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> AsyncIterator[tuple[AsyncClient, _SwitchableLagStub]]:
+    from syn_api.main import create_app
+    from syn_domain.testing.fake_revision_resolver import FakeRevisionResolver
+
+    fake = FakeRevisionResolver(shas={("acme/app", "main"): "a" * 40})
+    monkeypatch.setattr("syn_api.routes.evals.get_revision_resolver", lambda: fake)
+    stub = _SwitchableLagStub(_lag({EXECUTIONS: HEAD, EVALS: HEAD, DETAILS: HEAD}, replaying=False))
+    original = lifecycle._state.subscription_service
+    lifecycle._state.subscription_service = stub  # type: ignore[assignment]  # stub
+    try:
+        async with AsyncClient(transport=ASGITransport(app=create_app()), base_url="http://t") as c:
+            yield c, stub
+    finally:
+        lifecycle._state.subscription_service = original
+
+
+async def _seed_eval(client: AsyncClient) -> str:
+    """Create an eval over HTTP and replay it into the eval read model."""
+    from event_sourcing.client.memory import MemoryEventStoreClient
+    from event_sourcing.stores.memory_checkpoint import MemoryCheckpointStore
+
+    from syn_adapters.projections.manager import get_projection_manager
+    from syn_adapters.storage.event_store_client import get_event_store_client
+    from syn_domain.testing.stored_replay import replay
+
+    response = await client.post(
+        "/evals",
+        json={
+            "name": "Refactor baseline",
+            "goal": "Does the refactor workflow keep tests green?",
+            "baseline_repos": [{"repository": "acme/app", "requested_ref": "main"}],
+            "tags": [],
+        },
+    )
+    assert response.status_code == 201, response.text
+    store_client = get_event_store_client()
+    assert isinstance(store_client, MemoryEventStoreClient)
+    await replay(store_client, MemoryCheckpointStore(), get_projection_manager().eval_list)
+    return response.json()["eval_id"]
+
+
+@pytest.mark.anyio
+class TestEvalDetailOnTheWire:
+    async def test_the_eval_detail_says_its_own_read_model_is_rebuilding_then_caught_up(
+        self, eval_detail_client: tuple[AsyncClient, _SwitchableLagStub]
+    ) -> None:
+        client, coordinator = eval_detail_client
+        eval_id = await _seed_eval(client)
+
+        # Evals 20,470 behind; the execution read models are at the head.
+        coordinator.set_lag(
+            _lag({EXECUTIONS: HEAD, EVALS: HEAD - 20_470, DETAILS: HEAD}, replaying=True)
+        )
+        response = await client.get(f"/evals/{eval_id}")
+        assert response.status_code == 200, response.text
+        body = json.loads(response.text)
+        assert body["eval_id"] == eval_id
+        # 20,469 / 40,939 = 49.99%: floored, from the checkpoint.
+        assert body["read_model_status"] == {
+            "rebuilding": True,
+            "projection": EVALS,
+            "label_display": "evals",
+            "progress_pct": 49,
+            "progress_display": "49%",
+            "events_behind": 20_470,
+            "events_behind_display": "20,470 events behind",
+            "summary_display": "Rebuilding evals - 49% (20,470 events behind).",
+        }
+
+        coordinator.set_lag(_lag({EXECUTIONS: HEAD, EVALS: HEAD, DETAILS: HEAD}, replaying=False))
+        caught_up = json.loads((await client.get(f"/evals/{eval_id}")).text)["read_model_status"]
+        assert caught_up["rebuilding"] is False
+        assert caught_up["projection"] == EVALS
+        assert caught_up["summary_display"] is None
+
+    async def test_the_eval_detail_ignores_another_read_model_rebuilding(
+        self, eval_detail_client: tuple[AsyncClient, _SwitchableLagStub]
+    ) -> None:
+        client, coordinator = eval_detail_client
+        eval_id = await _seed_eval(client)
+
+        coordinator.set_lag(_rebuilding_executions())
+        status = json.loads((await client.get(f"/evals/{eval_id}")).text)["read_model_status"]
+        assert status["projection"] == EVALS
+        assert status["rebuilding"] is False

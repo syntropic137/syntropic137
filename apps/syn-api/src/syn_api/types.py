@@ -1259,6 +1259,18 @@ class ReadModelStatus(BaseModel):
     )
 
 
+class EvalDetailResponse(EvalResponse):
+    """One eval, as `GET /evals/{eval_id}` returns it.
+
+    The row model plus whether the evals read model is rebuilding, so a
+    missing or stale eval can say why. Kept off `EvalResponse` so every list
+    row does not repeat the list's own status.
+    """
+
+    read_model_status: ReadModelStatus | None = None
+    """Whether the evals read model is rebuilding."""
+
+
 class EvalListResponse(BaseModel):
     """One page of evals, newest first (#967)."""
 

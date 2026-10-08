@@ -2475,7 +2475,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/EvalResponse"
+                  "$ref": "#/components/schemas/EvalDetailResponse"
                 }
               }
             }
@@ -10108,6 +10108,164 @@
         ],
         "title": "EvalCreatedResponse",
         "description": "The receipt for a create, read from the Eval aggregate, never a projection (#967).\n\nThe eval list and `GET /evals/{eval_id}` are read models and may not show\nthe eval for a moment after this returns. That is lag, not a failed create:\n`eval_id` is authoritative from here on."
+      },
+      "EvalDetailResponse": {
+        "properties": {
+          "eval_id": {
+            "type": "string",
+            "title": "Eval Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "goal": {
+            "type": "string",
+            "title": "Goal"
+          },
+          "starting_workflow_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Starting Workflow Id"
+          },
+          "baseline_repos": {
+            "items": {
+              "$ref": "#/components/schemas/EvalBaselineRepoResponse"
+            },
+            "type": "array",
+            "title": "Baseline Repos"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tags"
+          },
+          "frozen": {
+            "type": "boolean",
+            "title": "Frozen"
+          },
+          "archived": {
+            "type": "boolean",
+            "title": "Archived"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "run_count": {
+            "type": "integer",
+            "title": "Run Count"
+          },
+          "run_status_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Run Status Counts"
+          },
+          "scored_count": {
+            "type": "integer",
+            "title": "Scored Count",
+            "default": 0
+          },
+          "pass_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pass Rate"
+          },
+          "pass_rate_display": {
+            "type": "string",
+            "title": "Pass Rate Display",
+            "default": "\u2014"
+          },
+          "last_run_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Run At"
+          },
+          "last_verdict": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Verdict"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "variants": {
+            "items": {
+              "$ref": "#/components/schemas/EvalVariantResponse"
+            },
+            "type": "array",
+            "title": "Variants"
+          },
+          "read_model_status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReadModelStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "eval_id",
+          "name",
+          "goal",
+          "starting_workflow_id",
+          "baseline_repos",
+          "tags",
+          "frozen",
+          "archived",
+          "created_at",
+          "updated_at",
+          "run_count",
+          "run_status_counts"
+        ],
+        "title": "EvalDetailResponse",
+        "description": "One eval, as `GET /evals/{eval_id}` returns it.\n\nThe row model plus whether the evals read model is rebuilding, so a\nmissing or stale eval can say why. Kept off `EvalResponse` so every list\nrow does not repeat the list's own status."
       },
       "EvalId": {
         "type": "string",
