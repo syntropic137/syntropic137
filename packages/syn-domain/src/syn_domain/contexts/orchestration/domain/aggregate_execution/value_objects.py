@@ -1094,6 +1094,11 @@ class ExecutablePhase:
     # which of the two its working tree can possibly hold.
     delivers_repo_changes: bool = True
 
+    # Whether setup installs the cloned repos' locked dependencies while it
+    # still has network, so an agent with none can run the repo's gates
+    # (#1726). Like clone_repos it decides what the WORKSPACE contains.
+    prewarm: bool = False
+
     # Resolved plugins for the workspace materializer (issue #726). PR1 leaves
     # this empty; PR2's resolution service populates it from the workflow- and
     # phase-scope ClaudePluginRefs.

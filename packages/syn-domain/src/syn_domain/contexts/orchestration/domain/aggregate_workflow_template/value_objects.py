@@ -194,6 +194,13 @@ class PhaseDefinition(BaseModel):
     ``PhaseYamlDefinition.delivers_repo_changes`` for why the gate cannot work
     this out for itself."""
 
+    prewarm: bool = False
+    """Whether setup installs the cloned repos' locked dependencies (#1726).
+
+    Sourced from the workflow YAML ``prewarm`` field. See
+    ``PhaseYamlDefinition.prewarm`` for what is installed and why it has to
+    happen before the agent starts."""
+
     # Claude Code command extensions (ISS-211)
     argument_hint: str | None = None
     """Describes what $ARGUMENTS expects for this phase (e.g., '[task-description]')."""

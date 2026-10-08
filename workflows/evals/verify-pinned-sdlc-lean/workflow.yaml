@@ -37,6 +37,10 @@ phases:
       - markdown
     timeout_seconds: 3600
     delivers_repo_changes: false
+    # Install the pinned checkout's locked dependencies during setup, while it
+    # still has network: the codex sandbox has none, so without this every gate
+    # fails installing instead of checking (#1726). The agent's network is unchanged.
+    prewarm: true
     # No allowed_tools: codex enforces a filesystem sandbox, not a tool
     # vocabulary, so the validator refuses a tool list on it. The sandbox is
     # workspace-write, not read-only: read-only is refused at authoring and at

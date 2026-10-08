@@ -61,6 +61,9 @@ def _repo_full_name(url: str) -> str:
 #: makes; it is a constant so that a caller cannot spell it a second way.
 _STAGED: Final[str] = '"$syn_staged_secret"'
 
+PREWARM_TIMEOUT_SECONDS: Final[int] = 1800
+"""The most one prewarm install may take, and the extra time a prewarming setup gets (#1726)."""
+
 
 def _append_secret_file(lines: list[str], *, dest: str, contents: list[str]) -> None:
     """Append lines replacing ``dest`` with ``contents``, or leaving it untouched.
@@ -552,6 +555,13 @@ class SetupPhaseSecrets:
     Set for the phase a resume continues: that repository's pin is the
     branch's head, checked out on the branch instead of detached
     (`StartPins.checkout_for`)."""
+    prewarm: bool = False
+    """Install each cloned repository's locked dependencies here, during setup (#1726).
+
+    Setup has network and runs before the agent; the agent may have none (a
+    codex ``workspace-write`` sandbox is all-or-nothing). Only meaningful with
+    ``clone_repos``: without a checkout there is nothing to install into. See
+    `_append_dependency_prewarm` for exactly what runs."""
     claude_code_oauth_token: str | None = None
     anthropic_api_key: str | None = None
     codex_auth_json: str | None = None
@@ -576,6 +586,7 @@ class SetupPhaseSecrets:
         *,
         repositories: list[str] | None = None,
         clone_repos: bool = True,
+        prewarm: bool = False,
         pinned_commits: Mapping[str, str] | None = None,
         continued_branches: Mapping[str, str] | None = None,
         require_github: bool = True,
@@ -595,6 +606,7 @@ class SetupPhaseSecrets:
             clone_repos: If False, the repos are credentialed but not checked
                 out (#1187). Pass the repos either way - dropping them to skip
                 the clone also drops the token routing they key.
+            prewarm: Install the clones' locked dependencies during setup (#1726).
             pinned_commits: ``owner/name`` -> the commit to check that
                 repository out at (#1458). Empty when no commit was recorded.
             continued_branches: ``owner/name`` -> the branch a continuing
@@ -631,6 +643,7 @@ class SetupPhaseSecrets:
             gh_token=github.gh_token,
             issued=github.issued,
             clone_repos=clone_repos,
+            prewarm=prewarm,
             pinned_commits=dict(pinned_commits or {}),
             continued_branches=dict(continued_branches or {}),
             claude_code_oauth_token=claude_code_oauth_token,
@@ -653,6 +666,7 @@ class SetupPhaseSecrets:
         repo_tokens: dict[str, str] | None = None,
         gh_token: str | None = None,
         clone_repos: bool = True,
+        prewarm: bool = False,
         pinned_commits: Mapping[str, str] | None = None,
         continued_branches: Mapping[str, str] | None = None,
     ) -> SetupPhaseSecrets:
@@ -670,6 +684,7 @@ class SetupPhaseSecrets:
             repo_tokens: Optional pre-minted URL→token map for tests that need credentials
             gh_token: gh's credential; defaults to the one `create` would route to
             clone_repos: False to credential the repos without checking them out (#1187)
+            prewarm: Install the clones' locked dependencies during setup (#1726)
             pinned_commits: ``owner/name`` -> the commit to check it out at (#1458)
             continued_branches: ``owner/name`` -> the branch to continue at its head (#1513)
         """
@@ -687,6 +702,7 @@ class SetupPhaseSecrets:
             repositories=repositories or [],
             gh_token=gh_token,
             clone_repos=clone_repos,
+            prewarm=prewarm,
             pinned_commits=dict(pinned_commits or {}),
             continued_branches=dict(continued_branches or {}),
             claude_code_oauth_token=claude_code_oauth_token
@@ -725,8 +741,96 @@ class SetupPhaseSecrets:
         self._append_git_credentials(lines)
         if self.repositories and self.clone_repos:
             self._append_repo_clones(lines)
+            if self.prewarm:
+                self._append_dependency_prewarm(lines)
 
         return "\n".join(lines) + "\n"
+
+    def setup_timeout_seconds(self, configured: int) -> int:
+        """The setup script's time limit: the configured one, plus the installs' (#1726).
+
+        The configured limit is sized for credentials and a clone (120s by
+        default); a dependency install does not fit in it, and raising it for
+        every workspace would loosen the bound on the phases that install
+        nothing. So only a prewarming setup gets the extra budget, and it is
+        the same budget each install step is individually held to.
+        """
+        if self.prewarm and self.clone_repos and self.repositories:
+            return configured + PREWARM_TIMEOUT_SECONDS
+        return configured
+
+    def _append_dependency_prewarm(self, lines: list[str]) -> None:
+        """Install each clone's locked dependencies while setup still has network (#1726).
+
+        Runs after every clone is at its pin, so what is installed is what the
+        pinned commit's lockfiles say. Every installer is FROZEN: a lockfile
+        that does not match its manifest fails setup rather than being
+        rewritten, because a rewritten lockfile is a change in the tree the
+        agent was asked to review and the unpushed-work gate would see it.
+
+        Per lockfile found, at any depth below the checkout (submodules
+        included; dependency, build and VCS directories excluded):
+
+        - ``uv.lock``: ``uv sync --frozen``, the environment ``uv run`` uses.
+        - ``pnpm-lock.yaml``: ``pnpm install --frozen-lockfile``, through
+          corepack when pnpm itself is not on PATH.
+        - ``Cargo.lock``: ``cargo fetch --locked``, so a later ``cargo build
+          --locked`` needs no network. With no cargo but a rustup, the stable
+          minimal toolchain is installed first - the step
+          ``scripts/agent-fitness.sh`` would otherwise take offline and fail.
+
+        A tool the image does not have is skipped with a line on stderr, not
+        failed: the agent cannot run that tool either, so there is nothing to
+        warm for it. A step that runs and fails, or outlives
+        ``PREWARM_TIMEOUT_SECONDS``, fails setup (``set -e``), so no agent
+        starts against half a dependency tree. TMPDIR moves under /workspace
+        because /tmp is mounted noexec in the workspace image (#1100).
+        """
+        budget = PREWARM_TIMEOUT_SECONDS
+        roots = " ".join(shlex.quote(dest) for _, dest in _clone_destinations(self.repositories))
+        lines.extend(
+            [
+                "",
+                "# Install the clones' locked dependencies while setup has network (#1726)",
+                "export TMPDIR=/workspace/.tmp",
+                'mkdir -p "$TMPDIR"',
+                "syn_locks() {",
+                f"    find {roots} \\( -name node_modules -o -name target -o -name .venv"
+                ' -o -name .git \\) -prune -o -name "$1" -type f -print | sort',
+                "}",
+                "syn_locks uv.lock | while read -r lock; do",
+                "    if ! command -v uv >/dev/null 2>&1; then",
+                '        echo "prewarm: no uv on PATH; not installing $lock" >&2; continue',
+                "    fi",
+                '    echo "prewarm: uv sync --frozen in ${lock%/*}"',
+                f'    (cd "${{lock%/*}}" && timeout {budget} uv sync --frozen)',
+                "done",
+                "syn_locks pnpm-lock.yaml | while read -r lock; do",
+                "    if command -v pnpm >/dev/null 2>&1; then syn_pnpm=pnpm",
+                "    elif command -v corepack >/dev/null 2>&1; then syn_pnpm='corepack pnpm'",
+                "    else",
+                '        echo "prewarm: no pnpm or corepack on PATH; not installing $lock" >&2',
+                "        continue",
+                "    fi",
+                '    echo "prewarm: pnpm install --frozen-lockfile in ${lock%/*}"',
+                f'    (cd "${{lock%/*}}" && timeout {budget} $syn_pnpm install --frozen-lockfile)',
+                "done",
+                'if [ -n "$(syn_locks Cargo.lock)" ] && ! cargo --version >/dev/null 2>&1'
+                " && command -v rustup >/dev/null 2>&1; then",
+                '    echo "prewarm: installing the stable Rust toolchain"',
+                f"    timeout {budget} rustup toolchain install stable --profile minimal"
+                " --no-self-update",
+                "fi",
+                "syn_locks Cargo.lock | while read -r lock; do",
+                '    [ -f "${lock%/*}/Cargo.toml" ] || continue',
+                "    if ! cargo --version >/dev/null 2>&1; then",
+                '        echo "prewarm: no cargo; not fetching crates for $lock" >&2; continue',
+                "    fi",
+                '    echo "prewarm: cargo fetch --locked for ${lock%/*}"',
+                f'    timeout {budget} cargo fetch --locked --manifest-path "${{lock%/*}}/Cargo.toml"',
+                "done",
+            ]
+        )
 
     def _append_codex_auth(self, lines: list[str]) -> None:
         """Relocate the staged codex auth file to ~/.codex/auth.json (0600).

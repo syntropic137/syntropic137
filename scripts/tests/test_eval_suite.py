@@ -223,7 +223,14 @@ def test_the_sdlc_eval_workflows_are_the_codex_workflow_but_for_identity(which: 
 
     ours = _workflow_yaml(f"workflows/evals/verify-pinned-sdlc-{which}/workflow.yaml")
     codex = _workflow_yaml("workflows/evals/verify-pinned-codex/workflow.yaml")
-    assert comparable(ours) == comparable(codex)
+    # The one intended difference (#1726): the sdlc prompts run the repo's
+    # gates, which need the dependencies installed while setup has network.
+    # The codex workflow keeps the default, so it is the same eval it was.
+    phases = ours["phases"]
+    assert isinstance(phases, list) and [p["prewarm"] for p in phases] == [True]
+    assert all("prewarm" not in p for p in codex["phases"])  # type: ignore[union-attr]
+    unwarmed = {**ours, "phases": [{k: v for k, v in p.items() if k != "prewarm"} for p in phases]}
+    assert comparable(unwarmed) == comparable(codex)
     assert ours["id"] == f"eval-verify-pinned-sdlc-{which}-v1"
 
 
