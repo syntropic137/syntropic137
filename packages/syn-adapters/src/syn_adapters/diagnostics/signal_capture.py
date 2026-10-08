@@ -81,6 +81,42 @@ _MAX_RECORDS: Final[int] = 8192
 _BUDGET_SECONDS: Final[float] = 2.0
 
 
+#: Stands in for an environment value in a retained command. The NAME stays, so
+#: the diagnostic still says what the process was launched with.
+REDACTED: Final[str] = "<redacted>"
+
+
+def redact_environment(command: Sequence[str]) -> tuple[str, ...]:
+    """``command`` with every ``-e``/``--env`` value replaced by :data:`REDACTED`.
+
+    A launch argv carries the agent's credentials as ``-e KEY=VALUE`` (the
+    platform token of ADR-072 among them), and a diagnostic is logged at ERROR
+    and carried outward, so no value survives into one. Every spelling docker
+    accepts: ``-e K=V``, ``--env K=V``, ``-eK=V`` and ``--env=K=V``.
+    """
+    redacted: list[str] = []
+    value_next = False
+    for arg in command:
+        if value_next:
+            redacted.append(_redact_assignment(arg))
+            value_next = False
+        elif arg in ("-e", "--env"):
+            redacted.append(arg)
+            value_next = True
+        elif arg.startswith("--env="):
+            redacted.append("--env=" + _redact_assignment(arg.removeprefix("--env=")))
+        elif arg.startswith("-e") and not arg.startswith("--") and len(arg) > 2:
+            redacted.append("-e" + _redact_assignment(arg[2:]))
+        else:
+            redacted.append(arg)
+    return tuple(redacted)
+
+
+def _redact_assignment(assignment: str) -> str:
+    name, sep, _ = assignment.partition("=")
+    return f"{name}={REDACTED}" if sep else assignment
+
+
 async def capture_signal_death(
     command: Sequence[str],
     exit_code: int | None,
@@ -111,7 +147,7 @@ async def capture_signal_death(
     return SignalDeath(
         exit_code=exit_code,
         signal_number=number,
-        command=tuple(command),
+        command=redact_environment(command),
         kernel_lines=lines,
         unreadable_because=unreadable,
     )
