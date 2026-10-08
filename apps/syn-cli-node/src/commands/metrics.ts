@@ -5,7 +5,7 @@
 
 import { CommandGroup, type CommandDef, type ParsedArgs } from "../framework/command.js";
 import { api, unwrap } from "../client/typed.js";
-import { print, printDim } from "../output/console.js";
+import { print, printDim, printError } from "../output/console.js";
 import { style, BOLD, CYAN } from "../output/ansi.js";
 import { formatCost, formatDuration, formatStatus, formatTokens } from "../output/format.js";
 import { Table } from "../output/table.js";
@@ -62,5 +62,70 @@ const showCommand: CommandDef = {
   },
 };
 
+const profilesCommand: CommandDef = {
+  name: "profiles",
+  description: "Per-phase p50/p90 token and cost, p50/p95 resource profiles for a workflow",
+  options: {
+    workflow: { type: "string", short: "w", description: "Workflow ID (required)" },
+    days: { type: "string", short: "d", description: "Look-back window in days", default: "7" },
+  },
+  handler: async (parsed: ParsedArgs) => {
+    const workflow = parsed.values["workflow"] as string | undefined;
+    if (!workflow) {
+      printError("--workflow is required");
+      process.exitCode = 1;
+      return;
+    }
+    const days = Number((parsed.values["days"] as string | undefined) ?? "7");
+
+    const d = unwrap(await api.GET("/metrics/phase-profiles", {
+      params: { query: { workflow_id: workflow, window_days: days } },
+    }), "Fetch phase profiles");
+
+    print(style(`Phase profiles: ${d.workflow_id} (last ${d.window_days}d, ${d.executions} executions)`, CYAN));
+
+    const tokens = new Table({ title: "Tokens and cost per phase and model (p50 / p90)" });
+    for (const col of ["Phase", "Model", "n", "Input", "Output", "Cache write", "Cache read", "Cost"]) {
+      tokens.addColumn(col, col === "Phase" || col === "Model" ? {} : { align: "right" });
+    }
+    for (const t of d.tokens) {
+      const pair = (p: { p50_display: string; p90_display: string }) =>
+        p.p50_display === p.p90_display ? p.p50_display : `${p.p50_display} / ${p.p90_display}`;
+      tokens.addRow(
+        t.phase_id,
+        t.model,
+        String(t.input_tokens.n),
+        pair(t.input_tokens),
+        pair(t.output_tokens),
+        pair(t.cache_creation_tokens),
+        pair(t.cache_read_tokens),
+        pair(t.cost_usd) + (t.unpriced_phases ? ` (${t.unpriced_phases} unpriced)` : ""),
+      );
+    }
+    if (d.tokens.length > 0) tokens.print();
+    else printDim("No token usage recorded for this workflow in the window.");
+
+    const resources = new Table({ title: "Workspace resources per phase (p50 / p95)" });
+    for (const col of ["Phase", "Coverage", "CPU s / wall s", "Throttled", "Memory peak", "Disk at teardown"]) {
+      resources.addColumn(col, col === "Phase" || col === "Coverage" ? {} : { align: "right" });
+    }
+    for (const r of d.resources) {
+      const pair = (p: { p50_display: string; p95_display: string }) =>
+        p.p50_display === p.p95_display ? p.p50_display : `${p.p50_display} / ${p.p95_display}`;
+      resources.addRow(
+        r.phase_id,
+        r.coverage.coverage_display,
+        pair(r.cpu_seconds_per_wall_second),
+        pair(r.cpu_throttled_seconds),
+        pair(r.memory_peak_bytes),
+        pair(r.disk_bytes_at_teardown),
+      );
+    }
+    if (d.resources.length > 0) resources.print();
+    printDim("Percentiles over every phase in the window; fewer than 10 phases reads 'insufficient'.");
+  },
+};
+
 export const metricsGroup = new CommandGroup("metrics", "View aggregated workflow and session metrics");
 metricsGroup.command(showCommand);
+metricsGroup.command(profilesCommand);
