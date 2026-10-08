@@ -8,6 +8,7 @@ from typing import Literal, Protocol
 from pydantic import BaseModel, ConfigDict
 
 PullRequestStatus = Literal["open", "merged", "closed"]
+BranchStatus = Literal["pushed", "resolved", "expired"]
 
 
 class PullRequestMergeState(BaseModel):
@@ -24,6 +25,10 @@ class PullRequestMergePort(Protocol):
     """Asks the forge whether a PR was merged. MUST NOT raise: unreadable instead."""
 
     async def read_merge(self, repository: str, pull_request: int) -> PullRequestMergeState: ...
+
+    async def pull_requests_from(self, repository: str, branch: str) -> tuple[int, ...] | None:
+        """Every PR, open or closed, whose head is ``branch``; None when unreadable."""
+        ...
 
 
 class MergeRecorder(Protocol):
@@ -47,6 +52,7 @@ class RunLinks(BaseModel):
     chain: tuple[str, ...]
     pull_requests: tuple[str, ...] = ()
     repositories: tuple[str, ...] = ()
+    branches: tuple[str, ...] = ()
 
 
 class PullRequestContributors(BaseModel):
@@ -76,6 +82,35 @@ class PullRequestContributors(BaseModel):
     @property
     def unrecorded(self) -> tuple[str, ...]:
         return tuple(e for e in self.execution_ids if e not in self.recorded)
+
+
+class BranchContributors(BaseModel):
+    """A branch a run pushed with no PR open from it yet, and the runs that pushed it.
+
+    The PR may be opened later, by a later phase or run that does not push, so
+    the live pass asks the forge for the PRs from it until one appears.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    repository: str
+    branch: str
+    observed_at: datetime
+    execution_ids: tuple[str, ...] = ()
+    status: BranchStatus = "pushed"
+    pull_requests: tuple[int, ...] = ()
+
+    @property
+    def key(self) -> str:
+        return branch_key(self.repository, self.branch)
+
+    def with_contributors(self, execution_ids: tuple[str, ...]) -> BranchContributors:
+        merged = tuple(dict.fromkeys((*self.execution_ids, *execution_ids)))
+        return self.model_copy(update={"execution_ids": merged})
+
+
+def branch_key(repository: str, branch: str) -> str:
+    return f"{repository}:{branch}"
 
 
 def pull_request_key(repository: str, pull_request: int) -> str:

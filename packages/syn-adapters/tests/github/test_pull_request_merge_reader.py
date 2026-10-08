@@ -23,6 +23,7 @@ _REPO = "acme/widget"
 _LOOKUP = f"/repos/{_REPO}/installation"
 _MINT = "/app/installations/7/access_tokens"
 _PULL = f"/repos/{_REPO}/pulls/7"
+_PULLS = f"/repos/{_REPO}/pulls"
 _MERGED_AT = "2026-10-07T11:00:00Z"
 
 
@@ -53,8 +54,14 @@ class _Network:
             return httpx.Response(
                 201, json={"token": "ghs_minted", "expires_at": expires_at.isoformat()}
             )
-        assert path == _PULL
         assert request.headers["authorization"].endswith("ghs_minted")
+        if path == _PULLS:
+            assert request.url.params["head"] == "acme:feat/widget"
+            assert request.url.params["state"] == "all"
+            return httpx.Response(
+                200, json=[{"number": 9, "state": "closed"}, {"number": 7, "state": "open"}]
+            )
+        assert path == _PULL
         return httpx.Response(
             200, json={"state": self.pull_state, "merged_at": self.pull_merged_at}
         )
@@ -98,3 +105,18 @@ async def test_github_that_cannot_answer_is_unreadable_not_unmerged(network: _Ne
     state = await _reader(network).read_merge(_REPO, 7)
 
     assert not state.readable
+
+
+async def test_the_prs_from_a_branch_are_read_through_a_retried_mint(network: _Network) -> None:
+    network.failures[_MINT] = [503]
+
+    numbers = await _reader(network).pull_requests_from(_REPO, "feat/widget")
+
+    assert network.sent.count(_MINT) == 2
+    assert numbers == (7, 9)
+
+
+async def test_prs_github_cannot_list_are_unreadable_not_none_opened(network: _Network) -> None:
+    network.failures[_PULLS] = [500] * 10
+
+    assert await _reader(network).pull_requests_from(_REPO, "feat/widget") is None

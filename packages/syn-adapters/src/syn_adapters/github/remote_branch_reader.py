@@ -68,7 +68,7 @@ class GitHubRemoteBranchReader(RemoteBranchPort):
             head = await _head(client, repository, branch, installation_id)
             if head is None:
                 return RemoteBranchReading(repository=repository, branch=branch, readable=True)
-            pulls = await _pulls(client, repository, branch, installation_id)
+            pulls = await pulls_from(client, repository, branch, installation_id)
         except (GitHubAppError, httpx.HTTPError, ValueError, ValidationError) as exc:
             logger.warning("Could not read branch %s of %s: %s", branch, repository, exc)
             return unreadable
@@ -101,7 +101,7 @@ async def _head(
     return _Branch.model_validate(body).commit.sha
 
 
-async def _pulls(
+async def pulls_from(
     client: GitHubAppClient, repository: str, branch: str, installation_id: str
 ) -> list[_Pull]:
     """Every PR, open or closed, whose head is ``branch`` in ``repository``."""

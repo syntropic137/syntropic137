@@ -160,10 +160,13 @@ asks GitHub, so a replay rebuilds the same numbers with no call (#1728).
 unique contributors wherever in time they ran, averaged over those PRs. An
 unmerged PR contributes nothing.
 
-**Unclear:** a Phase that opened a PR from a branch it did not move (pushed in
-an earlier Phase, opened in a later one) records no observation for it, since
-an observation is only taken of branches that moved; the earlier Phase's own
-reading carries the PR only if it was already open then (#1728).
+A **Pushed Branch** is an origin branch a Phase observed moving with no PR
+open from it yet. The PR may be opened later, by a Phase or run that pushes
+nothing and so observes nothing, so the manager remembers the branch with the
+Resume Chains that pushed it, and asks GitHub, live only, for the PRs from it
+until one appears (for at most 30 days). Every PR found links those runs, so
+the run that pushed in implement and opened the PR in review is a contributor.
+A branch nobody opened a PR from contributes nothing.
 
 ## Unresolved Findings
 

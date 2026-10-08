@@ -11,18 +11,21 @@ PROJECTION SIDE (handle_event): pure. A run is linked to a PR when it reports
   phase completed or failed - which is how a run that OPENED a PR links. A
   resume inherits its parent's links and carries its whole chain into every
   link it makes, so a failed run, its resume and an independent reverify of
-  the same PR are all contributors. A replayed ``PullRequestMergeRecorded``
+  the same PR are all contributors. A branch a phase pushed with no PR open
+  from it yet is remembered with the runs that pushed it, because the PR may be
+  opened later by a phase that pushes nothing. A replayed ``PullRequestMergeRecorded``
   marks its contributor recorded, so nothing is recorded twice.
 
-PROCESSOR SIDE (process_pending): live only. Asks the forge about each PR not
-  yet settled and records the merge for each contributor not yet recorded.
+PROCESSOR SIDE (process_pending): live only. Asks the forge for the PRs from
+  each remembered branch, linking its runs to them, then about each PR not yet
+  settled and records the merge for each contributor not yet recorded.
   The platform's clock tick guarantees a pass after a merge on a quiet system.
 """
 
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from event_sourcing import (
@@ -52,13 +55,15 @@ from syn_domain.contexts.orchestration.domain.events.WorkflowFailedEvent import 
     WorkflowFailedEvent,
 )
 from syn_domain.contexts.orchestration.slices.attribute_merged_pull_requests.value_objects import (
+    BranchContributors,
     PullRequestContributors,
     RunLinks,
+    branch_key,
     pull_request_key,
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Callable, Iterable
 
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
         BranchObservation,
@@ -80,7 +85,12 @@ _RECHECK_EVENTS = {"WorkflowCompleted", "InventoryReconciliationSweep"}
 
 _RUNS = "merged_pr_attribution_runs"
 _PULL_REQUESTS = "merged_pr_attribution_prs"
+_BRANCHES = "merged_pr_attribution_branches"
 _UNSETTLED = ("open", "merged")
+_ORIGIN = "origin"
+#: How long a pushed branch is asked about before nobody opening a PR from it
+#: is taken as final, so an abandoned branch is not polled forever.
+_BRANCH_LOOKUP = timedelta(days=30)
 
 
 def _reported_pull_requests(event: WorkflowExecutionStartedEvent) -> Iterable[tuple[str, int]]:
@@ -109,21 +119,35 @@ def _observed_pull_requests(
             yield repository, observed.pull_request
 
 
+def _pushed_branches(
+    run: RunLinks, observations: Iterable[BranchObservation] | None
+) -> Iterable[tuple[str, str]]:
+    """The origin branches a phase pushed with no PR open from them yet."""
+    slugs = repository_slugs_by_name(run.repositories)
+    for observed in observations or ():
+        repository = observed.repo if "/" in observed.repo else slugs.get(observed.repo)
+        pushed = observed.remote == _ORIGIN and observed.remote_commit is not None
+        if pushed and observed.pull_request is None and repository is not None:
+            yield repository, observed.branch
+
+
 class MergedPullRequestAttributionProcessManager(ProcessManager):
     """Records which executions contributed to each merged PR."""
 
     PROJECTION_NAME = "merged_pr_attribution"
-    VERSION = 2  # 2: folds PhaseCompleted observations (#1728)
+    VERSION = 3  # 2: folds PhaseCompleted observations; 3: remembers pushed branches (#1728)
 
     def __init__(
         self,
         store: ProjectionStore | None = None,
         merges: PullRequestMergePort | None = None,
         recorder: MergeRecorder | None = None,
+        clock: Callable[[], datetime] | None = None,
     ) -> None:
         self._store = store
         self._merges = merges
         self._recorder = recorder
+        self._clock = clock or (lambda: datetime.now(UTC))
 
     def get_name(self) -> str:
         return self.PROJECTION_NAME
@@ -148,7 +172,15 @@ class MergedPullRequestAttributionProcessManager(ProcessManager):
                 await self._on_started(event)
             elif isinstance(event, (PhaseCompletedEvent, WorkflowFailedEvent)):
                 run = await self._run(event.execution_id)
-                await self._link(run, _observed_pull_requests(run, event.observed_branches))
+                observed_at = (
+                    event.completed_at
+                    if isinstance(event, PhaseCompletedEvent)
+                    else event.failed_at
+                )
+                run = await self._link(run, _observed_pull_requests(run, event.observed_branches))
+                await self._remember(
+                    run, _pushed_branches(run, event.observed_branches), observed_at
+                )
             elif isinstance(event, PullRequestMergeRecordedEvent):
                 await self._on_merge_recorded(event)
             await checkpoint_store.save_checkpoint(
@@ -168,6 +200,7 @@ class MergedPullRequestAttributionProcessManager(ProcessManager):
         inherited: tuple[str, ...] = ()
         chain: tuple[str, ...] = (event.execution_id,)
         repositories = tuple(c.repository for c in event.source_commits or ())
+        parent = RunLinks(execution_id=event.execution_id, chain=())
         if event.resumed_from is not None:
             parent = await self._run(event.resumed_from.parent_execution_id)
             chain = tuple(dict.fromkeys((*parent.chain, event.execution_id)))
@@ -178,13 +211,41 @@ class MergedPullRequestAttributionProcessManager(ProcessManager):
             pr = await self._pull_request_by_key(key)
             if pr is not None:
                 run = await self._link_one(run, pr.repository, pr.pull_request)
+        for key in parent.branches:
+            branch = await self._branch_by_key(key)
+            if branch is not None:
+                run = await self._join_branch(run, branch)
         await self._save_run(run)
         await self._link(run, _reported_pull_requests(event))
 
-    async def _link(self, run: RunLinks, pull_requests: Iterable[tuple[str, int]]) -> None:
+    async def _link(self, run: RunLinks, pull_requests: Iterable[tuple[str, int]]) -> RunLinks:
         for repository, number in pull_requests:
             run = await self._link_one(run, repository, number)
         await self._save_run(run)
+        return run
+
+    async def _remember(
+        self, run: RunLinks, branches: Iterable[tuple[str, str]], observed_at: datetime
+    ) -> None:
+        for repository, name in branches:
+            branch = await self._branch_by_key(branch_key(repository, name))
+            run = await self._join_branch(
+                run,
+                branch
+                or BranchContributors(repository=repository, branch=name, observed_at=observed_at),
+            )
+        await self._save_run(run)
+
+    async def _join_branch(self, run: RunLinks, branch: BranchContributors) -> RunLinks:
+        """Add ``run``'s chain to the branch, and to each PR already found from it."""
+        joined = branch.with_contributors(run.chain)
+        if joined != branch:
+            await self._save_branch(joined)
+        for number in joined.pull_requests:
+            run = await self._link_one(run, joined.repository, number)
+        if joined.key in run.branches:
+            return run
+        return run.model_copy(update={"branches": (*run.branches, joined.key)})
 
     async def _link_one(self, run: RunLinks, repository: str, number: int) -> RunLinks:
         """Add ``run``'s whole chain to the PR; the run remembers the PR for its resumes."""
@@ -217,11 +278,34 @@ class MergedPullRequestAttributionProcessManager(ProcessManager):
         """PROCESSOR SIDE: ask the forge, record each contributor's merge. Live-only."""
         if self._store is None or self._merges is None or self._recorder is None:
             return 0
+        for row in await self._store.query(_BRANCHES, filters={"status": "pushed"}):
+            await self._find_pull_requests(BranchContributors.model_validate(row))
         recorded = 0
         for status in _UNSETTLED:
             for row in await self._store.query(_PULL_REQUESTS, filters={"status": status}):
                 recorded += await self._settle(PullRequestContributors.model_validate(row))
         return recorded
+
+    async def _find_pull_requests(self, branch: BranchContributors) -> None:
+        """Link the branch's runs to the PRs from it, once the forge has any."""
+        assert self._merges is not None
+        if self._clock() - branch.observed_at > _BRANCH_LOOKUP:
+            await self._save_branch(branch.model_copy(update={"status": "expired"}))
+            return
+        numbers = await self._merges.pull_requests_from(branch.repository, branch.branch)
+        if not numbers:
+            return  # none yet, or unreadable: asked again on the next pass
+        for number in numbers:
+            key = pull_request_key(branch.repository, number)
+            pr = await self._pull_request_by_key(key) or PullRequestContributors(
+                repository=branch.repository, pull_request=number
+            )
+            linked = pr.with_contributors(branch.execution_ids)
+            if linked != pr:
+                await self._save_pull_request(linked)
+        await self._save_branch(
+            branch.model_copy(update={"status": "resolved", "pull_requests": numbers})
+        )
 
     async def _settle(self, pr: PullRequestContributors) -> int:
         if pr.status == "merged" and not pr.unrecorded:
@@ -264,6 +348,15 @@ class MergedPullRequestAttributionProcessManager(ProcessManager):
 
     # === Store ===
 
+    async def _branch_by_key(self, key: str) -> BranchContributors | None:
+        assert self._store is not None
+        row = await self._store.get(_BRANCHES, key)
+        return BranchContributors.model_validate(row) if row is not None else None
+
+    async def _save_branch(self, branch: BranchContributors) -> None:
+        assert self._store is not None
+        await self._store.save(_BRANCHES, branch.key, branch.model_dump(mode="json"))
+
     async def _run(self, execution_id: str) -> RunLinks:
         assert self._store is not None
         row = await self._store.get(_RUNS, execution_id)
@@ -292,3 +385,4 @@ class MergedPullRequestAttributionProcessManager(ProcessManager):
         if self._store is not None:
             await self._store.delete_all(_RUNS)
             await self._store.delete_all(_PULL_REQUESTS)
+            await self._store.delete_all(_BRANCHES)

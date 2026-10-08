@@ -27,6 +27,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     WorkflowExecutionAggregate,
 )
+from syn_domain.contexts.orchestration.domain.events.PhaseCompletedEvent import (
+    PhaseCompletedEvent,
+)
 from syn_domain.contexts.orchestration.domain.events.PullRequestMergeRecordedEvent import (
     PullRequestMergeRecordedEvent,
 )
@@ -71,6 +74,11 @@ class _Forge:
     """GitHub as the manager sees it: PR 7 merged, PR 8 still open."""
 
     calls: list[int] = field(default_factory=list)
+    branches: dict[str, tuple[int, ...]] = field(default_factory=dict)
+
+    async def pull_requests_from(self, repository: str, branch: str) -> tuple[int, ...] | None:
+        assert repository == REPO
+        return self.branches.get(branch, ())
 
     async def read_merge(self, repository: str, pull_request: int) -> PullRequestMergeState:
         assert repository == REPO
@@ -83,6 +91,9 @@ class _Forge:
 class _Unreachable:
     async def read_merge(self, repository: str, pull_request: int) -> PullRequestMergeState:
         raise AssertionError(f"replay asked GitHub about {repository}#{pull_request}")
+
+    async def pull_requests_from(self, repository: str, branch: str) -> tuple[int, ...] | None:
+        raise AssertionError(f"replay asked GitHub about {repository}:{branch}")
 
 
 @dataclass
@@ -305,23 +316,29 @@ async def test_the_aggregate_records_a_contributor_once_per_pr() -> None:
     ]
 
 
-def _run_that_opens_pr_7(execution_id: str) -> list[DomainEvent]:
-    """A run started on no PR whose one phase opened PR 7, through the real producers.
+def _run_that_opens_pr_7(execution_id: str, *, in_a_later_phase: bool = False) -> list[DomainEvent]:
+    """A run started on no PR that opened PR 7, through the real producers.
 
-    The processor observes the phase's branches as it completes (with the PR
+    The processor observes each phase's branches as it completes (with the PR
     the forge has open from each) and hands them to ``completed_phase``; the
     aggregate puts them on ``PhaseCompleted``. The observation names the
     workspace directory, ``widget``, as git does, not the slug.
+
+    ``in_a_later_phase``: implement pushes ``feat/widget`` with no PR, and
+    review opens PR 7 from it without pushing, so review observes nothing.
     """
+    phase_ids = ("implement", "review") if in_a_later_phase else ("implement",)
     aggregate = WorkflowExecutionAggregate()
     aggregate.start_execution(
         StartExecutionCommand(
             execution_id=execution_id,
             workflow_id="wf",
             workflow_name="implement",
-            total_phases=1,
+            total_phases=len(phase_ids),
             inputs={"task": "build the widget"},
-            phase_definitions=[PhaseDefinition(phase_id="implement", name="Implement", order=1)],
+            phase_definitions=[
+                PhaseDefinition(phase_id=p, name=p, order=i) for i, p in enumerate(phase_ids, 1)
+            ],
             source_commits=[SourceCommit(repository=REPO, sha="a" * 40)],
         )
     )
@@ -332,22 +349,25 @@ def _run_that_opens_pr_7(execution_id: str) -> list[DomainEvent]:
         remote_commit="b" * 40,
         remote_commit_at_phase_start=None,
         unpushed_commits=0,
-        pull_request=7,
+        pull_request=None if in_a_later_phase else 7,
     )
-    phase = completed_phase(
-        execution_id=execution_id,
-        workflow_id="wf",
-        phase_id="implement",
-        session_id="s",
-        started_at=_at(0),
-        artifact_ids=[],
-        auth_tokens=None,
-        now=_at(1),
-        observed=ObservedBranches(branches=(opened,)),
-    )
-    aggregate.complete_phase(phase.command)
+    results = []
+    for i, phase_id in enumerate(phase_ids):
+        phase = completed_phase(
+            execution_id=execution_id,
+            workflow_id="wf",
+            phase_id=phase_id,
+            session_id="s",
+            started_at=_at(i),
+            artifact_ids=[],
+            auth_tokens=None,
+            now=_at(i + 1),
+            observed=ObservedBranches(branches=(opened,) if i == 0 else ()),
+        )
+        aggregate.complete_phase(phase.command)
+        results.append(phase.result)
     aggregate.complete_execution(
-        completed_execution([phase.result], []).as_command(execution_id, total_phases=1)
+        completed_execution(results, []).as_command(execution_id, total_phases=len(phase_ids))
     )
     return [e.event for e in aggregate.get_uncommitted_events()]
 
@@ -356,8 +376,12 @@ async def _live(
     log: list[DomainEvent],
 ) -> tuple[ScorecardProjection, list[DomainEvent], tuple[int | None, Decimal | None]]:
     """Deliver ``log`` live, let the manager record, deliver what it recorded."""
+    forge = _Forge(branches={"feat/widget": (7,)})
     manager = MergedPullRequestAttributionProcessManager(
-        store=InMemoryProjectionStore(), merges=_Forge(), recorder=_Recorder(log)
+        store=InMemoryProjectionStore(),
+        merges=forge,
+        recorder=_Recorder(log),
+        clock=lambda: _at(20),
     )
     scorecard = ScorecardProjection(InMemoryProjectionStore())
     history = len(log)
@@ -395,3 +419,52 @@ async def test_the_run_that_opened_a_merged_pr_counts_it_on_its_own() -> None:
 
     assert [e.execution_id for e in recorded] == ["a"]  # type: ignore[attr-defined]
     assert live == (1, Decimal(1))
+
+
+async def test_a_pr_opened_by_a_later_phase_that_pushed_nothing_counts_its_creator() -> None:
+    """RED before the fix: implement's branch had no PR yet and review moved no branch,
+    so the run that built and opened PR 7 was no contributor to it."""
+    creator = _run_that_opens_pr_7("a", in_a_later_phase=True)
+    observed = [e.observed_branches for e in creator if isinstance(e, PhaseCompletedEvent)]
+    assert [[b.pull_request for b in o or []] for o in observed] == [[None], []]
+    log = [*creator, _started("c", 4, pr=7), _completed("c", 5)]
+
+    scorecard, recorded, live = await _live(log)
+
+    assert sorted(e.execution_id for e in recorded) == ["a", "c"]  # type: ignore[attr-defined]
+    [merged] = await scorecard.merged_pull_requests_for_days(["2026-10-07"])
+    assert sorted(merged.execution_ids) == ["a", "c"]
+    assert live == (1, Decimal(5))  # the creator's 1 + the reverify's 4
+
+    replay_recorder = _Recorder([])
+    replayed = MergedPullRequestAttributionProcessManager(
+        store=InMemoryProjectionStore(), merges=_Unreachable(), recorder=replay_recorder
+    )
+    rebuilt = ScorecardProjection(InMemoryProjectionStore())
+    await _deliver((replayed, rebuilt), log)  # catch-up: handle_event only
+    assert await _score(rebuilt) == live
+    assert replay_recorder.log == []
+
+
+async def test_a_pr_opened_by_a_later_phase_counts_on_its_creator_alone() -> None:
+    _scorecard, recorded, live = await _live(_run_that_opens_pr_7("a", in_a_later_phase=True))
+
+    assert [e.execution_id for e in recorded] == ["a"]  # type: ignore[attr-defined]
+    assert live == (1, Decimal(1))
+
+
+async def test_a_pushed_branch_nobody_opened_a_pr_from_is_not_counted() -> None:
+    log = _run_that_opens_pr_7("a", in_a_later_phase=True)
+    forge = _Forge()  # no PR from feat/widget
+    manager = MergedPullRequestAttributionProcessManager(
+        store=InMemoryProjectionStore(),
+        merges=forge,
+        recorder=_Recorder(log),
+        clock=lambda: _at(20),
+    )
+    scorecard = ScorecardProjection(InMemoryProjectionStore())
+    await _deliver((manager, scorecard), log)
+
+    assert await manager.process_pending() == 0
+    assert forge.calls == []
+    assert await _score(scorecard) == (0, None)
