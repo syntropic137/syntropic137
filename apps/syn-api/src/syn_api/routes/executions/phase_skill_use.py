@@ -59,6 +59,15 @@ def summarize_skill_use(
     if ops is None:
         return PhaseSkillUseInfo(status="unavailable", declared=declared)
 
+    return PhaseSkillUseInfo(
+        status="observed",
+        declared=declared,
+        invoked=[InvokedSkillInfo(name=n, count=c) for n, c in sorted(_invoked(ops).items())],
+    )
+
+
+def _invoked(ops: Sequence[ToolOperation]) -> Counter[str]:
+    """How many distinct ``Skill`` calls named each skill."""
     # One count per CALL: a call's start and completion fold onto one identity,
     # and only the start carries the input that names the skill.
     names: dict[str, str] = {}
@@ -68,9 +77,4 @@ def summarize_skill_use(
         identity = call_identity(op)
         if op.operation_type == TOOL_EXECUTION_STARTED or identity not in names:
             names[identity] = op.skill_name or UNIDENTIFIED_SKILL
-    counts = Counter(names.values())
-    return PhaseSkillUseInfo(
-        status="observed",
-        declared=declared,
-        invoked=[InvokedSkillInfo(name=n, count=c) for n, c in sorted(counts.items())],
-    )
+    return Counter(names.values())
