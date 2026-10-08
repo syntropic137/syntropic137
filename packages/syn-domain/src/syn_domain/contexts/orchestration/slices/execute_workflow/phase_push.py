@@ -15,7 +15,9 @@ a moved branch, which is the safe direction.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Protocol
+
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
     RecordPhasePushCommand,
@@ -23,8 +25,6 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.commands impor
 from syn_shared.events import GIT_PUSH
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
-
     from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
         WorkflowExecutionAggregate,
     )
@@ -80,16 +80,46 @@ def push_recorder(
     return record
 
 
-# Any: the hook event is JSON parsed from the agent's tool output (system boundary).
-async def observe_push(embedded: Mapping[str, Any], on_push: PushObserver | None) -> None:
-    """Tell ``on_push`` of the push ``embedded`` reports, if it is one to origin."""
-    if on_push is None or embedded.get("event_type") != GIT_PUSH:
+class _Push(BaseModel):
+    """The fields of the hook's `context.git` this reads; the rest are ignored."""
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    remote: str = _ORIGIN
+    branch: str = ""
+    sha: str = ""
+    repo: str = ""
+
+
+class _PushContext(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    git: _Push
+
+
+class _HookEvent(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    event_type: str
+    context: _PushContext | None = None
+
+
+async def observe_push(embedded: object, on_push: PushObserver | None) -> None:
+    """Tell ``on_push`` of the push ``embedded`` reports, if it is one to origin.
+
+    ``embedded`` is a hook event as parsed from the agent's tool output.
+    """
+    if on_push is None:
         return
-    context = embedded.get("context")
-    git = context.get("git") if isinstance(context, dict) else None
-    if not isinstance(git, dict):
+    try:
+        event = _HookEvent.model_validate(embedded)
+    except ValidationError:
         return
-    repo, branch, sha = git.get("repo"), git.get("branch"), git.get("sha")
-    if git.get("remote", _ORIGIN) != _ORIGIN or not (repo and branch and sha) or branch == "HEAD":
+    if event.event_type != GIT_PUSH or event.context is None:
         return
-    await on_push(str(repo), str(branch), str(sha))
+    push = event.context.git
+    if push.remote != _ORIGIN or not (push.repo and push.branch and push.sha):
+        return
+    if push.branch == "HEAD":
+        return
+    await on_push(push.repo, push.branch, push.sha)
