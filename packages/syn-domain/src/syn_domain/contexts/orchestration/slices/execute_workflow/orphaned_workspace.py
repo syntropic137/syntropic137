@@ -23,6 +23,15 @@ whose order is enforced by type rather than by convention:
 Anything short of a clean verdict keeps the directory: a walk that could not
 finish, or a quarantine push that was refused, leaves the files on disk as the
 last copy, and the log says where.
+
+AND WHEN THE CONTAINER IS ALREADY GONE (PC-130). The guard above needs a live
+container, and a startup reap only sees running ones. A container that was
+OOM-killed, removed by a reap that then reported a failure, or swapped out by
+force leaves a directory nobody guards: twelve of them, 45 GB, filled the VPS
+on 2026-10-08. `guard_stale_workspace_dir` is the host-side guard for those.
+It never pushes - the container's credential died with it - so its rules are
+the owner's: any commit not on a remote keeps the directory, and an
+uncommitted change is archived as a patch before the directory may go.
 """
 
 from __future__ import annotations
@@ -78,6 +87,8 @@ class ReclaimableDir:
 
     host_dir: str
     workspace_id: str
+    #: Bytes on disk when it was guarded; 0 when nobody measured (the startup path).
+    size_bytes: int = 0
 
 
 class WorkspaceDirRemover(Protocol):
@@ -120,8 +131,103 @@ async def guard_orphaned_workspace(orphan: OrphanedWorkspace) -> ReclaimableDir 
     return ReclaimableDir(host_dir=orphan.host_dir, workspace_id=orphan.workspace_id)
 
 
+@dataclass(frozen=True)
+class StaleWorkspaceDir:
+    """A workspace directory with no container left and no running execution.
+
+    ``execution_id`` is None when nothing on the host still names the owner:
+    the provider names the directory after a random workspace id, and only the
+    container's labels ever linked the two.
+    """
+
+    host_dir: str
+    workspace_id: str
+    execution_id: str | None
+    size_bytes: int
+
+
+class HostWorkspaceGit(Protocol):
+    """Reads a workspace's repositories from the host, without running them.
+
+    Every method raises when it cannot give a definite answer; the guard reads
+    any raise as "at risk" and keeps the directory.
+    """
+
+    async def repositories(self, host_dir: str) -> list[str]:
+        """Every git repository under ``host_dir``, submodules included."""
+        ...
+
+    async def unpushed_commits(self, repo: str) -> int:
+        """Commits reachable from a branch or HEAD that no remote-tracking ref has."""
+        ...
+
+    async def uncommitted_patch(self, repo: str) -> bytes:
+        """The working tree's changes against HEAD, untracked files included.
+
+        Empty when the tree is clean.
+        """
+        ...
+
+
+class PatchArchive(Protocol):
+    """Durable storage for a reclaimed workspace's uncommitted changes."""
+
+    async def save(self, stale: StaleWorkspaceDir, repo: str, patch: bytes) -> str:
+        """Store ``patch`` linked to the stale dir's execution; return where. Raises on failure."""
+        ...
+
+
+async def guard_stale_workspace_dir(
+    stale: StaleWorkspaceDir, git: HostWorkspaceGit, archive: PatchArchive
+) -> ReclaimableDir | None:
+    """Return the directory as reclaimable only if deleting it loses nothing.
+
+    A commit not on any remote keeps it: there is no credential left to push
+    with, so the directory is that commit's only copy. Uncommitted changes are
+    archived first, and a failed archive keeps it. Never raises.
+    """
+    try:
+        repos = await git.repositories(stale.host_dir)
+        for repo in repos:
+            unpushed = await git.unpushed_commits(repo)
+            if unpushed:
+                return _keep(stale, f"{unpushed} unpushed commit(s) in {repo}")
+        saved: list[str] = []
+        for repo in repos:
+            patch = await git.uncommitted_patch(repo)
+            if patch:
+                saved.append(await archive.save(stale, repo, patch))
+    except Exception as exc:
+        return _keep(stale, f"its work could not be shown safe ({type(exc).__name__}: {exc})")
+    for uri in saved:
+        logger.warning(
+            "Stale workspace %s (execution %s) had uncommitted changes; saved as %s "
+            "before its directory was reclaimed",
+            stale.workspace_id,
+            stale.execution_id or "unknown",
+            uri,
+        )
+    return ReclaimableDir(
+        host_dir=stale.host_dir, workspace_id=stale.workspace_id, size_bytes=stale.size_bytes
+    )
+
+
+def _keep(stale: StaleWorkspaceDir, why: str) -> None:
+    logger.error(
+        "Keeping stale workspace directory %s (execution %s, %d bytes): %s",
+        stale.host_dir,
+        stale.execution_id or "unknown",
+        stale.size_bytes,
+        why,
+    )
+
+
 def remove_reclaimed_dir(reclaimable: ReclaimableDir, remover: WorkspaceDirRemover) -> bool:
-    """Delete a directory the guard cleared. Returns whether it is gone."""
+    """Delete a directory the guard cleared. Returns whether it is gone.
+
+    The ``WorkspaceReclaimed`` log line is the record of the deletion (PC-130):
+    one line per directory, with its size, that an operator can sum.
+    """
     try:
         remover.remove(reclaimable.host_dir)
     except OSError:
@@ -129,7 +235,12 @@ def remove_reclaimed_dir(reclaimable: ReclaimableDir, remover: WorkspaceDirRemov
             "Could not remove reclaimed workspace directory %s", reclaimable.host_dir, exc_info=True
         )
         return False
-    logger.info("Removed orphaned workspace directory %s", reclaimable.host_dir)
+    logger.info(
+        "WorkspaceReclaimed workspace_id=%s host_dir=%s size_bytes=%d",
+        reclaimable.workspace_id,
+        reclaimable.host_dir,
+        reclaimable.size_bytes,
+    )
     return True
 
 

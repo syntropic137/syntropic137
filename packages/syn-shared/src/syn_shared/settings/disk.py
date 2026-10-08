@@ -32,7 +32,9 @@ class DiskSettings(BaseSettings):
     )
 
     degraded_below_percent: float = Field(
-        default=10.0,
+        # 15, not 10 (PC-130): at 10 the page came with too little room left
+        # to reclaim by hand before admission closed at 5.
+        default=15.0,
         gt=0.0,
         lt=100.0,
         description="/health reports mode=degraded (reason disk_space) below this percent free.",
@@ -46,6 +48,21 @@ class DiskSettings(BaseSettings):
             "New executions are refused (HTTP 507) below this percent free, rather "
             "than admitted to fail mid-write when Postgres runs out of space."
         ),
+    )
+
+    reclaim_grace_hours: float = Field(
+        default=6.0,
+        gt=0.0,
+        description=(
+            "A workspace directory with no container and no running execution is "
+            "reclaimed only once nothing in it has changed for this many hours (PC-130)."
+        ),
+    )
+
+    reclaim_interval_minutes: float = Field(
+        default=30.0,
+        gt=0.0,
+        description="How often stale workspace directories are looked for (PC-130).",
     )
 
     @model_validator(mode="after")

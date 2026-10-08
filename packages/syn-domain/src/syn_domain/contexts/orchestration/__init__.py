@@ -238,10 +238,14 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExe
     AgentExecutionResult,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.orphaned_workspace import (
+    HostWorkspaceGit,
     OrphanedWorkspace,
+    PatchArchive,
     ReclaimableDir,
+    StaleWorkspaceDir,
     WorkspaceDirRemover,
     guard_orphaned_workspace,
+    guard_stale_workspace_dir,
     remove_reclaimed_dir,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_verdict import (
@@ -398,6 +402,7 @@ __all__ = [
     "Goal",
     # Aggregates
     "HandlerResult",
+    "HostWorkspaceGit",
     "ImageManifest",
     "InheritanceUnavailableError",
     "InjectTokensCommand",
@@ -407,6 +412,7 @@ __all__ = [
     "IsolationConfig",
     "LaunchEval",
     "OrphanedWorkspace",
+    "PatchArchive",
     "PhaseDefinition",
     "PhaseExecutionType",
     "PhaseProgress",
@@ -443,6 +449,7 @@ __all__ = [
     "SkillInvalidName",
     "SkillNotRegistered",
     "SkillRef",
+    "StaleWorkspaceDir",
     "StartResumeHandler",
     "StartStatus",
     "StreamResult",
@@ -478,6 +485,7 @@ __all__ = [
     "build_command_from_definition",
     "execution_request_id",
     "guard_orphaned_workspace",
+    "guard_stale_workspace_dir",
     "inherited_outputs",
     "is_phase_id",
     "launch_eval_for",

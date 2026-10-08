@@ -257,6 +257,12 @@ class CoordinatorSubscriptionService:
         """Check if the subscription is running."""
         return self._running
 
+    @property
+    def is_live(self) -> bool:
+        """Running and past catch-up: the only state in which side effects may run."""
+        coordinator = self._coordinator
+        return self._running and coordinator is not None and not coordinator.is_catching_up
+
     def get_status(self) -> SubscriptionServiceStatus:
         """Get service status for health checks."""
         coordinator = self._coordinator

@@ -1,0 +1,255 @@
+"""The host side of reclaiming workspace directories whose container is gone (PC-130).
+
+Three things the domain guard (`guard_stale_workspace_dir`) cannot do itself:
+see which directories exist and which containers still mount them, read their
+repositories with git from the host, and archive a dirty tree to MinIO.
+
+RUNNING GIT ON A REPOSITORY AN AGENT WROTE. The repository's own config is
+the agent's to write, and git runs commands named there (filters, diff
+drivers, fsmonitor). This process is the API, on the host. So a repository
+whose config names a command is never read here - it is reported unreadable,
+which keeps the directory - and every call disables the remaining hooks.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import os
+from dataclasses import dataclass
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+from syn_adapters.workspace_backends.orphaned import docker_inspect_raw, parse_inspect
+
+if TYPE_CHECKING:
+    from syn_domain.contexts.orchestration import StaleWorkspaceDir
+
+#: A patch larger than this is not archived, so its directory is kept: a
+#: tree that big is not "a few uncommitted edits", and an operator decides.
+MAX_PATCH_BYTES = 100 * 1024 * 1024
+
+#: Config keys whose value git may execute. A repository setting any of them
+#: is not read from the host at all.
+_COMMAND_KEY_SUFFIXES = (
+    ".clean",
+    ".smudge",
+    ".process",
+    ".command",
+    ".textconv",
+    "core.fsmonitor",
+    "core.pager",
+    "core.sshcommand",
+    "core.gitproxy",
+    "core.askpass",
+    "core.editor",
+    "core.hookspath",
+    "gpg.program",
+    "credential.helper",
+)
+
+_GIT_GUARD_ARGS = (
+    "-c",
+    "safe.directory=*",
+    "-c",
+    "core.fsmonitor=false",
+    "-c",
+    "core.hooksPath=/dev/null",
+)
+
+_GIT_TIMEOUT_SECONDS = 120
+
+
+class HostGitError(RuntimeError):
+    """Git could not give a definite answer about a repository."""
+
+
+@dataclass(frozen=True)
+class WorkspaceDirListing:
+    """One directory under the workspace base, measured in a single walk."""
+
+    workspace_id: str
+    host_dir: str
+    size_bytes: int
+    #: Newest mtime of anything inside, epoch seconds: the grace clock.
+    last_modified: float
+
+
+@dataclass(frozen=True)
+class WorkspaceContainer:
+    """A workspace container in any state, by the directory it mounts."""
+
+    workspace_id: str
+    execution_id: str | None
+    running: bool
+
+
+def scan_workspace_dirs(base: str) -> list[WorkspaceDirListing]:
+    """Every directory directly under ``base``, sized. Blocking: call off the loop."""
+    root = Path(base)
+    if not root.is_dir():
+        return []
+    listings: list[WorkspaceDirListing] = []
+    for entry in sorted(root.iterdir()):
+        if entry.is_dir() and not entry.is_symlink():
+            size, newest = _measure(entry)
+            listings.append(
+                WorkspaceDirListing(
+                    workspace_id=entry.name,
+                    host_dir=str(entry),
+                    size_bytes=size,
+                    last_modified=newest,
+                )
+            )
+    return listings
+
+
+def _measure(directory: Path) -> tuple[int, float]:
+    size = 0
+    newest = directory.lstat().st_mtime
+    for dirpath, dirnames, filenames in os.walk(directory):
+        here = Path(dirpath)
+        for name, is_file in (*((d, False) for d in dirnames), *((f, True) for f in filenames)):
+            try:
+                stat = (here / name).lstat()
+            except OSError:
+                continue
+            newest = max(newest, stat.st_mtime)
+            if is_file:
+                size += stat.st_size
+    return size, newest
+
+
+async def list_workspace_containers() -> list[WorkspaceContainer]:
+    """Every ``agentic-ws-`` container, stopped ones included.
+
+    Raises when any of them cannot be read: a container whose state is unknown
+    may be running, and its directory must then be left alone.
+    """
+    proc = await asyncio.create_subprocess_exec(
+        "docker",
+        "ps",
+        "-a",
+        "-q",
+        "--filter",
+        "name=agentic-ws-",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
+    if proc.returncode != 0:
+        raise RuntimeError(f"docker ps -a exited {proc.returncode}")
+    containers: list[WorkspaceContainer] = []
+    for container_id in stdout.decode().split():
+        raw = await docker_inspect_raw(container_id)
+        inspected = parse_inspect(raw) if raw is not None else None
+        if inspected is None:
+            raise RuntimeError(f"could not inspect workspace container {container_id}")
+        if inspected.workspace_source is None:
+            continue
+        containers.append(
+            WorkspaceContainer(
+                workspace_id=Path(inspected.workspace_source).name,
+                execution_id=inspected.labels.get("syn.execution_id") or None,
+                running=inspected.running,
+            )
+        )
+    return containers
+
+
+class SubprocessHostWorkspaceGit:
+    """`HostWorkspaceGit` over the host's ``git`` binary."""
+
+    async def repositories(self, host_dir: str) -> list[str]:
+        return await asyncio.to_thread(_find_repositories, host_dir)
+
+    async def unpushed_commits(self, repo: str) -> int:
+        await self._refuse_command_config(repo)
+        # HEAD as well as --branches: an agent on a detached HEAD commits too.
+        out = await _git(repo, "rev-list", "--count", "--branches", "HEAD", "--not", "--remotes")
+        return int(out.strip() or b"0")
+
+    async def uncommitted_patch(self, repo: str) -> bytes:
+        await self._refuse_command_config(repo)
+        diff_args = ("--binary", "--no-ext-diff", "--no-textconv", "--no-color")
+        patch = await _git(repo, "diff", *diff_args, "HEAD")
+        untracked = await _git(repo, "ls-files", "--others", "--exclude-standard", "-z")
+        for name in filter(None, untracked.decode(errors="surrogateescape").split("\0")):
+            # Exit 1 is "they differ", which for /dev/null is always.
+            patch += await _git(
+                repo, "diff", "--no-index", *diff_args, "--", "/dev/null", name, ok_codes=(0, 1)
+            )
+            if len(patch) > MAX_PATCH_BYTES:
+                raise HostGitError(f"uncommitted changes in {repo} exceed {MAX_PATCH_BYTES} bytes")
+        if len(patch) > MAX_PATCH_BYTES:
+            raise HostGitError(f"uncommitted changes in {repo} exceed {MAX_PATCH_BYTES} bytes")
+        return patch
+
+    async def _refuse_command_config(self, repo: str) -> None:
+        config = await _git(repo, "config", "--list", "--name-only", "-z")
+        for key in filter(None, config.decode(errors="replace").lower().split("\0")):
+            if key.endswith(_COMMAND_KEY_SUFFIXES):
+                raise HostGitError(f"{repo} configures a command ({key}); not run from the host")
+
+
+def _find_repositories(host_dir: str) -> list[str]:
+    repos: list[str] = []
+    for dirpath, dirnames, filenames in os.walk(host_dir):
+        if ".git" in dirnames or ".git" in filenames:
+            repos.append(dirpath)
+        if ".git" in dirnames:
+            dirnames.remove(".git")
+    return repos
+
+
+async def _git(repo: str, *args: str, ok_codes: tuple[int, ...] = (0,)) -> bytes:
+    env = {
+        "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+        "HOME": "/nonexistent",
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_CONFIG_GLOBAL": "/dev/null",
+        "GIT_TERMINAL_PROMPT": "0",
+        "GIT_OPTIONAL_LOCKS": "0",
+    }
+    proc = await asyncio.create_subprocess_exec(
+        "git",
+        *_GIT_GUARD_ARGS,
+        "-C",
+        repo,
+        *args,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        stdin=asyncio.subprocess.DEVNULL,
+        env=env,
+    )
+    try:
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=_GIT_TIMEOUT_SECONDS)
+    except TimeoutError:
+        proc.kill()
+        await proc.wait()
+        raise HostGitError(f"git {args[0]} timed out in {repo}") from None
+    if proc.returncode not in ok_codes:
+        raise HostGitError(
+            f"git {args[0]} exited {proc.returncode} in {repo}: "
+            f"{stderr.decode(errors='replace')[:300].strip()}"
+        )
+    return stdout
+
+
+class ArtifactStoragePatchArchive:
+    """`PatchArchive` over the artifact bucket, keyed under the execution."""
+
+    async def save(self, stale: StaleWorkspaceDir, repo: str, patch: bytes) -> str:
+        from syn_adapters.storage.artifact_storage.factory import get_artifact_storage
+
+        storage = await get_artifact_storage()
+        relative = (
+            str(Path(repo).relative_to(stale.host_dir)).replace(os.sep, "_").strip("._") or "root"
+        )
+        result = await storage.upload(
+            f"reclaimed-{stale.workspace_id}-{relative}",
+            patch,
+            execution_id=stale.execution_id,
+            content_type="text/x-diff",
+            metadata={"reclaimed_from": stale.host_dir, "repository": repo},
+        )
+        return result.storage_uri
