@@ -116,6 +116,33 @@ def _holds_only_bytecode(path: Path) -> bool:
         return False
 
 
+_GIT_TIMEOUT_SECONDS = 120
+
+
+class HostGitError(RuntimeError):
+    """Git could not give a definite answer about a repository."""
+
+
+@dataclass(frozen=True)
+class WorkspaceDirListing:
+    """One directory under the workspace base, measured in a single walk."""
+
+    workspace_id: str
+    host_dir: str
+    size_bytes: int
+    #: Newest mtime of anything inside, epoch seconds: the grace clock.
+    last_modified: float
+
+
+@dataclass(frozen=True)
+class WorkspaceContainer:
+    """A workspace container in any state, by the directory it mounts."""
+
+    workspace_id: str
+    execution_id: str | None
+    running: bool
+
+
 #: A directory claimed for deletion is renamed to this prefix plus its
 #: workspace id, so no owner can reach it at its workspace path any more.
 CLAIM_PREFIX = ".reclaiming-"
