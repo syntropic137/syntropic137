@@ -309,7 +309,7 @@ class CompletePhaseCommand:
         self.cache_read_tokens = cache_read_tokens
         self.total_tokens = total_tokens
         self.duration_seconds = duration_seconds
-        self.observed_branches = observed_branches
+        self.observed_branches = list(observed_branches) if observed_branches is not None else None
 
 
 class CancelExecutionCommand:
