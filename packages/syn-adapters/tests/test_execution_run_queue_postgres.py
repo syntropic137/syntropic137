@@ -239,10 +239,19 @@ async def test_claim_refuses_stale_heartbeat_draining_host_newer_epoch_and_retry
     await queue.defer(run, timedelta(hours=1), "resume inheritance not readable")
     assert await queue.claim("h1") is None
 
+    # Eligible work, room and a fresh heartbeat: only draining stands in the way.
+    await _admit(queue, "eligible")
     async with pools[0].acquire() as conn:
         await conn.execute("UPDATE executor_hosts SET draining=TRUE WHERE host_id='h1'")
     assert await queue.heartbeat("h1") is True
     assert await queue.is_draining("h1") is True
+    assert await queue.claim("h1") is None
+    async with pools[0].acquire() as conn:
+        assert await conn.fetchval("SELECT in_use FROM execution_budget") == 0
+        assert (
+            await conn.fetchval("SELECT state FROM execution_runs WHERE execution_id='eligible'")
+            == "admitted"
+        )
 
     # A host that has left cannot look alive again.
     await queue.deregister("h1")
@@ -292,3 +301,75 @@ async def test_schema_is_idempotent_and_keeps_rows(pools: list[asyncpg.Pool]) ->
     await _admit(queue, "kept")
     await queue.ensure_ready()
     assert (await queue.in_use()).admitted == 1
+
+
+async def _blocked_until_waiting(pool: asyncpg.Pool, fragment: str) -> None:
+    """Return once a statement containing ``fragment`` is waiting on a row lock."""
+    for _ in range(200):
+        async with pool.acquire() as conn:
+            if await conn.fetchval(
+                """SELECT count(*) FROM pg_stat_activity
+                WHERE wait_event_type='Lock' AND query LIKE '%' || $1 || '%'""",
+                fragment,
+            ):
+                return
+        await asyncio.sleep(0.01)
+    raise AssertionError(f"no statement containing {fragment!r} reached its lock")
+
+
+async def test_claim_that_waits_out_its_heartbeat_on_the_budget_lock_gets_nothing(
+    pools: list[asyncpg.Pool],
+) -> None:
+    ttl = timedelta(milliseconds=200)
+    queue = PostgresExecutionRunQueue(pools[0], lease_ttl=ttl, heartbeat_stale=ttl)
+    await _online(queue, "slow", capacity=1)
+    await _admit(queue, "work")
+    async with pools[1].acquire() as blocker, blocker.transaction():
+        await blocker.execute("SELECT 1 FROM execution_budget WHERE executor_id='slow' FOR UPDATE")
+        claim = asyncio.create_task(queue.claim("slow"))
+        await _blocked_until_waiting(pools[2], "execution_budget")
+        await asyncio.sleep(0.4)
+    assert await claim is None
+    assert (await queue.in_use()).admitted == 1
+
+
+async def test_claim_whose_heartbeat_is_refreshed_during_the_wait_gets_a_full_lease(
+    pools: list[asyncpg.Pool],
+) -> None:
+    ttl = timedelta(milliseconds=300)
+    queue = PostgresExecutionRunQueue(pools[0], lease_ttl=ttl, heartbeat_stale=ttl)
+    await _online(queue, "slow", capacity=1)
+    await _admit(queue, "work")
+    async with pools[1].acquire() as blocker, blocker.transaction():
+        await blocker.execute("SELECT 1 FROM execution_budget WHERE executor_id='slow' FOR UPDATE")
+        claim = asyncio.create_task(queue.claim("slow"))
+        await _blocked_until_waiting(pools[2], "execution_budget")
+        await asyncio.sleep(0.5)
+        await blocker.execute(
+            "UPDATE execution_budget SET heartbeat_at=clock_timestamp() WHERE executor_id='slow'"
+        )
+    run = await claim
+    assert run is not None
+    async with pools[2].acquire() as conn:
+        remaining = await conn.fetchval(
+            """SELECT extract(epoch FROM leased_until-clock_timestamp())
+            FROM execution_runs WHERE execution_id='work'"""
+        )
+    assert remaining > 0.2
+
+
+async def test_renew_that_waits_out_its_lease_on_the_run_lock_raises(
+    pools: list[asyncpg.Pool],
+) -> None:
+    queue = PostgresExecutionRunQueue(pools[0], lease_ttl=timedelta(milliseconds=200))
+    await _online(queue, "h1", capacity=1)
+    await _admit(queue, "work")
+    run = await queue.claim("h1")
+    assert run is not None
+    async with pools[1].acquire() as blocker, blocker.transaction():
+        await blocker.execute("SELECT 1 FROM execution_runs WHERE execution_id='work' FOR UPDATE")
+        renew = asyncio.create_task(queue.renew(run))
+        await _blocked_until_waiting(pools[2], "execution_runs")
+        await asyncio.sleep(0.4)
+    with pytest.raises(RunLeaseLost):
+        await renew

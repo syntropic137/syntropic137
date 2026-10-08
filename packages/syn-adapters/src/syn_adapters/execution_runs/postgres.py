@@ -106,13 +106,17 @@ class PostgresExecutionRunQueue:
 
     async def claim(self, host_id: str) -> ClaimedRun | None:
         async with self._pool.acquire() as conn, conn.transaction():
-            # 1. Lock this executor's own budget row, only while it has room.
+            # 1. Lock this executor's own budget row. The lock can wait, and now()
+            # is the transaction's start, so room and liveness are read after it
+            # against clock_timestamp(), in a statement that sees the wait's writes.
+            await conn.execute(
+                "SELECT 1 FROM execution_budget WHERE executor_id=$1 FOR UPDATE", host_id
+            )
             epoch = await conn.fetchval(
                 """SELECT h.epoch::text FROM execution_budget b
                 JOIN executor_hosts h ON h.host_id=b.executor_id
                 WHERE b.executor_id=$1 AND b.in_use<b.capacity AND NOT h.draining
-                AND b.heartbeat_at>now()-$2::double precision*interval '1 second'
-                FOR UPDATE OF b""",
+                AND b.heartbeat_at>clock_timestamp()-$2::double precision*interval '1 second'""",
                 host_id,
                 self._stale_seconds,
             )
@@ -122,11 +126,11 @@ class PostgresExecutionRunQueue:
             raw = await conn.fetchval(
                 """WITH candidate AS (
                     SELECT execution_id FROM execution_runs
-                    WHERE state='admitted' AND retry_at<=now() AND writer_epoch<=$2
+                    WHERE state='admitted' AND retry_at<=clock_timestamp() AND writer_epoch<=$2
                     ORDER BY admitted_at,execution_id FOR UPDATE SKIP LOCKED LIMIT 1
                 ) UPDATE execution_runs r SET state='claimed',executor_id=$1,
                     lease_token=r.lease_token+1, reader_epoch=$2, reason=NULL,
-                    leased_until=now()+$3::double precision*interval '1 second'
+                    leased_until=clock_timestamp()+$3::double precision*interval '1 second'
                 FROM candidate c WHERE r.execution_id=c.execution_id
                 RETURNING jsonb_build_object('execution_id',r.execution_id,
                     'executor_id',r.executor_id,'token',r.lease_token,
@@ -144,12 +148,16 @@ class PostgresExecutionRunQueue:
         return ClaimedRun.model_validate_json(raw)
 
     async def renew(self, run: ClaimedRun) -> None:
-        async with self._pool.acquire() as conn:
+        async with self._pool.acquire() as conn, conn.transaction():
+            # Expiry is judged after the row lock, for the same reason as claim's step 1.
+            await conn.execute(
+                "SELECT 1 FROM execution_runs WHERE execution_id=$1 FOR UPDATE", run.execution_id
+            )
             renewed = await conn.fetchval(
                 """UPDATE execution_runs
-                SET leased_until=now()+$3::double precision*interval '1 second'
+                SET leased_until=clock_timestamp()+$3::double precision*interval '1 second'
                 WHERE execution_id=$1 AND lease_token=$2 AND state='claimed'
-                AND leased_until>now() RETURNING execution_id""",
+                AND leased_until>clock_timestamp() RETURNING execution_id""",
                 run.execution_id,
                 run.token,
                 self._lease_seconds,
