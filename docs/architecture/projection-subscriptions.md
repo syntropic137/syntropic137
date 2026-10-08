@@ -10,7 +10,7 @@
 
 This diagram shows which events feed which projections in the Syn137 system.
 
-**Total Relationships:** 76 events → 26 projections
+**Total Relationships:** 77 events → 26 projections
 
 ```mermaid
 graph LR
@@ -69,9 +69,9 @@ graph LR
 
 ## Statistics
 
-- **Events with projections:** 76
+- **Events with projections:** 77
 - **Unique projections:** 26
-- **Total event-to-projection mappings:** 123
+- **Total event-to-projection mappings:** 124
 
 ---
 
