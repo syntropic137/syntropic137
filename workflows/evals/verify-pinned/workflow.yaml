@@ -36,6 +36,9 @@ phases:
       - markdown
     timeout_seconds: 3600
     delivers_repo_changes: false
+    # A review: no review_verdict fails the phase instead of completing it, so
+    # the eval scores ERROR rather than a FAIL nobody judged (PC-116, #1780).
+    requires_verdict: true
     allowed_tools:
       - Read
       - Grep

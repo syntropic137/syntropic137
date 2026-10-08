@@ -175,6 +175,15 @@ def create_app() -> FastAPI:
     # and /health must answer without waiting on anything that startup builds.
     app.add_middleware(StartupGateMiddleware, gate=gate)
 
+    # Outermost of all: a request from a workspace (ADR-072) is refused unless
+    # its platform token's scope allows the route - before the gate, before
+    # any router. Always installed; with platform access OFF it refuses every
+    # workspace request, so the setting cannot open a route by being unset.
+    from syn_api._wiring import get_platform_token_service
+    from syn_api.middleware.workspace_ingress import WorkspaceIngressMiddleware
+
+    app.add_middleware(WorkspaceIngressMiddleware, tokens=get_platform_token_service())
+
     # ── API routers ────────────────────────────────────────────────────
     # No prefix here — versioning is handled at the routing layer (nginx).
     # nginx: location /api/v1/ → proxy_pass http://api:8000/
