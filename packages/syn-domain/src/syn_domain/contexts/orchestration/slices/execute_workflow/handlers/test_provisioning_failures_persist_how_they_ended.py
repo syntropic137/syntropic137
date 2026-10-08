@@ -69,6 +69,9 @@ CLONE_PROGRESS = "Cloning into '/workspace/repos/syntropic137'..."
 #: is the form the setup phase's own failures arrive in.
 SIGKILLED = 137
 
+#: The reap of a timed-out `skills add` before its retry (PC-126) found nothing left.
+_REAPED = ExecutionResult(exit_code=0, success=True, duration_ms=1.0)
+
 
 def _phase(*, skills: tuple[ResolvedSkill, ...] = ()) -> ExecutablePhase:
     return ExecutablePhase(
@@ -349,7 +352,10 @@ async def test_a_skill_install_that_timed_out_twice_is_recorded_as_transient() -
         timed_out=True,
     )
     workspace = _workspace(setup=ExecutionResult(exit_code=0, success=True, duration_ms=10.0))
-    workspace.execute = AsyncMock(return_value=timed_out)
+    # Every `skills add` times out; the reap between them (an `sh -c`) succeeds.
+    workspace.execute = AsyncMock(
+        side_effect=lambda command, **_: _REAPED if command[0] == "sh" else timed_out
+    )
     materializer = AsyncMock()
     materializer.fetch_for_workspace = AsyncMock(return_value=[])
     skill = ResolvedSkill(
@@ -401,7 +407,10 @@ async def test_a_setup_refusal_stores_no_transient_kind() -> None:
 async def test_a_skill_install_timed_out_twice_stores_a_transient_platform_failure() -> None:
     timed_out = ExecutionResult(exit_code=-1, success=False, duration_ms=1.0, timed_out=True)
     workspace = _workspace(setup=ExecutionResult(exit_code=0, success=True, duration_ms=10.0))
-    workspace.execute = AsyncMock(return_value=timed_out)
+    # Every `skills add` times out; the reap between them (an `sh -c`) succeeds.
+    workspace.execute = AsyncMock(
+        side_effect=lambda command, **_: _REAPED if command[0] == "sh" else timed_out
+    )
     materializer = AsyncMock()
     materializer.fetch_for_workspace = AsyncMock(return_value=[])
     skill = ResolvedSkill(

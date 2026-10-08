@@ -31,8 +31,10 @@ logger = logging.getLogger(__name__)
 #: by GRPC_ENABLE_FORK_SUPPORT=false in the syn-api image; this is the backstop.
 #: A positive exit is the installer refusing, and still fails fast.
 #: A timeout is retried ONCE (PC-126): under host load an install that would
-#: finish is killed at its deadline. The same idempotency makes that safe, and
-#: one retry bounds what a genuinely hung installer costs to two deadlines.
+#: finish is killed at its deadline. Only after the timed-out installer is
+#: reaped inside the container (`_reap_timed_out_install`): idempotency makes a
+#: SEQUENTIAL re-run safe, not two concurrent ones. One retry bounds what a
+#: genuinely hung installer costs to two deadlines.
 _SKILL_INSTALL_RETRY_BACKOFF_SECONDS: Final[tuple[float, ...]] = (0.5, 1.0, 2.0)
 
 #: This repo's "no real status" sentinel (timeout, missing container), which is
@@ -45,6 +47,48 @@ _TIMEOUT_ATTEMPTS: Final = 2
 #: Every signal retry plus every timeout attempt, plus the final attempt: the
 #: finite bound on `skills add` calls for one skill.
 _MAX_ATTEMPTS: Final = len(_SKILL_INSTALL_RETRY_BACKOFF_SECONDS) + _TIMEOUT_ATTEMPTS + 1
+
+
+#: Kills every process in the workspace still running THIS `skills add`, then
+#: waits (up to 5s) until none is left. The needle is the argv TAIL, not
+#: `skills add`, because the CLI is a node script: its process is
+#: `node <path-to-cli> add SRC --agent KEY -y`, and killing only the `sh -c`
+#: wrapper would orphan it. `$1`/`$2` are the source and agent, so the needle
+#: never appears contiguously in this script's own command line.
+_REAP_SCRIPT: Final = """needle=" add $1 --agent $2 -y"
+found() {
+  for d in /proc/[0-9]*; do
+    cmd=$(tr '\\0' ' ' < "$d/cmdline" 2>/dev/null) || continue
+    case "$cmd" in *"$needle"*) echo "${d#/proc/}" ;; esac
+  done
+}
+for pid in $(found); do kill -9 "$pid" 2>/dev/null; done
+i=0
+while [ -n "$(found)" ]; do
+  i=$((i + 1)); [ "$i" -ge 50 ] && exit 1; sleep 0.1
+done
+"""
+
+#: Deadline for the reap itself; it reads /proc and kills, nothing more.
+_REAP_TIMEOUT_SECONDS: Final = 30
+
+
+async def _reap_timed_out_install(workspace: ManagedWorkspace, source: str, agent_key: str) -> bool:
+    """Kill a timed-out `skills add` still running in the container (PC-126).
+
+    The deadline kills the `docker exec` CLIENT, not the installer inside the
+    container, so without this the retry runs BESIDE the first attempt. That is
+    not safe: the installer (skills 1.5.14 `cleanAndCreateDirectory`) deletes
+    its destination recursively before copying, so a first attempt that wakes
+    after the retry succeeded removes the files the agent is about to read.
+    Sequential idempotency says nothing about two concurrent writers. True when
+    no such process is left; False means the retry must not run.
+    """
+    result = await workspace.execute(
+        ["sh", "-c", _REAP_SCRIPT, "sh", source, agent_key],
+        timeout_seconds=_REAP_TIMEOUT_SECONDS,
+    )
+    return result.exit_code == 0
 
 
 def _backoff(attempt: int) -> float:
@@ -117,7 +161,9 @@ async def install_skill(
             return
         timeouts += 1 if result.timed_out else 0
         signal_deaths += 0 if result.timed_out else 1
-        if not _is_retryable(result, timeouts, signal_deaths):
+        if not _is_retryable(result, timeouts, signal_deaths) or (
+            result.timed_out and not await _reap_timed_out_install(workspace, source, agent_key)
+        ):
             raise _failure(result, skill_name, agent_key, timeout_seconds, timeouts)
         logger.warning(
             "installing skill %r: %s (exit %d), retry %d/%d (#1046, PC-126)",

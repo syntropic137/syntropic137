@@ -8,11 +8,13 @@ result. This drives the real path end to end: `install_skill` ->
 `WorkspaceDockerProvider` -> `docker exec` with its deadline, against a live
 container whose `skills` binary hangs on demand.
 
-What the hang looks like at the boundary, and why the retry is still safe:
-the deadline kills the `docker exec` CLIENT, not the process inside the
-container, so the hung first installer is still running when the retry
-starts. The retry relies on `skills add -y` being idempotent (verified for
-#1046), which is exactly that situation.
+What the hang looks like at the boundary: the deadline kills the `docker
+exec` CLIENT, not the process inside the container, so the hung first
+installer is still running when the retry starts. The real installer deletes
+its destination before copying, so a first attempt that wakes up late would
+delete what the retry installed. The fake does exactly that, after its hang,
+and the first test waits past that moment: it passes only because the
+timed-out installer is reaped before the retry.
 
 Needs Docker; skipped when `docker info` does not answer within 10s.
 """
@@ -25,6 +27,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 from unittest.mock import MagicMock, patch
 
+import anyio
 import pytest
 from agentic_isolation import SecurityConfig
 
@@ -57,12 +60,21 @@ _IMAGE = "alpine:3"
 #: The smallest deadline the setting allows (ge=10): a hang costs this per attempt.
 _TIMEOUT_SECONDS = 10
 
-#: Stands in for the real `skills` CLI. Records every call, then hangs for as
-#: many calls as /workspace/.hang_calls says, and installs after that.
-_FAKE_SKILLS = """#!/bin/sh
+#: How long a hung call sleeps before it wakes and deletes the install, as
+#: the real installer's `rm -rf` of its destination would.
+_HANG_SECONDS = 2 * _TIMEOUT_SECONDS + 3
+
+#: Stands in for the real `skills` CLI. Records every call. The first
+#: /workspace/.hang_calls calls hang past the deadline and then wipe the
+#: install; every later call installs.
+_FAKE_SKILLS = f"""#!/bin/sh
 echo "$*" >> /workspace/.calls
 calls=$(wc -l < /workspace/.calls)
-if [ "$calls" -le "$(cat /workspace/.hang_calls)" ]; then exec sleep 600; fi
+if [ "$calls" -le "$(cat /workspace/.hang_calls)" ]; then
+  sleep {_HANG_SECONDS}
+  rm -rf /workspace/.installed
+  exit 0
+fi
 mkdir -p /workspace/.installed
 basename "$2" > "/workspace/.installed/$(basename "$2")"
 """
@@ -174,10 +186,11 @@ async def test_a_hung_first_install_is_retried_once_and_succeeds(live: _Live) ->
 
     calls = (await live.sh("cat /workspace/.calls")).splitlines()
     assert calls == ["add /workspace/.syn-skills/review --agent claude-code -y"] * 2
+    # Past the moment the hung first attempt would have woken and wiped the
+    # install: it was reaped before the retry, so the install is intact.
+    await anyio.sleep(_HANG_SECONDS - _TIMEOUT_SECONDS + 2)
     assert (await live.sh("cat /workspace/.installed/review")).strip() == "review"
-    # The deadline killed the docker exec client, not the installer: the hung
-    # first attempt is still running beside the retry that succeeded.
-    assert (await live.sh("ps -o args | grep -c '^[s]leep 600'")).strip() == "1"
+    assert (await live.sh("ps -o args | grep -c '[s]kills add' || true")).strip() == "0"
 
 
 async def test_a_second_hang_fails_naming_the_step_as_resumable(live: _Live) -> None:

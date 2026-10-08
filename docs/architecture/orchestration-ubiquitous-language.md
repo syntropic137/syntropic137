@@ -88,8 +88,12 @@ and `checkout_verification` (the read-only git reads of each cloned
 repository's HEAD). A timeout says the host was too loaded to answer, not that
 the step is broken. So it is recorded as an upstream failure of kind
 `unavailable`: transient, and the Execution is resumable. A skill install, a
-sandbox probe or a checkout verification is retried once in place. The setup script is not, because a clone
-killed mid-transfer would be skipped by the re-run. Resuming provisions a fresh
+sandbox probe or a checkout verification is retried once in place. A skill
+install's retry comes only after the timed-out installer is killed inside the
+container: the deadline ends the `docker exec` client, not the installer, and
+the installer deletes its destination before copying, so two of them must
+never run at once. The setup script is not retried, because a clone killed
+mid-transfer would be skipped by the re-run. Resuming provisions a fresh
 workspace instead. Each deadline is a Setting.
 
 ## Fallback Agent

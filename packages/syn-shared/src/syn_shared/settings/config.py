@@ -435,14 +435,16 @@ class Settings(BaseSettings):
     #   one `skills add`                               63   0.5s   0.7s   0.8s
     #   credential guard probe / rm -f              12/24   0.2s   0.4s   0.6s
     #
-    # The two failures (120s skill install at 20:42Z, 120s setup at 21:38Z on
-    # 10-07) were 2-3x beyond the worst observed duration and 15x beyond p95:
-    # stalls, not a host uniformly slower by a load factor. So a step that is
-    # retried gets a deadline of ~2x the worst observed (the retry is the stall
-    # remedy, and a shorter deadline reaches it sooner); a step that is NOT
-    # retried in place (the setup script) keeps ~4x. The codex sandbox probe
-    # and checkout verification ran no sample in the window; they keep their
-    # derived 2x-the-old-bound values.
+    # Both failures ran past 120s. For the skill install that is ~3x the worst
+    # observed block of 3-5 installs (41.2s) and ~15x its p95 (8.1s); for the
+    # setup script ~2x the worst (61.4s) and ~3x p95 (39.9s). Our reading, a
+    # hypothesis since the failure window's own logs are gone: stalls, not a
+    # host uniformly slower by a load factor. So a step that is retried gets a
+    # deadline of ~2x the worst observed (the retry is the stall remedy, and a
+    # shorter deadline reaches it sooner; skill install 90s = 2.2x); a step
+    # that is NOT retried in place (the setup script) keeps ~4x (240s = 3.9x).
+    # The codex sandbox probe and checkout verification ran no isolated sample
+    # in the window; they keep their derived 2x-the-old-bound values.
     setup_phase_timeout_seconds: int = Field(
         default=240,
         ge=10,
