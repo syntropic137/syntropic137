@@ -30,11 +30,11 @@ _TAG = "v0.33.2-beta.1"
 
 
 def _stage(
-    fixture: str, tmp_path: Path, tag: str = _TAG
+    fixture: str, tmp_path: Path, tag: str = _TAG, *flags: str
 ) -> tuple[subprocess.CompletedProcess[str], Path]:
     staged = tmp_path / "staged.yaml"
     proc = subprocess.run(
-        [sys.executable, str(_HELPER), tag, str(_FIXTURES / fixture), str(staged)],
+        [sys.executable, str(_HELPER), tag, str(_FIXTURES / fixture), str(staged), *flags],
         capture_output=True,
         text=True,
         check=False,
@@ -42,11 +42,19 @@ def _stage(
     return proc, staged
 
 
-def _precheck_count(compose: Path, tag: str = _TAG) -> int:
-    """Run the `--swap-only` precheck's own grep, as written in pit_stop.sh."""
-    (pattern,) = re.findall(r"pins=\"\$\(remote \"grep -c '([^']+)' ", _SCRIPT.read_text())
+def _precheck_count(compose: Path, tag: str = _TAG, swapped: str = "api gateway") -> int:
+    """Run the `--swap-only` precheck's own `pins_on_tag`, as written in pit_stop.sh."""
+    text = _SCRIPT.read_text()
+    start = text.index("pins_on_tag() {")
+    counter = text[start : text.index("\n}\n", start) + 3]
     proc = subprocess.run(
-        ["grep", "-c", pattern.replace("$TAG", tag), str(compose)],
+        [
+            "bash",
+            "-c",
+            f'remote() {{ bash -c "$*"; }}\nTAG={tag}; SWAPPED="{swapped}"\n'
+            f"COMPOSE_DIR={compose.parent}; COMPOSE={compose.name}; TMP={compose.parent}\n"
+            f"REPOINT_PY={_SCRIPT.parent / 'pit_stop_repoint.py'}\n{counter}pins_on_tag",
+        ],
         capture_output=True,
         text=True,
         check=False,
@@ -94,6 +102,45 @@ class TestStagesEveryPinForm:
         proc, _ = _stage("compose-digest.yaml", tmp_path)
 
         assert re.fullmatch(r"[0-9A-Za-z._-]+", proc.stdout.strip())
+
+
+class TestGatewayOnly:
+    """`pit_stop.sh --service gateway` (#1310) ships one image, so the stage
+    must repoint one pin and leave syn-api on whatever it was deployed from."""
+
+    def test_only_the_gateway_pin_changes(self, tmp_path: Path) -> None:
+        proc, staged = _stage("compose-digest.yaml", tmp_path, _TAG, "--service", "gateway")
+
+        assert proc.returncode == 0, proc.stderr
+        before = (_FIXTURES / "compose-digest.yaml").read_text().splitlines()
+        after = staged.read_text().splitlines()
+        changed = [b.strip() for a, b in zip(before, after, strict=True) if a != b]
+        assert changed == [f"image: ghcr.io/syntropic137/syn-gateway:{_TAG}"]
+        # The one pin a gateway-only swap precheck counts, which is what it requires.
+        assert _precheck_count(staged, swapped="gateway") == 1
+
+    def test_the_backup_is_named_for_the_gateway_pin(self, tmp_path: Path) -> None:
+        proc, _ = _stage("compose-digest.yaml", tmp_path, _TAG, "--service", "gateway")
+
+        assert proc.stdout.strip() == "sha256-6b416d4a25dd"
+
+    def test_service_all_is_the_default(self, tmp_path: Path) -> None:
+        default, staged = _stage("compose-digest.yaml", tmp_path)
+        (tmp_path / "all").mkdir()
+        explicit, staged_all = _stage(
+            "compose-digest.yaml", tmp_path / "all", _TAG, "--service", "all"
+        )
+
+        assert (default.stdout, staged.read_text()) == (explicit.stdout, staged_all.read_text())
+
+    @pytest.mark.parametrize("flags", [("--service", "api"), ("--service",), ("--gateway", "x")])
+    def test_an_unknown_service_is_a_usage_error(
+        self, flags: tuple[str, ...], tmp_path: Path
+    ) -> None:
+        proc, staged = _stage("compose-digest.yaml", tmp_path, _TAG, *flags)
+
+        assert proc.returncode == 2
+        assert not staged.exists()
 
 
 class TestNothingToStage:
