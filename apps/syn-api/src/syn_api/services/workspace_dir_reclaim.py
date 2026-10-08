@@ -10,15 +10,19 @@ it. On 2026-10-08 that was twelve directories and 45 GB, and the VPS at 98%.
 So this runs on a clock, live only, over the directories themselves. A
 directory is a candidate only when all three hold:
 
-* no RUNNING container mounts it (a stopped one does not protect it - that
-  is the OOM case - but its labels still name the execution);
-* the execution that owns it, when known, is not running;
+* no RUNNING container mounts it - any one of them, however many mount it
+  (a stopped one does not protect it - that is the OOM case - but its labels
+  still name the execution);
+* the execution that owns it is not running. With no container left nothing
+  names the owner, and an unknown owner may be any running execution, so
+  such a directory waits until none is running;
 * nothing inside it has changed for the grace period.
 
-A candidate is then guarded (`guard_stale_workspace_dir`) and deleted only on
-a clean verdict. Any doubt about the inputs - docker unreadable, the execution
-list unreadable - skips the whole pass, because "I could not look" must never
-read as "nothing is running".
+A candidate is then guarded (`guard_stale_workspace_dir`), and after the
+guard's archival - which can take minutes - all of the above is read again,
+with the clock still live, before anything is deleted. Any doubt about the
+inputs - docker unreadable, the execution list unreadable - skips the whole
+pass, because "I could not look" must never read as "nothing is running".
 """
 
 from __future__ import annotations
@@ -73,13 +77,23 @@ class WorkspaceDirReclaimer:
     archive: PatchArchive
     remover: WorkspaceDirRemover
     clock: Callable[[], float] = field(default=time.time)
+    #: Whether side effects may run now; read again just before each deletion.
+    is_live: Callable[[], bool] = field(default=lambda: True)
+
+    async def _observe(
+        self,
+    ) -> tuple[dict[str, list[WorkspaceContainer]], set[str], list[WorkspaceDirListing]]:
+        containers: dict[str, list[WorkspaceContainer]] = {}
+        for container in await self.list_containers():
+            containers.setdefault(container.workspace_id, []).append(container)
+        running = await self.running_execution_ids()
+        listings = await asyncio.to_thread(self.scan_dirs, self.base_dir)
+        return containers, running, listings
 
     async def run_once(self) -> ReclaimPass:
         """Guard and reclaim every stale directory. Never raises."""
         try:
-            containers = {c.workspace_id: c for c in await self.list_containers()}
-            running = await self.running_execution_ids()
-            listings = await asyncio.to_thread(self.scan_dirs, self.base_dir)
+            containers, running, listings = await self._observe()
         except Exception as exc:
             logger.warning("Skipping workspace reclaim pass: %s", exc, exc_info=True)
             return ReclaimPass(skipped=f"{type(exc).__name__}: {exc}")
@@ -112,19 +126,26 @@ class WorkspaceDirReclaimer:
     def _stale(
         self,
         listing: WorkspaceDirListing,
-        containers: dict[str, WorkspaceContainer],
+        containers: dict[str, list[WorkspaceContainer]],
         running: set[str],
         now: float,
     ) -> StaleWorkspaceDir | None:
         """The listing as a reclaim candidate, or None while anything may still own it."""
         from syn_domain.contexts.orchestration import StaleWorkspaceDir
 
-        container = containers.get(listing.workspace_id)
-        if container is not None and container.running:
+        mounts = containers.get(listing.workspace_id, [])
+        if any(c.running for c in mounts):
             return None
-        execution_id = container.execution_id if container is not None else None
-        if execution_id is not None and execution_id in running:
+        owners = {c.execution_id for c in mounts if c.execution_id is not None}
+        if owners & running:
             return None
+        if not owners and running:
+            # Unknown owner: it may be any of the running executions.
+            return None
+        if len(owners) > 1:
+            # Two executions claim it; the archive cannot be linked to one.
+            return None
+        execution_id = next(iter(owners), None)
         if now - listing.last_modified < self.grace_seconds:
             return None
         return StaleWorkspaceDir(
@@ -132,6 +153,7 @@ class WorkspaceDirReclaimer:
             workspace_id=listing.workspace_id,
             execution_id=execution_id,
             size_bytes=listing.size_bytes,
+            last_modified=listing.last_modified,
         )
 
     async def _reclaim(self, stale: StaleWorkspaceDir) -> bool:
@@ -144,7 +166,37 @@ class WorkspaceDirReclaimer:
         reclaimable = await guard_stale_workspace_dir(stale, self.git, self.archive)
         if reclaimable is None:
             return False
+        if not await self._still_stale(stale):
+            return False
         return await asyncio.to_thread(remove_reclaimed_dir, reclaimable, self.remover)
+
+    async def _still_stale(self, stale: StaleWorkspaceDir) -> bool:
+        """Read everything again after archival; any change keeps the directory."""
+        why: str | None = None
+        if not self.is_live():
+            why = "subscriptions began catching up during archival"
+        else:
+            try:
+                containers, running, listings = await self._observe()
+            except Exception as exc:
+                why = f"could not look again ({type(exc).__name__}: {exc})"
+            else:
+                listing = next((x for x in listings if x.workspace_id == stale.workspace_id), None)
+                fresh = (
+                    None
+                    if listing is None
+                    else self._stale(listing, containers, running, self.clock())
+                )
+                if fresh is None or fresh.execution_id != stale.execution_id:
+                    why = "a container or running execution claimed it during archival"
+                elif listing is not None and listing.last_modified > stale.last_modified:
+                    why = "it changed during archival"
+                elif not self.is_live():
+                    why = "subscriptions began catching up during archival"
+        if why is not None:
+            logger.warning("Keeping workspace directory %s: %s", stale.host_dir, why)
+            return False
+        return True
 
 
 async def _running_execution_ids() -> set[str]:
@@ -160,7 +212,7 @@ async def _running_execution_ids() -> set[str]:
     return {row.workflow_execution_id for row in rows}
 
 
-def default_reclaimer() -> WorkspaceDirReclaimer:
+def default_reclaimer(is_live: Callable[[], bool]) -> WorkspaceDirReclaimer:
     """The production wiring: docker, the execution projection, host git, MinIO."""
     from syn_adapters.workspace_backends.orphaned import (
         ShutilWorkspaceDirRemover,
@@ -183,6 +235,7 @@ def default_reclaimer() -> WorkspaceDirReclaimer:
         git=SubprocessHostWorkspaceGit(),
         archive=ArtifactStoragePatchArchive(),
         remover=ShutilWorkspaceDirRemover(),
+        is_live=is_live,
     )
 
 
@@ -214,7 +267,7 @@ def start_workspace_reclaim(is_live: Callable[[], bool]) -> None:
 
     _reclaim_task = asyncio.create_task(
         reclaim_on_a_clock(
-            default_reclaimer(),
+            default_reclaimer(is_live),
             is_live=is_live,
             interval_seconds=get_settings().disk.reclaim_interval_minutes * 60,
         ),

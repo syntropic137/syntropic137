@@ -144,6 +144,8 @@ class StaleWorkspaceDir:
     workspace_id: str
     execution_id: str | None
     size_bytes: int
+    #: Newest mtime inside when it was found stale; a later one means it changed.
+    last_modified: float = 0.0
 
 
 class HostWorkspaceGit(Protocol):
@@ -154,7 +156,7 @@ class HostWorkspaceGit(Protocol):
     """
 
     async def repositories(self, host_dir: str) -> list[str]:
-        """Every git repository under ``host_dir``, submodules included."""
+        """Every git repository under ``host_dir``, bare ones and submodules included."""
         ...
 
     async def unpushed_commits(self, repo: str) -> int:
@@ -164,7 +166,16 @@ class HostWorkspaceGit(Protocol):
     async def uncommitted_patch(self, repo: str) -> bytes:
         """The working tree's changes against HEAD, untracked files included.
 
-        Empty when the tree is clean.
+        Empty when the tree is clean, or the repository is bare. Raises when
+        one patch cannot hold it (an index that differs from HEAD and tree).
+        """
+        ...
+
+    async def unversioned_files(self, host_dir: str, repos: list[str]) -> bytes:
+        """An archive of every file under ``host_dir`` no repository can reproduce.
+
+        Files outside ``repos`` and files they ignore, less proven caches.
+        Empty when there are none.
         """
         ...
 
@@ -176,6 +187,10 @@ class PatchArchive(Protocol):
         """Store ``patch`` linked to the stale dir's execution; return where. Raises on failure."""
         ...
 
+    async def save_files(self, stale: StaleWorkspaceDir, tarball: bytes) -> str:
+        """Store the unversioned-files archive the same way; return where. Raises on failure."""
+        ...
+
 
 async def guard_stale_workspace_dir(
     stale: StaleWorkspaceDir, git: HostWorkspaceGit, archive: PatchArchive
@@ -183,8 +198,9 @@ async def guard_stale_workspace_dir(
     """Return the directory as reclaimable only if deleting it loses nothing.
 
     A commit not on any remote keeps it: there is no credential left to push
-    with, so the directory is that commit's only copy. Uncommitted changes are
-    archived first, and a failed archive keeps it. Never raises.
+    with, so the directory is that commit's only copy. Uncommitted changes, and
+    every file outside a repository's history, are archived first, and a failed
+    archive keeps it. Never raises.
     """
     try:
         repos = await git.repositories(stale.host_dir)
@@ -197,11 +213,14 @@ async def guard_stale_workspace_dir(
             patch = await git.uncommitted_patch(repo)
             if patch:
                 saved.append(await archive.save(stale, repo, patch))
+        files = await git.unversioned_files(stale.host_dir, repos)
+        if files:
+            saved.append(await archive.save_files(stale, files))
     except Exception as exc:
         return _keep(stale, f"its work could not be shown safe ({type(exc).__name__}: {exc})")
     for uri in saved:
         logger.warning(
-            "Stale workspace %s (execution %s) had uncommitted changes; saved as %s "
+            "Stale workspace %s (execution %s) had unpreserved work; saved as %s "
             "before its directory was reclaimed",
             stale.workspace_id,
             stale.execution_id or "unknown",

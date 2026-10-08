@@ -62,6 +62,7 @@ def _workspace(base: Path, workspace_id: str, tmp_path: Path) -> Path:
 class _Archive:
     def __init__(self, *, fail: bool = False) -> None:
         self.saved: list[tuple[str | None, bytes]] = []
+        self.files: list[bytes] = []
         self._fail = fail
 
     async def save(self, stale: StaleWorkspaceDir, repo: str, patch: bytes) -> str:
@@ -69,6 +70,12 @@ class _Archive:
             raise OSError("minio down")
         self.saved.append((stale.execution_id, patch))
         return f"s3://artifacts/{stale.execution_id}/reclaimed-{stale.workspace_id}.md"
+
+    async def save_files(self, stale: StaleWorkspaceDir, tarball: bytes) -> str:
+        if self._fail:
+            raise OSError("minio down")
+        self.files.append(tarball)
+        return f"s3://artifacts/{stale.execution_id}/reclaimed-{stale.workspace_id}.tar.gz"
 
 
 def _reclaimer(
