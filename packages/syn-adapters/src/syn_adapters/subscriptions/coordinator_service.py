@@ -257,6 +257,12 @@ class CoordinatorSubscriptionService:
         """Check if the subscription is running."""
         return self._running
 
+    @property
+    def is_live(self) -> bool:
+        """Running and past catch-up: the only state in which side effects may run."""
+        coordinator = self._coordinator
+        return self._running and coordinator is not None and not coordinator.is_catching_up
+
     def get_status(self) -> SubscriptionServiceStatus:
         """Get service status for health checks."""
         coordinator = self._coordinator
@@ -660,6 +666,9 @@ def create_coordinator_service(
     from syn_domain.contexts.orchestration.slices.workflow_phase_metrics import (
         WorkflowPhaseMetricsProjection,
     )
+    from syn_domain.contexts.orchestration.slices.workspace_ownership.projection import (
+        WorkspaceOwnershipProjection,
+    )
     from syn_domain.contexts.organization._shared.organization_projection import (
         OrganizationProjection,
     )
@@ -744,6 +753,7 @@ def create_coordinator_service(
             GlobalClaudePluginsProjection(projection_store),
             # --- Skill injection (issue #772) ---
             SkillLockProjection(projection_store),
+            WorkspaceOwnershipProjection(projection_store),
             # --- Tool-call tally (issue #1322) ---
             # Not fed by replay: each tool call is counted in the transaction
             # that stores the event, so this is here for the rebuild half of

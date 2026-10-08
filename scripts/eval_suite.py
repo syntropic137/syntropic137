@@ -53,10 +53,10 @@ verdict on its eval (``POST /evals/{id}/runs/{run}/score``, scorer
 eval's current score and the history stays in its events.
 
 INSTALL PROVENANCE. ``launch`` installs with ``version`` = the suite version
-(``<n>.0.0``) and ``source_digest`` = sha256 of the exact YAML document it
+and the workflow's install ``revision`` (``<n>.<revision>.0``) and ``source_digest`` = sha256 of the exact YAML document it
 uploads. The server's install rules then do the rest: a byte-identical
 re-launch is a no-op, an archived workflow is restored, and a workflow file
-changed without a suite version bump is refused (409, digest mismatch) before
+changed without a suite version or revision bump is refused (409, digest mismatch) before
 any eval exists. Never install without provenance: once the server records a
 version, an install that declares none is refused by design.
 
@@ -126,6 +126,12 @@ class WorkflowRef(_Frozen):
     """Repo-relative path of the workflow file the suite runs."""
     models: dict[str, str] = Field(min_length=1)
     """Phase id -> the model that phase declares. Must match the workflow file."""
+    revision: int = Field(default=0, ge=0)
+    """Install revision of the workflow file within the suite version; installed as
+    ``<suite version>.<revision>.0``. Raise it for an edit that is not part of the
+    experiment (no case, prompt or model), so the server takes it as a new version
+    instead of refusing a republish. #1780's ``requires_verdict`` is revision 1.
+    """
 
 
 class PastVersion(_Frozen):
@@ -689,7 +695,11 @@ class Score(_Frozen):
 
     @property
     def passed(self) -> bool:
-        """A defect passes blocked and named; a clean control passes only certified."""
+        """A defect passes blocked and named; a clean control passes only certified.
+
+        False with no verdict, but such a run is never a FAIL: `run_verdict`
+        makes it ERROR, and ERROR is in no pass, catch or false-block rate.
+        """
         if self.polarity == "clean":
             return self.verdict == "certified"
         return self.verdict == "blocked" and self.matched
@@ -965,6 +975,13 @@ class ScoredRun(_Frozen):
     cost_usd: Decimal | None
     duration: str
     models: str
+    warning: str | None = None
+    """Where the report's own `VERDICT:` line and the engine's verdict disagree."""
+
+    @property
+    def verdict(self) -> RunVerdict | None:
+        """The verdict `score` records; None for a run never scored (not launched, rejected)."""
+        return run_verdict(self.status, self.score) if self.score else None
 
 
 def _get[M: BaseModel](client: httpx.Client, model: type[M], path: str, **params: str | int) -> M:
@@ -1053,7 +1070,8 @@ def score_suite(
             if problem:
                 rows.append(_row(case.id, ev.eval_id, launch.run_id, f"rejected: {problem}"))
                 continue
-            score = score_case(case, run.review_verdict, _report_of(client, run))
+            report = _report_of(client, run)
+            score = score_case(case, run.review_verdict, report)
             _record_score(client, loaded, case, ev.eval_id, run, score)
             rows.append(
                 ScoredRun(
@@ -1065,6 +1083,7 @@ def score_suite(
                     cost_usd=run.total_cost_usd,
                     duration=_duration_of(run),
                     models=_models_of(run),
+                    warning=verdict_mismatch(run.review_verdict, report),
                 )
             )
 
@@ -1122,16 +1141,41 @@ def _case_evals(client: httpx.Client, loaded: LoadedSuite, case: Case) -> list[_
     return _EvalList.model_validate(response.json()).evals
 
 
-def run_verdict(run: _Execution, score: Score) -> RunVerdict:
-    """The verdict recorded on the eval. ERROR: the run never finished, so it was not judged."""
-    if run.status != "completed":
+def run_verdict(status: str, score: Score) -> RunVerdict:
+    """The verdict recorded on the eval: ERROR when the run was not judged.
+
+    A run is judged only when it completed AND the engine recorded a review
+    verdict. A completed run with none (#1780) failed to report, it did not
+    review badly, so it is ERROR, never FAIL, whatever its report text says.
+    """
+    if status != "completed" or score.verdict is None:
         return "ERROR"
     return "PASS" if score.passed else "FAIL"
 
 
+_REPORT_VERDICT = re.compile(r"^\W*VERDICT:\W*(\w+)", re.MULTILINE)
+
+
+def verdict_mismatch(engine: Verdict | None, report: str) -> str | None:
+    """A warning when the report's first `VERDICT:` line disagrees with the engine.
+
+    For a human to read only: the score never comes from the report text, since
+    the engine verdict is what the workflow actually reported (#1780).
+    """
+    said = _REPORT_VERDICT.search(report)
+    if said is None or said.group(1).lower() == engine:
+        return None
+    return f"report says VERDICT: {said.group(1)}, engine recorded {engine or 'no verdict'}"
+
+
 def evidence_of(case: Case, run: _Execution, score: Score) -> str:
     """Why the verdict, as markdown: what the scorer looked for and what it found."""
-    head = [f"## {case.id} ({case.polarity})", "", f"- run status: `{run.status}`"]
+    head = [
+        f"## {case.id} ({case.polarity})",
+        "",
+        f"- run status: `{run.status}`",
+        f"- recorded: `{run_verdict(run.status, score)}` (ERROR: not completed, or no review verdict)",
+    ]
     tail = [f"- models: {_models_of(run) or '-'}"]
     if isinstance(case, CleanCase):
         return "\n".join(
@@ -1168,7 +1212,7 @@ def _record_score(
     response = client.post(
         f"/evals/{eval_id}/runs/{run.workflow_execution_id}/score",
         json={
-            "verdict": run_verdict(run, score),
+            "verdict": run_verdict(run.status, score),
             "score": 1.0 if score.passed else 0.0,
             "evidence": evidence_of(case, run, score),
             "scorer": SCORER,
@@ -1189,18 +1233,20 @@ def _ratio(part: int, whole: int) -> str:
 def rates(rows: list[ScoredRun]) -> str:
     """The catch rate over defect cases and the false-block rate over clean controls.
 
-    Over scored runs only; a run with no verdict is in the denominator and is
-    neither a catch nor a false block. A table with no clean controls says so:
-    its catch rate alone cannot tell a careful verifier from one that blocks all.
+    Over judged runs only (PASS or FAIL), as the API's pass rate: an ERROR run
+    was not judged, so it is in no denominator. A table with no clean controls
+    says so: its catch rate alone cannot tell a careful verifier from one that
+    blocks all.
     """
-    scores = [r.score for r in rows if r.score]
+    scores = [r.score for r in rows if r.score and r.verdict != "ERROR"]
     defects = [s for s in scores if s.polarity == "defect"]
     clean = [s for s in scores if s.polarity == "clean"]
     caught = sum(1 for s in defects if s.passed)
     blocked = sum(1 for s in clean if s.false_block)
+    has_clean = any(r.score and r.score.polarity == "clean" for r in rows)
     return f"catch rate (defect cases blocked and named): {_ratio(caught, len(defects))}\n" + (
         f"false-block rate (clean controls blocked): {_ratio(blocked, len(clean))}"
-        if clean
+        if has_clean
         else "false-block rate: not measured, no clean control in this version"
     )
 
@@ -1239,7 +1285,7 @@ def render(loaded: LoadedSuite, rows: list[ScoredRun], unrecorded: tuple[str, ..
                 )
                 if s
                 else "-",
-                ("PASS" if s.passed else "FAIL") if s else "-",
+                r.verdict or "-",
                 f"${r.cost_usd:.2f}" if r.cost_usd is not None else "-",
                 r.duration,
                 r.models,
@@ -1249,11 +1295,17 @@ def render(loaded: LoadedSuite, rows: list[ScoredRun], unrecorded: tuple[str, ..
     table = "\n".join(
         "  ".join(c.ljust(w) for c, w in zip(row, widths, strict=True)).rstrip() for row in lines
     )
-    passed = sum(1 for r in rows if r.score and r.score.passed)
+    verdicts = [r.verdict for r in rows]
+    judged = sum(1 for v in verdicts if v in ("PASS", "FAIL"))
+    errors = verdicts.count("ERROR")
     return (
         f"suite {loaded.tag}  version {loaded.version}  workflow {loaded.workflow.id}  "
-        f"declared models {loaded.workflow.models}\n\n{table}\n\n{passed}/{len(rows)} passed\n"
+        f"declared models {loaded.workflow.models}\n\n{table}\n\n"
+        f"{verdicts.count('PASS')}/{judged} passed (ERROR excluded, as in the API)"
+        f"{f'; {errors} ERROR' if errors else ''}"
+        f"{f'; {len(rows) - judged - errors} not scored' if len(rows) > judged + errors else ''}\n"
         + rates(rows)
+        + "".join(f"\nwarning: {r.case} {r.run_id}: {r.warning}" for r in rows if r.warning)
         + "".join(f"\nignored: {line}" for line in unrecorded)
     )
 
@@ -1319,13 +1371,16 @@ class Provenance(_Frozen):
 def install_provenance(loaded: LoadedSuite, document: str) -> Provenance:
     """Deterministic install provenance for the suite's workflow document.
 
-    The version is the suite's, so changing a listed workflow without bumping
-    the suite reuses a version under a new digest, which the server refuses as
-    a republish. The digest covers the uploaded bytes, prompts inlined, so a
+    The version is the suite's, with the workflow's install `revision` as the
+    minor, so changing a listed workflow without bumping either reuses a
+    version under a new digest, which the server refuses as a republish. The digest covers the uploaded bytes, prompts inlined, so a
     prompt-file edit changes it too.
     """
     digest = hashlib.sha256(document.encode("utf-8")).hexdigest()
-    return Provenance(version=f"{loaded.suite.version}.0.0", source_digest=f"sha256:{digest}")
+    return Provenance(
+        version=f"{loaded.suite.version}.{loaded.workflow.revision}.0",
+        source_digest=f"sha256:{digest}",
+    )
 
 
 def install_workflow(loaded: LoadedSuite, client: httpx.Client, root: Path = ROOT) -> str:
@@ -1352,7 +1407,8 @@ def install_workflow(loaded: LoadedSuite, client: httpx.Client, root: Path = ROO
         raise RuntimeError(
             f"server refused to install {w.id} as version {provenance.version} "
             f"({provenance.source_digest}): {_detail(response)}. If {w.path} changed, "
-            "bump the suite version; no eval was created"
+            "bump the suite version (or, for an edit outside the experiment, the workflow's "
+            "revision); no eval was created"
         )
     response.raise_for_status()
     installed = _Installed.model_validate(response.json())

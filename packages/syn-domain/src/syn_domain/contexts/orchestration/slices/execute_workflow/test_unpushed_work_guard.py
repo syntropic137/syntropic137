@@ -47,6 +47,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow import (
     unpushed_work_guard,
     workspace_git,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.cancel_teardown import (
+    record_cancel_and_release,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     RESCUE_BUNDLE_NAME,
     RESCUE_PATCH_NAME,
@@ -3547,13 +3550,16 @@ async def test_a_cancelled_execution_keeps_its_workflow_changes_as_an_artifact(
 
     run.processor._journal.append = AsyncMock()  # type: ignore[method-assign]
 
-    await run.processor._cancel_execution(
-        run.aggregate,  # type: ignore[arg-type]
-        _EXECUTION_ID,
-        "wf-1",
-        run.phase_results,
-        all_artifact_ids,
-        datetime.now(UTC),
+    await record_cancel_and_release(
+        aggregate=run.aggregate,
+        runtime=run.processor._runtimes.of(_EXECUTION_ID),
+        workspaces=run.processor._workspaces_for(_EXECUTION_ID, {}),
+        ledger=run.processor._cancelled_work,
+        execution_id=_EXECUTION_ID,
+        workflow_id="wf-1",
+        phase_results=run.phase_results,
+        all_artifact_ids=all_artifact_ids,
+        started_at=datetime.now(UTC),
         cancel_reason="stopped by the user",
         phase_id=_PHASE_ID,
     )
@@ -3677,13 +3683,16 @@ async def test_a_cancel_through_the_processor_tells_its_pr_once_from_the_stored_
         if failure == "delete_fails":
             monkeypatch.setattr(owed, "delete", AsyncMock(side_effect=RuntimeError("down")))
 
-        result = await run.processor._cancel_execution(
-            aggregate,
-            _EXECUTION_ID,
-            "wf-1",
-            run.phase_results,
-            [],
-            datetime.now(UTC),
+        result = await record_cancel_and_release(
+            aggregate=aggregate,
+            runtime=run.processor._runtimes.of(_EXECUTION_ID),
+            workspaces=run.processor._workspaces_for(_EXECUTION_ID, {}),
+            ledger=run.processor._cancelled_work,
+            execution_id=_EXECUTION_ID,
+            workflow_id="wf-1",
+            phase_results=run.phase_results,
+            all_artifact_ids=[],
+            started_at=datetime.now(UTC),
             cancel_reason="stop",
             phase_id=_PHASE_ID,
         )

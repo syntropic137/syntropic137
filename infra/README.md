@@ -339,13 +339,13 @@ moving to another S3-compatible store), not re-running a pull.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `API_MEMORY_LIMIT` | `512m` | API memory limit |
+| `API_MEMORY_LIMIT` | `2g` | API memory limit |
 | `API_CPU_LIMIT` | `2.0` | API CPU limit (cores) |
 | `UI_MEMORY_LIMIT` | `256m` | nginx memory limit |
 | `UI_CPU_LIMIT` | `0.25` | nginx CPU limit |
 | `POSTGRES_MEMORY_LIMIT` | `1g` | PostgreSQL memory limit |
 | `POSTGRES_CPU_LIMIT` | `2.0` | PostgreSQL CPU limit (cores) |
-| `EVENT_STORE_MEMORY_LIMIT` | `512m` | Event store memory limit |
+| `EVENT_STORE_MEMORY_LIMIT` | `2g` | Event store memory limit |
 | `CONTROL_PLANE_CPU_SHARES` | `4096` | CPU weight of api, timescaledb, event-store and gateway; workspaces run at Docker's default 1024, so the control plane wins under contention (#1600) |
 | `COLLECTOR_MEMORY_LIMIT` | `256m` | Collector memory limit |
 | `COLLECTOR_CPU_LIMIT` | `0.25` | Collector CPU limit |
@@ -354,7 +354,7 @@ moving to another S3-compatible store), not re-running a pull.
 | `REDIS_MEMORY_LIMIT` | `256m` | Redis memory limit |
 | `REDIS_CPU_LIMIT` | `0.25` | Redis CPU limit |
 
-**Minimum recommended hardware:** 4 CPU cores, 4 GB RAM. The defaults are conservative; increase limits if you run many concurrent agent workflows.
+**Minimum recommended hardware:** 4 CPU cores, 8 GB RAM (16 GB recommended). The control-plane limits above add up to about 6 GB (API and event store at 2g each), and each running workspace can use up to `SYN_WORKSPACE_MEMORY_LIMIT_MB` (4096) on top. Limits are ceilings, not reservations; increase them if you run many concurrent agent workflows.
 
 ---
 
@@ -709,8 +709,8 @@ just infra-build-image event-store
 If a container is killed with exit code 137, it ran out of memory. Increase the limit in `infra/.env`:
 
 ```bash
-# Example: increase API from 512m to 1g
-API_MEMORY_LIMIT=1g
+# Example: increase API from 2g to 4g
+API_MEMORY_LIMIT=4g
 ```
 
 Then restart:

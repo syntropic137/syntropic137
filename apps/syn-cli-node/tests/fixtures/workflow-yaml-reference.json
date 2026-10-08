@@ -107,7 +107,7 @@
           "prompt_file": "phases/verify.md"
         }
       ],
-      "document_sha256": "4e44a83d26998ddf1c77340b1ff46ab0747e6ad1db7cade610169f75a4d16571"
+      "document_sha256": "50408de3a9642bdfc7a2a5857df5792c60831a0c6f3b275b4ff6866f7801fa00"
     },
     "workflows/evals/verify-pinned-codex/workflow.yaml": {
       "phases": [
@@ -118,7 +118,7 @@
           "prompt_file": "phases/verify.md"
         }
       ],
-      "document_sha256": "e415b6b2ef430f4d63e526324fff380183ca16e73bd44179c227144132e7024b"
+      "document_sha256": "964e2089edf9c895a51a199eea79ac27fcf2cb2df4e9b047e361084a7de686b6"
     },
     "workflows/evals/verify-pinned-codex-gpt-5-6-luna/workflow.yaml": {
       "phases": [
@@ -129,7 +129,7 @@
           "prompt_file": "phases/verify.md"
         }
       ],
-      "document_sha256": "2c6be39e5740b5e989314b4cd9c3adbbb6ce388ce6f85959bf9009cf66d6e9d2"
+      "document_sha256": "fa52126f88e327c2457640d3d8cfc5d02d50110a7c6b5b15f802a541ddb0a761"
     },
     "workflows/evals/verify-pinned-codex-gpt-5-6-terra/workflow.yaml": {
       "phases": [
@@ -140,7 +140,7 @@
           "prompt_file": "phases/verify.md"
         }
       ],
-      "document_sha256": "bce8b0f4922a247e3bd8ac6f7302258f96b63ec9c107ae1422a6a80f04b5d453"
+      "document_sha256": "f65bd5f8331c9134d9083df8cde2dae95c6fbaf08614ec20f7cec2c759c8bca7"
     },
     "workflows/evals/verify-pinned-codex-gpt-6-luna/workflow.yaml": {
       "phases": [
@@ -151,7 +151,7 @@
           "prompt_file": "phases/verify.md"
         }
       ],
-      "document_sha256": "331f06b66b87e16d4803ec20897a40eee344e489287f5ae9d8e0087ad2659846"
+      "document_sha256": "292932a20fc3c62cbd155e06c7b6e42771d01d19a74755c1060882ff3eb52ac1"
     },
     "workflows/evals/verify-pinned-sonnet/workflow.yaml": {
       "phases": [
@@ -162,7 +162,7 @@
           "prompt_file": "phases/verify.md"
         }
       ],
-      "document_sha256": "43628b9712172ecc5e36afda5c25d0def2aba3be9ab9d1a4fafefe5e5a0d12fd"
+      "document_sha256": "8aab00511fa58d2856437b01f2f47514a2d98ab84fc93b423f5e105172ea83ef"
     },
     "workflows/examples/claude-delegates-to-codex.yaml": {
       "phases": [
