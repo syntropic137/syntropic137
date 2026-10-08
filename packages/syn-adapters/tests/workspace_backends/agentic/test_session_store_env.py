@@ -12,6 +12,7 @@ import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from agentic_isolation.providers.base import ExecuteResult
 from pydantic import SecretStr
 
 from syn_adapters.workspace_backends.agentic.adapter import (
@@ -340,6 +341,7 @@ def _mock_provider() -> MagicMock:
     workspace.metadata = {"workspace_dir": "/tmp/x"}
     provider = MagicMock()
     provider.create = AsyncMock(return_value=workspace)
+    provider.execute = AsyncMock(return_value=ExecuteResult(exit_code=0, stdout="", stderr=""))
     return provider
 
 

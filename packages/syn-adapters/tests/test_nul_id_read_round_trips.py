@@ -250,13 +250,14 @@ class _AgentEventsTable:
                 return True
         return False
 
-    def transaction(self) -> _FakeTransaction:
-        """``agent_event_span.custom_plans`` wraps the bounded read in one."""
+    def transaction(self, *, isolation: str, readonly: bool) -> _FakeTransaction:
+        """``agent_event_span.custom_plans`` wraps the bounded read in one read-only snapshot."""
+        assert (isolation, readonly) == ("repeatable_read", True)
         return _FakeTransaction()
 
     async def execute(self, query: str, *_args: object) -> str:
-        # custom_plans: the read-only snapshot, then the plan setting.
-        assert "REPEATABLE READ, READ ONLY" in query or "plan_cache_mode" in query, query
+        # custom_plans: the plan setting, its one statement after the BEGIN.
+        assert "plan_cache_mode" in query, query
         return "SET"
 
     async def fetch(self, query: str, *args: object) -> list[dict[str, _Cell]]:

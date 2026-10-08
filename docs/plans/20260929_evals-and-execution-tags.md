@@ -14,8 +14,34 @@ Status: proposed implementation plan. Date: 2026-09-29.
 | 6. API and CLI | merged, partial: `POST /evals` (id minted server-side, so it cannot share another aggregate's stream; receipt read from the aggregate), `GET /evals`, `GET /evals/{id}`, `GET /evals/{id}/runs` (= `GET /executions?eval_id=`), `POST /evals/{id}/archive`; `syn eval create/list/show/runs/archive` beside the existing `attach/detach`. Not yet: `PATCH /evals/{id}` (and `syn eval update`) and an eval-scoped `POST /evals/{id}/runs`; launching into an eval already works through `syn workflow run --eval`. Every eval command now refuses an id whose stream holds no `EvalCreated` (`EvalAggregate.exists`): on the server an execution's id loads the execution's stream as an eval | #1649 |
 | 7. Dashboard and docs | not started. The suite and scorer below are documented in `evals/verifier-seed-v1/suite.yaml` and `scripts/eval_suite.py`; no dashboard page and no public docs yet | |
 | 8. Integration acceptance | in review: the verifier seed suite `evals/verifier-seed-v1` (four escaped bugs from #1574, #1649, #1652 and #1654, each pinned to the commit before its fix), a read-only verify-only workflow `eval-verify-pinned-v1` on Opus, and `scripts/eval_suite.py check` (offline: definitions, SHAs, pin-before-fix, bug files) / `launch` (installs the workflow from the checked-in file and refuses unless the server's phases, prompts and models then match, before any eval exists; records each started run in `evals/verifier-seed-v1/launches.jsonl`) / `score` (pass = verdict blocked AND the report names the bug file and every keyword group; scores only ledger runs still in their eval, whose eval pins the case's commit and whose workflow is the suite's). One eval per case, grouped by the tag `verifier-seed-v1:v1`, because a Baseline pins one SHA per repository. Not yet: the runs have not been launched, so no score exists; no `syn eval score` in the Node CLI; and the API exposes no run's `checked_out_commits`, and the read path does not say whether a run was launched into its eval or attached later, so the scorer trusts the launch ledger plus the eval's Baseline for the commit; a run found only by tag is listed and never scored | #1683 |
+| 8a. Same cases, different verifier | in review: suite v2 adds two escaped bugs from #1668 (#1679 Live Commits accepted any non-empty string as a sha; #1680 a private repo rendered public because the App's live privacy was discarded), pinned at #1668's certified head. A second workflow `eval-verify-pinned-codex-v1` is `eval-verify-pinned-v1` with only the verify agent changed (codex, `gpt-sol`, `sandbox: workspace-write`; `read-only` is refused because it blocks the report write); a test asserts the prompts are byte-identical and the documents differ only in identity and the agent block. The suite lists both workflows; `--workflow` selects one and the tag is `verifier-seed-v1:v2:<workflow id>`, so each verifier is its own eval set and score table. v1 (Opus 5.5, four cases) scored 4/4 at $0.90-1.28 and 5-7 min per case. Not yet: no v2 run of either verifier | this PR |
+| 9. Evals v2 backend: score, read model, stable suite evals | in review: `RecordEvalRunScore` -> `EvalRunScored` on the existing Eval aggregate (verdict `PASS`/`FAIL`/`ERROR`, optional 0-1 score, markdown evidence, scorer + version, `scored_at`); re-score replaces, history stays in the events; a non-member run is refused (409); scoring is allowed on frozen and archived evals. `EvalListProjection` v2 stores the current score per run. `GET /evals` and `GET /evals/{id}` gain `run_count`, `scored_count`, `pass_rate`(+`_display`), `last_run_at`, `last_verdict` and `variants` (workflow x sorted observed models); `GET /evals/{id}/runs` is now `EvalRunListResponse` (newest first, observed models per phase, cost, duration, verdict, score, evidence excerpt); `POST /evals/{id}/runs/{exec}/score`. Observed models and cost are joined at read time from the execution detail (Lane 2), so they are never the declared alias. `scripts/eval_suite.py launch` reuses one eval per case (`suite:verifier-seed` + `case:<id>`) and tags runs `suite-version:<n>` + `verifier:<workflow id>`; `score` POSTs each verdict. `scripts/migrate_eval_suite_duplicates.py --dry-run` folds the old per-launch evals into the stable one (not yet run against any shared server). `workflow_version` is the template's installed version (or source digest) as the run launched it, recorded on `WorkflowExecutionStarted` and carried by the execution list projection (v10); runs started before that report null. `GET /evals/{id}/runs` resolves id prefixes like `GET /evals/{id}`. `GET /executions/{id}` gains `eval` (eval id, name, association kind, current verdict, score, scored_at) for the execution page's Eval badge. Run facts are joined at read time by decision (see Read models below). Not yet: the summary reads each run's detail, N reads per eval per request, fine at suite scale and a known cost at 1,000 runs | #1711 |
 
 Issue: #967. Keep this table current when a step's PR merges.
+
+### Running the same cases under a different verifier
+
+`evals/verifier-seed-v1/suite.yaml` lists every workflow its cases run under.
+They differ only in the verify phase's agent, so a score difference is the
+verifier. Each run of the script picks one with `--workflow` (default: the
+first listed):
+
+```
+uv run python scripts/eval_suite.py check                                     # validates every listed workflow
+uv run python scripts/eval_suite.py launch --workflow eval-verify-pinned-v1   # Opus
+uv run python scripts/eval_suite.py launch --workflow eval-verify-pinned-codex-v1
+uv run python scripts/eval_suite.py score  --workflow eval-verify-pinned-v1
+uv run python scripts/eval_suite.py score  --workflow eval-verify-pinned-codex-v1
+```
+
+`launch` costs money and never runs in CI. Commit `launches.jsonl` after each
+launch. The tag `<suite id>:v<version>:<workflow id>` keeps each verifier's
+evals, ledger rows and score table apart, so comparing them means putting the
+two `score` tables side by side: pass per case, cost and duration. Adding a
+verifier is a new workflow file (same prompt; the byte-identity test in
+`scripts/tests/test_eval_suite.py` names the pair it checks) plus one entry
+under `workflows:`. Changing a listed workflow's model or prompt bumps the
+suite version.
 
 ## Product goal
 
@@ -135,6 +161,10 @@ Command responses return authoritative IDs/state without waiting for projections
 Add versioned `EvalListProjection`, `EvalDetailProjection`, and `EvalRunsProjection` under owning slices. Extend workflow and execution list/detail projections for tags/default eval/membership. Membership rows use execution ID as identity; replayed events cannot duplicate a row or inflate counts.
 
 Keep execution status, cost, duration and artifacts in their existing read models. Eval run queries join those facts; preserve unknown duration and unpriced cost indicators. Avoid duplicating an alternative cost calculator.
+
+**Decision (2026-10-07, Evals v2): run facts are joined at read time, not projected.** A run's observed models and cost exist only as Lane 2 observations, and the rules that turn them into a model id and a dollar figure live in `syn_api.model_identity` and the execution detail loader behind `GET /executions/{id}`. A checkpointed run-facts projection would have to consume Lane 2 and re-implement those rules, which drifts silently the moment either changes, or route telemetry through the Eval aggregate, which breaks the two-lane rule. So the eval routes read each member run through that same loader and join it in the API service layer (`syn_api.routes.eval_runs`) with the eval read model's membership and current scores. Variants group by workflow id, workflow version and the sorted observed models. The cost is N detail reads per eval per request: fine at suite scale, and the thing to revisit (a Lane 2 run-facts read model owned beside the cost projections) before evals carry hundreds of runs each.
+
+`GET /executions/{id}` carries `eval` (`eval_id`, `eval_name`, `association_kind`, `verdict`, `score`, `scored_at`), read from the execution list's membership and the eval read model's current score, for the execution page's Eval badge.
 
 Proposed API surface under the current `/api/v1` prefix:
 

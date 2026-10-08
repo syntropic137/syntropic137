@@ -17,6 +17,7 @@ import { PhaseTimeline } from '../../pages/ExecutionDetail/PhaseTimeline'
 import { ExecutionCostSummary } from '../ExecutionCostSummary'
 import { SessionCostCard } from '../SessionCostCard'
 import { TokenInOut } from '../TokenInOut'
+import { withPlanOfPhases } from '../../test/phasePlanFixtures'
 
 // Plan phase of exec-105b88d56234.
 const PLAN = { fresh: 6, cacheWrite: 33928, cacheRead: 66399, output: 1047 }
@@ -46,7 +47,7 @@ describe('TokenInOut', () => {
 describe('every In/Out card agrees with the execution header', () => {
   it('phase timeline card', () => {
     const phase = {
-      workflow_phase_id: 'plan',
+      phase_id: 'plan',
       name: 'Plan (claude)',
       status: 'completed',
       session_id: null,
@@ -68,6 +69,7 @@ describe('every In/Out card agrees with the execution header', () => {
     } as ExecutionDetailResponse['phases'][number]
     const execution = {
       workflow_execution_id: 'exec-105b88d56234',
+      phase_progress: { completed: 0, skipped: 0, possible: 1, remaining_possible: 1, percent: 0, display: 'phase 1 of up to 1' },
       workflow_id: 'multi-agent-programmatic',
       workflow_name: 'Multi-agent',
       status: 'completed',
@@ -78,7 +80,7 @@ describe('every In/Out card agrees with the execution header', () => {
     } as unknown as ExecutionDetailResponse
     const { container } = render(
       <MemoryRouter>
-        <PhaseTimeline execution={execution} now={Date.now()} />
+        <PhaseTimeline execution={withPlanOfPhases(execution)} now={Date.now()} />
       </MemoryRouter>,
     )
     expect(segmentTotal(container, 'in')).toBe((100333).toLocaleString())

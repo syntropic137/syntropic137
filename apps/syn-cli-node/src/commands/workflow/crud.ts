@@ -271,7 +271,7 @@ function renderWorkflowDetail(detail: WorkflowResponse): void {
   if (phases.length > 0) {
     print(`\n  ${style(`Phases (${phases.length}):`, BOLD)}`);
     for (const phase of phases) {
-      // model_display is the API's rendering (e.g. "gpt-sol → gpt-6-sol"): verbatim.
+      // model_display is the API's rendering (e.g. "gpt-sol → gpt-6.1-sol"): verbatim.
       const model = phase.model_display ? `  ${style(phase.model_display, DIM)}` : "";
       print(`    - ${phase.name ?? "unnamed"}${model}`);
 

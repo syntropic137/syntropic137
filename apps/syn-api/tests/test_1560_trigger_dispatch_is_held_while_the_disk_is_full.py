@@ -16,6 +16,10 @@ from __future__ import annotations
 import asyncio
 import os
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
 
 import pytest
 from event_sourcing.core.event import EventEnvelope, EventMetadata
@@ -175,8 +179,9 @@ class _RefusingService:
         execution_id: str,
         task: str | None = None,
         repos: list[RepositoryRef] | None = None,
+        on_held: Callable[[Exception], Awaitable[None]] | None = None,
     ) -> AdmissionTicket | None:
-        del workflow_id, inputs, execution_id, task, repos
+        del workflow_id, inputs, execution_id, task, repos, on_held
         raise _RoadClosedError("the road is closed")
 
 

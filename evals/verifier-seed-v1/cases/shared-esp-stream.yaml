@@ -1,8 +1,12 @@
 id: shared-esp-stream
+polarity: defect
 source_pr: 1574
 # main just before #1641 merged (b1a162ab9^1), and #1641's branch base.
 commit: 6646da278d17a16e16549cf77b0749b25d8e8040
 fix_commit: 28607c4ec0845d617d9a07440d55407f00776711
+# The fix is two commits: 7aa3779de keys the test store like the ESP server, then
+# 28607c4ec fixes the stream id. The pin is the first one's parent.
+first_fix_commit: 7aa3779dece41e6a6e947029e52877fdacb6dcb4
 task: >
   The change under review adds an ExecutionRequest aggregate so a direct start
   is recorded as a request before the WorkflowExecution exists, gives every

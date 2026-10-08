@@ -1,0 +1,26 @@
+id: repo-privacy-ignores-app
+polarity: defect
+source_pr: 1680
+# The fix's first parent: main just before the fix, with the bug and none of
+# the fix. Its useRepoList.ts is byte-identical to the head #1668's verify
+# certified (d8012384d, merged as 9b7fe6790).
+commit: 4c16d8f95fca32a282210510fca70bebe7e8f902
+fix_commit: d9b8deaf5db1304a7b8a39b87796538ad82efcd0
+task: >
+  The change under review makes the dashboard's /repos page list every
+  connected repository: the union of repos registered from the CLI and repos
+  the GitHub App installation can reach, joined by full name. Each row shows
+  its system, whether the App can reach it, and whether it is private. It also
+  fixes the Live Commits card. Review whether each row's details, including
+  its privacy, are true of the repository GitHub reports.
+expected:
+  files:
+    - apps/syn-dashboard-ui/src/hooks/useRepoList.ts
+  keywords:
+    # What is wrong on the row.
+    - [privat, public, visibility]
+    # Where it comes from instead of the App's live answer.
+    - [app, github, installation, live, stored, store, cli, register, default, fallback, ignor,
+       discard, "?? false", stale, record, overrid]
+    # So a private repo is presented as public.
+    - [shown, show, render, display, appear, label, mark, lock, badge, icon, public, listed]

@@ -59,6 +59,7 @@ def completed_prefix(
     *,
     execution_id: str,
     phase_owners: Mapping[str, str],
+    skipped_phase_ids: frozenset[str] | set[str] = frozenset(),
 ) -> tuple[list[InheritedPhase], str | None]:
     """The phases a resume inherits, and the phase it resumes at.
 
@@ -82,9 +83,16 @@ def completed_prefix(
     ``execution_id`` for a phase this run ran, or its owner from
     ``phase_owners`` for one this run itself inherited. Without that a resume of a
     resume asks its parent for artifacts only the grandparent ever stored.
+
+    A phase in ``skipped_phase_ids`` is not a gap: a certified review decided it
+    would never run (PC-63), so the prefix passes over it without inheriting it
+    and a resume does not run a repair round the parent already made
+    unnecessary (#1681).
     """
     inherited: list[InheritedPhase] = []
     for phase in phase_definitions:
+        if phase.phase_id in skipped_phase_ids:
+            continue
         if phase.phase_id not in completed_phase_ids:
             return inherited, phase.phase_id
         inherited.append(
@@ -95,6 +103,25 @@ def completed_prefix(
             )
         )
     return inherited, None
+
+
+def skipped_before(
+    phase_definitions: Sequence[PhaseDefinition],
+    skipped_phase_ids: frozenset[str] | set[str],
+    resume_phase_id: str | None,
+) -> list[str]:
+    """The skipped phases that come before ``resume_phase_id``, in phase order.
+
+    What a resume inherits as skipped: a skip after the resume point belongs to
+    a decision the resume is about to make again.
+    """
+    skipped: list[str] = []
+    for phase in phase_definitions:
+        if phase.phase_id == resume_phase_id:
+            break
+        if phase.phase_id in skipped_phase_ids:
+            skipped.append(phase.phase_id)
+    return skipped
 
 
 def refuse_resume(
@@ -217,6 +244,7 @@ def decide_resume(
     started_phase_ids: Mapping[str, int] | frozenset[str] | set[str],
     command: ResumeExecutionCommand,
     repair_point: str | None = None,
+    skipped_phase_ids: frozenset[str] | set[str] = frozenset(),
 ) -> ResumeDecision:
     """Every rule above, applied in order.
 
@@ -227,6 +255,10 @@ def decide_resume(
     A completed run with unresolved findings inherits only the phases before
     its ``repair_point``: the prefix stops there as if that phase had never
     completed, so the resume re-runs the last round and what follows it.
+
+    Phases a certified review skipped before the resume point are passed over
+    and handed to the resume as skipped, so it neither runs them nor counts
+    them as work still to do (#1681).
     """
     from syn_domain.contexts.orchestration.domain.events.ExecutionResumedEvent import (
         ExecutionResumedEvent,
@@ -253,6 +285,7 @@ def decide_resume(
         phase_artifact_ids,
         execution_id=execution_id or "",
         phase_owners=phase_owners,
+        skipped_phase_ids=skipped_phase_ids,
     )
     # Started means an agent may have acted. Nothing on this stream can show
     # that it did not: branch observations cover git refs only, and the evidence
@@ -275,6 +308,9 @@ def decide_resume(
             resume_execution_id=command.resume_execution_id,
             inherited_phases=inherited,
             resume_phase_id=resume_phase_id or "",
+            inherited_skipped_phase_ids=skipped_before(
+                phase_definitions, skipped_phase_ids, resume_phase_id
+            ),
             resumed_at=datetime.now(UTC),
             cancellation_overridden=status is ExecutionStatus.CANCELLED,
             external_effects_acknowledged=may_repeat_effects,

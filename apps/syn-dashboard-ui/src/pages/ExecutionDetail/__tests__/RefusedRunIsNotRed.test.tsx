@@ -23,6 +23,7 @@ import type {
   FailureClassification,
   PhaseExecutionDetail,
 } from '../../../types'
+import { withPlanOfPhases } from '../../../test/phasePlanFixtures'
 
 vi.mock('../../../api/executions', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../api/executions')>()),
@@ -44,7 +45,7 @@ function failedPhase(failure_classification: FailureClassification): PhaseExecut
   // the timeline colours each card from its phase, not from the run.
   return {
     failure_classification,
-    workflow_phase_id: 'phase-1',
+    phase_id: 'phase-1',
     name: 'review',
     status: 'failed',
     session_id: null,
@@ -77,6 +78,7 @@ function failedExecution(
     phases: [failedPhase(failure_classification)],
     total_phases: 1,
     completed_phases: 0,
+    phase_progress: { completed: 0, skipped: 0, possible: 0, remaining_possible: 0, percent: 100, display: '0 of 0' },
     total_input_tokens: 10,
     total_output_tokens: 20,
     total_cache_creation_tokens: 0,
@@ -97,7 +99,7 @@ beforeEach(() => {
 })
 
 async function renderPage(execution: ExecutionDetailResponse): Promise<HTMLElement> {
-  vi.mocked(getExecution).mockResolvedValue(execution)
+  vi.mocked(getExecution).mockResolvedValue(withPlanOfPhases(execution))
   const { container } = render(
     <MemoryRouter initialEntries={[`/executions/${EXECUTION_ID}`]}>
       <Routes>

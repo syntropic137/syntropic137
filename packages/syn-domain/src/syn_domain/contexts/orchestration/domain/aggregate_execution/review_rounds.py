@@ -79,6 +79,9 @@ class ReviewRecord:
     latest: ReviewVerdict | None = None
     #: The phase that reported ``latest``.
     latest_phase_id: str | None = None
+    #: Phases a certified review skipped, here or in a parent (#1681): a
+    #: resume passes over them rather than stopping at them as a gap.
+    skipped: set[str] = field(default_factory=set)
 
     def report(self, phase_id: str, verdict: ReviewVerdict | None) -> None:
         """A phase's agent run finished, saying ``verdict`` (or nothing)."""

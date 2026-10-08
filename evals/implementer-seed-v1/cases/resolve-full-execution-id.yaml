@@ -1,0 +1,30 @@
+id: resolve-full-execution-id
+source_pr: 1732
+source_issue: 1555
+commit: 0ba296accd68865662e0db5a8246e492b6b3557e
+fix_commit: d097ce3365ac87771867815aab2457bd041b18b7
+task: |
+  Commands depend on read models: cancel and resume fail while projections rebuild.
+
+  After an API OOM orphaned six executions, `syn execution resume <id>` returned
+  "Execution not found" for every one, because the execution list/detail
+  projections (`workflow_execution_details`) were rebuilding after a version bump
+  and the command resolved its id through them. Resume is the recovery path for
+  exactly this kind of incident, but it depends on the read model the incident
+  disturbed. Commands must not require projections: never treat a lagging
+  projection as authoritative.
+
+  What must hold, through the HTTP API (`/executions/{id}/cancel`, `/resume`, `/state`):
+  - A FULL execution id is cancelled, resumed and its state read while the
+    execution read model is empty and rebuilding, and with no subscription
+    service running at all.
+  - A PREFIX cannot be expanded while that read model rebuilds: answer 409, with
+    a detail that contains "rebuilding", the prefix itself and the words
+    "full execution id". Cancel still offers the prefix to the queued-start
+    withdrawal first. A rebuild of some other read model leaves an unknown
+    prefix a plain 404.
+  - An id with no stream in the event store is 404.
+  - If the event store cannot be read, `/state` is 503 (never 500) with a detail
+    containing "event store could not be read".
+hidden_tests:
+  - apps/syn-api/tests/test_1555_commands_resolve_from_store.py

@@ -12,7 +12,7 @@ import { api, unwrap } from "../client/typed.js";
 import type { components } from "../generated/api-types.js";
 import { print, printDim, printError } from "../output/console.js";
 import { style, CYAN, GREEN } from "../output/ansi.js";
-import { formatCostWithCoverage, formatStatus, formatTimestamp } from "../output/format.js";
+import { formatStatus, formatTimestamp } from "../output/format.js";
 import { Table } from "../output/table.js";
 
 type EvalCreated = components["schemas"]["EvalCreatedResponse"];
@@ -21,7 +21,7 @@ type Eval = components["schemas"]["EvalResponse"];
 type EvalList = components["schemas"]["EvalListResponse"];
 type EvalBaselineRepoRequest = components["schemas"]["EvalBaselineRepoRequest"];
 type EvalBaselineRepo = components["schemas"]["EvalBaselineRepoResponse"];
-type ExecutionList = components["schemas"]["ExecutionListResponse"];
+type EvalRunList = components["schemas"]["EvalRunListResponse"];
 
 const evalIdArg = [{ name: "eval-id", description: "The eval", required: true }] as const;
 
@@ -190,27 +190,31 @@ const runsCommand: CommandDef = {
     const evalId = requireEvalId(parsed, "runs");
     const page = parseInt((parsed.values["page"] as string | undefined) ?? "1", 10);
     const pageSize = parseInt((parsed.values["page-size"] as string | undefined) ?? "50", 10);
-    const data = unwrap<ExecutionList>(
+    const data = unwrap<EvalRunList>(
       await api.GET("/evals/{eval_id}/runs", {
         params: { path: { eval_id: evalId }, query: { page, page_size: pageSize } },
       }),
       "List eval runs",
     );
-    if (data.executions.length === 0) { printDim("No runs in this eval."); return; }
+    if (data.items.length === 0) { printDim("No runs in this eval."); return; }
 
     const table = new Table({ title: `Runs of ${evalId} (page ${page}, ${data.total} total)` });
     table.addColumn("ID", { style: CYAN });
     table.addColumn("Workflow");
+    table.addColumn("Models");
     table.addColumn("Status");
     table.addColumn("Started");
     table.addColumn("Cost", { align: "right" });
-    for (const ex of data.executions) {
+    table.addColumn("Verdict");
+    for (const run of data.items) {
       table.addRow(
-        ex.workflow_execution_id,
-        ex.workflow_name,
-        formatStatus(ex.status),
-        formatTimestamp(ex.started_at),
-        formatCostWithCoverage(ex.total_cost_usd, ex.unpriced_observation_count),
+        run.execution_id,
+        run.workflow_id,
+        run.models.map((m) => m.model).join(", ") || "-",
+        formatStatus(run.status),
+        formatTimestamp(run.started_at),
+        run.total_cost_display,
+        run.verdict ?? "-",
       );
     }
     table.print();

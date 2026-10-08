@@ -139,6 +139,8 @@ phases:
   content hash is already stored performs no upload.
 - A phase that declares skills fails if they cannot be installed. It never runs
   silently without them.
+- Pin a release tag, not a branch, and upgrade by changing the tag through an
+  eval: [skills versioning](skills-versioning.md).
 
 Worked example, including per-phase divergence:
 [`workflows/examples/starter-plugin/`](../workflows/examples/starter-plugin/README.md).

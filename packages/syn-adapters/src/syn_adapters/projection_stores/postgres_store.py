@@ -82,10 +82,14 @@ class PostgresProjectionStore:
             self._lean_tables.add(projection)
         from syn_adapters.projection_stores.postgres_page import (
             LIST_FILTER_INDEXES,
+            LIST_WINDOW_INDEXES,
             ensure_list_indexes,
         )
+        from syn_adapters.projection_stores.postgres_page_keys import ensure_instant_function
 
-        if projection in LIST_FILTER_INDEXES:
+        # Before the first page is read: a windowed page calls it.
+        await ensure_instant_function(pool)
+        if projection in LIST_FILTER_INDEXES or projection in LIST_WINDOW_INDEXES:
             # In the background: a CONCURRENTLY build waits out every open
             # transaction on the table, and no request should wait with it.
             build = asyncio.create_task(ensure_list_indexes(pool, projection, table_name))

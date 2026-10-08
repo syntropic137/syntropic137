@@ -31,9 +31,9 @@ def _served(model: str | None, provider: str | None = None) -> PhaseDefinitionRe
 def test_codex_alias_is_served_with_its_translation() -> None:
     served = _served("gpt-sol", provider="codex")
     assert served.model == "gpt-sol"
-    assert served.resolved_model == "gpt-6-sol"
+    assert served.resolved_model == "gpt-6.1-sol"
     assert served.resolution_basis is AliasResolutionBasis.TRANSLATED
-    assert served.model_display == "gpt-sol → gpt-6-sol"
+    assert served.model_display == "gpt-sol → gpt-6.1-sol"
 
 
 def test_claude_alias_is_served_with_its_expected_target() -> None:
@@ -55,7 +55,7 @@ def test_concrete_or_unknown_model_has_no_resolution(model: str) -> None:
 @pytest.mark.parametrize(
     ("provider", "expected_display", "expected_target"),
     [
-        ("codex", "default \u2192 gpt-sol \u2192 gpt-6-sol", "gpt-6-sol"),
+        ("codex", "default \u2192 gpt-sol \u2192 gpt-6.1-sol", "gpt-6.1-sol"),
         (None, "default \u2192 opus \u2192 claude-opus-5-5", "claude-opus-5-5"),
     ],
 )
@@ -72,9 +72,9 @@ def test_wrong_provider_model_shows_what_execution_runs_instead() -> None:
     """A legacy codex phase storing `opus` runs the codex default, not Opus."""
     served = _served("opus", provider="codex")
     assert served.model == "opus"
-    assert served.resolved_model == "gpt-6-sol"
+    assert served.resolved_model == "gpt-6.1-sol"
     assert served.resolution_basis is AliasResolutionBasis.TRANSLATED
-    assert served.model_display == "opus \u2192 gpt-sol \u2192 gpt-6-sol"
+    assert served.model_display == "opus \u2192 gpt-sol \u2192 gpt-6.1-sol"
 
 
 def test_display_agrees_with_the_execution_rule() -> None:

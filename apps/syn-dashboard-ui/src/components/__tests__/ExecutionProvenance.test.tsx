@@ -13,6 +13,7 @@ import { DispatchedTask } from '../provenance/DispatchedTask'
 import { PhaseStartPins } from '../provenance/PhaseStartPins'
 import { PhaseTimeline } from '../../pages/ExecutionDetail/PhaseTimeline'
 import type { ExecutionDetailResponse, PhaseStartConfig, StartPinsStatus } from '../../types'
+import { withPlanOfPhases } from '../../test/phasePlanFixtures'
 
 /**
  * Leading and trailing whitespace, indentation, a blank line and trailing
@@ -140,7 +141,7 @@ describe('PhaseTimeline carries each phase its own pins', () => {
     status: StartPinsStatus,
   ): ExecutionDetailResponse['phases'][number] {
     return {
-      workflow_phase_id: id,
+      phase_id: id,
       name: id,
       status: 'completed',
       session_id: null,
@@ -177,6 +178,7 @@ describe('PhaseTimeline carries each phase its own pins', () => {
       ],
       total_phases: 3,
       completed_phases: 3,
+      phase_progress: { completed: 3, skipped: 0, possible: 3, remaining_possible: 0, percent: 100, display: '3 of 3' },
       total_input_tokens: 0,
       total_output_tokens: 0,
       total_cache_creation_tokens: 0,
@@ -188,7 +190,7 @@ describe('PhaseTimeline carries each phase its own pins', () => {
     } as unknown as ExecutionDetailResponse // test fixture: only the fields the timeline reads
     const { container } = render(
       <MemoryRouter>
-        <PhaseTimeline execution={execution} now={0} />
+        <PhaseTimeline execution={withPlanOfPhases(execution)} now={0} />
       </MemoryRouter>,
     )
     const text = container.textContent ?? ''
