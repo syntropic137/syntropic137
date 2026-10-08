@@ -624,17 +624,27 @@ def _yaml_phase_lines(phase: PhaseDefinitionResponse) -> list[str]:
     # truthy-only test would drop an explicit `false` and reinstall it as
     # `true`, which is the same laundering in the opposite direction. So the
     # guard compares against the default.
-    if not phase.clone_repos:
-        lines.append("    clone_repos: false")
-    if not phase.delivers_repo_changes:
-        lines.append("    delivers_repo_changes: false")
-    # PC-116. Defaults FALSE, so here the default is the absent one.
-    if phase.requires_verdict:
-        lines.append("    requires_verdict: true")
+    lines.extend(_yaml_declaration_lines(phase))
     lines.extend(_yaml_agent_lines(phase))
     lines.extend(_yaml_fallback_agent_lines(phase))
     lines.extend(_yaml_ref_lines("claude_plugins", phase.claude_plugins))
     lines.extend(_yaml_ref_lines("skills", phase.skills))
+    return lines
+
+
+def _yaml_declaration_lines(phase: PhaseDefinitionResponse) -> list[str]:
+    """The phase's boolean declarations, each emitted only when it differs from its default.
+
+    `clone_repos` and `delivers_repo_changes` default True and `requires_verdict`
+    (PC-116) defaults False, so "differs" is a different value for each.
+    """
+    lines: list[str] = []
+    if not phase.clone_repos:
+        lines.append("    clone_repos: false")
+    if not phase.delivers_repo_changes:
+        lines.append("    delivers_repo_changes: false")
+    if phase.requires_verdict:
+        lines.append("    requires_verdict: true")
     return lines
 
 
