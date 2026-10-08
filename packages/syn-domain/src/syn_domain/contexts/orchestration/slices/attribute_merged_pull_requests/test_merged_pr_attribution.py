@@ -13,13 +13,21 @@ from event_sourcing.stores.memory_checkpoint import MemoryCheckpointStore
 from syn_adapters.projection_stores import InMemoryProjectionStore
 from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
     RecordPullRequestMergeCommand,
+    StartExecutionCommand,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.lifecycle_events import (
     merge_recorded_event,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     BranchObservation,
+    PhaseDefinition,
     ResumeOrigin,
+)
+from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
+    WorkflowExecutionAggregate,
+)
+from syn_domain.contexts.orchestration.domain.events.PullRequestMergeRecordedEvent import (
+    PullRequestMergeRecordedEvent,
 )
 from syn_domain.contexts.orchestration.domain.events.WorkflowCompletedEvent import (
     WorkflowCompletedEvent,
@@ -33,6 +41,7 @@ from syn_domain.contexts.orchestration.domain.events.WorkflowFailedEvent import 
 from syn_domain.contexts.orchestration.slices.attribute_merged_pull_requests import (
     MergedPullRequestAttributionProcessManager,
     PullRequestMergeState,
+    RecordPullRequestMergeHandler,
 )
 from syn_domain.contexts.orchestration.slices.scorecard import (
     ExecutionSpend,
@@ -212,6 +221,8 @@ async def test_a_merged_pr_costs_its_failed_run_resume_and_reverify_once_each() 
 
     assert await manager.process_pending() == 0  # recorded once, however often offered
     assert sorted(set(forge.calls)) == [7, 8]
+    [merged] = await scorecard.merged_pull_requests_for_days(["2026-10-07"])
+    assert (merged.pull_request, sorted(merged.execution_ids)) == (7, ["a", "b", "c"])
     assert await _score(scorecard) == (1, Decimal(7))  # 1 + 2 + 4; d's unmerged 8 and e excluded
 
 
@@ -236,3 +247,53 @@ async def test_replay_rebuilds_identical_numbers_without_asking_github() -> None
 
     assert await _score(rebuilt) == live == (1, Decimal(7))
     assert replay_recorder.log == []
+
+
+@dataclass
+class _Repository:
+    """Saves an aggregate's events and loads it back by replaying them."""
+
+    streams: dict[str, list[EventEnvelope[DomainEvent]]] = field(default_factory=dict)
+
+    async def get_by_id(self, aggregate_id: str) -> WorkflowExecutionAggregate | None:
+        if aggregate_id not in self.streams:
+            return None
+        aggregate = WorkflowExecutionAggregate()
+        aggregate.rehydrate(list(self.streams[aggregate_id]))
+        return aggregate
+
+    async def save(self, aggregate: WorkflowExecutionAggregate) -> None:
+        self.streams.setdefault(str(aggregate.id), []).extend(aggregate.get_uncommitted_events())
+        aggregate.mark_events_as_committed()
+
+
+async def test_the_aggregate_records_a_contributor_once_per_pr() -> None:
+    """Through the real handler: a retried live pass cannot record the same merge twice."""
+    aggregate = WorkflowExecutionAggregate()
+    aggregate.start_execution(
+        StartExecutionCommand(
+            execution_id="a",
+            workflow_id="wf",
+            workflow_name="implement",
+            total_phases=1,
+            inputs={},
+            phase_definitions=[PhaseDefinition(phase_id="verify", name="Verify", order=1)],
+        )
+    )
+    repository = _Repository()
+    await repository.save(aggregate)
+    handler = RecordPullRequestMergeHandler(repository)  # type: ignore[arg-type]
+
+    await handler.record_merge("a", REPO, 7, _at(10))
+    await handler.record_merge("a", REPO, 7, _at(10))  # the pass that crashed before its save
+    await handler.record_merge("a", REPO, 9, _at(11))
+
+    merges = [
+        e.event
+        for e in repository.streams["a"]
+        if isinstance(e.event, PullRequestMergeRecordedEvent)
+    ]
+    assert [(m.pull_request, m.execution_id, m.workflow_id) for m in merges] == [
+        (7, "a", "wf"),
+        (9, "a", "wf"),
+    ]
