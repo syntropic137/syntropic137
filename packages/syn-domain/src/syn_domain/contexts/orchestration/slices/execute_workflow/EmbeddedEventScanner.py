@@ -15,7 +15,10 @@ from typing import TYPE_CHECKING
 # Any: dict[str, Any] used for JSON data from parse_jsonl_line() (system boundary — external CLI JSONL)
 from agentic_events import enrich_event, parse_jsonl_line
 
-from syn_domain.contexts.orchestration.slices.execute_workflow.phase_push import observe_push
+from syn_domain.contexts.orchestration.slices.execute_workflow.phase_push import (
+    observe_push,
+    push_operation,
+)
 from syn_shared.events import VALID_EVENT_TYPES
 
 if TYPE_CHECKING:
@@ -52,7 +55,8 @@ class EmbeddedEventScanner:
 
     async def scan_and_record(self, tool_content: str, tool_name: str) -> None:
         """Scan tool output for embedded JSONL and record valid events."""
-        for tl in tool_content.splitlines():
+        lines = tool_content.splitlines()
+        for index, tl in enumerate(lines):
             tl = tl.strip()
             if not tl:
                 continue
@@ -69,7 +73,7 @@ class EmbeddedEventScanner:
                 phase_id=self._phase_id,
             )
             await self._collector.record_embedded_event(et, enriched)
-            await observe_push(embedded, tool_content, self._on_push)
+            await observe_push(embedded, push_operation(lines, index), self._on_push)
             logger.info(
                 "Git hook event from tool output: %s (tool=%s)",
                 et,

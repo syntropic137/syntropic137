@@ -50,6 +50,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
     StartPhaseCommand,
     WorkflowExecutionAggregate,
 )
+from syn_domain.contexts.orchestration.domain.events.PhaseCommitPushedEvent import (
+    PhaseCommitPushedEvent,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.EmbeddedEventScanner import (
     EmbeddedEventScanner,
 )
@@ -423,6 +426,82 @@ class TestOnlyAPushGitAcceptedToTheBranchIsTheRuns:
         assert pins.checkout_for("fix").branches[REPO] == BRANCH
         assert pins.abandoned_branches == []
         assert OWN_UNVERIFIED_PUSH in _told(pins)
+
+
+class TestEachHookIsConfirmedOnlyByItsOwnPush:
+    """Several pushes in one tool result: git's line for one confirms no other's hook.
+
+    The phase created BRANCH at FIRST_PUSH, someone else then moved it to
+    FOREIGN, and the phase fetched that head and pushed `HEAD:unrelated`,
+    which origin rejected. The second hook names BRANCH at FOREIGN, and the
+    first push's `HEAD -> BRANCH` creation line is in the same output.
+    """
+
+    BATCH = (
+        f"{_hook_line(FIRST_PUSH)}\nTo github.com:acme/widgets.git\n"
+        f" * [new branch]      HEAD -> {BRANCH}\n"
+        f"{_hook_line(FOREIGN)}\nTo github.com:acme/widgets.git\n"
+        f" ! [remote rejected] HEAD -> {UNRELATED} (pre-receive hook declined)\n"
+        "error: failed to push some refs to 'github.com:acme/widgets.git'\n"
+    )
+
+    async def test_only_the_accepted_push_is_recorded_and_the_foreign_head_is_refused(
+        self,
+    ) -> None:
+        store = _Store()
+        await _orphaned_mid_fix(store, outputs=(self.BATCH,))
+
+        recorded = [
+            e.event.sha for e in store.events[PARENT] if isinstance(e.event, PhaseCommitPushedEvent)
+        ]
+        assert recorded == [FIRST_PUSH]
+
+        pins = await _resume(store, forge_head=FOREIGN)
+
+        checkout = pins.checkout_for("fix")
+        assert pins.continued_branches == []
+        assert REPO not in checkout.branches
+        assert checkout.commits[REPO] == VERIFIED
+        [abandoned] = pins.abandoned_branches
+        assert FOREIGN in abandoned.reason
+        assert OWN_UNVERIFIED_PUSH not in _told(pins)
+
+    async def test_the_accepted_push_in_the_batch_is_still_the_runs_own(self) -> None:
+        store = _Store()
+        await _orphaned_mid_fix(store, outputs=(self.BATCH,))
+
+        pins = await _resume(store, forge_head=FIRST_PUSH)
+
+        assert pins.checkout_for("fix").commits[REPO] == FIRST_PUSH
+        assert OWN_UNVERIFIED_PUSH in _told(pins)
+
+    async def test_two_pushes_after_one_hook_line_confirm_neither(self) -> None:
+        """`git push --no-verify` prints no hook line, so two `To` blocks follow one hook.
+
+        The hook's own `git push -q` printed nothing; two hookless pushes
+        followed it. At most one of them is the hook's, and nothing says which.
+        """
+        pins = await TestOnlyAPushGitAcceptedToTheBranchIsTheRuns()._resumed_after(
+            f"{_hook_line(FOREIGN)}\n"
+            "To github.com:acme/widgets.git\n"
+            f" * [new branch]      HEAD -> {BRANCH}\n"
+            "To github.com:acme/widgets.git\n"
+            f" ! [remote rejected] HEAD -> {UNRELATED} (pre-receive hook declined)\n"
+        )
+
+        assert pins.continued_branches == []
+        assert pins.checkout_for("fix").commits[REPO] == VERIFIED
+        assert _told(pins) == ""
+
+    async def test_a_push_to_another_repository_confirms_nothing_here(self) -> None:
+        pins = await TestOnlyAPushGitAcceptedToTheBranchIsTheRuns()._resumed_after(
+            f"{_hook_line(FOREIGN)}\nTo github.com:acme/gadgets.git\n"
+            f" * [new branch]      HEAD -> {BRANCH}\n"
+        )
+
+        assert pins.continued_branches == []
+        assert pins.checkout_for("fix").commits[REPO] == VERIFIED
+        assert _told(pins) == ""
 
 
 class TestNoPushIsUnchanged:
