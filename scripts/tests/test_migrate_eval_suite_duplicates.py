@@ -39,6 +39,8 @@ class _Api:
         }
         self.members = {"dup-a": ["run-1"], "dup-b": ["run-2"]}
         self.writes: list[tuple[str, str]] = []
+        self.fail_attach = 0
+        """Refuse this many attaches with a 503 (the process dying between requests)."""
 
     def handle(self, request: httpx.Request) -> httpx.Response:
         path, method = request.url.path, request.method
@@ -53,6 +55,10 @@ class _Api:
             self.evals["stable"] = _eval("stable", body["tags"], _CASE.commit)
             self.members["stable"] = []
             return httpx.Response(201, json=self.evals["stable"])
+        if method == "GET" and path.startswith("/executions/"):
+            rid = path.split("/")[2]
+            owner = next((e for e, runs in self.members.items() if rid in runs), None)
+            return httpx.Response(200, json={"eval": None if owner is None else {"eval_id": owner}})
         if method == "GET" and path.endswith("/runs"):
             ids = self.members[path.split("/")[2]]
             items = [{"execution_id": i} for i in ids]
@@ -61,6 +67,9 @@ class _Api:
             self.members[request.url.params["eval_id"]].remove(path.split("/")[2])
             return httpx.Response(200, json={})
         if method == "POST" and path.endswith("/eval"):
+            if self.fail_attach:
+                self.fail_attach -= 1
+                return httpx.Response(503, json={"detail": "gone"})
             self.members[json.loads(request.content)["eval_id"]].append(path.split("/")[2])
             return httpx.Response(200, json={})
         if method == "POST" and path.endswith("/archive"):
@@ -84,12 +93,53 @@ def test_dry_run_changes_nothing_and_says_what_it_would_do() -> None:
 
 
 @pytest.mark.unit
-def test_duplicates_fold_into_one_stable_eval_and_are_archived() -> None:
+def test_duplicates_fold_into_one_stable_eval_and_are_archived(tmp_path: Path) -> None:
     api = _Api()
 
-    migrate(_LOADED, api.client(), dry_run=False)
+    migrate(_LOADED, api.client(), dry_run=False, journal=tmp_path / "journal.jsonl")
 
     assert set(api.evals) == {"stable"}
     assert api.evals["stable"]["tags"] == [_LOADED.suite.suite_tag, _CASE.tag]
     assert sorted(api.members["stable"]) == ["run-1", "run-2"]
     assert migrate(_LOADED, api.client(), dry_run=True) == []
+
+
+@pytest.mark.unit
+def test_a_real_run_refuses_to_start_without_a_journal() -> None:
+    with pytest.raises(ValueError, match="journal"):
+        migrate(_LOADED, _Api().client(), dry_run=False)
+
+
+@pytest.mark.unit
+def test_a_move_cut_between_detach_and_attach_is_finished_on_the_next_run(
+    tmp_path: Path,
+) -> None:
+    """The failing scenario: run-1 detached, attach lost, so no eval lists it."""
+    api = _Api()
+    journal = tmp_path / "journal.jsonl"
+    api.fail_attach = 1
+
+    with pytest.raises(RuntimeError, match="attach run-1"):
+        migrate(_LOADED, api.client(), dry_run=False, journal=journal)
+    assert all("run-1" not in runs for runs in api.members.values())
+    assert "dup-a" in api.evals
+
+    lines = migrate(_LOADED, api.client(), dry_run=False, journal=journal)
+
+    assert "recover: attach run-1 -> stable" in lines
+    assert set(api.evals) == {"stable"}
+    assert sorted(api.members["stable"]) == ["run-1", "run-2"]
+
+
+@pytest.mark.unit
+def test_a_stable_eval_pinned_elsewhere_is_never_folded_into(tmp_path: Path) -> None:
+    api = _Api()
+    other = "f" * 40
+    api.evals["stable"] = _eval("stable", [_LOADED.suite.suite_tag, _CASE.tag], other)
+    api.members["stable"] = []
+
+    lines = migrate(_LOADED, api.client(), dry_run=False, journal=tmp_path / "journal.jsonl")
+
+    assert api.writes == []
+    assert any(line.startswith(f"{_CASE.id}: SKIP, stable eval stable pins") for line in lines)
+    assert api.members == {"dup-a": ["run-1"], "dup-b": ["run-2"], "stable": []}

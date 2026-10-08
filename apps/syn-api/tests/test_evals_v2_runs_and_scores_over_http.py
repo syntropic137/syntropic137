@@ -30,6 +30,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.commands impor
 )
 from syn_domain.contexts.orchestration.domain.read_models.execution_cost import ExecutionCost
 from syn_domain.testing.fake_revision_resolver import FakeRevisionResolver
+from syn_shared.observed_model import UNKNOWN_MODEL_KEY
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Iterator
@@ -66,6 +67,7 @@ class _Lane2:
     def __init__(self) -> None:
         self.observed: dict[str, str] = {}
         self.costs: dict[str, Decimal] = {}
+        self.by_phase: dict[str, dict[str, dict[str, Decimal]]] = {}
 
     async def get_session_cost(self, session_id: str) -> SessionCost | None:
         model = self.observed.get(session_id)
@@ -80,7 +82,11 @@ class _Lane2:
         if cost is None:
             return None
         return ExecutionCost(
-            execution_id=execution_id, total_cost_usd=cost, input_tokens=10, output_tokens=10
+            execution_id=execution_id,
+            total_cost_usd=cost,
+            input_tokens=10,
+            output_tokens=10,
+            models_by_phase=self.by_phase.get(execution_id, {}),
         )
 
 
@@ -297,6 +303,45 @@ class TestRuns:
         assert whole["total"] == 5
         paged = [row["execution_id"] for page in pages for row in page["items"]]
         assert paged == [row["execution_id"] for row in whole["items"]]
+
+
+class TestDelegation:
+    async def test_a_delegate_s_model_is_part_of_the_run_and_its_variant(
+        self, client: AsyncClient, lane2: _Lane2
+    ) -> None:
+        """A phase led by one model that delegated to another RAN both.
+
+        Grouping it with a run that used only the leader would pool two
+        different treatments, so the delegate's model (from the phase's cost
+        split) is in the run's models and in its variant.
+        """
+        eval_id = await _create(client)
+        await _run(lane2, eval_id, "solo", "wf-a", OPUS, "1", "2026-10-01T00:00:00+00:00")
+        await _run(lane2, eval_id, "led", "wf-a", OPUS, "2", "2026-10-02T00:00:00+00:00")
+        lane2.by_phase["led"] = {
+            "verify": {
+                OPUS: Decimal("1.5"),
+                SONNET: Decimal("0.5"),
+                UNKNOWN_MODEL_KEY: Decimal("0.1"),
+            }
+        }
+        await _catch_up()
+
+        runs = {
+            r["execution_id"]: r
+            for r in (await client.get(f"/evals/{eval_id}/runs")).json()["items"]
+        }
+        shown = (await client.get(f"/evals/{eval_id}")).json()
+
+        assert runs["led"]["models"] == [
+            {"phase_id": "verify", "model": OPUS},
+            {"phase_id": "verify", "model": SONNET},
+        ]
+        assert runs["solo"]["models"] == [{"phase_id": "verify", "model": OPUS}]
+        assert sorted(tuple(v["models"]) for v in shown["variants"]) == [
+            (OPUS,),
+            tuple(sorted((OPUS, SONNET))),
+        ]
 
 
 class TestSummary:
