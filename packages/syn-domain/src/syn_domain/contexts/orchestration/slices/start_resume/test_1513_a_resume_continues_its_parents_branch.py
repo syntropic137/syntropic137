@@ -586,3 +586,44 @@ class TestABranchOrPrThatIsGoneStartsFreshVisibly:
         _pinned_and_fresh(child, world)
         (abandoned,) = _child_start(executions).abandoned_branches or []
         assert "could not be asked" in abandoned.reason
+
+
+class TestASuccessfulRunRecordsThePrItOpened:
+    async def test_the_completed_phase_records_b_and_its_open_pr(self, world: _World) -> None:
+        """#1728: a run that OPENS a PR and succeeds is linked to it by its PhaseCompleted.
+
+        RED before the fix: only a failure observed its branches, so the run
+        that created a merged PR was no contributor to it unless it failed.
+        """
+        executions = _Executions()
+
+        async def implement_pushes(phase_id: str, _prompt: str, _w: ManagedWorkspace) -> None:
+            if phase_id == "implement":
+                world.push_and_open_pr()
+
+        agent = _Acts(
+            FakeAgentExecutionHandler.success(produces=A_DELIVERABLE), act=implement_pushes
+        )
+        result = await _wired(executions, agent, world).run(
+            workflow_id=WORKFLOW,
+            workflow_name="Open a PR",
+            phases=[_phase(p, i + 1) for i, p in enumerate(PHASE_IDS)],
+            inputs={"task": "open one"},
+            execution_id=PARENT,
+            repos=[RepositoryRef.from_slug(REPO)],
+            source_commits=[SourceCommit(repository=REPO, sha=PINNED)],
+        )
+        assert result.status == "completed", result
+
+        observed = {
+            json.loads(p)["phase_id"]: json.loads(p)["observed_branches"]
+            for m, p in executions.written[PARENT]
+            if m.event_type == "PhaseCompleted"
+        }
+        assert observed["research"] == []  # looked, and nothing moved
+        (opened,) = observed["implement"]
+        assert (opened["repo"], opened["branch"], opened["pull_request"]) == (
+            "pinned-repo",
+            BRANCH,
+            PR,
+        )
