@@ -88,12 +88,15 @@ Over the API the same record is on the parent's detail response under
 ## Resume is not fork
 
 Resume continues work that did **not finish**. It is not a way to re-run a
-workflow from an arbitrary point, and it is not available on a run that
-succeeded.
+workflow from an arbitrary point. It is not available on a run that completed
+cleanly; the one `completed` run that can be resumed is one that ended with
+unresolved findings (`review_verdict: blocked`), and it resumes at its repair
+point ([see below](#resuming-a-run-with-unresolved-findings)).
 
 | You want | How | Status |
 | --- | --- | --- |
 | Pick up a **failed or interrupted** run where it stopped | `syn execution resume <id>` | Available |
+| Run another repair round on a **completed** run with unresolved findings | `syn execution resume <id> --acknowledge-external-effects` | Available |
 | Start a new run from a chosen point of a **completed** run, the way a git branch is taken from a commit | - | **Not built.** Reserved as *fork* |
 | Run the same workflow again from scratch | `syn workflow run <name>` | Available |
 
@@ -111,7 +114,10 @@ what went wrong survives.
 ## What the child inherits
 
 The resume inherits the **contiguous** run of phases that completed, in order,
-stopping at the first one that did not:
+stopping at the first one that did not. A `completed` run with unresolved
+findings is the exception: every phase completed, so the child inherits only the
+phases before its repair point ([see below](#resuming-a-run-with-unresolved-findings)).
+Either way:
 
 - those phases are never re-run
 - their artifacts are handed to the resumed phase, so it reads its
@@ -127,6 +133,12 @@ stopping at the first one that did not:
   (#1460). A phase whose artifacts resolve to **nothing** is caught and refuses
   the resume.
 </Callout>
+
+Phases the parent **skipped** because a review certified (see
+[Phase Plan, Progress and Repair Rounds](/docs/guide/execution-progress)) are not
+a gap. The child inherits them as skipped (`inherited_skipped_phase_ids`): they
+are not run and not counted as work still to do. In the child's `phase_plan`,
+inherited phases read `inherited` and inherited skips read `skipped`.
 
 A phase that completed *after* a gap is deliberately not inherited. Its output
 was built on a predecessor the resume is about to produce again, so carrying it
@@ -185,12 +197,14 @@ syn execution resume exec-1234 --acknowledge-external-effects
 | `failed` | Yes, if a phase is left unfinished |
 | `interrupted` | Yes, if a phase is left unfinished |
 | `cancelled` | Only with `--override-cancellation` |
-| `completed` | No - nothing is left to run |
+| `completed` | Only when it ended with **unresolved findings** (`review_verdict: blocked`); see below. Otherwise no - nothing is left to run |
 | `running` | No - resuming would put two runs on one piece of work |
 
-Three conditions apply whatever the status. A run with **no unfinished phase** has
-nothing to resume and is refused. A run whose resumed phase had already started
-needs `--acknowledge-external-effects`. And a parent that pinned no phase
+Three conditions apply whatever the status. A run with **nothing to resume** is
+refused: a `failed` or `interrupted` run resumes at its first unfinished phase, so
+one with no unfinished phase is refused, while a `completed` run with unresolved
+findings has no unfinished phase and resumes at its repair point instead. A run
+whose resumed phase had already started needs `--acknowledge-external-effects`. And a parent that pinned no phase
 configuration - an execution from before that was recorded - cannot be resumed at
 all, because what the child would run could then only be read from the current
 workflow template.
@@ -219,6 +233,63 @@ A transient one is retried up to the attempt limit and then settles as failed wi
 the reason; a refusal the domain makes settles as failed immediately; and the
 child's own start event settles the record as started (#1463). So a child that
 never appears has a recorded reason rather than an indefinite retry.
+
+## Resuming a run with unresolved findings
+
+A workflow with bounded repair rounds (such as `sdlc-implement-v3`) can
+**complete** with `review_verdict: blocked`: every round ran and the last review
+still blocked the change. There is no unfinished phase, but the run is still
+resumable, at its **repair point**: the fix phase of the last round that ran
+(`fix_3` in `sdlc-implement-v3`).
+
+- The child inherits every phase before the repair point and re-runs that
+  round's fix, its review, and everything after (`finalize_pr`).
+- The repair point is decided by the platform from the parent's recorded review
+  verdicts, never by the caller.
+- The fix phase already ran and may have pushed, so the resume needs
+  `--acknowledge-external-effects`.
+- A `completed` run that certified, or that nothing reviewed, has nothing to
+  resume and is refused.
+
+```bash
+syn execution resume exec-43f430469266 --acknowledge-external-effects
+```
+
+## Queued resumes
+
+A resumed child starts like any other execution: it claims a slot from the same
+execution budget (`SYN_EXECUTION_MAX_CONCURRENT`) as direct starts and trigger
+dispatches. When every slot is taken, the child waits, first come first served.
+While it waits, `syn execution show <child-id>` and `GET /executions/{id}`
+report `status: queued` (or `starting` once it holds a slot) instead of 404,
+with a `start_queue` object: `path` (`resume`), `position` (1 is next),
+`running`, `waiting`, `limit`, `queued_at`, and `position_display`, for example
+`queued 2 of 3 (4/4 running)`. `queued` is not an execution status: the child has no event
+stream yet. A queued start survives an API restart. Maintenance mode also holds
+it: a resume admitted before a pause starts after admission reopens.
+
+## Cancelling a queued start
+
+A direct start (`syn workflow run`, `POST /workflows/{id}/execute`) that is
+still waiting for a slot can be cancelled the same way as a running execution:
+
+```bash
+syn control cancel <execution-id> --force --reason "no longer needed"
+# or
+curl -X POST "$SYN_API_URL/api/v1/executions/<execution-id>/cancel" \
+  -u "${SYN_API_USER:-admin}:$SYN_API_PASSWORD" \
+  -H 'Content-Type: application/json' -d '{"reason": "no longer needed"}'
+```
+
+- The start's request is **withdrawn**, durably, before the answer returns. It
+  never runs: not when a slot frees, and not after an API restart.
+- The response (`ControlResponse`) has `success: true`, `state: "cancelled"` and
+  `message: "Withdrawn before it started: it will not run"`. Afterwards
+  `syn execution show <execution-id>` reports it as `cancelled`.
+- If the start won the race and began before the withdrawal landed, it is
+  cancelled like any running execution and the response is the ordinary cancel
+  response, never "will not run".
+- `syn control cancel` refuses without `--force` (or `-f`).
 
 ## Over the API
 

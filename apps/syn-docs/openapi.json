@@ -789,6 +789,24 @@
             "description": "Keep only executions currently in this eval: an eval's runs (#967). Matched exactly, never as a prefix."
           },
           {
+            "name": "in_eval",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "true keeps only executions that are currently a run of some eval; false keeps only executions in no eval. Omit for both.",
+              "title": "In Eval"
+            },
+            "description": "true keeps only executions that are currently a run of some eval; false keeps only executions in no eval. Omit for both."
+          },
+          {
             "name": "page",
             "in": "query",
             "required": false,
@@ -2495,7 +2513,7 @@
           "evals"
         ],
         "summary": "List Eval Runs Endpoint",
-        "description": "The executions currently in an eval: the execution list, filtered by eval.\n\nAn eval with no runs, or one the read model has not caught up with, is an\nempty page rather than a 404.",
+        "description": "The executions currently in an eval, newest first, each with what it ran and its score.\n\nThe eval id may be a unique prefix, as on `GET /evals/{eval_id}`; an id\nmatching no eval is a 404. An eval with no runs is an empty page.",
         "operationId": "list_eval_runs_endpoint_evals__eval_id__runs_get",
         "parameters": [
           {
@@ -2555,13 +2573,74 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ExecutionListResponse"
+                  "$ref": "#/components/schemas/EvalRunListResponse"
                 }
               }
             }
           },
           "404": {
             "description": "No eval has this id in the eval read model (it may still be catching up)"
+          },
+          "422": {
+            "description": "The eval id is not a valid eval id"
+          }
+        }
+      }
+    },
+    "/evals/{eval_id}/runs/{execution_id}/score": {
+      "post": {
+        "tags": [
+          "evals"
+        ],
+        "summary": "Score Eval Run Endpoint",
+        "description": "Record a verdict on one run. Re-scoring replaces the run's current score.\n\nAllowed on frozen and archived evals: judging a run is not editing the eval.",
+        "operationId": "score_eval_run_endpoint_evals__eval_id__runs__execution_id__score_post",
+        "parameters": [
+          {
+            "name": "eval_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Eval Id"
+            }
+          },
+          {
+            "name": "execution_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Execution Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EvalRunScoreRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalRunScoreResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No eval has this id"
+          },
+          "409": {
+            "description": "The execution is not currently a run of this eval"
           },
           "422": {
             "description": "The eval id is not a valid eval id"
@@ -9717,6 +9796,8 @@
           "projection_catchup",
           "projection_stalled",
           "projection_dropped_event",
+          "projection_held",
+          "subscription_halted",
           "event_poller",
           "check_run_poller",
           "anthropic_api_key",
@@ -10170,6 +10251,55 @@
             },
             "type": "object",
             "title": "Run Status Counts"
+          },
+          "scored_count": {
+            "type": "integer",
+            "title": "Scored Count",
+            "default": 0
+          },
+          "pass_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pass Rate"
+          },
+          "pass_rate_display": {
+            "type": "string",
+            "title": "Pass Rate Display",
+            "default": "\u2014"
+          },
+          "last_run_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Run At"
+          },
+          "last_verdict": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Verdict"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "variants": {
+            "items": {
+              "$ref": "#/components/schemas/EvalVariantResponse"
+            },
+            "type": "array",
+            "title": "Variants"
           }
         },
         "type": "object",
@@ -10189,6 +10319,419 @@
         ],
         "title": "EvalResponse",
         "description": "An eval as the eval read model holds it, with its run tally (#967)."
+      },
+      "EvalRunListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/EvalRunResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "page_size": {
+            "type": "integer",
+            "title": "Page Size"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "page_size"
+        ],
+        "title": "EvalRunListResponse",
+        "description": "One page of an eval's current runs, newest first (Evals v2)."
+      },
+      "EvalRunModelResponse": {
+        "properties": {
+          "phase_id": {
+            "type": "string",
+            "title": "Phase Id"
+          },
+          "model": {
+            "type": "string",
+            "title": "Model"
+          }
+        },
+        "type": "object",
+        "required": [
+          "phase_id",
+          "model"
+        ],
+        "title": "EvalRunModelResponse",
+        "description": "The model one phase of a run ACTUALLY ran, as its harness reported it."
+      },
+      "EvalRunResponse": {
+        "properties": {
+          "execution_id": {
+            "type": "string",
+            "title": "Execution Id"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "workflow_id": {
+            "type": "string",
+            "title": "Workflow Id"
+          },
+          "workflow_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workflow Version"
+          },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/EvalRunModelResponse"
+            },
+            "type": "array",
+            "title": "Models"
+          },
+          "total_cost_usd": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Cost Usd"
+          },
+          "total_cost_display": {
+            "type": "string",
+            "title": "Total Cost Display"
+          },
+          "duration_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Seconds"
+          },
+          "duration_display": {
+            "type": "string",
+            "title": "Duration Display"
+          },
+          "verdict": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Verdict"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          },
+          "evidence_excerpt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evidence Excerpt"
+          },
+          "scorer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scorer"
+          },
+          "scorer_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scorer Version"
+          },
+          "scored_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scored At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "execution_id",
+          "started_at",
+          "completed_at",
+          "status",
+          "workflow_id",
+          "models",
+          "total_cost_usd",
+          "total_cost_display",
+          "duration_seconds",
+          "duration_display",
+          "verdict",
+          "score",
+          "evidence_excerpt",
+          "scorer",
+          "scorer_version",
+          "scored_at"
+        ],
+        "title": "EvalRunResponse",
+        "description": "One run of an eval: one data point of how the eval changes over time (Evals v2)."
+      },
+      "EvalRunScoreRequest": {
+        "properties": {
+          "verdict": {
+            "$ref": "#/components/schemas/Verdict"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          },
+          "evidence": {
+            "type": "string",
+            "title": "Evidence",
+            "default": ""
+          },
+          "scorer": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Scorer"
+          },
+          "scorer_version": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Scorer Version"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "verdict",
+          "scorer",
+          "scorer_version"
+        ],
+        "title": "EvalRunScoreRequest",
+        "description": "A scorer's verdict on one run of an eval. Re-scoring replaces the current score."
+      },
+      "EvalRunScoreResponse": {
+        "properties": {
+          "eval_id": {
+            "type": "string",
+            "title": "Eval Id"
+          },
+          "execution_id": {
+            "type": "string",
+            "title": "Execution Id"
+          },
+          "verdict": {
+            "$ref": "#/components/schemas/Verdict"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          },
+          "evidence": {
+            "type": "string",
+            "title": "Evidence"
+          },
+          "scorer": {
+            "type": "string",
+            "title": "Scorer"
+          },
+          "scorer_version": {
+            "type": "string",
+            "title": "Scorer Version"
+          },
+          "scored_at": {
+            "type": "string",
+            "title": "Scored At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "eval_id",
+          "execution_id",
+          "verdict",
+          "score",
+          "evidence",
+          "scorer",
+          "scorer_version",
+          "scored_at"
+        ],
+        "title": "EvalRunScoreResponse",
+        "description": "The run's score as recorded (Evals v2)."
+      },
+      "EvalVariantResponse": {
+        "properties": {
+          "workflow_id": {
+            "type": "string",
+            "title": "Workflow Id"
+          },
+          "workflow_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workflow Version"
+          },
+          "models": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Models"
+          },
+          "run_count": {
+            "type": "integer",
+            "title": "Run Count"
+          },
+          "pass_count": {
+            "type": "integer",
+            "title": "Pass Count"
+          },
+          "pass_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pass Rate"
+          },
+          "pass_rate_display": {
+            "type": "string",
+            "title": "Pass Rate Display"
+          },
+          "avg_cost_usd": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Cost Usd"
+          },
+          "avg_cost_display": {
+            "type": "string",
+            "title": "Avg Cost Display"
+          },
+          "last_run_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Run At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "workflow_id",
+          "models",
+          "run_count",
+          "pass_count",
+          "pass_rate",
+          "pass_rate_display",
+          "avg_cost_usd",
+          "avg_cost_display",
+          "last_run_at"
+        ],
+        "title": "EvalVariantResponse",
+        "description": "Every run of an eval with the same workflow, workflow version and OBSERVED models.\n\n(Evals v2.) Two versions of one workflow are two variants: an edit between\nruns is a different treatment, and pooling them would hide its effect."
       },
       "EventListResponse": {
         "properties": {
@@ -10462,6 +11005,49 @@
         "title": "ExecuteWorkflowResponse",
         "description": "Response after starting workflow execution."
       },
+      "ExecutionBudgetInfo": {
+        "properties": {
+          "running": {
+            "type": "integer",
+            "title": "Running"
+          },
+          "queued": {
+            "type": "integer",
+            "title": "Queued"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          },
+          "admission_paused": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Admission Paused"
+          },
+          "display": {
+            "type": "string",
+            "title": "Display",
+            "description": "e.g. '2 running / 3 queued / cap 4'.",
+            "readOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "running",
+          "queued",
+          "limit",
+          "admission_paused",
+          "display"
+        ],
+        "title": "ExecutionBudgetInfo",
+        "description": "How full the execution budget is right now, for the app bar (PC-124).\n\n``running`` and ``limit`` are this API process's budget. ``queued`` is\nevery start the list reports as ``queued``: waiting here for a slot, or\nrecorded durably and not yet picked up by any process."
+      },
       "ExecutionCostResponse": {
         "properties": {
           "execution_id": {
@@ -10684,6 +11270,13 @@
           "phase_progress": {
             "$ref": "#/components/schemas/PhaseProgressInfo"
           },
+          "phase_plan": {
+            "items": {
+              "$ref": "#/components/schemas/PlannedPhaseInfo"
+            },
+            "type": "array",
+            "title": "Phase Plan"
+          },
           "total_input_tokens": {
             "type": "integer",
             "title": "Total Input Tokens"
@@ -10859,6 +11452,16 @@
             "type": "object",
             "title": "Inputs"
           },
+          "eval": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExecutionEvalRunResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "resume_start": {
             "anyOf": [
               {
@@ -10887,6 +11490,7 @@
           "workflow_name",
           "status",
           "phase_progress",
+          "phase_plan",
           "total_input_tokens",
           "total_output_tokens",
           "total_cache_creation_tokens",
@@ -10949,6 +11553,76 @@
         "title": "ExecutionEvalResponse",
         "description": "An execution's eval membership after an edit, read from the aggregate (#967)."
       },
+      "ExecutionEvalRunResponse": {
+        "properties": {
+          "eval_id": {
+            "type": "string",
+            "title": "Eval Id"
+          },
+          "eval_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Eval Name"
+          },
+          "association_kind": {
+            "type": "string",
+            "enum": [
+              "launched",
+              "attached"
+            ],
+            "title": "Association Kind"
+          },
+          "verdict": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Verdict"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          },
+          "scored_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scored At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "eval_id",
+          "eval_name",
+          "association_kind",
+          "verdict",
+          "score",
+          "scored_at"
+        ],
+        "title": "ExecutionEvalRunResponse",
+        "description": "The eval an execution is a run of, and that run's current verdict (Evals v2).\n\nCarried on ``GET /executions/{id}`` so an execution page can link to its eval\nand show how the run was judged without a second request."
+      },
       "ExecutionHistoryResponse": {
         "properties": {
           "workflow_id": {
@@ -11007,6 +11681,16 @@
             "type": "integer",
             "title": "Excluded Undated",
             "default": 0
+          },
+          "budget": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExecutionBudgetInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "status_counts": {
             "additionalProperties": {
@@ -11228,6 +11912,12 @@
             "title": "Position Display",
             "description": "Human-readable position, e.g. 'queued 2 of 3 (4/4 running)'.",
             "readOnly": true
+          },
+          "reason_display": {
+            "type": "string",
+            "title": "Reason Display",
+            "description": "Why it has not started: 'slots full 4/4', 'admission paused', 'starting' or 'awaiting pickup (<status>)' (PC-124).",
+            "readOnly": true
           }
         },
         "type": "object",
@@ -11238,7 +11928,8 @@
           "waiting",
           "limit",
           "queued_at",
-          "position_display"
+          "position_display",
+          "reason_display"
         ],
         "title": "ExecutionStartQueueInfo",
         "description": "Where a start stands in the execution budget, before its execution exists (#1557).\n\nEvery start path - direct, trigger and resume - claims one of\n``SYN_EXECUTION_MAX_CONCURRENT`` slots. A start that finds none free waits\nhere, first come first served, and has no execution record yet; this is\nwhat it shows instead of a 404."
@@ -11527,6 +12218,26 @@
               }
             ],
             "title": "Repos Display"
+          },
+          "eval": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExecutionEvalRunResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "start_queue": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExecutionStartQueueInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -13328,6 +14039,34 @@
         ],
         "title": "HeatmapDayBucketResponse",
         "description": "Single day's aggregated activity."
+      },
+      "HeldProjectionHealth": {
+        "properties": {
+          "projection": {
+            "type": "string",
+            "title": "Projection",
+            "description": "Projection name, as in projection_checkpoints."
+          },
+          "event_type": {
+            "type": "string",
+            "title": "Event Type",
+            "description": "Type of the event it failed to apply."
+          },
+          "global_nonce": {
+            "type": "integer",
+            "title": "Global Nonce",
+            "description": "Global nonce of the event it is held at."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "projection",
+          "event_type",
+          "global_nonce"
+        ],
+        "title": "HeldProjectionHealth",
+        "description": "A projection held below an event it failed to apply (ESP #391).\n\nIt is retried there with backoff and never checkpointed past it, so it is\nbehind and stays behind until the handler is fixed or the projection is\nrebuilt. Every other projection keeps consuming."
       },
       "IdentityBinding": {
         "properties": {
@@ -15513,6 +16252,36 @@
         ],
         "title": "PinnedSkillInfo",
         "description": "One skill a phase was given at start, at the version it was resolved to (#1454)."
+      },
+      "PlannedPhaseInfo": {
+        "properties": {
+          "phase_id": {
+            "type": "string",
+            "title": "Phase Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "status_display": {
+            "type": "string",
+            "title": "Status Display"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "phase_id",
+          "name",
+          "status",
+          "status_display"
+        ],
+        "title": "PlannedPhaseInfo",
+        "description": "One phase the run declared, and where it stands (feedback cee46909).\n\n``ExecutionDetail.phase_plan`` lists every declared phase, so a client\nshows what is left as well as what ran. Clients render ``status_display``\nand style by ``status``; they never work the status out themselves."
       },
       "Priority": {
         "type": "string",
@@ -18582,13 +19351,15 @@
             "enum": [
               "healthy",
               "degraded",
+              "halted",
               "dropped_events",
+              "held",
               "stalled",
               "catching_up",
               "unknown"
             ],
             "title": "Status",
-            "description": "Verdict on the read path: 'healthy', 'catching_up' during a replay that ends by itself, 'stalled' for a projection that does not, 'degraded' for a coordinator that is not running, 'dropped_events' when a read model passed an event without applying it, or 'unknown' when the probe failed."
+            "description": "Verdict on the read path: 'healthy', 'catching_up' during a replay that ends by itself, 'stalled' for a projection that does not, 'degraded' for a coordinator that is not running, 'halted' when the subscription stopped at a stored event it cannot decode, 'dropped_events' when a read model passed an event without applying it, 'held' when a projection failed to apply an event and is retried below it, or 'unknown' when the probe failed."
           },
           "running": {
             "anyOf": [
@@ -18625,6 +19396,33 @@
             ],
             "title": "Realtime Enabled",
             "description": "Whether a realtime (SSE) projection is attached."
+          },
+          "held_projections": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/HeldProjectionHealth"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Held Projections",
+            "description": "Projections held below an event they failed to apply (ESP #391). Non-empty sets status 'held'; the cause is in the API log as the handler's exception. Null when the probe failed."
+          },
+          "halted_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Halted At",
+            "description": "Global nonce of the undecodable stored event the subscription is halted at (ESP ADR-026); status is then 'halted'. Re-checked every minute; repair per the ESP ADR-026 recovery steps in the API log. Null when not halted."
           },
           "is_catching_up": {
             "anyOf": [
@@ -18724,7 +19522,7 @@
           "status"
         ],
         "title": "SubscriptionHealth",
-        "description": "The read-path block of ``GET /health``: is the subscription up, and is it behind.\n\nFLAT, not nested, because that is the wire shape `syn health` and the deploy\nrunbook already read. The fields from ``running`` down are\n``CoordinatorSubscriptionService.get_status()``; the ones from\n``is_catching_up`` down are ``ReadModelLag``, spread into the same object by\n``lifecycle._describe_subscription_health``.\n\nEVERY FIELD BUT ``status`` IS OPTIONAL, and each absence is a distinct fact\nrather than a default: ``lag is None`` means the coordinator is not up yet,\nso there is nothing whose progress could be measured \u2014 which is not the same\nas \"not behind\", and must not serialize as ``lag: 0``. When the probe itself\nfails, ``status`` is \"unknown\" and nothing else is known at all.\n\n``ReadModelLag``'s fields are restated here because the block is flat on the\nwire and a generated client has to be able to see them. That restatement is\nthe one place this model can drift from its producer, so\n``test_health_contract.py`` asserts the two field sets still match."
+        "description": "The read-path block of ``GET /health``: is the subscription up, and is it behind.\n\nFLAT, not nested, because that is the wire shape `syn health` and the deploy\nrunbook already read. The fields from ``running`` down are\n``CoordinatorSubscriptionService.get_status()``; the ones from\n``is_catching_up`` down are ``ReadModelLag``, spread into the same object by\n``lifecycle._describe_subscription_health`` (rendered by ``subscription_health``).\n\nEVERY FIELD BUT ``status`` IS OPTIONAL, and each absence is a distinct fact\nrather than a default: ``lag is None`` means the coordinator is not up yet,\nso there is nothing whose progress could be measured \u2014 which is not the same\nas \"not behind\", and must not serialize as ``lag: 0``. When the lag or\ndropped-start probe fails, the lag fields are absent but what the\ncoordinator itself knows (``running``, ``held_projections``, ``halted_at``)\nis still published, and still sets ``status``: a halt at an undecodable\nhead event is exactly when the lag probe fails too. ``status`` is \"unknown\"\nonly when none of those fires.\n\n``ReadModelLag``'s fields are restated here because the block is flat on the\nwire and a generated client has to be able to see them. That restatement is\nthe one place this model can drift from its producer, so\n``test_health_contract.py`` asserts the two field sets still match."
       },
       "SystemActionResponse": {
         "properties": {
@@ -20494,6 +21292,16 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "Verdict": {
+        "type": "string",
+        "enum": [
+          "PASS",
+          "FAIL",
+          "ERROR"
+        ],
+        "title": "Verdict",
+        "description": "What a scorer concluded about one run of an eval.\n\n``ERROR`` is the scorer's own failure to reach a conclusion (the run left\nnothing to judge, or the scorer broke), never a judgement that the run\nfailed. It counts as scored, and not as passed."
       },
       "WorkflowDefaultEvalResponse": {
         "properties": {

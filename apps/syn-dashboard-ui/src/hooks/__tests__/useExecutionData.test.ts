@@ -47,7 +47,7 @@ function makeExecution(overrides: Partial<ExecutionDetailResponse> = {}): Execut
 // execution detail page actually renders while a phase is in flight.
 function makePhase(overrides: Partial<PhaseExecutionDetail> = {}): PhaseExecutionDetail {
   return {
-    workflow_phase_id: 'phase-1',
+    phase_id: 'phase-1',
     name: 'build',
     status: 'running',
     session_id: 'sess-1',

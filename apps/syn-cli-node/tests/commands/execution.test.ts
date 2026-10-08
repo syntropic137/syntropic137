@@ -85,6 +85,39 @@ describe("execution commands", () => {
       expect(url.searchParams.has("tag")).toBe(false);
     });
 
+    it("shows a queued start's place and reason, and the budget (PC-124)", async () => {
+      mockFetch.mockResolvedValue(
+        jsonResponse({
+          executions: [
+            {
+              workflow_execution_id: "exec-q1",
+              workflow_name: "my-workflow",
+              status: "queued",
+              started_at: null,
+              phase_progress: { completed: 0, skipped: 0, possible: 0, remaining_possible: 0, percent: 0, display: "0 of 0" },
+              total_tokens: 0,
+              total_cost_usd: "0",
+              start_queue: {
+                path: "direct", position: 1, held: true, running: 4, waiting: 2, limit: 4,
+                queued_at: "2026-10-08T00:00:00Z",
+                position_display: "queued 1 of 2 (4/4 running)",
+                reason_display: "slots full 4/4",
+              },
+            },
+          ],
+          total: 1,
+          budget: { running: 4, queued: 2, limit: 4, admission_paused: false, display: "4 running / 2 queued / cap 4" },
+        }),
+      );
+
+      await handler({ values: { status: "queued" }, positionals: [] });
+
+      expect((mockFetch.mock.calls[0]![0] as Request).url).toContain("status=queued");
+      const out = stdout();
+      expect(out).toContain("queued 1 of 2 (4/4 running): slots full 4/4");
+      expect(out).toContain("Budget: 4 running / 2 queued / cap 4");
+    });
+
     it("shows empty message when no executions", async () => {
       mockFetch.mockResolvedValue(jsonResponse({ executions: [], total: 0 }));
       await handler({ positionals: [], values: {} });

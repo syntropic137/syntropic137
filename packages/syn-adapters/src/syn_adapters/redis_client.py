@@ -6,6 +6,15 @@ queue) raised straight out of stream processing and failed an
 otherwise-healthy phase. Bounding the timeout and retrying narrows that
 window; adapters that read through this client still need to decide how to
 fail (open or closed) when retries are exhausted.
+
+The retry resends a command whose reply did not arrive, on a timeout or on a
+connection error while reading. Redis may already have applied it. So **every
+command sent through this client can run more than once**, and an adapter
+whose command is not idempotent must make the repeat harmless itself (#1756).
+Narrowing the retried errors would not help: a connection that drops after
+the send has the same "applied, reply lost" ambiguity as a timeout. See
+``RedisDedupAdapter.is_duplicate`` (per-call token) and
+``RedisSignalQueueAdapter.dequeue`` (claim, then acknowledge).
 """
 
 from __future__ import annotations

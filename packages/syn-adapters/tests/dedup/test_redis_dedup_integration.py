@@ -1,9 +1,13 @@
 """Integration tests for RedisDedupAdapter with real Redis via testcontainers.
 
 Run with: uv run pytest -m integration packages/syn-adapters/tests/dedup/ -v
+(set ``SYN_TEST_REDIS_URL`` to use a running Redis instead of Docker)
 """
 
 from __future__ import annotations
+
+import os
+import re
 
 import pytest
 
@@ -14,12 +18,21 @@ pytestmark = pytest.mark.integration
 
 @pytest.fixture
 async def redis_client():
-    """Create a real Redis connection via testcontainers."""
+    """Create a real Redis connection: ``SYN_TEST_REDIS_URL`` (flushed), else testcontainers."""
+    import redis.asyncio as aioredis
+
+    url = os.environ.get("SYN_TEST_REDIS_URL")
+    if url:
+        client = aioredis.Redis.from_url(url, decode_responses=True)
+        await client.flushdb()
+        yield client
+        await client.flushdb()
+        await client.aclose()
+        return
+
     from testcontainers.redis import RedisContainer
 
     with RedisContainer("redis:7-alpine") as container:
-        import redis.asyncio as aioredis
-
         client = aioredis.Redis(
             host=container.get_container_host_ip(),
             port=int(container.get_exposed_port(6379)),
@@ -63,7 +76,13 @@ class TestRedisDedupIntegration:
     async def test_keys_have_correct_prefix(self, dedup: RedisDedupAdapter, redis_client) -> None:
         await dedup.is_duplicate("prefix-test")
         val = await redis_client.get("syn:dedup:prefix-test")
-        assert val == "1"
+        # is_duplicate stores a per-call token (#1756), a uuid4 hex.
+        assert val is not None and re.fullmatch(r"[0-9a-f]{32}", val)
+
+    @pytest.mark.asyncio
+    async def test_mark_seen_stores_marker(self, dedup: RedisDedupAdapter, redis_client) -> None:
+        await dedup.mark_seen("marker-test")
+        assert await redis_client.get("syn:dedup:marker-test") == "1"
 
     @pytest.mark.asyncio
     async def test_keys_have_ttl(self, dedup: RedisDedupAdapter, redis_client) -> None:

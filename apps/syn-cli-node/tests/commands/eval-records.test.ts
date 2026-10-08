@@ -132,12 +132,15 @@ describe("syn eval create|list|show|runs|archive (#967)", () => {
   it("runs reads the eval's runs route and lists the executions", async () => {
     mockFetch.mockResolvedValueOnce(
       jsonResponse({
-        executions: [
+        items: [
           {
-            workflow_execution_id: "exec-in-eval", workflow_id: "wf-1", workflow_name: "Refactor",
-            status: "completed", started_at: null, completed_at: null, completed_phases: 1,
-            total_phases: 1, total_tokens: 0, total_cost_usd: "0", unpriced_observation_count: 0,
-            tool_call_count: 0, repos: [], tags: [],
+            execution_id: "exec-in-eval", started_at: null, completed_at: null,
+            status: "completed", workflow_id: "wf-1", workflow_version: null,
+            models: [{ phase_id: "verify", model: "claude-opus-5-5" }],
+            total_cost_usd: "1.25", total_cost_display: "$1.25",
+            duration_seconds: null, duration_display: "-",
+            verdict: "PASS", score: 1, evidence_excerpt: "## PASS", scorer: "eval_suite.py",
+            scorer_version: "2", scored_at: null,
           },
         ],
         total: 1, page: 1, page_size: 50,
@@ -147,7 +150,10 @@ describe("syn eval create|list|show|runs|archive (#967)", () => {
     await run("runs")({ positionals: ["eval-a"], values: {} });
 
     expect(new URL(sent().url).pathname).toMatch(/\/evals\/eval-a\/runs$/);
-    expect(stdout()).toContain("exec-in-eval");
+    const out = stdout();
+    expect(out).toContain("exec-in-eval");
+    expect(out).toContain("claude-opus-5-5");
+    expect(out).toContain("PASS");
   });
 
   it("archive POSTs to the archive route", async () => {

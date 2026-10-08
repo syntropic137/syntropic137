@@ -34,8 +34,12 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     CheckoutMismatch,
     CheckoutMismatchError,
+    ProvisionStep,
+    ProvisionStepTimeoutError,
+    WorkspaceInspectionFailedError,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.workspace_git import git
+from syn_shared.settings import get_settings
 from syn_shared.workspace_paths import WORKSPACE_REPOS_DIR
 
 if TYPE_CHECKING:
@@ -46,12 +50,62 @@ if TYPE_CHECKING:
     )
 
 
+#: Attempts a timed-out provisioning checkout read gets in total (PC-126). The
+#: reads are `rev-parse` and `rev-list`: they change nothing, so a second
+#: attempt cannot see or leave anything the first did not.
+_TIMEOUT_ATTEMPTS = 2
+
+
+async def verify_provisioned_checkout(
+    workspace: GitWorkspace,
+    pinned: Mapping[str, str],
+    *,
+    continued_branches: Mapping[str, str],
+    phase_name: str,
+) -> tuple[SourceCommit, ...]:
+    """`verify_checkout` while provisioning: configured bound, one retry of a timeout.
+
+    Only a read that was CUT OFF is retried; a read that answered, a mismatch
+    and any other failure propagate unchanged. A second cut-off read raises
+    `ProvisionStepTimeoutError`, which records the run as transient and
+    resumable, because a loaded host is not a workspace at the wrong commit.
+
+    Raises:
+        CheckoutMismatchError: as `verify_checkout`.
+        WorkspaceInspectionFailedError: a read failed without timing out.
+        ProvisionStepTimeoutError: every attempt timed out.
+    """
+    timeout_seconds = get_settings().checkout_verification_timeout_seconds
+    for attempt in range(1, _TIMEOUT_ATTEMPTS + 1):
+        try:
+            return await verify_checkout(
+                workspace,
+                pinned,
+                continued_branches=continued_branches,
+                phase_name=phase_name,
+                timeout_seconds=timeout_seconds,
+            )
+        except WorkspaceInspectionFailedError as err:
+            if not err.failure.timed_out:
+                raise
+            if attempt == _TIMEOUT_ATTEMPTS:
+                raise ProvisionStepTimeoutError(
+                    ProvisionStep.CHECKOUT_VERIFICATION,
+                    subject=f"phase {phase_name!r}",
+                    timeout_seconds=timeout_seconds,
+                    attempts=attempt,
+                    detail=err.summary,
+                ) from err
+    raise AssertionError("unreachable: the last attempt returns or raises")
+
+
 async def verify_checkout(
     workspace: GitWorkspace,
     pinned: Mapping[str, str],
     *,
     continued_branches: Mapping[str, str],
     phase_name: str,
+    timeout_seconds: int | None = None,
 ) -> tuple[SourceCommit, ...]:
     """Each pinned repository's actual HEAD, or raise if one is not at its pin.
 
@@ -75,13 +129,17 @@ async def verify_checkout(
     mismatches: list[CheckoutMismatch] = []
     for repository, pinned_sha in sorted(pinned.items()):
         repo_dir = str(WORKSPACE_REPOS_DIR / repository.rsplit("/", 1)[-1])
-        actual_sha = (await git(workspace, repo_dir, "rev-parse", "HEAD")).strip()
+        actual_sha = (
+            await git(workspace, repo_dir, "rev-parse", "HEAD", timeout_seconds=timeout_seconds)
+        ).strip()
         checked_out.append(SourceCommit(repository=repository, sha=actual_sha))
         branch = continued_branches.get(repository)
         if branch is None:
             if actual_sha != pinned_sha:
                 mismatches.append(CheckoutMismatch(repository, pinned_sha, actual_sha))
-        elif not await _on_branch_head(workspace, repo_dir, branch, pinned_sha, actual_sha):
+        elif not await _on_branch_head(
+            workspace, repo_dir, branch, pinned_sha, actual_sha, timeout_seconds
+        ):
             mismatches.append(CheckoutMismatch(repository, pinned_sha, actual_sha, branch=branch))
     if mismatches:
         raise CheckoutMismatchError(phase_name=phase_name, mismatches=tuple(mismatches))
@@ -89,7 +147,12 @@ async def verify_checkout(
 
 
 async def _on_branch_head(
-    workspace: GitWorkspace, repo_dir: str, branch: str, pinned_sha: str, actual_sha: str
+    workspace: GitWorkspace,
+    repo_dir: str,
+    branch: str,
+    pinned_sha: str,
+    actual_sha: str,
+    timeout_seconds: int | None = None,
 ) -> bool:
     """Whether HEAD is on ``branch``, at ``origin/<branch>``'s fetched head, containing the pin.
 
@@ -103,12 +166,36 @@ async def _on_branch_head(
     which `git` would read as the workspace not answering.
     """
     branch_head = (
-        await git(workspace, repo_dir, "rev-parse", "--verify", f"refs/remotes/origin/{branch}")
+        await git(
+            workspace,
+            repo_dir,
+            "rev-parse",
+            "--verify",
+            f"refs/remotes/origin/{branch}",
+            timeout_seconds=timeout_seconds,
+        )
     ).strip()
     if actual_sha != branch_head:
         return False
-    attached_to = await git(workspace, repo_dir, "rev-parse", "--symbolic-full-name", "HEAD")
+    attached_to = await git(
+        workspace,
+        repo_dir,
+        "rev-parse",
+        "--symbolic-full-name",
+        "HEAD",
+        timeout_seconds=timeout_seconds,
+    )
     if attached_to.strip() != f"refs/heads/{branch}":
         return False
-    missing = await git(workspace, repo_dir, "rev-list", "-n", "1", pinned_sha, "--not", "HEAD")
+    missing = await git(
+        workspace,
+        repo_dir,
+        "rev-list",
+        "-n",
+        "1",
+        pinned_sha,
+        "--not",
+        "HEAD",
+        timeout_seconds=timeout_seconds,
+    )
     return not missing.strip()

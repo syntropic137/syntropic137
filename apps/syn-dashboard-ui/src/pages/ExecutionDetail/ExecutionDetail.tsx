@@ -15,6 +15,7 @@ import {
 import { TokenBreakdown } from '../../components/TokenBreakdown'
 import type { BreadcrumbItem } from '../../components/Breadcrumbs'
 import { ExecutionControl } from '../../components/ExecutionControl'
+import { ExecutionEvalBadge } from '../../components/evals'
 import { useExecutionData } from '../../hooks'
 import type { ExecutionDetailResponse, FailureClassification, ReportedFailureReason } from '../../types'
 import { type ExactUsd, exactUsdToString, parseExactUsd } from '../../utils/exactUsd'
@@ -173,7 +174,7 @@ function ExecutionErrorCard({
   )
 }
 
-const CONTROLLABLE_STATUSES = new Set(['running'])
+const CONTROLLABLE_STATUSES = new Set(['running', 'queued'])
 
 function ExecutionHeader({ execution, executionId, isConnected, refreshError, now, refreshExecution }: {
   execution: ExecutionDetailResponse
@@ -185,14 +186,15 @@ function ExecutionHeader({ execution, executionId, isConnected, refreshError, no
 }) {
   const showControl = !!executionId && CONTROLLABLE_STATUSES.has(execution.status)
   return (
-    <div className="flex justify-between items-start">
-      <div>
+    // Wraps so the controls drop below the title at phone width (375px).
+    <div className="flex flex-wrap justify-between items-start gap-4">
+      <div className="min-w-0">
         <div className="flex items-start gap-4">
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500/20 to-teal-500/20">
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500/20 to-teal-500/20">
             <Play className="h-6 w-6 text-emerald-400" />
           </div>
-          <div>
-            <div className="flex items-center gap-3">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-3">
               <h1 className="text-2xl font-bold text-[var(--color-text-primary)]">Execution</h1>
               <StatusBadge
                 status={execution.status}
@@ -200,10 +202,11 @@ function ExecutionHeader({ execution, executionId, isConnected, refreshError, no
                 size="lg"
                 pulse={execution.status === 'running'}
               />
+              <ExecutionEvalBadge evalRun={execution.eval} />
             </div>
             <p className="mt-1 text-sm text-[var(--color-text-secondary)]">{execution.workflow_name}</p>
-            <div className="mt-2 flex items-center gap-4 text-xs text-[var(--color-text-muted)]">
-              <span className="font-mono">{execution.workflow_execution_id}</span>
+            <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[var(--color-text-muted)]">
+              <span className="font-mono break-all">{execution.workflow_execution_id}</span>
               <span>&bull;</span>
               <span>Duration: {formatDurationFromRange(execution.started_at, execution.completed_at, now)}</span>
             </div>
@@ -214,7 +217,7 @@ function ExecutionHeader({ execution, executionId, isConnected, refreshError, no
         {showControl && (
           <ExecutionControl
             executionId={executionId}
-            initialState={execution.status as 'running'}
+            initialState={execution.status as 'running' | 'queued'}
             onSuccess={refreshExecution}
           />
         )}

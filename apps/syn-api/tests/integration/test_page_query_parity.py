@@ -59,6 +59,8 @@ DOCS: dict[str, ProjectionRecord] = {
     },
     "d": {"name": "delta", "status": "running", "at": "not a date", "tags": ["x"], "eval_id": "e1"},
     "e": {"name": "Epsilon", "at": None, "tags": "x", "eval_id": None},
+    # No eval_id at all: ``present`` reads it as the null above does.
+    "k": {"name": "Kappa", "status": "completed", "at": "2026-10-03T12:00:00Z"},
     "f": {
         "name": 42,
         "status": "completed",
@@ -118,6 +120,8 @@ QUERIES = [
         status=TEXT, timestamp_field="at", after=AFTER, search="straß", search_fields=("name",)
     ),
     PageQuery(status=TEXT, timestamp_field="at", equals={"eval_id": "e1"}, limit=0),
+    PageQuery(status=TEXT, timestamp_field="at", present={"eval_id": True}),
+    PageQuery(status=TEXT, timestamp_field="at", present={"eval_id": False}),
     PageQuery(status=FLAG, timestamp_field="at", statuses=frozenset({"active"}), limit=3),
     PageQuery(
         status=FLAG,

@@ -188,6 +188,7 @@ class _ExecutionList:
         search: str | None,
         tags: object,
         eval_id: str | None,
+        in_eval: bool | None,
         offset: int,
         limit: int | None,
     ) -> Page[WorkflowExecutionSummary]:
@@ -197,6 +198,8 @@ class _ExecutionList:
 class _Manager:
     def __init__(self, pool: _Pool) -> None:
         self.workflow_execution_list = _ExecutionList()
+        # No row here is in an eval, so the eval read model is never read.
+        self.store = None
         # The real cost read, over the recording pool. Its store is never
         # touched when it has a pool: it reads TimescaleDB directly.
         self.execution_cost = ExecutionCostProjection(store=None, pool=pool)  # type: ignore[arg-type]  # a recording double

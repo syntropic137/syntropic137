@@ -13,9 +13,11 @@ from syn_api.execution_budget import StartPath  # noqa: TC001
 from syn_api.model_identity import CostModelKey, ObservedModelId  # noqa: TC001
 from syn_api.types import (
     BranchObservationInfo,
+    ExecutionEvalRunResponse,
     PhaseActivityInfo,
     PhaseProgressInfo,
     PhaseStartConfig,
+    PlannedPhaseInfo,
     StartPinsStatus,
 )
 from syn_domain.contexts.orchestration import (
@@ -245,6 +247,20 @@ class ExecutionStartQueueInfo(BaseModel):
             return f"starting ({self.running}/{self.limit} running)"
         return f"queued {self.position} of {self.waiting} ({self.running}/{self.limit} running)"
 
+    @computed_field(
+        description="Why it has not started: 'slots full 4/4', 'admission paused', "
+        "'starting' or 'awaiting pickup (<status>)' (PC-124)."
+    )
+    @property
+    def reason_display(self) -> str:
+        if self.start_status == "paused":
+            return "admission paused"
+        if not self.held:
+            return f"awaiting pickup ({self.start_status or 'pending'})"
+        if self.position is None:
+            return "starting"
+        return f"slots full {self.running}/{self.limit}"
+
 
 class ResumeStartInfo(BaseModel):
     """How starting the child of this execution's resume is going (#1480).
@@ -297,6 +313,14 @@ class ExecutionDetailResponse(BaseModel):
     """Phases that finished. Same field, same meaning, as on the list view."""
     phase_progress: PhaseProgressInfo
     """Progress with skipped repair rounds accounted for; what clients render."""
+    phase_plan: list[PlannedPhaseInfo]
+    """Every phase the run declared, in order, with where each stands: ran here,
+    ``pending``, ``skipped`` or ``inherited`` (feedback cee46909).
+
+    Read off the same start event as ``total_phases``, so a run with declared
+    phases lists exactly that many. Draw the timeline from this, not from
+    ``phases``, which holds only the phases that started.
+    """
     total_input_tokens: int
     total_output_tokens: int
     total_cache_creation_tokens: int
@@ -399,6 +423,8 @@ class ExecutionDetailResponse(BaseModel):
     Enough to re-dispatch the run: a caller retrying one that died on the
     platform posts these back rather than reconstructing them from its own
     notes (#1307)."""
+    eval: ExecutionEvalRunResponse | None = None
+    """The eval this execution is a current run of, with its verdict. Null in no eval."""
     resume_start: ResumeStartInfo | None = None
     """The start of the child this execution admitted when it was resumed.
 
@@ -473,6 +499,39 @@ class ExecutionSummaryResponse(BaseModel):
     tags: list[str] = Field(default_factory=list)
     """The execution's current tags, normalised and sorted (#967)."""
     repos_display: str | None = None
+    eval: ExecutionEvalRunResponse | None = None
+    """The eval this execution is a current run of, with its verdict. Null in no eval.
+
+    The same shape ``GET /executions/{id}`` carries, so a list row and the
+    execution page cannot describe the run differently."""
+    start_queue: ExecutionStartQueueInfo | None = None
+    """Set exactly when ``status`` is ``queued``: an accepted start with no
+    execution yet, and where it stands (PC-124). Same block as on the detail."""
+
+
+class ExecutionBudgetInfo(BaseModel):
+    """How full the execution budget is right now, for the app bar (PC-124).
+
+    ``running`` and ``limit`` are this API process's budget. ``queued`` is
+    every start the list reports as ``queued``: waiting here for a slot, or
+    recorded durably and not yet picked up by any process.
+    """
+
+    running: int
+    queued: int
+    limit: int
+    """``SYN_EXECUTION_MAX_CONCURRENT``."""
+    admission_paused: bool | None
+    """Maintenance mode is on: new starts are accepted and held, not started.
+    ``None`` when the flag could not be read, which is not a statement either way."""
+
+    @computed_field(description="e.g. '2 running / 3 queued / cap 4'.")
+    @property
+    def display(self) -> str:
+        text = f"{self.running} running / {self.queued} queued / cap {self.limit}"
+        if self.admission_paused is None:
+            return f"{text} (admission state unknown)"
+        return f"{text} (admission paused)" if self.admission_paused else text
 
 
 class ExecutionListResponse(BaseModel):
@@ -492,6 +551,8 @@ class ExecutionListResponse(BaseModel):
     row and returns the undated ones. Non-zero means rows exist that this
     filter could not judge, NOT that they failed it.
     """
+    budget: ExecutionBudgetInfo | None = None
+    """The execution budget's occupancy (PC-124). Not filtered by the request."""
     status_counts: dict[str, int] = Field(default_factory=dict)
     """Matching executions tallied by status, ignoring the status filter itself.
 
