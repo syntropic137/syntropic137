@@ -52,6 +52,10 @@ describe('every screen has data in fixtures mode', () => {
     const wf = await getWorkflow('research-workflow')
     expect(wf.phases.map((p) => p.name)).toEqual(['Research', 'Synthesize', 'Report'])
     expect((await listWorkflowRuns('research-workflow')).length).toBeGreaterThan(3)
+    expect((await listWorkflows({ page_size: 100 })).total).toBe(27)
+    const skills = await getWorkflow('skills-matrix')
+    expect(skills.phases[1]?.skills?.map((s) => s.name)).toEqual(['vendored-scribe', 'remote-herald'])
+    expect((await getWorkflow('code-review')).runs_count).toBe(0)
   })
   it('executions, filtered and paged, with consistent detail', async () => {
     const page = await listExecutions({ page: 1, page_size: 5, statuses: ['failed'] })
