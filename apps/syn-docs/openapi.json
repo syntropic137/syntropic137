@@ -14741,6 +14741,25 @@
         ],
         "title": "InventorySnapshot"
       },
+      "InvokedSkillInfo": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "count"
+        ],
+        "title": "InvokedSkillInfo",
+        "description": "One skill the agent invoked through the Skill tool, and how often (#1269)."
+      },
       "LineageEdge": {
         "properties": {
           "parent": {
@@ -16112,6 +16131,9 @@
             "title": "Start Pins Status",
             "default": "unavailable"
           },
+          "skill_use": {
+            "$ref": "#/components/schemas/PhaseSkillUseInfo"
+          },
           "operations": {
             "items": {
               "$ref": "#/components/schemas/PhaseOperationInfo"
@@ -16377,6 +16399,49 @@
         "type": "object",
         "title": "PhaseRefResponse",
         "description": "A plugin or skill reference. Structured, never a joined string.\n\nJoining source and name is not reversible: a ref whose source already\nends in the repo name reparses to a different repository (#1013)."
+      },
+      "PhaseSkillUseInfo": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "observed",
+              "not_observable",
+              "unavailable"
+            ],
+            "title": "Status",
+            "default": "unavailable"
+          },
+          "declared": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Declared"
+          },
+          "invoked": {
+            "items": {
+              "$ref": "#/components/schemas/InvokedSkillInfo"
+            },
+            "type": "array",
+            "title": "Invoked"
+          },
+          "declared_not_invoked": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Declared Not Invoked",
+            "description": "Declared skills with no observed invocation. Empty unless status is 'observed': an unobservable use is not a non-use.",
+            "readOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "declared_not_invoked"
+        ],
+        "title": "PhaseSkillUseInfo",
+        "description": "Which declared skills this phase actually used (#1269).\n\nDeclaring a skill installs it; only an invocation shows the agent reached\nfor it. This is the fact that tells the two apart, per phase."
       },
       "PhaseStartConfig": {
         "properties": {

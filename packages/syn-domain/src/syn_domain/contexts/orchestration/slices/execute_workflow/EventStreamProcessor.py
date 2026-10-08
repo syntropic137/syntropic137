@@ -366,6 +366,13 @@ def _model_under_message(message: object) -> object:
 
 _SUBAGENT_TOOL_NAMES = frozenset({ClaudeToolName.SUBAGENT, ClaudeToolName.SUBAGENT_LEGACY})
 
+#: The claude tool that invokes a skill, and the input field naming the skill
+#: (#1269). Recorded as its own field, never read back out of the preview: the
+#: preview is cut at 500 characters and a long ``args`` before ``skill`` would
+#: cut the name off.
+SKILL_TOOL_NAME = "Skill"
+_SKILL_INPUT_FIELD = "skill"
+
 # This processor drives a CLAUDE primary, so its declared delegate is codex.
 DELEGATION_TARGET: DelegationTarget = DELEGATION_TARGET_BY_PRIMARY[AgentProvider.CLAUDE]
 
@@ -855,10 +862,12 @@ class EventStreamProcessor:
 
         self._note_delegation_attempt(tool_use_id, tool_input.get("command"))
 
+        skill = tool_input.get(_SKILL_INPUT_FIELD) if tool_name == SKILL_TOOL_NAME else None
         await self._collector.record_tool_started(
             tool_name=tool_name,
             tool_use_id=tool_use_id,
             input_preview=json.dumps(tool_input)[:500],
+            skill_name=skill if isinstance(skill, str) and skill else None,
         )
         logger.debug("Tool started: %s", tool_name)
 
