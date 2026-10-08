@@ -78,6 +78,19 @@ calendar date, so it is never retried, and the Phase fails with
 line only. **Unclear:** no real claude quota message exists in this repo or its
 submodules, so claude quota text is not yet recognised and reads as `unknown`.
 
+## Provision Step Timeout
+
+A provisioning step that ran inside the workspace and did not finish before its
+deadline (`ProvisionStepTimeoutError`, PC-126). The steps are named by
+`ProvisionStep`: `secret_injection` (the ADR-024 setup script, including the
+token mint and repository clones), `skill_install` (one `skills add`) and
+`codex_sandbox_probe`. A timeout says the host was too loaded to answer, not that
+the step is broken. So it is recorded as an upstream failure of kind
+`unavailable`: transient, and the Execution is resumable. A skill install or a
+sandbox probe is retried once in place. The setup script is not, because a clone
+killed mid-transfer would be skipped by the re-run. Resuming provisions a fresh
+workspace instead. Each deadline is a Setting.
+
 ## Fallback Agent
 
 The agent (provider and model) a Phase declares under `fallback_agent`, to be

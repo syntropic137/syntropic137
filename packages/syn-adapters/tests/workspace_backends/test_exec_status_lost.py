@@ -29,9 +29,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
 import pytest
@@ -49,6 +49,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects 
 )
 from syn_shared.process_exit import describe_process_failure
 from syn_shared.settings import reset_settings
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 pytestmark = [pytest.mark.unit]
 
