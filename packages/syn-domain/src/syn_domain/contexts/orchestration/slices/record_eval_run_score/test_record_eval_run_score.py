@@ -267,3 +267,14 @@ class TestBatchReadsForAPageOfRuns:
             str(_EVAL): "Refactor quality",
             str(_OTHER): "Other",
         }
+
+    async def test_records_leaves_out_a_projected_eval_nobody_asked_about(self) -> None:
+        stream, _handler = await _scored_stream()
+        evals = await _replayed(stream, times=1)
+
+        # _OTHER is projected too; asking for _EVAL alone must not return it.
+        records = await evals.records({str(_EVAL), "eval-not-projected"})
+
+        assert {eval_id: record.name for eval_id, record in records.items()} == {
+            str(_EVAL): "Refactor quality"
+        }
