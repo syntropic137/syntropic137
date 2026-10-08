@@ -858,23 +858,25 @@ async def test_the_four_outcomes_are_distinguishable_without_reading_prose(
 # ---------------------------------------------------------------------------
 
 
-async def test_a_phase_that_writes_its_deliverable_is_never_even_asked(
+async def test_a_phase_that_writes_its_deliverable_is_asked_once_as_it_completes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The success path must not acquire a git inspection it does not need.
+    """The success path asks where a phase's branches stood ONCE per phase, at completion.
 
-    Asserted by making the question itself fatal rather than by checking the
-    happy path still ends `completed`: the inspection runs against a live
-    container, and a version that ran it on every phase would cost every
-    successful run a round of git and would still pass a status assertion.
+    Until #1728 the success path asked nothing. It now asks once, as each
+    phase completes, because the PR a successful run opened is linked to it by
+    that reading and by nothing else. The cost #1200 guarded against is still
+    bounded: one inspection per completed phase, never one per to-do item, and
+    the run still ends `completed` on what the agent produced.
     """
+    asked: list[str | None] = []
 
-    def _never_ask(*_args: object, **_kwargs: object) -> object:
-        raise AssertionError("the success path asked where a phase's branches stood")
+    async def _count(_starting_points: object, phase_id: str | None) -> None:
+        asked.append(phase_id)
 
     # Patched where the question is asked rather than where it is wired in, so
-    # this fails for ANY success-path caller, not only the one wired today.
-    monkeypatch.setattr(branch_observation, "observe_branches", _never_ask)
+    # this counts ANY success-path caller, not only the one wired today.
+    monkeypatch.setattr(branch_observation, "observe_branches", _count)
 
     fake = FakeAgentExecutionHandler.success(
         produces=[("artifacts/output/deliverable.md", b"# Real output")]
@@ -894,6 +896,7 @@ async def test_a_phase_that_writes_its_deliverable_is_never_even_asked(
     )
     assert result.error_message is None
     assert fake.call_count == 2
+    assert len(asked) == 2, f"Expected one inspection per completed phase, got {asked}"
     assert len(result.artifact_ids) == 2, (
         f"Expected one artifact per phase, got {result.artifact_ids}"
     )
