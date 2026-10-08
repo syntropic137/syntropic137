@@ -42,12 +42,17 @@ export default defineConfig({
   ],
   webServer: startsOwnServer
     ? {
-        command: `pnpm exec vite --port ${E2E_PORT} --strictPort --host 127.0.0.1`,
+        // A fixtures build served by `vite preview`: no HMR, so edits landing
+        // mid-run cannot reload the page under a test. Built into e2e/.dist so
+        // the app's own dist/ is untouched. E2E_DEV=1 uses the dev server.
+        command: process.env.E2E_DEV
+          ? `pnpm exec vite --port ${E2E_PORT} --strictPort --host 127.0.0.1`
+          : `pnpm exec vite build --outDir e2e/.dist --emptyOutDir --logLevel warn && pnpm exec vite preview --outDir e2e/.dist --port ${E2E_PORT} --strictPort --host 127.0.0.1`,
         cwd: import.meta.dirname,
         url: BASE_URL,
         env: { VITE_SYN_FIXTURES: '1' },
         reuseExistingServer: !process.env.CI,
-        timeout: 60_000,
+        timeout: 180_000,
         stdout: 'ignore',
         stderr: 'pipe',
       }
