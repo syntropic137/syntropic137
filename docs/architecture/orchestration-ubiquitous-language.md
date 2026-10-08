@@ -137,12 +137,27 @@ A `phase_id` it does not name is `other`, never folded into a neighbour.
 
 ## Merged-PR Attribution
 
-Linking a merged pull request to every Resume Chain that produced it.
+Linking a merged pull request to every Execution that contributed to it. A run
+**contributes** to a PR when it reports one: the `repository` and `pr_number`
+it was started with (a reverify), a Continued Branch with a PR open from it,
+or a branch its failure observed with a PR open from it. Every link carries
+the run's whole Resume Chain, and a Resume inherits its parent's links, so a
+failed run, its resume and an independent reverify of the same PR are all
+contributors, each counted once.
 
-**Unclear:** no event records the PR a run produced, and only a failed run
-records its branches (`observed_branches`), so the Scorecard reports merged PRs
-and cost per merged PR as not recorded. When it is built, the GitHub lookup
-belongs in a ProcessManager, never in `ScorecardProjection` (#1728).
+`MergedPullRequestAttributionProcessManager` asks GitHub, live only, whether a
+linked PR merged, and records **PullRequestMergeRecorded** on each
+contributor's stream through the execution aggregate, which records a given
+PR on a given run once. `ScorecardProjection` folds those events and never
+asks GitHub, so a replay rebuilds the same numbers with no call (#1728).
+
+**Cost per merged PR** is, for each PR merged in the window, the cost of its
+unique contributors wherever in time they ran, averaged over those PRs. An
+unmerged PR contributes nothing.
+
+**Unclear:** a completed run that opened a PR it was not started on and that
+no failure observed is not linked: no event records the PR a successful run
+produced (#1728).
 
 ## Unresolved Findings
 
