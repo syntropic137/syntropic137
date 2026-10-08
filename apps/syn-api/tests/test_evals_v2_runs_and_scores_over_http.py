@@ -70,6 +70,7 @@ class _Lane2:
         self.observed: dict[str, str] = {}
         self.costs: dict[str, Decimal] = {}
         self.by_phase: dict[str, dict[str, dict[str, Decimal]]] = {}
+        self.unpriced: dict[str, int] = {}
 
     async def get_session_cost(self, session_id: str) -> SessionCost | None:
         model = self.observed.get(session_id)
@@ -89,6 +90,7 @@ class _Lane2:
             input_tokens=10,
             output_tokens=10,
             models_by_phase=self.by_phase.get(execution_id, {}),
+            unpriced_observation_count=self.unpriced.get(execution_id, 0),
         )
 
 
@@ -199,6 +201,46 @@ async def _pin_started_at(execution_id: str, started_at: str) -> None:
     row = await store.get("workflow_executions", execution_id)
     assert row is not None
     await store.save("workflow_executions", execution_id, {**row, "started_at": started_at})
+
+
+async def _complete_with_an_unmeasured_phase(execution_id: str, *, verify_seconds: float) -> None:
+    """Rewrite the run's DETAIL record as a completed execution with two phases:
+    ``verify`` took ``verify_seconds``; ``review`` finished with no recorded
+    duration and no timestamps, so nobody knows how long it took (#890).
+
+    Stored exactly as the projection stores phases, so the real ``get_detail``
+    resolves the durations and counts the unknown phase itself.
+    """
+    from syn_adapters.projections.manager import get_projection_manager
+
+    store = get_projection_manager().store
+    row = await store.get("workflow_execution_details", execution_id)
+    assert row is not None
+    [verify] = row["phases"]
+    phases = [
+        {
+            **verify,
+            "status": "completed",
+            "started_at": "2026-10-01T00:00:00+00:00",
+            "completed_at": "2026-10-01T00:05:00+00:00",
+            "duration_seconds": verify_seconds,
+        },
+        {
+            **verify,
+            "workflow_phase_id": "review",
+            "name": "Review",
+            "status": "completed",
+            "session_id": None,
+            "started_at": None,
+            "completed_at": None,
+            "duration_seconds": None,
+        },
+    ]
+    await store.save(
+        "workflow_execution_details",
+        execution_id,
+        {**row, "status": "completed", "phases": phases},
+    )
 
 
 async def _score(client: AsyncClient, eval_id: str, execution_id: str, verdict: str):
@@ -407,6 +449,65 @@ class TestSummary:
             # ERROR-only: nothing was judged, so no rate rather than 0%.
             assert variants["wf-b", "1.0.0", (OPUS,)]["pass_count"] == 0
             assert variants["wf-b", "1.0.0", (OPUS,)]["pass_rate"] is None
+            assert variants["wf-b", "1.0.0", (OPUS,)]["last_verdict"] == "ERROR"
+            assert v1_opus["stats"]["median_cost_display"] == "$1.00"
+            assert v1_opus["stats"]["cost_per_pass_display"] == "$1.00"
+            assert v2_opus["stats"]["cost_per_pass_display"] == "—"
+
+    async def test_eval_figures_cover_every_run_not_one_page_of_runs(
+        self, client: AsyncClient, lane2: _Lane2
+    ) -> None:
+        """The detail's aggregates are the eval's, whatever page of runs the page shows."""
+        eval_id = await _two_by_two(client, lane2)
+
+        page = (await client.get(f"/evals/{eval_id}/runs", params={"page_size": 1})).json()
+        shown = (await client.get(f"/evals/{eval_id}")).json()
+
+        assert (len(page["items"]), page["total"]) == (1, 5)
+        assert sum(v["run_count"] for v in shown["variants"]) == 5
+        # Costs 1.00, 3.00, 0.50, 2.00, 0.25: median 1.00 over every run. Cost per
+        # PASS is the SCORED spend 6.50 (ERROR's 2.00 in, unscored r5's 0.25 out)
+        # over two PASS runs.
+        assert shown["stats"]["median_cost_display"] == "$1.00"
+        assert Decimal(shown["stats"]["cost_per_pass_usd"]) == Decimal("3.25")
+        assert shown["stats"]["cost_per_pass_display"] == "$3.25"
+
+    async def test_a_lower_bound_is_never_shown_as_a_whole_cost_or_duration(
+        self, client: AsyncClient, lane2: _Lane2
+    ) -> None:
+        """r1 (PASS, $1.00) had an unpriced observation and a phase of unknown
+        duration, so both its figures are lower bounds (#890). They must say so
+        on the run, stay out of the medians, and make cost per PASS partial."""
+        lane2.unpriced["r1"] = 1
+        eval_id = await _two_by_two(client, lane2)
+        await _complete_with_an_unmeasured_phase("r1", verify_seconds=300.0)
+
+        runs = (await client.get(f"/evals/{eval_id}/runs")).json()["items"]
+        shown = (await client.get(f"/evals/{eval_id}")).json()
+
+        r1 = next(r for r in runs if r["execution_id"] == "r1")
+        assert r1["total_cost_display"] == ">=$1.00 (partial)"
+        # The real get_detail folded 300s known + one unmeasured phase.
+        assert r1["duration_seconds"] == 300.0
+        assert r1["duration_display"] == ">=5m (partial)"
+        # The four complete costs 3.00, 0.50, 2.00, 0.25: median 1.25, not 1.00.
+        assert Decimal(shown["stats"]["median_cost_usd"]) == Decimal("1.25")
+        assert shown["stats"]["median_cost_display"] == "$1.25 (excl. 1 incomplete)"
+        assert shown["stats"]["incomplete_duration_count"] == 1
+        # The other four are still running, so their live durations are the median.
+        assert shown["stats"]["median_duration_display"].endswith(" (excl. 1 incomplete)")
+        assert shown["stats"]["cost_per_pass_display"] == ">=$3.25 (partial)"
+        [v1_opus] = [
+            v
+            for v in shown["variants"]
+            if (v["workflow_id"], v["workflow_version"], v["models"]) == ("wf-a", "1.0.0", [OPUS])
+        ]
+        # Its only run is a lower bound: no median to show, and it cannot win on cost.
+        assert v1_opus["stats"]["median_cost_usd"] is None
+        assert v1_opus["avg_cost_usd"] is None
+        assert v1_opus["stats"]["cost_per_pass_display"] == ">=$1.00 (partial)"
+        assert v1_opus["stats"]["incomplete_duration_count"] == 1
+        assert v1_opus["stats"]["median_duration_seconds"] is None
 
 
 class TestScore:

@@ -17,10 +17,10 @@
 # report a result and never choose one. The six earlier defects are train:
 # verifiers were already shaped against them. The holdout is, within each
 # batch of added cases, the ~30% whose sha256(id) sorts lowest (7 of the first
-# 18 mined, 2 of the next 6, 2 of the 6 clean controls, 1 of v6's 4
+# 18 mined, 2 of the next 6, 2 of the 6 clean controls, none of v6's 2
 # controls), fixed once, recorded in each file, and never moved to train. That
 # was 11 of 36 in v4; after v5's retirements and additions it is 10 of 33, and
-# 11 of 37 in v6.
+# 10 of 35 in v6.
 #
 # What it measures: given a workflow, a prompt and a model, does verification
 # find the defect, and certify the change that has none? `score` prints both
@@ -52,10 +52,13 @@
 #     Three codex verifiers pinned to cheaper GPT slugs (gpt-6-luna,
 #     gpt-5.6-luna, gpt-5.6-terra) were added later under v5: new workflows,
 #     no existing table.
-# v6: four clean controls added by the same rule (#1774), each passing `check`
-#     and quiet by `git log -L` on every hunk it changed through main
-#     23edd9c0b: the API, syn-shared, syn-adapters and the fitness scripts. No
-#     CLI or dashboard change met the rule. 31 defects, 6 controls, 37 in all.
+# v6: two clean controls added by the same rule (#1774): the API list
+#     endpoints and the fitness scripts. Two candidates were dropped after
+#     review: the capture-status one (its parser reads counters off the whole
+#     line, spool path included) and the tool-declarations one (it still held
+#     the declared-skills-not-invocable defect). The #1774 target of 8 or more
+#     clean controls is NOT met: 4 exist. No CLI or dashboard change met the
+#     rule. 31 defects, 4 controls, 35 in all.
 #
 # EVERY VERSION KEEPS ITS SCORE. `history` records each earlier version whose
 # runs launches.jsonl still holds: the tag exactly as those runs carry it, the

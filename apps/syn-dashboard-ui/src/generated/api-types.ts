@@ -3536,6 +3536,7 @@ export interface components {
             last_verdict?: components["schemas"]["Verdict"] | null;
             /** Variants */
             variants?: components["schemas"]["EvalVariantResponse"][];
+            stats: components["schemas"]["EvalRunStatsResponse"];
             read_model_status?: components["schemas"]["ReadModelStatus"] | null;
         };
         /**
@@ -3610,6 +3611,7 @@ export interface components {
             last_verdict?: components["schemas"]["Verdict"] | null;
             /** Variants */
             variants?: components["schemas"]["EvalVariantResponse"][];
+            stats: components["schemas"]["EvalRunStatsResponse"];
         };
         /**
          * EvalRunListResponse
@@ -3714,6 +3716,30 @@ export interface components {
             scored_at: string;
         };
         /**
+         * EvalRunStatsResponse
+         * @description How long a set of an eval's runs took and what it cost, over EVERY run in the set.
+         *
+         *     Medians, not means: one runaway run should not make a variant look slow.
+         */
+        EvalRunStatsResponse: {
+            /** Median Duration Seconds */
+            median_duration_seconds: number | null;
+            /** Median Duration Display */
+            median_duration_display: string;
+            /** Incomplete Duration Count */
+            incomplete_duration_count: number;
+            /** Median Cost Usd */
+            median_cost_usd: string | null;
+            /** Median Cost Display */
+            median_cost_display: string;
+            /** Incomplete Cost Count */
+            incomplete_cost_count: number;
+            /** Cost Per Pass Usd */
+            cost_per_pass_usd: string | null;
+            /** Cost Per Pass Display */
+            cost_per_pass_display: string;
+        };
+        /**
          * EvalVariantResponse
          * @description Every run of an eval with the same workflow, workflow version and OBSERVED models.
          *
@@ -3741,6 +3767,8 @@ export interface components {
             avg_cost_display: string;
             /** Last Run At */
             last_run_at: string | null;
+            last_verdict: components["schemas"]["Verdict"] | null;
+            stats: components["schemas"]["EvalRunStatsResponse"];
         };
         /**
          * EventListResponse

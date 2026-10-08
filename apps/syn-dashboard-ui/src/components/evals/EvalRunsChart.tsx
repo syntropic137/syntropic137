@@ -1,21 +1,26 @@
 /**
  * Runs over time: x is when a run started, one lane per variant, and each
  * marker is coloured by its verdict. Drawn by hand in SVG (no chart library):
- * the shape is a dot plot, and a viewBox scales it to any width, 375px included.
+ * the shape is a dot plot. The viewBox is as wide as the rendered SVG, so
+ * labels and markers keep their pixel size at any width, 375px included,
+ * instead of shrinking with a fixed-width viewBox.
  */
 
 import type { EvalRun } from '../../api/evals'
+import { useElementWidth } from '../../hooks/useElementWidth'
 import { UNSCORED_COLOUR, VERDICT_COLOURS, runVariantKey, verdictColour } from '../../utils/evalVerdict'
 
-const WIDTH = 600
+/** The viewBox width before the SVG is measured. */
+const DEFAULT_WIDTH = 600
 const PAD_X = 12
 const LANE_HEIGHT = 34
 const LABEL_HEIGHT = 12
 const AXIS_HEIGHT = 18
-const MAX_LABEL_CHARS = 80
+/** Roughly one 11px character, to fit a lane label to the width it has. */
+const CHAR_WIDTH = 6.5
 
-function truncate(text: string): string {
-  return text.length > MAX_LABEL_CHARS ? `${text.slice(0, MAX_LABEL_CHARS - 1)}…` : text
+function truncate(text: string, maxChars: number): string {
+  return text.length > maxChars ? `${text.slice(0, maxChars - 1)}…` : text
 }
 
 function shortDate(ms: number): string {
@@ -23,6 +28,7 @@ function shortDate(ms: number): string {
 }
 
 export function EvalRunsChart({ runs }: { runs: readonly EvalRun[] }) {
+  const [svgRef, WIDTH] = useElementWidth<SVGSVGElement>(DEFAULT_WIDTH)
   const dated = runs.filter((r) => r.started_at && !Number.isNaN(Date.parse(r.started_at)))
   if (dated.length === 0) {
     return <p className="p-4 text-sm text-[var(--color-text-muted)]">No runs yet. A run appears here once it starts.</p>
@@ -39,6 +45,7 @@ export function EvalRunsChart({ runs }: { runs: readonly EvalRun[] }) {
   return (
     <div className="p-4">
       <svg
+        ref={svgRef}
         role="img"
         aria-label={`${dated.length} runs over time across ${lanes.length} variants`}
         viewBox={`0 0 ${WIDTH} ${height}`}
@@ -49,7 +56,7 @@ export function EvalRunsChart({ runs }: { runs: readonly EvalRun[] }) {
           return (
             <g key={lane} data-lane={lane}>
               <text x={PAD_X} y={i * LANE_HEIGHT + LABEL_HEIGHT} fontSize={11} fill="var(--color-text-muted)">
-                {truncate(lane)}
+                {truncate(lane, Math.floor((WIDTH - 2 * PAD_X) / CHAR_WIDTH))}
               </text>
               <line x1={PAD_X} x2={WIDTH - PAD_X} y1={y} y2={y} stroke="var(--color-border)" />
             </g>

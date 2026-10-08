@@ -366,6 +366,50 @@ class TestRequiresReposPreflightGating:
 
         preflight.assert_not_awaited()
 
+    @pytest.mark.asyncio
+    async def test_explicit_repos_are_access_checked_without_requires_repos(self) -> None:
+        """#955: explicit repos reach the workspace whatever requires_repos says,
+        so a repo the App cannot reach is refused at admission for these too."""
+        from fastapi import HTTPException
+
+        from syn_api.routes.executions.commands import (
+            ExecuteWorkflowRequest,
+            _validate_execution_request,
+        )
+
+        wf = self._make_workflow(requires_repos=False)
+        checked: list[str] = []
+
+        async def _no_access(repo_full_name: str) -> None:
+            checked.append(repo_full_name)
+            raise HTTPException(status_code=422, detail=f"not installed: {repo_full_name}")
+
+        with (
+            patch(
+                "syn_api.routes.executions.commands.get_workflow_repo",
+                return_value=MagicMock(get_by_id=AsyncMock(return_value=wf)),
+            ),
+            patch(
+                "syn_api.routes.executions.commands.ensure_connected",
+                new=AsyncMock(),
+            ),
+            patch(
+                "syn_api.routes.executions.repo_access._validate_repo_access",
+                new=_no_access,
+            ),
+        ):
+            # Control: no explicit repo, nothing to check, admitted.
+            await _validate_execution_request("wf-1", ExecuteWorkflowRequest())
+            assert checked == []
+
+            with pytest.raises(HTTPException) as exc_info:
+                await _validate_execution_request(
+                    "wf-1", ExecuteWorkflowRequest(repos=["acme/private"])
+                )
+
+        assert exc_info.value.status_code == 422
+        assert checked == ["acme/private"]
+
 
 # -- Reserved repo input-key rejection (ADR-063 boundary) ---------------------
 
