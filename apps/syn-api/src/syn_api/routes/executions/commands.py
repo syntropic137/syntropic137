@@ -789,6 +789,11 @@ async def _validate_execution_request(
         await _preflight_repos_or_reject(
             workflow, workflow_id, typed_repos, effective_inputs, merged, request.task
         )
+    else:
+        # #955: the handler uses explicit repos whatever requires_repos says, so
+        # they get the same access check; a repo the App cannot reach is a 422
+        # here, not a run that dies in its workspace.
+        await _validate_all_repos_access([r.https_url for r in typed_repos])
 
     return workflow, effective_inputs, typed_repos
 
