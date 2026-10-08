@@ -36,12 +36,12 @@ export const LIST_PAGE_SIZE = 50
 export const RUN_LIST_PAGE_SIZES: readonly number[] = [50, 100]
 
 /**
- * Sessions opens at 100 rows: at p95 on the E2 dataset 100 rows cost 0.87x and
- * 1.24x of 50 over two runs, inside the owner's 1.5x bound. Executions measured
- * 1.59x and 1.76x, over it, so it opens at `LIST_PAGE_SIZE` and 100 is a choice
- * (PR #1785 has the numbers).
+ * Both open at 50; 100 is the operator's choice. The owner's bound was "100 by
+ * default unless it costs over 1.5x of 50". On the E2 dataset (p95 of 20, three
+ * runs) /executions measured 1.59x, 1.76x, 1.83x and /sessions 0.87x, 1.24x,
+ * 1.71x, so neither clears it reliably (PR #1785 has the tables).
  */
-export const SESSION_LIST_PAGE_SIZE = 100
+export const SESSION_LIST_PAGE_SIZE = LIST_PAGE_SIZE
 export const EXECUTION_LIST_PAGE_SIZE = LIST_PAGE_SIZE
 
 export interface ListQueryState {

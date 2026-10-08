@@ -19,8 +19,7 @@ import type { PhaseProgressInfo } from '../types'
  *   030-079   1-7 days old     7d holds 80, more than one page
  *   080-119   older than 7d    All holds 120, also more than one page
  *
- * and at a page of 100 (sessions, built in SessionList.test.tsx) every band
- * is doubled.
+ * and at a page of 100 every band is doubled.
  *
  * That last property is the difficult one. Widening a lower bound on a
  * newest-first list CANNOT change the first page, so a fixture whose narrow

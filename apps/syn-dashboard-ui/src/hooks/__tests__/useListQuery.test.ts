@@ -18,7 +18,7 @@ import { createElement, type ReactNode } from 'react'
 import { MemoryRouter } from 'react-router-dom'
 
 import type { ListQuery } from '../../api/listQuery'
-import { LIST_PAGE_SIZE, SESSION_LIST_PAGE_SIZE, useListQuery } from '../useListQuery'
+import { LIST_PAGE_SIZE, RUN_LIST_PAGE_SIZES, useListQuery } from '../useListQuery'
 
 const SEARCH_DEBOUNCE_MS = 300
 
@@ -64,13 +64,13 @@ describe('useListQuery', () => {
   })
 
   it('asks for the page size a surface names instead of the shared one', () => {
-    // Sessions opens at 100 (feedback 60d9f990); everything else keeps the
-    // shared 50, so the override must reach the query and only it.
-    const { result } = renderHook(() => useListQuery('', SESSION_LIST_PAGE_SIZE), {
+    // The Executions/Sessions picker offers 100 (feedback 60d9f990); the
+    // chosen size must reach the query, not the shared default.
+    const { result } = renderHook(() => useListQuery('', 100), {
       wrapper: wrapperAt('/'),
     })
 
-    expect(SESSION_LIST_PAGE_SIZE).toBe(100)
+    expect(RUN_LIST_PAGE_SIZES).toContain(100)
     expect(result.current.query.page_size).toBe(100)
   })
 
