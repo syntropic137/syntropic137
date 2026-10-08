@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
+import os
 import subprocess
 import tarfile
 import time
@@ -322,6 +323,8 @@ async def test_ignored_files_are_archived_and_proven_caches_are_not(
     (app / "secret-notes.txt").write_text("unique\n")
     (app / "node_modules" / "pkg").mkdir(parents=True)
     (app / "node_modules" / "pkg" / "index.js").write_text("cache\n")
+    (ws / "node_modules" / "pkg").mkdir(parents=True)
+    (ws / "node_modules" / "pkg" / "index.js").write_text("cache outside a repo\n")
     archive = _Archive()
     result = await _reclaimer(base, archive=archive).run_once()
     assert result.reclaimed == ("ws-ignored",)
@@ -367,6 +370,12 @@ async def test_index_that_differs_from_head_and_tree_keeps_the_dir(
     (app / "README.md").write_text("INDEX ONLY AUTHORED CONTENT\n")
     _git(app, "add", "README.md")
     (app / "README.md").write_text("hello\n")
+    # Age the file and refresh the index now, as hours of grace would: a racily
+    # clean index is rewritten by the guard's own git calls, which trips the
+    # changed-during-archival check instead of the one under test.
+    hours_ago = time.time() - 2 * 3600
+    os.utime(app / "README.md", (hours_ago, hours_ago))
+    subprocess.run(["git", "update-index", "-q", "--refresh"], cwd=app, check=False)
     archive = _Archive()
     result = await _reclaimer(base, archive=archive).run_once()
     assert result.kept == ("ws-staged",)

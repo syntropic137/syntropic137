@@ -139,12 +139,17 @@ def _measure(directory: Path) -> tuple[int, float]:
     newest = directory.lstat().st_mtime
     for dirpath, dirnames, filenames in os.walk(directory):
         here = Path(dirpath)
+        # Git's own bookkeeping is not work: reading a repository refreshes
+        # its index, and that must not read as "changed during archival".
+        # A commit made in there is caught by the unpushed guard instead.
+        bookkeeping = ".git" in here.relative_to(directory).parts
         for name, is_file in (*((d, False) for d in dirnames), *((f, True) for f in filenames)):
             try:
                 stat = (here / name).lstat()
             except OSError:
                 continue
-            newest = max(newest, stat.st_mtime)
+            if not bookkeeping and name != ".git":
+                newest = max(newest, stat.st_mtime)
             if is_file:
                 size += stat.st_size
     return size, newest
