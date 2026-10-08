@@ -20,6 +20,7 @@ from event_sourcing import (
 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continuation import (
     LeftBranches,
+    PushedCommit,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (  # noqa: TC001 - re-exported + used at runtime by @command_handler
     AgentExecutionCompletedCommand,
@@ -31,6 +32,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.commands impor
     InterruptExecutionCommand,
     ProvisionWorkspaceCompletedCommand,
     RecordCancelledWorkCommand,
+    RecordPhasePushCommand,
     ResumeExecutionCommand,
     RetryPhaseCommand,
     StartExecutionCommand,
@@ -138,6 +140,9 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.orchestration.domain.events.NextPhaseReadyEvent import (
         NextPhaseReadyEvent,
+    )
+    from syn_domain.contexts.orchestration.domain.events.PhaseCommitPushedEvent import (
+        PhaseCommitPushedEvent,
     )
     from syn_domain.contexts.orchestration.domain.events.PhaseCompletedEvent import (
         PhaseCompletedEvent,
@@ -280,6 +285,8 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         self._pins = StartPins()
         #: The branches the phase this run failed in left on origin (#1513).
         self._left_branches = LeftBranches()
+        #: Every commit a phase's own workspace pushed, in order (PC-128).
+        self._pushed: list[PushedCommit] = []
         #: The tags it launched with and the tags it carries now (#967).
         self._tags = ExecutionTags()
         self._eval = EvalMembership()
@@ -584,6 +591,32 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         )
         self._apply(event)
 
+    @command_handler("RecordPhasePushCommand")
+    def record_phase_push(self, command: RecordPhasePushCommand) -> None:
+        """Handle RecordPhasePushCommand - the running phase's workspace pushed (PC-128).
+
+        Refused for any phase but the running one: a push is only this run's
+        when the workspace that made it was running this run's phase.
+        """
+        from syn_domain.contexts.orchestration.domain.events.PhaseCommitPushedEvent import (
+            PhaseCommitPushedEvent,
+        )
+
+        if self._status != ExecutionStatus.RUNNING or self._running_phase_id != command.phase_id:
+            msg = f"Cannot record a push for {command.phase_id}: it is not the running phase"
+            raise ValueError(msg)
+        self._apply(
+            PhaseCommitPushedEvent(
+                workflow_id=self._workflow_id or "",
+                execution_id=command.aggregate_id,
+                phase_id=command.phase_id,
+                repository=command.repository,
+                branch=command.branch,
+                sha=command.sha,
+                pushed_at=datetime.now(UTC),
+            )
+        )
+
     @command_handler("CompletePhaseCommand")
     def complete_phase(self, command: CompletePhaseCommand) -> None:
         """Handle CompletePhaseCommand."""
@@ -874,7 +907,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         self._reported_failure_reason = ReportedFailureReason.from_stored(
             evt(event, "reported_failure_reason")
         )
-        self._left_branches = read_left_branches(self._pins, event)
+        self._left_branches = read_left_branches(self._pins, event, self._pushed)
 
     @event_sourcing_handler("PhaseStarted")
     def on_phase_started(self, event: PhaseStartedEvent) -> None:
@@ -904,6 +937,18 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         collected = self._phase_artifact_ids.setdefault(phase_id, [])
         if artifact_id and artifact_id not in collected:
             collected.append(artifact_id)
+
+    @event_sourcing_handler("PhaseCommitPushed")
+    def on_phase_commit_pushed(self, event: PhaseCommitPushedEvent) -> None:
+        """Apply PhaseCommitPushedEvent."""
+        self._pushed.append(
+            PushedCommit(
+                phase_id=evt(event, "phase_id"),
+                repository=evt(event, "repository"),
+                branch=evt(event, "branch"),
+                sha=evt(event, "sha"),
+            )
+        )
 
     @event_sourcing_handler("PhaseRetryScheduled")
     def on_phase_retry_scheduled(self, event: PhaseRetryScheduledEvent) -> None:

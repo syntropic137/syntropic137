@@ -19,6 +19,16 @@ pure function of recorded facts:
    ABANDONED with a recorded reason and the phase starts fresh; nothing stale
    is reused, and nothing is dropped silently.
 
+OWN PUSHES (PC-128). A run orphaned by a deploy records no failure-time
+observation, and a fix phase's branch existed before the phase started, so
+neither fact above can say the phase left it. What can is `PhaseCommitPushed`:
+the commits the phase's own workspace pushed, recorded as it pushed them. A
+branch the failing phase pushed to is a candidate, carrying every SHA it
+pushed there, and is continued when origin's head is ANY of them - the run's
+own unverified commits. A head that is none of them is someone else's push and
+is abandoned exactly as before: the identity rule does not change, it just
+learns which SHAs are this run's.
+
 THE CHECKOUT RULE (ADR-058, #1458 + #1513). A phase that only READS code is
 checked out at the run's pinned start commit. A phase that CONTINUES a branch
 is checked out at that branch's head. `checkout_for` is the one place that
@@ -69,6 +79,31 @@ class ContinuedBranch(BaseModel):
     branch: str
     head_sha: str
     pull_request: int | None = None
+    #: Every SHA the failing phase itself pushed to this branch, oldest first
+    #: (PC-128). Empty for a branch known only from the failure's observation.
+    #: As a DECISION, non-empty means `head_sha` is one of them: the run's own
+    #: commits, pushed and never verified.
+    pushed_shas: list[str] = Field(default_factory=list)
+
+    @property
+    def is_own_unverified_push(self) -> bool:
+        """Whether the head is a commit this run pushed and nothing verified."""
+        return self.head_sha in self.pushed_shas
+
+
+class PushedCommit(BaseModel):
+    """One push a phase's own workspace made to origin, as it made it (PC-128).
+
+    `repository` is the clone's directory name, as the workspace's push hook
+    reports it; `branch_continuation` maps it to its slug.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    phase_id: str
+    repository: str
+    branch: str
+    sha: str
 
 
 class AbandonedBranch(BaseModel):
@@ -131,6 +166,7 @@ def branches_left_by(
     *,
     repositories: Sequence[str],
     continued: Sequence[ContinuedBranch],
+    pushed: Sequence[PushedCommit] = (),
 ) -> list[ContinuedBranch]:
     """The branches a failing phase left on origin, as `ContinuedBranch`es.
 
@@ -141,17 +177,46 @@ def branches_left_by(
     second half is what keeps a branch the phase merely sat on - `main`
     moving under a fetch - from ever being continued.
 
+    ``pushed`` is what the failing phase's own workspace pushed (PC-128). A
+    branch it pushed to is owned, and is left at its last pushed SHA even
+    when there is no observation at all - the orphaned-by-restart case.
+
     ``repositories`` maps an observation's directory name back to its slug; a
     name two repositories share maps to neither, rather than to a guess.
     """
     slugs = repository_slugs_by_name(repositories)
-    owned = {(c.repository, c.branch) for c in continued}
+    own = _pushed_shas_by_branch(pushed, slugs)
+    owned = {(c.repository, c.branch) for c in continued} | own.keys()
     left = {(c.repository, c.branch): c for c in continued}
+    for (slug, branch), shas in own.items():
+        earlier = left.get((slug, branch))
+        left[slug, branch] = ContinuedBranch(
+            repository=slug,
+            branch=branch,
+            head_sha=shas[-1],
+            pull_request=earlier.pull_request if earlier is not None else None,
+            pushed_shas=shas,
+        )
     for raw in observed or ():
         branch = _left_branch(_observation(raw), slugs, owned, left)
         if branch is not None:
             left[branch.repository, branch.branch] = branch
     return list(left.values())
+
+
+def _pushed_shas_by_branch(
+    pushed: Sequence[PushedCommit], slugs: dict[str, str]
+) -> dict[tuple[str, str], list[str]]:
+    """(slug, branch) -> the SHAs pushed to it, oldest first, without repeats."""
+    by_branch: dict[tuple[str, str], list[str]] = {}
+    for push in pushed:
+        slug = slugs.get(push.repository)
+        if slug is None:
+            continue
+        shas = by_branch.setdefault((slug, push.branch), [])
+        if push.sha not in shas:
+            shas.append(push.sha)
+    return by_branch
 
 
 def repository_slugs_by_name(repositories: Sequence[str]) -> dict[str, str]:
@@ -177,12 +242,14 @@ def _left_branch(
         return None
     # A PR the forge could not be asked about at failure is still the one the
     # run was continuing, if it was continuing one.
-    earlier = left[key].pull_request if key in left else None
+    earlier = left.get(key)
+    earlier_pr = earlier.pull_request if earlier is not None else None
     return ContinuedBranch(
         repository=slug,
         branch=obs.branch,
         head_sha=obs.remote_commit,
-        pull_request=obs.pull_request if obs.pull_request is not None else earlier,
+        pull_request=obs.pull_request if obs.pull_request is not None else earlier_pr,
+        pushed_shas=earlier.pushed_shas if earlier is not None else [],
     )
 
 
@@ -225,7 +292,8 @@ def decide_continuation(
     """Which candidates the child continues, and which it abandons and why.
 
     Continued only when the forge confirms the branch is exactly where the
-    parent left it and the PR open from it is the one the parent recorded.
+    parent left it, or at another commit the parent's phase itself pushed
+    there (PC-128), and the PR open from it is the one the parent recorded.
     Everything else is abandoned with the reason: the phase starts fresh,
     visibly.
     """
@@ -234,6 +302,8 @@ def decide_continuation(
     abandoned: list[AbandonedBranch] = []
     for candidate in candidates:
         reading = by_key.get((candidate.repository, candidate.branch))
+        if reading is not None and reading.head_sha in candidate.pushed_shas:
+            candidate = _at_own_push(candidate, reading)
         reason = _abandon_reason(candidate, reading)
         if reason is None:
             continued.append(candidate)
@@ -247,6 +317,20 @@ def decide_continuation(
                 )
             )
     return continued, abandoned
+
+
+def _at_own_push(candidate: ContinuedBranch, reading: RemoteBranchReading) -> ContinuedBranch:
+    """``candidate`` at the head origin has, which the parent's phase pushed itself.
+
+    The PR the parent recorded still has to be the open one. When it recorded
+    none - a fix phase pushes to a PR it did not open, and an orphaned run
+    records no PR at all - the PR open from a branch whose head is the run's
+    own commit is the one that commit updated, so it is the one continued.
+    """
+    pull_request = candidate.pull_request
+    if pull_request is None:
+        pull_request = reading.open_pull_request
+    return candidate.model_copy(update={"head_sha": reading.head_sha, "pull_request": pull_request})
 
 
 def _abandon_reason(candidate: ContinuedBranch, reading: RemoteBranchReading | None) -> str | None:
