@@ -313,7 +313,9 @@ landed, and it is not a Branch Observation, which records that a ref moved and
 deliberately not who moved it. A Resume reads it to tell the Execution's own
 commits from someone else's; a head that is not an Own Push is still
 Abandoned. Recorded mid-Phase because the run it exists for, one orphaned by a
-restart, never reaches the end of its Phase. (PC-128.)
+restart, never reaches the end of its Phase. Only a push git reports as an update of
+an existing branch to the hook's commit is one: creating a branch names no
+commit in git's output, so a creation is never an Own Push. (PC-128.)
 
 ## Abandoned Branch
 

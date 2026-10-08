@@ -15,6 +15,14 @@ update - names the hook's branch as the destination and updates it to the
 hook's SHA. A rejected, up-to-date, quiet or other-ref push has no such line
 and records nothing.
 
+Only an update line can confirm a SHA: ` <old>..<new> <from> -> <to>` names
+the commit origin's branch now holds. A created branch (`* [new branch]`)
+names none, so nothing in git's output ties it to the hook's SHA - a quiet
+push whose hook read one HEAD, then a `--no-verify` creation from another,
+prints exactly what one hooked creation prints. A creation therefore
+establishes no ownership; the phase's next push to the branch, an update,
+does. Until then a resume refuses the branch, the pre-PC-128 behaviour.
+
 That status line must belong to the same push as the hook. One tool result
 can hold several pushes, and git's accepted line for one confirms nothing
 about another's hook. A push's hook writes its line to stderr before git
@@ -123,13 +131,14 @@ class _HookLine(BaseModel):
     context: _PushContext | None = None
 
 
-#: git's per-ref status line for an accepted update (git-push(1), OUTPUT):
-#: ` <old>..<new> <from> -> <to>`, `+ <old>...<new> <from> -> <to>` or
-#: `* [new branch] <from> -> <to>`. Rejections (`!`), deletions (`-`) and
-#: `[up to date]` (`=`) are deliberately not matched.
+#: git's per-ref status line for an accepted update of an existing ref
+#: (git-push(1), OUTPUT): ` <old>..<new> <from> -> <to>` or
+#: `+ <old>...<new> <from> -> <to>`. Creations (`* [new branch]`) name no
+#: commit and are deliberately not matched (see the module docstring), nor are
+#: rejections (`!`), deletions (`-`) and `[up to date]` (`=`).
 _ACCEPTED_UPDATE = re.compile(
-    r"^(?:[+*]\s+)?"
-    r"(?:[0-9a-f]{4,40}\.\.\.?(?P<new>[0-9a-f]{4,40})|(?P<created>\[new branch\]))"
+    r"^(?:\+\s+)?"
+    r"[0-9a-f]{4,40}\.\.\.?(?P<new>[0-9a-f]{4,40})"
     r"\s+(?P<source>\S+)\s+->\s+(?P<destination>\S+)(?:\s+\(.*\))?$"
 )
 _HEADS = "refs/heads/"
@@ -173,19 +182,16 @@ def git_accepted(push_output: Sequence[str], push: _Push) -> bool:
 
     ``push_output`` is the output of the push ``push`` is the hook event of
     (see `push_operation`). An update line names the new commit abbreviated,
-    which must be a prefix of the SHA. A created branch names none, so its
-    source must be the branch the hook read the SHA from - the checked-out
-    branch, or HEAD itself.
+    which must be a prefix of the SHA. A created branch names none, so it
+    confirms nothing: which push's HEAD it created the branch at is exactly
+    what positional output cannot tell.
     """
     for row in _status_table(push_output, push.repo):
         update = _ACCEPTED_UPDATE.match(row)
-        if update is None or _branch_name(update["destination"]) != push.branch:
-            continue
-        if update["new"] is not None and push.sha.startswith(update["new"]):
-            return True
-        if update["created"] is not None and _branch_name(update["source"]) in (
-            push.branch,
-            "HEAD",
+        if (
+            update is not None
+            and _branch_name(update["destination"]) == push.branch
+            and push.sha.startswith(update["new"])
         ):
             return True
     return False

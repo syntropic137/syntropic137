@@ -416,30 +416,31 @@ class TestOnlyAPushGitAcceptedToTheBranchIsTheRuns:
 
         self._refused(pins)
 
-    async def test_creating_the_branch_from_head_is_the_runs_push(self) -> None:
+    async def test_creating_the_branch_names_no_commit_so_establishes_nothing(self) -> None:
+        """A quiet push's hook then a hookless creation print exactly this (round 3).
+
+        See test_pc128_a_created_branch_is_not_an_own_push.py for it in real git.
+        """
         pins = await self._resumed_after(
             f"{_hook_line(FOREIGN)}\nTo github.com:acme/widgets.git\n"
             f" * [new branch]      HEAD -> {BRANCH}\n"
         )
 
-        assert pins.checkout_for("fix").commits[REPO] == FOREIGN
-        assert pins.checkout_for("fix").branches[REPO] == BRANCH
-        assert pins.abandoned_branches == []
-        assert OWN_UNVERIFIED_PUSH in _told(pins)
+        self._refused(pins)
 
 
 class TestEachHookIsConfirmedOnlyByItsOwnPush:
     """Several pushes in one tool result: git's line for one confirms no other's hook.
 
-    The phase created BRANCH at FIRST_PUSH, someone else then moved it to
+    The phase moved BRANCH to FIRST_PUSH, someone else then moved it to
     FOREIGN, and the phase fetched that head and pushed `HEAD:unrelated`,
     which origin rejected. The second hook names BRANCH at FOREIGN, and the
-    first push's `HEAD -> BRANCH` creation line is in the same output.
+    first push's `HEAD -> BRANCH` update line is in the same output.
     """
 
     BATCH = (
         f"{_hook_line(FIRST_PUSH)}\nTo github.com:acme/widgets.git\n"
-        f" * [new branch]      HEAD -> {BRANCH}\n"
+        f"   {VERIFIED[:7]}..{FIRST_PUSH[:7]}  HEAD -> {BRANCH}\n"
         f"{_hook_line(FOREIGN)}\nTo github.com:acme/widgets.git\n"
         f" ! [remote rejected] HEAD -> {UNRELATED} (pre-receive hook declined)\n"
         "error: failed to push some refs to 'github.com:acme/widgets.git'\n"
@@ -484,7 +485,7 @@ class TestEachHookIsConfirmedOnlyByItsOwnPush:
         pins = await TestOnlyAPushGitAcceptedToTheBranchIsTheRuns()._resumed_after(
             f"{_hook_line(FOREIGN)}\n"
             "To github.com:acme/widgets.git\n"
-            f" * [new branch]      HEAD -> {BRANCH}\n"
+            f"   {VERIFIED[:7]}..{FOREIGN[:7]}  HEAD -> {BRANCH}\n"
             "To github.com:acme/widgets.git\n"
             f" ! [remote rejected] HEAD -> {UNRELATED} (pre-receive hook declined)\n"
         )
@@ -496,7 +497,7 @@ class TestEachHookIsConfirmedOnlyByItsOwnPush:
     async def test_a_push_to_another_repository_confirms_nothing_here(self) -> None:
         pins = await TestOnlyAPushGitAcceptedToTheBranchIsTheRuns()._resumed_after(
             f"{_hook_line(FOREIGN)}\nTo github.com:acme/gadgets.git\n"
-            f" * [new branch]      HEAD -> {BRANCH}\n"
+            f"   {VERIFIED[:7]}..{FOREIGN[:7]}  HEAD -> {BRANCH}\n"
         )
 
         assert pins.continued_branches == []
