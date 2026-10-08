@@ -101,13 +101,7 @@ class InMemoryExecutionRunQueue(InMemoryAdapter):
         async with self._lock:
             now = self._now()
             entry = self._hosts.get(host_id)
-            if (
-                entry is None
-                or not entry.registered
-                or entry.draining
-                or entry.in_use >= entry.capacity
-                or entry.heartbeat_at <= now - self._stale
-            ):
+            if entry is None or not self._has_room(entry, now):
                 return None
             epoch = entry.host.epoch
             ready = [
@@ -197,6 +191,15 @@ class InMemoryExecutionRunQueue(InMemoryAdapter):
 
     async def in_use(self) -> RunCounts:
         return RunCounts.model_validate(Counter(r.state for r in self._runs.values()))
+
+    def _has_room(self, entry: _Host, now: datetime) -> bool:
+        """The budget-row predicate of the Postgres claim's step 1."""
+        return (
+            entry.registered
+            and not entry.draining
+            and entry.in_use < entry.capacity
+            and entry.heartbeat_at > now - self._stale
+        )
 
     def _promote(self, execution_id: str) -> bool:
         row = self._runs.get(execution_id)
