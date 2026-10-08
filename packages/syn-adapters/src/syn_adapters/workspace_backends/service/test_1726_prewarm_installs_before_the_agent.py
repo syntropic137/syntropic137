@@ -16,10 +16,8 @@ import pytest
 if TYPE_CHECKING:
     from pathlib import Path
 
-from syn_adapters.workspace_backends.service.setup_phase_secrets import (
-    PREWARM_TIMEOUT_SECONDS,
-    SetupPhaseSecrets,
-)
+from syn_adapters.workspace_backends.service.dependency_prewarm import PREWARM_TIMEOUT_SECONDS
+from syn_adapters.workspace_backends.service.setup_phase_secrets import SetupPhaseSecrets
 
 pytestmark = pytest.mark.unit
 

@@ -624,16 +624,28 @@ def _yaml_phase_lines(phase: PhaseDefinitionResponse) -> list[str]:
     # truthy-only test would drop an explicit `false` and reinstall it as
     # `true`, which is the same laundering in the opposite direction. So the
     # guard compares against the default.
+    lines.extend(_yaml_workspace_lines(phase))
+    lines.extend(_yaml_agent_lines(phase))
+    lines.extend(_yaml_fallback_agent_lines(phase))
+    lines.extend(_yaml_ref_lines("claude_plugins", phase.claude_plugins))
+    lines.extend(_yaml_ref_lines("skills", phase.skills))
+    return lines
+
+
+def _yaml_workspace_lines(phase: PhaseDefinitionResponse) -> list[str]:
+    """The phase's workspace flags, each emitted only where it differs from the loader's default.
+
+    `clone_repos` and `delivers_repo_changes` default TRUE, `prewarm` FALSE
+    (#1726): a truthy-only test would drop an explicit `false` and reinstall it
+    as `true`, so each guard compares against its own default.
+    """
+    lines: list[str] = []
     if not phase.clone_repos:
         lines.append("    clone_repos: false")
     if not phase.delivers_repo_changes:
         lines.append("    delivers_repo_changes: false")
     if phase.prewarm:
         lines.append("    prewarm: true")
-    lines.extend(_yaml_agent_lines(phase))
-    lines.extend(_yaml_fallback_agent_lines(phase))
-    lines.extend(_yaml_ref_lines("claude_plugins", phase.claude_plugins))
-    lines.extend(_yaml_ref_lines("skills", phase.skills))
     return lines
 
 
