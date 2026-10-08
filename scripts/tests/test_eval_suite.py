@@ -89,7 +89,7 @@ _SONNET_WF = "eval-verify-pinned-sonnet-v1"
 def test_the_seed_suite_loads_and_records_its_workflow_and_models() -> None:
     loaded = load_suite(DEFAULT_SUITE)
 
-    assert loaded.tag == "verifier-seed-v1:v4:eval-verify-pinned-v1"
+    assert loaded.tag == "verifier-seed-v1:v5:eval-verify-pinned-v1"
     assert loaded.workflow.id == "eval-verify-pinned-v1"
     assert loaded.workflow.models == {"verify": "opus"}
     by_polarity = {
@@ -97,8 +97,8 @@ def test_the_seed_suite_loads_and_records_its_workflow_and_models() -> None:
         for polarity in ("defect", "clean")
     }
     assert by_polarity["defect"] >= {1574, 1649, 1652, 1654, 1679, 1680}
-    assert by_polarity["clean"] == {1083, 1130, 1238, 1486, 1643, 1691}
-    assert sum(c.polarity == "defect" for c in loaded.cases) == 30
+    assert by_polarity["clean"] == {917, 1010, 1238, 1486, 1643, 1691}
+    assert sum(c.polarity == "defect" for c in loaded.cases) == 31
     assert sum(c.polarity == "clean" for c in loaded.cases) == 6
 
 
@@ -109,7 +109,7 @@ def test_the_same_cases_load_under_the_codex_verifier_with_their_own_tag() -> No
 
     assert codex.workflow.id == _CODEX_WF
     assert codex.workflow.models == {"verify": "gpt-sol"}
-    assert codex.tag == f"verifier-seed-v1:v4:{_CODEX_WF}"
+    assert codex.tag == f"verifier-seed-v1:v5:{_CODEX_WF}"
     assert codex.tag != opus.tag
     assert codex.cases == opus.cases
 
@@ -121,7 +121,7 @@ def test_the_same_cases_load_under_the_sonnet_verifier_with_their_own_tag() -> N
 
     assert sonnet.workflow.id == _SONNET_WF
     assert sonnet.workflow.models == {"verify": "sonnet"}
-    assert sonnet.tag == f"verifier-seed-v1:v4:{_SONNET_WF}"
+    assert sonnet.tag == f"verifier-seed-v1:v5:{_SONNET_WF}"
     assert sonnet.cases == opus.cases
 
 
@@ -881,6 +881,24 @@ _PARAPHRASES: dict[str, tuple[tuple[str, str], ...]] = {
             "skill invocation is unavailable to the agent.",
         ),
     ),
+    "redis-retry-non-idempotent": (
+        (
+            "redis_client.py:32",
+            "retry_on_timeout=True re-sends a command Redis may already have applied; GETDEL "
+            "and SET NX are not idempotent, so the retry loses the signal or reports a duplicate.",
+        ),
+        (
+            "control/adapters/redis_adapter.py:76",
+            "check_signal uses getdel under a client that retries on timeout: if the first "
+            "attempt deleted the key and the reply was lost, the retry returns nothing and the "
+            "cancel signal is dropped.",
+        ),
+        (
+            "dedup/redis_dedup.py",
+            "the SET NX claim is retried after a timeout; the first attempt already set the "
+            "key, so the retry sees it and the first delivery is treated as a duplicate.",
+        ),
+    ),
     "redis-url-password-logged": (
         (
             "_wiring.py:846",
@@ -1089,6 +1107,10 @@ def test_every_seed_has_at_least_three_paraphrases() -> None:
 
 # Blocking findings that name a seed's file but describe a different defect.
 _WRONG_DEFECTS: dict[str, tuple[str, str]] = {
+    "redis-retry-non-idempotent": (
+        "redis_client.py:30",
+        "the socket timeout is read from a hard-coded constant instead of settings.",
+    ),
     "binary-artifact-minio-key": (
         "minio.py:12",
         "the bucket name is read from an unvalidated setting.",
@@ -1413,7 +1435,7 @@ def test_score_reads_verdict_report_cost_and_model_from_the_api() -> None:
     assert unrecorded == ()
 
     table = render(loaded, rows)
-    assert "exec-1" in table and "PASS" in table and "$3.75" in table and "1/36 passed" in table
+    assert "exec-1" in table and "PASS" in table and "$3.75" in table and "1/37 passed" in table
 
 
 @pytest.mark.unit
@@ -1480,7 +1502,7 @@ def test_launch_on_a_fresh_server_installs_the_workflow_before_any_eval(tmp_path
         c.commit for c in loaded.cases
     ]
     assert [c["tags"] for c in creates] == [["suite:verifier-seed", c.tag] for c in loaded.cases]
-    assert all(s["tags"] == ["suite-version:4", f"verifier:{_WF}"] for s in starts)
+    assert all(s["tags"] == ["suite-version:5", f"verifier:{_WF}"] for s in starts)
     assert [s["eval_id"] for s in starts] == [f"eval-{c.commit[:6]}" for c in loaded.cases]
     assert len(lines) == 1 + len(loaded.cases)
 
@@ -1562,13 +1584,13 @@ def test_launch_under_the_codex_verifier_runs_and_records_the_codex_workflow(
     # The case evals are shared by every verifier; the run says which one it was.
     assert all("starting_workflow_id" not in c for c in creates)
     starts = [json.loads(r.content) for r in server.requests if r.url.path.endswith("/execute")]
-    assert {tuple(s["tags"]) for s in starts} == {("suite-version:4", f"verifier:{_CODEX_WF}")}
+    assert {tuple(s["tags"]) for s in starts} == {("suite-version:5", f"verifier:{_CODEX_WF}")}
     assert all(not any(t.startswith("verifier") for t in c["tags"][1:]) for c in creates)
     starts = [r.url.path for r in server.requests if r.url.path.endswith("/execute")]
     assert set(starts) == {f"/workflows/{_CODEX_WF}/execute"}
     recorded = read_launches(ledger)
     assert {(x.suite, x.workflow_id) for x in recorded} == {
-        (f"verifier-seed-v1:v4:{_CODEX_WF}", _CODEX_WF)
+        (f"verifier-seed-v1:v5:{_CODEX_WF}", _CODEX_WF)
     }
 
 
@@ -1766,7 +1788,7 @@ def test_v1_runs_never_count_toward_the_current_version(tmp_path: Path) -> None:
     current = load_suite(DEFAULT_SUITE)
     rows, unrecorded = score_suite(current, _LedgerServer(launches).client(), launches)
 
-    assert len(rows) == 36 and {r.status for r in rows} == {"not launched"}
+    assert len(rows) == 37 and {r.status for r in rows} == {"not launched"}
     assert unrecorded == ()
 
 
@@ -1827,7 +1849,9 @@ def test_a_retired_case_no_history_version_holds_is_refused(tmp_path: Path) -> N
     case = suite_dir / "cases" / "redis-retry-non-idempotent.yaml"
     case.write_text(case.read_text() + "retired: v5 - never ran\n")
 
-    with pytest.raises(DefinitionError, match=r"retired case\(s\) \['redis-retry-non-idempotent'\]"):
+    with pytest.raises(
+        DefinitionError, match=r"retired case\(s\) \['redis-retry-non-idempotent'\]"
+    ):
         load_suite(suite_dir)
 
 
@@ -1889,7 +1913,7 @@ def test_the_holdout_is_new_cases_only_and_within_its_share() -> None:
     cases = load_suite(DEFAULT_SUITE).cases
     holdout = {c.id for c in cases if c.split == "holdout"}
 
-    assert len(holdout) == 11 and len(cases) == 36
+    assert len(holdout) == 11 and len(cases) == 37
     # The pre-v4 defects were already run against the verifiers: never holdout.
     assert not holdout & _V2_CASES
 
@@ -1902,7 +1926,7 @@ def test_a_train_launch_never_starts_a_holdout_case(tmp_path: Path) -> None:
 
     holdout = {c.id for c in load_suite(DEFAULT_SUITE, split="holdout").cases}
     launched = {x.case for x in read_launches(ledger)}
-    assert len(launched) == 25
+    assert len(launched) == 26
     assert not launched & holdout
 
 
@@ -1943,7 +1967,7 @@ def test_a_suite_with_too_little_holdout_is_refused(tmp_path: Path) -> None:
     for path in (suite_dir / "cases").glob("*.yaml"):
         path.write_text(path.read_text().replace("split: holdout", "split: train"))
 
-    with pytest.raises(DefinitionError, match="0 of 36 cases are holdout"):
+    with pytest.raises(DefinitionError, match="0 of 37 cases are holdout"):
         load_suite(suite_dir)
 
 
@@ -2055,8 +2079,8 @@ def test_an_identical_relaunch_is_an_unchanged_install(tmp_path: Path) -> None:
     _, client = _provenanced_server(loaded, templates)
     again = launch_suite(loaded, client, ledger)
 
-    assert first[0].startswith(f"workflow {_CODEX_WF}: created as 4.0.0")
-    assert again[0].startswith(f"workflow {_CODEX_WF}: unchanged as 4.0.0")
+    assert first[0].startswith(f"workflow {_CODEX_WF}: created as 5.0.0")
+    assert again[0].startswith(f"workflow {_CODEX_WF}: unchanged as 5.0.0")
 
 
 @pytest.mark.unit
@@ -2103,7 +2127,7 @@ def test_a_cli_installed_archived_record_is_restored_by_launch_without_force(
     lines = launch_suite(loaded, client, tmp_path / "launches.jsonl")
 
     stored = templates.by_id[_CODEX_WF]
-    assert lines[0].startswith(f"workflow {_CODEX_WF}: created as 4.0.0")
+    assert lines[0].startswith(f"workflow {_CODEX_WF}: created as 5.0.0")
     assert not stored.is_archived
     assert stored.source_digest == install_provenance(loaded, document).source_digest
 
@@ -2154,7 +2178,7 @@ def test_an_unchanged_relaunch_restores_an_archived_template(tmp_path: Path) -> 
     _, client = _provenanced_server(loaded, templates)
     lines = launch_suite(loaded, client, tmp_path / "launches.jsonl")
 
-    assert lines[0].startswith(f"workflow {_CODEX_WF}: created as 4.0.0")
+    assert lines[0].startswith(f"workflow {_CODEX_WF}: created as 5.0.0")
     assert not templates.by_id[_CODEX_WF].is_archived
 
 
@@ -2169,7 +2193,7 @@ def test_launch_reuses_each_case_eval_and_creates_none(tmp_path: Path) -> None:
     assert not any(r.method == "POST" and r.url.path == "/evals" for r in server.requests)
     starts = [json.loads(r.content) for r in server.requests if r.url.path.endswith("/execute")]
     assert [s["eval_id"] for s in starts] == [f"eval-{c.commit[:6]}" for c in loaded.cases]
-    assert {tuple(s["tags"]) for s in starts} == {("suite-version:4", f"verifier:{_WF}")}
+    assert {tuple(s["tags"]) for s in starts} == {("suite-version:5", f"verifier:{_WF}")}
 
 
 @pytest.mark.unit
@@ -2183,7 +2207,7 @@ def test_score_records_each_verdict_on_the_eval() -> None:
     assert path == "/evals/eval-1/runs/exec-1/score"
     assert body["verdict"] == "PASS"
     assert body["score"] == 1.0
-    assert (body["scorer"], body["scorer_version"]) == ("eval_suite.py", "4")
+    assert (body["scorer"], body["scorer_version"]) == ("eval_suite.py", "5")
     assert isinstance(body["evidence"], str) and _CASE in body["evidence"]
 
 
@@ -2221,9 +2245,7 @@ def _later(repo: Path, message: str) -> str:
     return _git(repo, "rev-parse", "HEAD")
 
 
-def _clean_suite(
-    tmp_path: Path, commit: str, merge: str, through: str, added_in: int = 3
-) -> Path:
+def _clean_suite(tmp_path: Path, commit: str, merge: str, through: str, added_in: int = 3) -> Path:
     suite_dir = _copy_suite(tmp_path)
     suite_file = suite_dir / "suite.yaml"
     suite = yaml.safe_load(suite_file.read_text())
@@ -2362,7 +2384,17 @@ def quiet(tmp_path: Path) -> tuple[Path, str, str, int]:
     _git(repo, "checkout", "-q", "main")
     env = {**os.environ, "GIT_AUTHOR_DATE": f"@{day0}", "GIT_COMMITTER_DATE": f"@{day0}"}
     subprocess.run(
-        ["git", "-C", str(repo), "merge", "-q", "--no-ff", "-m", "Merge pull request #7", "feature"],
+        [
+            "git",
+            "-C",
+            str(repo),
+            "merge",
+            "-q",
+            "--no-ff",
+            "-m",
+            "Merge pull request #7",
+            "feature",
+        ],
         env=env,
         check=True,
     )
@@ -2377,7 +2409,9 @@ def test_check_refuses_a_control_whose_function_a_later_commit_changes_within_30
     repo, head, merge, day0 = quiet
     moved = "def added():\n    return 9\n\n\n" + _PR_FILE
     _commit_at(repo, day0 + _DAY, "feat: added", moved)
-    touch = _commit_at(repo, day0 + 2 * _DAY, "refactor: tidy", moved.replace("return 2", "return 3"))
+    touch = _commit_at(
+        repo, day0 + 2 * _DAY, "refactor: tidy", moved.replace("return 2", "return 3")
+    )
     through = _commit_at(repo, day0 + 40 * _DAY, "chore: later")
 
     problems = check_commits(load_suite(_clean_suite(tmp_path, head, merge, through)), repo)
@@ -2506,7 +2540,7 @@ def test_score_records_a_certified_clean_control_as_a_pass() -> None:
     assert (body["verdict"], body["score"]) == ("PASS", 1.0)
     assert f"{_clean_case().id} (clean)" in str(body["evidence"])
     table = render(loaded, rows)
-    assert "1/36 passed" in table
+    assert "1/37 passed" in table
     assert "false-block rate (clean controls blocked): 0/1 (0%)" in table
     assert "catch rate (defect cases blocked and named): -" in table
 
@@ -2520,7 +2554,7 @@ def test_score_records_a_blocked_clean_control_as_a_false_block() -> None:
     [(_, body)] = server.scores
     assert (body["verdict"], body["score"]) == ("FAIL", 0.0)
     table = render(loaded, rows)
-    assert "0/36 passed" in table
+    assert "0/37 passed" in table
     assert "false-block rate (clean controls blocked): 1/1 (100%)" in table
 
 
