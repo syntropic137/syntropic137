@@ -7,10 +7,13 @@ polarity: clean
 source_pr: 1691
 commit: d103fe61d9d185bdc814ec7655ca52ed138cab98
 merge_commit: 8d70498fe0015c92ae76b649257fc6eed69b22a8
-clean_through: 6cb76a7f9aa881aff20ecaa8fefeeb690ce92673
+clean_through: 4108b74fc2f7f74b280aed08a49f6eb91c796a3f
 task: >
   The change under review runs the API's uvicorn server on the standard
   library asyncio event loop instead of uvloop, set once in the API image, so
   that spawning a subprocess never forks the whole API process. Review where
   the loop is chosen and whether every deployment of the API gets it.
 split: holdout
+# Under QUIET_DAYS old at every clean_through main can give it (main is
+# 4108b74fc, 2026-10-08), so it cannot meet the quiet-window rule yet.
+retired: v5 - under 30 days of quiet history; it scores in v4 as it ran
