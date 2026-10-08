@@ -292,36 +292,52 @@ function windows(list: readonly TrendRun[], lastT: number): Windows {
   return { now: list.slice(-CARD_WINDOW), then: list.filter((r) => r.t <= lastT - LOOKBACK_DAYS * DAY).slice(-CARD_WINDOW) }
 }
 
+const toneOf = (d: TrendDirection, upIsGood: boolean): TrendTone => (d === 'flat' ? 'neutral' : (d === 'up') === upIsGood ? 'good' : 'bad')
+
+interface ScoreChange {
+  fresh: boolean
+  now: number | null
+  delta: number
+  since: string
+}
+
+function scoreChange(scored: readonly TrendRun[], lastT: number): ScoreChange {
+  const w = windows(scored, lastT)
+  const now = w.now.length ? Math.round(avg(w.now.map((r) => r.score ?? 0))) : null
+  if (w.then.length === 0 || now === null) return { fresh: true, now, delta: 0, since: '' }
+  return { fresh: false, now, delta: now - Math.round(avg(w.then.map((r) => r.score ?? 0))), since: ` since ${shortDay(w.then.at(-1)!.t)}` }
+}
+
+function metricChange(mine: readonly TrendRun[], lastT: number, metric: MetricDef, fresh: boolean): { now: number; delta: number } {
+  const w = windows(mine, lastT)
+  const now = avg(w.now.map(metric.value))
+  return { now, delta: fresh || w.then.length === 0 ? 0 : now - avg(w.then.map(metric.value)) }
+}
+
 function verifierCard(s: TrendSeries, mine: readonly TrendRun[], metric: MetricDef): VerifierCard {
   const lastT = mine.at(-1)?.t ?? 0
-  const scored = mine.filter((r) => r.score !== null)
-  const sw = windows(scored, lastT)
-  const ew = windows(mine, lastT)
-  const fresh = sw.then.length === 0 || sw.now.length === 0
-  const sNow = sw.now.length ? Math.round(avg(sw.now.map((r) => r.score ?? 0))) : null
-  const ds = fresh || sNow === null ? 0 : sNow - Math.round(avg(sw.then.map((r) => r.score ?? 0)))
-  const eNow = avg(ew.now.map(metric.value))
-  const de = fresh ? 0 : eNow - avg(ew.then.map(metric.value))
-  const q = direction(ds, SCORE_MOVE - 1)
-  const e = direction(de, metric.tolerance)
-  const v = verifierVerdict({ fresh, q, e })
-  const since = fresh ? '' : ` since ${shortDay(sw.then.at(-1)!.t)}`
+  const sc = scoreChange(mine.filter((r) => r.score !== null), lastT)
+  const mc = metricChange(mine, lastT, metric, sc.fresh)
+  const q = direction(sc.delta, SCORE_MOVE - 1)
+  const e = direction(mc.delta, metric.tolerance)
+  const v = verifierVerdict({ fresh: sc.fresh, q, e })
+  const first = 'first runs'
   return {
     key: s.key,
     model: s.model,
     color: s.color,
-    score: sNow === null ? '—' : String(sNow),
-    scoreDelta: fresh ? 'first runs' : `${signed(ds, (n) => String(Math.abs(n)))}${since}`,
+    score: sc.now === null ? '—' : String(sc.now),
+    scoreDelta: sc.fresh ? first : `${signed(sc.delta, (n) => String(Math.abs(n)))}${sc.since}`,
     scoreDir: q,
-    scoreTone: q === 'up' ? 'good' : q === 'down' ? 'bad' : 'neutral',
+    scoreTone: toneOf(q, true),
     metricLabel: metric.label,
-    metricValue: metric.format(eNow),
-    metricDelta: fresh ? 'first runs' : e === 'flat' ? 'flat' : signed(de, metric.format),
+    metricValue: metric.format(mc.now),
+    metricDelta: sc.fresh ? first : e === 'flat' ? 'flat' : signed(mc.delta, metric.format),
     metricDir: e,
-    metricTone: e === 'down' ? 'good' : e === 'up' ? 'bad' : 'neutral',
+    metricTone: toneOf(e, false),
     verdict: v.text,
     tone: v.tone,
-    label: `${s.model}: score ${sNow ?? 'none'} of 100, ${metric.label.toLowerCase()} ${metric.format(eNow)}, ${v.text.toLowerCase()}`,
+    label: `${s.model}: score ${sc.now ?? 'none'} of 100, ${metric.label.toLowerCase()} ${metric.format(mc.now)}, ${v.text.toLowerCase()}`,
   }
 }
 
