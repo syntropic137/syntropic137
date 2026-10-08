@@ -19,10 +19,7 @@ import shlex
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Final, Protocol
 
-from syn_adapters.workspace_backends.service.dependency_prewarm import (
-    PREWARM_TIMEOUT_SECONDS,
-    append_dependency_prewarm,
-)
+from syn_adapters.workspace_backends.service import dependency_prewarm
 from syn_adapters.workspace_backends.service.issued_tokens import IssuedToken
 from syn_adapters.workspace_backends.service.pinned_checkout import append_pinned_checkout
 from syn_shared.upstream_failure import UpstreamFailureError
@@ -556,8 +553,7 @@ class SetupPhaseSecrets:
     Set for the phase a resume continues: that repository's pin is the
     branch's head, checked out on the branch instead of detached
     (`StartPins.checkout_for`)."""
-    prewarm: bool = False
-    """Install the clones' locked dependencies during setup; see `append_dependency_prewarm`."""
+    prewarm: bool = False  # install the clones' locked deps in setup (#1726)
     claude_code_oauth_token: str | None = None
     anthropic_api_key: str | None = None
     codex_auth_json: str | None = None
@@ -602,7 +598,6 @@ class SetupPhaseSecrets:
             clone_repos: If False, the repos are credentialed but not checked
                 out (#1187). Pass the repos either way - dropping them to skip
                 the clone also drops the token routing they key.
-            prewarm: Install the clones' locked dependencies during setup (#1726).
             pinned_commits: ``owner/name`` -> the commit to check that
                 repository out at (#1458). Empty when no commit was recorded.
             continued_branches: ``owner/name`` -> the branch a continuing
@@ -662,7 +657,6 @@ class SetupPhaseSecrets:
         repo_tokens: dict[str, str] | None = None,
         gh_token: str | None = None,
         clone_repos: bool = True,
-        prewarm: bool = False,
         pinned_commits: Mapping[str, str] | None = None,
         continued_branches: Mapping[str, str] | None = None,
     ) -> SetupPhaseSecrets:
@@ -680,7 +674,6 @@ class SetupPhaseSecrets:
             repo_tokens: Optional pre-minted URL→token map for tests that need credentials
             gh_token: gh's credential; defaults to the one `create` would route to
             clone_repos: False to credential the repos without checking them out (#1187)
-            prewarm: Install the clones' locked dependencies during setup (#1726)
             pinned_commits: ``owner/name`` -> the commit to check it out at (#1458)
             continued_branches: ``owner/name`` -> the branch to continue at its head (#1513)
         """
@@ -698,7 +691,6 @@ class SetupPhaseSecrets:
             repositories=repositories or [],
             gh_token=gh_token,
             clone_repos=clone_repos,
-            prewarm=prewarm,
             pinned_commits=dict(pinned_commits or {}),
             continued_branches=dict(continued_branches or {}),
             claude_code_oauth_token=claude_code_oauth_token
@@ -738,7 +730,7 @@ class SetupPhaseSecrets:
         if self.repositories and self.clone_repos:
             self._append_repo_clones(lines)
             if self.prewarm:
-                append_dependency_prewarm(
+                dependency_prewarm.append_dependency_prewarm(
                     lines, [dest for _, dest in _clone_destinations(self.repositories)]
                 )
 
@@ -746,9 +738,8 @@ class SetupPhaseSecrets:
 
     def setup_timeout_seconds(self, configured: int) -> int:
         """The configured setup limit, plus the install budget for a prewarming setup only (#1726)."""
-        if self.prewarm and self.clone_repos and self.repositories:
-            return configured + PREWARM_TIMEOUT_SECONDS
-        return configured
+        warm = self.prewarm and self.clone_repos and bool(self.repositories)
+        return configured + dependency_prewarm.PREWARM_TIMEOUT_SECONDS if warm else configured
 
     def _append_codex_auth(self, lines: list[str]) -> None:
         """Relocate the staged codex auth file to ~/.codex/auth.json (0600).
