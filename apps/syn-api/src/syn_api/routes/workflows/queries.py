@@ -625,16 +625,25 @@ def _yaml_phase_lines(phase: PhaseDefinitionResponse) -> list[str]:
     # truthy-only test would drop an explicit `false` and reinstall it as
     # `true`, which is the same laundering in the opposite direction. So the
     # guard compares against the default.
-    if not phase.clone_repos:
-        lines.append("    clone_repos: false")
-    if not phase.delivers_repo_changes:
-        lines.append("    delivers_repo_changes: false")
-    if phase.platform_access is not PlatformScope.READ:
-        lines.append(f"    platform_access: {phase.platform_access.value}")
+    lines.extend(_yaml_workspace_lines(phase))
     lines.extend(_yaml_agent_lines(phase))
     lines.extend(_yaml_fallback_agent_lines(phase))
     lines.extend(_yaml_ref_lines("claude_plugins", phase.claude_plugins))
     lines.extend(_yaml_ref_lines("skills", phase.skills))
+    return lines
+
+
+def _yaml_workspace_lines(phase: PhaseDefinitionResponse) -> list[str]:
+    """What the phase's workspace holds or may do, wherever it differs from the loader default."""
+    lines: list[str] = []
+    if not phase.clone_repos:
+        lines.append("    clone_repos: false")
+    if not phase.delivers_repo_changes:
+        lines.append("    delivers_repo_changes: false")
+    # #1744. Dropped, a reinstalled eval phase silently loses the access its
+    # workflow was written to need.
+    if phase.platform_access is not PlatformScope.READ:
+        lines.append(f"    platform_access: {phase.platform_access.value}")
     return lines
 
 
