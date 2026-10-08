@@ -40,7 +40,9 @@ class WorkspaceOwnershipProjection(AutoDispatchProjection):
     async def clear_all_data(self) -> None:
         await self._store.delete_all(self.PROJECTION_NAME)
 
-    async def on_workspace_provisioned_for_phase(self, event_data: object) -> None:
+    async def on_workspace_provisioned_for_phase(
+        self, event_data: WorkspaceProvisionedForPhaseEvent
+    ) -> None:
         event = WorkspaceProvisionedForPhaseEvent.model_validate(event_data)
         if not event.workspace_id or not event.execution_id:
             raise ValueError("Workspace provisioning must name its workspace and execution")
