@@ -202,8 +202,10 @@ class TestRoundTrip:
         # A time that no restored chunk covers: the insert needs a new chunk.
         _sql(
             timescaledb,
-            "insert into public.agent_events values"
-            " (timestamptz '2026-12-25 12:00', 'after-restore', 'tool_use', '{}')",
+            "insert into public.agent_events"
+            " (time, event_type, session_id, execution_id, phase_id, data) values"
+            " (timestamptz '2026-12-25 12:00', 'tool_use', 'after-restore',"
+            " 'exec-after', 'phase-1', '{\"after\": true}')",
             db,
         )
         one_day = _sql(
