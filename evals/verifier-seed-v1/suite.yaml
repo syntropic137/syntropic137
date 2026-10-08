@@ -17,10 +17,10 @@
 # report a result and never choose one. The six earlier defects are train:
 # verifiers were already shaped against them. The holdout is, within each
 # batch of added cases, the ~30% whose sha256(id) sorts lowest (7 of the first
-# 18 mined, 2 of the next 6, 2 of the 6 clean controls, 2 of v6's 6
+# 18 mined, 2 of the next 6, 2 of the 6 clean controls, 1 of v6's 4
 # controls), fixed once, recorded in each file, and never moved to train. That
 # was 11 of 36 in v4; after v5's retirements and additions it is 10 of 33, and
-# 12 of 39 in v6.
+# 11 of 37 in v6.
 #
 # What it measures: given a workflow, a prompt and a model, does verification
 # find the defect, and certify the change that has none? `score` prints both
@@ -49,11 +49,10 @@
 #     GitHub token one has no fix to cut a case from. Two replacement controls
 #     chosen by the quiet-window rule (README.md); four more v3/v4 controls
 #     retired because they are under its 30 days. 31 defects, 2 controls.
-# v6: six clean controls added by the same rule (#1774), each quiet through
-#     main 23edd9c0b by `git log -L` on every hunk it changed: two with CLI
-#     TypeScript, the rest Python across the API, syn-shared, syn-adapters and
-#     the fitness scripts. No dashboard change met the rule. 31 defects, 8
-#     controls, 39 in all.
+# v6: four clean controls added by the same rule (#1774), each passing `check`
+#     and quiet by `git log -L` on every hunk it changed through main
+#     23edd9c0b: the API, syn-shared, syn-adapters and the fitness scripts. No
+#     CLI or dashboard change met the rule. 31 defects, 6 controls, 37 in all.
 #
 # EVERY VERSION KEEPS ITS SCORE. `history` records each earlier version whose
 # runs launches.jsonl still holds: the tag exactly as those runs carry it, the

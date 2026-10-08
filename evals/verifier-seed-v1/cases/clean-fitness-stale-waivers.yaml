@@ -14,4 +14,4 @@ task: >
   already paid and adds a check that fails when the fitness tool reports a
   stale waiver, wired into the justfile. Review whether the check can pass
   while a stale waiver remains, or fail when none does.
-split: holdout
+split: train
