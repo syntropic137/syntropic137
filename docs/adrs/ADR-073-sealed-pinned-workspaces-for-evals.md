@@ -1,6 +1,6 @@
 # ADR-073: Sealed Pinned Workspaces for Evals
 
-- **Status**: Proposed (workspace mechanism landed in #1760; workflow declaration, egress and renewal pending)
+- **Status**: Proposed (decisions 1, 2 and 4 implemented in #1760; decision 3, egress, and the Docker probe test are not)
 - **Date**: 2026-10-08
 - **Issue**: #1725 (research, pitfall #2), #1747 (implementer evals, which documented leakage as unsolved)
 - **Related**: ADR-024 (setup-phase secrets), ADR-058 (multi-repo credentials), #1458 (pinned checkout), #725 (credential lifecycle)
@@ -52,27 +52,56 @@ sealed workspace refuses to be built with an unpinned repository, a skipped
 clone, or a continued branch: sealing at a default branch's head seals
 nothing.
 
-### 3. Egress for the agent's phase excludes GitHub (pending)
+### 3. Egress for the agent's phase excludes GitHub (NOT implemented)
 
-The phase allowlist must drop `github.com`, `api.github.com` and
-`raw.githubusercontent.com` once setup is done, while package indexes stay
-reachable (or are prewarmed) so gates can run. The default allowlist contains
-no package index today, so that must be added explicitly for these phases.
+The allowlist is not where this can be enforced today. `agent-net` is
+deliberately not an internal network (`docker/docker-compose.yaml`: "agents
+need egress for git operations"), so a workspace container reaches the
+internet directly and the Envoy allowlist governs only what is routed through
+Envoy. Dropping `api.github.com` from `SidecarConfig.allowed_hosts` for a
+pinned phase would therefore change nothing an agent could not route around.
 
-### 4. Declared per workflow (pending)
+What closing it needs, in order:
 
-A workflow opts in (`isolation: pinned`); the eval workflows declare it. The
-value flows from the YAML through the template and execution aggregates to
-`WorkspaceProvisionHandler`, exactly as `delivers_repo_changes` does, and the
-credential renewal path (`git_credential_renewal.py`) must not re-install a
-credential into a sealed workspace.
+1. A pinned phase's container on a network with no direct egress (an
+   `internal: true` network, or a per-container egress policy set by the
+   isolation provider in agentic-workspace), with the clone done before the
+   agent starts, as it already is.
+2. Its proxy allowlist without `github.com`, `api.github.com` and
+   `raw.githubusercontent.com`, and WITH the package indexes the gates need
+   (pypi, the npm registry) - none of which the default allowlist contains -
+   or the workspace prewarmed so no index is needed.
+3. A Docker probe test in a real pinned workspace: `git log --all`,
+   `git fetch origin`, `gh pr view <fix pr>` and `curl api.github.com` all
+   fail to reveal the fix, and the pinned files are present.
+
+Until then a sealed workspace has no route to the fix through git, gh or a
+credential, but anonymous HTTPS to GitHub's public API still works for a
+public repository.
+
+### 4. Declared per phase, as `isolation: pinned`
+
+`PhaseIsolation` (`_shared/phase_isolation.py`): `standard` or `pinned`.
+Declared on the phase, beside `clone_repos`, because like it it decides what
+the workspace contains, and because one workflow can hold a sealed phase and
+a phase that needs GitHub. The eval workflow's implement phase declares it.
+It travels the same hops as `delivers_repo_changes`: YAML -> `PhaseDefinition`
+-> `WorkflowTemplateCreated` -> `ExecutablePhase` ->
+`WorkspaceProvisionHandler` -> `SetupPhaseSecrets.sealed_at_pin`, and the API
+create path, read models and YAML export carry it too.
+
+A pinned phase is refused at authoring unless it declares
+`delivers_repo_changes: false` and clones: it could never push, and a phase
+with no clone has nothing to seal. `ManagedWorkspace` records no credential
+source for a sealed workspace, so credential renewal (#1393) has nothing to
+re-install.
 
 ## Consequences
 
-- With parts 1 and 2 alone, an agent can still reach GitHub anonymously over
-  the network for a public repository: the seal removes the URL and the
-  credential, not the route. Part 3 closes that. Until it lands, a PASS still
-  needs the tool trace read as the README says.
+- With decisions 1, 2 and 4 alone, an agent can still reach GitHub
+  anonymously over the network for a public repository: the seal removes the
+  history, the URL and the credential, not the route. Decision 3 closes that.
+  Until it lands, a PASS still needs the tool trace read as the README says.
 - Sealing is irreversible inside the workspace. A sealed phase cannot push,
   which is correct for the eval workflow (`delivers_repo_changes: false`) and
   is why sealing is opt-in rather than tied to having a pin.

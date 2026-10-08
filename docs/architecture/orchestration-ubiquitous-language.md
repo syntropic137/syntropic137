@@ -281,6 +281,27 @@ from it. The Resume Phase is checked out at its head; every other Phase still
 reads the pinned commit. Recorded on the resumed Execution's start. (#1513,
 ADR-058.)
 
+## Isolation
+
+What a Phase's workspace may reach beyond the checkout it was given, declared
+on the Phase as `isolation`. `standard` is every Phase's default: the full
+clone, every branch and tag, and a GitHub credential kept so the agent can
+push. `pinned` is for an evaluation, where the commits after a Pin may be the
+answer: the workspace is a Sealed Workspace. A `pinned` Phase must declare
+`delivers_repo_changes: false` and must clone, or it is refused when written.
+(#1725, ADR-073.)
+
+## Sealed Workspace
+
+A workspace of a `pinned` Phase. Each repository and submodule is cloned and
+its Pin verified as usual, then sealed: every remote, ref, tag and reflog is
+removed and every object the pinned commit does not reach is pruned, so no
+later commit can be named, listed or fetched from inside it. Its GitHub
+credential is deleted once the clone is done and never renewed, and `gh` is
+never given one. **Unclear:** a Sealed Workspace still has direct network
+egress, so it is not yet sealed from GitHub's public API (ADR-073 decision 3,
+#1725).
+
 ## Abandoned Branch
 
 A branch a Resume Phase could have continued and deliberately did not, because
