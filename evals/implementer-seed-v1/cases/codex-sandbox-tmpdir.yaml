@@ -1,0 +1,29 @@
+id: codex-sandbox-tmpdir
+source_pr: 1706
+commit: e59c17711a380e2a4bb6b4d28fd6ba02b61a8f86
+fix_commit: acac2720e70e6374c2f737560ee2b903300675df
+task: |
+  The codex sandbox probe panics on a missing /workspace/.tmp.
+
+  `eval-verify-pinned-codex-v1` failed at provision on 5 of 6 runs:
+
+      probe exit 101: thread 'main' panicked at linux-sandbox/src/linux_run_main.rs:1353:17:
+      failed to resolve synthetic mount registry temp directory /workspace/.tmp: No such file or directory (os error 2)
+
+  `AgenticIsolationAdapter` sets `TMPDIR=/workspace/.tmp` for every workspace
+  (#1042). Codex's linux-sandbox canonicalizes `TMPDIR` and panics when it is
+  missing, and the codex sandbox probe then refuses the workspace. SDLC codex
+  phases happen not to hit it; the eval verifier, which declares no skills,
+  always does.
+
+  What must hold: a workspace that `AgenticIsolationAdapter.create()` returns
+  already has its `TMPDIR` directory, whatever runs in it first. If that cannot
+  be arranged, the workspace is not handed out: it is destroyed and the failure
+  is raised as `WorkspaceProvisionError`.
+
+  Interface the scoring tests use: they drive `AgenticIsolationAdapter.create()`
+  over a provider double whose fresh workspace holds only `/workspace`. The only
+  command the double understands is `mkdir -p <dirs>` sent through the
+  provider's `execute()`; any other command at create fails the test.
+hidden_tests:
+  - packages/syn-adapters/tests/workspace_backends/agentic/test_executable_tmpdir.py

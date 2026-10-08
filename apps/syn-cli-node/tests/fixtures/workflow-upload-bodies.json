@@ -311,6 +311,48 @@
       }
     ]
   },
+  "workflows/evals/implement-pinned/workflow.yaml": {
+    "id": "eval-implement-pinned-v1",
+    "name": "Eval: implement a task at the pinned checkout, patch only (v1)",
+    "description": "One implement phase over the commit the workspace was provisioned at. It exists to be measured: the implementer-seed eval suite (evals/implementer-seed-v1) launches it at the first parent of a real merged fix, with the issue's statement of the problem as the task, and scores the patch it writes against the fix's own tests, which the agent never sees.\n",
+    "type": "custom",
+    "classification": "standard",
+    "requires_repos": true,
+    "inputs": [
+      {
+        "name": "task",
+        "description": "The problem to fix, as its issue stated it, with no description of the solution",
+        "required": true
+      }
+    ],
+    "phases": [
+      {
+        "id": "implement",
+        "name": "Implement the task at the pinned checkout",
+        "order": 1,
+        "execution_type": "sequential",
+        "input_artifacts": [],
+        "output_artifacts": [
+          "patch"
+        ],
+        "timeout_seconds": 3600,
+        "delivers_repo_changes": false,
+        "allowed_tools": [
+          "Read",
+          "Grep",
+          "Glob",
+          "Bash",
+          "Edit",
+          "Write"
+        ],
+        "agent": {
+          "provider": "claude",
+          "model": "opus"
+        },
+        "prompt_template": "# Implement the task at this checkout\n\nThe repository under `/workspace/repos/` is checked out at exactly the commit\nthe task starts from. The platform pinned it and read HEAD back before you\nstarted.\n\n## The task\n\n$ARGUMENTS\n\n## Rules\n\n- **Work at this checkout and nothing else.** Do not fetch, pull, check out,\n  merge, log or show any other ref or commit, and do not look the task up on\n  GitHub. This problem has been solved before; reading that solution would\n  make this run meaningless, and the run is scored as if you had not.\n- **Write nothing back.** Do not commit, push, comment, or open or edit any\n  issue or pull request. Your change leaves this workspace only as a patch.\n- **Fix the problem, not a test.** Your change is scored by tests you cannot\n  see, written against the behaviour the task describes. Write your own tests\n  for it as you would for a real change; they are part of your patch.\n- You may run tests and any other local command.\n\n## Output\n\n1. Write your change, uncommitted, in the working tree. Then write it out:\n\n   ```\n   cd /workspace/repos/<repo>\n   git add -A\n   git diff --cached --binary > /workspace/artifacts/output/implement.patch\n   ```\n\n   The patch must apply with `git apply` at this checkout. An empty or missing\n   patch scores as no change.\n2. Write `artifacts/output/implement.md`: what you changed and why, and which\n   tests you ran with what they printed.\n\nUse `\"success\": false` only when you could not work on the checkout at all."
+      }
+    ]
+  },
   "workflows/evals/verify-pinned/workflow.yaml": {
     "id": "eval-verify-pinned-v1",
     "name": "Eval: verify the pinned checkout, read-only (v1)",

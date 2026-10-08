@@ -789,6 +789,24 @@
             "description": "Keep only executions currently in this eval: an eval's runs (#967). Matched exactly, never as a prefix."
           },
           {
+            "name": "in_eval",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "true keeps only executions that are currently a run of some eval; false keeps only executions in no eval. Omit for both.",
+              "title": "In Eval"
+            },
+            "description": "true keeps only executions that are currently a run of some eval; false keeps only executions in no eval. Omit for both."
+          },
+          {
             "name": "page",
             "in": "query",
             "required": false,
@@ -10987,6 +11005,49 @@
         "title": "ExecuteWorkflowResponse",
         "description": "Response after starting workflow execution."
       },
+      "ExecutionBudgetInfo": {
+        "properties": {
+          "running": {
+            "type": "integer",
+            "title": "Running"
+          },
+          "queued": {
+            "type": "integer",
+            "title": "Queued"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          },
+          "admission_paused": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Admission Paused"
+          },
+          "display": {
+            "type": "string",
+            "title": "Display",
+            "description": "e.g. '2 running / 3 queued / cap 4'.",
+            "readOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "running",
+          "queued",
+          "limit",
+          "admission_paused",
+          "display"
+        ],
+        "title": "ExecutionBudgetInfo",
+        "description": "How full the execution budget is right now, for the app bar (PC-124).\n\n``running`` and ``limit`` are this API process's budget. ``queued`` is\nevery start the list reports as ``queued``: waiting here for a slot, or\nrecorded durably and not yet picked up by any process."
+      },
       "ExecutionCostResponse": {
         "properties": {
           "execution_id": {
@@ -11621,6 +11682,16 @@
             "title": "Excluded Undated",
             "default": 0
           },
+          "budget": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExecutionBudgetInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "status_counts": {
             "additionalProperties": {
               "type": "integer"
@@ -11841,6 +11912,12 @@
             "title": "Position Display",
             "description": "Human-readable position, e.g. 'queued 2 of 3 (4/4 running)'.",
             "readOnly": true
+          },
+          "reason_display": {
+            "type": "string",
+            "title": "Reason Display",
+            "description": "Why it has not started: 'slots full 4/4', 'admission paused', 'starting' or 'awaiting pickup (<status>)' (PC-124).",
+            "readOnly": true
           }
         },
         "type": "object",
@@ -11851,7 +11928,8 @@
           "waiting",
           "limit",
           "queued_at",
-          "position_display"
+          "position_display",
+          "reason_display"
         ],
         "title": "ExecutionStartQueueInfo",
         "description": "Where a start stands in the execution budget, before its execution exists (#1557).\n\nEvery start path - direct, trigger and resume - claims one of\n``SYN_EXECUTION_MAX_CONCURRENT`` slots. A start that finds none free waits\nhere, first come first served, and has no execution record yet; this is\nwhat it shows instead of a 404."
@@ -12140,6 +12218,26 @@
               }
             ],
             "title": "Repos Display"
+          },
+          "eval": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExecutionEvalRunResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "start_queue": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExecutionStartQueueInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",

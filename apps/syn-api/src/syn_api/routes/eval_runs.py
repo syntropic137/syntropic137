@@ -42,6 +42,8 @@ from syn_domain.contexts.orchestration.slices.list_evals.projection import EvalL
 from syn_shared.display.formatters import EM_DASH, format_cost, format_duration_seconds
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
     from syn_adapters.projections.manager import ProjectionManager
     from syn_api.types import PhaseExecution
@@ -201,19 +203,42 @@ async def execution_eval_run(
     route already holds, like its resume-start record. None in no eval.
     """
     row = await ExecutionListReads(store).get_by_id(execution_id)
-    if row is None or row.eval_id is None:
+    if row is None:
         return None
-    kind = row.association_kind
-    if kind not in ("launched", "attached"):
-        return None
+    return (await execution_eval_runs(store, [row])).get(execution_id)
+
+
+async def execution_eval_runs(
+    store: ProjectionStoreProtocol, rows: Iterable[WorkflowExecutionSummary]
+) -> dict[str, ExecutionEvalRunResponse]:
+    """The eval each execution row is a current run of, with its verdict, by execution id.
+
+    Two reads for any number of rows, one for the evals' names and one for the
+    runs' scores, so a page of executions costs what one execution costs.
+    Rows in no eval are omitted.
+    """
+    runs = {
+        row.workflow_execution_id: (row.eval_id, kind)
+        for row in rows
+        if row.eval_id is not None and (kind := row.association_kind) in ("launched", "attached")
+    }
+    if not runs:
+        return {}
     evals = EvalListProjection(store)
-    record = await evals.record(row.eval_id)
-    score = await evals.score(row.eval_id, execution_id)
-    return ExecutionEvalRunResponse(
-        eval_id=row.eval_id,
-        eval_name=None if record is None else record.name,
-        association_kind=kind,
-        verdict=None if score is None else score.verdict,
-        score=None if score is None else score.score,
-        scored_at=None if score is None else score.scored_at,
+    records = await evals.records({eval_id for eval_id, _ in runs.values()})
+    scores = await evals.scores_of(
+        {(eval_id, execution_id) for execution_id, (eval_id, _) in runs.items()}
     )
+    responses: dict[str, ExecutionEvalRunResponse] = {}
+    for execution_id, (eval_id, kind) in runs.items():
+        record = records.get(eval_id)
+        score = scores.get((eval_id, execution_id))
+        responses[execution_id] = ExecutionEvalRunResponse(
+            eval_id=eval_id,
+            eval_name=None if record is None else record.name,
+            association_kind="launched" if kind == "launched" else "attached",
+            verdict=None if score is None else score.verdict,
+            score=None if score is None else score.score,
+            scored_at=None if score is None else score.scored_at,
+        )
+    return responses
