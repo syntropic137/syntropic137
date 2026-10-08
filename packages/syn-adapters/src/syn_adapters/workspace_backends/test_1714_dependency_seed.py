@@ -184,7 +184,11 @@ def test_prune_drops_the_least_recently_copied_seed_past_the_budget(tmp_path: Pa
 def test_prune_never_deletes_a_seed_copied_within_the_grace(tmp_path: Path) -> None:
     store = DependencySeedStore(tmp_path / "seeds", max_bytes=1)
     key = SeedKey("uv", "org/app", "c" * 64)
-    store.publish(key, _built_cache(tmp_path / "b", "z" * 100))
+    built = _built_cache(tmp_path / "b", "z" * 100)
+    # A cache built long ago is still a seed published just now.
+    long_ago = time.time() - 7200
+    os.utime(built, (long_ago, long_ago))
+    store.publish(key, built)
 
     assert store.prune() == 0
     assert (tmp_path / "seeds" / key.relative_path).is_dir()

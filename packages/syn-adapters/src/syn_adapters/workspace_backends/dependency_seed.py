@@ -190,6 +190,9 @@ class DependencySeedStore:
         staging = target.parent / f".staging-{uuid.uuid4().hex}"
         staging.parent.mkdir(parents=True, exist_ok=True)
         shutil.copytree(built_cache, staging, symlinks=True)
+        # copytree carries the source's mtime over, and mtime is the LRU clock:
+        # without this a seed published a moment ago could be pruned first.
+        os.utime(staging)
         _make_read_only(staging)
         try:
             staging.rename(target)
@@ -207,7 +210,9 @@ class DependencySeedStore:
         seeds = sorted(
             (path.stat().st_mtime, path, _size(path))
             for path in self._root.glob("*/*/*/*")
-            if path.is_dir() and not path.name.startswith(".")
+            # Staging directories too: one a crashed publish left behind is
+            # otherwise never deleted. A live one is inside the grace.
+            if path.is_dir()
         )
         total = sum(size for _, _, size in seeds)
         freed = 0
