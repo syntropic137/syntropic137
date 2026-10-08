@@ -61,9 +61,10 @@ LIST_BUDGET_MS = 200.0
 DETAIL_BUDGET_MS = 300.0
 
 # Feedback 60d9f990: a list opens at 100 rows only if 100 costs at most 1.5x
-# of 50. Measured here (three runs) Executions cost 1.59x, 1.76x, 1.83x and
-# Sessions 0.87x, 1.24x, 1.71x, so both open at 50 and 100 is the operator's
-# choice; the ratios are printed so the next measurement is one run away.
+# of 50. On the VPS Sessions measured 0.85-1.22x, so Sessions opens at 100 and
+# that page is gated; Executions measured up to 2.04x, so it opens at 50 and
+# 100 is the operator's choice, timed for its ratio. The ratios are printed so
+# the next measurement is one run away.
 MAX_100_OVER_50 = 1.5
 
 # The execution the detail endpoint is timed on: mid-history, so its rows sit
@@ -91,7 +92,7 @@ ENDPOINTS: tuple[Endpoint, ...] = (
         LIST_BUDGET_MS,
     ),
     # 100 rows, timed beside 50 so the cost of the larger page is a number
-    # (feedback 60d9f990). No page opens at 100, so it is not gated.
+    # (feedback 60d9f990). Executions opens at 50, so this is not gated.
     Endpoint(
         "/executions?page_size=100",
         "/executions",
@@ -111,12 +112,12 @@ ENDPOINTS: tuple[Endpoint, ...] = (
     Endpoint(
         "/sessions?page_size=50", "/sessions", {"page": "1", "page_size": "50"}, LIST_BUDGET_MS
     ),
+    # Sessions opens at 100 (SESSION_LIST_PAGE_SIZE), so this one is gated.
     Endpoint(
         "/sessions?page_size=100",
         "/sessions",
         {"page": "1", "page_size": "100"},
         LIST_BUDGET_MS,
-        gated=False,
     ),
     Endpoint("/artifacts?page_size=20", "/artifacts", {"page_size": "20"}, LIST_BUDGET_MS),
 )
@@ -436,6 +437,11 @@ async def assert_timing_real_work(client: httpx.AsyncClient) -> None:
     assert len(artifacts["artifacts"]) == 20
 
 
+def over_budget(measured: dict[str, float]) -> list[str]:
+    """The gated endpoints whose measured p95 is over their budget."""
+    return [e.name for e in ENDPOINTS if e.gated and measured[e.name] > e.budget_ms]
+
+
 async def test_list_and_detail_endpoints_stay_inside_their_p95_budget(
     e2_seeded_client: httpx.AsyncClient,
 ) -> None:
@@ -456,5 +462,5 @@ async def test_list_and_detail_endpoints_stay_inside_their_p95_budget(
     for name, ratio in ratios.items():
         verdict = "within" if ratio <= MAX_100_OVER_50 else "OVER"
         print(f"  {name} p95 at 100 rows / at 50 rows: {ratio:.2f}x ({verdict} {MAX_100_OVER_50}x)")
-    over = [e.name for e in ENDPOINTS if e.gated and measured[e.name] > e.budget_ms]
+    over = over_budget(measured)
     assert not over, f"p95 over budget for {over}:\n{table}"
