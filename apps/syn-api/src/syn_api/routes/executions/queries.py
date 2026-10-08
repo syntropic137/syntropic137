@@ -668,18 +668,13 @@ async def list_executions_endpoint(
     manager = get_projection_mgr()
     selected = parse_statuses(statuses, status)
     all_queued = await queued_starts(manager.store)
-    # A queued start has no read model, so no tags or eval to judge: a request
-    # filtering on either is not shown one. It has not started, so a time
-    # window judges when it was accepted - the dashboard's default 24h window
-    # would otherwise hide every queued start.
-    queued = (
-        []
-        if tags or eval_id
-        else [
-            qs
-            for qs in all_queued
-            if _matches(qs, search=q, after=started_after, before=started_before)
-        ]
+    queued = _filter_queued(
+        all_queued,
+        tags=tags,
+        eval_id=eval_id,
+        search=q,
+        after=started_after,
+        before=started_before,
     )
     shown = queued if selected is None or QUEUED in selected else []
     # Queued rows lead the collection: they are the newest starts, and the
@@ -716,7 +711,7 @@ async def list_executions_endpoint(
         page_size=page_size,
         excluded_undated=execution_page.excluded_undated,
         # Like every other status, present only when something has it.
-        status_counts={**execution_page.status_counts, **({QUEUED: len(queued)} if queued else {})},
+        status_counts=_with_queued_count(execution_page.status_counts, len(queued)),
         budget=await _budget_info(len(all_queued)),
     )
 
@@ -737,6 +732,32 @@ def _read_model_statuses(selected: list[str] | None) -> list[str] | None:
     if selected is None:
         return None
     return [s for s in selected if s != QUEUED] or [QUEUED]
+
+
+def _filter_queued(
+    starts: list[QueuedStart],
+    *,
+    tags: TagSet,
+    eval_id: str | None,
+    search: str | None,
+    after: datetime | None,
+    before: datetime | None,
+) -> list[QueuedStart]:
+    """The queued starts the list's filters keep.
+
+    A queued start has no read model, so no tags or eval to judge: a request
+    filtering on either is not shown one. It has not started, so a time
+    window judges when it was accepted - the dashboard's default 24h window
+    would otherwise hide every queued start.
+    """
+    if tags or eval_id:
+        return []
+    return [qs for qs in starts if _matches(qs, search=search, after=after, before=before)]
+
+
+def _with_queued_count(counts: dict[str, int], queued: int) -> dict[str, int]:
+    """The read model's counts plus queued, present only when something has it."""
+    return {**counts, QUEUED: queued} if queued else dict(counts)
 
 
 def _matches(
