@@ -9,6 +9,7 @@
  */
 
 import { StatusBadge } from '../../components'
+import { ExecutionEvalBadge } from '../../components/evals'
 import type { ExecutionListItem } from '../../types'
 import { formatRelativeTime, formatTimestampLocale } from '../../utils/formatters'
 
@@ -50,6 +51,11 @@ export function ExecutionCard({ exec }: { exec: ExecutionListItem }) {
           {formatRelativeTime(exec.started_at)}
           {exec.total_phases > 0 && <> &middot; {exec.phase_progress.display}</>}
         </div>
+        {exec.eval && (
+          <div className="flex min-w-0">
+            <ExecutionEvalBadge evalRun={exec.eval} />
+          </div>
+        )}
       </div>
       <div className="grid grid-cols-2 gap-3">
         <MetricCell label="Repos" value={exec.repos_display ?? EM_DASH} />

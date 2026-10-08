@@ -10,6 +10,7 @@
 
 import type { ColumnDef } from '../../components'
 import { StatusBadge } from '../../components'
+import { ExecutionEvalBadge } from '../../components/evals'
 import type { ExecutionSortKey } from '../../hooks/useExecutionList'
 import type { ExecutionListItem } from '../../types'
 import { formatRelativeTime, formatTimestampLocale } from '../../utils/formatters'
@@ -33,7 +34,14 @@ const WORKFLOW: ColumnDef<ExecutionListItem, ExecutionSortKey> = {
   align: 'left',
   sortKey: 'workflow',
   cellClassName: 'text-sm text-[var(--color-text-primary)]',
-  render: (e) => e.workflow_name || e.workflow_id,
+  // An eval run carries its badge under the name, so it reads apart from an
+  // ordinary run at a glance; the width cap is what makes a long name truncate.
+  render: (e) => (
+    <div className="flex min-w-0 max-w-[18rem] flex-col items-start gap-1">
+      <span>{e.workflow_name || e.workflow_id}</span>
+      <ExecutionEvalBadge evalRun={e.eval} />
+    </div>
+  ),
 }
 
 const PROGRESS: ColumnDef<ExecutionListItem, ExecutionSortKey> = {

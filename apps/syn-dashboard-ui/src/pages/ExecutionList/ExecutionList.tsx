@@ -24,6 +24,7 @@ import { useExecutionList } from '../../hooks/useExecutionList'
 import { useIsMobile } from '../../hooks/useMediaQuery'
 import { useRowSelection } from '../../hooks/useRowSelection'
 import { formatExecutionIds, formatExecutionsForAgent } from '../../utils/executionExport'
+import { EvalFilterChips } from './EvalFilterChips'
 import { ExecutionCardList } from './ExecutionCardList'
 import { ExecutionTable } from './ExecutionTable'
 
@@ -58,6 +59,8 @@ export function ExecutionList() {
     setTimeWindow,
     resetView,
     isDefaultView,
+    evalFilter,
+    setEvalFilter,
     statusCounts,
     sort,
     toggleSort,
@@ -112,6 +115,8 @@ export function ExecutionList() {
         reset={resetView}
         isDefault={isDefaultView}
       />
+
+      <EvalFilterChips value={evalFilter} onChange={setEvalFilter} />
 
       <StaleResults stale={stale} failed={failed} onRetry={retry}>
         {isMobile ? (
