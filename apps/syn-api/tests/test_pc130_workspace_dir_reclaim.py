@@ -9,17 +9,21 @@ execution projection and MinIO are doubles.
 from __future__ import annotations
 
 import asyncio
+import io
 import logging
 import subprocess
+import tarfile
 import time
 from typing import TYPE_CHECKING
 
 import pytest
 
 from syn_adapters.workspace_backends.orphaned import ShutilWorkspaceDirRemover, parse_inspect
+from syn_adapters.workspace_backends import stale_dirs
 from syn_adapters.workspace_backends.stale_dirs import (
     SubprocessHostWorkspaceGit,
     WorkspaceContainer,
+    archive_key,
     scan_workspace_dirs,
 )
 from syn_api.services.workspace_dir_reclaim import WorkspaceDirReclaimer, reclaim_on_a_clock
@@ -250,3 +254,193 @@ def test_inspect_reads_whether_the_container_is_running() -> None:
     assert inspected is not None
     assert inspected.running is False
     assert parse_inspect(raw.replace('"Running": false', '"Running": true')).running is True  # type: ignore[union-attr]
+
+
+# --- Verification round 1 (PR #1755): shapes the first tests did not reach ---
+
+
+def _tar_names(tarball: bytes) -> set[str]:
+    with tarfile.open(fileobj=io.BytesIO(tarball), mode="r:gz") as tar:
+        return set(tar.getnames())
+
+
+async def test_different_owner_repo_config_is_seen_and_its_filter_never_runs(
+    base: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """B1: listed without safe.directory, git drops the config and the scan sees nothing."""
+    ws = _workspace(base, "ws-foreign", tmp_path)
+    app = ws / "repos" / "app"
+    marker = tmp_path / "filtered"
+    _git(app, "config", "filter.pc130.clean", f"touch {marker}; cat")
+    (app / ".gitattributes").write_text("README.md filter=pc130\n")
+    (app / "README.md").write_text("changed\n")
+    real_exec = asyncio.create_subprocess_exec
+
+    async def as_another_owner(*args: str, **kwargs: object) -> asyncio.subprocess.Process:
+        env = dict(kwargs.pop("env", None) or {})  # type: ignore[arg-type]
+        env["GIT_TEST_ASSUME_DIFFERENT_OWNER"] = "1"
+        return await real_exec(*args, env=env, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(stale_dirs.asyncio, "create_subprocess_exec", as_another_owner)
+    result = await _reclaimer(base).run_once()
+    assert result.kept == ("ws-foreign",)
+    assert ws.exists()
+    assert not marker.exists()
+
+
+async def test_work_outside_any_repository_is_archived_before_deletion(
+    base: Path, tmp_path: Path
+) -> None:
+    """B2: an agent's deliverable lives in artifacts/output, outside every repo."""
+    ws = _workspace(base, "ws-output", tmp_path)
+    (ws / "artifacts" / "output").mkdir(parents=True)
+    (ws / "artifacts" / "output" / "only-copy.md").write_text("the deliverable\n")
+    archive = _Archive()
+    result = await _reclaimer(base, archive=archive).run_once()
+    assert result.reclaimed == ("ws-output",)
+    [tarball] = archive.files
+    with tarfile.open(fileobj=io.BytesIO(tarball), mode="r:gz") as tar:
+        member = tar.extractfile("artifacts/output/only-copy.md")
+        assert member is not None
+        assert member.read() == b"the deliverable\n"
+
+
+async def test_failed_unversioned_archive_keeps_the_dir(base: Path, tmp_path: Path) -> None:
+    ws = _workspace(base, "ws-output-nosave", tmp_path)
+    (ws / "notes.md").write_text("only copy\n")
+    result = await _reclaimer(base, archive=_Archive(fail=True)).run_once()
+    assert result.kept == ("ws-output-nosave",)
+    assert (ws / "notes.md").read_text() == "only copy\n"
+
+
+async def test_ignored_files_are_archived_and_proven_caches_are_not(
+    base: Path, tmp_path: Path
+) -> None:
+    ws = _workspace(base, "ws-ignored", tmp_path)
+    app = ws / "repos" / "app"
+    (app / ".git" / "info" / "exclude").write_text("secret-notes.txt\nnode_modules/\n")
+    (app / "secret-notes.txt").write_text("unique\n")
+    (app / "node_modules" / "pkg").mkdir(parents=True)
+    (app / "node_modules" / "pkg" / "index.js").write_text("cache\n")
+    archive = _Archive()
+    result = await _reclaimer(base, archive=archive).run_once()
+    assert result.reclaimed == ("ws-ignored",)
+    [tarball] = archive.files
+    names = _tar_names(tarball)
+    assert "repos/app/secret-notes.txt" in names
+    assert not any("node_modules" in n for n in names)
+
+
+async def test_bare_repository_with_an_unpushed_branch_keeps_the_dir(
+    base: Path, tmp_path: Path
+) -> None:
+    ws = _workspace(base, "ws-bare", tmp_path)
+    bare = ws / "repos" / "authored.git"
+    _git(tmp_path, "clone", "--bare", str(tmp_path / "ws-bare-remote.git"), str(bare))
+    work = tmp_path / "bare-work"
+    _git(tmp_path, "clone", str(bare), str(work))
+    (work / "local.txt").write_text("only here\n")
+    _git(work, "add", "local.txt")
+    _git(work, "commit", "-m", "local only")
+    _git(work, "push", "origin", "HEAD:refs/heads/only-local")
+    result = await _reclaimer(base).run_once()
+    assert result.kept == ("ws-bare",)
+    assert bare.exists()
+
+
+async def test_stash_keeps_the_dir(base: Path, tmp_path: Path) -> None:
+    ws = _workspace(base, "ws-stash", tmp_path)
+    app = ws / "repos" / "app"
+    (app / "README.md").write_text("stashed work\n")
+    _git(app, "stash")
+    result = await _reclaimer(base).run_once()
+    assert result.kept == ("ws-stash",)
+    assert ws.exists()
+
+
+async def test_index_that_differs_from_head_and_tree_keeps_the_dir(
+    base: Path, tmp_path: Path
+) -> None:
+    """B3: staged then reverted: a HEAD-to-tree patch is empty, the index is not."""
+    ws = _workspace(base, "ws-staged", tmp_path)
+    app = ws / "repos" / "app"
+    (app / "README.md").write_text("INDEX ONLY AUTHORED CONTENT\n")
+    _git(app, "add", "README.md")
+    (app / "README.md").write_text("hello\n")
+    archive = _Archive()
+    result = await _reclaimer(base, archive=archive).run_once()
+    assert result.kept == ("ws-staged",)
+    assert ws.exists()
+
+
+@pytest.mark.parametrize("running_first", [True, False])
+async def test_any_running_mount_protects_the_dir_in_either_order(
+    base: Path, tmp_path: Path, running_first: bool
+) -> None:
+    """B4: a stopped mount listed after a running one must not hide it."""
+    ws = _workspace(base, "ws-twice", tmp_path)
+    pair = [
+        WorkspaceContainer(workspace_id="ws-twice", execution_id="exec-a", running=True),
+        WorkspaceContainer(workspace_id="ws-twice", execution_id="exec-a", running=False),
+    ]
+    containers = pair if running_first else pair[::-1]
+    result = await _reclaimer(base, containers=containers).run_once()
+    assert result.reclaimed == ()
+    assert ws.exists()
+
+
+async def test_unknown_owner_waits_while_any_execution_is_running(
+    base: Path, tmp_path: Path
+) -> None:
+    """B5: with its container removed nothing names the owner; it may be running."""
+    ws = _workspace(base, "ws-anon", tmp_path)
+    result = await _reclaimer(base, running={"exec-running"}).run_once()
+    assert result.reclaimed == ()
+    assert ws.exists()
+
+
+async def test_container_starting_during_archival_keeps_the_dir(
+    base: Path, tmp_path: Path
+) -> None:
+    """B6: authorization is read again after the archive, not only before it."""
+    ws = _workspace(base, "ws-race", tmp_path)
+    (ws / "repos" / "app" / "README.md").write_text("dirty\n")
+    containers = [WorkspaceContainer(workspace_id="ws-race", execution_id="exec-r", running=False)]
+
+    class StartsContainer(_Archive):
+        async def save(self, stale: StaleWorkspaceDir, repo: str, patch: bytes) -> str:
+            containers[0] = WorkspaceContainer(
+                workspace_id="ws-race", execution_id="exec-r", running=True
+            )
+            return await super().save(stale, repo, patch)
+
+    result = await _reclaimer(base, containers=containers, archive=StartsContainer()).run_once()
+    assert result.kept == ("ws-race",)
+    assert ws.exists()
+
+
+async def test_catch_up_beginning_during_archival_keeps_the_dir(
+    base: Path, tmp_path: Path
+) -> None:
+    ws = _workspace(base, "ws-replay-race", tmp_path)
+    (ws / "repos" / "app" / "README.md").write_text("dirty\n")
+    live = [True]
+
+    class CatchUpBegins(_Archive):
+        async def save(self, stale: StaleWorkspaceDir, repo: str, patch: bytes) -> str:
+            live[0] = False
+            return await super().save(stale, repo, patch)
+
+    reclaimer = _reclaimer(base, archive=CatchUpBegins())
+    reclaimer.is_live = lambda: live[0]
+    result = await reclaimer.run_once()
+    assert result.kept == ("ws-replay-race",)
+    assert ws.exists()
+
+
+def test_archive_keys_never_collide_across_repository_paths() -> None:
+    """B7: ``repos/a_b`` and ``repos/a/b`` once shared one object key."""
+    from syn_domain.contexts.orchestration import StaleWorkspaceDir
+
+    stale = StaleWorkspaceDir(host_dir="/w/ws-1", workspace_id="ws-1", execution_id=None, size_bytes=0)
+    assert archive_key(stale, "/w/ws-1/repos/a_b") != archive_key(stale, "/w/ws-1/repos/a/b")
