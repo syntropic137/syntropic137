@@ -5,7 +5,7 @@ name: Skyline UI
 # own job in ci.yml; nothing here builds or tests it, except as the gateway
 # image's / that the `gateway` job asserts is unchanged.
 #
-# Every job has a just recipe that runs the same commands locally
+# Every job has a recipe that runs the same commands locally
 # (just/skyline-serve.just): skyline-ci, skyline-e2e, skyline-gateway-smoke.
 
 on:
