@@ -20,7 +20,10 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Final, Protocol
 
 from syn_adapters.workspace_backends.service.issued_tokens import IssuedToken
-from syn_adapters.workspace_backends.service.pinned_checkout import append_pinned_checkout
+from syn_adapters.workspace_backends.service.pinned_checkout import (
+    append_pinned_checkout,
+    append_seal_at_pin,
+)
 from syn_shared.upstream_failure import UpstreamFailureError
 
 if TYPE_CHECKING:
@@ -552,6 +555,19 @@ class SetupPhaseSecrets:
     Set for the phase a resume continues: that repository's pin is the
     branch's head, checked out on the branch instead of detached
     (`StartPins.checkout_for`)."""
+    sealed_at_pin: bool = False
+    """Whether the agent must be unable to see anything after the pins (#1725, ADR-073).
+
+    For an evaluation, where the commits after a pin include the answer. The
+    setup script still clones with the credential and verifies each pin
+    exactly as an unsealed one (#1458); then it seals every repository at its
+    pin (`append_seal_at_pin`) and deletes the git credential, and gh is
+    never given one. What the agent is left with is the pinned tree and its
+    ancestry, no remote, and nothing that authenticates it to GitHub.
+
+    Every repository must be pinned and cloned, and none continues a branch:
+    a sealed workspace on a default branch's head would be sealed at
+    whatever happened to be newest, which seals nothing."""
     claude_code_oauth_token: str | None = None
     anthropic_api_key: str | None = None
     codex_auth_json: str | None = None
@@ -564,6 +580,25 @@ class SetupPhaseSecrets:
         # there is one routing rule, not one per constructor.
         if self.gh_token is None:
             self.gh_token = _gh_token_for_repo_under_work(self.repositories, self.repo_tokens)
+        # After the routing above, which would otherwise hand gh a token back.
+        if self.sealed_at_pin:
+            self._refuse_an_unsealable_workspace()
+
+    def _refuse_an_unsealable_workspace(self) -> None:
+        unpinned = [
+            url for url in self.repositories if _repo_full_name(url) not in self.pinned_commits
+        ]
+        if not self.clone_repos or unpinned or self.continued_branches:
+            msg = (
+                "A workspace sealed at its pins needs every repository cloned and pinned,"
+                f" and none continuing a branch (unpinned: {unpinned},"
+                f" clone_repos: {self.clone_repos},"
+                f" continued: {sorted(self.continued_branches)})"
+            )
+            raise ValueError(msg)
+        # Nothing after the clone may authenticate to GitHub, and gh needs no
+        # credential to clone.
+        self.gh_token = None
 
     @property
     def has_github_credential(self) -> bool:
@@ -578,6 +613,7 @@ class SetupPhaseSecrets:
         clone_repos: bool = True,
         pinned_commits: Mapping[str, str] | None = None,
         continued_branches: Mapping[str, str] | None = None,
+        sealed_at_pin: bool = False,
         require_github: bool = True,
         include_codex_auth: bool = False,
         ledger: IssuanceLedger,
@@ -599,6 +635,8 @@ class SetupPhaseSecrets:
                 repository out at (#1458). Empty when no commit was recorded.
             continued_branches: ``owner/name`` -> the branch a continuing
                 phase checks that pinned repository out on (#1513).
+            sealed_at_pin: Leave the agent nothing after the pins and no
+                GitHub credential (#1725); see the field.
             require_github: If True (default), raises GitHubAuthError if any
                 repo is not covered by a configured GitHub App installation.
                 Set False only for workflows with no private GitHub repos.
@@ -633,6 +671,7 @@ class SetupPhaseSecrets:
             clone_repos=clone_repos,
             pinned_commits=dict(pinned_commits or {}),
             continued_branches=dict(continued_branches or {}),
+            sealed_at_pin=sealed_at_pin,
             claude_code_oauth_token=claude_code_oauth_token,
             anthropic_api_key=anthropic_api_key,
             codex_auth_json=codex_auth_json,
@@ -655,6 +694,7 @@ class SetupPhaseSecrets:
         clone_repos: bool = True,
         pinned_commits: Mapping[str, str] | None = None,
         continued_branches: Mapping[str, str] | None = None,
+        sealed_at_pin: bool = False,
     ) -> SetupPhaseSecrets:
         """Create SetupPhaseSecrets for testing (no GitHub operations).
 
@@ -672,6 +712,7 @@ class SetupPhaseSecrets:
             clone_repos: False to credential the repos without checking them out (#1187)
             pinned_commits: ``owner/name`` -> the commit to check it out at (#1458)
             continued_branches: ``owner/name`` -> the branch to continue at its head (#1513)
+            sealed_at_pin: seal every repository at its pin, credential-free (#1725)
         """
         import os
 
@@ -689,6 +730,7 @@ class SetupPhaseSecrets:
             clone_repos=clone_repos,
             pinned_commits=dict(pinned_commits or {}),
             continued_branches=dict(continued_branches or {}),
+            sealed_at_pin=sealed_at_pin,
             claude_code_oauth_token=claude_code_oauth_token
             or os.environ.get(ENV_CLAUDE_CODE_OAUTH_TOKEN),
             anthropic_api_key=anthropic_api_key or os.environ.get(ENV_ANTHROPIC_API_KEY),
@@ -706,6 +748,8 @@ class SetupPhaseSecrets:
           github.com entry) so git picks the correct token for each clone
         - Appends git clone commands with idempotency guards (safe to re-run)
         - Checks a repository out at its pinned commit, if it has one (#1458)
+        - When ``sealed_at_pin``, seals each repository at its pin and deletes
+          the git credential once the clones are done (#1725)
         Whenever gh has a credential (repo-less workflows included), it is
         written to ~/.config/gh/hosts.yml - gh's only credential (#725).
 
@@ -725,8 +769,21 @@ class SetupPhaseSecrets:
         self._append_git_credentials(lines)
         if self.repositories and self.clone_repos:
             self._append_repo_clones(lines)
+        if self.sealed_at_pin:
+            self._append_seal(lines)
 
         return "\n".join(lines) + "\n"
+
+    def _append_seal(self, lines: list[str]) -> None:
+        """Seal every repository at its pin, then remove the credential that cloned it."""
+        lines.append("")
+        lines.append(
+            "# Seal each repository at its pin: no later commit, no remote (#1725, ADR-073)"
+        )
+        for url, dest in _clone_destinations(self.repositories):
+            append_seal_at_pin(lines, dest=dest, sha=self.pinned_commits[_repo_full_name(url)])
+        lines.append("rm -f ~/.git-credentials ~/.config/gh/hosts.yml")
+        lines.append("git config --global --unset-all credential.helper || true")
 
     def _append_codex_auth(self, lines: list[str]) -> None:
         """Relocate the staged codex auth file to ~/.codex/auth.json (0600).

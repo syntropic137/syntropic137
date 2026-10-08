@@ -150,3 +150,48 @@ def _append_branch_checkout(
     )
     lines.append(f"git -C {repo} checkout --quiet -B {name} {remote}")
     lines.append(f"git -C {repo} branch --quiet --set-upstream-to=origin/{branch} {name}")
+
+
+def append_seal_at_pin(lines: list[str], *, dest: str, sha: str) -> None:
+    """Leave ``dest`` - and every submodule under it - knowing no commit after ``sha``.
+
+    For an evaluation workspace, where any later commit may be the answer
+    (#1725, ADR-073). Runs AFTER `append_pinned_checkout` and the submodule
+    step, so the pin has already been verified by the full clone's
+    reachability rule (#1458) and the submodules are at its gitlinks. Sealing
+    then removes, in each repository:
+
+    - every remote, so `git fetch` has nowhere to go and no URL is left to
+      read back out of `.git/config`;
+    - every ref, tag and branch, so `git log --all` starts from HEAD alone;
+    - every reflog, and FETCH_HEAD and ORIG_HEAD, so the history the clone
+      walked through is not one `git reflog` or `cat` away;
+    - every object those no longer reach, so `git show <later sha>` fails
+      even for an agent that already knows the id.
+
+    One ref is put back, `_PIN_REMOTE_REF/<sha>`: under `refs/remotes`, it
+    keeps the pin out of what the unpushed-work guard and branch observation
+    read as this phase's own work, exactly as for a tag-only pin above. It
+    names nothing the agent could not already see.
+
+    The seal does not block the network. A sealed repository has no remote,
+    but nothing stops an agent typing a URL; that is the egress policy's job
+    and the setup script's credential removal (`SetupPhaseSecrets`).
+    """
+    if not _COMMIT_ID_RE.fullmatch(sha):
+        msg = f"The commit to seal {dest} at is not a full commit id: {sha!r}"
+        raise ValueError(msg)
+    repo = shlex.quote(dest)
+    # One command, run in the top-level repository and then in each submodule
+    # by `foreach`, which exports $sha1 as that submodule's gitlink. Single-
+    # quoted for `foreach`, so its variables expand there and not here.
+    seal = (
+        "git remote | xargs -r -n1 git remote remove"
+        " && git for-each-ref --format='delete %(refname)' | git update-ref --stdin"
+        " && git reflog expire --expire=now --expire-unreachable=now --all"
+        ' && rm -f "$(git rev-parse --git-dir)/FETCH_HEAD" "$(git rev-parse --git-dir)/ORIG_HEAD"'
+        " && git gc --quiet --prune=now"
+    )
+    lines.append(f"git -C {repo} submodule foreach --quiet --recursive {shlex.quote(seal)}")
+    lines.append(f"(cd {repo} && {seal})")
+    lines.append(f"git -C {repo} update-ref {_PIN_REMOTE_REF}/{sha} {sha}")
