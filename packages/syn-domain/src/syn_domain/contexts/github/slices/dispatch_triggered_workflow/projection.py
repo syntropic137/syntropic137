@@ -176,36 +176,40 @@ class _StartReports:
         self._execution_id = execution_id
         self._record = record
         self._landed = False
-        self._late: dict[str, str] | None = None
+        self._late: tuple[str, str | None] | None = None
 
     async def held(self, exc: Exception) -> None:
         """Did not start. #1617: refused at its slot, so `paused` again and the
         re-open re-offers it. #1707: anything else is a failure, recorded as
         one - `queued` would offer it again forever."""
         if isinstance(exc, AdmissionRefusedError):
-            await self._settle(status=_PAUSED, status_reason=exc.hold_reason)
+            await self._settle(_PAUSED, exc.hold_reason)
         else:
-            await self._settle(status="failed", status_reason="start_exception")
+            await self._settle("failed", "start_exception")
 
     async def started(self) -> None:
         """The execution is durable (#1707)."""
-        await self._settle(status=_DISPATCHED)
+        await self._settle(_DISPATCHED, None)
 
     async def landed(self) -> None:
         """The hand-off write is done: write whatever was parked behind it."""
         self._landed = True
         if self._late is not None:
-            await self._write(self._late)
+            await self._save_status(*self._late)
 
-    async def _settle(self, **change: str) -> None:
+    async def _settle(self, status: str, reason: str | None) -> None:
         if self._landed:
-            await self._write(change)
+            await self._save_status(status, reason)
         else:
-            self._late = change
+            self._late = (status, reason)
 
-    async def _write(self, change: dict[str, str]) -> None:
-        if self._execution_id:
-            await self._store.save(self._projection, self._execution_id, {**self._record, **change})
+    async def _save_status(self, status: str, reason: str | None) -> None:
+        if not self._execution_id:
+            return
+        settled = {**self._record, "status": status}
+        if reason is not None:
+            settled["status_reason"] = reason
+        await self._store.save(self._projection, self._execution_id, settled)
 
 
 class WorkflowDispatchProjection(ProcessManager):
