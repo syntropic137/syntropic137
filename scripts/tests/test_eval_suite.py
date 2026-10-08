@@ -39,6 +39,7 @@ from eval_suite import (
     install_provenance,
     launch_suite,
     load_suite,
+    main,
     read_launches,
     render,
     score_report,
@@ -82,10 +83,11 @@ _SONNET_WF = "eval-verify-pinned-sonnet-v1"
 def test_the_seed_suite_loads_and_records_its_workflow_and_models() -> None:
     loaded = load_suite(DEFAULT_SUITE)
 
-    assert loaded.tag == "verifier-seed-v1:v2:eval-verify-pinned-v1"
+    assert loaded.tag == "verifier-seed-v1:v3:eval-verify-pinned-v1"
     assert loaded.workflow.id == "eval-verify-pinned-v1"
     assert loaded.workflow.models == {"verify": "opus"}
-    assert {c.source_pr for c in loaded.cases} == {1574, 1649, 1652, 1654, 1679, 1680}
+    assert {c.source_pr for c in loaded.cases} >= {1574, 1649, 1652, 1654, 1679, 1680}
+    assert len(loaded.cases) == 24
 
 
 @pytest.mark.unit
@@ -95,7 +97,7 @@ def test_the_same_cases_load_under_the_codex_verifier_with_their_own_tag() -> No
 
     assert codex.workflow.id == _CODEX_WF
     assert codex.workflow.models == {"verify": "gpt-sol"}
-    assert codex.tag == f"verifier-seed-v1:v2:{_CODEX_WF}"
+    assert codex.tag == f"verifier-seed-v1:v3:{_CODEX_WF}"
     assert codex.tag != opus.tag
     assert codex.cases == opus.cases
 
@@ -107,7 +109,7 @@ def test_the_same_cases_load_under_the_sonnet_verifier_with_their_own_tag() -> N
 
     assert sonnet.workflow.id == _SONNET_WF
     assert sonnet.workflow.models == {"verify": "sonnet"}
-    assert sonnet.tag == f"verifier-seed-v1:v2:{_SONNET_WF}"
+    assert sonnet.tag == f"verifier-seed-v1:v3:{_SONNET_WF}"
     assert sonnet.cases == opus.cases
 
 
@@ -277,6 +279,7 @@ def _one_case_suite(
         "fix_commit": fix,
         "task": "Review it.",
         "expected": {"files": [file], "keywords": [["broken"]]},
+        "split": "train",
     }
     if first_fix is not None:
         case["first_fix_commit"] = first_fix
@@ -638,6 +641,310 @@ _PARAPHRASES: dict[str, tuple[tuple[str, str], ...]] = {
             "aggregates share a stream.",
         ),
     ),
+    "transcript-superseded-revision-issues": (
+        (
+            "session_relationship_resolver.py:210",
+            "an unresolved_spawn gap reported by an earlier revision of the transcript is kept "
+            "after a later revision resolved the Agent call, so the session reads incomplete.",
+        ),
+        (
+            "session_relationship_resolver.py",
+            "issues from older archived revisions are never dropped once superseded, so coverage "
+            "is reported missing for a fully accounted run.",
+        ),
+        (
+            "agent_sessions/domain/services/session_relationship_resolver.py",
+            "the resolver only filters inactive evidence; a stale revision's issue survives the "
+            "revision that fixed it and marks the session incomplete.",
+        ),
+    ),
+    "codex-turn-failed-reason-dropped": (
+        (
+            "CodexStreamProcessor.py:300",
+            "turn.failed events are never dispatched, so the reason codex gave is thrown away "
+            "and the phase reports the generic missing terminal turn message.",
+        ),
+        (
+            "CodexStreamProcessor.py",
+            "the parser has no branch for the error event type or a failed turn; the message "
+            "codex sent is lost and the operator sees only that the stream ended.",
+        ),
+        (
+            "execute_workflow/CodexStreamProcessor.py:260",
+            "a turn failed event is unhandled: its error.message is discarded instead of "
+            "becoming the phase's error reason.",
+        ),
+    ),
+    "cli-packages-own-remote-check": (
+        (
+            "install.ts:140",
+            "packagesCommand decides whether a source is remote with its own inline predicate "
+            "instead of parseSource, so it can disagree with install and update.",
+        ),
+        (
+            "commands/workflow/install.ts",
+            "a second, divergent remote check: a URL the resolver treats as remote can be "
+            "treated as a local path here and hidden as missing.",
+        ),
+        (
+            "install.ts",
+            "the listing duplicates the resolver's notion of a remote source rather than "
+            "calling parseSource, and the two drift apart on shorthand.",
+        ),
+    ),
+    "github-token-first-installation": (
+        (
+            "WorkspaceProvisionHandler.py:259",
+            "the token is minted for installations[0], the first installation, not the one "
+            "that owns the repo under work, so gh gets a token for the wrong org.",
+        ),
+        (
+            "WorkspaceProvisionHandler.py",
+            "_resolve_github_app_token assumes a single org and takes an arbitrary installation; "
+            "with two organizations the agent cannot read its own repository.",
+        ),
+        (
+            "handlers/WorkspaceProvisionHandler.py:250",
+            "the GITHUB_TOKEN ignores which owner the repo belongs to and always uses the first "
+            "App installation.",
+        ),
+    ),
+    "codex-deliverable-phase-failed": (
+        (
+            "AgentExecutionHandler.py:231",
+            "any codex error_reason becomes a non-zero exit, even when the phase already wrote "
+            "its deliverable to artifacts/output, so finished work is failed.",
+        ),
+        (
+            "AgentExecutionHandler.py",
+            "a codex stream that ends without turn.completed fails the phase although it "
+            "produced its output; the handler never checks for the artifact.",
+        ),
+        (
+            "handlers/AgentExecutionHandler.py:225",
+            "the phase is marked failed on a missing terminal turn after it completed its work; "
+            "the deliverable is discarded.",
+        ),
+    ),
+    "codex-brace-line-protocol-fault": (
+        (
+            "CodexStreamProcessor.py:490",
+            "any line that starts with { and fails json.loads sets error_reason immediately, so "
+            "a TSX line the agent echoed fails an otherwise successful phase.",
+        ),
+        (
+            "CodexStreamProcessor.py",
+            "stdout carries the agent's own subprocess output, but a brace-leading line that "
+            "does not parse is treated as a protocol fault and the phase fails.",
+        ),
+        (
+            "execute_workflow/CodexStreamProcessor.py:484",
+            "startswith('{') is taken as proof of a protocol event; a malformed echo from the "
+            "agent output is recorded as a fault and the run exits non-zero.",
+        ),
+    ),
+    "repo-name-collision-skipped-clone": (
+        (
+            "setup_phase_secrets.py:456",
+            "two repositories with the same bare name from different orgs map to one directory; "
+            "the [ -d ] guard skips the second clone silently.",
+        ),
+        (
+            "setup_phase_secrets.py",
+            "the destination is derived from the repo name alone, so a collision leaves the "
+            "phase working in the wrong repository without any error.",
+        ),
+        (
+            "workspace_backends/service/setup_phase_secrets.py:440",
+            "acme/api and other/api collide on /workspace/repos/api and the idempotency guard "
+            "means the second is never cloned.",
+        ),
+    ),
+    "sessions-execution-filter-dropped": (
+        (
+            "sessions.py:40",
+            "the list route declares no execution_id query parameter, so FastAPI drops it "
+            "silently and the whole collection comes back.",
+        ),
+        (
+            "routes/sessions.py",
+            "filtering sessions by execution id is ignored: the parameter is not declared and "
+            "every session is returned.",
+        ),
+        (
+            "sessions.py",
+            "GET /sessions?execution_id=... returns all sessions, unfiltered, because the route "
+            "has no such filter.",
+        ),
+    ),
+    "artifacts-execution-filter-dropped": (
+        (
+            "artifacts.py:60",
+            "list_artifacts has no execution_id parameter; FastAPI drops it silently, so a "
+            "phase asking for its run's deliverable gets the most recent artifact of any run.",
+        ),
+        (
+            "routes/artifacts.py",
+            "the execution id filter is not declared and the rows carry none, so the query "
+            "returns every artifact unfiltered.",
+        ),
+        (
+            "artifacts.py",
+            "asking for one execution's artifacts is ignored: the filter is missing and the "
+            "answer is all artifacts.",
+        ),
+    ),
+    "executions-total-is-page-length": (
+        (
+            "queries.py:80",
+            "total is set to len(domain_summaries), the page length, not the collection size, "
+            "so clients believe they have every execution.",
+        ),
+        (
+            "executions/queries.py",
+            "the response's total equals page_size whenever the page is full; it never counts "
+            "the projection.",
+        ),
+        (
+            "queries.py",
+            "total reports the number of returned rows rather than the count of executions, so "
+            "paging stops after the first page.",
+        ),
+    ),
+    "github-shorthand-any-slash": (
+        (
+            "resolver.ts:94",
+            "isGitHubShorthand accepts any string with a slash, so a local path like "
+            "~/workflows/foo is treated as owner/repo shorthand and cloned from GitHub.",
+        ),
+        (
+            "packages/resolver.ts",
+            "the shorthand check never validates two segments: a nested path such as a/b/c "
+            "is resolved as a github repository.",
+        ),
+        (
+            "resolver.ts",
+            "any source containing a slash is taken as GitHub shorthand; a home-relative path "
+            "is never treated as local.",
+        ),
+    ),
+    "guard-moved-gitlink-unsaved-work": (
+        (
+            "unpushed_work_guard.py:595",
+            "every status --porcelain line counts as unsaved work, including a submodule "
+            "gitlink that a checkout moved, so finished phases are failed.",
+        ),
+        (
+            "unpushed_work_guard.py",
+            "a submodule pointer moved by git checkout without --recurse-submodules looks "
+            "identical to an edited submodule and is falsely reported as unpushed work.",
+        ),
+        (
+            "execute_workflow/unpushed_work_guard.py",
+            "' M lib/sub' for a submodule a checkout moved is not edited work, but the guard reads "
+            "every line of the porcelain as unsaved and refuses the phase.",
+        ),
+    ),
+    "declared-skills-not-invocable": (
+        (
+            "ExecuteWorkflowHandler.py:540",
+            "a phase that declares skills and scopes its allowed tools never gets the Skill "
+            "tool, so its skills are installed but cannot be invoked.",
+        ),
+        (
+            "ExecuteWorkflowHandler.py",
+            "Skill is not granted when a phase restricts its tools: the declared skills are "
+            "withheld because the tool list omits Skill.",
+        ),
+        (
+            "execute_workflow/ExecuteWorkflowHandler.py",
+            "the handler resolves the phase's skills but leaves the tool list as declared, so "
+            "skill invocation is unavailable to the agent.",
+        ),
+    ),
+    "redis-url-password-logged": (
+        (
+            "_wiring.py:846",
+            "the controller logs the REDIS_URL verbatim at startup, so the Redis password "
+            "appears in docker logs and the rotating log files.",
+        ),
+        (
+            "_wiring.py",
+            "redis_url is written to logger.info unredacted; its credential leaks into every "
+            "log sink.",
+        ),
+        (
+            "syn_api/_wiring.py",
+            "the signal queue log line prints redis://:<password>@redis:6379 in plaintext.",
+        ),
+    ),
+    "token-injector-get-post-only": (
+        (
+            "token_injector.py:117",
+            "only do_GET and do_POST are defined, so an ext_authz check for a PUT, PATCH or "
+            "DELETE gets a 501 and the agent's request is denied.",
+        ),
+        (
+            "token_injector.py",
+            "the authz handler answers GET and POST only; any other method is unhandled and "
+            "the request to GitHub fails.",
+        ),
+        (
+            "docker/token-injector/token_injector.py",
+            "a DELETE to the GitHub API is rejected because the check service has no handler "
+            "for that HTTP verb.",
+        ),
+    ),
+    "workflow-run-task-undeliverable": (
+        (
+            "run.ts:195",
+            "a -t task is sent even when no phase prompt references $ARGUMENTS or {{task}}, so "
+            "the task is silently dropped and the run reports success.",
+        ),
+        (
+            "commands/workflow/run.ts",
+            "the CLI accepts a task no phase consumes; it is ignored by every prompt and the "
+            "user is never told.",
+        ),
+        (
+            "run.ts",
+            "the task is undeliverable when the workflow's prompts have no {{task}} "
+            "placeholder, yet the execution starts as if it was used.",
+        ),
+    ),
+    "workflow-run-inputs-go-nowhere": (
+        (
+            "run.ts:180",
+            "-i inputs that no phase references are sent and silently ignored; there is no "
+            "warning, not even under --dry-run.",
+        ),
+        (
+            "commands/workflow/run.ts",
+            "a -R repo or an input no phase consumes goes nowhere and the CLI gives no warning.",
+        ),
+        (
+            "run.ts",
+            "unconsumed input values are dropped at dispatch without telling the user; the "
+            "dry-run preview lists them as if they were used.",
+        ),
+    ),
+    "input-alias-independent-resolution": (
+        (
+            "ArtifactCollector.py:232",
+            "the flat <phase-id>.md alias and the nested tree are resolved independently by "
+            "_resolve_phase_outputs and _resolve_phase_files, so they can disagree.",
+        ),
+        (
+            "ArtifactCollector.py",
+            "two separate lookups populate the flat alias and the input tree; one can find the "
+            "output and the other not, leaving them out of sync.",
+        ),
+        (
+            "execute_workflow/ArtifactCollector.py:240",
+            "the alias is not derived from the resolved file tree, so a phase can receive a "
+            "tree with no flat alias - an inconsistent input.",
+        ),
+    ),
 }
 
 
@@ -976,7 +1283,7 @@ def test_score_reads_verdict_report_cost_and_model_from_the_api() -> None:
     assert unrecorded == ()
 
     table = render(loaded, rows)
-    assert "exec-1" in table and "PASS" in table and "$3.75" in table and "1/6 passed" in table
+    assert "exec-1" in table and "PASS" in table and "$3.75" in table and "1/24 passed" in table
 
 
 @pytest.mark.unit
@@ -1043,7 +1350,7 @@ def test_launch_on_a_fresh_server_installs_the_workflow_before_any_eval(tmp_path
         c.commit for c in loaded.cases
     ]
     assert [c["tags"] for c in creates] == [["suite:verifier-seed", c.tag] for c in loaded.cases]
-    assert all(s["tags"] == ["suite-version:2", f"verifier:{_WF}"] for s in starts)
+    assert all(s["tags"] == ["suite-version:3", f"verifier:{_WF}"] for s in starts)
     assert [s["eval_id"] for s in starts] == [f"eval-{c.commit[:6]}" for c in loaded.cases]
     assert len(lines) == 1 + len(loaded.cases)
 
@@ -1125,13 +1432,13 @@ def test_launch_under_the_codex_verifier_runs_and_records_the_codex_workflow(
     # The case evals are shared by every verifier; the run says which one it was.
     assert all("starting_workflow_id" not in c for c in creates)
     starts = [json.loads(r.content) for r in server.requests if r.url.path.endswith("/execute")]
-    assert {tuple(s["tags"]) for s in starts} == {("suite-version:2", f"verifier:{_CODEX_WF}")}
+    assert {tuple(s["tags"]) for s in starts} == {("suite-version:3", f"verifier:{_CODEX_WF}")}
     assert all(not any(t.startswith("verifier") for t in c["tags"][1:]) for c in creates)
     starts = [r.url.path for r in server.requests if r.url.path.endswith("/execute")]
     assert set(starts) == {f"/workflows/{_CODEX_WF}/execute"}
     recorded = read_launches(ledger)
     assert {(x.suite, x.workflow_id) for x in recorded} == {
-        (f"verifier-seed-v1:v2:{_CODEX_WF}", _CODEX_WF)
+        (f"verifier-seed-v1:v3:{_CODEX_WF}", _CODEX_WF)
     }
 
 
@@ -1324,20 +1631,20 @@ def test_the_committed_v1_ledger_scores_four_of_four_against_the_v1_cases(
 
 
 @pytest.mark.unit
-def test_v1_runs_never_count_toward_v2(tmp_path: Path) -> None:
+def test_v1_runs_never_count_toward_the_current_version(tmp_path: Path) -> None:
     launches = _v1_ledger(tmp_path)
-    v2 = load_suite(DEFAULT_SUITE)
-    rows, unrecorded = score_suite(v2, _LedgerServer(launches).client(), launches)
+    current = load_suite(DEFAULT_SUITE)
+    rows, unrecorded = score_suite(current, _LedgerServer(launches).client(), launches)
 
-    assert len(rows) == 6 and {r.status for r in rows} == {"not launched"}
+    assert len(rows) == 24 and {r.status for r in rows} == {"not launched"}
     assert unrecorded == ()
 
 
 @pytest.mark.unit
 def test_score_prints_every_version_the_workflow_ran() -> None:
     suite = load_suite(DEFAULT_SUITE).suite
-    assert versions_run(suite, _WF) == [1, 2]
-    assert versions_run(suite, _CODEX_WF) == [2]
+    assert versions_run(suite, _WF) == [1, 3]
+    assert versions_run(suite, _CODEX_WF) == [2, 3]
 
 
 @pytest.mark.unit
@@ -1357,6 +1664,86 @@ def test_a_history_entry_naming_a_missing_case_is_refused(tmp_path: Path) -> Non
     suite_dir = _copy_suite(tmp_path)
     (suite_dir / "cases" / "codex-cost-limit.yaml").unlink()
     with pytest.raises(DefinitionError, match=r"history v1 names no such case\(s\)"):
+        load_suite(suite_dir)
+
+
+# Read from the committed ledger, as the v1 fixture is: the six-case v2 codex runs.
+_V2_CASES = {
+    "binary-artifact-minio-key",
+    "codex-cost-limit",
+    "execution-id-as-eval-id",
+    "live-commits-unvalidated-sha",
+    "repo-privacy-ignores-app",
+    "shared-esp-stream",
+}
+
+
+@pytest.mark.unit
+def test_the_committed_v2_codex_runs_score_against_the_six_v2_cases_only() -> None:
+    v2 = load_suite(DEFAULT_SUITE, workflow=_CODEX_WF, version=2)
+    launches = [x for x in read_launches(DEFAULT_SUITE / "launches.jsonl") if x.suite == v2.tag]
+    rows, unrecorded = score_suite(v2, _LedgerServer(launches).client(), launches)
+
+    assert {c.id for c in v2.cases} == _V2_CASES
+    assert {r.case for r in rows} == _V2_CASES
+    assert "not launched" not in {r.status for r in rows}
+    assert unrecorded == ()
+
+
+# ---------------------------------------------------------------------------
+# Train and holdout
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_the_holdout_is_new_cases_only_and_within_its_share() -> None:
+    cases = load_suite(DEFAULT_SUITE).cases
+    holdout = {c.id for c in cases if c.split == "holdout"}
+
+    assert len(holdout) == 7 and len(cases) == 24
+    # The pre-v3 cases were already run against the verifiers: never holdout.
+    assert not holdout & _V2_CASES
+
+
+@pytest.mark.unit
+def test_a_train_launch_never_starts_a_holdout_case(tmp_path: Path) -> None:
+    train = load_suite(DEFAULT_SUITE, split="train")
+    ledger = tmp_path / "launches.jsonl"
+    launch_suite(train, _Server(train).client(), ledger)
+
+    holdout = {c.id for c in load_suite(DEFAULT_SUITE, split="holdout").cases}
+    launched = {x.case for x in read_launches(ledger)}
+    assert len(launched) == 17
+    assert not launched & holdout
+
+
+@pytest.mark.unit
+def test_the_split_flag_selects_the_cases_check_reports(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert main(["check", "--split", "holdout"]) == 0
+    out = capsys.readouterr().out
+    assert ": 7 case(s)" in out
+    assert "case:binary-artifact-minio-key" not in out
+
+
+@pytest.mark.unit
+def test_a_case_without_a_split_is_refused(tmp_path: Path) -> None:
+    suite_dir = _copy_suite(tmp_path)
+    case = suite_dir / "cases" / "codex-cost-limit.yaml"
+    case.write_text(case.read_text().replace("split: train\n", ""))
+
+    with pytest.raises(DefinitionError, match="split"):
+        load_suite(suite_dir)
+
+
+@pytest.mark.unit
+def test_a_suite_with_too_little_holdout_is_refused(tmp_path: Path) -> None:
+    suite_dir = _copy_suite(tmp_path)
+    for path in (suite_dir / "cases").glob("*.yaml"):
+        path.write_text(path.read_text().replace("split: holdout", "split: train"))
+
+    with pytest.raises(DefinitionError, match="0 of 24 cases are holdout"):
         load_suite(suite_dir)
 
 
@@ -1468,8 +1855,8 @@ def test_an_identical_relaunch_is_an_unchanged_install(tmp_path: Path) -> None:
     _, client = _provenanced_server(loaded, templates)
     again = launch_suite(loaded, client, ledger)
 
-    assert first[0].startswith(f"workflow {_CODEX_WF}: created as 2.0.0")
-    assert again[0].startswith(f"workflow {_CODEX_WF}: unchanged as 2.0.0")
+    assert first[0].startswith(f"workflow {_CODEX_WF}: created as 3.0.0")
+    assert again[0].startswith(f"workflow {_CODEX_WF}: unchanged as 3.0.0")
 
 
 @pytest.mark.unit
@@ -1498,7 +1885,7 @@ def test_a_cli_installed_archived_record_is_restored_by_launch_without_force(
     `syn workflow install workflows/evals/verify-pinned-codex` records version
     0.0.0 (no manifest), no digest and package name; `syn workflow delete -f`
     archives it. An install declaring no version is refused (provenance guard).
-    `launch` declares 2.0.0 + digest: a different version on an archived
+    `launch` declares the suite version + digest: a different version on an archived
     template, so the update is accepted, the template is active again and the
     recorded provenance is the suite's. No `force` is needed.
     """
@@ -1516,7 +1903,7 @@ def test_a_cli_installed_archived_record_is_restored_by_launch_without_force(
     lines = launch_suite(loaded, client, tmp_path / "launches.jsonl")
 
     stored = templates.by_id[_CODEX_WF]
-    assert lines[0].startswith(f"workflow {_CODEX_WF}: created as 2.0.0")
+    assert lines[0].startswith(f"workflow {_CODEX_WF}: created as 3.0.0")
     assert not stored.is_archived
     assert stored.source_digest == install_provenance(loaded, document).source_digest
 
@@ -1567,7 +1954,7 @@ def test_an_unchanged_relaunch_restores_an_archived_template(tmp_path: Path) -> 
     _, client = _provenanced_server(loaded, templates)
     lines = launch_suite(loaded, client, tmp_path / "launches.jsonl")
 
-    assert lines[0].startswith(f"workflow {_CODEX_WF}: created as 2.0.0")
+    assert lines[0].startswith(f"workflow {_CODEX_WF}: created as 3.0.0")
     assert not templates.by_id[_CODEX_WF].is_archived
 
 
@@ -1582,7 +1969,7 @@ def test_launch_reuses_each_case_eval_and_creates_none(tmp_path: Path) -> None:
     assert not any(r.method == "POST" and r.url.path == "/evals" for r in server.requests)
     starts = [json.loads(r.content) for r in server.requests if r.url.path.endswith("/execute")]
     assert [s["eval_id"] for s in starts] == [f"eval-{c.commit[:6]}" for c in loaded.cases]
-    assert {tuple(s["tags"]) for s in starts} == {("suite-version:2", f"verifier:{_WF}")}
+    assert {tuple(s["tags"]) for s in starts} == {("suite-version:3", f"verifier:{_WF}")}
 
 
 @pytest.mark.unit
@@ -1596,5 +1983,5 @@ def test_score_records_each_verdict_on_the_eval() -> None:
     assert path == "/evals/eval-1/runs/exec-1/score"
     assert body["verdict"] == "PASS"
     assert body["score"] == 1.0
-    assert (body["scorer"], body["scorer_version"]) == ("eval_suite.py", "2")
+    assert (body["scorer"], body["scorer_version"]) == ("eval_suite.py", "3")
     assert isinstance(body["evidence"], str) and _CASE in body["evidence"]

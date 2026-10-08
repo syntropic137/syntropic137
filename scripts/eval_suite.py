@@ -36,7 +36,7 @@ written once when the case is added. ``--split train`` launches or scores the
 train cases only: anything that tunes a verifier (a prompt, a model, a
 workflow) reads only those, and the holdout cases are run to report the
 result, never to choose it. ``check`` refuses a suite whose holdout share
-falls outside 25-35%. A case never moves from holdout to train: it has been
+falls outside 25-35% (rounded outward to whole cases). A case never moves from holdout to train: it has been
 seen.
 
 ``check`` needs only git. ``launch`` installs the suite's workflow from the
@@ -71,6 +71,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import math
 import os
 import re
 import subprocess
@@ -78,7 +79,6 @@ import sys
 import time
 from decimal import Decimal
 from pathlib import Path
-from typing import Literal
 from typing import Literal
 
 import httpx
@@ -94,7 +94,7 @@ _SHA = re.compile(r"^[0-9a-f]{40}$")
 
 type Split = Literal["train", "holdout"]
 HOLDOUT_SHARE = (0.25, 0.35)
-"""The inclusive bounds `check` holds a suite's holdout fraction to."""
+"""The bounds `check` holds a suite's holdout fraction to, rounded outward to whole cases."""
 
 
 # ---------------------------------------------------------------------------
@@ -296,7 +296,7 @@ def load_suite(
         problems.append(f"duplicate case ids: {sorted(ids)}")
     holdout = sum(c.split == "holdout" for c in cases)
     low, high = HOLDOUT_SHARE
-    if cases and not low <= holdout / len(cases) <= high:
+    if not math.floor(low * len(cases)) <= holdout <= math.ceil(high * len(cases)):
         problems.append(
             f"{holdout} of {len(cases)} cases are holdout; the share must be {low:.0%}-{high:.0%}"
         )
