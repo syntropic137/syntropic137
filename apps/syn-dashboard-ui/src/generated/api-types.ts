@@ -3485,6 +3485,60 @@ export interface components {
             tags: string[];
         };
         /**
+         * EvalDetailResponse
+         * @description One eval, as `GET /evals/{eval_id}` returns it.
+         *
+         *     The row model plus whether the evals read model is rebuilding, so a
+         *     missing or stale eval can say why. Kept off `EvalResponse` so every list
+         *     row does not repeat the list's own status.
+         */
+        EvalDetailResponse: {
+            /** Eval Id */
+            eval_id: string;
+            /** Name */
+            name: string;
+            /** Goal */
+            goal: string;
+            /** Starting Workflow Id */
+            starting_workflow_id: string | null;
+            /** Baseline Repos */
+            baseline_repos: components["schemas"]["EvalBaselineRepoResponse"][];
+            /** Tags */
+            tags: string[];
+            /** Frozen */
+            frozen: boolean;
+            /** Archived */
+            archived: boolean;
+            /** Created At */
+            created_at: string | null;
+            /** Updated At */
+            updated_at: string | null;
+            /** Run Count */
+            run_count: number;
+            /** Run Status Counts */
+            run_status_counts: {
+                [key: string]: number;
+            };
+            /**
+             * Scored Count
+             * @default 0
+             */
+            scored_count: number;
+            /** Pass Rate */
+            pass_rate?: number | null;
+            /**
+             * Pass Rate Display
+             * @default —
+             */
+            pass_rate_display: string;
+            /** Last Run At */
+            last_run_at?: string | null;
+            last_verdict?: components["schemas"]["Verdict"] | null;
+            /** Variants */
+            variants?: components["schemas"]["EvalVariantResponse"][];
+            read_model_status?: components["schemas"]["ReadModelStatus"] | null;
+        };
+        /**
          * EvalId
          * @description The identity of one eval, and the id of its stream.
          */
@@ -3506,6 +3560,7 @@ export interface components {
             status_counts: {
                 [key: string]: number;
             };
+            read_model_status?: components["schemas"]["ReadModelStatus"] | null;
         };
         /**
          * EvalResponse
@@ -4035,6 +4090,7 @@ export interface components {
             eval?: components["schemas"]["ExecutionEvalRunResponse"] | null;
             resume_start?: components["schemas"]["ResumeStartInfo"] | null;
             start_queue?: components["schemas"]["ExecutionStartQueueInfo"] | null;
+            read_model_status?: components["schemas"]["ReadModelStatus"] | null;
         };
         /**
          * ExecutionEvalResponse
@@ -4115,6 +4171,7 @@ export interface components {
             status_counts?: {
                 [key: string]: number;
             };
+            read_model_status?: components["schemas"]["ReadModelStatus"] | null;
         };
         /** ExecutionRunListResponse */
         ExecutionRunListResponse: {
@@ -6194,6 +6251,59 @@ export interface components {
             diffstat?: string | null;
         };
         /**
+         * ReadModelStatus
+         * @description Whether one read model is rebuilding, and how far it has got.
+         *
+         *     Carried on the list and detail responses a read model serves, so a page can
+         *     say "this list is incomplete because it is being rebuilt" instead of
+         *     looking broken, and listed on ``/health`` for every read model that is
+         *     rebuilding. Judged by ``services.read_model_status``; every number is
+         *     exact (checkpoint position against store head), never estimated.
+         */
+        ReadModelStatus: {
+            /**
+             * Rebuilding
+             * @description True while this read model is replaying history: it is more than the live-lag threshold (500 events) behind the head. A few events of ordinary live lag is NOT rebuilding, even while another read model replays.
+             */
+            rebuilding: boolean;
+            /**
+             * Projection
+             * @description Projection name, as in projection_checkpoints.
+             */
+            projection: string;
+            /**
+             * Label Display
+             * @description What the read model holds, for a sentence, e.g. 'execution history'.
+             */
+            label_display: string;
+            /**
+             * Progress Pct
+             * @description Checkpoint position as a whole percentage of the store head, 0-99 while rebuilding. Null when not rebuilding.
+             */
+            progress_pct?: number | null;
+            /**
+             * Progress Display
+             * @description progress_pct as '72%'.
+             */
+            progress_display?: string | null;
+            /**
+             * Events Behind
+             * @description Events between the checkpoint and the store head.
+             * @default 0
+             */
+            events_behind: number;
+            /**
+             * Events Behind Display
+             * @description events_behind as '29,476 events behind'.
+             */
+            events_behind_display?: string | null;
+            /**
+             * Summary Display
+             * @description One sentence for a banner, e.g. 'Rebuilding execution history - 72% (29,476 events behind).' Null when not rebuilding.
+             */
+            summary_display?: string | null;
+        };
+        /**
          * RegisterClaudePluginRequest
          * @description Request body for ``POST /claude-plugins/registrations`` (Phase A).
          *
@@ -7920,6 +8030,11 @@ export interface components {
              * @description Every projection short of the head, furthest behind first. Empty when all are at the head; null when lag is unmeasurable.
              */
             lagging_projections?: components["schemas"]["ProjectionLag"][] | null;
+            /**
+             * Rebuilding Read Models
+             * @description Every read model that is rebuilding, furthest behind first, with display strings for a banner. Ordinary live lag is excluded. Null when lag is unmeasurable.
+             */
+            rebuilding_read_models?: components["schemas"]["ReadModelStatus"][] | null;
             /**
              * Unapplied Starts
              * @description Executions whose WorkflowExecutionStarted an execution read model's checkpoint passed without applying (#1545). Lag cannot show these: the read model is at the head and wrong. Non-empty sets status 'dropped_events'; repair per docs/runbooks/repair-dropped-execution-start.md. Null when not measured.
@@ -10507,7 +10622,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["EvalResponse"];
+                    "application/json": components["schemas"]["EvalDetailResponse"];
                 };
             };
             /** @description No eval has this id in the eval read model (it may still be catching up) */
