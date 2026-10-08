@@ -1380,6 +1380,46 @@ class TestGatesComeFromTheTargetRepository:
         path = self._workflow(tmp_path, f"Run the gates under `{GATES_HEADING}` in AGENTS.md.")
         assert hardcoded_gates(path, ("python3 -m unittest discover -s scripts",)) == []
 
+    @pytest.mark.parametrize("external_prompt", [False, True])
+    def test_every_gate_in_a_later_phase_is_reported(
+        self, tmp_path: Path, external_prompt: bool
+    ) -> None:
+        # Production workflows load Markdown through prompt_file. Every
+        # (phase, gate) pair must survive that conversion, including pairs
+        # after a clean first phase and after the first offending gate.
+        agents = tmp_path / "AGENTS.md"
+        agents.write_text(self._AGENTS)
+        gates = declared_gates(agents)
+        prompt = "Run:\n\n```sh\n" + "\n".join(gates) + "\n```\n"
+        offending: dict[str, object] = {"id": "repair", "name": "Repair", "order": 2}
+        if external_prompt:
+            (tmp_path / "repair.md").write_text("---\nmodel: opus\n---\n" + prompt)
+            offending["prompt_file"] = "repair.md"
+        else:
+            offending["prompt_template"] = prompt
+        path = _write(
+            tmp_path,
+            {
+                "id": "gated",
+                "name": "Gated",
+                "requires_repos": False,
+                "phases": [
+                    {
+                        "id": "verify",
+                        "name": "Verify",
+                        "order": 1,
+                        "prompt_template": f"Read {GATES_HEADING} in AGENTS.md.",
+                    },
+                    offending,
+                ],
+            },
+        )
+        violations = hardcoded_gates(path, gates)
+        assert len(violations) == len(gates)
+        for gate, violation in zip(gates, violations, strict=True):
+            assert "phase 'repair'" in violation
+            assert f"`{gate}`" in violation
+
     def test_this_repository_declares_the_gates_its_agents_run(self) -> None:
         # Without a declaration the rule has nothing to forbid and passes
         # everything, so the declaration itself is part of the gate.
