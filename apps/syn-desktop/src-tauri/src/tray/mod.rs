@@ -1,95 +1,28 @@
 //! Tray icon with a Live-state dot. The web app reports its live connection
 //! state (skyline-core `LiveState`) through the `set_live_state` command.
+//!
+//! The tray owns no app state: callers pass the slots it reads and writes, so
+//! `state` depends on `tray` (for `LiveState`) and never the other way round.
 
-use std::str::FromStr;
+mod icon;
+mod live_state;
 
-use serde::{Deserialize, Serialize};
-use tauri::image::Image;
+use std::sync::Mutex;
+
 use tauri::menu::{MenuBuilder, MenuItem, MenuItemBuilder, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Manager, Wry};
+use tauri::{AppHandle, Wry};
 
-use crate::state::AppState;
+pub use icon::icon_for;
+pub use live_state::LiveState;
 
 pub const TRAY_ID: &str = "syn-tray";
 pub const MENU_SHOW: &str = "tray.show";
 pub const MENU_PALETTE: &str = "tray.palette";
 pub const MENU_STATUS: &str = "tray.status";
 
-const BASE_ICON: &[u8] = include_bytes!("../icons/32x32.png");
-
-/// Mirrors `LiveState` in packages/syn-ui/skyline-core/src/patterns/types.ts.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum LiveState {
-    Live,
-    #[default]
-    Connecting,
-    Offline,
-    Fixtures,
-}
-
-impl FromStr for LiveState {
-    type Err = String;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "live" => Ok(Self::Live),
-            "connecting" => Ok(Self::Connecting),
-            "offline" => Ok(Self::Offline),
-            "fixtures" => Ok(Self::Fixtures),
-            other => Err(format!(
-                "unknown live state {other:?} (expected live | connecting | offline | fixtures)"
-            )),
-        }
-    }
-}
-
-impl LiveState {
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Live => "Live",
-            Self::Connecting => "Connecting",
-            Self::Offline => "Offline",
-            Self::Fixtures => "Fixtures",
-        }
-    }
-
-    /// Dot colour (RGB). The tray is native chrome, outside the CSS token system.
-    fn rgb(self) -> [u8; 3] {
-        match self {
-            Self::Live => [46, 213, 115],
-            Self::Connecting => [245, 184, 46],
-            Self::Offline => [240, 82, 82],
-            Self::Fixtures => [110, 160, 255],
-        }
-    }
-}
-
-/// The base app icon with a status dot in the bottom-right corner.
-pub fn icon_for(state: LiveState) -> tauri::Result<Image<'static>> {
-    let base = Image::from_bytes(BASE_ICON)?;
-    let (w, h) = (base.width(), base.height());
-    let mut rgba = base.rgba().to_vec();
-    let r = (w.min(h) as f32) * 0.22; // dot radius
-    let ring = (w.min(h) as f32) * 0.07; // dark outline so the dot reads on any tray
-    let cx = w as f32 - r - ring - 0.5;
-    let cy = h as f32 - r - ring - 0.5;
-    let [dr, dg, db] = state.rgb();
-    for y in 0..h {
-        for x in 0..w {
-            let dx = x as f32 + 0.5 - cx;
-            let dy = y as f32 + 0.5 - cy;
-            let d = (dx * dx + dy * dy).sqrt();
-            let i = ((y * w + x) * 4) as usize;
-            if d <= r {
-                rgba[i..i + 4].copy_from_slice(&[dr, dg, db, 255]);
-            } else if d <= r + ring {
-                rgba[i..i + 4].copy_from_slice(&[11, 15, 20, 255]);
-            }
-        }
-    }
-    Ok(Image::new_owned(rgba, w, h))
-}
+/// The tray's disabled "Status: ..." menu item, kept so `set_state` can relabel it.
+pub type StatusSlot = Mutex<Option<MenuItem<Wry>>>;
 
 fn tooltip(state: LiveState) -> String {
     format!("Syntropic137 · {}", state.label())
@@ -99,7 +32,7 @@ fn status_text(state: LiveState) -> String {
     format!("Status: {}", state.label())
 }
 
-pub fn build(app: &AppHandle<Wry>) -> tauri::Result<()> {
+pub fn build(app: &AppHandle<Wry>, status_slot: &StatusSlot) -> tauri::Result<()> {
     let state = LiveState::default();
     let status: MenuItem<Wry> = MenuItemBuilder::with_id(MENU_STATUS, status_text(state))
         .enabled(false)
@@ -131,16 +64,20 @@ pub fn build(app: &AppHandle<Wry>) -> tauri::Result<()> {
         })
         .build(app)?;
 
-    if let Ok(mut slot) = app.state::<AppState>().tray_status.lock() {
+    if let Ok(mut slot) = status_slot.lock() {
         *slot = Some(status);
     }
     Ok(())
 }
 
-pub fn set_state(app: &AppHandle<Wry>, state: LiveState) -> tauri::Result<()> {
-    let st = app.state::<AppState>();
+pub fn set_state(
+    app: &AppHandle<Wry>,
+    live: &Mutex<LiveState>,
+    status_slot: &StatusSlot,
+    state: LiveState,
+) -> tauri::Result<()> {
     {
-        let mut cur = st.live.lock().expect("live state lock");
+        let mut cur = live.lock().expect("live state lock");
         if *cur == state {
             return Ok(());
         }
@@ -150,32 +87,8 @@ pub fn set_state(app: &AppHandle<Wry>, state: LiveState) -> tauri::Result<()> {
         tray.set_icon(Some(icon_for(state)?))?;
         tray.set_tooltip(Some(tooltip(state)))?;
     }
-    if let Some(item) = st.tray_status.lock().expect("tray status lock").as_ref() {
+    if let Some(item) = status_slot.lock().expect("tray status lock").as_ref() {
         item.set_text(status_text(state))?;
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parses_core_live_states() {
-        for s in ["live", "connecting", "offline", "fixtures"] {
-            assert!(s.parse::<LiveState>().is_ok(), "{s}");
-        }
-        assert!("reconnecting".parse::<LiveState>().is_err());
-    }
-
-    #[test]
-    fn dot_is_drawn() {
-        let img = icon_for(LiveState::Live).unwrap();
-        let (w, h) = (img.width(), img.height());
-        // a pixel inside the dot, near the bottom-right corner
-        let x = w - (w as f32 * 0.29) as u32;
-        let y = h - (h as f32 * 0.29) as u32;
-        let i = ((y * w + x) * 4) as usize;
-        assert_eq!(&img.rgba()[i..i + 4], &[46, 213, 115, 255]);
-    }
 }

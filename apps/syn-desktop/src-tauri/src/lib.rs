@@ -121,7 +121,8 @@ fn desktop_ready(state: tauri::State<'_, AppState>) -> Option<String> {
 #[tauri::command]
 fn set_live_state(app: AppHandle<Wry>, state: String) -> Result<(), String> {
     let parsed: LiveState = state.parse()?;
-    tray::set_state(&app, parsed).map_err(|e| e.to_string())
+    let st = app.state::<AppState>();
+    tray::set_state(&app, &st.live, &st.tray_status, parsed).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -238,7 +239,7 @@ pub fn run() {
             let handle = app.handle().clone();
 
             app.set_menu(menu::build(&handle)?)?;
-            tray::build(&handle)?;
+            tray::build(&handle, &handle.state::<AppState>().tray_status)?;
 
             #[cfg(desktop)]
             {
