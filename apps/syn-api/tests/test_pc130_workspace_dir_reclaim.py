@@ -482,3 +482,88 @@ def test_archive_keys_never_collide_across_repository_paths() -> None:
         host_dir="/w/ws-1", workspace_id="ws-1", execution_id=None, size_bytes=0
     )
     assert archive_key(stale, "/w/ws-1/repos/a_b") != archive_key(stale, "/w/ws-1/repos/a/b")
+
+
+async def test_catch_up_or_a_live_mount_after_the_last_look_cannot_reach_the_dir(
+    base: Path, tmp_path: Path
+) -> None:
+    """B6: the directory is claimed before the last look, so a later change finds nothing."""
+    ws = _workspace(base, "ws-handoff", tmp_path)
+    live = [True]
+    reclaimer = _reclaimer(base)
+    reclaimer.is_live = lambda: live[0]
+    claim = reclaimer.claim
+
+    def claim_then_catch_up(host_dir: str) -> str:
+        claimed = claim(host_dir)
+        live[0] = False
+        return claimed
+
+    reclaimer.claim = claim_then_catch_up
+    result = await reclaimer.run_once()
+    assert result.kept == ("ws-handoff",)
+    assert ws.exists()
+    assert sorted(p.name for p in base.iterdir()) == ["ws-handoff"]
+
+
+async def test_a_container_arriving_at_the_claim_keeps_the_dir(base: Path, tmp_path: Path) -> None:
+    ws = _workspace(base, "ws-claim-race", tmp_path)
+    containers: list[WorkspaceContainer] = []
+    reclaimer = _reclaimer(base, containers=containers)
+    claim = reclaimer.claim
+
+    def claim_then_mount(host_dir: str) -> str:
+        claimed = claim(host_dir)
+        containers.append(
+            WorkspaceContainer(workspace_id="ws-claim-race", execution_id="exec-c", running=True)
+        )
+        return claimed
+
+    reclaimer.claim = claim_then_mount
+    result = await reclaimer.run_once()
+    assert result.kept == ("ws-claim-race",)
+    assert ws.exists()
+
+
+@pytest.mark.parametrize("authored", ["commit", "stash", "ref"])
+async def test_git_work_authored_during_archival_keeps_the_dir(
+    base: Path, tmp_path: Path, authored: str
+) -> None:
+    """B6: no worktree mtime moves, so only the git-state comparison sees it."""
+    ws = _workspace(base, f"ws-during-{authored}", tmp_path)
+    app = ws / "repos" / "app"
+    (ws / "notes.md").write_text("outside any repository\n")
+
+    class AuthorsDuringUpload(_Archive):
+        async def save_files(self, stale: StaleWorkspaceDir, tarball: bytes) -> str:
+            if authored == "commit":
+                _git(app, "commit", "--allow-empty", "-m", "made during upload")
+            elif authored == "stash":
+                (app / "README.md").write_text("stashed during upload\n")
+                _git(app, "stash")
+            else:
+                sha = subprocess.run(
+                    [
+                        "git",
+                        "-c",
+                        "user.email=t@t",
+                        "-c",
+                        "user.name=t",
+                        "commit-tree",
+                        "-p",
+                        "HEAD",
+                        "-m",
+                        "new ref",
+                        "HEAD^{tree}",
+                    ],
+                    cwd=app,
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                ).stdout.strip()
+                _git(app, "update-ref", "refs/agent/keep", sha)
+            return await super().save_files(stale, tarball)
+
+    result = await _reclaimer(base, archive=AuthorsDuringUpload()).run_once()
+    assert result.kept == (f"ws-during-{authored}",)
+    assert ws.exists()

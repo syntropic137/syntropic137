@@ -135,8 +135,42 @@ class WorkspaceContainer:
     running: bool
 
 
+#: A directory claimed for deletion is renamed to this prefix plus its
+#: workspace id, so no owner can reach it at its workspace path any more.
+CLAIM_PREFIX = ".reclaiming-"
+
+
+def claim_workspace_dir(host_dir: str) -> str:
+    """Rename ``host_dir`` out of its workspace path; return where. Raises ``OSError``.
+
+    The rename is atomic, so the check that follows it is the last word: a
+    container or execution arriving later finds no directory to take.
+    """
+    path = Path(host_dir)
+    if path.name.startswith(CLAIM_PREFIX):
+        return host_dir
+    claimed = path.with_name(CLAIM_PREFIX + path.name)
+    if claimed.exists():
+        raise FileExistsError(f"{claimed} already exists")
+    path.rename(claimed)
+    return str(claimed)
+
+
+def release_workspace_dir(claimed: str, host_dir: str) -> None:
+    """Put a claimed directory back. Raises ``OSError`` when its path was retaken."""
+    if claimed == host_dir:
+        return
+    if Path(host_dir).exists():
+        raise FileExistsError(f"{host_dir} was recreated while it was claimed")
+    Path(claimed).rename(host_dir)
+
+
 def scan_workspace_dirs(base: str) -> list[WorkspaceDirListing]:
-    """Every directory directly under ``base``, sized. Blocking: call off the loop."""
+    """Every directory directly under ``base``, sized. Blocking: call off the loop.
+
+    A claimed directory left by a pass that died is listed under its
+    workspace id again, so the next pass guards and finishes it.
+    """
     root = Path(base)
     if not root.is_dir():
         return []
@@ -146,7 +180,7 @@ def scan_workspace_dirs(base: str) -> list[WorkspaceDirListing]:
             size, newest = _measure(entry)
             listings.append(
                 WorkspaceDirListing(
-                    workspace_id=entry.name,
+                    workspace_id=entry.name.removeprefix(CLAIM_PREFIX),
                     host_dir=str(entry),
                     size_bytes=size,
                     last_modified=newest,
@@ -162,7 +196,7 @@ def _measure(directory: Path) -> tuple[int, float]:
         here = Path(dirpath)
         # Git's own bookkeeping is not work: reading a repository refreshes
         # its index, and that must not read as "changed during archival".
-        # A commit made in there is caught by the unpushed guard instead.
+        # Git state is compared separately (`WorkspaceDirReclaimer._git_state`).
         bookkeeping = ".git" in here.relative_to(directory).parts
         for name, is_file in (*((d, False) for d in dirnames), *((f, True) for f in filenames)):
             try:

@@ -241,17 +241,23 @@ def _keep(stale: StaleWorkspaceDir, why: str) -> None:
     )
 
 
-def remove_reclaimed_dir(reclaimable: ReclaimableDir, remover: WorkspaceDirRemover) -> bool:
+def remove_reclaimed_dir(
+    reclaimable: ReclaimableDir, remover: WorkspaceDirRemover, *, at: str | None = None
+) -> bool:
     """Delete a directory the guard cleared. Returns whether it is gone.
 
+    ``at`` is where it is now, when it was moved after the guard (a claimed
+    stale directory); the log still names the path it was guarded at.
     The ``WorkspaceReclaimed`` log line is the record of the deletion (PC-130):
     one line per directory, with its size, that an operator can sum.
     """
     try:
-        remover.remove(reclaimable.host_dir)
+        remover.remove(at or reclaimable.host_dir)
     except OSError:
         logger.warning(
-            "Could not remove reclaimed workspace directory %s", reclaimable.host_dir, exc_info=True
+            "Could not remove reclaimed workspace directory %s",
+            at or reclaimable.host_dir,
+            exc_info=True,
         )
         return False
     logger.info(

@@ -18,9 +18,13 @@ directory is a candidate only when all three hold:
   such a directory waits until none is running;
 * nothing inside it has changed for the grace period.
 
-A candidate is then guarded (`guard_stale_workspace_dir`), and after the
-guard's archival - which can take minutes - all of the above is read again,
-with the clock still live, before anything is deleted. Any doubt about the
+A candidate is then guarded (`guard_stale_workspace_dir`). After the guard's
+archival - which can take minutes - the directory is first CLAIMED: renamed
+out of its workspace path, atomically, so nothing can take it from then on.
+Only then is all of the above read again, with the clock still live, and its
+repositories compared with what they held before the guard (a commit, stash
+or edit made during archival is in no archive). Any difference puts the
+directory back; otherwise the claimed directory is deleted. Any doubt about the
 inputs - docker unreadable, the execution list unreadable - skips the whole
 pass, because "I could not look" must never read as "nothing is running".
 """
@@ -29,7 +33,9 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import logging
+import os
 import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -79,6 +85,12 @@ class WorkspaceDirReclaimer:
     clock: Callable[[], float] = field(default=time.time)
     #: Whether side effects may run now; read again just before each deletion.
     is_live: Callable[[], bool] = field(default=lambda: True)
+    #: Rename a directory out of its workspace path; return where (blocking).
+    claim: Callable[[str], str] = field(default=lambda host_dir: _claim(host_dir))
+    #: Put a claimed directory back (blocking).
+    release: Callable[[str, str], None] = field(
+        default=lambda claimed, host_dir: _release(claimed, host_dir)
+    )
 
     async def _observe(
         self,
@@ -157,36 +169,68 @@ class WorkspaceDirReclaimer:
         )
 
     async def _reclaim(self, stale: StaleWorkspaceDir) -> bool:
-        """Guard, then delete. Whether the directory is gone."""
+        """Guard, claim, look again, then delete. Whether the directory is gone."""
         from syn_domain.contexts.orchestration import (
             guard_stale_workspace_dir,
             remove_reclaimed_dir,
         )
 
+        try:
+            before = await self._git_state(stale.host_dir)
+        except Exception as exc:
+            logger.warning("Keeping workspace directory %s: %s", stale.host_dir, exc)
+            return False
         reclaimable = await guard_stale_workspace_dir(stale, self.git, self.archive)
         if reclaimable is None:
             return False
-        if not await self._still_stale(stale):
+        try:
+            claimed = await asyncio.to_thread(self.claim, stale.host_dir)
+        except OSError as exc:
+            logger.warning(
+                "Keeping workspace directory %s: could not claim it (%s)", stale.host_dir, exc
+            )
             return False
-        return await asyncio.to_thread(remove_reclaimed_dir, reclaimable, self.remover)
-
-    async def _still_stale(self, stale: StaleWorkspaceDir) -> bool:
-        """Read everything again after archival; any change keeps the directory."""
-        why = await self._why_not_still_stale(stale)
+        why = await self._why_not_still_stale(stale, claimed, before)
         if why is not None:
             logger.warning("Keeping workspace directory %s: %s", stale.host_dir, why)
+            try:
+                await asyncio.to_thread(self.release, claimed, stale.host_dir)
+            except OSError:
+                logger.exception(
+                    "Claimed workspace directory %s could not be put back at %s; "
+                    "it stays where it is",
+                    claimed,
+                    stale.host_dir,
+                )
             return False
-        return True
+        return await asyncio.to_thread(remove_reclaimed_dir, reclaimable, self.remover, at=claimed)
 
-    async def _why_not_still_stale(self, stale: StaleWorkspaceDir) -> str | None:
+    async def _git_state(self, host_dir: str) -> tuple[tuple[str, int, str], ...]:
+        """Every repository's unpushed count and uncommitted-patch digest, by relative path.
+
+        Read before the guard and again under the claim: anything authored in
+        git meanwhile (a commit, a stash, a ref, a staged edit) changes it.
+        """
+        state: list[tuple[str, int, str]] = []
+        for repo in await self.git.repositories(host_dir):
+            digest = hashlib.sha256(await self.git.uncommitted_patch(repo)).hexdigest()
+            unpushed = await self.git.unpushed_commits(repo)
+            state.append((os.path.relpath(repo, host_dir), unpushed, digest))
+        return tuple(sorted(state))
+
+    async def _why_not_still_stale(
+        self, stale: StaleWorkspaceDir, claimed: str, before: tuple[tuple[str, int, str], ...]
+    ) -> str | None:
+        """Read everything again under the claim; any change is a reason to keep it."""
         catching_up = "subscriptions began catching up during archival"
         if not self.is_live():
             return catching_up
         try:
             containers, running, listings = await self._observe()
+            after = await self._git_state(claimed)
         except Exception as exc:
             return f"could not look again ({type(exc).__name__}: {exc})"
-        listing = next((x for x in listings if x.workspace_id == stale.workspace_id), None)
+        listing = next((x for x in listings if x.host_dir == claimed), None)
         if listing is None:
             return "it is no longer listed"
         fresh = self._stale(listing, containers, running, self.clock())
@@ -194,7 +238,21 @@ class WorkspaceDirReclaimer:
             return "a container or running execution claimed it during archival"
         if listing.last_modified > stale.last_modified:
             return "it changed during archival"
+        if after != before:
+            return "its repositories changed during archival"
         return None if self.is_live() else catching_up
+
+
+def _claim(host_dir: str) -> str:
+    from syn_adapters.workspace_backends.stale_dirs import claim_workspace_dir
+
+    return claim_workspace_dir(host_dir)
+
+
+def _release(claimed: str, host_dir: str) -> None:
+    from syn_adapters.workspace_backends.stale_dirs import release_workspace_dir
+
+    release_workspace_dir(claimed, host_dir)
 
 
 async def _running_execution_ids() -> set[str]:
