@@ -5,6 +5,8 @@ import {
   ArtifactDetail,
   ArtifactList,
   Dashboard,
+  EvalDetail,
+  EvalList,
   ExecutionDetail,
   ExecutionList,
   Insights,
@@ -29,6 +31,8 @@ export function App() {
           <Route path="workflows/:workflowId/runs" element={<WorkflowRuns />} />
           <Route path="executions" element={<ExecutionList />} />
           <Route path="executions/:executionId" element={<ExecutionDetail />} />
+          <Route path="evals" element={<EvalList />} />
+          <Route path="evals/:evalId" element={<EvalDetail />} />
           <Route path="sessions" element={<SessionList />} />
           <Route path="sessions/:sessionId" element={<SessionDetail />} />
           <Route path="artifacts" element={<ArtifactList />} />
