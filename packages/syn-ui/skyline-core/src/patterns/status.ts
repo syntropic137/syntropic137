@@ -19,10 +19,12 @@ export interface StatusSemantics {
   live: boolean
   /** No further change expected. */
   terminal: boolean
+  /** The state's colour, a `--sky-status-*` token; glyphs, segments and dots use it. */
+  token: string
 }
 
-const TABLE: Record<StatusKind, Omit<StatusSemantics, 'kind'>> = {
-  completed: { label: 'Completed', variant: 'soft', tone: 'accent', glyph: 'check', live: false, terminal: true },
+const TABLE: Record<StatusKind, Omit<StatusSemantics, 'kind' | 'token'>> = {
+  completed: { label: 'Completed', variant: 'soft', tone: 'success', glyph: 'check', live: false, terminal: true },
   failed: { label: 'Failed', variant: 'soft', tone: 'danger', glyph: 'cross', live: false, terminal: true },
   cancelled: { label: 'Cancelled', variant: 'outline', tone: 'neutral', glyph: 'dash', live: false, terminal: true },
   interrupted: { label: 'Interrupted', variant: 'outline', tone: 'warning', glyph: 'pause', live: false, terminal: true },
@@ -30,6 +32,11 @@ const TABLE: Record<StatusKind, Omit<StatusSemantics, 'kind'>> = {
   pending: { label: 'Pending', variant: 'outline', tone: 'neutral', glyph: 'clock', live: false, terminal: false },
   skipped: { label: 'Skipped', variant: 'outline', tone: 'neutral', glyph: 'skip', live: false, terminal: true },
   unknown: { label: 'Unknown', variant: 'outline', tone: 'neutral', glyph: 'dot', live: false, terminal: false },
+}
+
+/** The colour token for a status kind (themes/src/tokens.css). */
+export function statusToken(kind: StatusKind): string {
+  return `var(--sky-status-${kind})`
 }
 
 const ALIASES: Record<string, StatusKind> = {
@@ -67,7 +74,7 @@ export function statusSemantics(status: string | null | undefined): StatusSemant
   let label = base.label
   if (kind === 'unknown' && status) label = humanize(status)
   else if (status?.toLowerCase() === 'queued') label = 'Queued'
-  return { kind, ...base, label }
+  return { kind, ...base, label, token: statusToken(kind) }
 }
 
 /** "not_started" -> "Not started". */

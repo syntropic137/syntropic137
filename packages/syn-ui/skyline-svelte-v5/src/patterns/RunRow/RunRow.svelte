@@ -114,13 +114,13 @@
     background: var(--sky-color-empty);
   }
   .sky-run-row__seg[data-tone='done'] {
-    background: var(--ds-color-accent);
+    background: var(--sky-status-completed);
   }
   .sky-run-row__seg[data-tone='failed'] {
-    background: var(--ds-color-danger);
+    background: var(--sky-status-failed);
   }
   .sky-run-row__seg[data-tone='cancelled'] {
-    background: var(--ds-color-text-subtle);
+    background: var(--sky-status-cancelled);
   }
   .sky-run-row__seg[data-tone='running'] {
     background: var(--sky-color-running-block);

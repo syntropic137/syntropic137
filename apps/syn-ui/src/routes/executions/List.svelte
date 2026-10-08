@@ -303,13 +303,13 @@
     border-radius: 4px;
   }
   [data-tone='completed'] {
-    background: var(--ds-color-accent);
+    background: var(--sky-status-completed);
   }
   [data-tone='failed'] {
-    background: var(--ds-color-danger);
+    background: var(--sky-status-failed);
   }
   [data-tone='cancelled'] {
-    background: var(--ds-color-text-subtle);
+    background: var(--sky-status-cancelled);
   }
   [data-tone='empty'] {
     background: var(--sky-color-track);

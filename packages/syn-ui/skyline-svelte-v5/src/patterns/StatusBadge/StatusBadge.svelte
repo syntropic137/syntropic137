@@ -23,6 +23,7 @@
   data-tone={s.tone}
   data-kind={s.kind}
   data-live={s.live || undefined}
+  style:--_glyph={s.token}
 >
   <span class="sky-status__glyph"><Glyph d={STATUS_GLYPH_PATHS[s.glyph]} {size} weight={shape === 'pill' ? 2 : 1.9} /></span>
   {#if shape === 'pill'}
@@ -44,20 +45,22 @@
     flex-shrink: 0;
     color: var(--_glyph);
   }
+  /* The glyph colour is the state's --sky-status-* token, set inline from statusSemantics(). */
   .sky-status[data-tone='accent'] {
     --_bg: var(--sky-color-accent-soft);
     --_fg: var(--sky-color-accent-soft-fg);
-    --_glyph: var(--ds-color-accent);
+  }
+  .sky-status[data-tone='success'] {
+    --_bg: var(--sky-color-success-soft);
+    --_fg: var(--sky-color-success-soft-fg);
   }
   .sky-status[data-tone='danger'] {
     --_bg: var(--sky-color-danger-soft);
     --_fg: var(--sky-color-danger-soft-fg);
-    --_glyph: var(--ds-color-danger);
   }
   .sky-status[data-tone='warning'] {
     --_bg: var(--sky-color-warning-soft);
     --_fg: var(--sky-color-warning-soft-fg);
-    --_glyph: var(--ds-color-warning);
   }
 
   .sky-status[data-shape='pill'] {
@@ -75,7 +78,7 @@
     box-shadow: inset 0 0 0 var(--ds-border-width) var(--sky-color-border-strong);
   }
   .sky-status[data-shape='pill'] .sky-status__glyph {
-    color: currentColor;
+    color: var(--_glyph);
   }
 
   .sky-status[data-shape='square'] {
@@ -92,6 +95,15 @@
   @media (prefers-reduced-motion: no-preference) {
     .sky-status[data-live] .sky-status__glyph {
       animation: sky-status-spin 1.1s linear infinite;
+    }
+    /* Running also breathes, so it reads as in progress at a glance, not as another blue. */
+    .sky-status[data-live]:not([data-shape='glyph']) {
+      animation: sky-status-pulse 1.6s var(--sky-ease-in-out) infinite;
+    }
+  }
+  @keyframes sky-status-pulse {
+    50% {
+      box-shadow: 0 0 0 3px var(--sky-color-accent-ring);
     }
   }
   @keyframes sky-status-spin {

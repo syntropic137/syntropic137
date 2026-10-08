@@ -55,6 +55,13 @@ To refresh the baselines after an intended visual change:
 
 Locally, `just skyline-screenshots` runs the same spec against your own OS (add `--update-snapshots=all` to write local baselines). It is useful for checking a change by eye, not for the CI comparison.
 
+## Owner tweaks after demo
+
+Small changes made in code after the owner reviewed the demo. Where a board disagrees, the code wins.
+
+- **Wordmark** (TopNav, PhoneTop): the original Syntropic137 "S" mark (`apps/syn-ui/public/logo_syntropic137.png`) with Orbitron type replaces the cube drawn on the boards. The cube's extrude recipe stays in skyline-core for the charts.
+- **Status colours** (Executions, Execution, Sessions, Session, Overview, Workflow runs): each state has its own `--sky-status-*` token, chosen once by `statusSemantics()`. Completed is green with a check (the boards draw it accent blue), failed red with a cross, running accent with a spinning partial ring and a pulsing badge, pending and queued muted with a clock, cancelled grey with a dash, interrupted amber with a pause. Phase segments, the outcome ring and the list split use the same tokens.
+
 ## For agents
 
 UI work starts by reading this file, `skyline-spec.md`, the relevant boards and `packages/syn-ui/CONVENTIONS.md`. The `design-handoff` skill (`.claude/skills/design-handoff/SKILL.md`) has the steps.

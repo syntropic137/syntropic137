@@ -74,18 +74,18 @@
   }
   .sky-outcome__arc[data-key='completed'],
   .sky-outcome__swatch[data-key='completed'] {
-    stroke: var(--ds-color-accent);
-    background: var(--ds-color-accent);
+    stroke: var(--sky-status-completed);
+    background: var(--sky-status-completed);
   }
   .sky-outcome__arc[data-key='failed'],
   .sky-outcome__swatch[data-key='failed'] {
-    stroke: var(--ds-color-danger);
-    background: var(--ds-color-danger);
+    stroke: var(--sky-status-failed);
+    background: var(--sky-status-failed);
   }
   .sky-outcome__arc[data-key='cancelled'],
   .sky-outcome__swatch[data-key='cancelled'] {
-    stroke: var(--ds-color-text-subtle);
-    background: var(--ds-color-text-subtle);
+    stroke: var(--sky-status-cancelled);
+    background: var(--sky-status-cancelled);
   }
   .sky-outcome__pct {
     font-size: 24px;

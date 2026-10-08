@@ -160,5 +160,16 @@
 
   --sky-color-running-block: color-mix(in oklab, var(--ds-color-accent) 45%, var(--sky-color-empty));
 
+  /* Run and session status: one colour per state (owner tweak after demo).
+     skyline-core's statusSemantics() names these; nothing else picks status colours. */
+  --sky-status-completed: var(--ds-color-success);
+  --sky-status-failed: var(--ds-color-danger);
+  --sky-status-running: var(--ds-color-accent);
+  --sky-status-pending: var(--ds-color-text-subtle);
+  --sky-status-cancelled: var(--ds-color-text-muted);
+  --sky-status-interrupted: var(--ds-color-warning);
+  --sky-status-skipped: var(--ds-color-text-subtle);
+  --sky-status-unknown: var(--ds-color-text-subtle);
+
   color-scheme: dark;
 }
