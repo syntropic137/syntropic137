@@ -35,6 +35,8 @@ exit 0
 """
 
 TOOL_STUB = """#!/bin/bash
+# `uv python find` is the script probing for an interpreter, not an install.
+[ "$1" = python ] && exit 0
 printf 'CALL:%s %s @%s\\n' "$(basename "$0")" "$*" "$PWD" >> "$CALL_LOG"
 var="FAKE_$(basename "$0" | tr a-z A-Z)_EXIT"
 exit "${!var:-0}"
@@ -108,8 +110,8 @@ def test_every_locked_ecosystem_is_installed_frozen_in_its_own_directory_after_t
     assert installs == [
         "CALL:clone",
         "CALL:uv sync --frozen",
-        "CALL:pnpm install --frozen-lockfile",
-        "CALL:pnpm install --frozen-lockfile",
+        "CALL:pnpm install --frozen-lockfile --ignore-scripts",
+        "CALL:pnpm install --frozen-lockfile --ignore-scripts",
         "CALL:cargo fetch --locked --manifest-path <repo>/lib/tool/Cargo.toml",
     ]
     assert [c.split(" @")[1] for c in result.calls[1:4]] == ["<repo>", "<repo>/apps/web", "<repo>"]
@@ -119,7 +121,7 @@ def test_every_locked_ecosystem_is_installed_frozen_in_its_own_directory_after_t
     ("locks", "tool", "expected"),
     [
         ("uv.lock", "uv", "CALL:uv sync --frozen @<repo>"),
-        ("pnpm-lock.yaml", "pnpm", "CALL:pnpm install --frozen-lockfile @<repo>"),
+        ("pnpm-lock.yaml", "pnpm", "CALL:pnpm install --frozen-lockfile --ignore-scripts @<repo>"),
     ],
 )
 def test_a_failed_install_fails_setup_so_no_agent_starts(
@@ -172,3 +174,15 @@ def test_prewarm_is_off_unless_asked_for() -> None:
 
 def test_only_a_prewarming_setup_gets_the_install_budget() -> None:
     assert _secrets().setup_timeout_seconds(120) == 120 + PREWARM_TIMEOUT_SECONDS
+
+
+def test_a_failed_install_below_the_checkout_root_is_reported_and_setup_continues(run) -> None:
+    # Provisioning pin b2f680f for real failed here: a submodule's stale
+    # Cargo.lock refused `--locked` and set -e took every eval case with it.
+    result = run(_secrets(), "lib/sub/uv.lock uv.lock", uv=7)
+
+    assert result.proc.returncode != 0
+    assert [c.split(" @")[1] for c in result.calls[1:]] == ["<repo>/lib/sub", "<repo>"]
+    assert "FAILED for <repo>/lib/sub/uv.lock" in result.proc.stderr.replace(
+        str(result.repo), "<repo>"
+    )

@@ -29,8 +29,14 @@ def append_dependency_prewarm(lines: list[str], destinations: Sequence[tuple[str
     included; dependency, build and VCS directories excluded):
 
     - ``uv.lock``: ``uv sync --frozen``, the environment ``uv run`` uses.
-    - ``pnpm-lock.yaml``: ``pnpm install --frozen-lockfile``, through
-      corepack when pnpm itself is not on PATH.
+      A project whose requested Python (its ``.python-version``) the image
+      neither has nor can install is skipped like a missing tool: the
+      image's interpreter directory is read-only to the setup user, and the
+      agent could not run that project either.
+    - ``pnpm-lock.yaml``: ``pnpm install --frozen-lockfile --ignore-scripts``,
+      through corepack when pnpm itself is not on PATH. Scripts are not run:
+      a project's own ``prepare`` is a build (event-sourcing-platform's runs
+      ``make gen-ts``), not an install, and failing it failed setup.
     - ``Cargo.lock``: ``cargo fetch --locked``, so a later ``cargo build
       --locked`` needs no network. With no cargo but a rustup, the stable
       minimal toolchain is installed first - the step
@@ -38,9 +44,13 @@ def append_dependency_prewarm(lines: list[str], destinations: Sequence[tuple[str
 
     A tool the image does not have is skipped with a line on stderr, not
     failed: the agent cannot run that tool either, so there is nothing to
-    warm for it. A step that runs and fails, or outlives
-    ``PREWARM_TIMEOUT_SECONDS``, fails setup (``set -e``), so no agent
-    starts against half a dependency tree. TMPDIR moves under /workspace
+    warm for it. An install AT a checkout's root - the project the agent's
+    gates run in - that fails or outlives ``PREWARM_TIMEOUT_SECONDS`` fails
+    setup (``set -e``), so no agent starts against half a dependency tree.
+    One BELOW the root is reported on stderr and setup continues: provisioning
+    a pinned eval case for real showed submodule lockfiles are not kept to the
+    root's standard (event-sourcing-platform's Rust ``Cargo.lock`` is stale
+    against its manifest), and failing setup on them failed every case. TMPDIR moves under /workspace
     because /tmp is mounted noexec in the workspace image (#1100).
     """
 
@@ -56,12 +66,22 @@ def append_dependency_prewarm(lines: list[str], destinations: Sequence[tuple[str
             f"    find {roots} \\( -name node_modules -o -name target -o -name .venv"
             ' -o -name .git \\) -prune -o -name "$1" -type f -print | sort',
             "}",
+            "syn_nested() {",
+            f'    for root in {roots}; do [ "${{1%/*}}" = "$root" ] && return 1; done',
+            '    echo "prewarm: FAILED for $1, below the checkout root; continuing" >&2',
+            "}",
             "syn_locks uv.lock | while read -r lock; do",
             "    if ! command -v uv >/dev/null 2>&1; then",
             '        echo "prewarm: no uv on PATH; not installing $lock" >&2; continue',
             "    fi",
+            '    if ! (cd "${lock%/*}" && { uv python find >/dev/null 2>&1'
+            f" || timeout {budget} uv python install >/dev/null; }}); then",
+            '        echo "prewarm: no Python for ${lock%/*} can be found or installed;'
+            ' not installing $lock" >&2',
+            "        continue",
+            "    fi",
             '    echo "prewarm: uv sync --frozen in ${lock%/*}"',
-            f'    (cd "${{lock%/*}}" && timeout {budget} uv sync --frozen)',
+            f'    (cd "${{lock%/*}}" && timeout {budget} uv sync --frozen) || syn_nested "$lock"',
             "done",
             "syn_locks pnpm-lock.yaml | while read -r lock; do",
             "    if command -v pnpm >/dev/null 2>&1; then syn_pnpm=pnpm",
@@ -70,8 +90,9 @@ def append_dependency_prewarm(lines: list[str], destinations: Sequence[tuple[str
             '        echo "prewarm: no pnpm or corepack on PATH; not installing $lock" >&2',
             "        continue",
             "    fi",
-            '    echo "prewarm: pnpm install --frozen-lockfile in ${lock%/*}"',
-            f'    (cd "${{lock%/*}}" && timeout {budget} $syn_pnpm install --frozen-lockfile)',
+            '    echo "prewarm: pnpm install --frozen-lockfile --ignore-scripts in ${lock%/*}"',
+            f'    (cd "${{lock%/*}}" && timeout {budget} $syn_pnpm install --frozen-lockfile --ignore-scripts)'
+            ' || syn_nested "$lock"',
             "done",
             'if [ -n "$(syn_locks Cargo.lock)" ] && ! cargo --version >/dev/null 2>&1'
             " && command -v rustup >/dev/null 2>&1; then",
@@ -85,7 +106,8 @@ def append_dependency_prewarm(lines: list[str], destinations: Sequence[tuple[str
             '        echo "prewarm: no cargo; not fetching crates for $lock" >&2; continue',
             "    fi",
             '    echo "prewarm: cargo fetch --locked for ${lock%/*}"',
-            f'    timeout {budget} cargo fetch --locked --manifest-path "${{lock%/*}}/Cargo.toml"',
+            f'    timeout {budget} cargo fetch --locked --manifest-path "${{lock%/*}}/Cargo.toml"'
+            ' || syn_nested "$lock"',
             "done",
         ]
     )
