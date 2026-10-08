@@ -31,10 +31,10 @@ placement machinery:
 
 - one `execution_budget` row per executor, with a `backend` column
   (`docs/adrs/ADR-072-execution-hosting-and-upgrade-without-drain.md:150-161`,
-  `backend` at `:153`);
-- a single-transaction claim (`:163-179`);
-- releases fenced by a compare-and-set (`:181-201`);
-- fencing and reaping (D5, `:265-277`).
+  `backend` at `docs/adrs/ADR-072-execution-hosting-and-upgrade-without-drain.md:153`);
+- a single-transaction claim (`docs/adrs/ADR-072-execution-hosting-and-upgrade-without-drain.md:163-179`);
+- releases fenced by a compare-and-set (`docs/adrs/ADR-072-execution-hosting-and-upgrade-without-drain.md:181-201`);
+- fencing and reaping (D5, `docs/adrs/ADR-072-execution-hosting-and-upgrade-without-drain.md:265-277`).
 
 It is **not implemented**: no `ExecutionHost` or `ExecutionRunQueue` exists in
 any `.py` file (`git grep -nE "ExecutionHost|ExecutionRunQueue" -- '*.py'`
@@ -46,14 +46,14 @@ This doc corrects or refines #1612 and the brief in eight places:
 
 | # | Correction | Corrects | Evidence |
 |---|---|---|---|
-| C1 | `agent-net` is not internal in production, so local workspace egress is open. E2B's `allow_out` would be stricter than local, not parity. Tracked in [#1794](https://github.com/syntropic137/syntropic137/issues/1794), "security: agent-net is not internal in production; workspaces have direct internet egress, contrary to the code comment". | #1612 inventory row 15 and Step 9, which say `internal: true` | `docker/docker-compose.syntropic137.yaml:674-676` (`agent-net: null`, while `docker-proxy` is `internal: true`). The comment at `docker/sidecar-proxy/envoy.yaml:106` records that the pypi and npm passthrough hosts were removed and agents do not set `HTTP_PROXY`, so Envoy is not an egress gate either. The "cannot reach the internet directly" comment at `packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/adapter.py:219-221` is false. |
-| C2 | `/spool` is a named volume, not tmpfs. An explicit mount removes the matching `--tmpfs`. | refines #1612 Step 8 | `lib/agentic-workspace/lib/python/agentic_isolation/agentic_isolation/providers/docker.py:49`, `:310-328` |
-| C3 | E2B concurrency add-ons: Pro+ (600) is +$500/mo, Pro++ (1,100) is +$1,000/mo. #1612 says 1,100 costs a $500 add-on. | #1612 cost section (body line 267) | [E2B pricing](https://e2b.dev/pricing), accessed 2026-10-08 |
+| C1 | `agent-net` is not internal in production, so local workspace egress is open. E2B's `allow_out` would be stricter than local, not parity. Tracked in [#1794](https://github.com/syntropic137/syntropic137/issues/1794), "security: agent-net is not internal in production; workspaces have direct internet egress, contrary to the code comment". | #1612 inventory row 15 and Step 9, which say `internal: true` | `docker/docker-compose.syntropic137.yaml:674-676` (`agent-net: null`, while `docker-proxy` is `internal: true`). The comment at `docker/sidecar-proxy/envoy.yaml:106-110` records that the pypi and npm passthrough hosts were removed and agents do not set `HTTP_PROXY`, so Envoy is not an egress gate either. The "cannot reach the internet directly" comment at `packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/adapter.py:219-221` is false. |
+| C2 | `/spool` is a named volume, not tmpfs. An explicit mount removes the matching `--tmpfs`. | refines #1612 Step 8 | `lib/agentic-workspace/lib/python/agentic_isolation/agentic_isolation/providers/docker.py:49`, `lib/agentic-workspace/lib/python/agentic_isolation/agentic_isolation/providers/docker.py:310-328` |
+| C3 | E2B concurrency add-ons: Pro+ (600) is +$500/mo, Pro++ (1,100) is +$1,000/mo. #1612 says 1,100 costs a $500 add-on. | #1612 cost section (body line 266) | [E2B pricing](https://e2b.dev/pricing), accessed 2026-10-08 |
 | C4 | `read_file` already exists on the provider Protocol, but it takes a path relative to the workspace root and returns text. Artifacts, the spool and the manifest still need a new binary, absolute-path `read_files`. | refines #1612 Step 7 | `lib/agentic-workspace/lib/python/agentic_isolation/agentic_isolation/providers/base.py:201-218` |
-| C5 | Eval verify is not credential-free. It runs a Claude agent and clones repos. | the brief | `workflows/evals/verify-pinned-sonnet/workflow.yaml:11` (`requires_repos: true`), `:51-53` (`provider: claude`); `packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/WorkspaceProvisionHandler.py:252-255` |
-| C6 | The credential gate is #1735. [#724](https://github.com/syntropic137/syntropic137/issues/724) is only the Claude API-key sidecar spike. | #1612 and the brief | `docs/north-star.md:182`, `:215` |
-| C7 | A Scripted Agent is not a workflow provider. The stub image replaces the CLI, and its profile still names `claude` or `codex`. Nothing in production reads the profile today. | the earlier plan, not #1612 | `packages/syn-perf/src/syn_perf/loadtest/scripted_agent_profile.py:3-8`, `:37-38`, `:130`; `packages/syn-shared/src/syn_shared/agents.py:24`, `:27`, `:253-269` |
-| C8 | Proposed amendment: the ADR-072 D5 fence guard must require the fencing executor to hold recovery access to the dead owner's backend (decision 8). | extends ADR-072 D5 and #1612 | `docs/adrs/ADR-072-execution-hosting-and-upgrade-without-drain.md:268`, `:274-276`: any live executor may fence, and the reap removes containers by `syn.host_id`; nothing checks the backend |
+| C5 | Eval verify is not credential-free. It runs a Claude agent and clones repos. | the brief | `workflows/evals/verify-pinned-sonnet/workflow.yaml:11` (`requires_repos: true`), `workflows/evals/verify-pinned-sonnet/workflow.yaml:51-53` (`provider: claude`); `packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/WorkspaceProvisionHandler.py:252-255` |
+| C6 | The credential gate is #1735. [#724](https://github.com/syntropic137/syntropic137/issues/724) is only the Claude API-key sidecar spike. | #1612 and the brief | `docs/north-star.md:182`, `docs/north-star.md:215` |
+| C7 | A Scripted Agent is not a workflow provider. The stub image replaces the CLI, and its profile still names `claude` or `codex`. Nothing in production reads the profile today. | the earlier plan, not #1612 | `packages/syn-perf/src/syn_perf/loadtest/scripted_agent_profile.py:3-8`, `packages/syn-perf/src/syn_perf/loadtest/scripted_agent_profile.py:37-38`, `packages/syn-perf/src/syn_perf/loadtest/scripted_agent_profile.py:130`; `packages/syn-shared/src/syn_shared/agents.py:24`, `packages/syn-shared/src/syn_shared/agents.py:27`, `packages/syn-shared/src/syn_shared/agents.py:253-269` |
+| C8 | Proposed amendment: the ADR-072 D5 fence guard must require the fencing executor to hold recovery access to the dead owner's backend (decision 8). | extends ADR-072 D5 and #1612 | `docs/adrs/ADR-072-execution-hosting-and-upgrade-without-drain.md:268`, `docs/adrs/ADR-072-execution-hosting-and-upgrade-without-drain.md:274-276`: any live executor may fence, and the reap removes containers by `syn.host_id`; nothing checks the backend |
 
 The capture design below **keeps** #1612 Step 8 (decision 7). An earlier
 draft of this plan read the spool only at teardown and recovered only from a
@@ -66,22 +66,22 @@ or **differently**.
 
 | Need | Where today | E2B verdict |
 |---|---|---|
-| Image: `node:22-slim`, `USER agent`, entrypoint, CLIs baked in | `lib/agentic-workspace/implementations/docker/images/claude-cli/Dockerfile:66`, `:436`, `:474` | Differently. A template is built from the pinned digest ([E2B base image](https://e2b.dev/docs/template/base-image), accessed 2026-10-08, documents `from_image`). Cosign verification (`packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/adapter.py:321`) moves to template-build time and is recorded against the template. Private GHCR digests are not verified (Q5). |
-| Image manifest recorded on the Workspace event | `packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_lifecycle.py:163-172` (reads Docker `_active_workspaces`, calls `exec_run`), consumed at `:220-226` | Differently. Read through the provider. Today an E2B workspace would silently record `None`, losing image provenance in a Lane 1 event. |
+| Image: `node:22-slim`, `USER agent`, entrypoint, CLIs baked in | `lib/agentic-workspace/implementations/docker/images/claude-cli/Dockerfile:66`, `lib/agentic-workspace/implementations/docker/images/claude-cli/Dockerfile:436`, `lib/agentic-workspace/implementations/docker/images/claude-cli/Dockerfile:474` | Differently. A template is built from the pinned digest ([E2B base image](https://e2b.dev/docs/template/base-image), accessed 2026-10-08, documents `from_image`). Cosign verification (`packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/adapter.py:321`) moves to template-build time and is recorded against the template. Private GHCR digests are not verified (Q5). |
+| Image manifest recorded on the Workspace event | `packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_lifecycle.py:163-172` (reads Docker `_active_workspaces`, calls `exec_run`), consumed at `packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_lifecycle.py:220-226` | Differently. Read through the provider. Today an E2B workspace would silently record `None`, losing image provenance in a Lane 1 event. |
 | Hardening: cap-drop, read-only root, tmpfs, pids limit | `lib/agentic-workspace/lib/python/agentic_isolation/agentic_isolation/config.py:171-189` | Differently. The microVM is the boundary. In-VM read-only root and tmpfs are not documented in the pages read (Q5). This doc does not claim parity. |
 | Codex bwrap: seccomp plus host AppArmor | `lib/agentic-workspace/lib/python/agentic_isolation/agentic_isolation/config.py:194-205`; `packages/syn-adapters/src/syn_adapters/workspace_backends/host_security.py:26-43` | Cannot, as specified. Whether bwrap works in the VM is unknown (Q4). Claude-only until smoke-tested. |
 | Capture spool `/spool` as a named volume | `packages/syn-adapters/src/syn_adapters/session_inventory/workspace_capture.py:36-46`; `lib/agentic-workspace/lib/python/agentic_isolation/agentic_isolation/providers/docker.py:310-328` | Differently. The spool is a directory on sandbox disk, retained by pausing the sandbox, not by a volume (decision 7). |
-| Spool recovery after a crash | `packages/syn-adapters/src/syn_adapters/session_inventory/runtime.py:183` (Docker only); `packages/syn-adapters/src/syn_adapters/session_inventory/recovery_worker.py:45-48`, `:85-116`; the spool model has no backend or owner (`packages/syn-domain/src/syn_domain/contexts/agent_sessions/ports/SessionCaptureSpoolPort.py:14-18`) | Differently. Durable routing to a paused sandbox; the existing execute-based readers are reused (decision 7). |
+| Spool recovery after a crash | `packages/syn-adapters/src/syn_adapters/session_inventory/runtime.py:183` (Docker only); `packages/syn-adapters/src/syn_adapters/session_inventory/recovery_worker.py:45-48`, `packages/syn-adapters/src/syn_adapters/session_inventory/recovery_worker.py:85-116`; the spool model has no backend or owner (`packages/syn-domain/src/syn_domain/contexts/agent_sessions/ports/SessionCaptureSpoolPort.py:14-18`) | Differently. Durable routing to a paused sandbox; the existing execute-based readers are reused (decision 7). |
 | Artifact collection | `packages/syn-adapters/src/syn_adapters/workspace_backends/service/managed_workspace.py:249-254` -> `packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/adapter.py:582-583` -> host path, empty list if there is none (`packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/adapter_copy.py:158-160`) | Differently. Read through the provider's `read_files`. Today E2B output would **silently vanish**. |
 | Agent stream: `docker exec -i` with the announce wrapper, stderr merged, exit code and signal diagnosis | `packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/stream_helpers.py:44-73`; `packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/stream_adapter.py:176-212`; `last_exit_code` port at `packages/syn-domain/src/syn_domain/contexts/orchestration/_shared/ports.py:224-226` | Differently. An E2B command session. Only the inner sandbox argv (wrapper plus command) is reused (decision 4). |
-| Lost-status and signal-death diagnosis on short commands | `packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/adapter.py:534`, `:546-552` (by container name) | Differently. The provider supplies its own diagnosis, or reports explicitly that it has none. |
+| Lost-status and signal-death diagnosis on short commands | `packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/adapter.py:534`, `packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/adapter.py:546-552` (by container name) | Differently. The provider supplies its own diagnosis, or reports explicitly that it has none. |
 | Envoy on `agent-net` (`envoy-proxy:8081`), required by `_build_agent_env` | `packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_service.py:259-262`; `packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/WorkspaceProvisionHandler.py:226-232` | Cannot. Envoy is not reachable from E2B. Needs a public, authenticated ingress, after #1735. |
-| Claude credential in agent env | `packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/WorkspaceProvisionHandler.py:216-271`, called at `:760` | Must not. Gated on #1735. |
-| Codex `auth.json`; GitHub `~/.git-credentials` and `hosts.yml`, staged even when `clone_repos: false` | `packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/WorkspaceProvisionHandler.py:140-169`, `:512-531`; `packages/syn-adapters/src/syn_adapters/workspace_backends/service/setup_phase_secrets.py:208-213`, `:500-532` | Must not. Gated on #1735. |
-| Session-store write token in container env | `packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/adapter.py:237-257`, `:306-308` | Must not while it is a raw credential. Covered by the credential policy (decision 5). |
+| Claude credential in agent env | `packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/WorkspaceProvisionHandler.py:216-271`, called at `packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/WorkspaceProvisionHandler.py:760` | Must not. Gated on #1735. |
+| Codex `auth.json`; GitHub `~/.git-credentials` and `hosts.yml`, staged even when `clone_repos: false` | `packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/WorkspaceProvisionHandler.py:140-169`, `packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/WorkspaceProvisionHandler.py:512-531`; `packages/syn-adapters/src/syn_adapters/workspace_backends/service/setup_phase_secrets.py:208-213`, `packages/syn-adapters/src/syn_adapters/workspace_backends/service/setup_phase_secrets.py:500-532` | Must not. Gated on #1735. |
+| Session-store write token in container env | `packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/adapter.py:237-257`, `packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/adapter.py:306-308` | Must not while it is a raw credential. Covered by the credential policy (decision 5). |
 | Egress policy | `docker/docker-compose.syntropic137.yaml:674-676` (open, C1, #1794) | Provides more: `allow_out` and `deny_out`; domain allowlists only together with deny-all ([E2B internet access](https://e2b.dev/docs/sandbox/internet-access), accessed 2026-10-08). |
-| CPU, RAM, disk | `packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_service.py:103-104`, `:116-122` | Provides: up to 8 vCPU and 8 GiB, 10 GiB disk on Hobby and 20 GiB on Pro ([E2B billing and limits](https://e2b.dev/docs/billing), accessed 2026-10-08). |
-| Orphan reap, with the unpushed-work guard run inside each orphan | `apps/syn-api/src/syn_api/services/reconciliation.py:348-376`, `:379-399` | Differently. List by sandbox metadata; the guard runs through `attach` and `execute` (decision 8). |
+| CPU, RAM, disk | `packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_service.py:103-104`, `packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_service.py:116-122` | Provides: up to 8 vCPU and 8 GiB, 10 GiB disk on Hobby and 20 GiB on Pro ([E2B billing and limits](https://e2b.dev/docs/billing), accessed 2026-10-08). |
+| Orphan reap, with the unpushed-work guard run inside each orphan | `apps/syn-api/src/syn_api/services/reconciliation.py:348-376`, `apps/syn-api/src/syn_api/services/reconciliation.py:379-399` | Differently. List by sandbox metadata; the guard runs through `attach` and `execute` (decision 8). |
 | Docker socket for the API | `docker/docker-compose.syntropic137.yaml:180-245` | Not needed. The E2B executor talks to the E2B API. |
 
 ## 2. E2B facts
@@ -185,7 +185,7 @@ exactly what #1716 has to measure.
   tier. The choice between E2B Pro++, Enterprise and self-hosted Firecracker
   depends on the measured burst share. Model-provider quota
   ([#1718](https://github.com/syntropic137/syntropic137/issues/1718)) is
-  hypothesised to bind first (`docs/north-star.md:173`, `:184`).
+  hypothesised to bind first (`docs/north-star.md:173`, `docs/north-star.md:184`).
 
 ## 4. Adapter design
 
@@ -214,15 +214,15 @@ in the one `ExecutionRunQueue.claim` implementation.
   pull the run back. There is no preemption and no migration (ADR-072 D5).
 - **Disabling claims:** an outage breaker or operator action **disables new
   claims** on the row, using the D10 draining state (a draining host gets no
-  claim, `docs/adrs/ADR-072-execution-hosting-and-upgrade-without-drain.md:168`),
+  claim, `docs/adrs/ADR-072-execution-hosting-and-upgrade-without-drain.md:168-169`),
   or a `claims_enabled` flag if D10's drain does not fit. It never sets
-  `capacity = 0`: `CHECK (in_use >= 0 AND in_use <= capacity)` (`:154`) would
+  `capacity = 0`: `CHECK (in_use >= 0 AND in_use <= capacity)` (`docs/adrs/ADR-072-execution-hosting-and-upgrade-without-drain.md:154`) would
   reject that write while any run is charged. Accounting is untouched; charged
   runs finish or are fenced normally.
 
 *Rejected:* an admission-time router (ADR-021 `WorkspaceRouter`). It counts
 capacity outside the claim transaction, which D3 forbids ("A count taken
-outside the claim transaction is racy and is not acceptable", `:177-179`).
+outside the claim transaction is racy and is not acceptable", `docs/adrs/ADR-072-execution-hosting-and-upgrade-without-drain.md:177-179`).
 
 ### Decision 3. One composition point per backend: the BackendKit
 
@@ -243,15 +243,15 @@ every backend-specific decision, so no caller coordinates vendor choices:
 Today these decisions are unconditional inside the Docker adapter: capture
 mounts at
 `packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/adapter.py:295-299`,
-verification at `:321`, and `isolation_type="docker"` at `:370`. They move into
+verification at `packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/adapter.py:321`, and `isolation_type="docker"` at `packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/adapter.py:370`. They move into
 the Docker kit unchanged.
 
 Code location, by the CLAUDE.md boundary test:
 
 - **agentic-workspace:** `E2BWorkspaceProvider` and the capability Protocols of
   decision 4, beside `SupportsWorkspaceLogs`
-  (`lib/agentic-workspace/lib/python/agentic_isolation/agentic_isolation/providers/base.py:237`)
-  and `SupportsStagedTeardown` (`:284`). They are transport knowledge that
+  (`lib/agentic-workspace/lib/python/agentic_isolation/agentic_isolation/providers/base.py:237-238`)
+  and `SupportsStagedTeardown` (`lib/agentic-workspace/lib/python/agentic_isolation/agentic_isolation/providers/base.py:284-285`). They are transport knowledge that
   changes when E2B ships a new SDK.
 - **syn137:** the BackendKit, the credential policy, the budget row, the claim
   predicate, pricing, the `IsolationBackendType` value and the reconciler.
@@ -284,7 +284,7 @@ Per-command env goes in `env`, never baked into the argv.
 argv, `sh -c <announce-then-exec> <wrapper> <announce> <command...>`
 (`packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/stream_helpers.py:71-72`),
 so launch evidence (#1065) keeps one shape. Only the Docker provider prepends
-`docker exec -i -w ... -e ... <container>` (`:66-70`).
+`docker exec -i -w ... -e ... <container>` (`packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/stream_helpers.py:66-70`).
 
 Signal-death capture
 (`packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/stream_adapter.py:206`,
@@ -325,8 +325,8 @@ lives where credentials are produced.
   by **every** credential source:
   - the `with_sidecar` and `inject_tokens` arguments to `create_workspace`
     (`packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/WorkspaceProvisionHandler.py:434-441`);
-  - `SetupPhaseSecrets.create`, for GitHub and Codex auth (`:523-531`);
-  - `_build_agent_env`, for Claude (`:216-271`, called at `:760`);
+  - `SetupPhaseSecrets.create`, for GitHub and Codex auth (`packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/WorkspaceProvisionHandler.py:523-531`);
+  - `_build_agent_env`, for Claude (`packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/WorkspaceProvisionHandler.py:216-271`, called at `packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/WorkspaceProvisionHandler.py:760`);
   - the session-store write token
     (`packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/adapter.py:237-257`).
 
@@ -334,7 +334,7 @@ lives where credentials are produced.
   `NoCredentials` supplies nothing at every source, requests no sidecar and no
   token injection, and **refuses before `create_workspace`** any phase with a
   non-empty repo list, because `clone_repos: false` still hands repos to setup
-  secrets (`:512-516`). The BackendKit supplies the policy, so it is fixed per
+  secrets (`packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/WorkspaceProvisionHandler.py:512-516`). The BackendKit supplies the policy, so it is fixed per
   executor at wiring, never chosen per run.
 - **The image is tied to the mode.** A `NoCredentials` kit refuses to start
   unless its template's recorded source digest is the pinned stub image digest
@@ -345,7 +345,7 @@ lives where credentials are produced.
   carries an optional `ScriptedAgentProfile`, already a frozen,
   `extra="forbid"` Pydantic contract
   (`packages/syn-perf/src/syn_perf/loadtest/scripted_agent_profile.py:109-113`)
-  that nothing in production passes today (`:37-38`). The profile is recorded
+  that nothing in production passes today (`packages/syn-perf/src/syn_perf/loadtest/scripted_agent_profile.py:37-38`). The profile is recorded
   as an optional field on the execution-start event (default `None`, for
   replay), so it is domain truth after a restart. It is copied to an
   `execution_runs.workload` column (`scripted` or `agent`) at reserve, for the
@@ -436,7 +436,7 @@ spool on any crash.
 ADR-072 D5 lets any live executor fence an expired run, and the reap must
 report complete before `reaped`
 (`docs/adrs/ADR-072-execution-hosting-and-upgrade-without-drain.md:268`,
-`:276`). A Docker executor cannot list E2B sandboxes. A finite sandbox timeout
+`docs/adrs/ADR-072-execution-hosting-and-upgrade-without-drain.md:276`). A Docker executor cannot list E2B sandboxes. A finite sandbox timeout
 bounds money, not correctness: an unknown cleanup leaves `fully_reaped` false
 (`apps/syn-api/src/syn_api/services/reconciliation.py:336-341`).
 
@@ -452,9 +452,9 @@ bounds money, not correctness: an unknown cleanup leaves `fully_reaped` false
   kit never fences an E2B run, so a run is never stranded in `fencing` under a
   reconciler that cannot reap it. Takeover keeps the same rule. A failed list
   or kill leaves the run in `fencing` with its charge held (ADR-072 D3,
-  `:212-213`).
+  `docs/adrs/ADR-072-execution-hosting-and-upgrade-without-drain.md:212-213`).
 - **The unpushed-work guard** (#1560;
-  `apps/syn-api/src/syn_api/services/reconciliation.py:355-357`, `:379-399`)
+  `apps/syn-api/src/syn_api/services/reconciliation.py:355-357`, `apps/syn-api/src/syn_api/services/reconciliation.py:379-399`)
   runs inside a remote orphan through the kit's `attach` and `execute` before
   the kill. Scripted runs push nothing, but after #1735 real runs will.
 
@@ -510,13 +510,13 @@ can be filed as is.
   builds only the sandbox argv and calls `SupportsStreamingExec`; signal-death
   and lost-status diagnosis become provider calls; the `_workspaces` cache is
   filled by `attach`; `isolation_type` comes from the kit.
-- **Acceptance:** a test through the **production** `AgenticEventStreamAdapter.stream` (`packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/stream_adapter.py:69`, `:106`)
+- **Acceptance:** a test through the **production** `AgenticEventStreamAdapter.stream` (`packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/stream_adapter.py:69`, `packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/stream_adapter.py:106`)
   and the engine, with a provider fake, asserts that the provider received the
   sandbox argv with no `docker` prefix, that `last_exit_code` reflects the
   fake's outcome, and that cancellation calls `cancel()`.
 - **Negative control:** reverting B makes the adapter spawn `docker exec`, the
   fake receives nothing, and the test fails. This is unlike
-  `packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/test_stream_timeout_visibility.py:71`,
+  `packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/test_stream_timeout_visibility.py:71-78`,
   which calls `read_lines` directly and would pass either way.
 - **Depends on:** A.
 
@@ -667,7 +667,7 @@ the placement stack.
 ## 6. Rejected alternatives
 
 - **An admission router** (ADR-021 `WorkspaceRouter`, overflow threshold): it
-  decides placement outside the claim transaction (ADR-072 D3, `:177-179`),
+  decides placement outside the claim transaction (ADR-072 D3, `docs/adrs/ADR-072-execution-hosting-and-upgrade-without-drain.md:177-179`),
   and #1612 superseded it.
 - **One Executor for both backends:** backend branches in every call, coupled
   failure domains.
