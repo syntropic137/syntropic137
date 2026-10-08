@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from syn_shared.settings.execution import ExecutionSettings
     from syn_shared.settings.github import GitHubAppSettings
     from syn_shared.settings.image_verification import ImageVerificationSettings
+    from syn_shared.settings.platform_access import PlatformAccessSettings
     from syn_shared.settings.polling import PollingSettings
     from syn_shared.settings.session_inventory import SessionInventorySettings
     from syn_shared.settings.session_store import SessionStoreSettings
@@ -694,6 +695,13 @@ class Settings(BaseSettings):
         from syn_shared.settings.workspace import WorkspaceSecuritySettings
 
         return WorkspaceSecuritySettings()
+
+    @property
+    def platform_access(self) -> PlatformAccessSettings:
+        """Workspace access to the Syntropic137 API. Default OFF (ADR-072)."""
+        from syn_shared.settings.platform_access import PlatformAccessSettings
+
+        return PlatformAccessSettings()
 
     @property
     def git_identity(self) -> GitIdentitySettings:

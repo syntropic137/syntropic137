@@ -18,6 +18,14 @@ Model aliases are NOT here - they are not env var names. They live in
 ``syn_shared.agents.ModelAlias`` (issue #793).
 """
 
+from __future__ import annotations
+
+from datetime import datetime
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
 # ---------------------------------------------------------------------------
 # Deployment identity
 # APP_ENVIRONMENT is read in more places than any other name here, and it does
@@ -79,6 +87,18 @@ ENV_GH_REPO = "GH_REPO"
 #: Fixed once per phase, so every retry attempt is told the same deadline.
 ENV_SYN_PHASE_DEADLINE = "SYN_PHASE_DEADLINE"
 ENV_SYN_PHASE_TIMEOUT_SECONDS = "SYN_PHASE_TIMEOUT_SECONDS"
+
+
+def phase_deadline_of(environment: Mapping[str, str] | None) -> datetime | None:
+    """The phase deadline a launch environment carries, or None if it carries none.
+
+    The inverse of how the domain writes it (``isoformat``), kept beside the
+    variable's name so the two cannot drift. Read by the workspace adapter to
+    bound the phase's platform token (ADR-072).
+    """
+    raw = (environment or {}).get(ENV_SYN_PHASE_DEADLINE)
+    return None if raw is None else datetime.fromisoformat(raw)
+
 
 # ---------------------------------------------------------------------------
 # Workspace infrastructure env vars

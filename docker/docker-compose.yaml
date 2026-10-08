@@ -256,6 +256,9 @@ services:
     build:
       context: ./sidecar-proxy
       dockerfile: Dockerfile
+    environment:
+      # Opens the workspace -> API route (ADR-072). Same switch as the API's.
+      SYN_PLATFORM_ACCESS_ENABLED: ${SYN_PLATFORM_ACCESS_ENABLED:-false}
     networks:
       - default
       - agent-net

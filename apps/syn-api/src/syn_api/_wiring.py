@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from syn_adapters.control.ports import SignalQueuePort
     from syn_adapters.conversations.minio import MinioConversationStorage
     from syn_adapters.events.store import AgentEventStore
+    from syn_adapters.platform_access import PlatformTokenService
     from syn_adapters.projections.realtime import RealTimeProjection
     from syn_adapters.storage.claude_plugin_storage.memory import InMemoryClaudePluginStorage
     from syn_adapters.storage.claude_plugin_storage.minio import MinioClaudePluginStorage
@@ -290,6 +291,7 @@ async def get_execution_processor() -> WorkflowExecutionProcessor:
             config=ws_config,
             environment=_build_workspace_env(),
             capture_source_instance_id=capture_source_id,
+            platform_tokens=get_platform_token_service(),
         ),
         artifact_repository=get_artifact_repository(),
         artifact_content_storage=artifact_storage,
@@ -1276,3 +1278,45 @@ def _warn_if_stale_defaults(image: str, identity: str) -> None:
 
     for note in stale_default_notes(image, identity):
         logger.warning("%s", note)
+
+
+_platform_token_service_singleton: PlatformTokenService | None = None
+
+
+def get_platform_token_service() -> PlatformTokenService:
+    """Platform tokens for workspace access to the API (ADR-072).
+
+    OFF (the default) wires no store at all, which the service treats as
+    "refuse everything, issue nothing". ON wires Redis - grants must survive a
+    restart, or every running phase loses its token - and in-memory only under
+    test/offline (ADR-060).
+    """
+    global _platform_token_service_singleton
+    if _platform_token_service_singleton is not None:
+        return _platform_token_service_singleton
+
+    from syn_adapters.platform_access import (
+        InMemoryPlatformTokenStore,
+        PlatformTokenService,
+        PlatformTokenStore,
+        RedisPlatformTokenStore,
+    )
+    from syn_shared.settings import get_settings
+
+    settings = get_settings()
+    access = settings.platform_access
+    store: PlatformTokenStore | None = None
+    if access.enabled:
+        if settings.uses_in_memory_stores:
+            store = InMemoryPlatformTokenStore()
+        else:
+            from syn_adapters.redis_client import resilient_redis_client
+
+            store = RedisPlatformTokenStore(resilient_redis_client(settings.redis_url))
+        logger.info("Workspace platform access ENABLED (read-only tokens, ADR-072)")
+    _platform_token_service_singleton = PlatformTokenService(
+        store,
+        max_ttl_seconds=access.token_ttl_seconds,
+        workspace_api_url=access.workspace_api_url,
+    )
+    return _platform_token_service_singleton
