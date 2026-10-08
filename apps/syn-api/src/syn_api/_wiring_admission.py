@@ -59,6 +59,9 @@ from syn_domain.contexts._shared.maintenance import carrying, guarantee_settled
 
 logger = logging.getLogger(__name__)
 
+#: Told that a start is durable: its execution stream exists (#1707).
+StartConfirmer = Callable[[], Awaitable[None]]
+
 
 _maintenance_singleton: MaintenancePort | None = None
 
@@ -480,8 +483,26 @@ class BackgroundWorkflowDispatcher:
         except Exception:
             logger.exception("Could not record the failed start", extra={"start": start_key})
 
-    def holds_request(self, execution_id: str) -> bool:
-        """Whether this requested execution's start is queued or running here (#1557)."""
+    @staticmethod
+    async def _confirm_started(execution_id: str, on_started: StartConfirmer | None) -> None:
+        """Say the start is durable; a failure to record it is only logged.
+
+        Unrecorded, the record stays `queued` and a later process re-offers it,
+        which the execution stream refuses as a duplicate: late, not lost.
+        """
+        if on_started is None:
+            return
+        try:
+            await on_started()
+        except Exception:
+            logger.exception("Could not record the start", extra={"start": execution_id})
+
+    def holds_execution(self, execution_id: str) -> bool:
+        """Whether this execution's start is queued or running here (#1557, #1707).
+
+        Any start path: a direct request's to-do list and a trigger's dispatch
+        record both ask it before re-offering a start this process may own.
+        """
         return self._budget.position(execution_id) is not None
 
     async def start_requested(
@@ -496,7 +517,7 @@ class BackgroundWorkflowDispatcher:
         here is a no-op; one whose execution already exists is refused by the
         execution stream's NoStream write and counts as started.
         """
-        if self.holds_request(execution_id):
+        if self.holds_execution(execution_id):
             return None
         if self._requests is None:
             msg = "This dispatcher was built without an execution request repository"
@@ -609,9 +630,13 @@ class BackgroundWorkflowDispatcher:
         task: str | None = None,
         repos: list[RepositoryRef] | None = None,
         on_held: StartFailureReporter | None = None,
+        on_started: StartConfirmer | None = None,
     ) -> AdmissionTicket | None:
-        # ``on_held`` receives the refusal of a start that was queued for a slot
-        # when the gate closed (#1617), so the trigger record can hold it again.
+        # ``on_held`` receives what stopped a queued start before its execution
+        # existed - the gate closing meanwhile (#1617), or a failure (#1707) -
+        # so the trigger record can hold it again or settle it. ``on_started``
+        # is told once the execution is durable, and only then may the record
+        # say `dispatched`: until then the start lives in this process (#1707).
         #
         # Named HERE, before the start is queued, so a start waiting for a slot
         # has an id to be found by (#1557). The handler would mint the same
@@ -632,7 +657,17 @@ class BackgroundWorkflowDispatcher:
         if self._maintenance is None:
             await self._handler.validate_stored_declarations(workflow_id)
             launch_eval = await self._launch_eval(workflow_id)
-            self._spawn(workflow_id, inputs, execution_id, task, repos, None, launch_eval, None)
+            self._spawn(
+                workflow_id,
+                inputs,
+                execution_id,
+                task,
+                repos,
+                None,
+                launch_eval,
+                on_held,
+                on_started,
+            )
             return None
 
         # Two reads, and they are not the same check twice. This first one is
@@ -655,7 +690,15 @@ class BackgroundWorkflowDispatcher:
         # trigger record says.
         async with self._maintenance.admitting() as ticket:
             self._spawn(
-                workflow_id, inputs, execution_id, task, repos, ticket, launch_eval, on_held
+                workflow_id,
+                inputs,
+                execution_id,
+                task,
+                repos,
+                ticket,
+                launch_eval,
+                on_held,
+                on_started,
             )
             return ticket
 
@@ -683,6 +726,7 @@ class BackgroundWorkflowDispatcher:
         ticket: AdmissionTicket | None,
         launch_eval: LaunchEval | None,
         on_held: StartFailureReporter | None,
+        on_started: StartConfirmer | None,
     ) -> None:
         """Claim the start's place and create its fire-and-forget task. Synchronous,
         so nothing interleaves between the gate's answer and the work existing.
@@ -713,6 +757,7 @@ class BackgroundWorkflowDispatcher:
                 admitted=ticket,
                 launch_eval=launch_eval,
                 on_held=on_held,
+                on_started=on_started,
             ),
             name=f"workflow-exec-{execution_id}",
         )
@@ -728,6 +773,7 @@ class BackgroundWorkflowDispatcher:
         admitted: AdmissionTicket | None = None,
         launch_eval: LaunchEval | None = None,
         on_held: StartFailureReporter | None = None,
+        on_started: StartConfirmer | None = None,
     ) -> None:
         # #1387/#1617: the lease starts at the slot, not at `create_task`, and
         # lasts until the execution is durable; `_in_slot` owns both ends.
@@ -740,6 +786,8 @@ class BackgroundWorkflowDispatcher:
                 repos=repos,
                 admitted=admitted,
                 launch_eval=launch_eval,
+                on_held=on_held,
+                on_started=on_started,
             )
 
         await self._in_slot(claim, admitted, on_held, start)
@@ -753,7 +801,18 @@ class BackgroundWorkflowDispatcher:
         repos: list[RepositoryRef] | None = None,
         admitted: AdmissionTicket | None = None,
         launch_eval: LaunchEval | None = None,
+        on_held: StartFailureReporter | None = None,
+        on_started: StartConfirmer | None = None,
     ) -> None:
+        """Run the trigger's execution, and say how its start ended (#1707).
+
+        Started - its stream exists - when ``handle`` returns, or when the
+        stream's NoStream write refuses it as a duplicate: a re-offer after a
+        restart of a start that did become durable lands there. Anything else
+        that escapes did not start it, and goes to ``on_held``. A cancelled
+        start reports nothing: its record stays `queued` and the next process
+        offers it again.
+        """
         from syn_domain.contexts.orchestration import (
             DuplicateExecutionError,
             ExecuteWorkflowCommand,
@@ -777,13 +836,17 @@ class BackgroundWorkflowDispatcher:
                 "Duplicate dispatch for execution %s, already running",
                 execution_id,
             )
+            await self._confirm_started(execution_id, on_started)
             return
-        except Exception:
+        except Exception as exc:
             logger.exception(
                 "Background workflow execution raised exception",
                 extra={"workflow_id": workflow_id, "execution_id": execution_id},
             )
+            if on_held is not None:
+                await self._report_start_failure(execution_id, on_held, exc)
             return
+        await self._confirm_started(execution_id, on_started)
         if result.unrecorded_work_error is not None:
             # #1547: a trigger has no caller to hand an error to, so this log is
             # the report. It is also the only place outside process memory that
