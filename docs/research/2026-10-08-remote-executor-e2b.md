@@ -67,7 +67,7 @@ or **differently**.
 | Need | Where today | E2B verdict |
 |---|---|---|
 | Image: `node:22-slim`, `USER agent`, entrypoint, CLIs baked in | `lib/agentic-workspace/implementations/docker/images/claude-cli/Dockerfile:66`, `lib/agentic-workspace/implementations/docker/images/claude-cli/Dockerfile:436`, `lib/agentic-workspace/implementations/docker/images/claude-cli/Dockerfile:474` | Differently. A template is built from the pinned digest ([E2B base image](https://e2b.dev/docs/template/base-image), accessed 2026-10-08, documents `from_image`). Cosign verification (`packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/adapter.py:321`) moves to template-build time and is recorded against the template. Private GHCR digests are not verified (Q5). |
-| Image manifest recorded on the Workspace event | `packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_lifecycle.py:163-172` (reads Docker `_active_workspaces`, calls `exec_run`), consumed at `packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_lifecycle.py:220-226` | Differently. Read through the provider. Today an E2B workspace would silently record `None`, losing image provenance in a Lane 1 event. |
+| Image manifest (image provenance) | `packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_lifecycle.py:163-172` (reads Docker `_active_workspaces`, calls `exec_run`), applied at `packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_lifecycle.py:220-226` to a `WorkspaceAggregate` that is **never saved**: `packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_service.py:433-527` builds, yields and cleans it up without a repository, as #1612 Step 12 (body lines 541-543) also warns. The event that is persisted, `WorkspaceProvisionedForPhaseEvent` (`packages/syn-domain/src/syn_domain/contexts/orchestration/domain/events/WorkspaceProvisionedForPhaseEvent.py:14-34`), has no manifest field; its command is built at `packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/WorkspaceProvisionHandler.py:721-728` and appended at `packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/phase_workspace.py:215-216` | Differently, and there is a gap today on both backends. The read must go through the provider; on E2B it would silently be `None`. Separately, the manifest lives only on the live, unsaved Workspace aggregate, so it is **not durable provenance on any backend**: nothing survives a restart or a replay. Issue C carries it onto the persisted execution event. |
 | Hardening: cap-drop, read-only root, tmpfs, pids limit | `lib/agentic-workspace/lib/python/agentic_isolation/agentic_isolation/config.py:171-189` | Differently. The microVM is the boundary. In-VM read-only root and tmpfs are not documented in the pages read (Q5). This doc does not claim parity. |
 | Codex bwrap: seccomp plus host AppArmor | `lib/agentic-workspace/lib/python/agentic_isolation/agentic_isolation/config.py:194-205`; `packages/syn-adapters/src/syn_adapters/workspace_backends/host_security.py:26-43` | Cannot, as specified. Whether bwrap works in the VM is unknown (Q4). Claude-only until smoke-tested. |
 | Capture spool `/spool` as a named volume | `packages/syn-adapters/src/syn_adapters/session_inventory/workspace_capture.py:36-46`; `lib/agentic-workspace/lib/python/agentic_isolation/agentic_isolation/providers/docker.py:310-328` | Differently. The spool is a directory on sandbox disk, retained by pausing the sandbox, not by a volume (decision 7). |
@@ -415,12 +415,37 @@ decision: the credential leaves our hosts, though not into the sandbox.
   (`packages/syn-adapters/src/syn_adapters/session_inventory/recovery_worker.py:45-48`)
   per spool backend. A worker claims only spools whose backend it holds
   recovery access to (decision 8).
-- **Exclusive drain**, for a sandbox: the run's agent session has a known
-  outcome, or the run is `fencing`, `reaped` or closed, and the worker holds
-  the spool lease. The `CaptureRecoveryWorker`
+- **Exclusive drain means writer quiescence plus the spool lease**, not a
+  database state. The lease excludes other recovery workers; it does not stop
+  the agent writing inside the sandbox. A run in `fencing` is by definition not
+  yet reaped (ADR-072 D5,
+  `docs/adrs/ADR-072-execution-hosting-and-upgrade-without-drain.md:274-276`),
+  and a `disconnected` outcome (decision 4) means the process may still live,
+  so neither is evidence that writing has stopped. Resuming a paused sandbox
+  resumes any agent inside it. The E2B `SpoolRecoveryPort.open` therefore
+  follows #1612 Step 8 (body lines 433-437) exactly:
+  1. `attach` to the sandbox, with the ownership check;
+  2. if the agent command, or any other agent writer, is still running, kill
+     it, and set `exclusive` only once the **provider confirms** that no agent
+     process remains. A failed or ambiguous check leaves `exclusive` false,
+     the same conservative rule as `volume_unreferenced`
+     (`packages/syn-adapters/src/syn_adapters/session_inventory/docker_recovery.py:64-72`,
+     computed before the helper attaches at
+     `packages/syn-adapters/src/syn_adapters/session_inventory/docker_recovery.py:86-88`);
+  3. run `capture_retained_partition`;
+  4. yield the two readers over the sandbox's `execute`.
+
+  A known agent-session outcome or a `fencing`, `reaped` or closed run state
+  decides only **when** a worker may try; the provider's confirmation decides
+  whether the drain is exclusive. `RecoveryReaders.exclusive` keeps its
+  documented meaning, "nothing else could write during this traversal"
+  (`packages/syn-adapters/src/syn_adapters/session_inventory/recovery_worker.py:31-36`),
+  and release still requires it. The `CaptureRecoveryWorker`
   (`packages/syn-adapters/src/syn_adapters/session_inventory/recovery_worker.py:85-116`)
-  is reused unchanged: it resumes the paused sandbox, drains, marks drained,
-  and only then releases. For E2B, release means killing the sandbox.
+  is reused unchanged: it drains, marks drained, and only then releases. For
+  E2B, release means killing the sandbox. The quiescence step is new
+  behaviour in the E2B recovery adapter, proposed for issue F, not in the
+  worker.
 - **Retention limits.** The existing age and bytes limits
   (`packages/syn-adapters/src/syn_adapters/session_inventory/runtime.py:184-192`)
   apply per backend, plus a paused-sandbox count ceiling. E2B publishes no
@@ -520,22 +545,72 @@ can be filed as is.
   which calls `read_lines` directly and would pass either way.
 - **Depends on:** A.
 
-### C. Route artifacts and the image manifest through provider file transfer (syn137)
+### C. Route artifacts and the image manifest through provider file transfer, and persist the manifest (syn137)
 
-- **Context:** C4; artifacts silently vanish without a host path.
-- **Change:** `copy_from`
-  (`packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/adapter.py:582-583`)
-  and `_read_image_manifest`
-  (`packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_lifecycle.py:150-172`)
-  use `read_files`.
+- **Context:** C4; artifacts silently vanish without a host path. The image
+  manifest has two separate gaps. Its read is Docker-only, and what is read is
+  recorded only on a `WorkspaceAggregate` that nothing saves (section 1,
+  image-manifest row). So today the manifest is not durable provenance on
+  any backend.
+- **Change:**
+  - `copy_from`
+    (`packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/adapter.py:582-583`)
+    and `_read_image_manifest`
+    (`packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_lifecycle.py:150-172`)
+    use `read_files`.
+  - **The durable hop.** The manifest read at provisioning is carried on
+    `ProvisionWorkspaceCompletedCommand`
+    (`packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/WorkspaceProvisionHandler.py:721-728`)
+    into a new optional field on `WorkspaceProvisionedForPhaseEvent`
+    (`packages/syn-domain/src/syn_domain/contexts/orchestration/domain/events/WorkspaceProvisionedForPhaseEvent.py:14-34`;
+    default `None`, so stored events still replay). That event is on the
+    execution aggregate, which is appended through the journal
+    (`packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/phase_workspace.py:215-216`).
+    This follows #1612 Step 12 (body lines 541-543): do not rely on the
+    `WorkspaceAggregate` events.
+  - **Two digests, two namespaces, compared separately.**
+    `ImageManifest.manifest_digest` is the hash of the `manifest.yaml` used
+    for the build
+    (`packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_workspace/value_objects.py:111`).
+    `PINNED_DIGESTS` holds OCI image digests
+    (`packages/syn-shared/src/syn_shared/settings/workspace_images.py:598-602`).
+    An intact image has unequal values for the two, so they are never
+    compared with each other. The OCI digest is checked against the pin at
+    template build (decision 3), as today's cosign check is. The manifest
+    hash read from the running workspace is compared with an **expected
+    manifest hash** recorded alongside the verified source OCI digest when
+    the template (or, for Docker, the pinned image) is built. **This expected
+    hash does not exist today**: the reader copies whatever the image's
+    `/opt/agentic/version.json` says
+    (`packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_lifecycle.py:178-185`),
+    and at the pinned submodule `git -C lib/agentic-workspace grep -n
+    "manifest_digest\|version\.json" HEAD` finds no producer of either. So
+    recording the expected hash at build time is proposed work in this
+    issue, with E supplying it for the E2B template.
 - **Acceptance:**
   - a handle with **no host path** returns artifacts (today it returns `[]`,
     `packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/adapter_copy.py:158-160`);
   - a binary artifact survives byte for byte;
-  - a manifest whose `manifest_digest` differs from the kit's pinned digest is
-    recorded as read and flagged, not dropped to `None`.
-- **Negative control:** reverting C makes the no-host-path test return `[]`.
-- **Depends on:** A.
+  - **durable provenance:** after a provisioned phase, a **fresh process**
+    loads the execution aggregate from the event store (replaying its
+    events) and finds the manifest on the `WorkspaceProvisionedForPhase`
+    event. Inspecting the live `WorkspaceAggregate` does not satisfy this;
+  - **intact manifest:** a workspace whose read manifest hash equals the
+    recorded expected manifest hash is recorded as matching;
+  - **altered manifest:** a workspace whose `version.json` was altered so its
+    manifest hash differs is recorded as read **and flagged**, not dropped to
+    `None`;
+  - an event stored before the field existed still replays, with the
+    manifest `None`.
+- **Negative controls:**
+  - reverting the routing makes the no-host-path test return `[]`;
+  - dropping the manifest field from the command or event makes the
+    fresh-process replay test find no manifest and fail;
+  - removing the comparison, or comparing `manifest_digest` with the pinned
+    OCI digest instead of the expected manifest hash, makes the intact or the
+    altered case fail: the wrong-namespace comparison flags the intact
+    manifest, and no comparison flags nothing.
+- **Depends on:** A. The expected manifest hash for E2B depends on E.
 
 ### D. BackendKit composition point and WorkspaceCredentialPolicy (syn137)
 
@@ -591,9 +666,19 @@ can be filed as is.
     retryable;
   - the child journal is recovered;
   - release (kill) happens only after `mark_drained`;
+  - **live writer under fencing:** start from a paused sandbox whose agent is
+    still alive and writing, a dead Executor and a run newly in `fencing`. A
+    fresh worker holding the spool lease resumes the sandbox, stops and
+    confirms the writer gone, drains and releases. A transcript line written
+    after resume and before the stop is in the archive, and no write lands
+    after the drain;
+  - a `disconnected` outcome alone never yields `exclusive = True`;
   - a worker without E2B access never claims an E2B spool.
-- **Negative control:** wiring Docker recovery only makes the fresh-worker
-  test fail.
+- **Negative controls:**
+  - wiring Docker recovery only makes the fresh-worker test fail;
+  - an `open` that sets `exclusive` from the run state and skips the
+    stop-and-confirm step releases (kills) while the writer is live, so the
+    live-writer test finds a write that never reached the archive and fails.
 - **Depends on:** A, E.
 
 ### G. E2B Executor: budget row, overflow predicate, claim disable, recovery kit (syn137)
@@ -632,7 +717,9 @@ can be filed as is.
   (`packages/syn-perf/src/syn_perf/loadtest/scripted_agent_profile.py:498-513`).
 - **Acceptance:** one execution reaches `completed` with `isolation_type`
   reported as E2B, **output artifacts collected**, the transcript archived
-  through the F path, the image manifest recorded, no credential observed
+  through the F path, the image manifest on the persisted
+  `WorkspaceProvisionedForPhase` event (C's durable hop, read back after a
+  replay) and matching the template's expected manifest hash, no credential observed
   (D's scan, on the live path), and no sandbox with its `syn.execution_id`
   left in the E2B list.
 - **Negative control:** routing the run through a `HostCredentials` kit fails
@@ -652,12 +739,37 @@ can be filed as is.
 
 ### J. agent-net has open egress in production (syn137, security)
 
-- **Already tracked as
-  [#1794](https://github.com/syntropic137/syntropic137/issues/1794)**; listed
-  here because it changes what "parity" means. Evidence: C1,
-  `docker/docker-compose.syntropic137.yaml:674-676`,
-  `packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/adapter.py:219-221`.
-  Acceptance and negative control belong to #1794.
+**Already tracked as
+[#1794](https://github.com/syntropic137/syntropic137/issues/1794)** (accessed
+2026-10-08, OPEN). Not to be filed again. It is written out here in full
+because it changes what "parity" means for a remote tier, and #1794 names no
+negative control.
+
+- **Context:** C1. `agent-net` is a plain bridge
+  (`docker/docker-compose.syntropic137.yaml:674-676`), so workspaces have
+  direct internet egress. The comment saying they "cannot reach the internet
+  directly"
+  (`packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/adapter.py:219-221`)
+  is false, and Envoy is not an egress gate either
+  (`docker/sidecar-proxy/envoy.yaml:106-110`). With today's credentials inside
+  the workspace (#1735), open egress lets a prompt-injected agent send them
+  anywhere.
+- **Change, an owner decision first** (as #1794 frames it): either
+  1. make `agent-net` `internal: true` and route allowed egress (package
+     registries, GitHub, model APIs) through Envoy with an allowlist; or
+  2. keep open egress, correct the comment, and document the posture and its
+     threat model.
+- **Acceptance:** a fitness test under `ci/fitness/` pins the chosen posture
+  by reading `docker/docker-compose.syntropic137.yaml` (`agent-net`'s
+  `internal` value) together with the posture the adapter comment and the
+  security docs declare, so the compose file and the stated posture cannot
+  drift apart again. Under option 1 it also asserts every egress hostname
+  agents need is routed in `docker/sidecar-proxy/envoy.yaml`.
+- **Negative control:** flipping `agent-net`'s `internal` value in the compose
+  file without changing the declared posture (or the reverse) makes the
+  fitness test fail. Against today's tree, under option 1 the test fails
+  because `agent-net` is not internal; under option 2 it fails until the
+  false comment is corrected.
 - **Depends on:** nothing; independent of E2B.
 
 **Build order:** A; then B, C, D and E in parallel; then F; then G; then H;
