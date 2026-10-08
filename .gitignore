@@ -231,3 +231,6 @@ infra/.environments.lock
 
 # Separate nested git repo, not part of this project
 markdown-explorer/
+
+# One-off eval duplicate migration journal (scripts/migrate_eval_suite_duplicates.py)
+evals/*/migration-journal.jsonl

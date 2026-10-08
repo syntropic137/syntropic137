@@ -56,6 +56,7 @@ class StartExecutionCommand:
         source_commits: list[SourceCommit] | None = None,
         tags: TagSet | None = None,
         launch_eval: LaunchEval | None = None,
+        workflow_version: str | None = None,
     ) -> None:
         self.aggregate_id = execution_id
         self.workflow_id = workflow_id
@@ -70,6 +71,8 @@ class StartExecutionCommand:
         self.tags = tags or TagSet()
         # The eval this launch joins, resolved at dispatch (#967).
         self.launch_eval = launch_eval or LaunchEval(None, EvalSelection.NONE)
+        # The template's installed version or digest at launch (Evals v2).
+        self.workflow_version = workflow_version
 
 
 class StartResumeCommand:
@@ -92,12 +95,15 @@ class StartResumeCommand:
         resumed_from: ResumeOrigin,
         continuation_candidates: list[ContinuedBranch] | None = None,
         inherited_skipped_phase_ids: list[str] | None = None,
+        workflow_version: str | None = None,
     ) -> None:
         self.aggregate_id = execution_id
         self.workflow_id = workflow_id
         self.workflow_name = workflow_name
         self.inputs = inputs
         self.pinned_phases = pinned_phases
+        #: The parent's installed workflow version, from its start pins (Evals v2).
+        self.workflow_version = workflow_version
         self.source_commits = source_commits
         self.resumed_from = resumed_from
         #: The branches the parent's failing attempt at the resumed phase left

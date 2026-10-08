@@ -13,6 +13,7 @@ from syn_api.execution_budget import StartPath  # noqa: TC001
 from syn_api.model_identity import CostModelKey, ObservedModelId  # noqa: TC001
 from syn_api.types import (
     BranchObservationInfo,
+    ExecutionEvalRunResponse,
     PhaseActivityInfo,
     PhaseProgressInfo,
     PhaseStartConfig,
@@ -408,6 +409,8 @@ class ExecutionDetailResponse(BaseModel):
     Enough to re-dispatch the run: a caller retrying one that died on the
     platform posts these back rather than reconstructing them from its own
     notes (#1307)."""
+    eval: ExecutionEvalRunResponse | None = None
+    """The eval this execution is a current run of, with its verdict. Null in no eval."""
     resume_start: ResumeStartInfo | None = None
     """The start of the child this execution admitted when it was resumed.
 

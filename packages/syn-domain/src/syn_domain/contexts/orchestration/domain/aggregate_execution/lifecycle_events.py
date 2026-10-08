@@ -69,6 +69,7 @@ def started_event(command: StartExecutionCommand) -> WorkflowExecutionStartedEve
             else command.launch_eval.selection.value
         ),
         eval_baseline=_eval_baseline(command),
+        workflow_version=command.workflow_version,
     )
 
 
