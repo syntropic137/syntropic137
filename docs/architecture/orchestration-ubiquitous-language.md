@@ -343,11 +343,17 @@ not isolation: each running Execution costs the API memory, and an API killed
 for exceeding its limit takes every Execution it hosts with it. (#1557.)
 
 ADR-072 keeps the rule and moves the budget. Today it is a semaphore in each
-API process. Under ADR-072 it becomes one row (`execution_budget`) that every
-Executor on every host reads. A Claim takes its slot inside the same
-transaction that locks that row, so two hosts or two generations can never
-enforce different numbers. `SYN_EXECUTION_MAX_CONCURRENT` seeds that row and
-is not a second setting. Its value is measured from memory per running
+API process. Under ADR-072 (D3, adopting epic #1612 Step 2) it becomes one
+`execution_budget` row **per Executor**, holding that Executor's `capacity`,
+`in_use` and `heartbeat_at`. A Claim takes its slot inside the same
+transaction that locks the claiming Executor's own row, and only if
+`in_use < capacity` there, so no host runs more than its own capacity. Global
+capacity is the sum of the rows, a figure for reporting, not one anything
+claims against. During a generation overlap or a restart the successor starts
+at capacity 0 and receives the predecessor's capacity slot by slot as its runs
+finish, so one machine's capacity is never counted twice.
+`SYN_EXECUTION_MAX_CONCURRENT` seeds an Executor's capacity and is not a
+second setting. Its value is measured from memory per running
 Execution against the Executor's memory limit. A slot is in use while a run
 row is `claimed`, `fencing` or `reaped`, so a crash can hold a slot but never
 free one early. (ADR-072 D3, D12.)
@@ -442,11 +448,15 @@ An Executor taking one admitted Execution from the Run Queue to run, and the
 `ClaimedRun` that results. It is the ADR-072 form of "claim a slot" under
 Execution Budget: one claim is one slot, and taking the slot and taking the
 run are the same act. Capacity and claim are one transaction: it locks the
-execution budget row (`execution_budget`), counts the slots in use (`claimed`,
-`fencing`, `reaped`) and, if one is free, takes the oldest claimable row. One
-budget, held in that row, bounds every start path on every host, so two
-generations can never enforce different numbers. Its value is measured from
-memory per running Execution, never a constant.
+claiming Executor's own `execution_budget` row where `in_use < capacity` and
+its Heartbeat is fresh, takes the oldest claimable row with `SKIP LOCKED`,
+records its own `executor_id` on it, bumps the Lease token and increments
+`in_use`. Each Executor's capacity is measured from memory per running
+Execution on that host, never a constant; global capacity is the sum. The slot
+stays charged to the claiming Executor through `fencing` and `reaped` and is
+released only when the run row is closed, by a decrement fenced on the run's
+current `lease_token`, so it is freed exactly once. A claimed run is never
+redelivered.
 
 An Executor claims only rows whose Event Epoch it can read, and never claims an
 expired Lease to run it.
@@ -466,10 +476,14 @@ and holds the slot.
 
 ## Heartbeat
 
-An Executor's periodic write of `heartbeat_at` to its own `executor_hosts` row,
-on the Lease's 30 s interval and whether or not it holds a Claim. It is
-evidence that the host was recently alive, used by the reap-window alert and
-before reaping an unlabelled container. It decides nothing else. An expired
+An Executor's write of `heartbeat_at` to its own `execution_budget` row, made
+by the claim loop itself as the first step of every turn, on the Lease's 30 s
+cadence and including while idle with no Claim. Never a side task or separate
+timer: a wedged claim loop stops writing it, so it stops looking alive. It is
+evidence that the Executor's claim loop turned recently, used by the claim
+(a stale Executor does not claim), the global capacity report, the reap-window
+alert and before reaping an unlabelled container. It decides nothing else, and
+it is not Lease renewal, which is per run. An expired
 Lease, not a stale heartbeat, is what starts Fencing, and a stopped heartbeat
 is not leaving (see Fencing). A Lease belongs to one Claim. A heartbeat belongs
 to the host. (ADR-072 D4.)

@@ -93,7 +93,10 @@ The domain owns the port, `ExecutionRunQueue`, with operations named for what
 callers do (`reserve`, `mark_admitted`, `claim`, `renew`, `defer`,
 `close`, `fence_expired`, `mark_reaped`, `close_interrupted`, `sweep_opening`,
 `heartbeat`, `is_draining`, `in_use`), not a generic lease API. Three tables:
-`execution_runs`, `execution_budget`, `executor_hosts`. Production fails fast
+`execution_runs` (one row per admitted start), `execution_budget` (one row per
+executor: its capacity, slots in use and heartbeat, D3) and `executor_hosts`
+(one row per registered host: its container, generation, epoch and drain flag,
+D5, D9, D10). Production fails fast
 without Postgres (ADR-060); the test double inherits `InMemoryAdapter`.
 
 **Row states.**
@@ -144,20 +147,71 @@ threshold and the start ends `admitted`, not stranded.
 
 ### D3. Capacity and claim are one transaction
 
-The budget lives **in a row** (`execution_budget`), not in each host's
-settings, so two generations can never enforce different numbers. One
-transaction locks that row, counts slots in use (`claimed`, `fencing`,
-`reaped`), and if there is room claims the oldest claimable `admitted` row with
-`FOR UPDATE SKIP LOCKED`, bumping `lease_token` and setting `leased_until`. A
-count taken outside the claim transaction is racy across hosts and is not
-acceptable.
+**One budget row per executor, from day one.** This is epic #1612 Step 2,
+adopted here in place of the single global row the #1310 plan first proposed.
+`execution_budget` holds one row per executor: `executor_id` (its `host_id`),
+`backend` (`local` today), `capacity`, `in_use` and `heartbeat_at`, with
+`CHECK (in_use >= 0 AND in_use <= capacity)`. **Global capacity is the sum of
+the rows' capacities**; it is a derived figure for reporting, never a number
+anyone claims against. With one host there is exactly one row, so Phase 1 is
+no larger than with a global row. A second host, or a remote backend, adds a
+row, not a schema change. A single global number cannot express hosts of
+different sizes: with a global budget of 5 and one host sized for 2, a global
+count lets that host claim all 5, and sizing the global number to the smallest
+host wastes every larger host's capacity.
 
-**N is a measured setting, not a constant.** The row is seeded from a setting
-and changed by an operator. Its value is sized from measured memory per running
-execution against the executor's memory limit. The owner's target is 5 or more
+**The claim**, one transaction, in the shape of
+`PostgresCaptureDeliveryJobs.claim`:
+
+1. Lock the executor's **own** row:
+   `SELECT ... FROM execution_budget WHERE executor_id = <self> AND in_use < capacity AND heartbeat_at > now() - <stale> FOR UPDATE`.
+   No row (full, stale, or absent) means no claim this turn. A draining host
+   does not reach this step (D10).
+2. Take the oldest claimable `admitted` row:
+   `ORDER BY admitted_at, execution_id FOR UPDATE SKIP LOCKED LIMIT 1`. None
+   means no claim.
+3. Set the run's `executor_id = <self>`, `lease_token = lease_token + 1`,
+   `leased_until`, and `state = 'claimed'`.
+4. `in_use = in_use + 1` on the locked budget row.
+
+The capacity predicate is per executor, so no host ever holds more runs than
+its own row allows, and two executors never contend on one budget lock. A count
+taken outside the claim transaction is racy and is not acceptable.
+
+**Release is the reverse, fenced.** `in_use` counts the runs charged to that
+executor in `claimed`, `fencing` or `reaped`, so a slot is held until the run
+row is closed (`done`, or `interrupted` by D5 step 2), never at lease expiry.
+`close` and `close_interrupted` each decrement `in_use` on the row named by the
+run's `executor_id`, in the same transaction as the state change and guarded on
+the run's current `lease_token`, as `renew` is guarded today. A release
+carrying a superseded token raises `RunLeaseLost` and changes nothing, so a
+slot is freed exactly once, and the `CHECK` turns any accounting bug into a
+failed write rather than a leaked or double-freed slot. Fencing and takeover
+(D5) move the reconciler, not the charge: the slot stays on the claimer's row
+until the run is closed. Nothing is ever redelivered (D5).
+
+**Capacity across generations and restarts.** Each executor's row carries its
+own capacity, so two generations can never enforce different numbers for one
+host, and a host's memory is never counted twice while two of its processes
+overlap. An executor that replaces another on the same machine (generation
+N+1 in D10 Phase 2, or a process restarting in the same container, D5)
+registers its row with `capacity = 0` and is that row's **successor**. One
+transaction, at drain or at restart, sets the predecessor's `capacity` to its
+current `in_use` and adds the difference to the successor. After that, every
+release on the predecessor's row also moves that unit of capacity to the
+successor, in the same transaction. The machine's total stays exactly what it
+was throughout the overlap; the old generation's slots drain into the new one
+as its runs finish. A predecessor row is deleted when both its `capacity` and
+`in_use` are zero and its `executor_hosts` row is gone. A dead host retired
+with no successor keeps its row, and its slots, until its fenced runs close.
+
+**Capacity is a measured setting, not a constant.** Each row's capacity is
+seeded from a setting of the executor that registers it and changed by an
+operator. Its value is sized from measured memory per running execution
+against that executor's memory limit. The owner's target is 5 or more
 concurrent executions; nothing in this design caps it below that. The budget
 bounds every start path, including the direct `POST /workflows/{id}/execute`
-route.
+route, because every start reaches an executor only through a claim.
 
 ### D4. Lease timing
 
@@ -167,12 +221,19 @@ executor's reconciliation loop are working, a host that stops renewing is seen
 as expired within the TTL. It does not bound the expiry-to-reap window in D5,
 which ends only when a reap succeeds.
 
-**Heartbeat** is separate from the lease. Every executor writes
-`heartbeat_at` on its own `executor_hosts` row at the same 30 s interval, even
-while it holds no claim. A lease says that one run's claim is still held. A
-heartbeat says only that the host was recently alive, and it has two uses: the
-reap-window alert (D5), and deciding whether an unlabelled container may be
-reaped (D6). It never authorises anything. Fencing is decided by an expired
+**Heartbeat** is separate from the lease. **The claim loop itself writes it**,
+as the first step of every loop turn, setting `heartbeat_at` on the executor's
+own `execution_budget` row (D3) at the same 30 s cadence, including while the
+executor is idle and holds no claim. It is never written by a side task or an
+independent timer: a claim loop that is wedged must stop looking alive, and a
+timer beside it would keep advertising a host that can no longer claim,
+reconcile or drain. Per-run lease renewal is a different write with a
+different meaning: a lease says that one run's claim is still held, while a
+heartbeat says only that the executor's claim loop turned recently. Its uses:
+the claim predicate (D3: an executor whose own heartbeat is stale does not
+claim), the global capacity report (live rows only), the reap-window alert
+(D5), and deciding whether an unlabelled container may be reaped (D6). It
+never authorises fencing or takeover. Fencing is decided by an expired
 lease. Takeover is decided by the reconciler having left (D5), and a stopped
 heartbeat is not leaving.
 
@@ -216,7 +277,8 @@ atomic one:
    already holds that change, but this ADR's PR is docs only and does not
    carry it.
 2. **Then close the row** with `close_interrupted`, guarded on the row's
-   current `lease_token`. Only this releases the slot.
+   current `lease_token`. Only this releases the slot: it decrements `in_use`
+   on the claimer's `execution_budget` row in the same transaction (D3).
 
 **Reconciliation turns are exclusive.** Every turn on a `fencing` or `reaped`
 row is taken by the row's `reconciler` and no other host, so two turns on one
@@ -467,10 +529,11 @@ while it is the only reader that is the row's `reader_epoch`.
 | gateway | `pit_stop --service gateway`: swap the gateway alone | no |
 | api | `pit_stop --service api`: recreate `api` alone; admission stays open | no |
 | executor (Phase 1) | drain the one executor on `in_use().claimed == 0`; **admission stays open**, admitted work waits durably | yes, for that executor's runs only |
-| executor (Phase 2) | start generation N+1 in its own compose project, wait for its heartbeat, **drain** generation N | no |
+| executor (Phase 2) | start generation N+1 in its own compose project with `capacity = 0`, wait for its heartbeat, **drain** generation N naming N+1 as its successor, so N's capacity moves to N+1 as N's runs finish (D3) | no |
 
 **Drain (of an executor)** is: `executor_hosts.draining` is set
-(`PUT /executors/{host_id}/drain`), the host checks it every loop turn between
+(`PUT /executors/{host_id}/drain`, optionally naming a successor executor that
+then receives its capacity, D3), the host checks it every loop turn between
 claims, stops claiming, finishes what it holds (runs and reconciliation
 turns), deletes its own `executor_hosts` row as its last act (D5) and exits 0. The processor
 receives no new signal; this is a property of the host, not of an execution,
@@ -510,7 +573,7 @@ Item 1.2 **builds on its rule and replaces its mechanism**:
 
 | #1574 | After 1.2 / 1.3 |
 |---|---|
-| One budget bounds every start path | **Kept.** The rule is unchanged; it moves from a per-process semaphore to the `execution_budget` row (D3), so it holds across hosts and generations. `SYN_EXECUTION_MAX_CONCURRENT` is the seed for that row rather than a second setting, and its memory-per-execution sizing is the measurement N is taken from. |
+| One budget bounds every start path | **Kept.** The rule is unchanged; it moves from a per-process semaphore to the executor's own `execution_budget` row (D3, one row per executor per #1612 Step 2), checked in the claim transaction, so it holds across hosts and generations. `SYN_EXECUTION_MAX_CONCURRENT` becomes the seed for that executor's `capacity` rather than a second setting, and its memory-per-execution sizing is the measurement that capacity is taken from. With one host it is the same single number as today. |
 | `ExecutionBudget` in-process FIFO hand-off | **Replaced** by the claim transaction. FIFO order is `ORDER BY admitted_at, execution_id`. |
 | `queued` / `starting` as a value of `status`, for a start with no stream | **Replaced** by D11. Once admission opens the stream synchronously (1.3), there is no admitted start without a stream, so `status` carries only execution statuses and `queued` is a boolean. A `start_queue`-style position may stay as detail on the read path, computed from `execution_runs`. Changing the API field is a CLI type change through `just codegen`. |
 | `ExecutionRequest` stream as the durable start record | **Not a discovery source.** Executors discover work only from `execution_runs`. Whether `ExecutionRequested` survives as the domain record of what a caller asked for, or is folded into start-only admission, is decided in 1.3; either way the `opening` sweep (D2), not a ProcessManager re-offer, is what guarantees an admitted start is never lost. |
@@ -527,7 +590,9 @@ Item 1.2 **builds on its rule and replaces its mechanism**:
   no longer need a fully idle platform.
 - An API OOM no longer takes executions with it; an executor OOM interrupts
   only that host's runs, honestly and resumably.
-- One budget, enforced in one transaction, for every start path and every host.
+- One budget rule, enforced in the claim transaction against each executor's
+  own capacity row, for every start path and every host; hosts of different
+  sizes each get their own capacity, and global capacity is their sum.
 - A projection replay can no longer make a running execution "complete" with
   phases unrun, and can no longer hide admitted work from executors.
 
