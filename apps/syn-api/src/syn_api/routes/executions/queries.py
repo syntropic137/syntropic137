@@ -768,6 +768,7 @@ async def _resume_start_of(
 async def get_execution_endpoint(execution_id: str) -> ExecutionDetailResponse:
     """Get detailed information about a workflow execution run (supports partial ID prefix matching)."""
     from syn_api._wiring import get_projection_mgr
+    from syn_api.routes.eval_runs import execution_eval_run  # eval_runs imports this module
 
     mgr = get_projection_mgr()
     found = await _detail_or_queued(mgr, execution_id)
@@ -821,4 +822,5 @@ async def get_execution_endpoint(execution_id: str) -> ExecutionDetailResponse:
         task=detail.task,
         inputs=dict(detail.inputs),
         resume_start=await _resume_start_of(mgr.store, execution_id),
+        eval=await execution_eval_run(mgr.store, execution_id),
     )
