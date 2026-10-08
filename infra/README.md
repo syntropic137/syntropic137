@@ -354,7 +354,7 @@ moving to another S3-compatible store), not re-running a pull.
 | `REDIS_MEMORY_LIMIT` | `256m` | Redis memory limit |
 | `REDIS_CPU_LIMIT` | `0.25` | Redis CPU limit |
 
-**Minimum recommended hardware:** 4 CPU cores, 4 GB RAM. The defaults are conservative; increase limits if you run many concurrent agent workflows.
+**Minimum recommended hardware:** 4 CPU cores, 8 GB RAM (16 GB recommended). The control-plane limits above add up to about 6 GB (API and event store at 2g each), and each running workspace can use up to `SYN_WORKSPACE_MEMORY_LIMIT_MB` (4096) on top. Limits are ceilings, not reservations; increase them if you run many concurrent agent workflows.
 
 ---
 
