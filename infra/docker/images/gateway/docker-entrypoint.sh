@@ -211,6 +211,32 @@ location /assets/ {
 }
 
 
+# Skyline (apps/syn-ui), the Svelte 5 rebuild, at /next until it takes over /
+# (Skyline spec, Migration plan). Built with SYN_UI_BASE=/next/ into
+# /usr/share/nginx/html/next. Longest prefix wins, so /next/* never reaches the
+# React fallback below, and / keeps serving the React dashboard unchanged.
+# Auth and the brute-force backstop come from server scope, as for /.
+location = /next {
+    return 301 /next/;
+}
+
+# Hashed Skyline chunks: cache forever. A missing chunk is a real 404, never
+# index.html (the router's preload would otherwise parse HTML as JS).
+location /next/assets/ {
+    expires 1y;
+    add_header Cache-Control "public, immutable";
+    include /etc/nginx/conf.d/security-headers.conf;
+}
+
+# Skyline SPA routing. index.html names the current hashed chunks, so it is
+# revalidated on every load; add_header here drops the server-scope headers,
+# hence the include.
+location /next/ {
+    try_files $uri $uri/ /next/index.html;
+    add_header Cache-Control "no-cache";
+    include /etc/nginx/conf.d/security-headers.conf;
+}
+
 # SPA routing (dashboard — root). The brute-force backstop is applied at server
 # scope for whichever listener is authenticated (8081 in nginx.conf, port 80 via
 # auth-host.conf when it is bound off loopback), so it covers this and every

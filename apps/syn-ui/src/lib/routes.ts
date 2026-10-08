@@ -105,8 +105,14 @@ export const routes: RouteDef[] = [
 
   { path: '/repos', area: 'repos', title: () => 'Repos', crumbs: list('Repos', '/repos'), load: () => import('../routes/repos/List.svelte') },
 
+  // Pattern sheet for review (not in the nav).
+  { path: '/dev/patterns', area: 'none', title: () => 'Patterns', crumbs: () => [{ label: 'Dev' }, { label: 'Patterns' }], load: () => import('../routes/dev/Patterns.svelte') },
+
   // Insights left the nav (design review, Oct 8 2026). Old bookmarks land on Overview.
   { path: '/insights/*', area: 'overview', title: () => 'Overview', crumbs: () => [], redirect: '/' },
+
+  // Component gallery for review (components agent). Lazy chunk; not in the nav.
+  { path: '/dev/components', area: 'none', title: () => 'Components', crumbs: () => [{ label: 'Components' }], load: () => import('../routes/dev/Components.svelte') },
 ]
 
 export const notFoundRoute: RouteDef = {
