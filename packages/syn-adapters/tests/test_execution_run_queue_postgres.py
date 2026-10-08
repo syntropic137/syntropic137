@@ -389,3 +389,29 @@ async def test_renew_that_waits_out_its_lease_on_the_run_lock_raises(
         await asyncio.sleep(0.4)
     with pytest.raises(RunLeaseLost):
         await renew
+
+
+async def test_defer_that_waits_on_the_budget_lock_keeps_its_full_backoff(
+    pools: list[asyncpg.Pool],
+) -> None:
+    """``retry_at`` is set after the release's locks, so a lock wait cannot spend the backoff."""
+    queue = PostgresExecutionRunQueue(pools[0])
+    other = PostgresExecutionRunQueue(pools[3])
+    await _online(queue, "h1", capacity=1)
+    await _online(other, "h2", capacity=1)
+    await _admit(queue, "work")
+    run = await queue.claim("h1")
+    assert run is not None
+    async with pools[1].acquire() as blocker, blocker.transaction():
+        await blocker.execute("SELECT 1 FROM execution_budget WHERE executor_id='h1' FOR UPDATE")
+        defer = asyncio.create_task(queue.defer(run, timedelta(milliseconds=300), "not readable"))
+        await _blocked_until_waiting(pools[2], "in_use=in_use-1")
+        await asyncio.sleep(0.5)
+    await defer
+    assert await other.claim("h2") is None
+    async with pools[2].acquire() as conn:
+        remaining = await conn.fetchval(
+            """SELECT extract(epoch FROM retry_at-clock_timestamp())
+            FROM execution_runs WHERE execution_id='work'"""
+        )
+    assert remaining > 0.1

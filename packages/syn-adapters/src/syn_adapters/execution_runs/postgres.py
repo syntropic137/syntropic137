@@ -293,3 +293,13 @@ class PostgresExecutionRunQueue:
             await conn.execute(
                 "UPDATE execution_budget SET in_use=in_use-1 WHERE executor_id=$1", charged
             )
+            if retry_seconds > 0:
+                # now() is the transaction's start, so the lock waits above would
+                # spend the backoff. Stamp it once both locks are held.
+                await conn.execute(
+                    """UPDATE execution_runs
+                    SET retry_at=clock_timestamp()+$2::double precision*interval '1 second'
+                    WHERE execution_id=$1""",
+                    execution_id,
+                    retry_seconds,
+                )
