@@ -69,6 +69,20 @@ class EvalRunFacts:
     """``None`` when the run's cost could not be read, not when it was free."""
     duration_seconds: float | None
     score: EvalRunScore | None
+    unpriced_observation_count: int = 0
+    """Observations with no usable rate: non-zero makes ``total_cost_usd`` a lower bound (#890)."""
+    unknown_duration_phase_count: int = 0
+    """Phases with no known duration: non-zero makes ``duration_seconds`` a lower bound."""
+
+    @property
+    def complete_cost_usd(self) -> Decimal | None:
+        """The cost only when it is the whole of it; a lower bound is not a cost."""
+        return self.total_cost_usd if self.unpriced_observation_count == 0 else None
+
+    @property
+    def complete_duration_seconds(self) -> float | None:
+        """The duration only when it is the whole of it; a lower bound is not a duration."""
+        return self.duration_seconds if self.unknown_duration_phase_count == 0 else None
 
     @property
     def variant_models(self) -> tuple[str, ...]:
@@ -84,17 +98,28 @@ class EvalRunStats:
     """
 
     median_duration_seconds: float | None
-    """Over the runs whose duration is known; ``None`` when none is."""
+    """Over the runs whose duration is COMPLETE; ``None`` when none is.
+
+    A lower-bound duration is left out rather than counted as the whole run.
+    """
+    incomplete_duration_count: int
+    """Runs left out of the median: duration unknown, or only a lower bound."""
     median_cost_usd: Decimal | None
-    """Over the runs whose cost is known; ``None`` when none is."""
+    """Over the runs whose cost is COMPLETE; ``None`` when none is.
+
+    A lower-bound cost is left out, so it cannot make a variant look cheap.
+    """
+    incomplete_cost_count: int
+    """Runs left out of the median: cost unknown, or only a lower bound.
+
+    Non-zero also makes ``cost_per_pass_usd`` a lower bound.
+    """
     cost_per_pass_usd: Decimal | None
     """Known spend of every run (FAIL, ERROR and unscored included) over PASS runs.
 
     What one passing run costs once the runs that did not pass are paid for.
     ``None`` when nothing passed or no cost is known: not infinite, not zero.
     """
-    unknown_cost_count: int
-    """Runs whose cost could not be read, so ``cost_per_pass_usd`` is a lower bound."""
 
 
 @dataclass(frozen=True)
@@ -110,7 +135,7 @@ class EvalVariant:
     pass_rate: float | None
     """PASS over PASS + FAIL; ``None`` when neither. ERROR is not a verdict on the work."""
     avg_cost_usd: Decimal | None
-    """Mean over the runs whose cost is known; ``None`` when none is."""
+    """Mean over the runs whose cost is known and complete; ``None`` when none is."""
     last_run_at: str | None
     last_verdict: Verdict | None
     """The verdict of this variant's newest run that has one."""
@@ -144,13 +169,17 @@ def _pass_rate(runs: Sequence[EvalRunFacts]) -> tuple[int, int, float | None]:
 
 
 def _stats(runs: Sequence[EvalRunFacts], passed: int) -> EvalRunStats:
-    durations = [r.duration_seconds for r in runs if r.duration_seconds is not None]
-    costs = [r.total_cost_usd for r in runs if r.total_cost_usd is not None]
+    durations = [d for r in runs if (d := r.complete_duration_seconds) is not None]
+    costs = [c for r in runs if (c := r.complete_cost_usd) is not None]
+    # Cost per PASS is a sum, so a lower bound still belongs in it: it is spend
+    # that happened. incomplete_cost_count is what marks the result as partial.
+    spend = [r.total_cost_usd for r in runs if r.total_cost_usd is not None]
     return EvalRunStats(
         median_duration_seconds=median(durations) if durations else None,
+        incomplete_duration_count=len(runs) - len(durations),
         median_cost_usd=median(costs) if costs else None,
-        cost_per_pass_usd=sum(costs, Decimal(0)) / passed if costs and passed else None,
-        unknown_cost_count=len(runs) - len(costs),
+        incomplete_cost_count=len(runs) - len(costs),
+        cost_per_pass_usd=sum(spend, Decimal(0)) / passed if spend and passed else None,
     )
 
 
@@ -177,7 +206,7 @@ def summarize(runs: Iterable[EvalRunFacts]) -> EvalRunsSummary:
     variants = []
     for (workflow_id, _version, models), members in sorted(groups.items()):
         _, passed, rate = _pass_rate(members)
-        costs = [r.total_cost_usd for r in members if r.total_cost_usd is not None]
+        costs = [c for r in members if (c := r.complete_cost_usd) is not None]
         variants.append(
             EvalVariant(
                 workflow_id=workflow_id,

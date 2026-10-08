@@ -10836,6 +10836,10 @@
             "type": "string",
             "title": "Median Duration Display"
           },
+          "incomplete_duration_count": {
+            "type": "integer",
+            "title": "Incomplete Duration Count"
+          },
           "median_cost_usd": {
             "anyOf": [
               {
@@ -10851,6 +10855,10 @@
           "median_cost_display": {
             "type": "string",
             "title": "Median Cost Display"
+          },
+          "incomplete_cost_count": {
+            "type": "integer",
+            "title": "Incomplete Cost Count"
           },
           "cost_per_pass_usd": {
             "anyOf": [
@@ -10873,8 +10881,10 @@
         "required": [
           "median_duration_seconds",
           "median_duration_display",
+          "incomplete_duration_count",
           "median_cost_usd",
           "median_cost_display",
+          "incomplete_cost_count",
           "cost_per_pass_usd",
           "cost_per_pass_display"
         ],

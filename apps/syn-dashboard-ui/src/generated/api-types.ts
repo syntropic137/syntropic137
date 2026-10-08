@@ -3726,10 +3726,14 @@ export interface components {
             median_duration_seconds: number | null;
             /** Median Duration Display */
             median_duration_display: string;
+            /** Incomplete Duration Count */
+            incomplete_duration_count: number;
             /** Median Cost Usd */
             median_cost_usd: string | null;
             /** Median Cost Display */
             median_cost_display: string;
+            /** Incomplete Cost Count */
+            incomplete_cost_count: number;
             /** Cost Per Pass Usd */
             cost_per_pass_usd: string | null;
             /** Cost Per Pass Display */

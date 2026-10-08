@@ -70,6 +70,7 @@ class _Lane2:
         self.observed: dict[str, str] = {}
         self.costs: dict[str, Decimal] = {}
         self.by_phase: dict[str, dict[str, dict[str, Decimal]]] = {}
+        self.unpriced: dict[str, int] = {}
 
     async def get_session_cost(self, session_id: str) -> SessionCost | None:
         model = self.observed.get(session_id)
@@ -89,6 +90,7 @@ class _Lane2:
             input_tokens=10,
             output_tokens=10,
             models_by_phase=self.by_phase.get(execution_id, {}),
+            unpriced_observation_count=self.unpriced.get(execution_id, 0),
         )
 
 
@@ -427,6 +429,49 @@ class TestSummary:
         assert shown["stats"]["median_cost_display"] == "$1.00"
         assert Decimal(shown["stats"]["cost_per_pass_usd"]) == Decimal("3.375")
         assert shown["stats"]["cost_per_pass_display"] == "$3.38"
+
+    async def test_a_lower_bound_is_never_shown_as_a_whole_cost_or_duration(
+        self, client: AsyncClient, lane2: _Lane2, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """r1 (PASS, $1.00) had an unpriced observation and a phase of unknown
+        duration, so both its figures are lower bounds (#890). They must say so
+        on the run, stay out of the medians, and make cost per PASS partial."""
+        from syn_api.routes import eval_runs
+        from syn_api.types import Ok
+
+        lane2.unpriced["r1"] = 1
+        real_get_detail = eval_runs.get_detail
+
+        async def r1_missing_a_phase_duration(execution_id: str):
+            detail = await real_get_detail(execution_id)
+            if execution_id == "r1" and isinstance(detail, Ok):
+                return Ok(detail.value.model_copy(update={"unknown_duration_phase_count": 1}))
+            return detail
+
+        monkeypatch.setattr(eval_runs, "get_detail", r1_missing_a_phase_duration)
+        eval_id = await _two_by_two(client, lane2)
+
+        runs = (await client.get(f"/evals/{eval_id}/runs")).json()["items"]
+        shown = (await client.get(f"/evals/{eval_id}")).json()
+
+        r1 = next(r for r in runs if r["execution_id"] == "r1")
+        assert r1["total_cost_display"] == ">=$1.00 (partial)"
+        assert r1["duration_display"].startswith(">=")
+        # The four complete costs 3.00, 0.50, 2.00, 0.25: median 1.25, not 1.00.
+        assert Decimal(shown["stats"]["median_cost_usd"]) == Decimal("1.25")
+        assert shown["stats"]["median_cost_display"] == "$1.25 (excl. 1 incomplete)"
+        assert shown["stats"]["incomplete_duration_count"] == 1
+        assert shown["stats"]["median_duration_display"].endswith("(excl. 1 incomplete)")
+        assert shown["stats"]["cost_per_pass_display"] == ">=$3.38 (partial)"
+        [v1_opus] = [
+            v
+            for v in shown["variants"]
+            if (v["workflow_id"], v["workflow_version"], v["models"]) == ("wf-a", "1.0.0", [OPUS])
+        ]
+        # Its only run is a lower bound: no median to show, and it cannot win on cost.
+        assert v1_opus["stats"]["median_cost_usd"] is None
+        assert v1_opus["avg_cost_usd"] is None
+        assert v1_opus["stats"]["cost_per_pass_display"] == ">=$1.00 (partial)"
 
 
 class TestScore:

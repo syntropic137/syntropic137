@@ -8,6 +8,7 @@ coordinator uses, twice, so an appending handler would show up.
 from __future__ import annotations
 
 import os
+from dataclasses import replace
 from decimal import Decimal
 
 os.environ.setdefault("APP_ENVIRONMENT", "test")
@@ -239,7 +240,7 @@ class TestSummarize:
 
         assert (summary.run_count, summary.pass_rate, summary.last_verdict) == (0, None, None)
         assert summary.variants == ()
-        assert summary.stats == EvalRunStats(None, None, None, 0)
+        assert summary.stats == EvalRunStats(None, 0, None, 0, None)
 
     def test_duration_and_cost_are_medians_and_cost_per_pass_pays_for_every_run(self) -> None:
         opus = "claude-opus-5-5"
@@ -261,7 +262,8 @@ class TestSummarize:
         # 12.00 known spend - the FAIL, the ERROR and the unscored run included -
         # over 2 PASS runs. Run 5's cost is unknown, so this is a lower bound.
         assert variant.stats.cost_per_pass_usd == Decimal("6.00")
-        assert variant.stats.unknown_cost_count == 1
+        assert variant.stats.incomplete_cost_count == 1
+        assert variant.stats.incomplete_duration_count == 1
         assert variant.last_verdict is Verdict.PASS
 
     def test_nothing_passed_has_no_cost_per_pass_and_each_variant_its_own_last_verdict(
@@ -283,6 +285,27 @@ class TestSummarize:
         # Across the eval: 6.00 over one PASS.
         assert summary.stats.cost_per_pass_usd == Decimal("6.00")
         assert summary.stats.median_duration_seconds is None
+
+    def test_a_lower_bound_is_spend_but_never_a_median(self) -> None:
+        """A run with unpriced observations or a phase of unknown duration has only
+        a lower bound (#890). It is real spend for cost per PASS, which then says it
+        is partial, but it must not stand in for a whole run's cost or duration."""
+        opus = "claude-opus-5-5"
+        complete = _run("1", "wf-a", [opus], Verdict.PASS, "4.00", "2026-10-01T00:00:00+00:00")
+        partial = replace(
+            _run("2", "wf-a", [opus], Verdict.PASS, "1.00", "2026-10-02T00:00:00+00:00"),
+            unpriced_observation_count=2,
+            unknown_duration_phase_count=1,
+        )
+        runs = [replace(complete, duration_seconds=300.0), replace(partial, duration_seconds=20.0)]
+
+        stats = summarize(runs).stats
+        [variant] = summarize(runs).variants
+
+        assert (stats.median_cost_usd, stats.incomplete_cost_count) == (Decimal("4.00"), 1)
+        assert (stats.median_duration_seconds, stats.incomplete_duration_count) == (300.0, 1)
+        assert stats.cost_per_pass_usd == Decimal("2.50")
+        assert variant.avg_cost_usd == Decimal("4.00")
 
 
 class TestBatchReadsForAPageOfRuns:

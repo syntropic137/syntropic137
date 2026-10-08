@@ -14,8 +14,10 @@ export function stats(overrides: Partial<EvalRunStats> = {}): EvalRunStats {
   return {
     median_duration_seconds: 1200,
     median_duration_display: '20m med.',
+    incomplete_duration_count: 0,
     median_cost_usd: '0.4123',
     median_cost_display: '$0.41 med.',
+    incomplete_cost_count: 1,
     cost_per_pass_usd: '0.6185',
     cost_per_pass_display: '>=$0.62 (partial)',
     ...overrides,

@@ -1085,17 +1085,27 @@ class EvalRunStatsResponse(BaseModel):
     """
 
     median_duration_seconds: float | None
-    """Median over the runs whose duration is known. Null when none is."""
+    """Median over the runs whose duration is known and complete. Null when none is.
+
+    A run with a phase of unknown duration has only a lower bound and is left out."""
     median_duration_display: str
+    """Says how many runs it left out, e.g. ``"2m 14s (excl. 1 incomplete)"``."""
+    incomplete_duration_count: int
+    """Runs left out of the median duration: unknown, or only a lower bound."""
     median_cost_usd: Decimal | None
-    """Median over the runs whose cost is known. Null when none is."""
+    """Median over the runs whose cost is known and complete. Null when none is.
+
+    A run with unpriced observations has only a lower bound and is left out."""
     median_cost_display: str
+    """Says how many runs it left out, e.g. ``"$1.20 (excl. 1 incomplete)"``."""
+    incomplete_cost_count: int
+    """Runs left out of the median cost: unknown, or only a lower bound."""
     cost_per_pass_usd: Decimal | None
     """Known spend of every run (FAIL, ERROR and unscored too) over the PASS runs.
 
     Null when nothing passed or no cost is known."""
     cost_per_pass_display: str
-    """Says it is a lower bound when some run's cost could not be read."""
+    """Says it is a lower bound when some run's cost is unknown or incomplete."""
 
 
 class EvalVariantResponse(BaseModel):
@@ -1116,7 +1126,7 @@ class EvalVariantResponse(BaseModel):
     """PASS over this variant's PASS + FAIL runs, 0..1 (ERROR excluded). Null when none."""
     pass_rate_display: str
     avg_cost_usd: Decimal | None
-    """Mean over the runs whose cost is known. Null when none is."""
+    """Mean over the runs whose cost is known and complete. Null when none is."""
     avg_cost_display: str
     last_run_at: str | None
     last_verdict: Verdict | None
