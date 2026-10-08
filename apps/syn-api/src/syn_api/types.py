@@ -629,7 +629,7 @@ class PhaseProgressInfo(BaseModel):
     percent: int
     """Completed as a share of ``possible``, 0-100. A completed run is 100."""
     display: str
-    """E.g. ``6 of 6 (4 phases not needed)``, ``phase 3 of up to 10``."""
+    """E.g. ``6 of 6 (2 phases not needed)``, ``phase 3 of up to 8``."""
 
     @classmethod
     def of(cls, progress: PhaseProgress) -> PhaseProgressInfo:
@@ -1221,6 +1221,58 @@ class ExecutionEvalRunResponse(BaseModel):
     """When the current verdict was recorded, ISO 8601 UTC."""
 
 
+class ReadModelStatus(BaseModel):
+    """Whether one read model is rebuilding, and how far it has got.
+
+    Carried on the list and detail responses a read model serves, so a page can
+    say "this list is incomplete because it is being rebuilt" instead of
+    looking broken, and listed on ``/health`` for every read model that is
+    rebuilding. Judged by ``services.read_model_status``; every number is
+    exact (checkpoint position against store head), never estimated.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    rebuilding: bool = Field(
+        description="True while this read model is replaying history: it is more than the "
+        "live-lag threshold (500 events) behind the head. A few events of ordinary live lag "
+        "is NOT rebuilding, even while another read model replays.",
+    )
+    projection: str = Field(description="Projection name, as in projection_checkpoints.")
+    label_display: str = Field(
+        description="What the read model holds, for a sentence, e.g. 'execution history'."
+    )
+    progress_pct: int | None = Field(
+        default=None,
+        description="Checkpoint position as a whole percentage of the store head, 0-99 while "
+        "rebuilding. Null when not rebuilding.",
+    )
+    progress_display: str | None = Field(default=None, description="progress_pct as '72%'.")
+    events_behind: int = Field(
+        default=0, description="Events between the checkpoint and the store head."
+    )
+    events_behind_display: str | None = Field(
+        default=None, description="events_behind as '29,476 events behind'."
+    )
+    summary_display: str | None = Field(
+        default=None,
+        description="One sentence for a banner, e.g. 'Rebuilding execution history - 72% "
+        "(29,476 events behind).' Null when not rebuilding.",
+    )
+
+
+class EvalDetailResponse(EvalResponse):
+    """One eval, as `GET /evals/{eval_id}` returns it.
+
+    The row model plus whether the evals read model is rebuilding, so a
+    missing or stale eval can say why. Kept off `EvalResponse` so every list
+    row does not repeat the list's own status.
+    """
+
+    read_model_status: ReadModelStatus | None = None
+    """Whether the evals read model is rebuilding."""
+
+
 class EvalListResponse(BaseModel):
     """One page of evals, newest first (#967)."""
 
@@ -1231,6 +1283,8 @@ class EvalListResponse(BaseModel):
     page_size: int
     status_counts: dict[str, int]
     """Matching evals tallied as `active` / `archived`, ignoring the status filter."""
+    read_model_status: ReadModelStatus | None = None
+    """Whether the evals read model is rebuilding, so a short list can say why."""
 
 
 # ---------------------------------------------------------------------------
@@ -1441,6 +1495,12 @@ class ToolOperation(BaseModel):
     tool_use_id: str | None = None
     input_preview: str | None = None
     output_preview: str | None = None
+    skill_name: str | None = None
+    """The skill a `Skill` call invoked, recorded whole on its start (#1269).
+
+    Carried from `syn_adapters.projections.session_tools.ToolOperation` by
+    `model_validate(from_attributes=True)`; the names must stay identical.
+    """
     # Structured git data (v2 events - preferred).
     # AliasChoices: JSON clients send "git", from_attributes reads "git_data"
     # from the projection dataclass (which uses git_data to avoid shadowing).
@@ -1492,6 +1552,53 @@ class PhaseStartConfig(BaseModel):
     """Empty means the phase declared no restriction, so the harness ran with
     its own default tool set - not that the agent had no tools."""
     skills: list[PinnedSkillInfo] = Field(default_factory=list)
+
+
+SkillUseStatus = Literal["observed", "not_observable", "unavailable"]
+"""Whether a phase's skill USE could be read (#1269).
+
+``observed``: a claude phase whose timeline was read, so ``invoked`` is a
+measurement and an empty list means no skill was invoked. ``not_observable``:
+the harness has no Skill tool (codex), so skills land as context and their use
+leaves no signal - ``invoked`` is empty because nothing CAN be seen, never
+because nothing was used. ``unavailable``: the start pins or the timeline could
+not be read on this request, so nothing is known either way."""
+
+
+class InvokedSkillInfo(BaseModel):
+    """One skill the agent invoked through the Skill tool, and how often (#1269)."""
+
+    name: str
+    count: int
+    """Calls, not timeline rows: a call's start and completion fold to one."""
+
+
+class PhaseSkillUseInfo(BaseModel):
+    """Which declared skills this phase actually used (#1269).
+
+    Declaring a skill installs it; only an invocation shows the agent reached
+    for it. This is the fact that tells the two apart, per phase.
+    """
+
+    status: SkillUseStatus = "unavailable"
+    declared: list[str] = Field(default_factory=list)
+    """Skill names from `pinned_at_start.skills` - what the execution STARTED
+    with, never the template as it stands now."""
+    invoked: list[InvokedSkillInfo] = Field(default_factory=list)
+    """Meaningful only when `status` is ``observed``. May name a skill that was
+    not declared: one installed some other way is still a skill the agent used."""
+
+    @computed_field(
+        description="Declared skills with no observed invocation. Empty unless "
+        "status is 'observed': an unobservable use is not a non-use."
+    )
+    @property
+    def declared_not_invoked(self) -> list[str]:
+        """Derived, never passed in, so it cannot contradict the two lists."""
+        if self.status != "observed":
+            return []
+        used = {s.name for s in self.invoked}
+        return [name for name in self.declared if name not in used]
 
 
 class BranchObservationInfo(BaseModel):
@@ -1799,6 +1906,8 @@ class PhaseExecution(BaseModel):
     start_pins_status: StartPinsStatus = "unavailable"
     """Why `pinned_at_start` is or is not set. Defaults to ``unavailable``: a
     constructor that never read the start event must not claim it was empty."""
+    skill_use: PhaseSkillUseInfo = Field(default_factory=PhaseSkillUseInfo)
+    """Skills declared against skills invoked, for this phase (#1269)."""
     operations: list[ToolOperation] = Field(default_factory=list)
     activity: PhaseActivityInfo = Field(default_factory=PhaseActivityInfo)
     """What this phase was doing when it ended, summarised from `operations`
@@ -2573,6 +2682,11 @@ class SubscriptionHealth(_OmitsAbsentFields):
         default=None,
         description="Every projection short of the head, furthest behind first. Empty when "
         "all are at the head; null when lag is unmeasurable.",
+    )
+    rebuilding_read_models: list[ReadModelStatus] | None = Field(
+        default=None,
+        description="Every read model that is rebuilding, furthest behind first, with display "
+        "strings for a banner. Ordinary live lag is excluded. Null when lag is unmeasurable.",
     )
     unapplied_starts: list[UnappliedStart] | None = Field(
         default=None,

@@ -2,13 +2,15 @@
 
 $ARGUMENTS
 
+**Skills:** `testing`, `error-handling`, `security` and `architecture` are installed in this workspace as context, because codex has no Skill tool. Read and apply them when you judge whether each fix closed its finding.
+
 ## Which round this is
 
-**Round 1 of 3.** This prompt re-verifies after each of up to three fix
+**Round 1 of 2.** This prompt re-verifies after each of up to two fix
 rounds. This round's fix report is **`artifacts/input/fix/fix.md`** (flat
 alias `artifacts/input/fix.md`); the verdict that fix round acted on is
 `artifacts/input/verify/verify.md`. Read the fix report first. It says what the previous phase did about
-the defects still open. Write `Round: 1 of 3` as your report's second line.
+the defects still open. Write `Round: 1 of 2` as your report's second line.
 
 ## Check out the candidate you will certify
 
@@ -77,8 +79,9 @@ not moving the goalposts: it is the same check, read where it actually ran.
 
 ## A check this workspace cannot run is settled by CI on the same head SHA
 
-Some checks cannot run here at all: today the docker-backed fitness tests,
-which `preflight-agent` skips as `NOT RUN`. "Not run here" is not a pass, and
+Some checks cannot run here at all: a gate that needs a binary this workspace
+lacks, or a test the gate itself reports as `NOT RUN` (in syntropic137,
+today, the docker-backed fitness tests). "Not run here" is not a pass, and
 on its own it is not a blocker either. It is a question CI answers for the same
 commit, so read CI's answer instead of holding the PR in draft. PRs #1562 and
 #1576 each sat BLOCKED on exactly this while CI's Architectural Fitness job had
@@ -183,7 +186,7 @@ your report, not `verify.md`, and carries that section into the PR body.
 
 ## Be specific about what would make it deliverable
 
-If you find a blocking defect, the next fix round - or, in round 3, whoever
+If you find a blocking defect, the next fix round - or, in round 2, whoever
 picks up the draft - has only your report to work from. So write it as an
 instruction rather than an observation:
 
@@ -213,8 +216,8 @@ should have caught Y".
 under `artifacts/output/` FAILS.** Write the file before you finish.
 
 1. **CERTIFIED** or **BLOCKED**, as the first line, in one word.
-   Then `Round: N of 3` on the second line. If round 3 is BLOCKED, the third
-   line is `Repair bound reached: 3 of 3 rounds used, findings still open.` -
+   Then `Round: N of 2` on the second line. If round 2 is BLOCKED, the third
+   line is `Repair bound reached: 2 of 2 rounds used, findings still open.` -
    the run stops here and must not read as though it ran out of anything else.
 2. **The branch and the full commit SHA you certified** - or, if BLOCKED, the
    one you checked out and refused - with the `git rev-parse origin/<branch>`

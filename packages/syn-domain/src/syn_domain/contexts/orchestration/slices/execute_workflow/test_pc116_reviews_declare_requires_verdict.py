@@ -19,7 +19,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.test_1308_the_dec
 
 pytestmark = [pytest.mark.unit, pytest.mark.anyio]
 
-_ROUNDS = ("verify", "reverify", "reverify_2", "reverify_3")
+_ROUNDS = ("verify", "reverify", "reverify_2")
 _REVIEWS = [(w, p) for w in ("sdlc/implement-v3", "sdlc/reverify-pr") for p in _ROUNDS]
 
 #: Phases whose silence must still advance by order, so a change that declared
@@ -27,7 +27,7 @@ _REVIEWS = [(w, p) for w in ("sdlc/implement-v3", "sdlc/reverify-pr") for p in _
 _NOT_REVIEWS = [
     ("sdlc/implement-v3", "implement"),
     ("sdlc/implement-v3", "fix"),
-    ("sdlc/implement-v3", "fix_3"),
+    ("sdlc/implement-v3", "fix_2"),
     ("sdlc/implement-v3", "finalize_pr"),
     ("sdlc/reverify-pr", "prepare"),
     ("sdlc/reverify-pr", "fix_2"),

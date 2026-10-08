@@ -100,7 +100,7 @@ async def test_the_server_stores_every_phase_the_cli_uploads(rel_path: str) -> N
     ]
 
 
-async def test_implement_v3_is_stored_with_all_ten_phases() -> None:
+async def test_implement_v3_is_stored_with_all_eight_phases() -> None:
     from syn_api._wiring import get_workflow_repo
     from syn_api.routes.workflows.commands import create_workflow_from_yaml
 
@@ -111,6 +111,6 @@ async def test_implement_v3_is_stored_with_all_ten_phases() -> None:
     assert stored is not None
     assert [p.phase_id for p in stored.phases] == [
         "premise", "implement", "verify",
-        "fix", "reverify", "fix_2", "reverify_2", "fix_3", "reverify_3",
+        "fix", "reverify", "fix_2", "reverify_2",
         "finalize_pr",
     ]  # fmt: skip

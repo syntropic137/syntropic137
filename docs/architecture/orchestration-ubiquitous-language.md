@@ -283,6 +283,24 @@ code the original ran on. A pinned commit no branch or tag of origin still
 reaches refuses the Phase; it is never swapped for the branch's head.
 (#1458, ADR-058.)
 
+## Declared Skill / Invoked Skill
+
+A **Declared Skill** is one a Phase names in its `skills:`. The platform
+installs it into the Phase's workspace and, for a claude Phase that scopes its
+tools, grants the `Skill` tool so it can be invoked (#1269). The declared set
+read back is the Phase's Pin, never the Workflow as it stands now.
+
+An **Invoked Skill** is a declared or installed skill the agent actually called,
+counted per call. Declaring is not using: a Phase can be given a skill and never
+reach for it, and `phases[].skill_use.declared_not_invoked` names those.
+
+The two harnesses differ and the difference is reported, not hidden. Claude
+invokes a skill through its `Skill` tool, so the call is on the timeline and
+skill use is **observed**. Codex has no `Skill` tool: its skills arrive as
+context and their use leaves no signal, so a codex Phase reports skill use
+**not observable**, never zero invocations. **Unavailable** means the Pin or the
+timeline could not be read, so nothing is known either way.
+
 ## Starting Checkout
 
 The commit each pinned repository was actually found at once a Phase's
@@ -303,6 +321,24 @@ Execution's start to be exactly where it was left, together with the PR open
 from it. The Resume Phase is checked out at its head; every other Phase still
 reads the pinned commit. Recorded on the resumed Execution's start. (#1513,
 ADR-058.)
+
+A branch the failing attempt made an Own Push to is also continued when origin's
+head is not where the attempt was last seen but is any SHA it pushed there: the
+Execution's own unverified commits, which the Resume Phase re-verifies at that
+head before changing anything. (PC-128.)
+
+## Own Push
+
+A commit the running Phase's own workspace pushed to origin, recorded as
+`PhaseCommitPushed` while the Phase runs, from the workspace's push hook. It
+attributes the push to this Execution and nothing else: it does not say the push
+landed, and it is not a Branch Observation, which records that a ref moved and
+deliberately not who moved it. A Resume reads it to tell the Execution's own
+commits from someone else's; a head that is not an Own Push is still
+Abandoned. Recorded mid-Phase because the run it exists for, one orphaned by a
+restart, never reaches the end of its Phase. Only a push git reports as an update of
+an existing branch to the hook's commit is one: creating a branch names no
+commit in git's output, so a creation is never an Own Push. (PC-128.)
 
 ## Abandoned Branch
 
