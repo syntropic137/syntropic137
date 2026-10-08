@@ -31,6 +31,8 @@ from eval_implementer import (
 )
 from eval_suite import DefinitionError
 
+pytestmark = pytest.mark.unit
+
 
 def _full_clone() -> bool:
     shallow = subprocess.run(
