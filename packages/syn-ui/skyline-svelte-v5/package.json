@@ -1,0 +1,44 @@
+{
+  "name": "@syn137/skyline-svelte-v5",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Skyline Svelte 5 (runes) components and patterns. Plain CSS over --ds-*/--sky-* tokens; no colour literals.",
+  "type": "module",
+  "sideEffects": ["*.css"],
+  "svelte": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "svelte": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./patterns": {
+      "types": "./src/patterns/index.ts",
+      "svelte": "./src/patterns/index.ts",
+      "default": "./src/patterns/index.ts"
+    },
+    "./styles.css": "./src/styles.css"
+  },
+  "files": ["src"],
+  "scripts": {
+    "check": "svelte-check --tsconfig ./tsconfig.json --fail-on-warnings && node ../scripts/check-css.mjs src",
+    "build": "pnpm run check",
+    "test": "vitest run --passWithNoTests"
+  },
+  "peerDependencies": {
+    "svelte": "^5.30.0"
+  },
+  "dependencies": {
+    "@syn137/skyline-core": "workspace:*",
+    "@syn137/skyline-themes": "workspace:*"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "6.2.4",
+    "@lucide/svelte": "1.52.0",
+    "svelte": "5.57.1",
+    "svelte-check": "4.7.6",
+    "typescript": "5.9.3",
+    "vite": "7.3.6",
+    "vitest": "4.1.11"
+  }
+}

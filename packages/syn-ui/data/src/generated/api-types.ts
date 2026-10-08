@@ -1,0 +1,13781 @@
+// @generated -- do not edit. Regenerate with: pnpm --filter @syn137/syn-ui-data generate:types
+
+export interface paths {
+    "/workflows": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Workflows Endpoint
+         * @description List all workflow templates.
+         */
+        get: operations["list_workflows_endpoint_workflows_get"];
+        put?: never;
+        /**
+         * Create Workflow Endpoint
+         * @description Create a new workflow template.
+         */
+        post: operations["create_workflow_endpoint_workflows_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workflows/{workflow_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Workflow Endpoint
+         * @description Get workflow details by ID (supports partial ID prefix matching).
+         */
+        get: operations["get_workflow_endpoint_workflows__workflow_id__get"];
+        put?: never;
+        post?: never;
+        /**
+         * Archive (soft-delete) a workflow template
+         * @description Archive (soft-delete) a workflow template.
+         *
+         *     Archived templates are excluded from listing by default but remain
+         *     accessible via `GET /workflows/{id}` and with `?include_archived=true`.
+         *
+         *     ``expected_package_name`` makes the archive conditional on the current
+         *     aggregate still attributing the workflow to that package (#1588). A prune
+         *     picks candidates from `GET /workflows/{id}`, a read model that can lag;
+         *     this check is made against the aggregate at the moment of archive, so a
+         *     workflow reinstalled by another package is refused with 409 however stale
+         *     that read was.
+         */
+        delete: operations["delete_workflow_endpoint_workflows__workflow_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workflows/{workflow_id}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export Workflow Endpoint
+         * @description Export a workflow as a distributable package or Claude Code plugin.
+         */
+        get: operations["export_workflow_endpoint_workflows__workflow_id__export_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workflows/{workflow_id}/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Workflow Runs Endpoint
+         * @description List all execution runs for a workflow.
+         */
+        get: operations["list_workflow_runs_endpoint_workflows__workflow_id__runs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workflows/{workflow_id}/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Workflow History Endpoint
+         * @description DEPRECATED: Use /workflows/{workflow_id}/runs instead.
+         */
+        get: operations["get_workflow_history_endpoint_workflows__workflow_id__history_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workflows/validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Validate Yaml Endpoint
+         * @description Validate a workflow YAML definition.
+         */
+        post: operations["validate_yaml_endpoint_workflows_validate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workflows/{workflow_id}/phases/{phase_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Update Phase Prompt Endpoint
+         * @description Update a workflow phase's prompt template and optional config.
+         */
+        put: operations["update_phase_prompt_endpoint_workflows__workflow_id__phases__phase_id__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workflows/from-yaml": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Workflow From Yaml Endpoint
+         * @description Create a workflow template by uploading raw YAML.
+         *
+         *     The CLI (`syn workflow create --from <file>`) POSTs the file bytes
+         *     here. Every semantic field (name, classification, repository,
+         *     phases, inputs, requires_repos) comes from the YAML itself.
+         *
+         *     Query-string ``name`` and ``workflow_id`` are optional overrides
+         *     intended for scripted bulk installation (e.g. renaming a template
+         *     on install). They are *not* a second source of truth for fields
+         *     that live in the YAML.
+         *
+         *     ``version``, ``source_digest`` and ``force`` carry install provenance
+         *     and policy (issue #822). ``syn workflow install`` supplies the package
+         *     version and the resolved commit SHA; reinstalling a matching version is
+         *     refused with 409 unless ``force`` is set, and a matching version that
+         *     resolves to a different digest is refused regardless of how it looks,
+         *     because that is the signature of a republished version.
+         *
+         *     ``package_name`` records which package installed the definition (#1588).
+         *     It is read back on ``GET /workflows/{id}`` so ``syn workflow install
+         *     --prune`` archives only what the server attributes to that package.
+         */
+        post: operations["create_workflow_from_yaml_endpoint_workflows_from_yaml_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/executions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Executions Endpoint
+         * @description List all workflow executions across all workflows.
+         */
+        get: operations["list_executions_endpoint_executions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/executions/{execution_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Execution Endpoint
+         * @description Get detailed information about a workflow execution run (supports partial ID prefix matching).
+         */
+        get: operations["get_execution_endpoint_executions__execution_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workflows/{workflow_id}/execute": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Execute Workflow Endpoint
+         * @description Start workflow execution in background.
+         *
+         *     Returns 409 while maintenance mode is active; no execution is started.
+         */
+        post: operations["execute_workflow_endpoint_workflows__workflow_id__execute_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workflows/{workflow_id}/executions/{execution_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Execution Status Endpoint
+         * @description Get the status of a workflow execution.
+         */
+        get: operations["get_execution_status_endpoint_workflows__workflow_id__executions__execution_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workflows/executions/active": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Active Executions Endpoint
+         * @description List all active (non-completed) executions.
+         */
+        get: operations["list_active_executions_endpoint_workflows_executions_active_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/executions/{execution_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel Execution Endpoint
+         * @description Cancel an execution, or withdraw a start still queued for one (#1650).
+         */
+        post: operations["cancel_execution_endpoint_executions__execution_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/executions/{execution_id}/inject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Inject Context Endpoint
+         * @description Inject a message into the execution context.
+         */
+        post: operations["inject_context_endpoint_executions__execution_id__inject_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/executions/{execution_id}/state": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Execution State Endpoint
+         * @description Get current execution state.
+         */
+        get: operations["get_execution_state_endpoint_executions__execution_id__state_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/executions/{execution_id}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resume Execution Endpoint
+         * @description Resume a failed or interrupted execution so it resumes where it stopped.
+         */
+        post: operations["resume_execution_endpoint_executions__execution_id__resume_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/executions/{execution_id}/session-inventory": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Session Inventory */
+        get: operations["get_session_inventory_executions__execution_id__session_inventory_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/executions/{execution_id}/session-inventory/{snapshot_id}/{kind}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Session Inventory Page
+         * @description Keyset page of one pinned revision, narrowed to a phase/attempt membership in SQL.
+         *
+         *     Omit ``cursor`` for the first page, then pass ``next_cursor`` unchanged with
+         *     the same revision, section and filters. A mismatched cursor is rejected; a
+         *     cursor whose revision is no longer retained gets 410 with ``restart``.
+         */
+        get: operations["get_session_inventory_page_executions__execution_id__session_inventory__snapshot_id___kind__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/executions/{execution_id}/session-inventory/{snapshot_id}/nodes/{node_key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Session Inventory Node
+         * @description Resolve an edge endpoint on another page. Keys outside this revision stay opaque.
+         */
+        get: operations["get_session_inventory_node_executions__execution_id__session_inventory__snapshot_id__nodes__node_key__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/executions/{execution_id}/session-inventory/reconcile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Refresh Session Inventory */
+        post: operations["refresh_session_inventory_executions__execution_id__session_inventory_reconcile_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/session-inventory/backfill": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Backfill All Session Inventories
+         * @description Queue every known execution. The live inventory worker drains the durable list.
+         */
+        post: operations["backfill_all_session_inventories_session_inventory_backfill_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/session-inventory-jobs/{job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Session Inventory Job */
+        get: operations["get_session_inventory_job_session_inventory_jobs__job_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/executions/{execution_id}/session-transcripts/{archive_hash}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Local Transcript Revision
+         * @description Serve one exact archived revision after current whole-object authorization.
+         *
+         *     Bytes are returned exactly as archived (source redaction only). Deleted,
+         *     expired, missing and oversized bodies are explicit statuses, never content.
+         *     The shared deletion fence spans authorization, the read and rendering of the
+         *     response, so a deletion request either waits for this handoff or is seen.
+         */
+        get: operations["get_local_transcript_revision_executions__execution_id__session_transcripts__archive_hash__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/executions/{execution_id}/session-transcripts/{archive_hash}/deletion": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Local Transcript Deletion
+         * @description Local erasure and replica propagation state of an existing tombstone.
+         */
+        get: operations["get_local_transcript_deletion_executions__execution_id__session_transcripts__archive_hash__deletion_get"];
+        put?: never;
+        /**
+         * Delete Local Transcript Revision
+         * @description Durably tombstone exact bytes, then erase them asynchronously.
+         *
+         *     Idempotent: repeating the request returns the existing tombstone. The body is
+         *     withheld from the moment of the request for every run sharing the object.
+         *     Deletion propagates to the configured replica; retries, replays and
+         *     re-uploads cannot restore the bytes. Session history stays discoverable.
+         */
+        post: operations["delete_local_transcript_revision_executions__execution_id__session_transcripts__archive_hash__deletion_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/executions/{execution_id}/session-transcripts/{archive_hash}/revocation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Revoke Local Transcript Revision
+         * @description Withhold reads of exact bytes for every sharing run; bytes are retained.
+         */
+        post: operations["revoke_local_transcript_revision_executions__execution_id__session_transcripts__archive_hash__revocation_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/executions/{execution_id}/tags": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add Execution Tags Endpoint
+         * @description Add tags to an execution, retroactively. Its inherited tags are never changed.
+         */
+        post: operations["add_execution_tags_endpoint_executions__execution_id__tags_post"];
+        /**
+         * Remove Execution Tags Endpoint
+         * @description Remove tags from an execution. Removing an inherited tag leaves `inherited_tags` alone.
+         */
+        delete: operations["remove_execution_tags_endpoint_executions__execution_id__tags_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workflows/{workflow_id}/tags": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add Workflow Tags Endpoint
+         * @description Add tags to a workflow. Future runs inherit them; existing runs keep their own.
+         */
+        post: operations["add_workflow_tags_endpoint_workflows__workflow_id__tags_post"];
+        /**
+         * Remove Workflow Tags Endpoint
+         * @description Remove tags from a workflow. Existing runs keep the tags they launched with.
+         */
+        delete: operations["remove_workflow_tags_endpoint_workflows__workflow_id__tags_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/executions/{execution_id}/eval": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Attach Execution To Eval Endpoint
+         * @description Attach an execution to an eval, in any status. Never copies the eval's baseline.
+         */
+        post: operations["attach_execution_to_eval_endpoint_executions__execution_id__eval_post"];
+        /**
+         * Detach Execution From Eval Endpoint
+         * @description Detach an execution from its eval. The launch record (`launched_eval_id`) is kept.
+         */
+        delete: operations["detach_execution_from_eval_endpoint_executions__execution_id__eval_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workflows/{workflow_id}/default-eval": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Workflow Default Eval Endpoint
+         * @description Set or clear the eval a workflow's runs join when the launch names none.
+         */
+        put: operations["set_workflow_default_eval_endpoint_workflows__workflow_id__default_eval_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/evals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Evals Endpoint
+         * @description List evals, newest first, each with its run count and status tally.
+         */
+        get: operations["list_evals_endpoint_evals_get"];
+        put?: never;
+        /**
+         * Create Eval Endpoint
+         * @description Create an eval, pinning each baseline ref to a commit SHA. The id is minted here.
+         */
+        post: operations["create_eval_endpoint_evals_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/evals/{eval_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Eval Endpoint
+         * @description One eval with its Baseline and run tally. Its runs are `GET /evals/{eval_id}/runs`.
+         */
+        get: operations["get_eval_endpoint_evals__eval_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/evals/{eval_id}/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Eval Runs Endpoint
+         * @description The executions currently in an eval, newest first, each with what it ran and its score.
+         *
+         *     The eval id may be a unique prefix, as on `GET /evals/{eval_id}`; an id
+         *     matching no eval is a 404. An eval with no runs is an empty page.
+         */
+        get: operations["list_eval_runs_endpoint_evals__eval_id__runs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/evals/{eval_id}/runs/{execution_id}/score": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Score Eval Run Endpoint
+         * @description Record a verdict on one run. Re-scoring replaces the run's current score.
+         *
+         *     Allowed on frozen and archived evals: judging a run is not editing the eval.
+         */
+        post: operations["score_eval_run_endpoint_evals__eval_id__runs__execution_id__score_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/evals/{eval_id}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Archive Eval Endpoint
+         * @description Archive an eval: it stays readable with its runs, and admits no new ones. Idempotent.
+         */
+        post: operations["archive_eval_endpoint_evals__eval_id__archive_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Sessions Endpoint
+         * @description List agent sessions with optional filtering.
+         */
+        get: operations["list_sessions_endpoint_sessions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sessions/{session_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Session Endpoint
+         * @description Get session details by ID (supports partial ID prefix matching).
+         */
+        get: operations["get_session_endpoint_sessions__session_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/artifacts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Artifacts Endpoint
+         * @description List artifacts with optional filtering.
+         *
+         *     ``execution_id`` is declared here rather than left to the client because an
+         *     undeclared query parameter is dropped, not refused (#1306): a real id, a
+         *     nonsense id and no filter at all returned the same unfiltered page, so "this
+         *     run's deliverable" resolved to whatever any run wrote most recently. The
+         *     same defect #1263 fixed on ``/sessions``, on the surface where it decides
+         *     what a phase reads.
+         *
+         *     The window is named after ``created_at`` because that is the timestamp an
+         *     artifact has; the siblings bound ``started_at`` and spell it
+         *     ``started_after``. The validation is the same one (#1186): a bound with no
+         *     offset is refused rather than guessed at.
+         */
+        get: operations["list_artifacts_endpoint_artifacts_get"];
+        put?: never;
+        /**
+         * Create Artifact Endpoint
+         * @description Create a new artifact.
+         */
+        post: operations["create_artifact_endpoint_artifacts_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/artifacts/{artifact_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Artifact Endpoint
+         * @description Get artifact details by ID (supports partial ID prefix matching).
+         */
+        get: operations["get_artifact_endpoint_artifacts__artifact_id__get"];
+        /**
+         * Update Artifact Endpoint
+         * @description Update artifact metadata.
+         */
+        put: operations["update_artifact_endpoint_artifacts__artifact_id__put"];
+        post?: never;
+        /**
+         * Delete Artifact Endpoint
+         * @description Soft-delete an artifact.
+         */
+        delete: operations["delete_artifact_endpoint_artifacts__artifact_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/artifacts/{artifact_id}/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Artifact Content Endpoint
+         * @description Get artifact content only (for large artifacts).
+         */
+        get: operations["get_artifact_content_endpoint_artifacts__artifact_id__content_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/artifacts/{artifact_id}/raw": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Artifact Raw Endpoint
+         * @description Get artifact content as stored, byte-for-byte, under its own content type.
+         *
+         *     The way to fetch a binary artifact - a screenshot, a PDF - which has no
+         *     text form for the JSON endpoints to carry (#990). Text artifacts are
+         *     served the same way, as their UTF-8 bytes.
+         */
+        get: operations["get_artifact_raw_endpoint_artifacts__artifact_id__raw_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/artifacts/{artifact_id}/upload": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upload Artifact Endpoint
+         * @description Upload binary content for an existing artifact (max 50 MB).
+         */
+        post: operations["upload_artifact_endpoint_artifacts__artifact_id__upload_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/claude-plugins/registrations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Register Claude Plugin Endpoint
+         * @description Register a plugin by uploading the cloned tree (Phase A redesign).
+         *
+         *     The CLI clones the source locally, parses the manifest, and POSTs the tree
+         *     contents here. The API decodes the base64 file contents, computes the
+         *     sha256 over the normalized tree, uploads to storage, and dispatches a
+         *     ``RegisterClaudePluginCommand`` against the existing aggregate. Idempotent
+         *     on re-submission of the same ``(source_url, version, name)``.
+         */
+        post: operations["register_claude_plugin_endpoint_claude_plugins_registrations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/claude-plugins/global": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Global Claude Plugins Endpoint
+         * @description List currently-active global claude plugins (sorted by name).
+         */
+        get: operations["list_global_claude_plugins_endpoint_claude_plugins_global_get"];
+        put?: never;
+        /**
+         * Add Global Claude Plugin Endpoint
+         * @description Add an already-registered plugin to the global registry.
+         *
+         *     Looks up ``(name, version)`` in the lock projection and dispatches the add
+         *     command. Returns 404 with ``error_code=claude_plugin_not_registered`` if the
+         *     plugin has not been registered yet.
+         */
+        post: operations["add_global_claude_plugin_endpoint_claude_plugins_global_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/claude-plugins/global/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove Global Claude Plugin Endpoint
+         * @description Remove a plugin from the global registry by display name.
+         *
+         *     The underlying lock entry is left in place so any workflow that pinned the
+         *     same ``(source_url, version)`` continues to resolve.
+         */
+        delete: operations["remove_global_claude_plugin_endpoint_claude_plugins_global__name__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/claude-plugins": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Claude Plugins Endpoint
+         * @description List every entry currently in the lock projection.
+         */
+        get: operations["list_claude_plugins_endpoint_claude_plugins_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/claude-plugins/{name}/{version}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Show Claude Plugin Endpoint
+         * @description Look up a single lock entry by display name and version.
+         */
+        get: operations["show_claude_plugin_endpoint_claude_plugins__name___version__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/skills": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Skills
+         * @description List every registered skill (issue #826).
+         *
+         *     Reads the ``skill_lock`` projection, the same read model run-time
+         *     resolution uses, so what this reports is what a run would resolve.
+         */
+        get: operations["list_skills_skills_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/skills/storage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Skill Storage Stats
+         * @description Report how much space registered skill trees occupy.
+         *
+         *     Eviction is deliberately not implemented, so size is made observable
+         *     rather than assumed small.
+         */
+        get: operations["get_skill_storage_stats_skills_storage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/skills/registrations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Lookup Skill Registration
+         * @description Report whether this skill triple is already registered.
+         *
+         *     WHY a read surface exists: the skills API had only a write endpoint, so a
+         *     caller could not distinguish an already-stored skill from a new one without
+         *     uploading the whole tree. The returned sha is the cache key.
+         */
+        get: operations["lookup_skill_registration_skills_registrations_get"];
+        put?: never;
+        /**
+         * Register Skill Endpoint
+         * @description Register a skill by uploading the cloned tree (issue #772).
+         *
+         *     The CLI clones the source locally and POSTs the tree contents here. The
+         *     API decodes the base64 file contents, computes the sha256 over the
+         *     normalized tree, uploads to storage, and dispatches a
+         *     ``RegisterSkillCommand`` against the existing aggregate. Idempotent on
+         *     re-submission of the same ``(source_url, version, skill_name)``.
+         */
+        post: operations["register_skill_endpoint_skills_registrations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/skills/by-name/{skill_name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Skill Detail
+         * @description Every registration sharing a skill name (issue #826).
+         *
+         *     A name is not unique - the same skill can be pinned at several versions,
+         *     and two sources can publish the same name - so all matches are returned
+         *     rather than an arbitrary one.
+         */
+        get: operations["get_skill_detail_skills_by_name__skill_name__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Metrics Endpoint
+         * @description Get aggregated metrics across all workflows or for a specific workflow.
+         */
+        get: operations["get_metrics_endpoint_metrics_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/capture/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Capture Status
+         * @description Recorded session-capture verdicts, newest first.
+         */
+        get: operations["get_capture_status_capture_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/observability/sessions/{session_id}/tools": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Tool Timeline Endpoint
+         * @description Get tool execution timeline for a session.
+         */
+        get: operations["get_tool_timeline_endpoint_observability_sessions__session_id__tools_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/observability/sessions/{session_id}/tokens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Token Metrics Endpoint
+         * @description Get token usage metrics for a session.
+         */
+        get: operations["get_token_metrics_endpoint_observability_sessions__session_id__tokens_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/costs/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Session Costs Endpoint
+         * @description List session costs with optional filtering.
+         */
+        get: operations["list_session_costs_endpoint_costs_sessions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/costs/sessions/{session_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Session Cost Endpoint
+         * @description Get cost for a specific session.
+         */
+        get: operations["get_session_cost_endpoint_costs_sessions__session_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/costs/executions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Execution Costs Endpoint
+         * @description List execution costs.
+         */
+        get: operations["list_execution_costs_endpoint_costs_executions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/costs/executions/{execution_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Execution Cost Endpoint
+         * @description Get aggregated cost for a workflow execution.
+         */
+        get: operations["get_execution_cost_endpoint_costs_executions__execution_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/costs/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Cost Summary Endpoint
+         * @description Get summary of all costs across sessions and executions.
+         */
+        get: operations["get_cost_summary_endpoint_costs_summary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/events/recent": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Recent Activity Endpoint
+         * @description Get recent activity events for the global dashboard feed.
+         */
+        get: operations["get_recent_activity_endpoint_events_recent_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/events/sessions/{session_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Session Events Endpoint
+         * @description Get all events for a session.
+         */
+        get: operations["get_session_events_endpoint_events_sessions__session_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/events/sessions/{session_id}/timeline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Session Timeline Endpoint
+         * @description Get a timeline view of session events.
+         */
+        get: operations["get_session_timeline_endpoint_events_sessions__session_id__timeline_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/events/sessions/{session_id}/costs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Session Costs Endpoint
+         * @description Get cost summary for a session.
+         */
+        get: operations["get_session_costs_endpoint_events_sessions__session_id__costs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/events/sessions/{session_id}/tools": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Session Tools Endpoint
+         * @description Get tool usage summary for a session.
+         */
+        get: operations["get_session_tools_endpoint_events_sessions__session_id__tools_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/github/repos": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Accessible Repos Endpoint
+         * @description List repositories accessible to the GitHub App.
+         *
+         *     With no installation_id, aggregates every installation. The last complete
+         *     listing is cached and served as ``complete`` while under a minute old;
+         *     otherwise GitHub is asked live, and an older listing is served as
+         *     ``partial`` only if GitHub cannot be asked. The GitHub App's
+         *     ``installation`` and ``installation_repositories`` webhooks invalidate the
+         *     cache at once. A single installation_id is always asked live.
+         *
+         *     ``lookup`` says whether a repo missing from ``repos`` is known to be out of
+         *     the App's reach (``complete``) or merely went unseen because GitHub failed.
+         */
+        get: operations["list_accessible_repos_endpoint_github_repos_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/conversations/{session_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Conversation Log Endpoint
+         * @description Get conversation log for a session.
+         */
+        get: operations["get_conversation_log_endpoint_conversations__session_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/conversations/{session_id}/metadata": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Conversation Metadata Endpoint
+         * @description Get conversation metadata for a session.
+         */
+        get: operations["get_conversation_metadata_endpoint_conversations__session_id__metadata_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/triggers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Triggers Endpoint
+         * @description List all trigger rules.
+         */
+        get: operations["list_triggers_endpoint_triggers_get"];
+        put?: never;
+        /**
+         * Register Trigger Endpoint
+         * @description Register a new trigger rule.
+         */
+        post: operations["register_trigger_endpoint_triggers_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/triggers/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get All History Endpoint
+         * @description Get all trigger activity (global).
+         */
+        get: operations["get_all_history_endpoint_triggers_history_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/triggers/{trigger_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Trigger Endpoint
+         * @description Get trigger details.
+         */
+        get: operations["get_trigger_endpoint_triggers__trigger_id__get"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete Trigger Endpoint
+         * @description Delete a trigger rule.
+         */
+        delete: operations["delete_trigger_endpoint_triggers__trigger_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Trigger Endpoint
+         * @description Update trigger (pause/resume).
+         */
+        patch: operations["update_trigger_endpoint_triggers__trigger_id__patch"];
+        trace?: never;
+    };
+    "/triggers/{trigger_id}/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Trigger History Endpoint
+         * @description Get execution history for a trigger.
+         */
+        get: operations["get_trigger_history_endpoint_triggers__trigger_id__history_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/triggers/presets/{preset_name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Enable Preset Endpoint
+         * @description Enable a preset for a repository.
+         */
+        post: operations["enable_preset_endpoint_triggers_presets__preset_name__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/webhooks/github": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Github Webhook Endpoint
+         * @description Handle GitHub webhooks.
+         */
+        post: operations["github_webhook_endpoint_webhooks_github_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sse/executions/{execution_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Execution Sse
+         * @description Stream domain events for a single execution.
+         *
+         *     Sends a ``connected`` handshake frame on connect, then forwards every
+         *     domain event emitted by the RealTimeProjection for this execution.
+         *     Closes automatically when a terminal event (WorkflowCompleted /
+         *     WorkflowFailed) is broadcast, or when the client disconnects.
+         */
+        get: operations["execution_sse_sse_executions__execution_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sse/activity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Activity Sse
+         * @description Stream the global activity feed (git events, system-wide activity).
+         *
+         *     Runs indefinitely until the client disconnects.  There is no terminal
+         *     sentinel for the activity channel, it never completes.
+         */
+        get: operations["activity_sse_sse_activity_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sse/health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Sse Health
+         * @description Health check for the SSE subsystem.
+         *
+         *     Returns active subscriber and execution counts from the RealTimeProjection.
+         */
+        get: operations["sse_health_sse_health_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/organizations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Organizations Endpoint
+         * @description List all organizations.
+         */
+        get: operations["list_organizations_endpoint_organizations_get"];
+        put?: never;
+        /**
+         * Create Organization Endpoint
+         * @description Create a new organization.
+         */
+        post: operations["create_organization_endpoint_organizations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/organizations/{organization_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Organization Endpoint
+         * @description Get organization details.
+         */
+        get: operations["get_organization_endpoint_organizations__organization_id__get"];
+        /**
+         * Update Organization Endpoint
+         * @description Update an organization.
+         */
+        put: operations["update_organization_endpoint_organizations__organization_id__put"];
+        post?: never;
+        /**
+         * Delete Organization Endpoint
+         * @description Soft-delete an organization.
+         */
+        delete: operations["delete_organization_endpoint_organizations__organization_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/systems": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Systems Endpoint
+         * @description List systems with optional organization filter.
+         */
+        get: operations["list_systems_endpoint_systems_get"];
+        put?: never;
+        /**
+         * Create System Endpoint
+         * @description Create a new system.
+         */
+        post: operations["create_system_endpoint_systems_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/systems/{system_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get System Endpoint
+         * @description Get system details.
+         */
+        get: operations["get_system_endpoint_systems__system_id__get"];
+        /**
+         * Update System Endpoint
+         * @description Update a system.
+         */
+        put: operations["update_system_endpoint_systems__system_id__put"];
+        post?: never;
+        /**
+         * Delete System Endpoint
+         * @description Soft-delete a system.
+         */
+        delete: operations["delete_system_endpoint_systems__system_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/systems/{system_id}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get System Status Endpoint
+         * @description Get cross-repo health overview for a system.
+         */
+        get: operations["get_system_status_endpoint_systems__system_id__status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/systems/{system_id}/cost": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get System Cost Endpoint
+         * @description Get cost breakdown for a system.
+         */
+        get: operations["get_system_cost_endpoint_systems__system_id__cost_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/systems/{system_id}/activity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get System Activity Endpoint
+         * @description Get execution timeline for a system.
+         */
+        get: operations["get_system_activity_endpoint_systems__system_id__activity_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/systems/{system_id}/patterns": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get System Patterns Endpoint
+         * @description Get recurring failure and cost patterns for a system.
+         */
+        get: operations["get_system_patterns_endpoint_systems__system_id__patterns_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/systems/{system_id}/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get System History Endpoint
+         * @description Get historical execution timeline for a system.
+         */
+        get: operations["get_system_history_endpoint_systems__system_id__history_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/repos": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Repos Endpoint
+         * @description List repos with optional filters.
+         */
+        get: operations["list_repos_endpoint_repos_get"];
+        put?: never;
+        /**
+         * Register Repo Endpoint
+         * @description Register a new repo.
+         */
+        post: operations["register_repo_endpoint_repos_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/repos/{repo_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Repo Endpoint
+         * @description Get repo details.
+         */
+        get: operations["get_repo_endpoint_repos__repo_id__get"];
+        /**
+         * Update Repo Endpoint
+         * @description Update mutable fields of a repo.
+         */
+        put: operations["update_repo_endpoint_repos__repo_id__put"];
+        post?: never;
+        /**
+         * Deregister Repo Endpoint
+         * @description Deregister (soft-delete) a repo.
+         */
+        delete: operations["deregister_repo_endpoint_repos__repo_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/repos/{repo_id}/assign": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Assign Repo To System Endpoint
+         * @description Assign a repo to a system.
+         */
+        post: operations["assign_repo_to_system_endpoint_repos__repo_id__assign_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/repos/{repo_id}/unassign": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Unassign Repo From System Endpoint
+         * @description Unassign a repo from its system.
+         */
+        post: operations["unassign_repo_from_system_endpoint_repos__repo_id__unassign_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/repos/{repo_id}/health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Repo Health Endpoint
+         * @description Get health snapshot for a repo.
+         */
+        get: operations["get_repo_health_endpoint_repos__repo_id__health_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/repos/{repo_id}/cost": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Repo Cost Endpoint
+         * @description Get cost breakdown for a repo.
+         */
+        get: operations["get_repo_cost_endpoint_repos__repo_id__cost_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/repos/{repo_id}/activity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Repo Activity Endpoint
+         * @description Get execution timeline for a repo.
+         */
+        get: operations["get_repo_activity_endpoint_repos__repo_id__activity_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/repos/{repo_id}/failures": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Repo Failures Endpoint
+         * @description Get recent failures for a repo.
+         */
+        get: operations["get_repo_failures_endpoint_repos__repo_id__failures_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/repos/{repo_id}/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Repo Sessions Endpoint
+         * @description Get agent sessions for a repo.
+         */
+        get: operations["get_repo_sessions_endpoint_repos__repo_id__sessions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/insights/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Global Overview Endpoint
+         * @description Get global overview of all systems and repos.
+         */
+        get: operations["get_global_overview_endpoint_insights_overview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/insights/cost": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Global Cost Endpoint
+         * @description Get global cost breakdown, optionally filtered by system.
+         */
+        get: operations["get_global_cost_endpoint_insights_cost_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/insights/contribution-heatmap": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Contribution Heatmap Endpoint
+         * @description Get daily contribution heatmap data.
+         */
+        get: operations["get_contribution_heatmap_endpoint_insights_contribution_heatmap_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/maintenance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Maintenance Mode
+         * @description Report whether new executions are being admitted.
+         *
+         *     Read through to the durable store, never from process memory, so this
+         *     answers for the system rather than for this container.
+         */
+        get: operations["get_maintenance_mode_maintenance_get"];
+        /**
+         * Set Maintenance Mode
+         * @description Pause or resume execution admission.
+         *
+         *     Returns only once the state is durably stored AND every admission already
+         *     part-way through deciding has finished deciding. That ordering is the whole
+         *     point: a caller holding this response knows not only that the flag is set
+         *     but that nothing is still on its way through the old answer, so there is no
+         *     window on the setting side either.
+         *
+         *     Set through the gate rather than the port, because the port can only store
+         *     the flag - it cannot hold the door while it does so.
+         *
+         *     Clearing is only done when the work the deploy paused has been woken, so a
+         *     failed announcement answers 503 and not 200 (#1387). Admission IS open by
+         *     then - the 503 body says so - but the triggers parked during the deploy are
+         *     still asleep and nothing else will re-offer them, so reporting success here
+         *     would close the deploy over work that never runs. Repeating the clear
+         *     re-announces, which is why this is a retryable status and not a 500.
+         *
+         *     Pausing waits only for starts that already hold an execution slot and have
+         *     not written their start event, and only for a bound (#1617). Starts queued
+         *     for a slot stay queued and start after the clear. A pause that runs out of
+         *     that bound answers 503 with the flag NOT set: admission is still open.
+         */
+        put: operations["set_maintenance_mode_maintenance_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/features": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Features
+         * @description Report which optional features are enabled on this deployment.
+         */
+        get: operations["get_features_features_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/feedback/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Stats
+         * @description Get aggregate statistics for feedback items.
+         */
+        get: operations["get_stats_feedback_stats_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/feedback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Feedback
+         * @description List all feedback items with optional filtering.
+         */
+        get: operations["list_feedback_feedback_get"];
+        put?: never;
+        /**
+         * Create Feedback
+         * @description Create a new feedback item.
+         */
+        post: operations["create_feedback_feedback_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/feedback/{feedback_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Feedback
+         * @description Get a single feedback item with media metadata.
+         */
+        get: operations["get_feedback_feedback__feedback_id__get"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete Feedback
+         * @description Delete a feedback item and all associated media.
+         */
+        delete: operations["delete_feedback_feedback__feedback_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Feedback
+         * @description Update a feedback item (status, priority, assignment, notes).
+         */
+        patch: operations["update_feedback_feedback__feedback_id__patch"];
+        trace?: never;
+    };
+    "/feedback/{feedback_id}/media": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upload Media
+         * @description Upload a media file (screenshot or voice note).
+         */
+        post: operations["upload_media_feedback__feedback_id__media_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/feedback/{feedback_id}/media/{media_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Media
+         * @description Download a media file.
+         */
+        get: operations["get_media_feedback__feedback_id__media__media_id__get"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete Media
+         * @description Delete a media file.
+         */
+        delete: operations["delete_media_feedback__feedback_id__media__media_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Root
+         * @description Root endpoint with API info.
+         *
+         *     Reports a null release and ``version_status: "unavailable"`` rather than
+         *     the ``"unknown"`` sentinel it used to serve. It was a flat map of
+         *     strings, so it had nowhere to put a null and nothing to name the state
+         *     with — which made it the last surface still answering "which build?"
+         *     with a literal, the thing #1380 exists to remove (see ``RootResponse``).
+         */
+        get: operations["root__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Health
+         * @description Health check endpoint with detailed subscription status.
+         *
+         *     This is the container's LIVENESS check (#1575): while the gate withholds
+         *     the API it answers 200 with the gate's phase - "starting", or "failed"
+         *     in the moment between a late startup failure and the process exiting -
+         *     without probing anything startup has not built. "healthy" is what
+         *     readiness waits for, so it is only ever said once the gate is ready.
+         */
+        get: operations["health_health_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/version": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Version
+         * @description Which build is serving this API.
+         *
+         *     Returns the same ``BuildInfo`` block ``/health`` carries, rather than a
+         *     flat mapping holding ``version_string()``. That function yields the
+         *     ``"unknown"`` sentinel when package metadata cannot be read, and a bare
+         *     string in a version field is indistinguishable to a client from a release
+         *     actually called that - the defect #1380 exists to remove. ``BuildInfo``
+         *     makes the absence a declared state (``version: null`` plus
+         *     ``version_status``) instead of a word.
+         */
+        get: operations["version_version_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+}
+export type webhooks = Record<string, never>;
+export interface components {
+    schemas: {
+        /**
+         * AddGlobalClaudePluginRequest
+         * @description Request body for ``POST /claude-plugins/global`` (Phase A redesign).
+         *
+         *     Takes the display name plus version of an already-registered plugin. The
+         *     handler looks the entry up in the lock projection and refuses to add
+         *     anything that has not been registered first via
+         *     ``POST /claude-plugins/registrations``.
+         */
+        AddGlobalClaudePluginRequest: {
+            /** Name */
+            name: string;
+            /** Version */
+            version: string;
+        };
+        /**
+         * AddTagsRequest
+         * @description Tags to add to an execution or a workflow. Adds only: never replaces the set.
+         */
+        AddTagsRequest: {
+            /**
+             * Tags
+             * @description Tags to add. Normalised (trimmed, lowercased, deduped); an invalid tag is rejected with 422 and nothing is written. Tags already present are a no-op.
+             */
+            tags: string[];
+        };
+        /**
+         * AliasResolutionBasis
+         * @description How confident an alias -> model id resolution is.
+         * @enum {string}
+         */
+        AliasResolutionBasis: "translated" | "expected";
+        /**
+         * ArtifactActionResponse
+         * @description Response for artifact update/delete actions.
+         */
+        ArtifactActionResponse: {
+            /** Artifact Id */
+            artifact_id: string;
+            /** Status */
+            status: string;
+        };
+        /** ArtifactContentResponse */
+        ArtifactContentResponse: {
+            /** Artifact Id */
+            artifact_id: string;
+            /** Content */
+            content: string | null;
+            /** Content Type */
+            content_type: string;
+            /** Size Bytes */
+            size_bytes: number | null;
+        };
+        /**
+         * ArtifactListResponse
+         * @description One page of artifacts, and the numbers describing what it is a page of.
+         *
+         *     The same envelope ``/executions`` and ``/sessions`` answer with, for the
+         *     same reason: this endpoint used to return a bare array, so a response of 50
+         *     rows was indistinguishable from a collection of 50 and a client had no
+         *     number to page against (#1204). ``limit`` was the only parameter it
+         *     honoured and it capped at 200, which made 200 artifacts the whole of
+         *     reachable history.
+         */
+        ArtifactListResponse: {
+            /** Artifacts */
+            artifacts?: components["schemas"]["ArtifactSummaryResponse"][];
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+            /**
+             * Page
+             * @default 1
+             */
+            page: number;
+            /**
+             * Page Size
+             * @default 50
+             */
+            page_size: number;
+            /**
+             * Excluded Undated
+             * @default 0
+             */
+            excluded_undated: number;
+            /** Type Counts */
+            type_counts?: {
+                [key: string]: number;
+            };
+        };
+        /**
+         * ArtifactResponse
+         * @description Detailed artifact response.
+         */
+        ArtifactResponse: {
+            /** Id */
+            id: string;
+            /** Workflow Id */
+            workflow_id: string | null;
+            /** Phase Id */
+            phase_id: string | null;
+            /** Session Id */
+            session_id: string | null;
+            /** Artifact Type */
+            artifact_type: string;
+            /**
+             * Is Primary Deliverable
+             * @default true
+             */
+            is_primary_deliverable: boolean;
+            /** Content */
+            content?: string | null;
+            /**
+             * Content Type
+             * @default text/markdown
+             */
+            content_type: string;
+            /** Content Hash */
+            content_hash?: string | null;
+            /**
+             * Size Bytes
+             * @default 0
+             */
+            size_bytes: number;
+            /** Title */
+            title?: string | null;
+            /** Derived From */
+            derived_from?: string[];
+            /** Created At */
+            created_at?: string | null;
+            /** Created By */
+            created_by?: string | null;
+            /** Metadata */
+            metadata?: {
+                [key: string]: unknown;
+            };
+            /** Agent Provider */
+            agent_provider?: string | null;
+            /** Agent Model */
+            agent_model?: string | null;
+        };
+        /**
+         * ArtifactSummaryResponse
+         * @description Summary of an artifact.
+         */
+        ArtifactSummaryResponse: {
+            /** Id */
+            id: string;
+            /** Workflow Id */
+            workflow_id: string | null;
+            /** Execution Id */
+            execution_id?: string | null;
+            /** Phase Id */
+            phase_id: string | null;
+            /** Artifact Type */
+            artifact_type: string;
+            /** Title */
+            title?: string | null;
+            /**
+             * Size Bytes
+             * @default 0
+             */
+            size_bytes: number;
+            /** Created At */
+            created_at?: string | null;
+            /** Agent Provider */
+            agent_provider?: string | null;
+            /** Agent Model */
+            agent_model?: string | null;
+        };
+        /**
+         * AssignRepoToSystemRequest
+         * @description Request body for assigning a repo to a system.
+         */
+        AssignRepoToSystemRequest: {
+            /** System Id */
+            system_id: string;
+        };
+        /**
+         * AttachEvalRequest
+         * @description The eval to attach an execution to (#967).
+         */
+        AttachEvalRequest: {
+            /** @description The eval to attach to. It must exist and not be archived. Attaching to the eval the run already belongs to is a no-op; another eval needs a detach first. */
+            eval_id: components["schemas"]["EvalId"];
+        };
+        /**
+         * BodyAvailability
+         * @enum {string}
+         */
+        BodyAvailability: "present" | "pending" | "missing" | "expired" | "unknown";
+        /** Body_upload_artifact_endpoint_artifacts__artifact_id__upload_post */
+        Body_upload_artifact_endpoint_artifacts__artifact_id__upload_post: {
+            /** File */
+            file: string;
+        };
+        /** Body_upload_media_feedback__feedback_id__media_post */
+        Body_upload_media_feedback__feedback_id__media_post: {
+            /** File */
+            file: string;
+            media_type: components["schemas"]["MediaType"];
+        };
+        /**
+         * BranchObservationInfo
+         * @description One branch of a failed phase's workspace, as git had it (#1200).
+         *
+         *     THE ANSWER TO "WHERE DO I LOOK", made machine-readable. A phase can push
+         *     complete work and still fail - most often because it wrote no deliverable,
+         *     which #1167 correctly refuses to pass - and the failure then named no
+         *     branch, so nothing pointed at commits that were merged by hand twice in one
+         *     day once a human found them.
+         *
+         *     EVERY FIELD IS A READING, NOT AN ATTRIBUTION. `remote_commit` is what the
+         *     REMOTE ITSELF answered, asked while the workspace was still alive, and
+         *     `remote_commit_at_phase_start` is where this clone's tracking ref pointed
+         *     when the phase was handed that workspace. The two differing means the ref
+         *     moved. It does NOT mean this phase moved it, and no field here says so: a
+         *     push carries no author, so the same evidence is produced by a concurrent
+         *     process or a person. Two earlier versions of this claimed otherwise.
+         *
+         *     A RECORD EXISTS ONLY WHERE SOMETHING DIFFERS from how the phase found the
+         *     repository - the ref moved, or commits are sitting on no remote. The FIELD
+         *     is three-valued and the two empty answers must not be merged: absent/null
+         *     means nothing could look, `[]` means the workspace was read and every
+         *     branch is exactly where the phase found it. Only a moved ref can be
+         *     recovered by fetching.
+         */
+        BranchObservationInfo: {
+            /** Repo */
+            repo: string;
+            /** Branch */
+            branch: string;
+            /** Remote */
+            remote: string | null;
+            /** Remote Commit */
+            remote_commit: string | null;
+            /** Remote Commit At Phase Start */
+            remote_commit_at_phase_start: string | null;
+            /** Unpushed Commits */
+            unpushed_commits: number;
+        };
+        /**
+         * BuildInfo
+         * @description Which build is answering. Populated by ``syn_api.build_info``.
+         *
+         *     Reported in three places from that one source: this block on ``GET /health``,
+         *     the flat pair on ``GET /``, and ``openapi.json``'s ``info.version``. All
+         *     three used to be, or were derived from, a hardcoded literal that had drifted
+         *     twenty releases behind the installed package.
+         *
+         *     The release and its status come from ``_NamesTheRunningRelease``. What this
+         *     model adds is the two build-time stamps, which only an image can supply,
+         *     and when this process went live, which only the process can.
+         */
+        BuildInfo: {
+            /**
+             * Version
+             * @description Installed release of the syn-api distribution, as reported by importlib.metadata. This is the same string pyproject.toml ships, so it identifies the build exactly — including beta suffixes (e.g. '0.29.1b3'). Null when the distribution's metadata cannot be read, because there is no honest release to report then and a plausible one would mislead; read version_status to tell that case apart without inspecting the null.
+             */
+            version: string | null;
+            /**
+             * Image Tag
+             * @description Container image tag this process was built from, stamped at image build time. Null when the build did not stamp one — which is a different fact from an unknown tag, and is reported as such.
+             */
+            image_tag?: string | null;
+            /**
+             * Commit
+             * @description Git commit the image was built from, stamped at image build time. Null when the build did not stamp one.
+             */
+            commit?: string | null;
+            /**
+             * Started At
+             * Format: date-time
+             * @description When this API process started (UTC, ISO 8601): the moment the running deployment went live. Captured once per process, so it changes only when the process is replaced, which is what a redeploy does.
+             */
+            started_at: string;
+            /**
+             * Version Status
+             * @description Whether the running release could be read at all. 'installed' means version names the distribution this process was installed from; 'unavailable' means the distribution's metadata could not be read, version is null, and nothing has been invented to fill it.
+             * @enum {string}
+             */
+            readonly version_status: "installed" | "unavailable";
+            /**
+             * Started At Display
+             * @description started_at as an absolute UTC label, e.g. '2026-10-04 06:47 UTC'. Relative and local-time renderings are the client's to make from started_at.
+             */
+            readonly started_at_display: string;
+        };
+        /**
+         * CancelRequest
+         * @description Request to cancel an execution.
+         */
+        CancelRequest: {
+            /** Reason */
+            reason?: string | null;
+        };
+        /** CaptureReceipt */
+        CaptureReceipt: {
+            node: components["schemas"]["InventoryNodeRef"];
+            availability: components["schemas"]["BodyAvailability"];
+            /** Receipt Sequence */
+            receipt_sequence: number;
+            evidence: components["schemas"]["EvidenceReference"];
+            /**
+             * Destination
+             * @default local
+             * @enum {string}
+             */
+            destination: "local" | "remote";
+            /** Transcript Revision */
+            transcript_revision?: string | null;
+            /** Archived Byte Hash */
+            archived_byte_hash?: string | null;
+        };
+        /**
+         * CaptureRevisionHashes
+         * @description Names the representation behind each hash one capture receipt carries.
+         *
+         *     ``transcript_revision`` is not self-describing: a local receipt stores the
+         *     archived byte SHA-256 there, a remote receipt the APSS original-content hash.
+         *     ``transcript_revision_kind`` says which, or ``unqualified`` when the value
+         *     matches neither known form. Never compare hashes of different kinds.
+         */
+        CaptureRevisionHashes: {
+            /** Transcript Revision Kind */
+            transcript_revision_kind?: ("archived_bytes_sha256" | "source_content_hash" | "unqualified") | null;
+            /**
+             * Archived Bytes Sha256
+             * @description SHA-256 of the exact archived bytes; the local transcript read key.
+             */
+            archived_bytes_sha256?: string | null;
+            /**
+             * Source Content Hash
+             * @description APSS original-content hash reported by a replica receipt.
+             */
+            source_content_hash?: string | null;
+        };
+        /**
+         * CaptureStatusEntry
+         * @description One recorded session-capture verdict.
+         *
+         *     Mirrors the observation the workspace adapter writes on the observability
+         *     lane. The observed fields are None exactly when something went wrong, which
+         *     is when a backfill needs them most - so the expected values are carried
+         *     alongside rather than in place of them.
+         */
+        CaptureStatusEntry: {
+            /** Session Id */
+            session_id: string;
+            /** Execution Id */
+            execution_id?: string | null;
+            /** Phase Id */
+            phase_id?: string | null;
+            /** Workspace Id */
+            workspace_id?: string | null;
+            /** Recorded At */
+            recorded_at?: string | null;
+            /** State */
+            state: string;
+            /** Needs Backfill */
+            needs_backfill: boolean;
+            /** Partition */
+            partition?: string | null;
+            /** Expected Deployment */
+            expected_deployment?: string | null;
+            /** Origin Deployment */
+            origin_deployment?: string | null;
+            /** Agent Session Ids */
+            agent_session_ids?: string[] | null;
+        };
+        /**
+         * CaptureStatusResponse
+         * @description Recorded capture verdicts, newest first.
+         */
+        CaptureStatusResponse: {
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+            /**
+             * Needs Backfill Count
+             * @default 0
+             */
+            needs_backfill_count: number;
+            /**
+             * Unattributable Count
+             * @default 0
+             */
+            unattributable_count: number;
+            /**
+             * Scanned
+             * @default 0
+             */
+            scanned: number;
+            /**
+             * Truncated
+             * @default false
+             */
+            truncated: boolean;
+            /** Entries */
+            entries?: components["schemas"]["CaptureStatusEntry"][];
+        };
+        /**
+         * ClaudePluginFileEntry
+         * @description One file in the uploaded plugin tree (``POST /claude-plugins/registrations``).
+         *
+         *     ``content_b64`` is the base64-encoded byte content; the API decodes it back
+         *     into raw bytes before hashing/uploading. base64 keeps binary-safe payloads
+         *     inside the JSON envelope without forcing the caller to choose an encoding.
+         */
+        ClaudePluginFileEntry: {
+            /** Rel Path */
+            rel_path: string;
+            /** Content B64 */
+            content_b64: string;
+        };
+        /**
+         * ClaudePluginLockListResponse
+         * @description List of every entry currently in the claude plugin lock projection.
+         */
+        ClaudePluginLockListResponse: {
+            /** Plugins */
+            plugins?: components["schemas"]["ClaudePluginLockResponse"][];
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+        };
+        /**
+         * ClaudePluginLockResponse
+         * @description A single lock entry (one ``(source_url, version)`` pair).
+         */
+        ClaudePluginLockResponse: {
+            /** Name */
+            name: string;
+            /** Source Url */
+            source_url: string;
+            /** Version */
+            version: string;
+            /** Resolved Sha */
+            resolved_sha: string;
+            /** Tree Storage Prefix */
+            tree_storage_prefix: string;
+            /** Registered At */
+            registered_at?: string | null;
+        };
+        /**
+         * CodexAuthState
+         * @description Freshness of the configured codex credential.
+         * @enum {string}
+         */
+        CodexAuthState: "absent" | "ok" | "expiring" | "expired" | "unreadable";
+        /**
+         * CodexAuthStatus
+         * @description A non-secret description of the configured codex credential.
+         */
+        CodexAuthStatus: {
+            state: components["schemas"]["CodexAuthState"];
+            /**
+             * Expires In Hours
+             * @description Hours until the access token expires. Negative once expired.
+             */
+            expires_in_hours?: number | null;
+            /**
+             * Expires At
+             * @description Access token expiry, UTC.
+             */
+            expires_at?: string | null;
+            /**
+             * Detail
+             * @description Human-readable summary. Never contains token material.
+             */
+            detail: string;
+        };
+        /**
+         * ConditionRequest
+         * @description A single trigger condition (field operator value).
+         */
+        ConditionRequest: {
+            /** Field */
+            field: string;
+            /** Operator */
+            operator: string;
+            /** Value */
+            value: string;
+        };
+        /**
+         * ContributionHeatmapResponse
+         * @description Contribution heatmap data.
+         */
+        ContributionHeatmapResponse: {
+            /** Metric */
+            metric: string;
+            /** Start Date */
+            start_date: string;
+            /** End Date */
+            end_date: string;
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+            /** Days */
+            days?: components["schemas"]["HeatmapDayBucketResponse"][];
+            /** Filter */
+            filter?: {
+                [key: string]: string | null;
+            };
+        };
+        /**
+         * ControlResponse
+         * @description Response from a control command.
+         */
+        ControlResponse: {
+            /** Success */
+            success: boolean;
+            /** Execution Id */
+            execution_id: string;
+            /** State */
+            state: string;
+            /** Message */
+            message?: string | null;
+            /** Error */
+            error?: string | null;
+        };
+        /**
+         * ConversationLineResponse
+         * @description A single line from the conversation log.
+         */
+        ConversationLineResponse: {
+            /** Line Number */
+            line_number: number;
+            /** Raw */
+            raw: string;
+            /** Parsed */
+            parsed?: {
+                [key: string]: unknown;
+            } | null;
+            /** Event Type */
+            event_type?: string | null;
+            /** Tool Name */
+            tool_name?: string | null;
+            /** Content Preview */
+            content_preview?: string | null;
+        };
+        /**
+         * ConversationLogResponse
+         * @description Response containing conversation log.
+         */
+        ConversationLogResponse: {
+            /** Session Id */
+            session_id: string;
+            /** Lines */
+            lines: components["schemas"]["ConversationLineResponse"][];
+            /** Total Lines */
+            total_lines: number;
+            /** Metadata */
+            metadata?: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /**
+         * ConversationMetadataResponse
+         * @description Conversation index metadata.
+         */
+        ConversationMetadataResponse: {
+            /** Session Id */
+            session_id: string;
+            /** Execution Id */
+            execution_id?: string | null;
+            /** Workflow Id */
+            workflow_id?: string | null;
+            /** Phase Id */
+            phase_id?: string | null;
+            /** Event Count */
+            event_count?: number | null;
+            /** Total Input Tokens */
+            total_input_tokens?: number | null;
+            /** Total Output Tokens */
+            total_output_tokens?: number | null;
+            /** Tool Counts */
+            tool_counts?: {
+                [key: string]: number;
+            } | null;
+            /** Started At */
+            started_at?: string | null;
+            /** Completed At */
+            completed_at?: string | null;
+            /** Model */
+            model?: string | null;
+            /** Requested Model */
+            requested_model?: string | null;
+            /** Success */
+            success?: boolean | null;
+            /** Size Bytes */
+            size_bytes?: number | null;
+            /**
+             * Model Display
+             * @description The model for humans: the reported id verbatim, or 'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9).
+             */
+            readonly model_display: string;
+        };
+        /**
+         * CostOutlierResponse
+         * @description An execution with unusually high cost.
+         */
+        CostOutlierResponse: {
+            /**
+             * Execution Id
+             * @default
+             */
+            execution_id: string;
+            /**
+             * Repo Full Name
+             * @default
+             */
+            repo_full_name: string;
+            /**
+             * Workflow Name
+             * @default
+             */
+            workflow_name: string;
+            /**
+             * Cost Usd
+             * @default 0
+             */
+            cost_usd: string;
+            /**
+             * Median Cost Usd
+             * @default 0
+             */
+            median_cost_usd: string;
+            /**
+             * Deviation Factor
+             * @default 0
+             */
+            deviation_factor: number;
+            /**
+             * Executed At
+             * @default
+             */
+            executed_at: string;
+        };
+        /**
+         * CoverageState
+         * @enum {string}
+         */
+        CoverageState: "unknown" | "open" | "reconciled" | "missing" | "unsupported" | "conflicting";
+        /**
+         * CpuThrottling
+         * @description CPU throttling of the process answering /health, since its cgroup was created.
+         */
+        CpuThrottling: {
+            /**
+             * Status
+             * @description 'measured' when cgroup v2 cpu.stat reported throttling counters; 'unknown' on cgroup v1, outside a container, or with no CPU limit set. Unknown is not zero: the counters are null, not 0.
+             * @enum {string}
+             */
+            status: "measured" | "unknown";
+            /**
+             * Nr Periods
+             * @description Scheduling periods in which this cgroup was runnable.
+             */
+            nr_periods?: number | null;
+            /**
+             * Nr Throttled
+             * @description Periods in which the cgroup hit its CPU limit and was held back. nr_throttled / nr_periods is the share of time the control plane was starved.
+             */
+            nr_throttled?: number | null;
+            /**
+             * Throttled Usec
+             * @description Total time spent throttled, in microseconds.
+             */
+            throttled_usec?: number | null;
+        };
+        /** CreateArtifactRequest */
+        CreateArtifactRequest: {
+            /** Workflow Id */
+            workflow_id: string;
+            /** Artifact Type */
+            artifact_type: string;
+            /** Title */
+            title: string;
+            /** Content */
+            content: string;
+            /** Phase Id */
+            phase_id?: string | null;
+            /** Session Id */
+            session_id?: string | null;
+            /**
+             * Content Type
+             * @default text/markdown
+             */
+            content_type: string;
+        };
+        /** CreateArtifactResponse */
+        CreateArtifactResponse: {
+            /** Id */
+            id: string;
+            /** Title */
+            title: string;
+            /** Artifact Type */
+            artifact_type: string;
+            /** Status */
+            status: string;
+        };
+        /**
+         * CreateEvalRequest
+         * @description A new eval (#967). The server mints its id; see `EvalCreatedResponse`.
+         */
+        CreateEvalRequest: {
+            /** Name */
+            name: string;
+            /**
+             * Goal
+             * @description What the eval sets out to measure.
+             */
+            goal: string;
+            /**
+             * Starting Workflow Id
+             * @description The workflow a run uses when it names none.
+             */
+            starting_workflow_id?: string | null;
+            /** Baseline Repos */
+            baseline_repos?: components["schemas"]["EvalBaselineRepoRequest"][];
+            /** Tags */
+            tags?: string[];
+        };
+        /**
+         * CreateOrganizationRequest
+         * @description Request body for creating a new organization.
+         */
+        CreateOrganizationRequest: {
+            /** Name */
+            name: string;
+            /** Slug */
+            slug: string;
+            /**
+             * Created By
+             * @default api
+             */
+            created_by: string;
+        };
+        /**
+         * CreateSystemRequest
+         * @description Request body for creating a new system.
+         */
+        CreateSystemRequest: {
+            /** Organization Id */
+            organization_id: string;
+            /** Name */
+            name: string;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /**
+             * Created By
+             * @default api
+             */
+            created_by: string;
+        };
+        /** CreateWorkflowRequest */
+        CreateWorkflowRequest: {
+            /** Id */
+            id?: string | null;
+            /** Name */
+            name: string;
+            /**
+             * Workflow Type
+             * @default custom
+             */
+            workflow_type: string;
+            /**
+             * Classification
+             * @default standard
+             */
+            classification: string;
+            /**
+             * Repository Url
+             * @default
+             */
+            repository_url: string;
+            /**
+             * Repository Ref
+             * @default main
+             */
+            repository_ref: string;
+            /** Description */
+            description?: string | null;
+            /** Project Name */
+            project_name?: string | null;
+            /** Phases */
+            phases?: {
+                [key: string]: unknown;
+            }[] | null;
+            /** Input Declarations */
+            input_declarations?: {
+                [key: string]: unknown;
+            }[] | null;
+            /**
+             * Repos
+             * @description Default GitHub URLs for this workflow template (ADR-058). Can be overridden at execution time via the repos field on the execute request.
+             */
+            repos?: string[];
+            /**
+             * Requires Repos
+             * @description Whether this workflow requires repository access at execution time (ADR-058 #666). Set to false for research or analysis workflows that don't need repos.
+             * @default true
+             */
+            requires_repos: boolean;
+            /**
+             * Version
+             * @description Package version being installed (issue #822). Recorded on the template so an execution can be traced to the version that produced it. Reinstalling a matching version is refused unless force is set.
+             */
+            version?: string | null;
+            /**
+             * Source Digest
+             * @description Resolved source commit SHA for the package content (issue #822). A matching version resolving to a different digest is refused: that is the signature of a republished version.
+             */
+            source_digest?: string | null;
+            /**
+             * Force
+             * @description Overwrite an already-installed matching version.
+             * @default false
+             */
+            force: boolean;
+        };
+        /** CreateWorkflowResponse */
+        CreateWorkflowResponse: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Workflow Type */
+            workflow_type: string;
+            /** Classification */
+            classification: string;
+            /** Repository Url */
+            repository_url: string;
+            /** Requires Repos */
+            requires_repos: boolean;
+            /** Status */
+            status: string;
+            /** Warnings */
+            warnings?: string[];
+        };
+        /**
+         * DbPoolHealth
+         * @description One Postgres connection pool in this API process, at the moment of asking (#1583).
+         *
+         *     ``waiting`` greater than zero, or ``in_use`` equal to ``max_size``, means
+         *     requests are queueing for a connection rather than for the database itself.
+         */
+        DbPoolHealth: {
+            /**
+             * Name
+             * @description What the pool serves, e.g. 'projections' or 'agent_events'.
+             */
+            name: string;
+            /**
+             * Size
+             * @description Connections currently open.
+             */
+            size: number;
+            /**
+             * Max Size
+             * @description Most connections the pool will open.
+             */
+            max_size: number;
+            /**
+             * In Use
+             * @description Connections checked out right now.
+             */
+            in_use: number;
+            /**
+             * Waiting
+             * @description Callers blocked waiting for a connection right now.
+             */
+            waiting: number;
+        };
+        /**
+         * DegradedReason
+         * @description Reasons the API may enter degraded mode.
+         *
+         *     StrEnum so values serialize directly to JSON in health responses.
+         * @enum {string}
+         */
+        DegradedReason: "artifact_storage" | "claude_plugin_storage" | "skill_storage" | "conversation_storage" | "ui_feedback" | "subscription_coordinator" | "projection_catchup" | "projection_stalled" | "projection_dropped_event" | "projection_held" | "subscription_halted" | "event_poller" | "check_run_poller" | "anthropic_api_key" | "github_app" | "disk_space";
+        /**
+         * DelegationAttempt
+         * @description One delegate the phase's agent launched, as the platform observed it.
+         */
+        DelegationAttempt: {
+            /** Delegate Id */
+            delegate_id: string;
+            /** Target Harness */
+            target_harness: string;
+            outcome: components["schemas"]["DelegationOutcome"] | null;
+            /** Exit Code */
+            exit_code?: number | null;
+            /** Reason */
+            reason?: string | null;
+        };
+        /**
+         * DelegationFailure
+         * @description The typed account of a failed required delegation.
+         */
+        DelegationFailure: {
+            reason: components["schemas"]["DelegationFailureReason"];
+            /** Required Delegate */
+            required_delegate?: string | null;
+            /**
+             * Attempts
+             * @default []
+             */
+            attempts: components["schemas"]["DelegationAttempt"][];
+            /** Detail */
+            detail?: string | null;
+        };
+        /**
+         * DelegationFailureReason
+         * @description Why a required delegation is counted as not having happened.
+         * @enum {string}
+         */
+        DelegationFailureReason: "not_attempted" | "failed" | "unverifiable";
+        /**
+         * DelegationOutcome
+         * @description How a delegated run ended, in provider-neutral terms.
+         *
+         *     WHY NOT A BARE EXIT CODE (raised in review of this event): an integer exit
+         *     status is shell-specific baggage. The native same-harness fan-out path
+         *     reports a boolean success and has no process to exit; cancellation and
+         *     timeout have no natural integer either. Since these events are v1 and this
+         *     repo has no upcaster framework, encoding a shell assumption now would need
+         *     a v2 to undo.
+         * @enum {string}
+         */
+        DelegationOutcome: "succeeded" | "failed" | "cancelled" | "timed_out";
+        /** DeleteWorkflowResponse */
+        DeleteWorkflowResponse: {
+            /** Workflow Id */
+            workflow_id: string;
+            /** Status */
+            status: string;
+        };
+        /**
+         * DiskSpaceHealth
+         * @description Free space on the workspace volume, as /health reports it (#1560).
+         */
+        DiskSpaceHealth: {
+            /**
+             * Path
+             * @description Directory whose filesystem was measured.
+             */
+            path: string;
+            /**
+             * State
+             * @description 'low' degrades /health; 'critical' also refuses new executions.
+             * @enum {string}
+             */
+            state: "ok" | "unmeasurable" | "low" | "critical";
+            /**
+             * Free Percent
+             * @description Percent free; null when unmeasurable.
+             */
+            free_percent: number | null;
+            /**
+             * Free Bytes
+             * @description Bytes available; null when unmeasurable.
+             */
+            free_bytes: number | null;
+            /**
+             * Degraded Below Percent
+             * @description SYN_DISK_DEGRADED_BELOW_PERCENT.
+             */
+            degraded_below_percent: number;
+            /**
+             * Refuse Admission Below Percent
+             * @description SYN_DISK_REFUSE_ADMISSION_BELOW_PERCENT.
+             */
+            refuse_admission_below_percent: number;
+        };
+        /**
+         * EvalArchivedResponse
+         * @description The receipt for an archive, read from the Eval aggregate (#967).
+         */
+        EvalArchivedResponse: {
+            /** Eval Id */
+            eval_id: string;
+            /** Archived */
+            archived: boolean;
+        };
+        /**
+         * EvalBaselineRepoRequest
+         * @description One repository of a new eval's Baseline, before its ref is pinned (#967).
+         */
+        EvalBaselineRepoRequest: {
+            /**
+             * Repository
+             * @description The repository, as an `owner/name` slug.
+             */
+            repository: string;
+            /**
+             * Requested Ref
+             * @description A branch, tag or commit. Resolved once, at create, to a full commit SHA; every run starts from that SHA even after the branch or tag moves.
+             */
+            requested_ref: string;
+        };
+        /**
+         * EvalBaselineRepoResponse
+         * @description One repository of an eval's Baseline: the ref asked for and the SHA it pinned to.
+         */
+        EvalBaselineRepoResponse: {
+            /** Repository */
+            repository: string;
+            /** Requested Ref */
+            requested_ref: string;
+            /** Commit Sha */
+            commit_sha: string;
+        };
+        /**
+         * EvalCreatedResponse
+         * @description The receipt for a create, read from the Eval aggregate, never a projection (#967).
+         *
+         *     The eval list and `GET /evals/{eval_id}` are read models and may not show
+         *     the eval for a moment after this returns. That is lag, not a failed create:
+         *     `eval_id` is authoritative from here on.
+         */
+        EvalCreatedResponse: {
+            /** Eval Id */
+            eval_id: string;
+            /** Name */
+            name: string;
+            /** Goal */
+            goal: string;
+            /** Starting Workflow Id */
+            starting_workflow_id: string | null;
+            /** Baseline Repos */
+            baseline_repos: components["schemas"]["EvalBaselineRepoResponse"][];
+            /** Tags */
+            tags: string[];
+        };
+        /**
+         * EvalId
+         * @description The identity of one eval, and the id of its stream.
+         */
+        EvalId: string;
+        /**
+         * EvalListResponse
+         * @description One page of evals, newest first (#967).
+         */
+        EvalListResponse: {
+            /** Evals */
+            evals: components["schemas"]["EvalResponse"][];
+            /** Total */
+            total: number;
+            /** Page */
+            page: number;
+            /** Page Size */
+            page_size: number;
+            /** Status Counts */
+            status_counts: {
+                [key: string]: number;
+            };
+        };
+        /**
+         * EvalResponse
+         * @description An eval as the eval read model holds it, with its run tally (#967).
+         */
+        EvalResponse: {
+            /** Eval Id */
+            eval_id: string;
+            /** Name */
+            name: string;
+            /** Goal */
+            goal: string;
+            /** Starting Workflow Id */
+            starting_workflow_id: string | null;
+            /** Baseline Repos */
+            baseline_repos: components["schemas"]["EvalBaselineRepoResponse"][];
+            /** Tags */
+            tags: string[];
+            /** Frozen */
+            frozen: boolean;
+            /** Archived */
+            archived: boolean;
+            /** Created At */
+            created_at: string | null;
+            /** Updated At */
+            updated_at: string | null;
+            /** Run Count */
+            run_count: number;
+            /** Run Status Counts */
+            run_status_counts: {
+                [key: string]: number;
+            };
+            /**
+             * Scored Count
+             * @default 0
+             */
+            scored_count: number;
+            /** Pass Rate */
+            pass_rate?: number | null;
+            /**
+             * Pass Rate Display
+             * @default —
+             */
+            pass_rate_display: string;
+            /** Last Run At */
+            last_run_at?: string | null;
+            last_verdict?: components["schemas"]["Verdict"] | null;
+            /** Variants */
+            variants?: components["schemas"]["EvalVariantResponse"][];
+        };
+        /**
+         * EvalRunListResponse
+         * @description One page of an eval's current runs, newest first (Evals v2).
+         */
+        EvalRunListResponse: {
+            /** Items */
+            items: components["schemas"]["EvalRunResponse"][];
+            /** Total */
+            total: number;
+            /** Page */
+            page: number;
+            /** Page Size */
+            page_size: number;
+        };
+        /**
+         * EvalRunModelResponse
+         * @description The model one phase of a run ACTUALLY ran, as its harness reported it.
+         */
+        EvalRunModelResponse: {
+            /** Phase Id */
+            phase_id: string;
+            /** Model */
+            model: string;
+        };
+        /**
+         * EvalRunResponse
+         * @description One run of an eval: one data point of how the eval changes over time (Evals v2).
+         */
+        EvalRunResponse: {
+            /** Execution Id */
+            execution_id: string;
+            /** Started At */
+            started_at: string | null;
+            /** Completed At */
+            completed_at: string | null;
+            /** Status */
+            status: string;
+            /** Workflow Id */
+            workflow_id: string;
+            /** Workflow Version */
+            workflow_version?: string | null;
+            /** Models */
+            models: components["schemas"]["EvalRunModelResponse"][];
+            /** Total Cost Usd */
+            total_cost_usd: string | null;
+            /** Total Cost Display */
+            total_cost_display: string;
+            /** Duration Seconds */
+            duration_seconds: number | null;
+            /** Duration Display */
+            duration_display: string;
+            verdict: components["schemas"]["Verdict"] | null;
+            /** Score */
+            score: number | null;
+            /** Evidence Excerpt */
+            evidence_excerpt: string | null;
+            /** Scorer */
+            scorer: string | null;
+            /** Scorer Version */
+            scorer_version: string | null;
+            /** Scored At */
+            scored_at: string | null;
+        };
+        /**
+         * EvalRunScoreRequest
+         * @description A scorer's verdict on one run of an eval. Re-scoring replaces the current score.
+         */
+        EvalRunScoreRequest: {
+            verdict: components["schemas"]["Verdict"];
+            /** Score */
+            score?: number | null;
+            /**
+             * Evidence
+             * @default
+             */
+            evidence: string;
+            /** Scorer */
+            scorer: string;
+            /** Scorer Version */
+            scorer_version: string;
+        };
+        /**
+         * EvalRunScoreResponse
+         * @description The run's score as recorded (Evals v2).
+         */
+        EvalRunScoreResponse: {
+            /** Eval Id */
+            eval_id: string;
+            /** Execution Id */
+            execution_id: string;
+            verdict: components["schemas"]["Verdict"];
+            /** Score */
+            score: number | null;
+            /** Evidence */
+            evidence: string;
+            /** Scorer */
+            scorer: string;
+            /** Scorer Version */
+            scorer_version: string;
+            /** Scored At */
+            scored_at: string;
+        };
+        /**
+         * EvalVariantResponse
+         * @description Every run of an eval with the same workflow, workflow version and OBSERVED models.
+         *
+         *     (Evals v2.) Two versions of one workflow are two variants: an edit between
+         *     runs is a different treatment, and pooling them would hide its effect.
+         */
+        EvalVariantResponse: {
+            /** Workflow Id */
+            workflow_id: string;
+            /** Workflow Version */
+            workflow_version?: string | null;
+            /** Models */
+            models: string[];
+            /** Run Count */
+            run_count: number;
+            /** Pass Count */
+            pass_count: number;
+            /** Pass Rate */
+            pass_rate: number | null;
+            /** Pass Rate Display */
+            pass_rate_display: string;
+            /** Avg Cost Usd */
+            avg_cost_usd: string | null;
+            /** Avg Cost Display */
+            avg_cost_display: string;
+            /** Last Run At */
+            last_run_at: string | null;
+        };
+        /**
+         * EventListResponse
+         * @description List of events response.
+         */
+        EventListResponse: {
+            /** Events */
+            events: components["schemas"]["EventResponse"][];
+            /** Count */
+            count: number;
+            /**
+             * Has More
+             * @default false
+             */
+            has_more: boolean;
+        };
+        /**
+         * EventResponse
+         * @description Single event response.
+         */
+        EventResponse: {
+            /** Time */
+            time?: string | null;
+            /** Event Type */
+            event_type: string;
+            /** Session Id */
+            session_id?: string | null;
+            /** Execution Id */
+            execution_id?: string | null;
+            /** Phase Id */
+            phase_id?: string | null;
+            /**
+             * Data
+             * @default {}
+             */
+            data: {
+                [key: string]: unknown;
+            };
+        };
+        /**
+         * EvidenceClass
+         * @enum {string}
+         */
+        EvidenceClass: "registered" | "corroborated" | "candidate" | "conflicting";
+        /** EvidenceReference */
+        EvidenceReference: {
+            /** Evidence Id */
+            evidence_id: string;
+            /** Producer Id */
+            producer_id: string;
+            /** Source Revision */
+            source_revision: string;
+            /** Locator */
+            locator: string;
+            /** Extractor Version */
+            extractor_version: string;
+        };
+        /**
+         * EvidenceRetraction
+         * @description An explicit producer correction; it cannot revoke another producer's facts.
+         */
+        EvidenceRetraction: {
+            target: components["schemas"]["EvidenceReference"];
+            evidence: components["schemas"]["EvidenceReference"];
+        };
+        /**
+         * ExecuteWorkflowRequest
+         * @description Request to execute a workflow.
+         */
+        ExecuteWorkflowRequest: {
+            /**
+             * Inputs
+             * @description Input variables for the workflow.
+             */
+            inputs?: {
+                [key: string]: string;
+            };
+            /**
+             * Task
+             * @description Primary task description -- substituted for $ARGUMENTS in phase prompts. Omit it to run without a task; an empty or whitespace-only task is rejected with 422 (PC-66).
+             */
+            task?: string | null;
+            /**
+             * Repos
+             * @description GitHub URLs or 'owner/repo' slugs to pre-clone for workspace hydration (ADR-058, ADR-063). Typed channel for repository identity: one execution can touch 0, 1, or N repos. Passing 'repository' or 'repos' in the `inputs` dict is rejected with 422.
+             */
+            repos?: string[];
+            /**
+             * Tags
+             * @description Tags for this run, united with the workflow's own tags at launch (#967). Normalised (trimmed, lowercased, deduped); an invalid tag is rejected with 422.
+             */
+            tags?: string[];
+            /** @description The eval this run joins, overriding the workflow's default eval (#967). 404 if it does not exist, 409 if it is archived. */
+            eval_id?: components["schemas"]["EvalId"] | null;
+            /**
+             * No Eval
+             * @description Launch an ordinary run: join no eval, even if the workflow has a default eval (#967). Cannot be combined with `eval_id` (422).
+             * @default false
+             */
+            no_eval: boolean;
+            /**
+             * Provider
+             * @deprecated
+             * @description Agent provider to use. Currently ignored by execute(); sending this field has no effect.
+             * @default claude
+             */
+            provider: string;
+            /**
+             * Max Budget Usd
+             * @deprecated
+             * @description Maximum budget in USD. Currently ignored by execute(); sending this field has no effect.
+             */
+            max_budget_usd?: number | null;
+        };
+        /**
+         * ExecuteWorkflowResponse
+         * @description Response after starting workflow execution.
+         */
+        ExecuteWorkflowResponse: {
+            /** Execution Id */
+            execution_id: string;
+            /** Workflow Id */
+            workflow_id: string;
+            /**
+             * Status
+             * @default started
+             */
+            status: string;
+            /**
+             * Message
+             * @default Workflow execution started
+             */
+            message: string;
+        };
+        /**
+         * ExecutionBudgetInfo
+         * @description How full the execution budget is right now, for the app bar (PC-124).
+         *
+         *     ``running`` and ``limit`` are this API process's budget. ``queued`` is
+         *     every start the list reports as ``queued``: waiting here for a slot, or
+         *     recorded durably and not yet picked up by any process.
+         */
+        ExecutionBudgetInfo: {
+            /** Running */
+            running: number;
+            /** Queued */
+            queued: number;
+            /** Limit */
+            limit: number;
+            /** Admission Paused */
+            admission_paused: boolean | null;
+            /**
+             * Display
+             * @description e.g. '2 running / 3 queued / cap 4'.
+             */
+            readonly display: string;
+        };
+        /**
+         * ExecutionCostResponse
+         * @description Aggregated cost for a workflow execution.
+         */
+        ExecutionCostResponse: {
+            /** Execution Id */
+            execution_id: string;
+            /** Workflow Id */
+            workflow_id?: string | null;
+            /**
+             * Session Count
+             * @default 0
+             */
+            session_count: number;
+            /** Session Ids */
+            session_ids?: string[] | null;
+            /**
+             * Total Cost Usd
+             * @default 0
+             */
+            total_cost_usd: string;
+            /**
+             * Token Cost Usd
+             * @default 0
+             */
+            token_cost_usd: string;
+            /**
+             * Compute Cost Usd
+             * @default 0
+             */
+            compute_cost_usd: string;
+            /**
+             * Input Tokens
+             * @default 0
+             */
+            input_tokens: number;
+            /**
+             * Output Tokens
+             * @default 0
+             */
+            output_tokens: number;
+            /**
+             * Total Tokens
+             * @default 0
+             */
+            total_tokens: number;
+            /**
+             * Cache Creation Tokens
+             * @default 0
+             */
+            cache_creation_tokens: number;
+            /**
+             * Cache Read Tokens
+             * @default 0
+             */
+            cache_read_tokens: number;
+            /**
+             * Tool Calls
+             * @default 0
+             */
+            tool_calls: number;
+            /**
+             * Turns
+             * @default 0
+             */
+            turns: number;
+            /**
+             * Duration Ms
+             * @default 0
+             */
+            duration_ms: number;
+            /** Cost By Phase */
+            cost_by_phase?: {
+                [key: string]: string;
+            };
+            /** Unpriced By Phase */
+            unpriced_by_phase?: {
+                [key: string]: number;
+            };
+            /** Cost By Model */
+            cost_by_model?: {
+                [key: string]: string;
+            };
+            /** Cost By Tool */
+            cost_by_tool?: {
+                [key: string]: string;
+            };
+            /**
+             * Is Complete
+             * @default false
+             */
+            is_complete: boolean;
+            /**
+             * Unpriced Observation Count
+             * @default 0
+             */
+            unpriced_observation_count: number;
+            /** Started At */
+            started_at?: string | null;
+            /** Completed At */
+            completed_at?: string | null;
+        };
+        /** ExecutionDetailResponse */
+        ExecutionDetailResponse: {
+            /** Workflow Execution Id */
+            workflow_execution_id: string;
+            /** Workflow Id */
+            workflow_id: string;
+            /** Workflow Name */
+            workflow_name: string;
+            /** Status */
+            status: string;
+            /** Started At */
+            started_at?: string | null;
+            /** Completed At */
+            completed_at?: string | null;
+            /** Phases */
+            phases?: components["schemas"]["PhaseExecutionInfo"][];
+            /**
+             * Total Phases
+             * @default 0
+             */
+            total_phases: number;
+            /**
+             * Completed Phases
+             * @default 0
+             */
+            completed_phases: number;
+            phase_progress: components["schemas"]["PhaseProgressInfo"];
+            /** Phase Plan */
+            phase_plan: components["schemas"]["PlannedPhaseInfo"][];
+            /** Total Input Tokens */
+            total_input_tokens: number;
+            /** Total Output Tokens */
+            total_output_tokens: number;
+            /** Total Cache Creation Tokens */
+            total_cache_creation_tokens: number;
+            /** Total Cache Read Tokens */
+            total_cache_read_tokens: number;
+            /** Total Tokens */
+            total_tokens: number;
+            /**
+             * Total Cost Usd
+             * @default 0
+             */
+            total_cost_usd: string;
+            /**
+             * Unpriced Observation Count
+             * @default 0
+             */
+            unpriced_observation_count: number;
+            /** Cache Read Rate Display */
+            cache_read_rate_display?: string | null;
+            /** Cache Write Rate Display */
+            cache_write_rate_display?: string | null;
+            /** Total Duration Seconds */
+            total_duration_seconds?: number | null;
+            /**
+             * Unknown Duration Phase Count
+             * @default 0
+             */
+            unknown_duration_phase_count: number;
+            /** Artifact Ids */
+            artifact_ids?: string[];
+            /** Error Message */
+            error_message?: string | null;
+            /** @default unclassified */
+            failure_classification: components["schemas"]["FailureClassification"];
+            delegation_failure?: components["schemas"]["DelegationFailure"] | null;
+            reported_failure_reason?: components["schemas"]["ReportedFailureReason"] | null;
+            /** Quarantined Refs */
+            quarantined_refs?: components["schemas"]["QuarantinedRef"][];
+            /**
+             * Deliverable Produced
+             * @default false
+             */
+            deliverable_produced: boolean;
+            review_verdict?: components["schemas"]["ReviewVerdict"] | null;
+            reported_side_effects?: components["schemas"]["SideEffectStatus"] | null;
+            /** Repos */
+            repos?: string[];
+            /** Tags */
+            tags?: string[];
+            /** Task */
+            task?: string | null;
+            /** Inputs */
+            inputs?: {
+                [key: string]: string;
+            };
+            eval?: components["schemas"]["ExecutionEvalRunResponse"] | null;
+            resume_start?: components["schemas"]["ResumeStartInfo"] | null;
+            start_queue?: components["schemas"]["ExecutionStartQueueInfo"] | null;
+        };
+        /**
+         * ExecutionEvalResponse
+         * @description An execution's eval membership after an edit, read from the aggregate (#967).
+         */
+        ExecutionEvalResponse: {
+            /** Execution Id */
+            execution_id: string;
+            /** Eval Id */
+            eval_id: string | null;
+            /** Association Kind */
+            association_kind: ("launched" | "attached") | null;
+            /** Launched Eval Id */
+            launched_eval_id: string | null;
+        };
+        /**
+         * ExecutionEvalRunResponse
+         * @description The eval an execution is a run of, and that run's current verdict (Evals v2).
+         *
+         *     Carried on ``GET /executions/{id}`` so an execution page can link to its eval
+         *     and show how the run was judged without a second request.
+         */
+        ExecutionEvalRunResponse: {
+            /** Eval Id */
+            eval_id: string;
+            /** Eval Name */
+            eval_name: string | null;
+            /**
+             * Association Kind
+             * @enum {string}
+             */
+            association_kind: "launched" | "attached";
+            verdict: components["schemas"]["Verdict"] | null;
+            /** Score */
+            score: number | null;
+            /** Scored At */
+            scored_at: string | null;
+        };
+        /** ExecutionHistoryResponse */
+        ExecutionHistoryResponse: {
+            /** Workflow Id */
+            workflow_id: string;
+            /** Workflow Name */
+            workflow_name: string;
+            /** Executions */
+            executions?: {
+                [key: string]: unknown;
+            }[];
+            /**
+             * Total Executions
+             * @default 0
+             */
+            total_executions: number;
+        };
+        /** ExecutionListResponse */
+        ExecutionListResponse: {
+            /** Executions */
+            executions: components["schemas"]["ExecutionSummaryResponse"][];
+            /** Total */
+            total: number;
+            /**
+             * Page
+             * @default 1
+             */
+            page: number;
+            /**
+             * Page Size
+             * @default 50
+             */
+            page_size: number;
+            /**
+             * Excluded Undated
+             * @default 0
+             */
+            excluded_undated: number;
+            budget?: components["schemas"]["ExecutionBudgetInfo"] | null;
+            /** Status Counts */
+            status_counts?: {
+                [key: string]: number;
+            };
+        };
+        /** ExecutionRunListResponse */
+        ExecutionRunListResponse: {
+            /** Runs */
+            runs: components["schemas"]["ExecutionRunSummary"][];
+            /** Total */
+            total: number;
+            /** Workflow Id */
+            workflow_id: string;
+            /** Workflow Name */
+            workflow_name: string;
+        };
+        /** ExecutionRunSummary */
+        ExecutionRunSummary: {
+            /** Workflow Execution Id */
+            workflow_execution_id: string;
+            /** Workflow Id */
+            workflow_id: string;
+            /** Workflow Name */
+            workflow_name: string;
+            /** Status */
+            status: string;
+            /** Started At */
+            started_at?: string | null;
+            /** Completed At */
+            completed_at?: string | null;
+            /**
+             * Completed Phases
+             * @default 0
+             */
+            completed_phases: number;
+            /**
+             * Total Phases
+             * @default 0
+             */
+            total_phases: number;
+            phase_progress: components["schemas"]["PhaseProgressInfo"];
+            /**
+             * Total Tokens
+             * @default 0
+             */
+            total_tokens: number;
+            /**
+             * Total Cost Usd
+             * @default 0
+             */
+            total_cost_usd: string;
+            /** Error Message */
+            error_message?: string | null;
+            /** @default unclassified */
+            failure_classification: components["schemas"]["FailureClassification"];
+            reported_failure_reason?: components["schemas"]["ReportedFailureReason"] | null;
+        };
+        /**
+         * ExecutionStartQueueInfo
+         * @description Where a start stands in the execution budget, before its execution exists (#1557).
+         *
+         *     Every start path - direct, trigger and resume - claims one of
+         *     ``SYN_EXECUTION_MAX_CONCURRENT`` slots. A start that finds none free waits
+         *     here, first come first served, and has no execution record yet; this is
+         *     what it shows instead of a 404.
+         */
+        ExecutionStartQueueInfo: {
+            path: components["schemas"]["StartPath"];
+            /** Position */
+            position: number | null;
+            /**
+             * Held
+             * @default true
+             */
+            held: boolean;
+            /** Start Status */
+            start_status?: ("pending" | "paused" | "retryable" | "dispatched" | "started" | "failed" | "withdrawn") | null;
+            /** Status Reason */
+            status_reason?: string | null;
+            /** Running */
+            running: number;
+            /** Waiting */
+            waiting: number;
+            /** Limit */
+            limit: number;
+            /**
+             * Queued At
+             * Format: date-time
+             */
+            queued_at: string;
+            /**
+             * Position Display
+             * @description Human-readable position, e.g. 'queued 2 of 3 (4/4 running)'.
+             */
+            readonly position_display: string;
+            /**
+             * Reason Display
+             * @description Why it has not started: 'slots full 4/4', 'admission paused', 'starting' or 'awaiting pickup (<status>)' (PC-124).
+             */
+            readonly reason_display: string;
+        };
+        /**
+         * ExecutionStatusCounts
+         * @description How many executions are in each status, one field per status.
+         *
+         *     The fields are exactly the domain's ``ExecutionStatus`` values (a test pins
+         *     that), so every execution lands in exactly one field and the fields sum to
+         *     the number of executions. ``completed_workflows``/``failed_workflows``
+         *     alone left cancelled, interrupted and running runs invisible on the
+         *     dashboard. There is no ``paused``: that word was deleted from orchestration.
+         */
+        ExecutionStatusCounts: {
+            /**
+             * Not Started
+             * @default 0
+             */
+            not_started: number;
+            /**
+             * Running
+             * @default 0
+             */
+            running: number;
+            /**
+             * Completed
+             * @default 0
+             */
+            completed: number;
+            /**
+             * Failed
+             * @default 0
+             */
+            failed: number;
+            /**
+             * Cancelled
+             * @default 0
+             */
+            cancelled: number;
+            /**
+             * Interrupted
+             * @default 0
+             */
+            interrupted: number;
+        };
+        /**
+         * ExecutionStatusResponse
+         * @description Response for execution status check.
+         */
+        ExecutionStatusResponse: {
+            /** Execution Id */
+            execution_id: string;
+            /** Workflow Id */
+            workflow_id: string;
+            /** Status */
+            status: string;
+            /** Current Phase */
+            current_phase?: string | null;
+            /**
+             * Completed Phases
+             * @default 0
+             */
+            completed_phases: number;
+            /**
+             * Total Phases
+             * @default 0
+             */
+            total_phases: number;
+            phase_progress: components["schemas"]["PhaseProgressInfo"];
+            /** Started At */
+            started_at?: string | null;
+            /** Completed At */
+            completed_at?: string | null;
+            /** Error */
+            error?: string | null;
+        };
+        /**
+         * ExecutionSummaryResponse
+         * @description Summary of a workflow execution.
+         *
+         *     Display fields (``*_display``) are produced server-side so all clients
+         *     (dashboard, CLI, future UIs) share identical human-readable output. Raw
+         *     fields remain for programmatic consumers; both are always present.
+         *
+         *     See: docs/adrs/ADR-064-observability-monitor-ui.md
+         */
+        ExecutionSummaryResponse: {
+            /** Workflow Execution Id */
+            workflow_execution_id: string;
+            /** Workflow Id */
+            workflow_id: string;
+            /** Workflow Name */
+            workflow_name: string;
+            /** Status */
+            status: string;
+            /** Started At */
+            started_at?: string | null;
+            /** Completed At */
+            completed_at?: string | null;
+            /**
+             * Completed Phases
+             * @default 0
+             */
+            completed_phases: number;
+            /**
+             * Total Phases
+             * @default 0
+             */
+            total_phases: number;
+            phase_progress: components["schemas"]["PhaseProgressInfo"];
+            /** Total Tokens */
+            total_tokens: number;
+            /**
+             * Total Tokens Display
+             * @default 0
+             */
+            total_tokens_display: string;
+            /** Total Input Tokens */
+            total_input_tokens: number;
+            /** Total Output Tokens */
+            total_output_tokens: number;
+            /** Total Cache Creation Tokens */
+            total_cache_creation_tokens: number;
+            /** Total Cache Read Tokens */
+            total_cache_read_tokens: number;
+            /**
+             * Total Cost Usd
+             * @default 0
+             */
+            total_cost_usd: string;
+            /**
+             * Total Cost Display
+             * @default —
+             */
+            total_cost_display: string;
+            /**
+             * Unpriced Observation Count
+             * @default 0
+             */
+            unpriced_observation_count: number;
+            /** Duration Seconds */
+            duration_seconds?: number | null;
+            /**
+             * Duration Display
+             * @default —
+             */
+            duration_display: string;
+            /**
+             * Tool Call Count
+             * @default 0
+             */
+            tool_call_count: number;
+            /** Error Message */
+            error_message?: string | null;
+            /** @default unclassified */
+            failure_classification: components["schemas"]["FailureClassification"];
+            reported_failure_reason?: components["schemas"]["ReportedFailureReason"] | null;
+            /** Repos */
+            repos?: string[];
+            /** Tags */
+            tags?: string[];
+            /** Repos Display */
+            repos_display?: string | null;
+            start_queue?: components["schemas"]["ExecutionStartQueueInfo"] | null;
+        };
+        /**
+         * ExecutionTagsResponse
+         * @description An execution's tags after an edit, read from the aggregate, not a projection.
+         */
+        ExecutionTagsResponse: {
+            /** Execution Id */
+            execution_id: string;
+            /** Tags */
+            tags: string[];
+            /** Inherited Tags */
+            inherited_tags: string[];
+        };
+        /**
+         * ExportManifestResponse
+         * @description Structured export of a workflow as a file manifest.
+         *
+         *     Each key in ``files`` is a relative path; each value is the file content.
+         *     The CLI writes these to disk to produce an installable package or plugin.
+         */
+        ExportManifestResponse: {
+            /**
+             * Format
+             * @enum {string}
+             */
+            format: "package" | "plugin";
+            /** Workflow Id */
+            workflow_id: string;
+            /** Workflow Name */
+            workflow_name: string;
+            /** Files */
+            files: {
+                [key: string]: string;
+            };
+        };
+        /**
+         * FailureClassification
+         * @description Why a failed execution ended: the machinery, the request, or the work.
+         *
+         *     THE NUMBER THIS EXISTS TO FIX (#1357). Every failure was `status = failed`
+         *     and nothing else, so a phase that did three phases of real work, found a
+         *     genuine defect and correctly declined to ship it sat in the same bucket as
+         *     a segfault. Of 221 recorded failures an unknown fraction were the platform
+         *     working exactly as designed, which made every failure rate and every
+         *     lost-spend figure computed from `failed` an upper bound of unknown
+         *     tightness - and made the product look broken to the operator least able to
+         *     check.
+         *
+         *     THE EVIDENCE WAS ALREADY IN THE RECORD, it simply had nowhere to go: a
+         *     phase that ends on its own agent's `TASK_RESULT success=false` report is a
+         *     different fact from one that ends on an exit status, a timeout or a parse
+         *     failure, and `AgentVerdict` already knows which happened at the moment the
+         *     run is failed. This is where that fact is written down.
+         *
+         *     THE VOCABULARY is `workflows/sdlc/retrospective-v1/phases/classify.md`,
+         *     which is what analysts already sort failures into by hand.
+         *
+         *     WHY `task` IS A MEMBER, AND WHAT HAD TO ARRIVE BEFORE IT COULD BE (#1372).
+         *     classify.md's third class - "the request was wrong, too big for a phase, or
+         *     impossible" - is a judgement about the REQUEST, and the stored record did
+         *     not support it: the same exit code, the same error text and the same refusal
+         *     arise from a bad request and from a good one the platform mishandled.
+         *     Deriving it from any of those would be a guess, so the member was left out
+         *     with the note that whoever added it had to bring the evidence with them.
+         *
+         *     The evidence was asked for - `TASK_RESULT` carries a typed `failure_reason`
+         *     beside `success`, and the prompt every phase is sent says which word to
+         *     write - AND ASKING WAS NOT ENOUGH (#1392). The answer is the run's own
+         *     word about itself, and the only thing standing behind it is that the
+         *     process exited cleanly, which is evidence about the harness. So a phase
+         *     that had given up could write `task`, be believed, and leave the platform's
+         *     failure count by saying so. Nothing now reaches this member from a report:
+         *     the agent's word is recorded as `ReportedFailureReason`, beside the
+         *     classification and never as it, and this member waits for a source of
+         *     evidence that is not the run being measured.
+         *
+         *     THE DIRECTION OF DOUBT IS DELIBERATE and it is the one property to keep
+         *     when changing anything here: every member but `PLATFORM` is a POSITIVE
+         *     claim, made only where the agent's own readable report is what ended the
+         *     run and only from the field that states it. Everything else - including a
+         *     report nobody could read - is `PLATFORM`. So a path that forgets to
+         *     classify itself lands on the answer the system already gave, the failure
+         *     tally stays the upper bound it has always been, and no omission can ever
+         *     manufacture evidence that the system was working.
+         *
+         *     OMISSION IS NOT A SIGNAL. A phase that reports failure and names no reason
+         *     classifies exactly as it did before the field existed - `CORRECT_REFUSAL`
+         *     - because that is the answer the system already gave, a silent agent has
+         *     said nothing new to move it, and every report already in the store was
+         *     written by an agent that had no key to omit.
+         * @enum {string}
+         */
+        FailureClassification: "platform" | "task" | "correct_refusal" | "unclassified";
+        /**
+         * FailurePatternResponse
+         * @description A recurring failure pattern within a system.
+         */
+        FailurePatternResponse: {
+            /**
+             * Error Type
+             * @default
+             */
+            error_type: string;
+            /**
+             * Error Message
+             * @default
+             */
+            error_message: string;
+            /**
+             * Occurrence Count
+             * @default 0
+             */
+            occurrence_count: number;
+            /** Affected Repos */
+            affected_repos?: string[];
+            /**
+             * First Seen
+             * @default
+             */
+            first_seen: string;
+            /**
+             * Last Seen
+             * @default
+             */
+            last_seen: string;
+        };
+        /**
+         * FallbackAgentResponse
+         * @description The agent a phase is re-run on when its own provider cannot serve it (PC-83).
+         */
+        FallbackAgentResponse: {
+            /** Provider */
+            provider: string;
+            /** Model */
+            model?: string | null;
+        };
+        /**
+         * FeatureDisabledDetail
+         * @description Why a flag-gated route refuses to run.
+         */
+        FeatureDisabledDetail: {
+            /**
+             * Feature
+             * @description The feature flag that governs this route.
+             */
+            feature: string;
+            /**
+             * Reason
+             * @description Human-readable explanation.
+             */
+            reason: string;
+            /**
+             * Enable With
+             * @description The setting that enables the feature, when one exists.
+             */
+            enable_with?: string | null;
+        };
+        /**
+         * FeatureDisabledResponse
+         * @description Response from an installed route while its feature is disabled.
+         */
+        FeatureDisabledResponse: {
+            detail: components["schemas"]["FeatureDisabledDetail"];
+        };
+        /**
+         * FeaturesResponse
+         * @description Which optional features this deployment has switched on.
+         */
+        FeaturesResponse: {
+            /**
+             * Ui Feedback
+             * @description In-app feedback widget and /feedback routes (SYN_UI_FEEDBACK_ENABLED). When false the routes answer 404 and the dashboard never loads the widget.
+             * @default false
+             */
+            ui_feedback: boolean;
+        };
+        /**
+         * FeedbackCreate
+         * @description Request model for creating feedback.
+         */
+        FeedbackCreate: {
+            /**
+             * Url
+             * @description URL where feedback was created
+             */
+            url: string;
+            /**
+             * Route
+             * @description React Router path if available
+             */
+            route?: string | null;
+            /**
+             * Viewport Width
+             * @description Viewport width in pixels
+             */
+            viewport_width?: number | null;
+            /**
+             * Viewport Height
+             * @description Viewport height in pixels
+             */
+            viewport_height?: number | null;
+            /**
+             * Click X
+             * @description X coordinate of click
+             */
+            click_x?: number | null;
+            /**
+             * Click Y
+             * @description Y coordinate of click
+             */
+            click_y?: number | null;
+            /**
+             * Css Selector
+             * @description CSS selector of clicked element
+             */
+            css_selector?: string | null;
+            /**
+             * Xpath
+             * @description XPath of clicked element
+             */
+            xpath?: string | null;
+            /**
+             * Component Name
+             * @description React component name
+             */
+            component_name?: string | null;
+            /** @description Kind of domain object the page was about (execution, session, ...) */
+            subject_kind?: components["schemas"]["SubjectKind"] | null;
+            /**
+             * Subject Id
+             * @description Id of the domain object the page was about
+             */
+            subject_id?: string | null;
+            /**
+             * @description Type of feedback
+             * @default bug
+             */
+            feedback_type: components["schemas"]["FeedbackType"];
+            /**
+             * Comment
+             * @description User's comment
+             */
+            comment?: string | null;
+            /**
+             * @description Priority level
+             * @default medium
+             */
+            priority: components["schemas"]["Priority"];
+            /**
+             * App Name
+             * @description Name of the application
+             */
+            app_name: string;
+            /**
+             * App Version
+             * @description Version of the application
+             */
+            app_version?: string | null;
+            /**
+             * User Agent
+             * @description Browser user agent
+             */
+            user_agent?: string | null;
+            /**
+             * Environment
+             * @description Environment name (development, staging, production)
+             */
+            environment?: string | null;
+            /**
+             * Git Commit
+             * @description Git commit hash
+             */
+            git_commit?: string | null;
+            /**
+             * Git Branch
+             * @description Git branch name
+             */
+            git_branch?: string | null;
+            /**
+             * Hostname
+             * @description Hostname where the app is running
+             */
+            hostname?: string | null;
+        };
+        /**
+         * FeedbackItem
+         * @description Response model for a feedback item (without media).
+         */
+        FeedbackItem: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Url */
+            url: string;
+            /** Route */
+            route?: string | null;
+            /** Viewport Width */
+            viewport_width?: number | null;
+            /** Viewport Height */
+            viewport_height?: number | null;
+            /** Click X */
+            click_x?: number | null;
+            /** Click Y */
+            click_y?: number | null;
+            /** Css Selector */
+            css_selector?: string | null;
+            /** Xpath */
+            xpath?: string | null;
+            /** Component Name */
+            component_name?: string | null;
+            subject_kind?: components["schemas"]["SubjectKind"] | null;
+            /** Subject Id */
+            subject_id?: string | null;
+            feedback_type: components["schemas"]["FeedbackType"];
+            /** Comment */
+            comment?: string | null;
+            status: components["schemas"]["Status"];
+            priority: components["schemas"]["Priority"];
+            /** Assigned To */
+            assigned_to?: string | null;
+            /** Resolution Notes */
+            resolution_notes?: string | null;
+            /** App Name */
+            app_name: string;
+            /** App Version */
+            app_version?: string | null;
+            /** User Agent */
+            user_agent?: string | null;
+            /** Environment */
+            environment?: string | null;
+            /** Git Commit */
+            git_commit?: string | null;
+            /** Git Branch */
+            git_branch?: string | null;
+            /** Hostname */
+            hostname?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Resolved At */
+            resolved_at?: string | null;
+            /**
+             * Media Count
+             * @default 0
+             */
+            media_count: number;
+        };
+        /**
+         * FeedbackItemWithMedia
+         * @description Response model for a feedback item with media metadata.
+         */
+        FeedbackItemWithMedia: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Url */
+            url: string;
+            /** Route */
+            route?: string | null;
+            /** Viewport Width */
+            viewport_width?: number | null;
+            /** Viewport Height */
+            viewport_height?: number | null;
+            /** Click X */
+            click_x?: number | null;
+            /** Click Y */
+            click_y?: number | null;
+            /** Css Selector */
+            css_selector?: string | null;
+            /** Xpath */
+            xpath?: string | null;
+            /** Component Name */
+            component_name?: string | null;
+            subject_kind?: components["schemas"]["SubjectKind"] | null;
+            /** Subject Id */
+            subject_id?: string | null;
+            feedback_type: components["schemas"]["FeedbackType"];
+            /** Comment */
+            comment?: string | null;
+            status: components["schemas"]["Status"];
+            priority: components["schemas"]["Priority"];
+            /** Assigned To */
+            assigned_to?: string | null;
+            /** Resolution Notes */
+            resolution_notes?: string | null;
+            /** App Name */
+            app_name: string;
+            /** App Version */
+            app_version?: string | null;
+            /** User Agent */
+            user_agent?: string | null;
+            /** Environment */
+            environment?: string | null;
+            /** Git Commit */
+            git_commit?: string | null;
+            /** Git Branch */
+            git_branch?: string | null;
+            /** Hostname */
+            hostname?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Resolved At */
+            resolved_at?: string | null;
+            /**
+             * Media Count
+             * @default 0
+             */
+            media_count: number;
+            /**
+             * Media
+             * @default []
+             */
+            media: components["schemas"]["MediaSummary"][];
+        };
+        /**
+         * FeedbackList
+         * @description Response model for listing feedback items.
+         */
+        FeedbackList: {
+            /** Items */
+            items: components["schemas"]["FeedbackItem"][];
+            /** Total */
+            total: number;
+            /**
+             * Page
+             * @default 1
+             */
+            page: number;
+            /**
+             * Page Size
+             * @default 50
+             */
+            page_size: number;
+        };
+        /**
+         * FeedbackStats
+         * @description Aggregate statistics for feedback items.
+         */
+        FeedbackStats: {
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+            by_status?: components["schemas"]["StatusCount"];
+            by_type?: components["schemas"]["TypeCount"];
+            by_priority?: components["schemas"]["PriorityCount"];
+            /** By App */
+            by_app?: {
+                [key: string]: number;
+            };
+        };
+        /**
+         * FeedbackType
+         * @description Type of feedback.
+         * @enum {string}
+         */
+        FeedbackType: "bug" | "feature" | "ui_ux" | "performance" | "question" | "other";
+        /**
+         * FeedbackUpdate
+         * @description Request model for updating feedback.
+         */
+        FeedbackUpdate: {
+            /** @description New status */
+            status?: components["schemas"]["Status"] | null;
+            /** @description New priority */
+            priority?: components["schemas"]["Priority"] | null;
+            /**
+             * Assigned To
+             * @description Assignee
+             */
+            assigned_to?: string | null;
+            /**
+             * Resolution Notes
+             * @description Notes about resolution
+             */
+            resolution_notes?: string | null;
+            /**
+             * Comment
+             * @description Updated comment
+             */
+            comment?: string | null;
+        };
+        /**
+         * GitEventData
+         * @description Structured git event data from observability hooks.
+         *
+         *     Field names match agentic_events.payloads dataclasses (single source of truth).
+         *     This model is the Pydantic equivalent for API serialization.
+         */
+        GitEventData: {
+            /** Operation */
+            operation?: string | null;
+            /** Sha */
+            sha?: string | null;
+            /** Branch */
+            branch?: string | null;
+            /** Repo */
+            repo?: string | null;
+            /** Message */
+            message?: string | null;
+            /** Prev Branch */
+            prev_branch?: string | null;
+            /** Is Clone */
+            is_clone?: boolean | null;
+            /** Remote */
+            remote?: string | null;
+            /** Author */
+            author?: string | null;
+            /** Files Changed */
+            files_changed?: number | null;
+            /** Insertions */
+            insertions?: number | null;
+            /** Deletions */
+            deletions?: number | null;
+            /** Commits Count */
+            commits_count?: number | null;
+            /** Commit Range */
+            commit_range?: string | null;
+            /** Remote Url */
+            remote_url?: string | null;
+            /** Details */
+            details?: string | null;
+            /** From Branch */
+            from_branch?: string | null;
+            /** To Branch */
+            to_branch?: string | null;
+            /** Estimated Tokens Added */
+            estimated_tokens_added?: number | null;
+            /** Estimated Tokens Removed */
+            estimated_tokens_removed?: number | null;
+        };
+        /**
+         * GitHubRepoListResponse
+         * @description List of repositories accessible to the GitHub App.
+         */
+        GitHubRepoListResponse: {
+            /** Repos */
+            repos?: components["schemas"]["GitHubRepoResponse"][];
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+            /** Installation Id */
+            installation_id?: string | null;
+            lookup: components["schemas"]["GitHubRepoLookup"];
+        };
+        /**
+         * GitHubRepoLookup
+         * @description How much of the GitHub App's access a repo listing actually covers.
+         *
+         *     Only ``complete`` makes a repo's absence mean the App cannot reach it. A
+         *     ``partial`` listing still proves access for every repo it contains; an
+         *     ``unavailable`` one proves nothing.
+         * @enum {string}
+         */
+        GitHubRepoLookup: "complete" | "partial" | "unavailable";
+        /**
+         * GitHubRepoResponse
+         * @description A repository accessible to the GitHub App installation.
+         */
+        GitHubRepoResponse: {
+            /** Github Id */
+            github_id: number;
+            /** Name */
+            name: string;
+            /** Full Name */
+            full_name: string;
+            /** Private */
+            private: boolean;
+            /** Default Branch */
+            default_branch: string;
+            /** Owner */
+            owner: string;
+            /** Installation Id */
+            installation_id: string;
+        };
+        /**
+         * GlobalClaudePluginListResponse
+         * @description List of currently-registered global claude plugins.
+         */
+        GlobalClaudePluginListResponse: {
+            /** Plugins */
+            plugins?: components["schemas"]["GlobalClaudePluginResponse"][];
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+        };
+        /**
+         * GlobalClaudePluginResponse
+         * @description A single entry in the global claude plugin registry.
+         */
+        GlobalClaudePluginResponse: {
+            /** Name */
+            name: string;
+            /** Source Url */
+            source_url: string;
+            /** Version */
+            version: string;
+            /** Resolved Sha */
+            resolved_sha: string;
+            /** Added At */
+            added_at?: string | null;
+        };
+        /**
+         * GlobalCostResponse
+         * @description Global cost breakdown across all repos.
+         */
+        GlobalCostResponse: {
+            /**
+             * System Id
+             * @default
+             */
+            system_id: string;
+            /**
+             * System Name
+             * @default
+             */
+            system_name: string;
+            /**
+             * Organization Id
+             * @default
+             */
+            organization_id: string;
+            /**
+             * Total Cost Usd
+             * @default 0
+             */
+            total_cost_usd: string;
+            /**
+             * Total Tokens
+             * @default 0
+             */
+            total_tokens: number;
+            /**
+             * Total Input Tokens
+             * @default 0
+             */
+            total_input_tokens: number;
+            /**
+             * Total Output Tokens
+             * @default 0
+             */
+            total_output_tokens: number;
+            /**
+             * Total Cache Creation Tokens
+             * @default 0
+             */
+            total_cache_creation_tokens: number;
+            /**
+             * Total Cache Read Tokens
+             * @default 0
+             */
+            total_cache_read_tokens: number;
+            /** Cost By Repo */
+            cost_by_repo?: {
+                [key: string]: string;
+            };
+            /** Cost By Workflow */
+            cost_by_workflow?: {
+                [key: string]: string;
+            };
+            /** Cost By Model */
+            cost_by_model?: {
+                [key: string]: string;
+            };
+            /**
+             * Execution Count
+             * @default 0
+             */
+            execution_count: number;
+        };
+        /**
+         * GlobalOverviewResponse
+         * @description Global overview of all systems and repos.
+         */
+        GlobalOverviewResponse: {
+            /**
+             * Total Systems
+             * @default 0
+             */
+            total_systems: number;
+            /**
+             * Total Repos
+             * @default 0
+             */
+            total_repos: number;
+            /**
+             * Unassigned Repos
+             * @default 0
+             */
+            unassigned_repos: number;
+            /**
+             * Total Active Executions
+             * @default 0
+             */
+            total_active_executions: number;
+            /**
+             * Total Cost Usd
+             * @default 0
+             */
+            total_cost_usd: string;
+            /** Systems */
+            systems?: components["schemas"]["SystemOverviewEntryResponse"][];
+        };
+        /** HTTPValidationError */
+        HTTPValidationError: {
+            /** Detail */
+            detail?: components["schemas"]["ValidationError"][];
+        };
+        /**
+         * HealthResponse
+         * @description Payload of ``GET /health``.
+         *
+         *     EVERY FIELD IS DECLARED AND EXTRAS ARE FORBIDDEN. An earlier cut of #1380
+         *     typed only ``build`` and left ``extra="allow"`` for the probe blocks, which
+         *     put ``additionalProperties: true`` in ``openapi.json`` and an
+         *     ``[key: string]: unknown`` index signature in the generated CLI types: the
+         *     fields `syn health` actually reads were invisible to every generated
+         *     consumer, and a probe could change shape without the drift check noticing.
+         *     The probes own the shapes — ``CodexAuthStatus`` and ``ProjectionLag`` are
+         *     declared at their source and referenced, not copied — but the fact that
+         *     /health publishes them is this model's to state.
+         *
+         *     ABSENT OPTIONAL BLOCKS ARE OMITTED, not sent as null; see
+         *     ``_OmitsAbsentFields``.
+         */
+        HealthResponse: {
+            /**
+             * Status
+             * @description 'healthy' while the process is alive and accepting writes; 'starting' while it is alive but startup (a long migration, say) has not finished, when every route but /health and /version answers 503; 'failed' when startup failed after serving began and the process is exiting; 'unhealthy' when the probe failed.
+             */
+            status: string;
+            /**
+             * Mode
+             * @description 'full', or 'degraded' when some subsystem is impaired.
+             */
+            mode: string;
+            /** @description Which build is answering (#1380). */
+            build: components["schemas"]["BuildInfo"];
+            /**
+             * Degraded Reasons
+             * @description Every way this instance is up but not fully serving. Omitted entirely when there are none, which is how a reader tells 'nothing is wrong' from 'something is and it is not listed here'.
+             */
+            degraded_reasons?: components["schemas"]["DegradedReason"][] | null;
+            /** @description Read-path health. Omitted when no subscription service is wired up at all, e.g. in offline mode. */
+            subscription?: components["schemas"]["SubscriptionHealth"] | null;
+            /** @description Freshness of this instance's codex credential. Omitted when the probe could not run — a credential hint must never be able to take /health down. */
+            codex_auth?: components["schemas"]["CodexAuthStatus"] | null;
+            /**
+             * Warnings
+             * @description Human-readable notes that need attention but do not degrade the instance. Omitted when there are none.
+             */
+            warnings?: string[] | null;
+            /** @description Free space on the workspace volume (#1560). Omitted only when the probe itself could not be built. */
+            disk?: components["schemas"]["DiskSpaceHealth"] | null;
+            /**
+             * Db Pools
+             * @description Every open Postgres pool in this process, by name. Omitted when none is open, e.g. in offline mode.
+             */
+            db_pools?: components["schemas"]["DbPoolHealth"][] | null;
+            /** @description How often the API container hit its CPU limit (#1600). Always present once the gate is ready, with status 'unknown' when the cgroup does not say; omitted only while the gate is withholding the API. */
+            cpu_throttling?: components["schemas"]["CpuThrottling"] | null;
+        };
+        /**
+         * HeatmapDayBucketResponse
+         * @description Single day's aggregated activity.
+         */
+        HeatmapDayBucketResponse: {
+            /** Date */
+            date: string;
+            /**
+             * Count
+             * @default 0
+             */
+            count: number;
+            /** Breakdown */
+            breakdown?: {
+                [key: string]: number;
+            };
+        };
+        /**
+         * HeldProjectionHealth
+         * @description A projection held below an event it failed to apply (ESP #391).
+         *
+         *     It is retried there with backoff and never checkpointed past it, so it is
+         *     behind and stays behind until the handler is fixed or the projection is
+         *     rebuilt. Every other projection keeps consuming.
+         */
+        HeldProjectionHealth: {
+            /**
+             * Projection
+             * @description Projection name, as in projection_checkpoints.
+             */
+            projection: string;
+            /**
+             * Event Type
+             * @description Type of the event it failed to apply.
+             */
+            event_type: string;
+            /**
+             * Global Nonce
+             * @description Global nonce of the event it is held at.
+             */
+            global_nonce: number;
+        };
+        /**
+         * IdentityBinding
+         * @description A platform session or registered invocation represents native transcript work.
+         */
+        IdentityBinding: {
+            owner: components["schemas"]["InventoryNodeRef"];
+            transcript: components["schemas"]["InventoryNodeRef"];
+            /** Segment */
+            segment?: string | null;
+            confidence: components["schemas"]["EvidenceClass"];
+            /** Evidence */
+            evidence: components["schemas"]["EvidenceReference"][];
+        };
+        /**
+         * InjectRequest
+         * @description Request to inject context into an execution.
+         */
+        InjectRequest: {
+            /** Message */
+            message: string;
+            /**
+             * Role
+             * @default user
+             * @enum {string}
+             */
+            role: "user" | "system";
+        };
+        /** InputDeclarationModel */
+        InputDeclarationModel: {
+            /** Name */
+            name: string;
+            /** Description */
+            description?: string | null;
+            /**
+             * Required
+             * @default true
+             */
+            required: boolean;
+            /** Default */
+            default?: string | null;
+        };
+        /** InventoryCounts */
+        InventoryCounts: {
+            /** Node */
+            node: number;
+            /** Membership */
+            membership: number;
+            /** Edge */
+            edge: number;
+            /** Capture */
+            capture: number;
+            /** Gap */
+            gap: number;
+            /**
+             * Retraction
+             * @default 0
+             */
+            retraction: number;
+            /**
+             * Binding
+             * @default 0
+             */
+            binding: number;
+            /** Namespaces */
+            namespaces?: components["schemas"]["InventoryNamespaceCount"][] | null;
+        };
+        /** InventoryCoverage */
+        InventoryCoverage: {
+            state: components["schemas"]["CoverageState"];
+            /** Contract Id */
+            contract_id?: string | null;
+            /** Expected Count */
+            expected_count?: number | null;
+            /**
+             * Missing Keys
+             * @default []
+             */
+            missing_keys: string[];
+        };
+        /**
+         * InventoryFilter
+         * @description Membership narrowing. Unset fields match every phase or attempt.
+         *
+         *     A filter never changes what a node is; it selects nodes with at least one
+         *     matching membership, the edges and bindings touching them, their captures,
+         *     run-level or touching gaps, and every retraction (retractions are not
+         *     node-scoped).
+         */
+        InventoryFilter: {
+            /** Phase Id */
+            phase_id?: string | null;
+            /** Attempt Id */
+            attempt_id?: string | null;
+        };
+        /** InventoryGap */
+        InventoryGap: {
+            /**
+             * Reason
+             * @description Why the inventory is incomplete or uncertain here. Resolver reasons: invocation_running, invocation_pending, invocation_launch_failed, invocation_launch_failed_process_start_failed, invocation_launch_failed_codex_sandbox_unavailable, invocation_launch_failed_native_tool_failed, invocation_launch_failed_native_tool_interrupted, invocation_launch_failed_capture_hook_failed, invocation_launch_failed_hook_watchdog, invocation_launch_failed_capture_hook_unreachable, invocation_launch_failed_claude_nested_auth_unavailable, invocation_launch_failed_parent_permissions_unavailable, invocation_launch_failed_nested_journal_unavailable, invocation_transport_failed_before_announce, conflicting_invocation_lifecycle, conflicting_invocation_context, unverified_invocation_context, conflicting_parentage, lineage_cycle, unresolved_parentage, conflicting_source_evidence, conflicting_native_binding, expected_body_unavailable, invocation_unsettled_at_seal, capture_unsettled_at_seal, child_context_unresolved_at_seal, parentage_unresolved_at_seal, no_host_registration; plus invocation_<outcome> for other abnormal process outcomes and producer-specific acquisition reasons.
+             */
+            reason: string;
+            /**
+             * Node Keys
+             * @default []
+             */
+            node_keys: string[];
+            /**
+             * Evidence Ids
+             * @default []
+             */
+            evidence_ids: string[];
+        };
+        /**
+         * InventoryItemKeys
+         * @description Qualified node keys an item references, so a foreign endpoint is resolvable.
+         */
+        InventoryItemKeys: {
+            /** Node Key */
+            node_key?: string | null;
+            /** Peer Key */
+            peer_key?: string | null;
+        };
+        /**
+         * InventoryNamespaceCount
+         * @description Distinct nodes in one identity namespace. Transcripts are split per harness.
+         */
+        InventoryNamespaceCount: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "platform" | "invocation" | "transcript";
+            /** Harness */
+            harness?: string | null;
+            /** Count */
+            count: number;
+        };
+        /** InventoryNode */
+        InventoryNode: {
+            ref: components["schemas"]["InventoryNodeRef"];
+            /**
+             * Evidence
+             * @default []
+             */
+            evidence: components["schemas"]["EvidenceReference"][];
+        };
+        /**
+         * InventoryNodeRef
+         * @description A reference never changes the native ID or its source-content hash.
+         */
+        InventoryNodeRef: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "platform" | "invocation" | "transcript";
+            /** Source Instance Id */
+            source_instance_id: string;
+            /** Local Id */
+            local_id: string;
+            /** Harness */
+            harness?: string | null;
+        };
+        /** InventorySnapshot */
+        InventorySnapshot: {
+            /**
+             * Snapshot Id
+             * Format: uuid
+             */
+            snapshot_id: string;
+            run: components["schemas"]["RunIdentity"];
+            /** Revision */
+            revision: string;
+            /** Resolver Version */
+            resolver_version: string;
+            /** Evidence Watermark */
+            evidence_watermark: number;
+            coverage: components["schemas"]["InventoryCoverage"];
+            counts: components["schemas"]["InventoryCounts"];
+        };
+        /** LineageEdge */
+        LineageEdge: {
+            parent: components["schemas"]["InventoryNodeRef"];
+            child: components["schemas"]["InventoryNodeRef"];
+            /**
+             * Relation
+             * @enum {string}
+             */
+            relation: "spawn" | "resume" | "fork";
+            confidence: components["schemas"]["EvidenceClass"];
+            /** Evidence */
+            evidence: components["schemas"]["EvidenceReference"][];
+            /** Parent Segment */
+            parent_segment?: string | null;
+            /** Child Segment */
+            child_segment?: string | null;
+        };
+        /**
+         * LocalTranscriptResponse
+         * @description Exact archive bytes, base64 encoded without parsing provider content.
+         *
+         *     Redaction policy: the body is served exactly as archived. Any redaction was
+         *     applied by the capturing source before archival; the server neither redacts,
+         *     rewrites nor slices bytes, and never serves a partial range as the revision.
+         */
+        LocalTranscriptResponse: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "present" | "not_captured" | "missing" | "expired" | "deleted" | "too_large";
+            /**
+             * Archive Sha256
+             * @description SHA-256 of the exact archived bytes, not the APSS content hash.
+             */
+            archive_sha256: string;
+            /** Content Format */
+            content_format?: ("native" | "envelope") | null;
+            /**
+             * Size
+             * @description Archived byte length.
+             */
+            size?: number | null;
+            /**
+             * Redaction
+             * @description Only source-applied redaction; the server serves archived bytes unchanged.
+             * @default source
+             * @constant
+             */
+            redaction: "source";
+            /** Content Base64 */
+            content_base64?: string | null;
+            conversation?: components["schemas"]["TranscriptConversation"] | null;
+        };
+        /**
+         * MaintenanceModeResponse
+         * @description Whether new workflow executions are being admitted (#1387).
+         *
+         *     ``active`` is the gate: while it is true every admission path refuses and
+         *     the deploy script may swap containers knowing nothing new can start.
+         *     Executions already running are unaffected.
+         */
+        MaintenanceModeResponse: {
+            /**
+             * Active
+             * @description True when new execution admission is refused.
+             * @default false
+             */
+            active: boolean;
+            /**
+             * Reason
+             * @description Operator-supplied reason for the pause.
+             * @default
+             */
+            reason: string;
+            /**
+             * Since
+             * @description When admission was paused. Null while admission is open.
+             */
+            since?: string | null;
+            /**
+             * Actor
+             * @description Who set the current state.
+             * @default
+             */
+            actor: string;
+        };
+        /**
+         * MediaItem
+         * @description Response model for a media item.
+         */
+        MediaItem: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Feedback Id
+             * Format: uuid
+             */
+            feedback_id: string;
+            media_type: components["schemas"]["MediaType"];
+            /** Mime Type */
+            mime_type: string;
+            /** File Name */
+            file_name?: string | null;
+            /** File Size */
+            file_size?: number | null;
+            /** External Url */
+            external_url?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /**
+         * MediaSummary
+         * @description Summary of a media item (without binary data).
+         */
+        MediaSummary: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Media Type */
+            media_type: string;
+            /** Mime Type */
+            mime_type: string;
+            /** File Name */
+            file_name?: string | null;
+            /** File Size */
+            file_size?: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /**
+         * MediaType
+         * @description Type of media attachment.
+         * @enum {string}
+         */
+        MediaType: "screenshot" | "voice_note";
+        /** Membership */
+        Membership: {
+            node: components["schemas"]["InventoryNodeRef"];
+            run: components["schemas"]["RunIdentity"];
+            /** Phase Id */
+            phase_id?: string | null;
+            /** Attempt Id */
+            attempt_id?: string | null;
+            /** Segment */
+            segment?: string | null;
+            confidence: components["schemas"]["EvidenceClass"];
+            /** Evidence */
+            evidence: components["schemas"]["EvidenceReference"][];
+        };
+        /**
+         * MetricsResponse
+         * @description Aggregated metrics response.
+         */
+        MetricsResponse: {
+            /**
+             * Total Workflows
+             * @default 0
+             */
+            total_workflows: number;
+            /**
+             * Completed Workflows
+             * @default 0
+             */
+            completed_workflows: number;
+            /**
+             * Failed Workflows
+             * @default 0
+             */
+            failed_workflows: number;
+            execution_status_counts?: components["schemas"]["ExecutionStatusCounts"];
+            /**
+             * Total Sessions
+             * @default 0
+             */
+            total_sessions: number;
+            /** Total Input Tokens */
+            total_input_tokens: number;
+            /** Total Output Tokens */
+            total_output_tokens: number;
+            /** Total Cache Creation Tokens */
+            total_cache_creation_tokens: number;
+            /** Total Cache Read Tokens */
+            total_cache_read_tokens: number;
+            /** Total Tokens */
+            total_tokens: number;
+            /**
+             * Total Cost Usd
+             * @default 0
+             */
+            total_cost_usd: string;
+            /**
+             * Total Artifacts
+             * @default 0
+             */
+            total_artifacts: number;
+            /**
+             * Total Artifact Bytes
+             * @default 0
+             */
+            total_artifact_bytes: number;
+            /** Phases */
+            phases?: components["schemas"]["PhaseMetrics"][];
+        };
+        /**
+         * ModelCostEntry
+         * @description One model's share of a cost total.
+         */
+        ModelCostEntry: {
+            /** Model */
+            model: string;
+            /**
+             * Cost Usd
+             * @default 0
+             */
+            cost_usd: string;
+        };
+        /**
+         * OperationInfo
+         * @description Information about a session operation.
+         */
+        OperationInfo: {
+            /** Operation Id */
+            operation_id: string;
+            /** Operation Type */
+            operation_type: string;
+            /** Timestamp */
+            timestamp?: string | null;
+            /** Duration Seconds */
+            duration_seconds?: number | null;
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+            /** Error Message */
+            error_message?: string | null;
+            /** Input Tokens */
+            input_tokens?: number | null;
+            /** Output Tokens */
+            output_tokens?: number | null;
+            /** Total Tokens */
+            total_tokens?: number | null;
+            /** Tool Name */
+            tool_name?: string | null;
+            /** Tool Use Id */
+            tool_use_id?: string | null;
+            /** Tool Input */
+            tool_input?: {
+                [key: string]: unknown;
+            } | null;
+            /** Tool Output */
+            tool_output?: string | null;
+            /** Message Role */
+            message_role?: string | null;
+            /** Message Content */
+            message_content?: string | null;
+            /** Thinking Content */
+            thinking_content?: string | null;
+            git?: components["schemas"]["GitEventData"] | null;
+            /** Git Sha */
+            git_sha?: string | null;
+            /** Git Message */
+            git_message?: string | null;
+            /** Git Branch */
+            git_branch?: string | null;
+            /** Git Repo */
+            git_repo?: string | null;
+        };
+        /**
+         * OrganizationActionResponse
+         * @description Response for organization create/update/delete actions.
+         */
+        OrganizationActionResponse: {
+            /** Organization Id */
+            organization_id: string;
+            /** Name */
+            name?: string | null;
+            /** Slug */
+            slug?: string | null;
+            /** Status */
+            status: string;
+        };
+        /**
+         * OrganizationListResponse
+         * @description Paginated list of organizations.
+         */
+        OrganizationListResponse: {
+            /** Total */
+            total: number;
+            /** Organizations */
+            organizations?: components["schemas"]["OrganizationSummaryResponse"][];
+        };
+        /**
+         * OrganizationSummaryResponse
+         * @description Summary of an organization for list views.
+         */
+        OrganizationSummaryResponse: {
+            /** Organization Id */
+            organization_id: string;
+            /** Name */
+            name: string;
+            /** Slug */
+            slug: string;
+            /**
+             * Created By
+             * @default
+             */
+            created_by: string;
+            /** Created At */
+            created_at?: string | null;
+            /**
+             * System Count
+             * @default 0
+             */
+            system_count: number;
+            /**
+             * Repo Count
+             * @default 0
+             */
+            repo_count: number;
+        };
+        /**
+         * PhaseActivityInfo
+         * @description What a phase was DOING when it ended, and against what budget (#1262).
+         *
+         *     THE ANSWER TO "was it busy or was it stuck", for the one failure that
+         *     cannot answer it itself. A phase killed on its deadline exits 124, and so
+         *     does a phase that hung; the two need opposite responses - dispatch a
+         *     continuation with a bigger budget, or do not pay for that run a second
+         *     time - and until this model existed nothing in the execution record
+         *     separated them. An operator had to open the transcript, and four runs in
+         *     one day were triaged without one.
+         *
+         *     Read as a whole, the fields are the triage:
+         *
+         *     * many operations and a push moments before the end - it was working, and
+         *       the budget was too short;
+         *     * a handful of operations and no push for most of an hour - it stalled,
+         *       and a bigger budget buys another stalled hour;
+         *     * ``elapsed_seconds`` at or past ``timeout_seconds`` - it reached its cap,
+         *       as against a 124 reported well inside the budget, which is some other
+         *       death wearing the same exit code.
+         *
+         *     Every field is a READING, never a verdict. Nothing here says "stalled":
+         *     that word is a judgement about intent, and these are four measurements
+         *     that let a reader make it.
+         *
+         *     AND "WE COULD NOT SEE" IS A THIRD ANSWER, not a quiet fourth measurement.
+         *     The activity readings come from Lane 2, which fails soft, and a lookup that
+         *     raised or found no database once produced zero operations and no push -
+         *     which is precisely the shape of a stall. The feature built to stop an
+         *     operator being told "do not pay for this again" on no evidence was
+         *     manufacturing exactly that signal out of its own outage.
+         *     ``telemetry_available`` says whether the timeline was read at all, and the
+         *     readings taken from it are null when it was not.
+         */
+        PhaseActivityInfo: {
+            /**
+             * Telemetry Available
+             * @default false
+             */
+            telemetry_available: boolean;
+            /** Operations Count */
+            operations_count?: number | null;
+            /** Last Push At */
+            last_push_at?: string | null;
+            /** Seconds Since Last Push */
+            seconds_since_last_push?: number | null;
+            /** Elapsed Seconds */
+            elapsed_seconds?: number | null;
+            /** Timeout Seconds */
+            timeout_seconds?: number | null;
+            /** Deadline */
+            deadline?: string | null;
+        };
+        /**
+         * PhaseDefinitionResponse
+         * @description Phase definition within a workflow template.
+         */
+        PhaseDefinitionResponse: {
+            /** Phase Id */
+            phase_id: string;
+            /** Name */
+            name: string;
+            /**
+             * Order
+             * @default 0
+             */
+            order: number;
+            /** Description */
+            description?: string | null;
+            /**
+             * Agent Type
+             * @default
+             */
+            agent_type: string;
+            /** Prompt Template */
+            prompt_template?: string | null;
+            /**
+             * Timeout Seconds
+             * @default 300
+             */
+            timeout_seconds: number;
+            /** Max Cost Usd */
+            max_cost_usd?: number | null;
+            /** Allowed Tools */
+            allowed_tools?: string[];
+            /** Argument Hint */
+            argument_hint?: string | null;
+            /** Model */
+            model?: string | null;
+            /** Resolved Model */
+            resolved_model?: string | null;
+            resolution_basis?: components["schemas"]["AliasResolutionBasis"] | null;
+            /** Model Display */
+            model_display?: string | null;
+            /** Provider */
+            provider?: string | null;
+            /**
+             * Allow Delegation
+             * @default false
+             */
+            allow_delegation: boolean;
+            /**
+             * Require Delegation
+             * @default false
+             */
+            require_delegation: boolean;
+            fallback_agent?: components["schemas"]["FallbackAgentResponse"] | null;
+            /**
+             * Clone Repos
+             * @default true
+             */
+            clone_repos: boolean;
+            /**
+             * Delivers Repo Changes
+             * @default true
+             */
+            delivers_repo_changes: boolean;
+            /**
+             * Sandbox
+             * @default full-access
+             */
+            sandbox: string;
+            /** Claude Plugins */
+            claude_plugins?: components["schemas"]["PhaseRefResponse"][];
+            /** Skills */
+            skills?: components["schemas"]["PhaseRefResponse"][];
+            /**
+             * Execution Type
+             * @default sequential
+             */
+            execution_type: string;
+            /** Max Tokens */
+            max_tokens?: number | null;
+            /** Input Artifact Types */
+            input_artifact_types?: string[];
+            /** Output Artifact Types */
+            output_artifact_types?: string[];
+        };
+        /** PhaseExecutionInfo */
+        PhaseExecutionInfo: {
+            /** Phase Id */
+            phase_id: string;
+            /** Name */
+            name: string;
+            /** Status */
+            status: string;
+            /** Session Id */
+            session_id?: string | null;
+            /** Artifact Id */
+            artifact_id?: string | null;
+            /** Input Tokens */
+            input_tokens: number;
+            /** Output Tokens */
+            output_tokens: number;
+            /** Cache Creation Tokens */
+            cache_creation_tokens: number;
+            /** Cache Read Tokens */
+            cache_read_tokens: number;
+            /** Total Tokens */
+            total_tokens: number;
+            /** Duration Seconds */
+            duration_seconds?: number | null;
+            /**
+             * Cost Usd
+             * @default 0
+             */
+            cost_usd: string;
+            /**
+             * Unpriced Observation Count
+             * @default 0
+             */
+            unpriced_observation_count: number;
+            /** Started At */
+            started_at?: string | null;
+            /** Completed At */
+            completed_at?: string | null;
+            /** Error Message */
+            error_message?: string | null;
+            /**
+             * Deliverable Recovered
+             * @default false
+             */
+            deliverable_recovered: boolean;
+            reported_side_effects?: components["schemas"]["SideEffectStatus"] | null;
+            failure_classification?: components["schemas"]["FailureClassification"] | null;
+            reported_failure_reason?: components["schemas"]["ReportedFailureReason"] | null;
+            /** Model */
+            model?: string | null;
+            /** Requested Model */
+            requested_model: string | null;
+            /** Agent Provider */
+            agent_provider?: string | null;
+            /** Cost By Model */
+            cost_by_model?: {
+                [key: string]: string;
+            };
+            /** Agent Session Ids */
+            agent_session_ids?: string[] | null;
+            /** Exit Code */
+            exit_code?: number | null;
+            /** Observed Branches */
+            observed_branches?: components["schemas"]["BranchObservationInfo"][] | null;
+            pinned_at_start?: components["schemas"]["PhaseStartConfig"] | null;
+            /**
+             * Start Pins Status
+             * @default unavailable
+             * @enum {string}
+             */
+            start_pins_status: "recorded" | "not_recorded" | "unavailable";
+            /** Operations */
+            operations?: components["schemas"]["PhaseOperationInfo"][];
+            activity?: components["schemas"]["PhaseActivityInfo"];
+            /**
+             * Model Display
+             * @description The model for humans: the reported id verbatim, or 'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9).
+             */
+            readonly model_display: string;
+        };
+        /**
+         * PhaseMetrics
+         * @description Metrics for a single phase.
+         */
+        PhaseMetrics: {
+            /** Phase Id */
+            phase_id: string;
+            /** Phase Name */
+            phase_name: string;
+            /** Status */
+            status: string;
+            /**
+             * Input Tokens
+             * @default 0
+             */
+            input_tokens: number;
+            /**
+             * Output Tokens
+             * @default 0
+             */
+            output_tokens: number;
+            /**
+             * Total Tokens
+             * @default 0
+             */
+            total_tokens: number;
+            /**
+             * Cost Usd
+             * @default 0
+             */
+            cost_usd: string;
+            /**
+             * Unpriced Observation Count
+             * @default 0
+             */
+            unpriced_observation_count: number;
+            /**
+             * Cost In Progress
+             * @default false
+             */
+            cost_in_progress: boolean;
+            /** Duration Seconds */
+            duration_seconds?: number | null;
+            /**
+             * Artifact Count
+             * @default 0
+             */
+            artifact_count: number;
+        };
+        /** PhaseOperationInfo */
+        PhaseOperationInfo: {
+            /** Operation Id */
+            operation_id: string;
+            /** Operation Type */
+            operation_type: string;
+            /** Timestamp */
+            timestamp?: string | null;
+            /** Tool Name */
+            tool_name?: string | null;
+            /** Tool Use Id */
+            tool_use_id?: string | null;
+            /**
+             * Success
+             * @default true
+             */
+            success: boolean;
+            /** Error Message */
+            error_message?: string | null;
+        };
+        /**
+         * PhaseProgressInfo
+         * @description How far through its phases an execution is, skipped phases accounted for.
+         *
+         *     ``total_phases`` is what the workflow defines, and a review that certifies
+         *     skips the repair rounds after it (PC-63), so ``completed/total`` read
+         *     "6/10" for a run that finished. Clients render ``display`` and draw
+         *     ``percent``; they never divide the raw counts themselves.
+         */
+        PhaseProgressInfo: {
+            /** Completed */
+            completed: number;
+            /** Skipped */
+            skipped: number;
+            /** Possible */
+            possible: number;
+            /** Remaining Possible */
+            remaining_possible: number;
+            /** Percent */
+            percent: number;
+            /** Display */
+            display: string;
+        };
+        /**
+         * PhaseRefResponse
+         * @description A plugin or skill reference. Structured, never a joined string.
+         *
+         *     Joining source and name is not reversible: a ref whose source already
+         *     ends in the repo name reparses to a different repository (#1013).
+         */
+        PhaseRefResponse: {
+            /** Source Url */
+            source_url?: string | null;
+            /** Name */
+            name?: string | null;
+            /** Version */
+            version?: string | null;
+            /**
+             * Name Overridden
+             * @default false
+             */
+            name_overridden: boolean;
+            /** Raw */
+            raw?: string | null;
+        };
+        /**
+         * PhaseStartConfig
+         * @description What a phase was configured with when its execution STARTED.
+         *
+         *     Read from the execution's own start event (`StartPins`, #1454), never from
+         *     the workflow template, which may have been edited since. That is the whole
+         *     point: this answers "what did the agent have", not "what would it get now".
+         */
+        PhaseStartConfig: {
+            /** Provider */
+            provider: string;
+            /** Requested Model */
+            requested_model?: string | null;
+            /** Allowed Tools */
+            allowed_tools?: string[];
+            /** Skills */
+            skills?: components["schemas"]["PinnedSkillInfo"][];
+        };
+        /**
+         * PinnedSkillInfo
+         * @description One skill a phase was given at start, at the version it was resolved to (#1454).
+         */
+        PinnedSkillInfo: {
+            /** Name */
+            name: string;
+            /** Version */
+            version: string;
+            /** Resolved Sha */
+            resolved_sha: string;
+            /** Source Url */
+            source_url: string;
+        };
+        /**
+         * PlannedPhaseInfo
+         * @description One phase the run declared, and where it stands (feedback cee46909).
+         *
+         *     ``ExecutionDetail.phase_plan`` lists every declared phase, so a client
+         *     shows what is left as well as what ran. Clients render ``status_display``
+         *     and style by ``status``; they never work the status out themselves.
+         */
+        PlannedPhaseInfo: {
+            /** Phase Id */
+            phase_id: string;
+            /** Name */
+            name: string;
+            /** Status */
+            status: string;
+            /** Status Display */
+            status_display: string;
+        };
+        /**
+         * Priority
+         * @description Feedback priority level.
+         * @enum {string}
+         */
+        Priority: "low" | "medium" | "high" | "critical";
+        /**
+         * PriorityCount
+         * @description Count of items by priority.
+         */
+        PriorityCount: {
+            /**
+             * Low
+             * @default 0
+             */
+            low: number;
+            /**
+             * Medium
+             * @default 0
+             */
+            medium: number;
+            /**
+             * High
+             * @default 0
+             */
+            high: number;
+            /**
+             * Critical
+             * @default 0
+             */
+            critical: number;
+        };
+        /**
+         * ProjectionLag
+         * @description One projection's distance from the head of the event store.
+         */
+        ProjectionLag: {
+            /**
+             * Projection
+             * @description Projection name, as it appears in projection_checkpoints.
+             */
+            projection: string;
+            /**
+             * Position
+             * @description Global nonce this projection's checkpoint has reached. 0 when it has no checkpoint at all, which is what a projection looks like immediately after a version bump clears it.
+             */
+            position: number;
+            /**
+             * Lag
+             * @description Events between position and the store head. Always > 0 here.
+             */
+            lag: number;
+            /**
+             * Checkpoint Age Seconds
+             * @description Seconds since this projection's checkpoint last moved. None when the projection has no checkpoint row yet. This is the evidence behind `stalled`, and the number to sample if the stall threshold needs revisiting.
+             */
+            checkpoint_age_seconds?: number | null;
+            /**
+             * Stalled
+             * @description True when this projection is behind the head and its checkpoint has not moved for longer than the stall threshold (120s by default): it is not working through a backlog, it is stuck.
+             * @default false
+             */
+            stalled: boolean;
+        };
+        /**
+         * QuarantinedRef
+         * @description Where one repository's unpushed work was saved when its phase ended (#1547).
+         *
+         *     The structured half of what `describe_saved_work` writes as prose into
+         *     `error_message`: only work that LANDED, because a ref that does not exist
+         *     is nothing a reviewer can fetch. Travels on ``WorkflowFailedEvent`` so the
+         *     PR the run was working on can be told, by a ProcessManager rather than by
+         *     whoever happened to read the error.
+         */
+        QuarantinedRef: {
+            /** Repository */
+            repository: string;
+            /** Branch */
+            branch: string;
+            /** Ref */
+            ref: string;
+            /** Commit */
+            commit: string | null;
+            /** Commit Count */
+            commit_count: number;
+            /** Pull Request */
+            pull_request?: number | null;
+            /** Diffstat */
+            diffstat?: string | null;
+        };
+        /**
+         * RegisterClaudePluginRequest
+         * @description Request body for ``POST /claude-plugins/registrations`` (Phase A).
+         *
+         *     The CLI uploads the entire plugin tree inline alongside the parsed manifest;
+         *     the API hashes the normalized tree, stores it via the storage port, and
+         *     persists the registration aggregate. Idempotent on existing
+         *     ``(source_url, version, name)`` (re-uploading is a safe no-op).
+         */
+        RegisterClaudePluginRequest: {
+            /** Source Url */
+            source_url: string;
+            /** Version */
+            version: string;
+            /**
+             * Name
+             * @description Display name override; when omitted the manifest's ``name`` is used.
+             */
+            name?: string | null;
+            /**
+             * Manifest
+             * @description Pre-parsed contents of .claude-plugin/plugin.json.
+             */
+            manifest: {
+                [key: string]: unknown;
+            };
+            /**
+             * Files
+             * @description Every file in the plugin tree (base64-encoded).
+             */
+            files: components["schemas"]["ClaudePluginFileEntry"][];
+        };
+        /**
+         * RegisterClaudePluginResponse
+         * @description Response payload for ``POST /claude-plugins/registrations``.
+         */
+        RegisterClaudePluginResponse: {
+            /** Name */
+            name: string;
+            /** Version */
+            version: string;
+            /**
+             * Sha256
+             * @description Content-addressed sha of the normalized tree.
+             */
+            sha256: string;
+        };
+        /**
+         * RegisterRepoRequest
+         * @description Request body for registering a new repo.
+         */
+        RegisterRepoRequest: {
+            /**
+             * Organization Id
+             * @default _unaffiliated
+             */
+            organization_id: string;
+            /** Full Name */
+            full_name: string;
+            /**
+             * Provider
+             * @default github
+             */
+            provider: string;
+            /**
+             * Owner
+             * @default
+             */
+            owner: string;
+            /**
+             * Default Branch
+             * @default main
+             */
+            default_branch: string;
+            /**
+             * Provider Repo Id
+             * @default
+             */
+            provider_repo_id: string;
+            /**
+             * Installation Id
+             * @default
+             */
+            installation_id: string;
+            /**
+             * Is Private
+             * @default false
+             */
+            is_private: boolean;
+            /**
+             * Created By
+             * @default api
+             */
+            created_by: string;
+        };
+        /**
+         * RegisterSkillRequest
+         * @description Request body for ``POST /skills/registrations`` (issue #772).
+         *
+         *     The CLI uploads the entire skill tree inline; the API hashes the
+         *     normalized tree, stores it via the storage port, and persists the
+         *     registration aggregate. Idempotent on existing
+         *     ``(source_url, version, skill_name)``. Unlike claude plugins, there is no
+         *     caller-supplied manifest: the SKILL.md frontmatter at the tree root is the
+         *     manifest.
+         */
+        RegisterSkillRequest: {
+            /** Source Url */
+            source_url: string;
+            /** Version */
+            version: string;
+            /**
+             * Skill Name
+             * @description Display name override; when omitted the SKILL.md frontmatter's 'name' is used.
+             */
+            skill_name?: string | null;
+            /**
+             * Files
+             * @description Every file in the skill tree (base64-encoded).
+             */
+            files: components["schemas"]["SkillFilePayload"][];
+        };
+        /**
+         * RegisterTriggerRequest
+         * @description Request body for registering a new trigger rule.
+         */
+        RegisterTriggerRequest: {
+            /** Name */
+            name: string;
+            /** Event */
+            event: string;
+            /** Repository */
+            repository: string;
+            /** Workflow Id */
+            workflow_id: string;
+            /** Conditions */
+            conditions?: components["schemas"]["ConditionRequest"][] | null;
+            /**
+             * Installation Id
+             * @default
+             */
+            installation_id: string;
+            /** Input Mapping */
+            input_mapping?: {
+                [key: string]: string;
+            } | null;
+            config?: components["schemas"]["TriggerConfigRequest"] | null;
+            /**
+             * Created By
+             * @default api
+             */
+            created_by: string;
+        };
+        /**
+         * RemoveGlobalClaudePluginResponse
+         * @description Confirmation payload for ``DELETE /claude-plugins/global/{name}``.
+         */
+        RemoveGlobalClaudePluginResponse: {
+            /** Name */
+            name: string;
+            /** Status */
+            status: string;
+        };
+        /**
+         * RepoActionResponse
+         * @description Response for repo mutation actions (update, deregister, assign, unassign).
+         */
+        RepoActionResponse: {
+            /** Repo Id */
+            repo_id: string;
+            /** Status */
+            status: string;
+            /** System Id */
+            system_id?: string | null;
+        };
+        /**
+         * RepoActivityEntryResponse
+         * @description Single entry in a repo's execution timeline.
+         */
+        RepoActivityEntryResponse: {
+            /** Execution Id */
+            execution_id: string;
+            /**
+             * Workflow Id
+             * @default
+             */
+            workflow_id: string;
+            /**
+             * Workflow Name
+             * @default
+             */
+            workflow_name: string;
+            /**
+             * Status
+             * @default
+             */
+            status: string;
+            /** Started At */
+            started_at?: string | null;
+            /** Completed At */
+            completed_at?: string | null;
+            /** Duration Seconds */
+            duration_seconds?: number | null;
+            /**
+             * Trigger Source
+             * @default
+             */
+            trigger_source: string;
+        };
+        /**
+         * RepoActivityResponse
+         * @description Paginated list of repo activity entries.
+         */
+        RepoActivityResponse: {
+            /** Entries */
+            entries?: components["schemas"]["RepoActivityEntryResponse"][];
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+        };
+        /**
+         * RepoCostResponse
+         * @description Per-repo cost breakdown by workflow and model.
+         */
+        RepoCostResponse: {
+            /**
+             * Repo Id
+             * @default
+             */
+            repo_id: string;
+            /**
+             * Repo Full Name
+             * @default
+             */
+            repo_full_name: string;
+            /**
+             * Total Cost Usd
+             * @default 0
+             */
+            total_cost_usd: string;
+            /**
+             * Total Tokens
+             * @default 0
+             */
+            total_tokens: number;
+            /**
+             * Total Input Tokens
+             * @default 0
+             */
+            total_input_tokens: number;
+            /**
+             * Total Output Tokens
+             * @default 0
+             */
+            total_output_tokens: number;
+            /** Cost By Workflow */
+            cost_by_workflow?: {
+                [key: string]: string;
+            };
+            /** Cost By Model */
+            cost_by_model?: {
+                [key: string]: string;
+            };
+            /**
+             * Execution Count
+             * @default 0
+             */
+            execution_count: number;
+        };
+        /**
+         * RepoCreatedResponse
+         * @description Response after registering a new repo.
+         */
+        RepoCreatedResponse: {
+            /** Repo Id */
+            repo_id: string;
+            /** Full Name */
+            full_name: string;
+        };
+        /**
+         * RepoFailureEntryResponse
+         * @description A failed execution record for a repository.
+         */
+        RepoFailureEntryResponse: {
+            /** Execution Id */
+            execution_id: string;
+            /**
+             * Workflow Id
+             * @default
+             */
+            workflow_id: string;
+            /**
+             * Workflow Name
+             * @default
+             */
+            workflow_name: string;
+            /** Failed At */
+            failed_at?: string | null;
+            /**
+             * Error Message
+             * @default
+             */
+            error_message: string;
+            /**
+             * Error Type
+             * @default
+             */
+            error_type: string;
+            /**
+             * Phase Name
+             * @default
+             */
+            phase_name: string;
+            /** Conversation Tail */
+            conversation_tail?: string[];
+        };
+        /**
+         * RepoFailuresResponse
+         * @description Paginated list of repo failure entries.
+         */
+        RepoFailuresResponse: {
+            /** Failures */
+            failures?: components["schemas"]["RepoFailureEntryResponse"][];
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+        };
+        /**
+         * RepoHealthResponse
+         * @description Per-repo health snapshot with success rate, trend, and accumulated costs.
+         *
+         *     Note: ``recent_cost_usd`` is accumulated from WorkflowCompleted/Failed events
+         *     since the projection was last reset — it is not a fixed time window and may
+         *     differ from ``RepoCostResponse.total_cost_usd`` which is a TimescaleDB total.
+         */
+        RepoHealthResponse: {
+            /**
+             * Repo Id
+             * @default
+             */
+            repo_id: string;
+            /**
+             * Repo Full Name
+             * @default
+             */
+            repo_full_name: string;
+            /**
+             * Total Executions
+             * @default 0
+             */
+            total_executions: number;
+            /**
+             * Successful Executions
+             * @default 0
+             */
+            successful_executions: number;
+            /**
+             * Failed Executions
+             * @default 0
+             */
+            failed_executions: number;
+            /**
+             * Success Rate
+             * @default 0
+             */
+            success_rate: number;
+            /**
+             * Trend
+             * @default stable
+             */
+            trend: string;
+            /**
+             * Recent Cost Usd
+             * @default 0
+             */
+            recent_cost_usd: string;
+            /**
+             * Window Tokens
+             * @default 0
+             */
+            window_tokens: number;
+            /**
+             * Last Execution At
+             * @default
+             */
+            last_execution_at: string;
+        };
+        /**
+         * RepoListResponse
+         * @description Paginated list of repos.
+         */
+        RepoListResponse: {
+            /** Repos */
+            repos?: components["schemas"]["RepoSummaryResponse"][];
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+        };
+        /**
+         * RepoSessionEntryResponse
+         * @description Lightweight session record for repo insight views.
+         */
+        RepoSessionEntryResponse: {
+            /** Id */
+            id: string;
+            /** Execution Id */
+            execution_id: string;
+            /** Status */
+            status: string;
+            /** Started At */
+            started_at?: string | null;
+            /** Completed At */
+            completed_at?: string | null;
+            /**
+             * Agent Type
+             * @default
+             */
+            agent_type: string;
+            /**
+             * Total Tokens
+             * @default 0
+             */
+            total_tokens: number;
+            /**
+             * Total Cost Usd
+             * @default 0
+             */
+            total_cost_usd: string;
+        };
+        /**
+         * RepoSessionsResponse
+         * @description Paginated list of repo session entries.
+         */
+        RepoSessionsResponse: {
+            /** Sessions */
+            sessions?: components["schemas"]["RepoSessionEntryResponse"][];
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+        };
+        /**
+         * RepoStatusEntryResponse
+         * @description Health status for a single repo within a system.
+         */
+        RepoStatusEntryResponse: {
+            /**
+             * Repo Id
+             * @default
+             */
+            repo_id: string;
+            /**
+             * Repo Full Name
+             * @default
+             */
+            repo_full_name: string;
+            /**
+             * Status
+             * @default inactive
+             */
+            status: string;
+            /**
+             * Success Rate
+             * @default 0
+             */
+            success_rate: number;
+            /**
+             * Active Executions
+             * @default 0
+             */
+            active_executions: number;
+            /**
+             * Last Execution At
+             * @default
+             */
+            last_execution_at: string;
+        };
+        /**
+         * RepoSummaryResponse
+         * @description Summary of a repo for list views.
+         */
+        RepoSummaryResponse: {
+            /** Repo Id */
+            repo_id: string;
+            /** Organization Id */
+            organization_id: string;
+            /**
+             * System Id
+             * @default
+             */
+            system_id: string;
+            /**
+             * Provider
+             * @default github
+             */
+            provider: string;
+            /**
+             * Full Name
+             * @default
+             */
+            full_name: string;
+            /**
+             * Owner
+             * @default
+             */
+            owner: string;
+            /**
+             * Default Branch
+             * @default main
+             */
+            default_branch: string;
+            /**
+             * Installation Id
+             * @default
+             */
+            installation_id: string;
+            /**
+             * Is Private
+             * @default false
+             */
+            is_private: boolean;
+            /**
+             * Created By
+             * @default
+             */
+            created_by: string;
+            /** Created At */
+            created_at?: string | null;
+        };
+        /**
+         * ReportedFailureReason
+         * @description What a phase says CAUSED the failure it is reporting (#1372).
+         *
+         *     THE QUESTION THIS ANSWERS, and why it had to be asked rather than worked
+         *     out. A readable ``success=false`` says THAT a phase failed and nothing
+         *     more, so every reported failure was recorded as a correct refusal - the
+         *     system working - including the one whose agent had just written "GH_TOKEN
+         *     is not set", which is the system not working, and the one that said the
+         *     task was impossible, which is neither. Those three take opposite responses:
+         *     retry, fix the platform, rewrite the brief. An operator re-dispatching off
+         *     a record that cannot tell them apart spends a whole run to find out.
+         *
+         *     THE SPELLINGS ARE classify.md's, which is the vocabulary analysts already
+         *     sort failures into by hand and the one `FailureClassification` was built
+         *     from. Three words, closed, written here and nowhere else - a closed set in
+         *     one place is what separates a contract from the habit of adding one more
+         *     string every time a run is lost, and it is the definition the negative
+         *     tests are written against.
+         *
+         *     IT IS THE AGENT'S OWN WORD, NEVER AN INFERENCE. Nothing reads ``comments``,
+         *     an exception message or an exit status to reach a member of this; the only
+         *     way into one is a phase that wrote it.
+         *
+         *     AND BECAUSE IT IS THE AGENT'S OWN WORD, IT IS A REPORT AND NOT A
+         *     MEASUREMENT (#1392). This is the whole of what the type means, and the
+         *     reason it is spelled `reported_failure_reason` everywhere it is carried:
+         *     the platform's only corroboration of anything written here is that the
+         *     process exited cleanly and its stream arrived intact, which is evidence
+         *     about the HARNESS and not about whether the task was possible. A run that
+         *     named itself ``task`` established nothing about the request; it said
+         *     something about it. So the word travels the whole way to the operator - who
+         *     wants to know what the agent said - and `FailureClassification`, which is
+         *     what failure NUMBERS are computed from, is never decided by it. The one
+         *     thing a phase can do to that record is WITHDRAW a claim; see
+         *     `_corroborated_classification`, which holds the whole rule.
+         *
+         *     AND IT CANNOT CHANGE WHETHER A PHASE COMPLETES - the property to keep when
+         *     editing anything here. This decides a LABEL on a failure already decided by
+         *     ``success``. A word nobody recognises, a sentence, a number, or no key at
+         *     all all read as "no reason given" and leave the verdict exactly as it was.
+         *     Making a misspelling fatal would let a tally field refuse a finished run,
+         *     which is #1324's defect bought back in exchange for nothing.
+         * @enum {string}
+         */
+        ReportedFailureReason: "task" | "platform" | "refused" | "unknown";
+        /**
+         * ResumeRequest
+         * @description What an operator must decide before a resume is admitted.
+         *
+         *     Both flags default to the REFUSAL, because both exist to make an operator
+         *     say something out loud. Neither implies the other.
+         */
+        ResumeRequest: {
+            /**
+             * Override Cancellation
+             * @description Resume a CANCELLED parent. A cancel is an instruction to stop, so resuming past it needs a fresh decision rather than inheriting the old one.
+             * @default false
+             */
+            override_cancellation: boolean;
+            /**
+             * Acknowledge External Effects
+             * @description Accept that the phase the resume restarts may already have pushed or published something in the parent, which re-running it repeats.
+             * @default false
+             */
+            acknowledge_external_effects: boolean;
+        };
+        /**
+         * ResumeResponse
+         * @description The resume that was admitted, and what the child will do.
+         */
+        ResumeResponse: {
+            /** Parent Execution Id */
+            parent_execution_id: string;
+            /** Execution Id */
+            execution_id: string;
+            /** Resume Phase Id */
+            resume_phase_id: string;
+            /** Inherited Phase Ids */
+            inherited_phase_ids: string[];
+            /** Cancellation Overridden */
+            cancellation_overridden: boolean;
+            /** External Effects Acknowledged */
+            external_effects_acknowledged: boolean;
+        };
+        /**
+         * ResumeStartInfo
+         * @description How starting the child of this execution's resume is going (#1480).
+         *
+         *     A resume is admitted with a 200 and its child is started afterwards, in a
+         *     background task. When that start fails, this is the only place an operator
+         *     can see it: the child execution never appears, so there is nothing else to
+         *     look at.
+         */
+        ResumeStartInfo: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "paused" | "retryable" | "dispatched" | "started" | "failed" | "withdrawn";
+            /** Status Reason */
+            status_reason?: string | null;
+            /**
+             * Attempts
+             * @default 0
+             */
+            attempts: number;
+            /** Max Attempts */
+            max_attempts: number;
+            /**
+             * Recorded At
+             * Format: date-time
+             */
+            recorded_at: string;
+            /** Dispatched At */
+            dispatched_at?: string | null;
+            start_queue?: components["schemas"]["ExecutionStartQueueInfo"] | null;
+        };
+        /**
+         * ReviewVerdict
+         * @description What a reviewing phase concluded about the change in front of it (PC-63).
+         *
+         *     THE AGGREGATE DECIDES ON IT, THE AGENT ONLY REPORTS IT. A phase writes
+         *     ``review_verdict`` in its TASK_RESULT block; the aggregate reads it when
+         *     the phase's artifacts are collected and chooses the next phase from it
+         *     (see `WorkflowExecutionAggregate.artifacts_collected`):
+         *
+         *     * ``certified`` ends the repair loop. Every phase before the workflow's
+         *       final phase is skipped, so a run that certifies in round 1 does not pay
+         *       for rounds 2 and 3.
+         *     * ``blocked`` - or no verdict at all - advances by order, which is the
+         *       next repair round, or the final phase once the rounds are spent.
+         *
+         *     The latest verdict a run reported is also how it ended: a run completed
+         *     on ``blocked`` completed with UNRESOLVED FINDINGS, and says so on
+         *     `WorkflowCompleted` rather than looking certified.
+         *
+         *     A missing or misspelled verdict is never read as ``certified``: skipping
+         *     review on a word the reader did not recognise is the one mistake here that
+         *     costs more than a repair round.
+         * @enum {string}
+         */
+        ReviewVerdict: "certified" | "blocked";
+        /**
+         * RootResponse
+         * @description Payload of ``GET /`` — what this API is, and which build is serving it.
+         *
+         *     THE VERSION HERE IS NULLABLE AND COMES WITH A STATUS, like /health's. It was
+         *     a flat ``dict[str, str]`` whose version slot held the literal ``"unknown"``
+         *     when metadata could not be read: a string in a version field, indistinguish-
+         *     able to a client from a release actually called that, and exactly the defect
+         *     #1380 was filed to remove — just at the endpoint nobody re-read. A typed
+         *     response makes the absence a declared state instead of a word.
+         *
+         *     ``openapi.json``'s ``info.version`` remains the one place a sentinel is
+         *     unavoidable; see the comment at that call in ``main.py``.
+         */
+        RootResponse: {
+            /**
+             * Version
+             * @description Installed release of the syn-api distribution, as reported by importlib.metadata. This is the same string pyproject.toml ships, so it identifies the build exactly — including beta suffixes (e.g. '0.29.1b3'). Null when the distribution's metadata cannot be read, because there is no honest release to report then and a plausible one would mislead; read version_status to tell that case apart without inspecting the null.
+             */
+            version: string | null;
+            /**
+             * Name
+             * @description Human-readable name of this API.
+             */
+            name: string;
+            /**
+             * Docs
+             * @description Path to the interactive API documentation.
+             */
+            docs: string;
+            /**
+             * Health
+             * @description Path to the health endpoint, which reports the full build block plus read-path status.
+             */
+            health: string;
+            /**
+             * Version Status
+             * @description Whether the running release could be read at all. 'installed' means version names the distribution this process was installed from; 'unavailable' means the distribution's metadata could not be read, version is null, and nothing has been invented to fill it.
+             * @enum {string}
+             */
+            readonly version_status: "installed" | "unavailable";
+        };
+        /** RunIdentity */
+        RunIdentity: {
+            /** Source Instance Id */
+            source_instance_id: string;
+            /** Execution Id */
+            execution_id: string;
+        };
+        /**
+         * SSEHealthResponse
+         * @description Health status of the SSE subsystem.
+         */
+        SSEHealthResponse: {
+            /** Status */
+            status: string;
+            /** Active Executions */
+            active_executions?: number | null;
+            /** Active Connections */
+            active_connections?: number | null;
+        };
+        /**
+         * SessionCostResponse
+         * @description Cost for a single session.
+         */
+        SessionCostResponse: {
+            /** Session Id */
+            session_id: string;
+            /** Execution Id */
+            execution_id?: string | null;
+            /** Workflow Id */
+            workflow_id?: string | null;
+            /** Phase Id */
+            phase_id?: string | null;
+            /** Workspace Id */
+            workspace_id?: string | null;
+            /**
+             * Total Cost Usd
+             * @default 0
+             */
+            total_cost_usd: string;
+            /**
+             * Token Cost Usd
+             * @default 0
+             */
+            token_cost_usd: string;
+            /**
+             * Compute Cost Usd
+             * @default 0
+             */
+            compute_cost_usd: string;
+            /**
+             * Input Tokens
+             * @default 0
+             */
+            input_tokens: number;
+            /**
+             * Output Tokens
+             * @default 0
+             */
+            output_tokens: number;
+            /**
+             * Total Tokens
+             * @default 0
+             */
+            total_tokens: number;
+            /**
+             * Cache Creation Tokens
+             * @default 0
+             */
+            cache_creation_tokens: number;
+            /**
+             * Cache Read Tokens
+             * @default 0
+             */
+            cache_read_tokens: number;
+            /**
+             * Tool Calls
+             * @default 0
+             */
+            tool_calls: number;
+            /**
+             * Turns
+             * @default 0
+             */
+            turns: number;
+            /**
+             * Duration Ms
+             * @default 0
+             */
+            duration_ms: number;
+            /** Cost By Model */
+            cost_by_model?: {
+                [key: string]: string;
+            };
+            /** Cost By Tool */
+            cost_by_tool?: {
+                [key: string]: string;
+            };
+            /** Tokens By Tool */
+            tokens_by_tool?: {
+                [key: string]: number;
+            };
+            /** Cost By Tool Tokens */
+            cost_by_tool_tokens?: {
+                [key: string]: string;
+            };
+            /**
+             * Unpriced Observation Count
+             * @default 0
+             */
+            unpriced_observation_count: number;
+            /** Unmeasured Fields */
+            unmeasured_fields?: string[];
+            /**
+             * Is Finalized
+             * @default false
+             */
+            is_finalized: boolean;
+            /** Started At */
+            started_at?: string | null;
+            /** Completed At */
+            completed_at?: string | null;
+        };
+        /**
+         * SessionHistoryBackfillSummary
+         * @description Receipts are reused across retries, so a resumed backfill reports the same total.
+         */
+        SessionHistoryBackfillSummary: {
+            /** Receipts */
+            receipts: number;
+            /** Materialized */
+            materialized: number;
+            /** Evidence Watermark */
+            evidence_watermark: number;
+        };
+        /** SessionInventoryBackfillRequest */
+        SessionInventoryBackfillRequest: {
+            /** Idempotency Key */
+            idempotency_key: string;
+        };
+        /**
+         * SessionInventoryBackfillResponse
+         * @description Durably queued per-execution backfills; the live inventory worker drains them.
+         */
+        SessionInventoryBackfillResponse: {
+            /** Executions */
+            executions: number;
+            /** Enqueued */
+            enqueued: number;
+        };
+        /**
+         * SessionInventoryCursorError
+         * @description Why a continuation cursor was refused. ``restart`` means re-read the head.
+         */
+        SessionInventoryCursorError: {
+            /**
+             * Code
+             * @enum {string}
+             */
+            code: "cursor_invalid" | "cursor_mismatch" | "cursor_expired";
+            /** Message */
+            message: string;
+            /**
+             * Mismatched
+             * @default []
+             */
+            mismatched: ("scope" | "revision" | "section" | "filters")[];
+            /** Restart */
+            restart: boolean;
+            /** Restart Snapshot Id */
+            restart_snapshot_id?: string | null;
+        };
+        /** SessionInventoryCursorErrorResponse */
+        SessionInventoryCursorErrorResponse: {
+            detail: components["schemas"]["SessionInventoryCursorError"];
+        };
+        /** SessionInventoryJobResponse */
+        SessionInventoryJobResponse: {
+            /** Job Id */
+            job_id: string;
+            run: components["schemas"]["RunIdentity"];
+            /**
+             * Stage
+             * @enum {string}
+             */
+            stage: "pending" | "publishing" | "completed" | "failed";
+            /** Evidence Watermark */
+            evidence_watermark: number;
+            /** Snapshot Id */
+            snapshot_id: string;
+            /** Resolver Version */
+            resolver_version: string;
+            /** Revision */
+            revision: string | null;
+            /** Failure Code */
+            failure_code: string | null;
+        };
+        /**
+         * SessionInventoryNamespace
+         * @description Distinct sessions in one identity namespace (``platform``, ``invocation``,
+         *     ``transcript:<harness>``). A native transcript id is only meaningful inside
+         *     its harness namespace; it is never a platform session id.
+         */
+        SessionInventoryNamespace: {
+            /** Namespace */
+            namespace: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "platform" | "invocation" | "transcript";
+            /** Harness */
+            harness?: string | null;
+            /** Count */
+            count: number;
+        };
+        /**
+         * SessionInventoryNodeResponse
+         * @description A node-by-key lookup within one revision. Unknown keys disclose nothing.
+         */
+        SessionInventoryNodeResponse: {
+            /** Snapshot Id */
+            snapshot_id: string;
+            /** Node Key */
+            node_key: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "resolved" | "unresolved";
+            node?: components["schemas"]["InventoryNode"] | null;
+        };
+        /**
+         * SessionInventoryPageResponse
+         * @description One keyset page of a pinned revision plus current local restrictions.
+         *
+         *     ``item_keys[i]`` names the qualified node keys ``items[i]`` references, so an
+         *     edge endpoint on another page resolves through the node lookup route.
+         *     ``next_cursor`` is opaque and bound to this run, revision, section and filters.
+         *     Absent body overrides are unchecked. On capture pages ``capture_hashes[i]``
+         *     names the hash representations of ``items[i]``.
+         */
+        SessionInventoryPageResponse: {
+            snapshot: components["schemas"]["InventorySnapshot"];
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "node" | "membership" | "edge" | "capture" | "gap" | "retraction" | "binding";
+            filters: components["schemas"]["InventoryFilter"];
+            /** Items */
+            items: (components["schemas"]["InventoryNode"] | components["schemas"]["Membership"] | components["schemas"]["LineageEdge"] | components["schemas"]["CaptureReceipt"] | components["schemas"]["InventoryGap"] | components["schemas"]["EvidenceRetraction"] | components["schemas"]["IdentityBinding"])[];
+            /** Item Keys */
+            item_keys: components["schemas"]["InventoryItemKeys"][];
+            /** Next Cursor */
+            next_cursor?: string | null;
+            /**
+             * Body Overrides
+             * @default []
+             */
+            body_overrides: components["schemas"]["TranscriptBodyState"][];
+            /**
+             * Capture Hashes
+             * @default []
+             */
+            capture_hashes: components["schemas"]["CaptureRevisionHashes"][];
+        };
+        /** SessionInventoryRefreshRequest */
+        SessionInventoryRefreshRequest: {
+            /** Idempotency Key */
+            idempotency_key: string;
+            /**
+             * Include History
+             * @default false
+             */
+            include_history: boolean;
+        };
+        /** SessionInventoryRefreshResponse */
+        SessionInventoryRefreshResponse: {
+            /** Job Id */
+            job_id: string;
+            history?: components["schemas"]["SessionHistoryBackfillSummary"] | null;
+        };
+        /**
+         * SessionInventoryResponse
+         * @description Published inventory and observed reconstruction progress, without read side effects.
+         */
+        SessionInventoryResponse: {
+            run: components["schemas"]["RunIdentity"];
+            snapshot: components["schemas"]["InventorySnapshot"] | null;
+            /**
+             * Reconstruction Status
+             * @enum {string}
+             */
+            reconstruction_status: "not_started" | "pending" | "running" | "current" | "failed";
+            /** Observed Evidence Watermark */
+            observed_evidence_watermark: number;
+            /** Later Evidence Pending */
+            later_evidence_pending: boolean;
+            /** Job Id */
+            job_id?: string | null;
+            summary: components["schemas"]["SessionInventorySummary"];
+        };
+        /**
+         * SessionInventorySummary
+         * @description Server-derived counts, completeness and display text every client shows verbatim.
+         *
+         *     ``complete`` is the single completeness verdict: the published coverage
+         *     contract is ``reconciled`` AND that revision is current. Every other
+         *     coverage state (open, unknown, missing, unsupported, conflicting) or a
+         *     pending/failed reconstruction is incomplete. Count fields are None when no
+         *     revision is published, and the namespace split is None on revisions built
+         *     before it was recorded.
+         */
+        SessionInventorySummary: {
+            /** Complete */
+            complete: boolean;
+            /**
+             * Coverage State
+             * @enum {string}
+             */
+            coverage_state: "unknown" | "open" | "reconciled" | "missing" | "unsupported" | "conflicting";
+            /** Coverage Display */
+            coverage_display: string;
+            /** Revision */
+            revision: string | null;
+            /** Distinct Sessions */
+            distinct_sessions: number | null;
+            /** Platform Sessions */
+            platform_sessions: number | null;
+            /** Invocations */
+            invocations: number | null;
+            /** Native Transcripts */
+            native_transcripts: number | null;
+            /** Gaps */
+            gaps: number | null;
+            /** Namespaces */
+            namespaces: components["schemas"]["SessionInventoryNamespace"][] | null;
+            /** Counts Display */
+            counts_display: string;
+            /**
+             * Remote Replication
+             * @enum {string}
+             */
+            remote_replication: "enabled" | "disabled";
+            /** Follow Up Command */
+            follow_up_command: string;
+        };
+        /**
+         * SessionListResponse
+         * @description Wrapped list of session summaries.
+         */
+        SessionListResponse: {
+            /** Sessions */
+            sessions?: components["schemas"]["SessionSummaryResponse"][];
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+            /**
+             * Page
+             * @default 1
+             */
+            page: number;
+            /**
+             * Page Size
+             * @default 50
+             */
+            page_size: number;
+            /**
+             * Excluded Undated
+             * @default 0
+             */
+            excluded_undated: number;
+            /** Status Counts */
+            status_counts?: {
+                [key: string]: number;
+            };
+        };
+        /**
+         * SessionResponse
+         * @description Detailed session response.
+         *
+         *     Display fields (``*_display``) are produced server-side so all clients
+         *     share identical human-readable output. Raw fields remain for programmatic
+         *     consumers.
+         *
+         *     See: docs/adrs/ADR-064-observability-monitor-ui.md
+         */
+        SessionResponse: {
+            /** Id */
+            id: string;
+            /** Workflow Id */
+            workflow_id: string | null;
+            /** Workflow Name */
+            workflow_name?: string | null;
+            /** Execution Id */
+            execution_id?: string | null;
+            /** Phase Id */
+            phase_id: string | null;
+            /** Parent Session Id */
+            parent_session_id?: string | null;
+            /** Root Session Id */
+            root_session_id?: string | null;
+            /** Phase Display */
+            phase_display?: string | null;
+            /** Milestone Id */
+            milestone_id: string | null;
+            /** Agent Provider */
+            agent_provider: string | null;
+            /** Agent Model */
+            agent_model: string | null;
+            /** Requested Model */
+            requested_model: string | null;
+            /** Repos */
+            repos?: string[];
+            /** Repos Display */
+            repos_display?: string | null;
+            /** Status */
+            status: string;
+            /** Workspace Path */
+            workspace_path?: string | null;
+            /**
+             * Input Tokens
+             * @default 0
+             */
+            input_tokens: number;
+            /**
+             * Input Tokens Display
+             * @default 0
+             */
+            input_tokens_display: string;
+            /**
+             * Output Tokens
+             * @default 0
+             */
+            output_tokens: number;
+            /**
+             * Output Tokens Display
+             * @default 0
+             */
+            output_tokens_display: string;
+            /**
+             * Cache Creation Tokens
+             * @default 0
+             */
+            cache_creation_tokens: number;
+            /**
+             * Cache Creation Tokens Display
+             * @default 0
+             */
+            cache_creation_tokens_display: string;
+            /**
+             * Cache Read Tokens
+             * @default 0
+             */
+            cache_read_tokens: number;
+            /**
+             * Cache Read Tokens Display
+             * @default 0
+             */
+            cache_read_tokens_display: string;
+            /**
+             * Total Tokens
+             * @default 0
+             */
+            total_tokens: number;
+            /**
+             * Total Tokens Display
+             * @default 0
+             */
+            total_tokens_display: string;
+            /**
+             * Total Cost Usd
+             * @default 0
+             */
+            total_cost_usd: string;
+            /**
+             * Total Cost Display
+             * @default —
+             */
+            total_cost_display: string;
+            /**
+             * Unpriced Observation Count
+             * @default 0
+             */
+            unpriced_observation_count: number;
+            /** Cost By Model */
+            cost_by_model?: {
+                [key: string]: string;
+            };
+            /** Cache Read Rate Display */
+            cache_read_rate_display?: string | null;
+            /** Cache Write Rate Display */
+            cache_write_rate_display?: string | null;
+            /** Operations */
+            operations?: components["schemas"]["OperationInfo"][];
+            /** Started At */
+            started_at?: string | null;
+            /** Completed At */
+            completed_at?: string | null;
+            /** Duration Seconds */
+            duration_seconds?: number | null;
+            /**
+             * Duration Display
+             * @default —
+             */
+            duration_display: string;
+            /** Error Message */
+            error_message?: string | null;
+            /** Metadata */
+            metadata?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Agent Model Display
+             * @description The model for humans: the reported id verbatim, or 'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9).
+             */
+            readonly agent_model_display: string;
+        };
+        /**
+         * SessionSummaryResponse
+         * @description Summary of an agent session.
+         *
+         *     Display fields (``*_display``) are produced server-side so all clients
+         *     (dashboard, CLI, future UIs) share identical human-readable output. Raw
+         *     fields remain for programmatic consumers; both are always present.
+         *
+         *     Timestamps stay ISO 8601 UTC. Locale and relative-time formatting is the
+         *     client's job (it knows the viewer's time zone and when the response is
+         *     actually rendered).
+         *
+         *     See: docs/adrs/ADR-064-observability-monitor-ui.md
+         */
+        SessionSummaryResponse: {
+            /** Id */
+            id: string;
+            /** Workflow Id */
+            workflow_id: string | null;
+            /** Workflow Name */
+            workflow_name?: string | null;
+            /** Execution Id */
+            execution_id?: string | null;
+            /** Phase Id */
+            phase_id: string | null;
+            /** Parent Session Id */
+            parent_session_id?: string | null;
+            /** Root Session Id */
+            root_session_id?: string | null;
+            /** Phase Display */
+            phase_display?: string | null;
+            /** Status */
+            status: string;
+            /** Agent Provider */
+            agent_provider: string | null;
+            /** Agent Model */
+            agent_model?: string | null;
+            /** Requested Model */
+            requested_model: string | null;
+            /** Repos */
+            repos?: string[];
+            /** Repos Display */
+            repos_display?: string | null;
+            /**
+             * Input Tokens
+             * @default 0
+             */
+            input_tokens: number;
+            /**
+             * Output Tokens
+             * @default 0
+             */
+            output_tokens: number;
+            /**
+             * Cache Creation Tokens
+             * @default 0
+             */
+            cache_creation_tokens: number;
+            /**
+             * Cache Read Tokens
+             * @default 0
+             */
+            cache_read_tokens: number;
+            /**
+             * Total Tokens
+             * @default 0
+             */
+            total_tokens: number;
+            /**
+             * Total Tokens Display
+             * @default 0
+             */
+            total_tokens_display: string;
+            /**
+             * Total Cost Usd
+             * @default 0
+             */
+            total_cost_usd: string;
+            /**
+             * Total Cost Display
+             * @default —
+             */
+            total_cost_display: string;
+            /**
+             * Unpriced Observation Count
+             * @default 0
+             */
+            unpriced_observation_count: number;
+            /** Duration Seconds */
+            duration_seconds?: number | null;
+            /**
+             * Duration Display
+             * @default —
+             */
+            duration_display: string;
+            /** Started At */
+            started_at?: string | null;
+            /** Completed At */
+            completed_at?: string | null;
+            /**
+             * Agent Model Display
+             * @description The model for humans: the reported id verbatim, or 'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9).
+             */
+            readonly agent_model_display: string;
+        };
+        /**
+         * SessionTokenMetrics
+         * @description Token usage metrics for a session.
+         */
+        SessionTokenMetrics: {
+            /** Session Id */
+            session_id: string;
+            /**
+             * Input Tokens
+             * @default 0
+             */
+            input_tokens: number;
+            /**
+             * Output Tokens
+             * @default 0
+             */
+            output_tokens: number;
+            /**
+             * Total Tokens
+             * @default 0
+             */
+            total_tokens: number;
+            /**
+             * Total Cost Usd
+             * @default 0
+             */
+            total_cost_usd: string;
+            /**
+             * Cache Creation Tokens
+             * @default 0
+             */
+            cache_creation_tokens: number;
+            /**
+             * Cache Read Tokens
+             * @default 0
+             */
+            cache_read_tokens: number;
+        };
+        /**
+         * SetDefaultEvalRequest
+         * @description The eval a workflow's runs join when the launch names none (#967).
+         */
+        SetDefaultEvalRequest: {
+            /** @description The default eval, which must exist and not be archived. Null clears it. Runs already started keep the eval they launched into. */
+            eval_id: components["schemas"]["EvalId"] | null;
+        };
+        /**
+         * SetMaintenanceModeRequest
+         * @description Set or clear maintenance mode (#1387).
+         *
+         *     The response is not sent until the state is durably persisted, so a caller
+         *     that has seen a 200 knows no further execution can be admitted.
+         */
+        SetMaintenanceModeRequest: {
+            /**
+             * Active
+             * @description True to refuse new executions, false to resume admitting.
+             */
+            active: boolean;
+            /**
+             * Reason
+             * @description Why admission is paused; echoed back to every refused caller.
+             * @default
+             */
+            reason: string;
+            /**
+             * Actor
+             * @description Who is pausing. Free text - the deploy script sends its own name.
+             * @default
+             */
+            actor: string;
+        };
+        /**
+         * SideEffectStatus
+         * @description What a phase says happened to the external writes it attempted.
+         *
+         *     THE CONFLATION THIS SPLITS. A phase that wrote its deliverable and was then
+         *     refused a PR comment had one word for both facts - `success` - so it wrote
+         *     `false` and the run failed with the finished review still on disk. 17 runs
+         *     of one canary were recorded as failures that way. The deliverable and the
+         *     write-back are separate outcomes and take separate responses: a missing
+         *     deliverable is a failed phase, a refused comment is a permission to grant.
+         *
+         *     A REPORT, NEVER A MEASUREMENT, and spelled `reported_side_effects` wherever
+         *     it is carried for the reason `ReportedFailureReason` is: the agent chose
+         *     the word and nothing corroborates it. It never decides whether a phase
+         *     completes - `success` does that, unchanged.
+         * @enum {string}
+         */
+        SideEffectStatus: "none" | "succeeded" | "denied" | "failed";
+        /**
+         * SkillDetailResponse
+         * @description Every registration sharing one skill name.
+         *
+         *     A name is not unique: the same skill can be pinned at several versions, and
+         *     two sources can publish the same name. All of them are returned so the
+         *     caller can tell which pin a workflow actually resolves to.
+         */
+        SkillDetailResponse: {
+            /** Skill Name */
+            skill_name: string;
+            /** Registrations */
+            registrations?: components["schemas"]["SkillRegistrationSummary"][];
+        };
+        /**
+         * SkillFilePayload
+         * @description One file in the uploaded skill tree (``POST /skills/registrations``).
+         *
+         *     Mirrors ``ClaudePluginFileEntry``. ``content_base64`` is the base64-encoded
+         *     byte content; the API decodes it back into raw bytes before hashing and
+         *     uploading.
+         */
+        SkillFilePayload: {
+            /** Rel Path */
+            rel_path: string;
+            /** Content Base64 */
+            content_base64: string;
+        };
+        /**
+         * SkillListResponse
+         * @description Every registered skill.
+         */
+        SkillListResponse: {
+            /** Skills */
+            skills?: components["schemas"]["SkillRegistrationSummary"][];
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+        };
+        /**
+         * SkillRegistrationLookupResponse
+         * @description Whether a (source_url, version, skill_name) triple is already registered.
+         *
+         *     Lets the CLI skip uploading a skill tree it has already stored. The sha is
+         *     the cache key: identical content always resolves to the same hash, so a hit
+         *     here means zero network work for the caller.
+         */
+        SkillRegistrationLookupResponse: {
+            /** Registered */
+            registered: boolean;
+            /** Resolved Sha */
+            resolved_sha?: string | null;
+        };
+        /**
+         * SkillRegistrationResponse
+         * @description Response payload for ``POST /skills/registrations``.
+         */
+        SkillRegistrationResponse: {
+            /** Skill Name */
+            skill_name: string;
+            /** Source Url */
+            source_url: string;
+            /** Version */
+            version: string;
+            /**
+             * Resolved Sha
+             * @description Content-addressed sha of the normalized tree.
+             */
+            resolved_sha: string;
+            /** Tree Storage Prefix */
+            tree_storage_prefix: string;
+        };
+        /**
+         * SkillRegistrationSummary
+         * @description One registered skill, as the lock projection holds it.
+         *
+         *     Carries the full identity triple plus the content hash, because that is
+         *     exactly what makes a ``SkillNotRegistered`` failure actionable: the caller
+         *     can see which of the three fields does not match what a workflow declared.
+         */
+        SkillRegistrationSummary: {
+            /** Skill Name */
+            skill_name: string;
+            /** Source Url */
+            source_url: string;
+            /** Version */
+            version: string;
+            /**
+             * Resolved Sha
+             * @description Content-addressed sha of the normalized tree.
+             */
+            resolved_sha: string;
+            /**
+             * Resolved Sha Display
+             * @description First 12 characters of resolved_sha, for display in narrow columns.
+             */
+            resolved_sha_display: string;
+            /** Tree Storage Prefix */
+            tree_storage_prefix: string;
+            /**
+             * Registered At
+             * Format: date-time
+             * @description UTC; clients format for their locale.
+             */
+            registered_at: string;
+        };
+        /**
+         * SkillStorageStatsResponse
+         * @description Size of the content-addressed skill store.
+         *
+         *     Skill storage grows monotonically: registration is keyed by content hash
+         *     and nothing removes old trees (skills-distribution spec D6, eviction is
+         *     deliberately not implemented). This endpoint exists so that decision stays
+         *     a measured one rather than an assumption.
+         */
+        SkillStorageStatsResponse: {
+            /**
+             * Object Count
+             * @default 0
+             */
+            object_count: number;
+            /**
+             * Total Bytes
+             * @default 0
+             */
+            total_bytes: number;
+            /**
+             * Skill Count
+             * @description Distinct skill trees, not files.
+             * @default 0
+             */
+            skill_count: number;
+            /**
+             * Truncated
+             * @description True if the backend returned a partial listing, so the counts are floors.
+             * @default false
+             */
+            truncated: boolean;
+        };
+        /**
+         * StartPath
+         * @description Which entrance an execution start came through.
+         * @enum {string}
+         */
+        StartPath: "direct" | "trigger" | "resume";
+        /**
+         * StateResponse
+         * @description Response with execution state.
+         */
+        StateResponse: {
+            /** Execution Id */
+            execution_id: string;
+            /** State */
+            state: string;
+        };
+        /**
+         * Status
+         * @description Feedback ticket status.
+         * @enum {string}
+         */
+        Status: "open" | "in_progress" | "resolved" | "closed" | "wont_fix";
+        /**
+         * StatusCount
+         * @description Count of items by status.
+         */
+        StatusCount: {
+            /**
+             * Open
+             * @default 0
+             */
+            open: number;
+            /**
+             * In Progress
+             * @default 0
+             */
+            in_progress: number;
+            /**
+             * Resolved
+             * @default 0
+             */
+            resolved: number;
+            /**
+             * Closed
+             * @default 0
+             */
+            closed: number;
+            /**
+             * Wont Fix
+             * @default 0
+             */
+            wont_fix: number;
+        };
+        /**
+         * SubjectKind
+         * @description The kind of domain object a page was about when feedback was left.
+         *
+         *     One pair of columns (kind + id) rather than one column per entity: the
+         *     host app decides what its pages are about, and a new page type needs no
+         *     migration, no filter and no branch here.
+         * @enum {string}
+         */
+        SubjectKind: "execution" | "session" | "workflow" | "artifact" | "trigger";
+        /**
+         * SubscriptionHealth
+         * @description The read-path block of ``GET /health``: is the subscription up, and is it behind.
+         *
+         *     FLAT, not nested, because that is the wire shape `syn health` and the deploy
+         *     runbook already read. The fields from ``running`` down are
+         *     ``CoordinatorSubscriptionService.get_status()``; the ones from
+         *     ``is_catching_up`` down are ``ReadModelLag``, spread into the same object by
+         *     ``lifecycle._describe_subscription_health`` (rendered by ``subscription_health``).
+         *
+         *     EVERY FIELD BUT ``status`` IS OPTIONAL, and each absence is a distinct fact
+         *     rather than a default: ``lag is None`` means the coordinator is not up yet,
+         *     so there is nothing whose progress could be measured — which is not the same
+         *     as "not behind", and must not serialize as ``lag: 0``. When the lag or
+         *     dropped-start probe fails, the lag fields are absent but what the
+         *     coordinator itself knows (``running``, ``held_projections``, ``halted_at``)
+         *     is still published, and still sets ``status``: a halt at an undecodable
+         *     head event is exactly when the lag probe fails too. ``status`` is "unknown"
+         *     only when none of those fires.
+         *
+         *     ``ReadModelLag``'s fields are restated here because the block is flat on the
+         *     wire and a generated client has to be able to see them. That restatement is
+         *     the one place this model can drift from its producer, so
+         *     ``test_health_contract.py`` asserts the two field sets still match.
+         */
+        SubscriptionHealth: {
+            /**
+             * Status
+             * @description Verdict on the read path: 'healthy', 'catching_up' during a replay that ends by itself, 'stalled' for a projection that does not, 'degraded' for a coordinator that is not running, 'halted' when the subscription stopped at a stored event it cannot decode, 'dropped_events' when a read model passed an event without applying it, 'held' when a projection failed to apply an event and is retried below it, or 'unknown' when the probe failed.
+             * @enum {string}
+             */
+            status: "healthy" | "degraded" | "halted" | "dropped_events" | "held" | "stalled" | "catching_up" | "unknown";
+            /**
+             * Running
+             * @description Whether the subscription coordinator is running. Null when the probe failed and could not ask.
+             */
+            running?: boolean | null;
+            /**
+             * Projection Count
+             * @description How many projections the coordinator is driving.
+             */
+            projection_count?: number | null;
+            /**
+             * Realtime Enabled
+             * @description Whether a realtime (SSE) projection is attached.
+             */
+            realtime_enabled?: boolean | null;
+            /**
+             * Held Projections
+             * @description Projections held below an event they failed to apply (ESP #391). Non-empty sets status 'held'; the cause is in the API log as the handler's exception. Null when the probe failed.
+             */
+            held_projections?: components["schemas"]["HeldProjectionHealth"][] | null;
+            /**
+             * Halted At
+             * @description Global nonce of the undecodable stored event the subscription is halted at (ESP ADR-026); status is then 'halted'. Re-checked every minute; repair per the ESP ADR-026 recovery steps in the API log. Null when not halted.
+             */
+            halted_at?: number | null;
+            /**
+             * Is Catching Up
+             * @description True while the coordinator is replaying history and some projection has not reached the head. Reads may 404 for recently written aggregates. Ends by itself. Null when the subscription is not up yet and lag is unmeasurable.
+             */
+            is_catching_up?: boolean | null;
+            /**
+             * Is Stalled
+             * @description True when a projection is behind the head and its checkpoint has stopped moving. Does NOT resolve on its own. Null when lag is unmeasurable.
+             */
+            is_stalled?: boolean | null;
+            /**
+             * Lag
+             * @description Distance of the furthest-behind projection from the store head, in lag_unit. 0 means at the head; null means not measurable.
+             */
+            lag?: number | null;
+            /**
+             * Lag Unit
+             * @description Unit of lag: event-store global-nonce positions, not seconds.
+             */
+            lag_unit?: "events" | null;
+            /**
+             * Head Position
+             * @description Global nonce of the newest event in the store.
+             */
+            head_position?: number | null;
+            /**
+             * Lagging Projections
+             * @description Every projection short of the head, furthest behind first. Empty when all are at the head; null when lag is unmeasurable.
+             */
+            lagging_projections?: components["schemas"]["ProjectionLag"][] | null;
+            /**
+             * Unapplied Starts
+             * @description Executions whose WorkflowExecutionStarted an execution read model's checkpoint passed without applying (#1545). Lag cannot show these: the read model is at the head and wrong. Non-empty sets status 'dropped_events'; repair per docs/runbooks/repair-dropped-execution-start.md. Null when not measured.
+             */
+            unapplied_starts?: components["schemas"]["UnappliedStart"][] | null;
+        };
+        /**
+         * SystemActionResponse
+         * @description Response for system mutation actions (update, delete).
+         */
+        SystemActionResponse: {
+            /** System Id */
+            system_id: string;
+            /** Status */
+            status: string;
+        };
+        /**
+         * SystemActivityResponse
+         * @description Paginated list of system activity entries.
+         */
+        SystemActivityResponse: {
+            /** Entries */
+            entries?: components["schemas"]["RepoActivityEntryResponse"][];
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+        };
+        /**
+         * SystemCostResponse
+         * @description System-wide cost breakdown by repo, workflow, and model.
+         */
+        SystemCostResponse: {
+            /**
+             * System Id
+             * @default
+             */
+            system_id: string;
+            /**
+             * System Name
+             * @default
+             */
+            system_name: string;
+            /**
+             * Organization Id
+             * @default
+             */
+            organization_id: string;
+            /**
+             * Total Cost Usd
+             * @default 0
+             */
+            total_cost_usd: string;
+            /**
+             * Total Tokens
+             * @default 0
+             */
+            total_tokens: number;
+            /**
+             * Total Input Tokens
+             * @default 0
+             */
+            total_input_tokens: number;
+            /**
+             * Total Output Tokens
+             * @default 0
+             */
+            total_output_tokens: number;
+            /** Cost By Repo */
+            cost_by_repo?: {
+                [key: string]: string;
+            };
+            /** Cost By Workflow */
+            cost_by_workflow?: {
+                [key: string]: string;
+            };
+            /** Cost By Model */
+            cost_by_model?: {
+                [key: string]: string;
+            };
+            /**
+             * Execution Count
+             * @default 0
+             */
+            execution_count: number;
+        };
+        /**
+         * SystemCreatedResponse
+         * @description Response after creating a new system.
+         */
+        SystemCreatedResponse: {
+            /** System Id */
+            system_id: string;
+            /** Name */
+            name: string;
+        };
+        /**
+         * SystemHistoryResponse
+         * @description Paginated list of system history entries.
+         */
+        SystemHistoryResponse: {
+            /** Entries */
+            entries?: components["schemas"]["RepoActivityEntryResponse"][];
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+        };
+        /**
+         * SystemListResponse
+         * @description Paginated list of systems.
+         */
+        SystemListResponse: {
+            /** Systems */
+            systems?: components["schemas"]["SystemSummaryResponse"][];
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+        };
+        /**
+         * SystemOverviewEntryResponse
+         * @description Summary of a single system for global overview.
+         */
+        SystemOverviewEntryResponse: {
+            /**
+             * System Id
+             * @default
+             */
+            system_id: string;
+            /**
+             * System Name
+             * @default
+             */
+            system_name: string;
+            /**
+             * Organization Id
+             * @default
+             */
+            organization_id: string;
+            /**
+             * Organization Name
+             * @default
+             */
+            organization_name: string;
+            /**
+             * Repo Count
+             * @default 0
+             */
+            repo_count: number;
+            /**
+             * Overall Status
+             * @default healthy
+             */
+            overall_status: string;
+            /**
+             * Active Executions
+             * @default 0
+             */
+            active_executions: number;
+            /**
+             * Total Cost Usd
+             * @default 0
+             */
+            total_cost_usd: string;
+        };
+        /**
+         * SystemPatternsResponse
+         * @description Recurring failure and cost patterns within a system.
+         */
+        SystemPatternsResponse: {
+            /**
+             * System Id
+             * @default
+             */
+            system_id: string;
+            /**
+             * System Name
+             * @default
+             */
+            system_name: string;
+            /** Failure Patterns */
+            failure_patterns?: components["schemas"]["FailurePatternResponse"][];
+            /** Cost Outliers */
+            cost_outliers?: components["schemas"]["CostOutlierResponse"][];
+            /**
+             * Analysis Window Hours
+             * @default 168
+             */
+            analysis_window_hours: number;
+        };
+        /**
+         * SystemStatusResponse
+         * @description Cross-repo health overview within a system.
+         */
+        SystemStatusResponse: {
+            /**
+             * System Id
+             * @default
+             */
+            system_id: string;
+            /**
+             * System Name
+             * @default
+             */
+            system_name: string;
+            /**
+             * Organization Id
+             * @default
+             */
+            organization_id: string;
+            /**
+             * Overall Status
+             * @default healthy
+             */
+            overall_status: string;
+            /**
+             * Total Repos
+             * @default 0
+             */
+            total_repos: number;
+            /**
+             * Healthy Repos
+             * @default 0
+             */
+            healthy_repos: number;
+            /**
+             * Degraded Repos
+             * @default 0
+             */
+            degraded_repos: number;
+            /**
+             * Failing Repos
+             * @default 0
+             */
+            failing_repos: number;
+            /** Repos */
+            repos?: components["schemas"]["RepoStatusEntryResponse"][];
+        };
+        /**
+         * SystemSummaryResponse
+         * @description Summary of a system for list views.
+         */
+        SystemSummaryResponse: {
+            /** System Id */
+            system_id: string;
+            /** Organization Id */
+            organization_id: string;
+            /** Name */
+            name: string;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /**
+             * Created By
+             * @default
+             */
+            created_by: string;
+            /** Created At */
+            created_at?: string | null;
+            /**
+             * Repo Count
+             * @default 0
+             */
+            repo_count: number;
+        };
+        /**
+         * TimelineEntryResponse
+         * @description Timeline entry for visualization.
+         */
+        TimelineEntryResponse: {
+            /** Time */
+            time?: string | null;
+            /** Event Type */
+            event_type: string;
+            /** Tool Name */
+            tool_name?: string | null;
+            /** Duration Ms */
+            duration_ms?: number | null;
+            /** Success */
+            success?: boolean | null;
+        };
+        /**
+         * ToolSummary
+         * @description Tool usage summary.
+         */
+        ToolSummary: {
+            /** Tool Name */
+            tool_name: string;
+            /** Call Count */
+            call_count: number;
+            /** Success Count */
+            success_count: number;
+            /** Error Count */
+            error_count: number;
+            /** Total Duration Ms */
+            total_duration_ms: number;
+            /** Avg Duration Ms */
+            avg_duration_ms: number;
+        };
+        /**
+         * ToolTimelineEntry
+         * @description Single entry in a tool execution timeline.
+         */
+        ToolTimelineEntry: {
+            /**
+             * Observation Id
+             * @default
+             */
+            observation_id: string;
+            /**
+             * Operation Type
+             * @default
+             */
+            operation_type: string;
+            /** Tool Name */
+            tool_name?: string | null;
+            /** Timestamp */
+            timestamp?: string | null;
+            /** Duration Ms */
+            duration_ms?: number | null;
+            /** Success */
+            success?: boolean | null;
+            /** Error Message */
+            error_message?: string | null;
+        };
+        /**
+         * ToolTimelineResponse
+         * @description Tool execution timeline for a session.
+         */
+        ToolTimelineResponse: {
+            /** Session Id */
+            session_id: string;
+            /**
+             * Total Executions
+             * @default 0
+             */
+            total_executions: number;
+            /** Executions */
+            executions?: components["schemas"]["ToolTimelineEntry"][];
+        };
+        /**
+         * TranscriptBodyState
+         * @description A current restriction overlaid on an immutable inventory page.
+         *
+         *     Each hash names its representation. ``archive_sha256`` is the SHA-256 of the
+         *     exact archived bytes (a local receipt's ``archived_byte_hash``).
+         *     ``source_content_hash`` is the APSS original-content hash a remote receipt
+         *     reports as its ``transcript_revision``; it is absent until known.
+         */
+        TranscriptBodyState: {
+            /**
+             * Archive Sha256
+             * @description SHA-256 of the exact archived bytes, not the APSS content hash.
+             */
+            archive_sha256: string;
+            /**
+             * Source Content Hash
+             * @description APSS original-content hash of the same revision, when recorded.
+             */
+            source_content_hash?: string | null;
+            /**
+             * Status
+             * @description expired: retention removed the body. deleted: an owner deleted or retracted it. withheld: access was revoked while bytes are retained.
+             * @enum {string}
+             */
+            status: "expired" | "deleted" | "withheld";
+        };
+        /**
+         * TranscriptConversation
+         * @description ``supported`` is False when no reader exists for this harness or format.
+         */
+        TranscriptConversation: {
+            /** Supported */
+            supported: boolean;
+            /**
+             * Messages
+             * @default []
+             */
+            messages: components["schemas"]["TranscriptMessage"][];
+            /**
+             * Truncated
+             * @default false
+             */
+            truncated: boolean;
+            /**
+             * Issues
+             * @default []
+             */
+            issues: string[];
+            /** Reader Version */
+            reader_version?: string | null;
+        };
+        /**
+         * TranscriptDeletion
+         * @description A durable body tombstone. Catalog and inventory history remain discoverable.
+         */
+        TranscriptDeletion: {
+            /**
+             * Archive Sha256
+             * @description SHA-256 of the exact archived bytes this tombstone covers.
+             */
+            archive_sha256: string;
+            /**
+             * Source Content Hash
+             * @description APSS original-content hash used to delete replicated envelopes.
+             */
+            source_content_hash?: string | null;
+            /**
+             * Reason
+             * @enum {string}
+             */
+            reason: "retention_age" | "retention_quota" | "deletion" | "retraction";
+            /**
+             * Local Status
+             * @enum {string}
+             */
+            local_status: "pending" | "deleted";
+            /**
+             * Requested At
+             * @description ISO 8601 UTC time the tombstone was recorded.
+             */
+            requested_at: string;
+            /**
+             * Deleted At
+             * @description ISO 8601 UTC time local bytes were erased.
+             */
+            deleted_at?: string | null;
+            /**
+             * Replication
+             * @enum {string}
+             */
+            replication: "disabled" | "propagate" | "not_applicable";
+            /**
+             * Replicas
+             * @default []
+             */
+            replicas: components["schemas"]["TranscriptDeletionReplica"][];
+        };
+        /**
+         * TranscriptDeletionReplica
+         * @description Propagation of one body deletion to one configured replication destination.
+         */
+        TranscriptDeletionReplica: {
+            /**
+             * Destination Id
+             * @description Server-derived opaque destination identity.
+             */
+            destination_id: string;
+            /**
+             * Status
+             * @description pending: not yet handed to the exporter. queued: durably queued, not yet acknowledged. propagated: the replica acknowledged deletion. unresolvable: a legacy delivery recorded no content hash to delete by.
+             * @enum {string}
+             */
+            status: "pending" | "queued" | "propagated" | "unresolvable";
+        };
+        /** TranscriptDeletionRequest */
+        TranscriptDeletionRequest: {
+            /** Harness */
+            harness: string;
+            /** Native Id */
+            native_id: string;
+            /**
+             * Reason
+             * @default deletion
+             * @enum {string}
+             */
+            reason: "deletion" | "retraction";
+        };
+        /**
+         * TranscriptDeletionResponse
+         * @description Durable tombstone for exact bytes shared by every membership of the object.
+         *
+         *     ``created`` is false when a tombstone already existed; the original reason
+         *     is kept. Session history remains discoverable with a deleted body state.
+         */
+        TranscriptDeletionResponse: {
+            deletion: components["schemas"]["TranscriptDeletion"];
+            /** Created */
+            created: boolean;
+        };
+        /**
+         * TranscriptIdentityRequest
+         * @description Qualified native identity of one archived revision in the addressed run.
+         */
+        TranscriptIdentityRequest: {
+            /** Harness */
+            harness: string;
+            /** Native Id */
+            native_id: string;
+        };
+        /** TranscriptMessage */
+        TranscriptMessage: {
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "user" | "assistant";
+            /** Text */
+            text: string;
+            /** Line */
+            line: number;
+        };
+        /**
+         * TranscriptRevocationResponse
+         * @description Access to the exact bytes is withheld; stored bytes are retained.
+         */
+        TranscriptRevocationResponse: {
+            /**
+             * Archive Sha256
+             * @description SHA-256 of the exact archived bytes.
+             */
+            archive_sha256: string;
+            /**
+             * Status
+             * @default withheld
+             * @constant
+             */
+            status: "withheld";
+            /** Created */
+            created: boolean;
+        };
+        /**
+         * TriggerActionResponse
+         * @description Response for trigger create/update/delete actions.
+         */
+        TriggerActionResponse: {
+            /** Trigger Id */
+            trigger_id: string;
+            /** Name */
+            name?: string | null;
+            /** Status */
+            status: string;
+            /** Preset */
+            preset?: string | null;
+            /** Action */
+            action?: string | null;
+        };
+        /**
+         * TriggerConfigRequest
+         * @description Safety configuration for a trigger rule.
+         */
+        TriggerConfigRequest: {
+            /**
+             * Max Attempts
+             * @default 3
+             */
+            max_attempts: number;
+            /**
+             * Daily Limit
+             * @default 20
+             */
+            daily_limit: number;
+            /**
+             * Debounce Seconds
+             * @default 0
+             */
+            debounce_seconds: number;
+            /**
+             * Cooldown Seconds
+             * @default 300
+             */
+            cooldown_seconds: number;
+        };
+        /**
+         * TriggerDetail
+         * @description Detailed trigger rule response.
+         */
+        TriggerDetail: {
+            /** Trigger Id */
+            trigger_id: string;
+            /** Name */
+            name: string;
+            /** Event */
+            event: string;
+            /** Repository */
+            repository: string;
+            /** Workflow Id */
+            workflow_id: string;
+            /**
+             * Workflow Name
+             * @default
+             */
+            workflow_name: string;
+            /** Status */
+            status: string;
+            /**
+             * Fire Count
+             * @default 0
+             */
+            fire_count: number;
+            /** Created At */
+            created_at?: string | null;
+            /** Conditions */
+            conditions?: {
+                [key: string]: unknown;
+            }[];
+            /** Input Mapping */
+            input_mapping?: {
+                [key: string]: string;
+            };
+            /** Config */
+            config?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Installation Id
+             * @default
+             */
+            installation_id: string;
+            /**
+             * Created By
+             * @default
+             */
+            created_by: string;
+            /** Last Fired At */
+            last_fired_at?: string | null;
+        };
+        /**
+         * TriggerHistoryEntryResponse
+         * @description Single entry in a trigger-specific history response.
+         */
+        TriggerHistoryEntryResponse: {
+            /** Fired At */
+            fired_at?: string | null;
+            /**
+             * Execution Id
+             * @default
+             */
+            execution_id: string;
+            /**
+             * Webhook Delivery Id
+             * @default
+             */
+            webhook_delivery_id: string;
+            /**
+             * Event Type
+             * @default
+             */
+            event_type: string;
+            /** Pr Number */
+            pr_number?: number | null;
+            /**
+             * Status
+             * @default dispatched
+             */
+            status: string;
+            /** Cost Usd */
+            cost_usd?: number | null;
+            /**
+             * Guard Name
+             * @default
+             */
+            guard_name: string;
+            /**
+             * Block Reason
+             * @default
+             */
+            block_reason: string;
+        };
+        /**
+         * TriggerHistoryListEntry
+         * @description Entry in a cross-trigger history listing.
+         */
+        TriggerHistoryListEntry: {
+            /** Trigger Id */
+            trigger_id: string;
+            /** Fired At */
+            fired_at?: string | null;
+            /**
+             * Execution Id
+             * @default
+             */
+            execution_id: string;
+            /**
+             * Event Type
+             * @default
+             */
+            event_type: string;
+            /** Pr Number */
+            pr_number?: number | null;
+            /**
+             * Status
+             * @default dispatched
+             */
+            status: string;
+            /**
+             * Guard Name
+             * @default
+             */
+            guard_name: string;
+            /**
+             * Block Reason
+             * @default
+             */
+            block_reason: string;
+        };
+        /**
+         * TriggerHistoryListResponse
+         * @description Paginated list of trigger history entries (global).
+         */
+        TriggerHistoryListResponse: {
+            /** Total */
+            total: number;
+            /** Entries */
+            entries?: components["schemas"]["TriggerHistoryListEntry"][];
+        };
+        /**
+         * TriggerHistoryResponse
+         * @description History entries for a specific trigger.
+         */
+        TriggerHistoryResponse: {
+            /** Trigger Id */
+            trigger_id: string;
+            /** Entries */
+            entries?: components["schemas"]["TriggerHistoryEntryResponse"][];
+        };
+        /**
+         * TriggerListResponse
+         * @description Paginated list of trigger summaries.
+         */
+        TriggerListResponse: {
+            /** Total */
+            total: number;
+            /** Triggers */
+            triggers?: components["schemas"]["TriggerSummary"][];
+        };
+        /**
+         * TriggerSummary
+         * @description Summary of a trigger rule for list views.
+         */
+        TriggerSummary: {
+            /** Trigger Id */
+            trigger_id: string;
+            /** Name */
+            name: string;
+            /** Event */
+            event: string;
+            /** Repository */
+            repository: string;
+            /** Workflow Id */
+            workflow_id: string;
+            /**
+             * Workflow Name
+             * @default
+             */
+            workflow_name: string;
+            /** Status */
+            status: string;
+            /**
+             * Fire Count
+             * @default 0
+             */
+            fire_count: number;
+            /** Created At */
+            created_at?: string | null;
+        };
+        /**
+         * TypeCount
+         * @description Count of items by type.
+         */
+        TypeCount: {
+            /**
+             * Bug
+             * @default 0
+             */
+            bug: number;
+            /**
+             * Feature
+             * @default 0
+             */
+            feature: number;
+            /**
+             * Ui Ux
+             * @default 0
+             */
+            ui_ux: number;
+            /**
+             * Performance
+             * @default 0
+             */
+            performance: number;
+            /**
+             * Question
+             * @default 0
+             */
+            question: number;
+            /**
+             * Other
+             * @default 0
+             */
+            other: number;
+        };
+        /**
+         * UnappliedStart
+         * @description One execution whose start a projection skipped past. Published on /health as is.
+         */
+        UnappliedStart: {
+            /**
+             * Projection
+             * @description Read model that skipped the start.
+             */
+            projection: string;
+            /**
+             * Execution Id
+             * @description Execution whose WorkflowExecutionStarted it skipped.
+             */
+            execution_id: string;
+            /**
+             * Global Nonce
+             * @description Store position of that start event.
+             */
+            global_nonce: number;
+        };
+        /** UpdateArtifactRequest */
+        UpdateArtifactRequest: {
+            /** Title */
+            title?: string | null;
+            /** Metadata */
+            metadata?: {
+                [key: string]: unknown;
+            } | null;
+            /** Is Primary Deliverable */
+            is_primary_deliverable?: boolean | null;
+        };
+        /**
+         * UpdateOrganizationRequest
+         * @description Request body for updating an organization.
+         */
+        UpdateOrganizationRequest: {
+            /** Name */
+            name?: string | null;
+            /** Slug */
+            slug?: string | null;
+        };
+        /** UpdatePhasePromptRequest */
+        UpdatePhasePromptRequest: {
+            /** Prompt Template */
+            prompt_template: string;
+            /** Model */
+            model?: string | null;
+            /** Provider */
+            provider?: string | null;
+            /** Timeout Seconds */
+            timeout_seconds?: number | null;
+            /** Allowed Tools */
+            allowed_tools?: string[] | null;
+        };
+        /** UpdatePhaseResponse */
+        UpdatePhaseResponse: {
+            /** Workflow Id */
+            workflow_id: string;
+            /** Phase Id */
+            phase_id: string;
+            /** Status */
+            status: string;
+        };
+        /**
+         * UpdateRepoRequest
+         * @description Request body for updating a repo.
+         */
+        UpdateRepoRequest: {
+            /** Default Branch */
+            default_branch?: string | null;
+            /** Is Private */
+            is_private?: boolean | null;
+            /** Installation Id */
+            installation_id?: string | null;
+            /**
+             * Updated By
+             * @default api
+             */
+            updated_by: string;
+        };
+        /**
+         * UpdateSystemRequest
+         * @description Request body for updating a system.
+         */
+        UpdateSystemRequest: {
+            /** Name */
+            name?: string | null;
+            /** Description */
+            description?: string | null;
+        };
+        /** UploadArtifactResponse */
+        UploadArtifactResponse: {
+            /** Artifact Id */
+            artifact_id: string;
+            /** Storage Url */
+            storage_url: string;
+            /** Status */
+            status: string;
+        };
+        /** ValidateYamlRequest */
+        ValidateYamlRequest: {
+            /**
+             * Content
+             * @description Raw YAML content to validate
+             */
+            content?: string | null;
+            /**
+             * Filename
+             * @description Original filename (informational)
+             * @default workflow.yaml
+             */
+            filename: string;
+            /**
+             * File
+             * @description Deprecated; file paths are no longer supported. Use 'content' instead.
+             */
+            file?: string | null;
+        };
+        /** ValidateYamlResponse */
+        ValidateYamlResponse: {
+            /** Valid */
+            valid: boolean;
+            /**
+             * Name
+             * @default
+             */
+            name: string;
+            /**
+             * Workflow Type
+             * @default
+             */
+            workflow_type: string;
+            /**
+             * Phase Count
+             * @default 0
+             */
+            phase_count: number;
+            /** Errors */
+            errors?: string[];
+            /** Warnings */
+            warnings?: string[];
+        };
+        /** ValidationError */
+        ValidationError: {
+            /** Location */
+            loc: (string | number)[];
+            /** Message */
+            msg: string;
+            /** Error Type */
+            type: string;
+            /** Input */
+            input?: unknown;
+            /** Context */
+            ctx?: Record<string, never>;
+        };
+        /**
+         * Verdict
+         * @description What a scorer concluded about one run of an eval.
+         *
+         *     ``ERROR`` is the scorer's own failure to reach a conclusion (the run left
+         *     nothing to judge, or the scorer broke), never a judgement that the run
+         *     failed. It counts as scored, and not as passed.
+         * @enum {string}
+         */
+        Verdict: "PASS" | "FAIL" | "ERROR";
+        /**
+         * WorkflowDefaultEvalResponse
+         * @description A workflow's default eval after an edit, read from the aggregate (#967).
+         */
+        WorkflowDefaultEvalResponse: {
+            /** Workflow Id */
+            workflow_id: string;
+            /** Default Eval Id */
+            default_eval_id: string | null;
+        };
+        /** WorkflowListResponse */
+        WorkflowListResponse: {
+            /** Workflows */
+            workflows: components["schemas"]["WorkflowSummaryResponse"][];
+            /** Total */
+            total: number;
+            /**
+             * Page
+             * @default 1
+             */
+            page: number;
+            /**
+             * Page Size
+             * @default 20
+             */
+            page_size: number;
+        };
+        /** WorkflowResponse */
+        WorkflowResponse: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Description */
+            description?: string | null;
+            /** Workflow Type */
+            workflow_type: string;
+            /** Classification */
+            classification: string;
+            /** Phases */
+            phases?: components["schemas"]["PhaseDefinitionResponse"][];
+            /** Input Declarations */
+            input_declarations?: components["schemas"]["InputDeclarationModel"][];
+            /** Created At */
+            created_at?: string | null;
+            /**
+             * Runs Count
+             * @default 0
+             */
+            runs_count: number;
+            /** Runs Link */
+            runs_link?: string | null;
+            /** Repository Url */
+            repository_url?: string | null;
+            /** Repos */
+            repos?: string[];
+            /** Requires Repos */
+            requires_repos: boolean;
+            /** Tags */
+            tags?: string[];
+            /** Default Eval Id */
+            default_eval_id?: string | null;
+            /** Package Name */
+            package_name?: string | null;
+        };
+        /** WorkflowSummaryResponse */
+        WorkflowSummaryResponse: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Workflow Type */
+            workflow_type: string;
+            /** Phase Count */
+            phase_count: number;
+            /** Created At */
+            created_at?: string | null;
+            /**
+             * Runs Count
+             * @default 0
+             */
+            runs_count: number;
+            /**
+             * Is Archived
+             * @default false
+             */
+            is_archived: boolean;
+            /** Requires Repos */
+            requires_repos: boolean;
+            /** Tags */
+            tags?: string[];
+        };
+        /**
+         * WorkflowTagsResponse
+         * @description A workflow's tags after an edit, read from the aggregate, not a projection.
+         */
+        WorkflowTagsResponse: {
+            /** Workflow Id */
+            workflow_id: string;
+            /** Tags */
+            tags: string[];
+        };
+        /**
+         * CostSummaryResponse
+         * @description Summary of all costs across sessions/executions.
+         */
+        syn_api__routes__costs__CostSummaryResponse: {
+            /**
+             * Total Cost Usd
+             * @default 0
+             */
+            total_cost_usd: string;
+            /**
+             * Total Sessions
+             * @default 0
+             */
+            total_sessions: number;
+            /**
+             * Total Executions
+             * @default 0
+             */
+            total_executions: number;
+            /**
+             * Total Tokens
+             * @default 0
+             */
+            total_tokens: number;
+            /**
+             * Total Tool Calls
+             * @default 0
+             */
+            total_tool_calls: number;
+            /** Top Models */
+            top_models?: components["schemas"]["ModelCostEntry"][];
+            /** Top Sessions */
+            top_sessions?: {
+                [key: string]: unknown;
+            }[];
+        };
+        /**
+         * CostSummaryResponse
+         * @description Cost summary for a session.
+         */
+        syn_api__routes__events__CostSummaryResponse: {
+            /** Session Id */
+            session_id: string;
+            /**
+             * Input Tokens
+             * @default 0
+             */
+            input_tokens: number;
+            /**
+             * Output Tokens
+             * @default 0
+             */
+            output_tokens: number;
+            /**
+             * Total Tokens
+             * @default 0
+             */
+            total_tokens: number;
+            /**
+             * Cache Creation Tokens
+             * @default 0
+             */
+            cache_creation_tokens: number;
+            /**
+             * Cache Read Tokens
+             * @default 0
+             */
+            cache_read_tokens: number;
+            /** Estimated Cost Usd */
+            estimated_cost_usd?: string | null;
+        };
+    };
+    responses: never;
+    parameters: never;
+    requestBodies: never;
+    headers: never;
+    pathItems: never;
+}
+export type $defs = Record<string, never>;
+export interface operations {
+    list_workflows_endpoint_workflows_get: {
+        parameters: {
+            query?: {
+                /** @description Filter by workflow type */
+                workflow_type?: string | null;
+                /** @description Include archived workflows */
+                include_archived?: boolean;
+                page?: number;
+                page_size?: number;
+                /** @description Sort field (- prefix = descending) */
+                order_by?: string | null;
+                /** @description Case-insensitive substring match on name or id, applied before paging */
+                search?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_workflow_endpoint_workflows_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateWorkflowRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreateWorkflowResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_workflow_endpoint_workflows__workflow_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workflow_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_workflow_endpoint_workflows__workflow_id__delete: {
+        parameters: {
+            query?: {
+                expected_package_name?: string | null;
+            };
+            header?: never;
+            path: {
+                workflow_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeleteWorkflowResponse"];
+                };
+            };
+            /** @description Workflow template not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Conflict; workflow has active executions, is already archived, or is not attributed to expected_package_name */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_workflow_endpoint_workflows__workflow_id__export_get: {
+        parameters: {
+            query?: {
+                /** @description Export format: 'package' (workflow.yaml + phases) or 'plugin' (full CC plugin) */
+                format?: "package" | "plugin";
+            };
+            header?: never;
+            path: {
+                workflow_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExportManifestResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_workflow_runs_endpoint_workflows__workflow_id__runs_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workflow_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExecutionRunListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_workflow_history_endpoint_workflows__workflow_id__history_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workflow_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExecutionHistoryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    validate_yaml_endpoint_workflows_validate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ValidateYamlRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidateYamlResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_phase_prompt_endpoint_workflows__workflow_id__phases__phase_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workflow_id: string;
+                phase_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdatePhasePromptRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpdatePhaseResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_workflow_from_yaml_endpoint_workflows_from_yaml_post: {
+        parameters: {
+            query?: {
+                name?: string | null;
+                workflow_id?: string | null;
+                version?: string | null;
+                source_digest?: string | null;
+                package_name?: string | null;
+                force?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreateWorkflowResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_executions_endpoint_executions_get: {
+        parameters: {
+            query?: {
+                /** @description Filter by single status (legacy) */
+                status?: string | null;
+                /** @description Comma-separated list of statuses (OR'd; takes precedence over `status`) */
+                statuses?: string | null;
+                /** @description Inclusive ISO 8601 lower bound on started_at (timezone required) */
+                started_after?: string | null;
+                /** @description Inclusive ISO 8601 upper bound on started_at (timezone required) */
+                started_before?: string | null;
+                /** @description Case-insensitive substring match against execution id, workflow id and workflow name */
+                q?: string | null;
+                /** @description Keep only executions carrying this tag. Repeat to require several (AND). Normalised like stored tags; an invalid tag is rejected with 422. */
+                tag?: string[] | null;
+                /** @description Keep only executions currently in this eval: an eval's runs (#967). Matched exactly, never as a prefix. */
+                eval_id?: string | null;
+                /** @description Page number */
+                page?: number;
+                /** @description Items per page */
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExecutionListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_execution_endpoint_executions__execution_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                execution_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExecutionDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    execute_workflow_endpoint_workflows__workflow_id__execute_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workflow_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExecuteWorkflowRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExecuteWorkflowResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_execution_status_endpoint_workflows__workflow_id__executions__execution_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workflow_id: string;
+                execution_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExecutionStatusResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_active_executions_endpoint_workflows_executions_active_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExecutionStatusResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_execution_endpoint_executions__execution_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                execution_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["CancelRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ControlResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    inject_context_endpoint_executions__execution_id__inject_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                execution_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InjectRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ControlResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_execution_state_endpoint_executions__execution_id__state_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                execution_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StateResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resume_execution_endpoint_executions__execution_id__resume_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                execution_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ResumeRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResumeResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_session_inventory_executions__execution_id__session_inventory_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                execution_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionInventoryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_session_inventory_page_executions__execution_id__session_inventory__snapshot_id___kind__get: {
+        parameters: {
+            query?: {
+                phase_id?: string | null;
+                attempt_id?: string | null;
+                cursor?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                execution_id: string;
+                snapshot_id: string;
+                kind: "node" | "membership" | "edge" | "capture" | "gap" | "retraction" | "binding";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionInventoryPageResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionInventoryCursorErrorResponse"];
+                };
+            };
+            /** @description Gone */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionInventoryCursorErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_session_inventory_node_executions__execution_id__session_inventory__snapshot_id__nodes__node_key__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                execution_id: string;
+                snapshot_id: string;
+                node_key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionInventoryNodeResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    refresh_session_inventory_executions__execution_id__session_inventory_reconcile_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                execution_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SessionInventoryRefreshRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionInventoryRefreshResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    backfill_all_session_inventories_session_inventory_backfill_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SessionInventoryBackfillRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionInventoryBackfillResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_session_inventory_job_session_inventory_jobs__job_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionInventoryJobResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_local_transcript_revision_executions__execution_id__session_transcripts__archive_hash__get: {
+        parameters: {
+            query: {
+                harness: string;
+                native_id: string;
+            };
+            header?: never;
+            path: {
+                execution_id: string;
+                archive_hash: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LocalTranscriptResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_local_transcript_deletion_executions__execution_id__session_transcripts__archive_hash__deletion_get: {
+        parameters: {
+            query: {
+                harness: string;
+                native_id: string;
+            };
+            header?: never;
+            path: {
+                execution_id: string;
+                archive_hash: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TranscriptDeletionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_local_transcript_revision_executions__execution_id__session_transcripts__archive_hash__deletion_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                execution_id: string;
+                archive_hash: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TranscriptDeletionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TranscriptDeletionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revoke_local_transcript_revision_executions__execution_id__session_transcripts__archive_hash__revocation_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                execution_id: string;
+                archive_hash: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TranscriptIdentityRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TranscriptRevocationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    add_execution_tags_endpoint_executions__execution_id__tags_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                execution_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddTagsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExecutionTagsResponse"];
+                };
+            };
+            /** @description No execution or workflow has this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The id prefix matches more than one record */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A tag is invalid, none was given, or the limit would be exceeded */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    remove_execution_tags_endpoint_executions__execution_id__tags_delete: {
+        parameters: {
+            query: {
+                /** @description A tag to remove. Repeat to remove several. Normalised like stored tags; an invalid tag is rejected with 422. */
+                tag: string[];
+            };
+            header?: never;
+            path: {
+                execution_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExecutionTagsResponse"];
+                };
+            };
+            /** @description No execution or workflow has this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The id prefix matches more than one record */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A tag is invalid, none was given, or the limit would be exceeded */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    add_workflow_tags_endpoint_workflows__workflow_id__tags_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workflow_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddTagsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowTagsResponse"];
+                };
+            };
+            /** @description No execution or workflow has this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The id prefix matches more than one record */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A tag is invalid, none was given, or the limit would be exceeded */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    remove_workflow_tags_endpoint_workflows__workflow_id__tags_delete: {
+        parameters: {
+            query: {
+                /** @description A tag to remove. Repeat to remove several. Normalised like stored tags; an invalid tag is rejected with 422. */
+                tag: string[];
+            };
+            header?: never;
+            path: {
+                workflow_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowTagsResponse"];
+                };
+            };
+            /** @description No execution or workflow has this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The id prefix matches more than one record */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A tag is invalid, none was given, or the limit would be exceeded */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    attach_execution_to_eval_endpoint_executions__execution_id__eval_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                execution_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AttachEvalRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExecutionEvalResponse"];
+                };
+            };
+            /** @description No execution has this id, or no eval has the eval id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The eval is archived, the run belongs to a different eval, or the id prefix matches more than one execution */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The eval id is not a valid eval id */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    detach_execution_from_eval_endpoint_executions__execution_id__eval_delete: {
+        parameters: {
+            query: {
+                /** @description The eval to detach from. Must be the eval the run belongs to, or none. */
+                eval_id: string;
+            };
+            header?: never;
+            path: {
+                execution_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExecutionEvalResponse"];
+                };
+            };
+            /** @description No execution has this id, or no eval has the eval id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The eval is archived, the run belongs to a different eval, or the id prefix matches more than one execution */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The eval id is not a valid eval id */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    set_workflow_default_eval_endpoint_workflows__workflow_id__default_eval_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workflow_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetDefaultEvalRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowDefaultEvalResponse"];
+                };
+            };
+            /** @description No workflow has this id, or no eval has the eval id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The eval is archived, or the id prefix matches more than one workflow */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The eval id is not a valid eval id */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    list_evals_endpoint_evals_get: {
+        parameters: {
+            query?: {
+                /** @description Keep only active or only archived evals. Both when omitted. */
+                status?: ("active" | "archived") | null;
+                /** @description Case-insensitive match on id, name and goal */
+                q?: string | null;
+                /** @description Keep evals carrying this tag; repeat for AND */
+                tag?: string[] | null;
+                page?: number;
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvalListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_eval_endpoint_evals_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateEvalRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvalCreatedResponse"];
+                };
+            };
+            /** @description The request is invalid, or a baseline ref could not be resolved */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_eval_endpoint_evals__eval_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                eval_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvalResponse"];
+                };
+            };
+            /** @description No eval has this id in the eval read model (it may still be catching up) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The eval id is not a valid eval id */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    list_eval_runs_endpoint_evals__eval_id__runs_get: {
+        parameters: {
+            query?: {
+                /** @description Comma-separated execution statuses (OR'd) */
+                statuses?: string | null;
+                page?: number;
+                page_size?: number;
+            };
+            header?: never;
+            path: {
+                eval_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvalRunListResponse"];
+                };
+            };
+            /** @description No eval has this id in the eval read model (it may still be catching up) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The eval id is not a valid eval id */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    score_eval_run_endpoint_evals__eval_id__runs__execution_id__score_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                eval_id: string;
+                execution_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EvalRunScoreRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvalRunScoreResponse"];
+                };
+            };
+            /** @description No eval has this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The execution is not currently a run of this eval */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The eval id is not a valid eval id */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    archive_eval_endpoint_evals__eval_id__archive_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                eval_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvalArchivedResponse"];
+                };
+            };
+            /** @description No eval has this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The eval id is not a valid eval id */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    list_sessions_endpoint_sessions_get: {
+        parameters: {
+            query?: {
+                /** @description Filter by workflow ID */
+                workflow_id?: string | null;
+                /** @description Filter by the execution these sessions belong to. Every session carries one; before this existed the parameter was accepted and silently dropped, returning the whole collection (#1263). */
+                execution_id?: string | null;
+                /** @description Filter by single status (legacy) */
+                status?: string | null;
+                /** @description Comma-separated list of statuses (OR'd; takes precedence over `status`) */
+                statuses?: string | null;
+                /** @description Inclusive ISO 8601 lower bound on started_at (timezone required) */
+                started_after?: string | null;
+                /** @description Inclusive ISO 8601 upper bound on started_at (timezone required) */
+                started_before?: string | null;
+                /** @description Case-insensitive substring match against session id and workflow id */
+                q?: string | null;
+                /** @description Page number */
+                page?: number;
+                /** @description Items per page */
+                page_size?: number | null;
+                /**
+                 * @deprecated
+                 * @description Deprecated alias for page_size. Ignored when page_size is given.
+                 */
+                limit?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_session_endpoint_sessions__session_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_artifacts_endpoint_artifacts_get: {
+        parameters: {
+            query?: {
+                /** @description Filter by workflow ID */
+                workflow_id?: string | null;
+                /** @description Filter by execution ID */
+                execution_id?: string | null;
+                /** @description Filter by phase ID */
+                phase_id?: string | null;
+                /** @description Filter by session ID */
+                session_id?: string | null;
+                /** @description Filter by artifact type */
+                artifact_type?: string | null;
+                /** @description Inclusive ISO 8601 lower bound on created_at (timezone required) */
+                created_after?: string | null;
+                /** @description Inclusive ISO 8601 upper bound on created_at (timezone required) */
+                created_before?: string | null;
+                /** @description Case-insensitive substring match against artifact id, title, workflow id and phase id */
+                q?: string | null;
+                /** @description Page number */
+                page?: number;
+                /** @description Items per page */
+                page_size?: number | null;
+                /**
+                 * @deprecated
+                 * @description Deprecated alias for page_size. Ignored when page_size is given.
+                 */
+                limit?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArtifactListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_artifact_endpoint_artifacts_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateArtifactRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreateArtifactResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_artifact_endpoint_artifacts__artifact_id__get: {
+        parameters: {
+            query?: {
+                /** @description Include artifact content in response */
+                include_content?: boolean;
+            };
+            header?: never;
+            path: {
+                artifact_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArtifactResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_artifact_endpoint_artifacts__artifact_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                artifact_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateArtifactRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArtifactActionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_artifact_endpoint_artifacts__artifact_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                artifact_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArtifactActionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_artifact_content_endpoint_artifacts__artifact_id__content_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                artifact_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArtifactContentResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_artifact_raw_endpoint_artifacts__artifact_id__raw_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                artifact_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upload_artifact_endpoint_artifacts__artifact_id__upload_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                artifact_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_upload_artifact_endpoint_artifacts__artifact_id__upload_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadArtifactResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    register_claude_plugin_endpoint_claude_plugins_registrations_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RegisterClaudePluginRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RegisterClaudePluginResponse"];
+                };
+            };
+            /** @description Malformed file payload (bad base64, missing fields) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Plugin tree exceeds the size or file-count limit */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Manifest missing, malformed, or unsafe file path in the tree */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    list_global_claude_plugins_endpoint_claude_plugins_global_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GlobalClaudePluginListResponse"];
+                };
+            };
+        };
+    };
+    add_global_claude_plugin_endpoint_claude_plugins_global_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddGlobalClaudePluginRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GlobalClaudePluginResponse"];
+                };
+            };
+            /** @description Plugin not registered; register via /registrations first */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_global_claude_plugin_endpoint_claude_plugins_global__name__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RemoveGlobalClaudePluginResponse"];
+                };
+            };
+            /** @description Plugin not present in the global registry */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_claude_plugins_endpoint_claude_plugins_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClaudePluginLockListResponse"];
+                };
+            };
+        };
+    };
+    show_claude_plugin_endpoint_claude_plugins__name___version__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+                version: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClaudePluginLockResponse"];
+                };
+            };
+            /** @description No lock entry for the given (name, version) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_skills_skills_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillListResponse"];
+                };
+            };
+        };
+    };
+    get_skill_storage_stats_skills_storage_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillStorageStatsResponse"];
+                };
+            };
+        };
+    };
+    lookup_skill_registration_skills_registrations_get: {
+        parameters: {
+            query: {
+                /** @description Skill source repository URL */
+                source_url: string;
+                /** @description Pinned version (tag, branch, or commit) */
+                version: string;
+                /** @description Skill name as declared or overridden */
+                skill_name: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillRegistrationLookupResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    register_skill_endpoint_skills_registrations_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RegisterSkillRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillRegistrationResponse"];
+                };
+            };
+            /** @description Malformed file payload (bad base64, missing fields) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Skill tree exceeds the size or file-count limit */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Manifest missing, malformed, or unsafe file path in the tree */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_skill_detail_skills_by_name__skill_name__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                skill_name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillDetailResponse"];
+                };
+            };
+            /** @description No skill registered under that name */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_metrics_endpoint_metrics_get: {
+        parameters: {
+            query?: {
+                /** @description Filter by workflow ID */
+                workflow_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MetricsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_capture_status_capture_status_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                /** @description Return only sessions whose transcripts did not reach the store. */
+                needs_backfill?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CaptureStatusResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_tool_timeline_endpoint_observability_sessions__session_id__tools_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                include_blocked?: boolean;
+            };
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolTimelineResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_token_metrics_endpoint_observability_sessions__session_id__tokens_get: {
+        parameters: {
+            query?: {
+                include_records?: boolean;
+            };
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionTokenMetrics"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_session_costs_endpoint_costs_sessions_get: {
+        parameters: {
+            query?: {
+                /** @description Filter by execution ID */
+                execution_id?: string | null;
+                /** @description Max items to return */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionCostResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_session_cost_endpoint_costs_sessions__session_id__get: {
+        parameters: {
+            query?: {
+                /** @description Include model/tool breakdowns */
+                include_breakdown?: boolean;
+            };
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionCostResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_execution_costs_endpoint_costs_executions_get: {
+        parameters: {
+            query?: {
+                /** @description Max items to return */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExecutionCostResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_execution_cost_endpoint_costs_executions__execution_id__get: {
+        parameters: {
+            query?: {
+                /** @description Include phase/model/tool breakdowns */
+                include_breakdown?: boolean;
+                /** @description Include list of session IDs (unbounded; null when omitted) */
+                include_session_ids?: boolean;
+            };
+            header?: never;
+            path: {
+                execution_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExecutionCostResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_cost_summary_endpoint_costs_summary_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["syn_api__routes__costs__CostSummaryResponse"];
+                };
+            };
+        };
+    };
+    get_recent_activity_endpoint_events_recent_get: {
+        parameters: {
+            query?: {
+                /** @description Max events to return */
+                limit?: number;
+                /** @description Filter by event type */
+                event_type?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EventListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_session_events_endpoint_events_sessions__session_id__get: {
+        parameters: {
+            query?: {
+                /** @description Filter by event type */
+                event_type?: string | null;
+                /** @description Max events to return */
+                limit?: number;
+                /** @description Offset for pagination */
+                offset?: number;
+            };
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EventListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_session_timeline_endpoint_events_sessions__session_id__timeline_get: {
+        parameters: {
+            query?: {
+                /** @description Max entries */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TimelineEntryResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_session_costs_endpoint_events_sessions__session_id__costs_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["syn_api__routes__events__CostSummaryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_session_tools_endpoint_events_sessions__session_id__tools_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolSummary"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_accessible_repos_endpoint_github_repos_get: {
+        parameters: {
+            query?: {
+                installation_id?: string | null;
+                include_private?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitHubRepoListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_conversation_log_endpoint_conversations__session_id__get: {
+        parameters: {
+            query?: {
+                offset?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConversationLogResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_conversation_metadata_endpoint_conversations__session_id__metadata_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConversationMetadataResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_triggers_endpoint_triggers_get: {
+        parameters: {
+            query?: {
+                repository?: string | null;
+                status?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TriggerListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    register_trigger_endpoint_triggers_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RegisterTriggerRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TriggerActionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_all_history_endpoint_triggers_history_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TriggerHistoryListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_trigger_endpoint_triggers__trigger_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                trigger_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TriggerDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_trigger_endpoint_triggers__trigger_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                trigger_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TriggerActionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_trigger_endpoint_triggers__trigger_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                trigger_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TriggerActionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_trigger_history_endpoint_triggers__trigger_id__history_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                trigger_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TriggerHistoryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    enable_preset_endpoint_triggers_presets__preset_name__post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                preset_name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TriggerActionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    github_webhook_endpoint_webhooks_github_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-GitHub-Event": string;
+                "X-GitHub-Delivery": string;
+                "X-Hub-Signature-256"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    execution_sse_sse_executions__execution_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                execution_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    activity_sse_sse_activity_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    sse_health_sse_health_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SSEHealthResponse"];
+                };
+            };
+        };
+    };
+    list_organizations_endpoint_organizations_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationListResponse"];
+                };
+            };
+        };
+    };
+    create_organization_endpoint_organizations_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateOrganizationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationActionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_organization_endpoint_organizations__organization_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                organization_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationSummaryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_organization_endpoint_organizations__organization_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                organization_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateOrganizationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationActionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_organization_endpoint_organizations__organization_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                organization_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationActionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_systems_endpoint_systems_get: {
+        parameters: {
+            query?: {
+                organization_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_system_endpoint_systems_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateSystemRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemCreatedResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_system_endpoint_systems__system_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                system_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemSummaryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_system_endpoint_systems__system_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                system_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateSystemRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemActionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_system_endpoint_systems__system_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                system_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemActionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_system_status_endpoint_systems__system_id__status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                system_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemStatusResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_system_cost_endpoint_systems__system_id__cost_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                system_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemCostResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_system_activity_endpoint_systems__system_id__activity_get: {
+        parameters: {
+            query?: {
+                offset?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                system_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemActivityResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_system_patterns_endpoint_systems__system_id__patterns_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                system_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemPatternsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_system_history_endpoint_systems__system_id__history_get: {
+        parameters: {
+            query?: {
+                offset?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                system_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemHistoryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_repos_endpoint_repos_get: {
+        parameters: {
+            query?: {
+                organization_id?: string | null;
+                system_id?: string | null;
+                provider?: string | null;
+                unassigned?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RepoListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    register_repo_endpoint_repos_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RegisterRepoRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RepoCreatedResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_repo_endpoint_repos__repo_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                repo_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RepoSummaryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_repo_endpoint_repos__repo_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                repo_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateRepoRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RepoActionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    deregister_repo_endpoint_repos__repo_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                repo_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RepoActionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    assign_repo_to_system_endpoint_repos__repo_id__assign_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                repo_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AssignRepoToSystemRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RepoActionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    unassign_repo_from_system_endpoint_repos__repo_id__unassign_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                repo_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RepoActionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_repo_health_endpoint_repos__repo_id__health_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                repo_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RepoHealthResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_repo_cost_endpoint_repos__repo_id__cost_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                repo_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RepoCostResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_repo_activity_endpoint_repos__repo_id__activity_get: {
+        parameters: {
+            query?: {
+                offset?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                repo_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RepoActivityResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_repo_failures_endpoint_repos__repo_id__failures_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                repo_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RepoFailuresResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_repo_sessions_endpoint_repos__repo_id__sessions_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                repo_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RepoSessionsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_global_overview_endpoint_insights_overview_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GlobalOverviewResponse"];
+                };
+            };
+        };
+    };
+    get_global_cost_endpoint_insights_cost_get: {
+        parameters: {
+            query?: {
+                /** @description Filter costs by system ID */
+                system_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GlobalCostResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_contribution_heatmap_endpoint_insights_contribution_heatmap_get: {
+        parameters: {
+            query?: {
+                organization_id?: string | null;
+                system_id?: string | null;
+                repo_id?: string | null;
+                start_date?: string | null;
+                end_date?: string | null;
+                metric?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContributionHeatmapResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_maintenance_mode_maintenance_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MaintenanceModeResponse"];
+                };
+            };
+        };
+    };
+    set_maintenance_mode_maintenance_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetMaintenanceModeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MaintenanceModeResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_features_features_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeaturesResponse"];
+                };
+            };
+        };
+    };
+    get_stats_feedback_stats_get: {
+        parameters: {
+            query?: {
+                /** @description Filter by app name */
+                app?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackStats"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureDisabledResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_feedback_feedback_get: {
+        parameters: {
+            query?: {
+                /** @description Filter by status */
+                status?: string | null;
+                /** @description Filter by type */
+                type?: string | null;
+                /** @description Filter by priority */
+                priority?: string | null;
+                /** @description Filter by app name */
+                app?: string | null;
+                /** @description Filter by the page path feedback was left on */
+                route?: string | null;
+                /** @description Filter by subject kind (execution, session, workflow, ...) */
+                subject_kind?: string | null;
+                /** @description Filter by the id of the object the page was about */
+                subject_id?: string | null;
+                /** @description Only feedback created at or after this instant (ISO 8601) */
+                created_after?: string | null;
+                /** @description Only feedback created strictly before this instant (ISO 8601) */
+                created_before?: string | null;
+                /** @description Search in comments */
+                search?: string | null;
+                /** @description Page number */
+                page?: number;
+                /** @description Items per page */
+                limit?: number;
+                /** @description Field to order by */
+                order_by?: string;
+                /** @description Order descending */
+                desc?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackList"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureDisabledResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_feedback_feedback_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FeedbackCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackItem"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureDisabledResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_feedback_feedback__feedback_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                feedback_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackItemWithMedia"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureDisabledResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_feedback_feedback__feedback_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                feedback_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureDisabledResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_feedback_feedback__feedback_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                feedback_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FeedbackUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackItem"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureDisabledResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upload_media_feedback__feedback_id__media_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                feedback_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_upload_media_feedback__feedback_id__media_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MediaItem"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureDisabledResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_media_feedback__feedback_id__media__media_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                feedback_id: string;
+                media_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureDisabledResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_media_feedback__feedback_id__media__media_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                feedback_id: string;
+                media_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureDisabledResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    root__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RootResponse"];
+                };
+            };
+        };
+    };
+    health_health_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HealthResponse"];
+                };
+            };
+        };
+    };
+    version_version_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BuildInfo"];
+                };
+            };
+        };
+    };
+}

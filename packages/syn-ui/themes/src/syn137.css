@@ -1,0 +1,67 @@
+/*
+ * syn137: the blue theme. Values are the design canvas palette
+ * (Foundations board). Dark only for v1.
+ *
+ * Apply with <html data-theme="syn137">.
+ */
+[data-theme='syn137'] {
+  /* ---- Upstream roles (--ds-*) --------------------------------------- */
+  --ds-color-bg: #0A0C14;              /* Ground */
+  --ds-color-surface: #0D101A;         /* Card */
+  --ds-color-surface-raised: #111626;  /* Raised: run composer, overlays */
+  --ds-color-overlay: #1A2134;         /* Selected */
+  --ds-color-border: #1A2032;          /* Hairline, card border */
+  --ds-color-fg: #E8EEFB;              /* Primary text */
+  --ds-color-text-muted: #9AA8C7;      /* Secondary text */
+  --ds-color-text-subtle: #6F7FA3;     /* Labels, muted, cancelled */
+  --ds-color-accent: #4D80FF;
+  --ds-color-accent-hover: #6B95FF;
+  --ds-color-accent-contrast: #050A18;
+  --ds-color-danger: #FF6F61;          /* Failed, coral */
+  --ds-color-warning: #E5B450;         /* Warning, gaps */
+  --ds-color-success: #3FAF82;
+
+  /* ---- Skyline roles (--sky-*) --------------------------------------- */
+  --sky-color-border-strong: #283048;  /* Control border */
+  --sky-color-border-hover: #34406A;   /* Card and control hover */
+  --sky-color-border-muted: #222A40;   /* Chip and group outline, dock border */
+  --sky-color-divider: #151A29;        /* Row divider */
+  --sky-color-control: #0F121C;        /* Ghost control fill, capsule, dock */
+  --sky-color-control-hover: #151A2A;  /* Ghost button hover */
+  --sky-color-track: #121727;          /* Meter and bar track */
+  --sky-color-empty: #2B3350;          /* Empty phase block */
+  --sky-color-neutral-soft: #171C2B;   /* Cancelled / pending badge fill */
+  --sky-color-danger-soft: #2A1513;    /* Failed badge fill */
+  --sky-color-warning-soft: #1F1A0E;   /* Warning / scorer-error pill fill */
+  --sky-color-warning-soft-fg: #EBD9A8; /* Text on the warning pill */
+  --sky-color-danger-soft-fg: #FF8A7D; /* Text on the failed pill */
+  --sky-color-unscored: #4A567A;       /* Unscored verdict block */
+  --sky-color-text-code: #C3CCE2;      /* Transcript and code text */
+
+  --sky-color-accent-solid: #3D66CC;   /* Primary button fill (5.3:1 with white) */
+  --sky-color-accent-solid-contrast: #FFFFFF;
+  --sky-color-accent-solid-highlight: #94B3FF; /* 1px top highlight on the solid fill */
+
+  /* Token series: cache read, cache write, output, input */
+  --sky-color-data-1: #4C8DEA;
+  --sky-color-data-2: #E0703A;
+  --sky-color-data-3: #9085E9;
+  --sky-color-data-4: #C98500;
+
+  --sky-color-agent-claude: #D97757;   /* Claude agent marker */
+  --sky-color-agent-codex: #8E9BBC;    /* Codex agent marker (Evals board) */
+
+  --sky-color-scrim: rgba(5, 7, 12, 0.6);
+  --sky-color-highlight: rgba(255, 255, 255, 0.04);
+  --sky-color-highlight-strong: rgba(255, 255, 255, 0.07);
+
+  /* ---- Elevation ----------------------------------------------------- */
+  --sky-shadow-raised: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  --sky-shadow-raised-strong: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  --sky-shadow-selected: inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  --sky-shadow-glow: inset 0 1px 0 var(--sky-color-accent-solid-highlight), 0 8px 20px -8px var(--ds-color-accent);
+  --sky-shadow-float: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 16px 32px -16px rgba(0, 0, 0, 0.7);
+  --sky-shadow-dock: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 16px 32px -12px rgba(0, 0, 0, 0.85);
+  --sky-shadow-overlay: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 30px 60px -20px rgba(0, 0, 0, 0.85);
+  --sky-shadow-knob: 0 1px 3px rgba(0, 0, 0, 0.4);
+}

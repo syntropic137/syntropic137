@@ -1,0 +1,91 @@
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { configureClient } from '../client'
+import { ApiError } from '../client/errors'
+import {
+  getArtifact,
+  getContributionHeatmap,
+  getEval,
+  getExecution,
+  getSession,
+  getTrigger,
+  getWorkflow,
+  listArtifacts,
+  listEvals,
+  listExecutions,
+  listRepos,
+  listSessions,
+  listTriggers,
+  listWorkflowRuns,
+  listWorkflows,
+  getMetrics,
+  getCostSummary,
+  getToolTimeline,
+} from '../index'
+import { RUNS, matchFixture } from './index'
+
+beforeEach(() => {
+  configureClient({ fixtures: true, fixtureLatencyMs: 0 })
+})
+afterEach(() => {
+  configureClient({ fixtures: false, fixtureLatencyMs: 120 })
+})
+
+describe('fixture router', () => {
+  it('matches params and methods', () => {
+    expect(matchFixture('GET', '/workflows/research-workflow')?.params).toEqual({ workflowId: 'research-workflow' })
+    expect(matchFixture('POST', '/workflows/research-workflow')).toBeNull()
+    expect(matchFixture('GET', '/nope')).toBeNull()
+  })
+  it('404s for unknown paths and ids', async () => {
+    await expect(getWorkflow('missing')).rejects.toBeInstanceOf(ApiError)
+    await expect(getExecution('missing')).rejects.toMatchObject({ status: 404 })
+  })
+})
+
+describe('every screen has data in fixtures mode', () => {
+  it('workflows', async () => {
+    const list = await listWorkflows()
+    expect(list.total).toBeGreaterThan(5)
+    const wf = await getWorkflow('research-workflow')
+    expect(wf.phases.map((p) => p.name)).toEqual(['Research', 'Synthesize', 'Report'])
+    expect((await listWorkflowRuns('research-workflow')).length).toBeGreaterThan(3)
+  })
+  it('executions, filtered and paged, with consistent detail', async () => {
+    const page = await listExecutions({ page: 1, page_size: 5, statuses: ['failed'] })
+    expect(page.executions.every((e) => e.status === 'failed')).toBe(true)
+    expect(page.status_counts?.completed).toBeGreaterThan(0)
+    const all = await listExecutions({ page: 1, page_size: 100 })
+    expect(all.total).toBe(RUNS.length)
+    const first = all.executions[0]!
+    const detail = await getExecution(first.workflow_execution_id)
+    expect(detail.workflow_name).toBe(first.workflow_name)
+    expect(detail.phases.length).toBe(first.total_phases)
+  })
+  it('sessions link back to their execution', async () => {
+    const list = await listSessions({ page: 1, page_size: 10 })
+    const s = await getSession(list.sessions![0]!.id)
+    expect(s.execution_id).toBeTruthy()
+    expect(s.operations.length).toBeGreaterThan(0)
+    expect((await getToolTimeline(s.id)).total_executions).toBeGreaterThan(0)
+  })
+  it('evals, artifacts, triggers, repos, overview', async () => {
+    const evals = await listEvals()
+    expect(evals.total).toBe(24)
+    expect((await getEval(evals.evals[0]!.eval_id)).tags.some((t) => t.startsWith('case:'))).toBe(true)
+    const arts = await listArtifacts({ page: 1, page_size: 10 })
+    expect(arts.artifacts.length).toBeGreaterThan(0)
+    expect((await getArtifact(arts.artifacts[0]!.id, true)).content).toContain('#')
+    const triggers = await listTriggers()
+    expect((await getTrigger(triggers.triggers[0]!.trigger_id)).conditions).toBeTruthy()
+    expect((await listRepos()).length).toBe(2)
+    const heat = await getContributionHeatmap()
+    expect(heat.days?.find((d) => d.date === '2026-08-28')?.count).toBe(43)
+    expect((await getMetrics()).total_workflows).toBeGreaterThan(0)
+    expect((await getCostSummary()).total_cost_usd).toBeGreaterThan(0)
+  })
+  it('returns copies, so callers cannot edit the store', async () => {
+    const a = await getWorkflow('research-workflow')
+    a.name = 'changed'
+    expect((await getWorkflow('research-workflow')).name).toBe('Research Workflow')
+  })
+})

@@ -1,0 +1,27 @@
+{
+  "name": "@syn137/skyline-core",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Skyline plain-TypeScript core: contracts shim, formatters, chart geometry, state machines, pattern prop types. No DOM, no Svelte.",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/index.ts",
+    "./contracts": "./src/contracts/index.ts",
+    "./format": "./src/format/index.ts",
+    "./geometry": "./src/geometry/index.ts",
+    "./state": "./src/state/index.ts",
+    "./patterns": "./src/patterns/index.ts"
+  },
+  "files": ["src"],
+  "scripts": {
+    "check": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "vitest": "4.1.11"
+  }
+}

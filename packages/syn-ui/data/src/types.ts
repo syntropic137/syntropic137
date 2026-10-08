@@ -1,0 +1,798 @@
+import type { components } from './generated/api-types'
+
+// =============================================================================
+// GENERATED TYPES (from OpenAPI spec - single source of truth)
+// Regenerate with: pnpm generate:types
+// =============================================================================
+
+/** Structured git event data from observability hooks. */
+export type GitEventData = components['schemas']['GitEventData']
+
+/** A single timeline event within a session. */
+export type OperationInfo = components['schemas']['OperationInfo']
+
+// =============================================================================
+// WORKFLOW TEMPLATE TYPES
+// Note: Templates don't have status. Status belongs to Executions.
+// =============================================================================
+
+export interface WorkflowSummary {
+  id: string
+  name: string
+  workflow_type: string
+  phase_count: number
+  created_at: string | null
+  runs_count: number
+}
+
+export interface InputDeclaration {
+  name: string
+  description: string | null
+  required: boolean
+  default: string | null
+}
+
+export interface PhaseDefinition {
+  phase_id: string
+  name: string
+  order: number
+  description: string | null
+  agent_type: string
+  prompt_template: string | null
+  timeout_seconds: number
+  allowed_tools: string[]
+  argument_hint: string | null
+  /** The model as DEFINED: often an alias (opus, gpt-sol). */
+  model: string | null
+  /** Concrete id the alias resolves to; null when not an alias. Never what a run used. */
+  resolved_model?: string | null
+  /** "translated" (platform rewrites it, codex) or "expected" (the CLI picks, claude). */
+  resolution_basis?: 'translated' | 'expected' | null
+  /** e.g. "gpt-sol → gpt-6.1-sol"; the bare model otherwise. Render verbatim. */
+  model_display?: string | null
+  provider: string | null
+  /** Skills the phase DECLARES, as written; a version may be a tag, not a SHA. */
+  skills?: PhaseRef[]
+}
+
+/** A declared skill or plugin reference, aliased to the generated schema rather than restated. */
+export type PhaseRef = components['schemas']['PhaseRefResponse']
+
+export interface WorkflowResponse {
+  id: string
+  name: string
+  description: string | null
+  workflow_type: string
+  classification: string
+  phases: PhaseDefinition[]
+  input_declarations: InputDeclaration[]
+  created_at: string | null
+  runs_count: number
+  runs_link: string | null
+}
+
+export interface WorkflowListResponse {
+  workflows: WorkflowSummary[]
+  total: number
+  page: number
+  page_size: number
+}
+
+// =============================================================================
+// SESSION TYPES
+// =============================================================================
+
+export interface SubagentRecord {
+  subagent_tool_use_id: string
+  agent_name: string
+  started_at: string | null
+  stopped_at: string | null
+  duration_ms: number | null
+  tools_used: Record<string, number>
+  success: boolean
+}
+
+export interface SessionSummary {
+  id: string
+  workflow_id: string | null
+  workflow_name: string | null
+  execution_id: string | null
+  phase_id: string | null
+  phase_display: string | null
+  status: string
+  agent_provider: string | null
+  // Observed model id (ADR-067 D9); requested_model is what the definition asked for.
+  agent_model: string | null
+  /** Explicit model id, or "unknown (requested: X)" / "unknown". Render verbatim. */
+  agent_model_display: string
+  /** What the phase definition asked for (an alias such as "opus"). */
+  requested_model: string | null
+  repos: string[]
+  repos_display: string | null
+  total_tokens: number
+  total_tokens_display: string
+  total_cost_usd: number
+  total_cost_display: string
+  duration_seconds: number | null
+  duration_display: string
+  started_at: string | null
+  completed_at: string | null
+  // Subagent metrics (from agentic_isolation v0.3.0)
+  subagent_count?: number
+  subagents?: SubagentRecord[]
+  tools_by_subagent?: Record<string, Record<string, number>>
+  num_turns?: number
+  duration_api_ms?: number | null
+}
+
+// OperationInfo is now generated from the OpenAPI spec -- see top of file.
+
+export interface SessionResponse {
+  id: string
+  /**
+   * Cache-read / cache-write rate relative to fresh input, as the API words it,
+   * verbatim. Null when the scope mixes models with different multipliers
+   * or a model is unpriced; optional for a server that predates the field.
+   */
+  cache_read_rate_display?: string | null
+  cache_write_rate_display?: string | null
+  workflow_id: string | null
+  workflow_name: string | null
+  execution_id: string | null
+  phase_id: string | null
+  phase_display: string | null
+  milestone_id: string | null
+  agent_provider: string | null
+  /** Observed model id (ADR-067 D9); null when none was observed. */
+  agent_model: string | null
+  /** What the phase definition asked for (an alias such as "opus"). */
+  requested_model: string | null
+  /** Explicit model id, or "unknown (requested: X)". Render verbatim. */
+  agent_model_display: string
+  status: string
+  input_tokens: number
+  output_tokens: number
+  cache_creation_tokens: number
+  cache_read_tokens: number
+  total_tokens: number
+  total_cost_usd: number
+  /**
+   * Observations that carried no usable rate and so added nothing to the total.
+   *
+   * Non-zero means the cost is INCOMPLETE, not that the work was free (#890).
+   */
+  unpriced_observation_count: number
+  cost_by_model: Record<string, string>
+  operations: OperationInfo[]
+  started_at: string | null
+  completed_at: string | null
+  duration_seconds: number | null
+  error_message: string | null
+  metadata: Record<string, unknown>
+  // Subagent metrics (from agentic_isolation v0.3.0)
+  subagent_count?: number
+  subagents?: SubagentRecord[]
+  tools_by_subagent?: Record<string, Record<string, number>>
+  num_turns?: number
+  duration_api_ms?: number | null
+}
+
+// =============================================================================
+// ARTIFACT TYPES
+// =============================================================================
+
+export interface ArtifactSummary {
+  id: string
+  workflow_id: string | null
+  phase_id: string | null
+  artifact_type: string
+  title: string | null
+  size_bytes: number
+  created_at: string | null
+}
+
+/**
+ * One page of artifacts, and the numbers describing what it is a page of.
+ *
+ * Aliased to the generated schema for the same reason `ExecutionListResponse`
+ * is: a hand-written copy cannot notice a field the server added, and
+ * `response.total` on a shape that does not declare it is `undefined` rather
+ * than a build failure - which is how this endpoint returned a bare array
+ * that read as the whole collection for as long as it did (#1204).
+ */
+export type ArtifactListResponse = components['schemas']['ArtifactListResponse']
+
+export interface ArtifactResponse {
+  id: string
+  workflow_id: string | null
+  phase_id: string | null
+  session_id: string | null
+  artifact_type: string
+  is_primary_deliverable: boolean
+  content: string | null
+  content_type: string
+  content_hash: string | null
+  size_bytes: number
+  title: string | null
+  derived_from: string[]
+  created_at: string | null
+  created_by: string | null
+  metadata: Record<string, unknown>
+}
+
+// =============================================================================
+// METRICS TYPES
+// =============================================================================
+
+export interface PhaseMetrics {
+  phase_id: string
+  phase_name: string
+  status: string
+  input_tokens: number
+  output_tokens: number
+  total_tokens: number
+  /** Decimal string, as the API serialises Decimal; never parse it into a float to add. */
+  cost_usd: string
+  /**
+   * Observations in this phase that carried no usable rate.
+   *
+   * Non-zero means `cost_usd` is INCOMPLETE, not that the work was free (#890).
+   */
+  unpriced_observation_count: number
+  /** True while a run of this phase is open: `cost_usd` is a lower bound "so far" (#1048). */
+  cost_in_progress: boolean
+  /** Nullable: the API returns null when the duration is genuinely unknown. */
+  duration_seconds: number | null
+  artifact_count: number
+}
+
+/** Executions by status: one field per domain status, summing to every execution. */
+export interface ExecutionStatusCounts {
+  not_started: number
+  running: number
+  completed: number
+  failed: number
+  cancelled: number
+  interrupted: number
+}
+
+export interface MetricsResponse {
+  total_workflows: number
+  completed_workflows: number
+  failed_workflows: number
+  execution_status_counts: ExecutionStatusCounts
+  total_sessions: number
+  total_input_tokens: number
+  total_output_tokens: number
+  total_cache_creation_tokens: number
+  total_cache_read_tokens: number
+  /** Input + output + cache creation + cache read. */
+  total_tokens: number
+  total_cost_usd: number
+  total_artifacts: number
+  total_artifact_bytes: number
+  phases: PhaseMetrics[]
+}
+
+// =============================================================================
+// EXECUTION HISTORY TYPES
+// =============================================================================
+
+export interface ExecutionRun {
+  /** Explicit naming for OTel correlation (ADR-028) */
+  workflow_execution_id: string
+  status: string
+  started_at: string | null
+  completed_at: string | null
+  total_tokens: number
+  total_cost_usd: number
+  phase_results: PhaseMetrics[]
+  error_message: string | null
+}
+
+export interface ExecutionHistoryResponse {
+  workflow_id: string
+  workflow_name: string
+  executions: ExecutionRun[]
+  total_executions: number
+}
+
+// =============================================================================
+// WORKFLOW EXECUTION TYPES (NEW)
+// =============================================================================
+
+/**
+ * Phase progress with skipped repair rounds accounted for, computed by the
+ * API (PC-63). Render `display` and draw `percent`; never divide
+ * `completed_phases` by `total_phases`, which counts skipped rounds.
+ */
+export type PhaseProgressInfo = components['schemas']['PhaseProgressInfo']
+
+export interface WorkflowExecutionSummary {
+  /** Explicit naming for OTel correlation (ADR-028) */
+  workflow_execution_id: string
+  workflow_id: string
+  status: string
+  started_at: string | null
+  completed_at: string | null
+  completed_phases: number
+  total_phases: number
+  phase_progress: PhaseProgressInfo
+  total_tokens: number
+  total_cost_usd: number
+  /**
+   * Why a `failed` run failed, as `ExecutionRunSummary` now carries it (#1367).
+   *
+   * Absent until this change, so Workflow Runs had nothing to pass its badge
+   * and every correct refusal on that page read as a plain red failure - the
+   * one surface a prop could not fix, because the server was not sending it.
+   *
+   * Optional, unlike on `ExecutionListItem`: this interface is hand-written
+   * rather than aliased to the generated schema, and a required field here
+   * would be a claim about the wire that only the generated type can make.
+   */
+  failure_classification?: FailureClassification
+}
+
+/**
+ * Why a `failed` run failed: the machinery broke, or the work was refused (#1357).
+ *
+ * Aliased to the generated enum rather than restated, so a member added on the
+ * server is a compile error here instead of a string this UI silently renders
+ * as an unhandled default.
+ */
+export type FailureClassification = components['schemas']['FailureClassification']
+
+/**
+ * What a failing phase SAID caused it, in its own word (#1392).
+ *
+ * A REPORT and not a measurement, which is why it is a separate type from
+ * `FailureClassification` rather than more members on it: the only thing
+ * corroborating anything here is that the process exited cleanly. Rendered as
+ * attribution - see `reportedFailureNote` - and never used to pick a colour.
+ *
+ * Aliased to the generated enum for the same reason the type above is: a word
+ * added on the server is a compile error here rather than a string this UI
+ * silently renders as an unhandled default.
+ */
+export type ReportedFailureReason = components['schemas']['ReportedFailureReason']
+
+/** Item in the global execution list (includes workflow_name + display fields) */
+export interface ExecutionListItem {
+  /** Explicit naming for OTel correlation (ADR-028) */
+  workflow_execution_id: string
+  workflow_id: string
+  workflow_name: string
+  status: string
+  started_at: string | null
+  completed_at: string | null
+  completed_phases: number
+  total_phases: number
+  phase_progress: PhaseProgressInfo
+  total_tokens: number
+  total_tokens_display: string
+  total_cost_usd: number
+  total_cost_display: string
+  duration_seconds: number | null
+  duration_display: string
+  tool_call_count: number
+  /**
+   * Why this run failed, for a run that failed (#1357).
+   *
+   * `correct_refusal` is the agent reporting `success=false` and the platform
+   * recording it faithfully - the system WORKING - and it must not be rendered
+   * the same as the machinery breaking. `unclassified` is a run that ended
+   * before anything recorded the difference, which is every failure predating
+   * the field; it renders as a plain failure, which is what it has always been.
+   */
+  failure_classification: FailureClassification
+  /** Full GitHub URLs of repositories cloned for this execution (ADR-058) */
+  repos: string[]
+  repos_display: string | null
+  /** Set exactly when `status` is `queued`: where the start waits, and why (PC-124). */
+  start_queue: ExecutionStartQueueInfo | null
+}
+
+/**
+ * The `/executions` envelope, aliased to the generated type rather than
+ * restated.
+ *
+ * Hand-written, it silently lost every field the API gained: the compiler had
+ * nothing to compare it against, and `response.status_counts` on a shape that
+ * does not declare it is `undefined`, not an error. That is #1176 one layer
+ * out. As an alias, a server field added without regenerating is a build
+ * failure at the point of use.
+ *
+ * `ExecutionListItem` above is left in place for the callers that name it; the
+ * generated `ExecutionSummaryResponse` is assignable to it, which is what made
+ * this alias a drop-in.
+ */
+export type ExecutionListResponse = components['schemas']['ExecutionListResponse']
+/** Where an accepted start waits for a slot, and why (#1557, PC-124). */
+export type ExecutionStartQueueInfo = components['schemas']['ExecutionStartQueueInfo']
+/** How full the execution budget is: running, queued and the cap (PC-124). */
+export type ExecutionBudgetInfo = components['schemas']['ExecutionBudgetInfo']
+
+export interface PhaseExecutionDetail {
+  /**
+   * The phase's id, under the name the wire uses (`PhaseExecutionInfo.phase_id`).
+   * This read `workflow_phase_id`, which the server never sent, so the timeline
+   * could not match a phase that ran to its place in `phase_plan`.
+   */
+  phase_id: string
+  name: string
+  status: string
+  session_id: string | null
+  /** Claude CLI agent session ID for OTel correlation (ADR-028) */
+  agent_session_id: string | null
+  artifact_id: string | null
+  input_tokens: number
+  output_tokens: number
+  cache_creation_tokens: number
+  cache_read_tokens: number
+  /** Nullable: the API returns null when the duration is genuinely unknown. */
+  duration_seconds: number | null
+  cost_usd: number
+  /**
+   * Observations that carried no usable rate and so added nothing to the total.
+   *
+   * Non-zero means the cost is INCOMPLETE, not that the work was free (#890).
+   */
+  unpriced_observation_count: number
+  started_at: string | null
+  completed_at: string | null
+  /** Observed model id (ADR-067 D9); null when none was observed. */
+  model: string | null
+  /** What the phase definition asked for (an alias such as "opus"). */
+  requested_model: string | null
+  /** Explicit model id, or "unknown (requested: X)" / "unknown". Render verbatim. */
+  model_display: string
+  /** Keyed by observed model id, or UNATTRIBUTED_MODEL_KEY. */
+  cost_by_model: Record<string, string>
+  /**
+   * The tools, skills and model this phase had when its execution STARTED,
+   * read from the run's own start event (#1454) - never the current template.
+   * Null says nothing by itself: `start_pins_status` says whether it was
+   * not recorded (a run from before #1454) or could not be read.
+   */
+  pinned_at_start?: PhaseStartConfig | null
+  /** Absent from a server that predates the field: treat as `unavailable`. */
+  start_pins_status?: StartPinsStatus
+  /** Why THIS phase failed, in the server's words; null unless it failed. */
+  error_message?: string | null
+  /**
+   * What the platform classified THIS phase's failure as (#1592). A phase
+   * carries its own, so a card never borrows the run's for a phase it was not
+   * about. Null on a phase that did not fail; absent from an older server.
+   */
+  failure_classification?: FailureClassification | null
+  /** What this phase SAID caused its failure - attribution only, never a colour. */
+  reported_failure_reason?: ReportedFailureReason | null
+}
+
+/** A phase's start config, aliased to the generated schema rather than restated. */
+export type PhaseStartConfig = components['schemas']['PhaseStartConfig']
+/** Why a phase's start pins are or are not shown; only `not_recorded` reads as "not recorded". */
+export type StartPinsStatus = components['schemas']['PhaseExecutionInfo']['start_pins_status']
+
+/** One declared phase and where it stands, aliased to the generated schema rather than restated. */
+export type PlannedPhaseInfo = components['schemas']['PlannedPhaseInfo']
+
+export interface ExecutionDetailResponse {
+  /** Explicit naming for OTel correlation (ADR-028) */
+  workflow_execution_id: string
+  workflow_id: string
+  workflow_name: string
+  status: string
+  started_at: string | null
+  completed_at: string | null
+  phases: PhaseExecutionDetail[]
+  /**
+   * Phases this run set out to do.
+   *
+   * NOT `phases.length`, which counts the phases that started: a three-phase
+   * run that died in phase one carries one phase and a total of 3, and the
+   * gap is the two phases that never ran (#1147). 0 means the count is
+   * unknown, which is a projection that has not rebuilt, not a run with no
+   * phases.
+   */
+  total_phases: number
+  completed_phases: number
+  phase_progress: PhaseProgressInfo
+  /**
+   * Every phase the run declared, in order, each with its status (feedback
+   * cee46909): what ran, and what is pending, skipped or inherited. Render
+   * `status_display` and style by `status`; never work the status out here.
+   */
+  phase_plan: PlannedPhaseInfo[]
+  total_input_tokens: number
+  total_output_tokens: number
+  total_cache_creation_tokens: number
+  total_cache_read_tokens: number
+  total_tokens: number
+  total_cost_usd: number
+  /**
+   * Observations that carried no usable rate and so added nothing to the total.
+   *
+   * Non-zero means the cost is INCOMPLETE, not that the work was free (#890).
+   */
+  unpriced_observation_count: number
+  artifact_ids: string[]
+  error_message: string | null
+  /**
+   * Why this run failed, for a run that failed (#1357).
+   *
+   * `correct_refusal` is the agent reporting `success=false` and the platform
+   * recording it faithfully - the system WORKING - and it must not be rendered
+   * the same as the machinery breaking. `unclassified` is a run that ended
+   * before anything recorded the difference, which is every failure predating
+   * the field; it renders as a plain failure, which is what it has always been.
+   */
+  failure_classification: FailureClassification
+  /**
+   * What the failing phase SAID caused it, in its own word (#1392).
+   *
+   * Optional and nullable because most runs have nothing here: a phase that
+   * named no cause, and every report written before the field existed, both
+   * arrive as absent. Shown as attribution beside the classification above -
+   * see `reportedFailureNote` - and never used to decide a colour, because
+   * the agent chose this word and nothing corroborates it.
+   */
+  reported_failure_reason?: ReportedFailureReason | null
+  /** Full GitHub URLs of repositories cloned for this execution (ADR-058) */
+  repos: string[]
+  /**
+   * Cache-read / cache-write rate relative to fresh input, as the API words it,
+   * verbatim. Null when the scope mixes models with different multipliers
+   * or a model is unpriced; optional for a server that predates the field.
+   */
+  cache_read_rate_display?: string | null
+  cache_write_rate_display?: string | null
+  // Workspace info (ADR-021)
+  workspace: WorkspaceInfo | null
+  /**
+   * What this run was asked to do, verbatim (#1307). Null when it was
+   * dispatched with no task; absent from a server that predates the field.
+   */
+  task?: string | null
+  /**
+   * The eval this execution is a current run of, with its current verdict
+   * (Evals v2). Null in no eval; absent from a server that predates the field.
+   */
+  eval?: components['schemas']['ExecutionEvalRunResponse'] | null
+}
+
+// =============================================================================
+// EVENT TYPES
+// =============================================================================
+
+/**
+ * SSE event type constants used by UI components.
+ *
+ * NOTE: These are bridged from domain events defined in syn-domain.
+ * The domain layer (Python) is the source of truth for event definitions.
+ * Only add constants here for events the UI explicitly handles.
+ */
+export const SSE_EVENTS = {
+  // Events that trigger execution refresh
+  PHASE_STARTED: 'phase_started',
+  PHASE_COMPLETED: 'phase_completed',
+  WORKFLOW_COMPLETED: 'workflow_completed',
+  WORKFLOW_FAILED: 'workflow_failed',
+
+  // Live streaming (control plane)
+  TURN_UPDATE: 'turn_update',
+
+  // Subagent lifecycle events (agentic_isolation v0.3.0)
+  SUBAGENT_STARTED: 'subagent_started',
+  SUBAGENT_STOPPED: 'subagent_stopped',
+
+  // Workspace lifecycle events (ADR-021)
+  WORKSPACE_CREATING: 'workspace_creating',
+  WORKSPACE_CREATED: 'workspace_created',
+  WORKSPACE_COMMAND_EXECUTED: 'workspace_command_executed',
+  WORKSPACE_DESTROYING: 'workspace_destroying',
+  WORKSPACE_DESTROYED: 'workspace_destroyed',
+  WORKSPACE_ERROR: 'workspace_error',
+
+  // Git observability events (agentic-workspace observability plugin)
+  GIT_COMMIT: 'git_commit',
+  GIT_PUSH: 'git_push',
+  GIT_BRANCH_CHANGED: 'git_branch_changed',
+  GIT_OPERATION: 'git_operation',
+  GIT_MERGE: 'git_merge',
+  GIT_REWRITE: 'git_rewrite',
+  GIT_CHECKOUT: 'git_checkout',
+} as const
+
+export type SSEEventType = typeof SSE_EVENTS[keyof typeof SSE_EVENTS]
+
+/**
+ * Typed envelope matching the backend's SSEEventFrame.
+ *
+ * Every frame delivered over an SSE connection is parsed into this shape.
+ * The `type` field distinguishes frame kinds:
+ *   - `connected`: initial handshake when a client subscribes
+ *   - `event`: a domain event forwarded from the event store
+ *   - `terminal`: stream is ending (execution complete/failed)
+ *
+ * See: docs/adrs/ADR-064-observability-monitor-ui.md
+ */
+export interface SSEEventFrame {
+  type: 'connected' | 'event' | 'terminal'
+  event_type: string
+  execution_id: string | null
+  /** Event payload from domain model_dump(). Keys vary per event type. */
+  data: Record<string, unknown>
+  timestamp: string
+}
+
+export interface EventMessage {
+  event_type: string
+  timestamp: string
+  workflow_id: string | null
+  execution_id: string | null
+  phase_id: string | null
+  session_id: string | null
+  data: Record<string, unknown>
+
+  // Tool event properties (for tool_execution_started, tool_execution_completed, tool_blocked)
+  tool_name?: string
+  tool_use_id?: string
+  tool_input?: Record<string, unknown>
+  duration_ms?: number
+  success?: boolean
+  reason?: string
+
+  // Subagent event properties (for subagent_started, subagent_stopped)
+  agent_name?: string
+  subagent_tool_use_id?: string
+  tools_used?: Record<string, number>
+}
+
+// =============================================================================
+// WORKSPACE TYPES (ADR-021: Isolated Workspace Architecture)
+// =============================================================================
+
+export type IsolationBackend =
+  | 'docker_hardened'
+  | 'gvisor'
+  | 'firecracker'
+  | 'kata'
+  | 'cloud'
+  | 'local'
+
+export interface WorkspaceInfo {
+  workspace_id: string
+  isolation_backend: IsolationBackend
+  container_id: string | null
+  vm_id: string | null
+  sandbox_id: string | null
+  workspace_path: string
+  created_at: string
+  started_at: string | null
+  terminated_at: string | null
+  memory_used_bytes: number
+  cpu_time_seconds: number
+  commands_executed: number
+  status: 'creating' | 'running' | 'stopped' | 'error'
+}
+
+// =============================================================================
+// STATUS HELPERS
+// =============================================================================
+
+export type WorkflowStatus = 'pending' | 'in_progress' | 'completed' | 'failed' | 'cancelled'
+export type SessionStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
+export type PhaseStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped'
+
+/** Relative time window used by the Sessions filter bar. */
+export type TimeWindow = '15m' | '1h' | '24h' | '7d' | 'all'
+
+// =============================================================================
+// COST TRACKING TYPES
+// =============================================================================
+
+export interface SessionCost {
+  session_id: string
+  execution_id: string | null
+  workflow_id: string | null
+  phase_id: string | null
+  workspace_id: string | null
+
+  // Cost totals
+  total_cost_usd: number
+  token_cost_usd: number
+  compute_cost_usd: number
+
+  // Token counts
+  input_tokens: number
+  output_tokens: number
+  total_tokens: number
+  cache_creation_tokens: number
+  cache_read_tokens: number
+
+  // Metrics
+  tool_calls: number
+  turns: number
+  duration_ms: number
+
+  // Breakdowns
+  cost_by_model: Record<string, string>
+  cost_by_tool: Record<string, string>
+
+  // Tool token attribution (estimated)
+  tokens_by_tool: Record<string, number>
+  cost_by_tool_tokens: Record<string, string>
+
+  // Status
+  is_finalized: boolean
+  /**
+   * Observations that carried no usable rate and so added nothing to the total.
+   *
+   * Non-zero means the cost is INCOMPLETE, not that the work was free (#890).
+   */
+  unpriced_observation_count: number
+  started_at: string | null
+  completed_at: string | null
+}
+
+export interface ExecutionCost {
+  execution_id: string
+  workflow_id: string | null
+
+  // Session tracking
+  session_count: number
+  /** null when suppressed via include_session_ids=false (default) */
+  session_ids: string[] | null
+
+  // Cost totals
+  total_cost_usd: number
+  token_cost_usd: number
+  compute_cost_usd: number
+
+  // Token counts
+  input_tokens: number
+  output_tokens: number
+  total_tokens: number
+  cache_creation_tokens: number
+  cache_read_tokens: number
+
+  // Metrics
+  tool_calls: number
+  turns: number
+  duration_ms: number
+
+  // Breakdowns
+  cost_by_phase: Record<string, string>
+  /**
+   * Per-phase count of observations that could not be priced.
+   *
+   * A phase listed here but missing from `cost_by_phase` cost an UNKNOWN
+   * amount; a phase in neither genuinely spent nothing (#890).
+   */
+  unpriced_by_phase: Record<string, number>
+  cost_by_model: Record<string, string>
+  cost_by_tool: Record<string, string>
+
+  // Status
+  is_complete: boolean
+  /**
+   * Observations that carried no usable rate and so added nothing to the total.
+   *
+   * Non-zero means the cost is INCOMPLETE, not that the work was free (#890).
+   */
+  unpriced_observation_count: number
+  started_at: string | null
+  completed_at: string | null
+}
+
+export interface CostSummary {
+  total_cost_usd: number
+  total_sessions: number
+  total_executions: number
+  total_tokens: number
+  total_tool_calls: number
+  top_models: Array<{ model: string; cost_usd: string }>
+  top_sessions: Array<{ session_id: string; cost_usd: string; tokens: number }>
+}

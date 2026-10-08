@@ -1,0 +1,5 @@
+export { polygonPath, polygonPoints, round2 } from './path'
+export type { Point } from './path'
+export { extrudeColors, obliqueBox, obliqueFloor, isoBox } from './extrude'
+export type { Face, FaceColors, FacePaths, ExtrudeColorOptions, ObliqueBox, IsoBox } from './extrude'
+export { scaleLinear, sqrtHeight } from './scale'
