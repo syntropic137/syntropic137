@@ -30,6 +30,7 @@ here, and agentic-workspace's `codex_rollout` for the file itself).
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -109,6 +110,15 @@ class _RolloutForTheAnnouncedThread:
         return self._document if native_session_id == NATIVE_ID else None
 
 
+@dataclass(frozen=True)
+class _WrittenRow:
+    """One observation as the collector wrote it, before any projection read it."""
+
+    kind: str
+    model: object
+    requested_model: object
+
+
 class _ObservationsToProjection:
     """An observability writer that delivers each row to the session_cost projection.
 
@@ -120,8 +130,8 @@ class _ObservationsToProjection:
 
     def __init__(self, projection: SessionCostProjection) -> None:
         self._projection = projection
-        #: Every row as the collector wrote it, by observation type.
-        self.rows: list[tuple[str, dict[str, object]]] = []
+        #: Every row the collector wrote, with the two model fields it carried.
+        self.rows: list[_WrittenRow] = []
 
     async def record_observation(
         self,
@@ -134,7 +144,9 @@ class _ObservationsToProjection:
     ) -> None:
         assert isinstance(data, dict)
         kind = str(getattr(observation_type, "value", observation_type))
-        self.rows.append((kind, dict(data)))
+        self.rows.append(
+            _WrittenRow(kind, data.get(OBSERVED_MODEL_KEY), data.get(REQUESTED_MODEL_KEY))
+        )
         deliver = (
             self._projection.on_session_summary
             if kind == SESSION_SUMMARY
@@ -205,10 +217,10 @@ class TestTheSessionsReadModelNamesTheModelCodexRan:
         # Each hop carries the model, not just the summary. A replay that stops
         # before the summary, or a live view between turns, reads the
         # per-turn rows.
-        usage_rows = [data for kind, data in writer.rows if kind == TOKEN_USAGE]
+        usage_rows = [row for row in writer.rows if row.kind == TOKEN_USAGE]
         assert usage_rows
-        for data in usage_rows:
-            assert data[OBSERVED_MODEL_KEY] == CODEX_ANNOUNCED
+        for row in usage_rows:
+            assert row.model == CODEX_ANNOUNCED
 
     async def test_with_no_rollout_the_read_model_says_unknown_not_the_request(self) -> None:
         """The counterweight to the case above. When the rollout cannot be
@@ -219,11 +231,11 @@ class TestTheSessionsReadModelNamesTheModelCodexRan:
         # At the source, before any projection could demote an alias: every
         # row that carries a model says none was observed, and the request
         # travels in its own field.
-        model_rows = [data for kind, data in writer.rows if kind in (TOKEN_USAGE, SESSION_SUMMARY)]
-        assert {kind for kind, _ in writer.rows} >= {TOKEN_USAGE, SESSION_SUMMARY}
-        for data in model_rows:
-            assert data.get(OBSERVED_MODEL_KEY) is None
-            assert data[REQUESTED_MODEL_KEY] == REQUESTED_BY_A_CODEX_PHASE
+        model_rows = [row for row in writer.rows if row.kind in (TOKEN_USAGE, SESSION_SUMMARY)]
+        assert {row.kind for row in writer.rows} >= {TOKEN_USAGE, SESSION_SUMMARY}
+        for row in model_rows:
+            assert row.model is None
+            assert row.requested_model == REQUESTED_BY_A_CODEX_PHASE
 
         cost = await projection.get_session_cost(SESSION_ID)
 
