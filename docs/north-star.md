@@ -24,6 +24,7 @@ Concurrency is the product. Every design decision is judged against it.
 A number reached by queueing everything, or by letting the control plane fall over, does not count.
 
 Long-range sizing for 10k agents is in [scaling-to-10k.md](scaling-to-10k.md). It predates the measurements below; treat its numbers as estimates.
+What it takes to reach 100 and 1,000, with the 2026-10-08 observations: [research/2026-10-08-scale-to-100.md](research/2026-10-08-scale-to-100.md).
 
 ## Where we are (observed, 2026-10-05 to 2026-10-07)
 
