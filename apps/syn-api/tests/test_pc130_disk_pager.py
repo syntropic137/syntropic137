@@ -80,12 +80,12 @@ async def test_failed_delivery_is_retried_until_it_lands() -> None:
 
 
 async def test_webhook_sender_posts_the_page_as_json() -> None:
-    received: list[dict[str, object]] = []
+    received: list[DiskPage] = []
 
     class Handler(BaseHTTPRequestHandler):
         def do_POST(self) -> None:
             body = self.rfile.read(int(self.headers["Content-Length"]))
-            received.append(json.loads(body))
+            received.append(DiskPage.model_validate(json.loads(body)))
             self.send_response(204)
             self.end_headers()
 
@@ -103,4 +103,4 @@ async def test_webhook_sender_posts_the_page_as_json() -> None:
     finally:
         thread.join(timeout=5)
         server.server_close()
-    assert received == [page.model_dump()]
+    assert received == [page]
