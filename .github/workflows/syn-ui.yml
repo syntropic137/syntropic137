@@ -93,6 +93,17 @@ jobs:
       - name: Typecheck
         run: pnpm --filter syn-ui --filter './packages/syn-ui/*' run typecheck
 
+      # The published @syntropic137/design-contracts gate (just
+      # skyline-verify-contracts): tokens present, no colour literals,
+      # contract conformance, src/contract-adapter.ts exports the adapter.
+      - name: Verify design contracts
+        run: >-
+          pnpm --filter @syn137/skyline-core exec design-system-verify
+          --root "$GITHUB_WORKSPACE"
+          --package packages/syn-ui/skyline-svelte-v5
+          --tokens packages/syn-ui/themes/node_modules/@syntropic137/design-tokens/generated/design-tokens.css
+          --typecheck "pnpm --filter @syn137/skyline-svelte-v5 run typecheck"
+
       - name: Test
         run: pnpm --filter syn-ui --filter './packages/syn-ui/*' run test
 

@@ -12,6 +12,17 @@ skyline-install:
 skyline-check:
     {{_skyline}} --workspace-concurrency=1 run check
     {{_skyline}} run typecheck
+    just skyline-verify-contracts
+
+# The published @syntropic137/design-contracts gate against skyline-svelte-v5:
+# A tokens present, B no colour literals in src CSS, C contract conformance
+# (the package typecheck), D src/contract-adapter.ts exports the adapter
+skyline-verify-contracts:
+    pnpm --filter @syn137/skyline-core exec design-system-verify \
+      --root "{{justfile_directory()}}" \
+      --package packages/syn-ui/skyline-svelte-v5 \
+      --tokens packages/syn-ui/themes/node_modules/@syntropic137/design-tokens/generated/design-tokens.css \
+      --typecheck "pnpm --filter @syn137/skyline-svelte-v5 run typecheck"
 
 # Run Skyline unit tests (skyline-core, syn-ui-data, app router)
 skyline-test:

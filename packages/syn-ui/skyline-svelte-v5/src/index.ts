@@ -15,7 +15,7 @@
  * Skyline-only components (no contract yet):
  *   Card, Tag, Input, Breadcrumbs, Stat, Callout, Empty State, Skeleton.
  *
- * Conformance: `svelteV5ContractAdapter` (bottom of this file) covers every
+ * Conformance: `svelteV5ContractAdapter` (src/contract-adapter.ts) covers every
  * upstream required contract, and `SvelteV5ContractConformance` checks that
  * each of those components accepts its contract's props.
  *
@@ -100,26 +100,7 @@ export type { TriggerProps } from './components/_internal/trigger'
 // ---- Upstream conformance: the required contracts, type-checked ----
 // Every rendered contract union equals the contract's (src/contract-unions.ts).
 export type { SvelteV5UnionConformance } from './contract-unions'
-import type { RequiredComponentAdapter, RequiredComponentContracts } from '@syn137/skyline-core/contracts'
-import BadgeComponent from './components/Badge/Badge.svelte'
-import ButtonComponent from './components/Button/Button.svelte'
-import ToggleComponent from './components/Toggle/Toggle.svelte'
-import type { BadgeProps as BadgeComponentProps } from './components/Badge/types'
-import type { ButtonProps as ButtonComponentProps } from './components/Button/types'
-import type { ToggleProps as ToggleComponentProps } from './components/Toggle/types'
-// The adapter covers every required contract (upstream keys: button, badge, toggle).
-export const svelteV5ContractAdapter = { button: ButtonComponent, badge: BadgeComponent, toggle: ToggleComponent } satisfies RequiredComponentAdapter
-// Each required component accepts every prop of its contract. Checked this way round because
-// Skyline props are a superset (Button also takes Skyline's solid/outline variants and a tone).
-// Per key, because Svelte's HTML attribute types carry a symbol index signature (attachments).
-type AcceptsContract<Props, Contract> = {
-  [K in keyof Contract]-?: K extends keyof Props ? ([Contract[K]] extends [Props[K]] ? true : false) : false
-}[keyof Contract] extends true
-  ? true
-  : false
-type AssertTrue<T extends true> = T
-export type SvelteV5ContractConformance = [
-  AssertTrue<AcceptsContract<ButtonComponentProps, RequiredComponentContracts['button']>>,
-  AssertTrue<AcceptsContract<BadgeComponentProps, RequiredComponentContracts['badge']>>,
-  AssertTrue<AcceptsContract<ToggleComponentProps, RequiredComponentContracts['toggle']>>,
-]
+// The adapter and its prop conformance live in contract-adapter.ts, the file
+// the published design-system-verify gate (check D) looks for.
+export { svelteV5ContractAdapter } from './contract-adapter'
+export type { SvelteV5ContractConformance } from './contract-adapter'
