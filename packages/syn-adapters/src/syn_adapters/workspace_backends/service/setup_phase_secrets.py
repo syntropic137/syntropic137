@@ -699,12 +699,7 @@ class SetupPhaseSecrets:
         )
 
     def clones_under(self, workspace_dir: Path) -> list[tuple[str, Path]]:
-        """``(owner/name, its checkout)`` for every repository, seen from the host.
-
-        ``workspace_dir`` is the host side of ``/workspace``. Uses the same
-        destinations the setup script clones into, so a seed is looked up in
-        exactly the checkout that was made (#1714).
-        """
+        """``(owner/name, checkout)`` per repository, under the host side of /workspace (#1714)."""
         return [
             (_repo_full_name(url), workspace_dir / Path(dest).relative_to("/workspace"))
             for url, dest in _clone_destinations(self.repositories)
