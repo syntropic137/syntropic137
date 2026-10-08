@@ -789,6 +789,24 @@
             "description": "Keep only executions currently in this eval: an eval's runs (#967). Matched exactly, never as a prefix."
           },
           {
+            "name": "in_eval",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "true keeps only executions that are currently a run of some eval; false keeps only executions in no eval. Omit for both.",
+              "title": "In Eval"
+            },
+            "description": "true keeps only executions that are currently a run of some eval; false keeps only executions in no eval. Omit for both."
+          },
+          {
             "name": "page",
             "in": "query",
             "required": false,
@@ -12140,6 +12158,16 @@
               }
             ],
             "title": "Repos Display"
+          },
+          "eval": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExecutionEvalRunResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",

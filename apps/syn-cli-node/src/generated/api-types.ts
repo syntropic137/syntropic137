@@ -4343,6 +4343,7 @@ export interface components {
             tags?: string[];
             /** Repos Display */
             repos_display?: string | null;
+            eval?: components["schemas"]["ExecutionEvalRunResponse"] | null;
         };
         /**
          * ExecutionTagsResponse
@@ -9428,6 +9429,8 @@ export interface operations {
                 tag?: string[] | null;
                 /** @description Keep only executions currently in this eval: an eval's runs (#967). Matched exactly, never as a prefix. */
                 eval_id?: string | null;
+                /** @description true keeps only executions that are currently a run of some eval; false keeps only executions in no eval. Omit for both. */
+                in_eval?: boolean | null;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
