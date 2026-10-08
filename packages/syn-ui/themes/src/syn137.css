@@ -48,6 +48,15 @@
   --sky-color-data-3: #9085E9;
   --sky-color-data-4: #C98500;
 
+  /* Trend charts: one colour per series (verifier), grid lines, good-change text and pill */
+  --sky-color-series-1: #4D80FF;
+  --sky-color-series-2: #199E70;
+  --sky-color-series-3: #9085E9;
+  --sky-color-series-4: #D55181;
+  --sky-color-grid: #161B2B;
+  --sky-color-success-soft: #0F241C;
+  --sky-color-success-soft-fg: #7FE3B8;
+
   --sky-color-agent-claude: #D97757;   /* Claude agent marker */
   --sky-color-agent-codex: #8E9BBC;    /* Codex agent marker (Evals board) */
 

@@ -15,3 +15,5 @@ export { verdictBlock, VERDICT_HEIGHT, VERDICT_BAR, VERDICT_BOX } from './verdic
 export type { Verdict } from './verdictBlock'
 export { OBJECT_ICONS, OBJECT_KINDS } from './objectIcons'
 export type { IconFace, IconShape, ObjectIconDef } from './objectIcons'
+export { timeX, niceCeil, valueY, axisTicks, linePath, spreadEndLabels, linearFit, sparkPath, TREND_X_PAD } from './trend'
+export type { TrendPoint, EndLabel } from './trend'

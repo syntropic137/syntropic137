@@ -1,0 +1,115 @@
+/**
+ * Trend rows for GET /evals/{id}/trend and GET /workflows/{id}/trend.
+ *
+ * Eval rows are the Eval board's renderVals() sample (RAW): 28 runs over 30
+ * days by four verifiers, judged by claude-opus-5-5, with the verify prompt
+ * changed on day 18. Workflow rows are the catalog runs with durations shaped
+ * by the Workflows board's trendOf(), so each card reads Faster, Slower or
+ * Steady by the same rule the board used.
+ */
+import type { EvalVerdict } from '../resources/evals'
+import type { EvalTrendResponse, EvalTrendRow, WorkflowTrendResponse, WorkflowTrendRow } from '../resources/trends'
+import { RUNS, WORKFLOWS, type CatalogRun, type CatalogWorkflow } from './catalog'
+import { type FixtureRoute, notFound, route } from './define'
+import { EVALS } from './evals'
+import { EXTRA_WORKFLOWS } from './workflowDetails'
+
+const MODELS = ['claude-opus-5-5', 'claude-sonnet-5-5', 'gpt-5.6-sol', 'gpt-5.6-terra'] as const
+/** USD per million tokens, per verifier (board RATE): tokens = cost / rate. */
+const RATE = [9.0, 3.0, 2.5, 2.0]
+const JUDGE = 'claude-opus-5-5'
+/** Day 0 of the board's chart: Sep 8, 2026 (UTC). */
+const DAY0 = Date.UTC(2026, 8, 8)
+const DAY = 86_400_000
+/** The verify prompt changed on day 18 (board NOTES). */
+const CHANGE_DAY = 18
+
+type Raw = [day: number, verifier: number, verdict: EvalVerdict | 'UNSCORED', cost: number, seconds: number, score: number | null]
+
+/** Board RAW, verbatim apart from the judge column (always JUDGE when scored). */
+const RAW: Raw[] = [
+  [0, 0, 'PASS', 1.21, 452, 82], [4, 0, 'PASS', 1.18, 431, 85], [8, 0, 'FAIL', 1.25, 470, 61], [12, 0, 'PASS', 1.16, 418, 84],
+  [17, 0, 'PASS', 1.09, 392, 88], [21, 0, 'PASS', 1.06, 381, 90], [25, 0, 'PASS', 1.02, 366, 91], [29, 0, 'PASS', 1.04, 372, 92],
+  [1, 1, 'FAIL', 0.49, 241, 48], [5, 1, 'FAIL', 0.51, 236, 55], [9, 1, 'PASS', 0.5, 247, 72], [13, 1, 'FAIL', 0.53, 252, 63],
+  [16, 1, 'FAIL', 0.52, 240, 66], [19, 1, 'PASS', 0.5, 233, 78], [22, 1, 'PASS', 0.52, 238, 84], [26, 1, 'PASS', 0.51, 229, 87],
+  [28, 1, 'PASS', 0.52, 245, 89], [2, 2, 'PASS', 0.55, 262, 80], [7, 2, 'PASS', 0.58, 255, 78], [11, 2, 'FAIL', 0.61, 249, 64],
+  [15, 2, 'PASS', 0.63, 240, 76], [20, 2, 'FAIL', 0.66, 236, 62], [24, 2, 'PASS', 0.69, 231, 73], [27, 2, 'FAIL', 0.71, 228, 58],
+  [23, 3, 'PASS', 0.62, 214, 79], [25, 3, 'FAIL', 0.6, 201, 66], [27, 3, 'PASS', 0.59, 196, 81], [29, 3, 'UNSCORED', 0.61, 190, null],
+]
+
+function evalRow([day, v, verdict, cost, seconds, score]: Raw): EvalTrendRow {
+  const after = day >= CHANGE_DAY
+  return {
+    // Verifiers run two hours apart on a shared day, in board order.
+    date: new Date(DAY0 + day * DAY + (9 + v * 2) * 3_600_000).toISOString(),
+    verifier_model: MODELS[v]!,
+    judge_model: score === null ? null : JUDGE,
+    score,
+    verdict: verdict === 'UNSCORED' ? null : verdict,
+    cost_usd: cost,
+    duration_seconds: seconds,
+    tokens: Math.round((cost / RATE[v]!) * 1e6),
+    definition_version: after ? 'v2' : 'v1',
+    definition_changed_at: after ? new Date(DAY0 + CHANGE_DAY * DAY).toISOString() : null,
+  }
+}
+
+export const EVAL_TREND_ROWS: EvalTrendRow[] = RAW.map(evalRow).sort((a, b) => a.date.localeCompare(b.date))
+
+// ---- workflows ------------------------------------------------------------
+
+/** Board trendOf(): slope -3..3 from the name and phase count; each step is 6% of duration. */
+function boardSlope(w: CatalogWorkflow): number {
+  const k = w.name.length + w.phases.length
+  return ((k * 37) % 7) - 3
+}
+
+/** Board wobble, minus its own least-squares line so it never moves the fitted trend. */
+function wobble(n: number, k: number): number[] {
+  const raw = Array.from({ length: n }, (_, j) => ((j * 13 + k * 7) % 5) - 2)
+  const mx = (n - 1) / 2
+  const my = raw.reduce((a, v) => a + v, 0) / n
+  const sxx = raw.reduce((a, _, j) => a + (j - mx) ** 2, 0)
+  const slope = sxx ? raw.reduce((a, v, j) => a + (j - mx) * (v - my), 0) / sxx : 0
+  return raw.map((v, j) => v - my - slope * (j - mx))
+}
+
+/** Durations from S to S x (1 - slope x 6%), oldest first, with the board's wobble. */
+function shapedDurations(w: CatalogWorkflow, finished: readonly CatalogRun[]): number[] {
+  const n = finished.length
+  if (n < 3) return finished.map((r) => r.seconds)
+  const base = finished.reduce((a, r) => a + r.seconds, 0) / n
+  const change = (-boardSlope(w) * 6) / 100
+  const wob = wobble(n, w.name.length + w.phases.length)
+  return finished.map((_, j) => Math.round((base * (1 + (change * j) / (n - 1)) + wob[j]! * 0.02 * base) * 10) / 10)
+}
+
+function workflowRows(w: CatalogWorkflow): WorkflowTrendRow[] {
+  const runs = RUNS.filter((r) => r.workflowId === w.id).sort((a, b) => a.startedAt.localeCompare(b.startedAt))
+  const finished = runs.filter((r) => r.status !== 'running')
+  const shaped = new Map(finished.map((r, j) => [r.id, shapedDurations(w, finished)[j]!]))
+  return runs.map((r) => {
+    const d = shaped.get(r.id) ?? null
+    return {
+      date: r.startedAt,
+      status: r.status,
+      cost_usd: r.cost,
+      duration_seconds: d,
+      tokens: r.tokens,
+      phase_durations: w.phases.map((p) => ({ phase_name: p.name, duration_seconds: d === null ? null : Math.round((d / w.phases.length) * 10) / 10 })),
+      definition_version: 'v1',
+      definition_changed_at: null,
+    }
+  })
+}
+
+export const trendRoutes: FixtureRoute[] = [
+  route('GET', '/evals/:evalId/trend', ({ params }): EvalTrendResponse => {
+    const e = EVALS.find((x) => x.summary.eval_id === params.evalId) ?? notFound('Eval')
+    return { eval_id: e.summary.eval_id, rows: EVAL_TREND_ROWS }
+  }),
+  route('GET', '/workflows/:workflowId/trend', ({ params }): WorkflowTrendResponse => {
+    const w = [...WORKFLOWS, ...EXTRA_WORKFLOWS].find((x) => x.id === params.workflowId) ?? notFound('Workflow')
+    return { workflow_id: w.id, rows: workflowRows(w) }
+  }),
+]

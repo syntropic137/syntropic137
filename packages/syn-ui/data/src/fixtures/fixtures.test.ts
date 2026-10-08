@@ -23,6 +23,8 @@ import {
   getMetrics,
   getCostSummary,
   getToolTimeline,
+  getEvalTrend,
+  getWorkflowTrend,
 } from '../index'
 import { RUNS, matchFixture } from './index'
 
@@ -110,5 +112,25 @@ describe('every screen has data in fixtures mode', () => {
     const a = await getWorkflow('research-workflow')
     a.name = 'changed'
     expect((await getWorkflow('research-workflow')).name).toBe('Research Workflow')
+  })
+})
+
+describe('trend fixtures (Eval and Workflows boards)', () => {
+  it('serves the Eval board sample: 28 runs, four verifiers, one judge, v2 from day 18', async () => {
+    const rows = await getEvalTrend('eval-shared-esp-stream-4')
+    expect(rows).toHaveLength(28)
+    expect(new Set(rows.map((r) => r.verifier_model)).size).toBe(4)
+    expect(new Set(rows.flatMap((r) => (r.judge_model ? [r.judge_model] : [])))).toEqual(new Set(['claude-opus-5-5']))
+    expect(rows[0]).toMatchObject({ date: '2026-09-08T09:00:00.000Z', verifier_model: 'claude-opus-5-5', score: 82, verdict: 'PASS', cost_usd: 1.21, duration_seconds: 452, tokens: 134444 })
+    expect(rows.at(-1)).toMatchObject({ verifier_model: 'gpt-5.6-terra', score: null, verdict: null })
+    expect(rows.filter((r) => r.definition_version === 'v2').every((r) => r.definition_changed_at === '2026-09-26T00:00:00.000Z')).toBe(true)
+    await expect(getEvalTrend('missing')).rejects.toMatchObject({ status: 404 })
+  })
+  it('serves one workflow row per run with phase durations', async () => {
+    const rows = await getWorkflowTrend('research-workflow')
+    expect(rows).toHaveLength((await listWorkflowRuns('research-workflow')).length)
+    expect(rows[0]!.phase_durations.map((p) => p.phase_name)).toEqual(['Research', 'Synthesize', 'Report'])
+    expect(rows.find((r) => r.status === 'running')?.duration_seconds).toBeNull()
+    expect(await getWorkflowTrend('code-review')).toEqual([])
   })
 })

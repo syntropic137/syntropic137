@@ -1,22 +1,22 @@
-<!-- One eval. Boards: Eval · PhoneEval. Header, same case under other verifiers, Compare, Runs over time, Runs. -->
+<!-- One eval. Boards: Eval · PhoneEval. Header, Trend, same case under other verifiers, Compare, Runs. -->
 <script lang="ts">
-  import { getEval, listEvalRuns, listEvals } from '@syn137/syn-ui-data'
+  import { getEval, getEvalTrend, listEvalRuns, listEvals } from '@syn137/syn-ui-data'
   import { Callout, EmptyState, Pagination, Skeleton } from '@syn137/skyline-svelte-v5'
   import { PageHeader, VerdictBlock } from '@syn137/skyline-svelte-v5/patterns'
-  import { formatCost, formatDate, formatDateTime, formatDuration, formatRelativeTime } from '@syn137/skyline-core/format'
+  import { formatCost, formatDateTime, formatDuration, formatRelativeTime } from '@syn137/skyline-core/format'
   import { VERDICT_LOOK, normalizeVerdict } from '@syn137/skyline-core/patterns'
-  import { agentOfModel, averageEvalCost, evidenceFallback, runModels, runsTimeline, sameCaseSiblings, tagValue, variantPassed } from '@syn137/skyline-core/screens/evals'
+  import { agentOfModel, averageEvalCost, evidenceFallback, runModels, sameCaseSiblings, tagValue, variantPassed } from '@syn137/skyline-core/screens/evals'
   import { resource } from '../../lib/load.svelte'
   import { setPage } from '../../lib/page.svelte'
   import { href } from '../../lib/router'
   import type { PageProps } from '../../lib/routes'
   import EvalTag from './EvalTag.svelte'
   import FlaskIcon from './FlaskIcon.svelte'
+  import EvalTrend from './parts/EvalTrend.svelte'
 
   let { params }: PageProps = $props()
 
   const RUNS_PAGE = 20
-  const TIMELINE_RUNS = 200
 
   const live = { live: (t: string) => t.startsWith('eval') || t === 'workflow_completed' || t === 'workflow_failed' }
   const ev = resource((signal) => getEval(params.evalId ?? '', signal), live)
@@ -34,7 +34,7 @@
     const page = runsPage
     return listEvalRuns(params.evalId ?? '', { page, page_size: RUNS_PAGE }, signal)
   }, live)
-  const timelineRuns = resource((signal) => listEvalRuns(params.evalId ?? '', { page_size: TIMELINE_RUNS }, signal), live)
+  const trend = resource((signal) => getEvalTrend(params.evalId ?? '', signal), live)
   const caseId = $derived(ev.data ? tagValue(ev.data.tags, 'case') : null)
   const siblingsRes = resource((signal) => {
     const c = caseId
@@ -47,13 +47,6 @@
 
   const e = $derived(ev.data)
   const siblings = $derived(e && siblingsRes.data ? sameCaseSiblings(e, siblingsRes.data.evals) : [])
-  const timeline = $derived(runsTimeline(timelineRuns.data?.items ?? []))
-  const timelineSubtitle = $derived.by(() => {
-    const t = timelineRuns.data
-    if (!t) return 'Every run, one lane per variant'
-    if (t.items.length < t.total) return `Latest ${t.items.length} of ${t.total} runs, one lane per variant`
-    return `All ${t.total} ${t.total === 1 ? 'run' : 'runs'}, one lane per variant`
-  })
   const figures = $derived(
     e
       ? [
@@ -114,6 +107,8 @@
     {/if}
   </PageHeader>
 
+  <EvalTrend evalId={e.eval_id} evalName={e.name} rows={trend.data ?? null} error={trend.error} />
+
   {#if caseId}
     <section class="sky-eval__section" aria-labelledby="sky-eval-siblings">
       <div class="sky-eval__head">
@@ -149,85 +144,43 @@
     </section>
   {/if}
 
-  <div class="sky-eval__pair">
-    <section class="sky-eval__card sky-eval__compare" aria-labelledby="sky-eval-compare">
-      <div class="sky-eval__head">
-        <h2 id="sky-eval-compare">Compare</h2>
-        <span>{e.run_count} {e.run_count === 1 ? 'run' : 'runs'} · {e.scored_count} scored · pass rate {e.pass_rate_display}. One row per workflow, version and model set.</span>
+  <section class="sky-eval__card sky-eval__compare" aria-labelledby="sky-eval-compare">
+    <div class="sky-eval__head">
+      <h2 id="sky-eval-compare">Compare</h2>
+      <span>{e.run_count} {e.run_count === 1 ? 'run' : 'runs'} · {e.scored_count} scored · pass rate {e.pass_rate_display}. One row per workflow, version and model set.</span>
+    </div>
+    {#if (e.variants ?? []).length === 0}
+      <EmptyState bare level={3} title="No variants yet" description="A variant appears once a run of this eval completes." />
+    {:else}
+      <div class="sky-eval__scroll">
+        <table class="sky-eval__table" data-min="compare">
+          <thead>
+            <tr><th scope="col">Workflow · version · models</th><th scope="col" data-num="">Passed</th><th scope="col">Pass rate</th><th scope="col" data-num="">Avg cost</th><th scope="col" data-num="">Last run</th></tr>
+          </thead>
+          <tbody>
+            {#each e.variants ?? [] as v (`${v.workflow_id}@${v.workflow_version}|${v.models.join(',')}`)}
+              {@const p = variantPassed(v)}
+              <tr>
+                <td>
+                  <span class="sky-eval__mono-strong">{v.workflow_id}{v.workflow_version ? ` · ${v.workflow_version}` : ''}</span>
+                  <span class="sky-eval__model"><span class="sky-eval__dot" data-agent={agentOf(v.models)}></span>{v.models.join(', ') || 'no model observed'}</span>
+                </td>
+                <td data-num="">{p.fraction}</td>
+                <td>
+                  <span class="sky-eval__rate">
+                    <span class="sky-eval__bar" aria-hidden="true"><span style:width={`${p.fill ?? 0}%`}></span></span>
+                    <span data-muted={p.fill === null ? '' : undefined}>{v.pass_rate_display}</span>
+                  </span>
+                </td>
+                <td data-num="">{v.avg_cost_display}</td>
+                <td data-num="" class="sky-eval__muted" title={v.last_run_at ?? undefined}>{formatRelativeTime(v.last_run_at)}</td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
       </div>
-      {#if (e.variants ?? []).length === 0}
-        <EmptyState bare level={3} title="No variants yet" description="A variant appears once a run of this eval completes." />
-      {:else}
-        <div class="sky-eval__scroll">
-          <table class="sky-eval__table" data-min="compare">
-            <thead>
-              <tr><th scope="col">Workflow · version · models</th><th scope="col" data-num="">Passed</th><th scope="col">Pass rate</th><th scope="col" data-num="">Avg cost</th><th scope="col" data-num="">Last run</th></tr>
-            </thead>
-            <tbody>
-              {#each e.variants ?? [] as v (`${v.workflow_id}@${v.workflow_version}|${v.models.join(',')}`)}
-                {@const p = variantPassed(v)}
-                <tr>
-                  <td>
-                    <span class="sky-eval__mono-strong">{v.workflow_id}{v.workflow_version ? ` · ${v.workflow_version}` : ''}</span>
-                    <span class="sky-eval__model"><span class="sky-eval__dot" data-agent={agentOf(v.models)}></span>{v.models.join(', ') || 'no model observed'}</span>
-                  </td>
-                  <td data-num="">{p.fraction}</td>
-                  <td>
-                    <span class="sky-eval__rate">
-                      <span class="sky-eval__bar" aria-hidden="true"><span style:width={`${p.fill ?? 0}%`}></span></span>
-                      <span data-muted={p.fill === null ? '' : undefined}>{v.pass_rate_display}</span>
-                    </span>
-                  </td>
-                  <td data-num="">{v.avg_cost_display}</td>
-                  <td data-num="" class="sky-eval__muted" title={v.last_run_at ?? undefined}>{formatRelativeTime(v.last_run_at)}</td>
-                </tr>
-              {/each}
-            </tbody>
-          </table>
-        </div>
-      {/if}
-    </section>
-
-    <section class="sky-eval__card sky-eval__timeline" aria-labelledby="sky-eval-timeline">
-      <div class="sky-eval__head" data-stack="">
-        <h2 id="sky-eval-timeline">Runs over time</h2>
-        <span>{timelineSubtitle}</span>
-      </div>
-      {#if timelineRuns.error && !timelineRuns.data}
-        <Callout tone="warning" title="Could not load the run history">{errText(timelineRuns.error)}</Callout>
-      {:else if !timelineRuns.data}
-        <Skeleton variant="block" height="5rem" />
-      {:else if timeline.lanes.length === 0}
-        <EmptyState bare level={3} title="No runs yet" description="Each execution launched into this eval becomes a dot here." />
-      {:else}
-        {#each timeline.lanes as lane (lane.key)}
-          <div class="sky-eval__lane">
-            <span class="sky-eval__lane-label">{lane.label}</span>
-            <div class="sky-eval__track">
-              <span class="sky-eval__rail" aria-hidden="true"></span>
-              {#each lane.points as pt (pt.executionId)}
-                <a
-                  class="sky-eval__point"
-                  href={href(`/executions/${encodeURIComponent(pt.executionId)}`)}
-                  style:left={`${pt.x}%`}
-                  data-verdict={pt.verdict}
-                  aria-label={`${formatDateTime(pt.startedAt)}: ${VERDICT_LOOK[pt.verdict].label.toLowerCase()} run, open execution`}
-                  title={`${formatDateTime(pt.startedAt)} · ${VERDICT_LOOK[pt.verdict].label}`}
-                ><span></span></a>
-              {/each}
-            </div>
-          </div>
-        {/each}
-        <div class="sky-eval__axis" aria-hidden="true">
-          {#if timeline.start && timeline.end && formatDate(timeline.start) !== formatDate(timeline.end)}
-            <span>{formatDate(timeline.start)}</span><span>{formatDate(timeline.end)}</span>
-          {:else}
-            <span data-center="">{formatDate(timeline.start)}</span>
-          {/if}
-        </div>
-      {/if}
-    </section>
-  </div>
+    {/if}
+  </section>
 
   <section class="sky-eval__card" aria-labelledby="sky-eval-runs">
     <div class="sky-eval__head">
@@ -294,7 +247,6 @@
   .sky-eval__baseline a:focus-visible,
   .sky-eval__tag-link:focus-visible,
   .sky-eval__sib:focus-visible,
-  .sky-eval__point:focus-visible,
   .sky-eval__run-link:focus-visible {
     outline: var(--sky-focus-ring-width) solid var(--sky-color-focus);
     outline-offset: var(--sky-focus-ring-offset);
@@ -357,10 +309,6 @@
     flex-wrap: wrap;
     align-items: baseline;
     gap: var(--ds-space-1) var(--ds-space-3);
-  }
-  .sky-eval__head[data-stack] {
-    flex-direction: column;
-    gap: var(--ds-space-0-5);
   }
   .sky-eval__head h2 {
     margin: 0;
@@ -461,12 +409,6 @@
     color: var(--ds-color-text-muted);
     overflow-wrap: anywhere;
   }
-  .sky-eval__pair {
-    display: flex;
-    flex-direction: column;
-    gap: var(--ds-space-4);
-    min-width: 0;
-  }
   .sky-eval__scroll {
     overflow-x: auto;
     min-width: 0;
@@ -535,71 +477,6 @@
     height: 100%;
     border-radius: 4px;
     background: var(--ds-color-accent);
-  }
-  .sky-eval__lane {
-    display: flex;
-    flex-direction: column;
-    gap: var(--ds-space-2);
-  }
-  .sky-eval__lane-label {
-    font-family: var(--ds-font-mono);
-    font-size: var(--ds-text-xs);
-    color: var(--ds-color-text-muted);
-    overflow-wrap: anywhere;
-  }
-  .sky-eval__track {
-    position: relative;
-    height: 28px;
-    margin: 0 var(--ds-space-2);
-  }
-  .sky-eval__rail {
-    position: absolute;
-    left: 0;
-    right: 0;
-    top: 13px;
-    height: 2px;
-    border-radius: 1px;
-    background: var(--sky-color-track);
-  }
-  .sky-eval__point {
-    position: absolute;
-    top: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 28px;
-    height: 28px;
-    margin-left: -14px;
-    border-radius: 50%;
-  }
-  .sky-eval__point span {
-    width: 14px;
-    height: 14px;
-    border-radius: 50%;
-    background: var(--sky-color-unscored);
-    box-shadow:
-      0 0 0 3px var(--ds-color-surface),
-      0 0 0 4px var(--sky-color-border-hover);
-  }
-  .sky-eval__point[data-verdict='pass'] span {
-    background: var(--ds-color-accent);
-  }
-  .sky-eval__point[data-verdict='fail'] span {
-    background: var(--ds-color-danger);
-  }
-  .sky-eval__point[data-verdict='error'] span {
-    background: var(--ds-color-warning);
-  }
-  .sky-eval__axis {
-    display: flex;
-    justify-content: space-between;
-    font-family: var(--ds-font-mono);
-    font-size: var(--ds-text-xs);
-    color: var(--ds-color-text-subtle);
-  }
-  .sky-eval__axis [data-center] {
-    flex-grow: 1;
-    text-align: center;
   }
   .sky-eval__runs {
     display: flex;
@@ -694,12 +571,6 @@
     font-variant-numeric: tabular-nums;
   }
   @media (pointer: coarse) {
-    .sky-eval__point {
-      width: var(--sky-size-touch);
-      height: var(--sky-size-touch);
-      margin-left: calc(var(--sky-size-touch) / -2);
-      top: calc((28px - var(--sky-size-touch)) / 2);
-    }
     .sky-eval__run-link,
     .sky-eval__tag-link {
       min-height: var(--sky-size-touch);
@@ -728,19 +599,6 @@
     }
     .sky-eval__run-figs dt {
       display: none;
-    }
-  }
-  @media (min-width: 64rem) {
-    .sky-eval__pair {
-      flex-direction: row;
-      align-items: stretch;
-      gap: var(--ds-space-7);
-    }
-    .sky-eval__compare {
-      flex: 3 1 0;
-    }
-    .sky-eval__timeline {
-      flex: 2 1 0;
     }
   }
 </style>

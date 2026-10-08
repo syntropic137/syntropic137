@@ -288,3 +288,5 @@ export function withLatestRun(cell: VerdictCell | undefined, run: (EvalRunLike &
     ...extra,
   }
 }
+
+export * from './trend'

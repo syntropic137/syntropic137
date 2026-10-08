@@ -282,3 +282,5 @@ class PromptAccumulator {
     this.para.push(line)
   }
 }
+
+export * from './trend'

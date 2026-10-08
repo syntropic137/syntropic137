@@ -57,3 +57,28 @@ function inputLine(i: AgentPromptInput, task: AgentPromptInput | undefined): str
 function phasesLine(phases: readonly string[]): string {
   return `It runs ${phases.length} ${phases.length === 1 ? 'phase' : 'phases'} in order: ${phases.join(', ')}.`
 }
+
+export interface EvalTrendPromptSpec {
+  evalId: string
+  evalName?: string
+  /** CLI binary (default "syn"). */
+  cli?: string
+}
+
+/** The CLI command that returns an eval's run history as JSON. */
+export function evalTrendCommand(evalId: string, cli = 'syn'): string {
+  return `${cli} eval trend ${evalId} --json`
+}
+
+/** "Copy for an agent" on the eval Trend panel: the question, the command and the row shape. */
+export function buildEvalTrendPrompt(spec: EvalTrendPromptSpec): string {
+  const name = spec.evalName ? `"${spec.evalName}" (${spec.evalId})` : spec.evalId
+  return [
+    `Read the trend for eval ${name} and tell me which verifier gives the best quality per dollar, and whether any verifier is regressing.`,
+    '',
+    'Get the data with the Syn137 CLI:',
+    `  ${evalTrendCommand(spec.evalId, spec.cli)}`,
+    '',
+    'It returns one row per run: date, verifier model, judge model, score (0-100), verdict, cost, duration, tokens.',
+  ].join('\n')
+}
