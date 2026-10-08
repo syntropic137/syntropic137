@@ -299,6 +299,18 @@ class TestComposeService:
         ]
         assert f"${{BACKUP_DIR:-{fields['backup_dir'].default}}}:/backups" in backup["volumes"]
 
+    def test_scheduler_reads_its_identity_from_the_database_container(self):
+        services = self._services(_SELFHOST)
+        backup, database = services["db-backup"], services["timescaledb"]
+        env = backup["environment"]
+        assert "PGUSER" not in env and "PGDATABASE" not in env, (
+            "interpolated from infra/.env, not from the running database"
+        )
+        identity = Path(env["SYN_DB_IDENTITY_FILE"])
+        assert f"db_identity:{identity.parent}" in database["volumes"]
+        assert f"db_identity:{identity.parent}:ro" in backup["volumes"]
+        assert str(identity) in database["healthcheck"]["test"][1]
+
     def test_script_mounted_is_the_one_tested_here(self):
         backup = self._services(_SELFHOST)["db-backup"]
         source = backup["volumes"][0].split(":")[0]
@@ -410,3 +422,76 @@ class TestDatabaseIdentity:
         assert "-e PGUSER=container_user -e PGDATABASE=container_db" in run
         assert "db-backup restore /restore/syn-20261008T030000Z.dump" in run
         assert "file_" not in run
+
+
+class TestScheduledIdentity:
+    """The schedule connects as the running database container says."""
+
+    def test_schedule_uses_the_identity_the_database_container_wrote(self, tmp_path, fake_pg):
+        """The handoff end to end: timescaledb's healthcheck writes, the schedule reads."""
+        env = fake_pg(_LISTING_WITH_DATA)
+        bin_dir = Path(env["PATH"].split(os.pathsep)[0])
+        connected = tmp_path / "connected-as"
+        _stub(
+            bin_dir,
+            "pg_dump",
+            f'echo "$PGUSER $PGDATABASE" > "{connected}"\n'
+            'for a in "$@"; do case $a in --file=*) echo archive > "${a#--file=}";; esac; done',
+        )
+        # Ends the schedule loop after its first pass.
+        _stub(bin_dir, "sleep", "exit 99")
+        _stub(bin_dir, "pg_isready", "exit 0")
+
+        # The healthcheck as the database container runs it: Compose has
+        # interpolated ${...} from infra/.env and unescaped $$, and the
+        # container's own environment is the only other source.
+        handoff = tmp_path / "identity"
+        handoff.mkdir()
+        services = yaml.safe_load(_SELFHOST.read_text())["services"]
+        stale = {"POSTGRES_USER": "file_user", "POSTGRES_DB": "file_db"}
+        check = re.sub(
+            r"\$\$|\$\{(\w+)(?::-[^}]*)?\}",
+            lambda m: "$" if m.group(0) == "$$" else stale[m.group(1)],
+            services["timescaledb"]["healthcheck"]["test"][1],
+        ).replace("/syn-db-identity", str(handoff))
+        database_env = {**env, "POSTGRES_USER": "container_user", "POSTGRES_DB": "container_db"}
+        assert subprocess.run(["sh", "-c", check], env=database_env, check=False).returncode == 0
+
+        # What a stale shell / infra/.env would say, in the scheduler's env.
+        scheduler_env = {
+            **env,
+            "PGUSER": "file_user",
+            "PGDATABASE": "file_db",
+            "SYN_DB_IDENTITY_FILE": str(handoff / "identity"),
+        }
+        out = tmp_path / "backups"
+        out.mkdir()
+        result = subprocess.run(
+            ["sh", str(_SCRIPT), "schedule", str(out), "* * * * *", "7"],
+            env=scheduler_env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        assert "backup ok" in result.stdout, result.stderr
+        assert connected.read_text().split() == ["container_user", "container_db"]
+
+    def test_schedule_without_an_identity_fails_the_backup_not_the_schedule(
+        self, tmp_path, fake_pg
+    ):
+        env = fake_pg(_LISTING_WITH_DATA)
+        _stub(Path(env["PATH"].split(os.pathsep)[0]), "sleep", "exit 99")
+        out = tmp_path / "backups"
+        out.mkdir()
+        result = subprocess.run(
+            ["sh", str(_SCRIPT), "schedule", str(out), "* * * * *", "7"],
+            env={**env, "PGUSER": "file_user", "SYN_DB_IDENTITY_FILE": str(tmp_path / "none")},
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        assert "no database identity" in result.stderr
+        assert "scheduled backup FAILED" in result.stderr
+        assert not list(out.glob("syn-*.dump")), "dumped as the env file's identity"

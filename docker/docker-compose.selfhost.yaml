@@ -42,6 +42,15 @@ services:
     volumes:
       - db_data:/var/lib/postgresql/data
       - ./init-db:/docker-entrypoint-initdb.d:ro
+      - db_identity:/syn-db-identity
+    # Base healthcheck, plus a handoff for scheduled backups: the user and
+    # database name this container runs with (never the password), so
+    # db-backup connects as the running database says, not as infra/.env
+    # says now. A failed write leaves health alone; the backup reports it.
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - 'pg_isready -U ${POSTGRES_USER:-syn} -d ${POSTGRES_DB:-syn} || exit 1; printf "PGUSER=%s\nPGDATABASE=%s\n" "$$POSTGRES_USER" "$$POSTGRES_DB" > /syn-db-identity/.identity.new && mv -f /syn-db-identity/.identity.new /syn-db-identity/identity; exit 0'
     restart: always
     read_only: true
     security_opt:
@@ -436,14 +445,15 @@ services:
     command: ["schedule", "/backups", "${BACKUP_SCHEDULE:-0 3 * * *}", "${BACKUP_RETENTION_DAYS:-7}"]
     environment:
       PGHOST: timescaledb
-      PGUSER: ${POSTGRES_USER:-syn}
-      PGDATABASE: ${POSTGRES_DB:-syn}
+      # PGUSER/PGDATABASE: from the running timescaledb, never interpolated.
+      SYN_DB_IDENTITY_FILE: /syn-db-identity/identity
       POSTGRES_PASSWORD_FILE: /run/secrets/db_password
     secrets:
       - db_password
     volumes:
       - ./db-backup/syn-db-backup.sh:/usr/local/bin/syn-db-backup:ro
       - ${BACKUP_DIR:-/var/backups/syn}:/backups
+      - db_identity:/syn-db-identity:ro
     depends_on:
       timescaledb:
         condition: service_healthy
@@ -485,6 +495,8 @@ secrets:
 volumes:
   db_data:
     name: syn137_db_data
+  db_identity:
+    name: syn137_db_identity
   api_logs:
     name: syn137_api_logs
   minio_data:

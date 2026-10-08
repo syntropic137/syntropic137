@@ -6,9 +6,11 @@
 # match the server. `just selfhost-backup` / `just selfhost-restore` and the
 # scheduled service all call this one script; nothing else writes a backup.
 #
-# Connection comes from the libpq environment the service sets (PGHOST,
-# PGUSER, PGDATABASE) plus POSTGRES_PASSWORD_FILE, the same secret the
-# database reads. No credential is ever printed.
+# Connection comes from the libpq environment (PGHOST, PGUSER, PGDATABASE)
+# plus POSTGRES_PASSWORD_FILE, the same secret the database reads. The just
+# targets pass PGUSER/PGDATABASE as read from the running timescaledb
+# container; the schedule reads them from SYN_DB_IDENTITY_FILE, which that
+# container's healthcheck writes. No credential is ever printed.
 #
 #   backup   DIR                     dump DIR/syn-<UTC>.dump, verify, report
 #   prune    DIR DAYS                delete backups older than DAYS days
@@ -130,6 +132,19 @@ cron_match() {
     END { if (bad) exit 2; exit matched ? 0 : 1 }'
 }
 
+# PGUSER/PGDATABASE as the running database container says, from the file its
+# healthcheck writes (user and database name only). Read again for every
+# backup, so a recreated container with a new identity is followed.
+container_identity() {
+    f=${SYN_DB_IDENTITY_FILE:-}
+    [ -n "$f" ] || return 0
+    [ -r "$f" ] || fail "no database identity at $f; is timescaledb healthy?"
+    PGUSER=$(sed -n 's/^PGUSER=//p' "$f")
+    PGDATABASE=$(sed -n 's/^PGDATABASE=//p' "$f")
+    [ -n "$PGUSER" ] && [ -n "$PGDATABASE" ] || fail "incomplete database identity in $f"
+    export PGUSER PGDATABASE
+}
+
 schedule() {
     dir=$1 expr=$2 days=$3
     require_days "$days"
@@ -145,7 +160,7 @@ schedule() {
             last=$stamp
             # A child shell, so `set -e` and the EXIT trap in backup apply
             # and a failed backup does not end the schedule.
-            if sh "$0" backup "$dir"; then
+            if (container_identity && sh "$0" backup "$dir"); then
                 sh "$0" prune "$dir" "$days" || echo "syn-db-backup: prune failed" >&2
             else
                 echo "syn-db-backup: scheduled backup FAILED; previous backups kept" >&2
