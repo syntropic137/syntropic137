@@ -9,18 +9,18 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
 from typing import TYPE_CHECKING
 
 from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
     TokenType,
     WorkspaceStatus,
 )
-from syn_shared.env_constants import ENV_SYN_PHASE_DEADLINE
+from syn_shared.env_constants import phase_deadline_of
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Awaitable, Callable
     from contextlib import AbstractAsyncContextManager
+    from datetime import datetime
     from pathlib import Path
 
     from syn_adapters.platform_access import WorkspacePlatformGrant
@@ -174,7 +174,7 @@ class ManagedWorkspace:
         # The agent's read-only API access (ADR-072) rides on every streamed
         # launch, whatever the provider: callers do not need to know it exists.
         if self.platform_grant is not None:
-            await self._bound_platform_grant_to_phase(environment)
+            await self._bound_platform_grant_to_phase(phase_deadline_of(environment))
             environment = {**(environment or {}), **self.platform_grant.env}
         stream = self._service._event_stream.stream(
             self.isolation_handle,
@@ -187,13 +187,12 @@ class ManagedWorkspace:
         async for line in stream:  # type: ignore[attr-defined]
             yield line
 
-    async def _bound_platform_grant_to_phase(self, environment: dict[str, str] | None) -> None:
+    async def _bound_platform_grant_to_phase(self, deadline: datetime | None) -> None:
         """The API token expires with the phase, not only when teardown revokes it."""
-        deadline = (environment or {}).get(ENV_SYN_PHASE_DEADLINE)
         tokens = self._service._platform_tokens
         if deadline is None or tokens is None or self.platform_grant is None:
             return
-        await tokens.bound_to_deadline(self.platform_grant.token, datetime.fromisoformat(deadline))
+        await tokens.bound_to_deadline(self.platform_grant.token, deadline)
 
     @property
     def last_stream_exit_code(self) -> int | None:
