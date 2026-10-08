@@ -138,3 +138,34 @@ def test_symlinked_directory_inside_root_is_not_followed(workspace: Path) -> Non
     (workspace / "artifacts" / "output" / "dir").symlink_to(real_dir)
 
     assert _collect(workspace, ["artifacts/output/dir/c.md"]) == []
+
+
+def test_hard_linked_file_is_not_collected(workspace: Path, outside: Path) -> None:
+    """A second name for an inode could be one that lives outside the workspace."""
+    try:
+        os.link(outside, workspace / "artifacts" / "output" / "linked.md")
+    except OSError:
+        pytest.skip("hard links unsupported across these directories")
+
+    assert _collect(workspace) == []
+
+
+def test_total_bytes_across_files_are_bounded(workspace: Path) -> None:
+    out = workspace / "artifacts" / "output"
+    for name in ("a", "b", "c"):
+        (out / name).write_bytes(b"x" * 400)
+
+    collected = collect_matching_files(
+        workspace, _PATTERN, max_bytes=_LIMIT, max_total_bytes=_LIMIT
+    )
+    assert len(collected) == 2
+    assert sum(len(content) for _, content in collected) <= _LIMIT
+
+
+def test_number_of_matches_examined_is_bounded(workspace: Path) -> None:
+    out = workspace / "artifacts" / "output"
+    for i in range(5):
+        (out / f"f{i}").write_bytes(b"x")
+
+    collected = collect_matching_files(workspace, _PATTERN, max_bytes=_LIMIT, max_matches=3)
+    assert len(collected) == 3

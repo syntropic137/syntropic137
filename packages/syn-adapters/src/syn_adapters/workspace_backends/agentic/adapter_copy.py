@@ -68,6 +68,10 @@ def _normalize_pattern(pattern: str) -> str:
 _DIR_OPEN_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_DIRECTORY
 _FILE_OPEN_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
 _READ_CHUNK = 1024 * 1024
+# Collection-wide bounds, on top of the per-file limit: the total bytes held
+# in memory for one collection, and the number of glob matches examined.
+MAX_COLLECTION_BYTES = 200 * 1024 * 1024
+MAX_COLLECTION_MATCHES = 10_000
 
 
 class _SkipFileError(Exception):
@@ -108,6 +112,9 @@ def _read_bounded(fd: int, max_bytes: int) -> bytes:
     st = os.fstat(fd)
     if not stat.S_ISREG(st.st_mode):
         raise _SkipFileError("not a regular file")
+    if st.st_nlink != 1:
+        # A second name for the same inode may live outside the workspace.
+        raise _SkipFileError(f"it has {st.st_nlink} hard links")
     if st.st_size > max_bytes:
         raise _SkipFileError(f"{st.st_size} bytes exceeds the {max_bytes}-byte limit")
     chunks: list[bytes] = []
@@ -127,12 +134,12 @@ def _try_read_file(
     relative_path: str,
     max_bytes: int,
     results: list[tuple[str, bytes]],
-) -> None:
+) -> int:
     """Read one matched file if it is a regular file inside root.
 
     Workspace contents are written by the agent, so a match is read only when
     it resolves inside the workspace, no component of its path is a symlink,
-    it is a regular file, and it is within the size limit. Anything else is
+    it is a regular file with a single hard link, and it is within max_bytes. Anything else is
     skipped with a warning naming the relative path, never its content.
     """
     try:
@@ -145,20 +152,21 @@ def _try_read_file(
             os.close(fd)
     except _SkipFileError as e:
         logger.warning("copy_from: Skipped %s: %s", relative_path, e)
-        return
+        return 0
     except Exception as e:
         logger.warning(
             "copy_from: Failed to read file %s: %s",
             relative_path,
             e,
         )
-        return
+        return 0
     results.append((relative_path, content))
     logger.info(
         "copy_from: Collected file %s (%d bytes)",
         relative_path,
         len(content),
     )
+    return len(content)
 
 
 def collect_matching_files(
@@ -166,21 +174,34 @@ def collect_matching_files(
     patterns: list[str],
     *,
     max_bytes: int,
+    max_total_bytes: int = MAX_COLLECTION_BYTES,
+    max_matches: int = MAX_COLLECTION_MATCHES,
 ) -> list[tuple[str, bytes]]:
     """Glob patterns against workspace and read matching regular files.
 
     Only regular files inside the workspace are collected: no symlink is
     followed, at the file or at any directory on its path, and a file larger
-    than max_bytes is skipped.
+    than max_bytes is skipped. A file that would take the collection past
+    max_total_bytes is skipped, and collection stops after max_matches glob
+    matches.
     """
     results: list[tuple[str, bytes]] = []
     seen_paths: set[str] = set()
     root = workspace_path.resolve(strict=True)
+    used = 0
+    examined = 0
 
     for pattern in patterns:
         clean_pattern = _normalize_pattern(pattern)
 
         for file_path in root.glob(clean_pattern):
+            examined += 1
+            if examined > max_matches:
+                logger.warning(
+                    "copy_from: Stopped after %d matches; the rest were not collected",
+                    max_matches,
+                )
+                return results
             try:
                 if stat.S_ISDIR(file_path.lstat().st_mode):
                     continue
@@ -190,7 +211,8 @@ def collect_matching_files(
             if relative_path in seen_paths:
                 continue
             seen_paths.add(relative_path)
-            _try_read_file(root, file_path, relative_path, max_bytes, results)
+            limit = min(max_bytes, max_total_bytes - used)
+            used += _try_read_file(root, file_path, relative_path, limit, results)
     return results
 
 
