@@ -1,0 +1,20 @@
+id: declared-skills-not-invocable
+source_pr: 1540
+# Mined from the fix: the first fix commit's first parent, so the bug is
+# present and nothing of the fix is. Evidence at the pin:
+# no `ToolName.SKILL` grant at pin (0 matches, 2 after): a phase with skills
+# and a scoped tool list never gets `Skill`.
+commit: 31210dae686321f21ac6813054781bf97cce1bc6
+fix_commit: a2afdbd5c5a9bd6f1ba1421d83ef97582ed50372
+first_fix_commit: 3a795d73503fb0c813c8cc62e5bbbdf8243d96e3
+task: >
+  Review how the execute-workflow handler builds each phase's agent
+  configuration: its allowed tools and the skills it resolves for the phase.
+  Phases may restrict their tools.
+expected:
+  files:
+    - packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/ExecuteWorkflowHandler.py
+  keywords:
+    - ["skill"]
+    - ["allowed tools", "tool list", "tools", "not granted", "withheld", "missing", "not listed", "cannot invoke", "can't invoke", "never offered", "unavailable", "restrict"]
+split: holdout

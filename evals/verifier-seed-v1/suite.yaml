@@ -1,6 +1,16 @@
 # The verifier seed suite (#967 step 8). Each case is a commit that carries a
-# bug the platform's own verify certified and a second verifier caught
-# (docs/retrospectives/2026-10-06-merge-down-and-the-dropped-start.md).
+# known bug. The first six are bugs the platform's own verify certified and a
+# second verifier caught
+# (docs/retrospectives/2026-10-06-merge-down-and-the-dropped-start.md). From v3
+# the rest are mined from merged fix PRs: the pin is the first fix commit's
+# first parent, the expected file is the one the fix changed that holds the
+# defect, and a defect that only shows at runtime is not a case.
+#
+# TRAIN AND HOLDOUT. Every case carries `split`. Tune a verifier (prompt,
+# model, workflow) on `--split train` only; holdout cases report a result and
+# never choose one. The six earlier cases are train: verifiers were already
+# shaped against them. The v3 holdout is the seven new cases whose sha256(id)
+# sorts lowest - fixed once, recorded in each file, and never moved to train.
 #
 # What it measures: given a workflow, a prompt and a model, does verification
 # find the defect? Change any of the three and the version goes up - runs of
@@ -17,6 +27,8 @@
 # v1: four cases, eval-verify-pinned-v1 (Opus 5.5) only, scored 4/4.
 # v2: two cases added (#1679, #1680) and the codex verifier. The Sonnet
 #     verifier was added later under v2: a new workflow, no existing table.
+# v3: eighteen cases mined from merged fix PRs (24 in all), and the
+#     train/holdout split.
 #
 # EVERY VERSION KEEPS ITS SCORE. `history` records each earlier version whose
 # runs launches.jsonl still holds: the tag exactly as those runs carry it, the
@@ -27,7 +39,7 @@ id: verifier-seed-v1
 # version and verifier runs into those same evals; the run carries
 # `suite-version:<n>` and `verifier:<workflow id>`.
 eval_suite: verifier-seed
-version: 2
+version: 3
 goal: >
   Does the verifier block a change that carries a known escaped bug, and name
   the defect and the file it lives in?
@@ -59,4 +71,15 @@ history:
       - binary-artifact-minio-key
       - codex-cost-limit
       - execution-id-as-eval-id
+      - shared-esp-stream
+  # Only the codex verifier has v2 runs in the ledger.
+  - version: 2
+    tag: verifier-seed-v1:v2:eval-verify-pinned-codex-v1
+    workflow: eval-verify-pinned-codex-v1
+    cases:
+      - binary-artifact-minio-key
+      - codex-cost-limit
+      - execution-id-as-eval-id
+      - live-commits-unvalidated-sha
+      - repo-privacy-ignores-app
       - shared-esp-stream

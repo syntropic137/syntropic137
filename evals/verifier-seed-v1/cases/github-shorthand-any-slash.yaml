@@ -1,0 +1,21 @@
+id: github-shorthand-any-slash
+source_pr: 1066
+# Mined from the fix: the first fix commit's first parent, so the bug is
+# present and nothing of the fix is. Evidence at the pin:
+# `isGitHubShorthand` is `source.includes("/") && !source.includes("@") &&
+# !source.startsWith(".")` (line 94); the fix validates exactly two owner/repo
+# segments.
+commit: 1fa370c74d7f947c6ecce8fe7bd05505bf26e046
+fix_commit: 6337f289ea583a032cb40a9917edd31d8c1a0aab
+first_fix_commit: 96c77f54d536b6f9d56edfa8062fcced63e017b6
+task: >
+  Review the workflow package source resolver in the CLI, which decides
+  whether a `syn workflow install` argument is a local path, a git URL, or
+  GitHub owner/repo shorthand.
+expected:
+  files:
+    - apps/syn-cli-node/src/packages/resolver.ts
+  keywords:
+    - ["shorthand", "owner/repo", "owner repo", "github"]
+    - ["slash", "segment", "path", "local", "any string", "validat", "~/", "home", "nested", "absolute", "three"]
+split: train

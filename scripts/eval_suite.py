@@ -15,8 +15,8 @@ list is the case's history. What differs between runs goes on the RUN as tags:
 ``suite-version:<n>`` and ``verifier:<workflow id>``.
 
     uv run python scripts/eval_suite.py check  [--suite DIR]   # offline dry run
-    uv run python scripts/eval_suite.py launch [--suite DIR] [--workflow ID] [--api-url URL]
-    uv run python scripts/eval_suite.py score  [--suite DIR] [--workflow ID] [--version N] [--api-url URL]
+    uv run python scripts/eval_suite.py launch [--suite DIR] [--workflow ID] [--split S] [--api-url URL]
+    uv run python scripts/eval_suite.py score  [--suite DIR] [--workflow ID] [--version N] [--split S] [--api-url URL]
 
 SAME CASES, DIFFERENT VERIFIER. A suite lists one or more workflows; each
 differs from the others only in who verifies. ``--workflow`` picks one (the
@@ -30,6 +30,14 @@ the workflow suffix: ``verifier-seed-v1:v1``), the workflow it ran and the
 cases it held. ``score`` prints one table per version the selected workflow
 ran - each version's runs against its own case set, never another's - and
 ``--version N`` scores one. ``launch`` only ever launches the current version.
+
+TRAIN AND HOLDOUT. Every case declares ``split: train`` or ``split: holdout``,
+written once when the case is added. ``--split train`` launches or scores the
+train cases only: anything that tunes a verifier (a prompt, a model, a
+workflow) reads only those, and the holdout cases are run to report the
+result, never to choose it. ``check`` refuses a suite whose holdout share
+falls outside 25-35%. A case never moves from holdout to train: it has been
+seen.
 
 ``check`` needs only git. ``launch`` installs the suite's workflow from the
 checked-in file (refusing to go on unless the server then holds exactly that
@@ -71,6 +79,7 @@ import time
 from decimal import Decimal
 from pathlib import Path
 from typing import Literal
+from typing import Literal
 
 import httpx
 import yaml
@@ -82,6 +91,10 @@ from syn_shared.settings.dev_tooling import get_dev_api_url
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_SUITE = ROOT / "evals" / "verifier-seed-v1"
 _SHA = re.compile(r"^[0-9a-f]{40}$")
+
+type Split = Literal["train", "holdout"]
+HOLDOUT_SHARE = (0.25, 0.35)
+"""The inclusive bounds `check` holds a suite's holdout fraction to."""
 
 
 # ---------------------------------------------------------------------------
@@ -162,7 +175,8 @@ class Expected(_Frozen):
 class Case(_Frozen):
     id: str = Field(pattern=r"^[a-z0-9-]+$")
     source_pr: int = Field(ge=1)
-    """The PR that shipped the bug. Never put it in `task`: the agent could fetch the fix."""
+    """The PR the case comes from: the one that shipped the bug, or, for a case mined
+    from a fix, the one that fixed it. Never put it in `task`: the agent could fetch the fix."""
     commit: str
     """Full SHA the run is pinned to. The bug is present here."""
     fix_commit: str
@@ -175,6 +189,8 @@ class Case(_Frozen):
     """
     task: str = Field(min_length=1)
     expected: Expected
+    split: Split
+    """`train` cases may tune a verifier; `holdout` cases only measure it. Never moved."""
 
     @field_validator("commit", "fix_commit", "first_fix_commit")
     @classmethod
@@ -249,11 +265,12 @@ def load_suite(
     root: Path = ROOT,
     workflow: str | None = None,
     version: int | None = None,
+    split: Split | None = None,
 ) -> LoadedSuite:
-    """Parse and cross-check a suite, selecting `workflow` and `version`.
+    """Parse and cross-check a suite, selecting `workflow`, `version` and `split`.
 
     `workflow` defaults to the first listed (for a past version: the one it
-    ran), `version` to the current one. Every listed workflow and every
+    ran), `version` to the current one, `split` to every case. Every listed workflow and every
     history entry is checked, not only the selected ones. Raises
     `DefinitionError` naming every problem found.
     """
@@ -277,6 +294,12 @@ def load_suite(
     ids = [c.id for c in cases]
     if len(set(ids)) != len(ids):
         problems.append(f"duplicate case ids: {sorted(ids)}")
+    holdout = sum(c.split == "holdout" for c in cases)
+    low, high = HOLDOUT_SHARE
+    if cases and not low <= holdout / len(cases) <= high:
+        problems.append(
+            f"{holdout} of {len(cases)} cases are holdout; the share must be {low:.0%}-{high:.0%}"
+        )
 
     for ref in suite.workflows:
         problems.extend(_workflow_problems(ref, root))
@@ -299,6 +322,8 @@ def load_suite(
         )
     if problems or selected is None:
         raise DefinitionError("\n".join(problems))
+    if split is not None:
+        cases = tuple(c for c in cases if c.split == split)
     if past is None:
         return LoadedSuite(
             suite=suite,
@@ -1179,6 +1204,12 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="score this version only (default: every version the workflow ran)",
     )
+    parser.add_argument(
+        "--split",
+        choices=("train", "holdout"),
+        default=None,
+        help="launch or score only these cases (default: all); tune on train only",
+    )
     parser.add_argument("--api-url", default=None, help="defaults to DEV__API_URL / localhost")
     parser.add_argument(
         "--launches",
@@ -1190,7 +1221,7 @@ def main(argv: list[str] | None = None) -> int:
 
     to_score: list[LoadedSuite] = []
     try:
-        loaded = load_suite(args.suite, workflow=args.workflow)
+        loaded = load_suite(args.suite, workflow=args.workflow, split=args.split)
         if args.command == "score":
             versions = (
                 [args.version]
@@ -1198,7 +1229,8 @@ def main(argv: list[str] | None = None) -> int:
                 else versions_run(loaded.suite, loaded.workflow.id)
             )
             to_score = [
-                load_suite(args.suite, workflow=loaded.workflow.id, version=v) for v in versions
+                load_suite(args.suite, workflow=loaded.workflow.id, version=v, split=args.split)
+                for v in versions
             ]
     except DefinitionError as exc:
         print(f"❌ {args.suite}:\n{exc}", file=sys.stderr)

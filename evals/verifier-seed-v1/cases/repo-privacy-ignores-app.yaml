@@ -23,3 +23,4 @@ expected:
        discard, "?? false", stale, record, overrid]
     # So a private repo is presented as public.
     - [shown, show, render, display, appear, label, mark, lock, badge, icon, public, listed]
+split: train

@@ -25,3 +25,4 @@ expected:
        pattern, accept]
     # So the placeholder still reaches the card.
     - [placeholder, "???", question mark, render, display, show, blank, card, appear, visible]
+split: train

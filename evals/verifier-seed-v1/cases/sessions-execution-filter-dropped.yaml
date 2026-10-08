@@ -1,0 +1,20 @@
+id: sessions-execution-filter-dropped
+source_pr: 1277
+# Mined from the fix: the first fix commit's first parent, so the bug is
+# present and nothing of the fix is. Evidence at the pin:
+# the list route declares no `execution_id` Query parameter (0 matches at pin,
+# 1 after).
+commit: 0b72c95c5f79dd66f79766a71d60ced9dbbca667
+fix_commit: f906a572856deeacb372eac00d45bf59fe164f96
+first_fix_commit: 8cfecd5cd37c81650ad7d2e4a66bc889541f182a
+task: >
+  Review the session list endpoint in the API (GET /api/v1/sessions) and the
+  filters it offers. Every session row carries the execution it belongs to,
+  and clients use this endpoint to find one run's sessions.
+expected:
+  files:
+    - apps/syn-api/src/syn_api/routes/sessions.py
+  keywords:
+    - ["execution id", "execution filter", "filter"]
+    - ["ignored", "dropped", "silently", "unknown", "no such", "not declared", "not accepted", "missing", "unfiltered", "whole collection", "every session", "all sessions"]
+split: train

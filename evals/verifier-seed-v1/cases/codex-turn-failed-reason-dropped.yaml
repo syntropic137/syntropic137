@@ -1,0 +1,21 @@
+id: codex-turn-failed-reason-dropped
+source_pr: 1117
+# Mined from the fix: the first fix commit's first parent, so the bug is
+# present and nothing of the fix is. Evidence at the pin:
+# the processor dispatches no `TURN_FAILED`/`ERROR` event type at the pin (0
+# matches for TURN_FAILED); the fix adds `_note_stream_fault`.
+commit: 5eabcb962f34d797d51a985e32769c7d41024b53
+fix_commit: 6988ee7831b9523cc84d6fbceb7005a55b544600
+first_fix_commit: bcb3e8f2590629d2bff484e77a41b258e8de6a1d
+task: >
+  Review how the codex stream processor turns a codex JSONL stream into a
+  phase result, including the error it reports when a codex turn does not
+  complete. Review whether an operator reading a failed codex phase is told
+  why it failed.
+expected:
+  files:
+    - packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/CodexStreamProcessor.py
+  keywords:
+    - ["turn.failed", "turn failed", "error event", "error type", "failed turn"]
+    - ["ignored", "dropped", "discarded", "not handled", "never handled", "unhandled", "not dispatched", "never dispatched", "thrown away", "lost", "generic", "missing terminal"]
+split: holdout

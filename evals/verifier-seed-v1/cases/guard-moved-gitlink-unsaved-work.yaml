@@ -1,0 +1,20 @@
+id: guard-moved-gitlink-unsaved-work
+source_pr: 1527
+# Mined from the fix: the first fix commit's first parent, so the bug is
+# present and nothing of the fix is. Evidence at the pin:
+# every `status --porcelain` line (line 595) counts as unsaved work;
+# `split_moved_gitlinks` appears only after.
+commit: 366db9c0e7817b3e58f57285d25067bc5bab4bde
+fix_commit: 97af666f8b6afca35f07ab036d84d774e267efb6
+first_fix_commit: ec7da2ecbef32980396592076d26e8291b391a21
+task: >
+  Review the unpushed-work guard, which refuses to report a phase completed
+  while the workspace holds work that was never pushed. Repositories under
+  work can contain git submodules.
+expected:
+  files:
+    - packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/unpushed_work_guard.py
+  keywords:
+    - ["submodule", "gitlink"]
+    - ["checkout", "moved", "pointer", "not edited", "not unsaved", "false positive", "falsely", "not work", "porcelain", "every line"]
+split: train

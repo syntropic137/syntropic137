@@ -1,0 +1,22 @@
+id: cli-packages-own-remote-check
+source_pr: 1238
+# Mined from the fix: the first fix commit's first parent, so the bug is
+# present and nothing of the fix is. Evidence at the pin:
+# `packagesCommand` decides remoteness with its own predicate
+# (`isGitHubShorthand` imported, 3 matches at pin, 0 after) instead of
+# `parseSource`.
+commit: dcb5011a83b9631bb06fdb78ccfedae98f064537
+fix_commit: 8bc0806994b8ea16e39cfb74d059805f4aab76ad
+first_fix_commit: 32c112529edf59135157aaf5b26d0e403cd6e038
+task: >
+  Review `syn workflow packages`, which lists installed workflow packages and
+  hides entries whose local source path no longer exists, while always showing
+  remote sources. Review whether it can disagree with install/update about
+  which sources are remote.
+expected:
+  files:
+    - apps/syn-cli-node/src/commands/workflow/install.ts
+  keywords:
+    - ["parsesource", "parse source", "resolver", "install", "update", "second", "own", "duplicate", "inline", "separate", "divergent", "diverge"]
+    - ["remote", "local", "shorthand", "url"]
+split: train

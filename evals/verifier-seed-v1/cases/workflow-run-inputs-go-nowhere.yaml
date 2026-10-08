@@ -1,0 +1,18 @@
+id: workflow-run-inputs-go-nowhere
+source_pr: 1088
+# Mined from the fix: the first fix commit's first parent, so the bug is
+# present and nothing of the fix is. Evidence at the pin:
+# no warning is emitted for -i/-R values no phase consumes (0 `warn` matches
+# at pin, 1 after), including under --dry-run.
+commit: 46b4c127ad4abf0c8ca0dad1cb5cc0c74e44b14d
+fix_commit: 118c1b7e8c3edfb92cf3c621ae8c952fe961ee2b
+task: >
+  Review `syn workflow run`, including its -i (input) and -R (repo) flags and
+  its --dry-run preview of what would be dispatched.
+expected:
+  files:
+    - apps/syn-cli-node/src/commands/workflow/run.ts
+  keywords:
+    - ["input", "repo"]
+    - ["no phase", "not consumed", "unconsumed", "never used", "unused", "ignored", "dropped", "silently", "nowhere", "no warning", "not warned", "not referenced"]
+split: train
