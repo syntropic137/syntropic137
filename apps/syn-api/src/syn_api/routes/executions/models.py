@@ -247,6 +247,20 @@ class ExecutionStartQueueInfo(BaseModel):
             return f"starting ({self.running}/{self.limit} running)"
         return f"queued {self.position} of {self.waiting} ({self.running}/{self.limit} running)"
 
+    @computed_field(
+        description="Why it has not started: 'slots full 4/4', 'admission paused', "
+        "'starting' or 'awaiting pickup (<status>)' (PC-124)."
+    )
+    @property
+    def reason_display(self) -> str:
+        if self.start_status == "paused":
+            return "admission paused"
+        if not self.held:
+            return f"awaiting pickup ({self.start_status or 'pending'})"
+        if self.position is None:
+            return "starting"
+        return f"slots full {self.running}/{self.limit}"
+
 
 class ResumeStartInfo(BaseModel):
     """How starting the child of this execution's resume is going (#1480).
@@ -490,6 +504,34 @@ class ExecutionSummaryResponse(BaseModel):
 
     The same shape ``GET /executions/{id}`` carries, so a list row and the
     execution page cannot describe the run differently."""
+    start_queue: ExecutionStartQueueInfo | None = None
+    """Set exactly when ``status`` is ``queued``: an accepted start with no
+    execution yet, and where it stands (PC-124). Same block as on the detail."""
+
+
+class ExecutionBudgetInfo(BaseModel):
+    """How full the execution budget is right now, for the app bar (PC-124).
+
+    ``running`` and ``limit`` are this API process's budget. ``queued`` is
+    every start the list reports as ``queued``: waiting here for a slot, or
+    recorded durably and not yet picked up by any process.
+    """
+
+    running: int
+    queued: int
+    limit: int
+    """``SYN_EXECUTION_MAX_CONCURRENT``."""
+    admission_paused: bool | None
+    """Maintenance mode is on: new starts are accepted and held, not started.
+    ``None`` when the flag could not be read, which is not a statement either way."""
+
+    @computed_field(description="e.g. '2 running / 3 queued / cap 4'.")
+    @property
+    def display(self) -> str:
+        text = f"{self.running} running / {self.queued} queued / cap {self.limit}"
+        if self.admission_paused is None:
+            return f"{text} (admission state unknown)"
+        return f"{text} (admission paused)" if self.admission_paused else text
 
 
 class ExecutionListResponse(BaseModel):
@@ -509,6 +551,8 @@ class ExecutionListResponse(BaseModel):
     row and returns the undated ones. Non-zero means rows exist that this
     filter could not judge, NOT that they failed it.
     """
+    budget: ExecutionBudgetInfo | None = None
+    """The execution budget's occupancy (PC-124). Not filtered by the request."""
     status_counts: dict[str, int] = Field(default_factory=dict)
     """Matching executions tallied by status, ignoring the status filter itself.
 

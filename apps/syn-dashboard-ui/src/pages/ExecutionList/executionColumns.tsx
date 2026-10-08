@@ -15,6 +15,7 @@ import type { ExecutionSortKey } from '../../hooks/useExecutionList'
 import type { ExecutionListItem } from '../../types'
 import { formatRelativeTime, formatTimestampLocale } from '../../utils/formatters'
 import { ExecutionProgressBar } from './ExecutionProgressBar'
+import { queueLabel } from './queueLabel'
 
 const EM_DASH = '—'
 
@@ -95,8 +96,9 @@ const STARTED: ColumnDef<ExecutionListItem, ExecutionSortKey> = {
   align: 'left',
   sortKey: 'started',
   cellClassName: 'text-xs text-[var(--color-text-secondary)]',
-  cellTitle: (e) => formatTimestampLocale(e.started_at) ?? undefined,
-  render: (e) => formatRelativeTime(e.started_at),
+  cellTitle: (e) =>
+    e.start_queue ? queueLabel(e.start_queue) : (formatTimestampLocale(e.started_at) ?? undefined),
+  render: (e) => (e.start_queue ? queueLabel(e.start_queue) : formatRelativeTime(e.started_at)),
 }
 
 export const EXECUTION_COLUMNS: ColumnDef<ExecutionListItem, ExecutionSortKey>[] = [

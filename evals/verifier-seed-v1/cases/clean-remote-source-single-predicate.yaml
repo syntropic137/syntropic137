@@ -1,0 +1,15 @@
+id: clean-remote-source-single-predicate
+polarity: clean
+# A control, not a defect: PR #1238, merged 2026-09-08. A verifier passes it only by
+# certifying. clean_through is main when the history after the merge was read
+# (`check` re-reads it): no later fix or revert names the PR, and no later
+# commit to its files fixes what it changed.
+source_pr: 1238
+commit: 8bc0806994b8ea16e39cfb74d059805f4aab76ad
+merge_commit: bdbc56d1a99e0b8050d7e179cdff824db0d7ea27
+clean_through: 6cb76a7f9aa881aff20ecaa8fefeeb690ce92673
+task: >
+  The change under review makes the CLI's source parser the only answer to
+  whether a workflow package source is remote, so that sources with an
+  unsupported scheme are no longer treated as live and can be pruned on
+  install. Review install and prune for every kind of source a user can give.

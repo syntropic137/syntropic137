@@ -391,6 +391,8 @@ export interface ExecutionListItem {
   repos_display: string | null
   /** The eval this run is a current data point of, with its verdict; null in none. */
   eval: components['schemas']['ExecutionEvalRunResponse'] | null
+  /** Set exactly when `status` is `queued`: where the start waits, and why (PC-124). */
+  start_queue: ExecutionStartQueueInfo | null
 }
 
 /**
@@ -408,6 +410,10 @@ export interface ExecutionListItem {
  * this alias a drop-in.
  */
 export type ExecutionListResponse = components['schemas']['ExecutionListResponse']
+/** Where an accepted start waits for a slot, and why (#1557, PC-124). */
+export type ExecutionStartQueueInfo = components['schemas']['ExecutionStartQueueInfo']
+/** How full the execution budget is: running, queued and the cap (PC-124). */
+export type ExecutionBudgetInfo = components['schemas']['ExecutionBudgetInfo']
 
 export interface PhaseExecutionDetail {
   /**

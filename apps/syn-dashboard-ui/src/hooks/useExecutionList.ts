@@ -61,6 +61,7 @@ function toExecutionListItem(
     repos: row.repos ?? [],
     repos_display: row.repos_display ?? null,
     eval: row.eval ?? null,
+    start_queue: row.start_queue ?? null,
   }
 }
 
