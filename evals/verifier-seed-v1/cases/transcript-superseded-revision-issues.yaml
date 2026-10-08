@@ -1,0 +1,22 @@
+id: transcript-superseded-revision-issues
+polarity: defect
+source_pr: 1489
+# Mined from the fix: the first fix commit's first parent, so the bug is
+# present and nothing of the fix is. Evidence at the pin:
+# resolve() filters evidence with `active_evidence(evidence)` only; the fix
+# wraps it in `without_superseded_revision_issues`.
+commit: e9141b6e97f86b9d7f9907e5dad8ba50cd3fce10
+fix_commit: 790ba270f2ab8eb889bafc3cdcd81793765cbd9e
+first_fix_commit: ed1e543ab8b3da6356411cbc20ac13acdf5b48c0
+task: >
+  Review the session relationship resolver. Live transcripts are archived as a
+  series of growing revisions, and the resolver folds the extractor issues of
+  every archived revision into a session's coverage. Review whether a fully
+  accounted session can still be reported as incomplete.
+expected:
+  files:
+    - packages/syn-domain/src/syn_domain/contexts/agent_sessions/domain/services/session_relationship_resolver.py
+  keywords:
+    - ["revision", "superseded", "earlier", "older", "stale", "previous", "later"]
+    - ["issue", "gap", "unresolved", "spawn", "coverage", "incomplete", "missing"]
+split: train

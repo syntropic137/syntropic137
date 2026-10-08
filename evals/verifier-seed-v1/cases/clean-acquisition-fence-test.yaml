@@ -13,3 +13,4 @@ task: >
   asserts the acquisition status checkpoint's fence rather than the journal's
   maximum position. Review whether the test now pins the behaviour it is
   named for, and whether it can still flake.
+split: train

@@ -13,3 +13,4 @@ task: >
   library asyncio event loop instead of uvloop, set once in the API image, so
   that spawning a subprocess never forks the whole API process. Review where
   the loop is chosen and whether every deployment of the API gets it.
+split: holdout
