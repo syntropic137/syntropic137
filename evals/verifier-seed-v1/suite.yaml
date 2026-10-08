@@ -17,8 +17,9 @@
 # report a result and never choose one. The six earlier defects are train:
 # verifiers were already shaped against them. The holdout is, within each
 # batch of added cases, the ~30% whose sha256(id) sorts lowest (7 of the first
-# 18 mined, 2 of the next 6, 2 of the 6 clean controls): 11 of 36, fixed once,
-# recorded in each file, and never moved to train.
+# 18 mined, 2 of the next 6, 2 of the 6 clean controls), fixed once,
+# recorded in each file, and never moved to train. That was 11 of 36 in v4;
+# after v5's retirements and additions it is 10 of 33.
 #
 # What it measures: given a workflow, a prompt and a model, does verification
 # find the defect, and certify the change that has none? `score` prints both
@@ -45,7 +46,8 @@
 #     real defect. Both are retired (they still score in v3 and v4). The redis
 #     one's defect is a new defect case, redis-retry-non-idempotent; the
 #     GitHub token one has no fix to cut a case from. Two replacement controls
-#     chosen by the quiet-window rule (README.md). 31 defects, 6 controls.
+#     chosen by the quiet-window rule (README.md); four more v3/v4 controls
+#     retired because they are under its 30 days. 31 defects, 2 controls.
 #
 # EVERY VERSION KEEPS ITS SCORE. `history` records each earlier version whose
 # runs launches.jsonl still holds: the tag exactly as those runs carry it, the

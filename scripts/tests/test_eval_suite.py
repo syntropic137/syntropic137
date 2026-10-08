@@ -97,9 +97,9 @@ def test_the_seed_suite_loads_and_records_its_workflow_and_models() -> None:
         for polarity in ("defect", "clean")
     }
     assert by_polarity["defect"] >= {1574, 1649, 1652, 1654, 1679, 1680}
-    assert by_polarity["clean"] == {917, 1010, 1238, 1486, 1643, 1691}
+    assert by_polarity["clean"] == {917, 1010}
     assert sum(c.polarity == "defect" for c in loaded.cases) == 31
-    assert sum(c.polarity == "clean" for c in loaded.cases) == 6
+    assert sum(c.polarity == "clean" for c in loaded.cases) == 2
 
 
 @pytest.mark.unit
@@ -348,7 +348,12 @@ def test_check_passes_a_pin_before_the_first_commit_of_a_fix_series(
     ids=lambda c: c.id,
 )
 def test_every_committed_defect_pins_its_fixs_first_parent(case: DefectCase) -> None:
-    assert _git(ROOT, "rev-parse", f"{case.fix_start}^1") == case.commit
+    if case.reclassified_from:
+        # A reclassified control keeps the pin both verifiers reviewed, before the fix.
+        assert eval_suite._git_ok(ROOT, "merge-base", "--is-ancestor", case.commit, case.fix_start)
+        assert case.commit != case.fix_start
+    else:
+        assert _git(ROOT, "rev-parse", f"{case.fix_start}^1") == case.commit
 
 
 @pytest.mark.unit
@@ -1435,7 +1440,7 @@ def test_score_reads_verdict_report_cost_and_model_from_the_api() -> None:
     assert unrecorded == ()
 
     table = render(loaded, rows)
-    assert "exec-1" in table and "PASS" in table and "$3.75" in table and "1/37 passed" in table
+    assert "exec-1" in table and "PASS" in table and "$3.75" in table and "1/33 passed" in table
 
 
 @pytest.mark.unit
@@ -1788,7 +1793,7 @@ def test_v1_runs_never_count_toward_the_current_version(tmp_path: Path) -> None:
     current = load_suite(DEFAULT_SUITE)
     rows, unrecorded = score_suite(current, _LedgerServer(launches).client(), launches)
 
-    assert len(rows) == 37 and {r.status for r in rows} == {"not launched"}
+    assert len(rows) == 33 and {r.status for r in rows} == {"not launched"}
     assert unrecorded == ()
 
 
@@ -1913,7 +1918,7 @@ def test_the_holdout_is_new_cases_only_and_within_its_share() -> None:
     cases = load_suite(DEFAULT_SUITE).cases
     holdout = {c.id for c in cases if c.split == "holdout"}
 
-    assert len(holdout) == 11 and len(cases) == 37
+    assert len(holdout) == 10 and len(cases) == 33
     # The pre-v4 defects were already run against the verifiers: never holdout.
     assert not holdout & _V2_CASES
 
@@ -1926,7 +1931,7 @@ def test_a_train_launch_never_starts_a_holdout_case(tmp_path: Path) -> None:
 
     holdout = {c.id for c in load_suite(DEFAULT_SUITE, split="holdout").cases}
     launched = {x.case for x in read_launches(ledger)}
-    assert len(launched) == 26
+    assert len(launched) == 23
     assert not launched & holdout
 
 
@@ -1945,9 +1950,9 @@ def test_the_split_flag_selects_the_cases_check_reports(
 
     monkeypatch.setattr(eval_suite, "check_commits", record)
     assert main(["check", "--split", "holdout"]) == 0
-    assert [c.split for c in checked[0].cases] == ["holdout"] * 11
+    assert [c.split for c in checked[0].cases] == ["holdout"] * 10
     out = capsys.readouterr().out
-    assert ": 11 case(s)" in out
+    assert ": 10 case(s)" in out
     assert "case:binary-artifact-minio-key" not in out
 
 
@@ -1967,7 +1972,7 @@ def test_a_suite_with_too_little_holdout_is_refused(tmp_path: Path) -> None:
     for path in (suite_dir / "cases").glob("*.yaml"):
         path.write_text(path.read_text().replace("split: holdout", "split: train"))
 
-    with pytest.raises(DefinitionError, match="0 of 37 cases are holdout"):
+    with pytest.raises(DefinitionError, match="0 of 33 cases are holdout"):
         load_suite(suite_dir)
 
 
@@ -2238,14 +2243,17 @@ def merged(tmp_path: Path) -> tuple[Path, str, str, str]:
 
 
 def _later(repo: Path, message: str) -> str:
-    """Commit `message` on main after the merge, touching a file of its own."""
+    """Commit `message` on main 31 days after HEAD, touching a file of its own, so
+    the control's quiet window has passed."""
     (repo / "later.txt").write_text(message)
     _git(repo, "add", "later.txt")
-    _git(repo, "commit", "-qm", message)
+    when = int(_git(repo, "show", "-s", "--format=%ct", "HEAD")) + 31 * _DAY
+    env = {**os.environ, "GIT_AUTHOR_DATE": f"@{when}", "GIT_COMMITTER_DATE": f"@{when}"}
+    subprocess.run(["git", "-C", str(repo), "commit", "-qm", message], env=env, check=True)
     return _git(repo, "rev-parse", "HEAD")
 
 
-def _clean_suite(tmp_path: Path, commit: str, merge: str, through: str, added_in: int = 3) -> Path:
+def _clean_suite(tmp_path: Path, commit: str, merge: str, through: str) -> Path:
     suite_dir = _copy_suite(tmp_path)
     suite_file = suite_dir / "suite.yaml"
     suite = yaml.safe_load(suite_file.read_text())
@@ -2259,7 +2267,6 @@ def _clean_suite(tmp_path: Path, commit: str, merge: str, through: str, added_in
         "source_pr": 7,
         "commit": commit,
         "merge_commit": merge,
-        "added_in": added_in,
         "clean_through": through,
         "task": "Review it.",
         "split": "train",
@@ -2284,7 +2291,8 @@ def test_check_refuses_a_clean_pin_that_is_not_the_merges_second_parent(
     tmp_path: Path, merged: tuple[Path, str, str, str]
 ) -> None:
     repo, base, _, merge = merged
-    problems = check_commits(load_suite(_clean_suite(tmp_path, base, merge, merge)), repo)
+    through = _later(repo, "chore: later")
+    problems = check_commits(load_suite(_clean_suite(tmp_path, base, merge, through)), repo)
     assert problems == [
         f"control: pins {base[:12]}, but the merge {merge[:12]}'s second parent is "
         f"{_git(repo, 'rev-parse', merge + '^2')[:12]}; pin the PR head the merge took"
@@ -2345,7 +2353,8 @@ def test_check_refuses_a_clean_control_git_revert_undid(
     repo, _, head, merge = merged
     _git(repo, "revert", "--no-edit", "-m", "1", merge)
     revert = _git(repo, "rev-parse", "HEAD")
-    problems = check_commits(load_suite(_clean_suite(tmp_path, head, merge, revert)), repo)
+    through = _later(repo, "chore: later")
+    problems = check_commits(load_suite(_clean_suite(tmp_path, head, merge, through)), repo)
     assert problems == [
         f"control: {revert[:12]} fixes or reverts #7 after it merged; "
         "a clean control must have no known defect"
@@ -2431,24 +2440,97 @@ def test_check_passes_a_control_whose_other_functions_or_later_days_see_the_chan
     _commit_at(repo, day0 + 31 * _DAY, "feat: box", other.replace("return 2", "return 3"))
     through = _commit_at(repo, day0 + 40 * _DAY, "chore: later")
 
-    loaded = load_suite(_clean_suite(tmp_path, head, merge, through, added_in=5))
+    loaded = load_suite(_clean_suite(tmp_path, head, merge, through))
     assert check_commits(loaded, repo) == []
 
 
 @pytest.mark.unit
-def test_check_refuses_a_v5_control_younger_than_30_days_and_spares_an_older_one(
+def test_check_refuses_a_control_younger_than_30_days_and_spares_an_older_one(
     tmp_path: Path, quiet: tuple[Path, str, str, int]
 ) -> None:
     repo, head, merge, day0 = quiet
-    through = _commit_at(repo, day0 + 10 * _DAY, "chore: later")
+    young = _commit_at(repo, day0 + 10 * _DAY, "chore: later")
+    old = _commit_at(repo, day0 + 30 * _DAY, "chore: later still")
 
-    young = load_suite(_clean_suite(tmp_path / "v5", head, merge, through, added_in=5))
-    assert check_commits(young, repo) == [
-        f"control: clean_through {through[:12]} is under 30 days after the merge; "
+    assert check_commits(
+        load_suite(_clean_suite(tmp_path / "young", head, merge, young)), repo
+    ) == [
+        f"control: clean_through {young[:12]} is under 30 days after the merge; "
         "a clean control needs that long untouched"
     ]
-    legacy = load_suite(_clean_suite(tmp_path / "v3", head, merge, through, added_in=4))
-    assert check_commits(legacy, repo) == []
+    assert check_commits(load_suite(_clean_suite(tmp_path / "old", head, merge, old)), repo) == []
+
+
+def _quiet_repo(tmp_path: Path, before: str, after: str) -> tuple[Path, str, str, int]:
+    """Like `quiet`, but the PR changes m.py from `before` to `after`."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    _git(repo, "config", "user.email", "t@example.com")
+    _git(repo, "config", "user.name", "t")
+    day0 = 1_780_000_000
+    _commit_at(repo, day0 - _DAY, "base", before)
+    _git(repo, "checkout", "-qb", "feature")
+    head = _commit_at(repo, day0 - 60, "feat: change", after)
+    _git(repo, "checkout", "-q", "main")
+    env = {**os.environ, "GIT_AUTHOR_DATE": f"@{day0}", "GIT_COMMITTER_DATE": f"@{day0}"}
+    merge = ["git", "-C", str(repo), "merge", "-q", "--no-ff", "-m", "Merge #7", "feature"]
+    subprocess.run(merge, env=env, check=True)
+    return repo, head, _git(repo, "rev-parse", "HEAD"), day0
+
+
+def _touches_after(tmp_path: Path, after: str, later: str) -> tuple[str, list[str]]:
+    """A PR changes `return 0` to `return 2` in `after`; on day 2 main rewrites m.py
+    to `later`. Returns that commit and what `check` says, read through day 40."""
+    repo, head, merge, day0 = _quiet_repo(tmp_path, after.replace("return 2", "return 0"), after)
+    touch = _commit_at(repo, day0 + 2 * _DAY, "refactor: later", later)
+    through = _commit_at(repo, day0 + 40 * _DAY, "chore: later")
+    return touch, check_commits(load_suite(_clean_suite(tmp_path, head, merge, through)), repo)
+
+
+def _untouched(touch: str) -> str:
+    return f"control: {touch[:12]} changes m.py:"
+
+
+@pytest.mark.unit
+def test_check_follows_a_function_defined_under_a_conditional(tmp_path: Path) -> None:
+    source = "if True:\n    def changed():\n        return 2\n"
+    touch, problems = _touches_after(tmp_path, source, source.replace("return 2", "return 3"))
+    assert problems == [
+        f"{_untouched(touch)}changed within 30 days of the merge; "
+        "a clean control's code must stay untouched that long"
+    ]
+
+
+@pytest.mark.unit
+def test_check_follows_a_property_getter_beside_its_same_named_setter(tmp_path: Path) -> None:
+    source = (
+        "class Box:\n    @property\n    def value(self):\n        return 2\n\n"
+        "    @value.setter\n    def value(self, new):\n        self._value = new\n"
+    )
+    touch, problems = _touches_after(tmp_path, source, source.replace("return 2", "return 3"))
+    assert problems == [
+        f"{_untouched(touch)}Box.value within 30 days of the merge; "
+        "a clean control's code must stay untouched that long"
+    ]
+
+
+@pytest.mark.unit
+def test_check_ignores_a_function_added_after_the_changed_one(tmp_path: Path) -> None:
+    source = "def changed():\n    return 2\n"
+    _, problems = _touches_after(tmp_path, source, source + "\n\ndef other():\n    return 9\n")
+    assert problems == []
+
+
+@pytest.mark.unit
+def test_check_refuses_a_line_inserted_inside_the_changed_function(tmp_path: Path) -> None:
+    source = "def changed():\n    return 2\n"
+    later = "def changed():\n    print()\n    return 2\n"
+    touch, problems = _touches_after(tmp_path, source, later)
+    assert problems == [
+        f"{_untouched(touch)}changed within 30 days of the merge; "
+        "a clean control's code must stay untouched that long"
+    ]
 
 
 @pytest.mark.unit
@@ -2473,7 +2555,7 @@ def test_a_case_without_a_polarity_is_refused(tmp_path: Path) -> None:
 
 @pytest.mark.unit
 def test_each_split_holds_clean_controls() -> None:
-    # 30 defects outnumber the 6 controls, so a false-block rate is only
+    # 31 defects outnumber the 2 controls, so a false-block rate is only
     # measurable on each side of the split if both sides hold some.
     for split in ("train", "holdout"):
         cases = load_suite(DEFAULT_SUITE, split=split).cases
@@ -2540,7 +2622,7 @@ def test_score_records_a_certified_clean_control_as_a_pass() -> None:
     assert (body["verdict"], body["score"]) == ("PASS", 1.0)
     assert f"{_clean_case().id} (clean)" in str(body["evidence"])
     table = render(loaded, rows)
-    assert "1/37 passed" in table
+    assert "1/33 passed" in table
     assert "false-block rate (clean controls blocked): 0/1 (0%)" in table
     assert "catch rate (defect cases blocked and named): -" in table
 
@@ -2554,7 +2636,7 @@ def test_score_records_a_blocked_clean_control_as_a_false_block() -> None:
     [(_, body)] = server.scores
     assert (body["verdict"], body["score"]) == ("FAIL", 0.0)
     table = render(loaded, rows)
-    assert "0/37 passed" in table
+    assert "0/33 passed" in table
     assert "false-block rate (clean controls blocked): 1/1 (100%)" in table
 
 

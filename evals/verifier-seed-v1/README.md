@@ -14,7 +14,11 @@ This file holds what `suite.yaml` cannot: how a case is chosen.
 
 A defect case is mined from a merged fix. The pin is the first fix commit's
 first parent, so the bug is present and nothing of the fix is; `check` refuses
-any other pin. The expected files are ones the fix changed, and a defect that
+any other pin, with one exception. A defect found in a retired clean control
+keeps that control's pin, so the tree reviewed is the one both verifiers
+blocked: the case names the control in `reclassified_from`, and `check`
+requires the pin to equal the control's commit and to be a strict ancestor of
+the first fix commit. `redis-retry-non-idempotent` is the only such case. The expected files are ones the fix changed, and a defect that
 only shows at runtime is not a case.
 
 ## Clean controls
@@ -36,12 +40,19 @@ by this rule:
    functions the control changed.
 3. **What it changed stayed untouched for 30 days.** `clean_through` is at
    least 30 days after the merge, and no mainline commit in those 30 days
-   touches a Python function the PR changed. A function is followed by its
-   qualified name (`Class.method`), so moving it does not hide a later edit.
-   *Enforced by `check` for Python; controls added before v5
-   (`added_in` < 5) have their quiet days so far checked, and the rest as
-   `clean_through` advances.* A non-Python change cannot be followed by
-   function here: read its later history by hand before choosing it.
+   changes the source of a Python function the PR changed. A function is
+   followed by its qualified name (`Class.method`), wherever it is defined (a
+   function under an `if` included), so moving it does not hide a later edit;
+   same-named definitions such as a property's getter and setter are each
+   compared. *Enforced by `check` for Python, on every control in the current
+   version, however old the control is.* A non-Python change cannot be
+   followed by function here: read its later history by hand before choosing
+   it.
+
+A control that cannot meet the rule yet is retired from the current version,
+not exempted: v5 retired four v3/v4 controls under 30 days old at main
+4108b74fc. They still score in v4. A later version may bring one back as a
+new case once main gives it 30 quiet days.
 
 Rule 3 exists because rule 2 alone let two bad controls in. Both v3 controls
 that v5 retired had later commits rewriting the very functions they added
@@ -56,7 +67,7 @@ each naming the same defect. Both were real:
 
 | Control | What the verifiers found | Outcome |
 |---|---|---|
-| `clean-redis-signal-queue-fail-open` (PR #1083) | `resilient_redis_client` retries GETDEL and SET NX on timeout; neither is idempotent, so a retried signal read loses the signal and a retried dedup claim reports a first delivery as a duplicate | Issue #1756, fixed by #1757. Retired; the defect is now `redis-retry-non-idempotent` |
+| `clean-redis-signal-queue-fail-open` (PR #1083) | `resilient_redis_client` retries GETDEL and SET NX on timeout; neither is idempotent, so a retried signal read loses the signal and a retried dedup claim reports a first delivery as a duplicate | Issue #1756, fixed by #1757. Retired; the defect is now `redis-retry-non-idempotent`, at the same pin |
 | `clean-github-token-installation-routing` (PR #1130) | The first owning repo's installation token is used for the whole workspace, so another repo under a different installation gets the wrong token | Moved, not fixed, by ca367a88b (PR #1448) into `setup_phase_secrets._gh_token_for_repo_under_work`, still on main. Retired; no fix exists to cut a defect case from |
 
 So when two strong verifiers block a control and name the same thing, do not

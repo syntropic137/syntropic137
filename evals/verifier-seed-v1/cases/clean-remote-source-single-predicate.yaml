@@ -7,7 +7,6 @@ polarity: clean
 source_pr: 1238
 commit: 8bc0806994b8ea16e39cfb74d059805f4aab76ad
 merge_commit: bdbc56d1a99e0b8050d7e179cdff824db0d7ea27
-added_in: 3
 clean_through: 4108b74fc2f7f74b280aed08a49f6eb91c796a3f
 task: >
   The change under review makes the CLI's source parser the only answer to
@@ -15,3 +14,6 @@ task: >
   unsupported scheme are no longer treated as live and can be pruned on
   install. Review install and prune for every kind of source a user can give.
 split: train
+# Under QUIET_DAYS old at every clean_through main can give it (main is
+# 4108b74fc, 2026-10-08), so it cannot meet the quiet-window rule yet.
+retired: v5 - under 30 days of quiet history; it scores in v4 as it ran

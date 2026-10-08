@@ -7,7 +7,6 @@ polarity: clean
 source_pr: 1010
 commit: 11c0f3c28acf153d87eeaa9c6b92db2d7fd65c8f
 merge_commit: 1f5795dad61f8545f9d5e46314060435ae2a382b
-added_in: 5
 clean_through: 4108b74fc2f7f74b280aed08a49f6eb91c796a3f
 task: >
   The change under review reworks the developer script that prints the shape
