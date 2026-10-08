@@ -6,8 +6,23 @@
  * colour tokens with color-mix(), so they recolour with any theme; they sit
  * under [data-theme] so they resolve against the nearest theme root.
  *
- * Naming: --ds-* mirrors the upstream @syntropic137/design-tokens roles
- * (defaults here until that package is linked); --sky-* belongs to Skyline.
+ * Naming: --ds-* are the upstream @syntropic137/design-tokens roles (0.1.0,
+ * imported first by all.css); --sky-* belongs to Skyline.
+ *
+ * Intentional differences from upstream 0.1.0 (Skyline wins, being unlayered):
+ * - Values. Every --ds-* Skyline sets is overridden on purpose: the canvas
+ *   (Foundations board) is dark only, with its own palette per theme, rem
+ *   type and space sizes (upstream uses px), Instrument Sans / JetBrains
+ *   Mono, and the canvas radii. Upstream's light :root and dark values
+ *   never show: Skyline's theme roots are "skyline" and "syn137".
+ * - Extra names. Skyline also defines --ds-* names upstream 0.1.0 lacks:
+ *   font-weight-*, line-height-*, space-0, -px, -0-5, -1-5, -2-5, -3-5, -5,
+ *   -7, -9, -10, -12, -14, -16, radius-xs and border-width. check-themes.mjs
+ *   pins that list against the package's typed names, so a new one is a
+ *   deliberate change and an upstream addition is noticed.
+ * - Upstream-only names (brand-*, *-contrast, focus-ring, shadow-*,
+ *   duration-*, ease, z-*) keep upstream's values; Skyline does not use them
+ *   and has its own --sky-* equivalents.
  *
  * Breakpoints (custom properties cannot drive media queries, so they are
  * written literally in min-width rem queries): 48rem dock -> capsule nav,

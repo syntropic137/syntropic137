@@ -1,4 +1,12 @@
-/* Structural tokens plus both themes. Pick one with data-theme on <html>. */
+/*
+ * Structural tokens plus both themes. Pick one with data-theme on <html>.
+ *
+ * Upstream @syntropic137/design-tokens loads first, inside its own
+ * `@layer tokens`. Skyline's declarations are unlayered, so where both define
+ * a --ds-* name Skyline's value wins; upstream supplies the names Skyline
+ * leaves unset. See the header of tokens.css for the intentional differences.
+ */
+@import '@syntropic137/design-tokens/css';
 @import './tokens.css';
 @import './skyline.css';
 @import './syn137.css';

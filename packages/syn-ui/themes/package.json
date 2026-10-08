@@ -16,5 +16,8 @@
     "check": "node ../scripts/check-themes.mjs",
     "build": "node ../scripts/check-themes.mjs",
     "test": "node ../scripts/check-themes.mjs"
+  },
+  "dependencies": {
+    "@syntropic137/design-tokens": "0.1.0"
   }
 }

@@ -31,6 +31,7 @@ allowBuilds:
 # pin a release the day it ships.
 minimumReleaseAgeExclude:
   - '@syntropic137/design-contracts@0.1.0'
+  - '@syntropic137/design-tokens@0.1.0'
 
 overrides:
   '@babel/core@<7.29.6': '>=7.29.6 <8'

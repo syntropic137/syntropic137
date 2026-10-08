@@ -429,7 +429,11 @@ importers:
         specifier: 4.1.11
         version: 4.1.11(@types/node@24.10.1)(jsdom@30.1.1)(vite@7.3.6(@types/node@24.10.1)(jiti@2.6.1)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.8.3))
 
-  packages/syn-ui/themes: {}
+  packages/syn-ui/themes:
+    dependencies:
+      '@syntropic137/design-tokens':
+        specifier: 0.1.0
+        version: 0.1.0
 
 packages:
 
@@ -2203,6 +2207,10 @@ packages:
     resolution: {integrity: sha512-oWFGAz63nM/vR5Ut64KdW81xL2wNcIcuYj9mzhHV8UoM/kGuRqPM+/hSVZrLBWvm53cjA8llanQp9qw9eYtfLA==}
     engines: {node: '>=18.18.0'}
     hasBin: true
+
+  '@syntropic137/design-tokens@0.1.0':
+    resolution: {integrity: sha512-xdHrmCLKzLOUmcT9X9/cxlfw6ag/g5gck0Zwjm/aa9A9JuS5u9uyyheKH3QvGZ31ZCincInxPDhl+FC519JFFg==}
+    engines: {node: '>=18.18.0'}
 
   '@tailwindcss/node@4.1.0':
     resolution: {integrity: sha512-mfgxGxFaxbsUbaGwKIAQXUSm7Qoojw53FftpoKwo4ANwr9wnDaByz4vi1gMti/xfJvmQ5lzA1DvPiX5yCHtBkQ==}
@@ -7566,6 +7574,8 @@ snapshots:
       tslib: 2.8.1
 
   '@syntropic137/design-contracts@0.1.0': {}
+
+  '@syntropic137/design-tokens@0.1.0': {}
 
   '@tailwindcss/node@4.1.0':
     dependencies:
