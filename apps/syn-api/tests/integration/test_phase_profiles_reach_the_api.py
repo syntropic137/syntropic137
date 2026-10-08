@@ -104,9 +104,26 @@ def _plan_rows(
     return rows
 
 
+def _build_turn(
+    model: str, scale: int, input_tokens: int, cache_creation: int, cache_read: int
+) -> str:
+    return json.dumps(
+        {
+            "model": model,
+            "input_tokens": input_tokens,
+            "output_tokens": 5 * scale,
+            "cache_creation_tokens": cache_creation,
+            "cache_read_tokens": cache_read,
+        }
+    )
+
+
 def _build_rows(execution: str, start: datetime, scale: int) -> list[_Row]:
     session = f"{execution}-build"
     at = start + timedelta(minutes=5)
+    # Turns divide each category differently, and the summary is exactly twice
+    # them, so a share copied from the turns or split by overall tokens is off.
+    # Output alone divides 1:1.
     return [
         (at, "session_started", session, execution, "build", "{}"),
         (
@@ -115,7 +132,7 @@ def _build_rows(execution: str, start: datetime, scale: int) -> list[_Row]:
             session,
             execution,
             "build",
-            json.dumps({"model": OPUS, "input_tokens": 500, "output_tokens": 1}),
+            _build_turn(OPUS, scale, 50 * scale, 20 * scale, 300 * scale),
         ),
         (
             at + timedelta(seconds=2),
@@ -123,7 +140,7 @@ def _build_rows(execution: str, start: datetime, scale: int) -> list[_Row]:
             session,
             execution,
             "build",
-            json.dumps({"model": HAIKU, "input_tokens": 200 * scale, "output_tokens": 1}),
+            _build_turn(HAIKU, scale, 200 * scale, 10 * scale, 100 * scale),
         ),
         (
             at + timedelta(seconds=3),
@@ -134,8 +151,10 @@ def _build_rows(execution: str, start: datetime, scale: int) -> list[_Row]:
             json.dumps(
                 {
                     "model": OPUS,
-                    "total_input_tokens": 500 + 200 * scale,
+                    "total_input_tokens": 500 * scale,
                     "total_output_tokens": 20 * scale,
+                    "cache_creation_tokens": 60 * scale,
+                    "cache_read_tokens": 800 * scale,
                     "total_cost_usd": 0.1 * scale,
                 }
             ),
@@ -268,15 +287,21 @@ async def test_phase_profiles_are_read_from_recorded_usage(
     # consumed, and every category of the summary is conserved across them.
     opus, haiku = tokens[("build", OPUS)], tokens[("build", HAIKU)]
     assert opus["input_tokens"]["n"] == haiku["input_tokens"]["n"] == 12
-    assert opus["input_tokens"]["p50"] == pytest.approx(500)
-    assert haiku["input_tokens"]["p50"] == pytest.approx(1300)
-    # 20 * scale output, split 1:1 as the turns reported it: 65 + 65 at p50.
+    # Per category, twice what each model's turns reported, at p50 (scale 6.5).
+    assert opus["input_tokens"]["p50"] == pytest.approx(650)
+    assert haiku["input_tokens"]["p50"] == pytest.approx(2600)
+    assert opus["cache_creation_tokens"]["p50"] == pytest.approx(260)
+    assert haiku["cache_creation_tokens"]["p50"] == pytest.approx(130)
+    assert opus["cache_read_tokens"]["p50"] == pytest.approx(3900)
+    assert haiku["cache_read_tokens"]["p50"] == pytest.approx(1300)
     assert opus["output_tokens"]["p50"] == pytest.approx(65)
     assert haiku["output_tokens"]["p50"] == pytest.approx(65)
-    # The vendor's $0.10 * scale is conserved: $0.65 at p50, split by rate.
-    assert opus["cost_usd"]["p50"] + haiku["cost_usd"]["p50"] == pytest.approx(0.65)
-    assert opus["cost_usd"]["p50"] > 0
-    assert haiku["cost_usd"]["p50"] > 0
+    # The vendor's $0.10 * scale, divided by what each share costs at its own
+    # model's rate (per million, per unit of scale): opus 100 in * $5 + 10 out
+    # * $25 + 40 cache write * $6.25 + 600 cache read * $0.50 = 1300; haiku
+    # 400 * $1 + 10 * $5 + 20 * $1.25 + 200 * $0.10 = 495.
+    assert opus["cost_usd"]["p50"] == pytest.approx(0.65 * 1300 / 1795, rel=1e-3)
+    assert haiku["cost_usd"]["p50"] == pytest.approx(0.65 * 495 / 1795, rel=1e-3)
 
     resources = {r["phase_id"]: r for r in body["resources"]}
     plan_res = resources["plan"]
