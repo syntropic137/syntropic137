@@ -91,7 +91,7 @@ def _copy_suite(tmp_path: Path) -> Path:
 _CODEX_WF = "eval-verify-pinned-codex-v1"
 _SONNET_WF = "eval-verify-pinned-sonnet-v1"
 # The four clean controls v6 added (#1774), by source PR.
-_V6_CLEAN_PRS = {839, 974, 1104, 1210}
+_V6_CLEAN_PRS = {974, 1104}
 # Codex verifiers pinned to an explicit slug, never an alias: the model
 # measured is the one written, whatever `gpt-sol` targets later.
 _PINNED_CODEX_WFS = {
@@ -115,7 +115,7 @@ def test_the_seed_suite_loads_and_records_its_workflow_and_models() -> None:
     assert by_polarity["defect"] >= {1574, 1649, 1652, 1654, 1679, 1680}
     assert by_polarity["clean"] == {917, 1010} | _V6_CLEAN_PRS
     assert sum(c.polarity == "defect" for c in loaded.cases) == 31
-    assert sum(c.polarity == "clean" for c in loaded.cases) == 6
+    assert sum(c.polarity == "clean" for c in loaded.cases) == 4
 
 
 @pytest.mark.unit
@@ -1481,7 +1481,7 @@ def test_score_reads_verdict_report_cost_and_model_from_the_api() -> None:
     assert unrecorded == ()
 
     table = render(loaded, rows)
-    assert "exec-1" in table and "PASS" in table and "$3.75" in table and "1/37 passed" in table
+    assert "exec-1" in table and "PASS" in table and "$3.75" in table and "1/35 passed" in table
 
 
 @pytest.mark.unit
@@ -1834,7 +1834,7 @@ def test_v1_runs_never_count_toward_the_current_version(tmp_path: Path) -> None:
     current = load_suite(DEFAULT_SUITE)
     rows, unrecorded = score_suite(current, _LedgerServer(launches).client(), launches)
 
-    assert len(rows) == 37 and {r.status for r in rows} == {"not launched"}
+    assert len(rows) == 35 and {r.status for r in rows} == {"not launched"}
     assert unrecorded == ()
 
 
@@ -1980,7 +1980,7 @@ def test_the_holdout_is_new_cases_only_and_within_its_share() -> None:
     cases = load_suite(DEFAULT_SUITE).cases
     holdout = {c.id for c in cases if c.split == "holdout"}
 
-    assert len(holdout) == 11 and len(cases) == 37
+    assert len(holdout) == 10 and len(cases) == 35
     # The pre-v4 defects were already run against the verifiers: never holdout.
     assert not holdout & _V2_CASES
 
@@ -1993,7 +1993,7 @@ def test_a_train_launch_never_starts_a_holdout_case(tmp_path: Path) -> None:
 
     holdout = {c.id for c in load_suite(DEFAULT_SUITE, split="holdout").cases}
     launched = {x.case for x in read_launches(ledger)}
-    assert len(launched) == 26
+    assert len(launched) == 25
     assert not launched & holdout
 
 
@@ -2012,9 +2012,9 @@ def test_the_split_flag_selects_the_cases_check_reports(
 
     monkeypatch.setattr(eval_suite, "check_commits", record)
     assert main(["check", "--split", "holdout"]) == 0
-    assert [c.split for c in checked[0].cases] == ["holdout"] * 11
+    assert [c.split for c in checked[0].cases] == ["holdout"] * 10
     out = capsys.readouterr().out
-    assert ": 11 case(s)" in out
+    assert ": 10 case(s)" in out
     assert "case:binary-artifact-minio-key" not in out
 
 
@@ -2034,7 +2034,7 @@ def test_a_suite_with_too_little_holdout_is_refused(tmp_path: Path) -> None:
     for path in (suite_dir / "cases").glob("*.yaml"):
         path.write_text(path.read_text().replace("split: holdout", "split: train"))
 
-    with pytest.raises(DefinitionError, match="0 of 37 cases are holdout"):
+    with pytest.raises(DefinitionError, match="0 of 35 cases are holdout"):
         load_suite(suite_dir)
 
 
@@ -2684,7 +2684,7 @@ def test_score_records_a_certified_clean_control_as_a_pass() -> None:
     assert (body["verdict"], body["score"]) == ("PASS", 1.0)
     assert f"{_clean_case().id} (clean)" in str(body["evidence"])
     table = render(loaded, rows)
-    assert "1/37 passed" in table
+    assert "1/35 passed" in table
     assert "false-block rate (clean controls blocked): 0/1 (0%)" in table
     assert "catch rate (defect cases blocked and named): -" in table
 
@@ -2698,7 +2698,7 @@ def test_score_records_a_blocked_clean_control_as_a_false_block() -> None:
     [(_, body)] = server.scores
     assert (body["verdict"], body["score"]) == ("FAIL", 0.0)
     table = render(loaded, rows)
-    assert "0/37 passed" in table
+    assert "0/35 passed" in table
     assert "false-block rate (clean controls blocked): 1/1 (100%)" in table
 
 
