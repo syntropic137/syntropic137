@@ -1442,7 +1442,7 @@ def test_score_reads_verdict_report_cost_and_model_from_the_api() -> None:
     assert unrecorded == ()
 
     table = render(loaded, rows)
-    assert "exec-1" in table and "PASS" in table and "$3.75" in table and "1/33 passed" in table
+    assert "exec-1" in table and "PASS" in table and "$3.75" in table and "1/39 passed" in table
 
 
 @pytest.mark.unit
@@ -2639,7 +2639,7 @@ def test_score_records_a_certified_clean_control_as_a_pass() -> None:
     assert (body["verdict"], body["score"]) == ("PASS", 1.0)
     assert f"{_clean_case().id} (clean)" in str(body["evidence"])
     table = render(loaded, rows)
-    assert "1/33 passed" in table
+    assert "1/39 passed" in table
     assert "false-block rate (clean controls blocked): 0/1 (0%)" in table
     assert "catch rate (defect cases blocked and named): -" in table
 
@@ -2653,7 +2653,7 @@ def test_score_records_a_blocked_clean_control_as_a_false_block() -> None:
     [(_, body)] = server.scores
     assert (body["verdict"], body["score"]) == ("FAIL", 0.0)
     table = render(loaded, rows)
-    assert "0/33 passed" in table
+    assert "0/39 passed" in table
     assert "false-block rate (clean controls blocked): 1/1 (100%)" in table
 
 
