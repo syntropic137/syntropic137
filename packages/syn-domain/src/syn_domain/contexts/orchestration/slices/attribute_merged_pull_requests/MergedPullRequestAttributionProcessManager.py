@@ -216,12 +216,13 @@ class MergedPullRequestAttributionProcessManager(ProcessManager):
                 return 0
             pr = pr.model_copy(update={"status": "merged", "merged_at": state.merged_at})
             await self._save_pull_request(pr)
-        assert pr.merged_at is not None
+        merged_at = pr.merged_at
+        assert merged_at is not None
         recorded = 0
         for execution_id in pr.unrecorded:
             try:
                 await self._recorder.record_merge(
-                    execution_id, pr.repository, pr.pull_request, pr.merged_at
+                    execution_id, pr.repository, pr.pull_request, merged_at
                 )
             except Exception:
                 logger.exception("Could not record the merge of %s on %s", pr.key, execution_id)
