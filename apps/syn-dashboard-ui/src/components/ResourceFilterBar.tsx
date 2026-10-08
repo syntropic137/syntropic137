@@ -8,6 +8,7 @@
  */
 
 import { FilterChip } from './FilterChip'
+import { DEFAULT_STATUSES, type StatusChip } from './statusChips'
 import { TimeWindowPicker } from './TimeWindowPicker'
 import type { TimeWindow } from '../types'
 
@@ -25,18 +26,6 @@ export interface ResourceFilterBarProps {
   statuses?: readonly StatusChip[]
 }
 
-export interface StatusChip {
-  value: string
-  label: string
-}
-
-export const DEFAULT_STATUSES: readonly StatusChip[] = [
-  { value: 'pending', label: 'Pending' },
-  { value: 'running', label: 'Running' },
-  { value: 'completed', label: 'Completed' },
-  { value: 'failed', label: 'Failed' },
-  { value: 'cancelled', label: 'Cancelled' },
-]
 
 export function ResourceFilterBar({
   selectedStatuses,
