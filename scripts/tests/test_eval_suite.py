@@ -90,6 +90,8 @@ def _copy_suite(tmp_path: Path) -> Path:
 
 _CODEX_WF = "eval-verify-pinned-codex-v1"
 _SONNET_WF = "eval-verify-pinned-sonnet-v1"
+# The four clean controls v6 added (#1774), by source PR.
+_V6_CLEAN_PRS = {839, 974, 1104, 1210}
 # Codex verifiers pinned to an explicit slug, never an alias: the model
 # measured is the one written, whatever `gpt-sol` targets later.
 _PINNED_CODEX_WFS = {
@@ -103,7 +105,7 @@ _PINNED_CODEX_WFS = {
 def test_the_seed_suite_loads_and_records_its_workflow_and_models() -> None:
     loaded = load_suite(DEFAULT_SUITE)
 
-    assert loaded.tag == "verifier-seed-v1:v5:eval-verify-pinned-v1"
+    assert loaded.tag == "verifier-seed-v1:v6:eval-verify-pinned-v1"
     assert loaded.workflow.id == "eval-verify-pinned-v1"
     assert loaded.workflow.models == {"verify": "opus"}
     by_polarity = {
@@ -111,9 +113,9 @@ def test_the_seed_suite_loads_and_records_its_workflow_and_models() -> None:
         for polarity in ("defect", "clean")
     }
     assert by_polarity["defect"] >= {1574, 1649, 1652, 1654, 1679, 1680}
-    assert by_polarity["clean"] == {917, 1010}
+    assert by_polarity["clean"] == {917, 1010} | _V6_CLEAN_PRS
     assert sum(c.polarity == "defect" for c in loaded.cases) == 31
-    assert sum(c.polarity == "clean" for c in loaded.cases) == 2
+    assert sum(c.polarity == "clean" for c in loaded.cases) == 6
 
 
 @pytest.mark.unit
@@ -123,7 +125,7 @@ def test_the_same_cases_load_under_the_codex_verifier_with_their_own_tag() -> No
 
     assert codex.workflow.id == _CODEX_WF
     assert codex.workflow.models == {"verify": "gpt-sol"}
-    assert codex.tag == f"verifier-seed-v1:v5:{_CODEX_WF}"
+    assert codex.tag == f"verifier-seed-v1:v6:{_CODEX_WF}"
     assert codex.tag != opus.tag
     assert codex.cases == opus.cases
 
@@ -135,7 +137,7 @@ def test_the_same_cases_load_under_the_sonnet_verifier_with_their_own_tag() -> N
 
     assert sonnet.workflow.id == _SONNET_WF
     assert sonnet.workflow.models == {"verify": "sonnet"}
-    assert sonnet.tag == f"verifier-seed-v1:v5:{_SONNET_WF}"
+    assert sonnet.tag == f"verifier-seed-v1:v6:{_SONNET_WF}"
     assert sonnet.cases == opus.cases
 
 
@@ -146,7 +148,7 @@ def test_the_same_cases_load_under_each_pinned_codex_verifier(variant: str, slug
     pinned = load_suite(DEFAULT_SUITE, workflow=variant)
 
     assert pinned.workflow.models == {"verify": slug}
-    assert pinned.tag == f"verifier-seed-v1:v5:{variant}"
+    assert pinned.tag == f"verifier-seed-v1:v6:{variant}"
     assert pinned.cases == opus.cases
 
 
@@ -1479,7 +1481,7 @@ def test_score_reads_verdict_report_cost_and_model_from_the_api() -> None:
     assert unrecorded == ()
 
     table = render(loaded, rows)
-    assert "exec-1" in table and "PASS" in table and "$3.75" in table and "1/33 passed" in table
+    assert "exec-1" in table and "PASS" in table and "$3.75" in table and "1/37 passed" in table
 
 
 @pytest.mark.unit
@@ -1546,7 +1548,7 @@ def test_launch_on_a_fresh_server_installs_the_workflow_before_any_eval(tmp_path
         c.commit for c in loaded.cases
     ]
     assert [c["tags"] for c in creates] == [["suite:verifier-seed", c.tag] for c in loaded.cases]
-    assert all(s["tags"] == ["suite-version:5", f"verifier:{_WF}"] for s in starts)
+    assert all(s["tags"] == ["suite-version:6", f"verifier:{_WF}"] for s in starts)
     assert [s["eval_id"] for s in starts] == [f"eval-{c.commit[:6]}" for c in loaded.cases]
     assert len(lines) == 1 + len(loaded.cases)
 
@@ -1628,13 +1630,13 @@ def test_launch_under_the_codex_verifier_runs_and_records_the_codex_workflow(
     # The case evals are shared by every verifier; the run says which one it was.
     assert all("starting_workflow_id" not in c for c in creates)
     starts = [json.loads(r.content) for r in server.requests if r.url.path.endswith("/execute")]
-    assert {tuple(s["tags"]) for s in starts} == {("suite-version:5", f"verifier:{_CODEX_WF}")}
+    assert {tuple(s["tags"]) for s in starts} == {("suite-version:6", f"verifier:{_CODEX_WF}")}
     assert all(not any(t.startswith("verifier") for t in c["tags"][1:]) for c in creates)
     starts = [r.url.path for r in server.requests if r.url.path.endswith("/execute")]
     assert set(starts) == {f"/workflows/{_CODEX_WF}/execute"}
     recorded = read_launches(ledger)
     assert {(x.suite, x.workflow_id) for x in recorded} == {
-        (f"verifier-seed-v1:v5:{_CODEX_WF}", _CODEX_WF)
+        (f"verifier-seed-v1:v6:{_CODEX_WF}", _CODEX_WF)
     }
 
 
@@ -1832,16 +1834,16 @@ def test_v1_runs_never_count_toward_the_current_version(tmp_path: Path) -> None:
     current = load_suite(DEFAULT_SUITE)
     rows, unrecorded = score_suite(current, _LedgerServer(launches).client(), launches)
 
-    assert len(rows) == 33 and {r.status for r in rows} == {"not launched"}
+    assert len(rows) == 37 and {r.status for r in rows} == {"not launched"}
     assert unrecorded == ()
 
 
 @pytest.mark.unit
 def test_score_prints_every_version_the_workflow_ran() -> None:
     suite = load_suite(DEFAULT_SUITE).suite
-    assert versions_run(suite, _WF) == [1, 3, 4, 5]
-    assert versions_run(suite, _CODEX_WF) == [2, 3, 4, 5]
-    assert versions_run(suite, _SONNET_WF) == [3, 4, 5]
+    assert versions_run(suite, _WF) == [1, 3, 4, 5, 6]
+    assert versions_run(suite, _CODEX_WF) == [2, 3, 4, 5, 6]
+    assert versions_run(suite, _SONNET_WF) == [3, 4, 5, 6]
 
 
 # The twelve cases of #1750's v3: the six v2 defects and the six clean controls.
@@ -1888,8 +1890,29 @@ def test_a_retired_control_scores_in_the_versions_that_held_it_and_never_launche
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("workflow", [_WF, _CODEX_WF, _SONNET_WF])
+def test_v5_scores_its_own_cases_under_every_verifier_without_the_v6_controls(
+    workflow: str,
+) -> None:
+    v5 = load_suite(DEFAULT_SUITE, workflow=workflow, version=5)
+    current = load_suite(DEFAULT_SUITE, workflow=workflow)
+
+    assert v5.tag == f"verifier-seed-v1:v5:{workflow}"
+    assert len(v5.cases) == 33
+    assert {c.source_pr for c in v5.cases if c.polarity == "clean"} == {917, 1010}
+    added = {c.id for c in current.cases} - {c.id for c in v5.cases}
+    assert {c.source_pr for c in current.cases if c.id in added} == _V6_CLEAN_PRS
+
+
+@pytest.mark.unit
 def test_a_retired_case_no_history_version_holds_is_refused(tmp_path: Path) -> None:
     suite_dir = _copy_suite(tmp_path)
+    # v5 and later histories hold the case, so take it out of every one first:
+    # what is under test is a retired case with no version to score it in.
+    suite = suite_dir / "suite.yaml"
+    held = "      - redis-retry-non-idempotent\n"
+    assert held in suite.read_text()
+    suite.write_text(suite.read_text().replace(held, ""))
     case = suite_dir / "cases" / "redis-retry-non-idempotent.yaml"
     case.write_text(case.read_text() + "retired: v5 - never ran\n")
 
@@ -1957,7 +1980,7 @@ def test_the_holdout_is_new_cases_only_and_within_its_share() -> None:
     cases = load_suite(DEFAULT_SUITE).cases
     holdout = {c.id for c in cases if c.split == "holdout"}
 
-    assert len(holdout) == 10 and len(cases) == 33
+    assert len(holdout) == 11 and len(cases) == 37
     # The pre-v4 defects were already run against the verifiers: never holdout.
     assert not holdout & _V2_CASES
 
@@ -1970,7 +1993,7 @@ def test_a_train_launch_never_starts_a_holdout_case(tmp_path: Path) -> None:
 
     holdout = {c.id for c in load_suite(DEFAULT_SUITE, split="holdout").cases}
     launched = {x.case for x in read_launches(ledger)}
-    assert len(launched) == 23
+    assert len(launched) == 26
     assert not launched & holdout
 
 
@@ -1989,9 +2012,9 @@ def test_the_split_flag_selects_the_cases_check_reports(
 
     monkeypatch.setattr(eval_suite, "check_commits", record)
     assert main(["check", "--split", "holdout"]) == 0
-    assert [c.split for c in checked[0].cases] == ["holdout"] * 10
+    assert [c.split for c in checked[0].cases] == ["holdout"] * 11
     out = capsys.readouterr().out
-    assert ": 10 case(s)" in out
+    assert ": 11 case(s)" in out
     assert "case:binary-artifact-minio-key" not in out
 
 
@@ -2011,7 +2034,7 @@ def test_a_suite_with_too_little_holdout_is_refused(tmp_path: Path) -> None:
     for path in (suite_dir / "cases").glob("*.yaml"):
         path.write_text(path.read_text().replace("split: holdout", "split: train"))
 
-    with pytest.raises(DefinitionError, match="0 of 33 cases are holdout"):
+    with pytest.raises(DefinitionError, match="0 of 37 cases are holdout"):
         load_suite(suite_dir)
 
 
@@ -2123,8 +2146,8 @@ def test_an_identical_relaunch_is_an_unchanged_install(tmp_path: Path) -> None:
     _, client = _provenanced_server(loaded, templates)
     again = launch_suite(loaded, client, ledger)
 
-    assert first[0].startswith(f"workflow {_CODEX_WF}: created as 5.0.0")
-    assert again[0].startswith(f"workflow {_CODEX_WF}: unchanged as 5.0.0")
+    assert first[0].startswith(f"workflow {_CODEX_WF}: created as 6.0.0")
+    assert again[0].startswith(f"workflow {_CODEX_WF}: unchanged as 6.0.0")
 
 
 @pytest.mark.unit
@@ -2171,7 +2194,7 @@ def test_a_cli_installed_archived_record_is_restored_by_launch_without_force(
     lines = launch_suite(loaded, client, tmp_path / "launches.jsonl")
 
     stored = templates.by_id[_CODEX_WF]
-    assert lines[0].startswith(f"workflow {_CODEX_WF}: created as 5.0.0")
+    assert lines[0].startswith(f"workflow {_CODEX_WF}: created as 6.0.0")
     assert not stored.is_archived
     assert stored.source_digest == install_provenance(loaded, document).source_digest
 
@@ -2222,7 +2245,7 @@ def test_an_unchanged_relaunch_restores_an_archived_template(tmp_path: Path) -> 
     _, client = _provenanced_server(loaded, templates)
     lines = launch_suite(loaded, client, tmp_path / "launches.jsonl")
 
-    assert lines[0].startswith(f"workflow {_CODEX_WF}: created as 5.0.0")
+    assert lines[0].startswith(f"workflow {_CODEX_WF}: created as 6.0.0")
     assert not templates.by_id[_CODEX_WF].is_archived
 
 
@@ -2237,7 +2260,7 @@ def test_launch_reuses_each_case_eval_and_creates_none(tmp_path: Path) -> None:
     assert not any(r.method == "POST" and r.url.path == "/evals" for r in server.requests)
     starts = [json.loads(r.content) for r in server.requests if r.url.path.endswith("/execute")]
     assert [s["eval_id"] for s in starts] == [f"eval-{c.commit[:6]}" for c in loaded.cases]
-    assert {tuple(s["tags"]) for s in starts} == {("suite-version:5", f"verifier:{_WF}")}
+    assert {tuple(s["tags"]) for s in starts} == {("suite-version:6", f"verifier:{_WF}")}
 
 
 @pytest.mark.unit
@@ -2251,7 +2274,7 @@ def test_score_records_each_verdict_on_the_eval() -> None:
     assert path == "/evals/eval-1/runs/exec-1/score"
     assert body["verdict"] == "PASS"
     assert body["score"] == 1.0
-    assert (body["scorer"], body["scorer_version"]) == ("eval_suite.py", "5")
+    assert (body["scorer"], body["scorer_version"]) == ("eval_suite.py", "6")
     assert isinstance(body["evidence"], str) and _CASE in body["evidence"]
 
 
@@ -2594,7 +2617,7 @@ def test_a_case_without_a_polarity_is_refused(tmp_path: Path) -> None:
 
 @pytest.mark.unit
 def test_each_split_holds_clean_controls() -> None:
-    # 31 defects outnumber the 2 controls, so a false-block rate is only
+    # 31 defects outnumber the 6 controls, so a false-block rate is only
     # measurable on each side of the split if both sides hold some.
     for split in ("train", "holdout"):
         cases = load_suite(DEFAULT_SUITE, split=split).cases
@@ -2661,7 +2684,7 @@ def test_score_records_a_certified_clean_control_as_a_pass() -> None:
     assert (body["verdict"], body["score"]) == ("PASS", 1.0)
     assert f"{_clean_case().id} (clean)" in str(body["evidence"])
     table = render(loaded, rows)
-    assert "1/33 passed" in table
+    assert "1/37 passed" in table
     assert "false-block rate (clean controls blocked): 0/1 (0%)" in table
     assert "catch rate (defect cases blocked and named): -" in table
 
@@ -2675,7 +2698,7 @@ def test_score_records_a_blocked_clean_control_as_a_false_block() -> None:
     [(_, body)] = server.scores
     assert (body["verdict"], body["score"]) == ("FAIL", 0.0)
     table = render(loaded, rows)
-    assert "0/33 passed" in table
+    assert "0/37 passed" in table
     assert "false-block rate (clean controls blocked): 1/1 (100%)" in table
 
 

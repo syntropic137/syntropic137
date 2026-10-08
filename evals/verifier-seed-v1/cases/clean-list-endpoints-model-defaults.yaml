@@ -1,0 +1,18 @@
+id: clean-list-endpoints-model-defaults
+polarity: clean
+# A control, not a defect: PR #974, merged 2026-08-29. Chosen by the v5 rule
+# (README.md): no later fix or revert names the PR, no issue or fix PR refers
+# to it (searched on GitHub), and `git log -L` finds no mainline commit touching
+# a line it changed in triggers/queries.py or workflows/queries.py for 38
+# days; the first, 452934a72 (2026-10-06), adds a field and fixes nothing.
+source_pr: 974
+commit: b5c4af5c3cf9e03765523442e3f4c751f111bd2b
+merge_commit: aee9061b74edfb56ae718e5b9525986ca58be380
+clean_through: 23edd9c0b65e6c6841b2248bb1614144b9d3c160
+task: >
+  The change under review stops the workflow list and trigger list
+  endpoints letting a response model's default answer for a value the read
+  model holds: requires_repos becomes required, and the trigger summary
+  carries created_at. Review whether either list can still report a value
+  the stored row does not hold.
+split: train
