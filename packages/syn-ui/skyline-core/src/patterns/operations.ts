@@ -22,17 +22,22 @@ export interface Operation {
   delegated?: { agent: string; agentKind?: 'claude' | 'codex' | 'other'; label: string; id?: string; href?: string } | null
 }
 
+/** Tool-name rules in priority order: the first that matches picks the glyph. */
+const TOOL_GLYPH_RULES: readonly { glyph: string; exact: readonly string[]; test?: (t: string) => boolean }[] = [
+  { glyph: GLYPH.terminal, exact: ['bash', 'shell', 'command'], test: (t) => t.includes('exec') },
+  { glyph: GLYPH.edit, exact: ['edit', 'write', 'multiedit'], test: (t) => t.includes('patch') },
+  { glyph: GLYPH.file, exact: ['read', 'notebookread'] },
+  { glyph: GLYPH.search, exact: ['grep', 'glob'], test: (t) => t.includes('search') },
+  { glyph: GLYPH.globe, exact: [], test: (t) => t.startsWith('web') },
+  { glyph: GLYPH.agent, exact: ['task', 'agent'] },
+  { glyph: GLYPH.check, exact: ['capture'], test: (t) => t.includes('complete') },
+]
+
 /** Glyph path for a tool name. */
 export function toolGlyph(tool: string): string {
   const t = tool.toLowerCase()
-  if (t === 'bash' || t === 'shell' || t.includes('exec') || t === 'command') return GLYPH.terminal
-  if (t === 'edit' || t === 'write' || t === 'multiedit' || t.includes('patch')) return GLYPH.edit
-  if (t === 'read' || t === 'notebookread') return GLYPH.file
-  if (t === 'grep' || t === 'glob' || t.includes('search')) return GLYPH.search
-  if (t.startsWith('web')) return GLYPH.globe
-  if (t === 'task' || t === 'agent') return GLYPH.agent
-  if (t === 'capture' || t.includes('complete')) return GLYPH.check
-  return GLYPH.tool
+  const rule = TOOL_GLYPH_RULES.find((r) => r.exact.includes(t) || (r.test?.(t) ?? false))
+  return rule ? rule.glyph : GLYPH.tool
 }
 
 /** "failed · 0s", "ok · 6s", "running", or nothing for quiet rows. */

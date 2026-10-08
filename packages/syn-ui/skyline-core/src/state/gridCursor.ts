@@ -24,26 +24,22 @@ const clamp = (v: number, max: number) => Math.max(0, Math.min(max - 1, v))
 export const gridCursor: Reducer<GridCursorState, GridCursorEvent> = (s, e) => {
   if (e.type === 'resize') return { rows: e.rows, cols: e.cols, row: clamp(s.row, Math.max(1, e.rows)), col: clamp(s.col, Math.max(1, e.cols)) }
   if (s.rows <= 0 || s.cols <= 0) return s
-  let { row, col } = s
+  const { row, col } = nextCell(s, e)
+  return row === s.row && col === s.col ? s : { ...s, row, col }
+}
+
+/** The cell an event (other than resize) moves the cursor to. */
+function nextCell(s: GridCursorState, e: Exclude<GridCursorEvent, { type: 'resize' }>): { row: number; col: number } {
   switch (e.type) {
     case 'move':
-      row = clamp(row + e.dRow, s.rows)
-      col = clamp(col + e.dCol, s.cols)
-      break
+      return { row: clamp(s.row + e.dRow, s.rows), col: clamp(s.col + e.dCol, s.cols) }
     case 'home':
-      col = 0
-      if (e.grid) row = 0
-      break
+      return { row: e.grid ? 0 : s.row, col: 0 }
     case 'end':
-      col = s.cols - 1
-      if (e.grid) row = s.rows - 1
-      break
+      return { row: e.grid ? s.rows - 1 : s.row, col: s.cols - 1 }
     case 'pick':
-      row = clamp(e.row, s.rows)
-      col = clamp(e.col, s.cols)
-      break
+      return { row: clamp(e.row, s.rows), col: clamp(e.col, s.cols) }
   }
-  return row === s.row && col === s.col ? s : { ...s, row, col }
 }
 
 /** Map a keydown to a cursor event; null leaves the key alone. */

@@ -5,18 +5,23 @@ import { UNKNOWN, toTime } from './shared'
  * Two units at most; the smaller is dropped when zero ("4m", "2h").
  */
 export function formatDuration(ms: number | null | undefined): string {
-  if (ms === null || ms === undefined || !Number.isFinite(ms) || ms < 0) return UNKNOWN
+  if (!isValidMs(ms)) return UNKNOWN
   const total = Math.round(ms / 1000)
   if (total < 60) return `${total}s`
-  const s = total % 60
   const totalMin = Math.floor(total / 60)
-  if (totalMin < 60) return s ? `${totalMin}m ${s}s` : `${totalMin}m`
-  const m = totalMin % 60
+  if (totalMin < 60) return twoUnits(totalMin, 'm', total % 60, 's')
   const totalH = Math.floor(totalMin / 60)
-  if (totalH < 24) return m ? `${totalH}h ${m}m` : `${totalH}h`
-  const h = totalH % 24
-  const d = Math.floor(totalH / 24)
-  return h ? `${d}d ${h}h` : `${d}d`
+  if (totalH < 24) return twoUnits(totalH, 'h', totalMin % 60, 'm')
+  return twoUnits(Math.floor(totalH / 24), 'd', totalH % 24, 'h')
+}
+
+function isValidMs(ms: number | null | undefined): ms is number {
+  return ms !== null && ms !== undefined && Number.isFinite(ms) && ms >= 0
+}
+
+/** "3m 47s", or "4m" when the smaller unit is zero. */
+function twoUnits(big: number, bigUnit: string, small: number, smallUnit: string): string {
+  return small ? `${big}${bigUnit} ${small}${smallUnit}` : `${big}${bigUnit}`
 }
 
 /** Same as formatDuration, from seconds (the API's `duration_seconds`). */

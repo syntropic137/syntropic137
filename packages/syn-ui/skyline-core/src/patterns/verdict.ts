@@ -25,26 +25,24 @@ export const VERDICT_LOOK: Record<Verdict, VerdictLook> = {
   unscored: { word: 'Unscored', label: 'Unscored', tone: 'unscored' },
 }
 
+const VERDICT_WORDS: Record<string, Verdict> = {
+  pass: 'pass',
+  passed: 'pass',
+  success: 'pass',
+  fail: 'fail',
+  failed: 'fail',
+  failure: 'fail',
+  error: 'error',
+  errored: 'error',
+  scorer_error: 'error',
+}
+
 /** API verdict strings ("PASS", "passed", "scorer_error", null) -> a Verdict. */
 export function normalizeVerdict(raw: string | boolean | null | undefined): Verdict {
   if (raw === true) return 'pass'
   if (raw === false) return 'fail'
-  switch ((raw ?? '').toString().toLowerCase()) {
-    case 'pass':
-    case 'passed':
-    case 'success':
-      return 'pass'
-    case 'fail':
-    case 'failed':
-    case 'failure':
-      return 'fail'
-    case 'error':
-    case 'errored':
-    case 'scorer_error':
-      return 'error'
-    default:
-      return 'unscored'
-  }
+  const key = (raw ?? '').toString().toLowerCase()
+  return Object.hasOwn(VERDICT_WORDS, key) ? (VERDICT_WORDS[key] ?? 'unscored') : 'unscored'
 }
 
 export interface VerdictCase {

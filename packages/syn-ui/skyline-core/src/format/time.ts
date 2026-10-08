@@ -26,13 +26,22 @@ export function formatRelativeTime(value: TimeInput, options: RelativeTimeOption
   const diff = now - t
   const abs = Math.abs(diff)
   if (abs < 45_000) return 'just now'
-  let text: string
-  if (abs < HOUR) text = `${Math.max(1, Math.round(abs / MINUTE))}m`
-  else if (abs < DAY) text = `${Math.floor(abs / HOUR)}h`
-  else if (abs < WEEK) text = `${Math.floor(abs / DAY)}d`
-  else if (abs < 5 * WEEK) text = `${Math.floor(abs / WEEK)}w`
-  else return formatDate(t, { now, timeZone: options.timeZone })
+  const text = relativeSpan(abs)
+  if (text === null) return formatDate(t, { now, timeZone: options.timeZone })
   return diff >= 0 ? `${text} ago` : `in ${text}`
+}
+
+/** Below each limit, the span is counted in that unit; beyond the last, null (absolute date). */
+const RELATIVE_UNITS: readonly { below: number; count: (abs: number) => number; unit: string }[] = [
+  { below: HOUR, count: (abs) => Math.max(1, Math.round(abs / MINUTE)), unit: 'm' },
+  { below: DAY, count: (abs) => Math.floor(abs / HOUR), unit: 'h' },
+  { below: WEEK, count: (abs) => Math.floor(abs / DAY), unit: 'd' },
+  { below: 5 * WEEK, count: (abs) => Math.floor(abs / WEEK), unit: 'w' },
+]
+
+function relativeSpan(abs: number): string | null {
+  const u = RELATIVE_UNITS.find((r) => abs < r.below)
+  return u ? `${u.count(abs)}${u.unit}` : null
 }
 
 /** "Sep 12" in the current year, "Sep 12, 2025" otherwise. */

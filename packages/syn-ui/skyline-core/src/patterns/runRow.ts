@@ -2,7 +2,7 @@
  * Run Row (Main, Executions, Workflow boards): status, name, a bar whose
  * length is duration and whose blocks are phases, then tokens, cost and age.
  */
-import { statusKind } from './status'
+import { statusKind, type StatusKind } from './status'
 
 export type RunSegmentTone = 'done' | 'failed' | 'cancelled' | 'running' | 'empty'
 
@@ -36,18 +36,25 @@ export interface RunSegmentsInput {
  * cancelled, pulsing for running), the rest stay empty.
  */
 export function runSegments({ status, done, total }: RunSegmentsInput): RunSegmentTone[] {
-  const kind = statusKind(status)
+  const stop = STOP_TONE[statusKind(status)] ?? 'empty'
   const n = Math.max(0, Math.floor(total))
   const k = Math.max(0, Math.min(n, Math.floor(done)))
   const out: RunSegmentTone[] = []
-  for (let i = 0; i < n; i++) {
-    if (i < k) out.push('done')
-    else if (i === k && kind === 'failed') out.push('failed')
-    else if (i === k && (kind === 'cancelled' || kind === 'interrupted')) out.push('cancelled')
-    else if (i === k && kind === 'running') out.push('running')
-    else out.push('empty')
-  }
+  for (let i = 0; i < n; i++) out.push(segmentTone(i, k, stop))
   return out
+}
+
+/** Tone of the segment where the run stopped, by status kind; other kinds leave it empty. */
+const STOP_TONE: Partial<Record<StatusKind, RunSegmentTone>> = {
+  failed: 'failed',
+  cancelled: 'cancelled',
+  interrupted: 'cancelled',
+  running: 'running',
+}
+
+function segmentTone(i: number, done: number, stop: RunSegmentTone): RunSegmentTone {
+  if (i < done) return 'done'
+  return i === done ? stop : 'empty'
 }
 
 /** Duration against the longest run in view, floored so a 3s run still shows: 227 of 227 -> 100. */

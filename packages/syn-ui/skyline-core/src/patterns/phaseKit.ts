@@ -104,13 +104,29 @@ const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one :
 export function phaseKitChips(kit: Pick<PhaseKitProps, 'tools' | 'skills'> & { model?: string | null }): KitChip[] {
   const chips: KitChip[] = []
   if (kit.model) chips.push({ label: kit.model, tone: 'neutral' })
-  if (Array.isArray(kit.tools)) chips.push({ label: plural(kit.tools.length, 'tool', 'tools'), tone: 'neutral' })
-  else if (kit.tools === 'not-recorded') chips.push({ label: 'tools not recorded', tone: 'dashed' })
-  if (Array.isArray(kit.skills)) {
-    chips.push(kit.skills.length ? { label: plural(kit.skills.length, 'skill', 'skills'), tone: 'accent' } : { label: 'no skills', tone: 'dashed' })
-  } else if (kit.skills === 'none') chips.push({ label: 'no skills', tone: 'dashed' })
-  else if (kit.skills === 'not-recorded') chips.push({ label: 'skills not recorded', tone: 'dashed' })
+  const tools = toolsChip(kit.tools)
+  if (tools) chips.push(tools)
+  const skills = skillsChip(kit.skills)
+  if (skills) chips.push(skills)
   return chips
+}
+
+function toolsChip(tools: PhaseKitProps['tools']): KitChip | null {
+  if (Array.isArray(tools)) return { label: plural(tools.length, 'tool', 'tools'), tone: 'neutral' }
+  return tools === 'not-recorded' ? { label: 'tools not recorded', tone: 'dashed' } : null
+}
+
+const SKILL_ABSENCE_CHIP: Partial<Record<KitAbsence, KitChip>> = {
+  none: { label: 'no skills', tone: 'dashed' },
+  'not-recorded': { label: 'skills not recorded', tone: 'dashed' },
+}
+
+function skillsChip(skills: PhaseKitProps['skills']): KitChip | null {
+  if (typeof skills === 'string') {
+    const chip = SKILL_ABSENCE_CHIP[skills]
+    return chip ? { ...chip } : null
+  }
+  return skills.length ? { label: plural(skills.length, 'skill', 'skills'), tone: 'accent' } : { label: 'no skills', tone: 'dashed' }
 }
 
 /** One line on a phone: "31.8K tok · $0.0170 · 2 skills". */

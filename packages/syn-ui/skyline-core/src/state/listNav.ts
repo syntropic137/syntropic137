@@ -6,26 +6,25 @@
 export type ListMove = 'next' | 'prev' | 'first' | 'last'
 export type ListOrientation = 'horizontal' | 'vertical' | 'both'
 
+/** Navigation keys: the axis they belong to and the move in each reading direction. */
+const KEY_MOVES: Record<string, { axis: 'h' | 'v' | 'any'; ltr: ListMove; rtl: ListMove }> = {
+  ArrowRight: { axis: 'h', ltr: 'next', rtl: 'prev' },
+  ArrowLeft: { axis: 'h', ltr: 'prev', rtl: 'next' },
+  ArrowDown: { axis: 'v', ltr: 'next', rtl: 'next' },
+  ArrowUp: { axis: 'v', ltr: 'prev', rtl: 'prev' },
+  Home: { axis: 'any', ltr: 'first', rtl: 'first' },
+  End: { axis: 'any', ltr: 'last', rtl: 'last' },
+}
+
+/** Orientation that excludes each axis. */
+const EXCLUDED_BY: Record<'h' | 'v', ListOrientation> = { h: 'vertical', v: 'horizontal' }
+
 /** Keyboard key -> move for a widget's orientation, or null when the key is not a navigation key. */
 export function listMoveForKey(key: string, orientation: ListOrientation = 'both', dir: 'ltr' | 'rtl' = 'ltr'): ListMove | null {
-  const h = orientation !== 'vertical'
-  const v = orientation !== 'horizontal'
-  switch (key) {
-    case 'ArrowRight':
-      return h ? (dir === 'rtl' ? 'prev' : 'next') : null
-    case 'ArrowLeft':
-      return h ? (dir === 'rtl' ? 'next' : 'prev') : null
-    case 'ArrowDown':
-      return v ? 'next' : null
-    case 'ArrowUp':
-      return v ? 'prev' : null
-    case 'Home':
-      return 'first'
-    case 'End':
-      return 'last'
-    default:
-      return null
-  }
+  const entry = Object.hasOwn(KEY_MOVES, key) ? KEY_MOVES[key] : undefined
+  if (!entry) return null
+  if (entry.axis !== 'any' && orientation === EXCLUDED_BY[entry.axis]) return null
+  return entry[dir]
 }
 
 /**
@@ -36,25 +35,35 @@ export function listMoveForKey(key: string, orientation: ListOrientation = 'both
 export function moveIndex(current: number, move: ListMove, disabled: readonly boolean[], loop = true): number {
   const n = disabled.length
   if (n === 0 || disabled.every(Boolean)) return -1
-  const enabled = (i: number) => !disabled[i]
-  if (move === 'first') {
-    for (let i = 0; i < n; i++) if (enabled(i)) return i
-  }
-  if (move === 'last') {
-    for (let i = n - 1; i >= 0; i--) if (enabled(i)) return i
-  }
-  const step = move === 'next' ? 1 : -1
+  if (move === 'first') return disabled.findIndex((d) => !d)
+  if (move === 'last') return lastEnabledIndex(disabled)
+  return stepIndex(current, move === 'next' ? 1 : -1, disabled, loop)
+}
+
+function lastEnabledIndex(disabled: readonly boolean[]): number {
+  for (let i = disabled.length - 1; i >= 0; i--) if (!disabled[i]) return i
+  return -1
+}
+
+/** Walk one step at a time from `current`, wrapping when `loop`, to the next enabled item. */
+function stepIndex(current: number, step: 1 | -1, disabled: readonly boolean[], loop: boolean): number {
+  const n = disabled.length
   const inRange = current >= 0 && current < n
-  let i = inRange ? current : step === 1 ? -1 : n
+  const stuck = inRange ? current : -1
+  let i = startIndex(inRange, current, step, n)
   for (let tries = 0; tries < n; tries++) {
     i += step
-    if (i >= n || i < 0) {
-      if (!loop) return inRange ? current : -1
-      i = (i + n) % n
-    }
-    if (enabled(i)) return i
+    const outside = i >= n || i < 0
+    if (outside && !loop) return stuck
+    if (outside) i = (i + n) % n
+    if (!disabled[i]) return i
   }
   return current
+}
+
+function startIndex(inRange: boolean, current: number, step: 1 | -1, n: number): number {
+  if (inRange) return current
+  return step === 1 ? -1 : n
 }
 
 /**

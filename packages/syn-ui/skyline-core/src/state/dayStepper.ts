@@ -26,26 +26,29 @@ export function initialDayStepper(count: number): DayStepperState {
 
 export const dayStepper: Reducer<DayStepperState, DayStepperEvent> = (state, event) => {
   const { count } = state
-  if (event.type === 'resize') {
-    if (event.count <= 0) return { index: null, count: 0 }
-    const keep = event.keep ?? null
-    const index = keep !== null && keep >= 0 && keep < event.count ? keep : event.count - 1
-    return { index, count: event.count }
-  }
+  if (event.type === 'resize') return resizeStepper(event.count, event.keep ?? null)
   if (count <= 0) return state
-  const at = state.index ?? count - 1
-  switch (event.type) {
-    case 'prev':
-      return { count, index: (at + count - 1) % count }
-    case 'next':
-      return { count, index: (at + 1) % count }
-    case 'first':
-      return { count, index: 0 }
-    case 'last':
-      return { count, index: count - 1 }
-    case 'pick':
-      return event.index >= 0 && event.index < count && event.index !== state.index ? { count, index: event.index } : state
-  }
+  if (event.type === 'pick') return pickDay(state, event.index)
+  return { count, index: STEP_TO[event.type](state.index ?? count - 1, count) }
+}
+
+/** Where each step lands from `at` among `count` days; prev and next wrap. */
+const STEP_TO: Record<'prev' | 'next' | 'first' | 'last', (at: number, count: number) => number> = {
+  prev: (at, count) => (at + count - 1) % count,
+  next: (at, count) => (at + 1) % count,
+  first: () => 0,
+  last: (_at, count) => count - 1,
+}
+
+function resizeStepper(count: number, keep: number | null): DayStepperState {
+  if (count <= 0) return { index: null, count: 0 }
+  const index = keep !== null && keep >= 0 && keep < count ? keep : count - 1
+  return { index, count }
+}
+
+function pickDay(state: DayStepperState, index: number): DayStepperState {
+  const { count } = state
+  return index >= 0 && index < count && index !== state.index ? { count, index } : state
 }
 
 /** "11 of 11 active days". */
