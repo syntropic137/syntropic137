@@ -9,6 +9,9 @@
 
 # The only runtime value this proxy reads from disk is the platform-access
 # switch, written by entrypoint.sh from SYN_PLATFORM_ACCESS_ENABLED (ADR-072).
+# There is deliberately NO admin_layer: the admin port (9901) is reachable from
+# agent-net, and an admin layer would let a workspace POST /runtime_modify and
+# turn the platform route on while the setting is OFF.
 layered_runtime:
   layers:
     - name: static
@@ -17,8 +20,6 @@ layered_runtime:
       disk_layer:
         symlink_root: /var/lib/syn-envoy-runtime
         subdirectory: envoy
-    - name: admin
-      admin_layer: {}
 
 admin:
   address:

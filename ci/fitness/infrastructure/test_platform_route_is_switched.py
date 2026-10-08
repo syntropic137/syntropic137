@@ -56,3 +56,12 @@ def test_the_switch_is_written_where_envoy_reads_it() -> None:
     switch = f"{disk['symlink_root']}/{disk['subdirectory']}/{_KEY.replace('.', '/')}"
     assert f"switch={switch}\n" in (_SIDECAR / "entrypoint.sh").read_text()
     assert "syn-envoy-entrypoint.sh" in (_SIDECAR / "Dockerfile").read_text()
+
+
+def test_the_switch_cannot_be_flipped_through_the_admin_port() -> None:
+    # 9901 is reachable from agent-net (smoke-test probes it from there). An
+    # admin runtime layer would let a workspace POST /runtime_modify and open
+    # the platform route while SYN_PLATFORM_ACCESS_ENABLED is false.
+    config = yaml.safe_load((_SIDECAR / "envoy.yaml").read_text())
+    layers = config["layered_runtime"]["layers"]
+    assert not [layer for layer in layers if "admin_layer" in layer]

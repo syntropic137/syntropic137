@@ -224,3 +224,106 @@ async def test_a_framework_redirect_stays_on_the_platform_route(
         response = await c.get(f"{root_path}/health/", headers=_bearer(token))
     assert response.status_code == 307
     assert response.headers["location"] == "/syn-platform/api/v1/health"
+
+
+# ---------------------------------------------------------------------------
+# The whole route table, not a sample. A route added later is covered here the
+# day it lands: a write route must be refused, and a read route outside the
+# allowlist must be refused, whatever its path.
+
+_READ_SEGMENTS = frozenset({"executions", "sessions", "artifacts", "evals", "insights", "health"})
+_SENSITIVE_WORDS = ("secret", "credential", "token", "env", "setting", "config", "key", "auth")
+
+
+def _route_table() -> list[tuple[str, str]]:
+    from fastapi.routing import APIRoute
+
+    from syn_api.main import create_app
+
+    table: list[tuple[str, str]] = []
+    for route in create_app().routes:
+        if isinstance(route, APIRoute):
+            table.extend((method, route.path) for method in sorted(route.methods))
+    assert len(table) > 50, "route table looks empty; did create_app() change shape?"
+    return table
+
+
+def _concrete(path: str) -> str:
+    """A path template with every ``{param}`` filled, so the router can match it."""
+    import re
+
+    return re.sub(r"\{[^}]+\}", "x", path)
+
+
+_ROUTES = _route_table()
+_WRITES = [(m, p) for m, p in _ROUTES if m not in ("GET", "HEAD")]
+_OUTSIDE_READ = [
+    (m, p) for m, p in _ROUTES if m in ("GET", "HEAD") and p.split("/")[1] not in _READ_SEGMENTS
+]
+
+
+@pytest.mark.parametrize(("method", "path"), _WRITES)
+async def test_no_write_route_is_reachable_with_a_read_token(
+    client: AsyncClient, service: PlatformTokenService, method: str, path: str
+) -> None:
+    token = await service.issue("exec-pc127")
+    response = await client.request(method, _concrete(path), headers=_bearer(token))
+    assert response.status_code == 403, (method, path, response.status_code)
+
+
+@pytest.mark.parametrize(("method", "path"), _OUTSIDE_READ)
+async def test_no_read_route_outside_the_allowlist_is_reachable(
+    client: AsyncClient, service: PlatformTokenService, method: str, path: str
+) -> None:
+    token = await service.issue("exec-pc127")
+    response = await client.request(method, _concrete(path), headers=_bearer(token))
+    assert response.status_code == 403, (method, path, response.status_code)
+
+
+@pytest.mark.parametrize("method", ["POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
+@pytest.mark.parametrize("segment", sorted(_READ_SEGMENTS))
+async def test_every_write_method_is_refused_even_on_a_read_resource(
+    client: AsyncClient, service: PlatformTokenService, method: str, segment: str
+) -> None:
+    token = await service.issue("exec-pc127")
+    response = await client.request(method, f"/{segment}/x", headers=_bearer(token))
+    assert response.status_code == 403
+
+
+def _names_sensitive(path: str) -> bool:
+    """A literal path segment (not a ``{param}``) names secrets, env or credentials."""
+    literals = [seg for seg in path.lower().split("/") if seg and not seg.startswith("{")]
+    return any(word in seg for seg in literals for word in _SENSITIVE_WORDS)
+
+
+def test_no_reachable_route_names_secrets_env_or_credentials() -> None:
+    reachable = [
+        p for m, p in _ROUTES if m in ("GET", "HEAD") and p.split("/")[1] in _READ_SEGMENTS
+    ]
+    assert reachable
+    leaking = [p for p in reachable if _names_sensitive(p)]
+    assert leaking == []
+
+
+def test_routes_that_do_name_secrets_or_settings_are_all_outside_the_read_scope() -> None:
+    sensitive = [p for _, p in _ROUTES if _names_sensitive(p)]
+    assert sensitive, "expected the API to have settings/credential routes to check"
+    assert all(p.split("/")[1] not in _READ_SEGMENTS for p in sensitive)
+
+
+async def test_the_token_value_is_never_logged(
+    client: AsyncClient, service: PlatformTokenService, caplog: pytest.LogCaptureFixture
+) -> None:
+    import logging
+
+    caplog.set_level(logging.DEBUG)
+    token = await service.issue("exec-pc127")
+    await client.get("/executions/x", headers=_bearer(token))
+    await client.post("/workflows/wf-1/execute", headers=_bearer(token))
+    await service.bound_to_deadline(token, datetime(2026, 10, 7, 12, 30, tzinfo=UTC))
+    await service.revoke(token)
+    await client.get("/health", headers=_bearer(token))
+    assert caplog.records, "expected at least the issue log line"
+    secret = token.removeprefix("synpt_")
+    assert all(secret not in r.getMessage() for r in caplog.records)
+    assert secret not in caplog.text

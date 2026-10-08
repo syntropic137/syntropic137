@@ -1,6 +1,6 @@
 # ADR-072: Workspace Access to the Syntropic137 API
 
-- **Status**: Accepted (read scope built; eval scope deliberately not built, see "Not granted")
+- **Status**: Accepted (read scope only; the eval scope is split out to #1744, see "Not granted")
 - **Date**: 2026-10-07
 - **Issue**: PC-127; unblocks #1724, #1726, #1727
 - **Related**: ADR-024 (setup-phase secrets), ADR-059 (gateway two-port auth model), ADR-060 (in-memory adapter guard), ADR-021 (isolated workspaces)
@@ -41,7 +41,9 @@ and both `/syn-platform` routes match only when that key is on (default 0%).
 So with access OFF there is **no route**: a workspace request ends at Envoy's
 local 404 and nothing is forwarded to the API. The API's 403 stays as defense
 in depth. `ci/fitness/infrastructure/test_platform_route_is_switched.py` keeps
-every route to `syn_platform_api` gated.
+every route to `syn_platform_api` gated, and keeps Envoy's runtime free of an
+admin layer: the admin port is reachable from `agent-net`, so an admin layer
+would let a workspace flip the switch with `POST /runtime_modify`.
 
 ### 2. The route: a path on the Envoy sidecar, not a network join
 
@@ -129,10 +131,13 @@ rather than hidden:
 
 ## Not granted, and why
 
-**The eval scope (launch into an eval, record a score) is not built.**
+**The eval scope (launch into an eval, record a score) is not built here.** It
+is tracked in #1744. This ADR ships the read scope only.
 
-- `POST /evals/{id}/runs/{exec}/score` does not exist, and no score command or
-  event exists in the domain. There is nothing to grant until that is designed.
+- `POST /evals/{id}/runs/{exec}/score` now exists on `main`, but a platform
+  token cannot reach it: the read scope allows GET and HEAD only, and the API
+  refuses every other method from a workspace. Granting it needs a second
+  scope bound to one eval and one execution, which is #1744's design.
 - `POST /workflows/{id}/execute` with `eval_id` starts an execution. A
   credential that can start executions is exactly what this boundary exists to
   prevent. Granting it safely needs body-aware enforcement (eval_id required,
