@@ -1078,6 +1078,37 @@ class EvalArchivedResponse(BaseModel):
     archived: bool
 
 
+class EvalRunStatsResponse(BaseModel):
+    """How long a set of an eval's runs took and what it cost, over EVERY run in the set.
+
+    Medians, not means: one runaway run should not make a variant look slow.
+    """
+
+    median_duration_seconds: float | None
+    """Median over the runs whose duration is known and complete. Null when none is.
+
+    A run with a phase of unknown duration has only a lower bound and is left out."""
+    median_duration_display: str
+    """Says how many runs it left out, e.g. ``"2m 14s (excl. 1 incomplete)"``."""
+    incomplete_duration_count: int
+    """Runs left out of the median duration: unknown, or only a lower bound."""
+    median_cost_usd: Decimal | None
+    """Median over the runs whose cost is known and complete. Null when none is.
+
+    A run with unpriced observations has only a lower bound and is left out."""
+    median_cost_display: str
+    """Says how many runs it left out, e.g. ``"$1.20 (excl. 1 incomplete)"``."""
+    incomplete_cost_count: int
+    """Runs left out of the median cost: unknown, or only a lower bound."""
+    cost_per_pass_usd: Decimal | None
+    """Known spend of the SCORED runs (PASS, FAIL and ERROR) over the PASS runs.
+
+    Unscored runs are left out: they have no verdict yet. Null when nothing
+    passed or no cost is known."""
+    cost_per_pass_display: str
+    """Says it is a lower bound when some scored run's cost is unknown or incomplete."""
+
+
 class EvalVariantResponse(BaseModel):
     """Every run of an eval with the same workflow, workflow version and OBSERVED models.
 
@@ -1096,9 +1127,12 @@ class EvalVariantResponse(BaseModel):
     """PASS over this variant's PASS + FAIL runs, 0..1 (ERROR excluded). Null when none."""
     pass_rate_display: str
     avg_cost_usd: Decimal | None
-    """Mean over the runs whose cost is known. Null when none is."""
+    """Mean over the runs whose cost is known and complete. Null when none is."""
     avg_cost_display: str
     last_run_at: str | None
+    last_verdict: Verdict | None
+    """The verdict of this variant's newest run that has one."""
+    stats: EvalRunStatsResponse
 
 
 class EvalResponse(BaseModel):
@@ -1130,6 +1164,8 @@ class EvalResponse(BaseModel):
     """The verdict of the newest run that has one."""
     variants: list[EvalVariantResponse] = Field(default_factory=list)
     """The eval's runs grouped by workflow and the models its phases actually ran."""
+    stats: EvalRunStatsResponse
+    """Duration and cost over every current run, all variants together."""
 
 
 class EvalRunModelResponse(BaseModel):

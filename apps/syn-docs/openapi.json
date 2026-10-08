@@ -10256,6 +10256,9 @@
             "type": "array",
             "title": "Variants"
           },
+          "stats": {
+            "$ref": "#/components/schemas/EvalRunStatsResponse"
+          },
           "read_model_status": {
             "anyOf": [
               {
@@ -10280,7 +10283,8 @@
           "created_at",
           "updated_at",
           "run_count",
-          "run_status_counts"
+          "run_status_counts",
+          "stats"
         ],
         "title": "EvalDetailResponse",
         "description": "One eval, as `GET /evals/{eval_id}` returns it.\n\nThe row model plus whether the evals read model is rebuilding, so a\nmissing or stale eval can say why. Kept off `EvalResponse` so every list\nrow does not repeat the list's own status."
@@ -10468,6 +10472,9 @@
             },
             "type": "array",
             "title": "Variants"
+          },
+          "stats": {
+            "$ref": "#/components/schemas/EvalRunStatsResponse"
           }
         },
         "type": "object",
@@ -10483,7 +10490,8 @@
           "created_at",
           "updated_at",
           "run_count",
-          "run_status_counts"
+          "run_status_counts",
+          "stats"
         ],
         "title": "EvalResponse",
         "description": "An eval as the eval read model holds it, with its run tally (#967)."
@@ -10811,6 +10819,78 @@
         "title": "EvalRunScoreResponse",
         "description": "The run's score as recorded (Evals v2)."
       },
+      "EvalRunStatsResponse": {
+        "properties": {
+          "median_duration_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Median Duration Seconds"
+          },
+          "median_duration_display": {
+            "type": "string",
+            "title": "Median Duration Display"
+          },
+          "incomplete_duration_count": {
+            "type": "integer",
+            "title": "Incomplete Duration Count"
+          },
+          "median_cost_usd": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Median Cost Usd"
+          },
+          "median_cost_display": {
+            "type": "string",
+            "title": "Median Cost Display"
+          },
+          "incomplete_cost_count": {
+            "type": "integer",
+            "title": "Incomplete Cost Count"
+          },
+          "cost_per_pass_usd": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Per Pass Usd"
+          },
+          "cost_per_pass_display": {
+            "type": "string",
+            "title": "Cost Per Pass Display"
+          }
+        },
+        "type": "object",
+        "required": [
+          "median_duration_seconds",
+          "median_duration_display",
+          "incomplete_duration_count",
+          "median_cost_usd",
+          "median_cost_display",
+          "incomplete_cost_count",
+          "cost_per_pass_usd",
+          "cost_per_pass_display"
+        ],
+        "title": "EvalRunStatsResponse",
+        "description": "How long a set of an eval's runs took and what it cost, over EVERY run in the set.\n\nMedians, not means: one runaway run should not make a variant look slow."
+      },
       "EvalVariantResponse": {
         "properties": {
           "workflow_id": {
@@ -10884,6 +10964,19 @@
               }
             ],
             "title": "Last Run At"
+          },
+          "last_verdict": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Verdict"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "stats": {
+            "$ref": "#/components/schemas/EvalRunStatsResponse"
           }
         },
         "type": "object",
@@ -10896,7 +10989,9 @@
           "pass_rate_display",
           "avg_cost_usd",
           "avg_cost_display",
-          "last_run_at"
+          "last_run_at",
+          "last_verdict",
+          "stats"
         ],
         "title": "EvalVariantResponse",
         "description": "Every run of an eval with the same workflow, workflow version and OBSERVED models.\n\n(Evals v2.) Two versions of one workflow are two variants: an edit between\nruns is a different treatment, and pooling them would hide its effect."

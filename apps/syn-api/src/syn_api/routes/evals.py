@@ -47,6 +47,7 @@ from syn_api.routes.eval_runs import (
     eval_run_page,
     eval_summary,
     pass_rate_display,
+    stats_response,
     variant_responses,
 )
 from syn_api.services.read_model_status import read_model_status
@@ -262,6 +263,7 @@ async def _response(
         last_run_at=summary.last_run_at,
         last_verdict=summary.last_verdict,
         variants=variant_responses(summary),
+        stats=stats_response(summary.stats),
     )
 
 

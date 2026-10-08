@@ -17,10 +17,20 @@ export type EvalVerdict = Schemas['Verdict']
 
 export type EvalBaselineRepo = Schemas['EvalBaselineRepoResponse']
 
-/** One (workflow, workflow version, observed models) combination an eval has been run with. */
-export type EvalVariant = Schemas['EvalVariantResponse']
+/** Duration, cost and verdict counts over a set of an eval's runs. */
+export type EvalRunStats = Schemas['EvalRunStatsResponse']
 
-export type EvalSummary = Schemas['EvalResponse']
+/**
+ * `stats` is optional here although the schema requires it: an API deployed
+ * before #1772 sends no `stats`, and the dashboard can deploy ahead of the
+ * API. Declaring it absent-able makes every reader handle that case.
+ */
+type StatsMayBeAbsent<T> = Omit<T, 'stats'> & { stats?: EvalRunStats }
+
+/** One (workflow, workflow version, observed models) combination an eval has been run with. */
+export type EvalVariant = StatsMayBeAbsent<Schemas['EvalVariantResponse']>
+
+export type EvalSummary = Omit<StatsMayBeAbsent<Schemas['EvalResponse']>, 'variants'> & { variants?: EvalVariant[] }
 
 export type EvalListResponse = Schemas['EvalListResponse']
 
