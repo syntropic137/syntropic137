@@ -147,6 +147,20 @@ def git_accepted(tool_content: str, branch: str, sha: str) -> bool:
     return False
 
 
+def _hook_push(embedded: object) -> _Push | None:
+    """The push to origin's named branch ``embedded`` reports, or None."""
+    try:
+        event = _HookLine.model_validate(embedded)
+    except ValidationError:
+        return None
+    if event.event_type != GIT_PUSH or event.context is None:
+        return None
+    push = event.context.git
+    if push.remote != _ORIGIN or not (push.repo and push.branch and push.sha):
+        return None
+    return None if push.branch == "HEAD" else push
+
+
 async def observe_push(embedded: object, tool_content: str, on_push: PushObserver | None) -> None:
     """Tell ``on_push`` of the push ``embedded`` reports, if git confirms it to origin.
 
@@ -155,15 +169,7 @@ async def observe_push(embedded: object, tool_content: str, on_push: PushObserve
     """
     if on_push is None:
         return
-    try:
-        event = _HookLine.model_validate(embedded)
-    except ValidationError:
-        return
-    if event.event_type != GIT_PUSH or event.context is None:
-        return
-    push = event.context.git
-    if push.remote != _ORIGIN or not (push.repo and push.branch and push.sha):
-        return
-    if push.branch == "HEAD" or not git_accepted(tool_content, push.branch, push.sha):
+    push = _hook_push(embedded)
+    if push is None or not git_accepted(tool_content, push.branch, push.sha):
         return
     await on_push(push.repo, push.branch, push.sha)
