@@ -3846,7 +3846,7 @@ class PhaseTokenProfileResponse(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     phase_id: str
-    model: str
+    model: CostModelKey
     """The model the harness reported running; the unknown bucket when it reported none."""
     input_tokens: TokenPercentilesResponse
     output_tokens: TokenPercentilesResponse
