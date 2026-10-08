@@ -182,3 +182,45 @@ async def test_dot_and_empty_segments_are_refused_as_the_api_receives_them(
     denial = await service.authorize(f"Bearer {token}", "GET", path)
     assert denial is not None
     assert denial.status == 403
+
+
+# Selfhost runs Uvicorn with ``--root-path /api/v1``: an upstream ``/health``
+# arrives as scope path ``/api/v1/health`` with root_path ``/api/v1``. These
+# build that scope (ASGITransport passes the request path through as-is).
+_ROOT_PATHS = ["", "/api/v1"]
+
+
+async def _rooted_client(
+    service: PlatformTokenService, monkeypatch: pytest.MonkeyPatch, root_path: str
+) -> AsyncClient:
+    from syn_api import _wiring
+    from syn_api.main import create_app
+
+    monkeypatch.setattr(_wiring, "_platform_token_service_singleton", service)
+    transport = ASGITransport(app=create_app(), root_path=root_path)
+    return AsyncClient(transport=transport, base_url="http://envoy-proxy:8081")
+
+
+@pytest.mark.parametrize("root_path", _ROOT_PATHS)
+async def test_scope_is_judged_on_the_router_path_under_any_root_path(
+    service: PlatformTokenService, monkeypatch: pytest.MonkeyPatch, root_path: str
+) -> None:
+    token = await service.issue("exec-pc127")
+    async with await _rooted_client(service, monkeypatch, root_path) as c:
+        assert (await c.get(f"{root_path}/health", headers=_bearer(token))).status_code == 200
+        forbidden = await c.post(f"{root_path}/workflows/wf-1/execute", headers=_bearer(token))
+        assert forbidden.status_code == 403
+        assert (await c.get(f"{root_path}/workflows", headers=_bearer(token))).status_code == 403
+        await service.revoke(token)
+        assert (await c.get(f"{root_path}/health", headers=_bearer(token))).status_code == 401
+
+
+@pytest.mark.parametrize("root_path", _ROOT_PATHS)
+async def test_a_framework_redirect_stays_on_the_platform_route(
+    service: PlatformTokenService, monkeypatch: pytest.MonkeyPatch, root_path: str
+) -> None:
+    token = await service.issue("exec-pc127")
+    async with await _rooted_client(service, monkeypatch, root_path) as c:
+        response = await c.get(f"{root_path}/health/", headers=_bearer(token))
+    assert response.status_code == 307
+    assert response.headers["location"] == "/syn-platform/api/v1/health"

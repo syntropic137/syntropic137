@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import TYPE_CHECKING, Protocol
+from urllib.parse import urlsplit
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -170,6 +171,14 @@ class PlatformTokenService:
     @property
     def enabled(self) -> bool:
         return self._store is not None
+
+    @property
+    def workspace_api_base_path(self) -> str:
+        """The path a workspace puts before a router path: ``/syn-platform/api/v1``.
+
+        The CLI appends ``/api/v1`` to ``SYN_API_URL`` (``client/typed.ts``).
+        """
+        return urlsplit(self._api_url).path.rstrip("/") + "/api/v1"
 
     async def issue(self, execution_id: str, scope: PlatformScope = PlatformScope.READ) -> str:
         """Mint a token for one execution's phase. Raises if access is disabled."""
