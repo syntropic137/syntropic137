@@ -18,14 +18,18 @@ from typing import TYPE_CHECKING, ClassVar
 import pytest
 import yaml
 from pydantic import ValidationError
-from scripts.check_workflow_definitions import _ROOT as _REPO_ROOT
 from scripts.check_workflow_definitions import (
+    _GATES_STILL_NAMED,
+    GATES_HEADING,
     _workflow_files,
+    declared_gates,
     grant_violations,
+    hardcoded_gates,
     main,
     stale_phase_references,
     validate_file,
 )
+from scripts.check_workflow_definitions import _ROOT as _REPO_ROOT
 
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration._shared.workflow_definition import (
@@ -1310,3 +1314,98 @@ class TestARenameMustNotLeaveANameBehind:
         assert stale_phase_references(path, phase_library_dir=lib) == [], (
             "the phase library became unusable"
         )
+
+
+class TestGatesComeFromTheTargetRepository:
+    """A prompt must not name this repository's gates; it reads the target's (PC-129).
+
+    sdlc-implement-v3 named `just preflight-agent`, so a run on a repository
+    with no justfile could not certify. The forbidden commands are read from
+    this repository's own declaration, so these tests drive that parser too.
+    """
+
+    _AGENTS = (
+        "# Repo\n\n"
+        f"{GATES_HEADING}\n\n"
+        "Prose the agent reads.\n\n"
+        "```\n"
+        "make   check\n"
+        "# a comment, not a gate\n"
+        "\n"
+        "python3 -m unittest discover -s scripts\n"
+        "```\n\n"
+        "```\nnot-a-gate\n```\n\n"
+        "## Next section\n\n```\nalso-not-a-gate\n```\n"
+    )
+
+    @staticmethod
+    def _workflow(tmp_path: Path, prompt: str) -> Path:
+        return _write(
+            tmp_path,
+            {
+                "id": "gated",
+                "name": "Gated",
+                "requires_repos": False,
+                "phases": [
+                    {"id": "verify", "name": "Verify", "order": 1, "prompt_template": prompt}
+                ],
+            },
+        )
+
+    def test_the_first_fence_under_the_heading_is_the_gate_list(self, tmp_path: Path) -> None:
+        agents = tmp_path / "AGENTS.md"
+        agents.write_text(self._AGENTS)
+        assert declared_gates(agents) == ("make check", "python3 -m unittest discover -s scripts")
+
+    def test_a_repository_without_the_section_declares_nothing(self, tmp_path: Path) -> None:
+        agents = tmp_path / "AGENTS.md"
+        agents.write_text("# Repo\n\n## Testing\n\n```\nmake check\n```\n")
+        assert declared_gates(agents) == ()
+        assert declared_gates(tmp_path / "missing.md") == ()
+
+    def test_a_fence_in_the_next_section_is_not_a_gate(self, tmp_path: Path) -> None:
+        agents = tmp_path / "AGENTS.md"
+        agents.write_text(f"{GATES_HEADING}\n\nNone yet.\n\n## Testing\n\n```\nmake check\n```\n")
+        assert declared_gates(agents) == ()
+
+    def test_a_prompt_naming_a_declared_gate_is_reported(self, tmp_path: Path) -> None:
+        path = self._workflow(
+            tmp_path, "Run:\n\n```\npython3  -m unittest\n  discover -s scripts\n```\n"
+        )
+        [violation] = hardcoded_gates(path, ("python3 -m unittest discover -s scripts",))
+        assert "phase 'verify'" in violation
+        assert GATES_HEADING in violation
+
+    def test_a_prompt_that_reads_the_declaration_passes(self, tmp_path: Path) -> None:
+        path = self._workflow(tmp_path, f"Run the gates under `{GATES_HEADING}` in AGENTS.md.")
+        assert hardcoded_gates(path, ("python3 -m unittest discover -s scripts",)) == []
+
+    def test_this_repository_declares_the_gates_its_agents_run(self) -> None:
+        # Without a declaration the rule has nothing to forbid and passes
+        # everything, so the declaration itself is part of the gate.
+        gates = declared_gates(_REPO_ROOT / "AGENTS.md")
+        assert "just preflight-agent" in gates
+        assert "uv run pytest -m unit -q" in gates
+
+    def test_the_repo_gate_fails_a_workflow_that_names_a_declared_gate(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import scripts.check_workflow_definitions as gate
+
+        (tmp_path / "AGENTS.md").write_text(self._AGENTS)
+        (tmp_path / "workflows").mkdir()
+        self._workflow(tmp_path / "workflows", "Before pushing run `make check`.")
+        monkeypatch.setattr(gate, "_ROOT", tmp_path)
+        assert main() == 1
+
+    @pytest.mark.parametrize("workflow", ["sdlc/implement-v3", "sdlc/reverify-pr"])
+    def test_the_target_agnostic_sdlc_workflows_name_no_gate(self, workflow: str) -> None:
+        path = _REPO_ROOT / "workflows" / workflow / "workflow.yaml"
+        assert hardcoded_gates(path, declared_gates(_REPO_ROOT / "AGENTS.md")) == []
+
+    @pytest.mark.parametrize("workflow", sorted(_GATES_STILL_NAMED))
+    def test_every_exemption_still_names_a_gate(self, workflow: str) -> None:
+        # The exemption list may only shrink: once a workflow stops naming a
+        # gate, its entry must go, or it would hide the defect coming back.
+        path = _REPO_ROOT / workflow / "workflow.yaml"
+        assert hardcoded_gates(path, declared_gates(_REPO_ROOT / "AGENTS.md")), workflow

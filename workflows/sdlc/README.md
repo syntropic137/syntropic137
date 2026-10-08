@@ -124,6 +124,41 @@ the four disagree, so a switch that misses a round cannot certify round 1 on one
 model and round 3 on another. Remember a verifier on the same model as the fix
 phases (`opus`) is no longer a cross-model review; say so when you rely on it.
 
+## Verification gates
+
+`sdlc-implement-v3` and `sdlc-reverify-pr-v1` verify a change by running the
+**target repository's** gates, never a command written into the prompt. A
+workflow can be dispatched on any repository, and a gate that exists here
+(`just preflight-agent`) does not exist in one with no justfile (PC-129).
+
+**Declaring gates.** A repository declares them in its `AGENTS.md` (or
+`CLAUDE.md`, if it has no `AGENTS.md`):
+
+    ## Verification gates
+
+    Any prose the agent should read: what cannot run in a workspace, what CI
+    settles instead.
+
+    ```
+    python3 -m unittest discover -s scripts
+    ```
+
+The first fenced block under the heading is the list: one command per line,
+run in order from the repository root. Lines starting with `#` are comments.
+syntropic137 declares its own at the end of [AGENTS.md](../../AGENTS.md#verification-gates).
+
+**Without a declaration**, verify and fix fall back to what the repository
+treats as its gate - its pull-request CI, then its task runner (`justfile`,
+`Makefile`, `package.json`), then a test command its docs name - and, if none
+exists, say so and run the tests the change touched. Every report names which
+case applied and where each command came from.
+
+**Enforced.** `scripts/check_workflow_definitions.py` reads the gates this
+repository declares and fails any workflow prompt that names one literally
+(`hardcoded_gates`). The workflows written before the convention are listed in
+`_GATES_STILL_NAMED`; that list may only shrink, and a test fails on an entry
+that no longer names a gate.
+
 ## What `timeout_seconds` actually bounds
 
 `timeout_seconds` is an AGENT-WORK budget, not a wall-clock budget for the
