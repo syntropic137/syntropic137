@@ -43,6 +43,7 @@ _SERVICE_STATUS_FIELDS = frozenset(
         "held_projections",
         "halted_at",
         "unapplied_starts",
+        "rebuilding_read_models",
     }
 )
 

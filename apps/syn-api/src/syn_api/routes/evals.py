@@ -49,6 +49,7 @@ from syn_api.routes.eval_runs import (
     pass_rate_display,
     variant_responses,
 )
+from syn_api.services.read_model_status import read_model_status
 from syn_api.types import (
     AttachEvalRequest,
     CreateEvalRequest,
@@ -82,6 +83,7 @@ from syn_domain.contexts.orchestration import (
     SetWorkflowDefaultEvalCommand,
     SetWorkflowDefaultEvalHandler,
 )
+from syn_domain.contexts.orchestration.slices.list_evals.projection import EvalListProjection
 
 if TYPE_CHECKING:
     from syn_adapters.projections.manager import ProjectionManager
@@ -357,6 +359,7 @@ async def list_evals_endpoint(
         page=page,
         page_size=page_size,
         status_counts=result.status_counts,
+        read_model_status=await read_model_status(EvalListProjection.PROJECTION_NAME),
     )
 
 

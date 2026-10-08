@@ -16,6 +16,7 @@ from syn_api._wiring_admission import get_execution_budget
 from syn_api.cache_rate_display import cache_rate_display
 from syn_api.list_query import MAX_PAGE_SIZE, WindowBound, parse_statuses
 from syn_api.model_identity import cost_by_observed_model
+from syn_api.services.read_model_status import read_model_status
 from syn_api.types import (
     Err,
     ExecutionDetail,
@@ -34,6 +35,12 @@ from syn_domain.contexts.orchestration import (
     ResumeStartProcessManager,
     TagSet,
     read_record,
+)
+from syn_domain.contexts.orchestration.slices.get_execution_detail.projection import (
+    WorkflowExecutionDetailProjection,
+)
+from syn_domain.contexts.orchestration.slices.list_executions.projection import (
+    WorkflowExecutionListProjection,
 )
 from syn_domain.pagination import Page
 from syn_shared.display import (
@@ -694,6 +701,7 @@ async def list_executions_endpoint(
         page_size=page_size,
         excluded_undated=execution_page.excluded_undated,
         status_counts=execution_page.status_counts,
+        read_model_status=await read_model_status(WorkflowExecutionListProjection.PROJECTION_NAME),
     )
 
 
@@ -783,6 +791,9 @@ async def get_execution_endpoint(execution_id: str) -> ExecutionDetailResponse:
     artifact_ids = [p.artifact_id for p in phases if p.artifact_id]
     cache_rates = cache_rate_display(_models_run(phases))
     return ExecutionDetailResponse(
+        read_model_status=await read_model_status(
+            WorkflowExecutionDetailProjection.PROJECTION_NAME
+        ),
         workflow_execution_id=detail.workflow_execution_id,
         workflow_id=detail.workflow_id,
         workflow_name=detail.workflow_name,
