@@ -16,7 +16,7 @@ PREWARM_TIMEOUT_SECONDS: Final[int] = 1800
 """The most one prewarm install may take, and the extra time a prewarming setup gets (#1726)."""
 
 
-def append_dependency_prewarm(lines: list[str], destinations: Sequence[str]) -> None:
+def append_dependency_prewarm(lines: list[str], destinations: Sequence[tuple[str, str]]) -> None:
     """Install each clone's locked dependencies while setup still has network (#1726).
 
     Runs after every clone is at its pin, so what is installed is what the
@@ -45,7 +45,7 @@ def append_dependency_prewarm(lines: list[str], destinations: Sequence[str]) -> 
     """
 
     budget = PREWARM_TIMEOUT_SECONDS
-    roots = " ".join(shlex.quote(dest) for dest in destinations)
+    roots = " ".join(shlex.quote(dest) for _, dest in destinations)
     lines.extend(
         [
             "",

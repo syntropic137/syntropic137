@@ -19,7 +19,7 @@ import shlex
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Final, Protocol
 
-from syn_adapters.workspace_backends.service import dependency_prewarm
+from syn_adapters.workspace_backends.service import dependency_prewarm as deps
 from syn_adapters.workspace_backends.service.issued_tokens import IssuedToken
 from syn_adapters.workspace_backends.service.pinned_checkout import append_pinned_checkout
 from syn_shared.upstream_failure import UpstreamFailureError
@@ -730,16 +730,13 @@ class SetupPhaseSecrets:
         if self.repositories and self.clone_repos:
             self._append_repo_clones(lines)
             if self.prewarm:
-                dependency_prewarm.append_dependency_prewarm(
-                    lines, [dest for _, dest in _clone_destinations(self.repositories)]
-                )
+                deps.append_dependency_prewarm(lines, _clone_destinations(self.repositories))
 
         return "\n".join(lines) + "\n"
 
     def setup_timeout_seconds(self, configured: int) -> int:
-        """The configured setup limit, plus the install budget for a prewarming setup only (#1726)."""
         warm = self.prewarm and self.clone_repos and bool(self.repositories)
-        return configured + dependency_prewarm.PREWARM_TIMEOUT_SECONDS if warm else configured
+        return configured + deps.PREWARM_TIMEOUT_SECONDS if warm else configured
 
     def _append_codex_auth(self, lines: list[str]) -> None:
         """Relocate the staged codex auth file to ~/.codex/auth.json (0600).
