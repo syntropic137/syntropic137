@@ -432,13 +432,16 @@ class WorkflowExecutionProcessor:
                 all_artifact_ids.extend(
                     i for i in dispatch_ctx.kept_artifact_ids if i not in all_artifact_ids
                 )
-                return await self._cancel_execution(
-                    aggregate,
-                    execution_id,
-                    workflow_id,
-                    phase_results,
-                    all_artifact_ids,
-                    started_at,
+                return await record_cancel_and_release(
+                    aggregate=aggregate,
+                    runtime=self._runtimes.of(execution_id),
+                    workspaces=self._workspaces_for(execution_id, {}),
+                    ledger=self._cancelled_work,
+                    execution_id=execution_id,
+                    workflow_id=workflow_id,
+                    phase_results=phase_results,
+                    all_artifact_ids=all_artifact_ids,
+                    started_at=started_at,
                     cancel_reason=aggregate.cancel_reason,
                     phase_id=dispatch_ctx.current_phase_id,
                 )
@@ -571,41 +574,6 @@ class WorkflowExecutionProcessor:
             # The phase finished cleanly; a later workflow-level failure
             # (between phases) must not be attributed to it.
             dispatch_ctx.current_phase_id = None
-
-    async def _cancel_execution(
-        self,
-        aggregate: WorkflowExecutionAggregate,
-        execution_id: str,
-        workflow_id: str,
-        phase_results: list[PhaseResult],
-        all_artifact_ids: list[str],
-        started_at: datetime,
-        cancel_reason: str | None = None,
-        phase_id: str | None = None,
-    ) -> WorkflowExecutionResult:
-        """Close open sessions as cancelled and return cancelled result.
-
-        Called when the to-do list empties due to ExecutionCancelledEvent.
-        The aggregate is already CANCELLED; what the save landed is recorded for the PR (#1547).
-
-        ``phase_id`` is the phase that was mid-flight when the cancel landed,
-        from the run's own _DispatchContext for the reason ``failed_phase_id``
-        is: with concurrent runs sharing this processor, anything else could
-        name another execution's phase.
-        """
-        return await record_cancel_and_release(
-            aggregate=aggregate,
-            runtime=self._runtimes.of(execution_id),
-            workspaces=self._workspaces_for(execution_id, {}),
-            ledger=self._cancelled_work,
-            workflow_id=workflow_id,
-            execution_id=execution_id,
-            phase_id=phase_id,
-            cancel_reason=cancel_reason,
-            phase_results=phase_results,
-            all_artifact_ids=all_artifact_ids,
-            started_at=started_at,
-        )
 
     async def _complete_execution(
         self,
