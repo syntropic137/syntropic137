@@ -85,4 +85,4 @@ def test_event_store_default_keeps_headroom_over_its_stable_footprint() -> None:
     """
     limit_mib = _mib(_memory_default("event-store", "EVENT_STORE_MEMORY_LIMIT"))
 
-    assert _EVENT_STORE_STABLE_MIB < limit_mib / 2
+    assert limit_mib / 2 > _EVENT_STORE_STABLE_MIB
