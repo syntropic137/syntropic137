@@ -10,11 +10,14 @@ from __future__ import annotations
 
 import logging
 import os
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from syn_adapters.workspace_backends.agentic.adapter_copy import collect_matching_files
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 pytestmark = [pytest.mark.unit]
 
