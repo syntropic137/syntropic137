@@ -24,6 +24,12 @@ function RunRow({ run }: { run: EvalRun }) {
           {formatTimestampLocale(run.started_at)}
         </Link>
       </td>
+      <td className="px-3 py-2">
+        <VerdictPill verdict={run.verdict} />
+      </td>
+      <td className={num}>{run.duration_display}</td>
+      <td className={num}>{run.total_cost_display}</td>
+      <td className={num}>{run.score === null ? '—' : formatScore(run.score)}</td>
       <td className="break-all px-3 py-2 text-xs text-[var(--color-text-secondary)]">
         {run.workflow_id}
         {run.workflow_version && <span className="text-[var(--color-text-muted)]"> @ {run.workflow_version}</span>}
@@ -33,12 +39,6 @@ function RunRow({ run }: { run: EvalRun }) {
           </div>
         ))}
       </td>
-      <td className="px-3 py-2">
-        <VerdictPill verdict={run.verdict} />
-      </td>
-      <td className={num}>{run.score === null ? '—' : formatScore(run.score)}</td>
-      <td className={num}>{run.duration_display}</td>
-      <td className={num}>{run.total_cost_display}</td>
       <td className="break-all px-3 py-2 text-xs text-[var(--color-text-secondary)]">
         {run.scorer ? `${run.scorer}${run.scorer_version ? ` v${run.scorer_version}` : ''}` : '—'}
       </td>
@@ -50,12 +50,12 @@ function RunRow({ run }: { run: EvalRun }) {
 }
 
 const HEADERS: [string, string][] = [
-  ['Date', 'w-[9rem]'],
-  ['Variant', 'w-[13rem]'],
+  ['Date', 'w-[8.5rem]'],
   ['Verdict', 'w-[6rem]'],
-  ['Score', 'w-[4.5rem] text-right'],
   ['Duration', 'w-[6rem] text-right'],
   ['Cost', 'w-[6rem] text-right'],
+  ['Score', 'w-[4.5rem] text-right'],
+  ['Variant', 'w-[13rem]'],
   ['Scorer', 'w-[8rem]'],
   ['Evidence', 'w-[16rem]'],
 ]
@@ -63,7 +63,8 @@ const HEADERS: [string, string][] = [
 /**
  * A page of an eval's runs, newest first, each linking to its execution.
  * Every column shows at every width: on a narrow screen the table scrolls
- * inside its own container instead of dropping duration and cost.
+ * inside its own container instead of dropping any, and verdict, duration and
+ * cost come first so a phone shows them without scrolling.
  */
 export function EvalRunsTable({ runs }: { runs: readonly EvalRun[] }) {
   if (runs.length === 0) {
