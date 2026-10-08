@@ -13,6 +13,7 @@ already-written stream from replaying.
 from __future__ import annotations
 
 import re
+from enum import StrEnum
 from typing import Annotated, Self
 from uuid import uuid4
 
@@ -82,3 +83,16 @@ class Goal(RootModel[str]):
 
 #: The display name. Trimmed, never empty; editable for the eval's whole life.
 EvalName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
+
+
+class Verdict(StrEnum):
+    """What a scorer concluded about one run of an eval.
+
+    ``ERROR`` is the scorer's own failure to reach a conclusion (the run left
+    nothing to judge, or the scorer broke), never a judgement that the run
+    failed. It counts as scored, and not as passed.
+    """
+
+    PASS = "PASS"
+    FAIL = "FAIL"
+    ERROR = "ERROR"

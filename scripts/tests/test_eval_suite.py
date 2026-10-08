@@ -26,21 +26,28 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import eval_suite
 import yaml
 from eval_suite import (
     DEFAULT_SUITE,
     ROOT,
-    Case,
+    CleanCase,
+    DefectCase,
     DefinitionError,
     Expected,
     Launch,
     LoadedSuite,
+    Score,
+    ScoredRun,
     check_commits,
     install_provenance,
     launch_suite,
     load_suite,
+    main,
+    rates,
     read_launches,
     render,
+    score_case,
     score_report,
     score_suite,
     versions_run,
@@ -96,10 +103,17 @@ _PINNED_CODEX_WFS = {
 def test_the_seed_suite_loads_and_records_its_workflow_and_models() -> None:
     loaded = load_suite(DEFAULT_SUITE)
 
-    assert loaded.tag == "verifier-seed-v1:v2:eval-verify-pinned-v1"
+    assert loaded.tag == "verifier-seed-v1:v5:eval-verify-pinned-v1"
     assert loaded.workflow.id == "eval-verify-pinned-v1"
     assert loaded.workflow.models == {"verify": "opus"}
-    assert {c.source_pr for c in loaded.cases} == {1574, 1649, 1652, 1654, 1679, 1680}
+    by_polarity = {
+        polarity: {c.source_pr for c in loaded.cases if c.polarity == polarity}
+        for polarity in ("defect", "clean")
+    }
+    assert by_polarity["defect"] >= {1574, 1649, 1652, 1654, 1679, 1680}
+    assert by_polarity["clean"] == {917, 1010}
+    assert sum(c.polarity == "defect" for c in loaded.cases) == 31
+    assert sum(c.polarity == "clean" for c in loaded.cases) == 2
 
 
 @pytest.mark.unit
@@ -109,7 +123,7 @@ def test_the_same_cases_load_under_the_codex_verifier_with_their_own_tag() -> No
 
     assert codex.workflow.id == _CODEX_WF
     assert codex.workflow.models == {"verify": "gpt-sol"}
-    assert codex.tag == f"verifier-seed-v1:v2:{_CODEX_WF}"
+    assert codex.tag == f"verifier-seed-v1:v5:{_CODEX_WF}"
     assert codex.tag != opus.tag
     assert codex.cases == opus.cases
 
@@ -121,7 +135,7 @@ def test_the_same_cases_load_under_the_sonnet_verifier_with_their_own_tag() -> N
 
     assert sonnet.workflow.id == _SONNET_WF
     assert sonnet.workflow.models == {"verify": "sonnet"}
-    assert sonnet.tag == f"verifier-seed-v1:v2:{_SONNET_WF}"
+    assert sonnet.tag == f"verifier-seed-v1:v5:{_SONNET_WF}"
     assert sonnet.cases == opus.cases
 
 
@@ -132,7 +146,7 @@ def test_the_same_cases_load_under_each_pinned_codex_verifier(variant: str, slug
     pinned = load_suite(DEFAULT_SUITE, workflow=variant)
 
     assert pinned.workflow.models == {"verify": slug}
-    assert pinned.tag == f"verifier-seed-v1:v2:{variant}"
+    assert pinned.tag == f"verifier-seed-v1:v5:{variant}"
     assert pinned.cases == opus.cases
 
 
@@ -311,11 +325,13 @@ def _one_case_suite(
         p.unlink()
     case: dict[str, object] = {
         "id": "seed",
+        "polarity": "defect",
         "source_pr": 1,
         "commit": commit,
         "fix_commit": fix,
         "task": "Review it.",
         "expected": {"files": [file], "keywords": [["broken"]]},
+        "split": "train",
     }
     if first_fix is not None:
         case["first_fix_commit"] = first_fix
@@ -365,9 +381,18 @@ def test_check_passes_a_pin_before_the_first_commit_of_a_fix_series(
 
 @pytest.mark.skipif(_is_shallow(), reason="a shallow clone does not hold the pinned commits")
 @pytest.mark.unit
-@pytest.mark.parametrize("case", load_suite(DEFAULT_SUITE).cases, ids=lambda c: c.id)
-def test_every_committed_case_pins_its_fixs_first_parent(case: Case) -> None:
-    assert _git(ROOT, "rev-parse", f"{case.fix_start}^1") == case.commit
+@pytest.mark.parametrize(
+    "case",
+    [c for c in load_suite(DEFAULT_SUITE).cases if isinstance(c, DefectCase)],
+    ids=lambda c: c.id,
+)
+def test_every_committed_defect_pins_its_fixs_first_parent(case: DefectCase) -> None:
+    if case.reclassified_from:
+        # A reclassified control keeps the pin both verifiers reviewed, before the fix.
+        assert eval_suite._git_ok(ROOT, "merge-base", "--is-ancestor", case.commit, case.fix_start)
+        assert case.commit != case.fix_start
+    else:
+        assert _git(ROOT, "rev-parse", f"{case.fix_start}^1") == case.commit
 
 
 @pytest.mark.unit
@@ -552,8 +577,10 @@ def test_a_longer_file_name_ending_in_the_seed_file_does_not_name_it() -> None:
     assert score_report(_EXPECTED, "blocked", report).named_file is None
 
 
-def _case(case_id: str) -> Case:
-    return next(c for c in load_suite(DEFAULT_SUITE).cases if c.id == case_id)
+def _case(case_id: str) -> DefectCase:
+    return next(
+        c for c in load_suite(DEFAULT_SUITE).cases if isinstance(c, DefectCase) and c.id == case_id
+    )
 
 
 # Natural, correct descriptions of each seed's defect, worded independently of
@@ -677,6 +704,429 @@ _PARAPHRASES: dict[str, tuple[tuple[str, str], ...]] = {
             "aggregates share a stream.",
         ),
     ),
+    "transcript-superseded-revision-issues": (
+        (
+            "session_relationship_resolver.py:210",
+            "an unresolved_spawn gap reported by an earlier revision of the transcript is kept "
+            "after a later revision resolved the Agent call, so the session reads incomplete.",
+        ),
+        (
+            "session_relationship_resolver.py",
+            "issues from older archived revisions are never dropped once superseded, so coverage "
+            "is reported missing for a fully accounted run.",
+        ),
+        (
+            "agent_sessions/domain/services/session_relationship_resolver.py",
+            "the resolver only filters inactive evidence; a stale revision's issue survives the "
+            "revision that fixed it and marks the session incomplete.",
+        ),
+    ),
+    "codex-turn-failed-reason-dropped": (
+        (
+            "CodexStreamProcessor.py:300",
+            "turn.failed events are never dispatched, so the reason codex gave is thrown away "
+            "and the phase reports the generic missing terminal turn message.",
+        ),
+        (
+            "CodexStreamProcessor.py",
+            "the parser has no branch for the error event type or a failed turn; the message "
+            "codex sent is lost and the operator sees only that the stream ended.",
+        ),
+        (
+            "execute_workflow/CodexStreamProcessor.py:260",
+            "a turn failed event is unhandled: its error.message is discarded instead of "
+            "becoming the phase's error reason.",
+        ),
+    ),
+    "cli-packages-own-remote-check": (
+        (
+            "install.ts:140",
+            "packagesCommand decides whether a source is remote with its own inline predicate "
+            "instead of parseSource, so it can disagree with install and update.",
+        ),
+        (
+            "commands/workflow/install.ts",
+            "a second, divergent remote check: a URL the resolver treats as remote can be "
+            "treated as a local path here and hidden as missing.",
+        ),
+        (
+            "install.ts",
+            "the listing duplicates the resolver's notion of a remote source rather than "
+            "calling parseSource, and the two drift apart on shorthand.",
+        ),
+    ),
+    "github-token-first-installation": (
+        (
+            "WorkspaceProvisionHandler.py:259",
+            "the token is minted for installations[0], the first installation, not the one "
+            "that owns the repo under work, so gh gets a token for the wrong org.",
+        ),
+        (
+            "WorkspaceProvisionHandler.py",
+            "_resolve_github_app_token assumes a single org and takes an arbitrary installation; "
+            "with two organizations the agent cannot read its own repository.",
+        ),
+        (
+            "handlers/WorkspaceProvisionHandler.py:250",
+            "the GITHUB_TOKEN ignores which owner the repo belongs to and always uses the first "
+            "App installation.",
+        ),
+    ),
+    "codex-deliverable-phase-failed": (
+        (
+            "AgentExecutionHandler.py:231",
+            "any codex error_reason becomes a non-zero exit, even when the phase already wrote "
+            "its deliverable to artifacts/output, so finished work is failed.",
+        ),
+        (
+            "AgentExecutionHandler.py",
+            "a codex stream that ends without turn.completed fails the phase although it "
+            "produced its output; the handler never checks for the artifact.",
+        ),
+        (
+            "handlers/AgentExecutionHandler.py:225",
+            "the phase is marked failed on a missing terminal turn after it completed its work; "
+            "the deliverable is discarded.",
+        ),
+    ),
+    "codex-brace-line-protocol-fault": (
+        (
+            "CodexStreamProcessor.py:490",
+            "any line that starts with { and fails json.loads sets error_reason immediately, so "
+            "a TSX line the agent echoed fails an otherwise successful phase.",
+        ),
+        (
+            "CodexStreamProcessor.py",
+            "stdout carries the agent's own subprocess output, but a brace-leading line that "
+            "does not parse is treated as a protocol fault and the phase fails.",
+        ),
+        (
+            "execute_workflow/CodexStreamProcessor.py:484",
+            "startswith('{') is taken as proof of a protocol event; a malformed echo from the "
+            "agent output is recorded as a fault and the run exits non-zero.",
+        ),
+    ),
+    "repo-name-collision-skipped-clone": (
+        (
+            "setup_phase_secrets.py:456",
+            "two repositories with the same bare name from different orgs map to one directory; "
+            "the [ -d ] guard skips the second clone silently.",
+        ),
+        (
+            "setup_phase_secrets.py",
+            "the destination is derived from the repo name alone, so a collision leaves the "
+            "phase working in the wrong repository without any error.",
+        ),
+        (
+            "workspace_backends/service/setup_phase_secrets.py:440",
+            "acme/api and other/api collide on /workspace/repos/api and the idempotency guard "
+            "means the second is never cloned.",
+        ),
+    ),
+    "sessions-execution-filter-dropped": (
+        (
+            "sessions.py:40",
+            "the list route declares no execution_id query parameter, so FastAPI drops it "
+            "silently and the whole collection comes back.",
+        ),
+        (
+            "routes/sessions.py",
+            "filtering sessions by execution id is ignored: the parameter is not declared and "
+            "every session is returned.",
+        ),
+        (
+            "sessions.py",
+            "GET /sessions?execution_id=... returns all sessions, unfiltered, because the route "
+            "has no such filter.",
+        ),
+    ),
+    "artifacts-execution-filter-dropped": (
+        (
+            "artifacts.py:60",
+            "list_artifacts has no execution_id parameter; FastAPI drops it silently, so a "
+            "phase asking for its run's deliverable gets the most recent artifact of any run.",
+        ),
+        (
+            "routes/artifacts.py",
+            "the execution id filter is not declared and the rows carry none, so the query "
+            "returns every artifact unfiltered.",
+        ),
+        (
+            "artifacts.py",
+            "asking for one execution's artifacts is ignored: the filter is missing and the "
+            "answer is all artifacts.",
+        ),
+    ),
+    "executions-total-is-page-length": (
+        (
+            "queries.py:80",
+            "total is set to len(domain_summaries), the page length, not the collection size, "
+            "so clients believe they have every execution.",
+        ),
+        (
+            "executions/queries.py",
+            "the response's total equals page_size whenever the page is full; it never counts "
+            "the projection.",
+        ),
+        (
+            "queries.py",
+            "total reports the number of returned rows rather than the count of executions, so "
+            "paging stops after the first page.",
+        ),
+    ),
+    "github-shorthand-any-slash": (
+        (
+            "resolver.ts:94",
+            "isGitHubShorthand accepts any string with a slash, so a local path like "
+            "~/workflows/foo is treated as owner/repo shorthand and cloned from GitHub.",
+        ),
+        (
+            "packages/resolver.ts",
+            "the shorthand check never validates two segments: a nested path such as a/b/c "
+            "is resolved as a github repository.",
+        ),
+        (
+            "resolver.ts",
+            "any source containing a slash is taken as GitHub shorthand; a home-relative path "
+            "is never treated as local.",
+        ),
+    ),
+    "guard-moved-gitlink-unsaved-work": (
+        (
+            "unpushed_work_guard.py:595",
+            "every status --porcelain line counts as unsaved work, including a submodule "
+            "gitlink that a checkout moved, so finished phases are failed.",
+        ),
+        (
+            "unpushed_work_guard.py",
+            "a submodule pointer moved by git checkout without --recurse-submodules looks "
+            "identical to an edited submodule and is falsely reported as unpushed work.",
+        ),
+        (
+            "execute_workflow/unpushed_work_guard.py",
+            "' M lib/sub' for a submodule a checkout moved is not edited work, but the guard reads "
+            "every line of the porcelain as unsaved and refuses the phase.",
+        ),
+    ),
+    "declared-skills-not-invocable": (
+        (
+            "ExecuteWorkflowHandler.py:540",
+            "a phase that declares skills and scopes its allowed tools never gets the Skill "
+            "tool, so its skills are installed but cannot be invoked.",
+        ),
+        (
+            "ExecuteWorkflowHandler.py",
+            "Skill is not granted when a phase restricts its tools: the declared skills are "
+            "withheld because the tool list omits Skill.",
+        ),
+        (
+            "execute_workflow/ExecuteWorkflowHandler.py",
+            "the handler resolves the phase's skills but leaves the tool list as declared, so "
+            "skill invocation is unavailable to the agent.",
+        ),
+    ),
+    "redis-retry-non-idempotent": (
+        (
+            "redis_client.py:32",
+            "retry_on_timeout=True re-sends a command Redis may already have applied; GETDEL "
+            "and SET NX are not idempotent, so the retry loses the signal or reports a duplicate.",
+        ),
+        (
+            "control/adapters/redis_adapter.py:76",
+            "check_signal uses getdel under a client that retries on timeout: if the first "
+            "attempt deleted the key and the reply was lost, the retry returns nothing and the "
+            "cancel signal is dropped.",
+        ),
+        (
+            "dedup/redis_dedup.py",
+            "the SET NX claim is retried after a timeout; the first attempt already set the "
+            "key, so the retry sees it and the first delivery is treated as a duplicate.",
+        ),
+    ),
+    "redis-url-password-logged": (
+        (
+            "_wiring.py:846",
+            "the controller logs the REDIS_URL verbatim at startup, so the Redis password "
+            "appears in docker logs and the rotating log files.",
+        ),
+        (
+            "_wiring.py",
+            "redis_url is written to logger.info unredacted; its credential leaks into every "
+            "log sink.",
+        ),
+        (
+            "syn_api/_wiring.py",
+            "the signal queue log line prints redis://:<password>@redis:6379 in plaintext.",
+        ),
+    ),
+    "token-injector-get-post-only": (
+        (
+            "token_injector.py:117",
+            "only do_GET and do_POST are defined, so an ext_authz check for a PUT, PATCH or "
+            "DELETE gets a 501 and the agent's request is denied.",
+        ),
+        (
+            "token_injector.py",
+            "the authz handler answers GET and POST only; any other method is unhandled and "
+            "the request to GitHub fails.",
+        ),
+        (
+            "docker/token-injector/token_injector.py",
+            "a DELETE to the GitHub API is rejected because the check service has no handler "
+            "for that HTTP verb.",
+        ),
+    ),
+    "workflow-run-task-undeliverable": (
+        (
+            "run.ts:195",
+            "a -t task is sent even when no phase prompt references $ARGUMENTS or {{task}}, so "
+            "the task is silently dropped and the run reports success.",
+        ),
+        (
+            "commands/workflow/run.ts",
+            "the CLI accepts a task no phase consumes; it is ignored by every prompt and the "
+            "user is never told.",
+        ),
+        (
+            "run.ts",
+            "the task is undeliverable when the workflow's prompts have no {{task}} "
+            "placeholder, yet the execution starts as if it was used.",
+        ),
+    ),
+    "workflow-run-inputs-go-nowhere": (
+        (
+            "run.ts:180",
+            "-i inputs that no phase references are sent and silently ignored; there is no "
+            "warning, not even under --dry-run.",
+        ),
+        (
+            "commands/workflow/run.ts",
+            "a -R repo or an input no phase consumes goes nowhere and the CLI gives no warning.",
+        ),
+        (
+            "run.ts",
+            "unconsumed input values are dropped at dispatch without telling the user; the "
+            "dry-run preview lists them as if they were used.",
+        ),
+    ),
+    "input-alias-independent-resolution": (
+        (
+            "ArtifactCollector.py:232",
+            "the flat <phase-id>.md alias and the nested tree are resolved independently by "
+            "_resolve_phase_outputs and _resolve_phase_files, so they can disagree.",
+        ),
+        (
+            "ArtifactCollector.py",
+            "two separate lookups populate the flat alias and the input tree; one can find the "
+            "output and the other not, leaving them out of sync.",
+        ),
+        (
+            "execute_workflow/ArtifactCollector.py:240",
+            "the alias is not derived from the resolved file tree, so a phase can receive a "
+            "tree with no flat alias - an inconsistent input.",
+        ),
+    ),
+    "shared-body-expired-by-oldest-capture": (
+        (
+            "body_retention.py:67",
+            "age expiry selects each capture older than the retention age and tombstones its "
+            "archive, so a shared body is erased while a recent capture still references it.",
+        ),
+        (
+            "body_retention.py",
+            "a content-addressed object is judged by its oldest capture; expiring that one "
+            "deletes bytes another, newer capture needs.",
+        ),
+        (
+            "session_inventory/body_retention.py",
+            "retention expires the object as soon as any capture of it is old, not when every "
+            "referencing capture has aged out.",
+        ),
+    ),
+    "executions-enrichment-fetched-twice": (
+        (
+            "queries.py:642",
+            "the list endpoint calls _load_execution_enrichment twice per request for the same "
+            "ids, doubling the cost lookups.",
+        ),
+        (
+            "queries.py:329",
+            "the enrichment loader awaits get_execution_cost once per execution id in a loop - "
+            "an N+1 query on every list request.",
+        ),
+        (
+            "executions/queries.py",
+            "cost enrichment is fetched one id at a time, and then fetched again by the "
+            "endpoint, a redundant duplicate load.",
+        ),
+    ),
+    "prompt-claims-checkout-without-clone": (
+        (
+            "workspace_prompt.py:29",
+            "the prompt always says repos/ holds pre-cloned repositories, even for a phase with "
+            "clone_repos: false, so the agent navigates into a directory that does not exist.",
+        ),
+        (
+            "workspace_prompt.py",
+            "SYN_WORKSPACE_PROMPT is an unconditional constant: a phase that is not cloned is "
+            "still told to start in /workspace/repos/<name>.",
+        ),
+        (
+            "execute_workflow/workspace_prompt.py:50",
+            "with clone_repos disabled the instructions are false - they claim a checkout is on "
+            "disk and tell the agent to navigate to it.",
+        ),
+    ),
+    "heatmap-test-reads-clock-repeatedly": (
+        (
+            "test_heatmap_canonical_usage_source.py:114",
+            "_utc_today() reads the clock again on every call, so a test that records before "
+            "midnight and queries after it looks in a different day and fails.",
+        ),
+        (
+            "test_heatmap_canonical_usage_source.py",
+            "the write and the query each compute now() separately; across the UTC day "
+            "boundary the bucket assertion finds no bucket - a flaky test.",
+        ),
+        (
+            "tests/integration/test_heatmap_canonical_usage_source.py:138",
+            "start, end and the expected bucket each re-read the date, so they can disagree "
+            "when the date changes mid-test.",
+        ),
+    ),
+    "pit-stop-password-on-argv": (
+        (
+            "pit_stop.sh:69",
+            "curl is given -u admin:$SYN_API_PASSWORD on its command line, so the password is "
+            "visible in the process list to anyone on the host.",
+        ),
+        (
+            "pit_stop.sh",
+            "the API credential is passed as a curl argument, which exposes it in "
+            "/proc/<pid>/cmdline while each request runs.",
+        ),
+        (
+            "scripts/pit_stop.sh:398",
+            "api_post puts the secret in argv; it should reach curl via stdin or a config file.",
+        ),
+    ),
+    "prompt-deliverable-only-if-acted": (
+        (
+            "workspace_prompt.py:116",
+            "the prompt only asks for deliverable.md after making changes; a phase that "
+            "finds nothing to do writes no artifact and the collector fails it.",
+        ),
+        (
+            "workspace_prompt.py",
+            "the completion instructions never cover a phase that declined to act or found the "
+            "work already done, so it exits with no output and is failed.",
+        ),
+        (
+            "execute_workflow/workspace_prompt.py:100",
+            "writing the deliverable reads as conditional on having acted; when no change was "
+            "needed the agent writes nothing to artifacts/output/.",
+        ),
+    ),
 }
 
 
@@ -694,12 +1144,17 @@ def test_a_natural_correct_finding_passes(case_id: str, file: str, defect: str) 
 
 @pytest.mark.unit
 def test_every_seed_has_at_least_three_paraphrases() -> None:
-    assert {c.id for c in load_suite(DEFAULT_SUITE).cases} == set(_PARAPHRASES)
+    defects = {c.id for c in load_suite(DEFAULT_SUITE).cases if c.polarity == "defect"}
+    assert defects == set(_PARAPHRASES)
     assert all(len(found) >= 3 for found in _PARAPHRASES.values())
 
 
 # Blocking findings that name a seed's file but describe a different defect.
 _WRONG_DEFECTS: dict[str, tuple[str, str]] = {
+    "redis-retry-non-idempotent": (
+        "redis_client.py:30",
+        "the socket timeout is read from a hard-coded constant instead of settings.",
+    ),
     "binary-artifact-minio-key": (
         "minio.py:12",
         "the bucket name is read from an unvalidated setting.",
@@ -741,8 +1196,13 @@ def test_the_seed_file_with_a_different_defect_fails(case_id: str, found: tuple[
 @pytest.mark.parametrize("case_id", list(_PARAPHRASES))
 def test_a_correct_finding_outside_blocking_fails(case_id: str) -> None:
     file, defect = _PARAPHRASES[case_id][0]
-    report = _report(("other.py:3", "an unrelated defect."), non_blocking=f"- {file}: {defect}")
+    # The same structured finding the BLOCKING section would pass on, second,
+    # after an unrelated blocking one: only the heading keeps it out.
+    matching = f"### Finding 2\n- File: `{file}`\n- Defect: {defect}\n- Why blocking: it may."
+    report = _report(("other.py:3", "an unrelated defect."), non_blocking=matching)
     assert not score_report(_case(case_id).expected, "blocked", report).passed
+    promoted = _report(("other.py:3", "an unrelated defect."), (f"{file}", defect))
+    assert score_report(_case(case_id).expected, "blocked", promoted).passed
 
 
 # ---------------------------------------------------------------------------
@@ -788,9 +1248,16 @@ class _Server:
         self.installed: str | None = None
         self.phases = served_phases if served_phases is not None else _phases_of(loaded)
         self.attached = attached
+        self.case = _CASE
+        """The case `eval-1` is tagged with; `eval_pin` must be its commit."""
         self.eval_pin = _PIN
+        self.verdict = "blocked"
+        """The review verdict `exec-1` reports."""
         self.run_workflow = loaded.workflow.id
-        self.tag = loaded.tag
+        self.tag = loaded.suite.suite_tag
+        self.existing = False
+        """When set, every case already has its stable eval `eval-<pin[:6]>`."""
+        self.scores: list[tuple[str, dict[str, object]]] = []
 
     def client(self) -> httpx.Client:
         return httpx.Client(base_url="http://api", transport=httpx.MockTransport(self.handle))
@@ -803,7 +1270,7 @@ class _Server:
                 "workflow_id": self.run_workflow,
                 "workflow_name": "w",
                 "status": "completed",
-                "review_verdict": "blocked",
+                "review_verdict": self.verdict,
                 "total_cost_usd": "3.75",
                 "total_duration_seconds": 640.2,
                 "unknown_duration_phase_count": 0,
@@ -832,7 +1299,7 @@ class _Server:
             "name": "n",
             "goal": "g",
             "starting_workflow_id": None,
-            "tags": [self.tag, f"case:{_CASE}"],
+            "tags": [self.tag, f"case:{self.case}"],
             "frozen": True,
             "archived": False,
             "created_at": None,
@@ -845,6 +1312,16 @@ class _Server:
                     "requested_ref": self.eval_pin,
                     "commit_sha": self.eval_pin,
                 }
+            ],
+        }
+
+    def _stable(self, case_id: str) -> dict[str, object]:
+        pin = next(c.commit for c in load_suite(DEFAULT_SUITE).cases if c.id == case_id)
+        return {
+            "eval_id": f"eval-{pin[:6]}",
+            "tags": [self.tag, f"case:{case_id}"],
+            "baseline_repos": [
+                {"repository": "syntropic137/syntropic137", "requested_ref": pin, "commit_sha": pin}
             ],
         }
 
@@ -881,6 +1358,9 @@ class _Server:
                     "phases": [asdict(p) for p in self.phases],
                 },
             )
+        if request.method == "POST" and path.endswith("/score"):
+            self.scores.append((path, json.loads(request.content)))
+            return httpx.Response(200, json={})
         if request.method == "POST" and path == "/evals":
             body = json.loads(request.content)
             pin = body["baseline_repos"][0]["requested_ref"]
@@ -890,7 +1370,7 @@ class _Server:
                     "eval_id": f"eval-{pin[:6]}",
                     "name": body["name"],
                     "goal": body["goal"],
-                    "starting_workflow_id": body["starting_workflow_id"],
+                    "starting_workflow_id": body.get("starting_workflow_id"),
                     "tags": body["tags"],
                     "baseline_repos": [
                         {
@@ -915,7 +1395,13 @@ class _Server:
             )
         if path == "/evals":
             # The real list filters by tag: another verifier's tag finds nothing.
-            evals = [self._eval()] if request.url.params.get("tag") == self.tag else []
+            tags = set(request.url.params.get_list("tag"))
+            # `eval-1` is what `score` finds. A launch installs first and, on
+            # this fresh server, finds no case eval unless `existing` is set.
+            scoring = self.installed is None
+            evals = [self._eval()] if scoring and tags == {self.tag, f"case:{self.case}"} else []
+            if self.existing and self.tag in tags:
+                evals = [self._stable(t.removeprefix("case:")) for t in tags if t != self.tag]
             return httpx.Response(
                 200,
                 json={
@@ -936,12 +1422,12 @@ class _Server:
                     "total": len(ids),
                     "page": 1,
                     "page_size": 200,
-                    "executions": [
+                    "items": [
                         {
-                            "workflow_execution_id": i,
+                            "execution_id": i,
                             "workflow_id": _WF,
-                            "workflow_name": "w",
                             "status": "completed",
+                            "models": [{"phase_id": "verify", "model": "claude-opus-5-5"}],
                         }
                         for i in ids
                     ],
@@ -993,7 +1479,7 @@ def test_score_reads_verdict_report_cost_and_model_from_the_api() -> None:
     assert unrecorded == ()
 
     table = render(loaded, rows)
-    assert "exec-1" in table and "PASS" in table and "$3.75" in table and "1/6 passed" in table
+    assert "exec-1" in table and "PASS" in table and "$3.75" in table and "1/33 passed" in table
 
 
 @pytest.mark.unit
@@ -1050,12 +1536,17 @@ def test_launch_on_a_fresh_server_installs_the_workflow_before_any_eval(tmp_path
     assert paths[0] == ("POST", "/workflows/from-yaml")
     assert paths[1] == ("GET", f"/workflows/{_WF}")
     assert "prompt_file" not in server.requests[0].content.decode()
-    creates = [json.loads(r.content) for r in server.requests if r.url.path == "/evals"]
+    creates = [
+        json.loads(r.content)
+        for r in server.requests
+        if r.method == "POST" and r.url.path == "/evals"
+    ]
     starts = [json.loads(r.content) for r in server.requests if r.url.path.endswith("/execute")]
     assert [c["baseline_repos"][0]["requested_ref"] for c in creates] == [
         c.commit for c in loaded.cases
     ]
-    assert all(loaded.tag in c["tags"] for c in creates)
+    assert [c["tags"] for c in creates] == [["suite:verifier-seed", c.tag] for c in loaded.cases]
+    assert all(s["tags"] == ["suite-version:5", f"verifier:{_WF}"] for s in starts)
     assert [s["eval_id"] for s in starts] == [f"eval-{c.commit[:6]}" for c in loaded.cases]
     assert len(lines) == 1 + len(loaded.cases)
 
@@ -1129,15 +1620,21 @@ def test_launch_under_the_codex_verifier_runs_and_records_the_codex_workflow(
 
     paths = [(r.method, r.url.path) for r in server.requests]
     assert paths[1] == ("GET", f"/workflows/{_CODEX_WF}")
-    creates = [json.loads(r.content) for r in server.requests if r.url.path == "/evals"]
-    assert {c["starting_workflow_id"] for c in creates} == {_CODEX_WF}
-    assert all(f"verifier-seed-v1:v2:{_CODEX_WF}" in c["tags"] for c in creates)
-    assert all("verifier-seed-v1:v2:eval-verify-pinned-v1" not in c["tags"] for c in creates)
+    creates = [
+        json.loads(r.content)
+        for r in server.requests
+        if r.method == "POST" and r.url.path == "/evals"
+    ]
+    # The case evals are shared by every verifier; the run says which one it was.
+    assert all("starting_workflow_id" not in c for c in creates)
+    starts = [json.loads(r.content) for r in server.requests if r.url.path.endswith("/execute")]
+    assert {tuple(s["tags"]) for s in starts} == {("suite-version:5", f"verifier:{_CODEX_WF}")}
+    assert all(not any(t.startswith("verifier") for t in c["tags"][1:]) for c in creates)
     starts = [r.url.path for r in server.requests if r.url.path.endswith("/execute")]
     assert set(starts) == {f"/workflows/{_CODEX_WF}/execute"}
     recorded = read_launches(ledger)
     assert {(x.suite, x.workflow_id) for x in recorded} == {
-        (f"verifier-seed-v1:v2:{_CODEX_WF}", _CODEX_WF)
+        (f"verifier-seed-v1:v5:{_CODEX_WF}", _CODEX_WF)
     }
 
 
@@ -1222,9 +1719,12 @@ class _LedgerServer:
     def handle(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path
         parts = path.strip("/").split("/")
+        if request.method == "POST" and path.endswith("/score"):
+            return httpx.Response(200, json={})
         if path == "/evals":
-            tag = request.url.params.get("tag")
-            evals = [self._eval(x) for x in self.by_eval.values() if x.suite == tag]
+            # Before the duplicate migration: no eval carries the stable suite tag.
+            tags = set(request.url.params.get_list("tag"))
+            evals = [self._eval(x) for x in self.by_eval.values() if {x.suite} == tags]
             return httpx.Response(
                 200,
                 json={
@@ -1239,14 +1739,9 @@ class _LedgerServer:
             return httpx.Response(200, json=self._eval(self.by_eval[parts[1]]))
         if parts[0] == "evals" and parts[2:] == ["runs"]:
             x = self.by_eval[parts[1]]
-            run = {
-                "workflow_execution_id": x.run_id,
-                "workflow_id": x.workflow_id,
-                "workflow_name": "w",
-                "status": "completed",
-            }
+            run = {"execution_id": x.run_id, "workflow_id": x.workflow_id, "status": "completed"}
             return httpx.Response(
-                200, json={"total": 1, "page": 1, "page_size": 200, "executions": [run]}
+                200, json={"total": 1, "page": 1, "page_size": 200, "items": [run]}
             )
         if parts[0] == "executions":
             x = self.by_run[parts[1]]
@@ -1332,20 +1827,81 @@ def test_the_committed_v1_ledger_scores_four_of_four_against_the_v1_cases(
 
 
 @pytest.mark.unit
-def test_v1_runs_never_count_toward_v2(tmp_path: Path) -> None:
+def test_v1_runs_never_count_toward_the_current_version(tmp_path: Path) -> None:
     launches = _v1_ledger(tmp_path)
-    v2 = load_suite(DEFAULT_SUITE)
-    rows, unrecorded = score_suite(v2, _LedgerServer(launches).client(), launches)
+    current = load_suite(DEFAULT_SUITE)
+    rows, unrecorded = score_suite(current, _LedgerServer(launches).client(), launches)
 
-    assert len(rows) == 6 and {r.status for r in rows} == {"not launched"}
+    assert len(rows) == 33 and {r.status for r in rows} == {"not launched"}
     assert unrecorded == ()
 
 
 @pytest.mark.unit
 def test_score_prints_every_version_the_workflow_ran() -> None:
     suite = load_suite(DEFAULT_SUITE).suite
-    assert versions_run(suite, _WF) == [1, 2]
-    assert versions_run(suite, _CODEX_WF) == [2]
+    assert versions_run(suite, _WF) == [1, 3, 4, 5]
+    assert versions_run(suite, _CODEX_WF) == [2, 3, 4, 5]
+    assert versions_run(suite, _SONNET_WF) == [3, 4, 5]
+
+
+# The twelve cases of #1750's v3: the six v2 defects and the six clean controls.
+_V3_CLEAN = {
+    "clean-acquisition-fence-test",
+    "clean-api-stdlib-event-loop",
+    "clean-capture-volume-release",
+    "clean-github-token-installation-routing",
+    "clean-redis-signal-queue-fail-open",
+    "clean-remote-source-single-predicate",
+}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("workflow", [_WF, _CODEX_WF, _SONNET_WF])
+def test_v3_under_each_verifier_holds_its_twelve_cases_and_its_own_tag(workflow: str) -> None:
+    v3 = load_suite(DEFAULT_SUITE, workflow=workflow, version=3)
+
+    assert v3.tag == f"verifier-seed-v1:v3:{workflow}"
+    assert v3.workflow.id == workflow
+    assert {c.id for c in v3.cases if c.polarity == "defect"} == _V2_CASES
+    assert {c.id for c in v3.cases if c.polarity == "clean"} == _V3_CLEAN
+
+
+# Both were blocked by two strong verifiers for a real defect: retired in v5.
+_RETIRED = {"clean-github-token-installation-routing", "clean-redis-signal-queue-fail-open"}
+
+
+@pytest.mark.unit
+def test_a_retired_control_scores_in_the_versions_that_held_it_and_never_launches_again(
+    tmp_path: Path,
+) -> None:
+    v4 = load_suite(DEFAULT_SUITE, version=4)
+    held = {c.id: c for c in v4.cases if c.id in _RETIRED}
+    assert set(held) == _RETIRED and len(v4.cases) == 36
+    # As it ran: still a clean control there, so v4's runs score as they did.
+    assert all(isinstance(c, CleanCase) for c in held.values())
+
+    current = load_suite(DEFAULT_SUITE)
+    assert not {c.id for c in current.cases} & _RETIRED
+    ledger = tmp_path / "launches.jsonl"
+    launch_suite(current, _Server(current).client(), ledger)
+    assert not {x.case for x in read_launches(ledger)} & _RETIRED
+
+
+@pytest.mark.unit
+def test_a_retired_case_no_history_version_holds_is_refused(tmp_path: Path) -> None:
+    suite_dir = _copy_suite(tmp_path)
+    case = suite_dir / "cases" / "redis-retry-non-idempotent.yaml"
+    case.write_text(case.read_text() + "retired: v5 - never ran\n")
+
+    with pytest.raises(
+        DefinitionError, match=r"retired case\(s\) \['redis-retry-non-idempotent'\]"
+    ):
+        load_suite(suite_dir)
+
+
+@pytest.mark.unit
+def test_v3_defaults_to_the_first_verifier_it_ran() -> None:
+    assert load_suite(DEFAULT_SUITE, version=3).workflow.id == _WF
 
 
 @pytest.mark.unit
@@ -1365,6 +1921,97 @@ def test_a_history_entry_naming_a_missing_case_is_refused(tmp_path: Path) -> Non
     suite_dir = _copy_suite(tmp_path)
     (suite_dir / "cases" / "codex-cost-limit.yaml").unlink()
     with pytest.raises(DefinitionError, match=r"history v1 names no such case\(s\)"):
+        load_suite(suite_dir)
+
+
+# Read from the committed ledger, as the v1 fixture is: the six-case v2 codex runs.
+_V2_CASES = {
+    "binary-artifact-minio-key",
+    "codex-cost-limit",
+    "execution-id-as-eval-id",
+    "live-commits-unvalidated-sha",
+    "repo-privacy-ignores-app",
+    "shared-esp-stream",
+}
+
+
+@pytest.mark.unit
+def test_the_committed_v2_codex_runs_score_against_the_six_v2_cases_only() -> None:
+    v2 = load_suite(DEFAULT_SUITE, workflow=_CODEX_WF, version=2)
+    launches = [x for x in read_launches(DEFAULT_SUITE / "launches.jsonl") if x.suite == v2.tag]
+    rows, unrecorded = score_suite(v2, _LedgerServer(launches).client(), launches)
+
+    assert {c.id for c in v2.cases} == _V2_CASES
+    assert {r.case for r in rows} == _V2_CASES
+    assert "not launched" not in {r.status for r in rows}
+    assert unrecorded == ()
+
+
+# ---------------------------------------------------------------------------
+# Train and holdout
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_the_holdout_is_new_cases_only_and_within_its_share() -> None:
+    cases = load_suite(DEFAULT_SUITE).cases
+    holdout = {c.id for c in cases if c.split == "holdout"}
+
+    assert len(holdout) == 10 and len(cases) == 33
+    # The pre-v4 defects were already run against the verifiers: never holdout.
+    assert not holdout & _V2_CASES
+
+
+@pytest.mark.unit
+def test_a_train_launch_never_starts_a_holdout_case(tmp_path: Path) -> None:
+    train = load_suite(DEFAULT_SUITE, split="train")
+    ledger = tmp_path / "launches.jsonl"
+    launch_suite(train, _Server(train).client(), ledger)
+
+    holdout = {c.id for c in load_suite(DEFAULT_SUITE, split="holdout").cases}
+    launched = {x.case for x in read_launches(ledger)}
+    assert len(launched) == 23
+    assert not launched & holdout
+
+
+@pytest.mark.unit
+def test_the_split_flag_selects_the_cases_check_reports(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The pins themselves are checked by the shallow-guarded tests above; this
+    # one is about what the CLI hands to the check, so it runs on a shallow CI
+    # clone too.
+    checked: list[LoadedSuite] = []
+
+    def record(loaded: LoadedSuite, repo: Path) -> list[str]:
+        checked.append(loaded)
+        return []
+
+    monkeypatch.setattr(eval_suite, "check_commits", record)
+    assert main(["check", "--split", "holdout"]) == 0
+    assert [c.split for c in checked[0].cases] == ["holdout"] * 10
+    out = capsys.readouterr().out
+    assert ": 10 case(s)" in out
+    assert "case:binary-artifact-minio-key" not in out
+
+
+@pytest.mark.unit
+def test_a_case_without_a_split_is_refused(tmp_path: Path) -> None:
+    suite_dir = _copy_suite(tmp_path)
+    case = suite_dir / "cases" / "codex-cost-limit.yaml"
+    case.write_text(case.read_text().replace("split: train\n", ""))
+
+    with pytest.raises(DefinitionError, match="split"):
+        load_suite(suite_dir)
+
+
+@pytest.mark.unit
+def test_a_suite_with_too_little_holdout_is_refused(tmp_path: Path) -> None:
+    suite_dir = _copy_suite(tmp_path)
+    for path in (suite_dir / "cases").glob("*.yaml"):
+        path.write_text(path.read_text().replace("split: holdout", "split: train"))
+
+    with pytest.raises(DefinitionError, match="0 of 33 cases are holdout"):
         load_suite(suite_dir)
 
 
@@ -1476,8 +2123,8 @@ def test_an_identical_relaunch_is_an_unchanged_install(tmp_path: Path) -> None:
     _, client = _provenanced_server(loaded, templates)
     again = launch_suite(loaded, client, ledger)
 
-    assert first[0].startswith(f"workflow {_CODEX_WF}: created as 2.0.0")
-    assert again[0].startswith(f"workflow {_CODEX_WF}: unchanged as 2.0.0")
+    assert first[0].startswith(f"workflow {_CODEX_WF}: created as 5.0.0")
+    assert again[0].startswith(f"workflow {_CODEX_WF}: unchanged as 5.0.0")
 
 
 @pytest.mark.unit
@@ -1506,7 +2153,7 @@ def test_a_cli_installed_archived_record_is_restored_by_launch_without_force(
     `syn workflow install workflows/evals/verify-pinned-codex` records version
     0.0.0 (no manifest), no digest and package name; `syn workflow delete -f`
     archives it. An install declaring no version is refused (provenance guard).
-    `launch` declares 2.0.0 + digest: a different version on an archived
+    `launch` declares the suite version + digest: a different version on an archived
     template, so the update is accepted, the template is active again and the
     recorded provenance is the suite's. No `force` is needed.
     """
@@ -1524,7 +2171,7 @@ def test_a_cli_installed_archived_record_is_restored_by_launch_without_force(
     lines = launch_suite(loaded, client, tmp_path / "launches.jsonl")
 
     stored = templates.by_id[_CODEX_WF]
-    assert lines[0].startswith(f"workflow {_CODEX_WF}: created as 2.0.0")
+    assert lines[0].startswith(f"workflow {_CODEX_WF}: created as 5.0.0")
     assert not stored.is_archived
     assert stored.source_digest == install_provenance(loaded, document).source_digest
 
@@ -1575,5 +2222,490 @@ def test_an_unchanged_relaunch_restores_an_archived_template(tmp_path: Path) -> 
     _, client = _provenanced_server(loaded, templates)
     lines = launch_suite(loaded, client, tmp_path / "launches.jsonl")
 
-    assert lines[0].startswith(f"workflow {_CODEX_WF}: created as 2.0.0")
+    assert lines[0].startswith(f"workflow {_CODEX_WF}: created as 5.0.0")
     assert not templates.by_id[_CODEX_WF].is_archived
+
+
+@pytest.mark.unit
+def test_launch_reuses_each_case_eval_and_creates_none(tmp_path: Path) -> None:
+    loaded = load_suite(DEFAULT_SUITE)
+    server = _Server(loaded)
+    server.existing = True
+
+    launch_suite(loaded, server.client(), tmp_path / "launches.jsonl")
+
+    assert not any(r.method == "POST" and r.url.path == "/evals" for r in server.requests)
+    starts = [json.loads(r.content) for r in server.requests if r.url.path.endswith("/execute")]
+    assert [s["eval_id"] for s in starts] == [f"eval-{c.commit[:6]}" for c in loaded.cases]
+    assert {tuple(s["tags"]) for s in starts} == {("suite-version:5", f"verifier:{_WF}")}
+
+
+@pytest.mark.unit
+def test_score_records_each_verdict_on_the_eval() -> None:
+    loaded = load_suite(DEFAULT_SUITE)
+    server = _Server(loaded)
+
+    score_suite(loaded, server.client(), [_LAUNCHED])
+
+    [(path, body)] = server.scores
+    assert path == "/evals/eval-1/runs/exec-1/score"
+    assert body["verdict"] == "PASS"
+    assert body["score"] == 1.0
+    assert (body["scorer"], body["scorer_version"]) == ("eval_suite.py", "5")
+    assert isinstance(body["evidence"], str) and _CASE in body["evidence"]
+
+
+# ---------------------------------------------------------------------------
+# Clean controls: a merged change with no known defect passes only certified
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def merged(tmp_path: Path) -> tuple[Path, str, str, str]:
+    """A repo whose main merged a one-commit PR with --no-ff: (repo, base, PR head, merge)."""
+    repo = tmp_path / "merged"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    _git(repo, "config", "user.email", "t@example.com")
+    _git(repo, "config", "user.name", "t")
+    (repo / "a.py").write_text("one\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "base")
+    base = _git(repo, "rev-parse", "HEAD")
+    _git(repo, "checkout", "-qb", "feature")
+    (repo / "a.py").write_text("two\n")
+    _git(repo, "commit", "-qam", "feat: two")
+    head = _git(repo, "rev-parse", "HEAD")
+    _git(repo, "checkout", "-q", "main")
+    _git(repo, "merge", "-q", "--no-ff", "-m", "Merge pull request #7 from feature", "feature")
+    return repo, base, head, _git(repo, "rev-parse", "HEAD")
+
+
+def _later(repo: Path, message: str) -> str:
+    """Commit `message` on main 31 days after HEAD, touching a file of its own, so
+    the control's quiet window has passed."""
+    (repo / "later.txt").write_text(message)
+    _git(repo, "add", "later.txt")
+    when = int(_git(repo, "show", "-s", "--format=%ct", "HEAD")) + 31 * _DAY
+    env = {**os.environ, "GIT_AUTHOR_DATE": f"@{when}", "GIT_COMMITTER_DATE": f"@{when}"}
+    subprocess.run(["git", "-C", str(repo), "commit", "-qm", message], env=env, check=True)
+    return _git(repo, "rev-parse", "HEAD")
+
+
+def _clean_suite(tmp_path: Path, commit: str, merge: str, through: str) -> Path:
+    suite_dir = _copy_suite(tmp_path)
+    suite_file = suite_dir / "suite.yaml"
+    suite = yaml.safe_load(suite_file.read_text())
+    suite.pop("history", None)
+    suite_file.write_text(yaml.safe_dump(suite))
+    for p in (suite_dir / "cases").glob("*.yaml"):
+        p.unlink()
+    case = {
+        "id": "control",
+        "polarity": "clean",
+        "source_pr": 7,
+        "commit": commit,
+        "merge_commit": merge,
+        "clean_through": through,
+        "task": "Review it.",
+        "split": "train",
+    }
+    (suite_dir / "cases" / "control.yaml").write_text(json.dumps(case))
+    return suite_dir
+
+
+@pytest.mark.unit
+def test_check_passes_a_clean_pin_at_the_merged_pr_head(
+    tmp_path: Path, merged: tuple[Path, str, str, str]
+) -> None:
+    repo, _, head, merge = merged
+    through = _later(repo, "chore: changelog for #7")  # a mention that fixes nothing
+    loaded = load_suite(_clean_suite(tmp_path, head, merge, through))
+    assert [c.polarity for c in loaded.cases] == ["clean"]
+    assert check_commits(loaded, repo) == []
+
+
+@pytest.mark.unit
+def test_check_refuses_a_clean_pin_that_is_not_the_merges_second_parent(
+    tmp_path: Path, merged: tuple[Path, str, str, str]
+) -> None:
+    repo, base, _, merge = merged
+    through = _later(repo, "chore: later")
+    problems = check_commits(load_suite(_clean_suite(tmp_path, base, merge, through)), repo)
+    assert problems == [
+        f"control: pins {base[:12]}, but the merge {merge[:12]}'s second parent is "
+        f"{_git(repo, 'rev-parse', merge + '^2')[:12]}; pin the PR head the merge took"
+    ]
+
+
+@pytest.mark.unit
+def test_check_refuses_a_merge_off_the_first_parent_chain(
+    tmp_path: Path, merged: tuple[Path, str, str, str]
+) -> None:
+    # A merge made inside a branch and brought in by a later merge is not one
+    # main took: its first parent is the branch, not main.
+    repo, _, _, _ = merged
+    _git(repo, "checkout", "-qb", "outer")
+    _git(repo, "checkout", "-qb", "inner")
+    (repo / "b.py").write_text("b\n")
+    _git(repo, "add", "b.py")
+    _git(repo, "commit", "-qm", "feat: b")
+    inner_head = _git(repo, "rev-parse", "HEAD")
+    _git(repo, "checkout", "-q", "outer")
+    _git(repo, "merge", "-q", "--no-ff", "-m", "Merge inner", "inner")
+    inner_merge = _git(repo, "rev-parse", "HEAD")
+    _git(repo, "checkout", "-q", "main")
+    (repo / "c.py").write_text("c\n")
+    _git(repo, "add", "c.py")
+    _git(repo, "commit", "-qm", "main moves on")
+    _git(repo, "merge", "-q", "--no-ff", "-m", "Merge outer", "outer")
+    tip = _git(repo, "rev-parse", "HEAD")
+
+    problems = check_commits(load_suite(_clean_suite(tmp_path, inner_head, inner_merge, tip)), repo)
+    assert problems == [
+        f"control: the merge {inner_merge[:12]} is not on the first-parent chain of {tip[:12]}"
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "message", ["fix: the PR #7 retry never stops", "Fix(#7): restore the lost key"]
+)
+def test_check_refuses_a_clean_control_a_later_commit_fixes(
+    tmp_path: Path, merged: tuple[Path, str, str, str], message: str
+) -> None:
+    repo, _, head, merge = merged
+    fix = _later(repo, message)
+    through = _later(repo, "chore: unrelated")
+    problems = check_commits(load_suite(_clean_suite(tmp_path, head, merge, through)), repo)
+    assert problems == [
+        f"control: {fix[:12]} fixes or reverts #7 after it merged; "
+        "a clean control must have no known defect"
+    ]
+
+
+@pytest.mark.unit
+def test_check_refuses_a_clean_control_git_revert_undid(
+    tmp_path: Path, merged: tuple[Path, str, str, str]
+) -> None:
+    # `git revert` names the merge by SHA, never by PR number.
+    repo, _, head, merge = merged
+    _git(repo, "revert", "--no-edit", "-m", "1", merge)
+    revert = _git(repo, "rev-parse", "HEAD")
+    through = _later(repo, "chore: later")
+    problems = check_commits(load_suite(_clean_suite(tmp_path, head, merge, through)), repo)
+    assert problems == [
+        f"control: {revert[:12]} fixes or reverts #7 after it merged; "
+        "a clean control must have no known defect"
+    ]
+
+
+_DAY = 86400
+_PR_FILE = "def kept():\n    return 1\n\n\nclass Box:\n    def changed(self):\n        return 2\n"
+
+
+def _commit_at(repo: Path, when: int, message: str, text: str | None = None) -> str:
+    """Commit on the current branch at epoch `when`, writing `text` to m.py if given."""
+    if text is not None:
+        (repo / "m.py").write_text(text)
+    else:
+        (repo / "other.txt").write_text(message)
+    _git(repo, "add", ".")
+    env = {**os.environ, "GIT_AUTHOR_DATE": f"@{when}", "GIT_COMMITTER_DATE": f"@{when}"}
+    subprocess.run(["git", "-C", str(repo), "commit", "-qm", message], env=env, check=True)
+    return _git(repo, "rev-parse", "HEAD")
+
+
+@pytest.fixture
+def quiet(tmp_path: Path) -> tuple[Path, str, str, int]:
+    """A repo whose main merged a PR that changed `Box.changed` in m.py at day 0:
+    (repo, PR head, merge, the merge's epoch)."""
+    repo = tmp_path / "quiet"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    _git(repo, "config", "user.email", "t@example.com")
+    _git(repo, "config", "user.name", "t")
+    day0 = 1_780_000_000
+    _commit_at(repo, day0 - _DAY, "base", _PR_FILE.replace("return 2", "return 0"))
+    _git(repo, "checkout", "-qb", "feature")
+    head = _commit_at(repo, day0 - 60, "feat: box", _PR_FILE)
+    _git(repo, "checkout", "-q", "main")
+    env = {**os.environ, "GIT_AUTHOR_DATE": f"@{day0}", "GIT_COMMITTER_DATE": f"@{day0}"}
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo),
+            "merge",
+            "-q",
+            "--no-ff",
+            "-m",
+            "Merge pull request #7",
+            "feature",
+        ],
+        env=env,
+        check=True,
+    )
+    return repo, head, _git(repo, "rev-parse", "HEAD"), day0
+
+
+@pytest.mark.unit
+def test_check_refuses_a_control_whose_function_a_later_commit_changes_within_30_days(
+    tmp_path: Path, quiet: tuple[Path, str, str, int]
+) -> None:
+    # Moved below a new function first, so only its qualified name finds it.
+    repo, head, merge, day0 = quiet
+    moved = "def added():\n    return 9\n\n\n" + _PR_FILE
+    _commit_at(repo, day0 + _DAY, "feat: added", moved)
+    touch = _commit_at(
+        repo, day0 + 2 * _DAY, "refactor: tidy", moved.replace("return 2", "return 3")
+    )
+    through = _commit_at(repo, day0 + 40 * _DAY, "chore: later")
+
+    problems = check_commits(load_suite(_clean_suite(tmp_path, head, merge, through)), repo)
+    assert problems == [
+        f"control: {touch[:12]} changes m.py:Box.changed within 30 days of the merge; "
+        "a clean control's code must stay untouched that long"
+    ]
+
+
+@pytest.mark.unit
+def test_check_passes_a_control_whose_other_functions_or_later_days_see_the_change(
+    tmp_path: Path, quiet: tuple[Path, str, str, int]
+) -> None:
+    repo, head, merge, day0 = quiet
+    other = _PR_FILE.replace("return 1", "return 5")
+    _commit_at(repo, day0 + _DAY, "feat: kept", other)  # not a function the PR changed
+    _commit_at(repo, day0 + 31 * _DAY, "feat: box", other.replace("return 2", "return 3"))
+    through = _commit_at(repo, day0 + 40 * _DAY, "chore: later")
+
+    loaded = load_suite(_clean_suite(tmp_path, head, merge, through))
+    assert check_commits(loaded, repo) == []
+
+
+@pytest.mark.unit
+def test_check_refuses_a_control_younger_than_30_days_and_spares_an_older_one(
+    tmp_path: Path, quiet: tuple[Path, str, str, int]
+) -> None:
+    repo, head, merge, day0 = quiet
+    young = _commit_at(repo, day0 + 10 * _DAY, "chore: later")
+    old = _commit_at(repo, day0 + 30 * _DAY, "chore: later still")
+
+    assert check_commits(
+        load_suite(_clean_suite(tmp_path / "young", head, merge, young)), repo
+    ) == [
+        f"control: clean_through {young[:12]} is under 30 days after the merge; "
+        "a clean control needs that long untouched"
+    ]
+    assert check_commits(load_suite(_clean_suite(tmp_path / "old", head, merge, old)), repo) == []
+
+
+def _quiet_repo(tmp_path: Path, before: str, after: str) -> tuple[Path, str, str, int]:
+    """Like `quiet`, but the PR changes m.py from `before` to `after`."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    _git(repo, "config", "user.email", "t@example.com")
+    _git(repo, "config", "user.name", "t")
+    day0 = 1_780_000_000
+    _commit_at(repo, day0 - _DAY, "base", before)
+    _git(repo, "checkout", "-qb", "feature")
+    head = _commit_at(repo, day0 - 60, "feat: change", after)
+    _git(repo, "checkout", "-q", "main")
+    env = {**os.environ, "GIT_AUTHOR_DATE": f"@{day0}", "GIT_COMMITTER_DATE": f"@{day0}"}
+    merge = ["git", "-C", str(repo), "merge", "-q", "--no-ff", "-m", "Merge #7", "feature"]
+    subprocess.run(merge, env=env, check=True)
+    return repo, head, _git(repo, "rev-parse", "HEAD"), day0
+
+
+def _touches_after(tmp_path: Path, after: str, later: str) -> tuple[str, list[str]]:
+    """A PR changes `return 0` to `return 2` in `after`; on day 2 main rewrites m.py
+    to `later`. Returns that commit and what `check` says, read through day 40."""
+    repo, head, merge, day0 = _quiet_repo(tmp_path, after.replace("return 2", "return 0"), after)
+    touch = _commit_at(repo, day0 + 2 * _DAY, "refactor: later", later)
+    through = _commit_at(repo, day0 + 40 * _DAY, "chore: later")
+    return touch, check_commits(load_suite(_clean_suite(tmp_path, head, merge, through)), repo)
+
+
+def _untouched(touch: str) -> str:
+    return f"control: {touch[:12]} changes m.py:"
+
+
+@pytest.mark.unit
+def test_check_follows_a_function_defined_under_a_conditional(tmp_path: Path) -> None:
+    source = "if True:\n    def changed():\n        return 2\n"
+    touch, problems = _touches_after(tmp_path, source, source.replace("return 2", "return 3"))
+    assert problems == [
+        f"{_untouched(touch)}changed within 30 days of the merge; "
+        "a clean control's code must stay untouched that long"
+    ]
+
+
+@pytest.mark.unit
+def test_check_follows_a_property_getter_beside_its_same_named_setter(tmp_path: Path) -> None:
+    source = (
+        "class Box:\n    @property\n    def value(self):\n        return 2\n\n"
+        "    @value.setter\n    def value(self, new):\n        self._value = new\n"
+    )
+    touch, problems = _touches_after(tmp_path, source, source.replace("return 2", "return 3"))
+    assert problems == [
+        f"{_untouched(touch)}Box.value within 30 days of the merge; "
+        "a clean control's code must stay untouched that long"
+    ]
+
+
+@pytest.mark.unit
+def test_check_ignores_a_function_added_after_the_changed_one(tmp_path: Path) -> None:
+    source = "def changed():\n    return 2\n"
+    _, problems = _touches_after(tmp_path, source, source + "\n\ndef other():\n    return 9\n")
+    assert problems == []
+
+
+@pytest.mark.unit
+def test_check_refuses_a_line_inserted_inside_the_changed_function(tmp_path: Path) -> None:
+    source = "def changed():\n    return 2\n"
+    later = "def changed():\n    print()\n    return 2\n"
+    touch, problems = _touches_after(tmp_path, source, later)
+    assert problems == [
+        f"{_untouched(touch)}changed within 30 days of the merge; "
+        "a clean control's code must stay untouched that long"
+    ]
+
+
+@pytest.mark.unit
+def test_a_clean_case_with_a_fix_or_expected_findings_is_refused(tmp_path: Path) -> None:
+    suite_dir = _copy_suite(tmp_path)
+    case = suite_dir / "cases" / "clean-api-stdlib-event-loop.yaml"
+    case.write_text(case.read_text() + "fix_commit: " + "a" * 40 + "\n")
+
+    with pytest.raises(DefinitionError, match="fix_commit"):
+        load_suite(suite_dir)
+
+
+@pytest.mark.unit
+def test_a_case_without_a_polarity_is_refused(tmp_path: Path) -> None:
+    suite_dir = _copy_suite(tmp_path)
+    case = suite_dir / "cases" / "codex-cost-limit.yaml"
+    case.write_text(case.read_text().replace("polarity: defect\n", ""))
+
+    with pytest.raises(DefinitionError, match="polarity"):
+        load_suite(suite_dir)
+
+
+@pytest.mark.unit
+def test_each_split_holds_clean_controls() -> None:
+    # 31 defects outnumber the 2 controls, so a false-block rate is only
+    # measurable on each side of the split if both sides hold some.
+    for split in ("train", "holdout"):
+        cases = load_suite(DEFAULT_SUITE, split=split).cases
+        assert any(isinstance(c, CleanCase) for c in cases), split
+        assert any(isinstance(c, DefectCase) for c in cases), split
+
+
+def _clean_case() -> CleanCase:
+    return next(c for c in load_suite(DEFAULT_SUITE).cases if isinstance(c, CleanCase))
+
+
+@pytest.mark.unit
+def test_a_certified_clean_control_passes() -> None:
+    score = score_case(_clean_case(), "certified", "## BLOCKING\n\nNone.\n")
+    assert score.passed and not score.false_block
+
+
+@pytest.mark.unit
+def test_a_blocked_clean_control_fails_as_a_false_block_whatever_it_names() -> None:
+    # The finding names a defect seed's file and every keyword: on a clean
+    # control that is still a false block, never a catch.
+    score = score_case(_clean_case(), "blocked", _FINDING)
+    assert score.findings == 1
+    assert not score.passed and score.false_block
+
+
+@pytest.mark.unit
+def test_a_clean_control_with_no_verdict_fails_and_is_not_a_false_block() -> None:
+    score = score_case(_clean_case(), None, "")
+    assert not score.passed and not score.false_block
+
+
+@pytest.mark.unit
+def test_score_case_still_needs_a_defect_blocked_and_named() -> None:
+    defect = _case(_CASE)
+    assert score_case(defect, "blocked", _FINDING).passed
+    assert not score_case(defect, "certified", _FINDING).passed
+    assert not score_case(defect, "blocked", "## BLOCKING\n\nNone.\n").passed
+    assert not score_case(defect, "blocked", _FINDING).false_block
+
+
+def _clean_server(loaded: LoadedSuite, verdict: str) -> tuple[_Server, Launch]:
+    clean = _clean_case()
+    server = _Server(loaded)
+    server.case, server.eval_pin, server.verdict = clean.id, clean.commit, verdict
+    launch = Launch(
+        suite=loaded.tag,
+        case=clean.id,
+        eval_id="eval-1",
+        run_id="exec-1",
+        commit=clean.commit,
+        workflow_id=loaded.workflow.id,
+    )
+    return server, launch
+
+
+@pytest.mark.unit
+def test_score_records_a_certified_clean_control_as_a_pass() -> None:
+    loaded = load_suite(DEFAULT_SUITE)
+    server, launch = _clean_server(loaded, "certified")
+    rows, _ = score_suite(loaded, server.client(), [launch])
+
+    [(_, body)] = server.scores
+    assert (body["verdict"], body["score"]) == ("PASS", 1.0)
+    assert f"{_clean_case().id} (clean)" in str(body["evidence"])
+    table = render(loaded, rows)
+    assert "1/33 passed" in table
+    assert "false-block rate (clean controls blocked): 0/1 (0%)" in table
+    assert "catch rate (defect cases blocked and named): -" in table
+
+
+@pytest.mark.unit
+def test_score_records_a_blocked_clean_control_as_a_false_block() -> None:
+    loaded = load_suite(DEFAULT_SUITE)
+    server, launch = _clean_server(loaded, "blocked")
+    rows, _ = score_suite(loaded, server.client(), [launch])
+
+    [(_, body)] = server.scores
+    assert (body["verdict"], body["score"]) == ("FAIL", 0.0)
+    table = render(loaded, rows)
+    assert "0/33 passed" in table
+    assert "false-block rate (clean controls blocked): 1/1 (100%)" in table
+
+
+@pytest.mark.unit
+def test_rates_separate_catches_from_false_blocks_per_table() -> None:
+    loaded = load_suite(DEFAULT_SUITE)
+    clean = _clean_case()
+    defect = _case(_CASE)
+
+    def row(case_id: str, score: Score) -> ScoredRun:
+        return ScoredRun(
+            case=case_id,
+            eval_id="e",
+            run_id="r",
+            status="completed",
+            score=score,
+            cost_usd=None,
+            duration="-",
+            models="-",
+        )
+
+    rows = [
+        row(defect.id, score_case(defect, "blocked", _FINDING)),
+        row(defect.id, score_case(defect, "certified", "")),
+        row(clean.id, score_case(clean, "blocked", _FINDING)),
+        row(clean.id, score_case(clean, "certified", "")),
+        row(clean.id, score_case(clean, "certified", "")),
+    ]
+    assert rates(rows) == (
+        "catch rate (defect cases blocked and named): 1/2 (50%)\n"
+        "false-block rate (clean controls blocked): 1/3 (33%)"
+    )
+    assert "3/5 passed" in render(loaded, rows)

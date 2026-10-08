@@ -161,6 +161,9 @@ def _match_sql(query: PageQuery, params: _Params) -> str:
         where, values = _build_where_clause(dict(query.equals), start_idx=len(params.values) + 1)
         params.values.extend(values)
         conditions.append(where.removeprefix(" WHERE "))
+    for name, wanted in query.present.items():
+        # ``->>`` reads a JSON null as SQL NULL, as ``record.get`` reads it as None.
+        conditions.append(f"data->>'{_field(name)}' IS {'NOT ' if wanted else ''}NULL")
     for name, required in query.contains_all.items():
         if required:
             tags = json.dumps(sorted(pg_safe(tag) for tag in required))

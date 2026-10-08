@@ -13,6 +13,7 @@ import { Activity } from 'lucide-react'
 import { useMemo } from 'react'
 import {
   Card,
+  DEFAULT_STATUSES,
   EmptyState,
   ListPageHeader,
   ListPagination,
@@ -20,12 +21,18 @@ import {
   ResourceFilterBar,
   StaleResults,
 } from '../../components'
+import { ReadModelNotice } from '../../components/ReadPathBanner'
 import { useExecutionList } from '../../hooks/useExecutionList'
 import { useIsMobile } from '../../hooks/useMediaQuery'
+import { useRebuildingReadModel } from '../../hooks/useReadPathHealth'
 import { useRowSelection } from '../../hooks/useRowSelection'
 import { formatExecutionIds, formatExecutionsForAgent } from '../../utils/executionExport'
+import { EvalFilterChips } from './EvalFilterChips'
 import { ExecutionCardList } from './ExecutionCardList'
 import { ExecutionTable } from './ExecutionTable'
+
+/** An accepted start waiting for a slot is a status only executions have (PC-124). */
+const EXECUTION_STATUSES = [{ value: 'queued', label: 'Queued' }, ...DEFAULT_STATUSES]
 
 function ExecutionEmptyState({ searchQuery }: { searchQuery: string }) {
   return (
@@ -58,6 +65,8 @@ export function ExecutionList() {
     setTimeWindow,
     resetView,
     isDefaultView,
+    evalFilter,
+    setEvalFilter,
     statusCounts,
     sort,
     toggleSort,
@@ -79,6 +88,7 @@ export function ExecutionList() {
   const selection = useRowSelection(selectionItems)
   const isMobile = useIsMobile()
   const emptyState = <ExecutionEmptyState searchQuery={searchQuery} />
+  const rebuilding = useRebuildingReadModel('workflow_executions')
 
   return (
     <div className="space-y-6">
@@ -88,6 +98,8 @@ export function ExecutionList() {
         connected={connected}
         lastEventAt={lastEventAt}
       />
+
+      <ReadModelNotice status={rebuilding} />
 
       <ListToolbar
         searchPlaceholder="Search executions..."
@@ -111,7 +123,10 @@ export function ExecutionList() {
         setTimeWindow={setTimeWindow}
         reset={resetView}
         isDefault={isDefaultView}
+        statuses={EXECUTION_STATUSES}
       />
+
+      <EvalFilterChips value={evalFilter} onChange={setEvalFilter} />
 
       <StaleResults stale={stale} failed={failed} onRetry={retry}>
         {isMobile ? (

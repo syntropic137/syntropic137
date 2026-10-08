@@ -94,6 +94,7 @@ from syn_domain.contexts.orchestration import (
     ReviewVerdict,
     SideEffectStatus,
     TagSet,
+    Verdict,
 )
 
 # One import, and no TC001: DEFAULT_PHASE_SANDBOX is a Pydantic field default
@@ -102,6 +103,7 @@ from syn_domain.contexts.orchestration import (
 from syn_shared.agents import DEFAULT_PHASE_SANDBOX, AliasResolutionBasis
 from syn_shared.codex_auth_status import CodexAuthStatus  # noqa: TC001
 from syn_shared.display import format_utc_timestamp
+from syn_shared.display.formatters import EM_DASH
 from syn_shared.observed_model import format_observed_model
 
 # ---------------------------------------------------------------------------
@@ -568,6 +570,8 @@ class PhaseDefinitionResponse(BaseModel):
     fallback_agent: FallbackAgentResponse | None = None
     clone_repos: bool = True
     delivers_repo_changes: bool = True
+    # PC-116: the phase fails when it reports no review_verdict.
+    requires_verdict: bool = False
     sandbox: str = DEFAULT_PHASE_SANDBOX
     claude_plugins: list[PhaseRefResponse] = Field(default_factory=list)
     skills: list[PhaseRefResponse] = Field(default_factory=list)
@@ -1074,6 +1078,29 @@ class EvalArchivedResponse(BaseModel):
     archived: bool
 
 
+class EvalVariantResponse(BaseModel):
+    """Every run of an eval with the same workflow, workflow version and OBSERVED models.
+
+    (Evals v2.) Two versions of one workflow are two variants: an edit between
+    runs is a different treatment, and pooling them would hide its effect.
+    """
+
+    workflow_id: str
+    workflow_version: str | None = None
+    """The installed version (or source digest) the runs launched from. Null if unrecorded."""
+    models: list[ObservedModelId]
+    """Sorted, unique models the runs' phases reported running. Never an alias."""
+    run_count: int
+    pass_count: int
+    pass_rate: float | None
+    """PASS over this variant's PASS + FAIL runs, 0..1 (ERROR excluded). Null when none."""
+    pass_rate_display: str
+    avg_cost_usd: Decimal | None
+    """Mean over the runs whose cost is known. Null when none is."""
+    avg_cost_display: str
+    last_run_at: str | None
+
+
 class EvalResponse(BaseModel):
     """An eval as the eval read model holds it, with its run tally (#967)."""
 
@@ -1092,6 +1119,158 @@ class EvalResponse(BaseModel):
     """Executions currently in the eval. A detached run is not counted."""
     run_status_counts: dict[str, int]
     """Those executions tallied by execution status."""
+    scored_count: int = 0
+    """Runs with a score. ``ERROR`` counts as scored, and is left out of the pass rate."""
+    pass_rate: float | None = None
+    """PASS over PASS + FAIL runs, 0..1 (ERROR excluded). Null when there are none."""
+    pass_rate_display: str = EM_DASH
+    last_run_at: str | None = None
+    """When the newest run started, ISO 8601 UTC."""
+    last_verdict: Verdict | None = None
+    """The verdict of the newest run that has one."""
+    variants: list[EvalVariantResponse] = Field(default_factory=list)
+    """The eval's runs grouped by workflow and the models its phases actually ran."""
+
+
+class EvalRunModelResponse(BaseModel):
+    """The model one phase of a run ACTUALLY ran, as its harness reported it."""
+
+    phase_id: str
+    model: ObservedModelId
+
+
+class EvalRunResponse(BaseModel):
+    """One run of an eval: one data point of how the eval changes over time (Evals v2)."""
+
+    execution_id: str
+    started_at: str | None
+    completed_at: str | None
+    status: str
+    workflow_id: str
+    workflow_version: str | None = None
+    """The workflow's installed version (or source digest, when it has no version)
+    as the run launched it, recorded on the run's start event. Null for a run
+    started before that was recorded, a resume, or a template with neither."""
+    models: list[EvalRunModelResponse]
+    """Observed per phase; a phase with no reported model is omitted."""
+    total_cost_usd: Decimal | None
+    total_cost_display: str
+    duration_seconds: float | None
+    duration_display: str
+    verdict: Verdict | None
+    score: float | None
+    evidence_excerpt: str | None
+    """The start of the scorer's markdown evidence; the full text is on the score."""
+    scorer: str | None
+    scorer_version: str | None
+    scored_at: str | None
+
+
+class EvalRunListResponse(BaseModel):
+    """One page of an eval's current runs, newest first (Evals v2)."""
+
+    items: list[EvalRunResponse]
+    total: int
+    """Every current run of the eval, whatever the page size."""
+    page: int
+    page_size: int
+
+
+class EvalRunScoreRequest(BaseModel):
+    """A scorer's verdict on one run of an eval. Re-scoring replaces the current score."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    verdict: Verdict
+    score: float | None = Field(default=None, ge=0.0, le=1.0)
+    evidence: str = ""
+    """Markdown."""
+    scorer: str = Field(min_length=1)
+    scorer_version: str = Field(min_length=1)
+
+
+class EvalRunScoreResponse(BaseModel):
+    """The run's score as recorded (Evals v2)."""
+
+    eval_id: str
+    execution_id: str
+    verdict: Verdict
+    score: float | None
+    evidence: str
+    scorer: str
+    scorer_version: str
+    scored_at: str
+
+
+class ExecutionEvalRunResponse(BaseModel):
+    """The eval an execution is a run of, and that run's current verdict (Evals v2).
+
+    Carried on ``GET /executions/{id}`` so an execution page can link to its eval
+    and show how the run was judged without a second request.
+    """
+
+    eval_id: str
+    eval_name: str | None
+    """The eval's name. Null only while the eval's own record has not been projected."""
+    association_kind: Literal["launched", "attached"]
+    """How the run joined: chosen at launch, or attached afterwards."""
+    verdict: Verdict | None
+    """The run's current verdict. Null until a scorer records one."""
+    score: float | None
+    scored_at: str | None
+    """When the current verdict was recorded, ISO 8601 UTC."""
+
+
+class ReadModelStatus(BaseModel):
+    """Whether one read model is rebuilding, and how far it has got.
+
+    Carried on the list and detail responses a read model serves, so a page can
+    say "this list is incomplete because it is being rebuilt" instead of
+    looking broken, and listed on ``/health`` for every read model that is
+    rebuilding. Judged by ``services.read_model_status``; every number is
+    exact (checkpoint position against store head), never estimated.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    rebuilding: bool = Field(
+        description="True while this read model is replaying history: it is more than the "
+        "live-lag threshold (500 events) behind the head. A few events of ordinary live lag "
+        "is NOT rebuilding, even while another read model replays.",
+    )
+    projection: str = Field(description="Projection name, as in projection_checkpoints.")
+    label_display: str = Field(
+        description="What the read model holds, for a sentence, e.g. 'execution history'."
+    )
+    progress_pct: int | None = Field(
+        default=None,
+        description="Checkpoint position as a whole percentage of the store head, 0-99 while "
+        "rebuilding. Null when not rebuilding.",
+    )
+    progress_display: str | None = Field(default=None, description="progress_pct as '72%'.")
+    events_behind: int = Field(
+        default=0, description="Events between the checkpoint and the store head."
+    )
+    events_behind_display: str | None = Field(
+        default=None, description="events_behind as '29,476 events behind'."
+    )
+    summary_display: str | None = Field(
+        default=None,
+        description="One sentence for a banner, e.g. 'Rebuilding execution history - 72% "
+        "(29,476 events behind).' Null when not rebuilding.",
+    )
+
+
+class EvalDetailResponse(EvalResponse):
+    """One eval, as `GET /evals/{eval_id}` returns it.
+
+    The row model plus whether the evals read model is rebuilding, so a
+    missing or stale eval can say why. Kept off `EvalResponse` so every list
+    row does not repeat the list's own status.
+    """
+
+    read_model_status: ReadModelStatus | None = None
+    """Whether the evals read model is rebuilding."""
 
 
 class EvalListResponse(BaseModel):
@@ -1104,6 +1283,8 @@ class EvalListResponse(BaseModel):
     page_size: int
     status_counts: dict[str, int]
     """Matching evals tallied as `active` / `archived`, ignoring the status filter."""
+    read_model_status: ReadModelStatus | None = None
+    """Whether the evals read model is rebuilding, so a short list can say why."""
 
 
 # ---------------------------------------------------------------------------
@@ -2446,6 +2627,11 @@ class SubscriptionHealth(_OmitsAbsentFields):
         default=None,
         description="Every projection short of the head, furthest behind first. Empty when "
         "all are at the head; null when lag is unmeasurable.",
+    )
+    rebuilding_read_models: list[ReadModelStatus] | None = Field(
+        default=None,
+        description="Every read model that is rebuilding, furthest behind first, with display "
+        "strings for a banner. Ordinary live lag is excluded. Null when lag is unmeasurable.",
     )
     unapplied_starts: list[UnappliedStart] | None = Field(
         default=None,

@@ -199,8 +199,9 @@ class TestSixTriggersQueuedBehindFourRunning:
 
 
 class _SlowDispatchedSave(InMemoryProjectionStore):
-    """A store whose `dispatched` write for one key suspends until released -
-    an async Postgres save waiting on its pool, in the shape that matters."""
+    """A store whose hand-off write for one key suspends until released - an
+    async Postgres save waiting on its pool, in the shape that matters. The
+    hand-off writes `queued` since #1707."""
 
     def __init__(self, key: str) -> None:
         super().__init__()
@@ -211,7 +212,7 @@ class _SlowDispatchedSave(InMemoryProjectionStore):
     async def save(
         self, projection: str, key: str, data: dict[str, str | int | float | bool | None]
     ) -> None:
-        if key == self._key and data.get("status") == "dispatched":
+        if key == self._key and data.get("status") == "queued":
             self.suspended.set()
             await self.release.wait()
         await super().save(projection, key, data)
@@ -257,7 +258,7 @@ class TestATriggerHeldAtItsSlotWhileItsDispatchedWriteIsInFlight:
         async with asyncio.timeout(_PATIENCE):
             await gate.set_mode(active=True, reason="pit stop", actor="deploy")
 
-        # The slot frees while the `dispatched` write is still in flight: the
+        # The slot frees while the hand-off write is still in flight: the
         # queued trigger reaches it, is refused, and is handed back held.
         handler.may_finish.set()
         await _let_the_loop_run()
@@ -270,7 +271,7 @@ class TestATriggerHeldAtItsSlotWhileItsDispatchedWriteIsInFlight:
         row = await store.get(name, queued)
         assert row is not None
         assert row["status"] == "paused", (
-            "the in-flight `dispatched` write landed over the hand-back: the "
+            "the in-flight hand-off write landed over the hand-back: the "
             "trigger never ran and nothing will offer it again"
         )
 

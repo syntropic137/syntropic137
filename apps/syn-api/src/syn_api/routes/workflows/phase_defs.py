@@ -168,6 +168,9 @@ def _build_phase_defs(phases: list[dict[str, Any]] | None) -> list[PhaseDefiniti
                 delivers_repo_changes=_as_bool(
                     p.get("delivers_repo_changes", True), "delivers_repo_changes"
                 ),
+                # Dropping this lets a review phase that names no verdict
+                # advance by order as if it had found something (PC-116).
+                requires_verdict=_as_bool(p.get("requires_verdict", False), "requires_verdict"),
                 argument_hint=p.get("argument_hint"),
                 # These four were accepted and discarded (#1011). `provider`
                 # meant every codex phase installed through the API ran as

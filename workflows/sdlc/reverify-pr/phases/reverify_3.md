@@ -77,8 +77,9 @@ not moving the goalposts: it is the same check, read where it actually ran.
 
 ## A check this workspace cannot run is settled by CI on the same head SHA
 
-Some checks cannot run here at all: today the docker-backed fitness tests,
-which `preflight-agent` skips as `NOT RUN`. "Not run here" is not a pass, and
+Some checks cannot run here at all: a gate that needs a binary this workspace
+lacks, or a test the gate itself reports as `NOT RUN` (in syntropic137,
+today, the docker-backed fitness tests). "Not run here" is not a pass, and
 on its own it is not a blocker either. It is a question CI answers for the same
 commit, so read CI's answer instead of holding the PR in draft. PRs #1562 and
 #1576 each sat BLOCKED on exactly this while CI's Architectural Fitness job had
@@ -238,9 +239,10 @@ Your `TASK_RESULT` block MUST carry `"review_verdict"`, exactly `"certified"`
 or `"blocked"`, matching your first line. The engine reads that key, and only
 that key, to decide what runs next: `certified` skips every remaining repair
 round and goes straight to `finalize_pr`; `blocked` runs the next round, or
-ends the run with **unresolved findings** once the rounds are spent. A missing
-or misspelled verdict is read as no verdict, which never skips a round and
-never counts as certified.
+ends the run with **unresolved findings** once the rounds are spent. This phase
+declares `requires_verdict`, so a missing or misspelled verdict FAILS the phase
+("verify produced no verdict") and the review you did is not acted on; it is
+never read as certified.
 
 `review_verdict` is not `success`. A BLOCKED review you completed is a
 successful phase: write `"success": true, "review_verdict": "blocked"`.

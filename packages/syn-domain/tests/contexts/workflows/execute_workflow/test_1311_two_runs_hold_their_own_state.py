@@ -120,6 +120,9 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.slices.execute_workflow.phase_cost_limit import (
         PhaseCostLimit,
     )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.phase_push import (
+        PushObserver,
+    )
     from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import Runner
 
 pytestmark = pytest.mark.unit
@@ -376,6 +379,7 @@ class _AnAgentThatSignsItsWork:
         runner: Runner | None = None,
         on_launch: AgentLaunchObserver | None = None,
         cost_limit: PhaseCostLimit | None = None,
+        on_push: PushObserver | None = None,
     ) -> AgentExecutionResult:
         execution_id = todo.execution_id
         self.launches.append(
@@ -755,6 +759,7 @@ class _OneRunGoesDownWhileTheOtherWorks:
         runner: Runner | None = None,
         on_launch: AgentLaunchObserver | None = None,
         cost_limit: PhaseCostLimit | None = None,
+        on_push: PushObserver | None = None,
     ) -> AgentExecutionResult:
         execution_id = todo.execution_id
         self.sessions[execution_id] = session_id

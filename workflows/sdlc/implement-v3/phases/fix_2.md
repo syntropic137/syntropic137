@@ -71,6 +71,18 @@ report. If the remote branch has moved, or either value is missing or different,
 Something pushed over the branch after it was reviewed, and repairing a tree
 nobody verified produces a diff no pass in this run has ever seen.
 
+**The one exception: your own unverified commits (PC-128).** When the resume
+note in your context says `OWN UNVERIFIED COMMITS` for this branch, this
+execution's own earlier attempt at this phase pushed that head and was
+interrupted before anything verified it. The platform recorded those pushes as
+they happened and has already confirmed origin's head is one of them. Then
+the verified SHA above is replaced by the head SHA that note names: run the
+same commands with it, and both `rev-parse` results must equal it. Before you
+change anything, re-run the verification `verify.md` describes against that
+head and report its result in `fix.md`, naming that head as the verified SHA;
+fix only what that verification finds. Without that note, a moved branch is
+someone else's push, and the rule above stands.
+
 After committing, push normally. **Never force-push** - the remote head is the
 verified head, so a fast-forward is the only push that can be correct here, and
 one that is not fast-forward means the check above should have stopped you.
@@ -116,9 +128,10 @@ record the exact mutation and the failure output, then revert the mutation. A
 mutation that breaks nothing means the test asserts nothing, and the next
 verification pass will catch that and the run will have been wasted twice.
 
-New Python test files need the `unit` marker (`architecture` under
-`ci/fitness/`). CI runs `pytest -m unit`; an unmarked module collects zero tests
-and goes green over nothing.
+**Show it collected.** A test the repository's gate does not select proves
+nothing however it is written: in syntropic137, for one, the unit gate selects by
+`pytest` marker, and an unmarked module collects zero tests and goes green over
+nothing. Read how the gate selects tests and confirm yours is among them.
 
 ## Commit AND push
 
@@ -132,23 +145,28 @@ listing each finding and what you did about it, with the new head SHA. Do not
 mark the PR ready; that is `finalize_pr`'s decision alone. If no PR exists,
 say so in `fix.md`; `finalize_pr` will create it.
 
-Before pushing, run:
+Before pushing, run the repository's gates - the same ones verification ran.
+They come from the repository, not from this prompt: its `AGENTS.md` (or
+`CLAUDE.md`) `## Verification gates` section when it has one, and otherwise
+whatever its pull-request CI, task runner or docs name as the gate. The verify
+report says which it used and where each command came from; use the same
+commands, so the next verification judges what you judged. Redirect the
+workspace's write locations first:
 
 ```
 mkdir -p /workspace/.tmp /workspace/.cache
 export TMPDIR=/workspace/.tmp XDG_CACHE_HOME=/workspace/.cache UV_CACHE_DIR=/workspace/.cache/uv
-just preflight-agent
-uv run pytest -m unit -q
 ```
 
-`preflight-agent`, not `preflight`: this workspace ships `just`, `uv` and
-`node` and nothing else, so the full target's `vsa`, Cargo, pnpm and Docker
-gates cannot run here at all (#1109). The `TMPDIR` exports are not decoration
-either - `/tmp` is mounted `noexec` and `just` materialises every shebang
-recipe into a temp directory, so without them the gate dies on its first recipe
-before it reaches your change (#1100).
+The exports are not decoration - `/tmp` is mounted `noexec` and `just`
+materialises every shebang recipe into a temp directory, so without them the
+gate dies on its first recipe before it reaches your change (#1100). This
+workspace ships `just`, `uv`, `node`, `gh` and `rustup` and nothing else; a gate
+that fails on a missing binary did not run, so say so rather than substituting
+a command the repository did not choose.
 
-Record the final output of both commands in `fix.md`, and commit any tracked
+Record which gates you ran, where each came from, and the final output of each
+in `fix.md`, and commit any tracked
 auto-fixes before pushing: lint the commit, not the worktree, or local green
 becomes remote red.
 

@@ -389,6 +389,10 @@ export interface ExecutionListItem {
   /** Full GitHub URLs of repositories cloned for this execution (ADR-058) */
   repos: string[]
   repos_display: string | null
+  /** The eval this run is a current data point of, with its verdict; null in none. */
+  eval: components['schemas']['ExecutionEvalRunResponse'] | null
+  /** Set exactly when `status` is `queued`: where the start waits, and why (PC-124). */
+  start_queue: ExecutionStartQueueInfo | null
 }
 
 /**
@@ -406,6 +410,10 @@ export interface ExecutionListItem {
  * this alias a drop-in.
  */
 export type ExecutionListResponse = components['schemas']['ExecutionListResponse']
+/** Where an accepted start waits for a slot, and why (#1557, PC-124). */
+export type ExecutionStartQueueInfo = components['schemas']['ExecutionStartQueueInfo']
+/** How full the execution budget is: running, queued and the cap (PC-124). */
+export type ExecutionBudgetInfo = components['schemas']['ExecutionBudgetInfo']
 
 export interface PhaseExecutionDetail {
   /**
@@ -475,6 +483,8 @@ export type PlannedPhaseInfo = components['schemas']['PlannedPhaseInfo']
 export interface ExecutionDetailResponse {
   /** Explicit naming for OTel correlation (ADR-028) */
   workflow_execution_id: string
+  /** Whether the execution detail read model is rebuilding, judged by the API. */
+  read_model_status?: components['schemas']['ReadModelStatus'] | null
   workflow_id: string
   workflow_name: string
   status: string
@@ -549,6 +559,11 @@ export interface ExecutionDetailResponse {
    * dispatched with no task; absent from a server that predates the field.
    */
   task?: string | null
+  /**
+   * The eval this execution is a current run of, with its current verdict
+   * (Evals v2). Null in no eval; absent from a server that predates the field.
+   */
+  eval?: components['schemas']['ExecutionEvalRunResponse'] | null
 }
 
 // =============================================================================

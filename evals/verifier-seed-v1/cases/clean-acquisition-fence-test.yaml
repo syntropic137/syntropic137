@@ -1,0 +1,19 @@
+id: clean-acquisition-fence-test
+polarity: clean
+# A control, not a defect: PR #1643, merged 2026-10-05. A verifier passes it only by
+# certifying. clean_through is main when the history after the merge was read
+# (`check` re-reads it): no later fix or revert names the PR, and no later
+# commit to its files fixes what it changed.
+source_pr: 1643
+commit: 843576f4504e016096e0325ef180bc95461ad671
+merge_commit: dfc01457004000e9a036af8feaab3badf517267b
+clean_through: 4108b74fc2f7f74b280aed08a49f6eb91c796a3f
+task: >
+  The change under review rewrites a flaky session-inventory test so it
+  asserts the acquisition status checkpoint's fence rather than the journal's
+  maximum position. Review whether the test now pins the behaviour it is
+  named for, and whether it can still flake.
+split: train
+# Under QUIET_DAYS old at every clean_through main can give it (main is
+# 4108b74fc, 2026-10-08), so it cannot meet the quiet-window rule yet.
+retired: v5 - under 30 days of quiet history; it scores in v4 as it ran

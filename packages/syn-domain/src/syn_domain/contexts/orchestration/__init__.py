@@ -37,6 +37,7 @@ from syn_domain.contexts.orchestration._shared.eval_choice import (
 from syn_domain.contexts.orchestration._shared.eval_membership_edit import (
     EvalMembershipResult,
 )
+from syn_domain.contexts.orchestration._shared.execution_list_reads import ExecutionListReads
 from syn_domain.contexts.orchestration._shared.repository_baseline import BaselineRequest
 from syn_domain.contexts.orchestration._shared.resolved_claude_plugin import (
     ResolvedClaudePlugin,
@@ -90,7 +91,12 @@ from syn_domain.contexts.orchestration.domain import (
     WorkflowTemplateAggregate,
     WorkspaceAggregate,
 )
-from syn_domain.contexts.orchestration.domain.aggregate_eval import EvalId, Goal
+from syn_domain.contexts.orchestration.domain.aggregate_eval import (
+    EvalId,
+    EvalRunNotMemberError,
+    Goal,
+    Verdict,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
     FailExecutionCommand,
     ResumeExecutionCommand,
@@ -160,6 +166,9 @@ from syn_domain.contexts.orchestration.domain.commands import (
     UpdatePhasePromptCommand,
     UpdateWorkflowTemplateCommand,
 )
+from syn_domain.contexts.orchestration.domain.commands.RecordEvalRunScoreCommand import (
+    RecordEvalRunScoreCommand,
+)
 from syn_domain.contexts.orchestration.domain.commands.RequestExecutionCommand import (
     RequestExecutionCommand,
 )
@@ -212,6 +221,8 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.cancelled_work_re
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     CredentialRenewalFailedError,
     DuplicateExecutionError,
+    ProvisionStep,
+    ProvisionStepTimeoutError,
     UnsupportedToolPolicyForProviderError,
     WorkflowNotFoundError,
 )
@@ -267,6 +278,9 @@ from syn_domain.contexts.orchestration.slices.manage_global_claude_plugins impor
 from syn_domain.contexts.orchestration.slices.notify_quarantine import (
     PullRequestCommenter,
     QuarantineNoticeProcessManager,
+)
+from syn_domain.contexts.orchestration.slices.record_eval_run_score import (
+    RecordEvalRunScoreHandler,
 )
 from syn_domain.contexts.orchestration.slices.set_workflow_default_eval import (
     SetWorkflowDefaultEvalHandler,
@@ -355,6 +369,7 @@ __all__ = [
     "EvalChoice",
     "EvalId",
     "EvalMembershipResult",
+    "EvalRunNotMemberError",
     "EvalUnavailableError",
     # Value objects - execution
     "ExecutablePhase",
@@ -365,6 +380,7 @@ __all__ = [
     # Query services
     "ExecutionCostQueryService",
     "ExecutionJournal",
+    "ExecutionListReads",
     "ExecutionRequestAggregate",
     "ExecutionRequestStartProcessManager",
     "ExecutionRequestStartRecord",
@@ -399,10 +415,14 @@ __all__ = [
     # What a phase spent, as the failure path reports it (#1262)
     "PhaseUsage",
     "PlannedPhase",
+    "ProvisionStep",
+    "ProvisionStepTimeoutError",
     "PullRequestCommenter",
     "QuarantineNoticeProcessManager",
     "QuarantinedRef",
     "ReclaimableDir",
+    "RecordEvalRunScoreCommand",
+    "RecordEvalRunScoreHandler",
     "RemoveExecutionTagsCommand",
     "RemoveExecutionTagsHandler",
     "RemoveWorkflowTagsCommand",
@@ -440,6 +460,7 @@ __all__ = [
     "UpdatePhasePromptCommand",
     "UpdateWorkflowPhaseHandler",
     "UpdateWorkflowTemplateCommand",
+    "Verdict",
     "WithdrawExecutionRequestCommand",
     "WorkflowClassification",
     "WorkflowDefinition",

@@ -1,0 +1,147 @@
+---
+title: Evals
+description: Run a workflow repeatedly against a frozen baseline to measure it - create an eval, launch or attach runs, run a versioned eval suite and score it, and what is not shipped yet
+---
+
+An **eval** is an experiment: a goal, measured by runs that all start from the
+same repository baseline. Use it to compare a workflow, prompt or model against
+itself over time, or against a variant, on exactly the same code.
+
+## What an eval is
+
+| Term | Meaning |
+| --- | --- |
+| Eval | Id `eval-<uuid>`. Has a `name`, a `goal`, `tags`, and a baseline |
+| Goal | What the eval measures, in a sentence or a paragraph. Never empty |
+| Repository baseline | Per repository: the ref you asked for (`requested_ref`) and the full `commit_sha` it named at creation. Every run starts from `commit_sha`; moving the branch later changes nothing |
+| Freeze | Fixes the goal and baseline permanently. Happens automatically before the first run is admitted. Name and tags stay editable. There is no unfreeze |
+| Archive | Soft delete. The eval stays readable with its runs and admits no new ones |
+| Run | An execution that belongs to the eval. An execution belongs to at most one eval |
+
+Executions launched into an eval record the frozen baseline on their start
+event as `eval_baseline`, and their workspaces are checked out at those SHAs.
+Before the agent starts, each repository's checked-out HEAD is verified against
+the pinned commit; a mismatch fails setup with `CheckoutMismatchError`.
+
+## CLI
+
+```bash
+# Create an eval; each --repo ref is resolved to a full commit SHA now
+syn eval create --name "verify finds seeded bugs" \
+  --goal "Does verify block a change carrying a known bug?" \
+  --repo syntropic137/syntropic137@main \
+  --workflow eval-verify-pinned-v1 \
+  --tag verifier
+
+syn eval list [--status active|archived] [--tag t]... [--page N] [--page-size N]
+syn eval show <eval-id>          # goal, baseline and run tally
+syn eval runs <eval-id>          # executions currently in the eval
+syn eval archive <eval-id>
+
+# Launch a run into an eval
+syn workflow run <workflow-id> -t "<task>" --eval <eval-id>
+
+# Opt out of a workflow's default eval for one run
+syn workflow run <workflow-id> -t "<task>" --no-eval
+
+# Move an existing execution in or out, in any status
+syn eval attach <execution-id> <eval-id>
+syn eval detach <execution-id> <eval-id>
+```
+
+`--eval` and `--no-eval` cannot be combined. A ref that cannot be resolved
+refuses the whole `create`.
+
+## API
+
+| Method and path | Purpose |
+| --- | --- |
+| `POST /evals` | Create |
+| `GET /evals`, `GET /evals/{eval_id}` | List, show |
+| `GET /evals/{eval_id}/runs` | Executions in the eval (an `ExecutionListResponse`) |
+| `POST /evals/{eval_id}/archive` | Archive |
+| `POST /executions/{execution_id}/eval` | Attach |
+| `DELETE /executions/{execution_id}/eval` | Detach |
+| `PUT /workflows/{workflow_id}/default-eval` | Set or clear a workflow's default eval |
+| `GET /executions?eval_id=<id>` | Filter the execution list by eval |
+
+When starting a workflow over the API, pass `eval_id` to choose the eval or
+`no_eval: true` for an ordinary run. Passing both is a 422.
+
+## Default eval and how a run chose its eval
+
+A workflow may declare `default_eval_id` in its YAML (or have one set with
+`PUT /workflows/{id}/default-eval`). Its runs join that eval unless the launch
+names another or passes `--no-eval`. Changing it never moves a run already
+started.
+
+Each execution records `eval_selection`: `explicit`, `workflow_default`,
+`ordinary` (opted out), or `none` (no eval named and no default).
+
+## Attach and detach
+
+- Attach records membership on the **execution**, in any status, including
+  finished ones. It copies nothing: the run keeps the commits it actually
+  started from, and attaching does not freeze the eval. So an attached run may
+  not have started from the eval's baseline.
+- Attaching to the eval it already belongs to succeeds and records nothing.
+  Attaching to a different eval is refused until it is detached.
+- Detach works on an archived eval. `launched_eval_id` still records the eval a
+  run was launched into.
+
+## Eval suites (`scripts/eval_suite.py`)
+
+A suite is a versioned set of cases checked into the repository under
+`evals/<suite-id>/`: `suite.yaml` names the goal, the workflows and their
+models, and `cases/*.yaml` holds one case each - a commit carrying a known
+bug, and what a report must say to have found it. Each case is its own eval
+(one baseline SHA per repository), and the suite is the set of evals carrying
+the suite's tag `<id>:v<version>:<workflow id>`.
+
+```bash
+uv run python scripts/eval_suite.py check  [--suite DIR]                   # offline: validates cases, commits and files
+uv run python scripts/eval_suite.py launch [--suite DIR] [--workflow ID] [--api-url URL]
+uv run python scripts/eval_suite.py score  [--suite DIR] [--workflow ID] [--version N] [--api-url URL]
+```
+
+- `check` needs only git.
+- `launch` installs the suite's workflow from the checked-in file with install
+  provenance (version `<n>.0.0`, `source_digest` of the YAML), creates the
+  evals and starts **real agent runs, which cost money**. Never run it from CI.
+  A workflow file changed without a suite version bump is refused (409) before
+  any eval exists. Each launch is appended to `evals/<suite-id>/launches.jsonl`;
+  commit that file, because `score` reads only the runs it names.
+- `score` only reads. It prints one table per suite version the selected
+  workflow ran, each version against its own case set.
+- `--workflow` picks which listed workflow (variant) to launch or score; the
+  first listed is the default.
+
+### The verifier-seed suite
+
+`evals/verifier-seed-v1` asks: does the verifier block a change that carries a
+known escaped bug, and name the defect and the file it lives in? Each case is a
+commit with a bug the platform's own verify once certified. Its workflows
+differ only in who verifies:
+
+| Workflow | Verifier |
+| --- | --- |
+| `eval-verify-pinned-v1` | Opus 5.5 |
+| `eval-verify-pinned-codex-v1` | codex |
+| `eval-verify-pinned-sonnet-v1` | Sonnet 5.5 |
+
+Changing a listed workflow's model or prompt bumps the suite version; earlier
+versions keep their scores under `history` in `suite.yaml`.
+
+## Limits
+
+- One eval per baseline. Cases at different commits of the same repository need
+  separate evals.
+- There is no stored per-run score and no first-class variant object yet:
+  variants are separate workflows, and scoring is done by `eval_suite.py score`.
+- An attached run is not guaranteed to have started from the eval's baseline.
+
+## Coming in Evals v2 (not shipped)
+
+Evals v2 is open as pull requests and is **not** in a release yet: recorded run
+scores and variants on the backend, and an Evals section in the dashboard.
+Until it merges, use the CLI and `eval_suite.py` described above.

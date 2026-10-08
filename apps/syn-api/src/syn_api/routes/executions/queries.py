@@ -16,11 +16,13 @@ from syn_api._wiring_admission import get_execution_budget
 from syn_api.cache_rate_display import cache_rate_display
 from syn_api.list_query import MAX_PAGE_SIZE, WindowBound, parse_statuses
 from syn_api.model_identity import cost_by_observed_model
+from syn_api.services.read_model_status import read_model_status
 from syn_api.types import (
     Err,
     ExecutionDetail,
     ExecutionDetailFull,
     ExecutionError,
+    ExecutionEvalRunResponse,
     ExecutionSummary,
     Ok,
     PhaseExecution,
@@ -35,6 +37,12 @@ from syn_domain.contexts.orchestration import (
     TagSet,
     read_record,
 )
+from syn_domain.contexts.orchestration.slices.get_execution_detail.projection import (
+    WorkflowExecutionDetailProjection,
+)
+from syn_domain.contexts.orchestration.slices.list_executions.projection import (
+    WorkflowExecutionListProjection,
+)
 from syn_domain.pagination import Page
 from syn_shared.display import (
     format_cost,
@@ -45,6 +53,7 @@ from syn_shared.display import (
 )
 
 from .models import (
+    ExecutionBudgetInfo,
     ExecutionDetailResponse,
     ExecutionListResponse,
     ExecutionSummaryResponse,
@@ -56,7 +65,7 @@ from .phase_mapping import (
     _map_phase_to_response,
     load_configured_models,
 )
-from .queued_start import not_yet_started, start_queue_info
+from .queued_start import QueuedStart, not_yet_started, queued_starts, start_queue_info
 from .start_config import load_start_configs
 
 if TYPE_CHECKING:
@@ -173,6 +182,7 @@ def _merge_totals(
 def _build_execution_summary_response(
     e: ExecutionSummary,
     enrichment: _ExecutionEnrichment | None = None,
+    eval_run: ExecutionEvalRunResponse | None = None,
 ) -> ExecutionSummaryResponse:
     """Compose an ExecutionSummaryResponse from a domain summary + enrichment.
 
@@ -217,6 +227,7 @@ def _build_execution_summary_response(
         repos=list(e.repos),
         tags=list(e.tags),
         repos_display=format_repos(e.repos),
+        eval=eval_run,
     )
 
 
@@ -305,6 +316,7 @@ async def _load_execution_list_data(
     search: str | None = None,
     tags: TagSet | None = None,
     eval_id: str | None = None,
+    in_eval: bool | None = None,
 ) -> tuple[Page[WorkflowExecutionSummary], dict[str, _ExecutionEnrichment]]:
     """Fetch one page of domain summaries plus its tool-count and cost enrichment, once.
 
@@ -330,6 +342,7 @@ async def _load_execution_list_data(
             search=search,
             tags=tags,
             eval_id=eval_id,
+            in_eval=in_eval,
             offset=offset,
             limit=limit,
         )
@@ -654,10 +667,19 @@ async def list_executions_endpoint(
             "Matched exactly, never as a prefix."
         ),
     ),
+    in_eval: bool | None = Query(
+        None,
+        description=(
+            "true keeps only executions that are currently a run of some eval; "
+            "false keeps only executions in no eval. Omit for both."
+        ),
+    ),
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(50, ge=1, le=MAX_PAGE_SIZE, description="Items per page"),
 ) -> ExecutionListResponse:
     """List all workflow executions across all workflows."""
+    from syn_api.routes.eval_runs import execution_eval_runs  # eval_runs imports this module
+
     try:
         tags = TagSet(tag or ())
     except InvalidTagsError as exc:
@@ -665,35 +687,142 @@ async def list_executions_endpoint(
     offset = (page - 1) * page_size
     await ensure_connected()
     manager = get_projection_mgr()
+    selected = parse_statuses(statuses, status)
+    all_queued = await queued_starts(manager.store)
+    queued = _filter_queued(
+        all_queued,
+        tags=tags,
+        eval_id=eval_id,
+        in_eval=in_eval,
+        search=q,
+        after=started_after,
+        before=started_before,
+    )
+    shown = queued if selected is None or QUEUED in selected else []
+    # Queued rows lead the collection: they are the newest starts, and the
+    # ones an operator is waiting on. The projection pages after them.
+    head = shown[offset : offset + page_size]
     execution_page, cost_by_execution = await _load_execution_list_data(
         manager,
         None,
-        parse_statuses(statuses, status),
-        page_size,
-        offset,
+        _read_model_statuses(selected),
+        page_size - len(head) or 1,
+        max(0, offset - len(shown)),
         started_after=started_after,
         started_before=started_before,
         search=q,
         tags=tags,
         eval_id=eval_id,
+        in_eval=in_eval,
     )
+    eval_by_execution = await execution_eval_runs(manager.store, execution_page.rows)
+    names = await _workflow_names(manager, {qs.workflow_id for qs in head})
     return ExecutionListResponse(
-        executions=[
+        executions=[qs.as_summary(names.get(qs.workflow_id, "")) for qs in head]
+        + [
             _build_execution_summary_response(
                 _to_execution_summary(s, cost_by_execution),
                 cost_by_execution.get(s.workflow_execution_id),
+                eval_by_execution.get(s.workflow_execution_id),
             )
-            for s in execution_page.rows
+            for s in execution_page.rows[: page_size - len(head)]
         ],
         # The size of the filtered COLLECTION, not this page's length (#1119),
         # and counted over every filter above rather than status alone (#1159):
         # a total that ignores the time window describes all of history while
         # the rows describe a day of it.
-        total=execution_page.total,
+        total=execution_page.total + len(shown),
         page=page,
         page_size=page_size,
         excluded_undated=execution_page.excluded_undated,
-        status_counts=execution_page.status_counts,
+        # Like every other status, present only when something has it.
+        status_counts=_with_queued_count(execution_page.status_counts, len(queued)),
+        budget=await _budget_info(len(all_queued)),
+        read_model_status=await read_model_status(WorkflowExecutionListProjection.PROJECTION_NAME),
+    )
+
+
+QUEUED = "queued"
+"""The list's status for an accepted start with no execution yet (PC-124).
+
+A read-model status, not a domain one: the execution does not exist until its
+stream opens, so `ExecutionStatus` has nothing to say about it."""
+
+
+def _read_model_statuses(selected: list[str] | None) -> list[str] | None:
+    """The statuses to ask the read model for, which never holds a queued row.
+
+    "Only queued" still asks, for the totals and the other chips, with a
+    status no row has, so it pages no rows of its own.
+    """
+    if selected is None:
+        return None
+    return [s for s in selected if s != QUEUED] or [QUEUED]
+
+
+def _filter_queued(
+    starts: list[QueuedStart],
+    *,
+    tags: TagSet,
+    eval_id: str | None,
+    in_eval: bool | None,
+    search: str | None,
+    after: datetime | None,
+    before: datetime | None,
+) -> list[QueuedStart]:
+    """The queued starts the list's filters keep.
+
+    A queued start has no read model, so no tags or eval to judge: a request
+    filtering on either is not shown one, and it is in no eval, so
+    ``in_eval=true`` excludes it while ``in_eval=false`` keeps it. It has not started, so a time
+    window judges when it was accepted - the dashboard's default 24h window
+    would otherwise hide every queued start.
+    """
+    if tags or eval_id or in_eval:
+        return []
+    return [qs for qs in starts if _matches(qs, search=search, after=after, before=before)]
+
+
+def _with_queued_count(counts: dict[str, int], queued: int) -> dict[str, int]:
+    """The read model's counts plus queued, present only when something has it."""
+    return {**counts, QUEUED: queued} if queued else dict(counts)
+
+
+def _matches(
+    start: QueuedStart, *, search: str | None, after: datetime | None, before: datetime | None
+) -> bool:
+    """The list's search and window, as they apply to a start that has not started."""
+    queued_at = start.queue.queued_at
+    if (after is not None and queued_at < after) or (before is not None and queued_at > before):
+        return False
+    if not search:
+        return True
+    needle = search.lower()
+    return needle in start.execution_id.lower() or needle in start.workflow_id.lower()
+
+
+async def _workflow_names(manager: ProjectionManager, workflow_ids: set[str]) -> dict[str, str]:
+    names: dict[str, str] = {}
+    for workflow_id in workflow_ids:
+        workflow = await manager.workflow_detail.get_by_id(workflow_id)
+        if workflow is not None:
+            names[workflow_id] = workflow.name
+    return names
+
+
+async def _budget_info(queued: int) -> ExecutionBudgetInfo:
+    from syn_api._wiring_admission import get_maintenance_port
+
+    budget = get_execution_budget()
+    try:
+        paused = (await get_maintenance_port().current()).active
+    except Exception:
+        # The list must not fail because the flag could not be read; the
+        # admission paths themselves refuse in that case.
+        logger.warning("could not read maintenance mode for the list", exc_info=True)
+        paused = None
+    return ExecutionBudgetInfo(
+        running=budget.running, queued=queued, limit=budget.limit, admission_paused=paused
     )
 
 
@@ -768,6 +897,7 @@ async def _resume_start_of(
 async def get_execution_endpoint(execution_id: str) -> ExecutionDetailResponse:
     """Get detailed information about a workflow execution run (supports partial ID prefix matching)."""
     from syn_api._wiring import get_projection_mgr
+    from syn_api.routes.eval_runs import execution_eval_run  # eval_runs imports this module
 
     mgr = get_projection_mgr()
     found = await _detail_or_queued(mgr, execution_id)
@@ -782,6 +912,9 @@ async def get_execution_endpoint(execution_id: str) -> ExecutionDetailResponse:
     artifact_ids = [p.artifact_id for p in phases if p.artifact_id]
     cache_rates = cache_rate_display(_models_run(phases))
     return ExecutionDetailResponse(
+        read_model_status=await read_model_status(
+            WorkflowExecutionDetailProjection.PROJECTION_NAME
+        ),
         workflow_execution_id=detail.workflow_execution_id,
         workflow_id=detail.workflow_id,
         workflow_name=detail.workflow_name,
@@ -821,4 +954,5 @@ async def get_execution_endpoint(execution_id: str) -> ExecutionDetailResponse:
         task=detail.task,
         inputs=dict(detail.inputs),
         resume_start=await _resume_start_of(mgr.store, execution_id),
+        eval=await execution_eval_run(mgr.store, execution_id),
     )

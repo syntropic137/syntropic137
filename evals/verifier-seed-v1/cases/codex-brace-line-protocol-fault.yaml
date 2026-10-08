@@ -1,0 +1,22 @@
+id: codex-brace-line-protocol-fault
+polarity: defect
+source_pr: 1168
+# Mined from the fix: the first fix commit's first parent, so the bug is
+# present and nothing of the fix is. Evidence at the pin:
+# `except json.JSONDecodeError:` sets `self._error_reason` immediately (lines
+# 490-492); the fix holds it as `_parse_fault_candidate`.
+commit: c64c5b2ecea2ce94034729db5b8067f713b1949c
+fix_commit: 054fecf81baffc5b3357114cc0c691a652d0a6ef
+task: >
+  Review how the codex stream processor classifies stdout lines: codex
+  protocol events, stream noise, and parse failures. Codex stdout also carries
+  the output of commands the agent itself runs. Review whether a successful
+  phase can be reported as failed.
+expected:
+  files:
+    - packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/CodexStreamProcessor.py
+  keywords:
+    - ["{", "brace", "startswith", "json", "parse", "decode", "malformed"]
+    - ["echo", "agent output", "subprocess", "noise", "tsx", "jsx", "not an event", "not a protocol", "any line", "agent's own", "agent own"]
+    - ["fail", "error reason", "fault", "non zero"]
+split: holdout
