@@ -398,8 +398,8 @@ class PhaseYamlDefinition(BaseModel):
 
     Provisioning has been phase-blind: every phase paid the same clone plus
     recursive submodule init, because the only opt-out was the WORKFLOW-level
-    `requires_repos: false`, which turns cloning off for all of them. A
-    workflow whose implement phase needs a working tree and whose open_pr
+    `requires_repos: false`, which turns cloning off for all of them unless
+    repos are passed explicitly at dispatch (#955). A workflow whose implement phase needs a working tree and whose open_pr
     phase does not could not express that, so the phase doing the least work
     paid the same 600s bootstrap - under the shortest budget in the workflow.
 
