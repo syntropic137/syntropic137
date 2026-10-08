@@ -113,8 +113,12 @@ input::placeholder{color:#6F7FA3}
 <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #9AA8C7">{{w.phases}}</span>
 </div>
 <div style="display: flex; align-items: center; gap: 14px; padding-top: 14px; border-top: 1px solid #1A2032">
-<span style="flex-grow: 1; height: 6px; border-radius: 3px; background: #121727">
-<span style="display: block; width: {{w.pct}}; height: 6px; border-radius: 3px; background: #8E9BBC"></span>
+<span aria-label="{{w.trendLabel}}" style="display: flex; align-items: center; gap: 10px; flex-grow: 1; min-width: 0">
+<svg viewBox="0 0 200 40" preserveAspectRatio="none" aria-hidden="true" style="flex: 1 1 auto; min-width: 48px; height: 26px; overflow: visible"><path d="{{w.spark}}" fill="none" stroke="{{w.sparkC}}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"></path></svg>
+<span style="display: flex; flex-direction: column; align-items: flex-end; gap: 1px; flex-shrink: 0">
+<span style="font-size: 11.5px; font-weight: 600; color: {{w.trendFg}}; white-space: nowrap">{{w.trendWord}}</span>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; color: #6F7FA3; white-space: nowrap">{{w.trendSub}}</span>
+</span>
 </span>
 <a class="ghost" href="Workflow.dc.html" aria-label="{{w.runLabel}}" style="display: flex; align-items: center; gap: 7px; height: 32px; padding: 0 12px; border-radius: 10px; border: 1px solid #283048; background: #0F121C; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04); font-size: 12.5px; font-weight: 600; text-decoration: none">
 <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" style="color: var(--ac)"><path d="M4.5 2.75v10.5L13 8z"></path></svg>
@@ -180,6 +184,17 @@ const PAGE = 12;
 const matched = raw
 .filter((r) => filter === 'all' || (filter === 'skills' ? r[5].length > 0 : r[2].toLowerCase() === filter))
 .sort((a, b) => b[4] - a[4] || a[0].localeCompare(b[0]) || a[1].localeCompare(b[1]));
+
+const trendOf = (n, k) => {
+if (!n) return { spark: 'M0 38 L200 38', sparkC: '#283048', trendWord: 'No runs yet', trendFg: '#6F7FA3', trendSub: '—', trendLabel: 'No runs yet' };
+const pts = Math.max(2, Math.min(n, 12));
+const slope = ((k * 37) % 7) - 3;
+const ys = Array.from({ length: pts }, (_, j) => { const base = 22 + slope * (j / (pts - 1)) * 5; const wob = ((j * 13 + k * 7) % 5) - 2; return Math.max(4, Math.min(36, base + wob)); });
+const spark = ys.map((y, j) => (j ? 'L' : 'M') + ((j / (pts - 1)) * 200).toFixed(1) + ' ' + y.toFixed(1)).join(' ');
+const faster = slope > 0, slower = slope < 0;
+const pct = Math.abs(slope) * 6;
+return { spark, sparkC: 'var(--ac)', trendWord: pts < 3 ? 'Too few runs' : faster ? 'Faster' : slower ? 'Slower' : 'Steady', trendFg: pts < 3 ? '#9AA8C7' : faster ? '#7FE3B8' : slower ? '#FF8A7D' : '#9AA8C7', trendSub: pts < 3 ? n + (n === 1 ? ' run' : ' runs') : (faster ? '−' : slower ? '+' : '±') + pct + '% time, last ' + pts, trendLabel: 'Duration trend: ' + (faster ? pct + '% faster' : slower ? pct + '% slower' : 'steady') + ' over the last ' + pts + ' runs' };
+};
 const rows = matched
 .slice(0, PAGE)
 .map((r) => {
@@ -197,7 +212,7 @@ phases: r[3] === 1 ? '1 phase' : r[3] + ' phases',
 runs: r[4] === 0 ? 'never run' : r[4] === 1 ? '1 run' : r[4] + ' runs',
 runColor: r[4] === 0 ? '#6F7FA3' : '#E8EEFB',
 pct: Math.round((r[4] / 26) * 100) + '%',
-runLabel: 'Run ' + r[0]
+runLabel: 'Run ' + r[0], ...trendOf(r[4], r[0].length + r[3])
 };
 });
 const what = filter === 'all' ? 'workflows' : filter === 'skills' ? 'workflows with skills' : filter + ' workflows';
