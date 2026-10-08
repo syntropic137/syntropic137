@@ -38,7 +38,7 @@ help:
 
 # Self-host onboarding: use the NPX CLI — zero-clone, zero-dep, interactive wizard
 # npx @syntropic137/setup init
-# See https://github.com/syntropic137/syntropic137-npx for full documentation.
+# See https://github.com/syntropic137/syntropic137-setup for full documentation.
 
 # Dev onboarding: submodules → .env → deps → webhook URL → GitHub App → stack
 # GitHub App setup runs by default (use --skip-github to skip).
@@ -2117,7 +2117,7 @@ github-reconfigure:
     @echo ""
     @echo "  npx @syntropic137/setup init --skip-docker"
     @echo ""
-    @echo "See https://github.com/syntropic137/syntropic137-npx for documentation."
+    @echo "See https://github.com/syntropic137/syntropic137-setup for documentation."
 
 # --- Security & Audit ---
 

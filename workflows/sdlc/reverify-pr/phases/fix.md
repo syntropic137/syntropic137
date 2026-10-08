@@ -2,6 +2,8 @@
 
 $ARGUMENTS
 
+**Skills:** before you change code for a finding, invoke the matching one with the Skill tool: `architecture`, `types`, `error-handling` or `principles-and-patterns`.
+
 Read `artifacts/input/verify/verify.md` first. It is the output of an
 independent verification pass over the branch you are about to change. If that
 file is absent, fall back to the temporary compatibility alias
@@ -21,9 +23,9 @@ verification might have said edits a certified branch at nobody's request.
 
 ## Which round this is
 
-**Round 1 of 3.** This workflow repairs in up to three rounds (`fix`, `fix_2`,
-`fix_3`, each followed by its own re-verification). In round 1 the verdict you
-act on is `artifacts/input/verify/verify.md`, as above. Write `Round: 1 of 3` as
+**Round 1 of 2.** This workflow repairs in up to two rounds (`fix` and
+`fix_2`, each followed by its own re-verification). In round 1 the verdict you
+act on is `artifacts/input/verify/verify.md`, as above. Write `Round: 1 of 2` as
 the first line of your report.
 
 ## If verification certified the change, stop
@@ -61,6 +63,18 @@ report. If the remote branch has moved, or either value is missing or different,
 **do not edit and do not push**: report the mismatch in `fix.md` and stop.
 Something pushed over the branch after it was reviewed, and repairing a tree
 nobody verified produces a diff no pass in this run has ever seen.
+
+**The one exception: your own unverified commits (PC-128).** When the resume
+note in your context says `OWN UNVERIFIED COMMITS` for this branch, this
+execution's own earlier attempt at this phase pushed that head and was
+interrupted before anything verified it. The platform recorded those pushes as
+they happened and has already confirmed origin's head is one of them. Then
+the verified SHA above is replaced by the head SHA that note names: run the
+same commands with it, and both `rev-parse` results must equal it. Before you
+change anything, re-run the verification `verify.md` describes against that
+head and report its result in `fix.md`, naming that head as the verified SHA;
+fix only what that verification finds. Without that note, a moved branch is
+someone else's push, and the rule above stands.
 
 After committing, push normally. **Never force-push** - the remote head is the
 verified head, so a fast-forward is the only push that can be correct here, and
@@ -107,9 +121,10 @@ record the exact mutation and the failure output, then revert the mutation. A
 mutation that breaks nothing means the test asserts nothing, and the next
 verification pass will catch that and the run will have been wasted twice.
 
-New Python test files need the `unit` marker (`architecture` under
-`ci/fitness/`). CI runs `pytest -m unit`; an unmarked module collects zero tests
-and goes green over nothing.
+**Show it collected.** A test the repository's gate does not select proves
+nothing however it is written: in syntropic137, for one, the unit gate selects by
+`pytest` marker, and an unmarked module collects zero tests and goes green over
+nothing. Read how the gate selects tests and confirm yours is among them.
 
 ## Commit AND push
 
@@ -123,23 +138,28 @@ listing each finding and what you did about it, with the new head SHA. Do not
 mark the PR ready; that is `finalize_pr`'s decision alone. If no PR exists,
 say so in `fix.md`; `finalize_pr` will create it.
 
-Before pushing, run:
+Before pushing, run the repository's gates - the same ones verification ran.
+They come from the repository, not from this prompt: its `AGENTS.md` (or
+`CLAUDE.md`) `## Verification gates` section when it has one, and otherwise
+whatever its pull-request CI, task runner or docs name as the gate. The verify
+report says which it used and where each command came from; use the same
+commands, so the next verification judges what you judged. Redirect the
+workspace's write locations first:
 
 ```
 mkdir -p /workspace/.tmp /workspace/.cache
 export TMPDIR=/workspace/.tmp XDG_CACHE_HOME=/workspace/.cache UV_CACHE_DIR=/workspace/.cache/uv
-just preflight-agent
-uv run pytest -m unit -q
 ```
 
-`preflight-agent`, not `preflight`: this workspace ships `just`, `uv` and
-`node` and nothing else, so the full target's `vsa`, Cargo, pnpm and Docker
-gates cannot run here at all (#1109). The `TMPDIR` exports are not decoration
-either - `/tmp` is mounted `noexec` and `just` materialises every shebang
-recipe into a temp directory, so without them the gate dies on its first recipe
-before it reaches your change (#1100).
+The exports are not decoration - `/tmp` is mounted `noexec` and `just`
+materialises every shebang recipe into a temp directory, so without them the
+gate dies on its first recipe before it reaches your change (#1100). This
+workspace ships `just`, `uv`, `node`, `gh` and `rustup` and nothing else; a gate
+that fails on a missing binary did not run, so say so rather than substituting
+a command the repository did not choose.
 
-Record the final output of both commands in `fix.md`, and commit any tracked
+Record which gates you ran, where each came from, and the final output of each
+in `fix.md`, and commit any tracked
 auto-fixes before pushing: lint the commit, not the worktree, or local green
 becomes remote red.
 
@@ -149,7 +169,7 @@ becomes remote red.
 under `artifacts/output/` FAILS.** Write the file before you finish, including
 when the answer is "nothing to do".
 
-1. **`Round: N of 3`** as the first line, from the section above, and which
+1. **`Round: N of 2`** as the first line, from the section above, and which
    report you took as the latest verdict.
 2. **What verification found** - one line per defect.
 3. **What you changed** for each, with `file:line`, or why you did not.

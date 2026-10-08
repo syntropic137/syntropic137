@@ -1,0 +1,33 @@
+id: exec-status-lost
+source_pr: 1692
+commit: 8d70498fe0015c92ae76b649257fc6eed69b22a8
+fix_commit: 3e045066c04eb31b28d627475ac50bf3d8813819
+task: |
+  A docker exec comes back with no exit status and no output, and nobody can say why.
+
+  Selfhost, 2026-10-06/07: setup phases failed with "Secret-injection setup for
+  phase '...' failed without reporting an exit status (-1) and printed nothing",
+  and another execution failed closed with "unable to remove staged codex
+  credential ... attempts=4 [#1 exit=-1 (no exit status), ...]". The API log has
+  gaps of 60-190s in which nothing was logged, each one between
+  "copy_from: Checking path" and "copy_from: Collected file". The workspace
+  containers were healthy: no OOM, no restart.
+
+  What must hold:
+  - Collecting files from a workspace (`adapter_copy.copy_from_workspace`) does
+    not block the API's event loop, and never walks the whole workspace.
+  - A setup script whose exec status was lost (exit -1, nothing printed) is run
+    once more and the phase proceeds. An exec that reported a real exit code, or
+    timed out, is never retried.
+  - A status lost twice fails with a message that says why: the container's
+    state and how long the exec ran against its timeout. The staged-credential
+    removal still fails closed, and now says why.
+
+  Interface the scoring tests use: a module
+  `syn_adapters.workspace_backends.exec_status_lost` with
+  `status_was_lost(result) -> bool` over an `agentic_isolation.ExecuteResult`;
+  `syn_shared.process_exit.describe_process_failure` (exists today);
+  `run_setup_phase` driven through a real `ManagedWorkspace` and
+  `AgenticIsolationAdapter` with only the provider replaced.
+hidden_tests:
+  - packages/syn-adapters/tests/workspace_backends/test_exec_status_lost.py

@@ -1,6 +1,8 @@
 export { ArtifactDetail } from './ArtifactDetail'
 export { ArtifactList } from './ArtifactList'
 export { Dashboard } from './Dashboard'
+export { EvalDetail } from './EvalDetail'
+export { EvalList } from './EvalList'
 export { ExecutionDetail } from './ExecutionDetail'
 export { ExecutionList } from './ExecutionList'
 export { Insights } from './Insights'

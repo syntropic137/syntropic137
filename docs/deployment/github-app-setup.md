@@ -49,7 +49,7 @@ manual field entry required.
 > workflow files (`.github/workflows/*.yml`). If your agent needs to create or
 > edit workflow files, the permission must be added to the manifest in the NPX
 > setup repo (`src/manifest.ts`) — file a request at
-> https://github.com/syntropic137/syntropic137-npx/issues — and ensure branch
+> https://github.com/syntropic137/syntropic137-setup/issues — and ensure branch
 > protection rules require PR reviews for workflow changes.
 
 ---

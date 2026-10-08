@@ -194,6 +194,13 @@ class PhaseDefinition(BaseModel):
     ``PhaseYamlDefinition.delivers_repo_changes`` for why the gate cannot work
     this out for itself."""
 
+    requires_verdict: bool = False
+    """Whether this phase must report a ``review_verdict`` (PC-116).
+
+    Sourced from the workflow YAML ``requires_verdict`` field. When True, a
+    run that reports none fails instead of advancing by order. See
+    ``PhaseYamlDefinition.requires_verdict``."""
+
     # Claude Code command extensions (ISS-211)
     argument_hint: str | None = None
     """Describes what $ARGUMENTS expects for this phase (e.g., '[task-description]')."""

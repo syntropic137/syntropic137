@@ -1,0 +1,192 @@
+---
+title: Concepts for Agents
+description: Short, exact definitions of the words an agent or operator meets when running and reading executions - execution, phase, repair round, review verdict, skipped, resume, refusal vs failure, eval - with the API field each one maps to
+---
+
+This page is a glossary written to be read by AI agents as much as by people.
+Each entry says what the thing is, where it shows up in the API or CLI, and its
+limits. The canonical vocabulary lives in the repository at
+`docs/architecture/orchestration-ubiquitous-language.md`; where this page and
+that file disagree, that file wins.
+
+## Execution
+
+One run of one workflow. Identified by an id starting `exec-`. It is recorded
+as an event stream and never rewritten.
+
+- Statuses: `not_started`, `running`, `completed`, `failed`, `cancelled`,
+  `interrupted`. The last four are terminal.
+- `queued` and `starting` are **not** execution statuses. They describe an
+  admitted start waiting for a concurrency slot, before the execution's stream
+  exists. The API reports them in place of a 404.
+- Read it: `syn execution show <id>`, `GET /executions/{id}`.
+
+## Phase
+
+One step of a workflow inside an execution, with its own agent, model, prompt
+and timeout. Phases run in the total order given by `order`.
+
+- A phase is completed only when the execution recorded it as completed. There
+  is no partial credit and no mid-phase resume.
+- `phases` on the execution detail lists only phases that **started in this
+  execution**. `phase_plan` lists every declared phase (see below).
+
+## Declared phase and phase plan
+
+A declared phase is one the execution set out to run, as stated when it
+started. The **phase plan** is every declared phase, in order, with where it
+stands. Served as `phase_plan` on `GET /executions/{id}`; each entry has
+`phase_id`, `name`, `status`, `status_display`.
+
+| `status` | Meaning |
+| --- | --- |
+| `pending` | Not started yet; work still to come |
+| `skipped` | A review verdict made it unnecessary; it will never run |
+| `inherited` | Completed by the execution this one resumed; not re-run |
+| any phase status (`running`, `completed`, `failed`, ...) | How it ran here |
+
+Render `status_display`; do not derive the label yourself.
+
+## Phase deadline
+
+When a phase's agent is killed on its timeout. The clock starts when the
+phase's workspace is ready. The agent sees it as `SYN_PHASE_DEADLINE` (ISO 8601
+UTC) and `SYN_PHASE_TIMEOUT_SECONDS`. Push work before then: only pushed work
+and `artifacts/output/` survive.
+
+## Phase cost limit
+
+`max_cost_usd` on a phase: the most it may spend, in USD, before its agent is
+stopped. Crossing it fails the phase (a failure, not a cancel), so the
+execution is resumable. Claude phases only; a codex phase that sets it is
+refused at install. See [Workflow Packages](/docs/guide/workflows#per-phase-cost-limit-max_cost_usd).
+
+## Review verdict
+
+What a reviewing phase concluded about the change in front of it. Reported as
+`review_verdict` in the phase's `TASK_RESULT` block.
+
+- `certified`: nothing blocks the change.
+- `blocked`: something must be fixed first.
+- Any other word, or none, is **no verdict** and skips nothing.
+
+A review verdict is not `success`. A phase that finished a review and found a
+blocker **succeeded**; its verdict is `blocked`.
+
+## Repair round
+
+One fix phase followed by one re-verify phase, run because a review returned
+`blocked`. The workflow declares a bounded number of them as ordinary phases.
+`sdlc-implement-v3` declares two: `fix`/`reverify` and `fix_2`/`reverify_2`.
+There is no unbounded loop.
+
+## Certify and skipped phase
+
+To certify is to report `review_verdict: certified`. When that happens, every
+phase after the reviewing phase and before the workflow's **final** phase
+becomes a **skipped phase**: never started, never billed. The final phase
+(for example `finalize_pr`) still runs.
+
+- Recorded on the `NextPhaseReady` decision as `skipped_phase_ids`.
+- Shown in `phase_plan` as `skipped` and counted in `phase_progress.skipped`.
+- A run that certified early is complete. "6 of 6 (4 phases not needed)" is a
+  finished run, not a stalled one.
+
+## Unresolved findings
+
+How a `completed` execution ended when its last review verdict was `blocked`:
+every repair round ran and the last review still refused the change. Shown as
+`review_verdict: blocked` on the execution detail. It is not a failure status:
+every phase did its job and the bound was the workflow's own.
+
+## Resume
+
+Starting a **new** execution that continues one which did not finish. The new
+execution has its own id; the original is never changed except to record that
+it was resumed. One resume per execution.
+
+- Applies to `failed` and `interrupted`. `cancelled` needs
+  `--override-cancellation`.
+- Also applies to a `completed` execution with unresolved findings: it restarts
+  at the **repair point**, the last round's fix phase.
+- Phases already completed (and phases already skipped) are **inherited**, not
+  re-run. The resume phase restarts from its beginning.
+- If the resume phase had already started in the original, it may have pushed
+  something; resuming then requires `--acknowledge-external-effects`.
+- The call answers when the resume is **admitted**, not when the child runs.
+- CLI: `syn execution resume <id> [--acknowledge-external-effects] [--override-cancellation]`.
+  API: `POST /executions/{id}/resume`.
+
+See [Resuming Executions](/docs/guide/resuming-executions).
+
+## Retry
+
+A second attempt of a phase **within one execution** (`PhaseRetryScheduled`),
+for example after an upstream capacity error. Never a new execution. Contrast
+with resume.
+
+## Refusal vs failure
+
+Two separate fields keep the agent's word and the platform's judgement apart.
+
+| Field | Who decides | Values |
+| --- | --- | --- |
+| `failure_reason` in `TASK_RESULT` (recorded as `reported_failure_reason`) | The agent | `task`, `platform`, `refused`, `unknown` |
+| `failure_classification` on the execution and on each failed phase | The platform | `platform`, `correct_refusal`, `unclassified` (`task` is reserved and not set today) |
+
+- **Correct refusal**: the agent ran cleanly to the end and reported a
+  readable `success: false`. The system worked as designed; the agent judged the
+  work should not ship or could not be done.
+- **Platform**: anything else that failed - non-zero exit, timeout, crash,
+  broken stream, unreadable report.
+- **Unclassified**: the agent reported `unknown`, or the record predates the
+  field.
+
+The agent cannot move a failure out of the platform's count by claiming
+`task`. See [How a Phase Reports Its Outcome](/docs/guide/phase-outcomes).
+
+## Upstream failure kind
+
+A different list from the one above. When a phase fails because a service it
+depends on did not serve it, its `error_message` ends with the kind and what to
+do about it:
+
+| Kind | Meaning | Resumable? |
+| --- | --- | --- |
+| `capacity` | Model provider had no capacity (overloaded, 529) | Yes |
+| `rate_limited` | Provider is throttling (429) | Yes |
+| `unavailable` | Service did not answer: dropped connection, timeout, 5xx after every retry | Yes |
+| `auth` | Credentials or permissions refused (401, 403) | No - an operator must fix credentials |
+| `quota` | Account allowance spent until a named reset | Not retried; use a different agent or wait |
+| `unknown` | A fault nothing recognised | Read the reason |
+
+## Admission and maintenance mode
+
+**Admission** is the decision that a start may proceed, made before any work
+begins. **Maintenance mode** pauses admission for the whole deployment: new
+executions are refused while running ones are unaffected. It is not an
+execution status; there is no paused execution. See
+[Self-Hosting](/docs/guide/self-hosting#pausing-admission-maintenance-mode).
+
+## Eval, run, variant, score
+
+- **Eval**: an experiment. A goal, measured by runs that all start from the
+  same **repository baseline** (each repo pinned to a full commit SHA).
+  Id starts `eval-`. **Freezing** fixes the goal and baseline permanently; the
+  first admitted run freezes it.
+- **Run**: an execution that belongs to an eval, by launch
+  (`syn workflow run --eval <id>`) or by **attach** afterwards.
+- **Variant** and **score**: in the shipped version, a variant is a different
+  workflow over the same cases (for example, a different verifier model), and
+  scoring is done offline by `scripts/eval_suite.py score`. First-class
+  variants and stored run scores are part of Evals v2, which is not shipped yet.
+
+See [Evals](/docs/guide/evals).
+
+## Words not used
+
+- **Pause** (an execution): removed. Cancel is the mechanism that stops an
+  execution. Admission pause (maintenance mode) is a different thing.
+- **Fork**: reserved for a future "start from a chosen phase" operation. Not
+  implemented; continuing unfinished work is a resume.
+- **Lock** (an eval): the word is freeze.

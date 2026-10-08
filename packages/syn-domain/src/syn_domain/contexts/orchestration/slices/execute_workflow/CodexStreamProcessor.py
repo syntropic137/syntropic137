@@ -326,6 +326,7 @@ class CodexObservabilityRecorder(Protocol):
         tool_name: str,
         tool_use_id: str,
         input_preview: str,
+        skill_name: str | None = None,
     ) -> None: ...
 
     async def record_tool_completed(

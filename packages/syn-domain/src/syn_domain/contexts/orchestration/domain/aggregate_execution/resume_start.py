@@ -151,6 +151,7 @@ def resume_start_command(
         ),
         continuation_candidates=continuation_candidates(left, resume_phase_id),
         inherited_skipped_phase_ids=list(admitted.inherited_skipped_phase_ids),
+        workflow_version=pins.workflow_version,
     )
 
 
@@ -194,4 +195,5 @@ def resume_started_event(command: StartResumeCommand) -> WorkflowExecutionStarte
         continued_branches=continued or None,
         abandoned_branches=abandoned or None,
         inherited_skipped_phase_ids=command.inherited_skipped_phase_ids or None,
+        workflow_version=command.workflow_version,
     )
