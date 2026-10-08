@@ -16,3 +16,7 @@ task: >
   Review whether a Redis outage is now survived where it should be, and
   refused where it must be.
 split: train
+# Not clean: both strong verifiers blocked it for a real defect, the retry of
+# non-idempotent GETDEL / SET NX on timeout (#1756, fixed by #1757). It scores
+# in v3 as it ran; from v5 that defect is the case redis-retry-non-idempotent.
+retired: v5 - not clean; carries the #1756 defect, now case redis-retry-non-idempotent

@@ -16,3 +16,11 @@ task: >
   logins. Review the token routing for every repository shape a workflow can
   run against.
 split: holdout
+# Not clean: both strong verifiers blocked it. The token routing it adds hands
+# the first owning repo's installation token to the whole workspace, so a
+# second repo under another installation gets the wrong token. That routing was
+# moved, not fixed, by ca367a88b (PR #1448) into
+# setup_phase_secrets._gh_token_for_repo_under_work and is still on main,
+# documented as deliberate, so no fix commit exists to cut a defect case from.
+# It scores in v3 as it ran.
+retired: v5 - not clean; first-repo token routing still unfixed on main, so no defect case

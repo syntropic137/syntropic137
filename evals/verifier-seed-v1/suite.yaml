@@ -7,7 +7,10 @@
 # defect, and a defect that only shows at runtime is not a case.
 # A `clean` case is a control: a merged PR head whose later history holds no
 # fix of it. Without controls a verifier that blocks everything is never wrong
-# (docs/research/2026-10-07-eval-best-practices.md).
+# (docs/research/2026-10-07-eval-best-practices.md). How a control is chosen,
+# and what to do when strong verifiers block one, is in README.md beside this
+# file: a clean control both strong verifiers block is a candidate defect, not
+# a false positive - investigate before scoring.
 #
 # TRAIN AND HOLDOUT. Every case, defect or clean, carries `split`. Tune a
 # verifier (prompt, model, workflow) on `--split train` only; holdout cases
@@ -38,6 +41,11 @@
 #     passes only when certified.
 # v4: twenty-four defect cases mined from merged fix PRs (30 defects and 6
 #     clean controls, 36 in all), and the train/holdout split.
+# v5: two v3 controls were not clean - both strong verifiers blocked them for a
+#     real defect. Both are retired (they still score in v3 and v4). The redis
+#     one's defect is a new defect case, redis-retry-non-idempotent; the
+#     GitHub token one has no fix to cut a case from. Two replacement controls
+#     chosen by the quiet-window rule (README.md). 31 defects, 6 controls.
 #
 # EVERY VERSION KEEPS ITS SCORE. `history` records each earlier version whose
 # runs launches.jsonl still holds: the tag exactly as those runs carry it, the
@@ -48,7 +56,7 @@ id: verifier-seed-v1
 # version and verifier runs into those same evals; the run carries
 # `suite-version:<n>` and `verifier:<workflow id>`.
 eval_suite: verifier-seed
-version: 4
+version: 5
 goal: >
   Does the verifier block a change that carries a known escaped bug, naming
   the defect and the file it lives in, and certify a merged change that has
@@ -142,3 +150,124 @@ history:
       - live-commits-unvalidated-sha
       - repo-privacy-ignores-app
       - shared-esp-stream
+  # v4 is the thirty-six cases of #1752 under every listed verifier.
+  - version: 4
+    tag: verifier-seed-v1:v4:eval-verify-pinned-v1
+    workflow: eval-verify-pinned-v1
+    cases:
+      - artifacts-execution-filter-dropped
+      - binary-artifact-minio-key
+      - clean-acquisition-fence-test
+      - clean-api-stdlib-event-loop
+      - clean-capture-volume-release
+      - clean-github-token-installation-routing
+      - clean-redis-signal-queue-fail-open
+      - clean-remote-source-single-predicate
+      - cli-packages-own-remote-check
+      - codex-brace-line-protocol-fault
+      - codex-cost-limit
+      - codex-deliverable-phase-failed
+      - codex-turn-failed-reason-dropped
+      - declared-skills-not-invocable
+      - execution-id-as-eval-id
+      - executions-enrichment-fetched-twice
+      - executions-total-is-page-length
+      - github-shorthand-any-slash
+      - github-token-first-installation
+      - guard-moved-gitlink-unsaved-work
+      - heatmap-test-reads-clock-repeatedly
+      - input-alias-independent-resolution
+      - live-commits-unvalidated-sha
+      - pit-stop-password-on-argv
+      - prompt-claims-checkout-without-clone
+      - prompt-deliverable-only-if-acted
+      - redis-url-password-logged
+      - repo-name-collision-skipped-clone
+      - repo-privacy-ignores-app
+      - sessions-execution-filter-dropped
+      - shared-body-expired-by-oldest-capture
+      - shared-esp-stream
+      - token-injector-get-post-only
+      - transcript-superseded-revision-issues
+      - workflow-run-inputs-go-nowhere
+      - workflow-run-task-undeliverable
+  - version: 4
+    tag: verifier-seed-v1:v4:eval-verify-pinned-codex-v1
+    workflow: eval-verify-pinned-codex-v1
+    cases:
+      - artifacts-execution-filter-dropped
+      - binary-artifact-minio-key
+      - clean-acquisition-fence-test
+      - clean-api-stdlib-event-loop
+      - clean-capture-volume-release
+      - clean-github-token-installation-routing
+      - clean-redis-signal-queue-fail-open
+      - clean-remote-source-single-predicate
+      - cli-packages-own-remote-check
+      - codex-brace-line-protocol-fault
+      - codex-cost-limit
+      - codex-deliverable-phase-failed
+      - codex-turn-failed-reason-dropped
+      - declared-skills-not-invocable
+      - execution-id-as-eval-id
+      - executions-enrichment-fetched-twice
+      - executions-total-is-page-length
+      - github-shorthand-any-slash
+      - github-token-first-installation
+      - guard-moved-gitlink-unsaved-work
+      - heatmap-test-reads-clock-repeatedly
+      - input-alias-independent-resolution
+      - live-commits-unvalidated-sha
+      - pit-stop-password-on-argv
+      - prompt-claims-checkout-without-clone
+      - prompt-deliverable-only-if-acted
+      - redis-url-password-logged
+      - repo-name-collision-skipped-clone
+      - repo-privacy-ignores-app
+      - sessions-execution-filter-dropped
+      - shared-body-expired-by-oldest-capture
+      - shared-esp-stream
+      - token-injector-get-post-only
+      - transcript-superseded-revision-issues
+      - workflow-run-inputs-go-nowhere
+      - workflow-run-task-undeliverable
+  - version: 4
+    tag: verifier-seed-v1:v4:eval-verify-pinned-sonnet-v1
+    workflow: eval-verify-pinned-sonnet-v1
+    cases:
+      - artifacts-execution-filter-dropped
+      - binary-artifact-minio-key
+      - clean-acquisition-fence-test
+      - clean-api-stdlib-event-loop
+      - clean-capture-volume-release
+      - clean-github-token-installation-routing
+      - clean-redis-signal-queue-fail-open
+      - clean-remote-source-single-predicate
+      - cli-packages-own-remote-check
+      - codex-brace-line-protocol-fault
+      - codex-cost-limit
+      - codex-deliverable-phase-failed
+      - codex-turn-failed-reason-dropped
+      - declared-skills-not-invocable
+      - execution-id-as-eval-id
+      - executions-enrichment-fetched-twice
+      - executions-total-is-page-length
+      - github-shorthand-any-slash
+      - github-token-first-installation
+      - guard-moved-gitlink-unsaved-work
+      - heatmap-test-reads-clock-repeatedly
+      - input-alias-independent-resolution
+      - live-commits-unvalidated-sha
+      - pit-stop-password-on-argv
+      - prompt-claims-checkout-without-clone
+      - prompt-deliverable-only-if-acted
+      - redis-url-password-logged
+      - repo-name-collision-skipped-clone
+      - repo-privacy-ignores-app
+      - sessions-execution-filter-dropped
+      - shared-body-expired-by-oldest-capture
+      - shared-esp-stream
+      - token-injector-get-post-only
+      - transcript-superseded-revision-issues
+      - workflow-run-inputs-go-nowhere
+      - workflow-run-task-undeliverable
