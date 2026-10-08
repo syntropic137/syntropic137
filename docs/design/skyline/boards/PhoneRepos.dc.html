@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Syn137 repos on a phone</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Orbitron:wght@500;600;700&display=swap">
+<style>
+:root{--ac:#4D80FF}
+body{margin:0;background:#0A0C14}
+a{color:#E8EEFB}a:hover{color:#FFFFFF}
+button{font-family:inherit}
+input::placeholder{color:#6F7FA3}
+:focus-visible{outline:2px solid var(--ac);outline-offset:2px}
+</style>
+</helmet>
+<div style="--ac: {{accent}}; display: flex; flex-direction: column; min-height: 100vh; background: #0A0C14; color: #E8EEFB; font-family: 'Instrument Sans', 'Helvetica Neue', system-ui, sans-serif; font-size: 15px; line-height: 1.45; -webkit-font-smoothing: antialiased">
+
+<dc-import name="PhoneTop" hint-size="100%,68px"></dc-import>
+
+<main style="display: flex; flex-direction: column; gap: 16px; flex-grow: 1; box-sizing: border-box; padding: 4px 16px 24px">
+
+<nav aria-label="Breadcrumb" style="display: flex; align-items: center; gap: 2px; min-height: 44px; margin: 0 -8px; font-size: 14px">
+<a href="PhoneOverview.dc.html" aria-label="Overview" style="display: flex; align-items: center; justify-content: center; flex-shrink: 0; width: 40px; height: 44px; color: #9AA8C7"><svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M2.75 7.25L8 2.75l5.25 4.5V13a.5.5 0 0 1-.5.5H9.5V9.75h-3v3.75H3.25a.5.5 0 0 1-.5-.5z"></path></svg></a>
+<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="#6F7FA3" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink: 0; opacity: 0.7"><path d="M6 3.5L10.5 8 6 12.5"></path></svg>
+<span aria-current="page" style="flex: 0 1 auto; min-width: 48px; padding: 0 6px; line-height: 44px; font-weight: 600; color: #E8EEFB; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">Repos</span>
+</nav>
+
+<section aria-label="Repos" style="display: flex; flex-direction: column; gap: 18px; padding: 20px; border-radius: 24px; border: 1px solid #1A2032; background: radial-gradient(70% 90% at 100% 0%, color-mix(in oklab, var(--ac) 20%, transparent), transparent 70%), #0D101A; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05)">
+<div style="display: flex; align-items: center; gap: 14px">
+<svg width="52" height="52" viewBox="0 0 64 64" aria-hidden="true" style="flex-shrink: 0">
+<polygon points="32,30 52,40 32,50 12,40" style="fill: color-mix(in oklab, var(--ac) 30%, #0D101A)"></polygon>
+<polygon points="12,40 32,50 32,54 12,44" style="fill: color-mix(in oklab, var(--ac) 40%, black)"></polygon>
+<polygon points="32,50 52,40 52,44 32,54" style="fill: color-mix(in oklab, var(--ac) 25%, black)"></polygon>
+<polygon points="32,20 52,30 32,40 12,30" style="fill: color-mix(in oklab, var(--ac) 58%, white)"></polygon>
+<polygon points="12,30 32,40 32,45 12,35" style="fill: var(--ac)"></polygon>
+<polygon points="32,40 52,30 52,35 32,45" style="fill: color-mix(in oklab, var(--ac) 50%, black)"></polygon>
+<polygon points="32,10 52,20 32,30 12,20" style="fill: color-mix(in oklab, var(--ac) 70%, white)"></polygon>
+<polygon points="12,20 32,30 32,35 12,25" style="fill: color-mix(in oklab, var(--ac) 85%, white)"></polygon>
+<polygon points="32,30 52,20 52,25 32,35" style="fill: color-mix(in oklab, var(--ac) 60%, black)"></polygon>
+<circle cx="32" cy="20" r="2.6" style="fill: #0A0C14; opacity: 0.75"></circle>
+</svg>
+<div style="display: flex; flex-direction: column; gap: 2px; min-width: 0">
+<h1 style="margin: 0; font-size: 30px; line-height: 1.1; font-weight: 600; letter-spacing: -0.03em">Repos</h1>
+<p style="margin: 0; font-size: 14px; color: #9AA8C7">3 connected through the GitHub app</p>
+</div>
+</div>
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px">
+<div style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 26px; line-height: 1.1; font-weight: 600; letter-spacing: -0.03em; font-variant-numeric: tabular-nums">3</span><span style="font-size: 12.5px; color: #9AA8C7">connected</span></div>
+<div style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 26px; line-height: 1.1; font-weight: 600; letter-spacing: -0.03em; font-variant-numeric: tabular-nums">6</span><span style="font-size: 12.5px; color: #9AA8C7">trigger rules</span></div>
+<div style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 26px; line-height: 1.1; font-weight: 600; letter-spacing: -0.03em; font-variant-numeric: tabular-nums">10<span style="font-size: 14px; color: #6F7FA3"> / 75</span></span><span style="font-size: 12.5px; color: #9AA8C7">runs on a repo</span></div>
+</div>
+</section>
+
+<div style="display: flex; gap: 8px; margin: 0 -16px; padding: 0 16px; overflow-x: auto">
+<button type="button" aria-pressed="{{chip.all.on}}" onClick="{{pickAll}}" style="display: flex; align-items: center; gap: 8px; flex-shrink: 0; height: 44px; padding: 0 16px; border-radius: 22px; border: 1px solid {{chip.all.bd}}; background: {{chip.all.bg}}; color: {{chip.all.fg}}; font-size: 14px; cursor: pointer"><span>All</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #9AA8C7">3</span></button>
+<button type="button" aria-pressed="{{chip.watched.on}}" onClick="{{pickWatched}}" style="display: flex; align-items: center; gap: 8px; flex-shrink: 0; height: 44px; padding: 0 16px; border-radius: 22px; border: 1px solid {{chip.watched.bd}}; background: {{chip.watched.bg}}; color: {{chip.watched.fg}}; font-size: 14px; cursor: pointer"><span>With triggers</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #9AA8C7">2</span></button>
+<button type="button" aria-pressed="{{chip.quiet.on}}" onClick="{{pickQuiet}}" style="display: flex; align-items: center; gap: 8px; flex-shrink: 0; height: 44px; padding: 0 16px; border-radius: 22px; border: 1px solid {{chip.quiet.bd}}; background: {{chip.quiet.bg}}; color: {{chip.quiet.fg}}; font-size: 14px; cursor: pointer"><span>No triggers</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #9AA8C7">1</span></button>
+</div>
+
+<section aria-label="Repo list" style="display: flex; flex-direction: column; gap: 10px">
+<sc-for list="{{repos}}" as="r" hint-placeholder-count="3">
+<article style="display: flex; flex-direction: column; gap: 14px; padding: 16px; border-radius: 18px; border: 1px solid #1A2032; background: #0D101A">
+<div style="display: flex; align-items: flex-start; gap: 12px; min-width: 0">
+<span style="display: flex; align-items: center; justify-content: center; flex-shrink: 0; width: 38px; height: 38px; border-radius: 12px; background: {{r.iconBg}}; color: {{r.iconFg}}">
+<svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 12.25v-9a1.5 1.5 0 0 1 1.5-1.5h7.5v9H5a1.5 1.5 0 0 0 0 3h7.5v-3"></path></svg>
+</span>
+<div style="display: flex; flex-direction: column; gap: 4px; min-width: 0">
+<span style="font-size: 16px; line-height: 1.25; overflow-wrap: anywhere"><span style="color: #9AA8C7">syntropic137/</span><span style="font-weight: 600">{{r.name}}</span></span>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3">{{r.visibility}} · {{r.branch}} · installed {{r.installed}}</span>
+<span style="display: flex; align-items: center; gap: 7px; font-size: 13px; color: {{r.healthFg}}"><span style="flex-shrink: 0; width: 7px; height: 7px; border-radius: 50%; background: {{r.healthDot}}"></span>{{r.health}}</span>
+</div>
+</div>
+
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; padding: 12px 0; border-top: 1px solid #1A2032; border-bottom: 1px solid #1A2032">
+<div style="display: flex; flex-direction: column; gap: 1px"><span style="font-size: 20px; line-height: 1.1; font-weight: 600; font-variant-numeric: tabular-nums">{{r.runs}}</span><span style="font-size: 12px; color: #9AA8C7">runs</span></div>
+<div style="display: flex; flex-direction: column; gap: 1px"><span style="font-size: 20px; line-height: 1.1; font-weight: 600; font-variant-numeric: tabular-nums; color: {{r.rateFg}}">{{r.rate}}</span><span style="font-size: 12px; color: #9AA8C7">passed</span></div>
+<div style="display: flex; flex-direction: column; gap: 1px"><span style="font-size: 20px; line-height: 1.1; font-weight: 600; font-variant-numeric: tabular-nums">{{r.cost}}</span><span style="font-size: 12px; color: #9AA8C7">spent</span></div>
+</div>
+
+<sc-if value="{{r.hasRules}}" hint-placeholder-val="{{ true }}">
+<a href="PhoneTriggers.dc.html" style="display: flex; align-items: center; gap: 10px; min-height: 44px; text-decoration: none">
+<span style="display: flex; flex-direction: column; flex-grow: 1; min-width: 0">
+<span style="font-size: 14px; font-weight: 600">{{r.ruleCount}} trigger rules</span>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{r.ruleList}}</span>
+</span>
+<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#6F7FA3" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink: 0"><path d="M6 3.5L10.5 8 6 12.5"></path></svg>
+</a>
+</sc-if>
+<sc-if value="{{r.noRules}}" hint-placeholder-val="{{ false }}">
+<a href="PhoneTriggers.dc.html" style="display: flex; align-items: center; justify-content: center; gap: 8px; height: 44px; border-radius: 14px; border: 1px dashed #34406A; font-size: 14px; font-weight: 600; text-decoration: none">
+<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M8 3v10M3 8h10"></path></svg>Add a trigger</a>
+</sc-if>
+
+<sc-if value="{{r.hasLast}}" hint-placeholder-val="{{ true }}">
+<a href="PhoneExecution.dc.html" style="display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 12px; border-radius: 14px; border: 1px solid #1A2032; background: #0A0C14; text-decoration: none">
+<span style="display: flex; align-items: center; justify-content: center; flex-shrink: 0; width: 26px; height: 26px; border-radius: 8px; background: {{r.lastBadge}}; color: {{r.lastTone}}"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{r.lastIcon}}"></path></svg></span>
+<span style="flex-grow: 1; min-width: 0; font-size: 13.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">Last run · {{r.lastName}}</span>
+<span style="flex-shrink: 0; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3">{{r.lastWhen}}</span>
+</a>
+</sc-if>
+</article>
+</sc-for>
+</section>
+
+<a href="PhoneExecutions.dc.html" style="display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-radius: 18px; border: 1px dashed #283048; text-decoration: none; color: #E8EEFB">
+<span style="display: flex; flex-direction: column; flex-grow: 1; min-width: 0">
+<span style="font-size: 14.5px; font-weight: 600">65 runs without a repo</span>
+<span style="font-size: 13px; color: #9AA8C7">Research, delegation and demos · $4.12</span>
+</span>
+<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#6F7FA3" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink: 0"><path d="M6 3.5L10.5 8 6 12.5"></path></svg>
+</a>
+
+<button type="button" style="display: flex; align-items: center; justify-content: center; gap: 8px; height: 48px; border-radius: 14px; border: 1px solid #283048; background: #0F121C; color: #E8EEFB; font-size: 15px; font-weight: 600; cursor: pointer">
+<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M8 3v10M3 8h10"></path></svg>Connect a repo</button>
+
+</main>
+
+<div style="position: sticky; bottom: 0; padding: 8px 16px 16px; background: linear-gradient(to top, #0A0C14 55%, transparent)">
+<dc-import name="PhoneDock" active="more" hint-size="100%,66px"></dc-import>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#4D80FF","options":["#4D80FF","#4CC9F0","#45E0A0","#A78BFA"]},"$preview":{"width":390,"height":1520}}'>
+class Component extends DCLogic {
+renderVals() {
+const filter = (this.state && this.state.filter) || 'all';
+const EVENTS = ['check_run.completed', 'pull_request_review.submitted', 'issue_comment.created'];
+const LAST = {
+completed: { tone: 'var(--ac)', badge: 'color-mix(in oklab, var(--ac) 16%, transparent)', icon: 'M3.5 8.5l3 3 6-7' },
+failed: { tone: '#FF6F61', badge: '#2A1513', icon: 'M4.5 4.5l7 7M11.5 4.5l-7 7' }
+};
+const mk = (o) => {
+const last = o.last ? LAST[o.last.status] : null;
+return {
+name: o.name,
+visibility: o.visibility,
+branch: o.branch,
+installed: o.installed,
+health: o.health,
+healthFg: o.warn ? '#FFB3A8' : '#9AA8C7',
+healthDot: o.warn ? '#FF6F61' : 'var(--ac)',
+iconBg: o.rules ? 'color-mix(in oklab, var(--ac) 16%, transparent)' : '#151A2A',
+iconFg: o.rules ? 'var(--ac)' : '#9AA8C7',
+watched: !!o.rules,
+hasRules: !!o.rules,
+noRules: !o.rules,
+ruleCount: String(EVENTS.length),
+ruleList: EVENTS.join(' · '),
+runs: String(o.runs),
+rate: o.runs ? Math.round((o.passed / o.runs) * 100) + '%' : '—',
+rateFg: o.runs && o.passed / o.runs < 0.5 ? '#FF8A7D' : '#E8EEFB',
+cost: o.cost,
+hasLast: !!o.last,
+lastName: o.last ? o.last.name : '',
+lastWhen: o.last ? o.last.when : '',
+lastTone: last ? last.tone : '',
+lastBadge: last ? last.badge : '',
+lastIcon: last ? last.icon : ''
+};
+};
+const all = [
+mk({ name: 'syntropic137', visibility: 'private', branch: 'main', installed: '9w ago', health: 'Last 2 runs failed before the first phase', warn: true, rules: true, runs: 4, passed: 1, cost: '$0.18', last: { status: 'failed', name: 'PR Review', when: '1w ago' } }),
+mk({ name: 'sandbox_syn-engineer-beta', visibility: 'private', branch: 'main', installed: '8w ago', health: 'Webhook healthy · 3 rules active', rules: true, runs: 6, passed: 5, cost: '$0.41', last: { status: 'completed', name: 'Skill Probe', when: '6w ago' } }),
+mk({ name: 'syn-mkt-validation', visibility: 'private', branch: 'main', installed: '5w ago', health: 'Webhook healthy · no rules', rules: false, runs: 0, passed: 0, cost: '$0.00', last: null })
+];
+const repos = all.filter((r) => filter === 'all' || (filter === 'watched' ? r.watched : !r.watched));
+const chipOf = (key) => {
+const on = filter === key;
+return { on: on ? 'true' : 'false', bg: on ? '#1A2134' : 'transparent', fg: on ? '#E8EEFB' : '#9AA8C7', bd: on ? '#34406A' : '#222A40' };
+};
+return {
+accent: this.props.accent ?? '#4D80FF',
+repos,
+chip: { all: chipOf('all'), watched: chipOf('watched'), quiet: chipOf('quiet') },
+pickAll: () => this.setState({ filter: 'all' }),
+pickWatched: () => this.setState({ filter: 'watched' }),
+pickQuiet: () => this.setState({ filter: 'quiet' })
+};
+}
+}
+</script>
+</body>
+</html>

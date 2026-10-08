@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Syn137 usage meter component</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Orbitron:wght@500;600;700&display=swap">
+<style>
+:root{--ac:#4D80FF}
+body{margin:0;background:#0A0C14}
+</style>
+</helmet>
+<div style="--ac: {{accent}}; display: flex; flex-direction: column; gap: 28px; width: 1440px; height: 900px; box-sizing: border-box; padding: 48px; background: #0A0C14; color: #E8EEFB; font-family: 'Instrument Sans', 'Helvetica Neue', system-ui, sans-serif; font-size: 14px; line-height: 1.45; -webkit-font-smoothing: antialiased">
+<div style="display: flex; flex-direction: column; gap: 6px">
+<h1 style="margin: 0; font-size: 32px; line-height: 1.1; font-weight: 600; letter-spacing: -0.03em">Usage meter</h1>
+<p style="margin: 0; font-size: 15px; color: #9AA8C7">One block for what a session, execution or day spent: total cost, tokens by type, and where the cost went. It reflows from a wide strip to a narrow column.</p>
+</div>
+<div style="display: flex; flex-direction: column; gap: 10px">
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3">Wide · session, cost by model</span>
+<section aria-label="Usage" style="display: flex; flex-wrap: wrap; align-items: stretch; gap: 20px 40px; padding: 24px 28px; border-radius: 20px; border: 1px solid #1A2032; background: #0D101A; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04)">
+<div style="flex: 0 1 170px; display: flex; flex-direction: column; gap: 4px; min-width: 0">
+<h2 style="margin: 0; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3; font-weight: 500">Usage</h2>
+<span style="font-size: 32px; line-height: 1.1; font-weight: 600; letter-spacing: -0.03em; font-variant-numeric: tabular-nums">$0.2162</span>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px; color: #9AA8C7">176.0K tokens</span>
+</div>
+<div style="flex: 3 1 300px; display: flex; flex-direction: column; gap: 12px; min-width: 0">
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3">Tokens by type</span>
+<svg viewBox="0 0 1000 46" preserveAspectRatio="none" role="img" aria-label="Tokens by type: Cache read 81.9 percent, Input 17.0 percent, Output 1.1 percent" style="display: block; width: 100%; height: 34px">
+<polygon points="799.3,12 815.3,0 815.3,32 799.3,44" style="fill: color-mix(in oklab, #4C8DEA 50%, black)"></polygon>
+<polygon points="0.0,12 799.3,12 815.3,0 16.0,0" style="fill: color-mix(in oklab, #4C8DEA 58%, white)"></polygon>
+<polygon points="0.0,12 799.3,12 799.3,44 0.0,44" style="fill: #4C8DEA"></polygon>
+<polygon points="969.2,12 985.2,0 985.2,32 969.2,44" style="fill: color-mix(in oklab, #C98500 50%, black)"></polygon>
+<polygon points="803.3,12 969.2,12 985.2,0 819.3,0" style="fill: color-mix(in oklab, #C98500 58%, white)"></polygon>
+<polygon points="803.3,12 969.2,12 969.2,44 803.3,44" style="fill: #C98500"></polygon>
+<polygon points="984.0,12 1000.0,0 1000.0,32 984.0,44" style="fill: color-mix(in oklab, #9085E9 50%, black)"></polygon>
+<polygon points="973.2,12 984.0,12 1000.0,0 989.2,0" style="fill: color-mix(in oklab, #9085E9 58%, white)"></polygon>
+<polygon points="973.2,12 984.0,12 984.0,44 973.2,44" style="fill: #9085E9"></polygon>
+</svg>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 12px 16px">
+<div style="display: flex; flex-direction: column; gap: 3px; min-width: 0"><span style="display: flex; flex-wrap: wrap; align-items: center; gap: 4px 7px; font-size: 12.5px; color: #9AA8C7"><span style="flex-shrink: 0; width: 8px; height: 8px; border-radius: 2px; background: #4C8DEA"></span>Cache read <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; padding: 1px 6px; border-radius: 6px; border: 1px solid #283048; color: #9AA8C7">0.1× rate</span></span><span style="display: flex; align-items: baseline; gap: 7px; font-family: 'JetBrains Mono', ui-monospace, monospace"><span style="font-size: 13.5px; font-weight: 600">144,128</span><span style="font-size: 11.5px; color: #9AA8C7">81.9%</span></span></div>
+<div style="display: flex; flex-direction: column; gap: 3px; min-width: 0"><span style="display: flex; flex-wrap: wrap; align-items: center; gap: 4px 7px; font-size: 12.5px; color: #9AA8C7"><span style="flex-shrink: 0; width: 8px; height: 8px; border-radius: 2px; background: #C98500"></span>Input</span><span style="display: flex; align-items: baseline; gap: 7px; font-family: 'JetBrains Mono', ui-monospace, monospace"><span style="font-size: 13.5px; font-weight: 600">29,924</span><span style="font-size: 11.5px; color: #9AA8C7">17.0%</span></span></div>
+<div style="display: flex; flex-direction: column; gap: 3px; min-width: 0"><span style="display: flex; flex-wrap: wrap; align-items: center; gap: 4px 7px; font-size: 12.5px; color: #9AA8C7"><span style="flex-shrink: 0; width: 8px; height: 8px; border-radius: 2px; background: #9085E9"></span>Output</span><span style="display: flex; align-items: baseline; gap: 7px; font-family: 'JetBrains Mono', ui-monospace, monospace"><span style="font-size: 13.5px; font-weight: 600">1,945</span><span style="font-size: 11.5px; color: #9AA8C7">1.1%</span></span></div>
+</div>
+</div>
+<div style="flex: 2 1 260px; display: flex; flex-direction: column; gap: 12px; min-width: 0">
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3">Cost by model</span>
+<div style="display: flex; flex-direction: column; gap: 10px">
+<div style="display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(40px, 1fr) auto; column-gap: 12px; align-items: center"><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">gpt-5.6-sol</span><span aria-hidden="true" style="display: block; height: 6px; border-radius: 3px; background: #1A2134"><span style="display: block; width: 100%; height: 100%; border-radius: 3px; background: #8E9BBC"></span></span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px; text-align: right">$0.2162 <span style="color: #9AA8C7">100%</span></span></div>
+</div>
+</div>
+</section>
+</div>
+<div style="display: flex; gap: 32px; align-items: flex-start">
+<div style="display: flex; flex-direction: column; gap: 10px; width: 860px">
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3">Wide · execution, cost by phase</span>
+<section aria-label="Usage" style="display: flex; flex-wrap: wrap; align-items: stretch; gap: 20px 40px; padding: 24px 28px; border-radius: 20px; border: 1px solid #1A2032; background: #0D101A; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04)">
+<div style="flex: 0 1 170px; display: flex; flex-direction: column; gap: 4px; min-width: 0">
+<h2 style="margin: 0; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3; font-weight: 500">Usage</h2>
+<span style="font-size: 32px; line-height: 1.1; font-weight: 600; letter-spacing: -0.03em; font-variant-numeric: tabular-nums">$0.2100</span>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px; color: #9AA8C7">396.8K tokens</span>
+</div>
+<div style="flex: 3 1 300px; display: flex; flex-direction: column; gap: 12px; min-width: 0">
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3">Tokens by type</span>
+<svg viewBox="0 0 1000 46" preserveAspectRatio="none" role="img" aria-label="Tokens by type: Cache read 79.0 percent, Cache write 16.4 percent, Output 4.6 percent, Input 0.0 percent" style="display: block; width: 100%; height: 34px">
+<polygon points="762.0,12 778.0,0 778.0,32 762.0,44" style="fill: color-mix(in oklab, #4C8DEA 50%, black)"></polygon>
+<polygon points="0.0,12 762.0,12 778.0,0 16.0,0" style="fill: color-mix(in oklab, #4C8DEA 58%, white)"></polygon>
+<polygon points="0.0,12 762.0,12 762.0,44 0.0,44" style="fill: #4C8DEA"></polygon>
+<polygon points="923.7,12 939.7,0 939.7,32 923.7,44" style="fill: color-mix(in oklab, #E0703A 50%, black)"></polygon>
+<polygon points="766.0,12 923.7,12 939.7,0 782.0,0" style="fill: color-mix(in oklab, #E0703A 58%, white)"></polygon>
+<polygon points="766.0,12 923.7,12 923.7,44 766.0,44" style="fill: #E0703A"></polygon>
+<polygon points="972.1,12 988.1,0 988.1,32 972.1,44" style="fill: color-mix(in oklab, #9085E9 50%, black)"></polygon>
+<polygon points="927.7,12 972.1,12 988.1,0 943.7,0" style="fill: color-mix(in oklab, #9085E9 58%, white)"></polygon>
+<polygon points="927.7,12 972.1,12 972.1,44 927.7,44" style="fill: #9085E9"></polygon>
+<polygon points="984.0,12 1000.0,0 1000.0,32 984.0,44" style="fill: color-mix(in oklab, #C98500 50%, black)"></polygon>
+<polygon points="976.1,12 984.0,12 1000.0,0 992.1,0" style="fill: color-mix(in oklab, #C98500 58%, white)"></polygon>
+<polygon points="976.1,12 984.0,12 984.0,44 976.1,44" style="fill: #C98500"></polygon>
+</svg>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 12px 16px">
+<div style="display: flex; flex-direction: column; gap: 3px; min-width: 0"><span style="display: flex; flex-wrap: wrap; align-items: center; gap: 4px 7px; font-size: 12.5px; color: #9AA8C7"><span style="flex-shrink: 0; width: 8px; height: 8px; border-radius: 2px; background: #4C8DEA"></span>Cache read</span><span style="display: flex; align-items: baseline; gap: 7px; font-family: 'JetBrains Mono', ui-monospace, monospace"><span style="font-size: 13.5px; font-weight: 600">313,560</span><span style="font-size: 11.5px; color: #9AA8C7">79.0%</span></span></div>
+<div style="display: flex; flex-direction: column; gap: 3px; min-width: 0"><span style="display: flex; flex-wrap: wrap; align-items: center; gap: 4px 7px; font-size: 12.5px; color: #9AA8C7"><span style="flex-shrink: 0; width: 8px; height: 8px; border-radius: 2px; background: #E0703A"></span>Cache write</span><span style="display: flex; align-items: baseline; gap: 7px; font-family: 'JetBrains Mono', ui-monospace, monospace"><span style="font-size: 13.5px; font-weight: 600">64,884</span><span style="font-size: 11.5px; color: #9AA8C7">16.4%</span></span></div>
+<div style="display: flex; flex-direction: column; gap: 3px; min-width: 0"><span style="display: flex; flex-wrap: wrap; align-items: center; gap: 4px 7px; font-size: 12.5px; color: #9AA8C7"><span style="flex-shrink: 0; width: 8px; height: 8px; border-radius: 2px; background: #9085E9"></span>Output</span><span style="display: flex; align-items: baseline; gap: 7px; font-family: 'JetBrains Mono', ui-monospace, monospace"><span style="font-size: 13.5px; font-weight: 600">18,254</span><span style="font-size: 11.5px; color: #9AA8C7">4.6%</span></span></div>
+<div style="display: flex; flex-direction: column; gap: 3px; min-width: 0"><span style="display: flex; flex-wrap: wrap; align-items: center; gap: 4px 7px; font-size: 12.5px; color: #9AA8C7"><span style="flex-shrink: 0; width: 8px; height: 8px; border-radius: 2px; background: #C98500"></span>Input</span><span style="display: flex; align-items: baseline; gap: 7px; font-family: 'JetBrains Mono', ui-monospace, monospace"><span style="font-size: 13.5px; font-weight: 600">93</span><span style="font-size: 11.5px; color: #9AA8C7">0.0%</span></span></div>
+</div>
+</div>
+<div style="flex: 2 1 260px; display: flex; flex-direction: column; gap: 12px; min-width: 0">
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3">Cost by phase</span>
+<div style="display: flex; flex-direction: column; gap: 10px">
+<div style="display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(40px, 1fr) auto; column-gap: 12px; align-items: center"><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">01 Discovery</span><span aria-hidden="true" style="display: block; height: 6px; border-radius: 3px; background: #1A2134"><span style="display: block; width: 70%; height: 100%; border-radius: 3px; background: var(--ac)"></span></span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px; text-align: right">$0.0557 <span style="color: #9AA8C7">27%</span></span></div>
+<div style="display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(40px, 1fr) auto; column-gap: 12px; align-items: center"><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">02 Deep Dive</span><span aria-hidden="true" style="display: block; height: 6px; border-radius: 3px; background: #1A2134"><span style="display: block; width: 100%; height: 100%; border-radius: 3px; background: var(--ac)"></span></span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px; text-align: right">$0.0798 <span style="color: #9AA8C7">38%</span></span></div>
+<div style="display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(40px, 1fr) auto; column-gap: 12px; align-items: center"><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">03 Synthesis</span><span aria-hidden="true" style="display: block; height: 6px; border-radius: 3px; background: #1A2134"><span style="display: block; width: 93%; height: 100%; border-radius: 3px; background: var(--ac)"></span></span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px; text-align: right">$0.0745 <span style="color: #9AA8C7">35%</span></span></div>
+</div>
+<p style="margin: 0; font-size: 12.5px; line-height: 1.45; color: #9AA8C7">Model unknown: all three phases requested haiku, and the cost is not attributed to a model.</p>
+</div>
+</section>
+</div>
+<div style="display: flex; flex-direction: column; gap: 10px; width: 358px">
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3">Narrow · phone or side column</span>
+<section aria-label="Usage" style="display: flex; flex-wrap: wrap; align-items: stretch; gap: 20px 40px; padding: 20px; border-radius: 20px; border: 1px solid #1A2032; background: #0D101A; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04)">
+<div style="flex: 0 1 170px; display: flex; flex-direction: column; gap: 4px; min-width: 0">
+<h2 style="margin: 0; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3; font-weight: 500">Usage</h2>
+<span style="font-size: 32px; line-height: 1.1; font-weight: 600; letter-spacing: -0.03em; font-variant-numeric: tabular-nums">$0.2162</span>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px; color: #9AA8C7">176.0K tokens</span>
+</div>
+<div style="flex: 3 1 300px; display: flex; flex-direction: column; gap: 12px; min-width: 0">
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3">Tokens by type</span>
+<svg viewBox="0 0 1000 46" preserveAspectRatio="none" role="img" aria-label="Tokens by type: Cache read 81.9 percent, Input 17.0 percent, Output 1.1 percent" style="display: block; width: 100%; height: 34px">
+<polygon points="799.3,12 815.3,0 815.3,32 799.3,44" style="fill: color-mix(in oklab, #4C8DEA 50%, black)"></polygon>
+<polygon points="0.0,12 799.3,12 815.3,0 16.0,0" style="fill: color-mix(in oklab, #4C8DEA 58%, white)"></polygon>
+<polygon points="0.0,12 799.3,12 799.3,44 0.0,44" style="fill: #4C8DEA"></polygon>
+<polygon points="969.2,12 985.2,0 985.2,32 969.2,44" style="fill: color-mix(in oklab, #C98500 50%, black)"></polygon>
+<polygon points="803.3,12 969.2,12 985.2,0 819.3,0" style="fill: color-mix(in oklab, #C98500 58%, white)"></polygon>
+<polygon points="803.3,12 969.2,12 969.2,44 803.3,44" style="fill: #C98500"></polygon>
+<polygon points="984.0,12 1000.0,0 1000.0,32 984.0,44" style="fill: color-mix(in oklab, #9085E9 50%, black)"></polygon>
+<polygon points="973.2,12 984.0,12 1000.0,0 989.2,0" style="fill: color-mix(in oklab, #9085E9 58%, white)"></polygon>
+<polygon points="973.2,12 984.0,12 984.0,44 973.2,44" style="fill: #9085E9"></polygon>
+</svg>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 12px 16px">
+<div style="display: flex; flex-direction: column; gap: 3px; min-width: 0"><span style="display: flex; flex-wrap: wrap; align-items: center; gap: 4px 7px; font-size: 12.5px; color: #9AA8C7"><span style="flex-shrink: 0; width: 8px; height: 8px; border-radius: 2px; background: #4C8DEA"></span>Cache read <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; padding: 1px 6px; border-radius: 6px; border: 1px solid #283048; color: #9AA8C7">0.1× rate</span></span><span style="display: flex; align-items: baseline; gap: 7px; font-family: 'JetBrains Mono', ui-monospace, monospace"><span style="font-size: 13.5px; font-weight: 600">144,128</span><span style="font-size: 11.5px; color: #9AA8C7">81.9%</span></span></div>
+<div style="display: flex; flex-direction: column; gap: 3px; min-width: 0"><span style="display: flex; flex-wrap: wrap; align-items: center; gap: 4px 7px; font-size: 12.5px; color: #9AA8C7"><span style="flex-shrink: 0; width: 8px; height: 8px; border-radius: 2px; background: #C98500"></span>Input</span><span style="display: flex; align-items: baseline; gap: 7px; font-family: 'JetBrains Mono', ui-monospace, monospace"><span style="font-size: 13.5px; font-weight: 600">29,924</span><span style="font-size: 11.5px; color: #9AA8C7">17.0%</span></span></div>
+<div style="display: flex; flex-direction: column; gap: 3px; min-width: 0"><span style="display: flex; flex-wrap: wrap; align-items: center; gap: 4px 7px; font-size: 12.5px; color: #9AA8C7"><span style="flex-shrink: 0; width: 8px; height: 8px; border-radius: 2px; background: #9085E9"></span>Output</span><span style="display: flex; align-items: baseline; gap: 7px; font-family: 'JetBrains Mono', ui-monospace, monospace"><span style="font-size: 13.5px; font-weight: 600">1,945</span><span style="font-size: 11.5px; color: #9AA8C7">1.1%</span></span></div>
+</div>
+</div>
+<div style="flex: 2 1 260px; display: flex; flex-direction: column; gap: 12px; min-width: 0">
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3">Cost by model</span>
+<div style="display: flex; flex-direction: column; gap: 10px">
+<div style="display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(40px, 1fr) auto; column-gap: 12px; align-items: center"><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">gpt-5.6-sol</span><span aria-hidden="true" style="display: block; height: 6px; border-radius: 3px; background: #1A2134"><span style="display: block; width: 100%; height: 100%; border-radius: 3px; background: #8E9BBC"></span></span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px; text-align: right">$0.2162 <span style="color: #9AA8C7">100%</span></span></div>
+</div>
+</div>
+</section>
+</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#4D80FF","options":["#4D80FF","#4CC9F0","#45E0A0","#A78BFA"]},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+renderVals() {
+return { accent: this.props.accent ?? '#4D80FF' };
+}
+}
+</script>
+</body>
+</html>

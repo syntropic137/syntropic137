@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Syn137 execution detail</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Orbitron:wght@500;600;700&display=swap">
+<style>
+:root{--ac:#4D80FF}
+body{margin:0;background:#0A0C14}
+a{color:#E8EEFB}a:hover{color:#FFFFFF}
+.row:hover{background:#111626}
+.card:hover{border-color:#34406A}
+.ghost:hover{background:#151A2A}
+button{font-family:inherit}
+:focus-visible{outline:2px solid var(--ac);outline-offset:2px}
+</style>
+</helmet>
+<div style="--ac: {{accent}}; display: flex; flex-direction: column; min-height: 100vh; background: #0A0C14; color: #E8EEFB; font-family: 'Instrument Sans', 'Helvetica Neue', system-ui, sans-serif; font-size: 14px; line-height: 1.45; -webkit-font-smoothing: antialiased">
+
+<dc-import name="TopNav" active="executions" hint-size="100%,78px"></dc-import>
+
+<nav aria-label="Breadcrumb" style="display: flex; flex-wrap: wrap; align-items: center; gap: 4px; box-sizing: border-box; width: 100%; max-width: 1400px; margin: 0 auto; padding: 0 40px 14px; font-size: 13px">
+<a href="Main.dc.html" aria-label="Overview" style="display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 10px; color: #9AA8C7"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M2.75 7.25L8 2.75l5.25 4.5V13a.5.5 0 0 1-.5.5H9.5V9.75h-3v3.75H3.25a.5.5 0 0 1-.5-.5z"></path></svg></a>
+<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="#6F7FA3" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink: 0; opacity: 0.7"><path d="M6 3.5L10.5 8 6 12.5"></path></svg>
+<a href="Workflows.dc.html" style="display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 8px; border-radius: 9px; color: #9AA8C7; text-decoration: none; white-space: nowrap">Workflows</a>
+<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="#6F7FA3" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink: 0; opacity: 0.7"><path d="M6 3.5L10.5 8 6 12.5"></path></svg>
+<a href="Workflow.dc.html" style="display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 8px; border-radius: 9px; color: #9AA8C7; text-decoration: none; white-space: nowrap">Research Workflow</a>
+<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="#6F7FA3" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink: 0; opacity: 0.7"><path d="M6 3.5L10.5 8 6 12.5"></path></svg>
+<span aria-current="page" style="display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 9px; border: 1px solid #1A2032; background: #0F121C; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04); font-weight: 600; color: #E8EEFB; white-space: nowrap">Execution <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px">66e14f23</span></span>
+</nav>
+
+<main style="display: flex; flex-direction: column; gap: 28px; box-sizing: border-box; width: 100%; max-width: 1400px; margin: 0 auto; padding: 8px 40px 64px">
+
+<section aria-label="Execution" style="display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 28px 56px; padding: 32px 36px; border-radius: 24px; border: 1px solid #1A2032; background: radial-gradient(50% 130% at 100% 0%, color-mix(in oklab, var(--ac) 18%, transparent), transparent 70%), #0D101A; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05)">
+<div style="display: flex; align-items: flex-start; gap: 24px; min-width: 0; max-width: 720px">
+<svg width="84" height="84" viewBox="0 0 64 64" aria-hidden="true" style="flex-shrink: 0">
+<ellipse cx="32" cy="59" rx="18" ry="3.5" style="fill: var(--ac); opacity: 0.22"></ellipse>
+<polygon points="32,10 52,20 32,30 12,20" style="fill: color-mix(in oklab, var(--ac) 58%, white)"></polygon>
+<polygon points="12,20 32,30 32,54 12,44" style="fill: var(--ac)"></polygon>
+<polygon points="32,30 52,20 52,44 32,54" style="fill: color-mix(in oklab, var(--ac) 50%, black)"></polygon>
+<polygon points="18,29 18,41 27,39.5" style="fill: #0A0C14; opacity: 0.8"></polygon>
+</svg>
+<div style="display: flex; flex-direction: column; gap: 12px; min-width: 0">
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #6F7FA3">
+<span>exec-66e14f235942</span>
+</div>
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: 13px">
+<span style="display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 12px 0 9px; border-radius: 13px; background: color-mix(in oklab, var(--ac) 18%, transparent); color: color-mix(in oklab, var(--ac) 40%, white); font-weight: 600">
+<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7"></path></svg>
+<span>Completed</span>
+</span>
+<span style="color: #9AA8C7">3 of 3 phases · Aug 27, 2026, 2:59 AM</span>
+</div>
+<div style="display: flex; flex-direction: column; gap: 4px">
+<div style="display: flex; align-items: center; gap: 8px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3">
+<span>Task</span>
+<button class="ghost" type="button" aria-label="Copy task" style="display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: #6F7FA3; cursor: pointer">
+<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"></rect><path d="M10.5 5.5v-2a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2"></path></svg>
+</button>
+</div>
+<h1 style="margin: 0; font-size: 44px; line-height: 1.08; font-weight: 600; letter-spacing: -0.035em; text-wrap: balance">one sentence on sorting</h1>
+</div>
+</div>
+</div>
+<div style="display: flex; flex-direction: column; align-items: flex-end; gap: 26px">
+<div style="display: flex; flex-wrap: wrap; gap: 10px">
+<button class="ghost" type="button" style="display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 14px; border-radius: 11px; border: 1px solid #283048; background: #0F121C; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04); color: #E8EEFB; font-size: 13px; font-weight: 600; cursor: pointer">
+<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"></rect><path d="M10.5 5.5v-2a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2"></path></svg>
+<span>Copy run identity</span>
+</button>
+<a href="Workflow.dc.html" style="display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 16px; border-radius: 11px; background: color-mix(in oklab, var(--ac) 80%, black); box-shadow: inset 0 1px 0 color-mix(in oklab, var(--ac) 60%, white), 0 8px 20px -8px var(--ac); color: #FFFFFF; font-size: 13px; font-weight: 600; text-decoration: none">
+<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13.25 8a5.25 5.25 0 1 1-1.6-3.77M13.25 2.5v2.75H10.5"></path></svg>
+<span>Run again</span>
+</a>
+</div>
+<div style="display: grid; grid-template-columns: repeat(2, minmax(110px, auto)); gap: 20px 40px">
+<div style="display: flex; flex-direction: column; gap: 2px"><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3">Duration</span><span style="font-size: 30px; line-height: 1.1; font-weight: 600; letter-spacing: -0.03em; font-variant-numeric: tabular-nums">3m 47s</span></div>
+<div style="display: flex; flex-direction: column; gap: 2px"><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3">Cost</span><span style="font-size: 30px; line-height: 1.1; font-weight: 600; letter-spacing: -0.03em; font-variant-numeric: tabular-nums">$0.2100</span></div>
+<div style="display: flex; flex-direction: column; gap: 2px"><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3">Tokens</span><span style="font-size: 30px; line-height: 1.1; font-weight: 600; letter-spacing: -0.03em; font-variant-numeric: tabular-nums">396,791</span></div>
+<div style="display: flex; flex-direction: column; gap: 2px"><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3">Artifacts</span><span style="font-size: 30px; line-height: 1.1; font-weight: 600; letter-spacing: -0.03em; font-variant-numeric: tabular-nums">3</span></div>
+</div>
+</div>
+</section>
+
+<div style="display: flex; flex-wrap: wrap; gap: 28px 32px">
+
+<div style="flex: 999 1 640px; min-width: 0; display: flex; flex-direction: column; gap: 28px">
+
+<section aria-label="Phase timeline" style="display: flex; flex-direction: column; gap: 8px; padding: 24px 24px 14px; border-radius: 20px; border: 1px solid #1A2032; background: radial-gradient(70% 70% at 60% 100%, color-mix(in oklab, var(--ac) 12%, transparent), transparent 75%), #0D101A; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04)">
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px">
+<h2 style="margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -0.015em">Phase timeline</h2>
+<span style="font-size: 14px; color: #9AA8C7">Length is time, height is tokens. 223.8s inside phases. Each phase carries the session it ran in and the artifact it produced.</span>
+</div>
+<svg viewBox="0 0 880 164" role="img" aria-label="Three phases back to back. Discovery took 24.3 seconds and 93.4K tokens, Deep Dive Analysis 118.9 seconds and 143.9K tokens, Synthesis and Documentation 80.6 seconds and 159.4K tokens." style="display: block; width: 100%; height: auto">
+<polygon points="107.3,112 129.3,98 129.3,57 107.3,71" style="fill: color-mix(in oklab, var(--ac) 50%, black)"></polygon>
+<polygon points="20,112 107.3,112 107.3,71 20,71" style="fill: var(--ac)"></polygon>
+<polygon points="20,71 107.3,71 129.3,57 42,57" style="fill: color-mix(in oklab, var(--ac) 58%, white)"></polygon>
+<polygon points="542.5,112 564.5,98 564.5,35 542.5,49" style="fill: color-mix(in oklab, var(--ac) 50%, black)"></polygon>
+<polygon points="115.3,112 542.5,112 542.5,49 115.3,49" style="fill: var(--ac)"></polygon>
+<polygon points="115.3,49 542.5,49 564.5,35 137.3,35" style="fill: color-mix(in oklab, var(--ac) 58%, white)"></polygon>
+<polygon points="840.1,112 862.1,98 862.1,28 840.1,42" style="fill: color-mix(in oklab, var(--ac) 50%, black)"></polygon>
+<polygon points="550.5,112 840.1,112 840.1,42 550.5,42" style="fill: var(--ac)"></polygon>
+<polygon points="550.5,42 840.1,42 862.1,28 572.5,28" style="fill: color-mix(in oklab, var(--ac) 58%, white)"></polygon>
+<g style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; font-weight: 600; fill: #050A18">
+<text x="30" y="103">01</text>
+<text x="125.3" y="103">02</text>
+<text x="560.5" y="103">03</text>
+</g>
+<g style="font-size: 13px; font-weight: 600; fill: #E8EEFB">
+<text x="20" y="136">Discovery</text>
+<text x="115.3" y="136">Deep Dive Analysis</text>
+<text x="550.5" y="136">Synthesis &amp; Documentation</text>
+</g>
+<g style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; fill: #9AA8C7">
+<text x="20" y="154">24.3s</text>
+<text x="115.3" y="154">118.9s · 143.9K tokens · $0.0798</text>
+<text x="550.5" y="154">80.6s · 159.4K tokens · $0.0745</text>
+</g>
+</svg>
+<div style="display: flex; flex-direction: column; gap: 2px; margin-top: 6px; padding-top: 10px; border-top: 1px solid #1A2032">
+<sc-for list="{{phases}}" as="p" hint-placeholder-count="3">
+<div class="row" style="display: flex; flex-direction: column; gap: 10px; padding: 14px 10px; border-radius: 12px; font-size: 12.5px; color: #9AA8C7">
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px">
+<span style="display: flex; align-items: center; justify-content: center; flex-shrink: 0; width: 28px; height: 28px; border-radius: 9px; background: color-mix(in oklab, var(--ac) 16%, transparent); color: var(--ac); font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; font-weight: 600">{{p.n}}</span>
+<span style="font-size: 14px; font-weight: 600; color: #E8EEFB">{{p.name}}</span>
+<span style="height: 24px; padding: 0 10px; border-radius: 12px; background: #151A2A; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; line-height: 24px">Claude · haiku requested</span>
+<span style="height: 22px; padding: 0 9px; border-radius: 8px; border: 1px dashed #34406A; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; line-height: 22px">skills not recorded</span>
+<span style="flex-grow: 1"></span>
+<span style="min-width: 50px; text-align: right; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px">{{p.dur}}</span>
+<span style="min-width: 60px; text-align: right; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px; color: #E8EEFB">{{p.cost}}</span>
+</div>
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding-left: 40px">
+<span style="display: flex; gap: 2px; width: 84px; height: 6px" aria-hidden="true">
+<span style="flex: {{p.cr}} 1 0; border-radius: 2px; background: #4C8DEA"></span>
+<span style="flex: {{p.cw}} 1 0; border-radius: 2px; background: #E0703A"></span>
+<span style="flex: {{p.out}} 1 0; border-radius: 2px; background: #9085E9"></span>
+</span>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px">{{p.split}}</span>
+</div>
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding-left: 40px">
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3">Ran in</span>
+<a class="card" href="Session.dc.html" aria-label="{{p.sessLabel}}" style="display: flex; align-items: center; gap: 9px; height: 34px; padding: 0 12px 0 10px; border-radius: 11px; border: 1px solid #283048; background: #0A0C14; text-decoration: none">
+<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color: var(--ac)"><path d="M3 4.5L6.5 8 3 11.5M8.5 11.5H13"></path></svg>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px">{{p.session}}</span>
+<span style="font-size: 12px; color: #9AA8C7">platform session · no local transcript</span>
+</a>
+<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#6F7FA3" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 8h10.5M9.5 4.5L13 8l-3.5 3.5"></path></svg>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3">Produced</span>
+<a class="card" href="Artifact.dc.html" aria-label="{{p.artLabel}}" style="display: flex; align-items: center; gap: 9px; height: 34px; padding: 0 12px 0 10px; border-radius: 11px; border: 1px solid #283048; background: #0A0C14; text-decoration: none">
+<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true" style="color: var(--ac)"><path d="M4 1.75h5l3 3v9.5H4zM9 1.75v3h3"></path></svg>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px">deliverable.md</span>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #9AA8C7">{{p.size}}</span>
+</a>
+</div>
+</div>
+</sc-for>
+</div>
+<div aria-label="Provenance" style="display: flex; flex-direction: column; gap: 12px; margin-top: 4px; padding: 16px 10px 8px; border-top: 1px solid #1A2032">
+<div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px">
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px">
+<h3 style="margin: 0; font-size: 14px; font-weight: 600">Provenance</h3>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #9AA8C7">3 platform sessions · 0 native transcripts · 0 invocations · 1 gap</span>
+</div>
+<button class="ghost" type="button" style="height: 32px; padding: 0 12px; border-radius: 10px; border: 1px solid #283048; background: #0F121C; color: #E8EEFB; font-size: 12.5px; font-weight: 600; cursor: pointer">Load latest revision</button>
+</div>
+<p style="display: flex; align-items: flex-start; gap: 10px; margin: 0; font-size: 13px; line-height: 1.5; color: #EBD9A8">
+<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="#E5B450" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink: 0; margin-top: 2px"><path d="M8 2.25l6 10.75H2zM8 6.5v3M8 11.4v.1"></path></svg>
+<span><strong style="font-weight: 600; color: #F5E7BD">Coverage can't be proven for this harness.</strong> The three sessions above are real, but others may exist. Missing host registration affects all 3.</span>
+</p>
+<p style="margin: 0; font-size: 12.5px; line-height: 1.5; color: #9AA8C7">This run started before start config was pinned, so the tools and skills each phase had were not recorded. Which skills an agent actually used is not reported yet either.</p>
+<div style="display: flex; flex-wrap: wrap; gap: 4px 16px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3">
+<span>revision f82315509573…b742d4d5</span>
+<span>reconstruction current</span>
+<span>every section loaded</span>
+<span>no parent sessions</span>
+<span>remote replication off</span>
+</div>
+</div>
+</section>
+
+</div>
+
+<div style="flex: 1 1 340px; min-width: 0; display: flex; flex-direction: column; gap: 20px">
+
+<section aria-label="Usage" style="display: flex; flex-wrap: wrap; align-items: stretch; gap: 20px 40px; padding: 22px; border-radius: 18px; border: 1px solid #1A2032; background: #0D101A; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04)">
+<div style="flex: 0 1 170px; display: flex; flex-direction: column; gap: 4px; min-width: 0">
+<h2 style="margin: 0; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3; font-weight: 500">Usage</h2>
+<span style="font-size: 32px; line-height: 1.1; font-weight: 600; letter-spacing: -0.03em; font-variant-numeric: tabular-nums">$0.2100</span>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px; color: #9AA8C7">396.8K tokens</span>
+</div>
+<div style="flex: 3 1 300px; display: flex; flex-direction: column; gap: 12px; min-width: 0">
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3">Tokens by type</span>
+<svg viewBox="0 0 1000 46" preserveAspectRatio="none" role="img" aria-label="Tokens by type: Cache read 79.0 percent, Cache write 16.4 percent, Output 4.6 percent, Input 0.0 percent" style="display: block; width: 100%; height: 34px">
+<polygon points="762.0,12 778.0,0 778.0,32 762.0,44" style="fill: color-mix(in oklab, #4C8DEA 50%, black)"></polygon>
+<polygon points="0.0,12 762.0,12 778.0,0 16.0,0" style="fill: color-mix(in oklab, #4C8DEA 58%, white)"></polygon>
+<polygon points="0.0,12 762.0,12 762.0,44 0.0,44" style="fill: #4C8DEA"></polygon>
+<polygon points="923.7,12 939.7,0 939.7,32 923.7,44" style="fill: color-mix(in oklab, #E0703A 50%, black)"></polygon>
+<polygon points="766.0,12 923.7,12 939.7,0 782.0,0" style="fill: color-mix(in oklab, #E0703A 58%, white)"></polygon>
+<polygon points="766.0,12 923.7,12 923.7,44 766.0,44" style="fill: #E0703A"></polygon>
+<polygon points="972.1,12 988.1,0 988.1,32 972.1,44" style="fill: color-mix(in oklab, #9085E9 50%, black)"></polygon>
+<polygon points="927.7,12 972.1,12 988.1,0 943.7,0" style="fill: color-mix(in oklab, #9085E9 58%, white)"></polygon>
+<polygon points="927.7,12 972.1,12 972.1,44 927.7,44" style="fill: #9085E9"></polygon>
+<polygon points="984.0,12 1000.0,0 1000.0,32 984.0,44" style="fill: color-mix(in oklab, #C98500 50%, black)"></polygon>
+<polygon points="976.1,12 984.0,12 1000.0,0 992.1,0" style="fill: color-mix(in oklab, #C98500 58%, white)"></polygon>
+<polygon points="976.1,12 984.0,12 984.0,44 976.1,44" style="fill: #C98500"></polygon>
+</svg>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 12px 16px">
+<div style="display: flex; flex-direction: column; gap: 3px; min-width: 0"><span style="display: flex; flex-wrap: wrap; align-items: center; gap: 4px 7px; font-size: 12.5px; color: #9AA8C7"><span style="flex-shrink: 0; width: 8px; height: 8px; border-radius: 2px; background: #4C8DEA"></span>Cache read</span><span style="display: flex; align-items: baseline; gap: 7px; font-family: 'JetBrains Mono', ui-monospace, monospace"><span style="font-size: 13.5px; font-weight: 600">313,560</span><span style="font-size: 11.5px; color: #9AA8C7">79.0%</span></span></div>
+<div style="display: flex; flex-direction: column; gap: 3px; min-width: 0"><span style="display: flex; flex-wrap: wrap; align-items: center; gap: 4px 7px; font-size: 12.5px; color: #9AA8C7"><span style="flex-shrink: 0; width: 8px; height: 8px; border-radius: 2px; background: #E0703A"></span>Cache write</span><span style="display: flex; align-items: baseline; gap: 7px; font-family: 'JetBrains Mono', ui-monospace, monospace"><span style="font-size: 13.5px; font-weight: 600">64,884</span><span style="font-size: 11.5px; color: #9AA8C7">16.4%</span></span></div>
+<div style="display: flex; flex-direction: column; gap: 3px; min-width: 0"><span style="display: flex; flex-wrap: wrap; align-items: center; gap: 4px 7px; font-size: 12.5px; color: #9AA8C7"><span style="flex-shrink: 0; width: 8px; height: 8px; border-radius: 2px; background: #9085E9"></span>Output</span><span style="display: flex; align-items: baseline; gap: 7px; font-family: 'JetBrains Mono', ui-monospace, monospace"><span style="font-size: 13.5px; font-weight: 600">18,254</span><span style="font-size: 11.5px; color: #9AA8C7">4.6%</span></span></div>
+<div style="display: flex; flex-direction: column; gap: 3px; min-width: 0"><span style="display: flex; flex-wrap: wrap; align-items: center; gap: 4px 7px; font-size: 12.5px; color: #9AA8C7"><span style="flex-shrink: 0; width: 8px; height: 8px; border-radius: 2px; background: #C98500"></span>Input</span><span style="display: flex; align-items: baseline; gap: 7px; font-family: 'JetBrains Mono', ui-monospace, monospace"><span style="font-size: 13.5px; font-weight: 600">93</span><span style="font-size: 11.5px; color: #9AA8C7">0.0%</span></span></div>
+</div>
+</div>
+<div style="flex: 2 1 260px; display: flex; flex-direction: column; gap: 12px; min-width: 0">
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3">Cost by phase</span>
+<div style="display: flex; flex-direction: column; gap: 10px">
+<div style="display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(40px, 1fr) auto; column-gap: 12px; align-items: center"><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">01 Discovery</span><span aria-hidden="true" style="display: block; height: 6px; border-radius: 3px; background: #1A2134"><span style="display: block; width: 70%; height: 100%; border-radius: 3px; background: var(--ac)"></span></span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px; text-align: right">$0.0557 <span style="color: #9AA8C7">27%</span></span></div>
+<div style="display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(40px, 1fr) auto; column-gap: 12px; align-items: center"><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">02 Deep Dive</span><span aria-hidden="true" style="display: block; height: 6px; border-radius: 3px; background: #1A2134"><span style="display: block; width: 100%; height: 100%; border-radius: 3px; background: var(--ac)"></span></span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px; text-align: right">$0.0798 <span style="color: #9AA8C7">38%</span></span></div>
+<div style="display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(40px, 1fr) auto; column-gap: 12px; align-items: center"><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">03 Synthesis</span><span aria-hidden="true" style="display: block; height: 6px; border-radius: 3px; background: #1A2134"><span style="display: block; width: 93%; height: 100%; border-radius: 3px; background: var(--ac)"></span></span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px; text-align: right">$0.0745 <span style="color: #9AA8C7">35%</span></span></div>
+</div>
+<p style="margin: 0; font-size: 12.5px; line-height: 1.45; color: #9AA8C7">Model unknown: all three phases requested haiku, and the cost is not attributed to a model.</p>
+</div>
+</section>
+
+</div>
+</div>
+
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#4D80FF","options":["#4D80FF","#4CC9F0","#45E0A0","#A78BFA"]},"$preview":{"width":1440,"height":1320}}'>
+class Component extends DCLogic {
+renderVals() {
+const raw = [
+{ name: 'Discovery Phase', dur: '24.3s', size: '2.9 KB', fresh: 25, cw: 31442, cr: 60160, out: 1801, cost: '$0.0557', session: '10dfeb5d' },
+{ name: 'Deep Dive Analysis', dur: '118.9s', size: '29.4 KB', fresh: 34, cw: 13074, cr: 120987, out: 9823, cost: '$0.0798', session: '7288d417' },
+{ name: 'Synthesis & Documentation', dur: '80.6s', size: '19.8 KB', fresh: 34, cw: 20368, cr: 132413, out: 6630, cost: '$0.0745', session: '3ef71a70' }
+];
+const fmt = (n) => (n >= 1000 ? (n / 1000).toFixed(1) + 'K' : String(n));
+const phases = raw.map((p, i) => ({
+n: '0' + (i + 1),
+name: p.name,
+cr: p.cr,
+cw: p.cw,
+out: p.out,
+split: fmt(p.cr) + ' read · ' + fmt(p.cw) + ' write · ' + fmt(p.out) + ' out · ' + p.fresh + ' in',
+cost: p.cost,
+dur: p.dur,
+size: p.size,
+sessLabel: 'Session ' + p.session + ' of ' + p.name,
+artLabel: 'Artifact from ' + p.name + ', deliverable.md, ' + p.size,
+session: p.session
+}));
+return { accent: this.props.accent ?? '#4D80FF', phases };
+}
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,414 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Syn137 overview on a phone</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Orbitron:wght@500;600;700&display=swap">
+<style>
+:root{--ac:#4D80FF}
+body{margin:0;background:#0A0C14}
+a{color:#E8EEFB}a:hover{color:#FFFFFF}
+button{font-family:inherit}
+:focus-visible{outline:2px solid var(--ac);outline-offset:2px}
+</style>
+</helmet>
+<div style="--ac: {{accent}}; display: flex; flex-direction: column; min-height: 100vh; background: #0A0C14; color: #E8EEFB; font-family: 'Instrument Sans', 'Helvetica Neue', system-ui, sans-serif; font-size: 15px; line-height: 1.45; -webkit-font-smoothing: antialiased">
+
+<dc-import name="PhoneTop" hint-size="100%,68px"></dc-import>
+
+<main style="display: flex; flex-direction: column; gap: 20px; flex-grow: 1; box-sizing: border-box; padding: 4px 16px 24px">
+
+<section aria-label="Right now" style="display: flex; flex-direction: column; gap: 18px; padding: 22px 0 10px; border-radius: 24px; border: 1px solid #1A2032; background: radial-gradient(90% 50% at 70% 104%, color-mix(in oklab, var(--ac) 26%, transparent), transparent 72%), #0D101A; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05); overflow: hidden">
+<div style="display: flex; flex-direction: column; gap: 14px; padding: 0 20px">
+<div style="display: flex; align-items: center; gap: 10px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: #9AA8C7">
+<span style="width: 7px; height: 7px; border-radius: 50%; background: var(--ac); box-shadow: 0 0 0 4px color-mix(in oklab, var(--ac) 24%, transparent)"></span>
+<span>Right now</span>
+</div>
+<h1 style="margin: 0; font-size: 36px; line-height: 1.05; font-weight: 600; letter-spacing: -0.035em">All quiet.<br><span style="color: #6F7FA3">Two runs need a look.</span></h1>
+</div>
+<div style="display: flex; flex-direction: column; gap: 8px; padding: 0 14px">
+<a href="PhoneExecution.dc.html" style="display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 0 12px; border-radius: 14px; border: 1px solid #283048; background: #0A0C14; text-decoration: none">
+<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="#FF6F61" stroke-width="1.9" stroke-linecap="round" aria-hidden="true" style="flex-shrink: 0"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"></path></svg>
+<span style="flex-grow: 1; font-size: 14.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">Starter PR Review</span>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #9AA8C7">5s · 1w ago</span>
+</a>
+<a href="PhoneExecution.dc.html" style="display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 0 12px; border-radius: 14px; border: 1px solid #283048; background: #0A0C14; text-decoration: none">
+<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="#FF6F61" stroke-width="1.9" stroke-linecap="round" aria-hidden="true" style="flex-shrink: 0"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"></path></svg>
+<span style="flex-grow: 1; font-size: 14.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">PR Review</span>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #9AA8C7">8s · 1w ago</span>
+</a>
+</div>
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 20px; padding: 4px 20px 0">
+<div style="display: flex; flex-direction: column; gap: 2px"><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3">Sessions</span><span style="font-size: 28px; line-height: 1.1; font-weight: 600; letter-spacing: -0.03em; font-variant-numeric: tabular-nums">108</span></div>
+<div style="display: flex; flex-direction: column; gap: 2px"><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3">Active days</span><span style="font-size: 28px; line-height: 1.1; font-weight: 600; letter-spacing: -0.03em; font-variant-numeric: tabular-nums">11</span></div>
+<div style="display: flex; flex-direction: column; gap: 2px"><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3">Tokens</span><span style="font-size: 28px; line-height: 1.1; font-weight: 600; letter-spacing: -0.03em; font-variant-numeric: tabular-nums">10.26M</span></div>
+<div style="display: flex; flex-direction: column; gap: 2px"><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3">Spend</span><span style="font-size: 28px; line-height: 1.1; font-weight: 600; letter-spacing: -0.03em; font-variant-numeric: tabular-nums">$6.92</span></div>
+</div>
+<div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 20px 0">
+<span style="font-size: 13px; color: #9AA8C7">Agent activity · last 16 weeks</span>
+<div role="group" aria-label="Range" style="display: flex; gap: 2px; padding: 3px; border-radius: 12px; border: 1px solid #1A2032; background: #0A0C14; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px">
+<button type="button" aria-pressed="true" style="height: 30px; padding: 0 10px; border: 0; border-radius: 9px; background: #1A2134; color: #E8EEFB; cursor: pointer">16w</button>
+<button type="button" style="height: 30px; padding: 0 10px; border: 0; border-radius: 9px; background: transparent; color: #9AA8C7; cursor: pointer">Year</button>
+</div>
+</div>
+<div style="position: relative; margin: 0 8px">
+<svg viewBox="0 0 350 146" role="img" aria-label="Activity skyline for the last 16 weeks. Eleven active days run from July 25 to August 28, and August 28 is by far the tallest with 43 sessions." style="display: block; width: 100%; height: auto">
+<path d="{{sky.floor}}" style="fill: #171C2C"></path>
+<path d="{{sky.future}}" style="fill: #10141F"></path>
+<path d="{{sky.r6.side}}" style="fill: color-mix(in oklab, var(--ac) 50%, black)"></path>
+<path d="{{sky.r6.front}}" style="fill: var(--ac)"></path>
+<path d="{{sky.r6.top}}" style="fill: color-mix(in oklab, var(--ac) 58%, white)"></path>
+<path d="{{sky.r5.side}}" style="fill: color-mix(in oklab, var(--ac) 50%, black)"></path>
+<path d="{{sky.r5.front}}" style="fill: var(--ac)"></path>
+<path d="{{sky.r5.top}}" style="fill: color-mix(in oklab, var(--ac) 58%, white)"></path>
+<path d="{{sky.r4.side}}" style="fill: color-mix(in oklab, var(--ac) 50%, black)"></path>
+<path d="{{sky.r4.front}}" style="fill: var(--ac)"></path>
+<path d="{{sky.r4.top}}" style="fill: color-mix(in oklab, var(--ac) 58%, white)"></path>
+<path d="{{sky.r3.side}}" style="fill: color-mix(in oklab, var(--ac) 50%, black)"></path>
+<path d="{{sky.r3.front}}" style="fill: var(--ac)"></path>
+<path d="{{sky.r3.top}}" style="fill: color-mix(in oklab, var(--ac) 58%, white)"></path>
+<path d="{{sky.r2.side}}" style="fill: color-mix(in oklab, var(--ac) 50%, black)"></path>
+<path d="{{sky.r2.front}}" style="fill: var(--ac)"></path>
+<path d="{{sky.r2.top}}" style="fill: color-mix(in oklab, var(--ac) 58%, white)"></path>
+<path d="{{sky.r1.side}}" style="fill: color-mix(in oklab, var(--ac) 50%, black)"></path>
+<path d="{{sky.r1.front}}" style="fill: var(--ac)"></path>
+<path d="{{sky.r1.top}}" style="fill: color-mix(in oklab, var(--ac) 58%, white)"></path>
+<path d="{{sky.r0.side}}" style="fill: color-mix(in oklab, var(--ac) 50%, black)"></path>
+<path d="{{sky.r0.front}}" style="fill: var(--ac)"></path>
+<path d="{{sky.r0.top}}" style="fill: color-mix(in oklab, var(--ac) 58%, white)"></path>
+<path d="{{sky.sel.side}}" style="fill: var(--ac); stroke: #FFFFFF; stroke-width: 1; stroke-linejoin: round"></path>
+<path d="{{sky.sel.front}}" style="fill: color-mix(in oklab, var(--ac) 62%, white); stroke: #FFFFFF; stroke-width: 1; stroke-linejoin: round"></path>
+<path d="{{sky.sel.top}}" style="fill: #FFFFFF; stroke: #FFFFFF; stroke-width: 1; stroke-linejoin: round"></path>
+<g style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; fill: #6F7FA3">
+<text x="25" y="140">Jul</text>
+<text x="102" y="140">Aug</text>
+<text x="199" y="140">Sep</text>
+<text x="276" y="140">Oct</text>
+</g>
+</svg>
+<sc-for list="{{sky.hits}}" as="d" hint-placeholder-count="11">
+<button type="button" aria-label="{{d.label}}" aria-pressed="{{d.on}}" onMouseEnter="{{d.pick}}" onFocus="{{d.pick}}" onClick="{{d.pick}}" style="position: absolute; left: {{d.l}}; top: {{d.t}}; width: {{d.w}}; height: {{d.h}}; z-index: {{d.z}}; padding: 0; border: 0; border-radius: 4px; background: transparent; cursor: pointer"></button>
+</sc-for>
+</div>
+<div role="status" style="display: flex; flex-direction: column; gap: 12px; margin: 0 12px 12px; padding: 12px 14px 14px; border-radius: 16px; border: 1px solid #283048; background: #111626; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06)">
+<div style="display: flex; align-items: center; gap: 10px">
+<button type="button" aria-label="Previous active day" onClick="{{day.prev}}" style="display: flex; align-items: center; justify-content: center; flex-shrink: 0; width: 44px; height: 44px; padding: 0; border-radius: 14px; border: 1px solid #283048; background: #0F121C; color: #E8EEFB; cursor: pointer"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 3.5L5.5 8l4.5 4.5"></path></svg></button>
+<div style="display: flex; flex-direction: column; align-items: center; flex-grow: 1; min-width: 0">
+<span style="font-size: 16px; font-weight: 600; letter-spacing: -0.01em">{{day.date}}</span>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3">{{day.pos}}</span>
+</div>
+<button type="button" aria-label="Next active day" onClick="{{day.next}}" style="display: flex; align-items: center; justify-content: center; flex-shrink: 0; width: 44px; height: 44px; padding: 0; border-radius: 14px; border: 1px solid #283048; background: #0F121C; color: #E8EEFB; cursor: pointer"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3.5L10.5 8 6 12.5"></path></svg></button>
+</div>
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px">
+<div style="display: flex; flex-direction: column; gap: 1px"><span style="font-size: 22px; line-height: 1.1; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; color: color-mix(in oklab, var(--ac) 45%, white)">{{day.sessions}}</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3">Sessions</span></div>
+<div style="display: flex; flex-direction: column; gap: 1px"><span style="font-size: 22px; line-height: 1.1; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; color: #E8EEFB">{{day.executions}}</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3">Executions</span></div>
+<div style="display: flex; flex-direction: column; gap: 1px"><span style="font-size: 22px; line-height: 1.1; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; color: #E8EEFB">{{day.commits}}</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3">Commits</span></div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 8px; padding-top: 12px; border-top: 1px solid #222A40">
+<div style="display: flex; align-items: baseline; justify-content: space-between; gap: 10px">
+<span style="display: flex; align-items: baseline; gap: 8px"><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3">Tokens</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; font-weight: 600">{{day.tokens}}</span></span>
+<span style="display: flex; align-items: baseline; gap: 8px"><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3">Spend</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; font-weight: 600">{{day.cost}}</span></span>
+</div>
+<sc-if value="{{day.hasTokens}}" hint-placeholder-val="{{ true }}">
+<div style="display: flex; flex-direction: column; gap: 8px">
+<div aria-hidden="true" style="display: flex; gap: 2px; height: 8px">
+<sc-for list="{{day.parts}}" as="p" hint-placeholder-count="4">
+<span style="flex: {{p.flex}} 1 0; border-radius: 2px; background: {{p.c}}"></span>
+</sc-for>
+</div>
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px 14px">
+<sc-for list="{{day.parts}}" as="p" hint-placeholder-count="4">
+<span style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: #9AA8C7"><span style="flex-shrink: 0; width: 8px; height: 8px; border-radius: 2px; background: {{p.c}}"></span><span style="flex-grow: 1">{{p.label}}</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #E8EEFB">{{p.v}}</span></span>
+</sc-for>
+</div>
+</div>
+</sc-if>
+<sc-if value="{{day.noTokens}}" hint-placeholder-val="{{ false }}">
+<span style="font-size: 12.5px; color: #9AA8C7">No tokens recorded for this day.</span>
+</sc-if>
+</div>
+<a href="PhoneExecutions.dc.html" style="display: flex; align-items: center; justify-content: center; height: 44px; border-radius: 12px; border: 1px solid #283048; background: #0F121C; font-size: 14px; font-weight: 600; text-decoration: none">Runs that day →</a>
+</div>
+</section>
+
+<section aria-label="From trigger to artifact" style="display: flex; flex-direction: column; gap: 4px; padding: 20px 8px 8px; border-radius: 20px; border: 1px solid #1A2032; background: #0D101A; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04)">
+<h2 style="margin: 0; padding: 0 12px 8px; font-size: 18px; font-weight: 600; letter-spacing: -0.01em">From trigger to artifact</h2>
+<a href="PhoneTriggers.dc.html" style="display: flex; align-items: center; gap: 14px; min-height: 64px; padding: 4px 12px; border-radius: 14px; text-decoration: none">
+<svg width="44" height="44" viewBox="0 0 64 64" aria-hidden="true" style="flex-shrink: 0">
+<polygon points="38,10 22,36 34,36 30,58 50,28 38,28" style="fill: color-mix(in oklab, var(--ac) 50%, black)"></polygon>
+<polygon points="34,8 18,34 30,34 26,56 46,26 34,26" style="fill: color-mix(in oklab, var(--ac) 58%, white)"></polygon>
+</svg>
+<span style="display: flex; flex-direction: column; flex-grow: 1; min-width: 0"><span style="font-weight: 600">Triggers</span><span style="font-size: 13px; color: #9AA8C7">watching 2 repos</span></span>
+<span style="font-size: 24px; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums">6</span>
+</a>
+<a href="PhoneWorkflows.dc.html" style="display: flex; align-items: center; gap: 14px; min-height: 64px; padding: 4px 12px; border-radius: 14px; text-decoration: none">
+<svg width="44" height="44" viewBox="0 0 64 64" aria-hidden="true" style="flex-shrink: 0">
+<g opacity="0.45">
+<polygon points="32,30 52,40 32,50 12,40" style="fill: color-mix(in oklab, var(--ac) 58%, white)"></polygon>
+<polygon points="12,40 32,50 32,55 12,45" style="fill: var(--ac)"></polygon>
+<polygon points="32,50 52,40 52,45 32,55" style="fill: color-mix(in oklab, var(--ac) 50%, black)"></polygon>
+</g>
+<g opacity="0.72">
+<polygon points="32,19 52,29 32,39 12,29" style="fill: color-mix(in oklab, var(--ac) 58%, white)"></polygon>
+<polygon points="12,29 32,39 32,44 12,34" style="fill: var(--ac)"></polygon>
+<polygon points="32,39 52,29 52,34 32,44" style="fill: color-mix(in oklab, var(--ac) 50%, black)"></polygon>
+</g>
+<polygon points="32,8 52,18 32,28 12,18" style="fill: color-mix(in oklab, var(--ac) 58%, white)"></polygon>
+<polygon points="12,18 32,28 32,33 12,23" style="fill: var(--ac)"></polygon>
+<polygon points="32,28 52,18 52,23 32,33" style="fill: color-mix(in oklab, var(--ac) 50%, black)"></polygon>
+</svg>
+<span style="display: flex; flex-direction: column; flex-grow: 1; min-width: 0"><span style="font-weight: 600">Workflows</span><span style="font-size: 13px; color: #9AA8C7">phased definitions</span></span>
+<span style="font-size: 24px; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums">31</span>
+</a>
+<a href="PhoneExecutions.dc.html" style="display: flex; align-items: center; gap: 14px; min-height: 64px; padding: 4px 12px; border-radius: 14px; text-decoration: none">
+<svg width="44" height="44" viewBox="0 0 64 64" aria-hidden="true" style="flex-shrink: 0">
+<polygon points="32,10 52,20 32,30 12,20" style="fill: color-mix(in oklab, var(--ac) 58%, white)"></polygon>
+<polygon points="12,20 32,30 32,54 12,44" style="fill: var(--ac)"></polygon>
+<polygon points="32,30 52,20 52,44 32,54" style="fill: color-mix(in oklab, var(--ac) 50%, black)"></polygon>
+<polygon points="18,29 18,41 27,39.5" style="fill: #0A0C14; opacity: 0.8"></polygon>
+</svg>
+<span style="display: flex; flex-direction: column; flex-grow: 1; min-width: 0"><span style="font-weight: 600">Executions</span><span style="font-size: 13px; color: #9AA8C7">50 done · 23 failed · 2 cancelled</span></span>
+<span style="font-size: 24px; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums">75</span>
+</a>
+<a href="PhoneSession.dc.html" style="display: flex; align-items: center; gap: 14px; min-height: 64px; padding: 4px 12px; border-radius: 14px; text-decoration: none">
+<svg width="44" height="44" viewBox="0 0 64 64" aria-hidden="true" style="flex-shrink: 0">
+<polygon points="32,18 54,29 32,40 10,29" style="fill: color-mix(in oklab, var(--ac) 58%, white)"></polygon>
+<polygon points="10,29 32,40 32,50 10,39" style="fill: var(--ac)"></polygon>
+<polygon points="32,40 54,29 54,39 32,50" style="fill: color-mix(in oklab, var(--ac) 50%, black)"></polygon>
+<polyline points="34,23 34,28 24,28" fill="none" stroke="#0A0C14" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" opacity="0.8"></polyline>
+</svg>
+<span style="display: flex; flex-direction: column; flex-grow: 1; min-width: 0"><span style="font-weight: 600">Sessions</span><span style="font-size: 13px; color: #9AA8C7">one agent, one phase</span></span>
+<span style="font-size: 24px; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums">108</span>
+</a>
+<a href="PhoneArtifact.dc.html" style="display: flex; align-items: center; gap: 14px; min-height: 64px; padding: 4px 12px; border-radius: 14px; text-decoration: none">
+<svg width="44" height="44" viewBox="0 0 64 64" aria-hidden="true" style="flex-shrink: 0">
+<polygon points="26,10 46,20 46,48 26,38" style="fill: color-mix(in oklab, var(--ac) 50%, black)"></polygon>
+<polygon points="18,16 38,26 38,54 18,44" style="fill: color-mix(in oklab, var(--ac) 58%, white)"></polygon>
+<path d="M22,25L34,31M22,31L34,37M22,37L30,41" fill="none" stroke="#0A0C14" stroke-width="2" stroke-linecap="round" opacity="0.6"></path>
+</svg>
+<span style="display: flex; flex-direction: column; flex-grow: 1; min-width: 0"><span style="font-weight: 600">Artifacts</span><span style="font-size: 13px; color: #9AA8C7">files the phases left behind</span></span>
+<span style="font-size: 24px; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums">130</span>
+</a>
+</section>
+
+<section aria-label="Recent runs" style="display: flex; flex-direction: column; gap: 6px">
+<div style="display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 0 4px 4px">
+<h2 style="margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -0.01em">Recent runs</h2>
+<a href="PhoneExecutions.dc.html" style="font-size: 13.5px; color: #9AA8C7; text-decoration: none">All 75 →</a>
+</div>
+<sc-for list="{{runs}}" as="r" hint-placeholder-count="5">
+<a href="PhoneExecution.dc.html" style="display: flex; flex-direction: column; gap: 10px; padding: 14px; border-radius: 16px; border: 1px solid #1A2032; background: #0D101A; text-decoration: none; color: #E8EEFB">
+<span style="display: flex; align-items: center; gap: 12px">
+<span style="display: flex; align-items: center; justify-content: center; flex-shrink: 0; width: 36px; height: 36px; border-radius: 11px; background: {{r.badge}}; color: {{r.tone}}">
+<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{r.icon}}"></path></svg>
+</span>
+<span style="display: flex; flex-direction: column; flex-grow: 1; min-width: 0">
+<span style="font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{r.name}}</span>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{r.sub}}</span>
+</span>
+<span style="display: flex; flex-direction: column; align-items: flex-end; flex-shrink: 0; font-family: 'JetBrains Mono', ui-monospace, monospace"><span style="font-size: 13px">{{r.cost}}</span><span style="font-size: 11px; color: #6F7FA3">{{r.when}}</span></span>
+</span>
+<span style="display: flex; align-items: center; gap: 10px">
+<span style="display: flex; flex-grow: 1; height: 10px; border-radius: 5px; background: #121727">
+<span style="display: flex; gap: 2px; width: {{r.pct}}; min-width: 14px">
+<sc-for list="{{r.segs}}" as="p" hint-placeholder-count="3">
+<span style="flex: 1 1 0; height: 10px; border-radius: 3px; background: {{p.c}}"></span>
+</sc-for>
+</span>
+</span>
+<span style="width: 48px; text-align: right; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #9AA8C7">{{r.dur}}</span>
+</span>
+</a>
+</sc-for>
+</section>
+
+<section aria-label="Outcomes" style="display: flex; align-items: center; gap: 20px; padding: 20px; border-radius: 20px; border: 1px solid #1A2032; background: #0D101A; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04)">
+<svg width="104" height="104" viewBox="0 0 120 120" role="img" aria-label="67 percent of executions completed, 31 percent failed, 3 percent were cancelled" style="flex-shrink: 0">
+<circle cx="60" cy="60" r="46" fill="none" stroke="#151A2A" stroke-width="12"></circle>
+<g transform="rotate(-90 60 60)" fill="none" stroke-width="12">
+<circle cx="60" cy="60" r="46" stroke-dasharray="189.7 289.03" stroke-dashoffset="0" style="stroke: var(--ac)"></circle>
+<circle cx="60" cy="60" r="46" stroke-dasharray="85.6 289.03" stroke-dashoffset="-192.69" style="stroke: #FF6F61"></circle>
+<circle cx="60" cy="60" r="46" stroke-dasharray="4.7 289.03" stroke-dashoffset="-281.33" style="stroke: #6F7FA3"></circle>
+</g>
+<text x="60" y="64" text-anchor="middle" style="font-size: 24px; font-weight: 600; fill: #E8EEFB">67%</text>
+<text x="60" y="79" text-anchor="middle" style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 9px; fill: #9AA8C7">completed</text>
+</svg>
+<div style="flex-grow: 1; display: flex; flex-direction: column; gap: 10px">
+<h2 style="margin: 0 0 2px; font-size: 15px; font-weight: 600">Outcomes · 75 runs</h2>
+<div style="display: flex; align-items: center; gap: 10px; font-size: 13.5px"><span style="width: 8px; height: 8px; border-radius: 2px; background: var(--ac)"></span><span style="flex-grow: 1; color: #9AA8C7">Completed</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px">50</span></div>
+<div style="display: flex; align-items: center; gap: 10px; font-size: 13.5px"><span style="width: 8px; height: 8px; border-radius: 2px; background: #FF6F61"></span><span style="flex-grow: 1; color: #9AA8C7">Failed</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px">23</span></div>
+<div style="display: flex; align-items: center; gap: 10px; font-size: 13.5px"><span style="width: 8px; height: 8px; border-radius: 2px; background: #6F7FA3"></span><span style="flex-grow: 1; color: #9AA8C7">Cancelled</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px">2</span></div>
+</div>
+</section>
+
+<section aria-label="Token mix" style="display: flex; flex-direction: column; gap: 16px; padding: 20px; border-radius: 20px; border: 1px solid #1A2032; background: #0D101A; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04)">
+<div style="display: flex; align-items: baseline; justify-content: space-between; gap: 12px">
+<h2 style="margin: 0; font-size: 15px; font-weight: 600">Token mix</h2>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #9AA8C7">10,264,313</span>
+</div>
+<div style="display: flex; gap: 2px; height: 14px" role="img" aria-label="Cached 91 percent, input 7 percent, output 2 percent">
+<span style="flex: 9300 1 0; border-radius: 5px 0 0 5px; background: #4C8DEA"></span>
+<span style="flex: 727 1 0; background: #C98500"></span>
+<span style="flex: 203 1 0; border-radius: 0 5px 5px 0; background: #9085E9"></span>
+</div>
+<div style="display: flex; flex-direction: column; gap: 8px; font-size: 13.5px">
+<div style="display: flex; align-items: center; gap: 10px"><span style="width: 8px; height: 8px; border-radius: 2px; background: #4C8DEA"></span><span style="flex-grow: 1; color: #9AA8C7">Cached</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px">9.3M</span><span style="width: 44px; text-align: right; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #6F7FA3">90.9%</span></div>
+<div style="display: flex; align-items: center; gap: 10px"><span style="width: 8px; height: 8px; border-radius: 2px; background: #C98500"></span><span style="flex-grow: 1; color: #9AA8C7">Input</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px">726.9K</span><span style="width: 44px; text-align: right; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #6F7FA3">7.1%</span></div>
+<div style="display: flex; align-items: center; gap: 10px"><span style="width: 8px; height: 8px; border-radius: 2px; background: #9085E9"></span><span style="flex-grow: 1; color: #9AA8C7">Output</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px">202.8K</span><span style="width: 44px; text-align: right; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #6F7FA3">2.0%</span></div>
+</div>
+</section>
+
+</main>
+
+<div style="position: sticky; bottom: 0; padding: 8px 16px 16px; background: linear-gradient(to top, #0A0C14 55%, transparent)">
+<dc-import name="PhoneDock" active="overview" hint-size="100%,66px"></dc-import>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#4D80FF","options":["#4D80FF","#4CC9F0","#45E0A0","#A78BFA"]},"$preview":{"width":390,"height":2350}}'>
+class Component extends DCLogic {
+renderVals() {
+const A = 19.3, W = 13.5, DX = 6, DY = 5, EX = 4.2, EY = 3.5, OX = 6, Y0 = 118, HITMIN = 30;
+const DAYS = [
+['2026-07-25', 8, 6, 0, 0.2769, 73903, 8458, 60299, 828266],
+['2026-07-28', 4, 3, 0, 0.1737, 41859, 7150, 30391, 568180],
+['2026-08-06', 1, 1, 0, 0, 0, 0, 0, 0],
+['2026-08-08', 5, 4, 0, 0.043, 17, 279, 29892, 29688],
+['2026-08-10', 5, 5, 0, 0.1793, 78954, 7729, 0, 617216],
+['2026-08-17', 3, 2, 0, 0.1258, 29972, 4808, 30385, 326031],
+['2026-08-21', 10, 6, 0, 0.1324, 62, 4626, 69736, 139626],
+['2026-08-22', 5, 2, 0, 0.2159, 950, 5038, 70631, 204525],
+['2026-08-26', 5, 2, 0, 0.1266, 50, 5760, 66436, 82410],
+['2026-08-27', 19, 11, 0, 0.661, 37111, 21117, 154563, 953286],
+['2026-08-28', 43, 23, 0, 4.9849, 464027, 137651, 517201, 4556030]
+];
+const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const MO = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const BASE = Date.UTC(2025, 11, 28);
+const MAXS = 43;
+const picked = this.state && typeof this.state.day === 'number' ? this.state.day : DAYS.length - 1;
+const n = (v) => Math.round(v * 100) / 100;
+const pc = (v, of) => n((v / of) * 100) + '%';
+const tok = (v) => (v >= 1e6 ? (v / 1e6).toFixed(2) + 'M' : v >= 1e3 ? (v / 1e3).toFixed(1) + 'K' : String(v));
+const poly = (pts) => 'M' + pts.map((p) => n(p[0]) + ',' + n(p[1])).join('L') + 'Z';
+const byCell = {};
+DAYS.forEach((d, i) => {
+const p = d[0].split('-').map(Number);
+const idx = Math.round((Date.UTC(p[0], p[1] - 1, p[2]) - BASE) / 86400000);
+byCell[Math.floor(idx / 7) + '-' + (idx % 7)] = { i, d, dow: idx % 7, mon: p[1] - 1, dom: p[2] };
+});
+const rows = [];
+for (let j = 0; j < 7; j++) rows.push({ side: '', front: '', top: '' });
+let floor = '';
+let future = '';
+const hits = [];
+let sel = { side: 'M0,0', front: 'M0,0', top: 'M0,0' };
+let lead = 'M0,0';
+let dot = { x: -10, y: -10 };
+for (let w = 25; w < 41; w++) {
+for (let d = 0; d < 7; d++) {
+const idx = w * 7 + d;
+if (idx < 4 || idx > 368) continue;
+const j = 6 - d;
+const X = OX + (w - 25) * A + j * DX;
+const Y = Y0 - j * DY;
+const cell = byCell[w + '-' + d];
+if (idx > 283) {
+future += poly([[X, Y], [X + W, Y], [X + W + EX, Y - EY], [X + EX, Y - EY]]);
+} else if (!cell) {
+floor += poly([[X, Y], [X + W, Y], [X + W + EX, Y - EY], [X + EX, Y - EY]]);
+} else {
+const h = Math.max(11, Math.round(72 * Math.sqrt(cell.d[1] / MAXS)));
+const front = poly([[X, Y], [X + W, Y], [X + W, Y - h], [X, Y - h]]);
+const side = poly([[X + W, Y], [X + W + EX, Y - EY], [X + W + EX, Y - EY - h], [X + W, Y - h]]);
+const top = poly([[X, Y - h], [X + W, Y - h], [X + W + EX, Y - h - EY], [X + EX, Y - h - EY]]);
+rows[j].front += front;
+rows[j].side += side;
+rows[j].top += top;
+const on = cell.i === picked;
+if (on) {
+sel = { side, front, top };
+const cx = X + (W + EX) / 2;
+const ty = Y - h - EY / 2;
+dot = { x: n(cx), y: n(ty) };
+lead = 'M' + n(cx) + ',' + n(ty) + 'V0H0';
+}
+const pad = 3;
+let y0 = Y - h - EY - pad;
+const y1 = Y + pad;
+if (y1 - y0 < HITMIN) y0 = y1 - HITMIN;
+const i = cell.i;
+hits.push({
+label: WD[cell.dow] + ', ' + MO[cell.mon] + ' ' + cell.dom + ': ' + cell.d[1] + (cell.d[1] === 1 ? ' session' : ' sessions'),
+on: on ? 'true' : 'false',
+l: pc(X - pad, 350),
+t: pc(y0, 146),
+w: pc(W + EX + pad * 2, 350),
+h: pc(y1 - y0, 146),
+z: 10 - j,
+pick: () => this.setState({ day: i })
+});
+}
+}
+}
+const safe = (r) => ({ side: r.side || 'M0,0', front: r.front || 'M0,0', top: r.top || 'M0,0' });
+const sky = { floor, future: future || 'M0,0', r0: safe(rows[0]), r1: safe(rows[1]), r2: safe(rows[2]), r3: safe(rows[3]), r4: safe(rows[4]), r5: safe(rows[5]), r6: safe(rows[6]), sel, lead, dot, hits };
+const cur = DAYS[picked];
+const cp = cur[0].split('-').map(Number);
+const cdow = Math.round((Date.UTC(cp[0], cp[1] - 1, cp[2]) - BASE) / 86400000) % 7;
+const total = cur[5] + cur[6] + cur[7] + cur[8];
+const parts = [
+{ label: 'Cache read', v: cur[8], c: '#4C8DEA' },
+{ label: 'Cache write', v: cur[7], c: '#E0703A' },
+{ label: 'Output', v: cur[6], c: '#9085E9' },
+{ label: 'Input', v: cur[5], c: '#C98500' }
+].map((p) => ({ label: p.label, c: p.c, v: tok(p.v), flex: Math.max(p.v, total * 0.008) }));
+const day = {
+date: WD[cdow] + ', ' + MO[cp[1] - 1] + ' ' + cp[2],
+year: String(cp[0]),
+pos: picked + 1 + ' of ' + DAYS.length + ' active days',
+sessions: String(cur[1]),
+executions: String(cur[2]),
+commits: String(cur[3]),
+tokens: tok(total),
+cost: '$' + cur[4].toFixed(2),
+parts,
+hasTokens: total > 0,
+noTokens: total === 0,
+prev: () => this.setState({ day: (picked + DAYS.length - 1) % DAYS.length }),
+next: () => this.setState({ day: (picked + 1) % DAYS.length })
+};
+const ST = {
+completed: { tone: 'var(--ac)', badge: 'color-mix(in oklab, var(--ac) 16%, transparent)', icon: 'M3.5 8.5l3 3 6-7' },
+failed: { tone: '#FF6F61', badge: '#2A1513', icon: 'M4.5 4.5l7 7M11.5 4.5l-7 7' }
+};
+const LONGEST = 227;
+const mk = (status, name, done, total, repo, cost, secs, dur, when) => {
+const s = ST[status];
+const segs = [];
+for (let i = 0; i < total; i++) {
+let c = '#2B3350';
+if (i < done) c = 'var(--ac)';
+else if (i === done && status === 'failed') c = '#FF6F61';
+segs.push({ c });
+}
+return { tone: s.tone, badge: s.badge, icon: s.icon, name, sub: (repo || 'no repo') + ' · ' + done + '/' + total + ' phases', segs, pct: Math.max(5, Math.round((secs / LONGEST) * 100)) + '%', dur, cost, when };
+};
+const runs = [
+mk('failed', 'Starter PR Review', 0, 2, 'syntropic137/syntropic137', '$0.00', 5, '5s', '1w ago'),
+mk('failed', 'PR Review', 0, 3, 'syntropic137/syntropic137', '$0.00', 8, '8s', '1w ago'),
+mk('completed', 'Codex delegates to Claude', 1, 1, '', '$0.33', 62, '1m 2s', '6w ago'),
+mk('completed', 'Codex delegates to Claude', 1, 1, '', '$0.29', 66, '1m 6s', '6w ago'),
+mk('completed', 'Research Workflow', 3, 3, '', '$0.21', 227, '3m 47s', '6w ago')
+];
+return { accent: this.props.accent ?? '#4D80FF', sky, day, runs };
+}
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Syn137 artifacts on a phone</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Orbitron:wght@500;600;700&display=swap">
+<style>
+:root{--ac:#4D80FF}
+body{margin:0;background:#0A0C14}
+a{color:#E8EEFB}a:hover{color:#FFFFFF}
+button{font-family:inherit}
+input::placeholder{color:#6F7FA3}
+:focus-visible{outline:2px solid var(--ac);outline-offset:2px}
+</style>
+</helmet>
+<div style="--ac: {{accent}}; display: flex; flex-direction: column; min-height: 100vh; background: #0A0C14; color: #E8EEFB; font-family: 'Instrument Sans', 'Helvetica Neue', system-ui, sans-serif; font-size: 15px; line-height: 1.45; -webkit-font-smoothing: antialiased">
+
+<dc-import name="PhoneTop" hint-size="100%,68px"></dc-import>
+
+<main style="display: flex; flex-direction: column; gap: 16px; flex-grow: 1; box-sizing: border-box; padding: 4px 16px 24px">
+
+<nav aria-label="Breadcrumb" style="display: flex; align-items: center; gap: 2px; min-height: 44px; margin: 0 -8px; font-size: 14px">
+<a href="PhoneOverview.dc.html" aria-label="Overview" style="display: flex; align-items: center; justify-content: center; flex-shrink: 0; width: 40px; height: 44px; color: #9AA8C7"><svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M2.75 7.25L8 2.75l5.25 4.5V13a.5.5 0 0 1-.5.5H9.5V9.75h-3v3.75H3.25a.5.5 0 0 1-.5-.5z"></path></svg></a>
+<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="#6F7FA3" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink: 0; opacity: 0.7"><path d="M6 3.5L10.5 8 6 12.5"></path></svg>
+<span aria-current="page" style="flex: 0 1 auto; min-width: 48px; padding: 0 6px; line-height: 44px; font-weight: 600; color: #E8EEFB; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">Artifacts</span>
+</nav>
+
+<section aria-label="Artifacts" style="display: flex; flex-direction: column; gap: 18px; padding: 20px; border-radius: 24px; border: 1px solid #1A2032; background: radial-gradient(70% 90% at 100% 0%, color-mix(in oklab, var(--ac) 20%, transparent), transparent 70%), #0D101A; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05)">
+<div style="display: flex; align-items: center; gap: 14px">
+<svg width="52" height="52" viewBox="0 0 64 64" aria-hidden="true" style="flex-shrink: 0">
+<polygon points="26,10 46,20 46,48 26,38" style="fill: color-mix(in oklab, var(--ac) 50%, black)"></polygon>
+<polygon points="18,16 38,26 38,54 18,44" style="fill: color-mix(in oklab, var(--ac) 58%, white)"></polygon>
+<path d="M22,25L34,31M22,31L34,37M22,37L30,41" fill="none" stroke="#0A0C14" stroke-width="2" stroke-linecap="round" opacity="0.6"></path>
+</svg>
+<div style="display: flex; flex-direction: column; gap: 2px; min-width: 0">
+<h1 style="margin: 0; font-size: 30px; line-height: 1.1; font-weight: 600; letter-spacing: -0.03em">Artifacts</h1>
+<p style="margin: 0; font-size: 14px; color: #9AA8C7">64 files from phase output, 1.4 MB</p>
+</div>
+</div>
+<div style="display: flex; gap: 3px; height: 12px" role="img" aria-label="21 research summaries, 18 reports, 15 code files, 10 data files">
+<span style="flex: 21 1 0; border-radius: 4px; background: var(--ac)"></span>
+<span style="flex: 18 1 0; border-radius: 4px; background: #9085E9"></span>
+<span style="flex: 15 1 0; border-radius: 4px; background: #C98500"></span>
+<span style="flex: 10 1 0; border-radius: 4px; background: #4C8DEA"></span>
+</div>
+<div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px">
+<div style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 24px; line-height: 1.1; font-weight: 600; letter-spacing: -0.03em; font-variant-numeric: tabular-nums">21</span><span style="display: flex; align-items: center; gap: 5px; font-size: 12px; color: #9AA8C7"><span style="width: 7px; height: 7px; border-radius: 2px; background: var(--ac)"></span>research</span></div>
+<div style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 24px; line-height: 1.1; font-weight: 600; letter-spacing: -0.03em; font-variant-numeric: tabular-nums">18</span><span style="display: flex; align-items: center; gap: 5px; font-size: 12px; color: #9AA8C7"><span style="width: 7px; height: 7px; border-radius: 2px; background: #9085E9"></span>reports</span></div>
+<div style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 24px; line-height: 1.1; font-weight: 600; letter-spacing: -0.03em; font-variant-numeric: tabular-nums">15</span><span style="display: flex; align-items: center; gap: 5px; font-size: 12px; color: #9AA8C7"><span style="width: 7px; height: 7px; border-radius: 2px; background: #C98500"></span>code</span></div>
+<div style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 24px; line-height: 1.1; font-weight: 600; letter-spacing: -0.03em; font-variant-numeric: tabular-nums">10</span><span style="display: flex; align-items: center; gap: 5px; font-size: 12px; color: #9AA8C7"><span style="width: 7px; height: 7px; border-radius: 2px; background: #4C8DEA"></span>data</span></div>
+</div>
+</section>
+
+<label style="display: flex; align-items: center; gap: 10px; height: 46px; box-sizing: border-box; padding: 0 14px; border-radius: 14px; border: 1px solid #222A40; background: #0D101A; color: #6F7FA3">
+<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="7" cy="7" r="4.25"></circle><path d="M10.25 10.25L13.5 13.5"></path></svg>
+<input type="search" aria-label="Search artifacts" placeholder="File name, phase or session" style="flex-grow: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: #E8EEFB; font: inherit; font-size: 15px">
+</label>
+
+<div style="display: flex; gap: 8px; margin: 0 -16px; padding: 0 16px; overflow-x: auto">
+<button type="button" aria-pressed="{{chip.all.on}}" onClick="{{pickAll}}" style="display: flex; align-items: center; gap: 8px; flex-shrink: 0; height: 44px; padding: 0 16px; border-radius: 22px; border: 1px solid {{chip.all.bd}}; background: {{chip.all.bg}}; color: {{chip.all.fg}}; font-size: 14px; cursor: pointer"><span>All</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #9AA8C7">64</span></button>
+<button type="button" aria-pressed="{{chip.research.on}}" onClick="{{pickResearch}}" style="display: flex; align-items: center; gap: 8px; flex-shrink: 0; height: 44px; padding: 0 16px; border-radius: 22px; border: 1px solid {{chip.research.bd}}; background: {{chip.research.bg}}; color: {{chip.research.fg}}; font-size: 14px; cursor: pointer"><span style="width: 7px; height: 7px; border-radius: 2px; background: var(--ac)"></span><span>Research</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #9AA8C7">21</span></button>
+<button type="button" aria-pressed="{{chip.report.on}}" onClick="{{pickReport}}" style="display: flex; align-items: center; gap: 8px; flex-shrink: 0; height: 44px; padding: 0 16px; border-radius: 22px; border: 1px solid {{chip.report.bd}}; background: {{chip.report.bg}}; color: {{chip.report.fg}}; font-size: 14px; cursor: pointer"><span style="width: 7px; height: 7px; border-radius: 2px; background: #9085E9"></span><span>Reports</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #9AA8C7">18</span></button>
+<button type="button" aria-pressed="{{chip.code.on}}" onClick="{{pickCode}}" style="display: flex; align-items: center; gap: 8px; flex-shrink: 0; height: 44px; padding: 0 16px; border-radius: 22px; border: 1px solid {{chip.code.bd}}; background: {{chip.code.bg}}; color: {{chip.code.fg}}; font-size: 14px; cursor: pointer"><span style="width: 7px; height: 7px; border-radius: 2px; background: #C98500"></span><span>Code</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #9AA8C7">15</span></button>
+<button type="button" aria-pressed="{{chip.data.on}}" onClick="{{pickData}}" style="display: flex; align-items: center; gap: 8px; flex-shrink: 0; height: 44px; padding: 0 16px; border-radius: 22px; border: 1px solid {{chip.data.bd}}; background: {{chip.data.bg}}; color: {{chip.data.fg}}; font-size: 14px; cursor: pointer"><span style="width: 7px; height: 7px; border-radius: 2px; background: #4C8DEA"></span><span>Data</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #9AA8C7">10</span></button>
+</div>
+
+<section aria-label="Artifact list" style="display: flex; flex-direction: column; gap: 8px">
+<sc-for list="{{groups}}" as="g" hint-placeholder-count="3">
+<a href="PhoneExecution.dc.html" style="display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 6px 4px 0; text-decoration: none; color: #E8EEFB">
+<span style="display: flex; flex-direction: column; flex-grow: 1; min-width: 0">
+<span style="font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{g.workflow}}</span>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3">exec-{{g.exec}} · {{g.meta}} · {{g.when}}</span>
+</span>
+<span style="flex-shrink: 0; height: 22px; padding: 0 9px; border-radius: 11px; background: {{g.badge}}; color: {{g.tone}}; font-size: 11.5px; font-weight: 600; line-height: 22px">{{g.status}}</span>
+</a>
+<sc-for list="{{g.files}}" as="f" hint-placeholder-count="3">
+<a href="PhoneArtifact.dc.html" style="display: flex; flex-direction: column; gap: 10px; padding: 14px; border-radius: 16px; border: 1px solid #1A2032; background: #0D101A; text-decoration: none; color: #E8EEFB">
+<span style="display: flex; align-items: center; gap: 12px">
+<span style="display: flex; align-items: center; justify-content: center; flex-shrink: 0; width: 36px; height: 36px; border-radius: 11px; background: {{f.chipBg}}; color: {{f.color}}">
+<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{f.glyph}}"></path></svg>
+</span>
+<span style="display: flex; flex-direction: column; flex-grow: 1; min-width: 0">
+<span style="font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{f.title}}</span>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{f.path}}</span>
+</span>
+<span style="flex-shrink: 0; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px">{{f.size}}</span>
+</span>
+<span style="display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; font-size: 13.5px; line-height: 1.45; color: #9AA8C7">{{f.preview}}</span>
+<span style="display: flex; align-items: center; gap: 10px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #9AA8C7">
+<span style="display: flex; align-items: center; gap: 6px; height: 24px; padding: 0 9px; border-radius: 12px; border: 1px solid #283048"><span style="width: 6px; height: 6px; border-radius: 2px; background: {{f.color}}"></span>{{f.type}}</span>
+<span style="margin-left: auto; color: #6F7FA3">{{f.n}} · {{f.session}}</span>
+</span>
+</a>
+</sc-for>
+</sc-for>
+</section>
+
+<div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 13.5px; color: #9AA8C7">
+<span>{{summary}}</span>
+<button type="button" style="height: 44px; padding: 0 18px; border-radius: 14px; border: 1px solid #283048; background: #0F121C; color: #E8EEFB; font-size: 14px; font-weight: 600; cursor: pointer">Next</button>
+</div>
+
+</main>
+
+<div style="position: sticky; bottom: 0; padding: 8px 16px 16px; background: linear-gradient(to top, #0A0C14 55%, transparent)">
+<dc-import name="PhoneDock" active="artifacts" hint-size="100%,66px"></dc-import>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#4D80FF","options":["#4D80FF","#4CC9F0","#45E0A0","#A78BFA"]},"$preview":{"width":390,"height":1760}}'>
+class Component extends DCLogic {
+renderVals() {
+const filter = (this.state && this.state.filter) || 'all';
+const TYPE = {
+research: { label: 'research_summary', color: 'var(--ac)', chipBg: 'color-mix(in oklab, var(--ac) 16%, transparent)', glyph: 'M4 1.75h5l3 3v9.5H4zM9 1.75v3h3M6 8h4M6 10.75h4' },
+report: { label: 'report', color: '#9085E9', chipBg: 'color-mix(in oklab, #9085E9 18%, transparent)', glyph: 'M4 1.75h5l3 3v9.5H4zM9 1.75v3h3M6 11.5V9.5M8 11.5V7.5M10 11.5V8.5' },
+code: { label: 'code', color: '#C98500', chipBg: 'color-mix(in oklab, #C98500 18%, transparent)', glyph: 'M5.5 4.5L2 8l3.5 3.5M10.5 4.5L14 8l-3.5 3.5' },
+data: { label: 'data', color: '#4C8DEA', chipBg: 'color-mix(in oklab, #4C8DEA 18%, transparent)', glyph: 'M3 4c0-1 2.25-1.75 5-1.75S13 3 13 4v8c0 1-2.25 1.75-5 1.75S3 13 3 12zM3 4c0 1 2.25 1.75 5 1.75S13 5 13 4M3 8c0 1 2.25 1.75 5 1.75S13 9 13 8' }
+};
+const ST = {
+completed: { tone: 'color-mix(in oklab, var(--ac) 40%, white)', badge: 'color-mix(in oklab, var(--ac) 18%, transparent)' },
+failed: { tone: '#FF8A7D', badge: '#2A1513' }
+};
+const f = (n, kind, title, path, size, session, preview) => {
+const t = TYPE[kind];
+return { n: 'phase ' + n, kind, title, path, size, session, preview, type: t.label, color: t.color, chipBg: t.chipBg, glyph: t.glyph };
+};
+const all = [
+{ workflow: 'Research Workflow', exec: '66e14f23', status: 'completed', when: '6w ago', files: [
+f('01', 'research', 'Discovery Phase', 'artifacts/output/deliverable.md', '2.9 KB', '10dfeb5d', 'Scope map for "sorting" across algorithms, systems and UX. Five research questions and three domains.'),
+f('02', 'research', 'Deep Dive Analysis', 'artifacts/output/deliverable.md', '29.4 KB', '7288d417', 'Quicksort, Mergesort and Timsort on random, reversed and nearly-sorted inputs.'),
+f('03', 'research', 'Synthesis & Documentation', 'artifacts/output/deliverable.md', '19.8 KB', '3ef71a70', 'Optimal sorting strategies are context-dependent. 95% of applications should use the standard library sort.')
+] },
+{ workflow: 'Codex delegates to Claude', exec: '6350e65e', status: 'completed', when: '6w ago', files: [
+f('01', 'report', 'Palindrome utility and review', 'artifacts/output/deliverable.md', '2.4 KB', '2fd5ec12', 'Adds is_palindrome() with Unicode normalisation. The delegated Claude review flagged two edge cases.'),
+f('01', 'code', 'palindrome.py', 'artifacts/output/palindrome.py', '1.1 KB', '2fd5ec12', 'Utilities for identifying palindromic strings.')
+] },
+{ workflow: 'Skills Matrix', exec: '91f3ab27', status: 'failed', when: '6w ago', files: [
+f('03', 'data', 'skills-matrix.json', 'artifacts/output/skills-matrix.json', '6.2 KB', '1e47b9a2', 'Three skills by two agents, written before the verify phase failed.')
+] }
+];
+const groups = all
+.map((g) => {
+const files = g.files.filter((x) => filter === 'all' || x.kind === filter);
+const s = ST[g.status];
+return Object.assign({}, g, { files, status: g.status === 'failed' ? 'Failed' : 'Completed', tone: s.tone, badge: s.badge, meta: files.length + (files.length === 1 ? ' file' : ' files') });
+})
+.filter((g) => g.files.length > 0);
+const shown = groups.reduce((n, g) => n + g.files.length, 0);
+const totals = { all: 64, research: 21, report: 18, code: 15, data: 10 };
+const chipOf = (key) => {
+const on = filter === key;
+return { on: on ? 'true' : 'false', bg: on ? '#1A2134' : 'transparent', fg: on ? '#E8EEFB' : '#9AA8C7', bd: on ? '#34406A' : '#222A40' };
+};
+return {
+accent: this.props.accent ?? '#4D80FF',
+groups,
+summary: shown + ' of ' + totals[filter],
+chip: { all: chipOf('all'), research: chipOf('research'), report: chipOf('report'), code: chipOf('code'), data: chipOf('data') },
+pickAll: () => this.setState({ filter: 'all' }),
+pickResearch: () => this.setState({ filter: 'research' }),
+pickReport: () => this.setState({ filter: 'report' }),
+pickCode: () => this.setState({ filter: 'code' }),
+pickData: () => this.setState({ filter: 'data' })
+};
+}
+}
+</script>
+</body>
+</html>

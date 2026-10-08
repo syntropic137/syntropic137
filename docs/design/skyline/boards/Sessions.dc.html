@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Syn137 sessions</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Orbitron:wght@500;600;700&display=swap">
+<style>
+:root{--ac:#4D80FF}
+body{margin:0;background:#0A0C14}
+a{color:#E8EEFB}a:hover{color:#FFFFFF}
+.row:hover{background:#111626}
+.card:hover{border-color:#34406A}
+.ghost:hover{background:#151A2A}
+button{font-family:inherit}
+input::placeholder{color:#6F7FA3}
+:focus-visible{outline:2px solid var(--ac);outline-offset:2px}
+</style>
+</helmet>
+<div style="--ac: {{accent}}; display: flex; flex-direction: column; min-height: 100vh; background: #0A0C14; color: #E8EEFB; font-family: 'Instrument Sans', 'Helvetica Neue', system-ui, sans-serif; font-size: 14px; line-height: 1.45; -webkit-font-smoothing: antialiased">
+
+<dc-import name="TopNav" active="sessions" hint-size="100%,78px"></dc-import>
+
+<nav aria-label="Breadcrumb" style="display: flex; flex-wrap: wrap; align-items: center; gap: 4px; box-sizing: border-box; width: 100%; max-width: 1400px; margin: 0 auto; padding: 0 40px 14px; font-size: 13px">
+<a href="Main.dc.html" aria-label="Overview" style="display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 10px; color: #9AA8C7"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M2.75 7.25L8 2.75l5.25 4.5V13a.5.5 0 0 1-.5.5H9.5V9.75h-3v3.75H3.25a.5.5 0 0 1-.5-.5z"></path></svg></a>
+<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="#6F7FA3" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink: 0; opacity: 0.7"><path d="M6 3.5L10.5 8 6 12.5"></path></svg>
+<span aria-current="page" style="display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 9px; border: 1px solid #1A2032; background: #0F121C; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04); font-weight: 600; color: #E8EEFB; white-space: nowrap">Sessions</span>
+</nav>
+
+<main style="display: flex; flex-direction: column; gap: 24px; box-sizing: border-box; width: 100%; max-width: 1400px; margin: 0 auto; padding: 8px 40px 64px">
+
+<section aria-label="Sessions" style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 28px 48px; padding: 32px 36px; border-radius: 24px; border: 1px solid #1A2032; background: radial-gradient(50% 130% at 100% 0%, color-mix(in oklab, var(--ac) 18%, transparent), transparent 70%), #0D101A; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05)">
+<div style="display: flex; align-items: center; gap: 24px; min-width: 0">
+<svg width="84" height="84" viewBox="0 0 64 64" aria-hidden="true" style="flex-shrink: 0">
+<ellipse cx="32" cy="59" rx="18" ry="3.5" style="fill: var(--ac); opacity: 0.22"></ellipse>
+<polygon points="32,18 54,29 32,40 10,29" style="fill: color-mix(in oklab, var(--ac) 58%, white)"></polygon>
+<polygon points="10,29 32,40 32,50 10,39" style="fill: var(--ac)"></polygon>
+<polygon points="32,40 54,29 54,39 32,50" style="fill: color-mix(in oklab, var(--ac) 50%, black)"></polygon>
+<polyline points="34,23 34,28 24,28" fill="none" stroke="#0A0C14" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" opacity="0.8"></polyline>
+<line x1="32" y1="32" x2="39" y2="35.5" stroke="#0A0C14" stroke-width="2.2" stroke-linecap="round" opacity="0.8"></line>
+</svg>
+<div style="display: flex; flex-direction: column; gap: 8px; min-width: 0">
+<h1 style="margin: 0; font-size: 44px; line-height: 1.05; font-weight: 600; letter-spacing: -0.035em">Sessions</h1>
+<p style="margin: 0; max-width: 520px; font-size: 15px; color: #9AA8C7">One agent run per phase, plus any child sessions it hands off to. 118 so far across 75 executions, none running.</p>
+</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 14px; width: 380px; max-width: 100%">
+<div style="display: flex; gap: 3px; height: 12px" role="img" aria-label="89 completed, 27 failed, 2 cancelled">
+<span style="flex: 89 1 0; border-radius: 4px; background: var(--ac); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25)"></span>
+<span style="flex: 27 1 0; border-radius: 4px; background: #FF6F61; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25)"></span>
+<span style="flex: 2 1 0; border-radius: 4px; background: #6F7FA3"></span>
+</div>
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px">
+<div style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 30px; line-height: 1.1; font-weight: 600; letter-spacing: -0.03em; font-variant-numeric: tabular-nums">89</span><span style="display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: #9AA8C7"><span style="width: 8px; height: 8px; border-radius: 2px; background: var(--ac)"></span>completed</span></div>
+<div style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 30px; line-height: 1.1; font-weight: 600; letter-spacing: -0.03em; font-variant-numeric: tabular-nums">27</span><span style="display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: #9AA8C7"><span style="width: 8px; height: 8px; border-radius: 2px; background: #FF6F61"></span>failed</span></div>
+<div style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 30px; line-height: 1.1; font-weight: 600; letter-spacing: -0.03em; font-variant-numeric: tabular-nums">2</span><span style="display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: #9AA8C7"><span style="width: 8px; height: 8px; border-radius: 2px; background: #6F7FA3"></span>cancelled</span></div>
+</div>
+<div style="display: flex; align-items: center; gap: 14px; padding-top: 12px; border-top: 1px solid #1A2032; font-size: 12.5px; color: #9AA8C7">
+<span style="display: flex; align-items: center; gap: 7px"><span style="width: 7px; height: 7px; border-radius: 50%; background: #D97757"></span>Claude <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; color: #E8EEFB">81</span></span>
+<span style="display: flex; align-items: center; gap: 7px"><span style="width: 7px; height: 7px; border-radius: 50%; background: var(--ac)"></span>Codex <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; color: #E8EEFB">37</span></span>
+<span style="margin-left: auto; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px">14 handoffs</span>
+</div>
+</div>
+</section>
+
+<div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 16px">
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px">
+<button type="button" aria-pressed="{{chip.all.on}}" onClick="{{pickAll}}" style="display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 14px; border-radius: 17px; border: 1px solid {{chip.all.bd}}; background: {{chip.all.bg}}; color: {{chip.all.fg}}; font-size: 13px; cursor: pointer">
+<span>All</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #9AA8C7">118</span>
+</button>
+<button type="button" aria-pressed="false" style="display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 14px; border-radius: 17px; border: 1px solid #222A40; background: transparent; color: #9AA8C7; font-size: 13px; cursor: pointer">
+<span>Running</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #6F7FA3">0</span>
+</button>
+<button type="button" aria-pressed="{{chip.completed.on}}" onClick="{{pickCompleted}}" style="display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 14px; border-radius: 17px; border: 1px solid {{chip.completed.bd}}; background: {{chip.completed.bg}}; color: {{chip.completed.fg}}; font-size: 13px; cursor: pointer">
+<span>Completed</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #9AA8C7">89</span>
+</button>
+<button type="button" aria-pressed="{{chip.failed.on}}" onClick="{{pickFailed}}" style="display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 14px; border-radius: 17px; border: 1px solid {{chip.failed.bd}}; background: {{chip.failed.bg}}; color: {{chip.failed.fg}}; font-size: 13px; cursor: pointer">
+<span>Failed</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #9AA8C7">27</span>
+</button>
+<button type="button" aria-pressed="{{chip.cancelled.on}}" onClick="{{pickCancelled}}" style="display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 14px; border-radius: 17px; border: 1px solid {{chip.cancelled.bd}}; background: {{chip.cancelled.bg}}; color: {{chip.cancelled.fg}}; font-size: 13px; cursor: pointer">
+<span>Cancelled</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #9AA8C7">2</span>
+</button>
+<span style="width: 1px; height: 18px; margin: 0 4px; background: #222A40"></span>
+<div role="group" aria-label="Agent" style="display: flex; gap: 2px; padding: 3px; border-radius: 12px; border: 1px solid #222A40; background: #0D101A; font-size: 12.5px">
+<button type="button" aria-pressed="{{agent.all.on}}" onClick="{{agentAll}}" style="height: 28px; padding: 0 12px; border: 0; border-radius: 9px; background: {{agent.all.bg}}; box-shadow: {{agent.all.sh}}; color: {{agent.all.fg}}; cursor: pointer">Any agent</button>
+<button type="button" aria-pressed="{{agent.claude.on}}" onClick="{{agentClaude}}" style="display: flex; align-items: center; gap: 7px; height: 28px; padding: 0 12px; border: 0; border-radius: 9px; background: {{agent.claude.bg}}; box-shadow: {{agent.claude.sh}}; color: {{agent.claude.fg}}; cursor: pointer"><span style="width: 7px; height: 7px; border-radius: 50%; background: #D97757"></span>Claude</button>
+<button type="button" aria-pressed="{{agent.codex.on}}" onClick="{{agentCodex}}" style="display: flex; align-items: center; gap: 7px; height: 28px; padding: 0 12px; border: 0; border-radius: 9px; background: {{agent.codex.bg}}; box-shadow: {{agent.codex.sh}}; color: {{agent.codex.fg}}; cursor: pointer"><span style="width: 7px; height: 7px; border-radius: 50%; background: var(--ac)"></span>Codex</button>
+</div>
+</div>
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px">
+<label style="display: flex; align-items: center; gap: 8px; height: 36px; width: 260px; max-width: 100%; box-sizing: border-box; padding: 0 12px; border-radius: 12px; border: 1px solid #222A40; background: #0D101A; color: #6F7FA3">
+<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="7" cy="7" r="4.25"></circle><path d="M10.25 10.25L13.5 13.5"></path></svg>
+<input type="search" aria-label="Search sessions" placeholder="Phase, workflow, model or ID" style="flex-grow: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: #E8EEFB; font: inherit; font-size: 13px">
+</label>
+<div role="group" aria-label="Time window" style="display: flex; gap: 2px; padding: 3px; border-radius: 12px; border: 1px solid #222A40; background: #0D101A; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px">
+<button type="button" style="height: 28px; padding: 0 10px; border: 0; border-radius: 9px; background: transparent; color: #9AA8C7; cursor: pointer">24h</button>
+<button type="button" style="height: 28px; padding: 0 10px; border: 0; border-radius: 9px; background: transparent; color: #9AA8C7; cursor: pointer">7d</button>
+<button type="button" style="height: 28px; padding: 0 10px; border: 0; border-radius: 9px; background: transparent; color: #9AA8C7; cursor: pointer">30d</button>
+<button type="button" aria-pressed="true" style="height: 28px; padding: 0 10px; border: 0; border-radius: 9px; background: #1A2134; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07); color: #E8EEFB; cursor: pointer">All</button>
+</div>
+</div>
+</div>
+
+<section aria-label="Session list" style="padding: 10px; border-radius: 20px; border: 1px solid #1A2032; background: #0D101A; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04)">
+<div style="overflow-x: auto">
+<div style="display: flex; flex-direction: column; gap: 2px; min-width: 1080px">
+<div style="display: grid; grid-template-columns: 32px minmax(220px, 1.25fr) minmax(190px, 1fr) 236px 44px 66px 70px 58px 72px; column-gap: 16px; align-items: center; height: 36px; padding: 0 12px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: #6F7FA3">
+<span></span>
+<span>Session</span>
+<span>Execution</span>
+<span>Agent · model</span>
+<span style="text-align: right">Tools</span>
+<span style="text-align: right">Tokens</span>
+<span style="text-align: right">Cost</span>
+<span style="text-align: right">Took</span>
+<span style="text-align: right; color: #E8EEFB">Started ↓</span>
+</div>
+<sc-for list="{{groups}}" as="g" hint-placeholder-count="3">
+<div style="display: flex; align-items: center; gap: 10px; height: 30px; margin-top: 6px; padding: 0 12px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #9AA8C7">
+<span>{{g.title}}</span>
+<span style="color: #6F7FA3">{{g.count}}</span>
+<span style="flex-grow: 1; height: 1px; background: #1A2032"></span>
+</div>
+<sc-for list="{{g.rows}}" as="r" hint-placeholder-count="5">
+<div class="row" style="display: grid; grid-template-columns: 32px minmax(220px, 1.25fr) minmax(190px, 1fr) 236px 44px 66px 70px 58px 72px; column-gap: 16px; align-items: center; padding: 9px 12px; border-radius: 14px">
+<span style="display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 10px; background: {{r.badge}}; color: {{r.tone}}">
+<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{r.icon}}"></path></svg>
+</span>
+<a href="Session.dc.html" style="display: flex; flex-direction: column; min-width: 0; padding-left: {{r.indent}}; text-decoration: none">
+<span style="display: flex; align-items: center; gap: 8px; min-width: 0">
+<sc-if value="{{r.isChild}}" hint-placeholder-val="{{ false }}"><span aria-hidden="true" style="flex-shrink: 0; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #6F7FA3">↳</span></sc-if>
+<span style="font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{r.phase}}</span>
+</span>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{r.sub}}</span>
+</a>
+<a href="Execution.dc.html" style="display: flex; flex-direction: column; min-width: 0; text-decoration: none">
+<span style="font-size: 13px; color: #C3CCE2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{r.workflow}}</span>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{r.execSub}}</span>
+</a>
+<span style="display: flex; align-items: center; gap: 8px; justify-self: start; max-width: 100%; box-sizing: border-box; height: 26px; padding: 0 11px; border-radius: 13px; border: 1px solid #283048; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; white-space: nowrap; overflow: hidden">
+<span style="flex-shrink: 0; width: 7px; height: 7px; border-radius: 50%; background: {{r.dot}}"></span>
+<span style="overflow: hidden; text-overflow: ellipsis">{{r.model}}</span>
+</span>
+<span style="text-align: right; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px; color: #9AA8C7">{{r.tools}}</span>
+<span style="text-align: right; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px; color: #9AA8C7">{{r.tokens}}</span>
+<span style="text-align: right; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px">{{r.cost}}</span>
+<span style="text-align: right; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #9AA8C7">{{r.dur}}</span>
+<span style="text-align: right; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #6F7FA3">{{r.when}}</span>
+</div>
+</sc-for>
+</sc-for>
+<sc-if value="{{empty}}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 48px 12px; text-align: center; color: #9AA8C7">
+<span style="font-size: 15px; font-weight: 600; color: #E8EEFB">No sessions match</span>
+<span style="font-size: 13px">Try a different status or agent.</span>
+</div>
+</sc-if>
+</div>
+</div>
+</section>
+
+<div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; font-size: 13px; color: #9AA8C7">
+<span>{{summary}}</span>
+<div style="display: flex; align-items: center; gap: 8px">
+<button type="button" disabled="{{ true }}" style="height: 34px; padding: 0 14px; border-radius: 11px; border: 1px solid #1A2032; background: transparent; color: #6F7FA3; font-size: 13px">Previous</button>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px">1 / 8</span>
+<button class="ghost" type="button" style="height: 34px; padding: 0 14px; border-radius: 11px; border: 1px solid #283048; background: #0F121C; color: #E8EEFB; font-size: 13px; cursor: pointer">Next</button>
+</div>
+</div>
+
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#4D80FF","options":["#4D80FF","#4CC9F0","#45E0A0","#A78BFA"]},"$preview":{"width":1440,"height":1560}}'>
+class Component extends DCLogic {
+renderVals() {
+const filter = (this.state && this.state.filter) || 'all';
+const agentKey = (this.state && this.state.agent) || 'all';
+const ST = {
+completed: { tone: 'var(--ac)', badge: 'color-mix(in oklab, var(--ac) 16%, transparent)', icon: 'M3.5 8.5l3 3 6-7' },
+failed: { tone: '#FF6F61', badge: '#2A1513', icon: 'M4.5 4.5l7 7M11.5 4.5l-7 7' },
+cancelled: { tone: '#9AA8C7', badge: '#171C2B', icon: 'M3.5 8h9' }
+};
+const SYN = 'syntropic137/syntropic137';
+const BOX = 'sandbox_syn-engineer-beta';
+const mk = (status, phase, id, workflow, exec, repo, agent, model, tools, tokens, cost, dur, when, parent) => {
+const s = ST[status];
+return {
+status,
+agent,
+tone: s.tone,
+badge: s.badge,
+icon: s.icon,
+phase,
+sub: id + (parent ? ' · child of ' + parent : '') + (repo ? ' · ' + repo : ''),
+isChild: !!parent,
+indent: parent ? '14px' : '0px',
+workflow,
+execSub: 'exec ' + exec,
+dot: agent === 'claude' ? '#D97757' : 'var(--ac)',
+model: (agent === 'claude' ? 'Claude · ' : 'Codex · ') + model,
+tools: String(tools),
+tokens,
+cost,
+dur,
+when
+};
+};
+const all = [
+{ title: 'Last week', rows: [
+mk('failed', 'review', 'a41c09e7', 'PR Review', 'e93b07d2', 'syntropic137', 'claude', 'claude-sonnet-5-5', 0, '0', '$0.00', '8s', '1w ago'),
+mk('failed', 'triage', 'c2b87f30', 'Starter PR Review', 'f4a1d6c9', 'syntropic137', 'claude', 'claude-haiku-4-5', 0, '0', '$0.00', '5s', '1w ago')
+] },
+{ title: '6 weeks ago', rows: [
+mk('completed', 'build-and-delegate', '2fd5ec12', 'Codex delegates to Claude', '6350e65e', '', 'codex', 'gpt-5.6-sol', 8, '176.0K', '$0.2162', '57s', '6w ago'),
+mk('completed', 'review (delegated)', '35468ba1', 'Codex delegates to Claude', '6350e65e', '', 'claude', 'claude-sonnet-5-5', 5, '67.4K', '$0.0738', '6s', '6w ago', '2fd5ec12'),
+mk('completed', 'Synthesis & Documentation', '3ef71a70', 'Research Workflow', '66e14f23', '', 'claude', 'claude-haiku-4-5', 11, '159.4K', '$0.0745', '1m 21s', '6w ago'),
+mk('completed', 'Deep Dive Analysis', '7288d417', 'Research Workflow', '66e14f23', '', 'claude', 'claude-haiku-4-5', 23, '143.9K', '$0.0798', '1m 59s', '6w ago'),
+mk('completed', 'Discovery Phase', '10dfeb5d', 'Research Workflow', '66e14f23', '', 'claude', 'claude-haiku-4-5', 9, '93.4K', '$0.0557', '24s', '6w ago'),
+mk('cancelled', 'Deep Dive Analysis', '5d81e3a4', 'Research Workflow', '2a9c4f70', '', 'claude', 'claude-haiku-4-5', 6, '41.2K', '$0.0233', '2m 4s', '6w ago'),
+mk('completed', 'plan-and-delegate', '8b3e2a91', 'Claude delegates to Codex', '0c7d5e48', '', 'claude', 'claude-opus-5-5', 6, '81.2K', '$0.0410', '21s', '6w ago'),
+mk('completed', 'implement (delegated)', 'd6f04c13', 'Claude delegates to Codex', '0c7d5e48', '', 'codex', 'gpt-5.6-terra', 12, '46.7K', '$0.0190', '16s', '6w ago', '8b3e2a91'),
+mk('failed', 'matrix-verify', 'e5a9c2d0', 'Skills Matrix', '91f3ab27', '', 'claude', 'claude-haiku-4-5', 14, '31.0K', '$0.0204', '18s', '6w ago'),
+mk('completed', 'report', '4c1e8f62', 'Skill Probe', 'b27d90e5', BOX, 'claude', 'claude-sonnet-5-5', 7, '31.5K', '$0.0241', '19s', '6w ago')
+] },
+{ title: '7 weeks ago', rows: [
+mk('completed', 'summarize', 'f08c6b33', 'Starter Research', '3d6e8a15', BOX, 'claude', 'claude-sonnet-5-5', 10, '74.1K', '$0.0560', '34s', '7w ago'),
+mk('failed', 'observe', '2be7d5a8', 'Subagent Observability Demo', '7c40b9e2', '', 'claude', 'claude-haiku-4-5', 0, '0', '$0.00', '1s', '7w ago'),
+mk('completed', 'bridge', '6f93c0d1', 'Codex Bridge Demo', '58e2d7a6', '', 'codex', 'gpt-5.6-sol', 9, '162.2K', '$0.0400', '56s', '7w ago')
+] }
+];
+const groups = all
+.map((g) => ({ title: g.title, rows: g.rows.filter((r) => (filter === 'all' || r.status === filter) && (agentKey === 'all' || r.agent === agentKey)) }))
+.filter((g) => g.rows.length > 0)
+.map((g) => ({ title: g.title, rows: g.rows, count: g.rows.length + (g.rows.length === 1 ? ' session' : ' sessions') }));
+const shown = groups.reduce((n, g) => n + g.rows.length, 0);
+const statusTotals = { all: 118, completed: 89, failed: 27, cancelled: 2 };
+const agentTotals = { claude: 81, codex: 37 };
+let summary;
+if (shown === 0) summary = 'No sessions on this page match';
+else if (agentKey === 'all') summary = 'Showing 1–' + shown + ' of ' + statusTotals[filter] + (filter === 'all' ? '' : ' ' + filter) + ' sessions';
+else if (filter === 'all') summary = 'Showing 1–' + shown + ' of ' + agentTotals[agentKey] + ' ' + (agentKey === 'claude' ? 'Claude' : 'Codex') + ' sessions';
+else summary = shown + ' ' + filter + ' ' + (agentKey === 'claude' ? 'Claude' : 'Codex') + ' sessions on this page';
+const chipOf = (key) => {
+const on = filter === key;
+return { on: on ? 'true' : 'false', bg: on ? '#1A2134' : 'transparent', fg: on ? '#E8EEFB' : '#9AA8C7', bd: on ? '#34406A' : '#222A40' };
+};
+const segOf = (key) => {
+const on = agentKey === key;
+return { on: on ? 'true' : 'false', bg: on ? '#1A2134' : 'transparent', fg: on ? '#E8EEFB' : '#9AA8C7', sh: on ? 'inset 0 1px 0 rgba(255, 255, 255, 0.07)' : 'none' };
+};
+return {
+accent: this.props.accent ?? '#4D80FF',
+groups,
+empty: shown === 0,
+summary,
+chip: { all: chipOf('all'), completed: chipOf('completed'), failed: chipOf('failed'), cancelled: chipOf('cancelled') },
+agent: { all: segOf('all'), claude: segOf('claude'), codex: segOf('codex') },
+pickAll: () => this.setState({ filter: 'all' }),
+pickCompleted: () => this.setState({ filter: 'completed' }),
+pickFailed: () => this.setState({ filter: 'failed' }),
+pickCancelled: () => this.setState({ filter: 'cancelled' }),
+agentAll: () => this.setState({ agent: 'all' }),
+agentClaude: () => this.setState({ agent: 'claude' }),
+agentCodex: () => this.setState({ agent: 'codex' })
+};
+}
+}
+</script>
+</body>
+</html>
