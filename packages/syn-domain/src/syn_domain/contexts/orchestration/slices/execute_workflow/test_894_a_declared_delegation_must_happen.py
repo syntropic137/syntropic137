@@ -168,6 +168,7 @@ async def test_the_issue_case_end_to_end_a_clean_green_run_is_failed_as_platform
         evidence=_Evidence((_attempt(DelegationOutcome.FAILED, exit_code=3),)),
         workspace=_WORKSPACE,
         required_delegate="codex",
+        requires_verdict=False,
     )
     assert isinstance(failure, DelegationFailedError)
     assert "delegate child-7 -> codex: failed (exit_code=3)" in str(failure)
@@ -182,6 +183,7 @@ async def test_a_run_that_already_failed_keeps_its_own_failure() -> None:
         evidence=_Evidence(()),
         workspace=_WORKSPACE,
         required_delegate="codex",
+        requires_verdict=False,
     )
     assert isinstance(failure, NonZeroExitError)
 
@@ -202,6 +204,7 @@ async def test_a_phase_permitted_to_delegate_that_did_the_work_itself_completes(
             evidence=_Evidence(()),
             workspace=_WORKSPACE,
             required_delegate=config.required_delegate,
+            requires_verdict=False,
         )
         is None
     )
@@ -216,6 +219,7 @@ async def test_a_phase_required_to_delegate_that_did_the_work_itself_fails() -> 
         evidence=_Evidence(()),
         workspace=_WORKSPACE,
         required_delegate=config.required_delegate,
+        requires_verdict=False,
     )
     assert isinstance(failure, DelegationFailedError)
     assert failure.delegation_failure.reason is DelegationFailureReason.NOT_ATTEMPTED

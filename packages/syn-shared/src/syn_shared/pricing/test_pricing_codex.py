@@ -91,7 +91,7 @@ def test_unknown_model_is_never_substituted() -> None:
 
 
 def test_aliases_track_the_current_generation() -> None:
-    assert require_model_pricing("sonnet").model_id == ModelId.CLAUDE_SONNET_5
+    assert require_model_pricing("sonnet").model_id == ModelId.CLAUDE_SONNET_5_5
     assert require_model_pricing("opus").model_id == ModelId.CLAUDE_OPUS_5_5
     assert require_model_pricing("gpt-sol").model_id == ModelId.GPT_6_1_SOL
     assert require_model_pricing("haiku").model_id == ModelId.CLAUDE_HAIKU_4_5

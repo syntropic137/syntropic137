@@ -22,6 +22,11 @@ syn workflow run research-package-v1 --task "Investigate event sourcing patterns
 syn workflow installed
 ```
 
+`--task` (`-t`) must say something. `syn workflow run <name> -t ""` (or a
+whitespace-only task) is refused by the CLI before any request is sent, and the
+API answers **422** for a `task` that is empty or whitespace-only. To run a
+workflow that takes no task, omit `-t` (or the `task` field) entirely.
+
 ## Installing Packages
 
 Workflow packages can be installed from local directories or git repositories:
@@ -191,6 +196,43 @@ it is handed, so it is a genuinely independent read of the work.
 A phase-level `model:` key, sitting outside the `agent` block, takes precedence
 over `agent.model`. If you set both, the outer one wins.
 
+### Fallback agent (`fallback_agent`)
+
+A phase may name a second agent to run on, **once**, when its own provider could
+not serve it at all:
+
+```yaml title="workflow.yaml"
+phases:
+  - id: implement
+    name: Implement
+    order: 1
+    prompt_file: phases/implement.md
+    agent:
+      provider: claude
+      model: opus
+    fallback_agent:
+      provider: codex       # required: claude or codex
+      model: gpt-sol        # optional: omitted means the provider's default
+```
+
+- **When it runs:** only after the primary failed for **capacity** (after every
+  retry was spent) or **quota** (never retried). Any other failure, including
+  `auth`, `rate_limited` and `unavailable`, is the phase's answer and the
+  fallback does not run.
+- **Only if the primary got nowhere.** An attempt that did any work (edited a
+  file, ran a command, pushed) is not re-run on the fallback, for the same reason
+  it is not retried.
+- **One attempt.** The fallback is not itself retried.
+- **Shared limits.** It runs with the phase's prompt, tools, sandbox and budget,
+  and draws on the **same** phase deadline as the primary's attempts, so
+  declaring one never buys the phase more time. If too little time is left, it
+  does not start. The provider rules that bind `agent` bind `fallback_agent` at
+  validate and install (for example, `max_cost_usd` refuses a codex fallback).
+- **What is recorded:** the execution records the agent that actually produced
+  the result. If the fallback also fails, its error starts with
+  `Primary agent <provider>/<model> failed: <reason>` so both failures are
+  visible.
+
 ### What `sandbox` actually does
 
 `sandbox` steers `codex exec --sandbox`. Claude phases ignore it.
@@ -248,6 +290,23 @@ For a durable deployment credential that a developer running `codex login` on a
 laptop cannot revoke, use a ChatGPT Business or Enterprise access token. See
 [Codex access tokens: setup and validation](https://github.com/syntropic137/syntropic137/blob/main/docs/testing/codex-access-token-setup.md).
 
+### Claude model aliases
+
+On claude phases, `model` may be an alias or a concrete Claude model id. The
+alias reaches `claude --model` unchanged and the pinned Claude Code CLI resolves
+it, so the table is what the platform **expects** it to resolve to. The model a
+run actually reports always wins, for display and for pricing.
+
+| Alias | Expected model |
+| --- | --- |
+| `opus` | `claude-opus-5-5` |
+| `sonnet` | `claude-sonnet-5-5` (Sonnet 5.5; needs Claude Code CLI 2.1.293 or later, which the workspace images pin) |
+| `haiku` | `claude-haiku-4-5-20251001` |
+| `fable` | `claude-fable-5` |
+
+To pin a model regardless of what an alias means later, write the concrete id,
+for example `model: claude-sonnet-5-5`.
+
 ### Codex model ids and cost
 
 On codex phases, write `gpt-sol` or a concrete model id such as `gpt-6.1-sol`.
@@ -262,6 +321,36 @@ than wrongly priced.
 
 `vendor_cost_usd` is always null for codex phases. Token counts are still recorded
 for both harnesses.
+
+### Per-phase cost limit (`max_cost_usd`)
+
+A phase may declare the most it may spend, in USD:
+
+```yaml title="workflow.yaml"
+phases:
+  - id: implement
+    name: Implement
+    order: 1
+    prompt_file: phases/implement.md
+    timeout_seconds: 3600
+    max_cost_usd: 5.00
+```
+
+- The phase's spend is the per-turn token usage on the agent's own stream,
+  priced the same way the execution's cost is. One limit covers every attempt
+  (retry) of the phase.
+- Crossing it stops the agent and **fails** the phase with
+  `cost limit USD 5.00 exceeded at USD 5.12`. It is a failure, not a cancel, so
+  the execution can be [resumed](/docs/guide/resuming-executions).
+- Must be greater than 0. Unset (the default) means no limit.
+- **Claude phases only.** `codex exec` reports usage once, at the end of the
+  run, so a limit could never stop it. A phase that declares `max_cost_usd`
+  while its `agent` or its `fallback_agent` is codex is refused at validate and
+  install.
+- Checked per turn, not reserved before each call, so turns already in flight
+  can land the final spend above the limit.
+- It is separate from the execution budget (`SYN_EXECUTION_MAX_CONCURRENT`),
+  which limits concurrent executions, not money.
 
 ### What each harness gives you
 

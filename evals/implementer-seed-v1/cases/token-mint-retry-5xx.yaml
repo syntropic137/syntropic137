@@ -1,0 +1,35 @@
+id: token-mint-retry-5xx
+source_pr: 1709
+commit: b969beaeee53ac9991a7de36399bc3745cdc1696
+fix_commit: 6dcbc7e026d3ec69da8bbbc6f193bea5b68e3480
+task: |
+  GitHub App installation-token mints fail the phase on a GitHub 5xx burst.
+
+  Setup phases mint a GitHub installation token
+  (`POST /app/installations/{id}/access_tokens`). When GitHub answers 500/502/503
+  for a few seconds, or drops the response, the mint is not retried and the
+  phase fails, even though a second request a moment later would succeed. A
+  non-idempotent POST is deliberately never resent, and the mint was treated
+  the same way. The owner has accepted the trade-off for the mint endpoint
+  only: a mint whose response was lost may have created a token we never see,
+  and that orphan token is acceptable.
+
+  What must hold:
+  - A mint answered 500 (or 502/503/504), or whose response was dropped, is
+    retried and succeeds when GitHub recovers; `Retry-After` is honoured.
+  - A mint that stays unavailable fails with a resumable error that names its
+    attempts.
+  - The whole mint, retries and waits and slow requests included, ends inside a
+    deadline that is a fraction of the setup phase timeout
+    (`SETUP_PHASE_TIMEOUT_SECONDS`), so the setup phase never times out first.
+    A `Retry-After` past the deadline stops retrying at once; no attempt starts
+    past the deadline.
+  - Any other POST, including one to a look-alike path, is still never resent
+    after GitHub may have acted on it.
+
+  Interface the scoring tests use: `syn_adapters.github.client_retry` exports
+  `MINT_ATTEMPTS` (int, the most mint attempts) and
+  `MINT_DEADLINE_FRACTION_OF_SETUP_TIMEOUT` (float, the share of the setup
+  phase timeout the whole mint may take), beside the existing `RetryPolicy`.
+hidden_tests:
+  - packages/syn-adapters/tests/github/test_provisioning_retry.py

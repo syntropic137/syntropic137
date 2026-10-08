@@ -1,31 +1,58 @@
-# The verifier seed suite (#967 step 8). Each case is a commit that carries a
-# bug the platform's own verify certified and a second verifier caught
-# (docs/retrospectives/2026-10-06-merge-down-and-the-dropped-start.md).
+# The verifier seed suite (#967 step 8). A `defect` case is a commit that
+# carries a known bug. The first six are bugs the platform's own verify
+# certified and a second verifier caught
+# (docs/retrospectives/2026-10-06-merge-down-and-the-dropped-start.md). From v4
+# the rest are mined from merged fix PRs: the pin is the first fix commit's
+# first parent, the expected file is the one the fix changed that holds the
+# defect, and a defect that only shows at runtime is not a case.
+# A `clean` case is a control: a merged PR head whose later history holds no
+# fix of it. Without controls a verifier that blocks everything is never wrong
+# (docs/research/2026-10-07-eval-best-practices.md).
+#
+# TRAIN AND HOLDOUT. Every case, defect or clean, carries `split`. Tune a
+# verifier (prompt, model, workflow) on `--split train` only; holdout cases
+# report a result and never choose one. The six earlier defects are train:
+# verifiers were already shaped against them. The holdout is, within each
+# batch of added cases, the ~30% whose sha256(id) sorts lowest (7 of the first
+# 18 mined, 2 of the next 6, 2 of the 6 clean controls): 11 of 36, fixed once,
+# recorded in each file, and never moved to train.
 #
 # What it measures: given a workflow, a prompt and a model, does verification
-# find the defect? Change any of the three and the version goes up - runs of
+# find the defect, and certify the change that has none? `score` prints both
+# rates per verifier: the catch rate over defects and the false-block rate
+# over clean controls. Change any of the three and the version goes up - runs of
 # different versions are different experiments, and the scorer prints the
 # version beside every row.
 #
 # SAME CASES, DIFFERENT VERIFIER. `workflows` lists every workflow the cases
 # run under; they differ only in the verify phase's agent. `eval_suite.py
 # --workflow <id>` picks one (default: the first), and the suite tag carries
-# it - `verifier-seed-v1:v2:<workflow id>` - so each verifier's runs are their
+# it - `verifier-seed-v1:v<version>:<workflow id>` - so each verifier's runs are their
 # own evals and their own score table. Adding a workflow changes no existing
 # table; changing a listed workflow's model or prompt bumps the version.
 #
 # v1: four cases, eval-verify-pinned-v1 (Opus 5.5) only, scored 4/4.
-# v2: two cases added (#1679, #1680) and the codex verifier.
+# v2: two cases added (#1679, #1680) and the codex verifier. The Sonnet
+#     verifier was added later under v2: a new workflow, no existing table.
+# v3: six clean controls added, and `polarity` on every case. A clean case
+#     passes only when certified.
+# v4: twenty-four defect cases mined from merged fix PRs (30 defects and 6
+#     clean controls, 36 in all), and the train/holdout split.
 #
 # EVERY VERSION KEEPS ITS SCORE. `history` records each earlier version whose
 # runs launches.jsonl still holds: the tag exactly as those runs carry it, the
 # workflow it ran and the cases it held. `score` scores each version's runs
 # against its own cases only. Never edit a history entry or a ledger line.
 id: verifier-seed-v1
-version: 2
+# The stable name the case evals carry, `suite:verifier-seed` + `case:<id>`. Every
+# version and verifier runs into those same evals; the run carries
+# `suite-version:<n>` and `verifier:<workflow id>`.
+eval_suite: verifier-seed
+version: 4
 goal: >
-  Does the verifier block a change that carries a known escaped bug, and name
-  the defect and the file it lives in?
+  Does the verifier block a change that carries a known escaped bug, naming
+  the defect and the file it lives in, and certify a merged change that has
+  no known defect?
 repository: syntropic137/syntropic137
 workflows:
   - id: eval-verify-pinned-v1
@@ -39,6 +66,12 @@ workflows:
     path: workflows/evals/verify-pinned-codex/workflow.yaml
     models:
       verify: gpt-sol
+  # Sonnet 5.5 against Opus 5.5 at half the price. `sonnet` is the alias the
+  # pinned CLI resolves; a run is Sonnet 5.5 only if its reported model says so.
+  - id: eval-verify-pinned-sonnet-v1
+    path: workflows/evals/verify-pinned-sonnet/workflow.yaml
+    models:
+      verify: sonnet
 history:
   # v1 predates the workflow suffix in the tag.
   - version: 1
@@ -48,4 +81,64 @@ history:
       - binary-artifact-minio-key
       - codex-cost-limit
       - execution-id-as-eval-id
+      - shared-esp-stream
+  # Only the codex verifier has v2 runs in the ledger.
+  - version: 2
+    tag: verifier-seed-v1:v2:eval-verify-pinned-codex-v1
+    workflow: eval-verify-pinned-codex-v1
+    cases:
+      - binary-artifact-minio-key
+      - codex-cost-limit
+      - execution-id-as-eval-id
+      - live-commits-unvalidated-sha
+      - repo-privacy-ignores-app
+      - shared-esp-stream
+  # v3 is the twelve cases of #1750 under every listed verifier.
+  - version: 3
+    tag: verifier-seed-v1:v3:eval-verify-pinned-v1
+    workflow: eval-verify-pinned-v1
+    cases:
+      - binary-artifact-minio-key
+      - clean-acquisition-fence-test
+      - clean-api-stdlib-event-loop
+      - clean-capture-volume-release
+      - clean-github-token-installation-routing
+      - clean-redis-signal-queue-fail-open
+      - clean-remote-source-single-predicate
+      - codex-cost-limit
+      - execution-id-as-eval-id
+      - live-commits-unvalidated-sha
+      - repo-privacy-ignores-app
+      - shared-esp-stream
+  - version: 3
+    tag: verifier-seed-v1:v3:eval-verify-pinned-codex-v1
+    workflow: eval-verify-pinned-codex-v1
+    cases:
+      - binary-artifact-minio-key
+      - clean-acquisition-fence-test
+      - clean-api-stdlib-event-loop
+      - clean-capture-volume-release
+      - clean-github-token-installation-routing
+      - clean-redis-signal-queue-fail-open
+      - clean-remote-source-single-predicate
+      - codex-cost-limit
+      - execution-id-as-eval-id
+      - live-commits-unvalidated-sha
+      - repo-privacy-ignores-app
+      - shared-esp-stream
+  - version: 3
+    tag: verifier-seed-v1:v3:eval-verify-pinned-sonnet-v1
+    workflow: eval-verify-pinned-sonnet-v1
+    cases:
+      - binary-artifact-minio-key
+      - clean-acquisition-fence-test
+      - clean-api-stdlib-event-loop
+      - clean-capture-volume-release
+      - clean-github-token-installation-routing
+      - clean-redis-signal-queue-fail-open
+      - clean-remote-source-single-predicate
+      - codex-cost-limit
+      - execution-id-as-eval-id
+      - live-commits-unvalidated-sha
+      - repo-privacy-ignores-app
       - shared-esp-stream

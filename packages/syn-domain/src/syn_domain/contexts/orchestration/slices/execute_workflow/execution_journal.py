@@ -37,7 +37,7 @@ import re
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Awaitable, Callable, Sequence
 
     from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
         WorkflowExecutionAggregate,
@@ -73,17 +73,25 @@ class ExecutionJournal:
         self._repository = repository
         self._projection = projection
 
-    async def open(self, aggregate: WorkflowExecutionAggregate) -> None:
+    async def open(
+        self,
+        aggregate: WorkflowExecutionAggregate,
+        written: Callable[[], Awaitable[None]] | None = None,
+    ) -> None:
         """Record the first events of a run, on a stream that must not already exist.
 
         Uses `save_new` (ExpectedVersion.NoStream) so a re-dispatch of the same
         execution id cannot quietly start a second run against the same stream.
+        ``written`` is awaited once the stream exists and before the local
+        projection, which can still fail over a start that happened (#1707).
 
         Raises:
             StreamAlreadyExistsError: the execution has already been started.
         """
         uncommitted = self._pending(aggregate)
         await self._repository.save_new(aggregate)
+        if written is not None:
+            await written()
         await self._project(uncommitted)
 
     async def append(self, aggregate: WorkflowExecutionAggregate) -> None:

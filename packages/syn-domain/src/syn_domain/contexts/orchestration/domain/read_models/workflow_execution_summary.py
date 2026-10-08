@@ -115,6 +115,9 @@ class WorkflowExecutionSummary:
     association_kind: str | None = None
     """How it joined ``eval_id``: ``launched`` or ``attached``; None in no Eval."""
 
+    workflow_version: str | None = None
+    """The workflow's installed version or source digest at launch (Evals v2)."""
+
     @property
     def phase_progress(self) -> PhaseProgress:
         """How far through its phases the run is, skipped phases accounted for."""
@@ -168,6 +171,7 @@ class WorkflowExecutionSummary:
             inherited_tags=tuple(data.get("inherited_tags") or ()),
             eval_id=data.get("eval_id"),
             association_kind=data.get("association_kind"),
+            workflow_version=data.get("workflow_version"),
         )
 
     @staticmethod
@@ -208,4 +212,5 @@ class WorkflowExecutionSummary:
             "inherited_tags": list(self.inherited_tags),
             "eval_id": self.eval_id,
             "association_kind": self.association_kind,
+            "workflow_version": self.workflow_version,
         }

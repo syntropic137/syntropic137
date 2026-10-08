@@ -1,4 +1,5 @@
 id: codex-cost-limit
+polarity: defect
 source_pr: 1654
 # The parent of the PR's final head 4dae285b2, which is the fix.
 commit: 123b25204fce5052f1b0ab494d2c59fa607624ad
@@ -31,3 +32,4 @@ expected:
        already been spent, has occurred, not stream, no running, no incremental,
        never incremental, mid run, mid turn, during the run, while it runs, exceed,
        overshoot, overrun, unbounded, not enforced, never enforced, ineffective, no effect]
+split: train
