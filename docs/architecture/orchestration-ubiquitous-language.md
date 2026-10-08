@@ -810,6 +810,15 @@ remote, and archives an uncommitted change as a patch artifact under the
 Execution before the delete. Each deletion is logged as `WorkspaceReclaimed`
 with its size. It is housekeeping, not domain state: no event, no aggregate.
 
+**Workspace ownership** is the durable association from a
+`WorkspaceProvisionedForPhase` event's Workspace to its Execution. The
+`workspace_ownership` projection retains this association after a container
+is removed and rebuilds it during replay. Conflicting owners protect the
+directory. Authored work with no known owner is retained, so its archive
+cannot disappear into an unattributed storage prefix. Only a directory with
+an explicit `CACHEDIR.TAG` is treated as disposable cache data; an installed
+dependency directory can still contain authored changes.
+
 ## Scripted Agent
 
 What runs in a Phase's workspace in place of the agent CLI during a load test

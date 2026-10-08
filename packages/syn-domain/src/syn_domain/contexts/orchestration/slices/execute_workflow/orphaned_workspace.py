@@ -135,9 +135,8 @@ async def guard_orphaned_workspace(orphan: OrphanedWorkspace) -> ReclaimableDir 
 class StaleWorkspaceDir:
     """A workspace directory with no container left and no running execution.
 
-    ``execution_id`` is None when nothing on the host still names the owner:
-    the provider names the directory after a random workspace id, and only the
-    container's labels ever linked the two.
+    ``execution_id`` is None when neither the durable provisioning index nor
+    any container label names its owner. Unidentified authored work is kept.
     """
 
     host_dir: str
@@ -160,7 +159,7 @@ class HostWorkspaceGit(Protocol):
         ...
 
     async def unpushed_commits(self, repo: str) -> int:
-        """Commits reachable from a branch or HEAD that no remote-tracking ref has."""
+        """Commits reachable from any ref or HEAD that no remote-tracking ref has."""
         ...
 
     async def uncommitted_patch(self, repo: str) -> bytes:
@@ -212,9 +211,13 @@ async def guard_stale_workspace_dir(
         for repo in repos:
             patch = await git.uncommitted_patch(repo)
             if patch:
+                if stale.execution_id is None:
+                    return _keep(stale, "its authored work has no known execution owner")
                 saved.append(await archive.save(stale, repo, patch))
         files = await git.unversioned_files(stale.host_dir, repos)
         if files:
+            if stale.execution_id is None:
+                return _keep(stale, "its unversioned files have no known execution owner")
             saved.append(await archive.save_files(stale, files))
     except Exception as exc:
         return _keep(stale, f"its work could not be shown safe ({type(exc).__name__}: {exc})")

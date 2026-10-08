@@ -90,12 +90,18 @@ def _reclaimer(
     running: set[str] | None = None,
     archive: _Archive | None = None,
     hours_later: float = 7.0,
+    known_owner: bool = True,
 ) -> WorkspaceDirReclaimer:
     async def list_containers() -> list[WorkspaceContainer]:
         return containers or []
 
     async def running_ids() -> set[str]:
         return running or set()
+
+    async def workspace_owners(workspace_id: str) -> set[str]:
+        if not known_owner or containers:
+            return set()
+        return {"exec-fixture"}
 
     return WorkspaceDirReclaimer(
         base_dir=str(base),
@@ -107,6 +113,7 @@ def _reclaimer(
         archive=archive or _Archive(),
         remover=ShutilWorkspaceDirRemover(),
         clock=lambda: time.time() + hours_later * 3600,
+        workspace_owners=workspace_owners,
     )
 
 
@@ -126,6 +133,7 @@ async def test_clean_pushed_stale_dir_is_reclaimed_and_logged_with_size(
     assert result.reclaimed == ("ws-clean",)
     assert result.reclaimed_bytes > 0
     assert not ws.exists()
+    assert list(base.iterdir()) == []  # A rename alone is not reclamation.
     assert f"WorkspaceReclaimed workspace_id=ws-clean host_dir={ws} size_bytes=" in caplog.text
 
 
@@ -233,15 +241,34 @@ async def test_repo_config_naming_a_command_is_never_run_and_keeps_the_dir(
     assert not marker.exists()
 
 
-async def test_no_pass_runs_while_catching_up(base: Path, tmp_path: Path) -> None:
+async def test_no_pass_runs_while_catching_up(
+    base: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     ws = _workspace(base, "ws-replay", tmp_path)
+    reclaimer = _reclaimer(base)
+    ran = asyncio.Event()
+    run_once = reclaimer.run_once
+    live = [False]
+
+    async def observed_run_once() -> object:
+        ran.set()
+        return await run_once()
+
+    monkeypatch.setattr(reclaimer, "run_once", observed_run_once)
     task = asyncio.create_task(
-        reclaim_on_a_clock(_reclaimer(base), is_live=lambda: False, interval_seconds=0.01)
+        reclaim_on_a_clock(reclaimer, is_live=lambda: live[0], interval_seconds=0.01)
     )
-    await asyncio.sleep(0.1)
-    task.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await task
+    try:
+        await asyncio.sleep(0.1)
+        ran_during_replay = ran.is_set()
+        live[0] = True
+        await asyncio.wait_for(ran.wait(), timeout=1)
+    finally:
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    assert not ran_during_replay
+    assert ran.is_set()
     assert ws.exists()
 
 
@@ -324,9 +351,15 @@ async def test_ignored_files_are_archived_and_proven_caches_are_not(
     (app / "package.json").write_text("{}\n")
     (app / "node_modules" / "pkg").mkdir(parents=True)
     (app / "node_modules" / "pkg" / "index.js").write_text("cache\n")
+    (app / "node_modules" / "CACHEDIR.TAG").write_bytes(
+        b"Signature: 8a477f597d28d172789f06886806bc55\n"
+    )
     (ws / "package.json").write_text("{}\n")
     (ws / "node_modules" / "pkg").mkdir(parents=True)
     (ws / "node_modules" / "pkg" / "index.js").write_text("cache outside a repo\n")
+    (ws / "node_modules" / "CACHEDIR.TAG").write_bytes(
+        b"Signature: 8a477f597d28d172789f06886806bc55\n"
+    )
     archive = _Archive()
     result = await _reclaimer(base, archive=archive).run_once()
     assert result.reclaimed == ("ws-ignored",)
@@ -434,7 +467,7 @@ async def test_unknown_owner_waits_while_any_execution_is_running(
 ) -> None:
     """B5: with its container removed nothing names the owner; it may be running."""
     ws = _workspace(base, "ws-anon", tmp_path)
-    result = await _reclaimer(base, running={"exec-running"}).run_once()
+    result = await _reclaimer(base, running={"exec-running"}, known_owner=False).run_once()
     assert result.reclaimed == ()
     assert ws.exists()
 
@@ -567,3 +600,86 @@ async def test_git_work_authored_during_archival_keeps_the_dir(
     result = await _reclaimer(base, archive=AuthorsDuringUpload()).run_once()
     assert result.kept == (f"ws-during-{authored}",)
     assert ws.exists()
+
+
+@pytest.mark.parametrize("running_owner", [False, True])
+async def test_containerless_workspace_uses_replayed_ownership(
+    base: Path, tmp_path: Path, running_owner: bool
+) -> None:
+    """B5: the real producer, replay and a new reader retain every phase's owner."""
+    from event_sourcing import EventEnvelope, MemoryCheckpointStore, ProjectionResult
+    from event_sourcing.core.envelope import decode_event, encode_payload, event_type_of
+
+    from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
+        ProvisionWorkspaceCompletedCommand,
+        StartExecutionCommand,
+        WorkflowExecutionAggregate,
+    )
+    from syn_domain.contexts.orchestration.slices.workspace_ownership.projection import (
+        WorkspaceOwnershipProjection,
+    )
+
+    store = InMemoryProjectionStore()
+    projection = WorkspaceOwnershipProjection(store)
+    checkpoints = MemoryCheckpointStore()
+    for execution_id, workspace_id in [("exec-first", "ws-first"), ("exec-second", "ws-second")]:
+        ws = _workspace(base, workspace_id, tmp_path)
+        (ws / "repos" / "app" / "README.md").write_text(f"only copy from {execution_id}\n")
+        aggregate = WorkflowExecutionAggregate()
+        aggregate._handle_command(
+            StartExecutionCommand(
+                execution_id=execution_id,
+                workflow_id="wf",
+                workflow_name="ownership",
+                total_phases=1,
+                inputs={},
+            )
+        )
+        aggregate._handle_command(
+            ProvisionWorkspaceCompletedCommand(
+                execution_id=execution_id, phase_id="p", workspace_id=workspace_id
+            )
+        )
+        envelope = aggregate._uncommitted_events[-1]
+        # Serialize and decode as the event store does, then replay twice.
+        event_type = event_type_of(envelope.event)
+        decoded = decode_event(event_type, 1, encode_payload(envelope.event))
+        envelope = EventEnvelope(
+            event=decoded.event,
+            metadata=envelope.metadata.model_copy(update={"event_type": decoded.event_type}),
+        )
+        for _ in range(2):
+            assert await projection.handle_event(envelope, checkpoints) is ProjectionResult.SUCCESS
+    reader = WorkspaceOwnershipProjection(store)
+    archive = _Archive()
+    reclaimer = _reclaimer(
+        base, archive=archive, running={"exec-second"} if running_owner else set()
+    )
+    reclaimer.workspace_owners = reader.owners
+    result = await reclaimer.run_once()
+    for execution_id, workspace_id in [("exec-first", "ws-first"), ("exec-second", "ws-second")]:
+        assert await reader.owners(workspace_id) == {execution_id}
+        if running_owner and execution_id == "exec-second":
+            assert (base / workspace_id).exists()
+        else:
+            assert workspace_id in result.reclaimed
+            assert any(
+                owner == execution_id and f"only copy from {execution_id}".encode() in patch
+                for owner, patch in archive.saved
+            )
+
+
+@pytest.mark.parametrize("outside_repo", [False, True])
+async def test_unidentified_authored_work_is_kept(
+    base: Path, tmp_path: Path, outside_repo: bool
+) -> None:
+    ws = _workspace(base, "ws-unidentified", tmp_path)
+    authored = ws / "notes.md" if outside_repo else ws / "repos" / "app" / "README.md"
+    authored.write_text("no known owner, only copy\n")
+    archive = _Archive()
+    result = await _reclaimer(base, archive=archive, known_owner=False).run_once()
+    assert result.kept == ("ws-unidentified",)
+    assert ws.exists()
+    assert not archive.saved
+    assert not archive.files

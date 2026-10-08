@@ -13,9 +13,9 @@ directory is a candidate only when all three hold:
 * no RUNNING container mounts it - any one of them, however many mount it
   (a stopped one does not protect it - that is the OOM case - but its labels
   still name the execution);
-* the execution that owns it is not running. With no container left nothing
-  names the owner, and an unknown owner may be any running execution, so
-  such a directory waits until none is running;
+* the execution that owns it is not running. Provisioning events retain the
+  owner after its container disappears. A directory with no recorded owner
+  waits while any execution runs, and unidentified authored work is retained;
 * nothing inside it has changed for the grace period.
 
 A candidate is then guarded (`guard_stale_workspace_dir`). After the guard's
@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import gzip
 import hashlib
 import logging
 import os
@@ -70,6 +71,12 @@ class ReclaimPass:
     skipped: str | None = None
 
 
+@dataclass(frozen=True)
+class _WorkspaceSnapshot:
+    repositories: tuple[tuple[str, int, str], ...]
+    unversioned_digest: str
+
+
 @dataclass
 class WorkspaceDirReclaimer:
     """One reclaim pass over the workspace base directory, with its collaborators."""
@@ -91,6 +98,8 @@ class WorkspaceDirReclaimer:
     release: Callable[[str, str], None] = field(
         default=lambda claimed, host_dir: _release(claimed, host_dir)
     )
+    #: Durable provisioning links survive the removal of Docker labels.
+    workspace_owners: Callable[[str], Awaitable[set[str]]] | None = None
 
     async def _observe(
         self,
@@ -100,6 +109,14 @@ class WorkspaceDirReclaimer:
             containers.setdefault(container.workspace_id, []).append(container)
         running = await self.running_execution_ids()
         listings = await asyncio.to_thread(self.scan_dirs, self.base_dir)
+        if self.workspace_owners is not None:
+            from syn_adapters.workspace_backends.stale_dirs import WorkspaceContainer
+
+            for listing in listings:
+                for owner in await self.workspace_owners(listing.workspace_id):
+                    containers.setdefault(listing.workspace_id, []).append(
+                        WorkspaceContainer(listing.workspace_id, owner, running=False)
+                    )
         return containers, running, listings
 
     async def run_once(self) -> ReclaimPass:
@@ -205,21 +222,28 @@ class WorkspaceDirReclaimer:
             return False
         return await asyncio.to_thread(remove_reclaimed_dir, reclaimable, self.remover, at=claimed)
 
-    async def _git_state(self, host_dir: str) -> tuple[tuple[str, int, str], ...]:
-        """Every repository's unpushed count and uncommitted-patch digest, by relative path.
+    async def _git_state(self, host_dir: str) -> _WorkspaceSnapshot:
+        """Repository state and unversioned contents, independent of the workspace path.
 
         Read before the guard and again under the claim: anything authored in
         git meanwhile (a commit, a stash, a ref, a staged edit) changes it.
+        Unversioned bytes are compared too: timestamp-preserving copies must
+        not slip past the final check.
         """
         state: list[tuple[str, int, str]] = []
-        for repo in await self.git.repositories(host_dir):
+        repos = await self.git.repositories(host_dir)
+        for repo in repos:
             digest = hashlib.sha256(await self.git.uncommitted_patch(repo)).hexdigest()
             unpushed = await self.git.unpushed_commits(repo)
             state.append((os.path.relpath(repo, host_dir), unpushed, digest))
-        return tuple(sorted(state))
+        files = await self.git.unversioned_files(host_dir, repos)
+        # The gzip header includes the archive time; compare the tar's file
+        # contents and metadata, not the time it was compressed.
+        digest = hashlib.sha256(gzip.decompress(files) if files else b"").hexdigest()
+        return _WorkspaceSnapshot(tuple(sorted(state)), digest)
 
     async def _why_not_still_stale(
-        self, stale: StaleWorkspaceDir, claimed: str, before: tuple[tuple[str, int, str], ...]
+        self, stale: StaleWorkspaceDir, claimed: str, before: _WorkspaceSnapshot
     ) -> str | None:
         """Read everything again under the claim; any change is a reason to keep it."""
         catching_up = "subscriptions began catching up during archival"
@@ -270,6 +294,7 @@ async def _running_execution_ids() -> set[str]:
 
 def default_reclaimer(is_live: Callable[[], bool]) -> WorkspaceDirReclaimer:
     """The production wiring: docker, the execution projection, host git, MinIO."""
+    from syn_adapters.projection_stores import get_projection_store
     from syn_adapters.workspace_backends.orphaned import (
         ShutilWorkspaceDirRemover,
         workspace_base_dir,
@@ -279,6 +304,9 @@ def default_reclaimer(is_live: Callable[[], bool]) -> WorkspaceDirReclaimer:
         SubprocessHostWorkspaceGit,
         list_workspace_containers,
         scan_workspace_dirs,
+    )
+    from syn_domain.contexts.orchestration.slices.workspace_ownership.projection import (
+        WorkspaceOwnershipProjection,
     )
     from syn_shared.settings import get_settings
 
@@ -292,6 +320,7 @@ def default_reclaimer(is_live: Callable[[], bool]) -> WorkspaceDirReclaimer:
         archive=ArtifactStoragePatchArchive(),
         remover=ShutilWorkspaceDirRemover(),
         is_live=is_live,
+        workspace_owners=WorkspaceOwnershipProjection(get_projection_store()).owners,
     )
 
 

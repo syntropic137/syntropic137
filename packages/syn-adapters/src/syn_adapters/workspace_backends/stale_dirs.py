@@ -82,36 +82,19 @@ def _is_proven_cache(path: Path) -> bool:
 
     A name proves nothing - an agent may write its only copy into ``target``
     or ``.cache`` - so each rule reads the directory, not what it is called:
-    a CACHEDIR.TAG its tool wrote, a ``node_modules`` beside the
-    ``package.json`` that reinstalls it, a virtualenv's ``pyvenv.cfg``, or a
-    ``__pycache__`` holding nothing but bytecode.
+    a CACHEDIR.TAG explicitly designates the contents as disposable. A
+    package manifest or virtualenv marker does not prove that every file
+    inside can be reproduced: agents may edit installed dependencies.
     """
     if path.is_symlink() or not path.is_dir():
         return False
-    if _has_cachedir_tag(path):
-        return True
-    if path.name == "node_modules":
-        return (path.parent / "package.json").is_file()
-    if path.name in (".venv", "venv"):
-        return (path / "pyvenv.cfg").is_file()
-    if path.name == "__pycache__":
-        return _holds_only_bytecode(path)
-    return False
+    return _has_cachedir_tag(path)
 
 
 def _has_cachedir_tag(path: Path) -> bool:
     try:
         with (path / "CACHEDIR.TAG").open("rb") as tag:
             return tag.read(len(_CACHEDIR_TAG_SIGNATURE)) == _CACHEDIR_TAG_SIGNATURE
-    except OSError:
-        return False
-
-
-def _holds_only_bytecode(path: Path) -> bool:
-    try:
-        return all(
-            e.is_file() and not e.is_symlink() and e.suffix == ".pyc" for e in path.iterdir()
-        )
     except OSError:
         return False
 
@@ -272,11 +255,29 @@ class SubprocessHostWorkspaceGit:
         await self._refuse_command_config(repo)
         if _is_bare(repo):
             return b""
+        index_entries = await _git(repo, "ls-files", "-v", "-z")
+        if any(
+            entry[:1] == b"S" or entry[:1].islower()
+            for entry in index_entries.split(b"\0")
+            if entry
+        ):
+            raise HostGitError(f"{repo} has index flags that can hide authored changes")
         diff_args = ("--binary", "--no-ext-diff", "--no-textconv", "--no-color")
         # A HEAD-to-tree patch holds one state. When the index differs from
         # both HEAD and the tree, the staged state would be lost: keep it.
-        staged = await _git(repo, "diff", "--cached", "--quiet", ok_codes=(0, 1), status=True)
-        unstaged = await _git(repo, "diff", "--quiet", ok_codes=(0, 1), status=True)
+        staged = await _git(
+            repo,
+            "diff",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--cached",
+            "--quiet",
+            ok_codes=(0, 1),
+            status=True,
+        )
+        unstaged = await _git(
+            repo, "diff", "--no-ext-diff", "--no-textconv", "--quiet", ok_codes=(0, 1), status=True
+        )
         if staged and unstaged:
             raise HostGitError(f"{repo} has staged changes the working tree no longer matches")
         patch = await _git(repo, "diff", *diff_args, "HEAD")
