@@ -184,13 +184,18 @@ def test_a_gateway_left_created_is_started_verified_and_reported(
     assert run.state == "running"
     assert "PIT STOP DONE" in run.proc.stdout
     # Said so: the operator sees it was left Created and was started.
-    assert "syn137-gateway: running=false after compose up (left Created); starting it" in run.proc.stdout
+    assert (
+        "syn137-gateway: running=false after compose up (left Created); starting it"
+        in run.proc.stdout
+    )
     assert "syn137-gateway: docker start issued" in run.proc.stdout
     assert "syn137-gateway: running=true image=sha256:gateway" in run.proc.stdout
     # Ordered: every compose up, then the start, then the running/image verify.
     assert run.calls.count(f"docker {_START.removeprefix('docker ')}") == 1
     start = _index(run.calls, _START)
-    last_up = max(i for i, c in enumerate(run.calls) if c.startswith("docker compose") and " up " in c)
+    last_up = max(
+        i for i, c in enumerate(run.calls) if c.startswith("docker compose") and " up " in c
+    )
     verify = _index(run.calls, "docker inspect syn137-gateway --format {{.Image}}")
     assert last_up < start < verify
     assert len([c for c in run.calls if c.startswith("docker compose")]) == 1 + compose_fails
@@ -203,7 +208,9 @@ def test_the_gateway_alone_still_never_touches_the_api_or_admission(tmp_path: Pa
     assert run.proc.returncode == 0, run.proc.stderr
     (up,) = [c for c in run.calls if c.startswith("docker compose")]
     assert up.endswith("up -d --no-deps gateway")
-    assert not [c for c in run.calls if "/maintenance" in c or "/executions" in c or "/version" in c]
+    assert not [
+        c for c in run.calls if "/maintenance" in c or "/executions" in c or "/version" in c
+    ]
     assert not [c for c in run.calls if "syn137-api" in c or "syn-api:" in c]
 
 
