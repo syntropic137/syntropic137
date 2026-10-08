@@ -20,10 +20,18 @@ the compliant route, and what does it cost?
   subscriptions behind an automated platform to raise its capacity is
   **likely outside the consumer terms**. Nothing fetched says it is
   permitted. This document does not conclude permission from a plan name.
-- The OpenAI Terms of Use, Service Terms and Business Terms all returned
-  HTTP 403 to every fetch attempt, so **every OpenAI terms question is
-  UNVERIFIED** here. The one OpenAI statement fetched is that an API key is
-  "Great for automation in shared environments like CI" (section 1.3).
+- OpenAI's Terms of Use returned 403 to curl; an Internet Archive capture
+  of the same URL from 2026-10-08 was fetched instead, and says "You may not
+  share your account credentials or make your account available to anyone
+  else" and forbids attempts to "circumvent any rate limits or
+  restrictions" (section 1.3). The Service and Business Terms stay
+  **UNVERIFIED**.
+- Both providers document headless use of a subscription login by its own
+  licensee (Claude Code's `claude setup-token` "for CI pipelines and
+  scripts"; Codex's ChatGPT-managed auth in CI/CD, an "advanced" path). That
+  is not permission to pool subscriptions or to run one login across many
+  concurrent workspaces, and OpenAI says "Do not share the same file across
+  concurrent jobs or multiple machines" (section 1.5).
 - The routes the fetched pages describe for automated, organization-level
   use are API keys under the Commercial Terms (Anthropic, OpenAI), cloud
   marketplaces (Bedrock, Vertex), and usage-based Enterprise plans billed at
@@ -43,12 +51,14 @@ Every section separates **what exists today**, **what is proposed**, and
 ## 1. Provider facts
 
 All pages below were fetched with `curl` on 2026-10-08 ("accessed
-2026-10-08"). Quotes are verbatim and in block quotes. Where a quoted
-sentence contains an em dash on the source page, the quote stops before it
-and the cut is marked `[...]`. Typographic apostrophes and quotation
-marks are rendered as ASCII; nothing else inside a quote is changed.
-Anything not fetched is marked **UNVERIFIED** and kept out of section 2's
-arithmetic.
+2026-10-08"). Quotes are verbatim and in block quotes, with the source's own
+punctuation, typographic apostrophes and quotation marks included. The only
+change made inside a quote is layout whitespace: where the page renders an
+inline code span or a line break inside a sentence, the pieces are joined
+with a single space. Any omitted material, including every passage that
+contains an em dash on the source page, is replaced by a visible `[...]`.
+A quote marked "excerpt" is not the whole paragraph. Anything not fetched is
+marked **UNVERIFIED** and kept out of section 2's arithmetic.
 
 ### 1.1 Fetch log
 
@@ -67,12 +77,20 @@ arithmetic.
 | Amazon Bedrock quotas (user guide) | https://docs.aws.amazon.com/bedrock/latest/userguide/quotas.html | 200 |
 | Amazon Bedrock service quotas (general reference) | https://docs.aws.amazon.com/general/latest/gr/bedrock.html | 200 |
 | Vertex AI, Claude models | https://cloud.google.com/vertex-ai/generative-ai/docs/partner-models/claude/use-claude | 200, but no default quota values found on it: **UNVERIFIED** |
-| OpenAI Terms of Use | https://openai.com/policies/terms-of-use/ (also `/row-terms-of-use/`, `/en-GB/policies/terms-of-use/`) | **403, UNVERIFIED** |
+| Claude Code, Authentication | https://code.claude.com/docs/en/authentication | 200 |
+| Claude Code, Run Claude Code programmatically | https://code.claude.com/docs/en/headless | 200 |
+| Amazon Bedrock pricing | https://aws.amazon.com/bedrock/pricing/ | 200, but the Anthropic price values are not in the static page (column headers only): **UNVERIFIED** |
+| Vertex AI generative AI pricing | https://cloud.google.com/vertex-ai/generative-ai/pricing | 200 |
+| OpenAI Terms of Use | https://openai.com/policies/terms-of-use/ (also `/row-terms-of-use/`, `/en-GB/policies/terms-of-use/`) | **403** to curl |
+| OpenAI Terms of Use, Internet Archive capture of the same URL taken 2026-10-08 16:38:31 UTC | https://web.archive.org/web/20261008163831/https://openai.com/policies/terms-of-use/ | 200 (page shows "Effective: January 1, 2026") |
 | OpenAI Service Terms | https://openai.com/policies/service-terms/ | **403, UNVERIFIED** |
 | OpenAI Business Terms | https://openai.com/policies/business-terms/ | **403, UNVERIFIED** |
 | Using Codex with your ChatGPT plan | https://help.openai.com/en/articles/11369540-using-codex-with-your-chatgpt-plan | **403, UNVERIFIED** |
 | Codex pricing and plan limits | https://developers.openai.com/codex/pricing | 200 |
+| Codex, Non-interactive mode | https://developers.openai.com/codex/noninteractive | 200 |
+| Codex, Maintain Codex account auth in CI/CD | https://developers.openai.com/codex/auth/ci-cd-auth | 200 |
 | OpenAI API rate limits | https://platform.openai.com/docs/guides/rate-limits | 200 |
+| OpenAI GPT-6.1 Sol model page | https://developers.openai.com/api/docs/models/gpt-6.1-sol | 200 |
 
 ### 1.2 Anthropic terms, quoted
 
@@ -98,12 +116,13 @@ arithmetic.
 
 > Claude Code usage is subject to the Anthropic Usage Policy. Advertised usage limits for Pro and Max plans assume ordinary, individual usage of Claude Code and the Agent SDK.
 
-**Same page**, "Authentication and credential use" (the first two paragraphs in full; the third sentence of the second paragraph is cut at an em dash on the source page):
+**Same page**, "Authentication and credential use" (excerpt: the section's first three paragraphs; the last sentence of the OAuth paragraph, a pointer to the sign-in pages, is omitted, and the third paragraph's last sentence is cut where the source page has an em dash):
 
-> Claude Code authenticates with Anthropic's servers using OAuth tokens or API keys. These authentication methods serve different purposes:
-> OAuth authentication is intended exclusively for purchasers of Claude Free, Pro, Max, Team, and Enterprise subscription plans and is designed to support ordinary use of Claude Code and other native Anthropic applications.
+> Claude Code authenticates with Anthropic’s servers using OAuth tokens or API keys. These authentication methods serve different purposes:
+>
+> OAuth authentication is intended exclusively for purchasers of Claude Free, Pro, Max, Team, and Enterprise subscription plans and is designed to support ordinary use of Claude Code and other native Anthropic applications. [...]
 
-> Developers building products or services that interact with Claude's capabilities, including those using the Agent SDK, should use API key authentication through Claude Console or a supported cloud provider. Anthropic does not permit third-party developers to offer Claude.ai login into their own applications, or to route requests through Free, Pro, or Max plan credentials on behalf of their users. Moreover, developers may not collect, store, or intermediate Claude.ai credentials or session tokens [...]
+> Developers building products or services that interact with Claude’s capabilities, including those using the Agent SDK, should use API key authentication through Claude Console or a supported cloud provider. Anthropic does not permit third-party developers to offer Claude.ai login into their own applications, or to route requests through Free, Pro, or Max plan credentials on behalf of their users. Moreover, developers may not collect, store, or intermediate Claude.ai credentials or session tokens [...]
 
 **Same page**, the paragraph that follows it:
 
@@ -113,15 +132,17 @@ arithmetic.
 >
 > For questions about permitted authentication methods for your use case, please contact sales.
 
-**Same page**, "Can customers offer Claude Code in their products?" (first sentence and second bullet):
+**Same page**, "Can customers offer Claude Code in their products?" (excerpt: the opening sentence and the second of the listed conditions; the first condition, on not modifying the binary, and the third, on names and logos, are omitted):
 
-> Unless we've mutually agreed otherwise, preinstalling or running Claude Code in your products or services (e.g. in hosted sandboxes or other agent infrastructure) requires agreeing to our Commercial Terms of Service and complying with the conditions below:
+> Unless we’ve mutually agreed otherwise, preinstalling or running Claude Code in your products or services (e.g. in hosted sandboxes or other agent infrastructure) requires agreeing to our Commercial Terms of Service and complying with the conditions below:
 
-> Customers may not pay for, resell, or intermediate Claude usage on their end users' behalf. Each end user must authenticate with their own Anthropic API key, Claude subscription plan credentials, or 3P inference provider credential (Amazon Bedrock, Google Cloud's Agent Platform, Microsoft Foundry). That usage is billed directly to the end user under their own agreement with Anthropic or, for third-party inference providers, with the applicable provider.
+> [...]
+>
+> Customers may not pay for, resell, or intermediate Claude usage on their end users’ behalf. Each end user must authenticate with their own Anthropic API key, Claude subscription plan credentials, or 3P inference provider credential (Amazon Bedrock, Google Cloud’s Agent Platform, Microsoft Foundry). That usage is billed directly to the end user under their own agreement with Anthropic or, for third-party inference providers, with the applicable provider.
 
 **Same page**, "Commercial agreements":
 
-> Whether you're using the Claude API directly (1P) or accessing it through Amazon Bedrock or Google Cloud's Agent Platform (3P), your existing commercial agreement will apply to Claude Code usage, unless we've mutually agreed otherwise.
+> Whether you’re using the Claude API directly (1P) or accessing it through Amazon Bedrock or Google Cloud’s Agent Platform (3P), your existing commercial agreement will apply to Claude Code usage, unless we’ve mutually agreed otherwise.
 
 **Usage Policy**, under "Do Not Abuse Our Platform" (https://www.anthropic.com/legal/aup, accessed 2026-10-08; the page header reads "Effective November 12, 2026"):
 
@@ -131,46 +152,130 @@ The Usage Policy does not say, in what was fetched, whether a usage limit is a "
 
 **Commercial Terms**, D.4 (https://www.anthropic.com/legal/commercial-terms, accessed 2026-10-08):
 
-> D.4. Use Restrictions. Customer may not and must not attempt to (a) access the Services to build a competing product or service, including to train competing AI models or resell the Services except as expressly approved by Anthropic; (b) reverse engineer or duplicate the Services; or (c) support any third party's attempt at any of the conduct restricted in this sentence.
+> D.4. Use Restrictions. Customer may not and must not attempt to (a) access the Services to build a competing product or service, including to train competing AI models or resell the Services except as expressly approved by Anthropic; (b) reverse engineer or duplicate the Services; or (c) support any third party’s attempt at any of the conduct restricted in this sentence.
 
 No Commercial Terms clause on rate-limit circumvention or on automated access was found by searching the fetched text for "circumvent", "rate limit" and "usage limit".
 
-### 1.3 OpenAI terms
+**Claude Code, Authentication**, "Generate a long-lived token" (https://code.claude.com/docs/en/authentication, accessed 2026-10-08; excerpt: the paragraph's opening, then the paragraph after the shell examples):
 
-**UNVERIFIED.** The Terms of Use, Service Terms, Business Terms and the
-Codex-with-ChatGPT help article all returned 403 (section 1.1). The plan's
-reviewer reported a 2026-10-08 spot-check that the Terms of Use prohibit
-circumventing rate limits; this document could not re-quote it, so it is
-**not** relied on. A reviewer with a browser should quote the account-sharing,
-automated-access and rate-limit clauses here before any decision uses them.
+> For CI pipelines, scripts, or other environments where interactive browser login isn’t available, generate a one-year OAuth token with claude setup-token:
 
-The one OpenAI statement fetched on this topic, from the Codex pricing page
-(https://developers.openai.com/codex/pricing, accessed 2026-10-08), next to
-the "API Key" option:
+> [...]
+>
+> This token authenticates with your Claude subscription and requires a Pro, Max, Team, or Enterprise plan. It can only make model requests, so it can’t establish Remote Control sessions or fetch claude.ai connectors. MCP servers you configure locally still work.
+
+**Same page**, "Authentication precedence" (excerpt: the list's lead-in and the `CLAUDE_CODE_OAUTH_TOKEN` item; the other items are omitted):
+
+> When multiple credentials are present, Claude Code chooses one in this order:
+>
+> [...]
+>
+> CLAUDE_CODE_OAUTH_TOKEN environment variable. A long-lived OAuth token generated by claude setup-token. Use this for CI pipelines and scripts where browser login isn’t available.
+
+**Claude Code, Run Claude Code programmatically** (https://code.claude.com/docs/en/headless, accessed 2026-10-08; excerpt):
+
+> To run Claude Code in non-interactive mode, pass -p with your prompt and the CLI options you need:
+
+**Same site, Authentication page**, on bare mode (excerpt):
+
+> Bare mode does not read CLAUDE_CODE_OAUTH_TOKEN. If your script passes --bare, authenticate with ANTHROPIC_API_KEY or an apiKeyHelper instead.
+
+These pages document headless use of a subscription token by its licensee
+("CI pipelines and scripts"). They are product documentation, not terms, and
+none of them mentions concurrency, several workspaces, or a platform running
+the token on someone's behalf. Section 1.5 reads them together with the
+Consumer Terms and Claude Code legal quotes.
+
+### 1.3 OpenAI terms and Codex automation
+
+**Terms of Use.** The live page returned 403 to curl. The quotes below are
+from the Internet Archive capture of the same URL taken on 2026-10-08 at
+16:38:31 UTC
+(https://web.archive.org/web/20261008163831/https://openai.com/policies/terms-of-use/,
+accessed 2026-10-08), which shows "Effective: January 1, 2026". They are a
+third-party copy, so a reviewer with a browser should re-open the live page
+before a decision rests on them. The Service Terms, Business Terms and the
+Codex-with-ChatGPT help article stay **UNVERIFIED** (403, section 1.1).
+
+"Registration and access", "Registration" (excerpt: the third sentence is omitted):
+
+> Registration. You must provide accurate and complete information to register for an account to use our Services. You may not share your account credentials or make your account available to anyone else and are responsible for all activities that occur under your account. [...]
+
+"Using our Services", "What you cannot do" (excerpt: the lead-in and the item on rate limits; the other items are omitted):
+
+> What you cannot do. You may not use our Services for any illegal, harmful, or abusive activity. For example, you may not:
+>
+> [...]
+>
+> Interfere with or disrupt our Services, including circumvent any rate limits or restrictions or bypass any protective measures or safety mitigations we put on our Services.
+
+These are the Terms of Use. Which OpenAI terms govern a ChatGPT Business or
+Enterprise workspace, or the API, is in the Service and Business Terms,
+which are **UNVERIFIED** here.
+
+**Codex pricing page** (https://developers.openai.com/codex/pricing, accessed 2026-10-08), next to the "API Key" option:
 
 > Great for automation in shared environments like CI.
 
-That is a product description, not a terms clause, and it says nothing about
-whether ChatGPT plan credentials may be used the same way.
+**Codex, Non-interactive mode**, "Use ChatGPT-managed auth in CI/CD (advanced)" (https://developers.openai.com/codex/noninteractive, accessed 2026-10-08):
+
+> Read this if you need to run CI/CD jobs with a Codex user account instead of an API key, such as enterprise teams using ChatGPT-managed Codex access on trusted runners or users who need ChatGPT/Codex rate limits instead of API key usage.
+>
+> API keys are the right default for automation because they are simpler to provision and rotate. Use this path only if you specifically need to run as your Codex account.
+
+**Codex, Maintain Codex account auth in CI/CD** (https://developers.openai.com/codex/auth/ci-cd-auth, accessed 2026-10-08; excerpts):
+
+> This is an advanced workflow for enterprise and other trusted private automation. API keys are still the recommended option for most CI/CD jobs.
+
+> Use one auth.json per runner or per serialized workflow stream.
+>
+> Do not share the same file across concurrent jobs or multiple machines.
+
+These are product documentation, not terms. They document that one Codex
+user may run their own ChatGPT-managed login in automation, as an advanced
+path, and they say plainly that one `auth.json` must not be shared across
+concurrent jobs.
 
 ### 1.4 Terms by usage pattern
 
-Each cell is a pointer to a quote in 1.2 or 1.3, or **UNVERIFIED**. A cell
-summarises which quote applies; the quote itself is the evidence.
+Each cell is a literal excerpt from a quote in 1.2 or 1.3 (same URL and
+access date), or **UNVERIFIED**. The cells are evidence only; what this
+document reads into them is in the "Interpretation" list under the table,
+labelled as interpretation.
 
-| Pattern | Anthropic (Claude Code, Pro/Max) | Anthropic (Team / Enterprise seats) | Anthropic (API key, Bedrock, Vertex) | OpenAI (Codex, ChatGPT plans) | OpenAI (API key) |
+| Pattern | Anthropic (Pro/Max) | Anthropic (Team / Enterprise seats) | Anthropic (API key, Bedrock, Vertex) | OpenAI (Codex, ChatGPT plans) | OpenAI (API key) |
 |---|---|---|---|---|---|
-| Supported CLI automation by its licensee | Consumer Terms automated-access clause: prohibited "Except when you are accessing our Services via an Anthropic API Key or where we otherwise explicitly permit it". No fetched page explicitly permits headless subscription use. Claude Code page: limits "assume ordinary, individual usage". **Not established as permitted.** | Commercial Terms apply (License quote). No fetched clause addresses headless or automated seat use: **UNVERIFIED** | "Developers building products or services ... should use API key authentication through Claude Console or a supported cloud provider" | **UNVERIFIED** | "Great for automation in shared environments like CI" (product description, not terms) |
-| One person's login used by a platform | "developers may not collect, store, or intermediate Claude.ai credentials or session tokens"; but "Nor does it prevent an end user from signing in to the unmodified Claude Code binary with their own Claude subscription, including where a platform hosts Claude Code". Whether copying one OAuth token into many automated workspaces is "signing in" is **not answered** by the quote. | Same Claude Code quotes; **UNVERIFIED** beyond them | "configuring an API key in a development environment, secrets manager, or machine image for use by the customer's own authorized users" is not restricted | **UNVERIFIED** | **UNVERIFIED** |
-| Many personal subscriptions pooled | "You may not share your Account login information ... You also may not make your Account available to anyone else"; "Anthropic does not permit third-party developers ... to route requests through Free, Pro, or Max plan credentials on behalf of their users". **Likely outside the terms.** | Seats are per member (Team page: "This article applies to members of Team or Enterprise plan organizations"). Whether one automated service may route through many members' seats: **UNVERIFIED**. Team is not blanket permission. | n/a (organization-level) | **UNVERIFIED** | n/a |
-| Per-user seat assignment | n/a | The Team page describes seats as assigned to members; no fetched clause permits non-human seat holders: **UNVERIFIED** | n/a | Business "$20/ user / month" (pricing page; per user). Terms: **UNVERIFIED** | n/a |
-| Organization-level capacity | n/a | Usage-based Enterprise: quoted below the table | "Limits are set at the organization level." (rate-limits page) | Enterprise/Edu with flexible pricing: "no fixed rate limits. Usage scales with credits." (Codex pricing page) | "Rate limits are defined at the organization level and at the project level, not user level." (rate-limits guide) |
-| Multi-account to exceed a limit | No clause found that names usage limits. Usage Policy "create multiple accounts, to ... circumvent product guardrails" is quoted, but whether a usage limit is a guardrail is **not stated**. The pooling quotes above apply regardless. | **UNVERIFIED** | Spend and rate limits are per organization (rate-limits page); creating extra organizations to evade them: **UNVERIFIED** | **UNVERIFIED** (reviewer's spot-check not re-quoted) | **UNVERIFIED** |
+| Supported CLI automation by its licensee | "For CI pipelines, scripts, or other environments where interactive browser login isn’t available, generate a one-year OAuth token"; "This token authenticates with your Claude subscription and requires a Pro, Max, Team, or Enterprise plan." | same two excerpts (they name Team and Enterprise) | "Developers building products or services that interact with Claude’s capabilities, including those using the Agent SDK, should use API key authentication through Claude Console or a supported cloud provider." | "Read this if you need to run CI/CD jobs with a Codex user account instead of an API key"; "Use this path only if you specifically need to run as your Codex account." | "Great for automation in shared environments like CI."; "API keys are the right default for automation" |
+| One person's login used by a platform | "developers may not collect, store, or intermediate Claude.ai credentials or session tokens"; "Nor does it prevent an end user from signing in to the unmodified Claude Code binary with their own Claude subscription, including where a platform hosts Claude Code" | same excerpts | "This does not restrict how customers provision and manage their own API keys or third-party inference provider credentials" | "Do not share the same file across concurrent jobs or multiple machines." | **UNVERIFIED** |
+| Many personal subscriptions pooled | "You may not share your Account login information, Anthropic API key, or Account credentials with anyone else. You also may not make your Account available to anyone else."; "Anthropic does not permit third-party developers to offer Claude.ai login into their own applications, or to route requests through Free, Pro, or Max plan credentials on behalf of their users." | **UNVERIFIED** | n/a | "You may not share your account credentials or make your account available to anyone else" (Terms of Use, archive capture) | n/a |
+| Per-user seat assignment | n/a | "This article applies to members of Team or Enterprise plan organizations" (scope line of the Team page only) | n/a | "$20/ user / month*" (Business price; terms **UNVERIFIED**) | n/a |
+| Organization-level capacity | n/a | "If your organization is on a usage-based Enterprise plan (including self-serve Enterprise), there are no per-seat usage limits [...] usage is based on consumption and billed at API rates." | "Limits are set at the organization level." | "no fixed rate limits. Usage scales with credits." (Enterprise/Edu with flexible pricing) | "Rate limits are defined at the organization level and at the project level, not user level." |
+| Multi-account to exceed a limit | "create multiple accounts, to avoid detection, circumvent product guardrails, or generate identical or similar inputs that otherwise violate our Usage Policy" (Usage Policy) | **UNVERIFIED** | **UNVERIFIED** | "circumvent any rate limits or restrictions" (Terms of Use, archive capture) | same Terms of Use excerpt; whether the API is governed by these terms or by Service/Business Terms: **UNVERIFIED** |
 
 The usage-based Enterprise quote, cut at the em dash on the source page
 (https://support.claude.com/en/articles/11845131-using-claude-code-with-your-team-or-enterprise-plan, accessed 2026-10-08):
 
 > If your organization is on a usage-based Enterprise plan (including self-serve Enterprise), there are no per-seat usage limits [...] usage is based on consumption and billed at API rates.
+
+**Interpretation (this document's reading, not a quote):**
+
+- *Supported licensee automation exists on both sides.* Anthropic documents
+  a subscription OAuth token "for CI pipelines and scripts", and OpenAI
+  documents ChatGPT-managed Codex auth in CI as an advanced path. Neither
+  page is a terms clause, and neither mentions concurrency or a platform
+  running the credential for someone else. A documented CLI flag is not a
+  grant of permission for this platform's use.
+- *Many personal subscriptions pooled* behind one automated service is
+  likely outside both providers' terms on the quoted sharing clauses, and on
+  Anthropic's "route requests through Free, Pro, or Max plan credentials on
+  behalf of their users" sentence.
+- *Team/Enterprise seats are not blanket permission.* The only seat text
+  fetched scopes the article to "members"; nothing fetched says whether one
+  automated service may run through many members' seats.
+- *Multi-account to exceed a limit:* OpenAI's Terms of Use name rate limits
+  explicitly. Anthropic's Usage Policy line names "product guardrails"; it
+  does not say whether a usage limit is one, so this document does not read
+  it as covering usage limits.
 
 ### 1.5 What this means for today's single-token use
 
@@ -180,26 +285,47 @@ agent workspace
 and the code's only stated basis is an unsourced note, "OAuth is out of scope
 (ToS gray area for header proxying)"
 (`packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/WorkspaceProvisionHandler.py:251`;
-`docs/adrs/ADR-024-setup-phase-secrets.md:531`).
+`docs/adrs/ADR-024-setup-phase-secrets.md:531`). Codex runs on one
+`auth.json` copied into every workspace that needs it
+(`packages/syn-adapters/src/syn_adapters/workspace_backends/service/setup_phase_secrets.py:731-751`).
 
-**What the quotes establish.** The fetched pages do not explicitly permit
-running one person's Pro or Max OAuth token in many concurrent automated
-workspaces. The Consumer Terms prohibit automated access except via an API key
-"or where we otherwise explicitly permit it", and the Claude Code page says
-subscription limits "assume ordinary, individual usage". Whether the
-platform's current use is covered by the "end user ... signing in to the
-unmodified Claude Code binary with their own Claude subscription" sentence is
-not answered by the text; the page's own answer is "please contact sales".
-The owner should treat the current single-token posture as **unresolved, not
-as permitted**, and the "gray area" note should be replaced with these quotes
-(follow-up, not this PR).
+**What the quotes establish.** Three things are kept apart:
+
+1. *Supported automation by the licensee.* Both providers document running
+   their own CLI headless on the licensee's own subscription login: Claude
+   Code's `claude setup-token` token "for CI pipelines and scripts", read in
+   `-p` (non-bare) mode, and Codex's ChatGPT-managed auth in CI/CD, which
+   OpenAI calls an advanced path and says to "Use this path only if you
+   specifically need to run as your Codex account". So one owner running
+   their own subscription headless is a documented use, on these pages.
+2. *Many people's subscriptions pooled behind a service.* Not covered by
+   that documentation and likely outside the quoted sharing clauses (1.4).
+3. *Third-party hosted authentication.* Anthropic's legal page says
+   developers "may not collect, store, or intermediate Claude.ai credentials
+   or session tokens", and that hosting Claude Code in "hosted sandboxes or
+   other agent infrastructure" requires the Commercial Terms unless agreed
+   otherwise.
+
+**What remains unresolved for many concurrent workspaces.** None of the
+fetched pages says whether one licensee's subscription token may drive many
+concurrent automated workspaces on a platform the licensee operates. The
+Claude Code page says subscription limits "assume ordinary, individual
+usage", and its own answer for edge cases is "please contact sales". For
+Codex the documentation is more specific and runs against the current
+design: "Do not share the same file across concurrent jobs or multiple
+machines", while the platform copies one `auth.json` into every concurrent
+workspace (see 3.10). The owner should treat the current single-token
+posture as **unresolved for Claude and contrary to OpenAI's documented
+operational rule for Codex**, not as permitted, and the "gray area" note
+should be replaced with these quotes (follow-up, not this PR).
 
 **Compliant routes the quotes describe:** an Anthropic API key under the
 Commercial Terms; Bedrock or Vertex under the existing commercial agreement;
 a usage-based Enterprise plan billed at API rates; an explicit arrangement
-with Anthropic sales. For OpenAI: an API key (organization or project limits).
+with Anthropic sales. For OpenAI: an API key, which its documentation calls
+"the right default for automation" (organization or project limits).
 Whether ChatGPT Enterprise with flexible pricing permits automated platform
-use is **UNVERIFIED** (terms pages 403).
+use is **UNVERIFIED** (Service and Business Terms returned 403).
 
 ### 1.6 Limits and prices, sourced
 
@@ -215,7 +341,7 @@ Codex plan limits (https://developers.openai.com/codex/pricing, accessed 2026-10
 > The estimates below show local messages per five-hour period for Plus and
 > Standard Business. Pro plans currently have no five-hour limit.
 
-> Local messages and cloud chats share your plan's usage allowance. Weekly
+> Local messages and cloud chats share your plan’s usage allowance. Weekly
 > limits may also apply.
 
 > Enterprise and Edu plans without flexible pricing have the same per-seat
@@ -232,7 +358,30 @@ Codex plan limits (https://developers.openai.com/codex/pricing, accessed 2026-10
 | ChatGPT Business | "$20/ user / month*" (footnote not captured) | https://developers.openai.com/codex/pricing |
 | Claude Opus 5.5 API | $4 input, $20 output, $5 5-minute cache write, $0.20 cache hit, per MTok | https://docs.claude.com/en/docs/about-claude/pricing |
 | Claude Sonnet 5.5 API | $2 input, $10 output, $2.50 5-minute cache write, $0.10 cache hit, per MTok | same |
-| GPT-6.1-Sol API | $2 input, $10 output, $0.10 cached, $2.50 cache write (repo convention) per MTok | **not re-fetched here**: taken from `packages/syn-shared/src/syn_shared/pricing/__init__.py:239-252`, which cites developers.openai.com, retrieved 2026-10-06 |
+| GPT-6.1-Sol API, Standard | Input "$2.00", Cached input "$0.10", Cache writes "$2.50", Output "$10.00", per 1M text tokens | https://developers.openai.com/api/docs/models/gpt-6.1-sol |
+| Claude Sonnet 5.5 on Vertex AI | Input "$2.00", Output "$10.00", 5m Cache Write "$2.50", Cache Hit "$0.10" (first table); a later table on the page shows "$2.20", "$11.00", "$2.75", "$0.11" | https://cloud.google.com/vertex-ai/generative-ai/pricing |
+| Claude Opus 5.5 on Vertex AI | Input "$4.00", Output "$20.00", 5m Cache Write "$5.00", Cache Hit "$0.20" (first table); the later table shows "$4.40", "$22.00" for input and output | same |
+| Claude on Amazon Bedrock | **UNVERIFIED**: the page's Anthropic table headers were fetched, its values were not in the static page | https://aws.amazon.com/bedrock/pricing/ |
+
+GPT-6.1-Sol pricing modifiers, from the same model page:
+
+> Prompts with more than 272K input tokens are priced at 2x input and cache rates and 1.5x output for the full request.
+
+> Fast mode prices are 2x Standard. Batch and Flex prices are 50% lower than Standard.
+
+> Ultrafast mode prices are 6x Standard.
+
+> Regional processing adds a 10% premium where available.
+
+The fetched GPT-6.1-Sol Standard rates match
+`packages/syn-shared/src/syn_shared/pricing/__init__.py:239-252`, whose comment
+also records the 272K long-context rule and says that tier is not modelled.
+
+Vertex: the page lists its Claude prices under "Models with regional
+pricing", with region tabs beginning "Global", "US Multi-Region (US)", "EU
+Multi-Region (EU)". From the static page this document could not establish
+which tab each repeated table belongs to, so it records only that the first
+table equals the Anthropic API rates and a later one is 10% higher.
 
 The fetched Claude prices match the repository table
 (`packages/syn-shared/src/syn_shared/pricing/__init__.py:210-237`). The
@@ -264,7 +413,13 @@ limits below the standard limits", and that response headers
 and related ones are returned on API responses. Whether those headers appear
 on **subscription (OAuth)** traffic: **UNVERIFIED**.
 
-**Amazon Bedrock** (https://docs.aws.amazon.com/general/latest/gr/bedrock.html, accessed 2026-10-08): "Cross-region model inference tokens per minute for Anthropic Claude Opus 5.5", "Each supported Region: 30,000,000", adjustable "Yes"; the same for Sonnet 5.5 is "Each supported Region: 6,000,000", adjustable "Yes". The quota "considers the combined sum of input and output tokens". Whether cache reads count toward it: **UNVERIFIED**. From the user guide (https://docs.aws.amazon.com/bedrock/latest/userguide/quotas.html):
+Tier advancement and higher limits, same page:
+
+> Limits are defined by usage tier. Organizations are placed on a tier automatically based on usage history and account standing and can move to a higher tier over time as they use the API.
+
+> To request higher rate limits or a higher monthly spend cap, use Request tier increase on the Rate limits page.
+
+**Amazon Bedrock** (https://docs.aws.amazon.com/general/latest/gr/bedrock.html, accessed 2026-10-08): "Cross-region model inference tokens per minute for Anthropic Claude Opus 5.5", "Each supported Region: 30,000,000", adjustable "Yes"; the same for Sonnet 5.5 is "Each supported Region: 6,000,000", adjustable "Yes". "On-demand model inference tokens per minute for Anthropic Claude Opus 5.5" is "Each supported Region: 15,000,000", adjustable "No". The quota "considers the combined sum of input and output tokens across all requests to Converse, ConverseStream, InvokeModel and InvokeModelWithResponseStream". Whether cache reads count toward it: **UNVERIFIED**. No requests-per-minute quota for Claude Opus 5.5 or Sonnet 5.5 was found in the fetched reference: **UNVERIFIED**. From the user guide (https://docs.aws.amazon.com/bedrock/latest/userguide/quotas.html):
 
 > Quota increases aren't granted automatically.
 
@@ -281,8 +436,23 @@ links to a quotas page whose values were not captured).
 | Launch | $100 in total credit purchases | $5,000 / month |
 | Grow | $500 in total credit purchases | $200,000 / month |
 
-Per-model TPM/RPM for Codex models: **UNVERIFIED** (the page directs to the
-organization's limits page).
+> Your organization’s usage tier upgrades automatically as its total credit purchases reach each threshold.
+
+How the token rate limit is counted (same page):
+
+> Your rate limit is calculated as the maximum of max_tokens and the estimated number of tokens based on the character count of your request.
+
+Whether cached input is excluded from that count is not stated on the
+fetched page: **UNVERIFIED**. How to exceed Grow's $200,000/month usage
+limit is not stated in what was fetched: **UNVERIFIED**.
+
+GPT-6.1-Sol per-tier limits (https://developers.openai.com/api/docs/models/gpt-6.1-sol, accessed 2026-10-08):
+
+| Tier | RPM | TPM |
+|---|---|---|
+| Build | 5,000 | 1,000,000 |
+| Launch | 10,000 | 4,000,000 |
+| Grow | 15,000 | 40,000,000 |
 
 ## 2. Arithmetic
 
@@ -307,16 +477,38 @@ than per run, every row below must be recomputed per phase.
 | 100 | $75/h | $1,200/h | $18,000 to $288,000 | $54,000 to $864,000 |
 | 1,000 | $750/h | $12,000/h | $180,000 to $2,880,000 | $540,000 to $8,640,000 |
 
-All estimates. Against section 1.6: the Anthropic Scale tier's $200,000
-monthly cap covers 100 at the low end of the range at either duty cycle, but
-not the high end; 1,000 needs the Custom tier (or a cloud marketplace) at
-any point in the range. OpenAI's Grow tier has the same $200,000 figure.
+All estimates. Spend is checked here; rate limits are checked separately
+in 2.6, and the two verdicts are independent.
+
+Against section 1.6: a $200,000 monthly cap (Anthropic Scale; OpenAI Grow
+uses the same figure) holds while $/h x hours per month <= $200,000, that is
+while N x C / D <= $833/h at 8 h/day x 30 (240 h), or <= $278/h at 24 h/day
+x 30 (720 h). Read against the table:
+
+| N | 8 h/day x 30 | 24 h/day x 30 |
+|---|---|---|
+| 100 | within the cap at the low end ($18,000); above it from $833/h up, so the high end ($288,000) needs a higher negotiated limit | within the cap at the low end ($54,000); above it from $278/h up, so the high end ($864,000) needs a higher limit |
+| 1,000 | within the cap at the low end ($180,000 < $200,000); above it from $833/h up, so the high end ($2,880,000) needs a higher limit | above the cap across the whole range ($540,000 to $8,640,000) |
+
+"A higher limit" means Anthropic's Custom tier ("no monthly spend cap;
+limits are arranged with their account team") or a requested increase; for
+OpenAI, how to exceed Grow is **UNVERIFIED** (1.6).
 
 ### 2.3 Tokens, by declared mix
 
 No blended price without a mix. Each scenario assumes the same token mix,
 chosen as an **assumption** for a long agentic run with heavy prompt caching:
 90% cache read, 3% cache write, 5% uncached input, 2% output.
+
+**Pricing regime (assumption):** each provider's Standard, on-demand,
+non-batch rate from section 1.6, with 5-minute cache writes for Claude. For
+GPT-6.1-Sol this is the short-context rate: every request is assumed to
+stay at or under 272K input tokens, and Fast, Ultrafast, Batch, Flex and
+regional processing are not used. A request above 272K input is billed at
+"2x input and cache rates and 1.5x output for the full request" (1.6), so a
+long-context run buys fewer tokens per dollar than shown. The token volumes
+below are derived from Anthropic API and OpenAI API prices; they describe
+the workload, and are reused unchanged for Bedrock and Vertex in 2.6.
 
 | Scenario | Prices used (per MTok) | Effective $/MTok = sum(share x price) | MTok per run at C = $3 / $12 |
 |---|---|---|---|
@@ -328,14 +520,27 @@ Tokens per minute = ($/h / 60) / effective $/MTok. Rate-limit-counted input
 (Anthropic ITPM) = uncached input + cache write = 8% of the total; output
 (OTPM) = 2%.
 
-| Scenario | N | $/min | Total MTok/min | ITPM-counted MTok/min | OTPM MTok/min |
+Per minute:
+
+| Scenario | N | $/min | Total MTok/min | Excluding cache reads (10%) | ITPM-counted MTok/min | OTPM MTok/min |
+|---|---|---|---|---|---|---|
+| A. Sonnet 5.5 | 100 | 1.25 to 20 | 2.69 to 43.0 | 0.27 to 4.30 | 0.22 to 3.44 | 0.05 to 0.86 |
+| A. Sonnet 5.5 | 1,000 | 12.5 to 200 | 26.9 to 430 | 2.69 to 43.0 | 2.15 to 34.4 | 0.54 to 8.60 |
+| B. Opus 5.5 | 100 | 1.25 to 20 | 1.34 to 21.5 | 0.13 to 2.15 | 0.11 to 1.72 | 0.03 to 0.43 |
+| B. Opus 5.5 | 1,000 | 12.5 to 200 | 13.4 to 215 | 1.34 to 21.5 | 1.08 to 17.2 | 0.27 to 4.30 |
+| C. GPT-6.1-Sol | 100 | 1.25 to 20 | 2.69 to 43.0 | 0.27 to 4.30 | n/a (Anthropic ITPM rule) | 0.05 to 0.86 |
+| C. GPT-6.1-Sol | 1,000 | 12.5 to 200 | 26.9 to 430 | 2.69 to 43.0 | n/a | 0.54 to 8.60 |
+
+Per hour (60 x the per-minute values):
+
+| Scenario | N | $/h | Total MTok/h | ITPM-counted MTok/h | Output MTok/h |
 |---|---|---|---|---|---|
-| A. Sonnet 5.5 | 100 | 1.25 to 20 | 2.69 to 43.0 | 0.22 to 3.44 | 0.05 to 0.86 |
-| A. Sonnet 5.5 | 1,000 | 12.5 to 200 | 26.9 to 430 | 2.15 to 34.4 | 0.54 to 8.60 |
-| B. Opus 5.5 | 100 | 1.25 to 20 | 1.34 to 21.5 | 0.11 to 1.72 | 0.03 to 0.43 |
-| B. Opus 5.5 | 1,000 | 12.5 to 200 | 13.4 to 215 | 1.08 to 17.2 | 0.27 to 4.30 |
-| C. GPT-6.1-Sol | 100 | 1.25 to 20 | 2.69 to 43.0 | n/a (OpenAI per-model limits UNVERIFIED) | n/a |
-| C. GPT-6.1-Sol | 1,000 | 12.5 to 200 | 26.9 to 430 | n/a | n/a |
+| A. Sonnet 5.5 | 100 | 75 to 1,200 | 161 to 2,581 | 12.9 to 206 | 3.23 to 51.6 |
+| A. Sonnet 5.5 | 1,000 | 750 to 12,000 | 1,613 to 25,806 | 129 to 2,065 | 32.3 to 516 |
+| B. Opus 5.5 | 100 | 75 to 1,200 | 80.6 to 1,290 | 6.45 to 103 | 1.61 to 25.8 |
+| B. Opus 5.5 | 1,000 | 750 to 12,000 | 806 to 12,903 | 64.5 to 1,032 | 16.1 to 258 |
+| C. GPT-6.1-Sol | 100 | 75 to 1,200 | 161 to 2,581 | n/a | 3.23 to 51.6 |
+| C. GPT-6.1-Sol | 1,000 | 750 to 12,000 | 1,613 to 25,806 | n/a | 32.3 to 516 |
 
 All estimates. Attempts can change provider and model mid-phase
 (`packages/syn-domain/src/syn_domain/contexts/orchestration/domain/events/AgentExecutionCompletedEvent.py:67-72`),
@@ -373,25 +578,68 @@ Break-even runs per seat per month = seat price / C.
 The comparison means something only once the last column is measured. And
 if section 1's quotes hold (pooling consumer seats for this use is likely
 not permitted), the consumer rows are moot: the comparison that matters is
-API keys versus usage-based Enterprise versus Bedrock or Vertex, all of
-which are billed at or near API rates, so section 2.2 is the cost.
+API keys versus usage-based Enterprise versus Bedrock or Vertex. Their costs,
+as far as the sources go:
+
+- Anthropic API and usage-based Enterprise: section 2.2 (Enterprise is
+  "billed at API rates", plus the seat price in 1.6).
+- Vertex: section 2.2 if the first price table in 1.6 applies to the
+  chosen region; up to 10% more if the later table does (region mapping
+  not established).
+- Bedrock: **UNVERIFIED**, because its Claude prices were not extracted
+  (1.6). It is not assigned the 2.2 estimate.
+- OpenAI API (scenario C): section 2.2 at the short-context Standard rates
+  of 2.3; more for any request above 272K input.
 
 ### 2.6 Feasibility, not just price
 
-| Route | Need at 100 (scenario A, high end) | Sourced default | Verdict |
-|---|---|---|---|
-| Anthropic API, Sonnet 5.5 | ITPM 3.44M, OTPM 0.86M; spend up to $288k to $864k/month | Scale: 10M ITPM, 2M OTPM, $200k/month cap | Rate limits fit at Scale; spend cap does not at the high end: Custom tier |
-| Anthropic API, Sonnet 5.5 at 1,000 | ITPM 34.4M, OTPM 8.6M | Scale: 10M / 2M | Exceeds Scale: Custom tier |
-| Bedrock, Sonnet 5.5 | 43.0M tokens/min if cache reads count; 4.3M if they do not | 6,000,000 cross-region TPM per region, adjustable | Fits only if cache reads do not count (**UNVERIFIED**); increases "aren't granted automatically" |
-| Bedrock, Opus 5.5 | 21.5M if cache reads count; 2.15M if not | 30,000,000 per region, adjustable | Fits at 100 either way; 1,000 (215M) needs an increase if cache reads count |
-| Vertex | as above | **UNVERIFIED** | **UNVERIFIED** |
-| OpenAI API | 43.0M total tokens/min at 100 | per-model TPM **UNVERIFIED**; Grow $200k/month | Spend cap binds at the high end; TPM unknown |
+Rate limits only; spend is 2.2, and each row repeats which spend case
+applies. Throughput comes from 2.3 (low end = C $3, D 4 h; high end = C $12,
+D 1 h). Each route's own counting rule decides which column is "counted":
 
-Requests per minute: the north star estimates 3 to 10 requests per second at
-100 (`docs/north-star.md:167`), i.e. 180 to 600 RPM, within every tier's
-1,000 RPM. Burst behaviour ("Short bursts of requests can exceed the limit
-and trigger rate limit errors", rate-limits page) and increase lead times are
-**UNVERIFIED** in practice.
+- Anthropic API: ITPM counts uncached input + cache writes, OTPM counts
+  output ("only input_tokens + cache_creation_input_tokens count toward your
+  ITPM limit", 1.6).
+- Bedrock: one combined figure, "the combined sum of input and output
+  tokens". Whether cache reads are part of it is **UNVERIFIED**, so both
+  readings are shown: all tokens, and all tokens excluding cache reads.
+- Vertex: the requirement is the same as Bedrock's; the quota is
+  **UNVERIFIED**.
+- OpenAI API: "the maximum of max_tokens and the estimated number of tokens
+  based on the character count of your request". Whether cached input is
+  excluded is **UNVERIFIED**, so both readings are shown. A large
+  `max_tokens` setting raises the counted figure further.
+
+**Requests per minute (assumption):** the north star's estimate is 3 to 10
+requests per second at 100 on the Envoy (Claude) path
+(`docs/north-star.md:167`). This document **assumes** the same per-run
+request rate on every route and linear scaling: 180 to 600 RPM at 100 and
+1,800 to 6,000 RPM at 1,000. That is an extrapolation, not a measurement,
+and Codex traffic does not pass through Envoy.
+
+| Route | N | Required (counted) | Required RPM (assumed) | Sourced default | Rate verdict | Spend (2.2) |
+|---|---|---|---|---|---|---|
+| Anthropic API, Sonnet 5.5 | 100 | ITPM 0.22M to 3.44M; OTPM 0.05M to 0.86M | 180 to 600 | Scale: 10,000 RPM, 10M ITPM, 2M OTPM | fits Scale across the range | within $200k/month at the low end; above it at the high end |
+| Anthropic API, Sonnet 5.5 | 1,000 | ITPM 2.15M to 34.4M; OTPM 0.54M to 8.60M | 1,800 to 6,000 | Scale, as above | low end fits Scale; high end exceeds ITPM and OTPM: Custom tier or a requested increase | within the cap only at the low end and 8 h/day |
+| Anthropic API, Opus 5.5 | 100 | ITPM 0.11M to 1.72M; OTPM 0.03M to 0.43M | 180 to 600 | Scale: 10,000 / 10M / 2M | fits Scale across the range | as Sonnet at 100 |
+| Anthropic API, Opus 5.5 | 1,000 | ITPM 1.08M to 17.2M; OTPM 0.27M to 4.30M | 1,800 to 6,000 | Scale, as above | low end fits; high end exceeds ITPM and OTPM | as Sonnet at 1,000 |
+| Bedrock, Sonnet 5.5 | 100 | all tokens 2.69M to 43.0M; excluding cache reads 0.27M to 4.30M | 180 to 600 | 6,000,000 cross-region TPM per Region, adjustable; RPM **UNVERIFIED** | excluding cache reads: fits; all tokens: low end fits, high end needs an increase ("aren't granted automatically") | **UNVERIFIED** (prices not extracted) |
+| Bedrock, Sonnet 5.5 | 1,000 | all tokens 26.9M to 430M; excluding cache reads 2.69M to 43.0M | 1,800 to 6,000 | as above | all tokens: exceeds across the range; excluding cache reads: low end fits, high end exceeds | **UNVERIFIED** |
+| Bedrock, Opus 5.5 | 100 | all tokens 1.34M to 21.5M; excluding cache reads 0.13M to 2.15M | 180 to 600 | 30,000,000 cross-region TPM per Region, adjustable; on-demand 15,000,000, not adjustable; RPM **UNVERIFIED** | fits cross-region either way; on-demand: high end exceeds if cache reads count | **UNVERIFIED** |
+| Bedrock, Opus 5.5 | 1,000 | all tokens 13.4M to 215M; excluding cache reads 1.34M to 21.5M | 1,800 to 6,000 | as above | excluding cache reads: fits cross-region; all tokens: low end fits, high end exceeds | **UNVERIFIED** |
+| Vertex, Sonnet 5.5 or Opus 5.5 | 100 | as the Bedrock rows | 180 to 600 | **UNVERIFIED** | **UNVERIFIED** | as Anthropic API, or up to 10% more (1.6) |
+| Vertex, Sonnet 5.5 or Opus 5.5 | 1,000 | as the Bedrock rows | 1,800 to 6,000 | **UNVERIFIED** | **UNVERIFIED** | as above |
+| OpenAI API, GPT-6.1-Sol | 100 | all tokens 2.69M to 43.0M; excluding cached input 0.27M to 4.30M | 180 to 600 | Grow: 15,000 RPM, 40,000,000 TPM (Launch 10,000 / 4,000,000) | RPM fits; excluding cached input: fits Grow; all tokens: low end fits, high end (43.0M) exceeds 40M | within $200k/month at the low end; above it at the high end; beyond Grow **UNVERIFIED** |
+| OpenAI API, GPT-6.1-Sol | 1,000 | all tokens 26.9M to 430M; excluding cached input 2.69M to 43.0M | 1,800 to 6,000 | Grow, as above | RPM fits Grow; tokens: low end fits under either reading, high end exceeds under either | within the cap only at the low end and 8 h/day |
+
+Tier advancement and approvals: Anthropic organizations "are placed on a
+tier automatically based on usage history and account standing", and higher
+limits are requested with "Request tier increase" (1.6). OpenAI tiers
+upgrade "automatically as its total credit purchases reach each threshold"
+(1.6). Bedrock "Quota increases aren't granted automatically." Vertex's
+process: **UNVERIFIED**. Burst behaviour ("Short bursts of requests can
+exceed the limit and trigger rate limit errors", Anthropic rate-limits page)
+and increase lead times are **UNVERIFIED** in practice.
 
 **Platform limits that no provider purchase fixes:**
 
@@ -582,8 +830,17 @@ handler).
 
 **(b) Continuation after partial work: not supported, and a pool does not
 recover it.** Rerunning the prompt would redo edits, commands or pushes over
-a changed tree. The phase fails as QUOTA with its reset time, as today. A
-future continuation needs: (1) the native session or transcript, and whether
+a changed tree. **Today**, a partial-work failure is not rerun, and how it
+is classified depends on the provider: a Codex quota message that matches
+`_CODEX_QUOTA_PHRASES` is classified QUOTA, with a reset time only when the
+message names a parseable date (`_codex_quota_reset` returns `None`
+otherwise); a Claude quota failure reads as UNKNOWN, with no reset, because
+`_CLAUDE_QUOTA_PHRASES` is empty and its reset reader is `_no_reset`
+(`packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/upstream_failure.py:74-106`,
+`:139-153`; #1669). **Proposed:** once #1669 lands, a partial-work quota
+failure on either provider fails as QUOTA with its reset time when the
+provider supplies one, and the pool still does not rerun it. A future
+continuation needs: (1) the native session or transcript, and whether
 it can resume under a different credential (**UNVERIFIED** for both
 harnesses); (2) the working tree including uncommitted files; (3) a durable
 successor attempt identity linked to its predecessor; (4) the external
@@ -636,7 +893,10 @@ and a codex fallback stages Codex auth for the whole phase (`:158-169`).
 ### 3.10 Codex refresh-token risk (UNVERIFIED)
 
 The same `auth.json` is copied into every concurrent workspace. If refresh
-tokens rotate on use, parallel copies could invalidate each other. The
+tokens rotate on use, parallel copies could invalidate each other. OpenAI's
+CI/CD auth page (1.3) states the operational rule without saying why: "Do
+not share the same file across concurrent jobs or multiple machines". The
+mechanism stays unverified. The
 settling test: read agentic-workspace's codex adapter, then run two
 workspaces on one blob past a refresh. One blob per credential narrows the
 risk; it does not remove it.
@@ -730,9 +990,13 @@ parsing to agentic-workspace).
 
 ## Verification notes
 
-- The OpenAI terms are the gap: a reviewer with a browser should quote the
-  Terms of Use and Service Terms clauses on account sharing, automated access
-  and rate-limit circumvention into section 1.3.
+- The OpenAI Terms of Use quotes come from an Internet Archive capture
+  dated 2026-10-08, not the live page (403 to curl); a reviewer with a
+  browser should re-open the live page. The Service and Business Terms are
+  still the gap.
+- Bedrock Claude prices, Vertex Claude quotas, Bedrock request quotas and
+  OpenAI's cached-input counting are **UNVERIFIED** and appear in 2.5 and
+  2.6 only as such.
 - Each section 1 quote was copied from the fetched page text on 2026-10-08;
   one quote per provider should be re-opened at its URL by the reviewer.
 - Each arithmetic row was computed from the inputs stated beside it.
