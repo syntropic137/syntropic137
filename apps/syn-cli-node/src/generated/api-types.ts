@@ -3038,7 +3038,7 @@ export interface components {
             size_bytes?: number | null;
             /**
              * Model Display
-             * @description The model for humans: the reported id verbatim, or 'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9).
+             * @description The model for humans: the reported id verbatim, or '<alias> (requested)', or 'unknown' (ADR-067 D9).
              */
             readonly model_display: string;
         };
@@ -6059,7 +6059,7 @@ export interface components {
             activity?: components["schemas"]["PhaseActivityInfo"];
             /**
              * Model Display
-             * @description The model for humans: the reported id verbatim, or 'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9).
+             * @description The model for humans: the reported id verbatim, or '<alias> (requested)', or 'unknown' (ADR-067 D9).
              */
             readonly model_display: string;
         };
@@ -7631,7 +7631,7 @@ export interface components {
             };
             /**
              * Agent Model Display
-             * @description The model for humans: the reported id verbatim, or 'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9).
+             * @description The model for humans: the reported id verbatim, or '<alias> (requested)', or 'unknown' (ADR-067 D9).
              */
             readonly agent_model_display: string;
         };
@@ -7736,7 +7736,7 @@ export interface components {
             completed_at?: string | null;
             /**
              * Agent Model Display
-             * @description The model for humans: the reported id verbatim, or 'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9).
+             * @description The model for humans: the reported id verbatim, or '<alias> (requested)', or 'unknown' (ADR-067 D9).
              */
             readonly agent_model_display: string;
         };

@@ -107,6 +107,8 @@ describe('SessionList paging', () => {
     const { params } = server.requests[0]
     expect(params.get('page')).toBe('1')
     expect(params.get('page_size')).toBe(String(PAGE_SIZE))
+    // Written out: Sessions open at 100 rows (feedback 60d9f990, #1785).
+    expect(PAGE_SIZE).toBe(100)
     // The deprecated alias is gone; nothing sends `limit` any more.
     expect(params.has('limit')).toBe(false)
 

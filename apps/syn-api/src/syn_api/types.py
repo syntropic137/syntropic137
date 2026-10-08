@@ -907,6 +907,9 @@ class SessionSummary(BaseModel):
     total_cost_usd: Decimal = Decimal("0")
     started_at: datetime | None = None
     completed_at: datetime | None = None
+    #: The model the workflow ASKED for, from SessionStarted. Never what ran;
+    #: served when Lane 2 has reported nothing yet (#1785).
+    requested_model: str | None = None
 
 
 class ArtifactSummary(BaseModel):
@@ -1958,7 +1961,7 @@ class PhaseExecution(BaseModel):
 
     @computed_field(
         description="The model for humans: the reported id verbatim, or "
-        "'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9)."
+        "'<alias> (requested)', or 'unknown' (ADR-067 D9)."
     )
     @property
     def model_display(self) -> str:
@@ -2156,7 +2159,7 @@ class SessionDetail(BaseModel):
 
     @computed_field(
         description="The model for humans: the reported id verbatim, or "
-        "'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9)."
+        "'<alias> (requested)', or 'unknown' (ADR-067 D9)."
     )
     @property
     def agent_model_display(self) -> str:
@@ -2424,7 +2427,7 @@ class ConversationMeta(BaseModel):
 
     @computed_field(
         description="The model for humans: the reported id verbatim, or "
-        "'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9)."
+        "'<alias> (requested)', or 'unknown' (ADR-067 D9)."
     )
     @property
     def model_display(self) -> str:

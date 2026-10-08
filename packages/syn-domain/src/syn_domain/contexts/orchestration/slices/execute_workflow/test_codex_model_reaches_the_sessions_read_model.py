@@ -242,5 +242,5 @@ class TestTheSessionsReadModelNamesTheModelCodexRan:
         assert cost is not None
         assert cost.agent_model is None
         assert format_observed_model(cost.agent_model, cost.requested_model) == (
-            f"unknown (requested: {REQUESTED_BY_A_CODEX_PHASE})"
+            f"{REQUESTED_BY_A_CODEX_PHASE} (requested)"
         )

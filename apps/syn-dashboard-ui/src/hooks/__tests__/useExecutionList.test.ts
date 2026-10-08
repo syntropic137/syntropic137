@@ -102,7 +102,7 @@ describe('useExecutionList', () => {
     }
 
     // `page_size` is not a parameter this hook exposes - the surface fixes it
-    // at `SESSION_LIST_PAGE_SIZE` - so the page size cannot be varied from
+    // at `EXECUTION_LIST_PAGE_SIZE` - so the page size cannot be varied from
     // here. Varying the PAGE is the same property from the same fixture: a
     // total computed from the rows in hand would have read 100, 100, 40.
     expect(seenTotals).toEqual([TOTAL, TOTAL, TOTAL])

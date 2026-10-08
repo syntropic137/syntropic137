@@ -156,7 +156,7 @@ describe("conversations commands", () => {
           session_id: "sess-legacy",
           model: null,
           requested_model: "opus",
-          model_display: "unknown (requested: opus)",
+          model_display: "opus (requested)",
         }),
       );
 

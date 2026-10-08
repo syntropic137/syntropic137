@@ -36,12 +36,13 @@ export const LIST_PAGE_SIZE = 50
 export const RUN_LIST_PAGE_SIZES: readonly number[] = [50, 100]
 
 /**
- * Both open at 50; 100 is the operator's choice. The owner's bound was "100 by
- * default unless it costs over 1.5x of 50". On the E2 dataset (p95 of 20, three
- * runs) /executions measured 1.59x, 1.76x, 1.83x and /sessions 0.87x, 1.24x,
- * 1.71x, so neither clears it reliably (PR #1785 has the tables).
+ * Sessions open at 100, Executions at 50; either can switch to the other size.
+ * The owner's bound was "100 by default unless it costs over 1.5x of 50". On
+ * the VPS /sessions at 100 measured 0.85-1.22x of 50, inside it. /executions
+ * measured up to 2.04x at p95 - still within the 200 ms budget, but outside
+ * the ratio, so it keeps 50 and offers 100 (PR #1785 has the tables).
  */
-export const SESSION_LIST_PAGE_SIZE = LIST_PAGE_SIZE
+export const SESSION_LIST_PAGE_SIZE = 100
 export const EXECUTION_LIST_PAGE_SIZE = LIST_PAGE_SIZE
 
 export interface ListQueryState {
