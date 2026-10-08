@@ -32,6 +32,18 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     QuarantinedWork,
     SavedWork,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
+    StreamResult,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
+    AgentExecutionResult,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.SubagentTracker import (
+    SubagentTracker,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.TokenAccumulator import (
+    TokenAccumulator,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor import (
     WorkflowExecutionProcessor,
 )
@@ -74,6 +86,7 @@ class _Harness:
         #: Every event the store was handed, as the store received it.
         self.stored: list[object] = []
         self.repository = AsyncMock()
+        self.repository.save_new.side_effect = self._save_new
         self.repository.save.side_effect = self._save
         self.processor = WorkflowExecutionProcessor(
             execution_repository=self.repository,
@@ -91,7 +104,18 @@ class _Harness:
             interrupt_budget_seconds=budget,
         )
         runtime = self.processor._runtimes.of(EXECUTION)  # pyright: ignore[reportPrivateUsage]
-        runtime._auth_tokens[EXECUTION, PHASE] = (*SPENT, 0, 0)  # pyright: ignore[reportPrivateUsage]
+        tokens = TokenAccumulator()
+        tokens.record(*SPENT)
+        runtime.record_agent_run(
+            PHASE,
+            execution_id=EXECUTION,
+            result=AgentExecutionResult(
+                StreamResult(line_count=1, interrupt_requested=False, interrupt_reason=None),
+                tokens,
+                SubagentTracker(),
+                command=None,
+            ),
+        )
         self.runtime = runtime
         self.save_work = self._save_work
         runtime.save_unpushed_work = self._dispatch_save  # type: ignore[method-assign]
@@ -118,9 +142,14 @@ class _Harness:
         self.order.append("save")
         return _SAVED
 
+    async def _save_new(self, aggregate: WorkflowExecutionAggregate) -> None:
+        self.stored.extend(e.event for e in aggregate.get_uncommitted_events())
+        aggregate.mark_events_as_committed()
+
     async def _save(self, aggregate: WorkflowExecutionAggregate) -> None:
         self.order.append(f"append:{aggregate.status.value}")
         self.stored.extend(e.event for e in aggregate.get_uncommitted_events())
+        aggregate.mark_events_as_committed()
 
     def start(self) -> asyncio.Task[object]:
         aggregate = WorkflowExecutionAggregate()
@@ -270,3 +299,115 @@ async def test_v1d_a_push_hanging_past_the_budget_is_cut_off_and_awaited_before_
         for r in caplog.records
         if r.levelno == logging.ERROR
     )
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+async def test_shutdown_between_phases_records_no_invented_phase_or_usage() -> None:
+    h = _Harness()
+
+    async def between_phases(*, dispatch_ctx: _DispatchContext, **_: object) -> None:
+        assert dispatch_ctx.current_phase_id is None
+        h.in_flight.set()
+        await asyncio.Event().wait()
+
+    h.processor._drain_todo_list = between_phases  # type: ignore[method-assign]
+    h.runtime.save_unpushed_work = AsyncMock(return_value=SavedWork())  # type: ignore[method-assign]
+    task = h.start()
+    await h.in_flight.wait()
+    await _shut_down(task)
+
+    (event,) = h.interruptions()
+    assert event.phase_id == ""
+    assert (event.partial_input_tokens, event.partial_output_tokens) == (0, 0)
+    assert event.partial_artifact_ids == []
+    assert h.aggregate.status is ExecutionStatus.INTERRUPTED
+    h.runtime.save_unpushed_work.assert_awaited_once_with(None, execution_id=EXECUTION)
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+async def test_shutdown_before_agent_result_has_no_fabricated_usage() -> None:
+    h = _Harness()
+    h.runtime._auth_tokens.clear()  # pyright: ignore[reportPrivateUsage]
+    task = h.start()
+    await h.in_flight.wait()
+    await _shut_down(task)
+
+    (event,) = h.interruptions()
+    assert (event.partial_input_tokens, event.partial_output_tokens) == (0, 0)
+    assert h.order == ["save", "append:interrupted", "abandon:shutdown"]
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+async def test_shutdown_keeps_every_dropped_artifact_once() -> None:
+    h = _Harness()
+    h.processor._workspaces_for = MagicMock(  # type: ignore[method-assign]
+        return_value=MagicMock(
+            keep_dropped_workflows=AsyncMock(
+                return_value=["artifact-kept-1381", "workflow-a", "workflow-b", "workflow-a"]
+            )
+        )
+    )
+    task = h.start()
+    await h.in_flight.wait()
+    await _shut_down(task)
+
+    (event,) = h.interruptions()
+    expected = {"artifact-kept-1381", "workflow-a", "workflow-b"}
+    assert set(event.partial_artifact_ids) == expected
+    for artifact in expected:
+        assert event.partial_artifact_ids.count(artifact) == 1
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+async def test_shutdown_does_not_relabel_a_durably_cancelled_execution() -> None:
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
+        CancelExecutionCommand,
+    )
+
+    h = _Harness()
+    task = h.start()
+    await h.in_flight.wait()
+    h.aggregate.cancel_execution(
+        CancelExecutionCommand(execution_id=EXECUTION, phase_id=PHASE, reason="user stop")
+    )
+    await h.processor._journal.append(h.aggregate)  # pyright: ignore[reportPrivateUsage]
+    await _shut_down(task)
+
+    assert h.aggregate.status is ExecutionStatus.CANCELLED
+    assert h.interruptions() == []
+    assert h.order == ["append:cancelled", "abandon:shutdown"]
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+async def test_a_failure_after_budget_expiry_is_reported_before_teardown(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    h = _Harness(budget=0.01)
+
+    async def failing_on_cancel(phase_id: str | None, *, execution_id: str) -> SavedWork:
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            raise ConnectionError("salvage failed while settling") from None
+
+    h.save_work = failing_on_cancel
+    task = h.start()
+    await h.in_flight.wait()
+    with caplog.at_level(logging.ERROR):
+        await _shut_down(task)
+
+    assert task.cancelled()
+    assert h.aggregate.status is ExecutionStatus.RUNNING
+    assert h.order == ["abandon:shutdown"]
+    assert any(
+        record.name == shutdown_interruption.__name__
+        and record.exc_info is not None
+        and isinstance(record.exc_info[1], ConnectionError)
+        and EXECUTION in record.getMessage()
+        for record in caplog.records
+    ), "settling failures must be consumed and reported, not lost as task warnings"

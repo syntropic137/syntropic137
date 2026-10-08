@@ -144,6 +144,11 @@ async def preserve_interrupted_run(
                 "tearing its workspace down anyway",
                 execution_id,
             )
+            sequence.add_done_callback(lambda done: _report_unrecorded(done, execution_id))
+        else:
+            # A cancelled salvage can fail while settling. Consume and report
+            # that failure just as on the within-budget path (#1381).
+            _report_unrecorded(sequence, execution_id)
         return
     _report_unrecorded(sequence, execution_id)
 
