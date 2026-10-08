@@ -43,7 +43,7 @@ from syn_domain.contexts._shared.admission_refusal import AdmissionRefusedError
 from syn_domain.contexts._shared.disk_space import InsufficientDiskSpaceError
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Iterator
+    from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 
     from syn_domain.contexts._shared.disk_space import DiskSpaceGuard
 
@@ -244,6 +244,7 @@ class AdmissionTicket:
         self._gate = gate
         self._holds_slot = False
         self._settled = False
+        self._on_durable: Callable[[], Awaitable[None]] | None = None
 
     async def enter_slot(self) -> None:
         """The start now holds its execution slot: re-check the gate, then lease.
@@ -279,6 +280,21 @@ class AdmissionTicket:
         the lease ends where the guarantee actually becomes true.
         """
         self._settle()
+
+    def on_durable(self, report: Callable[[], Awaitable[None]]) -> None:
+        """Have ``report`` awaited at the durable write, before anything after it (#1707).
+
+        Whoever queued the work cannot learn when it became durable from the
+        handler returning: that is the end of the run, and an exception after
+        the write is not a failure to start.
+        """
+        self._on_durable = report
+
+    async def mark_durable(self) -> None:
+        """The start event is durably written: :meth:`mark_visible`, then tell ``on_durable``."""
+        self.mark_visible()
+        if self._on_durable is not None:
+            await self._on_durable()
 
     def abort(self) -> None:
         """This admission produced no execution and never will.
