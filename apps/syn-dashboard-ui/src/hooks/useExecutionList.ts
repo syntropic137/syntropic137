@@ -10,7 +10,8 @@
  */
 
 import { useCallback, useMemo } from 'react'
-import { listAllExecutions } from '../api/executions'
+import { useSearchParams } from 'react-router-dom'
+import { listAllExecutions, type EvalFilter } from '../api/executions'
 import type { ListPage, ListQuery } from '../api/listQuery'
 import type { ExecutionListItem, ExecutionListResponse } from '../types'
 import { sortExecutions } from '../utils/executionSort'
@@ -59,8 +60,36 @@ function toExecutionListItem(
     duration_seconds: row.duration_seconds ?? null,
     repos: row.repos ?? [],
     repos_display: row.repos_display ?? null,
+    eval: row.eval ?? null,
     start_queue: row.start_queue ?? null,
   }
+}
+
+const EVAL_FILTER_PARAM = 'evals'
+
+function parseEvalFilter(raw: string | null): EvalFilter {
+  return raw === 'only' || raw === 'hide' ? raw : 'all'
+}
+
+/** The eval filter, held in the URL so a filtered view can be shared. */
+function useEvalFilterUrlState(): [EvalFilter, (next: EvalFilter) => void] {
+  const [searchParams, setSearchParams] = useSearchParams()
+  const evalFilter = parseEvalFilter(searchParams.get(EVAL_FILTER_PARAM))
+  const setEvalFilter = useCallback(
+    (next: EvalFilter) => {
+      setSearchParams(
+        (prev) => {
+          const out = new URLSearchParams(prev)
+          if (next === 'all') out.delete(EVAL_FILTER_PARAM)
+          else out.set(EVAL_FILTER_PARAM, next)
+          return out
+        },
+        { replace: true },
+      )
+    },
+    [setSearchParams],
+  )
+  return [evalFilter, setEvalFilter]
 }
 
 export interface UseExecutionListResult
@@ -69,16 +98,20 @@ export interface UseExecutionListResult
   executions: ExecutionListItem[]
   /** True when filters and sort are at their defaults. */
   isDefaultView: boolean
+  /** Every run, only eval runs, or only runs in no eval. */
+  evalFilter: EvalFilter
+  setEvalFilter: (next: EvalFilter) => void
   sort: SortState<ExecutionSortKey>
   toggleSort: (key: ExecutionSortKey) => void
 }
 
 export function useExecutionList(): UseExecutionListResult {
   const { sort, toggleSort, isDefault: isDefaultSort } = useSortUrlState(EXECUTION_SORT_CONFIG)
+  const [evalFilter, setEvalFilter] = useEvalFilterUrlState()
 
   const fetchPage = useCallback(
     async (query: ListQuery, signal?: AbortSignal): Promise<ListPage<ExecutionListItem>> => {
-      const response = await listAllExecutions(query, signal)
+      const response = await listAllExecutions(query, evalFilter, signal)
       return {
         rows: response.executions.map(toExecutionListItem),
         total: response.total,
@@ -86,11 +119,14 @@ export function useExecutionList(): UseExecutionListResult {
         excludedUndated: response.excluded_undated,
       }
     },
-    [],
+    [evalFilter],
   )
 
+  // The eval filter selects a different collection, which `useListQuery`
+  // turns into page 1.
   const { rows, isDefaultFilters, ...list } = useServerList({
     fetchPage,
+    scopeKey: evalFilter,
     liveEvents: EXECUTION_LIVE_EVENTS,
     isTerminal: isTerminalExecution,
   })
@@ -105,7 +141,9 @@ export function useExecutionList(): UseExecutionListResult {
   return {
     ...list,
     executions,
-    isDefaultView: isDefaultSort && isDefaultFilters,
+    isDefaultView: isDefaultSort && isDefaultFilters && evalFilter === 'all',
+    evalFilter,
+    setEvalFilter,
     sort,
     toggleSort,
   }

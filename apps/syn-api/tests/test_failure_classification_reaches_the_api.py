@@ -349,6 +349,7 @@ async def _summaries(
         q=None,
         tag=None,
         eval_id=None,
+        in_eval=None,
         page=1,
         page_size=50,
     )

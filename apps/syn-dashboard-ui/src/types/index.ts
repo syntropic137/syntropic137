@@ -389,6 +389,8 @@ export interface ExecutionListItem {
   /** Full GitHub URLs of repositories cloned for this execution (ADR-058) */
   repos: string[]
   repos_display: string | null
+  /** The eval this run is a current data point of, with its verdict; null in none. */
+  eval: components['schemas']['ExecutionEvalRunResponse'] | null
   /** Set exactly when `status` is `queued`: where the start waits, and why (PC-124). */
   start_queue: ExecutionStartQueueInfo | null
 }
