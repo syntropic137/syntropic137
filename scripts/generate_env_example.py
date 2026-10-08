@@ -40,6 +40,7 @@ from syn_shared.settings.image_verification import (  # noqa: E402
     ImageVerificationSettings,
 )
 from syn_shared.settings.infra import InfraSettings  # noqa: E402
+from syn_shared.settings.platform_access import PlatformAccessSettings  # noqa: E402
 from syn_shared.settings.session_inventory import SessionInventorySettings  # noqa: E402
 from syn_shared.settings.session_store import SessionStoreSettings  # noqa: E402
 from syn_shared.settings.storage import StorageSettings  # noqa: E402
@@ -523,6 +524,19 @@ def generate_env_example() -> str:
             "LOCAL SESSION INVENTORY",
             prefix="SYN_SESSION_INVENTORY_",
             description="Local discovery and transcript archive work without SeshMagic. Empty archive path uses ~/.syntropic137/session-inventory; Docker uses its persistent inventory volume.",
+        )
+    )
+
+    lines.extend(
+        generate_settings_section(
+            PlatformAccessSettings,
+            "WORKSPACE ACCESS TO THE API - OPT-IN, DEFAULT OFF",
+            prefix="SYN_PLATFORM_ACCESS_",
+            description=(
+                "Give each workspace phase a read-only, expiring, revocable API "
+                "token (ADR-072). Off: no token is issued and the API refuses all "
+                "workspace traffic."
+            ),
         )
     )
 

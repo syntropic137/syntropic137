@@ -43,7 +43,7 @@ From [the 2026-10-04 retrospective](retrospectives/2026-10-04-dogfood-orchestrat
   - a deploy kills in-flight runs ([#1310](https://github.com/syntropic137/syntropic137/issues/1310));
   - a graceful shutdown skips work preservation ([#1381](https://github.com/syntropic137/syntropic137/issues/1381));
   - transient errors fail whole runs ([#1593](https://github.com/syntropic137/syntropic137/issues/1593));
-  - the API is OOM-killed at its 512 MB default ([#1552](https://github.com/syntropic137/syntropic137/issues/1552));
+  - the API was OOM-killed at its former 512 MB default; the code default is now 2 GB, sized from the incident, not from a load test ([#1552](https://github.com/syntropic137/syntropic137/issues/1552));
   - a deployed event store can lag the ESP pin ([#1708](https://github.com/syntropic137/syntropic137/issues/1708)); nothing yet prevents it, although on 2026-10-08 the VPS ran v0.17.0, matching the pin (operator report).
 
 ## Capacity model
@@ -124,9 +124,9 @@ The limit is per installation, and **5,000 req/h is GitHub's documented minimum*
 |---|---|---|
 | Execution budget | 4 by code default, a hand-set constant not derived from the host ([#1715](https://github.com/syntropic137/syntropic137/issues/1715)); overridable with `SYN_EXECUTION_MAX_CONCURRENT`. The VPS runs 10 (operator report, 2026-10-08) | `packages/syn-shared/src/syn_shared/settings/execution.py:23,46-49` |
 | API process | one uvicorn process, stdlib event loop, no `--workers` | `infra/docker/images/syn-api/Dockerfile:135,182` |
-| API container | 2 CPU, 512 MB code default (a 2 GB override is reported live on [#1552](https://github.com/syntropic137/syntropic137/issues/1552)) | `packages/syn-shared/src/syn_shared/settings/infra.py:183-184` |
+| API container | 2 CPU, 2 GB code default (was 512 MB; raised from the #1552 incident numbers, not a measured slope) | `packages/syn-shared/src/syn_shared/settings/infra.py:183-184` |
 | Postgres (event store tables, projections, observations) | 2 CPU, 1 GB, one instance | `infra.py:201-209` |
-| Event store process | 512 MB | `infra.py:211` (OOM on replay: [#1553](https://github.com/syntropic137/syntropic137/issues/1553)) |
+| Event store process | 2 GB code default (was 512 MB, which OOM'd on replay: [#1553](https://github.com/syntropic137/syntropic137/issues/1553)); stable at 749 MB on a 46k-event store | `infra.py:220-221` |
 | Envoy model-proxy bucket | 100 burst, 10 req/s refill, global, on the shared proxy that Claude traffic takes (`workspace_service.py:259-262`) | `docker/sidecar-proxy/envoy.yaml:156-158` |
 | Trigger dispatch guards | 50 per hour, and 10 per 60 s | `packages/syn-shared/src/syn_shared/settings/polling.py:86-107` |
 | GitHub App | 5,000 req/h per installation, the documented minimum | GitHub docs, above. The real limit is unread ([#1719](https://github.com/syntropic137/syntropic137/issues/1719)) |
@@ -141,7 +141,7 @@ Starts/h to hold 20 at *D* = 1-4 h: 5-20.
 |---|---|---|---|
 | Host CPU | 20 x 1.2 = 24 CPU, plus about 4 for the control plane | 16 cores | **hypothesis: yes**, about 1.75x, *if* the 1.2 CPU estimate holds. The operator observations (load 17 at 5 workspaces on 2026-10-07; about 2.7 load per run, CPU-bound, on 2026-10-08) point the same way, and at 2.7 per run 16 cores would saturate near 6 runs, but load average does not measure per-run CPU demand ([#1714](https://github.com/syntropic137/syntropic137/issues/1714)) |
 | Admission | 20 slots | 4 by code default, 10 on the VPS (operator report) | yes, by configuration. Sizing it needs the CPU figure ([#1715](https://github.com/syntropic137/syntropic137/issues/1715)) |
-| API memory | **unmeasured.** Linear extrapolation of the one 443 MB / 8 sample gives about 1.1 GB, an **unvalidated scenario** and not a minimum | 512 MB code default (2 GB reported live) | **possible**; measure the slope ([#1552](https://github.com/syntropic137/syntropic137/issues/1552)) |
+| API memory | **unmeasured.** Linear extrapolation of the one 443 MB / 8 sample gives about 1.1 GB, an **unvalidated scenario** and not a minimum | 2 GB code default (was 512 MB) | **possible**; 2 GB is an incident-derived limit, not a validated one. The slope is still unmeasured, outstanding in the load test ([#1717](https://github.com/syntropic137/syntropic137/issues/1717)) ([#1552](https://github.com/syntropic137/syntropic137/issues/1552)) |
 | Host RAM | 10-20 GB in use (estimate) plus the platform | 62 GB; caps overcommit (20 x 4 GiB = 80 GiB at the default) | not on the estimate. Caps can overcommit |
 | Disk | 20-60 GB (estimate) | 63 GB free on 2026-10-05 ([#1310](https://github.com/syntropic137/syntropic137/issues/1310) plan); not re-measured | possible at the upper end |
 | Codex, one account | up to 20 parallel verify/reverify phases | unknown; 2 capacity failures at 7 or fewer | **hypothesis: likely** ([#1718](https://github.com/syntropic137/syntropic137/issues/1718)) |
@@ -162,7 +162,7 @@ Starts/h to hold 100 at *D* = 1-4 h: 25-100.
 | Host CPU | 120 CPU on the estimate, plus the platform | 16 | **hypothesis: yes, 7.5x.** Even an 8x cut in per-run CPU only just fits one node |
 | Disk | 100-300 GB (estimate) | about 63 GB free | yes across the whole estimated range |
 | Host RAM | 50-100 GB (estimate) | 62 GB | **possible**: the estimate straddles the limit |
-| API process | 100 `docker exec` streams and every projection in one process; memory unmeasured (a linear extrapolation of the one sample gives about 5.5 GB, an unvalidated scenario) | one process, 512 MB code default | **hypothesis: yes**. The executors would need to split from the API ([#1310](https://github.com/syntropic137/syntropic137/issues/1310)) |
+| API process | 100 `docker exec` streams and every projection in one process; memory unmeasured (a linear extrapolation of the one sample gives about 5.5 GB, an unvalidated scenario) | one process, 2 GB code default (an incident-derived stopgap, not validated at 20 or 100) | **hypothesis: yes**. The executors would need to split from the API ([#1310](https://github.com/syntropic137/syntropic137/issues/1310)) |
 | Model providers | 100 parallel agents on one Claude and one Codex account | unknown caps | **hypothesis: the first external limit** ([#1718](https://github.com/syntropic137/syntropic137/issues/1718)) |
 | Envoy bucket | 3-10 req/s (estimate) | 10 req/s | possible at the upper end ([#1720](https://github.com/syntropic137/syntropic137/issues/1720)) |
 | GitHub installation | check-runs at 1 pending SHA per run: 3,000-12,000 req/h; revocations at most 2,500 req/h; Events API up to 600 req/h per watched repository with pagination included (does not scale with runs) | 5,000 req/h (minimum) | **exceeded at the upper end of the scenario**, *if* check-run polling is active and webhooks are stale ([#1719](https://github.com/syntropic137/syntropic137/issues/1719)) |

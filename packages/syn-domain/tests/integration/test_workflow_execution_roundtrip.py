@@ -36,6 +36,84 @@ pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 class TestWorkflowExecutionRoundtrip:
     """Level 4 tests: Verify workflow execution persists to real event store."""
 
+    async def test_shutdown_interruption_survives_event_store_reload(
+        self,
+        workflow_execution_repository: EventStoreRepository[WorkflowExecutionAggregate],
+        unique_execution_id: str,
+    ) -> None:
+        """#1381: the shutdown helper writes an interruption the next process can replay."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
+        from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+            ExecutionStatus,
+        )
+        from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
+            StartExecutionCommand,
+            WorkflowExecutionAggregate,
+        )
+        from syn_domain.contexts.orchestration.slices.execute_workflow.errors import SavedWork
+        from syn_domain.contexts.orchestration.slices.execute_workflow.execution_journal import (
+            ExecutionJournal,
+        )
+        from syn_domain.contexts.orchestration.slices.execute_workflow.shutdown_interruption import (
+            preserve_interrupted_run,
+        )
+        from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor import (
+            WorkflowExecutionProcessor,
+        )
+        from syn_domain.contexts.orchestration.slices.execution_todo.projection import (
+            ExecutionTodoProjection,
+        )
+
+        projection = ExecutionTodoProjection(store=InMemoryProjectionStore())
+        processor = WorkflowExecutionProcessor(
+            execution_repository=AsyncMock(),
+            session_repository=AsyncMock(),
+            workspace_service=MagicMock(),
+            artifact_repository=AsyncMock(),
+            artifact_content_storage=None,
+            artifact_query=None,
+            conversation_storage=None,
+            observability_writer=None,
+            controller=None,
+            prompt_builder=AsyncMock(),
+            command_builder=MagicMock(),
+            todo_projection=projection,
+        )
+        aggregate = WorkflowExecutionAggregate()
+        aggregate.start_execution(
+            StartExecutionCommand(
+                execution_id=unique_execution_id,
+                workflow_id="wf-shutdown-roundtrip",
+                workflow_name="Shutdown roundtrip",
+                total_phases=1,
+                inputs={},
+            )
+        )
+        await workflow_execution_repository.save(aggregate)
+        runtime = processor._runtimes.of(unique_execution_id)
+        runtime.save_unpushed_work = AsyncMock(return_value=SavedWork())  # type: ignore[method-assign]
+
+        await preserve_interrupted_run(
+            aggregate=aggregate,
+            runtime=runtime,
+            workspaces=processor._workspaces_for(unique_execution_id, {}),
+            # The SDK repository has save/load; only save is used by append.
+            journal=ExecutionJournal(workflow_execution_repository, projection),  # type: ignore[arg-type]
+            workflow_id="wf-shutdown-roundtrip",
+            execution_id=unique_execution_id,
+            phase_id=None,
+            kept_artifact_ids=["artifact-from-shutdown"],
+            budget_seconds=5,
+        )
+
+        loaded = await workflow_execution_repository.load(unique_execution_id)
+        assert loaded is not None
+        assert loaded is not aggregate
+        assert loaded.status is ExecutionStatus.INTERRUPTED
+        assert loaded.version == 2
+
     async def test_start_execution_persists_to_event_store(
         self,
         workflow_execution_repository: EventStoreRepository[WorkflowExecutionAggregate],

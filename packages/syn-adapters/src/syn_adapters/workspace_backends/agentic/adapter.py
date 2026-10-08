@@ -48,6 +48,7 @@ from syn_adapters.workspace_backends.exec_status_lost import (
     status_was_lost,
     workspace_container_name,
 )
+from syn_adapters.workspace_backends.host_labels import host_labels
 from syn_adapters.workspace_backends.host_security import host_security_failure
 from syn_adapters.workspace_backends.image_verification import verify_image_async
 from syn_shared.env_constants import (
@@ -153,6 +154,7 @@ def _container_labels(config: IsolationConfig) -> dict[str, str]:
     labels = {
         "syn.execution_id": config.execution_id,
         "syn.workspace_id": config.workspace_id,
+        **host_labels(),
     }
     if config.phase_id:
         labels["syn.phase_id"] = config.phase_id
