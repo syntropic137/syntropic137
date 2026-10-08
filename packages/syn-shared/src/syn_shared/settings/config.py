@@ -458,6 +458,17 @@ class Settings(BaseSettings):
         ),
     )
 
+    github_api_request_timeout_seconds: float = Field(
+        default=30.0,
+        gt=0,
+        le=600,
+        description=(
+            "Timeout in seconds for ONE GitHub API request, token mint included. "
+            "Retried mints are still bounded as a whole by 3/4 of "
+            "SETUP_PHASE_TIMEOUT_SECONDS, which caps each attempt to the time left."
+        ),
+    )
+
     # =========================================================================
     # COLLECTOR (Observability) - See ADR-017, ADR-018
     # =========================================================================

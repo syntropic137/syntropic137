@@ -176,6 +176,8 @@ class GitHubAppClient:
             msg = "GitHub App is not fully configured"
             raise ValueError(msg)
 
+        from syn_shared.settings import get_settings
+
         self._settings = settings
         self._private_key: str | None = None
         self._cached_tokens: dict[str, InstallationToken] = {}
@@ -185,7 +187,7 @@ class GitHubAppClient:
                 "Accept": "application/vnd.github+json",
                 "X-GitHub-Api-Version": "2022-11-28",
             },
-            timeout=30.0,
+            timeout=get_settings().github_api_request_timeout_seconds,
             transport=RetryingTransport(transport or httpx.AsyncHTTPTransport()),
         )
 

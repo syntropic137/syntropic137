@@ -582,3 +582,31 @@ async def test_a_wait_that_overruns_starts_no_attempt_past_the_deadline(
     assert all(start <= deadline and end <= deadline for start, end in network.mint_spans)
     assert "after 1 attempt(s)" in str(raised.value)
     assert failure_account(raised.value).upstream is UpstreamFailureKind.UNAVAILABLE
+
+
+@pytest.mark.anyio
+async def test_the_configured_request_timeout_reaches_each_mint_attempt(
+    network: _Network, monkeypatch: pytest.MonkeyPatch, setup_timeout: None
+) -> None:
+    """PC-126: the per-request bound is a Setting, not a fixed 30 s."""
+    monkeypatch.setenv("GITHUB_API_REQUEST_TIMEOUT_SECONDS", "17")
+    reset_settings()
+    network.failures[_MINT] = [httpx.Response(500, json={"message": "scripted"})]
+
+    _assert_usable(await _provision())
+
+    assert network.mint_timeouts == [17.0, 17.0]
+
+
+@pytest.mark.anyio
+async def test_a_request_timeout_past_the_deadline_is_capped_by_it(
+    network: _Network, monkeypatch: pytest.MonkeyPatch, setup_timeout: None
+) -> None:
+    """The aggregate deadline still wins over a larger per-request setting."""
+    monkeypatch.setenv("GITHUB_API_REQUEST_TIMEOUT_SECONDS", "500")
+    monkeypatch.setenv("SETUP_PHASE_TIMEOUT_SECONDS", "60")
+    reset_settings()
+
+    _assert_usable(await _provision())
+
+    assert network.mint_timeouts == [60 * MINT_DEADLINE_FRACTION_OF_SETUP_TIMEOUT]
