@@ -185,7 +185,8 @@ class SubprocessHostWorkspaceGit:
         return patch
 
     async def _refuse_command_config(self, repo: str) -> None:
-        config = await _git(repo, "config", "--list", "--name-only", "-z")
+        # Without our own `-c` overrides, which `--list` would report back.
+        config = await _git(repo, "config", "--list", "--name-only", "-z", overrides=())
         for key in filter(None, config.decode(errors="replace").lower().split("\0")):
             if key.endswith(_COMMAND_KEY_SUFFIXES):
                 raise HostGitError(f"{repo} configures a command ({key}); not run from the host")
@@ -201,7 +202,12 @@ def _find_repositories(host_dir: str) -> list[str]:
     return repos
 
 
-async def _git(repo: str, *args: str, ok_codes: tuple[int, ...] = (0,)) -> bytes:
+async def _git(
+    repo: str,
+    *args: str,
+    ok_codes: tuple[int, ...] = (0,),
+    overrides: tuple[str, ...] = _GIT_GUARD_ARGS,
+) -> bytes:
     env = {
         "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
         "HOME": "/nonexistent",
@@ -212,7 +218,7 @@ async def _git(repo: str, *args: str, ok_codes: tuple[int, ...] = (0,)) -> bytes
     }
     proc = await asyncio.create_subprocess_exec(
         "git",
-        *_GIT_GUARD_ARGS,
+        *overrides,
         "-C",
         repo,
         *args,

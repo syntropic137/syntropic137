@@ -610,6 +610,22 @@ unknown rather than zero when its read failed. A Phase retried after a failed
 attempt held one workspace per attempt, so it has one usage per attempt. It
 exists to size the platform against `docs/north-star.md`.
 
+## Stale Workspace Directory
+
+A workspace directory on the host that nothing will come back for
+(`StaleWorkspaceDir`, PC-130): no running container mounts it, the Execution
+that owns it (when anything still names one) is not running, and nothing in it
+has changed for the reclaim grace period. Its container is already gone, so
+unlike an **Orphaned Workspace** (`OrphanedWorkspace`, #1560) it cannot be
+guarded from inside.
+
+**Reclaiming** one means deleting it, and only through a `ReclaimableDir`,
+which only a guard can produce. The host-side guard
+(`guard_stale_workspace_dir`) keeps the directory if any commit is not on a
+remote, and archives an uncommitted change as a patch artifact under the
+Execution before the delete. Each deletion is logged as `WorkspaceReclaimed`
+with its size. It is housekeeping, not domain state: no event, no aggregate.
+
 ## Scripted Agent
 
 What runs in a Phase's workspace in place of the agent CLI during a load test
