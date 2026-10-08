@@ -65,3 +65,22 @@ def test_the_switch_cannot_be_flipped_through_the_admin_port() -> None:
     config = yaml.safe_load((_SIDECAR / "envoy.yaml").read_text())
     layers = config["layered_runtime"]["layers"]
     assert not [layer for layer in layers if "admin_layer" in layer]
+
+
+def test_the_admin_interface_is_loopback_only_and_9901_serves_only_ready() -> None:
+    # Admin on an agent-net address would let a workspace POST /logging and
+    # make Envoy print other workspaces' Authorization headers (their platform
+    # tokens), or POST /quitquitquit. 9901 stays reachable for /ready only.
+    config = yaml.safe_load((_SIDECAR / "envoy.yaml").read_text())
+    assert config["admin"]["address"]["socket_address"]["address"] == "127.0.0.1"
+    (ready,) = [
+        listener
+        for listener in config["static_resources"]["listeners"]
+        if listener["address"]["socket_address"]["port_value"] == 9901
+    ]
+    (chain,) = ready["filter_chains"]
+    (hcm,) = chain["filters"]
+    (host,) = hcm["typed_config"]["route_config"]["virtual_hosts"]
+    forwarded = [r for r in host["routes"] if "route" in r]
+    assert [r["match"]["path"] for r in forwarded] == ["/ready"]
+    assert all("direct_response" in r for r in host["routes"] if "route" not in r)

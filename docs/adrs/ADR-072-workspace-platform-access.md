@@ -41,9 +41,13 @@ and both `/syn-platform` routes match only when that key is on (default 0%).
 So with access OFF there is **no route**: a workspace request ends at Envoy's
 local 404 and nothing is forwarded to the API. The API's 403 stays as defense
 in depth. `ci/fitness/infrastructure/test_platform_route_is_switched.py` keeps
-every route to `syn_platform_api` gated, and keeps Envoy's runtime free of an
-admin layer: the admin port is reachable from `agent-net`, so an admin layer
-would let a workspace flip the switch with `POST /runtime_modify`.
+every route to `syn_platform_api` gated, and keeps Envoy's admin interface out
+of a workspace's reach. Port 9901 is reachable from `agent-net`, so Envoy's
+admin API listens on `127.0.0.1:9900` only and 9901 is a listener that forwards
+`GET /ready` and nothing else. Admin on 9901 would let a workspace flip the
+switch (`POST /runtime_modify`), raise the log level so Envoy prints other
+workspaces' `Authorization` headers (`POST /logging`), or stop the proxy. The
+runtime also has no admin layer, as a second lock on the switch.
 
 ### 2. The route: a path on the Envoy sidecar, not a network join
 
