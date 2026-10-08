@@ -16,6 +16,8 @@ from typing import TYPE_CHECKING
 from syn_shared.settings import get_settings
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from agentic_isolation import AgenticWorkspace, WorkspaceDockerProvider
 
     from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
@@ -168,6 +170,34 @@ def _try_read_file(
     )
 
 
+def _candidates(root: Path, patterns: list[str], max_matches: int) -> Iterator[tuple[Path, str]]:
+    """Yield (path, relative path) for each distinct non-directory glob match.
+
+    Stops after max_matches matches, so a workspace full of matching entries
+    cannot make collection unbounded.
+    """
+    seen_paths: set[str] = set()
+    examined = 0
+    for pattern in patterns:
+        for file_path in root.glob(_normalize_pattern(pattern)):
+            examined += 1
+            if examined > max_matches:
+                logger.warning(
+                    "copy_from: Stopped after %d matches; the rest were not collected",
+                    max_matches,
+                )
+                return
+            try:
+                if stat.S_ISDIR(file_path.lstat().st_mode):
+                    continue
+            except OSError:
+                continue
+            relative_path = str(file_path.relative_to(root))
+            if relative_path not in seen_paths:
+                seen_paths.add(relative_path)
+                yield file_path, relative_path
+
+
 def collect_matching_files(
     workspace_path: Path,
     patterns: list[str],
@@ -185,36 +215,14 @@ def collect_matching_files(
     matches.
     """
     results: list[tuple[str, bytes]] = []
-    seen_paths: set[str] = set()
     root = workspace_path.resolve(strict=True)
     used = 0
-    examined = 0
-
-    for pattern in patterns:
-        clean_pattern = _normalize_pattern(pattern)
-
-        for file_path in root.glob(clean_pattern):
-            examined += 1
-            if examined > max_matches:
-                logger.warning(
-                    "copy_from: Stopped after %d matches; the rest were not collected",
-                    max_matches,
-                )
-                return results
-            try:
-                if stat.S_ISDIR(file_path.lstat().st_mode):
-                    continue
-            except OSError:
-                continue
-            relative_path = str(file_path.relative_to(root))
-            if relative_path in seen_paths:
-                continue
-            seen_paths.add(relative_path)
-            limit = min(max_bytes, max_total_bytes - used)
-            collected_before = len(results)
-            _try_read_file(root, file_path, relative_path, limit, results)
-            if len(results) > collected_before:
-                used += len(results[-1][1])
+    for file_path, relative_path in _candidates(root, patterns, max_matches):
+        limit = min(max_bytes, max_total_bytes - used)
+        collected_before = len(results)
+        _try_read_file(root, file_path, relative_path, limit, results)
+        if len(results) > collected_before:
+            used += len(results[-1][1])
     return results
 
 
