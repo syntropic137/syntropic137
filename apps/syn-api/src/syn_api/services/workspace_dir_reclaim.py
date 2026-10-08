@@ -172,31 +172,29 @@ class WorkspaceDirReclaimer:
 
     async def _still_stale(self, stale: StaleWorkspaceDir) -> bool:
         """Read everything again after archival; any change keeps the directory."""
-        why: str | None = None
-        if not self.is_live():
-            why = "subscriptions began catching up during archival"
-        else:
-            try:
-                containers, running, listings = await self._observe()
-            except Exception as exc:
-                why = f"could not look again ({type(exc).__name__}: {exc})"
-            else:
-                listing = next((x for x in listings if x.workspace_id == stale.workspace_id), None)
-                fresh = (
-                    None
-                    if listing is None
-                    else self._stale(listing, containers, running, self.clock())
-                )
-                if fresh is None or fresh.execution_id != stale.execution_id:
-                    why = "a container or running execution claimed it during archival"
-                elif listing is not None and listing.last_modified > stale.last_modified:
-                    why = "it changed during archival"
-                elif not self.is_live():
-                    why = "subscriptions began catching up during archival"
+        why = await self._why_not_still_stale(stale)
         if why is not None:
             logger.warning("Keeping workspace directory %s: %s", stale.host_dir, why)
             return False
         return True
+
+    async def _why_not_still_stale(self, stale: StaleWorkspaceDir) -> str | None:
+        catching_up = "subscriptions began catching up during archival"
+        if not self.is_live():
+            return catching_up
+        try:
+            containers, running, listings = await self._observe()
+        except Exception as exc:
+            return f"could not look again ({type(exc).__name__}: {exc})"
+        listing = next((x for x in listings if x.workspace_id == stale.workspace_id), None)
+        if listing is None:
+            return "it is no longer listed"
+        fresh = self._stale(listing, containers, running, self.clock())
+        if fresh is None or fresh.execution_id != stale.execution_id:
+            return "a container or running execution claimed it during archival"
+        if listing.last_modified > stale.last_modified:
+            return "it changed during archival"
+        return None if self.is_live() else catching_up
 
 
 async def _running_execution_ids() -> set[str]:

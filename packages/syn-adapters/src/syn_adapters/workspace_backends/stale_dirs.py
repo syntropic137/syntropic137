@@ -293,36 +293,39 @@ def _tar_unversioned(host_dir: str, repos: list[str], ignored: list[str]) -> byt
     """
     root = Path(host_dir)
     repo_roots = {Path(r) for r in repos}
-    members: list[Path] = []
-
-    def collect(path: Path) -> None:
-        if path.is_symlink() or path.is_file():
-            members.append(path)
-            return
-        for dirpath, dirnames, filenames in os.walk(path):
-            here = Path(dirpath)
-            dirnames[:] = [
-                d for d in dirnames if d not in _DISPOSABLE_DIRS and here / d not in repo_roots
-            ]
-            members.extend(here / f for f in filenames)
-            members.extend(here / d for d in dirnames if (here / d).is_symlink())
-
-    collect(root)
+    members = _unversioned_under(root, repo_roots)
     for name in ignored:
         path = Path(name)
         if not any(part in _DISPOSABLE_DIRS for part in path.relative_to(root).parts):
-            collect(path)
+            members.extend(_unversioned_under(path, repo_roots))
     if not members:
         return b""
+    return _write_tar(root, sorted(set(members)))
+
+
+def _unversioned_under(path: Path, repo_roots: set[Path]) -> list[Path]:
+    """``path`` itself if a file, else every file below it outside ``repo_roots`` and caches."""
+    if path.is_symlink() or path.is_file():
+        return [path]
+    members: list[Path] = []
+    for dirpath, dirnames, filenames in os.walk(path):
+        here = Path(dirpath)
+        dirnames[:] = [
+            d for d in dirnames if d not in _DISPOSABLE_DIRS and here / d not in repo_roots
+        ]
+        members.extend(here / f for f in filenames)
+        members.extend(here / d for d in dirnames if (here / d).is_symlink())
+    return members
+
+
+def _write_tar(root: Path, members: list[Path]) -> bytes:
     total = 0
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode="w:gz") as tar:
-        for member in sorted(set(members)):
+        for member in members:
             total += member.lstat().st_size
             if total > MAX_PATCH_BYTES:
-                raise HostGitError(
-                    f"unversioned files in {host_dir} exceed {MAX_PATCH_BYTES} bytes"
-                )
+                raise HostGitError(f"unversioned files in {root} exceed {MAX_PATCH_BYTES} bytes")
             tar.add(member, arcname=str(member.relative_to(root)), recursive=False)
     return buffer.getvalue()
 
