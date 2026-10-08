@@ -668,12 +668,18 @@ async def list_executions_endpoint(
     manager = get_projection_mgr()
     selected = parse_statuses(statuses, status)
     all_queued = await queued_starts(manager.store)
-    # A queued start has no read model: no date, tags or eval to judge, so a
-    # request filtering on any of them is not shown one. Search still applies.
+    # A queued start has no read model, so no tags or eval to judge: a request
+    # filtering on either is not shown one. It has not started, so a time
+    # window judges when it was accepted - the dashboard's default 24h window
+    # would otherwise hide every queued start.
     queued = (
         []
-        if started_after or started_before or tags or eval_id
-        else [qs for qs in all_queued if _matches(qs, search=q)]
+        if tags or eval_id
+        else [
+            qs
+            for qs in all_queued
+            if _matches(qs, search=q, after=started_after, before=started_before)
+        ]
     )
     shown = queued if selected is None or QUEUED in selected else []
     # Queued rows lead the collection: they are the newest starts, and the
@@ -732,8 +738,13 @@ def _read_model_statuses(selected: list[str] | None) -> list[str] | None:
     return [s for s in selected if s != QUEUED] or [QUEUED]
 
 
-def _matches(start: QueuedStart, *, search: str | None) -> bool:
-    """The list's search, as it applies to a start with no workflow name read yet."""
+def _matches(
+    start: QueuedStart, *, search: str | None, after: datetime | None, before: datetime | None
+) -> bool:
+    """The list's search and window, as they apply to a start that has not started."""
+    queued_at = start.queue.queued_at
+    if (after is not None and queued_at < after) or (before is not None and queued_at > before):
+        return False
     if not search:
         return True
     needle = search.lower()

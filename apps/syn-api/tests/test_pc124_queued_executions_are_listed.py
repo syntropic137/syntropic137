@@ -11,6 +11,7 @@ the list endpoint the dashboard and `syn execution list` call.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 import pytest
@@ -52,12 +53,14 @@ def world(monkeypatch: pytest.MonkeyPatch) -> _World:
     return built
 
 
-async def _listed(status: str | None = None, q: str | None = None) -> ExecutionListResponse:
+async def _listed(
+    status: str | None = None, q: str | None = None, started_after: datetime | None = None
+) -> ExecutionListResponse:
     """`GET /executions`, as `syn execution list` and the dashboard call it."""
     return await queries.list_executions_endpoint(
         status=status,
         statuses=None,
-        started_after=None,
+        started_after=started_after,
         started_before=None,
         q=q,
         tag=None,
@@ -109,6 +112,22 @@ class TestAQueuedStartIsListed:
 
         await _release_everything(world)
 
+    async def test_the_dashboards_default_window_judges_when_it_was_accepted(
+        self, world: _World
+    ) -> None:
+        """The dashboard asks for the last 24h by default; a queued start is in it."""
+        _, queued = await _two_running_one_queued(world)
+        now = datetime.now(UTC)
+
+        recent = await _listed(started_after=now - timedelta(hours=24))
+        later = await _listed(started_after=now + timedelta(hours=1))
+
+        assert queued in {e.workflow_execution_id for e in recent.executions}
+        assert recent.status_counts["queued"] == 1
+        assert later.status_counts["queued"] == 0
+
+        await _release_everything(world)
+
     async def test_once_it_has_run_it_is_no_longer_queued(self, world: _World) -> None:
         await _two_running_one_queued(world)
         await _release_everything(world)
@@ -121,9 +140,7 @@ class TestAQueuedStartIsListed:
 
 
 class TestTheListIsDurable:
-    async def test_after_a_restart_the_recorded_start_is_still_listed(
-        self, world: _World
-    ) -> None:
+    async def test_after_a_restart_the_recorded_start_is_still_listed(self, world: _World) -> None:
         """No process holds it now; its durable request record still owes it a start."""
         _, queued = await _two_running_one_queued(world)
         await world.coordinate()

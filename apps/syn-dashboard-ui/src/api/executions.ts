@@ -1,4 +1,5 @@
 import type {
+  ExecutionBudgetInfo,
   ExecutionDetailResponse,
   ExecutionListResponse,
   WorkflowExecutionSummary,
@@ -37,6 +38,14 @@ export async function listAllExecutions(
   signal?: AbortSignal
 ): Promise<ExecutionListResponse> {
   return fetchJSON(`${API_BASE}/executions?${listQueryParams(query)}`, { signal })
+}
+
+/** The execution budget's occupancy, which the list reports beside every page (PC-124). */
+export async function getExecutionBudget(signal?: AbortSignal): Promise<ExecutionBudgetInfo | null> {
+  const response = await fetchJSON<ExecutionListResponse>(`${API_BASE}/executions?page_size=1`, {
+    signal,
+  })
+  return response.budget ?? null
 }
 
 export async function cancelExecution(
