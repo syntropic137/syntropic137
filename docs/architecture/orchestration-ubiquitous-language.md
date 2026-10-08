@@ -140,7 +140,12 @@ A `phase_id` it does not name is `other`, never folded into a neighbour.
 Linking a merged pull request to every Execution that contributed to it. A run
 **contributes** to a PR when it reports one: the `repository` and `pr_number`
 it was started with (a reverify), a Continued Branch with a PR open from it,
-or a branch its failure observed with a PR open from it. Every link carries
+or a branch one of its Phases observed with a PR open from it, as that Phase
+completed or failed. The completed-Phase reading is what links the run that
+**opened** a PR: no input names a PR that did not exist yet, so the PR open
+from each branch the Phase left is recorded on `PhaseCompleted`
+(`observed_branches`), resolved from the workspace directory to the run's
+`owner/name` by its source commits. Every link carries
 the run's whole Resume Chain, and a Resume inherits its parent's links, so a
 failed run, its resume and an independent reverify of the same PR are all
 contributors, each counted once.
@@ -155,9 +160,10 @@ asks GitHub, so a replay rebuilds the same numbers with no call (#1728).
 unique contributors wherever in time they ran, averaged over those PRs. An
 unmerged PR contributes nothing.
 
-**Unclear:** a completed run that opened a PR it was not started on and that
-no failure observed is not linked: no event records the PR a successful run
-produced (#1728).
+**Unclear:** a Phase that opened a PR from a branch it did not move (pushed in
+an earlier Phase, opened in a later one) records no observation for it, since
+an observation is only taken of branches that moved; the earlier Phase's own
+reading carries the PR only if it was already open then (#1728).
 
 ## Unresolved Findings
 
