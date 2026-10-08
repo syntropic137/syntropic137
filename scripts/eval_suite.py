@@ -53,10 +53,10 @@ verdict on its eval (``POST /evals/{id}/runs/{run}/score``, scorer
 eval's current score and the history stays in its events.
 
 INSTALL PROVENANCE. ``launch`` installs with ``version`` = the suite version
-(``<n>.0.0``) and ``source_digest`` = sha256 of the exact YAML document it
+and the workflow's install ``revision`` (``<n>.<revision>.0``) and ``source_digest`` = sha256 of the exact YAML document it
 uploads. The server's install rules then do the rest: a byte-identical
 re-launch is a no-op, an archived workflow is restored, and a workflow file
-changed without a suite version bump is refused (409, digest mismatch) before
+changed without a suite version or revision bump is refused (409, digest mismatch) before
 any eval exists. Never install without provenance: once the server records a
 version, an install that declares none is refused by design.
 
@@ -126,6 +126,12 @@ class WorkflowRef(_Frozen):
     """Repo-relative path of the workflow file the suite runs."""
     models: dict[str, str] = Field(min_length=1)
     """Phase id -> the model that phase declares. Must match the workflow file."""
+    revision: int = Field(default=0, ge=0)
+    """Install revision of the workflow file within the suite version; installed as
+    ``<suite version>.<revision>.0``. Raise it for an edit that is not part of the
+    experiment (no case, prompt or model), so the server takes it as a new version
+    instead of refusing a republish. #1780's ``requires_verdict`` is revision 1.
+    """
 
 
 class PastVersion(_Frozen):
@@ -1365,13 +1371,16 @@ class Provenance(_Frozen):
 def install_provenance(loaded: LoadedSuite, document: str) -> Provenance:
     """Deterministic install provenance for the suite's workflow document.
 
-    The version is the suite's, so changing a listed workflow without bumping
-    the suite reuses a version under a new digest, which the server refuses as
-    a republish. The digest covers the uploaded bytes, prompts inlined, so a
+    The version is the suite's, with the workflow's install `revision` as the
+    minor, so changing a listed workflow without bumping either reuses a
+    version under a new digest, which the server refuses as a republish. The digest covers the uploaded bytes, prompts inlined, so a
     prompt-file edit changes it too.
     """
     digest = hashlib.sha256(document.encode("utf-8")).hexdigest()
-    return Provenance(version=f"{loaded.suite.version}.0.0", source_digest=f"sha256:{digest}")
+    return Provenance(
+        version=f"{loaded.suite.version}.{loaded.workflow.revision}.0",
+        source_digest=f"sha256:{digest}",
+    )
 
 
 def install_workflow(loaded: LoadedSuite, client: httpx.Client, root: Path = ROOT) -> str:
@@ -1398,7 +1407,8 @@ def install_workflow(loaded: LoadedSuite, client: httpx.Client, root: Path = ROO
         raise RuntimeError(
             f"server refused to install {w.id} as version {provenance.version} "
             f"({provenance.source_digest}): {_detail(response)}. If {w.path} changed, "
-            "bump the suite version; no eval was created"
+            "bump the suite version (or, for an edit outside the experiment, the workflow's "
+            "revision); no eval was created"
         )
     response.raise_for_status()
     installed = _Installed.model_validate(response.json())

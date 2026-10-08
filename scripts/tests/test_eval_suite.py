@@ -2132,7 +2132,9 @@ def test_launch_installs_with_the_suite_version_and_the_document_digest(tmp_path
     install = server.requests[0]
     document = install.content.decode()
     digest = hashlib.sha256(install.content).hexdigest()
-    assert install.url.params.get("version") == f"{loaded.suite.version}.0.0"
+    assert install.url.params.get("version") == (
+        f"{loaded.suite.version}.{loaded.workflow.revision}.0"
+    )
     assert install.url.params.get("source_digest") == f"sha256:{digest}"
     assert "force" not in install.url.params
     assert install_provenance(loaded, document).source_digest == f"sha256:{digest}"
@@ -2149,8 +2151,8 @@ def test_an_identical_relaunch_is_an_unchanged_install(tmp_path: Path) -> None:
     _, client = _provenanced_server(loaded, templates)
     again = launch_suite(loaded, client, ledger)
 
-    assert first[0].startswith(f"workflow {_CODEX_WF}: created as 6.0.0")
-    assert again[0].startswith(f"workflow {_CODEX_WF}: unchanged as 6.0.0")
+    assert first[0].startswith(f"workflow {_CODEX_WF}: created as 6.1.0")
+    assert again[0].startswith(f"workflow {_CODEX_WF}: unchanged as 6.1.0")
 
 
 @pytest.mark.unit
@@ -2197,7 +2199,7 @@ def test_a_cli_installed_archived_record_is_restored_by_launch_without_force(
     lines = launch_suite(loaded, client, tmp_path / "launches.jsonl")
 
     stored = templates.by_id[_CODEX_WF]
-    assert lines[0].startswith(f"workflow {_CODEX_WF}: created as 6.0.0")
+    assert lines[0].startswith(f"workflow {_CODEX_WF}: created as 6.1.0")
     assert not stored.is_archived
     assert stored.source_digest == install_provenance(loaded, document).source_digest
 
@@ -2248,8 +2250,59 @@ def test_an_unchanged_relaunch_restores_an_archived_template(tmp_path: Path) -> 
     _, client = _provenanced_server(loaded, templates)
     lines = launch_suite(loaded, client, tmp_path / "launches.jsonl")
 
-    assert lines[0].startswith(f"workflow {_CODEX_WF}: created as 6.0.0")
+    assert lines[0].startswith(f"workflow {_CODEX_WF}: created as 6.1.0")
     assert not templates.by_id[_CODEX_WF].is_archived
+
+
+def _pre_1780_document(document: str) -> str:
+    """The document a verify workflow uploaded before #1780: no `requires_verdict` on verify."""
+    data = yaml.safe_load(document)
+    (verify,) = [p for p in data["phases"] if p["id"] == "verify"]
+    assert verify.pop("requires_verdict") is True
+    return yaml.safe_dump(data, sort_keys=False, allow_unicode=True)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("archived", [False, True], ids=["active", "archived"])
+@pytest.mark.parametrize("workflow", [w.id for w in load_suite(DEFAULT_SUITE).suite.workflows])
+def test_a_pre_1780_install_is_upgraded_to_require_a_verdict(
+    tmp_path: Path, workflow: str, archived: bool
+) -> None:
+    """#1780 adds `requires_verdict` without a suite bump; the workflow revision carries it.
+
+    The server holds what launch installed before: the document without the
+    flag, as `<suite>.0.0` under its own digest. Relaunching must reach the
+    new definition (not a 409), active or archived, and a second relaunch is
+    an unchanged no-op.
+    """
+    loaded = load_suite(DEFAULT_SUITE, workflow=workflow)
+    templates = _Templates()
+    document = _document(loaded)
+    old = _pre_1780_document(document)
+    templates.install(
+        old,
+        version=f"{loaded.suite.version}.0.0",
+        source_digest=f"sha256:{hashlib.sha256(old.encode()).hexdigest()}",
+    )
+    assert [p.requires_verdict for p in templates.by_id[workflow].phases] == [False]
+    if archived:
+        templates.archive(workflow)
+
+    server, client = _provenanced_server(loaded, templates)
+    lines = launch_suite(loaded, client, tmp_path / "launches.jsonl")
+
+    stored = templates.by_id[workflow]
+    new = install_provenance(loaded, document)
+    assert new.version == f"{loaded.suite.version}.1.0"
+    assert lines[0].startswith(f"workflow {workflow}: created as {new.version}")
+    assert [p.requires_verdict for p in stored.phases] == [True]
+    assert stored.source_digest == new.source_digest
+    assert not stored.is_archived
+    assert any(r.url.path == "/evals" for r in server.requests)
+
+    _, client = _provenanced_server(loaded, templates)
+    again = launch_suite(loaded, client, tmp_path / "launches.jsonl")
+    assert again[0].startswith(f"workflow {workflow}: unchanged as {new.version}")
 
 
 @pytest.mark.unit
