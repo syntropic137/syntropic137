@@ -29,14 +29,18 @@ export interface ReadPathHealth {
   held: HeldProjectionHealth[]
   /** Global nonce of the undecodable event the subscription halted at, or null. */
   haltedAt: number | null
+  /** False until `/health` has measured the subscription; the lists above are then empty, not healthy. */
+  measured: boolean
 }
 
-export const HEALTHY_READ_PATH: ReadPathHealth = { rebuilding: [], held: [], haltedAt: null }
+export const HEALTHY_READ_PATH: ReadPathHealth = { rebuilding: [], held: [], haltedAt: null, measured: true }
+export const UNMEASURED_READ_PATH: ReadPathHealth = { ...HEALTHY_READ_PATH, measured: false }
 
 export function readPathHealthOf(health: HealthResponse | null): ReadPathHealth {
   const sub = health?.subscription
-  if (!sub) return HEALTHY_READ_PATH
+  if (!sub) return UNMEASURED_READ_PATH
   return {
+    measured: true,
     rebuilding: sub.rebuilding_read_models ?? [],
     held: sub.held_projections ?? [],
     haltedAt: sub.halted_at ?? null,
@@ -44,18 +48,14 @@ export function readPathHealthOf(health: HealthResponse | null): ReadPathHealth 
 }
 
 /**
- * True until `/health` has measured the subscription. No answer yet, a failed
+ * True when anything is on screen that a later answer could clear, or while
+ * `/health` has not yet measured the subscription. No answer yet, a failed
  * first fetch, and the startup gate's `starting` response (which carries no
  * subscription) all say nothing about the read path - and the startup window
  * right after a deploy is exactly when a rebuild begins.
  */
-export function readPathUnmeasured(health: HealthResponse | null): boolean {
-  return !health?.subscription
-}
-
-/** True when anything is on screen that a later answer could clear. */
 export function readPathNeedsWatching(health: ReadPathHealth): boolean {
-  return health.rebuilding.length > 0 || health.held.length > 0 || health.haltedAt !== null
+  return !health.measured || health.rebuilding.length > 0 || health.held.length > 0 || health.haltedAt !== null
 }
 
 export function useReadPathHealth(): ReadPathHealth {
@@ -69,8 +69,7 @@ export function useReadPathHealth(): ReadPathHealth {
   const readPath = readPathHealthOf(health)
   const { refetch } = useSerialRefresh({
     fetch: fetchHealth,
-    pollIntervalMs:
-      readPathUnmeasured(health) || readPathNeedsWatching(readPath) ? READ_PATH_POLL_INTERVAL_MS : null,
+    pollIntervalMs: readPathNeedsWatching(readPath) ? READ_PATH_POLL_INTERVAL_MS : null,
   })
 
   useEffect(() => {
@@ -81,10 +80,27 @@ export function useReadPathHealth(): ReadPathHealth {
 }
 
 /** The shell's answer, shared with pages so they do not poll `/health` again. */
-export const ReadPathHealthContext = createContext<ReadPathHealth>(HEALTHY_READ_PATH)
+export const ReadPathHealthContext = createContext<ReadPathHealth>(UNMEASURED_READ_PATH)
 
 /** This page's read model, if it is rebuilding right now. */
 export function useRebuildingReadModel(projection: string): ReadModelStatus | null {
   const { rebuilding } = useContext(ReadPathHealthContext)
   return rebuilding.find((status) => status.projection === projection) ?? null
+}
+
+/**
+ * This page's read model status, reconciling a response's verdict with the
+ * shell's. Once `/health` has measured the subscription its answer is the
+ * current one and wins: a response snapshot goes stale when its page stops
+ * refreshing (a terminal execution), so it would keep saying "rebuilding"
+ * after catch-up. Before that, the response's own verdict is all there is.
+ */
+export function useReadModelStatus(
+  projection: string,
+  responseStatus: ReadModelStatus | null | undefined,
+): ReadModelStatus | null {
+  const { measured } = useContext(ReadPathHealthContext)
+  const fromShell = useRebuildingReadModel(projection)
+  if (measured) return fromShell
+  return responseStatus?.rebuilding ? responseStatus : null
 }

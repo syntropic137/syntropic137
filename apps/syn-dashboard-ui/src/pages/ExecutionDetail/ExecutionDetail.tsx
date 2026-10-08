@@ -18,7 +18,7 @@ import { ExecutionControl } from '../../components/ExecutionControl'
 import { ReadModelNotice } from '../../components/ReadPathBanner'
 import { ExecutionEvalBadge } from '../../components/evals'
 import { useExecutionData } from '../../hooks'
-import { useRebuildingReadModel } from '../../hooks/useReadPathHealth'
+import { useReadModelStatus } from '../../hooks/useReadPathHealth'
 import type { ExecutionDetailResponse, FailureClassification, ReportedFailureReason } from '../../types'
 import { type ExactUsd, exactUsdToString, parseExactUsd } from '../../utils/exactUsd'
 import { executionTokenTotals } from '../../utils/executionTokens'
@@ -284,8 +284,9 @@ export function ExecutionDetail() {
   const navigate = useNavigate()
   const { execution, artifactDetails, loading, error, isConnected, now, refreshExecution } =
     useExecutionData(executionId)
-  // From /health, so a 404 while the detail read model replays can say why.
-  const rebuilding = useRebuildingReadModel('workflow_execution_details')
+  // From /health once measured, so a 404 while the detail read model replays
+  // can say why, and a terminal execution's snapshot cannot outlive catch-up.
+  const rebuilding = useReadModelStatus('workflow_execution_details', execution?.read_model_status)
 
   if (loading) return <PageLoader />
 
@@ -316,7 +317,7 @@ export function ExecutionDetail() {
   return (
     <div className="space-y-6">
       <Breadcrumbs items={breadcrumbs} />
-      <ReadModelNotice status={execution.read_model_status ?? rebuilding} />
+      <ReadModelNotice status={rebuilding} />
       <ExecutionHeader execution={execution} executionId={executionId} isConnected={isConnected} refreshError={error} now={now} refreshExecution={refreshExecution} />
       {execution.error_message && (
         <ExecutionErrorCard
