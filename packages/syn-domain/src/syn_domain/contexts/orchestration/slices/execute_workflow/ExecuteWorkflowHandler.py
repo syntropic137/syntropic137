@@ -475,9 +475,7 @@ class ExecuteWorkflowHandler:
 
         phases = await self._get_executable_phases(workflow)
         merged_inputs = self._merge_inputs(command, workflow)
-        repos = (
-            self._resolve_repos(command, merged_inputs, workflow) if workflow.requires_repos else []
-        )
+        repos = self._resolve_repos(command, merged_inputs, workflow)
 
         # #967: the launch snapshot, read from the template NOW, so a later tag
         # edit changes future runs only. Raises (ValueError) over the tag limit.
@@ -579,6 +577,11 @@ class ExecuteWorkflowHandler:
     ) -> list[RepositoryRef]:
         """Resolve repos: typed ``command.repos`` first, else workflow template fields.
 
+        Explicit repos are honoured whatever the template says (#955): a caller
+        who names a repository with ``-R`` gets it. ``requires_repos`` decides
+        only whether the template's own DEFAULTS apply, so a workflow that does
+        not need a repository resolves to none when the caller gives none.
+
         Per ADR-063, repository identity must be passed across context boundaries
         as typed ``RepositoryRef`` on the command. This handler does NOT inspect
         ``inputs`` for repo keys - that path was removed when boundaries were typed.
@@ -588,6 +591,8 @@ class ExecuteWorkflowHandler:
         """
         if command.repos:
             return list(command.repos)
+        if not workflow.requires_repos:
+            return []
 
         # Guard: if a producer left repo identity in inputs without populating
         # command.repos, that's a missed boundary translation - fail loud (ADR-063).
