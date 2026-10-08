@@ -150,3 +150,33 @@ syn eval show <eval-id>
 | `eval-id` | `text` | Yes | The eval |
 
 ---
+
+## `syn eval trend`
+
+An eval's runs as trend points: score, verdict, models, cost, duration, tokens
+
+```bash
+syn eval trend <eval-id> [options]
+```
+
+**Arguments:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `eval-id` | `text` | Yes | The eval |
+
+**Options:**
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--json` | `boolean` | `false` | Print the API response as JSON |
+| `--page` | `text` | `1` | Page number |
+| `--page-size` | `text` | `50` | Items per page |
+
+**Examples:**
+
+```bash
+syn eval trend eval-abc123 --json
+```
+
+---

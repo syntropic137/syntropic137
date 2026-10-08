@@ -41,6 +41,7 @@ from syn_domain.contexts.orchestration.domain.events.EvalUpdatedEvent import Eva
 from syn_domain.contexts.orchestration.domain.read_models.eval_runs import EvalRunScore
 from syn_domain.contexts.orchestration.domain.read_models.eval_summary import (
     EvalBaselineRepo,
+    EvalDefinitionChange,
     EvalDetail,
     EvalRecord,
     EvalSummary,
@@ -67,8 +68,9 @@ class EvalListProjection(AutoDispatchProjection):
 
     PROJECTION_NAME = "evals"
     SCORES = "eval_run_scores"
-    VERSION = 2
-    """2: run scores (``EvalRunScored``) in ``SCORES``."""
+    VERSION = 3
+    """2: run scores (``EvalRunScored``) in ``SCORES``.
+    3: ``judge_model`` on scores; definition version and changes on records (#1788)."""
 
     def __init__(self, store: ProjectionStore):
         self._store = store
@@ -99,6 +101,7 @@ class EvalListProjection(AutoDispatchProjection):
             archived=False,
             created_at=created_at,
             updated_at=created_at,
+            definition_changes=(EvalDefinitionChange(definition_version=1, changed_at=created_at),),
         )
         await self._save(record)
 
@@ -109,6 +112,16 @@ class EvalListProjection(AutoDispatchProjection):
             return
         tags = replay_tag_edit(record.tags, event.tags_added, added=True)
         tags = replay_tag_edit(tags, event.tags_removed, added=False)
+        updated_at = event.updated_at.isoformat()
+        changes = record.definition_changes
+        redefines = event.goal is not None or event.baseline_repos is not None
+        # A redelivered event carries the same time: it is not a second change.
+        if redefines and not any(c.changed_at == updated_at for c in changes):
+            version = changes[-1].definition_version + 1 if changes else 1
+            changes = (
+                *changes,
+                EvalDefinitionChange(definition_version=version, changed_at=updated_at),
+            )
         await self._save(
             record.model_copy(
                 update={
@@ -120,7 +133,8 @@ class EvalListProjection(AutoDispatchProjection):
                         else _baseline(event.baseline_repos)
                     ),
                     "tags": tuple(tags),
-                    "updated_at": event.updated_at.isoformat(),
+                    "updated_at": updated_at,
+                    "definition_changes": changes,
                 }
             )
         )
@@ -156,6 +170,7 @@ class EvalListProjection(AutoDispatchProjection):
             scorer=event.scorer,
             scorer_version=event.scorer_version,
             scored_at=event.scored_at.isoformat(),
+            judge_model=event.judge_model,
         )
         await self._store.save(
             self.SCORES,

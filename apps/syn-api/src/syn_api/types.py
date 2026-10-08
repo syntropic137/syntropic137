@@ -96,6 +96,9 @@ from syn_domain.contexts.orchestration import (
     TagSet,
     Verdict,
 )
+from syn_domain.contexts.orchestration.domain.read_models.workflow_definition_changes import (
+    DefinitionChangeKind,  # noqa: TC001 - Pydantic field type, needed at runtime
+)
 
 # One import, and no TC001: DEFAULT_PHASE_SANDBOX is a Pydantic field default
 # so `syn_shared.agents` is needed at RUNTIME, which makes a type-checking-only
@@ -1200,6 +1203,8 @@ class EvalRunResponse(BaseModel):
     scorer: str | None
     scorer_version: str | None
     scored_at: str | None
+    judge_model: ObservedModelId | None = None
+    """The model that judged the run; null for a deterministic scorer or an older score."""
 
 
 class EvalRunListResponse(BaseModel):
@@ -1223,6 +1228,8 @@ class EvalRunScoreRequest(BaseModel):
     """Markdown."""
     scorer: str = Field(min_length=1)
     scorer_version: str = Field(min_length=1)
+    judge_model: ObservedModelId | None = Field(default=None, min_length=1)
+    """The model that judged the run, when a model did. Omit for a deterministic scorer."""
 
 
 class EvalRunScoreResponse(BaseModel):
@@ -1236,6 +1243,110 @@ class EvalRunScoreResponse(BaseModel):
     scorer: str
     scorer_version: str
     scored_at: str
+    judge_model: ObservedModelId | None = None
+
+
+class DefinitionChangeResponse(BaseModel):
+    """A change to an eval's or workflow's definition: a trend chart's annotation (#1788)."""
+
+    definition_version: str | None
+    """Eval: "1" at creation, one more per goal or baseline change. Workflow: the
+    package version, else the source digest, as its runs record it; null if neither."""
+    changed_at: str
+    """ISO 8601 UTC."""
+    kind: DefinitionChangeKind
+
+
+class TrendDefinition(BaseModel):
+    """The current definition version, when it last changed, and every change."""
+
+    definition_version: str | None
+    definition_changed_at: str | None
+    """ISO 8601 UTC; null when no change was recorded."""
+    definition_changes: list[DefinitionChangeResponse]
+    """Oldest first."""
+
+
+class EvalTrendPointResponse(BaseModel):
+    """One run of an eval as one point on its trend charts (#1788)."""
+
+    execution_id: str
+    date: str | None
+    """When the run started, ISO 8601 UTC; null if it never recorded a start."""
+    workflow_id: str
+    workflow_version: str | None
+    """The workflow version the run launched from, as on `GET /evals/{id}/runs`."""
+    eval_definition_version: str | None
+    """The eval's definition version current when the run started."""
+    verifier_model: ObservedModelId | None
+    """The model the run's last reporting phase ran, as its harness reported it."""
+    observed_models: list[ObservedModelId]
+    """Every distinct model the run was observed running, delegates included, sorted."""
+    judge_model: ObservedModelId | None
+    score: int | None
+    """0 to 100; the recorded fraction x 100, rounded. Null when unscored or scored without one."""
+    verdict: Verdict | None
+    cost_usd: Decimal | None
+    cost_is_lower_bound: bool
+    """True when some of the run's work had no price, so `cost_usd` is a floor."""
+    cost_display: str
+    duration_seconds: float | None
+    duration_is_lower_bound: bool
+    """True when some phase has no known duration, so `duration_seconds` is a floor."""
+    duration_display: str
+    tokens: int
+    """Total tokens, the same figure as `total_tokens` on `GET /executions`."""
+
+
+class EvalTrendResponse(TrendDefinition):
+    """One page of an eval's current runs as trend points, newest first (#1788)."""
+
+    eval_id: str
+    items: list[EvalTrendPointResponse]
+    total: int
+    """Every current run of the eval, whatever the page size."""
+    page: int
+    page_size: int
+
+
+class PhaseDurationResponse(BaseModel):
+    """How long one phase of a run took."""
+
+    phase_id: str
+    phase_name: str
+    duration_seconds: float | None
+    """Null when the phase has no known duration."""
+
+
+class WorkflowTrendPointResponse(BaseModel):
+    """One execution of a workflow as one point on its trend charts (#1788)."""
+
+    execution_id: str
+    date: str | None
+    """When the execution started, ISO 8601 UTC."""
+    status: str
+    workflow_version: str | None
+    """The version the execution launched from; compare with `definition_changes`."""
+    cost_usd: Decimal | None
+    cost_is_lower_bound: bool
+    cost_display: str
+    duration_seconds: float | None
+    duration_is_lower_bound: bool
+    duration_display: str
+    tokens: int
+    phase_durations: list[PhaseDurationResponse]
+    """In the order the phases ran."""
+
+
+class WorkflowTrendResponse(TrendDefinition):
+    """One page of a workflow's executions as trend points, newest first (#1788)."""
+
+    workflow_id: str
+    items: list[WorkflowTrendPointResponse]
+    total: int
+    """Every execution of the workflow, whatever the page size."""
+    page: int
+    page_size: int
 
 
 class ExecutionEvalRunResponse(BaseModel):

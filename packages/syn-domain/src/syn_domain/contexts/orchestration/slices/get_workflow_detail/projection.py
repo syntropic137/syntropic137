@@ -33,6 +33,11 @@ from syn_domain.contexts.orchestration.domain.events.WorkflowTagsAddedEvent impo
 from syn_domain.contexts.orchestration.domain.events.WorkflowTagsRemovedEvent import (
     WorkflowTagsRemovedEvent,
 )
+from syn_domain.contexts.orchestration.domain.read_models.workflow_definition_changes import (
+    DefinitionChangeKind,
+    WorkflowDefinitionChange,
+    WorkflowDefinitionHistory,
+)
 from syn_domain.contexts.orchestration.domain.read_models.workflow_detail import (
     InputDeclarationDetail,
     PhaseDefinitionDetail,
@@ -129,7 +134,11 @@ class WorkflowDetailProjection(RecordedTimeProjection):
     # v12 (#959): `created_at` was read from a payload that never carried it,
     # so every row has None. It now comes from the envelope's recorded time,
     # and only a replay can supply that for existing rows.
-    VERSION = 12  # v12: created_at from the envelope's recorded time (#959)
+    #
+    # v13 (#1788): definition changes in ``CHANGES``, dated by recorded time,
+    # which only a replay can supply for existing workflows.
+    VERSION = 13  # v13: definition change history (#1788)
+    CHANGES = "workflow_definition_changes"
 
     def __init__(self, store: ProjectionStore):
         """Initialize with a projection store."""
@@ -147,9 +156,47 @@ class WorkflowDetailProjection(RecordedTimeProjection):
         """Clear projection data for rebuild."""
         if hasattr(self._store, "delete_all"):
             await self._store.delete_all(self.PROJECTION_NAME)
+            await self._store.delete_all(self.CHANGES)
 
     async def on_workflow_template_created(self, event_data: dict) -> None:
         """Handle WorkflowTemplateCreated event - create template detail."""
+        await self._save_template(event_data)
+        await self._record_change(event_data, DefinitionChangeKind.CREATED)
+
+    async def _record_change(self, event_data: dict, kind: DefinitionChangeKind) -> None:
+        """Append a definition change, dated by the envelope (#1788).
+
+        A phase edit carries no version, so it keeps the one current when it
+        was recorded. Without an envelope (a handler called directly) there is
+        no date, so nothing is recorded.
+        """
+        workflow_id = event_data.get("workflow_id", "")
+        recorded_at = self.recorded_at
+        if not workflow_id or recorded_at is None:
+            return
+        history = await self.definition_history(workflow_id)
+        version = (
+            history.version_at(recorded_at)
+            if kind is DefinitionChangeKind.PHASE_UPDATED
+            else event_data.get("version") or event_data.get("source_digest")
+        )
+        change = WorkflowDefinitionChange(
+            definition_version=version,
+            changed_at=recorded_at.isoformat(),
+            kind=kind,
+        )
+        updated = history.with_change(change)
+        if updated is not history:
+            await self._store.save(self.CHANGES, workflow_id, updated.model_dump(mode="json"))
+
+    async def definition_history(self, workflow_id: str) -> WorkflowDefinitionHistory:
+        """Every definition change of the workflow, oldest first; empty if none recorded."""
+        document = await self._store.get(self.CHANGES, workflow_id)
+        if document is None:
+            return WorkflowDefinitionHistory(workflow_id=workflow_id)
+        return WorkflowDefinitionHistory.model_validate(document)
+
+    async def _save_template(self, event_data: dict) -> None:
         workflow_id = event_data.get("workflow_id", "")
 
         # Convert phase data to PhaseDefinitionDetail format
@@ -242,7 +289,8 @@ class WorkflowDetailProjection(RecordedTimeProjection):
             return
 
         existing = await self._store.get(self.PROJECTION_NAME, workflow_id)
-        await self.on_workflow_template_created(event_data)
+        await self._save_template(event_data)
+        await self._record_change(event_data, DefinitionChangeKind.UPDATED)
 
         if not existing:
             return
@@ -310,6 +358,7 @@ class WorkflowDetailProjection(RecordedTimeProjection):
             _apply_phase_fields(phase, event_data)
 
         await self._store.save(self.PROJECTION_NAME, workflow_id, existing)
+        await self._record_change(event_data, DefinitionChangeKind.PHASE_UPDATED)
 
     async def get_by_id(self, workflow_id: str) -> WorkflowDetail | None:
         """Get a workflow template by ID."""

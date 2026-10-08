@@ -63,7 +63,7 @@ def _iso(value: datetime | str | None) -> str | None:
     return value.isoformat() if isinstance(value, datetime) else value
 
 
-def _cost(value: Decimal | str) -> Decimal | None:
+def decimal_or_none(value: Decimal | str) -> Decimal | None:
     try:
         return Decimal(value)
     except (InvalidOperation, TypeError, ValueError):
@@ -92,14 +92,16 @@ async def _facts(row: WorkflowExecutionSummary, scores: dict[str, EvalRunScore])
     if isinstance(detail, Ok):
         full = detail.value
         models = tuple(m for p in full.phases for m in _phase_models(p))
-        cost = _cost(full.total_cost_usd)
+        cost = decimal_or_none(full.total_cost_usd)
         duration = full.total_duration_seconds
         unpriced, unknown_phases = (
             full.unpriced_observation_count,
             full.unknown_duration_phase_count,
         )
+        final_model = next((str(p.model) for p in reversed(full.phases) if p.model), None)
     else:
         models, cost, duration, unpriced, unknown_phases = (), None, None, 0, 0
+        final_model = None
     return EvalRunFacts(
         execution_id=execution_id,
         workflow_id=row.workflow_id,
@@ -113,6 +115,8 @@ async def _facts(row: WorkflowExecutionSummary, scores: dict[str, EvalRunScore])
         score=scores.get(execution_id),
         unpriced_observation_count=unpriced,
         unknown_duration_phase_count=unknown_phases,
+        total_tokens=row.total_tokens,
+        final_phase_model=final_model,
     )
 
 
@@ -147,7 +151,7 @@ def _excluding(display: str, incomplete: int) -> str:
     return f"{display} (excl. {incomplete} incomplete)" if incomplete else display
 
 
-def _duration_display(seconds: float | None, unknown_phases: int) -> str:
+def duration_display(seconds: float | None, unknown_phases: int) -> str:
     """A run's duration, marked as a lower bound the way ``format_cost`` marks cost."""
     display = format_duration_seconds(seconds)
     return f">={display} (partial)" if seconds is not None and unknown_phases else display
@@ -203,13 +207,14 @@ def _run_response(run: EvalRunFacts) -> EvalRunResponse:
         total_cost_usd=run.total_cost_usd,
         total_cost_display=format_cost(run.total_cost_usd, run.unpriced_observation_count),
         duration_seconds=run.duration_seconds,
-        duration_display=_duration_display(run.duration_seconds, run.unknown_duration_phase_count),
+        duration_display=duration_display(run.duration_seconds, run.unknown_duration_phase_count),
         verdict=None if score is None else score.verdict,
         score=None if score is None else score.score,
         evidence_excerpt=None if score is None else score.evidence[:EVIDENCE_EXCERPT_CHARS],
         scorer=None if score is None else score.scorer,
         scorer_version=None if score is None else score.scorer_version,
         scored_at=None if score is None else score.scored_at,
+        judge_model=None if score is None else score.judge_model,
     )
 
 

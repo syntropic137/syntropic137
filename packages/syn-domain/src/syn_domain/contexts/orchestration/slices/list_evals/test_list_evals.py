@@ -348,3 +348,38 @@ class TestQueries:
         assert (await evals.page(tags=["nightly"])).total == 1
         assert (await evals.page(search="v2")).total == 1
         assert await evals.detail("eval-missing") is None
+
+
+class TestDefinitionChanges:
+    """#1788: an eval's goal and baseline edits are dated, so a trend chart can mark them."""
+
+    @staticmethod
+    async def _stream() -> _Stream:
+        stream = _Stream()
+        await stream.create_eval(_EVAL, "Refactor quality", [])
+        await stream.on_eval(_EVAL, "rename")
+        aggregate = await stream.evals.get_by_id(str(_EVAL))
+        assert aggregate is not None
+        aggregate.update(UpdateEvalCommand(eval_id=_EVAL, goal=Goal("A sharper goal")))
+        await stream.evals.save(aggregate)
+        return stream
+
+    async def test_a_goal_edit_is_a_new_version_and_a_rename_is_not(self) -> None:
+        evals = await _replayed(await self._stream(), times=1)
+
+        record = await evals.record(str(_EVAL))
+
+        assert record is not None
+        versions = [c.definition_version for c in record.definition_changes]
+        assert versions == [1, 2]
+        assert record.definition_changes[0].changed_at == record.created_at
+        assert record.definition_changes[-1].changed_at == record.updated_at
+
+    async def test_replaying_twice_counts_each_change_once(self) -> None:
+        stream = await self._stream()
+
+        once = await (await _replayed(stream, times=1)).record(str(_EVAL))
+        twice = await (await _replayed(stream, times=2)).record(str(_EVAL))
+
+        assert once is not None and twice is not None
+        assert once.definition_changes == twice.definition_changes
