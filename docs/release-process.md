@@ -527,10 +527,14 @@ scripts/rehearse_upgrade.sh --dump <events-YYYYMMDDTHHMMSSZ.dump> \
 The backup is a `pg_dump -Fc` of the `events` table. The script is safe by
 construction and exits 3 before touching anything unless: the Docker daemon is
 local (`DOCKER_CONTEXT` unset, `DOCKER_HOST` unset or `unix://`, the selected
-context a unix socket), no `syn137rehearse-*` container, volume or network
-exists, `--workdir` (if given) does not exist yet, and the created API and
-collector containers carry no credential (checked by name, before restore and
-again once running). The project name is generated, compose runs with an empty
+context a unix socket), the container, volume and network listings all
+succeed and none shows a `syn137rehearse-*` name, `--workdir` (if given) does
+not exist yet, the created API and collector containers run
+`APP_ENVIRONMENT=selfhost` (durable stores) and carry no credential (checked by
+name, before restore and again once running), and each image's own
+`op_available()`, probed in a one-off container, reports 1Password unusable:
+`op` is shadowed by a stub that always fails, so even a cached login cannot
+resolve the vault. The project name is generated, compose runs with an empty
 host environment, and no docker socket is reachable from inside. It starts the
 `--from` release's digest-pinned compose under that project, restores
 the dump, waits for every projection to reach the head, snapshots counts, then
