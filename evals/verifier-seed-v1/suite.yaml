@@ -1,9 +1,14 @@
-# The verifier seed suite (#967 step 8). Each case is a commit that carries a
-# bug the platform's own verify certified and a second verifier caught
-# (docs/retrospectives/2026-10-06-merge-down-and-the-dropped-start.md).
+# The verifier seed suite (#967 step 8). A `defect` case is a commit that
+# carries a bug the platform's own verify certified and a second verifier
+# caught (docs/retrospectives/2026-10-06-merge-down-and-the-dropped-start.md).
+# A `clean` case is a control: a merged PR head whose later history holds no
+# fix of it. Without controls a verifier that blocks everything is never wrong
+# (docs/research/2026-10-07-eval-best-practices.md).
 #
 # What it measures: given a workflow, a prompt and a model, does verification
-# find the defect? Change any of the three and the version goes up - runs of
+# find the defect, and certify the change that has none? `score` prints both
+# rates per verifier: the catch rate over defects and the false-block rate
+# over clean controls. Change any of the three and the version goes up - runs of
 # different versions are different experiments, and the scorer prints the
 # version beside every row.
 #
@@ -17,6 +22,8 @@
 # v1: four cases, eval-verify-pinned-v1 (Opus 5.5) only, scored 4/4.
 # v2: two cases added (#1679, #1680) and the codex verifier. The Sonnet
 #     verifier was added later under v2: a new workflow, no existing table.
+# v3: six clean controls added, and `polarity` on every case. A clean case
+#     passes only when certified.
 #
 # EVERY VERSION KEEPS ITS SCORE. `history` records each earlier version whose
 # runs launches.jsonl still holds: the tag exactly as those runs carry it, the
@@ -27,10 +34,11 @@ id: verifier-seed-v1
 # version and verifier runs into those same evals; the run carries
 # `suite-version:<n>` and `verifier:<workflow id>`.
 eval_suite: verifier-seed
-version: 2
+version: 3
 goal: >
-  Does the verifier block a change that carries a known escaped bug, and name
-  the defect and the file it lives in?
+  Does the verifier block a change that carries a known escaped bug, naming
+  the defect and the file it lives in, and certify a merged change that has
+  no known defect?
 repository: syntropic137/syntropic137
 workflows:
   - id: eval-verify-pinned-v1
@@ -59,4 +67,15 @@ history:
       - binary-artifact-minio-key
       - codex-cost-limit
       - execution-id-as-eval-id
+      - shared-esp-stream
+  # v2 ran only the codex verifier before v3 superseded it.
+  - version: 2
+    tag: verifier-seed-v1:v2:eval-verify-pinned-codex-v1
+    workflow: eval-verify-pinned-codex-v1
+    cases:
+      - binary-artifact-minio-key
+      - codex-cost-limit
+      - execution-id-as-eval-id
+      - live-commits-unvalidated-sha
+      - repo-privacy-ignores-app
       - shared-esp-stream
