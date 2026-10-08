@@ -32,6 +32,13 @@ Statuses: `not_started`, `running`, `completed`, `failed`, `cancelled`,
 describes a start that has no Execution yet (see Queued Start). There is no paused Execution - see
 "Words we do not use".
 
+`interrupted` is what the platform records when it shuts down under a running
+Execution (#1381). The in-flight Phase's unpushed work is saved to a quarantine
+ref first. Nobody decided the work should stop, so it can be resumed, like
+`failed`. When the shutdown budget (`SYN_EXECUTION_INTERRUPT_BUDGET_S`) runs
+out before the event is written, the Execution stays `running`, and the next
+start's reconciliation fails it as `OrphanedByRestart`.
+
 ## Phase
 
 One step of a Workflow inside an Execution, with its own agent, model, prompt
@@ -118,6 +125,11 @@ is no verdict - it never skips anything.
 
 Not `success`. A Phase that finished a review that blocks the change
 succeeded; its verdict is `blocked`.
+
+A Phase that declares `requires_verdict` MUST report one (PC-116): with no
+verdict it fails ("verify produced no verdict") instead of advancing by
+`order`, because for a review, silence and `blocked` would otherwise look the
+same. A Phase without the declaration keeps the rule above.
 
 ## Skipped Phase
 
@@ -278,6 +290,24 @@ code the original ran on. A pinned commit no branch or tag of origin still
 reaches refuses the Phase; it is never swapped for the branch's head.
 (#1458, ADR-058.)
 
+## Declared Skill / Invoked Skill
+
+A **Declared Skill** is one a Phase names in its `skills:`. The platform
+installs it into the Phase's workspace and, for a claude Phase that scopes its
+tools, grants the `Skill` tool so it can be invoked (#1269). The declared set
+read back is the Phase's Pin, never the Workflow as it stands now.
+
+An **Invoked Skill** is a declared or installed skill the agent actually called,
+counted per call. Declaring is not using: a Phase can be given a skill and never
+reach for it, and `phases[].skill_use.declared_not_invoked` names those.
+
+The two harnesses differ and the difference is reported, not hidden. Claude
+invokes a skill through its `Skill` tool, so the call is on the timeline and
+skill use is **observed**. Codex has no `Skill` tool: its skills arrive as
+context and their use leaves no signal, so a codex Phase reports skill use
+**not observable**, never zero invocations. **Unavailable** means the Pin or the
+timeline could not be read, so nothing is known either way.
+
 ## Starting Checkout
 
 The commit each pinned repository was actually found at once a Phase's
@@ -298,6 +328,24 @@ Execution's start to be exactly where it was left, together with the PR open
 from it. The Resume Phase is checked out at its head; every other Phase still
 reads the pinned commit. Recorded on the resumed Execution's start. (#1513,
 ADR-058.)
+
+A branch the failing attempt made an Own Push to is also continued when origin's
+head is not where the attempt was last seen but is any SHA it pushed there: the
+Execution's own unverified commits, which the Resume Phase re-verifies at that
+head before changing anything. (PC-128.)
+
+## Own Push
+
+A commit the running Phase's own workspace pushed to origin, recorded as
+`PhaseCommitPushed` while the Phase runs, from the workspace's push hook. It
+attributes the push to this Execution and nothing else: it does not say the push
+landed, and it is not a Branch Observation, which records that a ref moved and
+deliberately not who moved it. A Resume reads it to tell the Execution's own
+commits from someone else's; a head that is not an Own Push is still
+Abandoned. Recorded mid-Phase because the run it exists for, one orphaned by a
+restart, never reaches the end of its Phase. Only a push git reports as an update of
+an existing branch to the hook's commit is one: creating a branch names no
+commit in git's output, so a creation is never an Own Push. (PC-128.)
 
 ## Abandoned Branch
 
@@ -793,6 +841,31 @@ failed measurement or write never fails a Phase. Each field is independently
 unknown rather than zero when its read failed. A Phase retried after a failed
 attempt held one workspace per attempt, so it has one usage per attempt. It
 exists to size the platform against `docs/north-star.md`.
+
+## Stale Workspace Directory
+
+A workspace directory on the host that nothing will come back for
+(`StaleWorkspaceDir`, PC-130): no running container mounts it, the Execution
+that owns it (when anything still names one) is not running, and nothing in it
+has changed for the reclaim grace period. Its container is already gone, so
+unlike an **Orphaned Workspace** (`OrphanedWorkspace`, #1560) it cannot be
+guarded from inside.
+
+**Reclaiming** one means deleting it, and only through a `ReclaimableDir`,
+which only a guard can produce. The host-side guard
+(`guard_stale_workspace_dir`) keeps the directory if any commit is not on a
+remote, and archives an uncommitted change as a patch artifact under the
+Execution before the delete. Each deletion is logged as `WorkspaceReclaimed`
+with its size. It is housekeeping, not domain state: no event, no aggregate.
+
+**Workspace ownership** is the durable association from a
+`WorkspaceProvisionedForPhase` event's Workspace to its Execution. The
+`workspace_ownership` projection retains this association after a container
+is removed and rebuilds it during replay. Conflicting owners protect the
+directory. Authored work with no known owner is retained, so its archive
+cannot disappear into an unattributed storage prefix. Only a directory with
+an explicit `CACHEDIR.TAG` is treated as disposable cache data; an installed
+dependency directory can still contain authored changes.
 
 ## Scripted Agent
 

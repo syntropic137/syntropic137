@@ -49,7 +49,7 @@ services:
     # need to bypass the gateway for debugging.
     restart: unless-stopped
     entrypoint: ["/bin/sh", "/selfhost-entrypoint.sh"]
-    command: ["sh", "-c", "uvicorn syn_api.main:app --host $${SYN_API_HOST:-0.0.0.0} --port $${SYN_API_PORT:-8000}"]
+    command: ["sh", "-c", "uvicorn syn_api.main:app --host $${SYN_API_HOST:-0.0.0.0} --port $${SYN_API_PORT:-8000} --timeout-graceful-shutdown 30"]
     env_file:
       - ../.env # Load environment variables from root .env file
     environment:

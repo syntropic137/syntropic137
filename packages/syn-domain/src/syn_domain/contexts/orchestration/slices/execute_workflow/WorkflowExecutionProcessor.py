@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -64,6 +65,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.phase_outcome imp
     completed_phase,
     failed_phase_outcome,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.phase_push import push_recorder
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_retry import (
     retry_lost_terminal_attempt,
 )
@@ -88,6 +90,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.resume_handoff im
     inherited_outputs,
     inherited_phase_ids,
     record_continuation,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.shutdown_interruption import (
+    preserve_interrupted_run,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_guard import (
     already_saved_by_the_completion_gate,
@@ -205,7 +210,11 @@ class WorkflowExecutionProcessor:
         remote_branches: RemoteBranchPort | None = None,
         owed_cancelled_work: ProjectionStore | None = None,
         delegation_evidence: DelegationEvidencePort | None = None,
+        interrupt_budget_seconds: float = 60.0,
     ) -> None:
+        #: How long a shutdown waits for a run's work to be saved and the run
+        #: recorded INTERRUPTED before tearing it down (#1381).
+        self._interrupt_budget_seconds = interrupt_budget_seconds
         self._session_repo = session_repository
         #: Read as a phase that declared delegation completes, to show its
         #: delegate actually ran (#894). See `phase_delegation`.
@@ -388,16 +397,18 @@ class WorkflowExecutionProcessor:
         # must not leave a child that exists and can never run its first phase.
         phase_outputs = await inherited_outputs(self._artifact_query, origin)
         record_continuation(phase_outputs, aggregate.start_pins)
-        await self._journal.open(aggregate)
-
-        # #1387: durable, therefore visible. From here the drain counts this
-        # execution and a maintenance transition may proceed over it; before
-        # here it existed only as a queued task, and `set_mode(active=True)`
-        # was waiting on this line. If `open()` raised - a duplicate stream,
-        # a store that is down - the lease is ended by the worker instead,
-        # which is the other honest answer: nothing started.
-        if admitted is not None:
-            admitted.mark_visible()
+        # #1387: durable, therefore visible. From the write the drain counts
+        # this execution and a maintenance transition may proceed over it;
+        # before it, it existed only as a queued task, and `set_mode(active=True)`
+        # was waiting on this line. #1707: the write is also where whoever
+        # queued it learns it started - not later, where an exception would
+        # read as a start that never happened. If `open()` raised before the
+        # write - a duplicate stream, a store that is down - the lease is
+        # ended by the worker instead, which is the other honest answer:
+        # nothing started.
+        await self._journal.open(
+            aggregate, written=admitted.mark_durable if admitted is not None else None
+        )
 
         phase_results: list[PhaseResult] = []
         all_artifact_ids: list[str] = []
@@ -422,13 +433,16 @@ class WorkflowExecutionProcessor:
                 all_artifact_ids.extend(
                     i for i in dispatch_ctx.kept_artifact_ids if i not in all_artifact_ids
                 )
-                return await self._cancel_execution(
-                    aggregate,
-                    execution_id,
-                    workflow_id,
-                    phase_results,
-                    all_artifact_ids,
-                    started_at,
+                return await record_cancel_and_release(
+                    aggregate=aggregate,
+                    runtime=self._runtimes.of(execution_id),
+                    workspaces=self._workspaces_for(execution_id, {}),
+                    ledger=self._cancelled_work,
+                    execution_id=execution_id,
+                    workflow_id=workflow_id,
+                    phase_results=phase_results,
+                    all_artifact_ids=all_artifact_ids,
+                    started_at=started_at,
                     cancel_reason=aggregate.cancel_reason,
                     phase_id=dispatch_ctx.current_phase_id,
                 )
@@ -461,6 +475,22 @@ class WorkflowExecutionProcessor:
                 failed_phase_id=dispatch_ctx.current_phase_id,
                 kept_artifact_ids=dispatch_ctx.kept_artifact_ids,
             )
+        except asyncio.CancelledError:
+            # Platform shutdown (#1381): neither path above saves the work on a
+            # cancel, so save it and record the run INTERRUPTED before the
+            # teardown below, then let the cancel go on.
+            await preserve_interrupted_run(
+                aggregate=aggregate,
+                runtime=self._runtimes.of(execution_id),
+                workspaces=self._workspaces_for(execution_id, {}),
+                journal=self._journal,
+                workflow_id=workflow_id,
+                execution_id=execution_id,
+                phase_id=dispatch_ctx.current_phase_id,
+                kept_artifact_ids=dispatch_ctx.kept_artifact_ids,
+                budget_seconds=self._interrupt_budget_seconds,
+            )
+            raise
         finally:
             # A shutdown may cancel the minutes-long agent await before either
             # terminal path runs. Tear down only this execution's runtime,
@@ -545,41 +575,6 @@ class WorkflowExecutionProcessor:
             # The phase finished cleanly; a later workflow-level failure
             # (between phases) must not be attributed to it.
             dispatch_ctx.current_phase_id = None
-
-    async def _cancel_execution(
-        self,
-        aggregate: WorkflowExecutionAggregate,
-        execution_id: str,
-        workflow_id: str,
-        phase_results: list[PhaseResult],
-        all_artifact_ids: list[str],
-        started_at: datetime,
-        cancel_reason: str | None = None,
-        phase_id: str | None = None,
-    ) -> WorkflowExecutionResult:
-        """Close open sessions as cancelled and return cancelled result.
-
-        Called when the to-do list empties due to ExecutionCancelledEvent.
-        The aggregate is already CANCELLED; what the save landed is recorded for the PR (#1547).
-
-        ``phase_id`` is the phase that was mid-flight when the cancel landed,
-        from the run's own _DispatchContext for the reason ``failed_phase_id``
-        is: with concurrent runs sharing this processor, anything else could
-        name another execution's phase.
-        """
-        return await record_cancel_and_release(
-            aggregate=aggregate,
-            runtime=self._runtimes.of(execution_id),
-            workspaces=self._workspaces_for(execution_id, {}),
-            ledger=self._cancelled_work,
-            workflow_id=workflow_id,
-            execution_id=execution_id,
-            phase_id=phase_id,
-            cancel_reason=cancel_reason,
-            phase_results=phase_results,
-            all_artifact_ids=all_artifact_ids,
-            started_at=started_at,
-        )
 
     async def _complete_execution(
         self,
@@ -771,6 +766,7 @@ class WorkflowExecutionProcessor:
                 session_id=session_id,
                 observability=self._observability_writer,
                 retry_policy=self._retry_policy,
+                on_push=push_recorder(aggregate, self._journal, todo.phase_id),
             )
             said = result.stream_result.last_agent_message
 
@@ -821,6 +817,7 @@ class WorkflowExecutionProcessor:
                 evidence=self._delegation_evidence,
                 workspace=runtime.workspace_for(todo.phase_id),
                 required_delegate=phase.agent_config.required_delegate,
+                requires_verdict=phase.requires_verdict,
             )
             if failure is not None:
                 logger.error(str(failure))

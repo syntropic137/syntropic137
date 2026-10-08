@@ -1,5 +1,7 @@
+export { EvalHeader } from './EvalHeader'
 export { EvalRunsChart } from './EvalRunsChart'
 export { EvalRunsTable } from './EvalRunsTable'
+export { EvalSummaryStrip } from './EvalSummaryStrip'
 export { EvalVariantsStrip, EvalVariantsTable } from './EvalVariantsTable'
 export { ExecutionEvalBadge } from './ExecutionEvalBadge'
 export { VerdictPill } from './VerdictPill'

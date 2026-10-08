@@ -93,6 +93,11 @@ class ToolOperation:
     to say what failed. `session_error` recorded the reason in its payload all
     along and every reader dropped it (#1196) - the same one-hop loss as #891.
     """
+    skill_name: str | None = None
+    """The skill a `Skill` call invoked, recorded whole on its start (#1269).
+
+    None on every other row, and on starts recorded before the field existed.
+    """
     # Git-specific fields (populated for git_* event types)
     git_sha: str | None = None
     git_message: str | None = None

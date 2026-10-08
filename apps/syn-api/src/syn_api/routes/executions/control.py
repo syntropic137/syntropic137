@@ -5,7 +5,6 @@ Cancel, inject, and state inspection for running executions.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import Literal
 
@@ -24,11 +23,6 @@ from syn_api.types import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["control"])
-
-
-#: How long a prefix miss waits to learn whether the read model is rebuilding.
-#: The probe reads the database; past this the miss stays the 404 it always was.
-_REBUILD_PROBE_TIMEOUT_S = 2.0
 
 
 class ExecutionReadModelRebuilding(HTTPException):
@@ -77,28 +71,16 @@ async def _resolve_execution_id(execution_id: str) -> str:
 async def _execution_read_model_rebuilding() -> bool:
     """Whether `workflow_execution_details` is replaying history right now.
 
-    False when that cannot be told - no subscription, or a probe that failed or
-    hung - so a miss stays the 404 it was before this question was asked.
+    False when that cannot be told, so a miss stays the 404 it was before this
+    question was asked. See `services.read_model_status` for what counts.
     """
-    from syn_api.services.lifecycle import _state
+    from syn_api.services.read_model_status import read_model_status
     from syn_domain.contexts.orchestration.slices.get_execution_detail.projection import (
         WorkflowExecutionDetailProjection,
     )
 
-    service = _state.subscription_service
-    if service is None:
-        return False
-    try:
-        lag = await asyncio.wait_for(
-            service.describe_read_model_lag(), timeout=_REBUILD_PROBE_TIMEOUT_S
-        )
-    except Exception:
-        logger.warning("Read model lag probe failed; reporting a prefix miss as 404", exc_info=True)
-        return False
-    if lag is None or not lag.is_catching_up:
-        return False
-    name = WorkflowExecutionDetailProjection.PROJECTION_NAME
-    return any(behind.projection == name for behind in lag.lagging_projections)
+    status = await read_model_status(WorkflowExecutionDetailProjection.PROJECTION_NAME)
+    return status.rebuilding
 
 
 # =============================================================================

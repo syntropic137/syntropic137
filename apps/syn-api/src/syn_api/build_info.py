@@ -71,6 +71,7 @@ from datetime import UTC, datetime
 from importlib.metadata import version
 
 from syn_api.types import BuildInfo
+from syn_shared.env_constants import ENV_BUILD_IMAGE_TAG
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +79,7 @@ logger = logging.getLogger(__name__)
 PACKAGE_NAME = "syn-api"
 
 #: Stamped by the image build; see module docstring.
-ENV_IMAGE_TAG = "SYN_BUILD_IMAGE_TAG"
+ENV_IMAGE_TAG = ENV_BUILD_IMAGE_TAG
 ENV_COMMIT = "SYN_BUILD_COMMIT"
 
 #: What to say where a release has to be a non-empty string and there is none.

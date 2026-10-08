@@ -86,22 +86,22 @@ describe("CLI YAML loader agrees with the PyYAML reference", () => {
     );
   });
 
-  it("reads implement-v3's merge keys as ten phases", () => {
+  it("reads implement-v3's merge keys as eight phases", () => {
     const rel = "workflows/sdlc/implement-v3/workflow.yaml";
     const document = parseYaml(fs.readFileSync(path.join(REPO_ROOT, rel), "utf-8"), rel);
     expect(phasesOf(document).map((p) => p.id)).toEqual([
       "premise", "implement", "verify",
-      "fix", "reverify", "fix_2", "reverify_2", "fix_3", "reverify_3",
+      "fix", "reverify", "fix_2", "reverify_2",
       "finalize_pr",
     ]);
   });
 
-  it("reads reverify-pr as nine phases", () => {
+  it("reads reverify-pr as seven phases", () => {
     const rel = "workflows/sdlc/reverify-pr/workflow.yaml";
     const document = parseYaml(fs.readFileSync(path.join(REPO_ROOT, rel), "utf-8"), rel);
     expect(phasesOf(document).map((p) => p.id)).toEqual([
       "prepare", "verify",
-      "fix", "reverify", "fix_2", "reverify_2", "fix_3", "reverify_3",
+      "fix", "reverify", "fix_2", "reverify_2",
       "finalize_pr",
     ]);
   });

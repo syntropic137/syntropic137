@@ -59,7 +59,7 @@ class _Starter:
         del on_failure
         self.offered.append(execution_id)
 
-    def holds_request(self, execution_id: str) -> bool:
+    def holds_execution(self, execution_id: str) -> bool:
         del execution_id
         return False
 

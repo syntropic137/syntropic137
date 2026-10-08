@@ -1,8 +1,8 @@
 """Ask the exporter, from the host, whether this workspace's sessions landed.
 
 THE POINT IS WHO ASKS. The finalizer inside the container also reports a
-verdict, and `capture_status` can read it, but the agent runs as the same Unix
-user as the finalizer and can print anything it can. This module runs the
+verdict on stderr, but the agent runs as the same Unix user as the finalizer
+and can print anything it can. This module runs the
 exporter as a distinct command issued BY THE HOST and reads its exit status and
 JSON, which is a channel the agent has no handle on.
 
