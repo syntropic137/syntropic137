@@ -352,6 +352,14 @@ place of a 404. First come, first served. A start already queued in a process
 is never queued twice there; across processes, the Execution's first write is
 what refuses a second start.
 
+The execution list reports Queued Starts too, as rows with status `queued`,
+counted in `status_counts.queued` and selected by `status=queued` (PC-124).
+A start waiting in this process is listed with its position; a direct start
+whose Execution Request is still owed a start but held by no process is
+listed from that record, with no position. A resume's record is keyed by its
+parent, so an unheld resume is reported on the parent (`resume_start`), not
+as a row. Withdrawing a queued resume is not yet possible (#1677).
+
 ## Execution Request
 
 The durable record that a direct start (`POST /workflows/{id}/execute`) was

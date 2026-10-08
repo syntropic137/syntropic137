@@ -13,6 +13,7 @@ import { Activity } from 'lucide-react'
 import { useMemo } from 'react'
 import {
   Card,
+  DEFAULT_STATUSES,
   EmptyState,
   ListPageHeader,
   ListPagination,
@@ -26,6 +27,9 @@ import { useRowSelection } from '../../hooks/useRowSelection'
 import { formatExecutionIds, formatExecutionsForAgent } from '../../utils/executionExport'
 import { ExecutionCardList } from './ExecutionCardList'
 import { ExecutionTable } from './ExecutionTable'
+
+/** An accepted start waiting for a slot is a status only executions have (PC-124). */
+const EXECUTION_STATUSES = [{ value: 'queued', label: 'Queued' }, ...DEFAULT_STATUSES]
 
 function ExecutionEmptyState({ searchQuery }: { searchQuery: string }) {
   return (
@@ -111,6 +115,7 @@ export function ExecutionList() {
         setTimeWindow={setTimeWindow}
         reset={resetView}
         isDefault={isDefaultView}
+        statuses={EXECUTION_STATUSES}
       />
 
       <StaleResults stale={stale} failed={failed} onRetry={retry}>
