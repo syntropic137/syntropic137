@@ -110,20 +110,58 @@ describe('SkillUseLine', () => {
 })
 
 describe('SkillUseOverview', () => {
+  // Every phase observed: an unused declared skill is a measured non-use.
   const SUMMARY: ExecutionSkillUse = {
-    declared: ['architecture', 'principles-and-patterns', 'types'],
+    declared: ['architecture', 'principles-and-patterns'],
     invoked: [{ name: 'architecture', count: 3 }],
     never_invoked: ['principles-and-patterns'],
-    not_known: ['types'],
-    summary_display: '3 skills declared · 1 invoked · 1 never invoked · 1 use unknown',
+    not_known: [],
+    summary_display: '2 skills declared · 1 invoked · 1 never invoked',
   }
 
-  it('separates never invoked from use that could not be seen', () => {
+  // A codex phase ran too, so the same skill's use is unknown, not never.
+  const BLIND: ExecutionSkillUse = {
+    declared: ['architecture', 'types'],
+    invoked: [{ name: 'architecture', count: 3 }],
+    never_invoked: [],
+    not_known: ['types'],
+    summary_display: '2 skills declared · 1 invoked · 1 use unknown',
+  }
+
+  it('flags a skill no phase invoked when every phase was observed', () => {
     const { container } = render(<SkillUseOverview use={SUMMARY} />)
     expect(container.textContent).toContain(SUMMARY.summary_display)
     expect(screen.getByTestId('skill-use-never-invoked').textContent).toBe('principles-and-patterns')
     expect(screen.getByTestId('skill-use-never-invoked')).toHaveClass('skill-use--warn')
+    expect(container.textContent).not.toContain('Use unknown')
+  })
+
+  it('says use unknown, never "never invoked", when a phase was blind', () => {
+    const { container } = render(<SkillUseOverview use={BLIND} />)
+    expect(screen.queryByTestId('skill-use-never-invoked')).toBeNull()
     expect(container.textContent).toContain('Use unknown')
+    expect(container.textContent).toContain('types')
+  })
+
+  it('lists what was declared apart from what was invoked', () => {
+    const mixed: ExecutionSkillUse = {
+      ...SUMMARY,
+      declared: ['architecture'],
+      invoked: [
+        { name: 'architecture', count: 2 },
+        { name: 'extra', count: 1 },
+      ],
+      never_invoked: [],
+      summary_display: '1 skill declared · 1 invoked · 0 never invoked · 1 undeclared invoked',
+    }
+    render(<SkillUseOverview use={mixed} />)
+    expect(screen.getByText('Declared', { selector: 'dt' })).toBeInTheDocument()
+    expect(screen.getByTestId('skill-use-declared').textContent).toBe('architecture')
+  })
+
+  it('says none when no phase declared a skill', () => {
+    render(<SkillUseOverview use={{ ...SUMMARY, declared: [], never_invoked: [] }} />)
+    expect(screen.getByTestId('skill-use-declared').textContent).toBe('none')
   })
 
   it('reads a server that sends no summary as unavailable', () => {
@@ -174,7 +212,7 @@ describe('execution detail page', () => {
         invoked: [{ name: 'architecture', count: 3 }],
         never_invoked: [],
         not_known: ['principles-and-patterns', 'types'],
-        summary_display: '3 skills declared · 1 invoked · 0 never invoked · 2 use unknown',
+        summary_display: '3 skills declared · 1 invoked · 2 use unknown',
       },
       total_phases: 3,
       completed_phases: 3,
@@ -206,7 +244,7 @@ describe('execution detail page', () => {
     )
 
     const overview = screen.getByRole('region', { name: 'Skill use' })
-    expect(overview.textContent).toContain('3 skills declared · 1 invoked · 0 never invoked · 2 use unknown')
+    expect(overview.textContent).toContain('3 skills declared · 1 invoked · 2 use unknown')
 
     const timeline = document.getElementById('phase-timeline')
     if (!timeline) throw new Error('phase timeline not rendered')

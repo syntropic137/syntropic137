@@ -93,6 +93,7 @@ export function SkillUseOverview({ use }: { use: ExecutionSkillUse | undefined }
       </section>
     )
   }
+  const declared = use.declared ?? []
   const invoked = use.invoked ?? []
   const never = use.never_invoked ?? []
   const unknown = use.not_known ?? []
@@ -101,6 +102,10 @@ export function SkillUseOverview({ use }: { use: ExecutionSkillUse | undefined }
       <h2 className="provenance-card__title">Skills</h2>
       <p className="skill-use-overview__summary">{use.summary_display}</p>
       <dl className="provenance-pins__list">
+        <dt>Declared</dt>
+        <dd data-testid="skill-use-declared">
+          {declared.length === 0 ? 'none' : <Names names={declared} />}
+        </dd>
         {invoked.length > 0 && (
           <>
             <dt>Invoked</dt>

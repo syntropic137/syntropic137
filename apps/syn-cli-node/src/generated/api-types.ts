@@ -4307,10 +4307,11 @@ export interface components {
          * ExecutionSkillUseSummary
          * @description Skill use across every phase of one execution (feedback 01308bcf).
          *
-         *     A declared skill is only ``never_invoked`` when EVERY phase that declared
-         *     it was observed. If any of them ran where use cannot be seen (codex), or
-         *     could not be read, its use is ``not_known`` - the #1269 misreading this
-         *     model exists to refuse, one level up.
+         *     A declared skill is only ``never_invoked`` when EVERY phase was observed.
+         *     A phase may invoke a skill it never declared, so one phase that ran where
+         *     use cannot be seen (codex), or could not be read, could have used any of
+         *     them: every declared skill no observed phase invoked is then ``not_known``
+         *     - the #1269 misreading this model exists to refuse, one level up.
          */
         ExecutionSkillUseSummary: {
             /** Declared */
