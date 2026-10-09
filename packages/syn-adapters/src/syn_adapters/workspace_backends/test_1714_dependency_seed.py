@@ -11,6 +11,7 @@ import hashlib
 import os
 import shutil
 import subprocess
+import threading
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
@@ -33,6 +34,8 @@ from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects 
 )
 
 if TYPE_CHECKING:
+    from contextlib import AbstractContextManager
+
     from syn_adapters.workspace_backends.service.workspace_service import WorkspaceService
 
 pytestmark = pytest.mark.unit
@@ -419,3 +422,218 @@ class _LocalWorkspace:
             duration_ms=1.0,
             stderr=done.stderr,
         )
+
+
+def _aged_store(tmp_path: Path, keys: list[SeedKey], *, max_bytes: int) -> DependencySeedStore:
+    """``keys`` published from caches of many files, then last copied two hours ago."""
+    store = DependencySeedStore(tmp_path / "seeds", max_bytes=max_bytes)
+    long_ago = time.time() - 7200
+    for index, key in enumerate(keys):
+        built = _built_cache(tmp_path / f"built-{index}", "x" * 100)
+        for n in range(20):
+            (built / "archive" / f"dep{n}.py").write_text("y" * 100)
+        store.publish(key, built)
+        os.utime(tmp_path / "seeds" / key.relative_path, (long_ago + index, long_ago + index))
+    return store
+
+
+def _files_under(root: Path) -> set[Path]:
+    return {path.relative_to(root) for path in root.rglob("*") if not path.is_dir()}
+
+
+def _clone_of_uv_lock(tmp_path: Path) -> tuple[Path, Path]:
+    workspace_dir = tmp_path / "ws"
+    clone = workspace_dir / "repos" / "app"
+    clone.mkdir(parents=True)
+    (clone / "uv.lock").write_bytes(_UV_LOCK)
+    return workspace_dir, clone
+
+
+def test_a_burst_over_budget_is_pruned_by_cache_hits_alone_once_the_grace_expires(
+    tmp_path: Path,
+) -> None:
+    hit = SeedKey("uv", "org/app", _sha(_UV_LOCK))
+    others = [SeedKey("uv", "org/other", "f" * 64), SeedKey("pnpm", "org/other", "0" * 64)]
+    store = _aged_store(tmp_path, [*others, hit], max_bytes=10**9)
+    seed_bytes = _size_of(tmp_path / "seeds" / hit.relative_path)
+    store._max_bytes = seed_bytes
+    seeds = [tmp_path / "seeds" / key.relative_path for key in [*others, hit]]
+    # The burst: every seed published within the grace, three times the budget.
+    for path in seeds:
+        os.utime(path)
+    assert store.prune() == 0
+    assert sum(_size_of(path) for path in seeds if path.exists()) == 3 * seed_bytes
+
+    long_ago = time.time() - 7200
+    for path in seeds:
+        os.utime(path, (long_ago, long_ago))
+    workspace_dir, clone = _clone_of_uv_lock(tmp_path)
+    # Only cache hits from here on: nothing is published again.
+    assert store.seed(workspace_dir, [("org/app", clone)]).copied == [hit]
+
+    assert sum(_size_of(path) for path in seeds if path.exists()) <= seed_bytes
+    assert (tmp_path / "seeds" / hit.relative_path).is_dir()
+
+
+def test_a_prune_during_a_copy_never_deletes_the_seed_being_copied(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The reported race: prune snapshots an aged seed, then a copy touches it and starts."""
+    key = SeedKey("uv", "org/app", _sha(_UV_LOCK))
+    store = _aged_store(tmp_path, [key], max_bytes=1)
+    source = tmp_path / "seeds" / key.relative_path
+    seed_files = _files_under(source)
+    snapshotted, go = threading.Event(), threading.Event()
+    pruned: list[int] = []
+    real_recorded_size = dependency_seed._recorded_size
+
+    def size_then_pause(seed: Path) -> int:
+        size = real_recorded_size(seed)
+        if threading.current_thread() is pruner:
+            snapshotted.set()  # its stale mtime is taken; hold until the copy is underway
+            assert go.wait(10)
+        return size
+
+    pruner = threading.Thread(target=lambda: pruned.append(store.prune()))
+    monkeypatch.setattr(dependency_seed, "_recorded_size", size_then_pause)
+
+    def copy_pausing_for_the_prune(src: Path, destination: Path) -> None:
+        copied = 0
+
+        def copy_one(file_src: str, file_dst: str) -> None:
+            nonlocal copied
+            shutil.copy2(file_src, file_dst)
+            copied += 1
+            if copied == 3:  # partway through, let the prune finish
+                go.set()
+                pruner.join(10)
+
+        shutil.copytree(src, destination, symlinks=True, copy_function=copy_one)
+
+    monkeypatch.setattr(dependency_seed, "_copy_writable", copy_pausing_for_the_prune)
+    workspace_dir, clone = _clone_of_uv_lock(tmp_path)
+    pruner.start()
+    assert snapshotted.wait(10)
+
+    outcome = store.seed(workspace_dir, [("org/app", clone)])
+    pruner.join(10)
+
+    assert pruned == [0]
+    assert source.is_dir()
+    assert outcome.copied == [key]
+    assert _files_under(workspace_dir / ".cache" / "uv") == seed_files
+
+
+def test_a_copy_never_starts_on_a_seed_a_prune_is_deleting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Prune has decided under its lease; a copy arriving now waits, then finds no seed."""
+    key = SeedKey("uv", "org/app", _sha(_UV_LOCK))
+    store = _aged_store(tmp_path, [key], max_bytes=1)
+    deleting, go, copy_started = threading.Event(), threading.Event(), threading.Event()
+    real_remove = dependency_seed._remove
+
+    def remove_after_a_pause(root: Path) -> None:
+        if threading.current_thread() is pruner:
+            deleting.set()
+            assert go.wait(10)
+        real_remove(root)
+
+    def copy_noting_it_started(src: Path, destination: Path) -> None:
+        def copy_one(file_src: str, file_dst: str) -> None:
+            copy_started.set()
+            shutil.copy2(file_src, file_dst)
+            pruner.join(10)  # the delete lands while this copy is reading
+
+        shutil.copytree(src, destination, symlinks=True, copy_function=copy_one)
+
+    monkeypatch.setattr(dependency_seed, "_remove", remove_after_a_pause)
+    monkeypatch.setattr(dependency_seed, "_copy_writable", copy_noting_it_started)
+    pruner = threading.Thread(target=store.prune)
+    pruner.start()
+    assert deleting.wait(10)
+    workspace_dir, clone = _clone_of_uv_lock(tmp_path)
+    outcomes: list[SeedOutcome] = []
+    seeder = threading.Thread(
+        target=lambda: outcomes.append(store.seed(workspace_dir, [("org/app", clone)]))
+    )
+    seeder.start()
+
+    # Without the lease the copy starts at once; with it, it cannot start at all.
+    assert not copy_started.wait(0.5)
+    go.set()
+    pruner.join(10)
+    seeder.join(10)
+
+    assert outcomes[0].missing == [(key, clone)]
+    assert outcomes[0].copied == []
+    assert not (workspace_dir / ".cache" / "uv").exists()
+
+
+def test_a_copy_that_breaks_partway_leaves_no_cache_at_all(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    key = SeedKey("uv", "org/app", _sha(_UV_LOCK))
+    store = _aged_store(tmp_path, [key], max_bytes=10**9)
+    source = tmp_path / "seeds" / key.relative_path
+    seed_files = _files_under(source)
+
+    def copy_whose_seed_vanishes(src: Path, destination: Path) -> None:
+        copied = 0
+
+        def copy_one(file_src: str, file_dst: str) -> None:
+            nonlocal copied
+            shutil.copy2(file_src, file_dst)
+            copied += 1
+            if copied == 3:  # anything that ignores the lease, e.g. an operator's rm
+                dependency_seed._remove(src)
+
+        shutil.copytree(src, destination, symlinks=True, copy_function=copy_one)
+
+    monkeypatch.setattr(dependency_seed, "_copy_writable", copy_whose_seed_vanishes)
+    workspace_dir, clone = _clone_of_uv_lock(tmp_path)
+
+    outcome = store.seed(workspace_dir, [("org/app", clone)])
+
+    cache = workspace_dir / ".cache" / "uv"
+    # Whole or absent, never partial; here the seed is gone, so absent.
+    assert not cache.exists() or _files_under(cache) == seed_files
+    assert not cache.exists()
+    assert outcome.copied == []
+
+
+def test_prune_skips_a_seed_whose_lease_is_held(tmp_path: Path) -> None:
+    key = SeedKey("uv", "org/app", "a" * 64)
+    store = _aged_store(tmp_path, [key], max_bytes=1)
+    source = tmp_path / "seeds" / key.relative_path
+
+    with dependency_seed._seed_lease(source, exclusive=False):
+        assert store.prune() == 0
+        assert source.is_dir()
+    assert store.prune() > 0
+    assert not source.exists()
+
+
+def test_prune_rereads_the_lru_clock_of_a_seed_copied_after_its_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    key = SeedKey("uv", "org/app", _sha(_UV_LOCK))
+    store = _aged_store(tmp_path, [key], max_bytes=1)
+    source = tmp_path / "seeds" / key.relative_path
+    workspace_dir, clone = _clone_of_uv_lock(tmp_path)
+    real_lease = dependency_seed._seed_lease
+    copied_first: list[SeedOutcome] = []
+
+    def lease_after_a_copy(
+        seed: Path, *, exclusive: bool, blocking: bool = True
+    ) -> AbstractContextManager[None]:
+        # Between prune's snapshot and its lease, a whole copy runs and ends.
+        if exclusive and not copied_first:
+            copied_first.append(store.seed(workspace_dir, [("org/app", clone)]))
+        return real_lease(seed, exclusive=exclusive, blocking=blocking)
+
+    monkeypatch.setattr(dependency_seed, "_seed_lease", lease_after_a_copy)
+
+    assert store.prune() == 0
+    assert copied_first[0].copied == [key]
+    assert source.is_dir()

@@ -32,11 +32,17 @@ repository could point anywhere on the host) is not read.
 
 Retention is LRU by the time a seed was last copied, under one byte budget
 (`SYN_DEPENDENCY_SEED_MAX_BYTES`), so the store cannot grow without bound.
+Every `seed` and every `publish` prunes, so a store a burst of publications
+left over budget converges once the grace expires, even if only cache hits
+follow. A copy holds a shared lease on its seed (`_seed_lease`) and a prune
+deletes only under an exclusive one, so a seed is never deleted mid-copy.
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import fcntl
 import hashlib
 import logging
 import os
@@ -50,7 +56,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Final, Protocol
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Iterable, Iterator
 
     from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
         ExecutionResult,
@@ -114,8 +120,9 @@ _WARM_ENVIRONMENT: Final[dict[str, str]] = {"UV_NO_CONFIG": "1"}
 #: A warm that has not finished by then is abandoned and the run goes on cold.
 _WARM_TIMEOUT_SECONDS: Final = 900
 
-#: A seed copied less than this long ago is never pruned, so a prune cannot
-#: delete a seed out from under a copy that is reading it.
+#: A seed copied or published less than this long ago is never pruned, even
+#: over budget, so a seed a burst of runs is about to reuse is not thrashed
+#: out and rebuilt. It is NOT what protects a copy in flight: the lease is.
 _PRUNE_GRACE_SECONDS: Final = 3600
 
 #: A GitHub ``owner/name``. Checked because it becomes two path components of
@@ -179,20 +186,46 @@ class DependencySeedStore:
         ``workspace_dir`` is the host side of `/workspace`; each clone is
         ``(repository, host path of its checkout)``. A seed the store does not
         have is reported missing, not raised: that workspace installs cold.
+
+        A copy that fails partway removes the whole of that tool's cache from
+        the workspace, so it installs cold rather than from half a seed.
+
+        Ends with a `prune`: a cache hit is the only event a store that is
+        over budget may ever see again.
         """
         outcome = SeedOutcome()
         for repository, clone_dir in clones:
             for key in seed_keys(repository, clone_dir):
-                source = self._root / key.relative_path
+                self._seed_one(key, clone_dir, workspace_dir / ".cache" / key.tool, outcome)
+        try:
+            self.prune()
+        except OSError:
+            logger.exception("Could not prune the dependency seed store %s", self._root)
+        return outcome
+
+    def _seed_one(
+        self, key: SeedKey, clone_dir: Path, destination: Path, outcome: SeedOutcome
+    ) -> None:
+        source = self._root / key.relative_path
+        try:
+            with _seed_lease(source, exclusive=False):
+                # Checked under the lease: a prune may have deleted the seed
+                # between any earlier look and taking it.
                 if not source.is_dir():
                     outcome.missing.append((key, clone_dir))
-                    continue
-                # Touched BEFORE the copy: it is both the LRU clock and the
-                # grace `prune` honours for a seed being read right now.
+                    return
+                # Touched under the lease, so a prune waiting on it re-reads
+                # this as the seed's LRU clock before deciding.
                 os.utime(source)
-                _copy_writable(source, workspace_dir / ".cache" / key.tool)
-                outcome.copied.append(key)
-        return outcome
+                _copy_writable(source, destination)
+        except OSError:
+            logger.exception("Could not copy dependency seed %s; installing cold", _label(key))
+            # The destination is fresh (no agent has run yet), so all of it
+            # goes, including any earlier clone's seed for the same tool.
+            shutil.rmtree(destination, ignore_errors=True)
+            outcome.copied = [copied for copied in outcome.copied if copied.tool != key.tool]
+            return
+        outcome.copied.append(key)
 
     def publish(self, key: SeedKey, built_cache: Path) -> None:
         """Install a cache THE PLATFORM built as the seed for ``key``, then prune.
@@ -212,7 +245,11 @@ class DependencySeedStore:
         # copytree carries the source's mtime over, and mtime is the LRU clock:
         # without this a seed published a moment ago could be pruned first.
         os.utime(staging)
+        size = _size(staging)
         _make_read_only(staging)
+        # Recorded once here, so a prune on every cache hit reads one small
+        # file per seed instead of walking every file of every seed.
+        _write_size(target, size)
         try:
             staging.rename(target)
         except OSError:
@@ -224,25 +261,84 @@ class DependencySeedStore:
         """Delete least recently copied seeds until the store fits its budget.
 
         Returns the bytes freed. A seed copied within the grace period is kept
-        even over budget: deleting it could truncate a copy in flight.
+        even over budget, so a burst does not thrash. A seed being copied
+        right now is kept whatever its age: its lease is held, and a seed is
+        deleted only under an exclusive lease, after re-reading its LRU clock.
         """
         seeds = sorted(
-            (path.stat().st_mtime, path, _size(path))
+            (path.stat().st_mtime, path, _recorded_size(path))
             for path in self._root.glob("*/*/*/*")
             # Staging directories too: one a crashed publish left behind is
             # otherwise never deleted. A live one is inside the grace.
             if path.is_dir()
         )
-        total = sum(size for _, _, size in seeds)
+        remaining = sum(size for _, _, size in seeds)
         freed = 0
         cutoff = time.time() - _PRUNE_GRACE_SECONDS
-        for mtime, path, size in seeds:
-            if total - freed <= self._max_bytes or mtime > cutoff:
+        for snapshot_mtime, path, size in seeds:
+            # mtimes only move forward, so nothing after this is past the grace.
+            if remaining <= self._max_bytes or snapshot_mtime > cutoff:
                 break
-            _remove(path)
+            try:
+                with _seed_lease(path, exclusive=True, blocking=False):
+                    # Re-read under the lease: a copy may have touched the
+                    # seed since the snapshot this loop is sorted by.
+                    try:
+                        mtime = path.stat().st_mtime
+                    except FileNotFoundError:
+                        remaining -= size  # another prune got there first
+                        continue
+                    if mtime > cutoff:
+                        continue
+                    _remove(path)
+                    _sidecar(path, ".size").unlink(missing_ok=True)
+            except BlockingIOError:
+                continue  # being copied right now, so not least recently used
+            remaining -= size
             freed += size
             logger.info("Pruned dependency seed %s (%d bytes)", path, size)
         return freed
+
+
+@contextlib.contextmanager
+def _seed_lease(seed: Path, *, exclusive: bool, blocking: bool = True) -> Iterator[None]:
+    """Hold a lease on ``seed``: shared to copy it, exclusive to delete it.
+
+    A `flock` on a sidecar beside the seed (the seed itself is read-only).
+    The lock file is never deleted, so every holder locks the same inode; one
+    is left per seed ever published, which is a few bytes each.
+
+    Host-local: correct for the API processes on one host that share the
+    store's filesystem, and not over NFS.
+    """
+    lock_path = _sidecar(seed, ".lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        operation = fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH
+        fcntl.flock(fd, operation if blocking else operation | fcntl.LOCK_NB)
+        yield
+    finally:
+        os.close(fd)  # closing the last descriptor releases the flock
+
+
+def _sidecar(seed: Path, suffix: str) -> Path:
+    # Beside the seed, never inside it: the seed's directories are 0o555.
+    return seed.parent / f"{seed.name}{suffix}"
+
+
+def _write_size(seed: Path, size: int) -> None:
+    staged = _sidecar(seed, f".size-{uuid.uuid4().hex}")
+    staged.write_text(str(size))
+    staged.replace(_sidecar(seed, ".size"))
+
+
+def _recorded_size(seed: Path) -> int:
+    """``seed``'s size as `publish` recorded it, or walked when nothing was."""
+    try:
+        return int(_sidecar(seed, ".size").read_text())
+    except (FileNotFoundError, ValueError):
+        return _size(seed)
 
 
 def _copy_writable(source: Path, destination: Path) -> None:
