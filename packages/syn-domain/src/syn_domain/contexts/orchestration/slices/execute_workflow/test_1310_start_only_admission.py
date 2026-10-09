@@ -241,8 +241,10 @@ class _Consumed:
     """What a drain handed the workspace and the prompt, per execution."""
 
     def __init__(self) -> None:
+        #: The execution whose workspace is being provisioned right now.
+        self.current = ""
         self.secrets: dict[str, tuple[list[str], dict[str, str]]] = {}
-        self.prompts: dict[str, tuple[str | None, dict[str, object]]] = {}
+        self.prompts: dict[str, tuple[str | None, dict[str, str]]] = {}
 
 
 _REPOS = [RepositoryRef.from_slug("acme/widgets"), RepositoryRef.from_slug("acme/gadgets")]
@@ -270,13 +272,12 @@ def consumed(monkeypatch: pytest.MonkeyPatch) -> _Consumed:
         repos = kwargs["repositories"]
         pins = kwargs["pinned_commits"]
         assert isinstance(repos, list) and isinstance(pins, dict)
-        seen.secrets[_current[0]] = (list(repos), dict(pins))
+        seen.secrets[seen.current] = (list(repos), dict(pins))
         return MagicMock()
 
     async def nothing(*_args: object, **_kwargs: object) -> object:
         return ()
 
-    _current: list[str] = [""]
     monkeypatch.setattr(service.SetupPhaseSecrets, "create", staticmethod(create))
     monkeypatch.setattr(provisioning, "verify_provisioned_checkout", nothing)
     monkeypatch.setattr(provisioning, "require_codex_sandbox", nothing)
@@ -288,7 +289,6 @@ def consumed(monkeypatch: pytest.MonkeyPatch) -> _Consumed:
         "_inject_phase_artifacts",
     ):
         monkeypatch.setattr(provisioning.WorkspaceProvisionHandler, step, nothing)
-    seen.current = _current  # type: ignore[attr-defined]
     return seen
 
 
@@ -299,7 +299,7 @@ def _agent_reaching_world(seen: _Consumed) -> _World:
     )
 
     def create_workspace(**kwargs: object) -> object:
-        seen.current[0] = str(kwargs["execution_id"])  # type: ignore[attr-defined]
+        seen.current = str(kwargs["execution_id"])
         return world.workspace.create_workspace.return_value
 
     world.workspace.create_workspace.side_effect = create_workspace
@@ -313,7 +313,7 @@ def _prompt_recorder(seen: _Consumed) -> AsyncMock:
         _workflow_id: str,
         repo_url: str | None,
         _outputs: object,
-        inputs: dict[str, object],
+        inputs: dict[str, str],
     ) -> str:
         seen.prompts[execution_id] = (repo_url, dict(inputs))
         msg = "stop at the prompt"
@@ -337,7 +337,7 @@ async def _start(world: _World, processor: WorkflowExecutionProcessor, execution
     return result.status
 
 
-def _normalized(payloads: list[dict[str, object]], execution_id: str) -> list[dict[str, object]]:
+def _normalized(payloads: list[object], execution_id: str) -> list[object]:
     """Event payloads with what legitimately differs between two runs removed."""
     volatile = {"execution_id", "session_id", "workspace_id"}
 
@@ -354,10 +354,10 @@ def _normalized(payloads: list[dict[str, object]], execution_id: str) -> list[di
             return value.replace(execution_id, "<exec>")
         return value
 
-    return [scrub(p) for p in payloads]  # type: ignore[misc]
+    return [scrub(p) for p in payloads]
 
 
-async def _payloads(world: _World, execution_id: str) -> list[dict[str, object]]:
+async def _payloads(world: _World, execution_id: str) -> list[object]:
     return [
         e.event.model_dump(mode="json")
         for e in await stored_envelopes(world.store)

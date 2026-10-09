@@ -415,7 +415,14 @@ class WorkflowExecutionProcessor:
                 started_at=started_at,
             )
         return await self._drain(
-            aggregate, workflow_id, phases, inputs, repos, origin, phase_outputs, started_at
+            aggregate,
+            workflow_id,
+            phases,
+            _DispatchContext(inputs=inputs),
+            repos,
+            origin,
+            phase_outputs,
+            started_at,
         )
 
     async def _start(
@@ -500,7 +507,7 @@ class WorkflowExecutionProcessor:
             aggregate,
             aggregate.workflow_id or "",
             pins.pinned_phases,
-            dict(pins.inputs),
+            _DispatchContext(inputs=dict(pins.inputs)),
             repos or None,
             pins.resumed_from,
             phase_outputs,
@@ -512,7 +519,7 @@ class WorkflowExecutionProcessor:
         aggregate: WorkflowExecutionAggregate,
         workflow_id: str,
         phases: list[ExecutablePhase],
-        inputs: dict[str, Any],
+        dispatch_ctx: _DispatchContext,
         repos: list[RepositoryRef] | None,
         origin: ResumeOrigin | None,
         phase_outputs: PhaseOutputCache,
@@ -525,8 +532,6 @@ class WorkflowExecutionProcessor:
         phase_results: list[PhaseResult] = []
         all_artifact_ids: list[str] = []
         completed_phase_ids = inherited_phase_ids(origin)
-        dispatch_ctx = _DispatchContext(inputs=inputs)
-
         try:
             await self._drain_todo_list(
                 execution_id=execution_id,
