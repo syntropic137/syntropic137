@@ -53,6 +53,13 @@ PACKAGE_JSON_RELPATHS = (
     "apps/syn-cli-node/package.json",
     "apps/syn-dashboard-ui/package.json",
     "apps/syn-docs/package.json",
+    # syn-ui joined the product version at the cutover release
+    # (docs/syn-ui-rollout.md), so the shell's UI version equals the API's.
+    "apps/syn-ui/package.json",
+    "packages/syn-ui/data/package.json",
+    "packages/syn-ui/skyline-core/package.json",
+    "packages/syn-ui/skyline-svelte-v5/package.json",
+    "packages/syn-ui/themes/package.json",
 )
 
 # The plugin schemas advertise the version in their `$id`. `--check` reporting

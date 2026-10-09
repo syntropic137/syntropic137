@@ -8,7 +8,7 @@ import { getBuildInfo } from '@syn137/syn-ui-data'
 import { buildView, type BuildView } from '@syn137/skyline-core/screens/version'
 import { resource } from '../lib/load.svelte'
 
-/** apps/syn-ui/package.json's version, stamped by vite.config.ts. Never the product version. */
+/** apps/syn-ui/package.json's version (lockstep with the product, bump_version.py), stamped by vite.config.ts. The served release still comes from the API. */
 export const UI_VERSION: string = __SYN_UI_VERSION__
 
 export function useBuild(): { readonly view: BuildView } {

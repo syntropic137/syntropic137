@@ -9,8 +9,7 @@ packages:
   # syn-ui: the Svelte 5 app and its Skyline component library
   # (packages/syn-ui/CONVENTIONS.md). Listed one by one, not as a glob, so
   # scripts/workflows/bump_version.py can be checked against this file.
-  # Pre-release: versioned 0.0.0 independently until the cutover release,
-  # when apps/syn-ui joins the product version (#1788).
+  # Versioned in lockstep with the product since the cutover release (#1788).
   - apps/syn-ui
   - packages/syn-ui/data
   - packages/syn-ui/skyline-core
