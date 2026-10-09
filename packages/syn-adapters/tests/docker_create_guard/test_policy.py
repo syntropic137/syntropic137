@@ -15,16 +15,7 @@ import pytest
 from agentic_isolation.config import codex_sandbox_seccomp_profile
 
 from syn_adapters.docker_create_guard.__main__ import policy_from_env
-from syn_adapters.docker_create_guard.policy import (
-    _DEVICE_FIELDS,
-    _HOST_NAMESPACE_FIELDS,
-    _PROC_MASK_FIELDS,
-    _UNCONFINED_SECURITY_OPTS,
-    CreatePolicy,
-    JsonObject,
-    JsonValue,
-    Refusal,
-)
+from syn_adapters.docker_create_guard.policy import CreatePolicy, JsonObject, JsonValue, Refusal
 from syn_adapters.workspace_backends.docker.docker_sidecar_adapter import DEFAULT_SIDECAR_IMAGE
 from syn_shared.settings.workspace_images import (
     DEFAULT_WORKSPACE_IMAGE,
@@ -277,26 +268,40 @@ class TestHostAccessIsRefused:
         assert POLICY.check(b"{nope", FakeHost()) is not None
 
 
-class TestEveryNamedShapeIsRefused:
-    """Iterates the policy's own lists, so dropping any member fails the case named for it."""
+# Spelled out here rather than imported from the policy: a case generated from
+# the policy's own list disappears with the member it was meant to pin.
+NAMESPACE_FIELDS = ("NetworkMode", "PidMode", "IpcMode", "UTSMode", "UsernsMode", "CgroupnsMode")
+DEVICE_FIELDS = ("Devices", "DeviceRequests", "DeviceCgroupRules")
+UNCONFINED_SECURITY_OPTS = (
+    "seccomp=unconfined",
+    "seccomp:unconfined",
+    "apparmor=unconfined",
+    "apparmor:unconfined",
+    "label=disable",
+    "label:disable",
+    "systempaths=unconfined",
+)
+PROC_MASK_FIELDS = ("MaskedPaths", "ReadonlyPaths")
 
-    @pytest.mark.parametrize("name", _HOST_NAMESPACE_FIELDS)
+
+class TestEveryNamedShapeIsRefused:
+    @pytest.mark.parametrize("name", NAMESPACE_FIELDS)
     @pytest.mark.parametrize("mode", ["host", "container:syn137-docker-create-guard"])
     def test_namespace_join(self, name: str, mode: str) -> None:
         refusal = _check(_with(workspace_body(), **{name: mode}))
         assert refusal is not None and f"{name}={mode}" in refusal.reason
 
-    @pytest.mark.parametrize("name", _DEVICE_FIELDS)
+    @pytest.mark.parametrize("name", DEVICE_FIELDS)
     def test_device_field(self, name: str) -> None:
         refusal = _check(_with(workspace_body(), **{name: ["c 1:3 rwm"]}))
         assert refusal is not None and name in refusal.reason
 
-    @pytest.mark.parametrize("opt", sorted(_UNCONFINED_SECURITY_OPTS))
+    @pytest.mark.parametrize("opt", UNCONFINED_SECURITY_OPTS)
     def test_unconfined_security_opt(self, opt: str) -> None:
         refusal = _check(_with(workspace_body(), SecurityOpt=[opt]))
         assert refusal is not None and repr(opt) in refusal.reason
 
-    @pytest.mark.parametrize("name", _PROC_MASK_FIELDS)
+    @pytest.mark.parametrize("name", PROC_MASK_FIELDS)
     def test_proc_masks(self, name: str) -> None:
         refusal = _check(_with(workspace_body(), **{name: []}))
         assert refusal is not None and name in refusal.reason
@@ -310,8 +315,9 @@ class TestEveryNamedShapeIsRefused:
         assert refusal is not None and "VolumeDriver" in refusal.reason
 
     def test_root_configured_as_slash_allows_no_bind(self) -> None:
+        # normpath keeps a double leading slash, so "//etc" starts with "/" + "/".
         refusal = _check(
-            _with(workspace_body(), Binds=["/etc:/x"]), CreatePolicy(workspace_root="/")
+            _with(workspace_body(), Binds=["//etc:/x"]), CreatePolicy(workspace_root="/")
         )
         assert refusal is not None and "only paths under" in refusal.reason
 
