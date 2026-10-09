@@ -112,7 +112,7 @@
           {/each}
         </ul>
       {/if}
-      {#if prompt}<AgentPromptButton {prompt} label="Copy for an agent" />{/if}
+      {#if prompt}<div class="sky-wf__prompt-copy"><AgentPromptButton {prompt} label="Copy for an agent" /></div>{/if}
     </PageHeader>
 
     {#if running}
@@ -281,6 +281,10 @@
   }
   .sky-wf__skills svg {
     color: var(--ds-color-accent);
+  }
+  .sky-wf__prompt-copy {
+    flex: 1 1 100%;
+    min-width: 0;
   }
   .sky-wf__section {
     display: flex;

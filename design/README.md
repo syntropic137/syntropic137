@@ -83,5 +83,6 @@ Boards for these screens are frozen history. Change the code, not the board.
 | Repos | `Repos.dc.html`, `PhoneRepos.dc.html` | `/repos` | #1764 | 2026-10-08 |
 | Eval Trend panel | `Eval.dc.html`, `PhoneEval.dc.html` (trend section) | `/evals/:evalId` | #1764 | 2026-10-08 |
 | Workflows list trend cards | `Workflows.dc.html`, `PhoneWorkflows.dc.html` (duration graph, Faster/Slower/Steady) | `/workflows` | #1764 | 2026-10-08 |
+| Workflow detail and runs (with Performance panel) | `Workflow.dc.html`, `PhoneWorkflow.dc.html` | `/workflows/:workflowId`, `/workflows/:workflowId/runs` | #1764 | 2026-10-08 |
 
-Sessions is partial: finish it from its board. The Workflow detail Performance panel on `Workflow.dc.html` and `PhoneWorkflow.dc.html` is not shipped yet (#1788), so that board is still a live spec.
+Sessions is partial: finish it from its board. The Workflow detail Performance panel shipped from the canvas export's newer `Workflow.dc.html` and `PhoneWorkflow.dc.html`; the snapshots in `canvas/` predate that panel.
