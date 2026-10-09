@@ -111,7 +111,6 @@ async def _moved_gitlinks(workspace: GitWorkspace, repo: str) -> frozenset[str]:
         "status",
         "--porcelain=v2",
         "--ignore-submodules=none",
-        "--untracked-files=all",
         hardened=True,
     )
     moved: set[str] = set()
