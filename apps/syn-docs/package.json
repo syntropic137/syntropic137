@@ -13,8 +13,6 @@
     "generate:cli": "pnpm --filter @syntropic137/cli generate:docs"
   },
   "dependencies": {
-    "@react-three/drei": "10.7.7",
-    "@react-three/fiber": "9.5.0",
     "@syn137/skyline-themes": "workspace:*",
     "@theguild/remark-mermaid": "0.3.0",
     "@xyflow/react": "12.10.0",
@@ -28,8 +26,7 @@
     "next": "16.3.8",
     "react": "19.2.0",
     "react-dom": "19.2.0",
-    "shiki": "3.2.1",
-    "three": "0.182.0"
+    "shiki": "3.2.1"
   },
   "devDependencies": {
     "@playwright/test": "1.59.0",
@@ -39,7 +36,6 @@
     "@types/node": "22.14.0",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
-    "@types/three": "0.182.0",
     "postcss": "8.5.28",
     "tailwindcss": "4.1.0",
     "typescript": "5.8.2"
