@@ -726,7 +726,9 @@ def test_refused_candidate_never_reaches_teardown_or_the_active_config(rig: Rig)
     assert "compose names resources outside" in res.output and "syn137_db_data" in res.output
     # The baseline really ran: restored and started before the candidate.
     assert any("pg_restore" in line for line in res.trace), "baseline never ran"
-    assert any(" up " in line and " api" in line for line in res.trace), "baseline api never started"
+    assert any(" up " in line and " api" in line for line in res.trace), (
+        "baseline api never started"
+    )
     active = (rig.root / "work" / "docker-compose.syntropic137.yaml").read_text()
     assert "FOREIGN_VOLUME" not in active, "the refused candidate replaced the active config"
     assert_torn_down_by_name_only(res)
@@ -766,12 +768,20 @@ CLEANUP_MUTATIONS = {
         test_refused_candidate_never_reaches_teardown_or_the_active_config,
     ),
     "copy-before-validate": (
-        [('    check_rendered "$stage"', '    cp "$1/docker-compose.syntropic137.yaml" "$WORK/"\n    check_rendered "$stage"')],
+        [
+            (
+                '    check_rendered "$stage"',
+                '    cp "$1/docker-compose.syntropic137.yaml" "$WORK/"\n    check_rendered "$stage"',
+            )
+        ],
         test_refused_candidate_never_reaches_teardown_or_the_active_config,
     ),
     "old-use-version-and-teardown": (
         [
-            ('    check_rendered "$stage"', '    cp "$1/docker-compose.syntropic137.yaml" "$WORK/"\n    check_rendered "$WORK"'),
+            (
+                '    check_rendered "$stage"',
+                '    cp "$1/docker-compose.syntropic137.yaml" "$WORK/"\n    check_rendered "$WORK"',
+            ),
             (
                 'for name in $(owned_names "$kind"); do rm_owned "$kind" "$name"; done',
                 "dc down -v >/dev/null 2>&1 || true",
@@ -782,7 +792,10 @@ CLEANUP_MUTATIONS = {
     "delete-scope": (
         [
             ('| grep -E "^${PROJECT}[-_]" || true', "|| true"),
-            ('    case "$2" in "${PROJECT}-"*|"${PROJECT}_"*) ;; *) echo', '    case "$2" in *) ;; x) echo'),
+            (
+                '    case "$2" in "${PROJECT}-"*|"${PROJECT}_"*) ;; *) echo',
+                '    case "$2" in *) ;; x) echo',
+            ),
         ],
         test_refused_candidate_never_reaches_teardown_or_the_active_config,
     ),
