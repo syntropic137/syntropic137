@@ -7,7 +7,7 @@ export type FieldMessageTone = 'danger' | 'warning' | 'neutral'
 
 interface FieldProps {
   size?: ContractSize
-  /** Marks the field invalid (coral border, aria-invalid). Implied by `messageTone="danger"`. */
+  /** Marks the field invalid (coral border, aria-invalid). Implied by `messageTone="danger"` while a `message` shows. */
   invalid?: boolean
   /** Line under the field; linked with aria-describedby. */
   message?: string

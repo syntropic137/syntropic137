@@ -26,7 +26,8 @@
   const inputId = $derived(id ?? `${uid}-input`)
   const messageId = `${uid}-message`
   const tone = $derived(messageTone ?? (invalid ? 'danger' : 'neutral'))
-  const isInvalid = $derived(invalid || tone === 'danger')
+  // A danger tone with no message showing is only the caller's default: no red until there is something to say.
+  const isInvalid = $derived(invalid || (tone === 'danger' && !!message))
   const describedByAll = $derived([describedBy, message ? messageId : null].filter(Boolean).join(' ') || undefined)
 </script>
 

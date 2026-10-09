@@ -2,6 +2,11 @@
   Desktop and tablet top bar (TopNav board): wordmark, the capsule with all
   eight sections, then Live, search and Run workflow. From 48rem only; the
   phone gets PhoneTop + PhoneDock instead.
+
+  One row from 64rem, never wrapping: the capsule shows icons only (labels
+  stay for screen readers and as tooltips) until 90rem, where the labels
+  fit beside the actions (at 80rem they do not, by about 90px). Feedback is
+  icon-only on desktop; its label would push the row over at 1400px.
 -->
 <script lang="ts">
   import type { LiveState } from '@syn137/skyline-core/patterns'
@@ -20,9 +25,9 @@
 
   <nav class="sky-capsule" aria-label="Primary">
     {#each SECTIONS as s (s.key)}
-      <a class="sky-capsule__item" href={href(s.href)} aria-current={active === s.key ? 'page' : undefined}>
+      <a class="sky-capsule__item" href={href(s.href)} title={s.label} aria-current={active === s.key ? 'page' : undefined}>
         <span class="sky-capsule__icon"><NavIcon name={s.key} /></span>
-        <span>{s.label}</span>
+        <span class="sky-capsule__label">{s.label}</span>
       </a>
     {/each}
   </nav>
@@ -31,7 +36,9 @@
     <LiveBadge state={live} />
     {#if FEEDBACK_LOCAL_ONLY}
       <!-- Lazy and dev-only: a production build carries none of the feedback code in its first load. -->
-      {#await import('./FeedbackButton.svelte') then { default: FeedbackButton }}<FeedbackButton />{/await}
+      <span class="sky-topnav__feedback" title="Send feedback">
+        {#await import('./FeedbackButton.svelte') then { default: FeedbackButton }}<FeedbackButton />{/await}
+      </span>
     {/if}
     <button class="sky-topnav__search" type="button" aria-label="Search or jump to" aria-keyshortcuts="Meta+K Control+K" onclick={onsearch}>
       <NavIcon name="search" size={14} />
@@ -154,6 +161,50 @@
   .sky-topnav__run:focus-visible {
     outline: var(--sky-focus-ring-width) solid var(--sky-color-focus);
     outline-offset: var(--sky-focus-ring-offset);
+  }
+
+  .sky-topnav__feedback {
+    display: contents;
+  }
+
+  /* Desktop: one row, no wrapping (owner tweak, Oct 8 2026). */
+  @media (min-width: 64rem) {
+    .sky-topnav,
+    .sky-capsule,
+    .sky-topnav__actions {
+      flex-wrap: nowrap;
+    }
+    .sky-topnav {
+      gap: var(--ds-space-4);
+    }
+    .sky-topnav__actions {
+      gap: var(--ds-space-2);
+      flex-shrink: 0;
+    }
+    .sky-capsule__item {
+      padding: 0 var(--ds-space-2-5);
+    }
+    .sky-capsule__label {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+      white-space: nowrap;
+    }
+    /* Icon-only Feedback; its aria-label and the wrapper's title name it. */
+    .sky-topnav__feedback :global(.sky-feedback-btn > span) {
+      display: none;
+    }
+  }
+  @media (min-width: 90rem) {
+    .sky-capsule__label {
+      position: static;
+      width: auto;
+      height: auto;
+      overflow: visible;
+      clip-path: none;
+    }
   }
 
   @media (pointer: coarse) {
