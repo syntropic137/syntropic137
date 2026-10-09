@@ -19,7 +19,11 @@
       "svelte": "./src/patterns/index.ts",
       "default": "./src/patterns/index.ts"
     },
-    "./styles.css": "./src/styles.css"
+    "./styles.css": "./src/styles.css",
+    "./examples": {
+      "types": "./src/examples.ts",
+      "default": "./src/examples.ts"
+    }
   },
   "files": [
     "src"

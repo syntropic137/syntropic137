@@ -66,7 +66,22 @@ export interface UsageModel {
   bandLabel: string
 }
 
-export function usageModel(p: Pick<UsageMeterProps, 'cost' | 'tokens' | 'costRows' | 'rates' | 'costBy'>): UsageModel {
+export interface UsageBandProps {
+  tokens: TokenBreakdown
+  /** Rate badges per series, e.g. { cacheRead: '0.1× rate' }. */
+  rates?: Partial<Record<keyof TokenBreakdown, string>>
+}
+
+export interface UsageBandModel {
+  total: number
+  /** Non-empty series in TOKEN_SERIES order, with counts and shares. */
+  series: UsageSeriesRow[]
+  /** "Tokens by type: Cache read 81.9 percent, Input 17.0 percent, Output 1.1 percent". */
+  bandLabel: string
+}
+
+/** The Usage Band (tokens by type), shared by the Usage Meter and the landing. */
+export function usageBand(p: UsageBandProps): UsageBandModel {
   const t = p.tokens
   const total = t.input + t.output + t.cacheWrite + t.cacheRead
   const series = TOKEN_SERIES.filter((s) => t[s.key] > 0).map((s) => {
@@ -76,6 +91,18 @@ export function usageModel(p: Pick<UsageMeterProps, 'cost' | 'tokens' | 'costRow
     if (rate) row.rate = rate
     return row
   })
+  return {
+    total,
+    series,
+    bandLabel:
+      total > 0
+        ? `Tokens by type: ${series.map((s) => `${s.label} ${s.percent.replace('%', ' percent')}`).join(', ')}`
+        : 'No tokens recorded',
+  }
+}
+
+export function usageModel(p: Pick<UsageMeterProps, 'cost' | 'tokens' | 'costRows' | 'rates' | 'costBy'>): UsageModel {
+  const band = usageBand(p)
   const values = p.costRows.map((r) => (typeof r.value === 'number' && r.value > 0 ? r.value : 0))
   const sum = values.reduce((s, v) => s + v, 0)
   const max = Math.max(0, ...values)
@@ -88,13 +115,10 @@ export function usageModel(p: Pick<UsageMeterProps, 'cost' | 'tokens' | 'costRow
   }))
   return {
     cost: p.cost ?? formatCostPrecise(sum),
-    tokensTotal: total,
-    tokensLabel: `${formatTokens(total, { case: 'upper' })} tokens`,
-    series,
+    tokensTotal: band.total,
+    tokensLabel: `${formatTokens(band.total, { case: 'upper' })} tokens`,
+    series: band.series,
     costRows,
-    bandLabel:
-      total > 0
-        ? `Tokens by type: ${series.map((s) => `${s.label} ${s.percent.replace('%', ' percent')}`).join(', ')}`
-        : 'No tokens recorded',
+    bandLabel: band.bandLabel,
   }
 }
