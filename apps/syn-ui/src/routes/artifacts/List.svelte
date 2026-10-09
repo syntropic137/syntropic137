@@ -209,7 +209,7 @@
             </div>
             <ul class="sky-arts__cards">
               {#each g.files as a, i (a.id)}
-                <li>
+                <li data-sky-row>
                   <a class="sky-arts__card" href={artifactHref(a)}>
                     <span class="sky-arts__card-top">
                       <span class="sky-arts__glyph" data-tone={tone(a.artifact_type)} aria-hidden="true">
@@ -240,7 +240,7 @@
         <ul class="sky-arts__rows">
           {#each rows as a (a.id)}
             {@const exec = execOf(a)}
-            <li>
+            <li data-sky-row>
               <a class="sky-arts__row" href={artifactHref(a)}>
                 <span class="sky-arts__glyph" data-tone={tone(a.artifact_type)} aria-hidden="true">
                   <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 1.75h5l3 3v9.5H4zM9 1.75v3h3M6 8h4M6 10.75h4"></path></svg>

@@ -135,7 +135,7 @@
     {/if}
     <ol class="sky-sessions__list" bind:this={listEl} aria-label="Sessions" aria-busy={list.loading} style:padding-top="{range.padTop}px" style:padding-bottom="{range.padBottom}px">
       {#each visible as s, i (s.id)}
-        <li class="sky-sessions__item" aria-setsize={rows.length} aria-posinset={range.start + i + 1}>
+        <li class="sky-sessions__item" data-sky-row aria-setsize={rows.length} aria-posinset={range.start + i + 1}>
           <a class="sky-sessions__row" href={href(`/sessions/${encodeURIComponent(s.id)}`)} use:measure>
             <StatusBadge status={s.status} shape="square" />
             <span class="sky-sessions__name">

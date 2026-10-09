@@ -26,7 +26,12 @@ export function isTyping(el: Element | null): boolean {
   return el instanceof HTMLInputElement && !TEXT_INPUTS.has(el.type)
 }
 
-const rows = (): HTMLElement[] => [...document.querySelectorAll<HTMLElement>(`#sky-main ${ROW}`)]
+/** Rendered and visible: a screen may keep a second layout's rows in the DOM, hidden by CSS. */
+const shown = (el: Element) => el.getClientRects().length > 0
+
+const rows = (): HTMLElement[] => [...document.querySelectorAll<HTMLElement>(`#sky-main ${ROW}`)].filter(shown)
+
+const modalOpen = () => [...document.querySelectorAll(MODAL)].some(shown)
 
 /** Focus is on the page itself or a list row, not on a control that owns these keys. */
 function focusIsFree(): boolean {
@@ -113,12 +118,17 @@ export function startKeyboard(): () => void {
       mod: e.metaKey || e.ctrlKey,
       alt: e.altKey,
       typing: isTyping(e.target instanceof Element ? e.target : document.activeElement),
-      modal: !!document.querySelector(MODAL),
+      modal: modalOpen(),
       at: e.timeStamp,
     })
     state = r.state
     if (r.action ? perform(r.action, e.key) : r.handled) e.preventDefault()
   }
   addEventListener('keydown', onKey)
-  return () => removeEventListener('keydown', onKey)
+  // Lets tests (and anything else) know the lazily loaded handler is live.
+  document.documentElement.dataset.skyKeys = 'ready'
+  return () => {
+    removeEventListener('keydown', onKey)
+    delete document.documentElement.dataset.skyKeys
+  }
 }

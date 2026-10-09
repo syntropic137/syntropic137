@@ -79,7 +79,7 @@
         </div>
         <ul class="sky-repos__rows">
           {#each g.repos as r (r.key)}
-            <li class="sky-repos__row">
+            <li class="sky-repos__row" data-sky-row>
               <span class="sky-repos__glyph" aria-hidden="true">
                 <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 2.75h8v10.5h-8a1.5 1.5 0 0 1-1.5-1.5v-7.5a1.5 1.5 0 0 1 1.5-1.5zM3 11.75a1.5 1.5 0 0 1 1.5-1.5h8"></path></svg>
               </span>

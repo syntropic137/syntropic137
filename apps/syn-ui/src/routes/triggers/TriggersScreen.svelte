@@ -122,7 +122,7 @@
             </div>
             <ul class="sky-triggers__rules">
               {#each g.rules as t (t.trigger_id)}
-                <li>
+                <li data-sky-row>
                   <div class="sky-triggers__row" data-open={openId === t.trigger_id ? true : undefined}>
                     <span class="sky-triggers__bolt" aria-hidden="true">
                       <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M9 1.75L3.5 9h4l-1 5.25L12.5 7h-4z"></path></svg>

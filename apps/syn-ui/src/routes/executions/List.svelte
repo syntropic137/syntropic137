@@ -207,7 +207,7 @@
         </div>
         <ul class="sky-execs__rows">
           {#each g.rows as r (r.workflow_execution_id)}
-            <li>
+            <li data-sky-row>
               <RunRow
                 href={href(`/executions/${r.workflow_execution_id}`)}
                 status={r.status}

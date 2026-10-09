@@ -187,7 +187,7 @@
       {#each list.data.rows as row (row.eval.eval_id)}
         {@const e = row.eval}
         {@const verdict = e.run_count > 0 ? normalizeVerdict(e.last_verdict) : 'unscored'}
-        <li class="sky-evals__row">
+        <li class="sky-evals__row" data-sky-row>
           <VerdictBlock class="sky-evals__block" {verdict} size={44} />
           <div class="sky-evals__row-body">
             <div class="sky-evals__row-top">

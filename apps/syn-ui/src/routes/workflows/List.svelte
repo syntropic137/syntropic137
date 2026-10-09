@@ -188,7 +188,7 @@
         {@const cat = workflowCategory(w.workflow_type)}
         {@const names = skills[w.id] ?? []}
         {@const trend = trendOf(w)}
-        <li class="sky-wfs__card">
+        <li class="sky-wfs__card" data-sky-row>
           <div class="sky-wfs__top">
             <span class="sky-wfs__type">
               <span class="sky-wfs__type-icon">
