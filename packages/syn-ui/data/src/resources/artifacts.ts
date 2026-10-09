@@ -1,4 +1,4 @@
-import { type ListQuery, listQueryParams, request, seg } from '../client'
+import { type ListQuery, bucketTimeWindow, listQueryParams, request, seg } from '../client'
 import type { ArtifactListResponse, ArtifactResponse, ArtifactSummary } from '../types'
 import { cached } from '../keys'
 
@@ -22,7 +22,8 @@ function toArtifactSummary(row: ApiArtifactSummary): ArtifactSummary {
 }
 
 export function listArtifacts(query: ListQuery, scope: ArtifactScope = {}, signal?: AbortSignal): Promise<ArtifactPage> {
-  return cached('listArtifacts', [query, scope], (s) => fetchArtifactPage(query, scope, s), { signal, staleAfter: 'list' })
+  const q = bucketTimeWindow(query)
+  return cached('listArtifacts', [q, scope], (s) => fetchArtifactPage(q, scope, s), { signal, staleAfter: 'list' })
 }
 
 async function fetchArtifactPage(query: ListQuery, scope: ArtifactScope, signal: AbortSignal): Promise<ArtifactPage> {

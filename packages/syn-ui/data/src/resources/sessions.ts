@@ -1,4 +1,4 @@
-import { type ListQuery, listQueryParams, request, seg } from '../client'
+import { type ListQuery, bucketTimeWindow, listQueryParams, request, seg } from '../client'
 import type { components } from '../generated/api-types'
 import type { SessionResponse } from '../types'
 import { cached } from '../keys'
@@ -9,9 +9,10 @@ export type SessionListItem = components['schemas']['SessionSummaryResponse']
 
 /** Sessions are additionally scoped to one workflow; every other filter is shared. */
 export function listSessions(query: ListQuery & { workflow_id?: string }, signal?: AbortSignal): Promise<SessionListResponse> {
-  return cached('listSessions', [query], (s) => {
-    const params = listQueryParams(query)
-    if (query.workflow_id) params.set('workflow_id', query.workflow_id)
+  const q = bucketTimeWindow(query)
+  return cached('listSessions', [q], (s) => {
+    const params = listQueryParams(q)
+    if (q.workflow_id) params.set('workflow_id', q.workflow_id)
     return request('/sessions', { query: params, signal: s })
   }, { signal, staleAfter: 'list' })
 }

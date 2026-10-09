@@ -1,4 +1,4 @@
-import { type ListQuery, listQueryParams, request, seg } from '../client'
+import { type ListQuery, bucketTimeWindow, listQueryParams, request, seg } from '../client'
 import type {
   ExecutionBudgetInfo,
   ExecutionDetailResponse,
@@ -24,7 +24,8 @@ export function getExecution(executionId: string, signal?: AbortSignal): Promise
 
 /** One page of executions across every workflow (shared list query, #1159). */
 export function listExecutions(query: ListQuery, signal?: AbortSignal): Promise<ExecutionListResponse> {
-  return cached('listExecutions', [query], (s) => request('/executions', { query: listQueryParams(query), signal: s }), { signal, staleAfter: 'list' })
+  const q = bucketTimeWindow(query)
+  return cached('listExecutions', [q], (s) => request('/executions', { query: listQueryParams(q), signal: s }), { signal, staleAfter: 'list' })
 }
 
 /** The execution budget's occupancy, which the list reports beside every page (PC-124). */

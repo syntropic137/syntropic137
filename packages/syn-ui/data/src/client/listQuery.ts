@@ -101,3 +101,24 @@ export function listQueryParams(
   if (query.q) params.set('q', query.q)
   return params
 }
+
+/** Width of a time-window bucket, ms. */
+export const TIME_BUCKET_MS = 60_000
+
+/**
+ * The query with its time bounds snapped to the minute (lower bound down,
+ * upper bound up), so "the last hour" asked twice within a minute is the
+ * same cache key and the same request. A window computed from `Date.now()`
+ * otherwise differs every millisecond: seed and effect diverge, back
+ * navigation misses the cache, and each live refresh adds an entry.
+ * At most one bucket wider than asked; never narrower.
+ */
+export function bucketTimeWindow<Q extends ListQuery>(query: Q, bucketMs: number = TIME_BUCKET_MS): Q {
+  const snap = (iso: string | undefined, round: (n: number) => number) => {
+    if (!iso) return iso
+    const ms = Date.parse(iso)
+    return Number.isNaN(ms) ? iso : new Date(round(ms / bucketMs) * bucketMs).toISOString()
+  }
+  if (!query.started_after && !query.started_before) return query
+  return { ...query, started_after: snap(query.started_after, Math.floor), started_before: snap(query.started_before, Math.ceil) }
+}

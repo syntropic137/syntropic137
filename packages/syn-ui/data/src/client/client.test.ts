@@ -110,3 +110,30 @@ describe('mapLimit', () => {
     expect(peak).toBe(2)
   })
 })
+
+describe('time-window bucketing', () => {
+  it('two "last hour" cutoffs computed ms apart within a minute give one cache key', async () => {
+    const { bucketTimeWindow } = await import('./listQuery')
+    const { queryKey } = await import('./queryKey')
+    const base = Date.parse('2026-10-08T12:00:00.000Z')
+    const at = (now: number) => bucketTimeWindow({ page: 1, page_size: 50, started_after: new Date(now - 3_600_000).toISOString() })
+    const a = at(base + 1_234)
+    const b = at(base + 58_999)
+    expect(queryKey('listExecutions', [a])).toBe(queryKey('listExecutions', [b]))
+    expect(a.started_after).toBe('2026-10-08T11:00:00.000Z') // floored: never narrower than asked
+    expect(queryKey('listExecutions', [at(base + 61_000)])).not.toBe(queryKey('listExecutions', [a]))
+    expect(bucketTimeWindow({ page: 1, page_size: 1, started_before: '2026-10-08T11:00:00.001Z' }).started_before).toBe('2026-10-08T11:01:00.000Z')
+  })
+  it('listExecutions keys by the bucketed window, so a second call within the minute is a cache hit', async () => {
+    const { listExecutions } = await import('../resources/executions')
+    const { queryCache } = await import('./queryCache')
+    queryCache.clear()
+    const fetch = vi.fn(async () => json({ executions: [], total: 0, page: 1, page_size: 50 }))
+    configureClient({ fetch, baseUrl: '/api/v1', fixtures: false })
+    const base = Date.parse('2026-10-08T12:00:10.000Z')
+    await listExecutions({ page: 1, page_size: 50, started_after: new Date(base - 3_600_000).toISOString() })
+    await listExecutions({ page: 1, page_size: 50, started_after: new Date(base + 7 - 3_600_000).toISOString() })
+    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(String((fetch.mock.calls[0] as unknown[])[0])).toContain('started_after=2026-10-08T11%3A00%3A00.000Z')
+  })
+})
