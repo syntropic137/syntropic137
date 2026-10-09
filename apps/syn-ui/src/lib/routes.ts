@@ -63,7 +63,8 @@ export const routes: RouteDef[] = [
     path: '/executions/:executionId',
     area: 'executions',
     title: () => 'Execution',
-    crumbs: (p) => [{ label: 'Executions', href: '/executions' }, { label: 'Execution', id: short(p.executionId) }],
+    // Same parents the page sets once it loads (Workflows > workflow > Execution), so the trail never swaps under the cursor.
+    crumbs: (p) => [{ label: 'Workflows', href: '/workflows' }, { label: 'Workflow' }, { label: 'Execution', id: short(p.executionId) }],
     load: () => import('../routes/executions/Detail.svelte'),
   },
 

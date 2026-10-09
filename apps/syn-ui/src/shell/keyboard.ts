@@ -63,6 +63,9 @@ function openRow(): boolean {
   const row = activeRow()
   const link = row?.matches('a[href]') ? (row as HTMLAnchorElement) : row?.querySelector<HTMLAnchorElement>('a[href]')
   if (!link) return false
+  // Opening consumes the selection: the list stays on screen until the next
+  // page's chunk loads, and a stale active row would swallow the next Backspace.
+  row?.removeAttribute(ACTIVE)
   link.click()
   return true
 }
