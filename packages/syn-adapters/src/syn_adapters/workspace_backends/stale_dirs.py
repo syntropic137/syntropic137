@@ -251,6 +251,11 @@ class SubprocessHostWorkspaceGit:
         out = await _git(repo, "rev-list", "--count", "--all", "HEAD", "--not", "--remotes")
         return int(out.strip() or b"0")
 
+    async def unpushed_bundle(self, repo: str) -> bytes:
+        """`UnpushedBundler`: the same commits `unpushed_commits` counts, as a bundle."""
+        await self._refuse_command_config(repo)
+        return await _git(repo, "bundle", "create", "-", "--all", "--not", "--remotes")
+
     async def uncommitted_patch(self, repo: str) -> bytes:
         await self._refuse_command_config(repo)
         if _is_bare(repo):
