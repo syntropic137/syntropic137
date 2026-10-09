@@ -140,17 +140,66 @@ def _own_nodes(scope: ast.AST) -> list[ast.AST]:
     return out
 
 
+def _bound_names(scope: ast.AST) -> set[str]:
+    """Every name a function binds itself: its parameters and assignment targets.
+
+    A local binding shadows a module-level one of the same name, whatever its type.
+    """
+    if not isinstance(scope, ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda):
+        return set()
+    args = scope.args
+    names = {a.arg for a in [*args.posonlyargs, *args.args, *args.kwonlyargs]}
+    names.update(a.arg for a in (args.vararg, args.kwarg) if a is not None)
+    names.update(
+        n.id for n in _own_nodes(scope) if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store)
+    )
+    return names
+
+
+def _imports_get_settings(tree: ast.Module) -> bool:
+    """True when the module imports `get_settings` from `syn_shared.settings`."""
+    return any(
+        isinstance(node, ast.ImportFrom)
+        and (node.module or "").startswith("syn_shared.settings")
+        and any(alias.name == "get_settings" and alias.asname is None for alias in node.names)
+        for node in ast.walk(tree)
+    )
+
+
+def _root_names(scope: ast.AST, has_get_settings: bool) -> set[str]:
+    """Names bound to the root `Settings` directly inside `scope`."""
+    names = _instance_names(scope, "Settings")
+    if has_get_settings:
+        for node in _own_nodes(scope):
+            if isinstance(node, ast.Assign) and _is_get_settings(node.value, has_get_settings):
+                names.update(t.id for t in node.targets if isinstance(t, ast.Name))
+    return names
+
+
+def _is_get_settings(node: ast.AST | None, has_get_settings: bool) -> bool:
+    return (
+        has_get_settings
+        and isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "get_settings"
+    )
+
+
 def settings_reads(source: str, class_name: str, accessors: frozenset[str]) -> set[str]:
     """Attributes read on a `class_name` instance in `source`.
 
     The receiver must be identifiably the settings instance: a name bound to
-    it in the same scope or the module, `Cls().field`, or
-    `<root settings>.<accessor>.field`. An attribute of the same name on any
-    other object is not a read of the setting, and neither is a comment or
-    docstring that mentions the class (#1805 verify B2).
+    it in the same scope or (unless a local binding shadows it) the module,
+    `Cls().field`, or `<root>.<accessor>.field` where `<root>` is itself
+    identifiably the root `Settings`: a name bound to one, `Settings()`, or
+    `get_settings()` imported from `syn_shared.settings`. An attribute of the
+    same name on any other object is not a read of the setting, and neither
+    is a comment or docstring that mentions the class (#1805 verify B2).
     """
     tree = ast.parse(source)
+    has_get_settings = _imports_get_settings(tree)
     module_names = _instance_names(tree, class_name)
+    module_roots = _root_names(tree, has_get_settings)
     scopes: list[ast.AST] = [tree]
     scopes += [
         n
@@ -159,8 +208,19 @@ def settings_reads(source: str, class_name: str, accessors: frozenset[str]) -> s
     ]
     reads: set[str] = set()
     for scope in scopes:
+        shadowed = _bound_names(scope)
         local = _instance_names(scope, class_name) if scope is not tree else set()
-        bound = module_names | local
+        bound = (module_names - shadowed) | local
+        local_roots = _root_names(scope, has_get_settings) if scope is not tree else set()
+        roots = (module_roots - shadowed) | local_roots
+
+        def is_root(node: ast.AST, roots: set[str] = roots) -> bool:
+            return (
+                (isinstance(node, ast.Name) and node.id in roots)
+                or _constructs(node, "Settings")
+                or _is_get_settings(node, has_get_settings)
+            )
+
         for node in _own_nodes(scope):
             if not (isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load)):
                 continue
@@ -168,7 +228,11 @@ def settings_reads(source: str, class_name: str, accessors: frozenset[str]) -> s
             if (
                 (isinstance(receiver, ast.Name) and receiver.id in bound)
                 or _constructs(receiver, class_name)
-                or (isinstance(receiver, ast.Attribute) and receiver.attr in accessors)
+                or (
+                    isinstance(receiver, ast.Attribute)
+                    and receiver.attr in accessors
+                    and is_root(receiver.value)
+                )
             ):
                 reads.add(node.attr)
     return reads
@@ -269,6 +333,7 @@ class TestSettingsReceiver:
             "    ws = WorkspaceSettings()\n"
             "    return ws.a, WorkspaceSettings().b, get_settings().workspace.c, other.d\n"
         )
+        source = "from syn_shared.settings import get_settings\n" + source
         reads = settings_reads(source, "WorkspaceSettings", frozenset({"workspace"}))
         assert reads == {"a", "b", "c"}
 
@@ -280,6 +345,33 @@ class TestSettingsReceiver:
             "    return settings.b\n"
         )
         assert settings_reads(source, "WorkspaceSettings", frozenset()) == {"a"}
+
+    def test_an_accessor_on_an_unrelated_object_does_not_count(self) -> None:
+        source = (
+            "from syn_shared.settings import Settings, get_settings\n"
+            "def f(other):\n"
+            "    return other.workspace.environment\n"
+            "def g(root: Settings):\n"
+            "    return root.workspace.a, Settings().workspace.b\n"
+            "def h():\n"
+            "    s = get_settings()\n"
+            "    return s.workspace.c\n"
+        )
+        reads = settings_reads(source, "WorkspaceSettings", frozenset({"workspace"}))
+        assert reads == {"a", "b", "c"}
+
+    def test_a_local_binding_shadows_the_module_instance(self) -> None:
+        source = (
+            "settings = WorkspaceSettings()\n"
+            "def f(settings: Other):\n"
+            "    return settings.environment\n"
+            "def g():\n"
+            "    settings = Other()\n"
+            "    return settings.other_field\n"
+            "def h():\n"
+            "    return settings.real\n"
+        )
+        assert settings_reads(source, "WorkspaceSettings", frozenset()) == {"real"}
 
     def test_root_settings_property_is_discovered(self) -> None:
         from syn_shared.settings.workspace import WorkspaceSettings
