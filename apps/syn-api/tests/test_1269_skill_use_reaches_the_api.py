@@ -319,8 +319,56 @@ async def test_execution_summary_never_calls_a_codex_declared_skill_unused() -> 
     assert summary.never_invoked == []
     assert summary.not_known == ["principles-and-patterns"]
     assert summary.summary_display == (
-        "2 skills declared · 1 invoked · 0 never invoked · 1 use unknown"
+        "2 skills declared · 1 invoked · 1 use unknown"
     )
+
+
+async def _blind_review(start_configs: dict[str, PhaseStartConfig]) -> PhaseExecutionInfo:
+    phase = PhaseExecutionDetail(
+        workflow_phase_id="review", name="Review", status="completed", session_id=SESSION_ID
+    )
+    mapped = await _map_phase_detail(
+        phase,
+        _Manager([]),  # pyright: ignore[reportArgumentType]
+        None,
+        start_configs=start_configs,
+    )
+    return _map_phase_to_response(mapped)
+
+
+@pytest.mark.asyncio
+async def test_a_blind_phase_declaring_other_skills_still_hides_use_of_these() -> None:
+    # The codex phase declares only `types`, but an agent can invoke a skill
+    # its phase never declared, so it may have used either of claude's.
+    claude = await _as_client_sees_it([], "claude")
+    codex_pins = _pins("codex").model_copy(
+        update={
+            "skills": [
+                PinnedSkillInfo(
+                    name="types", version="v1", resolved_sha="sha-types", source_url="x/y"
+                )
+            ]
+        }
+    )
+    codex = await _blind_review({"review": codex_pins})
+
+    summary = await _execution_sees(claude, codex)
+
+    assert summary.never_invoked == []
+    assert summary.not_known == [*DECLARED, "types"]
+    assert "never invoked" not in summary.summary_display
+
+
+@pytest.mark.asyncio
+async def test_a_phase_with_no_pins_still_hides_use_of_every_skill() -> None:
+    claude = await _as_client_sees_it([], "claude")
+    unread = await _blind_review({})
+
+    summary = await _execution_sees(claude, unread)
+
+    assert unread.skill_use.status == "unavailable"
+    assert summary.never_invoked == []
+    assert summary.not_known == list(DECLARED)
 
 
 @pytest.mark.asyncio

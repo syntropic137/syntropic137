@@ -339,10 +339,11 @@ context and their use leaves no signal, so a codex Phase reports skill use
 timeline could not be read, so nothing is known either way.
 
 Across an Execution (`skill_use` on the execution detail), a declared skill is
-**never invoked** only when every Phase that declared it was observed and none
-invoked it. If any declaring Phase was not observable or unavailable and no
-observed Phase invoked it, its use is **not known**: the same refusal to read
-an unobservable use as a non-use, one level up.
+**never invoked** only when every Phase of the Execution was observed and none
+invoked it. An agent can invoke a skill its Phase did not declare, so if any
+Phase was not observable or unavailable and no observed Phase invoked it, its
+use is **not known**: the same refusal to read an unobservable use as a
+non-use, one level up.
 
 ## Starting Checkout
 

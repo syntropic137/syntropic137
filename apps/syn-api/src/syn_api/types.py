@@ -1692,10 +1692,11 @@ def _count(n: int, noun: str) -> str:
 class ExecutionSkillUseSummary(BaseModel):
     """Skill use across every phase of one execution (feedback 01308bcf).
 
-    A declared skill is only ``never_invoked`` when EVERY phase that declared
-    it was observed. If any of them ran where use cannot be seen (codex), or
-    could not be read, its use is ``not_known`` - the #1269 misreading this
-    model exists to refuse, one level up.
+    A declared skill is only ``never_invoked`` when EVERY phase was observed.
+    A phase may invoke a skill it never declared, so one phase that ran where
+    use cannot be seen (codex), or could not be read, could have used any of
+    them: every declared skill no observed phase invoked is then ``not_known``
+    - the #1269 misreading this model exists to refuse, one level up.
     """
 
     declared: list[str] = Field(default_factory=list)
@@ -1704,10 +1705,10 @@ class ExecutionSkillUseSummary(BaseModel):
     """Every skill an observed phase invoked, counts summed across phases.
     May include a skill no phase declared."""
     never_invoked: list[str] = Field(default_factory=list)
-    """Declared, every declaring phase observed, and no phase invoked it."""
+    """Declared, every phase observed, and no phase invoked it."""
     not_known: list[str] = Field(default_factory=list)
-    """Declared, not invoked where observed, and some declaring phase could not
-    be observed - so whether it was used is unknown, never zero."""
+    """Declared, not invoked where observed, and some phase (declaring it or
+    not) could not be observed - so whether it was used is unknown, never zero."""
     summary_display: str = "no phase has started"
 
     @classmethod
@@ -1718,10 +1719,12 @@ class ExecutionSkillUseSummary(BaseModel):
             if p.status == "observed":
                 for s in p.invoked:
                     counts[s.name] = counts.get(s.name, 0) + s.count
-        blind = {name for p in phases if p.status != "observed" for name in p.declared}
+        # Undeclared invocations are real, so a blind phase hides use of ANY
+        # skill, not only the ones it declared.
+        blind = any(p.status != "observed" for p in phases)
         unused = [name for name in declared if name not in counts]
-        never = [name for name in unused if name not in blind]
-        not_known = [name for name in unused if name in blind]
+        never = [] if blind else unused
+        not_known = unused if blind else []
         return cls(
             declared=declared,
             invoked=[InvokedSkillInfo(name=n, count=c) for n, c in sorted(counts.items())],
@@ -1750,7 +1753,8 @@ def _execution_summary(
         )
     parts = [f"{_count(len(declared), 'skill')} declared"]
     parts.append(f"{sum(1 for n in declared if n in counts)} invoked")
-    parts.append(f"{len(never)} never invoked")
+    if never or not not_known:
+        parts.append(f"{len(never)} never invoked")
     if not_known:
         parts.append(f"{len(not_known)} use unknown")
     undeclared = len(set(counts) - set(declared))
