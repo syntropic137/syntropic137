@@ -11,15 +11,15 @@ drop, which ``GET /observability/latency`` reports.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from syn_adapters.request_latency import (
     RequestLatencyRecorder,
     ensure_request_latency_schema,
     request_latency_recorder,
 )
+from syn_adapters.request_latency.bounded import BoundedPool, run_bounded
 from syn_api._wiring import get_event_store_instance
 from syn_shared.settings import get_settings
 
@@ -44,12 +44,15 @@ async def _ready_pool(timeout_s: float) -> asyncpg.Pool | None:
     if pool is None:
         logger.warning("request latency: observability pool not open yet")
         return None
-    async with asyncio.timeout(timeout_s), pool.acquire() as conn:
-        ready = await ensure_request_latency_schema(
-            conn,  # type: ignore[arg-type]  # asyncpg PoolConnectionProxy is compatible with Connection
-            skip_auto_create=store.skip_auto_create,
-        )
-    if not ready:
+    skip = store.skip_auto_create
+
+    async def ready_on(conn: asyncpg.Connection) -> bool:
+        return await ensure_request_latency_schema(conn, skip_auto_create=skip)
+
+    # Acquire, schema and release each bounded; see run_bounded for why the
+    # `async with pool.acquire()` form cannot be.
+    outcome = await run_bounded(cast("BoundedPool[asyncpg.Connection]", pool), timeout_s, ready_on)
+    if not outcome.value:
         logger.warning(
             "request latency: api_request_latency does not exist and "
             "SYN_SKIP_AUTO_CREATE_TABLES forbids creating it; apply migration 009"
@@ -94,13 +97,15 @@ async def stop_request_latency() -> None:
     """Stop retrying, then write what is buffered within the shutdown deadline."""
     global _supervisor
     task, _supervisor = _supervisor, None
+    settings = get_settings()
     if task is not None:
         task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await task
+        # Bounded: a cancelled attempt terminates its connection and ends at
+        # once, but teardown must not depend on that.
+        _, pending = await asyncio.wait({task}, timeout=settings.request_latency_io_timeout_s)
+        if pending:
+            logger.warning("request latency supervisor did not end after cancel")
     try:
-        await request_latency_recorder.stop(
-            timeout_s=get_settings().request_latency_shutdown_timeout_s
-        )
+        await request_latency_recorder.stop(timeout_s=settings.request_latency_shutdown_timeout_s)
     except Exception:
         logger.warning("request latency recorder did not stop cleanly", exc_info=True)

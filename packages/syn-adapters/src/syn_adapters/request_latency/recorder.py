@@ -5,9 +5,11 @@ appends to a bounded buffer, or counts a drop when the buffer is full or the
 recorder is not running. A background task drains the buffer into
 ``api_request_latency`` with one ``COPY`` per batch.
 
-EVERY DATABASE STEP HAS A DEADLINE. Acquiring a connection and writing a batch
-together get ``io_timeout_s``; a batch that overruns or fails is counted in
-``write_failures`` and not retried. ``stop`` waits at most its own deadline for
+EVERY DATABASE STEP HAS A DEADLINE (``run_bounded``): acquiring a connection,
+the COPY and releasing the connection each get ``io_timeout_s``. A batch whose
+acquire or COPY overruns or fails is counted in ``write_failures`` and not
+retried; a COPY that landed but whose connection could not be released in time
+counts as ``written`` plus one ``cleanup_failures``, the connection terminated. ``stop`` waits at most its own deadline for
 the drain to finish, then cancels it and counts whatever was still buffered or
 mid-write as ``discarded``. So a stalled database can lose samples, but never
 silently and never by holding up a request or a shutdown.
@@ -22,8 +24,9 @@ import contextlib
 import logging
 from collections import deque
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol, cast
 
+from syn_adapters.request_latency.bounded import BoundedPool, run_bounded
 from syn_adapters.request_latency.schema import TABLE
 
 if TYPE_CHECKING:
@@ -34,6 +37,14 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _COLUMNS = ("time", "method", "route", "status", "duration_ms", "request_id")
+
+
+class _CopyConnection(Protocol):
+    def terminate(self) -> None: ...
+
+    async def copy_records_to_table(
+        self, table_name: str, *, records: list[tuple[object, ...]], columns: tuple[str, ...]
+    ) -> str: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +73,8 @@ class RecorderCounters:
     """Samples lost because their batch failed or overran its deadline."""
     discarded: int
     """Samples still buffered or mid-write when shutdown's deadline expired."""
+    cleanup_failures: int
+    """Written batches whose connection could not be released in time (terminated)."""
     buffered: int
 
 
@@ -82,7 +95,7 @@ class RequestLatencyRecorder:
         self._io_timeout_s = io_timeout_s
         self._buffer: deque[RequestSample] = deque()
         self._in_flight: list[RequestSample] = []
-        self._pool: asyncpg.Pool | None = None
+        self._pool: BoundedPool[_CopyConnection] | None = None
         self._task: asyncio.Task[None] | None = None
         self._wake = asyncio.Event()
         self._stopping = False
@@ -90,6 +103,7 @@ class RequestLatencyRecorder:
         self._dropped = 0
         self._write_failures = 0
         self._discarded = 0
+        self._cleanup_failures = 0
 
     @property
     def running(self) -> bool:
@@ -115,6 +129,7 @@ class RequestLatencyRecorder:
             dropped=self._dropped,
             write_failures=self._write_failures,
             discarded=self._discarded,
+            cleanup_failures=self._cleanup_failures,
             buffered=len(self._buffer),
         )
 
@@ -122,24 +137,31 @@ class RequestLatencyRecorder:
         """Begin draining into ``pool``. Idempotent."""
         if self.running:
             return
-        self._pool = pool
+        self._pool = cast("BoundedPool[_CopyConnection]", pool)
         self._stopping = False
         self._wake = asyncio.Event()
         self._task = asyncio.create_task(self._run(), name="request-latency-recorder")
 
     async def stop(self, *, timeout_s: float) -> None:
-        """Drain what is buffered within ``timeout_s``, then stop; count what is left."""
+        """Drain what is buffered within ``timeout_s``, then stop; count what is left.
+
+        On expiry the drain is cancelled; every await it can be in (acquire,
+        COPY, release) terminates its connection without waiting when
+        cancelled, so it ends promptly. Waiting for that is still bounded, by
+        the io deadline, so ``stop`` can never hang.
+        """
         task = self._task
         if task is None:
             return
         self._stopping = True
         self._wake.set()
         try:
-            await asyncio.wait_for(asyncio.shield(task), timeout=timeout_s)
-        except TimeoutError:
-            task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await task
+            done, _ = await asyncio.wait({task}, timeout=timeout_s)
+            if not done:
+                task.cancel()
+                _, pending = await asyncio.wait({task}, timeout=self._io_timeout_s)
+                if pending:
+                    logger.warning("request latency: drain did not end after cancel")
         finally:
             self._task = None
             self._pool = None
@@ -166,19 +188,24 @@ class RequestLatencyRecorder:
             await self._write(self._pool, self._in_flight)
             self._in_flight = []
 
-    async def _write(self, pool: asyncpg.Pool, batch: list[RequestSample]) -> None:
-        records = [
+    async def _write(self, pool: BoundedPool[_CopyConnection], batch: list[RequestSample]) -> None:
+        records: list[tuple[object, ...]] = [
             (s.time, s.method, s.route, s.status, s.duration_ms, s.request_id) for s in batch
         ]
+
+        async def copy(conn: _CopyConnection) -> str:
+            return await conn.copy_records_to_table(TABLE, records=records, columns=_COLUMNS)
+
         try:
-            async with asyncio.timeout(self._io_timeout_s), pool.acquire() as conn:
-                await conn.copy_records_to_table(TABLE, records=records, columns=_COLUMNS)  # type: ignore[union-attr]  # asyncpg generates PoolConnectionProxy's methods at runtime
+            outcome = await run_bounded(pool, self._io_timeout_s, copy)
         except Exception:
-            # TimeoutError included: a stalled pool or COPY loses this batch, counted.
+            # TimeoutError included: a stalled acquire or COPY loses this batch, counted.
             self._write_failures += len(batch)
             logger.warning("request latency batch of %d not written", len(batch), exc_info=True)
             return
         self._written += len(batch)
+        if not outcome.released:
+            self._cleanup_failures += 1
 
 
 # One per API process, like the middleware stack that feeds it.

@@ -274,29 +274,124 @@ async def test_a_startup_gate_503_is_timed_and_carries_a_request_id(
     assert sample.status == 503
 
 
+class _SchemaConn:
+    def __init__(self) -> None:
+        self.terminated = False
+
+    def terminate(self) -> None:
+        self.terminated = True
+
+    async def execute(self, statement: str) -> str:
+        return "OK"
+
+    async def fetchval(self, query: str, *args: object) -> bool:
+        return True
+
+
+class _SchemaPool:
+    """asyncpg's acquire(timeout)/release(conn, timeout), able to stall either."""
+
+    def __init__(self, *, acquire_hangs: bool = False, release_hangs: bool = False) -> None:
+        self.acquire_hangs = acquire_hangs
+        self.release_hangs = release_hangs
+        self.conns: list[_SchemaConn] = []
+
+    async def acquire(self, *, timeout: float | None = None) -> _SchemaConn:
+        import asyncio
+
+        if self.acquire_hangs:
+            await asyncio.wait_for(asyncio.Event().wait(), timeout=timeout)
+        conn = _SchemaConn()
+        self.conns.append(conn)
+        return conn
+
+    async def release(self, connection: _SchemaConn, *, timeout: float | None = None) -> None:
+        import asyncio
+
+        if self.release_hangs and not connection.terminated:
+            await asyncio.shield(asyncio.Event().wait())  # a stalled reset, as asyncpg shields it
+
+
+def _store_with(pool: _SchemaPool) -> object:
+    class _Store:
+        skip_auto_create = False
+
+    store = _Store()
+    store.pool = pool  # type: ignore[attr-defined]  # the double's one attribute the code reads
+    return store
+
+
 async def test_readying_the_table_is_bounded_by_its_deadline(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """BLOCKER: a stalled acquire at startup used to wait forever."""
     import asyncio
-    from contextlib import asynccontextmanager
 
     from syn_api.services import request_latency_lifecycle as lifecycle
 
-    class _StalledPool:
-        @asynccontextmanager
-        async def acquire(self) -> AsyncIterator[object]:
-            await asyncio.Event().wait()
-            yield object()
-
-    class _Store:
-        pool = _StalledPool()
-        skip_auto_create = False
-
-    monkeypatch.setattr(lifecycle, "get_event_store_instance", lambda: _Store())
+    monkeypatch.setattr(
+        lifecycle, "get_event_store_instance", lambda: _store_with(_SchemaPool(acquire_hangs=True))
+    )
     async with asyncio.timeout(2):
         with pytest.raises(TimeoutError):
             await lifecycle._ready_pool(0.05)  # pyright: ignore[reportPrivateUsage]  # the attempt itself
+
+
+async def test_a_stalled_release_after_the_schema_attempt_terminates_the_connection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """BLOCKER: the release asyncpg shields used to outlive the attempt and block pool.close()."""
+    import asyncio
+
+    from syn_api.services import request_latency_lifecycle as lifecycle
+
+    pool = _SchemaPool(release_hangs=True)
+    monkeypatch.setattr(lifecycle, "get_event_store_instance", lambda: _store_with(pool))
+    loop = asyncio.get_running_loop()
+    started = loop.time()
+    async with asyncio.timeout(2):
+        ready = await lifecycle._ready_pool(0.05)  # pyright: ignore[reportPrivateUsage]  # the attempt itself
+
+    assert ready is pool
+    assert loop.time() - started < 0.5
+    (conn,) = pool.conns
+    assert conn.terminated
+
+
+async def test_supervisor_teardown_is_bounded_even_if_the_task_will_not_end(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import asyncio
+
+    from syn_api.services import request_latency_lifecycle as lifecycle
+
+    class _Settings:
+        request_latency_io_timeout_s = 0.05
+        request_latency_shutdown_timeout_s = 0.05
+
+    refusing = True
+
+    async def stubborn() -> None:
+        while True:
+            try:
+                await asyncio.sleep(10)
+            except asyncio.CancelledError:
+                if not refusing:
+                    raise
+                # Refuses to end: the worst case teardown must survive.
+
+    task = asyncio.create_task(stubborn())
+    await asyncio.sleep(0)  # let it reach its loop before anyone cancels it
+    monkeypatch.setattr(lifecycle, "get_settings", lambda: _Settings())
+    monkeypatch.setattr(lifecycle, "_supervisor", task)
+    async with asyncio.timeout(2):
+        await lifecycle.stop_request_latency()
+
+    assert not task.done()  # it was abandoned, not awaited forever
+    refusing = False
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
 
 
 async def test_a_failed_schema_init_is_retried_until_recording_starts() -> None:
@@ -318,3 +413,50 @@ async def test_a_failed_schema_init_is_retried_until_recording_starts() -> None:
     assert len(attempts) == 3
     assert recorder.running
     await recorder.stop(timeout_s=1)
+
+
+async def test_the_frameworks_own_error_response_is_kept_and_stamped() -> None:
+    """SHOULD FIX 1: the timing layer replaced a custom 500 body and headers with its own."""
+    from fastapi.responses import JSONResponse
+    from starlette.requests import Request  # noqa: TC002  # FastAPI reads the annotation
+
+    from syn_api.main import create_app
+
+    app = create_app()
+
+    async def handler(request: Request, exc: Exception) -> JSONResponse:
+        return JSONResponse({"error": "custom"}, status_code=500, headers={"X-Custom": "kept"})
+
+    app.add_exception_handler(Exception, handler)
+
+    @app.get("/__boom")
+    async def boom() -> None:
+        raise RuntimeError("application failure")
+
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
+    async with AsyncClient(transport=transport, base_url="http://t") as client:
+        response = await client.get("/__boom")
+
+    assert response.status_code == 500
+    assert response.json() == {"error": "custom"}
+    assert response.headers["x-custom"] == "kept"
+    assert len(response.headers.get_list("x-request-id")) == 1
+
+
+async def test_the_debug_traceback_page_is_kept_and_stamped() -> None:
+    from syn_api.main import create_app
+
+    app = create_app()
+    app.debug = True
+
+    @app.get("/__boom")
+    async def boom() -> None:
+        raise RuntimeError("application failure")
+
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
+    async with AsyncClient(transport=transport, base_url="http://t") as client:
+        response = await client.get("/__boom", headers={"accept": "text/html"})
+
+    assert response.status_code == 500
+    assert "RuntimeError" in response.text  # Starlette's traceback, not a bare 500
+    assert "x-request-id" in response.headers

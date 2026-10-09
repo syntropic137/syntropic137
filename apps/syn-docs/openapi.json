@@ -4220,7 +4220,7 @@
           "observability"
         ],
         "summary": "Get Request Latency",
-        "description": "Exact p50/p95/p99, max and count per (method, route template) over the window.\n\nRead from ``api_request_latency`` (Lane 2, ADR-075). Every API process\nrecords its own requests; ``recorder`` describes THIS process's only.",
+        "description": "Exact p50/p95/p99, max and count of arrival-to-response-start latency per (method, route template).\n\nRead from ``api_request_latency`` (Lane 2, ADR-075). Every API process\nrecords its own requests; ``recorder`` describes THIS process's only.",
         "operationId": "get_request_latency_observability_latency_get",
         "parameters": [
           {
@@ -15006,6 +15006,10 @@
             "type": "integer",
             "title": "Discarded"
           },
+          "cleanup_failures": {
+            "type": "integer",
+            "title": "Cleanup Failures"
+          },
           "buffered": {
             "type": "integer",
             "title": "Buffered"
@@ -15018,6 +15022,7 @@
           "dropped",
           "write_failures",
           "discarded",
+          "cleanup_failures",
           "buffered"
         ],
         "title": "LatencyRecorderStatusResponse",
@@ -18030,7 +18035,7 @@
           "recorder"
         ],
         "title": "RequestLatencyResponse",
-        "description": "Per-route request latency, from ``api_request_latency``, slowest p99 first."
+        "description": "Per-route arrival-to-response-start latency from ``api_request_latency``, slowest p99 first."
       },
       "ResourceCoverageResponse": {
         "properties": {
@@ -18373,7 +18378,7 @@
           "p99_display"
         ],
         "title": "RouteLatencyResponse",
-        "description": "Exact latency percentiles of one (method, route template) over the window."
+        "description": "Exact latency percentiles of one (method, route template) over the window.\n\nLatency here is ARRIVAL TO RESPONSE START (time to first byte), not to the\nlast byte, so a long-lived stream counts as fast if it answered promptly."
       },
       "RunIdentity": {
         "properties": {

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -13,7 +12,7 @@ from syn_adapters.request_latency import RequestLatencyRecorder, RequestSample
 from syn_adapters.request_latency.schema import TABLE
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Sequence
+    from collections.abc import Sequence
 
 pytestmark = [pytest.mark.unit, pytest.mark.anyio]
 
@@ -35,10 +34,15 @@ def _sample(n: int = 0) -> RequestSample:
 class _Conn:
     def __init__(self, pool: _Pool) -> None:
         self._pool = pool
+        self.terminated = False
+
+    def terminate(self) -> None:
+        self.terminated = True
+        self._pool.terminated += 1
 
     async def copy_records_to_table(
         self, table: str, *, records: Sequence[tuple[object, ...]], columns: Sequence[str]
-    ) -> None:
+    ) -> str:
         if self._pool.fail:
             raise ConnectionError("observability db down")
         if self._pool.copy_hangs:
@@ -48,10 +52,11 @@ class _Conn:
         assert table == TABLE
         assert tuple(columns) == ("time", "method", "route", "status", "duration_ms", "request_id")
         self._pool.batches.append(list(records))
+        return "COPY"
 
 
 class _Pool:
-    """asyncpg as the recorder uses it: acquire, then COPY."""
+    """asyncpg as the recorder uses it: acquire(timeout), COPY, release(conn, timeout)."""
 
     def __init__(
         self,
@@ -60,18 +65,29 @@ class _Pool:
         acquire_hangs: bool = False,
         copy_hangs: bool = False,
         copy_delay_s: float = 0.0,
+        release_hangs: bool = False,
     ) -> None:
         self.fail = fail
         self.acquire_hangs = acquire_hangs
         self.copy_hangs = copy_hangs
         self.copy_delay_s = copy_delay_s
+        self.release_hangs = release_hangs
         self.batches: list[list[tuple[object, ...]]] = []
+        self.acquire_timeouts: list[float | None] = []
+        self.terminated = 0
 
-    @asynccontextmanager
-    async def acquire(self) -> AsyncIterator[_Conn]:
+    async def acquire(self, *, timeout: float | None = None) -> _Conn:
+        self.acquire_timeouts.append(timeout)
         if self.acquire_hangs:
-            await _NEVER().wait()
-        yield _Conn(self)
+            # asyncpg honours its timeout; so does this double.
+            await asyncio.wait_for(_NEVER().wait(), timeout=timeout)
+        return _Conn(self)
+
+    async def release(self, connection: _Conn, *, timeout: float | None = None) -> None:
+        # A stalled reset that ignores its timeout: the worst asyncpg can do,
+        # because it shields the release from cancellation.
+        if self.release_hangs and not connection.terminated:
+            await asyncio.shield(_NEVER().wait())
 
 
 async def _until(predicate: object, *, within_s: float = 2.0) -> None:
@@ -184,3 +200,50 @@ async def test_a_slow_write_still_finishes_inside_the_shutdown_deadline() -> Non
 
     counters = recorder.counters()
     assert (counters.written, counters.discarded) == (5, 0)
+
+
+async def test_a_stalled_release_does_not_hold_up_shutdown() -> None:
+    """BLOCKER: asyncpg shields release; a 20 ms deadline was still pending after 122 ms."""
+    pool = _Pool(release_hangs=True)
+    recorder = RequestLatencyRecorder(batch_size=2, flush_interval_s=60, io_timeout_s=60)
+    recorder.start(pool)  # type: ignore[arg-type]  # a double with asyncpg's acquire/COPY/release shape
+    recorder.offer(_sample(1))
+    recorder.offer(_sample(2))
+    await _until(lambda: pool.batches)  # the COPY landed; the release is now stalled
+
+    loop = asyncio.get_running_loop()
+    started = loop.time()
+    async with asyncio.timeout(2):
+        await recorder.stop(timeout_s=0.02)
+    elapsed = loop.time() - started
+
+    assert elapsed < 0.5, f"stop took {elapsed:.3f}s against a 20 ms deadline"
+    assert pool.terminated == 1  # nothing left pending on the server
+    assert not recorder.running
+
+
+async def test_a_landed_copy_whose_release_overruns_counts_written_and_a_cleanup_failure() -> None:
+    """SHOULD FIX 2: this was write_failures=1, written=0."""
+    pool = _Pool(release_hangs=True)
+    recorder = RequestLatencyRecorder(batch_size=2, flush_interval_s=60, io_timeout_s=0.05)
+    recorder.start(pool)  # type: ignore[arg-type]  # a double with asyncpg's acquire/COPY/release shape
+    recorder.offer(_sample(1))
+    recorder.offer(_sample(2))
+
+    await _until(lambda: recorder.counters().cleanup_failures == 1)
+
+    counters = recorder.counters()
+    assert (counters.written, counters.write_failures, counters.cleanup_failures) == (2, 0, 1)
+    assert pool.terminated == 1
+    await recorder.stop(timeout_s=1)
+
+
+async def test_acquire_is_always_given_the_io_deadline() -> None:
+    pool = _Pool()
+    recorder = RequestLatencyRecorder(batch_size=1, flush_interval_s=60, io_timeout_s=0.25)
+    recorder.start(pool)  # type: ignore[arg-type]  # a double with asyncpg's acquire/COPY/release shape
+    recorder.offer(_sample())
+    await _until(lambda: pool.batches)
+    await recorder.stop(timeout_s=1)
+
+    assert pool.acquire_timeouts == [0.25]

@@ -1273,7 +1273,7 @@ export interface paths {
         };
         /**
          * Get Request Latency
-         * @description Exact p50/p95/p99, max and count per (method, route template) over the window.
+         * @description Exact p50/p95/p99, max and count of arrival-to-response-start latency per (method, route template).
          *
          *     Read from ``api_request_latency`` (Lane 2, ADR-075). Every API process
          *     records its own requests; ``recorder`` describes THIS process's only.
@@ -5567,6 +5567,8 @@ export interface components {
             write_failures: number;
             /** Discarded */
             discarded: number;
+            /** Cleanup Failures */
+            cleanup_failures: number;
             /** Buffered */
             buffered: number;
         };
@@ -7105,7 +7107,7 @@ export interface components {
         ReportedFailureReason: "task" | "platform" | "refused" | "unknown";
         /**
          * RequestLatencyResponse
-         * @description Per-route request latency, from ``api_request_latency``, slowest p99 first.
+         * @description Per-route arrival-to-response-start latency from ``api_request_latency``, slowest p99 first.
          */
         RequestLatencyResponse: {
             /**
@@ -7301,6 +7303,9 @@ export interface components {
         /**
          * RouteLatencyResponse
          * @description Exact latency percentiles of one (method, route template) over the window.
+         *
+         *     Latency here is ARRIVAL TO RESPONSE START (time to first byte), not to the
+         *     last byte, so a long-lived stream counts as fast if it answered promptly.
          */
         RouteLatencyResponse: {
             /** Method */

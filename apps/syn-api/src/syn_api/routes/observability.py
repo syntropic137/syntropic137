@@ -247,7 +247,7 @@ async def get_request_latency(
     ),
     window: LatencyWindow = Query("24h", description="How far back to look"),
 ) -> RequestLatencyResponse:
-    """Exact p50/p95/p99, max and count per (method, route template) over the window.
+    """Exact p50/p95/p99, max and count of arrival-to-response-start latency per (method, route template).
 
     Read from ``api_request_latency`` (Lane 2, ADR-075). Every API process
     records its own requests; ``recorder`` describes THIS process's only.
@@ -263,6 +263,7 @@ async def get_request_latency(
         dropped=counters.dropped,
         write_failures=counters.write_failures,
         discarded=counters.discarded,
+        cleanup_failures=counters.cleanup_failures,
         buffered=counters.buffered,
     )
     try:
