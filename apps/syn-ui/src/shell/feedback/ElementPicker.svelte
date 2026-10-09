@@ -6,6 +6,7 @@
   the link or presses the button underneath.
 -->
 <script lang="ts">
+  import { Keycaps } from '@syn137/skyline-svelte-v5/patterns'
   import { onMount } from 'svelte'
   import { FEEDBACK_UI_ATTR, candidateAt, keyboardCandidates, pin, type PinnedElement } from './element'
 
@@ -96,7 +97,7 @@
   {/if}
   <div class="sky-fb-pick__hint" aria-live="polite">
     {#if label}<code>{label}</code>{:else}Click or tap an element to pin feedback{/if}
-    <span>· Tab to cycle, Enter to pin, <kbd>Esc</kbd> to cancel</span>
+    <span>· Tab to cycle, Enter to pin, <Keycaps keys={['Esc']} /> to cancel</span>
   </div>
 </div>
 
@@ -123,10 +124,11 @@
     pointer-events: none;
     transition: all var(--sky-duration-fast) var(--sky-ease-out);
   }
+  /* Above the bubble's corner, clear of the top nav. */
   .sky-fb-pick__hint {
     position: fixed;
     left: 50%;
-    top: var(--ds-space-4);
+    bottom: calc(var(--ds-space-6) + var(--sky-dock-clearance) + env(safe-area-inset-bottom));
     transform: translateX(-50%);
     max-width: calc(100vw - 2 * var(--sky-gutter));
     padding: var(--ds-space-2) var(--ds-space-3);

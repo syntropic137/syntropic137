@@ -299,7 +299,7 @@
       onclick={() => set(c.value)}
       onkeydown={(e) => onChipKey(e, list, current, set)}
     >
-      <span class="sky-fb__chip-dot" aria-hidden="true"></span>{c.label}<kbd aria-hidden="true">{c.key.toUpperCase()}</kbd>
+      <span class="sky-fb__chip-dot" aria-hidden="true"></span><span class="sky-fb__chip-text">{c.label}<kbd class="sky-fb__kbd" aria-hidden="true">{c.key.toUpperCase()}</kbd></span>
     </button>
   {/each}
 {/snippet}
@@ -341,12 +341,14 @@
           novalidate
           aria-busy={sending}
         >
-          <div class="sky-fb__attached" data-testid="feedback-attached">
+          <div class="sky-fb__group" data-testid="feedback-attached">
             <span class="sky-fb__chip-label">Attached to</span>
+            <div class="sky-fb__attached">
             <code class="sky-fb__pill" title={location.href}>{route}</code>
             {#if subject}<span class="sky-fb__pill sky-fb__pill--soft">{subject.kind}</span>{/if}
             <span class="sky-fb__pill sky-fb__pill--soft">{innerWidth}×{innerHeight}</span>
             {#await build then info}{#if info?.version}<span class="sky-fb__pill sky-fb__pill--soft">v{info.version}{info.commit ? ` · ${info.commit.slice(0, 7)}` : ''}</span>{/if}{/await}
+            </div>
           </div>
 
           <div class="sky-fb__group">
@@ -433,7 +435,7 @@
                 }}
               />
             </div>
-            <p class="sky-fb__muted">Or paste or drop an image here.</p>
+            <p class="sky-fb__muted sky-fb__drop-hint">Or paste or drop an image here.</p>
             {#if shots.length > 0}
               <ul class="sky-fb__shots" aria-label="Screenshots to attach">
                 {#each shots as s, i (s.previewUrl)}
@@ -487,7 +489,7 @@
   .sky-fb__chip-label {
     font-family: var(--ds-font-mono);
     font-size: var(--sky-text-label);
-    letter-spacing: 0.06em;
+    letter-spacing: var(--sky-tracking-label);
     text-transform: uppercase;
     color: var(--ds-color-text-subtle);
   }
@@ -501,8 +503,12 @@
     gap: var(--ds-space-1-5);
   }
   .sky-fb__pill {
+    display: inline-flex;
+    align-items: center;
+    box-sizing: border-box;
+    height: var(--ds-space-6);
     max-width: 100%;
-    padding: var(--ds-space-0-5) var(--ds-space-2);
+    padding: 0 var(--ds-space-2-5);
     border-radius: var(--ds-radius-full);
     border: var(--ds-border-width) solid var(--sky-color-border-strong);
     background: var(--sky-color-control);
@@ -517,12 +523,15 @@
     color: var(--ds-color-text-muted);
     border-color: var(--ds-color-border);
   }
+  .sky-fb__chips {
+    gap: var(--ds-space-2);
+  }
   .sky-fb__chip {
     display: inline-flex;
     align-items: center;
-    gap: var(--ds-space-1-5);
+    gap: var(--ds-space-2);
     min-height: var(--sky-size-nav-item);
-    padding: 0 var(--ds-space-2-5);
+    padding: 0 var(--ds-space-3-5);
     border-radius: var(--ds-radius-full);
     border: var(--ds-border-width) solid var(--ds-color-border);
     background: var(--sky-color-control);
@@ -530,6 +539,17 @@
     font: inherit;
     font-size: var(--ds-text-sm);
     cursor: pointer;
+  }
+  /* Label and key letter share a baseline. */
+  .sky-fb__chip-text {
+    display: inline-flex;
+    align-items: baseline;
+    gap: var(--ds-space-1-5);
+  }
+  @media (pointer: coarse) {
+    .sky-fb__chip {
+      min-height: var(--sky-size-touch);
+    }
   }
   .sky-fb__chip:hover {
     border-color: var(--sky-color-border-hover);
@@ -551,7 +571,7 @@
     border-radius: 50%;
     background: var(--fb-color);
   }
-  .sky-fb__chip kbd,
+  /* One hint style for every in-dialog key letter (chips and buttons). */
   .sky-fb__kbd {
     font-family: var(--ds-font-mono);
     font-size: var(--sky-text-label);
@@ -600,8 +620,8 @@
   }
   .sky-fb__shot img {
     display: block;
-    width: 7.5rem;
-    height: 4.5rem;
+    width: var(--sky-size-feedback-thumb-w);
+    height: var(--sky-size-feedback-thumb-h);
     object-fit: cover;
     border-radius: var(--ds-radius-md);
     border: var(--ds-border-width) solid var(--sky-color-border-strong);
@@ -615,6 +635,10 @@
     margin: 0;
     color: var(--ds-color-text-subtle);
     font-size: var(--ds-text-xs);
+  }
+  /* Belongs to the buttons above: 4 above, 8 below. */
+  .sky-fb__drop-hint {
+    margin-top: calc(var(--ds-space-1) * -1);
   }
   .sky-fb__error {
     margin: 0;

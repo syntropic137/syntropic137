@@ -22,7 +22,7 @@
   }
   .sky-keycaps__key {
     min-width: 1.5em;
-    padding: 1px 5px;
+    padding: var(--ds-space-px) var(--ds-space-1-5);
     border-radius: var(--ds-radius-xs);
     border: var(--ds-border-width) solid var(--sky-color-border-strong);
     font-family: var(--ds-font-mono);

@@ -7,6 +7,7 @@
 -->
 <script lang="ts">
   import { feedbackMediaSrc, getFeedback, updateFeedback, type FeedbackItem, type FeedbackItemWithMedia } from '@syn137/syn-ui-data'
+  import ChevronLeft from '@lucide/svelte/icons/chevron-left'
   import { Button } from '@syn137/skyline-svelte-v5'
   import { onDestroy, onMount } from 'svelte'
   import { parseComment } from './comment'
@@ -19,7 +20,8 @@
   let error = $state<string | null>(null)
   let saving = $state(false)
   let current = $derived<FeedbackItem>(full ?? item)
-  let backBtn: HTMLButtonElement | undefined = $state()
+  let head: HTMLDivElement | undefined = $state()
+  const created = $derived(new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(current.created_at)))
 
   const parsed = $derived(parseComment(current.comment))
   const type = $derived(typeChoice(current.feedback_type))
@@ -41,7 +43,7 @@
     return () => ctl.abort()
   })
 
-  onMount(() => backBtn?.focus())
+  onMount(() => head?.querySelector<HTMLElement>('button')?.focus())
 
   onDestroy(() => {
     for (const s of srcs) if (s.startsWith('blob:')) URL.revokeObjectURL(s)
@@ -63,8 +65,11 @@
 </script>
 
 <div class="sky-fb-detail" data-testid="feedback-detail">
-  <div class="sky-fb-detail__head">
-    <button bind:this={backBtn} type="button" class="sky-fb-detail__back" onclick={onback}>Back</button>
+  <div class="sky-fb-detail__head" bind:this={head}>
+    <Button size="sm" variant="ghost" onclick={onback}>
+      {#snippet icon()}<ChevronLeft size={14} aria-hidden="true" />{/snippet}
+      Back
+    </Button>
     <span class="sky-fb-detail__chip" style:--fb-color={type.color}><span class="sky-fb-detail__dot"></span>{type.label}</span>
     <span class="sky-fb-detail__chip" style:--fb-color={priority.color}><span class="sky-fb-detail__dot"></span>{priority.label}</span>
     <span class="sky-fb-detail__status" data-status={current.status}>{STATUS_LABEL[current.status]}</span>
@@ -74,7 +79,7 @@
 
   <dl class="sky-fb-detail__meta">
     <dt>Created</dt>
-    <dd><time datetime={current.created_at}>{current.created_at}</time></dd>
+    <dd><time datetime={current.created_at} title={current.created_at}>{created}</time></dd>
     <dt>Page</dt>
     <dd><code>{current.route ?? '-'}</code></dd>
     <dt>URL</dt>
@@ -105,44 +110,35 @@
 </div>
 
 <style>
+  /* Panel 6 + 12 = 18px inset, as the menu and list; the ghost Back sits at the panel edge like the list's. */
   .sky-fb-detail {
     display: flex;
     flex-direction: column;
     gap: var(--ds-space-2-5);
-    padding: var(--ds-space-1);
+    padding: 0 var(--ds-space-3) var(--ds-space-3);
   }
   .sky-fb-detail__head {
     display: flex;
+    margin-left: calc(var(--ds-space-3) * -1);
     flex-wrap: wrap;
     align-items: center;
     gap: var(--ds-space-1-5);
   }
-  .sky-fb-detail__back {
-    border: var(--ds-border-width) solid var(--ds-color-border);
-    border-radius: var(--ds-radius-md);
-    background: var(--sky-color-control);
-    color: var(--ds-color-fg);
-    font: inherit;
-    padding: 0 var(--ds-space-2);
-    cursor: pointer;
-  }
-  .sky-fb-detail__back:focus-visible {
-    outline: var(--sky-focus-ring-width) solid var(--sky-color-focus);
-    outline-offset: var(--sky-focus-ring-offset);
-  }
   .sky-fb-detail__chip {
     display: inline-flex;
     align-items: center;
-    gap: var(--ds-space-1);
-    padding: 0 var(--ds-space-2);
+    box-sizing: border-box;
+    height: var(--ds-space-6);
+    gap: var(--ds-space-1-5);
+    padding: 0 var(--ds-space-2-5);
     border-radius: var(--ds-radius-full);
     border: var(--ds-border-width) solid var(--fb-color);
     background: color-mix(in oklab, var(--fb-color) 16%, transparent);
     font-size: var(--ds-text-xs);
   }
   .sky-fb-detail__dot {
-    width: var(--ds-space-1-5);
-    height: var(--ds-space-1-5);
+    width: var(--ds-space-2);
+    height: var(--ds-space-2);
     border-radius: 50%;
     background: var(--fb-color);
   }
@@ -150,6 +146,7 @@
     margin-left: auto;
     font-family: var(--ds-font-mono);
     font-size: var(--sky-text-label);
+    letter-spacing: var(--sky-tracking-label);
     text-transform: uppercase;
     color: var(--ds-color-text-muted);
   }
@@ -162,7 +159,7 @@
     overflow: auto;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
-    font-size: var(--ds-text-sm);
+    font-size: var(--sky-text-control);
   }
   .sky-fb-detail__meta {
     display: grid;
@@ -182,7 +179,14 @@
   .sky-fb-detail__meta code {
     font-family: var(--ds-font-mono);
   }
+  /* One line, never split across lines (ellipsis; the full selector is in the title). */
   .sky-fb-detail__pill {
+    display: inline-block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: bottom;
     padding: 0 var(--ds-space-1-5);
     border-radius: var(--ds-radius-full);
     border: var(--ds-border-width) solid var(--sky-color-border-strong);
@@ -206,8 +210,8 @@
   }
   .sky-fb-detail__shots img {
     display: block;
-    width: 7rem;
-    height: 4.25rem;
+    width: var(--sky-size-feedback-thumb-w);
+    height: var(--sky-size-feedback-thumb-h);
     object-fit: cover;
     border-radius: var(--ds-radius-md);
     border: var(--ds-border-width) solid var(--sky-color-border-strong);

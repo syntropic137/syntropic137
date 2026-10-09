@@ -3,6 +3,7 @@
   Esc cancels. Keyboard users take the full-viewport screenshot instead.
 -->
 <script lang="ts">
+  import { Keycaps } from '@syn137/skyline-svelte-v5/patterns'
   import { onMount } from 'svelte'
   import type { Area } from './capture'
   import { FEEDBACK_UI_ATTR } from './element'
@@ -64,7 +65,7 @@
   {:else}
     <div class="sky-fb-area__scrim"></div>
   {/if}
-  <div class="sky-fb-area__hint">Drag to select an area · <kbd>Esc</kbd> to cancel</div>
+  <div class="sky-fb-area__hint">Drag to select an area · <Keycaps keys={['Esc']} /> to cancel</div>
 </div>
 
 <style>
@@ -86,10 +87,11 @@
     outline: var(--sky-focus-ring-width) dashed var(--sky-feedback-pick);
     box-shadow: 0 0 0 100vmax var(--sky-feedback-scrim);
   }
+  /* Above the bubble's corner, clear of the top nav. */
   .sky-fb-area__hint {
     position: fixed;
     left: 50%;
-    top: var(--ds-space-4);
+    bottom: calc(var(--ds-space-6) + var(--sky-dock-clearance) + env(safe-area-inset-bottom));
     transform: translateX(-50%);
     padding: var(--ds-space-2) var(--ds-space-3);
     border-radius: var(--ds-radius-full);
