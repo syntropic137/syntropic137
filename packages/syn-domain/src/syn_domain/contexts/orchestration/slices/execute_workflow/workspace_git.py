@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import shlex
 from typing import TYPE_CHECKING, Final, Protocol
 
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
@@ -170,11 +171,13 @@ _HOOKS_OFF: Final[tuple[str, ...]] = ("-c", "core.hooksPath=/dev/null")
 #: a workspace checkout owned by another uid, and a refusal would read as an
 #: unreachable workspace. It trusts no program: hooks and fsmonitor are off.
 #:
-#: HOME IS KEPT for `git_remote`, deliberately: the workspace's credential and
-#: its `insteadOf` rewrites are written to --global by provisioning
-#: (`setup_phase_secrets`), so a remote command without HOME cannot
-#: authenticate, and a private origin that will not answer keeps every
-#: published tag counted as work - the #1815 failure again.
+#: A hardened REMOTE command loses HOME too, and gets back only what
+#: provisioning itself installs (`setup_phase_secrets`), spelled here as
+#: `-c` (`_provisioned_remote_config`): the credential store under the
+#: workspace user's home, path-scoped matching, and the SSH-to-HTTPS rewrites.
+#: Nothing else of the global config reaches it, so a private origin still
+#: answers and the #1815 tags are still subtracted, without HOME's other
+#: settings riding along (#1815 review).
 _HARDENED_ENV: Final[tuple[str, ...]] = ("GIT_CONFIG_NOSYSTEM=1",)
 _NO_HOME_ENV: Final[tuple[str, ...]] = ("HOME=/nonexistent", "XDG_CONFIG_HOME=/nonexistent")
 _HARDENED_CONFIG: Final[tuple[str, ...]] = (
@@ -183,6 +186,26 @@ _HARDENED_CONFIG: Final[tuple[str, ...]] = (
     "-c",
     "safe.directory=*",
 )
+
+#: What provisioning writes to --global for remotes, and nothing more. The
+#: `setup_phase_secrets` script is the other spelling; a test there pins the two
+#: together, so a change on one side fails until the other follows.
+PROVISIONED_CREDENTIAL_FILE: Final[str] = ".git-credentials"
+PROVISIONED_REMOTE_SETTINGS: Final[tuple[str, ...]] = (
+    "credential.https://github.com.useHttpPath=true",
+    "url.https://github.com/.insteadOf=git@github.com:",
+    "url.https://github.com/.insteadOf=ssh://git@github.com/",
+)
+
+
+def _provisioned_remote_config(home: str) -> tuple[str, ...]:
+    """`-c` pairs giving a no-HOME git the workspace's provisioned remote access."""
+    store = shlex.quote(f"{home.rstrip('/')}/{PROVISIONED_CREDENTIAL_FILE}")
+    config = ["-c", f"credential.helper=store --file={store}"]
+    for setting in PROVISIONED_REMOTE_SETTINGS:
+        config.extend(("-c", setting))
+    return tuple(config)
+
 
 #: `timeout`'s documented exit code for "the bound fired". Named here because
 #: this module is what put the wrapper in the argv, so this module is what can
@@ -380,7 +403,7 @@ def git_argv(
     index: str | None = None,
     identity: bool = False,
     hardened: bool = False,
-    keep_home: bool = False,
+    credentials_home: str | None = None,
 ) -> list[str]:
     """Argv for one git command in ``repo``, with no hook of the repository's own.
 
@@ -395,8 +418,10 @@ def git_argv(
     and changes between releases, and a prefix applied to all of them cannot
     be left off the one that starts to.
 
-    ``hardened`` adds `_HARDENED_CONFIG` and `_HARDENED_ENV`, and with them
-    `_NO_HOME_ENV` unless ``keep_home``: what `git_remote` passes.
+    ``hardened`` adds `_HARDENED_CONFIG`, `_HARDENED_ENV` and `_NO_HOME_ENV`;
+    ``credentials_home`` then adds back the provisioned remote access from
+    that home, explicitly (`_provisioned_remote_config`): what `git_remote`
+    passes.
     """
     prefix: list[str] = []
     if index is not None:
@@ -405,10 +430,10 @@ def git_argv(
         prefix.extend(_IDENTITY)
     config: tuple[str, ...] = ()
     if hardened:
-        prefix.extend(_HARDENED_ENV)
-        if not keep_home:
-            prefix.extend(_NO_HOME_ENV)
+        prefix.extend((*_HARDENED_ENV, *_NO_HOME_ENV))
         config = _HARDENED_CONFIG
+        if credentials_home:
+            config = (*config, *_provisioned_remote_config(credentials_home))
     env = ["env", *prefix] if prefix else []
     return [*env, "git", *_HOOKS_OFF, *config, "-C", repo, *args]
 
@@ -431,6 +456,20 @@ async def git(
     )
 
 
+async def _workspace_home(workspace: GitWorkspace) -> str | None:
+    """The workspace user's home: where provisioning put the credential store.
+
+    Asked rather than assumed, since the user is the image's business. A
+    workspace that will not say raises, and one with no usable home gets no
+    credential: either way a private origin does not answer, which the
+    hardened caller already reads as "keep counting it as work".
+    """
+    home = (
+        await checked(workspace, ["printenv", "HOME"], doing="reading the workspace user's home")
+    ).strip()
+    return home if home.startswith("/") else None
+
+
 async def git_remote(
     workspace: GitWorkspace, repo: str, *args: str, doing: str, hardened: bool = False
 ) -> str:
@@ -446,9 +485,10 @@ async def git_remote(
     command's failure is about the remote, and "asking origin where fix/x is"
     is what an operator needs to read, not "running 'git ls-remote'".
     """
+    home = await _workspace_home(workspace) if hardened else None
     return await checked(
         workspace,
-        git_argv(repo, *args, hardened=hardened, keep_home=True),
+        git_argv(repo, *args, hardened=hardened, credentials_home=home),
         doing=doing,
         timeout_seconds=REMOTE_TIMEOUT_SECONDS,
     )
