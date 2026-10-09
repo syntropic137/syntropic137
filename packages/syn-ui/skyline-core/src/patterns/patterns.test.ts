@@ -14,8 +14,10 @@ import {
   phaseKitLine,
   provenanceSummary,
   ruleText,
+  runBarColumns,
   runBarPercent,
   runSegments,
+  runSlots,
   runSubline,
   shortDigest,
   skillRefDisplay,
@@ -41,6 +43,19 @@ describe('run row', () => {
     expect(runBarPercent(62_000, 227_000)).toBe(27)
     expect(runBarPercent(5_000, 227_000)).toBe(4)
     expect(runBarPercent(null, 227_000)).toBe(4)
+  })
+  it('shares one phase grid across a list so blocks line up (feedback c80ad278)', () => {
+    expect(runSlots([8, 3, null, 10, 0])).toBe(10)
+    expect(runSlots([])).toBe(1)
+    expect(runSlots([undefined])).toBe(1)
+    // A 1-minute 8-phase run gets the same column width as a 2-hour one: the
+    // grid depends on the list's slots, never on duration.
+    expect(runBarColumns(8, 10)).toBe(10)
+    expect(runBarColumns(3, 10)).toBe(10)
+    // A row with more phases than the list declared widens its own grid.
+    expect(runBarColumns(12, 10)).toBe(12)
+    expect(runBarColumns(4, undefined)).toBe(4)
+    expect(runBarColumns(0, 0)).toBe(1)
   })
   it('writes the sub line', () => {
     expect(runSubline('syntropic137/syntropic137', 0, 2)).toBe('syntropic137/syntropic137 · 0 of 2 phases')

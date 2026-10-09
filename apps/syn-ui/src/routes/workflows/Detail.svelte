@@ -14,7 +14,7 @@
 -->
 <script lang="ts">
   import { formatCost, formatInteger, formatPercent, formatRelativeTime, formatTokens, formatDuration } from '@syn137/skyline-core/format'
-  import { runBarPercent, runSegments } from '@syn137/skyline-core/patterns'
+  import { runBarPercent, runSegments, runSlots } from '@syn137/skyline-core/patterns'
   import {
     formatTimeout,
     latestOutputsByPhase,
@@ -69,6 +69,7 @@
   const now = $derived(runs.data ? Date.now() : 0)
   const recent = $derived((runs.data ?? []).slice(0, 5))
   const longest = $derived(Math.max(0, ...recent.map((r) => runDurationMs(r, now || Date.now()) ?? 0)))
+  const slots = $derived(runSlots(recent.map((r) => r.phase_progress?.possible ?? r.total_phases)))
   const runsHref = $derived(href(`/workflows/${id}/runs`))
   const totalRuns = $derived(Math.max(w?.runs_count ?? 0, runs.data?.length ?? 0))
 
@@ -227,6 +228,7 @@
                 sub={r.phase_progress?.display ?? `${r.completed_phases} of ${r.total_phases} phases`}
                 segments={runSegments({ status: r.status, done: r.phase_progress?.completed ?? r.completed_phases, total: r.phase_progress?.possible ?? r.total_phases })}
                 barPercent={runBarPercent(ms, longest)}
+                {slots}
                 duration={formatDuration(ms)}
                 tokens={formatTokens(r.total_tokens)}
                 cost={formatCost(r.total_cost_usd)}

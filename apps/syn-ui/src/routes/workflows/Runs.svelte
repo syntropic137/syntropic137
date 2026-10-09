@@ -7,7 +7,7 @@
 -->
 <script lang="ts">
   import { formatCost, formatDuration, formatRelativeTime, formatTokens } from '@syn137/skyline-core/format'
-  import { runBarPercent, runSegments } from '@syn137/skyline-core/patterns'
+  import { runBarPercent, runSegments, runSlots } from '@syn137/skyline-core/patterns'
   import { TIME_WINDOWS, groupByAge, parseTimeWindow } from '@syn137/skyline-core/screens/executions'
   import { RUN_FILTERS, parseRunFilter, runDurationMs, runsSummary, runsView } from '@syn137/skyline-core/screens/workflows'
   import { Button, Callout, EmptyState, Pagination, Skeleton, ToggleGroup } from '@syn137/skyline-svelte-v5'
@@ -38,6 +38,7 @@
   const page = $derived(Math.max(1, Number(router.query.get('page')) || 1))
 
   const now = $derived(runs.data ? Date.now() : 0)
+  const slots = $derived(runSlots((runs.data ?? []).map((r) => r.phase_progress?.possible ?? r.total_phases)))
   const view = $derived(runsView(runs.data ?? [], { status, window, page, pageSize: PAGE_SIZE, now: now || Date.now() }))
   const groups = $derived(groupByAge(view.rows, (r) => r.started_at, now || Date.now()))
   const chips = $derived(RUN_FILTERS.map((f) => ({ value: f.value, label: f.label, count: view.counts[f.value] })))
@@ -137,6 +138,7 @@
                 sub={r.phase_progress?.display ?? `${r.completed_phases} of ${r.total_phases} phases`}
                 segments={runSegments({ status: r.status, done: r.phase_progress?.completed ?? r.completed_phases, total: r.phase_progress?.possible ?? r.total_phases })}
                 barPercent={runBarPercent(ms, view.longestMs)}
+                {slots}
                 duration={formatDuration(ms)}
                 tokens={formatTokens(r.total_tokens)}
                 cost={formatCost(r.total_cost_usd)}

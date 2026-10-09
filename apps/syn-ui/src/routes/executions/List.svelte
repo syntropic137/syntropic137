@@ -6,7 +6,7 @@
 -->
 <script lang="ts">
   import { formatCost, formatRelativeTime, formatTokens } from '@syn137/skyline-core/format'
-  import { runBarPercent, runSegments, runSubline } from '@syn137/skyline-core/patterns'
+  import { runBarPercent, runSegments, runSlots, runSubline } from '@syn137/skyline-core/patterns'
   import {
     EXECUTION_FILTERS,
     TIME_WINDOWS,
@@ -69,6 +69,7 @@
   const rows = $derived(list.data?.executions ?? [])
   const totals = $derived(outcomeTotals(list.data?.status_counts))
   const longest = $derived(Math.max(0, ...rows.map((r) => (r.duration_seconds ?? 0) * 1000)))
+  const slots = $derived(runSlots(rows.map((r) => r.phase_progress?.possible ?? r.total_phases)))
   const groups = $derived(groupByAge(rows, (r) => r.started_at, now || Date.now()))
   const pageCount = $derived(Math.max(1, Math.ceil((list.data?.total ?? 0) / PAGE_SIZE)))
   const outcomeLabel = $derived(`${totals.completed} completed, ${totals.failed} failed, ${totals.cancelled} cancelled`)
@@ -224,6 +225,7 @@
                 sub={rowSub(r)}
                 segments={runSegments({ status: r.status, done: r.phase_progress?.completed ?? r.completed_phases, total: r.phase_progress?.possible ?? r.total_phases })}
                 barPercent={runBarPercent((r.duration_seconds ?? 0) * 1000, longest)}
+                {slots}
                 duration={r.duration_display ?? '—'}
                 tokens={r.total_tokens_display ?? formatTokens(r.total_tokens)}
                 cost={r.total_cost_display ?? formatCost(r.total_cost_usd)}

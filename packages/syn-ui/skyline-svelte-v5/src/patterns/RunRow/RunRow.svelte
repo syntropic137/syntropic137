@@ -1,15 +1,20 @@
 <!--
   Run Row (Main, Executions, Workflow, phone boards): status tile, name and
-  sub line, a bar whose length is duration and whose blocks are phases, then
-  tokens, cost and age. A card with the bar under the name on a phone; one
-  grid row from a 40rem container. Build `segments`, `barPercent` and `sub`
-  with runSegments(), runBarPercent() and runSubline() from skyline-core.
+  sub line, phase blocks on a grid shared by the whole list (`slots`, from
+  runSlots()) with a duration rule under them, then tokens, cost and age.
+  Blocks are one size and phase N sits in the same column on every row
+  (owner feedback c80ad278; the boards scaled the blocks with duration).
+  A card with the bar under the name on a phone; one grid row from a 40rem
+  container. Build `segments`, `barPercent`, `slots` and `sub` with
+  runSegments(), runBarPercent(), runSlots() and runSubline().
 -->
 <script lang="ts">
+  import { runBarColumns } from '@syn137/skyline-core/patterns'
   import StatusBadge from '../StatusBadge/StatusBadge.svelte'
   import type { RunRowProps } from './types'
 
-  let { status, name, sub, href, segments, barPercent, duration, tokens, cost, when, ...rest }: RunRowProps = $props()
+  let { status, name, sub, href, segments, barPercent, slots, duration, tokens, cost, when, ...rest }: RunRowProps = $props()
+  const columns = $derived(runBarColumns(segments.length, slots))
 </script>
 
 <div class="sky-run-row-host">
@@ -21,11 +26,12 @@
     </span>
     <span class="sky-run-row__bar">
       <span class="sky-run-row__track" aria-hidden="true">
-        <span class="sky-run-row__fill" style:width={`${barPercent}%`}>
+        <span class="sky-run-row__cells" style:--_columns={columns}>
           {#each segments as tone, i (i)}
             <span class="sky-run-row__seg" data-tone={tone}></span>
           {/each}
         </span>
+        <span class="sky-run-row__time"><span class="sky-run-row__fill" style:width={`${barPercent}%`}></span></span>
       </span>
       <span class="sky-run-row__duration">{duration}</span>
     </span>
@@ -97,19 +103,31 @@
   }
   .sky-run-row__track {
     display: flex;
+    flex-direction: column;
+    gap: 3px;
     flex-grow: 1;
+    min-width: 0;
+  }
+  .sky-run-row__cells {
+    display: grid;
+    grid-template-columns: repeat(var(--_columns), minmax(0, 1fr));
+    gap: 2px;
     height: 0.625rem;
-    border-radius: 5px;
+  }
+  .sky-run-row__time {
+    display: block;
+    height: 2px;
+    border-radius: 1px;
     background: var(--sky-color-track);
   }
   .sky-run-row__fill {
-    display: flex;
-    gap: 2px;
-    min-width: 14px;
+    display: block;
+    height: 100%;
+    border-radius: 1px;
+    background: var(--ds-color-text-subtle);
   }
   .sky-run-row__seg {
-    flex: 1 1 0;
-    height: 0.625rem;
+    height: 100%;
     border-radius: 3px;
     background: var(--sky-color-empty);
   }

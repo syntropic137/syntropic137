@@ -11,7 +11,7 @@
 <script lang="ts">
   import { formatCost, formatInteger, formatRelativeTime, formatTokens } from '@syn137/skyline-core/format'
   import { dayFromMs, type SkylineDay } from '@syn137/skyline-core/geometry'
-  import { runBarPercent, runSegments, runSubline } from '@syn137/skyline-core/patterns'
+  import { runBarPercent, runSegments, runSlots, runSubline } from '@syn137/skyline-core/patterns'
   import {
     activeDayCount,
     attentionRuns,
@@ -76,6 +76,7 @@
   const mix = $derived(tokenMix(metrics.data))
   const top = $derived(topWorkflows(workflows.data?.workflows))
   const longest = $derived(Math.max(0, ...rows.map((r) => (r.duration_seconds ?? 0) * 1000)))
+  const slots = $derived(runSlots(rows.map((r) => r.phase_progress?.possible ?? r.total_phases)))
 
   const stats = $derived([
     { label: 'Sessions', value: formatInteger(metrics.data?.total_sessions) },
@@ -205,7 +206,7 @@
       <div class="sky-ov-section-head">
         <div>
           <h2 id="sky-ov-runs-title">Recent runs</h2>
-          <p>Bar length is duration, each block is a phase.</p>
+          <p>Each block is a phase; the line under it is duration.</p>
         </div>
         <a class="sky-ov-more" href={href('/executions')}>{runs.data ? `View all ${formatInteger(runs.data.total)} →` : 'View all →'}</a>
       </div>
@@ -226,10 +227,11 @@
             <RunRow
               status={r.status}
               name={r.workflow_name}
-              sub={runSubline(r.repos_display ?? r.repos?.[0] ?? null, r.completed_phases, r.total_phases)}
+              sub={runSubline(r.repos_display ?? r.repos?.[0] ?? null, r.phase_progress?.completed ?? r.completed_phases, r.phase_progress?.possible ?? r.total_phases)}
               href={execHref(r.workflow_execution_id)}
-              segments={runSegments({ status: r.status, done: r.completed_phases, total: r.total_phases })}
+              segments={runSegments({ status: r.status, done: r.phase_progress?.completed ?? r.completed_phases, total: r.phase_progress?.possible ?? r.total_phases })}
               barPercent={runBarPercent((r.duration_seconds ?? 0) * 1000, longest)}
+              {slots}
               duration={r.duration_display || '—'}
               tokens={r.total_tokens_display}
               cost={r.total_cost_display}
