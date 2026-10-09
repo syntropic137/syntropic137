@@ -80,15 +80,15 @@ Boards for these screens are frozen history. Change the code, not the board.
 | Screen | Board | Route | PR | Date |
 |---|---|---|---|---|
 | Overview | `Main.dc.html`, `PhoneOverview.dc.html` | `/` | #1764 | 2026-10-08 |
-| Executions | `Executions.dc.html`, `Execution.dc.html`, `PhoneExecutions.dc.html`, `PhoneExecution.dc.html` | `/executions`, `/executions/:executionId` | #1764 | 2026-10-08 |
-| Sessions (partial) | `Sessions.dc.html`, `Session.dc.html`, `PhoneSessions.dc.html`, `PhoneSession.dc.html` | `/sessions`, `/sessions/:sessionId` | #1764 | 2026-10-08 |
+| Executions | `Executions.dc.html`, `Execution.dc.html`, `PhoneExecutions.dc.html`, `PhoneExecution.dc.html` | `/executions`, `/executions/:executionId` | #1764 | 2026-10-08, eyes-on 2026-10-09 |
+| Sessions | `Sessions.dc.html`, `Session.dc.html`, `PhoneSessions.dc.html`, `PhoneSession.dc.html` | `/sessions`, `/sessions/:sessionId` | #1764 | 2026-10-08, eyes-on 2026-10-09 |
 | Workflows list | `Workflows.dc.html`, `PhoneWorkflows.dc.html` | `/workflows` | #1764 | 2026-10-08 |
 | Evals | `Evals.dc.html`, `Eval.dc.html`, `PhoneEvals.dc.html`, `PhoneEval.dc.html` | `/evals`, `/evals/:evalId` | #1764 | 2026-10-08 |
-| Artifacts | `Artifacts.dc.html`, `Artifact.dc.html`, `PhoneArtifacts.dc.html`, `PhoneArtifact.dc.html` | `/artifacts`, `/artifacts/:artifactId` | #1764 | 2026-10-08 |
-| Triggers | `Triggers.dc.html`, `PhoneTriggers.dc.html` | `/triggers` | #1764 | 2026-10-08 |
-| Repos | `Repos.dc.html`, `PhoneRepos.dc.html` | `/repos` | #1764 | 2026-10-08 |
+| Artifacts | `Artifacts.dc.html`, `Artifact.dc.html`, `PhoneArtifacts.dc.html`, `PhoneArtifact.dc.html` | `/artifacts`, `/artifacts/:artifactId` | #1764 | 2026-10-08, eyes-on 2026-10-09 |
+| Triggers | `Triggers.dc.html`, `PhoneTriggers.dc.html` | `/triggers` | #1764 | 2026-10-08, eyes-on 2026-10-09 |
+| Repos | `Repos.dc.html`, `PhoneRepos.dc.html` | `/repos` | #1764 | 2026-10-08, eyes-on 2026-10-09 |
 | Eval Trend panel | `Eval.dc.html`, `PhoneEval.dc.html` (trend section) | `/evals/:evalId` | #1764 | 2026-10-08 |
 | Workflows list trend cards | `Workflows.dc.html`, `PhoneWorkflows.dc.html` (duration graph, Faster/Slower/Steady) | `/workflows` | #1764 | 2026-10-08 |
 | Workflow detail and runs (with Performance panel) | `Workflow.dc.html`, `PhoneWorkflow.dc.html` | `/workflows/:workflowId`, `/workflows/:workflowId/runs` | #1764 | 2026-10-08 |
 
-Sessions is partial: finish it from its board. The Workflow detail Performance panel shipped from the canvas export's newer `Workflow.dc.html` and `PhoneWorkflow.dc.html`; the snapshots in `canvas/` predate that panel.
+Sessions was finished from its board in the 2026-10-09 eyes-on pass; what is left there needs backend fields (agent split, tools count) or a canvas decision. The Workflow detail Performance panel shipped from the canvas export's newer `Workflow.dc.html` and `PhoneWorkflow.dc.html`; the snapshots in `canvas/` predate that panel.
