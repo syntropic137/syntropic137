@@ -47,9 +47,6 @@ class CodexItemType(StrEnum):
     FILE_CHANGE = "file_change"
     """One or more file edits the model made."""
 
-    REASONING = "reasoning"
-    """The model's summarised thinking: words, never a side effect."""
-
 
 # Tool-name labels a codex item maps onto in the observability timeline.
 # Mirrors CodexStreamProcessor so the transcript and the timeline agree.

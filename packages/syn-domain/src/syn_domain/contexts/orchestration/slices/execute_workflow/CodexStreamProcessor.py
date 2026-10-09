@@ -262,9 +262,9 @@ class _CodexItem(TypedDict, total=False):
 
 
 #: Item types that are the model's words, so can change nothing (#1825).
-_WORDS_ONLY_ITEMS: frozenset[str] = frozenset(
-    {CodexItemType.AGENT_MESSAGE, CodexItemType.REASONING}
-)
+#: ``reasoning`` is codex's summarised thinking. It is named here rather than in
+#: `CodexItemType` because nothing else in the platform reads it.
+_WORDS_ONLY_ITEMS: frozenset[str] = frozenset({CodexItemType.AGENT_MESSAGE, "reasoning"})
 
 
 def _item_changes_nothing(item: _CodexItem) -> bool:
