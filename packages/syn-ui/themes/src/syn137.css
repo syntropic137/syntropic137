@@ -60,6 +60,16 @@
   --sky-color-agent-claude: #D97757;   /* Claude agent marker */
   --sky-color-agent-codex: #8E9BBC;    /* Codex agent marker (Evals board) */
 
+  /* S mark: the blue cubes mix the accent toward these (top lighter, right
+     shaded); dark cube faces, their edge, the glass cube edge and top */
+  --sky-color-display-hi: #FFFFFF;
+  --sky-color-ground-deep: #06080E;
+  --sky-color-cube-dark-top: #2B3350;
+  --sky-color-cube-dark-left: #1C2236;
+  --sky-color-cube-dark-right: #10141F;
+  --sky-color-cube-edge: rgba(120, 140, 190, 0.1);
+  --sky-color-cube-glass-edge: rgba(255, 255, 255, 0.55);
+
   --sky-color-scrim: rgba(5, 7, 12, 0.6);
   --sky-color-highlight: rgba(255, 255, 255, 0.04);
   --sky-color-highlight-strong: rgba(255, 255, 255, 0.07);
