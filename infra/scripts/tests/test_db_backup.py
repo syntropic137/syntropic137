@@ -190,8 +190,8 @@ class TestPrune:
         assert f"pruned: {old.name}" in result.stdout
 
     def test_abandoned_partial_dumps_are_cleared_after_a_day(self, tmp_path):
-        stale = self._make(tmp_path, ".syn-20260901T030000Z.dump.partial", 2 * _DAY)
-        live = self._make(tmp_path, ".syn-20261008T030000Z.dump.partial", 60)
+        stale = self._make(tmp_path, ".syn-20260901T030000Z.dump.partial.Ab12Cd", 2 * _DAY)
+        live = self._make(tmp_path, ".syn-20261008T030000Z.dump.partial.Ef34Gh", 60)
 
         assert _run("prune", str(tmp_path), "7").returncode == 0
         assert not stale.exists()

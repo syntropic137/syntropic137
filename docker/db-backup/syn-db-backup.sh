@@ -54,7 +54,8 @@ backup() {
     # Written under a unique name prune never matches, and published only once
     # verified: a dump that dies half way never looks like a backup, and two
     # backups in the same second (schedule + manual) never share a file.
-    partial=$(mktemp "$dir/.syn-$stamp-XXXXXX.dump.partial") ||
+    # busybox mktemp (this image) needs the X run at the very end.
+    partial=$(mktemp "$dir/.syn-$stamp.dump.partial.XXXXXX") ||
         fail "cannot create a file in $dir"
     trap 'rm -f "$partial"' EXIT
     pg_dump --format=custom --file="$partial"
@@ -80,7 +81,7 @@ prune() {
     # -mmin, not -mtime: -mtime truncates to whole days, so +7 keeps 7.9 days.
     find "$dir" -maxdepth 1 -type f -name 'syn-*.dump' -mmin "+$(($2 * 1440))" \
         -print -exec rm -f {} \; | sed 's|.*/|pruned: |'
-    find "$dir" -maxdepth 1 -type f -name '.syn-*.dump.partial' -mmin +1440 -exec rm -f {} \;
+    find "$dir" -maxdepth 1 -type f -name '.syn-*.dump.partial.*' -mmin +1440 -exec rm -f {} \;
 }
 
 # Standard five-field cron: numbers, '*', lists, ranges and '/step'. Day of
