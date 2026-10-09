@@ -232,7 +232,7 @@ Every keyboard shortcut lives in skyline-core's `KEYMAP` (`state/keymap.ts`), an
 
 A floating bubble, bottom right (above the dock on phones), is the React widget (`lib/ui-feedback`) ported: `src/shell/FeedbackBubble.svelte`, `FeedbackDialog.svelte` and `src/shell/feedback/`. Its menu has Quick note, Pin to element and Recent feedback (the last 8 from `syn-ui`, with the open count as a badge). A Recent item opens a detail view in the panel (`feedback/FeedbackDetail.svelte`): full comment, type, priority, status with Mark resolved / Reopen (`PATCH /feedback/{id}`), `created_at` as the API sends it (FeedbackItem has no display field), route, URL, pinned element and screenshots (`feedbackMediaSrc()`). Arrows move between items, Enter opens, Esc steps back. Shortcut hints render as separate caps with the `Keycaps` pattern via `shell/keycaps.ts` (`⌃ ⇧ F` on Apple, `Ctrl Shift F` elsewhere; plain Mod chords stay `⌘ K`), and the `?` overlay uses the same. The dialog files one item through `createFeedback()` (`POST /feedback`, #1385), then uploads each screenshot with `uploadFeedbackMedia()` (multipart `POST /feedback/{id}/media` through `requestForm()` in the data client).
 
-What it records: coloured type and priority (`--sky-feedback-type-*`, `--sky-feedback-priority-*` in tokens.css; React defaults bug and low), title plus description (the API has no title field, so the title is the comment's first line), the page (url, route, viewport, user agent, hostname, `app_version` and `git_commit` from `GET /version`, `subject_kind`/`subject_id` on detail routes), an optional pinned element (`css_selector` preferring data-testid, then aria-label, then a short CSS path; `xpath`; click point), and screenshots. Element text, box and theme have no API field and are appended to the comment under `---`.
+What it records: coloured type and priority (`--sky-feedback-type-*`, `--sky-feedback-priority-*` in tokens.css; defaults Other and Medium, compact chips always visible under the box), the comment as typed (one autofocused box, the only required input; the Recent list shows its first line), and, under a collapsed Details disclosure, the page (url, route, viewport, user agent, hostname, `app_version` and `git_commit` from `GET /version`, `subject_kind`/`subject_id` on detail routes), an optional pinned element (`css_selector` preferring data-testid, then aria-label, then a short CSS path; `xpath`; click point), and screenshots. Element text, box and theme have no API field and are appended to the comment under `---`.
 
 Screenshots: Take screenshot (visible viewport) and Capture area render the DOM with `html2canvas-pro` (the maintained html2canvas fork: html2canvas 1.4.1 throws on the oklab values our color-mix tokens compute to), imported dynamically from `feedback/capture.ts` only, so no byte of it is in a production build. Upload image, paste and drop take PNG, JPEG or WebP up to 10 MB, resized to fit 1920x1080.
 
@@ -244,8 +244,8 @@ Shortcuts:
 | Page | `Ctrl+Shift+Q` / `Ctrl+Shift+F` / `Ctrl+Shift+T` | Quick note / pin to element / recent (React widget bindings) |
 | Dialog, focus not in a text field | `B F U P Q O` | Type: bug, feature, UI/UX, perf, question, other |
 | Dialog, focus not in a text field | `1`-`4` | Priority: low, medium, high, critical |
-| Dialog, focus not in a text field | `E` / `S` / `A` / `T` | Pick element / take screenshot / capture area / focus title |
-| Dialog | `Shift+Enter` or `Mod+Enter` | Send |
+| Dialog, focus not in a text field | `E` / `S` / `A` / `C` | Pick element / take screenshot / capture area / focus the comment |
+| Dialog | `Mod+Enter` | Send (a one-line Sent, then the dialog closes itself after a second) |
 | Picker | Tab, arrows / Enter / Esc | Cycle candidates / pin / cancel |
 
 `F` is handled by the bubble, not KEYMAP: a KEYMAP entry needs a new `KeyAction` and a case in `keyboard.ts`, which the shell owner adds.

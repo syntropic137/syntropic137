@@ -36,8 +36,8 @@ export const STATUS_LABEL = {
 
 export const typeChoice = (v: FeedbackType): Choice<FeedbackType> => TYPE_CHOICES.find((c) => c.value === v) ?? TYPE_CHOICES[0]!
 
-/** Same defaults as the React form: bug, low. */
-export const DEFAULT_TYPE: FeedbackType = 'bug'
-export const DEFAULT_PRIORITY: FeedbackPriority = 'low'
+/** Nothing is mandatory (owner, Oct 9 2026): a plain note files as Other / Medium. */
+export const DEFAULT_TYPE: FeedbackType = 'other'
+export const DEFAULT_PRIORITY: FeedbackPriority = 'medium'
 
 export const APP_NAME = 'syn-ui'

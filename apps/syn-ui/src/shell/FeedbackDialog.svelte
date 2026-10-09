@@ -1,8 +1,8 @@
 <!--
-  Feedback dialog (#1385), the React widget's FeedbackModal ported: coloured
-  type and priority chips with single-key hotkeys, the page it is attached to,
-  an optional pinned element, screenshots (take, area, upload, paste, drop),
-  and a title plus description. Files through createFeedback(), then uploads
+  Feedback dialog (#1385), the React widget's FeedbackModal ported: one box (the
+  comment, as typed), with type and priority chips, the page, a pinned element
+  and screenshots collapsed under Details (owner: "a simple single feedback
+  section"). Defaults Other / Medium, so the comment is the only input. Files through createFeedback(), then uploads
   each screenshot with uploadFeedbackMedia(). Loaded lazily by AppShell.
 
   FeedbackCreate carries the location (url, route, viewport, css_selector,
@@ -27,7 +27,7 @@
     type FeedbackPriority,
     type FeedbackType,
   } from '@syn137/syn-ui-data'
-  import { Button, Callout, Dialog, Input, Label, Textarea } from '@syn137/skyline-svelte-v5'
+  import { Button, Callout, Dialog, Textarea } from '@syn137/skyline-svelte-v5'
   import { untrack } from 'svelte'
   import { router } from '../lib/router'
   import AreaSelect from './feedback/AreaSelect.svelte'
@@ -36,6 +36,7 @@
   import ElementPicker from './feedback/ElementPicker.svelte'
   import { FEEDBACK_UI_ATTR, type PinnedElement } from './feedback/element'
   import { APP_NAME, DEFAULT_PRIORITY, DEFAULT_TYPE, PRIORITY_CHOICES, TYPE_CHOICES, type Choice } from './feedback/meta'
+  import { APPLE } from './overlays.svelte'
   import { feedbackUi } from './feedback.svelte'
   import { buildView } from '@syn137/skyline-core/screens/version'
   import { UI_VERSION } from './build.svelte'
@@ -45,20 +46,20 @@
 
   let type = $state<FeedbackType>(DEFAULT_TYPE)
   let priority = $state<FeedbackPriority>(DEFAULT_PRIORITY)
-  let title = $state('')
-  let description = $state('')
+  let comment = $state('')
+  let detailsOpen = $state(false)
+  let commentTouched = $state(false)
+  let closeTimer: ReturnType<typeof setTimeout> | undefined
   let element = $state<PinnedElement | null>(null)
   let shots = $state<Shot[]>([])
   let phase = $state<Phase>({ kind: 'editing' })
-  let titleTouched = $state(false)
   let overlay = $state<Overlay>('none')
   let shotError = $state<string | null>(null)
   let capturing = $state(false)
   let dragging = $state(false)
   let fileInput: HTMLInputElement | undefined = $state()
-  let typeGroup: HTMLDivElement | undefined = $state()
 
-  const titleMissing = $derived(title.trim() === '')
+  const commentMissing = $derived(comment.trim() === '')
   const sending = $derived(phase.kind === 'sending')
   const route = $derived(router.path)
   const subject = $derived(subjectOf(route))
@@ -80,11 +81,12 @@
     for (const s of shots) URL.revokeObjectURL(s.previewUrl)
     type = DEFAULT_TYPE
     priority = DEFAULT_PRIORITY
-    title = ''
-    description = ''
+    clearTimeout(closeTimer)
+    comment = ''
+    detailsOpen = false
     element = null
     shots = []
-    titleTouched = false
+    commentTouched = false
     shotError = null
     phase = { kind: 'editing' }
   }
@@ -106,7 +108,7 @@
   }
   function onPickCancel() {
     // Cancelled straight from the bubble with nothing drafted: back to the page.
-    const empty = !element && titleMissing && !description && shots.length === 0
+    const empty = !element && commentMissing && shots.length === 0
     if (empty && feedbackUi.start === 'pick' && phase.kind !== 'failed') {
       overlay = 'none'
       feedbackUi.picking = false
@@ -188,12 +190,12 @@
 
   async function submit(e?: Event) {
     e?.preventDefault()
-    titleTouched = true
-    if (titleMissing || sending) return
+    commentTouched = true
+    if (commentMissing || sending) return
     phase = { kind: 'sending' }
     const page = pageContext(route)
     const info = await build
-    const body = description.trim() ? `${title.trim()}\n\n${description.trim()}` : title.trim()
+    const body = comment.trim()
     try {
       const item = await createFeedback({
         url: page.url,
@@ -228,6 +230,8 @@
       }
       phase = { kind: 'sent', item, media, mediaFailed }
       feedbackUi.sent += 1
+      // A failed upload stays open so it can be read; otherwise the dialog closes itself.
+      if (mediaFailed === 0) closeTimer = setTimeout(closeDialog, 1000)
     } catch (err: unknown) {
       phase = { kind: 'failed', message: messageOf(err) }
     }
@@ -238,10 +242,10 @@
     return t.isContentEditable || t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement || (t instanceof HTMLInputElement && t.type !== 'radio' && t.type !== 'checkbox' && t.type !== 'button')
   }
 
-  /** Single-key hotkeys while focus is not in a text field; Shift/Mod+Enter submits from anywhere. */
+  /** Single-key hotkeys while focus is not in a text field; Cmd/Ctrl+Enter submits from anywhere. */
   function onKey(e: KeyboardEvent) {
     if (phase.kind === 'sent' || sending) return
-    if (e.key === 'Enter' && (e.shiftKey || e.metaKey || e.ctrlKey)) {
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
       e.preventDefault()
       void submit()
       return
@@ -255,7 +259,7 @@
     else if (k === 'e') beginOverlay('element')
     else if (k === 's') void shoot(null)
     else if (k === 'a') beginOverlay('area')
-    else if (k === 't') document.getElementById('sky-feedback-title')?.focus()
+    else if (k === 'c') document.getElementById('sky-feedback-comment')?.focus()
     else return
     e.preventDefault()
   }
@@ -272,7 +276,7 @@
   }
 
   function initialFocus(): HTMLElement | null {
-    return typeGroup?.querySelector<HTMLElement>('[aria-checked="true"]') ?? null
+    return document.getElementById('sky-feedback-comment')
   }
 
   function onChipKey<V extends string>(e: KeyboardEvent, list: readonly Choice<V>[], current: V, set: (v: V) => void) {
@@ -316,15 +320,12 @@
   <Dialog bind:open={feedbackUi.open} {onOpenChange} {initialFocus} title="Send feedback" size="md">
     {#snippet children()}
       {#if phase.kind === 'sent'}
-        <div class="sky-fb__done" role="status">
-          <Callout tone="note" title="Sent.">
-            Filed as <code class="sky-fb__id" data-testid="feedback-sent-id">{phase.item.id}</code>{#if phase.media > 0}
-              with {phase.media} screenshot{phase.media === 1 ? '' : 's'}{/if}. Read it under Recent feedback in the bubble, or in the React dashboard's feedback tickets.
-          </Callout>
-          {#if phase.mediaFailed > 0}
-            <Callout tone="danger" title="Some screenshots did not upload.">{phase.mediaFailed} failed; the item itself was filed.</Callout>
-          {/if}
-        </div>
+        <p class="sky-fb__sent" role="status">
+          Sent <code class="sky-fb__id" data-testid="feedback-sent-id">{phase.item.id}</code>{#if phase.media > 0}&nbsp;with {phase.media} screenshot{phase.media === 1 ? '' : 's'}{/if}
+        </p>
+        {#if phase.mediaFailed > 0}
+          <Callout tone="danger" title="Some screenshots did not upload.">{phase.mediaFailed} failed; the item itself was filed.</Callout>
+        {/if}
       {:else}
         <!-- svelte-ignore a11y_no_noninteractive_element_interactions: hotkeys, paste and drop are conveniences over the buttons below -->
         <form
@@ -343,113 +344,114 @@
           novalidate
           aria-busy={sending}
         >
-          <div class="sky-fb__group" data-testid="feedback-attached">
-            <span class="sky-fb__chip-label">Attached to</span>
-            <div class="sky-fb__attached">
-            <code class="sky-fb__pill" title={location.href}>{route}</code>
-            {#if subject}<span class="sky-fb__pill sky-fb__pill--soft">{subject.kind}</span>{/if}
-            <span class="sky-fb__pill sky-fb__pill--soft">{innerWidth}×{innerHeight}</span>
-            {#await build then info}{@const v = buildView(info, UI_VERSION)}{#if v.label}<span class="sky-fb__pill sky-fb__pill--soft" data-state={v.mismatch ? 'mismatch' : undefined}>{v.label}{v.commit ? ` · ${v.commit}` : ''}{v.mismatch ? ` · ui v${v.ui}` : ''}</span>{/if}{/await}
-            </div>
-          </div>
+          <Textarea
+            id="sky-feedback-comment"
+            aria-label="Feedback"
+            bind:value={comment}
+            rows={5}
+            placeholder="What's on your mind?"
+            disabled={sending}
+            invalid={commentTouched && commentMissing}
+            message={commentTouched && commentMissing ? 'Write something first.' : undefined}
+            messageTone={commentTouched && commentMissing ? 'danger' : undefined}
+          />
 
-          <div class="sky-fb__group">
-            <span class="sky-fb__chip-label" id="sky-fb-type-label">Type</span>
-            <div class="sky-fb__chips" role="radiogroup" aria-labelledby="sky-fb-type-label" bind:this={typeGroup}>
+          <div class="sky-fb__classify">
+            <div class="sky-fb__chips" role="radiogroup" aria-label="Type">
               {@render chips('type', TYPE_CHOICES, type, (v) => (type = v))}
             </div>
-          </div>
-          <div class="sky-fb__group">
-            <span class="sky-fb__chip-label" id="sky-fb-priority-label">Priority</span>
-            <div class="sky-fb__chips" role="radiogroup" aria-labelledby="sky-fb-priority-label">
+            <div class="sky-fb__chips" role="radiogroup" aria-label="Priority">
               {@render chips('priority', PRIORITY_CHOICES, priority, (v) => (priority = v))}
             </div>
           </div>
 
-          <div class="sky-fb__group">
-            <span class="sky-fb__chip-label">Element</span>
-            {#if element}
-              <div class="sky-fb__element" data-testid="feedback-element">
-                <code class="sky-fb__pill" title={element.selector}>{element.label}</code>
-                <span class="sky-fb__muted">{element.box.width}×{element.box.height}</span>
-                <Button size="sm" variant="ghost" onclick={() => beginOverlay('element')} disabled={sending}>Re-pick</Button>
-                <Button size="sm" variant="ghost" aria-label="Remove pinned element" onclick={() => (element = null)} disabled={sending}>
-                  {#snippet icon()}<X size={14} aria-hidden="true" />{/snippet}
-                </Button>
+          <details class="sky-fb__details" bind:open={detailsOpen}>
+            <summary class="sky-fb__summary" data-testid="feedback-details">
+              <span class="sky-fb__summary-label">Details</span>
+              <span class="sky-fb__summary-chips">
+                <code class="sky-fb__mini">{route}</code>
+                {#if element}<code class="sky-fb__mini">{element.label}</code>{/if}
+                {#if shots.length > 0}<span class="sky-fb__mini">{shots.length} screenshot{shots.length === 1 ? '' : 's'}</span>{/if}
+              </span>
+            </summary>
+            <div class="sky-fb__details-body">
+              <div class="sky-fb__group" data-testid="feedback-attached">
+                <span class="sky-fb__chip-label">Attached to</span>
+                <div class="sky-fb__attached">
+                <code class="sky-fb__pill" title={location.href}>{route}</code>
+                {#if subject}<span class="sky-fb__pill sky-fb__pill--soft">{subject.kind}</span>{/if}
+                <span class="sky-fb__pill sky-fb__pill--soft">{innerWidth}×{innerHeight}</span>
+                {#await build then info}{@const v = buildView(info, UI_VERSION)}{#if v.label}<span class="sky-fb__pill sky-fb__pill--soft" data-state={v.mismatch ? 'mismatch' : undefined}>{v.label}{v.commit ? ` · ${v.commit}` : ''}{v.mismatch ? ` · ui v${v.ui}` : ''}</span>{/if}{/await}
+                </div>
               </div>
-            {:else}
-              <Button size="sm" variant="outline" onclick={() => beginOverlay('element')} disabled={sending}>
-                {#snippet icon()}<MousePointerClick size={14} aria-hidden="true" />{/snippet}
-                {#snippet iconEnd()}<kbd class="sky-fb__kbd">E</kbd>{/snippet}
-                Pick element
-              </Button>
-            {/if}
-          </div>
 
-          <div class="sky-fb__field">
-            <Label for="sky-feedback-title" required>Title</Label>
-            <Input
-              id="sky-feedback-title"
-              bind:value={title}
-              maxlength={200}
-              autocomplete="off"
-              placeholder="What happened, in one line"
-              disabled={sending}
-              onblur={() => (titleTouched = true)}
-              invalid={titleTouched && titleMissing}
-              message={titleTouched && titleMissing ? 'Add a title.' : undefined}
-              messageTone="danger"
-            />
-          </div>
-          <div class="sky-fb__field">
-            <Label for="sky-feedback-description" hint="optional">Description</Label>
-            <Textarea id="sky-feedback-description" bind:value={description} rows={4} placeholder="Steps, what you expected, what you saw (Shift+Enter sends)" disabled={sending} />
-          </div>
+              <div class="sky-fb__group">
+                <span class="sky-fb__chip-label">Element</span>
+                {#if element}
+                  <div class="sky-fb__element" data-testid="feedback-element">
+                    <code class="sky-fb__pill" title={element.selector}>{element.label}</code>
+                    <span class="sky-fb__muted">{element.box.width}×{element.box.height}</span>
+                    <Button size="sm" variant="ghost" onclick={() => beginOverlay('element')} disabled={sending}>Re-pick</Button>
+                    <Button size="sm" variant="ghost" aria-label="Remove pinned element" onclick={() => (element = null)} disabled={sending}>
+                      {#snippet icon()}<X size={14} aria-hidden="true" />{/snippet}
+                    </Button>
+                  </div>
+                {:else}
+                  <Button size="sm" variant="outline" onclick={() => beginOverlay('element')} disabled={sending}>
+                    {#snippet icon()}<MousePointerClick size={14} aria-hidden="true" />{/snippet}
+                    {#snippet iconEnd()}<kbd class="sky-fb__kbd">E</kbd>{/snippet}
+                    Pick element
+                  </Button>
+                {/if}
+              </div>
 
-          <div class="sky-fb__group">
-            <span class="sky-fb__chip-label">Screenshots</span>
-            <div class="sky-fb__shot-actions">
-              <Button size="sm" variant="outline" onclick={() => void shoot(null)} disabled={sending || capturing}>
-                {#snippet icon()}<Camera size={14} aria-hidden="true" />{/snippet}
-                {#snippet iconEnd()}<kbd class="sky-fb__kbd">S</kbd>{/snippet}
-                Take screenshot
-              </Button>
-              <Button size="sm" variant="outline" onclick={() => beginOverlay('area')} disabled={sending || capturing}>
-                {#snippet icon()}<SquareDashed size={14} aria-hidden="true" />{/snippet}
-                {#snippet iconEnd()}<kbd class="sky-fb__kbd">A</kbd>{/snippet}
-                Capture area
-              </Button>
-              <Button size="sm" variant="outline" onclick={() => fileInput?.click()} disabled={sending}>
-                {#snippet icon()}<ImageUp size={14} aria-hidden="true" />{/snippet}
-                Upload image
-              </Button>
-              <input
-                bind:this={fileInput}
-                class="sky-fb__file"
-                type="file"
-                accept={FEEDBACK_IMAGE_TYPES.join(',')}
-                multiple
-                aria-label="Upload image"
-                data-testid="feedback-file"
-                onchange={(e) => {
-                  const input = e.currentTarget
-                  void addFiles([...(input.files ?? [])]).then(() => (input.value = ''))
-                }}
-              />
+              <div class="sky-fb__group">
+                <span class="sky-fb__chip-label">Screenshots</span>
+                <div class="sky-fb__shot-actions">
+                  <Button size="sm" variant="outline" onclick={() => void shoot(null)} disabled={sending || capturing}>
+                    {#snippet icon()}<Camera size={14} aria-hidden="true" />{/snippet}
+                    {#snippet iconEnd()}<kbd class="sky-fb__kbd">S</kbd>{/snippet}
+                    Take screenshot
+                  </Button>
+                  <Button size="sm" variant="outline" onclick={() => beginOverlay('area')} disabled={sending || capturing}>
+                    {#snippet icon()}<SquareDashed size={14} aria-hidden="true" />{/snippet}
+                    {#snippet iconEnd()}<kbd class="sky-fb__kbd">A</kbd>{/snippet}
+                    Capture area
+                  </Button>
+                  <Button size="sm" variant="outline" onclick={() => fileInput?.click()} disabled={sending}>
+                    {#snippet icon()}<ImageUp size={14} aria-hidden="true" />{/snippet}
+                    Upload image
+                  </Button>
+                  <input
+                    bind:this={fileInput}
+                    class="sky-fb__file"
+                    type="file"
+                    accept={FEEDBACK_IMAGE_TYPES.join(',')}
+                    multiple
+                    aria-label="Upload image"
+                    data-testid="feedback-file"
+                    onchange={(e) => {
+                      const input = e.currentTarget
+                      void addFiles([...(input.files ?? [])]).then(() => (input.value = ''))
+                    }}
+                  />
+                </div>
+                <p class="sky-fb__muted sky-fb__drop-hint">Or paste or drop an image here.</p>
+                {#if shots.length > 0}
+                  <ul class="sky-fb__shots" aria-label="Screenshots to attach">
+                    {#each shots as s, i (s.previewUrl)}
+                      <li class="sky-fb__shot">
+                        <img src={s.previewUrl} alt="Screenshot {i + 1}" />
+                        <button type="button" class="sky-fb__icon sky-fb__shot-remove" aria-label="Remove screenshot {i + 1}" onclick={() => removeShot(i)} disabled={sending}><X size={14} aria-hidden="true" /></button>
+                      </li>
+                    {/each}
+                  </ul>
+                {/if}
+                {#if shotError}<p class="sky-fb__error" role="alert">{shotError}</p>{/if}
+              </div>
+
             </div>
-            <p class="sky-fb__muted sky-fb__drop-hint">Or paste or drop an image here.</p>
-            {#if shots.length > 0}
-              <ul class="sky-fb__shots" aria-label="Screenshots to attach">
-                {#each shots as s, i (s.previewUrl)}
-                  <li class="sky-fb__shot">
-                    <img src={s.previewUrl} alt="Screenshot {i + 1}" />
-                    <button type="button" class="sky-fb__icon sky-fb__shot-remove" aria-label="Remove screenshot {i + 1}" onclick={() => removeShot(i)} disabled={sending}><X size={14} aria-hidden="true" /></button>
-                  </li>
-                {/each}
-              </ul>
-            {/if}
-            {#if shotError}<p class="sky-fb__error" role="alert">{shotError}</p>{/if}
-          </div>
+          </details>
 
           {#if phase.kind === 'failed'}
             <Callout tone="danger" role="alert" title="Not sent.">{phase.message}</Callout>
@@ -458,21 +460,17 @@
       {/if}
     {/snippet}
     {#snippet footer()}
-      {#if phase.kind === 'sent'}
-        <Button variant="outline" onclick={reset}>Send another</Button>
-        <Button variant="solid" onclick={closeDialog}>Done</Button>
-      {:else}
-        <span class="sky-fb__keys">B F U P Q O type · 1-4 priority · E pin · S shot · A area</span>
+      {#if phase.kind !== 'sent'}
+        <span class="sky-fb__keys">{APPLE ? '⌘' : 'Ctrl'}+Enter send · Esc close · off the text box: B F U P Q O type, 1-4 priority, E pin, S shot, A area</span>
         <Button type="button" variant="ghost" onclick={closeDialog} disabled={sending}>Cancel</Button>
-        <Button type="submit" form="sky-fb-form" variant="solid" loading={sending}>{sending ? 'Sending' : 'Send feedback'}</Button>
+        <Button type="submit" form="sky-fb-form" variant="solid" loading={sending}>{sending ? 'Sending' : 'Send'}</Button>
       {/if}
     {/snippet}
   </Dialog>
 </div>
 
 <style>
-  .sky-fb,
-  .sky-fb__done {
+  .sky-fb {
     display: flex;
     flex-direction: column;
     gap: var(--ds-space-4);
@@ -525,32 +523,47 @@
     color: var(--ds-color-text-muted);
     border-color: var(--ds-color-border);
   }
+  /* Type and priority: always visible, compact, one row each under the box. */
+  .sky-fb__classify {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ds-space-1-5);
+    margin-top: calc(var(--ds-space-2) * -1);
+  }
   .sky-fb__chips {
-    gap: var(--ds-space-2);
+    gap: var(--ds-space-1);
   }
   .sky-fb__chip {
     display: inline-flex;
     align-items: center;
-    gap: var(--ds-space-2);
-    min-height: var(--sky-size-nav-item);
-    padding: 0 var(--ds-space-3-5);
+    gap: var(--ds-space-1-5);
+    box-sizing: border-box;
+    height: var(--ds-space-6);
+    padding: 0 var(--ds-space-2-5);
     border-radius: var(--ds-radius-full);
     border: var(--ds-border-width) solid var(--ds-color-border);
     background: var(--sky-color-control);
     color: var(--ds-color-text-muted);
     font: inherit;
-    font-size: var(--ds-text-sm);
+    font-size: var(--ds-text-xs);
     cursor: pointer;
   }
-  /* Label and key letter share a baseline. */
+  /* Label and key letter share a baseline; the letter shows on hover or focus only. */
   .sky-fb__chip-text {
     display: inline-flex;
     align-items: baseline;
-    gap: var(--ds-space-1-5);
+    gap: var(--ds-space-1);
+  }
+  .sky-fb__chip .sky-fb__kbd {
+    display: none;
+  }
+  .sky-fb__chip:hover .sky-fb__kbd,
+  .sky-fb__chip:focus-visible .sky-fb__kbd {
+    display: inline;
   }
   @media (pointer: coarse) {
     .sky-fb__chip {
-      min-height: var(--sky-size-touch);
+      height: var(--sky-size-control-sm);
     }
   }
   .sky-fb__chip:hover {
@@ -641,6 +654,77 @@
   /* Belongs to the buttons above: 4 above, 8 below. */
   .sky-fb__drop-hint {
     margin-top: calc(var(--ds-space-1) * -1);
+  }
+  .sky-fb__sent {
+    margin: 0;
+    color: var(--ds-color-fg);
+    font-size: var(--sky-text-control);
+  }
+  .sky-fb__details {
+    border-top: var(--ds-border-width) solid var(--sky-color-divider);
+    padding-top: var(--ds-space-3);
+  }
+  .sky-fb__summary {
+    display: flex;
+    align-items: center;
+    gap: var(--ds-space-2-5);
+    min-width: 0;
+    cursor: pointer;
+    list-style: none;
+  }
+  .sky-fb__summary::-webkit-details-marker {
+    display: none;
+  }
+  .sky-fb__summary::before {
+    content: '▸';
+    color: var(--ds-color-text-subtle);
+    font-size: var(--ds-text-xs);
+    transition: transform var(--sky-duration-fast) var(--sky-ease-out);
+  }
+  .sky-fb__details[open] > .sky-fb__summary::before {
+    transform: rotate(90deg);
+  }
+  .sky-fb__summary:focus-visible {
+    outline: var(--sky-focus-ring-width) solid var(--sky-color-focus);
+    outline-offset: var(--sky-focus-ring-offset);
+    border-radius: var(--ds-radius-sm);
+  }
+  .sky-fb__summary-label {
+    flex: none;
+    font-family: var(--ds-font-mono);
+    font-size: var(--sky-text-label);
+    letter-spacing: var(--sky-tracking-label);
+    text-transform: uppercase;
+    color: var(--ds-color-text-subtle);
+  }
+  .sky-fb__summary-chips {
+    display: flex;
+    align-items: center;
+    gap: var(--ds-space-1-5);
+    min-width: 0;
+    overflow: hidden;
+  }
+  .sky-fb__mini {
+    display: inline-flex;
+    align-items: center;
+    flex: none;
+    gap: var(--ds-space-1-5);
+    max-width: 12rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--ds-color-text-muted);
+    font-size: var(--ds-text-xs);
+  }
+  code.sky-fb__mini {
+    display: inline-block;
+    font-family: var(--ds-font-mono);
+  }
+  .sky-fb__details-body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ds-space-4);
+    padding-top: var(--ds-space-4);
   }
   .sky-fb__error {
     margin: 0;
