@@ -19,6 +19,10 @@ enumerate every field. To let a new shape through, extend the allowlist here
 and pin it in ``tests/docker_create_guard/test_policy.py``. To let an operator
 image through, set ``SYN_DOCKER_CREATE_GUARD_IMAGE_PREFIXES``.
 
+Bind sources must sit under ``SYN_WORKSPACE_HOST_DIR`` both as written and
+after symlinks are resolved (the guard mounts that root read-only), and a bind
+the guard cannot see is refused.
+
 Field names are matched case-insensitively, as the daemon's Go JSON decoder
 does, and an object naming one field twice under different cases is refused
 rather than guessed at.
