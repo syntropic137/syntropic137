@@ -14,13 +14,20 @@ resolves to keeping the line.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Final
 
+from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
+    WorkspaceInspectionFailedError,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.workspace_git import (
     GitWorkspace,
     git,
+    git_remote,
 )
+
+logger = logging.getLogger(__name__)
 
 #: The escapes git's C-style path quoting writes besides octal bytes.
 _C_ESCAPES: Final = {
@@ -79,7 +86,9 @@ async def _moved_gitlinks(workspace: GitWorkspace, repo: str) -> frozenset[str]:
       reaches, branch, tag or stash alike - is missing from every one of its
       remotes. A commit the phase made in the submodule is authored work whose
       objects nothing here quarantines, so it must keep failing the phase,
-      whatever kind of ref it was left on.
+      whatever kind of ref it was left on. "Missing" is judged against what
+      origin ADVERTISES as well as the remote-tracking refs: see
+      `_stranded_commits` (#1815).
 
     Paths come back DECODED (`_unquote`), because v1 and v2 do not quote the
     same paths the same way. Everything else - a staged gitlink, a rename - is
@@ -94,14 +103,76 @@ async def _moved_gitlinks(workspace: GitWorkspace, repo: str) -> frozenset[str]:
         if len(fields) != 9 or fields[:3] != ["1", ".M", "SC.."]:
             continue
         path = _unquote(fields[8])
-        # --all, not --branches: a tag or a stash keeps a commit alive in the
-        # submodule exactly as a branch does, and no remote has it either.
-        stranded = await git(
-            workspace, f"{repo}/{path}", "rev-list", "HEAD", "--all", "--not", "--remotes"
-        )
-        if not stranded.strip():
+        if not await _stranded_commits(workspace, f"{repo}/{path}"):
             moved.add(path)
     return frozenset(moved)
+
+
+async def _stranded_commits(workspace: GitWorkspace, submodule: str) -> bool:
+    """Whether ``submodule`` holds a commit its origin does not have.
+
+    --all, not --branches: a tag or a stash keeps a commit alive in the
+    submodule exactly as a branch does, and no remote has it either.
+
+    But --all also walks the TAGS THE CLONE FETCHED FROM ORIGIN, and
+    ``--not --remotes`` subtracts only remote-tracking branches. A release tag
+    whose commit no origin branch still contains therefore read as local work,
+    and a clean submodule merely checked out at an older pin failed every
+    reverify of an older branch (#1815). Locally a fetched tag and a tag the
+    agent made are the same ref, so only origin can tell them apart: whatever
+    it advertises under a branch or a tag is published, and is subtracted too.
+
+    Origin is asked only when the local answer already says "stranded", so the
+    common clean case stays off the network. An origin that cannot be asked
+    subtracts nothing, and the commits stay counted: every doubt keeps the work.
+    """
+    local = await git(workspace, submodule, "rev-list", "HEAD", "--all", "--not", "--remotes")
+    if not local.strip():
+        return False
+    published = await _advertised_by_origin(workspace, submodule)
+    if not published:
+        return True
+    # --ignore-missing: origin advertises tips this clone never fetched, and
+    # a commit we do not have cannot be what keeps one of ours alive.
+    remaining = await git(
+        workspace,
+        submodule,
+        "rev-list",
+        "--ignore-missing",
+        "HEAD",
+        "--all",
+        "--not",
+        "--remotes",
+        *published,
+    )
+    return bool(remaining.strip())
+
+
+async def _advertised_by_origin(workspace: GitWorkspace, submodule: str) -> tuple[str, ...]:
+    """The object ids origin advertises under its branches and tags, or none if it will not say.
+
+    Peeled entries (``^{}``) carry an annotated tag's commit; the tag object
+    itself is kept as well, since rev-list peels either.
+    """
+    try:
+        listing = await git_remote(
+            workspace,
+            submodule,
+            "ls-remote",
+            "--heads",
+            "--tags",
+            "origin",
+            doing=f"asking origin which commits of {submodule} it already has",
+        )
+    except WorkspaceInspectionFailedError:
+        logger.warning(
+            "Could not ask origin of %s what it publishes; its local-only commits stay counted "
+            "as work",
+            submodule,
+            exc_info=True,
+        )
+        return ()
+    return tuple(sorted({line.split("\t", 1)[0] for line in listing.splitlines() if line.strip()}))
 
 
 def _unquote(path: str) -> str:

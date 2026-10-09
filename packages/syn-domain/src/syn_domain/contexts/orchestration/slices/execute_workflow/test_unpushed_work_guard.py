@@ -4236,6 +4236,80 @@ async def test_a_submodule_change_kept_only_by_a_stash_still_fails_the_phase(
     assert _SUBMODULE in str(raised.value)
 
 
+def _publish_a_tag_no_origin_branch_contains(superproject: _WithSubmodule, *tag_args: str) -> str:
+    """#1815's shape: origin has a tag on a commit none of its branches reach, and the clone fetched it.
+
+    What a release tag cut from a since-rewritten branch looks like. Returns
+    the tagged commit, and asserts the fixture really staged the bug: before
+    #1815 that commit read as "missing from every remote".
+    """
+    seed = superproject.clone.root / "plugin.seed"
+    home = superproject.clone.root / "home"
+    _git("checkout", "-b", "since-deleted", cwd=seed, home=home)
+    (seed / "plugin.txt").write_text("released from a branch origin no longer has\n")
+    _git("commit", "-am", "release", cwd=seed, home=home)
+    tagged = _git("rev-parse", "HEAD", cwd=seed, home=home).stdout.strip()
+    _git("tag", *tag_args, "v1.0.0", cwd=seed, home=home)
+    _git("push", str(superproject.clone.root / "plugin.origin.git"), "v1.0.0", cwd=seed, home=home)
+    superproject.git("fetch", "--tags", "origin")
+    assert superproject.git("rev-list", "HEAD", "--all", "--not", "--remotes").split() == [tagged]
+    return tagged
+
+
+@pytest.mark.parametrize("tag_args", [(), ("-a", "-m", "release")], ids=["light", "annotated"])
+async def test_a_tag_origin_publishes_off_every_branch_does_not_fail_the_phase(
+    superproject: _WithSubmodule, tag_args: tuple[str, ...]
+) -> None:
+    """#1815: a clean submodule at an older pin, holding only what origin already has.
+
+    Remote-tracking refs do not include tags, so the release tag's commit
+    looked unpushed and every reverify of a pre-bump branch was quarantined.
+    """
+    _publish_a_tag_no_origin_branch_contains(superproject, *tag_args)
+    superproject.move_the_gitlink()
+    assert superproject.v2_token() == "SC.."
+    run = _PhaseRun(superproject.clone.workspace)
+
+    await run.complete()
+
+    run.aggregate.complete_phase.assert_called_once()
+    assert run.completed_phase_ids == [_PHASE_ID]
+    assert not _quarantined(superproject.clone)
+
+
+async def test_a_local_tag_named_like_a_published_one_still_fails_the_phase(
+    superproject: _WithSubmodule,
+) -> None:
+    """Origin's tags are subtracted by OBJECT, not by name: a reused name publishes nothing."""
+    _publish_a_tag_no_origin_branch_contains(superproject)
+    (superproject.path / "plugin.txt").write_text("committed, never pushed\n")
+    superproject.git("commit", "-am", "work in the submodule")
+    superproject.git("tag", "-f", "v1.0.0")
+    superproject.git("checkout", "--detach", superproject.new)
+    superproject.move_the_gitlink()
+    assert superproject.v2_token() == "SC.."
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await superproject.clone.run_gate()
+
+    assert _SUBMODULE in str(raised.value)
+
+
+async def test_a_published_tag_still_counts_when_origin_cannot_be_asked(
+    superproject: _WithSubmodule,
+) -> None:
+    """No answer from origin is no evidence: the tagged commit stays counted as work."""
+    _publish_a_tag_no_origin_branch_contains(superproject)
+    superproject.git("remote", "set-url", "origin", str(superproject.clone.root / "gone.git"))
+    superproject.move_the_gitlink()
+    assert superproject.v2_token() == "SC.."
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await superproject.clone.run_gate()
+
+    assert _SUBMODULE in str(raised.value)
+
+
 _QUOTED_SUBMODULE = "lib/my plugin"
 
 
