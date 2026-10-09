@@ -3,7 +3,7 @@ directory could stay claimed or a pass could trust a stale or emptied input."""
 
 from __future__ import annotations
 
-from types import SimpleNamespace
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock
 
@@ -64,13 +64,27 @@ async def test_an_uninspectable_container_skips_the_pass_and_keeps_the_dir(
 # -- 1b: a truncated running-execution list is no list at all --
 
 
+@dataclass(frozen=True)
+class _Row:
+    workflow_execution_id: str
+
+
+@dataclass(frozen=True)
+class _ExecutionList:
+    rows: list[_Row]
+
+    async def get_all(self, **_kwargs: object) -> list[_Row]:
+        return self.rows
+
+
+@dataclass(frozen=True)
+class _ProjectionManager:
+    workflow_execution_list: _ExecutionList
+
+
 def _execution_list(count: int, monkeypatch: pytest.MonkeyPatch) -> None:
-    rows = [SimpleNamespace(workflow_execution_id=f"exec-{i}") for i in range(count)]
-
-    async def get_all(**_kwargs: object) -> list[SimpleNamespace]:
-        return rows
-
-    manager = SimpleNamespace(workflow_execution_list=SimpleNamespace(get_all=get_all))
+    rows = [_Row(f"exec-{i}") for i in range(count)]
+    manager = _ProjectionManager(_ExecutionList(rows))
     monkeypatch.setattr("syn_api._wiring.get_projection_mgr", lambda: manager)
 
 
@@ -289,7 +303,7 @@ async def test_a_rebuild_skips_the_pass(base: Path, tmp_path: Path) -> None:
 async def test_a_rebuild_beginning_during_archival_keeps_the_dir(
     base: Path, tmp_path: Path
 ) -> None:
-    ws = _workspace(base, "ws-rebuild-late", tmp_path)
+    _workspace(base, "ws-rebuild-late", tmp_path)
     reclaimer = _reclaimer(base)
     rebuilding: list[str | None] = [None]
 
