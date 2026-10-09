@@ -389,6 +389,25 @@ EOF
 
 ## Monitoring & Observability
 
+### Request latency (ADR-075)
+
+Every API request's method, route template, status and time to first byte go
+to `api_request_latency` in the observability database. Rows are kept for 30
+days. Read them with `GET /api/v1/observability/latency?window=24h` or
+`syn insights latency --window 7d`. Both show exact p50/p95/p99 per route and
+this API process's `dropped` / `write_failures` / `discarded` counters.
+
+- **`SYN_SKIP_AUTO_CREATE_TABLES` set: provision the table yourself.** There is
+  no migration runner. Before or after upgrading, apply
+  `packages/syn-adapters/src/syn_adapters/projection_stores/migrations/009_api_request_latency.sql`
+  to the observability database. Until you do, the API serves normally but
+  records nothing, and every sample shows as `dropped`.
+- Flag unset: the API creates the table itself, retrying in the background
+  until it can.
+- Tuning: `REQUEST_LATENCY_IO_TIMEOUT_S` (default 5) bounds each database
+  step. `REQUEST_LATENCY_SHUTDOWN_TIMEOUT_S` (default 10) bounds the final
+  flush at shutdown.
+
 ### Metrics (Prometheus)
 
 ```yaml

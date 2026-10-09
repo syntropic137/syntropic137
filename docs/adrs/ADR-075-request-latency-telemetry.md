@@ -39,25 +39,54 @@ a query pass through this middleware; only the template leaves it. An incoming
 
 ### How it is written
 
-`RequestTimingMiddleware` builds a sample and calls
-`RequestLatencyRecorder.offer`, which appends to a bounded in-memory buffer
-(10,000) and returns: no I/O and no await on the request path. A background
-task drains it with one `COPY` per batch of up to 500, every second or as soon
-as a batch fills. Backpressure drops, never blocks: a sample offered while the
-buffer is full, or while the recorder is not running, is counted in `dropped`;
-a batch whose write fails is counted in `write_failures` and not retried.
-Shutdown flushes once before the pool closes. Measured overhead in-process is
-about 6 us per request (`test_adr075_request_latency.py` asserts < 1 ms).
+`RequestTimingMiddleware` is the OUTERMOST app middleware, so a startup-gate
+503 and a workspace-ingress refusal are timed and recorded like any response.
+At response START it builds a sample, sets `x-request-id` (replacing any the
+app set) and calls `RequestLatencyRecorder.offer`. A long-lived stream is
+therefore recorded when it answered, not when it closed. If no response
+starts, a sample is offered when the request ends. An unhandled exception gets
+its 500 sent here, with the id, before the exception is re-raised to
+Starlette's error middleware. A recorder that raises is logged and ignored, so
+telemetry never fails a request and never masks the application's exception.
 
-Recording is best-effort (ADR-057 spirit): if the table cannot be readied the
-API serves anyway and every sample is a counted drop.
+`offer` appends to a bounded in-memory buffer (10,000) and returns: no I/O and
+no await on the request path. A background task drains it with one `COPY` per
+batch of up to 500, every second or as soon as a batch fills. Backpressure
+drops, never blocks. Every loss is counted in `GET /observability/latency`:
+
+| Counter | Meaning |
+|---|---|
+| `dropped` | Offered while the buffer was full or the recorder was not running |
+| `write_failures` | In a batch that failed or overran `REQUEST_LATENCY_IO_TIMEOUT_S` |
+| `discarded` | Still buffered or mid-write when `REQUEST_LATENCY_SHUTDOWN_TIMEOUT_S` expired |
+
+Every database step has a deadline from settings, never a literal.
+`request_latency_io_timeout_s` (default 5 s) bounds connection acquisition, each
+batch write and each attempt to ready the table.
+`request_latency_shutdown_timeout_s` (default 10 s) bounds the final flush. A
+stalled database can lose samples, counted, but cannot hold up a request, a
+startup or a shutdown. Failed batches are not retried.
+
+Readying the table never blocks startup. A supervised background task retries
+it with exponential backoff (1 s doubling to 60 s) until it succeeds, so a
+database that is slow or down at boot delays recording instead of disabling it
+until the next restart. Measured overhead in-process is about 6 us per request
+(`test_adr075_request_latency.py` asserts < 1 ms).
 
 ### Retention
 
 `api_request_latency` is a TimescaleDB hypertable with one-day chunks and a
-30-day retention policy, so old data leaves a whole chunk at a time. DDL runs
-at startup unless `SYN_SKIP_AUTO_CREATE_TABLES` says the migrations own it, the
-same policy as `agent_events`.
+30-day retention policy, so old data leaves a whole chunk at a time.
+
+### Provisioning
+
+DDL runs at API startup unless `SYN_SKIP_AUTO_CREATE_TABLES` is set, the same
+policy as `agent_events`. **There is no migration runner.**
+`projection_stores/migrations/009_api_request_latency.sql` documents the DDL
+and nothing applies it. A deployment that sets the flag must apply that file
+to the observability database itself. Until then the API serves normally,
+records nothing, reports every sample as `dropped`, and logs a warning on each
+retry. The deploy notes say the same.
 
 ### How p99 is computed
 
