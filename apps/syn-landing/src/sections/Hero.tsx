@@ -1,9 +1,10 @@
-import { useEffect, useMemo } from "react";
-import { CITY_TONE_FILL, S_MARK_FACES, extrudeColors, isoCity, sMark } from "@syn137/skyline-core/geometry";
+import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { S_MARK_FACES, cityBlockPaint, isoCity, sMark, type CityFill } from "@syn137/skyline-core/geometry";
 import GlassCard from "../components/GlassCard";
 import HarnessChip from "../components/HarnessChip";
 import InstallTerminal from "../components/InstallTerminal";
 import { loadElement, useElement } from "../components/useElement";
+import { useInViewOnce } from "../components/useInView";
 import { useMedia } from "../components/useMedia";
 import { HERO } from "../data/copy";
 import { CITY_DESKTOP, CITY_MAX_SESSIONS, CITY_PHONE, HERO_CARDS, HERO_STATS, cityDays, type CityLayout } from "../data/sample/hero";
@@ -14,12 +15,10 @@ const loadCity = () => import("@syn137/skyline-svelte-v5/elements/iso-city");
 const loadMark = () => import("@syn137/skyline-svelte-v5/elements/s-mark");
 
 const MARK = sMark(64);
-const FACES = {
-  run: extrudeColors(CITY_TONE_FILL.run),
-  live: extrudeColors(CITY_TONE_FILL.live),
-  failed: extrudeColors(CITY_TONE_FILL.failed),
-  errored: extrudeColors(CITY_TONE_FILL.errored),
-};
+/** Opaque blocks: quiet days darken instead of turning see-through (owner review; the board fades them). */
+const FILL: CityFill = "solid";
+/** If the city element has not loaded this long after the city came into view, show the static city. */
+const LOAD_GRACE_MS = 2500;
 
 /** The S in cubes as static SVG: <sky-s-mark>'s light-DOM fallback. */
 function MarkArt() {
@@ -56,9 +55,9 @@ function CityArt({ layout }: { layout: CityLayout }) {
       <ellipse cx={city.glow.cx} cy={city.glow.cy} rx={city.glow.rx} ry={city.glow.ry} fill="url(#hero-city-glow)" />
       <polygon className="hero__floor" points={city.floor} />
       {city.blocks.map((b) => {
-        const f = FACES[b.tone];
+        const f = cityBlockPaint(b.tone, b.opacity, FILL);
         return (
-          <g key={b.index} style={{ opacity: b.opacity }}>
+          <g key={b.index} style={f.opacity === 1 ? undefined : { opacity: f.opacity }}>
             <polygon points={b.left} style={{ fill: f.front }} />
             <polygon points={b.right} style={{ fill: f.side }} />
             <polygon points={b.top} style={{ fill: f.top }} />
@@ -69,8 +68,7 @@ function CityArt({ layout }: { layout: CityLayout }) {
   );
 }
 
-function City({ layout }: { layout: CityLayout }) {
-  const ready = useElement("sky-iso-city", loadCity, "idle");
+function City({ layout, ready, animate }: { layout: CityLayout; ready: boolean; animate: boolean }) {
   const days = useMemo(() => cityDays(layout), [layout]);
   useEffect(() => void loadElement("sky-s-mark", loadMark), []);
 
@@ -99,20 +97,48 @@ function City({ layout }: { layout: CityLayout }) {
       cell={layout.cell}
       maxSessions={CITY_MAX_SESSIONS}
       label={HERO.cityLabel}
-      animate
-      drift
+      fill={FILL}
+      animate={animate}
+      drift={animate}
     >
-      <sky-s-mark slot="overlay" className="hero__mark" animate label={HERO.markLabel}>
+      <sky-s-mark slot="overlay" className="hero__mark" animate={animate} label={HERO.markLabel}>
         <MarkArt />
       </sky-s-mark>
     </sky-iso-city>
   );
 }
 
+/**
+ * When the city entrance plays (owner review: so nobody misses it). With
+ * motion allowed, the stage holds (data-hold: blocks and S hidden, every
+ * motion.css class paused through --sky-motion-play) until the city is 40%
+ * on screen and its element has loaded; then the blocks rise, the S drops
+ * and the cards start to bob, once. With reduced motion nothing holds: the
+ * static city shows at once. If the element is slow to load, the static
+ * city shows after LOAD_GRACE_MS instead of an empty stage.
+ */
+function useCityEntrance(stage: RefObject<HTMLDivElement | null>) {
+  const motion = useMedia("(prefers-reduced-motion: no-preference)");
+  const ready = useElement("sky-iso-city", loadCity, "idle");
+  const inView = useInViewOnce(stage, 0.4);
+  const [late, setLate] = useState(false);
+
+  useEffect(() => {
+    if (!motion || !inView || ready) return;
+    const id = window.setTimeout(() => setLate(true), LOAD_GRACE_MS);
+    return () => window.clearTimeout(id);
+  }, [motion, inView, ready]);
+
+  const animate = motion && !late;
+  return { ready, animate, hold: animate && !(inView && ready) };
+}
+
 /** Section 1, "Agent work that compounds." (v4 Landing and PhoneLanding boards). */
 export default function Hero() {
   const wide = useMedia("(min-width: 48rem)");
   const cards = useMedia("(min-width: 64rem)");
+  const stage = useRef<HTMLDivElement>(null);
+  const city = useCityEntrance(stage);
   const { run, phases, trend } = HERO_CARDS;
 
   return (
@@ -134,8 +160,8 @@ export default function Hero() {
         </div>
       </div>
 
-      <div className="hero__stage">
-        <City layout={wide ? CITY_DESKTOP : CITY_PHONE} />
+      <div ref={stage} className="hero__stage" data-hold={city.hold ? "" : undefined}>
+        <City layout={wide ? CITY_DESKTOP : CITY_PHONE} ready={city.ready} animate={city.animate} />
         {cards && (
           <>
             <GlassCard className="hero__card hero__card--run" float="bob">

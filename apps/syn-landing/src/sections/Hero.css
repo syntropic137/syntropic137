@@ -169,6 +169,22 @@
   stroke-linejoin: round;
 }
 
+/* The entrance waits for the city to scroll into view (useCityEntrance in
+   Hero.tsx sets data-hold only when motion is allowed): every motion.css
+   class on the stage is paused on its first frame, and the static fallback
+   city and S, which have no entrance of their own, stay hidden meanwhile.
+   The floor, the glow and the cards show throughout. */
+@media (prefers-reduced-motion: no-preference) {
+  .hero__stage[data-hold] {
+    --sky-motion-play: paused;
+  }
+  .hero__stage[data-hold] .hero__city-art g,
+  .hero__stage[data-hold] .hero__overlay,
+  .hero__stage[data-hold] sky-s-mark:not(:defined) {
+    opacity: 0;
+  }
+}
+
 .hero__stats {
   position: relative;
   z-index: 4;
