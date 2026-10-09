@@ -452,6 +452,19 @@ cache derived wholly from durable events and rebuilt at every claim, so losing
 it loses nothing. It must not be `InMemoryProjectionStore`, which refuses
 production (ADR-060).
 
+*As built (#1310 item 1.4).* The in-memory fitness check
+(`test_in_memory_adapters_are_guarded.py`) never treats `RunTodoStore` as a
+candidate: neither its name nor its module (`run_todo_fold.py`) matches the
+check's patterns, and an exemption entry for a non-candidate fails as stale. So
+the by-name pin is a test beside the code instead
+(`test_run_todo_store_is_not_an_in_memory_adapter`), which fails if the class
+ever becomes an `InMemoryProjectionStore` or an `InMemoryAdapter`. The entry
+point is `RunScopedTodoFold.for_execution(execution_id, repository, events)`.
+`ExecutionRepository` cannot read a stream, so seeding reads through a port,
+`ExecutionEventStream`, satisfied in `syn-adapters` by
+`EventStoreExecutionEventStream`. Seeding and live saves share one dispatch,
+`execution_journal.project_events`.
+
 ### D9. Event epoch
 
 Event models forbid extra fields, and with overlapping generations a newer API
