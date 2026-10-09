@@ -1,363 +1,389 @@
-"""Shared scanning for the syn-ui data-layer fitness functions (ADR-074).
+"""Shared model for the syn-ui data-layer fitness functions (ADR-074).
 
-TypeScript, JavaScript and Svelte sources are tokenized by a small state
-machine, not matched with comment regexes, so a string can never hide code
-from the comment stripper (``" /* "; fetch(x); " */ "``) and a comment can
-never hide a string. It knows strings, template literals (``${}`` nests),
-comments and regex literals; that is all the checks need.
+The sources are parsed, not scanned: ``packages/syn-ui/scripts/boundary-facts.mjs``
+runs the TypeScript compiler API over every ``.ts``/``.js``/``.mjs`` file and
+``svelte/compiler`` over every ``.svelte`` file (its ``<script>`` blocks and
+markup expressions are then parsed with TypeScript too), and writes one JSON
+file of facts: imports, re-exports, exports, top-level declarations, calls with
+their callee chain and folded string arguments, references to imported
+bindings and to ``fetch``, and every folded string expression. A file that does
+not parse carries ``parse_error`` and every check reports it.
 
-A ``.svelte`` file is scanned per region: ``<script>`` blocks are JavaScript,
-``<style>`` blocks have only ``/* */`` comments, and markup has only
-``<!-- -->`` comments. Markup is otherwise left as text, so ``{fetch(x)}`` in
-markup is still seen.
+This module loads those facts and resolves names the way the module system
+does: an imported binding is followed through aliases (``import { a as b }``)
+and re-export chains (``export { x as y } from``, ``export *``,
+``import { x }; export { x }``) to the declaration that defines it, so a check
+asks "is this the data package's ``request``?", never "is this spelled
+``request``?".
+
+Checks run over a *base*: ``""`` for the repository, or a planted tree under
+``ci/fitness/code_quality/fixtures/syn_ui/<tree>/`` laid out like the repo.
 """
 
 from __future__ import annotations
 
-import re
+import posixpath
+import shutil
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict
 
 ROOT = Path(__file__).resolve().parents[3]
 SYN_UI_APP = ROOT / "apps" / "syn-ui"
-SYN_UI_PACKAGES = ROOT / "packages" / "syn-ui"
-DATA = SYN_UI_PACKAGES / "data"
+FACTS_SCRIPT = ROOT / "packages" / "syn-ui" / "scripts" / "boundary-facts.mjs"
+PLANTED = "ci/fitness/code_quality/fixtures/syn_ui"
+#: Directories the facts cover (repo-relative): the Skyline UI and the planted trees.
+SCANNED = ("apps/syn-ui", "packages/syn-ui", PLANTED)
 
-#: Source files the checks read.
-SOURCE_SUFFIXES = frozenset({".ts", ".js", ".mjs", ".svelte"})
-#: Build output and installed packages are never first-party source.
-SKIP_DIRS = frozenset({"node_modules", "dist", ".dist", ".results", ".report", ".svelte-kit"})
-
-
-@dataclass(frozen=True)
-class Token:
-    """A non-code span. ``kind``: str | tmpl | tmplpart | comment | regex.
-
-    ``value`` is the literal's text without quotes (escapes kept). For ``tmpl``
-    (a whole template literal) it is the static text with ``\\x00`` where each
-    ``${}`` was, and ``static`` says there were none.
-    """
-
-    kind: str
-    start: int
-    end: int
-    value: str = ""
-    static: bool = True
+PACKAGE = "@syn137/syn-ui-data"
+DATA = "packages/syn-ui/data/"
+CLIENT_INDEX = "packages/syn-ui/data/src/client/index.ts"
 
 
-_REGEX_AFTER_WORDS = frozenset(
-    {
-        "return",
-        "typeof",
-        "case",
-        "do",
-        "else",
-        "in",
-        "of",
-        "new",
-        "delete",
-        "void",
-        "throw",
-        "yield",
-        "await",
-    }
-)
-_REGEX_AFTER_CHARS = frozenset("(,=:[!&|?{};+-*%<>~^")
+class _Fact(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
 
-class _Lexer:
-    def __init__(self, text: str) -> None:
-        self.text = text
-        self.tokens: list[Token] = []
+class Folded(_Fact):
+    """A folded expression: ``literal`` text, a ``pattern`` (``\\x00`` per substitution), or ``dynamic`` source."""
 
-    def code(self, i: int, end: int, *, until_brace: bool = False) -> int:
-        """Scan code from ``i``; with ``until_brace`` stop at the ``}`` closing a ``${``."""
-        text = self.text
-        depth = 0
-        while i < end:
-            c = text[i]
-            if c in "'\"":
-                i = self._string(i, end)
-            elif c == "`":
-                i = self._template(i, end)
-            elif text.startswith("//", i):
-                j = text.find("\n", i)
-                j = end if j < 0 or j > end else j
-                self.tokens.append(Token("comment", i, j))
-                i = j
-            elif text.startswith("/*", i):
-                j = text.find("*/", i + 2)
-                j = end if j < 0 else min(j + 2, end)
-                self.tokens.append(Token("comment", i, j))
-                i = j
-            elif c == "/" and self._regex_allowed(i):
-                i = self._regex(i, end)
-            elif c == "{":
-                depth += 1
-                i += 1
-            elif c == "}":
-                if until_brace and depth == 0:
-                    return i
-                depth -= 1
-                i += 1
-            else:
-                i += 1
-        return i
-
-    def _string(self, i: int, end: int) -> int:
-        quote = self.text[i]
-        j = i + 1
-        while j < end and self.text[j] != quote and self.text[j] != "\n":
-            j += 2 if self.text[j] == "\\" else 1
-        self.tokens.append(Token("str", i, min(j + 1, end), self.text[i + 1 : j]))
-        return min(j + 1, end)
-
-    def _template(self, i: int, end: int) -> int:
-        text = self.text
-        j = i + 1
-        part = j
-        static: list[str] = []
-        subs = False
-        while j < end and text[j] != "`":
-            if text[j] == "\\":
-                j += 2
-                continue
-            if text.startswith("${", j):
-                self.tokens.append(Token("tmplpart", part, j))
-                static.append(text[part:j] + "\x00")
-                subs = True
-                j = self.code(j + 2, end, until_brace=True) + 1
-                part = j
-                continue
-            j += 1
-        self.tokens.append(Token("tmplpart", part, min(j, end)))
-        static.append(text[part : min(j, end)])
-        self.tokens.append(Token("tmpl", i, min(j + 1, end), "".join(static), not subs))
-        return min(j + 1, end)
-
-    def _regex_allowed(self, i: int) -> bool:
-        j = i - 1
-        while j >= 0 and self.text[j] in " \t\r\n":
-            j -= 1
-        if j < 0:
-            return True
-        prev = self.text[j]
-        if prev in _REGEX_AFTER_CHARS:
-            return True
-        m = re.search(r"[A-Za-z_$][\w$]*$", self.text[max(0, j - 12) : j + 1])
-        return bool(m and m.group(0) in _REGEX_AFTER_WORDS)
-
-    def _regex(self, i: int, end: int) -> int:
-        j = i + 1
-        in_class = False
-        while j < end and self.text[j] != "\n":
-            c = self.text[j]
-            if c == "\\":
-                j += 2
-                continue
-            if c == "[":
-                in_class = True
-            elif c == "]":
-                in_class = False
-            elif c == "/" and not in_class:
-                j += 1
-                while j < end and (self.text[j].isalnum() or self.text[j] == "_"):
-                    j += 1
-                self.tokens.append(Token("regex", i, j, self.text[i:j]))
-                return j
-            j += 1
-        return i + 1  # not a regex after all: a lone `/`
+    kind: Literal["literal", "pattern", "dynamic"]
+    value: str
 
 
-_SVELTE_BLOCK = re.compile(r"<(script|style)\b[^>]*>(.*?)</\1\s*>", re.DOTALL | re.IGNORECASE)
-_HTML_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
-_CSS_COMMENT = re.compile(r"/\*.*?\*/", re.DOTALL)
-
-
-def tokens(text: str, *, svelte: bool = False) -> list[Token]:
-    """Every string, template, comment and regex in ``text``, in source order."""
-    lexer = _Lexer(text)
-    if not svelte:
-        lexer.code(0, len(text))
-        return sorted(lexer.tokens, key=lambda t: t.start)
-    pos = 0
-    for block in _SVELTE_BLOCK.finditer(text):
-        _markup_comments(lexer, text, pos, block.start())
-        start, end = block.start(2), block.end(2)
-        if block.group(1).lower() == "script":
-            lexer.code(start, end)
-        else:
-            lexer.tokens += [
-                Token("comment", m.start(), m.end())
-                for m in _CSS_COMMENT.finditer(text, start, end)
-            ]
-        pos = block.end()
-    _markup_comments(lexer, text, pos, len(text))
-    return sorted(lexer.tokens, key=lambda t: t.start)
-
-
-def _markup_comments(lexer: _Lexer, text: str, start: int, end: int) -> None:
-    lexer.tokens += [
-        Token("comment", m.start(), m.end()) for m in _HTML_COMMENT.finditer(text, start, end)
-    ]
-
-
-def is_svelte(path: str | Path) -> bool:
-    return str(path).endswith(".svelte")
-
-
-def _blank(text: str, spans: list[tuple[int, int]]) -> str:
-    out = list(text)
-    for start, end in spans:
-        for k in range(start, end):
-            if out[k] != "\n":
-                out[k] = " "
-    return "".join(out)
-
-
-def strip_comments(text: str, *, svelte: bool = False) -> str:
-    """Blank comments (strings kept), keeping offsets and line numbers stable."""
-    return _blank(
-        text, [(t.start, t.end) for t in tokens(text, svelte=svelte) if t.kind == "comment"]
-    )
-
-
-def code_only(text: str, *, svelte: bool = False) -> str:
-    """Blank comments and the insides of strings, templates and regexes (quotes kept)."""
-    spans: list[tuple[int, int]] = []
-    for t in tokens(text, svelte=svelte):
-        if t.kind == "comment":
-            spans.append((t.start, t.end))
-        elif t.kind in ("str", "regex"):
-            spans.append((t.start + 1, t.end - 1))
-        elif t.kind == "tmplpart":
-            spans.append((t.start, t.end))
-    return _blank(text, spans)
-
-
-def source_files(root: Path) -> list[Path]:
-    """Every TS/JS/Svelte file under ``root``, skipping build output and dependencies."""
-    if not root.exists():
-        return []
-    return sorted(
-        p
-        for p in root.rglob("*")
-        if p.is_file()
-        and p.suffix in SOURCE_SUFFIXES
-        and not SKIP_DIRS.intersection(p.relative_to(root).parts)
-    )
-
-
-def rel(path: Path) -> str:
-    return path.relative_to(ROOT).as_posix()
-
-
-def line_of(text: str, index: int) -> int:
-    return text.count("\n", 0, index) + 1
-
-
-# ---------------------------------------------------------------------------
-# Module specifiers
-# ---------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class ModuleRef:
-    """One import / export-from / dynamic import / require.
-
-    ``spec`` is the module string, or None when a dynamic import's argument is
-    not a literal. ``names`` are the imported (or re-exported) original names;
-    ``namespace`` marks ``import * as`` / ``export *``; ``reexport`` marks
-    ``export ... from``; ``type_only`` marks ``import type`` / ``export type``.
-    """
-
-    line: int
+class Import(_Fact):
     spec: str | None
-    names: tuple[str, ...] = ()
-    namespace: bool = False
-    reexport: bool = False
-    type_only: bool = False
-    dynamic: bool = False
+    resolved: str | None
+    line: int
+    #: The local binding; None for a side-effect import or an ``import('x')`` type.
+    local: str | None
+    #: ``default``, ``*`` (namespace), a name, or None (side-effect import).
+    imported: str | None
+    type_only: bool
 
 
-def _literal_at(toks: dict[int, Token], code: str, i: int) -> tuple[Token | None, int]:
-    """The static string literal starting at ``i`` (after whitespace), if any."""
-    while i < len(code) and code[i].isspace():
-        i += 1
-    t = toks.get(i)
-    if t and (t.kind == "str" or (t.kind == "tmpl" and t.static)):
-        return t, t.end
-    return None, i
+class DynamicImport(_Fact):
+    #: None when the argument does not fold to a literal: it cannot be checked.
+    spec: str | None
+    resolved: str | None
+    line: int
+    require: bool
 
 
-def _names(clause: str) -> tuple[str, ...]:
-    """`{ a, b as c, type d }` -> ('a', 'b', 'd')."""
-    inner = clause[clause.find("{") + 1 : clause.rfind("}")] if "{" in clause else ""
-    out = []
-    for part in inner.split(","):
-        words = part.replace("type ", " ").split()
-        if words:
-            out.append(words[0])
-    return tuple(out)
+class ReExport(_Fact):
+    spec: str
+    resolved: str | None
+    line: int
+    #: The name in the source module, or ``*``.
+    local: str
+    #: The name exported here; None for ``export * from``.
+    exported: str | None
+    type_only: bool
 
 
-#: `import x, { a } from 's'`, `export * from 's'`, `import type {..} from`, `import 's'`. The clause
-#: holds only names, braces, commas and `*`, and never another import/export keyword.
-_STATIC = re.compile(
-    r"(?<![\w$.])(import|export)\b(\s+type\b)?((?:(?!\b(?:import|export)\b)[\w$\s{},*])*?)\bfrom\s*(?=['\"`])"
-    r"|(?<![\w$.])import\s*(?=['\"`])"
-)
-_DYNAMIC = re.compile(r"(?<![\w$.])(import|require)\s*\(")
+class Export(_Fact):
+    #: The local binding exported; None for ``export default <expression>``.
+    local: str | None
+    exported: str
+    kind: str
+    type_only: bool
+    line: int
 
 
-def module_refs(text: str, *, svelte: bool = False) -> list[ModuleRef]:
-    """Every module reference in ``text``; strings and comments cannot fake or hide one."""
-    toks = {t.start: t for t in tokens(text, svelte=svelte) if t.kind in ("str", "tmpl")}
-    code = code_only(text, svelte=svelte)
-    out: list[ModuleRef] = []
-    for m in _STATIC.finditer(code):
-        lit, _ = _literal_at(toks, code, m.end())
-        if not lit:
-            continue
-        clause = m.group(3) or ""
-        out.append(
-            ModuleRef(
-                line_of(code, m.start()),
-                lit.value,
-                names=_names(clause),
-                namespace="*" in clause,
-                reexport=m.group(1) == "export",
-                type_only=bool(m.group(2)),
-            )
+class Decl(_Fact):
+    """One top-level declaration and the top-level names (declarations, imports) it references."""
+
+    names: tuple[str, ...]
+    kind: str
+    line: int
+    refs: tuple[str, ...]
+    #: ``const x = y`` / ``const x = ns.y``: the chain x is another name for.
+    alias: tuple[str, ...] | None
+
+
+class Call(_Fact):
+    callee: tuple[str, ...] | None
+    line: int
+    #: The top-level declaration the call sits in, if any.
+    decl: str | None
+    #: The first three arguments, folded.
+    args: tuple[Folded, ...]
+    #: ``method`` in an object-literal second argument, when it is a literal.
+    method: str | None
+    method_known: bool
+
+
+class Ref(_Fact):
+    name: str
+    line: int
+
+
+class StringFact(_Fact):
+    value: str
+    line: int
+
+
+class FileFacts(_Fact):
+    path: str
+    kind: Literal["ts", "svelte"]
+    parse_error: str | None
+    imports: tuple[Import, ...]
+    dynamic_imports: tuple[DynamicImport, ...]
+    reexports: tuple[ReExport, ...]
+    exports: tuple[Export, ...]
+    decls: tuple[Decl, ...]
+    calls: tuple[Call, ...]
+    refs: tuple[Ref, ...]
+    member_fetch: tuple[int, ...]
+    strings: tuple[StringFact, ...]
+
+
+class Facts(_Fact):
+    root: str
+    files: tuple[FileFacts, ...]
+
+
+def generate_facts(out: Path) -> Facts:
+    """Run boundary-facts.mjs (with the workspace's own typescript and svelte) and load its output."""
+    pnpm = shutil.which("pnpm")
+    if pnpm is None:
+        raise RuntimeError(
+            "pnpm is not on PATH: the syn-ui boundary checks need it to parse sources"
         )
-    for m in _DYNAMIC.finditer(code):
-        lit, after = _literal_at(toks, code, m.end())
-        rest = code[after:].lstrip()[:1]
-        # `import('a' + x)` is not a literal import: only `import('a')` / `import('a', opts)` resolve.
-        spec = lit.value if lit is not None and rest in (")", ",") else None
-        out.append(ModuleRef(line_of(code, m.start()), spec, dynamic=True))
-    return sorted(out, key=lambda r: r.line)
+    done = subprocess.run(
+        [pnpm, "exec", "node", str(FACTS_SCRIPT), "--root", str(ROOT), "--out", str(out), *SCANNED],
+        cwd=SYN_UI_APP,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if done.returncode != 0:
+        raise RuntimeError(f"boundary-facts.mjs failed ({done.returncode}):\n{done.stderr}")
+    return Facts.model_validate_json(out.read_text(encoding="utf-8"))
 
 
-def local_exports(text: str, *, svelte: bool = False) -> set[str]:
-    """Names in `export { a, b as c }` lists that have no `from` (local bindings re-exported)."""
-    code = code_only(text, svelte=svelte)
-    return {
-        name
-        for m in re.finditer(r"(?<![\w$.])export\s+(?:type\s+)?(\{[^}]*\})(?!\s*from\b)", code)
-        for name in _names(m.group(1))
-    }
+@dataclass(frozen=True)
+class Symbol:
+    """What a name resolves to: ``name`` declared in ``module`` (a repo path, or a bare spec when external)."""
+
+    module: str
+    name: str
 
 
-_RESOLVE_SUFFIXES = ("", ".ts", ".js", ".mjs", ".svelte", "/index.ts", "/index.js")
+@dataclass(frozen=True)
+class Violation:
+    path: str
+    line: int
+    what: str
+
+    def render(self) -> str:
+        return f"{self.path}:{self.line}: {self.what}"
 
 
-def resolve_relative(importer: Path, spec: str) -> Path | None:
-    """The file a relative specifier names (``./x``, ``../x.svelte``, ``./x.js`` for ``x.ts``)."""
-    if not spec.startswith("."):
+def is_test_file(path: str) -> bool:
+    return path.endswith((".test.ts", ".spec.ts", ".test.js", ".spec.js"))
+
+
+def parse_violation(f: FileFacts) -> list[Violation]:
+    """A file the parsers reject is a violation: it cannot be checked, so it never passes."""
+    return [Violation(f.path, 1, f"does not parse: {f.parse_error}")] if f.parse_error else []
+
+
+class Graph:
+    """The module graph of the parsed files, with name resolution through aliases and re-exports."""
+
+    def __init__(self, facts: Facts) -> None:
+        self.files: dict[str, FileFacts] = {f.path: f for f in facts.files}
+        self._exports_cache: dict[str, frozenset[Symbol]] = {}
+
+    def under(self, base: str, prefix: str) -> list[FileFacts]:
+        """Files under ``base + prefix``."""
+        start = base + prefix
+        return [f for path, f in sorted(self.files.items()) if path.startswith(start)]
+
+    # -- resolution ---------------------------------------------------------
+
+    def _from(
+        self, spec: str | None, resolved: str | None, name: str, seen: frozenset[str]
+    ) -> Symbol | None:
+        if resolved is not None:
+            return self.resolve_export(resolved, name, seen)
+        return Symbol(spec or "<unresolvable>", name)
+
+    def resolve_export(
+        self, module: str, name: str, seen: frozenset[str] = frozenset()
+    ) -> Symbol | None:
+        """The declaration ``module`` exports as ``name``, followed through every re-export; None if absent."""
+        key = f"{module}\x00{name}"
+        if key in seen:
+            return None
+        seen = seen | {key}
+        f = self.files.get(module)
+        if f is None:
+            return Symbol(module, name)
+        for e in f.exports:
+            if e.exported == name:
+                return (
+                    self.resolve_local(module, e.local, seen)
+                    if e.local
+                    else Symbol(module, "default")
+                )
+        for r in f.reexports:
+            if r.exported == name:
+                if r.local == "*":
+                    return Symbol(r.resolved or r.spec, "*")
+                return self._from(r.spec, r.resolved, r.local, seen)
+        if name != "default":
+            for r in f.reexports:
+                if r.exported is None and r.resolved is not None:
+                    hit = self.resolve_export(r.resolved, name, seen)
+                    if hit is not None:
+                        return hit
         return None
-    base = (importer.parent / spec).resolve()
-    candidates = [Path(f"{base}{s}") for s in _RESOLVE_SUFFIXES]
-    if base.suffix == ".js":
-        candidates.append(base.with_suffix(".ts"))
-    return next((c for c in candidates if c.is_file()), None)
+
+    def resolve_local(
+        self, module: str, local: str, seen: frozenset[str] = frozenset()
+    ) -> Symbol | None:
+        """What a top-level name in ``module`` is: an import followed to its declaration, or a local one."""
+        f = self.files.get(module)
+        if f is not None:
+            for i in f.imports:
+                if i.local == local and i.imported is not None:
+                    if i.imported == "*":
+                        return Symbol(i.resolved or i.spec or "<unresolvable>", "*")
+                    return self._from(i.spec, i.resolved, i.imported, seen)
+            for d in f.decls:
+                if local in d.names and d.alias and f"{module}\x00={local}" not in seen:
+                    return self._alias(module, d.alias, seen | {f"{module}\x00={local}"}) or Symbol(
+                        module, local
+                    )
+        return Symbol(module, local)
+
+    def _alias(self, module: str, chain: tuple[str, ...], seen: frozenset[str]) -> Symbol | None:
+        """``const x = y`` or ``const x = ns.y``, followed; None when the chain goes anywhere else."""
+        head = self.resolve_local(module, chain[0], seen)
+        if head is None or len(chain) == 1:
+            return head
+        if head.name == "*" and len(chain) == 2 and head.module in self.files:
+            return self.resolve_export(head.module, chain[1], seen)
+        return None
+
+    def resolve_callee(self, f: FileFacts, callee: tuple[str, ...] | None) -> Symbol | None:
+        """``x(...)`` or ``ns.x(...)`` (``ns`` a namespace import) resolved to its declaration."""
+        if not callee:
+            return None
+        head = self.resolve_local(f.path, callee[0])
+        if head is None:
+            return None
+        if head.name == "*" and len(callee) == 2:
+            return (
+                self.resolve_export(head.module, callee[1]) if head.module in self.files else None
+            )
+        if len(callee) == 1:
+            if head == Symbol(f.path, callee[0]) and not any(callee[0] in d.names for d in f.decls):
+                return Symbol("<global>", callee[0])
+            return head
+        return None
+
+    def exported_symbols(
+        self, module: str, seen: frozenset[str] = frozenset()
+    ) -> frozenset[Symbol]:
+        """Every declaration ``module`` exports (namespaces expanded), resolved."""
+        if module in self._exports_cache:
+            return self._exports_cache[module]
+        if module in seen:
+            return frozenset()
+        seen = seen | {module}
+        f = self.files.get(module)
+        if f is None:
+            return frozenset()
+        out: set[Symbol] = set()
+        names = {e.exported for e in f.exports} | {r.exported for r in f.reexports if r.exported}
+        for name in names:
+            sym = self.resolve_export(module, name)
+            if sym is None:
+                continue
+            out.add(sym)
+            if sym.name == "*":
+                out |= self.exported_symbols(sym.module, seen)
+        for r in f.reexports:
+            if r.exported is None and r.resolved is not None:
+                out |= self.exported_symbols(r.resolved, seen)
+        result = frozenset(out)
+        self._exports_cache[module] = result
+        return result
+
+    def value_export_names(self, module: str) -> set[str]:
+        f = self.files[module]
+        return {e.exported for e in f.exports if not e.type_only} | {
+            r.exported for r in f.reexports if r.exported and not r.type_only
+        }
+
+
+def is_data(module: str, base: str) -> bool:
+    """Is ``module`` inside the data package (the repo's, or a planted tree's own)?"""
+    return module.startswith(DATA) or (bool(base) and module.startswith(base + DATA))
+
+
+def client_index(graph: Graph, base: str) -> str:
+    """The data package's ``client/index.ts`` for ``base`` (a planted tree may bring its own)."""
+    own = base + CLIENT_INDEX
+    return own if own in graph.files else CLIENT_INDEX
+
+
+#: Exports of client/index.ts that are not transport: error types and plain helpers screens use.
+NOT_TRANSPORT = frozenset({"ApiError", "isAbortError", "abortError", "MAX_PAGE_SIZE", "mapLimit"})
+
+
+def transport(graph: Graph, base: str) -> frozenset[Symbol]:
+    """The request layer: every value client/index.ts exports except NOT_TRANSPORT, plus ``cached``.
+
+    Enumerated from the index, so a new export is transport until someone
+    decides otherwise (fail closed).
+    """
+    index = client_index(graph, base)
+    out = {
+        sym
+        for name in graph.value_export_names(index) - NOT_TRANSPORT
+        if (sym := graph.resolve_export(index, name)) is not None
+    }
+    keys = index.replace("client/index.ts", "keys.ts")
+    if keys in graph.files and (cached := graph.resolve_export(keys, "cached")) is not None:
+        out.add(cached)
+    return frozenset(out)
+
+
+def relative_target(path: str, spec: str) -> str:
+    """Where a relative specifier points (repo-relative), whether or not the file exists."""
+    return posixpath.normpath(posixpath.join(posixpath.dirname(path), spec.split("?", 1)[0]))
+
+
+def tree_base(tree: str) -> str:
+    """The base of one planted tree: ``ci/fitness/code_quality/fixtures/syn_ui/<tree>/``."""
+    return f"{PLANTED}/{tree}/"
+
+
+def planted_cases(tree: str) -> list[str]:
+    """Planted files of ``tree`` that assert something (PROBE or CLEAN), repo-relative."""
+    root = ROOT / tree_base(tree)
+    files = sorted(
+        p.relative_to(ROOT).as_posix()
+        for p in root.rglob("*")
+        if p.is_file() and p.suffix in (".ts", ".svelte")
+    )
+    return [p for p in files if expectation(p) != "helper"]
+
+
+def expectation(path: str) -> Literal["probe", "clean", "helper"]:
+    """A planted file says what it is on its first line: PROBE (must be reported), CLEAN or HELPER."""
+    first = (ROOT / path).read_text(encoding="utf-8").lstrip().splitlines()[0]
+    if "PROBE" in first:
+        return "probe"
+    if "CLEAN" in first:
+        return "clean"
+    if "HELPER" in first:
+        return "helper"
+    raise AssertionError(f"{path}: first line must say PROBE, CLEAN or HELPER")

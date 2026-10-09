@@ -4,54 +4,54 @@ ADR-074 rule 2: every resource has a fixture under
 ``packages/syn-ui/data/src/fixtures``, so every screen runs offline
 (``VITE_SYN_FIXTURES=1``) and every e2e test runs without an API.
 
-The convention (CONVENTIONS.md, "Fixtures: how to add one"):
+The convention (CONVENTIONS.md, "Fixtures: how to add one"), checked on parsed
+facts (``_syn_ui``), never on text:
 
-* A resource is an exported function in ``packages/syn-ui/data/src/resources/*.ts``
-  that sends a request: ``export function``, ``export const x = (...) =>``, or a
-  local function or arrow exported by an ``export { x }`` list. It calls
-  ``request(path, ...)`` with the path written as a string or template literal,
-  or literals joined by ``+`` (the whole expression is the path), directly or
-  through a non-exported helper in the same file. Exported functions that send
-  nothing (URL builders such as ``executionStreamUrl``) are not resources.
-* Each request it sends has a fixture route with the same method and the same
-  path shape: ``route('GET', '/executions/:executionId', ...)`` inside the
-  exported route array of a ``fixtures/*.ts`` file that ``fixtures/routes.ts``
-  spreads into ``routes``, the table the fixtures router compiles. A route in a
-  test file, outside that array, or in a module routes.ts imports without
-  spreading, serves nothing and does not count. A template substitution
-  (``${seg(id)}``) and a ``:param`` are the same segment.
-* Resources never call ``fetch`` or ``fetchJSON`` themselves, and never pass a
-  path the check cannot read.
+* A resource is an exported value binding of ``packages/syn-ui/data/src/resources/*.ts``
+  (``export function``, an exported arrow or const, a local exported by an
+  ``export { x as y }`` list, at any indentation) whose body, or a top-level
+  helper it references, calls the data package's ``request`` (resolved
+  through aliases and namespace imports, so ``send`` or ``client.request`` is
+  ``request`` when it resolves there). Exported functions that send nothing
+  (URL builders such as ``executionStreamUrl``) are not resources.
+* The path is ``request``'s whole first argument, folded: a string, a template
+  (each ``${}`` is one segment) or literals joined by ``+``. Anything else is
+  a problem, as is a ``method`` that is not a literal and any direct
+  ``fetch`` / ``fetchJSON`` call.
+* Each request has a fixture route with the same method and path shape: a
+  ``route(METHOD, PATH, ...)`` CALL EXPRESSION (resolved to
+  ``fixtures/define.ts``'s ``route``; a string that looks like one counts for
+  nothing) inside a declaration reachable from the ``routes`` that
+  ``fixtures/router.ts`` compiles: ``routes`` in ``routes.ts``, the arrays it
+  spreads, and what those reference. A route in a test file, in an array
+  nothing references, or in a module routes.ts imports without using serves
+  nothing and does not count. Every fixture module with routes must be reached.
 
-Zero tolerance, no exceptions.
+Planted trees under ``fixtures/syn_ui/resources`` hold every probe from both
+codex reviews. Zero tolerance, no exceptions.
 """
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 
 import pytest
-from ci.fitness.code_quality._syn_ui import DATA, local_exports, rel, strip_comments, tokens
+from ci.fitness.code_quality._syn_ui import (
+    Call,
+    FileFacts,
+    Graph,
+    Symbol,
+    Violation,
+    client_index,
+    expectation,
+    is_test_file,
+    parse_violation,
+    planted_cases,
+    tree_base,
+)
 
-RESOURCES = DATA / "src" / "resources"
-FIXTURES = DATA / "src" / "fixtures"
-
-_TOP_FUNCTION = re.compile(
-    r"^(export\s+)?(?:(?:async\s+)?function\s+(\w+)"
-    r"|const\s+(\w+)\b[^=\n]*=\s*(?:async\b|\(|function\b|\w+\s*=>))",
-    re.MULTILINE,
-)
-_TOP_LEVEL = re.compile(
-    r"^(?:export\s+|async\s+|function\s+|const\s+|let\s+|interface\s+|type\s+)", re.MULTILINE
-)
-_REQUEST = re.compile(r"(?<![\w$.])request\s*(?:<[^()]*?>)?\s*\(")
-_RAW_FETCH = re.compile(r"(?<![\w$])(?:fetch|fetchJSON)\s*\(")
-_METHOD = re.compile(r"""\bmethod\s*:\s*['"](GET|POST|PUT|PATCH|DELETE)['"]""")
-_FIXTURE_ROUTE = re.compile(
-    r"""\broute\(\s*['"](GET|POST|PUT|PATCH|DELETE)['"]\s*,\s*['"]([^'"]+)['"]"""
-)
-_CALL = re.compile(r"(?<![\w$.])(\w+)\s*\(")
+RESOURCES = "packages/syn-ui/data/src/resources/"
+FIXTURES = "packages/syn-ui/data/src/fixtures/"
 
 
 @dataclass(frozen=True)
@@ -64,370 +64,192 @@ class Request:
 class Resource:
     name: str
     path: str
+    line: int
     requests: list[Request] = field(default_factory=list)
     problems: list[str] = field(default_factory=list)
 
 
-def _close_paren(text: str, open_index: int) -> int:
-    """Index of the `)` matching `text[open_index] == '('`, skipping strings and templates."""
-    depth = 0
-    i = open_index
-    while i < len(text):
-        c = text[i]
-        if c in "'\"`":
-            i = _skip_string(text, i)
-            continue
-        depth += {"(": 1, ")": -1}.get(c, 0)
-        if depth == 0:
-            return i
-        i += 1
-    return len(text) - 1
-
-
-def _skip_string(text: str, start: int) -> int:
-    """Index just past the string literal starting at `start` (templates may nest `${}`)."""
-    quote = text[start]
-    i = start + 1
-    while i < len(text):
-        c = text[i]
-        if c == "\\":
-            i += 2
-            continue
-        if c == quote:
-            return i + 1
-        if quote == "`" and text.startswith("${", i):
-            i = _close_brace(text, i + 1) + 1
-            continue
-        i += 1
-    return i
-
-
-def _close_brace(text: str, open_index: int) -> int:
-    depth = 0
-    i = open_index
-    while i < len(text):
-        c = text[i]
-        if c in "'\"`":
-            i = _skip_string(text, i)
-            continue
-        depth += {"{": 1, "}": -1}.get(c, 0)
-        if depth == 0:
-            return i
-        i += 1
-    return len(text) - 1
-
-
-def _template_body(body: str) -> str:
-    """'/a/${seg(id)}/b' -> '/a/:/b' (each substitution is one opaque segment)."""
-    out: list[str] = []
-    i = 0
-    while i < len(body):
-        if body.startswith("${", i):
-            i = _close_brace(body, i + 1) + 1
-            out.append(":")
-            continue
-        out.append(body[i])
-        i += 1
-    return "".join(out)
-
-
-def _normalise(path: str) -> str:
-    path = path.split("?", 1)[0]
-    return "/".join(":" if part.startswith(":") else part for part in path.split("/"))
-
-
-def path_shape(literal: str) -> str:
-    """'/a/${seg(id)}/b' or '/a/:id/b' -> '/a/:/b'; a query string is not part of the shape."""
-    body = literal[1:-1]
-    return _normalise(_template_body(body) if literal[0] == "`" else body)
-
-
-def _first_argument(call: str) -> str:
-    """The text of a call's first argument (up to its top-level comma)."""
-    depth = 0
-    i = 0
-    while i < len(call):
-        c = call[i]
-        if c in "'\"`":
-            i = _skip_string(call, i)
-            continue
-        depth += {"(": 1, "[": 1, "{": 1, ")": -1, "]": -1, "}": -1}.get(c, 0)
-        if c == "," and depth == 0:
-            return call[:i]
-        i += 1
-    return call
-
-
-def argument_shape(arg: str) -> str | None:
-    """The path shape of `'lit'`, `` `tmpl` `` or `'a' + `b` + ...`; None for anything else."""
-    lits = [t for t in tokens(arg) if t.kind in ("str", "tmpl")]
-    if not lits:
-        return None
-    rest = list(arg)
-    for t in lits:
-        rest[t.start : t.end] = [" "] * (t.end - t.start)
-    if re.sub(r"[\s+]", "", "".join(rest)):
-        return None
-    body = "".join(
-        _template_body(arg[t.start + 1 : t.end - 1]) if t.kind == "tmpl" else t.value for t in lits
+def path_shape(value: str) -> str:
+    """'/a/\\x00/b' (a folded template) or '/a/:id/b' -> '/a/:/b'; the query string is not part of it."""
+    path = value.split("?", 1)[0]
+    return "/".join(
+        ":" if "\x00" in part or part.startswith(":") else part for part in path.split("/")
     )
-    return _normalise(body)
 
 
-def _requests_in(code: str) -> tuple[list[Request], list[str]]:
-    found: list[Request] = []
-    problems: list[str] = []
-    for m in _REQUEST.finditer(code):
-        open_index = m.end() - 1
-        call = code[open_index + 1 : _close_paren(code, open_index)]
-        arg = _first_argument(call)
-        shape = argument_shape(arg)
-        if shape is None:
-            problems.append(f"request() path is not a literal: {arg.strip()[:60]!r}")
+def _reach(f: FileFacts, start: str) -> set[str]:
+    """Top-level declarations ``start`` uses, transitively (first names)."""
+    decls = {n: d for d in f.decls for n in d.names}
+    seen: set[str] = set()
+    todo = [start]
+    while todo:
+        name = todo.pop()
+        d = decls.get(name)
+        if d is None or d.names[0] in seen:
             continue
-        method = _METHOD.search(call[len(arg) :])
-        found.append(Request(method.group(1) if method else "GET", shape))
-    problems += [
-        f"calls {m.group(0).rstrip('(').strip()}() directly" for m in _RAW_FETCH.finditer(code)
-    ]
-    return found, problems
+        seen.add(d.names[0])
+        todo += list(d.refs)
+    return seen
 
 
-def _chunks(code: str) -> dict[str, tuple[bool, str]]:
-    """Top-level function / arrow name -> (exported, its source up to the next top-level declaration)."""
-    starts = [m.start() for m in _TOP_LEVEL.finditer(code)] + [len(code)]
-    listed = local_exports(code)
-    out: dict[str, tuple[bool, str]] = {}
-    for m in _TOP_FUNCTION.finditer(code):
-        name = m.group(2) or m.group(3)
-        end = next(s for s in starts if s > m.start())
-        out[name] = (bool(m.group(1)) or name in listed, code[m.start() : end])
-    return out
+def _request(graph: Graph, base: str) -> tuple[Symbol | None, frozenset[Symbol]]:
+    index = client_index(graph, base)
+    raw = {Symbol("<global>", "fetch")}
+    if (fetch_json := graph.resolve_export(index, "fetchJSON")) is not None:
+        raw.add(fetch_json)
+    return graph.resolve_export(index, "request"), frozenset(raw)
 
 
-def resources_in(text: str, path: str) -> list[Resource]:
-    """Exported functions of one resources file that send requests, with their requests."""
-    chunks = _chunks(strip_comments(text))
+def _read(c: Call, resource: Resource) -> None:
+    path = c.args[0] if c.args else None
+    if path is None or path.kind == "dynamic":
+        resource.problems.append(
+            f"request() path is not a literal: {path.value if path else '<none>'!r}"
+        )
+        return
+    if not c.method_known:
+        resource.problems.append(f"request({path.value!r}) method is not a literal")
+        return
+    resource.requests.append(Request(c.method or "GET", path_shape(path.value)))
+
+
+def resources_in(graph: Graph, f: FileFacts, base: str) -> list[Resource]:
+    """Exported bindings of one resources file that send requests, with their requests."""
+    request, raw = _request(graph, base)
+    decls = {n: d for d in f.decls for n in d.names}
     out: list[Resource] = []
-    for name, (exported, _) in chunks.items():
-        if not exported:
+    for e in f.exports:
+        if e.type_only or e.local is None or e.local not in decls:
             continue
-        resource = Resource(name, path)
-        seen: set[str] = set()
-        todo = [name]
-        while todo:
-            current = todo.pop()
-            if current in seen:
+        resource = Resource(e.exported, f.path, e.line)
+        reach = _reach(f, e.local)
+        for c in f.calls:
+            if c.decl not in reach:
                 continue
-            seen.add(current)
-            body = chunks[current][1]
-            requests, problems = _requests_in(body)
-            resource.requests += requests
-            resource.problems += problems
-            todo += [c for c in _CALL.findall(body) if c in chunks and not chunks[c][0]]
+            sym = graph.resolve_callee(f, c.callee)
+            if sym is not None and sym == request:
+                _read(c, resource)
+            elif (sym is not None and sym in raw) or (
+                c.callee and c.callee[-1] in ("fetch", "fetchJSON")
+            ):
+                resource.problems.append(f"calls {'.'.join(c.callee or ())}() directly")
         if resource.requests or resource.problems:
             out.append(resource)
     return out
 
 
-def _array_after(code: str, pattern: str) -> str | None:
-    """The `[...]` literal assigned by the first declaration matching `pattern`."""
-    m = re.search(pattern + r"[^=\n]*=\s*\[", code)
-    if not m:
-        return None
-    start = m.end() - 1
-    depth = 0
-    i = start
-    while i < len(code):
-        c = code[i]
-        if c in "'\"`":
-            i = _skip_string(code, i)
+@dataclass
+class Served:
+    routes: set[Request] = field(default_factory=set)
+    files: set[str] = field(default_factory=set)
+    problems: list[Violation] = field(default_factory=list)
+
+
+def fixture_routes(graph: Graph, base: str) -> Served:
+    """Routes the fixtures router serves: route() calls reachable from what router.ts compiles."""
+    router = graph.files[base + FIXTURES + "router.ts"]
+    route = graph.resolve_export(base + FIXTURES + "define.ts", "route")
+    starts = [
+        c.args[0].value
+        for c in router.calls
+        if c.callee == ("compile",)
+        and c.args
+        and c.args[0].kind == "dynamic"
+        and c.args[0].value.isidentifier()
+    ]
+    assert starts, f"{router.path}: no compile(<name>) call; the router changed shape"
+    served = Served()
+    todo = [graph.resolve_local(router.path, name) for name in starts]
+    seen: set[Symbol] = set()
+    while todo:
+        sym = todo.pop()
+        if sym is None or sym in seen or sym.module not in graph.files:
             continue
-        depth += {"[": 1, "]": -1}.get(c, 0)
-        if depth == 0:
-            return code[start : i + 1]
-        i += 1
-    return code[start:]
+        seen.add(sym)
+        f = graph.files[sym.module]
+        decl = next((d for d in f.decls if sym.name in d.names), None)
+        if decl is None:
+            continue
+        for c in f.calls:
+            if c.decl != decl.names[0] or graph.resolve_callee(f, c.callee) != route:
+                continue
+            served.files.add(f.path)
+            method, path = (*c.args, None, None)[:2]
+            if method is None or path is None or method.kind != "literal" or path.kind != "literal":
+                served.problems.append(
+                    Violation(f.path, c.line, "route() method and path must be literals")
+                )
+                continue
+            served.routes.add(Request(method.value, path_shape(path.value)))
+        todo += [graph.resolve_local(f.path, ref) for ref in decl.refs]
+    return served
 
 
-def composed_route_arrays(routes_ts: str) -> list[tuple[str, str]]:
-    """(fixture module stem, exported array name) for each array `routes` spreads."""
-    code = strip_comments(routes_ts)
-    table = _array_after(code, r"\bexport\s+const\s+routes\b") or ""
-    imported = {
-        name.split(" as ")[-1].strip(): (module, name.split(" as ")[0].strip())
-        for names, module in re.findall(r"""import\s*\{([^}]*)\}\s*from\s*['"]\./(\w+)['"]""", code)
-        for name in names.split(",")
-        if name.strip()
-    }
-    return [imported[n] for n in re.findall(r"\.\.\.\s*(\w+)", table) if n in imported]
+def _defines_routes(graph: Graph, f: FileFacts, route: Symbol | None) -> bool:
+    return any(graph.resolve_callee(f, c.callee) == route for c in f.calls)
 
 
-def routes_in(fixture_ts: str, array: str) -> set[Request]:
-    """Fixture routes declared inside the exported array `array` of one fixture module."""
-    code = strip_comments(fixture_ts)
-    body = _array_after(code, rf"\bexport\s+const\s+{array}\b") or ""
-    return {
-        Request(m.group(1), path_shape(f"'{m.group(2)}'")) for m in _FIXTURE_ROUTE.finditer(body)
-    }
-
-
-def fixture_routes() -> set[Request]:
-    """Routes the fixtures router actually serves: router.ts compiles `routes` from routes.ts."""
-    router = strip_comments((FIXTURES / "router.ts").read_text(encoding="utf-8"))
-    assert re.search(r"""import\s*\{[^}]*\broutes\b[^}]*\}\s*from\s*['"]\./routes['"]""", router)
-    assert "compile(routes)" in router, "fixtures/router.ts no longer compiles `routes`"
-    out: set[Request] = set()
-    for module, array in composed_route_arrays(
-        (FIXTURES / "routes.ts").read_text(encoding="utf-8")
-    ):
-        out |= routes_in((FIXTURES / f"{module}.ts").read_text(encoding="utf-8"), array)
-    return out
+def violations(graph: Graph, base: str) -> list[Violation]:
+    found: list[Violation] = []
+    served = fixture_routes(graph, base)
+    found += served.problems
+    for f in graph.under(base, RESOURCES):
+        if is_test_file(f.path):
+            continue
+        found += parse_violation(f)
+        for r in resources_in(graph, f, base):
+            found += [Violation(r.path, r.line, f"{r.name}: {p}") for p in r.problems]
+            found += [
+                Violation(
+                    r.path, r.line, f"{r.name} sends {q.method} {q.shape} with no fixture route"
+                )
+                for q in r.requests
+                if q not in served.routes
+            ]
+    route = graph.resolve_export(base + FIXTURES + "define.ts", "route")
+    for f in graph.under(base, FIXTURES):
+        found += parse_violation(f)
+        if (
+            not is_test_file(f.path)
+            and f.path not in served.files
+            and _defines_routes(graph, f, route)
+        ):
+            found.append(
+                Violation(
+                    f.path, 1, "declares fixture routes that fixtures/routes.ts never composes"
+                )
+            )
+    return found
 
 
 @pytest.mark.architecture
-def test_every_resource_request_has_a_fixture_route() -> None:
+@pytest.mark.host_tool("pnpm")
+def test_every_resource_request_has_a_fixture_route(syn_ui_graph: Graph) -> None:
     resources = [
-        r
-        for f in sorted(RESOURCES.glob("*.ts"))
-        for r in resources_in(f.read_text(encoding="utf-8"), rel(f))
+        r for f in syn_ui_graph.under("", RESOURCES) for r in resources_in(syn_ui_graph, f, "")
     ]
     assert len(resources) > 30, f"found only {len(resources)} resources; the parser is broken"
-    routes = fixture_routes()
-    missing = [
-        f"{r.path}: {r.name} sends {q.method} {q.shape} with no fixture route"
-        for r in resources
-        for q in r.requests
-        if q not in routes
-    ]
-    problems = [f"{r.path}: {r.name}: {p}" for r in resources for p in r.problems]
-    assert not (missing or problems), (
+    served = fixture_routes(syn_ui_graph, "")
+    assert len(served.files) >= 8 and len(served.routes) > 30, served.files
+    found = violations(syn_ui_graph, "")
+    assert not found, (
         "ADR-074 rule 2: every resource has a fixture route (see CONVENTIONS.md, Fixtures):\n"
-        + "\n".join(missing + problems)
+        + "\n".join(v.render() for v in found)
     )
 
 
 @pytest.mark.architecture
-def test_every_fixture_file_with_routes_is_composed() -> None:
-    composed = {
-        module
-        for module, _ in composed_route_arrays((FIXTURES / "routes.ts").read_text(encoding="utf-8"))
-    }
-    uncomposed = [
-        rel(f)
-        for f in sorted(FIXTURES.glob("*.ts"))
-        if not f.name.endswith(".test.ts")
-        and _FIXTURE_ROUTE.search(strip_comments(f.read_text(encoding="utf-8")))
-        and f.stem not in composed | {"define", "router"}
-    ]
-    assert not uncomposed, (
-        "fixture routes not spread into fixtures/routes.ts `routes`:\n" + "\n".join(uncomposed)
-    )
-
-
-@pytest.mark.architecture
-def test_only_composed_routes_count() -> None:
-    routes_ts = """
-import { aRoutes } from './a'
-import { bRoutes } from './b'
-import { cRoutes as renamed } from './c'
-export const routes: FixtureRoute[] = [...aRoutes, ...renamed]
-"""
-    assert composed_route_arrays(routes_ts) == [("a", "aRoutes"), ("c", "cRoutes")]
-    fixture = """
-route('GET', '/outside', h)
-export const aRoutes: FixtureRoute[] = [route('GET', '/inside/:id', h), route('POST', '/x', h)]
-const extra = [route('GET', '/never', h)]
-"""
-    assert routes_in(fixture, "aRoutes") == {Request("GET", "/inside/:"), Request("POST", "/x")}
-
-
-@pytest.mark.architecture
-def test_test_files_and_bare_imports_never_count() -> None:
-    # Production registry: no test module is spread, and every spread array exists.
-    pairs = composed_route_arrays((FIXTURES / "routes.ts").read_text(encoding="utf-8"))
-    assert len(pairs) >= 8, pairs
-    assert all(not m.endswith(".test") for m, _ in pairs)
-    for module, array in pairs:
-        assert routes_in((FIXTURES / f"{module}.ts").read_text(encoding="utf-8"), array), (
-            module,
-            array,
-        )
-
-
-_PLANTED = """
-import { request, seg } from '../client'
-export function getThing(id: string, signal?: AbortSignal) {
-  return cached('getThing', [id], (s) => request(`/things/${seg(id)}`, { signal: s }), { signal })
-}
-export function makeThing(id: string) {
-  return request(`/things/${seg(id)}/make`, { method: 'POST', body: { a: ')' } })
-}
-export function listThings(signal?: AbortSignal) {
-  return load(signal)
-}
-async function load(signal?: AbortSignal) {
-  const r = await request<{ things?: string[] }>('/things', { query: { q: 'x' }, signal })
-  return r.things ?? []
-}
-export function thingStreamUrl(id: string): string {
-  return `/sse/things/${seg(id)}`
-}
-export function sneaky(path: string) {
-  return request(path)
-}
-export function raw() {
-  return fetchJSON('/x')
-}
-function hidden(id: string) {
-  return request(`/hidden/${seg(id)}`)
-}
-const arrow = async (signal?: AbortSignal) => request('/arrow', { signal })
-export const exportedArrow = (id: string) => request(`/exported-arrow/${seg(id)}`)
-export { hidden, arrow as renamedArrow }
-export function joined() {
-  return request('/covered' + '/uncovered')
-}
-export function joinedTemplate(id: string) {
-  return request('/a/' + `${seg(id)}/b`, { method: 'PUT' })
-}
-export function computed(id: string) {
-  return request('/a/' + id)
-}
-"""
-
-
-@pytest.mark.architecture
-def test_parser_reads_planted_resources() -> None:
-    found = {r.name: r for r in resources_in(_PLANTED, "planted.ts")}
-    assert set(found) == {
-        "getThing",
-        "makeThing",
-        "listThings",
-        "sneaky",
-        "raw",
-        "hidden",
-        "arrow",
-        "exportedArrow",
-        "joined",
-        "joinedTemplate",
-        "computed",
-    }
-    assert found["getThing"].requests == [Request("GET", "/things/:")]
-    assert found["makeThing"].requests == [Request("POST", "/things/:/make")]
-    assert found["listThings"].requests == [Request("GET", "/things")]
-    assert found["sneaky"].problems and found["raw"].problems
-    assert found["hidden"].requests == [Request("GET", "/hidden/:")]
-    assert found["arrow"].requests == [Request("GET", "/arrow")]
-    assert found["exportedArrow"].requests == [Request("GET", "/exported-arrow/:")]
-    assert found["joined"].requests == [Request("GET", "/covered/uncovered")]
-    assert found["joinedTemplate"].requests == [Request("PUT", "/a/:/b")]
-    assert found["computed"].problems and not found["computed"].requests
+@pytest.mark.host_tool("pnpm")
+@pytest.mark.parametrize("path", planted_cases("resources"))
+def test_planted_resource_probe(path: str, syn_ui_graph: Graph) -> None:
+    reported = [v for v in violations(syn_ui_graph, tree_base("resources")) if v.path == path]
+    if expectation(path) == "probe":
+        assert reported, f"{path}: planted violation was not reported"
+    else:
+        assert not reported, "\n".join(v.render() for v in reported)
 
 
 @pytest.mark.architecture
 def test_fixture_paths_and_templates_share_a_shape() -> None:
-    assert path_shape("'/executions/:executionId/cancel'") == path_shape(
-        "`/executions/${seg(id)}/cancel`"
-    )
-    assert path_shape("`/a/${x}/${kind}`") == "/a/:/:"
+    assert path_shape("/executions/:executionId/cancel") == path_shape("/executions/\x00/cancel")
+    assert path_shape("/a/\x00/\x00?x=1") == "/a/:/:"
