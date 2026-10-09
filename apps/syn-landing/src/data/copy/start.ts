@@ -1,5 +1,5 @@
 /** Closing call to action (#start), from the v4 boards. */
-export const INSTALL_COMMAND = "npx @syntropic137/setup init";
+import { INSTALL_COMMAND } from "./hero";
 
 export const START_COPY = {
   title: "Make your agent work compound.",

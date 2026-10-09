@@ -19,12 +19,12 @@ export interface SiteLink {
 export const isExternal = (href: string): boolean => /^https?:\/\//.test(href);
 
 /**
- * Nav links, in the board's order. The in-page targets are today's sections
- * until P6 rebuilds them; Evals is the "04 Compounding improvement" section.
+ * Nav links, in the board's order: the four pillars (#workflows,
+ * #harnesses, #observability, #evals), then the docs.
  */
 export const NAV_LINKS: readonly SiteLink[] = [
-  { label: "Workflows", href: "#how-it-works" },
-  { label: "Harnesses", href: "#orchestrator" },
+  { label: "Workflows", href: "#workflows" },
+  { label: "Harnesses", href: "#harnesses" },
   { label: "Observability", href: "#observability" },
   { label: "Evals", href: "#evals" },
   { label: "Docs", href: DOCS_URL },
@@ -69,6 +69,11 @@ export const FOOTER_COLUMNS: readonly FooterColumn[] = [
     ],
   },
 ];
+export * from "./copy/hero";
+export * from "./copy/whatIs";
+export * from "./copy/workflows";
+export * from "./copy/anyHarness";
+export * from "./copy/observability";
 export * from "./copy/evals";
 export * from "./copy/useCases";
 export * from "./copy/whyPlatform";

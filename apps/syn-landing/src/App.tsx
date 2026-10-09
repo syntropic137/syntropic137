@@ -1,10 +1,9 @@
 import Nav from "./components/Nav";
-import Hero from "./components/Hero";
-import HowItWorks from "./components/HowItWorks";
-import AgentControlPlane from "./components/AgentControlPlane";
-import GitHubTriggers from "./components/GitHubTriggers";
-import Observability from "./components/Observability";
-import Security from "./components/Security";
+import Hero from "./sections/Hero";
+import WhatIs from "./sections/WhatIs";
+import Workflows from "./sections/Workflows";
+import Harnesses from "./sections/Harnesses";
+import Observability from "./sections/Observability";
 import Evals from "./sections/Evals";
 import UseCases from "./sections/UseCases";
 import WhyPlatform from "./sections/WhyPlatform";
@@ -18,16 +17,10 @@ export default function App() {
       <Nav />
       <main id="main-content">
         <Hero />
-        <hr className="section-divider" />
-        <HowItWorks />
-        <hr className="section-divider" />
-        <AgentControlPlane />
-        <hr className="section-divider" />
+        <WhatIs />
+        <Workflows />
+        <Harnesses />
         <Observability />
-        <hr className="section-divider" />
-        <GitHubTriggers />
-        <hr className="section-divider" />
-        <Security />
         <Evals />
         <UseCases />
         <WhyPlatform />

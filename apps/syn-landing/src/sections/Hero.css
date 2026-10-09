@@ -1,0 +1,316 @@
+/* Section 1, the hero (v4 Landing and PhoneLanding boards). Phone first. */
+.hero {
+  position: relative;
+  overflow: hidden;
+  background: var(--sky-glow-accent-wash), var(--sky-texture-dots), var(--sky-color-ground-deep);
+  color: var(--ds-color-fg);
+}
+
+.hero__grain {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  background: var(--sky-texture-grain);
+  pointer-events: none;
+}
+
+.hero__copy {
+  position: relative;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 18px;
+  max-width: 1320px;
+  margin: 0 auto;
+  /* Clears the site header (absolute, over the hero). */
+  padding: 96px var(--sky-gutter) 0;
+}
+
+.hero__badge {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-2-5);
+  min-height: 32px;
+  padding: 4px 14px 4px 6px;
+  border: 1px solid var(--sky-color-border-glass);
+  border-radius: 16px;
+  background: color-mix(in oklab, var(--ds-color-surface) 60%, transparent);
+  font-size: 13px;
+  line-height: 1.3;
+  color: var(--sky-color-text-code);
+  text-decoration: none;
+}
+
+.hero__badge:hover {
+  border-color: var(--sky-color-border-hover);
+}
+
+.hero__badge:focus-visible {
+  outline: var(--sky-focus-ring-width) solid var(--sky-color-focus);
+  outline-offset: var(--sky-focus-ring-offset);
+}
+
+.hero__badge svg {
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.hero__badge-tag {
+  flex: none;
+  height: 22px;
+  padding: 0 9px;
+  border-radius: 11px;
+  background: color-mix(in oklab, var(--ds-color-accent) 22%, transparent);
+  color: color-mix(in oklab, var(--ds-color-accent) 40%, var(--sky-color-display-hi));
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 22px;
+}
+
+.hero__title {
+  max-width: 1120px;
+  margin: 0;
+  font-family: var(--sky-font-display);
+  font-size: var(--sky-font-display-phone-xl);
+  font-weight: var(--sky-font-weight-display);
+  line-height: var(--sky-line-height-display);
+  letter-spacing: var(--sky-tracking-display-tight);
+  text-wrap: balance;
+}
+
+.hero__lede {
+  max-width: 700px;
+  margin: 0;
+  font-size: 17px;
+  line-height: 1.5;
+  color: var(--ds-color-text-muted);
+}
+
+.hero__install {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2-5);
+  width: 100%;
+}
+
+.hero__note {
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--ds-color-text-subtle);
+}
+
+/* The city: 150% wide on phones, 112% from 48rem, centred; it bleeds past the edges. */
+.hero__stage {
+  position: relative;
+  z-index: 1;
+  width: 150%;
+  margin: 0 0 0 -25%;
+}
+
+.hero__city {
+  position: relative;
+  display: block;
+}
+
+.hero__city-art {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+.hero__glow-in {
+  stop-color: var(--ds-color-accent);
+  stop-opacity: 0.35;
+}
+
+.hero__glow-out {
+  stop-color: var(--ds-color-accent);
+  stop-opacity: 0;
+}
+
+.hero__floor {
+  fill: none;
+  stroke: var(--ds-color-border);
+  stroke-width: 1;
+}
+
+.hero__overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  pointer-events: none;
+  filter: drop-shadow(0 30px 40px color-mix(in oklab, var(--ds-color-accent) 45%, transparent));
+}
+
+/* The S over the city, fallback and slotted element alike. */
+.hero__mark {
+  display: block;
+  width: 26%;
+  margin-top: 4%;
+}
+
+.hero__mark-art {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+.hero__mark-art g {
+  stroke-width: 1;
+  stroke-linejoin: round;
+}
+
+.hero__stats {
+  position: relative;
+  z-index: 4;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--ds-space-3) 20px;
+  max-width: 1320px;
+  margin: -20px auto 0;
+  padding: 0 var(--sky-gutter) 40px;
+  list-style: none;
+}
+
+.hero__stats li {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+  white-space: nowrap;
+}
+
+.hero__stat-value {
+  font-family: var(--ds-font-mono);
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--ds-color-fg);
+}
+
+.hero__stat-label {
+  font-size: 12.5px;
+  color: var(--ds-color-text-subtle);
+}
+
+.hero__fade {
+  position: absolute;
+  inset: auto 0 0;
+  z-index: 2;
+  height: 160px;
+  background: var(--sky-fade-to-ground);
+  pointer-events: none;
+}
+
+/* Floating glass cards (64rem and up), placed on the stage as on the board. */
+.hero__card {
+  position: absolute;
+  z-index: 3;
+}
+
+.hero__card--run {
+  left: 6%;
+  top: 30%;
+}
+
+.hero__card--phases {
+  right: 7%;
+  top: 22%;
+}
+
+.hero__card--trend {
+  right: 12%;
+  top: 58%;
+}
+
+.hero__card-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+  font-family: var(--ds-font-mono);
+  font-size: 11px;
+  color: var(--ds-color-text-muted);
+}
+
+.hero__card-title {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.hero__card-detail {
+  font-size: 12px;
+  color: var(--ds-color-text-muted);
+}
+
+.hero__card-chips,
+.hero__card-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.hero__card-arrow,
+.hero__card-sep {
+  color: var(--ds-color-text-subtle);
+}
+
+.hero__card-gains {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.hero__card-gain {
+  color: var(--sky-color-success-soft-fg);
+}
+
+@media (min-width: 48rem) {
+  .hero__copy {
+    align-items: center;
+    gap: var(--ds-space-6);
+    padding-top: 158px;
+    text-align: center;
+  }
+  .hero__title {
+    font-size: var(--sky-font-display-l);
+  }
+  .hero__lede {
+    font-size: 21px;
+  }
+  .hero__install {
+    width: 560px;
+    max-width: 100%;
+  }
+  .hero__stage {
+    width: 112%;
+    margin: -30px 0 0 -6%;
+  }
+  .hero__mark {
+    width: 15%;
+    margin-top: 2%;
+  }
+  .hero__stats {
+    gap: 14px 56px;
+    margin-top: -110px;
+    padding-bottom: 72px;
+  }
+  .hero__stat-value {
+    font-size: 22px;
+  }
+}
+
+@media (min-width: 64rem) {
+  .hero__title {
+    font-size: var(--sky-font-display-xl);
+  }
+}

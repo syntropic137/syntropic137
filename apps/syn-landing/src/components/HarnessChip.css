@@ -1,0 +1,27 @@
+/* HarnessChip: the pre-upgrade fallback matches <sky-harness-chip>. */
+.harness-chip {
+  display: inline-flex;
+  flex: none;
+}
+
+.harness-chip__fallback {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 9px;
+  border: var(--ds-border-width) solid var(--sky-color-border-strong);
+  border-radius: var(--ds-radius-full);
+  background: var(--ds-color-surface);
+  font-family: var(--ds-font-mono);
+  font-size: var(--ds-text-xs);
+  line-height: 1;
+  color: var(--ds-color-text-muted);
+  white-space: nowrap;
+}
+
+.harness-chip__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
