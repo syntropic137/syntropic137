@@ -46,9 +46,16 @@ from syn_shared.settings import get_settings
 # =========================================================================
 
 if TYPE_CHECKING:
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+        AgentConfiguration,
+    )
     from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
         ExecutionResult,
     )
+
+_HANDLER_MODULE = (
+    "syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler"
+)
 
 
 @pytest.mark.unit
@@ -863,7 +870,24 @@ async def _provisioned_context(
     execute_error: Exception | None = None,
     read_results: dict[str, ExecutionResult] | None = None,
 ) -> str:
-    """Run the real WorkspaceProvisionHandler.handle() and return the context it injected.
+    """The context a claude phase is given: AGENTS.md and CLAUDE.md carry the same imports."""
+    injected = await _provisioned_files(
+        files, repos=repos, execute_error=execute_error, read_results=read_results
+    )
+    assert injected["AGENTS.md"] == injected["CLAUDE.md"]
+    return injected["CLAUDE.md"]
+
+
+async def _provisioned_files(
+    files: dict[str, str],
+    *,
+    repos: list[str] | None = None,
+    execute_error: Exception | None = None,
+    read_results: dict[str, ExecutionResult] | None = None,
+    agent: AgentConfiguration | None = None,
+    fallback: AgentConfiguration | None = None,
+) -> dict[str, str]:
+    """Run the real WorkspaceProvisionHandler.handle() and return the context files it injected.
 
     ``files`` is what the clone put on disk: reading a listed path succeeds
     with its content, reading anything else fails the way a missing file does
@@ -925,11 +949,18 @@ async def _provisioned_context(
         name="Test Phase",
         order=1,
         description="",
-        agent_config=AgentConfiguration(),
+        agent_config=agent or AgentConfiguration(),
         prompt_template="Do the task",
         output_artifact_types=("text",),
+        fallback_agent=fallback,
     )
-    with patch("syn_adapters.workspace_backends.service.SetupPhaseSecrets") as MockSecrets:
+    with (
+        patch("syn_adapters.workspace_backends.service.SetupPhaseSecrets") as MockSecrets,
+        # Codex or delegation in the workspace means a sandbox probe and a skill
+        # install; neither is under test here.
+        patch(f"{_HANDLER_MODULE}.require_codex_sandbox", AsyncMock()),
+        patch.object(WorkspaceProvisionHandler, "_install_baked_delegation_skill", AsyncMock()),
+    ):
         mock_secrets_instance = MagicMock()
         mock_secrets_instance.build_setup_script.return_value = "#!/bin/bash\necho ok\n"
         MockSecrets.create = AsyncMock(return_value=mock_secrets_instance)
@@ -950,9 +981,7 @@ async def _provisioned_context(
     ]
     assert len(injected) == 1, "the workspace context is injected exactly once"
     (files_injected,) = injected
-    # Each harness reads one of these two files, so both carry the same imports.
-    assert files_injected["AGENTS.md"] == files_injected["CLAUDE.md"]
-    return files_injected["CLAUDE.md"].decode()
+    return {name: content.decode() for name, content in files_injected.items()}
 
 
 # =========================================================================
@@ -2137,3 +2166,147 @@ class TestWorkspaceProvisionHandlerInjectsTheWholeTree:
         kwargs = collector.inject_from_previous_phases_explicit.await_args.kwargs
         assert kwargs["phase_files"] == {"p-1": files}
         assert collector.inject_from_previous_phases_explicit.await_args.args[2] == {"p-1": "r"}
+
+
+# =========================================================================
+# #1835: an agent that does not expand @-imports gets the content inline
+# =========================================================================
+
+_REPO_CLAUDE = "/workspace/repos/repo-a/CLAUDE.md"
+_REPO_AGENTS = "/workspace/repos/repo-a/AGENTS.md"
+_CLAUDE_BODY = "# Repo rules\n\nRULE_FROM_CLAUDE_MD_7f3a: run the gates.\n"
+
+
+def _agent(provider: str, *, allow_delegation: bool = False) -> AgentConfiguration:
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+        AgentConfiguration,
+    )
+
+    return AgentConfiguration(provider=provider, allow_delegation=allow_delegation)
+
+
+@pytest.mark.unit
+class TestInstructionsReachEveryAgent:
+    """What each provider READS: claude CLAUDE.md (expands @), codex AGENTS.md (does not)."""
+
+    @pytest.mark.anyio
+    async def test_a_codex_phase_reads_the_repo_claude_md_content_exactly_once(self) -> None:
+        injected = await _provisioned_files(
+            {_REPO_CLAUDE: _CLAUDE_BODY}, agent=_agent(AgentProvider.CODEX)
+        )
+        agents_md = injected["AGENTS.md"]
+        assert agents_md.count("RULE_FROM_CLAUDE_MD_7f3a") == 1
+        assert f"# Instructions from {_REPO_CLAUDE}" in agents_md
+        assert _imports(agents_md) == [], "codex would read a bare @path literally"
+        assert agents_md.count("This phase is killed at") == 1
+        # CLAUDE.md is untouched: still the @-import form.
+        assert _imports(injected["CLAUDE.md"]) == [_REPO_CLAUDE]
+
+    @pytest.mark.anyio
+    async def test_distinct_files_are_inlined_once_each_in_import_order(self) -> None:
+        injected = await _provisioned_files(
+            {
+                _REPO_AGENTS: "AGENTS_BODY_1\n",
+                _REPO_CLAUDE: "CLAUDE_BODY_1\n",
+                "/workspace/repos/repo-b/CLAUDE.md": "REPO_B_BODY\n",
+                # A byte-identical copy of repo-b's CLAUDE.md is dropped, as for imports.
+                "/workspace/repos/repo-b/AGENTS.md": "REPO_B_BODY\n",
+            },
+            repos=["https://github.com/org/repo-a", "https://github.com/org/repo-b"],
+            agent=_agent(AgentProvider.CODEX),
+        )
+        agents_md = injected["AGENTS.md"]
+        order = [agents_md.index(m) for m in ("AGENTS_BODY_1", "CLAUDE_BODY_1", "REPO_B_BODY")]
+        assert order == sorted(order)
+        assert agents_md.count("REPO_B_BODY") == 1
+        assert agents_md.count("# Instructions from ") == 3
+
+    @pytest.mark.anyio
+    async def test_a_claude_phase_is_byte_identical_to_the_import_form(self) -> None:
+        from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
+            WorkspaceProvisionHandler,
+        )
+
+        injected = await _provisioned_files(
+            {_REPO_CLAUDE: _CLAUDE_BODY}, agent=_agent(AgentProvider.CLAUDE)
+        )
+        expected = WorkspaceProvisionHandler._generate_workspace_context([_REPO_CLAUDE])
+        assert injected == {"AGENTS.md": expected, "CLAUDE.md": expected}
+
+    @pytest.mark.anyio
+    @pytest.mark.parametrize(
+        ("primary", "fallback"),
+        [
+            (AgentProvider.CLAUDE, AgentProvider.CODEX),
+            (AgentProvider.CODEX, AgentProvider.CLAUDE),
+        ],
+    )
+    async def test_a_fallback_finds_its_own_file_already_staged(
+        self, primary: AgentProvider, fallback: AgentProvider
+    ) -> None:
+        """The fallback runs in the same workspace (PC-83): both forms are staged up front."""
+        injected = await _provisioned_files(
+            {_REPO_CLAUDE: _CLAUDE_BODY}, agent=_agent(primary), fallback=_agent(fallback)
+        )
+        assert injected["AGENTS.md"].count("RULE_FROM_CLAUDE_MD_7f3a") == 1
+        assert _imports(injected["CLAUDE.md"]) == [_REPO_CLAUDE]
+
+    @pytest.mark.anyio
+    @pytest.mark.parametrize("primary", [AgentProvider.CLAUDE, AgentProvider.CODEX])
+    async def test_a_delegating_phase_stages_both_forms(self, primary: AgentProvider) -> None:
+        """Under allow_delegation the other CLI runs here too, whichever leads."""
+        injected = await _provisioned_files(
+            {_REPO_CLAUDE: _CLAUDE_BODY}, agent=_agent(primary, allow_delegation=True)
+        )
+        assert injected["AGENTS.md"].count("RULE_FROM_CLAUDE_MD_7f3a") == 1
+        assert _imports(injected["CLAUDE.md"]) == [_REPO_CLAUDE]
+
+    @pytest.mark.anyio
+    async def test_content_past_the_codex_limit_is_kept_and_named_in_a_warning(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        big = "x" * 600 + "\nTAIL_MARKER\n"
+        with (
+            patch(f"{_HANDLER_MODULE}.CODEX_PROJECT_DOC_MAX_BYTES", 400),
+            caplog.at_level("WARNING"),
+        ):
+            injected = await _provisioned_files(
+                {_REPO_CLAUDE: big}, agent=_agent(AgentProvider.CODEX)
+            )
+        assert "TAIL_MARKER" in injected["AGENTS.md"], "never cut on our side"
+        warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+        assert any(_REPO_CLAUDE in w and "400" in w for w in warnings), warnings
+
+    @pytest.mark.anyio
+    async def test_within_the_limit_nothing_is_warned(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level("WARNING"):
+            await _provisioned_files(
+                {_REPO_CLAUDE: _CLAUDE_BODY}, agent=_agent(AgentProvider.CODEX)
+            )
+        assert not [r for r in caplog.records if "inlined instructions" in r.getMessage()]
+
+    @pytest.mark.anyio
+    async def test_an_unreadable_file_is_named_not_dropped(self) -> None:
+        from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
+            ExecutionResult,
+        )
+
+        failed = ExecutionResult(exit_code=1, success=False, duration_ms=1.0, stderr="EIO")
+        injected = await _provisioned_files(
+            {_REPO_AGENTS: "A\n"},
+            read_results={_REPO_CLAUDE: failed},
+            agent=_agent(AgentProvider.CODEX),
+        )
+        assert f"# Instructions from {_REPO_CLAUDE}" in injected["AGENTS.md"]
+        assert "could not be read" in injected["AGENTS.md"]
+
+
+@pytest.mark.unit
+def test_every_provider_declares_whether_it_expands_at_imports() -> None:
+    """Measured on the pinned CLIs: claude expands @path, codex 0.160.1 does not (#1835)."""
+    assert {p: p.expands_at_imports for p in AgentProvider} == {
+        AgentProvider.CLAUDE: True,
+        AgentProvider.CODEX: False,
+    }
