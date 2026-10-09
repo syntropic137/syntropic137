@@ -60,20 +60,25 @@ const bundleRelease = (ui: string): string | null => {
   return v === '' || v === UNVERSIONED_UI ? null : v
 }
 
+/** The detail rows for a served build, in display order. */
+function apiDetails(api: ServedBuild): BuildDetail[] {
+  const rows: BuildDetail[] = [{ term: 'API', value: api.version ? `v${api.version}` : 'unavailable' }]
+  if (api.image_tag) rows.push({ term: 'Image', value: api.image_tag })
+  if (api.commit) rows.push({ term: 'Commit', value: api.commit.slice(0, SHORT_SHA) })
+  rows.push({ term: 'Deployed', value: api.started_at_display })
+  return rows
+}
+
+function buildText(api: ServedBuild | null | undefined, details: BuildDetail[], uiLabel: string): string {
+  return api ? `Build: ${details.map((d) => `${d.term} ${d.value}`).join(' · ')}` : `Build: API unknown · UI ${uiLabel}`
+}
+
 export function buildView(api: ServedBuild | null | undefined, uiVersion: string): BuildView {
   const ui = bundleRelease(uiVersion)
   const uiLabel = ui ? `v${toPep440(ui)}` : 'unversioned'
   const label = api?.version ? `v${api.version}` : null
-  const details: BuildDetail[] = []
-  if (api) {
-    details.push({ term: 'API', value: api.version ? `v${api.version}` : 'unavailable' })
-    if (api.image_tag) details.push({ term: 'Image', value: api.image_tag })
-    if (api.commit) details.push({ term: 'Commit', value: api.commit.slice(0, SHORT_SHA) })
-    details.push({ term: 'Deployed', value: api.started_at_display })
-  }
-  details.push({ term: 'UI', value: uiLabel })
+  const details: BuildDetail[] = [...(api ? apiDetails(api) : []), { term: 'UI', value: uiLabel }]
   const mismatch = Boolean(api?.version && ui && !isSameRelease(api.version, ui))
-  const text = api ? `Build: ${details.map((d) => `${d.term} ${d.value}`).join(' · ')}` : `Build: API unknown · UI ${uiLabel}`
   const commit = api?.commit ? api.commit.slice(0, SHORT_SHA) : null
-  return { label, ui, commit, mismatch, details, text }
+  return { label, ui, commit, mismatch, details, text: buildText(api, details, uiLabel) }
 }
