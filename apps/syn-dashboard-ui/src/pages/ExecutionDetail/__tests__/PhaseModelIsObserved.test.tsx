@@ -4,7 +4,7 @@
  *
  * The card used to print the alias ("opus", "gpt-sol") under each phase, which
  * proves nothing: an alias is a pointer and where it points moves. These cases
- * pin the observed id as the primary label, "unknown (requested: X)" when the
+ * pin the observed id as the primary label, "X (requested)" when the
  * harness reported nothing, and the alias only ever as "requested: X".
  */
 
@@ -94,16 +94,16 @@ describe('Phase Pipeline model label', () => {
     expect(screen.queryByText('opus-5-5')).toBeNull()
   })
 
-  it('shows "unknown (requested: gpt-sol)" when no model was observed', () => {
+  it('shows "gpt-sol (requested)" when no model was observed', () => {
     renderPhases([
       phase({
         model: null,
         requested_model: 'gpt-sol',
-        model_display: 'unknown (requested: gpt-sol)',
+        model_display: 'gpt-sol (requested)',
         cost_by_model: { [UNATTRIBUTED_MODEL_KEY]: '0.1' },
       }),
     ])
-    expect(primaryModelLabels()).toEqual(['unknown (requested: gpt-sol)'])
+    expect(primaryModelLabels()).toEqual(['gpt-sol (requested)'])
     expect(screen.queryByText('gpt-sol')).toBeNull()
     // Not repeated as a second line: the display already carries it.
     expect(screen.queryByText('requested: gpt-sol')).toBeNull()
@@ -131,7 +131,7 @@ describe('Phase Pipeline model label', () => {
           phase_id: `p${i}`,
           model: null,
           requested_model: alias,
-          model_display: `unknown (requested: ${alias})`,
+          model_display: `${alias} (requested)`,
         }),
       ),
     )
