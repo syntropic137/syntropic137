@@ -142,3 +142,43 @@ async def inline_instruction_files(
         if content is not _Unread.ABSENT:
             text += "\n" + _inlined_section(path, content)
     return text
+
+
+#: Where the inlined instructions are staged before ``INSTALL_CODEX_INSTRUCTIONS``
+#: moves them: ``inject_files`` can only write under /workspace.
+CODEX_INSTRUCTIONS_STAGED = ".setup/codex-instructions.md"
+
+#: Append ``$1`` to codex's global instructions file and remove it. Codex reads
+#: ``$CODEX_HOME/AGENTS.md`` from any working directory, so a delegated codex
+#: started inside a clone gets it too, where it never sees /workspace/AGENTS.md;
+#: and ``project_doc_max_bytes`` (32768 by default in codex-cli 0.160.1) does
+#: not cap it, so no launch cuts its tail (#1835). Appended, not overwritten:
+#: the image ships its own global instructions there.
+INSTALL_CODEX_INSTRUCTIONS = (
+    'h="${CODEX_HOME:-$HOME/.codex}"; mkdir -p "$h" && '
+    '{ if [ -s "$h/AGENTS.md" ]; then printf "\\n"; fi; cat -- "$1"; } >> "$h/AGENTS.md" && '
+    'rm -f -- "$1"'
+)
+
+#: /workspace/AGENTS.md when the instructions are codex's global instructions:
+#: codex at the workspace root reads both, so this must not repeat them.
+CODEX_POINTER = (
+    "The target repositories' instructions, and this phase's deadline, are in "
+    "codex's global instructions file (~/.codex/AGENTS.md), which codex loads "
+    "in every directory.\n"
+)
+
+
+async def install_codex_instructions(workspace: ManagedWorkspace) -> None:
+    """Move the staged inlined instructions into codex's global instructions.
+
+    A failure is raised, not logged: codex would run with none of the
+    target repos' instructions, which is the defect this exists to close.
+    """
+    result = await workspace.execute(
+        ["sh", "-c", INSTALL_CODEX_INSTRUCTIONS, "sh", f"/workspace/{CODEX_INSTRUCTIONS_STAGED}"],
+        timeout_seconds=30,
+    )
+    if result.exit_code != 0 or result.timed_out:
+        msg = f"could not install codex's instructions (exit {result.exit_code}): {result.stderr}"
+        raise RuntimeError(msg)

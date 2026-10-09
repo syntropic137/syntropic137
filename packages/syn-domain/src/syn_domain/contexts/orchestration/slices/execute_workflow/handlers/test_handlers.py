@@ -40,9 +40,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExe
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.ArtifactCollectionHandler import (
     ArtifactCollectionHandler,
 )
-from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
-    _CODEX_INSTRUCTIONS_STAGED,
-    _INSTALL_CODEX_INSTRUCTIONS,
+from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.instruction_imports import (
+    CODEX_INSTRUCTIONS_STAGED,
+    INSTALL_CODEX_INSTRUCTIONS,
 )
 from syn_shared.agents import AgentProvider
 from syn_shared.settings import get_settings
@@ -922,7 +922,7 @@ async def _provisioned_files(
     installed: list[str] = []
 
     async def execute(command: list[str], **_kwargs: object) -> ExecutionResult:
-        if command[:3] == ["sh", "-c", _INSTALL_CODEX_INSTRUCTIONS]:
+        if command[:3] == ["sh", "-c", INSTALL_CODEX_INSTRUCTIONS]:
             # Never run for real: it appends to the test runner's own ~/.codex.
             installed.append(command[-1])
             return ExecutionResult(exit_code=0, success=True, duration_ms=1.0)
@@ -1001,9 +1001,9 @@ async def _provisioned_files(
     assert len(injected) == 1, "the workspace context is injected exactly once"
     (files_injected,) = injected
     result = {name: content.decode() for name, content in files_injected.items()}
-    staged = result.pop(_CODEX_INSTRUCTIONS_STAGED, None)
+    staged = result.pop(CODEX_INSTRUCTIONS_STAGED, None)
     # Staged exactly when it is installed: a staged file left behind reaches no agent.
-    assert installed == ([f"/workspace/{_CODEX_INSTRUCTIONS_STAGED}"] if staged else [])
+    assert installed == ([f"/workspace/{CODEX_INSTRUCTIONS_STAGED}"] if staged else [])
     if staged is not None:
         result[_CODEX_GLOBAL] = staged
     return result
@@ -2341,14 +2341,12 @@ async def test_codex_sees_the_repo_rules_once_from_any_directory_past_32_kib(
     (clone / "CLAUDE.md").write_text(body)
     if breadcrumb:
         (clone / "AGENTS.md").write_text("@CLAUDE.md\n")
-    staged = workspace / _CODEX_INSTRUCTIONS_STAGED
+    staged = workspace / CODEX_INSTRUCTIONS_STAGED
     staged.parent.mkdir()
     staged.write_text(injected[_CODEX_GLOBAL])
     env = {**os.environ, "CODEX_HOME": str(home)}
     # The handler's real install script, against a stand-in codex home.
-    subprocess.run(
-        ["sh", "-c", _INSTALL_CODEX_INSTRUCTIONS, "sh", str(staged)], env=env, check=True
-    )
+    subprocess.run(["sh", "-c", INSTALL_CODEX_INSTRUCTIONS, "sh", str(staged)], env=env, check=True)
     assert not staged.exists()
 
     for cwd in (clone, workspace):

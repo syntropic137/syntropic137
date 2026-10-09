@@ -40,7 +40,10 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.codex_sa
     require_codex_sandbox,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.instruction_imports import (
+    CODEX_INSTRUCTIONS_STAGED,
+    CODEX_POINTER,
     inline_instruction_files,
+    install_codex_instructions,
     repo_instruction_imports,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.skill_install import (
@@ -227,30 +230,6 @@ def _check_no_conflicting_skill_versions(skills: tuple[ResolvedSkill, ...]) -> N
 _DEADLINE_NOTICE = (
     f"This phase is killed at ${ENV_SYN_PHASE_DEADLINE} (ISO 8601 UTC; read it with "
     f"`echo ${ENV_SYN_PHASE_DEADLINE}`). Only pushed work survives: commit and push before then."
-)
-
-#: Where the inlined instructions are staged before ``_INSTALL_CODEX_INSTRUCTIONS``
-#: moves them: ``inject_files`` can only write under /workspace.
-_CODEX_INSTRUCTIONS_STAGED = ".setup/codex-instructions.md"
-
-#: Append ``$1`` to codex's global instructions file and remove it. Codex reads
-#: ``$CODEX_HOME/AGENTS.md`` from any working directory, so a delegated codex
-#: started inside a clone gets it too, where it never sees /workspace/AGENTS.md;
-#: and ``project_doc_max_bytes`` (32768 by default in codex-cli 0.160.1) does
-#: not cap it, so no launch cuts its tail (#1835). Appended, not overwritten:
-#: the image ships its own global instructions there.
-_INSTALL_CODEX_INSTRUCTIONS = (
-    'h="${CODEX_HOME:-$HOME/.codex}"; mkdir -p "$h" && '
-    '{ if [ -s "$h/AGENTS.md" ]; then printf "\\n"; fi; cat -- "$1"; } >> "$h/AGENTS.md" && '
-    'rm -f -- "$1"'
-)
-
-#: /workspace/AGENTS.md when the instructions are codex's global instructions:
-#: codex at the workspace root reads both, so this must not repeat them.
-_CODEX_POINTER = (
-    "The target repositories' instructions, and this phase's deadline, are in "
-    "codex's global instructions file (~/.codex/AGENTS.md), which codex loads "
-    "in every directory.\n"
 )
 
 
@@ -637,13 +616,13 @@ class WorkspaceProvisionHandler:
                     workspace, imports, notice=_DEADLINE_NOTICE
                 )
                 files = [
-                    ("AGENTS.md", _CODEX_POINTER.encode()),
+                    ("AGENTS.md", CODEX_POINTER.encode()),
                     ("CLAUDE.md", context.encode()),
-                    (_CODEX_INSTRUCTIONS_STAGED, inlined.encode()),
+                    (CODEX_INSTRUCTIONS_STAGED, inlined.encode()),
                 ]
             await workspace.inject_files(files)
             if inline_instructions:
-                await self._install_codex_instructions(workspace)
+                await install_codex_instructions(workspace)
             logger.info(
                 "Injected /workspace/AGENTS.md + CLAUDE.md (%d repo(s), %d import(s))",
                 len(cloned_repos),
@@ -948,29 +927,6 @@ class WorkspaceProvisionHandler:
             agent_key,
             workspace.workspace_id,
         )
-
-    @staticmethod
-    async def _install_codex_instructions(workspace: ManagedWorkspace) -> None:
-        """Move the staged inlined instructions into codex's global instructions.
-
-        A failure is raised, not logged: codex would run with none of the
-        target repos' instructions, which is the defect this exists to close.
-        """
-        result = await workspace.execute(
-            [
-                "sh",
-                "-c",
-                _INSTALL_CODEX_INSTRUCTIONS,
-                "sh",
-                f"/workspace/{_CODEX_INSTRUCTIONS_STAGED}",
-            ],
-            timeout_seconds=30,
-        )
-        if result.exit_code != 0 or result.timed_out:
-            msg = (
-                f"could not install codex's instructions (exit {result.exit_code}): {result.stderr}"
-            )
-            raise RuntimeError(msg)
 
     @staticmethod
     def _generate_workspace_context(imports: Sequence[str]) -> str:
