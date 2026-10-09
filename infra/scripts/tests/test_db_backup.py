@@ -161,7 +161,7 @@ class TestBackup:
             # pg_restore itself reports the archive unreadable part way.
             (_DATA_STREAM, 1, "pg_restore failed reading the data"),
             # The TOC lists two tables, the data holds one.
-            (_DATA_STREAM.split("COPY public.\"Agent")[0], 0, "a listed table has no data"),
+            (_DATA_STREAM.split('COPY public."Agent')[0], 0, "a listed table has no data"),
         ],
         ids=["cut-inside-copy", "pg-restore-fails", "table-missing"],
     )
@@ -455,7 +455,6 @@ class TestRestoreGuards:
         assert result.returncode == 3
         assert "public.events" in result.stderr
         assert self._changed(tmp_path) == []
-
 
 
 class TestCronMatch:

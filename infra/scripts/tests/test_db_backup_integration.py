@@ -354,9 +354,7 @@ class TestNothingIsLost:
         assert _sql(container, _MARKER, db) == "1"
         assert not _databases(container, "syn\\_restore\\_%"), "staging database left behind"
 
-    def test_truncated_archive_is_refused_before_anything_changes(
-        self, timescaledb, backup_file
-    ):
+    def test_truncated_archive_is_refused_before_anything_changes(self, timescaledb, backup_file):
         db = "syn_truncated"
         before = _populated(timescaledb, backup_file, db)
         asides = _databases(timescaledb, "syn\\_pre\\_restore\\_%")
@@ -400,7 +398,7 @@ class TestNothingIsLost:
             timescaledb,
             "sh",
             "-c",
-            "awk '$1 == \"rows\" && $3 == \"public.events\" { $2 = $2 + 1 } { print }' "
+            'awk \'$1 == "rows" && $3 == "public.events" { $2 = $2 + 1 } { print }\' '
             f"{claimed}.manifest > /tmp/m && cat /tmp/m > {claimed}.manifest",
         )
         assert code == 0, out
