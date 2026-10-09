@@ -3,7 +3,8 @@
   workflow's phases in one lane per harness. Phase N sits in the same
   column in every lane; the harness that runs it fills the cell in its
   colour, the other lanes show an empty dashed slot. Widths follow `span`.
-  Lane labels narrow from 120px to 86px in small containers.
+  Lane labels narrow from 120px to 86px in small containers, and sit over
+  their cells in phone-narrow ones (under 24rem).
 -->
 <script lang="ts">
   import { harnessLanes } from '@syn137/skyline-core/patterns'
@@ -40,6 +41,20 @@
     grid-template-columns: 5.375rem minmax(0, 1fr);
     align-items: center;
     gap: var(--ds-space-3);
+  }
+  /* Phone-narrow containers: the lane name sits over its cells, so the
+     cells get the full width and phase names like "implement" fit. */
+  @container (max-width: 24rem) {
+    .sky-lanes__lane {
+      grid-template-columns: minmax(0, 1fr);
+      gap: var(--ds-space-1-5);
+    }
+    .sky-lanes__cell {
+      justify-content: center;
+      height: 2.5rem;
+      padding: 0 var(--ds-space-1);
+      font-size: var(--ds-text-xs);
+    }
   }
   @container (min-width: 32rem) {
     .sky-lanes__lane {
