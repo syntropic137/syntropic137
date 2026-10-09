@@ -28,9 +28,7 @@ from syn_domain.testing.fake_clock import FakeClock
 
 pytestmark = pytest.mark.unit
 
-_FIXTURE = (
-    Path(__file__).parents[6] / "tests" / "fixtures" / "codex" / "codex_turn_failed.jsonl"
-)
+_FIXTURE = Path(__file__).parents[6] / "tests" / "fixtures" / "codex" / "codex_turn_failed.jsonl"
 
 
 def _codex_refusal() -> str:
@@ -83,9 +81,7 @@ async def test_a_refusal_is_never_retried_on_the_same_agent() -> None:
 
 
 def test_a_refusal_before_any_work_is_granted_the_fallback() -> None:
-    attempts = UpstreamRetryPolicy(clock=FakeClock().as_attempt_clock()).begin(
-        timeout_seconds=3600
-    )
+    attempts = UpstreamRetryPolicy(clock=FakeClock().as_attempt_clock()).begin(timeout_seconds=3600)
 
     grant = attempts.fallback_attempt(reason=codex_fault_reason(CODEX_REFUSAL), work_done=False)
 
@@ -93,9 +89,7 @@ def test_a_refusal_before_any_work_is_granted_the_fallback() -> None:
 
 
 def test_a_refusal_after_work_is_not_granted_the_fallback() -> None:
-    attempts = UpstreamRetryPolicy(clock=FakeClock().as_attempt_clock()).begin(
-        timeout_seconds=3600
-    )
+    attempts = UpstreamRetryPolicy(clock=FakeClock().as_attempt_clock()).begin(timeout_seconds=3600)
 
     grant = attempts.fallback_attempt(reason=codex_fault_reason(CODEX_REFUSAL), work_done=True)
 
