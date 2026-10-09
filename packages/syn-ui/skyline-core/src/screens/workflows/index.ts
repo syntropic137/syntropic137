@@ -284,3 +284,6 @@ class PromptAccumulator {
 }
 
 export * from './trend'
+
+export * from './detail'
+export * from './performance'

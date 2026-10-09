@@ -56,6 +56,8 @@
           type="button"
           class="sky-trend__dot"
           data-color={d.color}
+          data-tone={d.tone}
+          data-muted={d.muted ? '' : undefined}
           aria-label={d.label}
           aria-pressed={d.i === selected}
           style:left={`${d.x}%`}
@@ -215,6 +217,22 @@
     border-radius: 50%;
     background: var(--sky-trend-c);
     box-shadow: 0 0 0 2px var(--ds-color-surface);
+  }
+  .sky-trend__dot[data-tone='completed'] {
+    --sky-trend-c: var(--sky-status-completed);
+  }
+  .sky-trend__dot[data-tone='failed'] {
+    --sky-trend-c: var(--sky-status-failed);
+  }
+  .sky-trend__dot[data-tone='cancelled'] {
+    --sky-trend-c: var(--sky-status-cancelled);
+  }
+  .sky-trend__dot[data-tone='running'] {
+    --sky-trend-c: var(--sky-status-running);
+  }
+  .sky-trend__dot[data-muted] span {
+    width: 7px;
+    height: 7px;
   }
   .sky-trend__dot[aria-pressed='true'] {
     z-index: 3;

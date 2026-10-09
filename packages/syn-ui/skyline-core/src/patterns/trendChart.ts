@@ -20,7 +20,13 @@ export interface TrendDot {
   top: number
   color: number
   label: string
+  /** Skyline: colour the dot by run outcome (--sky-status-*) instead of its series. */
+  tone?: TrendDotTone
+  /** Skyline: a run the line does not count (drawn small on the baseline). */
+  muted?: boolean
 }
+
+export type TrendDotTone = 'completed' | 'failed' | 'cancelled' | 'running'
 
 export interface TrendEnd {
   key: string
