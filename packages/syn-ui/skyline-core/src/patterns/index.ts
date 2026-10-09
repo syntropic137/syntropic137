@@ -27,3 +27,5 @@ export type { TrendLine, TrendDot, TrendDotTone, TrendEnd, TrendTick, TrendNote,
 export { usageBand } from './usage'
 export type { UsageBandProps, UsageBandModel } from './usage'
 export type { SMarkProps, IsoCityProps } from './brand'
+export { harnessLanes, harnessLook, harnessProvider, HARNESS_PROVIDERS } from './harness'
+export type { HarnessProvider, HarnessLook, HarnessChipProps, HarnessPhase, HarnessLanesProps, HarnessLane, HarnessLaneCell } from './harness'
