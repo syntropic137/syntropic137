@@ -74,12 +74,13 @@
     font-family: var(--ds-font-mono);
     font-size: var(--sky-text-label);
     line-height: var(--ds-line-height-snug);
-    color: var(--ds-color-text-subtle);
+    color: var(--sky-color-text-faint);
     white-space: nowrap;
     cursor: pointer;
   }
-  .sky-build-mark:hover {
-    color: var(--ds-color-text-muted);
+  .sky-build-mark:hover,
+  .sky-build-mark:focus-visible {
+    color: var(--ds-color-text-subtle);
   }
   .sky-build-mark[data-state='mismatch'],
   .sky-build-block__warn {

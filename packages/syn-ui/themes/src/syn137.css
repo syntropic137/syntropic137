@@ -31,6 +31,7 @@
   --sky-color-track: #121727;          /* Meter and bar track */
   --sky-color-empty: #2B3350;          /* Empty phase block */
   --sky-color-neutral-soft: #171C2B;   /* Cancelled / pending badge fill */
+  --sky-color-text-faint: #55607A;      /* Tertiary text: version label, build meta. Recedes further than text-subtle */
   --sky-color-danger-soft: #2A1513;    /* Failed badge fill */
   --sky-color-warning-soft: #1F1A0E;   /* Warning / scorer-error pill fill */
   --sky-color-warning-soft-fg: #EBD9A8; /* Text on the warning pill */

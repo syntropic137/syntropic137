@@ -31,6 +31,7 @@
   --sky-color-track: #161618;
   --sky-color-empty: #2E2E33;
   --sky-color-neutral-soft: #1A1A1D;
+  --sky-color-text-faint: #5E5E64;      /* Tertiary text: version label, build meta. Recedes further than text-subtle */
   --sky-color-danger-soft: #2A1513;
   --sky-color-warning-soft: #1F1A0E;
   --sky-color-warning-soft-fg: #EBD9A8;
