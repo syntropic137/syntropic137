@@ -4,8 +4,8 @@
   import { Callout, EmptyState, Pagination, Skeleton } from '@syn137/skyline-svelte-v5'
   import { PageHeader, VerdictBlock } from '@syn137/skyline-svelte-v5/patterns'
   import { formatCost, formatDateTime, formatDuration, formatRelativeTime } from '@syn137/skyline-core/format'
-  import { VERDICT_LOOK, normalizeVerdict } from '@syn137/skyline-core/patterns'
-  import { agentOfModel, averageEvalCost, evidenceFallback, runModels, sameCaseSiblings, tagValue, variantPassed } from '@syn137/skyline-core/screens/evals'
+  import { normalizeVerdict } from '@syn137/skyline-core/patterns'
+  import { agentOfModel, averageEvalCost, evidenceFallback, parseEvidence, runModels, runOutcome, sameCaseSiblings, tagValue, variantPassed, verdictWord } from '@syn137/skyline-core/screens/evals'
   import { isRunFinished } from '@syn137/syn-ui-data/live'
   import { resource } from '../../lib/load.svelte'
   import { setPage } from '../../lib/page.svelte'
@@ -132,11 +132,11 @@
               class="sky-eval__sib"
               href={href(`/evals/${encodeURIComponent(s.eval_id)}`)}
               aria-current={current ? 'page' : undefined}
-              aria-label={`${caseId} under ${models.join(', ') || s.starting_workflow_id}: ${VERDICT_LOOK[v].label}${current ? ' (this eval)' : ''}`}
+              aria-label={`${caseId} under ${models.join(', ') || s.starting_workflow_id}: ${verdictWord(v)}${current ? ' (this eval)' : ''}`}
             >
               <VerdictBlock verdict={v} size={70} />
               <span class="sky-eval__model"><span class="sky-eval__dot" data-agent={agentOf(models)}></span>{models.join(', ') || s.starting_workflow_id}</span>
-              <span class="sky-eval__word" data-verdict={v}>{VERDICT_LOOK[v].word}{current ? ' · this eval' : ''}</span>
+              <span class="sky-eval__word" data-verdict={v}>{verdictWord(v)}{current ? ' · this eval' : ''}</span>
               <span class="sky-eval__meta">{averageEvalCost(s.variants)} · {formatRelativeTime(s.last_run_at)}</span>
             </a>
           {/each}
@@ -199,8 +199,11 @@
     {:else}
       <ul class="sky-eval__runs" aria-busy={runs.loading}>
         {#each runs.data.items as run (run.execution_id)}
+          {@const outcome = runOutcome(run)}
           {@const v = normalizeVerdict(run.verdict)}
           {@const phases = run.models ?? []}
+          {@const facts = parseEvidence(run.evidence_excerpt)}
+          {@const evidence = run.evidence_excerpt ?? (outcome.kind === 'run-failed' ? 'The execution failed before the verifier produced a report.' : evidenceFallback(v))}
           <li class="sky-eval__run">
             <div class="sky-eval__run-main">
               <a class="sky-eval__run-link" href={href(`/executions/${encodeURIComponent(run.execution_id)}`)}>{formatDateTime(run.started_at)}</a>
@@ -217,8 +220,23 @@
               {#if phases.length === 0 && runModels(run).length}<span>{runModels(run).join(', ')}</span>{/if}
             </div>
             <div class="sky-eval__run-verdict">
-              <span class="sky-eval__pill" data-verdict={v}>{VERDICT_LOOK[v].word}</span>
-              <span class="sky-eval__evidence">{run.evidence_excerpt ?? evidenceFallback(v)}</span>
+              <span class="sky-eval__pill" data-verdict={outcome.verdict} data-outcome={outcome.kind}>{outcome.word}</span>
+              {#if facts}
+                <dl class="sky-eval__facts">
+                  {#if facts.runStatus}<div><dt>Run status</dt><dd>{facts.runStatus}</dd></div>{/if}
+                  {#if facts.reviewVerdict}<div><dt>Review verdict</dt><dd>{facts.reviewVerdict}{#if facts.reviewNeeds}<span class="sky-eval__dim"> (pass needs {facts.reviewNeeds})</span>{/if}</dd></div>{/if}
+                  {#if facts.findings !== null}<div><dt>Blocking findings</dt><dd>{facts.findings}</dd></div>{/if}
+                  {#if facts.expectedFile}<div><dt>Expected file</dt><dd class="sky-eval__path">{facts.expectedFile}</dd></div>{/if}
+                </dl>
+                <details class="sky-eval__raw">
+                  <summary>Scorer evidence</summary>
+                  <pre>{evidence}</pre>
+                </details>
+              {:else}
+                <details class="sky-eval__evidence">
+                  <summary><span class="sky-eval__clamp">{evidence}</span><span class="sky-eval__more" aria-hidden="true"></span></summary>
+                </details>
+              {/if}
               {#if run.scorer}<span class="sky-eval__mono-muted">{run.scorer}{run.scorer_version ? ` v${run.scorer_version}` : ''}{run.score !== null && run.score !== undefined ? ` · score ${run.score}` : ''}</span>{/if}
             </div>
             <dl class="sky-eval__run-figs">
@@ -542,10 +560,95 @@
     background: var(--sky-color-warning-soft);
     color: var(--sky-color-warning-soft-fg);
   }
-  .sky-eval__evidence {
+  .sky-eval__pill[data-outcome='run-failed'] {
+    background: transparent;
+    box-shadow: inset 0 0 0 var(--ds-border-width) var(--sky-color-border-strong);
+  }
+  .sky-eval__run-verdict {
+    max-width: 100%;
+  }
+  .sky-eval__evidence,
+  .sky-eval__raw,
+  .sky-eval__facts {
+    min-width: 0;
+    max-width: 100%;
     font-size: var(--ds-text-sm);
     line-height: var(--ds-line-height-normal);
     color: var(--ds-color-text-muted);
+    overflow-wrap: anywhere;
+  }
+  .sky-eval__evidence summary,
+  .sky-eval__raw summary {
+    cursor: pointer;
+    list-style: none;
+    border-radius: var(--ds-radius-xs);
+  }
+  .sky-eval__evidence summary::-webkit-details-marker,
+  .sky-eval__raw summary::-webkit-details-marker {
+    display: none;
+  }
+  .sky-eval__evidence summary:focus-visible,
+  .sky-eval__raw summary:focus-visible {
+    outline: var(--sky-focus-ring-width) solid var(--sky-color-focus);
+    outline-offset: var(--sky-focus-ring-offset);
+  }
+  .sky-eval__clamp {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
+    white-space: pre-line;
+  }
+  .sky-eval__evidence[open] .sky-eval__clamp {
+    display: block;
+    -webkit-line-clamp: unset;
+    line-clamp: none;
+  }
+  .sky-eval__more::before {
+    content: 'Show all';
+    font-size: var(--ds-text-xs);
+    color: var(--ds-color-accent);
+  }
+  .sky-eval__evidence[open] .sky-eval__more::before {
+    content: 'Show less';
+  }
+  .sky-eval__raw summary {
+    font-size: var(--ds-text-xs);
+    color: var(--ds-color-accent);
+  }
+  .sky-eval__raw pre {
+    margin: var(--ds-space-1-5) 0 0;
+    font-family: var(--ds-font-mono);
+    font-size: var(--ds-text-xs);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .sky-eval__facts {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: var(--ds-space-0-5) var(--ds-space-3);
+    margin: 0;
+  }
+  .sky-eval__facts div {
+    display: contents;
+  }
+  .sky-eval__facts dt {
+    font-family: var(--ds-font-mono);
+    font-size: var(--sky-text-label);
+    letter-spacing: var(--sky-tracking-label);
+    text-transform: uppercase;
+    color: var(--ds-color-text-subtle);
+    padding-top: 0.15em;
+  }
+  .sky-eval__facts dd {
+    margin: 0;
+    min-width: 0;
+    color: var(--ds-color-fg);
+  }
+  .sky-eval__path {
+    font-family: var(--ds-font-mono);
+    font-size: var(--ds-text-xs);
   }
   .sky-eval__run-figs {
     display: flex;

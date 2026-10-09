@@ -12,6 +12,10 @@ import {
   variantPassed,
   withLatestRun,
   workflowLabel,
+  NOT_SCORED,
+  parseEvidence,
+  runOutcome,
+  verdictWord,
   type EvalLike,
 } from './index'
 
@@ -192,5 +196,44 @@ describe('evals screen helpers', () => {
     expect(cell).toMatchObject({ verdict: 'unscored', durationMs: 190_000, costUsd: 0.61, runHref: '/x' })
     expect(cell!.evidence).toMatch(/Not scored yet/)
     expect(withLatestRun(undefined, undefined)).toBeUndefined()
+  })
+})
+
+describe('eval detail runs', () => {
+  const LIVE =
+    '## shared-esp-stream (defect)\n\n- run status: `completed`\n- review verdict: `blocked` (a pass needs `blocked`)\n- blocking findings: 1\n- expected file named: `packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution_request/ExecutionRequestAggregate.py` '
+
+  it('parses the scorer excerpt into facts', () => {
+    expect(parseEvidence(LIVE)).toEqual({
+      heading: 'shared-esp-stream (defect)',
+      runStatus: 'completed',
+      reviewVerdict: 'blocked',
+      reviewNeeds: 'blocked',
+      findings: 1,
+      expectedFile: 'packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution_request/ExecutionRequestAggregate.py',
+    })
+    const truncated = parseEvidence('## c\n\n- run status: `failed`\n- review verdict: `none` (a pass needs `blocked`)\n- blocking findings: 0\n- expected file named: no (one of `a.py`, `packag')
+    expect(truncated).toMatchObject({ runStatus: 'failed', reviewVerdict: 'none', findings: 0, expectedFile: 'no (one of a.py, packag' })
+    expect(parseEvidence('Blocked the change. Names minio.py.')).toBeNull()
+    expect(parseEvidence(null)).toBeNull()
+    expect(parseEvidence('- blocking findings: lots')!.findings).toBeNull()
+  })
+
+  it('separates failed runs from scorer faults and never calls unscored a fail', () => {
+    expect(runOutcome({ verdict: 'ERROR', status: 'failed' })).toEqual({ kind: 'run-failed', word: 'Run failed', verdict: 'unscored' })
+    expect(runOutcome({ verdict: null, status: 'failed' }).kind).toBe('run-failed')
+    expect(runOutcome({ verdict: 'ERROR', status: 'completed' })).toMatchObject({ kind: 'scorer-error', word: 'Scorer error', verdict: 'error' })
+    expect(runOutcome({ verdict: null, status: 'completed' })).toMatchObject({ kind: 'unscored', word: 'Not scored yet' })
+    expect(runOutcome({ verdict: 'FAIL', status: 'failed' }).kind).toBe('fail')
+    expect(runOutcome({ verdict: 'PASS' }).word).toBe('Pass')
+    expect(verdictWord('unscored')).toBe(NOT_SCORED)
+    expect(verdictWord('error')).toBe('Error')
+    expect(verdictWord('fail')).toBe('Fail')
+  })
+
+  it('compare reads unscored as not scored, not 0/1', () => {
+    expect(variantPassed({ run_count: 1, pass_count: 0, pass_rate: null })).toEqual({ fraction: 'Not scored yet', fill: null })
+    expect(variantPassed({ run_count: 4, pass_count: 2, pass_rate: 2 / 3 })).toEqual({ fraction: '2/3', fill: 67 })
+    expect(variantPassed({ run_count: 2, pass_count: 0, pass_rate: 0 })).toEqual({ fraction: '0 passed', fill: 0 })
   })
 })

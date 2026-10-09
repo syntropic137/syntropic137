@@ -359,9 +359,109 @@ function timelineLane(lanes: Map<string, TimelineLane>, r: EvalRunLike, models: 
   return lane
 }
 
-/** Compare row: "3/5" and the bar fill 0..100 (null when nothing is scored). */
+/** Words for a run or eval nobody has scored. Never "0/1", never a Fail. */
+export const NOT_SCORED = 'Not scored yet'
+
+/**
+ * Compare row: "3/5" passed of scored runs and the bar fill 0..100. With
+ * nothing scored it reads "Not scored yet" and has no fill, so an unscored
+ * variant never looks like 0%.
+ */
 export function variantPassed(v: { run_count: number; pass_count: number; pass_rate?: number | null }): { fraction: string; fill: number | null } {
-  return { fraction: `${v.pass_count}/${v.run_count}`, fill: v.pass_rate === null || v.pass_rate === undefined ? null : Math.round(v.pass_rate * 100) }
+  if (v.pass_rate === null || v.pass_rate === undefined) return { fraction: NOT_SCORED, fill: null }
+  const scored = v.pass_rate > 0 ? Math.round(v.pass_count / v.pass_rate) : null
+  return { fraction: scored === null ? `${v.pass_count} passed` : `${v.pass_count}/${scored}`, fill: Math.round(v.pass_rate * 100) }
+}
+
+/** Verdict word for pills and cards: "Pass", "Fail", "Error", "Not scored yet". */
+export function verdictWord(v: Verdict): string {
+  if (v === 'unscored') return NOT_SCORED
+  return v === 'error' ? 'Error' : v === 'pass' ? 'Pass' : 'Fail'
+}
+
+export type RunOutcomeKind = 'pass' | 'fail' | 'scorer-error' | 'run-failed' | 'unscored'
+
+export interface RunOutcome {
+  kind: RunOutcomeKind
+  /** Pill text: "Pass", "Fail", "Scorer error", "Run failed", "Not scored yet". */
+  word: string
+  /** Verdict tone for the pill: a failed run is not a verdict, so it is neutral. */
+  verdict: Verdict
+}
+
+const RUN_FAILED_STATUSES = new Set(['failed', 'cancelled', 'canceled', 'timed_out', 'error', 'errored', 'interrupted'])
+
+/**
+ * What a run's pill says. A run whose execution failed is "Run failed", not a
+ * scorer fault, even when the scorer recorded ERROR for it; ERROR on a run
+ * that completed is the scorer's fault.
+ */
+export function runOutcome(run: { verdict?: string | null; status?: string | null }): RunOutcome {
+  const v = normalizeVerdict(run.verdict)
+  const failedRun = RUN_FAILED_STATUSES.has((run.status ?? '').toLowerCase())
+  if (failedRun && (v === 'error' || v === 'unscored')) return { kind: 'run-failed', word: 'Run failed', verdict: 'unscored' }
+  if (v === 'error') return { kind: 'scorer-error', word: 'Scorer error', verdict: 'error' }
+  if (v === 'unscored') return { kind: 'unscored', word: NOT_SCORED, verdict: 'unscored' }
+  return { kind: v, word: verdictWord(v), verdict: v }
+}
+
+/** Facts read from the scorer's markdown excerpt (`eval_suite.py` format). */
+export interface EvidenceFacts {
+  /** "shared-esp-stream (defect)". */
+  heading: string | null
+  runStatus: string | null
+  /** "blocked". */
+  reviewVerdict: string | null
+  /** What a pass needs: "blocked" or "certified". */
+  reviewNeeds: string | null
+  findings: number | null
+  /** The file the scorer looked for, or "no (one of ...)". Backticks removed. */
+  expectedFile: string | null
+}
+
+const unquote = (s: string) => s.replace(/`/g, '').trim()
+
+type FactKey = 'runStatus' | 'review' | 'findings' | 'expectedFile'
+const FACT_LABELS: Record<string, FactKey> = {
+  'run status': 'runStatus',
+  'review verdict': 'review',
+  'blocking findings': 'findings',
+  'expected file named': 'expectedFile',
+}
+
+/**
+ * Parse an evidence excerpt shaped like
+ * `## <case> (defect)` then `- run status: ...`, `- review verdict: ...`,
+ * `- blocking findings: N`, `- expected file named: ...`. Returns null when
+ * the text has none of those lines, so free text renders as it is.
+ */
+export function parseEvidence(text: string | null | undefined): EvidenceFacts | null {
+  if (!text) return null
+  const facts: EvidenceFacts = { heading: null, runStatus: null, reviewVerdict: null, reviewNeeds: null, findings: null, expectedFile: null }
+  let found = false
+  for (const line of text.split('\n')) {
+    const h = line.match(/^#{1,6}\s+(.+)$/)
+    if (h) facts.heading ??= h[1]!.trim()
+    const m = line.match(/^\s*[-*]\s+([a-z ]+):\s*(.*)$/i)
+    const key = m ? FACT_LABELS[m[1]!.trim().toLowerCase()] : undefined
+    if (!m || !key) continue
+    found = true
+    applyFact(facts, key, m[2]!)
+  }
+  return found ? facts : null
+}
+
+function applyFact(facts: EvidenceFacts, key: FactKey, raw: string): void {
+  if (key === 'review') {
+    const r = raw.match(/^`?([^`(]+?)`?\s*(?:\(a pass needs `?([^`)]+)`?\))?\s*$/)
+    facts.reviewVerdict = unquote(r?.[1] ?? raw)
+    facts.reviewNeeds = r?.[2] ? unquote(r[2]) : null
+  } else if (key === 'findings') {
+    const n = Number.parseInt(raw, 10)
+    facts.findings = Number.isFinite(n) ? n : null
+  } else {
+    facts[key] = unquote(raw)
+  }
 }
 
 /** Header figure: average cost over variants weighted by their run count. */
