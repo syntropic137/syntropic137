@@ -15,6 +15,12 @@
   flex-direction: column;
   gap: var(--ds-space-6);
 }
+/* Number, rule and eyebrow as on pillars 01 to 03 (PillarHeader), so the four read as one set. */
+.evals__intro {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
 .evals__guide {
   align-self: flex-start;
   flex-shrink: 0;

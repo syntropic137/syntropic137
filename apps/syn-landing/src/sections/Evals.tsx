@@ -1,5 +1,5 @@
 import { useRef } from "react";
-import { SectionIntro } from "../components/PillarHeader";
+import { PillarNumber, SectionIntro } from "../components/PillarHeader";
 import CodeWindow from "../components/CodeWindow";
 import { useElement } from "../components/useElement";
 import { EVALS_COPY } from "../data/copy";
@@ -28,7 +28,10 @@ export default function Evals() {
     <section id="evals" ref={ref} className="page-section evals" aria-labelledby="evals-title">
       <div className="page-section__inner evals__inner">
         <div className="evals__head">
-          <SectionIntro titleId="evals-title" eyebrow={EVALS_COPY.eyebrow} title={EVALS_COPY.title} lede={EVALS_COPY.lede} />
+          <div className="evals__intro">
+            <PillarNumber num={EVALS_COPY.num} />
+            <SectionIntro titleId="evals-title" eyebrow={EVALS_COPY.eyebrow} title={EVALS_COPY.title} lede={EVALS_COPY.lede} />
+          </div>
           <a className="evals__guide" href={EVALS_COPY.guide.href} target="_blank" rel="noopener noreferrer">
             {EVALS_COPY.guide.label} <ArrowRight />
           </a>

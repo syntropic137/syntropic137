@@ -1,6 +1,7 @@
 /** "04 Compounding improvement" (#evals), from the v4 boards. Links are spelled out: importing DOCS_URL from ../copy would be a cycle (copy.ts re-exports this file). */
 export const EVALS_COPY = {
-  eyebrow: "04 · Compounding improvement",
+  num: "04",
+  eyebrow: "Compounding improvement",
   title: "Every run makes the next one better.",
   lede:
     "Your run history becomes evals: real bugs replayed against every model and workflow, scored out of 100 by a judge, next to what each run cost. Change a prompt or a model, and see whether it actually helped. Try it: pick a model on the right.",

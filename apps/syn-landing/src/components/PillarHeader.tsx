@@ -38,14 +38,21 @@ interface PillarHeaderProps extends Omit<SectionIntroProps, "align"> {
   points: readonly PillarPoint[];
 }
 
+/** A pillar's number ("01" to "04") in the wordmark face, with a short rule. */
+export function PillarNumber({ num }: { num: string }) {
+  return (
+    <span className="pillar-header__num" aria-hidden="true">
+      {num}
+      <span className="pillar-header__rule" />
+    </span>
+  );
+}
+
 /** A pillar's text column: number, intro and a checked list of points. */
 export default function PillarHeader({ num, points, ...intro }: PillarHeaderProps) {
   return (
     <div className="pillar-header">
-      <span className="pillar-header__num" aria-hidden="true">
-        {num}
-        <span className="pillar-header__rule" />
-      </span>
+      <PillarNumber num={num} />
       <SectionIntro {...intro} />
       <ul className="pillar-header__points">
         {points.map((p) => (
