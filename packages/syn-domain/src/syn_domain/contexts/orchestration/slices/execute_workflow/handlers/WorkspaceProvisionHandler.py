@@ -8,6 +8,8 @@ Reports ProvisionWorkspaceCompletedCommand to the aggregate.
 ADR-058: Repos are pre-cloned during setup phase. After setup, synthetic
 /workspace/AGENTS.md and /workspace/CLAUDE.md are injected with @-imports
 of each repo's distinct instruction files, so Claude starts fully hydrated.
+Where codex may run, AGENTS.md carries those files' content instead, because
+codex does not expand @-imports (#1835).
 """
 
 from __future__ import annotations
