@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from syn_api._wiring import ensure_connected, get_projection_mgr
 from syn_api.list_query import MAX_PAGE_SIZE
 from syn_api.types import (
+    DeclaredSkillResponse,
     Err,
     FallbackAgentResponse,
     InputDeclarationResponse,
@@ -42,6 +43,9 @@ if TYPE_CHECKING:
         PhaseDefinitionDetail,
         PhaseRefDetail,
     )
+    from syn_domain.contexts.orchestration.domain.read_models.workflow_summary import (
+        WorkflowSkillSummary,
+    )
 
 router = APIRouter(prefix="/workflows", tags=["workflows"])
 
@@ -63,6 +67,10 @@ class WorkflowSummaryResponse(BaseModel):
     requires_repos: bool
     tags: list[str] = Field(default_factory=list)
     """The workflow's tags, normalised and sorted (#967). Future runs inherit them."""
+    skills: list[DeclaredSkillResponse] = Field(default_factory=list)
+    """Every distinct skill the workflow's phases declare, first-declared first.
+
+    Here so a list of workflow cards needs one request, not one per workflow."""
 
 
 class InputDeclarationModel(BaseModel):
@@ -235,6 +243,19 @@ def _map_phase(p: PhaseDefinitionDetail) -> PhaseDefinitionResponse:
     )
 
 
+def _skill_response(skill: WorkflowSkillSummary) -> DeclaredSkillResponse:
+    """Field by field for the reason `_ref_response` gives."""
+    return DeclaredSkillResponse(
+        source_url=skill.ref.source_url,
+        name=skill.ref.name,
+        version=skill.ref.version,
+        name_overridden=skill.ref.name_overridden,
+        raw=skill.ref.raw,
+        phase_ids=list(skill.phase_ids),
+        workflow_scope=skill.workflow_scope,
+    )
+
+
 def _map_input_declarations(
     raw_decls: list[InputDeclarationDetail] | None,
 ) -> list[InputDeclarationResponse]:
@@ -283,6 +304,7 @@ async def list_workflows(
                 is_archived=s.is_archived,
                 requires_repos=s.requires_repos,
                 tags=list(s.tags),
+                skills=[_skill_response(skill) for skill in s.skills],
             )
             for s in domain_summaries
         ]
@@ -805,6 +827,7 @@ async def list_workflows_endpoint(
             # -R is then told repos are supported when they are not.
             requires_repos=s.requires_repos,
             tags=list(s.tags),
+            skills=list(s.skills),
         )
         for s in result.value
     ]

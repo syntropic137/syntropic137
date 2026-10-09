@@ -39,6 +39,7 @@ allowed_prefixes = [
     "syn_domain.pagination",
     "syn_domain.projection_scan",
     "syn_domain.projection_page",
+    "syn_domain.projection_newest",
     "syn_shared",
     "syn_adapters.projection_stores",
     "time",

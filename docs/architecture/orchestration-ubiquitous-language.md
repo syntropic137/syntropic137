@@ -259,6 +259,17 @@ The definition a run is made from - its Phases and their configuration.
 Mutable: installing a Workflow replaces it. An Execution therefore PINS what it
 needs rather than reading the Workflow later.
 
+## Declared Skill
+
+A skill a Workflow names, once, with where it names it: the Phases that list
+it themselves (`phase_ids`), and whether it is declared at **workflow scope**,
+which gives it to every Phase. The two are kept apart: "this Phase asked for
+it" and "the Workflow gave it to every Phase" are different facts. One skill is
+one `(source, version, name)`, the identity `SkillRef` compares by, so two
+versions of a skill are two Declared Skills. Carried on the workflow list as
+`skills` (`WorkflowSkillSummary`) so a list of Workflows needs no detail fetch
+per Workflow.
+
 ## Resume
 
 Continuing an Execution that DID NOT FINISH, by starting a new Execution that

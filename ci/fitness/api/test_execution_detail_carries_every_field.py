@@ -49,6 +49,14 @@ _PAIRS: tuple[tuple[str, tuple[str, str], tuple[tuple[str, str], ...]], ...] = (
         (("syn_api.routes.costs", "SessionCostResponse"),),
     ),
     (
+        "artifacts.py",
+        (
+            "syn_domain.contexts.artifacts.domain.read_models.artifact_summary",
+            "ArtifactSummary",
+        ),
+        (("syn_api.types", "ArtifactSummary"),),
+    ),
+    (
         "evals.py",
         (
             "syn_domain.contexts.orchestration.domain.read_models.eval_summary",

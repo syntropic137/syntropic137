@@ -28,6 +28,10 @@ DEFAULT_DEV_API_URL = f"http://localhost:{DEV_API_HOST_PORT}"
 DEFAULT_SELFHOST_API_URL = f"http://localhost:{SELFHOST_GATEWAY_PORT}"
 """Default API URL for selfhost users (CLI, browser)."""
 
+TAURI_DESKTOP_ORIGINS: tuple[str, ...] = ("tauri://localhost", "http://tauri.localhost")
+"""Origins the packaged desktop app (apps/syn-desktop) sends requests from:
+``tauri://localhost`` on macOS and Linux, ``http://tauri.localhost`` on Windows."""
+
 # ---------------------------------------------------------------------------
 # Environment variable names
 # ---------------------------------------------------------------------------

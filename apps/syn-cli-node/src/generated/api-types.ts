@@ -142,6 +142,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/workflows/{workflow_id}/latest-outputs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Workflow Latest Outputs Endpoint
+         * @description Each phase's latest output: its newest primary deliverable across all runs.
+         */
+        get: operations["get_workflow_latest_outputs_endpoint_workflows__workflow_id__latest_outputs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/workflows/validate": {
         parameters: {
             query?: never;
@@ -3178,6 +3198,15 @@ export interface components {
             executed_at: string;
         };
         /**
+         * CostSplitBasis
+         * @description How a cost-by-token-type breakdown was arrived at.
+         *
+         *     The two are not equally strong claims, so a client must be able to tell
+         *     them apart and label the second one.
+         * @enum {string}
+         */
+        CostSplitBasis: "rate_table" | "allocated";
+        /**
          * CoverageState
          * @enum {string}
          */
@@ -3415,6 +3444,36 @@ export interface components {
              * @description Callers blocked waiting for a connection right now.
              */
             waiting: number;
+        };
+        /**
+         * DeclaredSkillResponse
+         * @description A skill a workflow declares, once, and where it declares it.
+         *
+         *     On the workflow LIST so a card can draw its skill chips without one detail
+         *     request per workflow. Same ref shape as a phase's ``skills`` entry, so a
+         *     client matches a chip to a phase by comparing the ref fields.
+         */
+        DeclaredSkillResponse: {
+            /** Source Url */
+            source_url?: string | null;
+            /** Name */
+            name?: string | null;
+            /** Version */
+            version?: string | null;
+            /**
+             * Name Overridden
+             * @default false
+             */
+            name_overridden: boolean;
+            /** Raw */
+            raw?: string | null;
+            /** Phase Ids */
+            phase_ids?: string[];
+            /**
+             * Workflow Scope
+             * @default false
+             */
+            workflow_scope: boolean;
         };
         /**
          * DefinitionChangeKind
@@ -6301,6 +6360,17 @@ export interface components {
             readonly model_display: string;
         };
         /**
+         * PhaseLatestOutputResponse
+         * @description One phase of a workflow and the output it last produced.
+         */
+        PhaseLatestOutputResponse: {
+            /** Phase Id */
+            phase_id: string;
+            /** Phase Name */
+            phase_name: string;
+            artifact?: components["schemas"]["ArtifactSummaryResponse"] | null;
+        };
+        /**
          * PhaseMetrics
          * @description Metrics for a single phase.
          */
@@ -7998,6 +8068,7 @@ export interface components {
             cost_by_model?: {
                 [key: string]: string;
             };
+            cost_by_token_type?: components["schemas"]["TokenTypeCostResponse"] | null;
             /** Cache Read Rate Display */
             cache_read_rate_display?: string | null;
             /** Cache Write Rate Display */
@@ -8822,6 +8893,25 @@ export interface components {
             p90_display: string;
         };
         /**
+         * TokenTypeCostResponse
+         * @description A session's priced cost split by the kind of token it was spent on.
+         *
+         *     The parts sum to ``total_cost_usd`` (to within the canonical quantum per
+         *     part when ``basis`` is ``allocated``). Unpriced work is in neither, exactly
+         *     as with ``cost_by_model``.
+         */
+        TokenTypeCostResponse: {
+            /** Input Usd */
+            input_usd: string;
+            /** Output Usd */
+            output_usd: string;
+            /** Cache Creation Usd */
+            cache_creation_usd: string;
+            /** Cache Read Usd */
+            cache_read_usd: string;
+            basis: components["schemas"]["CostSplitBasis"];
+        };
+        /**
          * ToolSummary
          * @description Tool usage summary.
          */
@@ -9508,6 +9598,19 @@ export interface components {
             /** Default Eval Id */
             default_eval_id: string | null;
         };
+        /**
+         * WorkflowLatestOutputsResponse
+         * @description Every phase of a workflow, in phase order, with its latest output.
+         *
+         *     One request for the whole workflow detail page instead of one artifact
+         *     query per phase.
+         */
+        WorkflowLatestOutputsResponse: {
+            /** Workflow Id */
+            workflow_id: string;
+            /** Phases */
+            phases: components["schemas"]["PhaseLatestOutputResponse"][];
+        };
         /** WorkflowListResponse */
         WorkflowListResponse: {
             /** Workflows */
@@ -9589,6 +9692,8 @@ export interface components {
             requires_repos: boolean;
             /** Tags */
             tags?: string[];
+            /** Skills */
+            skills?: components["schemas"]["DeclaredSkillResponse"][];
         };
         /**
          * WorkflowTagsResponse
@@ -10008,6 +10113,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ExecutionHistoryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_workflow_latest_outputs_endpoint_workflows__workflow_id__latest_outputs_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workflow_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowLatestOutputsResponse"];
                 };
             };
             /** @description Validation Error */
