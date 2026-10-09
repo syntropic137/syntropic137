@@ -23,10 +23,16 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from syn_domain.contexts.orchestration import TagSet, WorkflowExecutionAggregate
+from syn_domain.contexts.orchestration._shared.eval_choice import EvalSelection, LaunchEval
 from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoAction, TodoItem
 from syn_domain.contexts.orchestration._shared.workflow_definition import WorkflowDefinition
 from syn_domain.contexts.orchestration._shared.yaml_to_command import (
     build_command_from_definition,
+)
+from syn_domain.contexts.orchestration.domain.aggregate_eval import EvalId
+from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
+    StartExecutionCommand,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
     WorkflowTemplateAggregate,
@@ -40,7 +46,11 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHa
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
     WorkspaceProvisionHandler,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.phase_workspace import (
+    PhaseWorkspace,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
+    PhaseOutputCache,
     WorkflowExecutionResult,
 )
 from syn_shared.platform_access import PlatformScope
@@ -155,3 +165,66 @@ def test_an_unknown_scope_is_refused_at_install() -> None:
         WorkflowDefinition.from_yaml(
             _WORKFLOW_YAML.replace("platform_access: eval", "platform_access: admin")
         )
+
+
+async def _eval_the_workspace_was_bound_to(launch_eval: LaunchEval | None) -> object:
+    """Provision through ``PhaseWorkspace``, the hop that reads the execution aggregate.
+
+    The eval an EVAL token may write to is the execution's own membership, never
+    a value the workspace sends, so it is read here off a real started aggregate.
+    """
+    phase = (await _executable_phases())["run_and_score"]
+    aggregate = WorkflowExecutionAggregate()
+    aggregate._handle_command(  # pyright: ignore[reportPrivateUsage]
+        StartExecutionCommand(
+            execution_id="exec-1744",
+            workflow_id="eval-runner-1744",
+            workflow_name="Eval runner",
+            total_phases=2,
+            inputs={},
+            tags=TagSet(),
+            launch_eval=launch_eval,
+        )
+    )
+    workspace_cm = AsyncMock()
+    workspace_cm.__aenter__ = AsyncMock(side_effect=_StopAfterCreate)
+    workspace_service = MagicMock()
+    workspace_service.create_workspace.return_value = workspace_cm
+    workspaces = PhaseWorkspace(
+        session_repository=MagicMock(),
+        workspace_service=workspace_service,
+        artifact_repository=MagicMock(),
+        artifact_content_storage=None,
+        artifact_query=None,
+        observability_writer=None,
+        prompt_builder=AsyncMock(),
+        command_builder=MagicMock(),
+        claude_plugin_materializer=None,
+        skill_materializer=None,
+        runtime=MagicMock(),
+        journal=MagicMock(),
+        inputs={},
+    )
+    todo = TodoItem(
+        execution_id="exec-1744", action=TodoAction.PROVISION_WORKSPACE, phase_id=phase.phase_id
+    )
+    with pytest.raises(_StopAfterCreate):
+        await workspaces.provision(
+            todo=todo,
+            phase=phase,
+            aggregate=aggregate,
+            session_id="s",
+            repo_urls=[],
+            completed_phase_ids=[],
+            phase_outputs=PhaseOutputCache(),
+        )
+    return workspace_service.create_workspace.call_args.kwargs["eval_id"]
+
+
+async def test_the_workspace_is_bound_to_the_eval_its_execution_was_launched_into() -> None:
+    launched = LaunchEval(EvalId("ev-1744"), EvalSelection.EXPLICIT)
+    assert await _eval_the_workspace_was_bound_to(launched) == "ev-1744"
+
+
+async def test_an_execution_in_no_eval_binds_its_workspace_to_none() -> None:
+    assert await _eval_the_workspace_was_bound_to(None) is None
