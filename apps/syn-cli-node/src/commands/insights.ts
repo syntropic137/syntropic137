@@ -146,6 +146,15 @@ const latencyCommand: CommandDef = {
       params: { query: { window, ...(route ? { route } : {}) } },
     }), "Fetch latency");
 
+    // Recorder health first: an empty table is exactly when the drop counters matter.
+    const rec = d.recorder;
+    if (!rec.running || rec.dropped > 0 || rec.write_failures > 0 || rec.discarded > 0) {
+      print(style(
+        `  recorder ${rec.running ? "running" : "NOT running"} on this API process: `
+          + `${rec.dropped} dropped, ${rec.write_failures} failed writes, ${rec.discarded} discarded`,
+        YELLOW,
+      ));
+    }
     if (!d.available) { printDim("Latency store unavailable."); return; }
     if (d.routes.length === 0) { printDim(`No requests recorded in the last ${d.window}.`); return; }
 
@@ -162,10 +171,6 @@ const latencyCommand: CommandDef = {
       table.addRow(r.method, r.route, String(r.count), ms(r.p50_ms), ms(r.p95_ms), ms(r.p99_ms), ms(r.max_ms));
     }
     table.print();
-    const rec = d.recorder;
-    if (rec.dropped > 0 || rec.write_failures > 0) {
-      print(style(`  this API process dropped ${rec.dropped} and failed to write ${rec.write_failures} samples`, YELLOW));
-    }
   },
 };
 
