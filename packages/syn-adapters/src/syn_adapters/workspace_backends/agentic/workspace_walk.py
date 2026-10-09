@@ -95,12 +95,13 @@ class _Patterns:
         return frozenset(s for s in self._close(moved) if s[1] < len(self._segments[s[0]]))
 
     def selects_file(self, states: frozenset[_State], name: str) -> bool:
-        for p, i in states:
-            segments = self._segments[p]
-            if i == len(segments) - 1 and segments[i] != _RECURSIVE:
-                if fnmatchcase(name, segments[i]):
-                    return True
-        return False
+        """Whether a non-directory called `name` is selected by its last segment."""
+        return any(
+            i == len(self._segments[p]) - 1
+            and self._segments[p][i] != _RECURSIVE
+            and fnmatchcase(name, self._segments[p][i])
+            for p, i in states
+        )
 
     def _close(self, states: Iterable[_State]) -> frozenset[_State]:
         """Add the states reached by letting each `**` match no directories."""

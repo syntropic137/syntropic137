@@ -10,11 +10,18 @@ from __future__ import annotations
 
 import logging
 import os
+import stat
+import time
+import tracemalloc
 from typing import TYPE_CHECKING
 
 import pytest
 
-from syn_adapters.workspace_backends.agentic.adapter_copy import collect_matching_files
+from syn_adapters.workspace_backends.agentic.adapter_copy import (
+    MAX_DIRECTORY_ENTRIES,
+    _normalize_pattern,
+    collect_matching_files,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -169,3 +176,137 @@ def test_number_of_matches_examined_is_bounded(workspace: Path) -> None:
 
     collected = collect_matching_files(workspace, _PATTERN, max_bytes=_LIMIT, max_matches=3)
     assert len(collected) == 3
+
+
+# --- Finding candidates: same selection as Path.glob, bounded cost ---------
+
+
+def _glob_selection(root: Path, pattern: str) -> set[str]:
+    """What the Path.glob implementation selected: its non-directory matches."""
+    return {
+        str(p.relative_to(root))
+        for p in root.glob(_normalize_pattern(pattern))
+        if not stat.S_ISDIR(p.lstat().st_mode)
+    }
+
+
+@pytest.fixture
+def tree(tmp_path: Path) -> Path:
+    """A workspace with no symlinks, where glob and the walk must agree."""
+    ws = tmp_path / "tree"
+    for rel in (
+        "README.md",
+        "top.txt",
+        ".hidden.md",
+        "artifacts/input/prev.md",
+        "artifacts/output/a.md",
+        "artifacts/output/b.json",
+        "artifacts/output/.dot",
+        "artifacts/output/sub/c.md",
+        "artifacts/output/sub/deeper/d.txt",
+        "artifacts/output/.hiddendir/e.md",
+        "artifacts/outputx/f.md",
+        "repo/src/g.md",
+    ):
+        (ws / rel).parent.mkdir(parents=True, exist_ok=True)
+        (ws / rel).write_bytes(rel.encode())
+    (ws / "artifacts" / "output" / "empty").mkdir()
+    return ws
+
+
+@pytest.mark.parametrize(
+    "pattern",
+    [
+        "artifacts/output/**/*",  # what ArtifactCollector and AgentExecutionHandler pass
+        "/workspace/artifacts/output/**/*",
+        "artifacts/output/**",
+        "artifacts/output/*",
+        "*.md",
+        "**/*.md",
+        "**/*",
+        "**",
+        "artifacts/*/*.md",
+        "artifacts/output/?.md",
+        "artifacts/output/[ab].*",
+        "artifacts/output/sub/c.md",
+        "artifacts/output/**/deeper/*",
+        "artifacts/**/**/*.md",
+    ],
+)
+def test_selection_matches_path_glob(tree: Path, pattern: str) -> None:
+    root = tree.resolve()
+    collected = {path for path, _ in _collect(tree, [pattern])}
+    assert collected == _glob_selection(root, pattern)
+
+
+def test_several_patterns_select_each_file_once(tree: Path) -> None:
+    collected = [path for path, _ in _collect(tree, ["artifacts/output/**/*", "**/*.md"])]
+    assert len(collected) == len(set(collected))
+    root = tree.resolve()
+    assert set(collected) == _glob_selection(root, "artifacts/output/**/*") | _glob_selection(
+        root, "**/*.md"
+    )
+
+
+def test_huge_directory_is_listed_only_up_to_the_cap(
+    workspace: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    out = workspace / "artifacts" / "output"
+    (out / "a.md").write_bytes(b"alpha")
+    big = out / "big"
+    big.mkdir()
+    for i in range(50_000):
+        os.close(os.open(big / f"f{i}", os.O_CREAT | os.O_WRONLY, 0o600))
+
+    tracemalloc.start()
+    started = time.monotonic()
+    try:
+        with caplog.at_level(logging.WARNING):
+            collected = collect_matching_files(
+                workspace, ["artifacts/output/**/*.md"], max_bytes=_LIMIT
+            )
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+
+    assert collected == [("artifacts/output/a.md", b"alpha")]
+    assert f"Stopped listing artifacts/output/big after {MAX_DIRECTORY_ENTRIES} entries" in (
+        caplog.text
+    )
+    # Path.glob holds the whole 50k-entry listing (about 9 MB) before
+    # yielding anything; the walk holds one entry at a time.
+    assert peak < 1024 * 1024
+    assert time.monotonic() - started < 30
+
+
+def test_entries_examined_across_directories_are_bounded(
+    workspace: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    out = workspace / "artifacts" / "output"
+    for d in range(4):
+        (out / f"d{d}").mkdir()
+        for i in range(5):
+            (out / f"d{d}" / f"f{i}.txt").write_bytes(b"x")
+
+    with caplog.at_level(logging.WARNING):
+        collected = collect_matching_files(
+            workspace, ["artifacts/output/**/*.md"], max_bytes=_LIMIT, max_entries=12
+        )
+
+    assert collected == []
+    assert "Stopped after examining 12 entries" in caplog.text
+
+
+def test_symlinked_prefix_directory_is_not_listed(
+    workspace: Path, outside: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Names outside the workspace are never listed, so never even logged."""
+    out = workspace / "artifacts" / "output"
+    out.rmdir()
+    out.symlink_to(outside.parent)
+
+    with caplog.at_level(logging.DEBUG):
+        assert _collect(workspace) == []
+        assert _collect(workspace, ["artifacts/output/*"]) == []
+    assert "secret.txt" not in caplog.text
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]

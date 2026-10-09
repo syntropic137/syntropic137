@@ -13,14 +13,13 @@ import stat
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from syn_shared.settings import get_settings
-
 from syn_adapters.workspace_backends.agentic.workspace_walk import (
     UnopenableDirectoryError,
     WalkLimits,
     iter_matching_paths,
     open_directory,
 )
+from syn_shared.settings import get_settings
 
 if TYPE_CHECKING:
     from agentic_isolation import AgenticWorkspace, WorkspaceDockerProvider
