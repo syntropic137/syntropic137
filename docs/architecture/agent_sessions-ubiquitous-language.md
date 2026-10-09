@@ -17,6 +17,20 @@ This context is Lane 2: observability. Nothing here is replayed to decide state.
 
 ---
 
+## Observability
+
+Telemetry about how the running platform and its agents behave: tokens, cost,
+tool calls, timing, and operational signals such as API request latency
+(ADR-075). Lane 2: append-only, never replayed, never read by an aggregate.
+Served under `GET /observability/*` and the `syn observe` command group
+(`tools`, `tokens`, `latency`). Observability is the concept; `observe` is the
+CLI verb for it.
+
+Not **Insight**. "Insights" is reserved for learning-loop analytics, lessons
+about how to improve workflows, speed and cost, owned by `organization` (see
+`organization-ubiquitous-language.md`). We do NOT call request latency an
+insight.
+
 ## Session
 
 One agent run inside one workspace, identified by a `session_id` the harness
