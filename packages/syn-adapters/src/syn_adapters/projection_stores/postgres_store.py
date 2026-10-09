@@ -239,6 +239,31 @@ class PostgresProjectionStore:
             lean_ready=projection in self._lean_tables,
         )
 
+    async def newest_per_group(
+        self,
+        projection: str,
+        *,
+        group_field: str,
+        timestamp_field: str,
+        fields: Sequence[str],
+        filters: Mapping[str, str | Sequence[str]] | None = None,
+        flag_field: str | None = None,
+    ) -> dict[str, Mapping[str, JsonValue]]:
+        """Newest document per group, by instant, in one statement (projection_newest)."""
+        from syn_adapters.projection_stores.postgres_scan import newest_per_group
+
+        await self._ensure_table(projection)
+        return await newest_per_group(
+            await self._get_pool(),
+            self._table_name(projection),
+            group_field=group_field,
+            timestamp_field=timestamp_field,
+            fields=fields,
+            filters=filters,
+            flag_field=flag_field,
+            lean_ready=projection in self._lean_tables,
+        )
+
     async def count_by(
         self,
         projection: str,

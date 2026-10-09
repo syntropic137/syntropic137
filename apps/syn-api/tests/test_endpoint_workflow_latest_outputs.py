@@ -147,3 +147,70 @@ async def test_the_service_answers_every_phase_from_the_projection() -> None:
         "claude",
     )
     assert result.value["review"] is None
+
+
+class _CountingStore(InMemoryProjectionStore):
+    """Records every read the service makes of the store."""
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        self.reads: list[str] = []
+
+    async def query(self, *args, **kwargs):
+        self.reads.append("query")
+        return await super().query(*args, **kwargs)
+
+    async def newest_per_group(self, *args, **kwargs):
+        self.reads.append("newest_per_group")
+        return await super().newest_per_group(*args, **kwargs)
+
+
+async def _write(
+    projection: ArtifactListProjection, artifact_id: str, phase: str, at: str, *, primary: bool
+) -> None:
+    await projection.on_artifact_created(
+        {
+            "artifact_id": artifact_id,
+            "workflow_id": "wf-1",
+            "phase_id": phase,
+            "artifact_type": "document",
+            "title": artifact_id,
+            "content": "x",
+            "created_at": at,
+            "is_primary_deliverable": primary,
+        }
+    )
+
+
+async def test_the_service_reads_the_store_once_per_workflow_not_per_phase() -> None:
+    """N phases used to cost N or more windowed reads, bodies included."""
+    from syn_api.routes.artifacts import latest_phase_outputs
+
+    store = _CountingStore()
+    projection = ArtifactListProjection(store)
+    phases = [f"phase-{i}" for i in range(6)]
+    for phase in phases:
+        for i in range(12):
+            await _write(
+                projection,
+                f"{phase}-support-{i:02d}",
+                phase,
+                f"2026-10-02T10:{i:02d}:00Z",
+                primary=False,
+            )
+        await _write(
+            projection, f"{phase}-deliverable", phase, "2026-10-02T09:00:00Z", primary=True
+        )
+    mgr = MagicMock()
+    mgr.artifact_list = projection
+    with (
+        patch("syn_api.routes.artifacts.ensure_connected", new=AsyncMock()),
+        patch("syn_api.routes.artifacts.get_projection_mgr", return_value=mgr),
+    ):
+        result = await latest_phase_outputs("wf-1", phases)
+
+    assert isinstance(result, Ok)
+    assert {p: (a.id if a else None) for p, a in result.value.items()} == {
+        p: f"{p}-deliverable" for p in phases
+    }
+    assert store.reads == ["newest_per_group"]

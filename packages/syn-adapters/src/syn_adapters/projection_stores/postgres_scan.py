@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 
 from syn_adapters.postgres_text import pg_safe
 from syn_adapters.projection_stores.lean_documents import lean_source
+from syn_adapters.projection_stores.postgres_page_keys import instant_sql
 from syn_adapters.projection_stores.postgres_query_builder import (
     _SAFE_FIELD,
     _build_order_clause,
@@ -83,6 +84,84 @@ async def scan_fields(
         msg = f"expected a JSON array from the scan, got {type(pairs).__name__}"
         raise TypeError(msg)
     return [(str(key), values) for key, values in pairs]
+
+
+def build_newest_per_group_query(
+    table_name: str,
+    *,
+    group_field: str,
+    timestamp_field: str,
+    fields: Sequence[str],
+    filters: Mapping[str, str | Sequence[str]] | None,
+    flag_field: str | None,
+    lean_ready: bool,
+) -> tuple[str, list[str]]:
+    """One JSON array of ``[group, {field: value...}]``, the newest per group.
+
+    ``DISTINCT ON`` the group, ordered by the PARSED instant newest-first and
+    then the key, so a timestamp's offset decides nothing and a tie has one
+    answer (syn_domain.projection_newest). Read from the lean source, so a
+    body nobody renders is never detoasted.
+    """
+    for field in (group_field, timestamp_field, *fields, *((flag_field,) if flag_field else ())):
+        # Interpolated, not bound: a JSON key cannot be a placeholder.
+        if not _SAFE_FIELD.fullmatch(field):
+            msg = f"unsafe newest-per-group field {field!r}: expected a plain identifier"
+            raise ValueError(msg)
+    picked = ", ".join(f"'{field}', data->'{field}'" for field in fields)
+    instant = instant_sql(timestamp_field)
+    params: list[str] = []
+    conditions: list[str] = []
+    if filters:
+        where_sql, params = _build_where_clause(dict(filters), start_idx=1)
+        conditions.append(where_sql.removeprefix(" WHERE "))
+    conditions += [f"data->>'{group_field}' IS NOT NULL", f"{instant} IS NOT NULL"]
+    if flag_field:
+        # Only a real JSON false is false (read_primary_flag); the CASE keeps
+        # the boolean cast from ever seeing a string.
+        conditions.append(
+            f"CASE WHEN jsonb_typeof(data->'{flag_field}') = 'boolean' "
+            f"THEN (data->'{flag_field}')::boolean ELSE true END"
+        )
+    query = (
+        "SELECT COALESCE(json_agg(json_build_array(grp, picked) ORDER BY grp), '[]') "
+        f"AS newest FROM (SELECT DISTINCT ON (data->>'{group_field}') "
+        f"data->>'{group_field}' AS grp, jsonb_build_object({picked}) AS picked FROM ("
+        f"SELECT id, {lean_source(lean_ready=lean_ready)} AS data FROM {table_name}"
+        f") AS documents WHERE {' AND '.join(conditions)} "
+        f"ORDER BY data->>'{group_field}', {instant} DESC, id) AS newest_rows"
+    )
+    return query, params
+
+
+async def newest_per_group(
+    pool: asyncpg.Pool,
+    table_name: str,
+    *,
+    group_field: str,
+    timestamp_field: str,
+    fields: Sequence[str],
+    filters: Mapping[str, str | Sequence[str]] | None,
+    flag_field: str | None,
+    lean_ready: bool,
+) -> dict[str, Mapping[str, JsonValue]]:
+    """Run :func:`build_newest_per_group_query`; each group's newest fields."""
+    query, params = build_newest_per_group_query(
+        table_name,
+        group_field=group_field,
+        timestamp_field=timestamp_field,
+        fields=fields,
+        filters=filters,
+        flag_field=flag_field,
+        lean_ready=lean_ready,
+    )
+    async with pool.acquire() as conn:
+        newest = await conn.fetchval(query, *params)
+    pairs = json.loads(newest) if isinstance(newest, str) else newest
+    if not isinstance(pairs, list):
+        msg = f"expected a JSON array from the query, got {type(pairs).__name__}"
+        raise TypeError(msg)
+    return {str(group): _json_object(values) for group, values in pairs}
 
 
 def build_count_query(

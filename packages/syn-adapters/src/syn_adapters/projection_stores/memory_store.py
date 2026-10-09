@@ -7,6 +7,7 @@ interface as the production PostgreSQL store.
 See ADR-060 (docs/adrs/ADR-060-restart-safe-trigger-deduplication.md).
 """
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -25,6 +26,8 @@ from syn_adapters.projection_stores.memory_store_helpers import (
     clear_projection as _clear_projection,
 )
 from syn_adapters.projection_stores.record_match import holds
+from syn_domain.projection_newest import newest_per_group
+from syn_domain.projection_scan import JsonValue
 
 # Re-export for backwards compatibility
 InMemoryProjectionStoreError = InMemoryAdapterError
@@ -143,6 +146,33 @@ class InMemoryProjectionStore:
         results = apply_filters(results, filters)
         results = apply_sorting(results, order_by)
         return apply_pagination(results, offset, limit)
+
+    async def newest_per_group(
+        self,
+        projection: str,
+        *,
+        group_field: str,
+        timestamp_field: str,
+        fields: Sequence[str],
+        filters: Mapping[str, str | Sequence[str]] | None = None,
+        flag_field: str | None = None,
+    ) -> dict[str, Mapping[str, JsonValue]]:
+        """Newest document per group, by instant (syn_domain.projection_newest)."""
+        wanted = dict(filters or {})
+        newest = newest_per_group(
+            (
+                (key, record)
+                for key, record in self._data.get(projection, {}).items()
+                if apply_filters([record], wanted)
+            ),
+            group_field=group_field,
+            timestamp_field=timestamp_field,
+            flag_field=flag_field,
+        )
+        return {
+            group: {name: record.get(name) for name in fields}
+            for group, (_, record) in newest.items()
+        }
 
     async def get_by_prefix(self, projection: str, prefix: str) -> list[tuple[str, dict[str, Any]]]:
         """Get all records whose key starts with the given prefix."""

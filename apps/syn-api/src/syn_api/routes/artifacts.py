@@ -5,7 +5,6 @@ Provides listing, retrieving, creating, and uploading artifacts.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import datetime
@@ -183,19 +182,18 @@ async def latest_phase_outputs(
     Keyed by phase id, every requested phase present: ``None`` is the answer
     "this phase has produced no output yet", which a missing key could not
     tell apart from a phase nobody asked about.
+
+    One store read for the whole workflow, not one (or several) per phase.
     """
     await ensure_connected()
     try:
-        projection = get_projection_mgr().artifact_list
-        found = await asyncio.gather(
-            *(projection.latest_deliverable(workflow_id, phase_id) for phase_id in phase_ids)
-        )
+        found = await get_projection_mgr().artifact_list.latest_deliverables(workflow_id, phase_ids)
     except Exception as e:
         return Err(ArtifactError.STORAGE_ERROR, message=str(e))
     return Ok(
         {
-            phase_id: _summary_from_domain(row) if row is not None else None
-            for phase_id, row in zip(phase_ids, found, strict=True)
+            phase_id: _summary_from_domain(row) if (row := found.get(phase_id)) else None
+            for phase_id in phase_ids
         }
     )
 

@@ -59,8 +59,10 @@ A Workflow Phase's newest Primary Deliverable across every Execution of that
 Workflow: what the Phase last produced. Asked of the Workflow, not of one
 Execution, which is why it is not the same query as Ownership by Execution.
 An Artifact with no creation time is never the Latest Output, because nothing
-says it is newer than anything. `ArtifactListProjection.latest_deliverable`;
-served for every Phase at once on `GET /workflows/{id}/latest-outputs`.
+says it is newer than anything. "Newest" is the latest instant, never the
+latest timestamp text, and equal instants go to the lowest Artifact id.
+`ArtifactListProjection.latest_deliverables`, one store read for every Phase;
+served on `GET /workflows/{id}/latest-outputs`.
 
 ## Ownership by Execution
 

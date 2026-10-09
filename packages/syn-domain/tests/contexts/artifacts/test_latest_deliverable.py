@@ -128,3 +128,80 @@ async def test_the_answer_past_the_first_window_is_found(
 
     assert latest is not None
     assert latest.id == "deliverable"
+
+
+class _QueryOnlyStore:
+    """A store without ``newest_per_group``: the projection's fallback path."""
+
+    def __init__(self) -> None:
+        self._inner = InMemoryProjectionStore()
+        self.save = self._inner.save
+        self.queries = 0
+
+    async def query(
+        self, projection: str, filters: dict[str, str | list[str]] | None = None
+    ):  # inferred: the inner store's row type
+        self.queries += 1
+        return await self._inner.query(projection, filters=filters)
+
+
+@pytest.fixture(params=["store-capability", "query-fallback"])
+def any_projection(request: pytest.FixtureRequest) -> ArtifactListProjection:
+    if request.param == "store-capability":
+        return ArtifactListProjection(InMemoryProjectionStore())
+    return ArtifactListProjection(_QueryOnlyStore())
+
+
+async def test_newest_is_the_latest_instant_not_the_latest_text(
+    any_projection: ArtifactListProjection,
+) -> None:
+    """``10:00+02:00`` is 08:00 UTC: an hour BEFORE ``09:00+00:00``."""
+    await _create(any_projection, "later", created_at="2026-10-01T09:00:00+00:00")
+    await _create(any_projection, "earlier", created_at="2026-10-01T10:00:00+02:00")
+
+    latest = await any_projection.latest_deliverable(WORKFLOW, "plan")
+
+    assert latest is not None
+    assert latest.id == "later"
+
+
+async def test_equal_instants_go_to_the_lowest_artifact_id(
+    any_projection: ArtifactListProjection,
+) -> None:
+    """The same instant spelled two ways is a tie; the answer must not depend on write order."""
+    await _create(any_projection, "art-b", created_at="2026-10-01T12:00:00+02:00")
+    await _create(any_projection, "art-a", created_at="2026-10-01T10:00:00+00:00")
+
+    latest = await any_projection.latest_deliverable(WORKFLOW, "plan")
+
+    assert latest is not None
+    assert latest.id == "art-a"
+
+
+async def test_every_phase_is_answered_in_one_read_without_bodies(
+    any_projection: ArtifactListProjection,
+) -> None:
+    await _create(any_projection, "plan-1", created_at="2026-10-01T09:00:00+00:00")
+    await _create(any_projection, "plan-2", created_at="2026-10-02T09:00:00+00:00")
+    await _create(
+        any_projection, "review-1", created_at="2026-10-01T09:00:00+00:00", phase_id="review"
+    )
+    await _create(
+        any_projection,
+        "review-notes",
+        created_at="2026-10-03T09:00:00+00:00",
+        phase_id="review",
+        primary=False,
+    )
+    await _create(any_projection, "undated", created_at=None, phase_id="ship")
+
+    latest = await any_projection.latest_deliverables(WORKFLOW, ["plan", "review", "ship"])
+
+    assert {phase: s.id for phase, s in latest.items()} == {
+        "plan": "plan-2",
+        "review": "review-1",
+    }
+    assert all(s.content is None for s in latest.values())
+    store = any_projection._store  # pyright: ignore[reportPrivateUsage]
+    if isinstance(store, _QueryOnlyStore):
+        assert store.queries == 1
