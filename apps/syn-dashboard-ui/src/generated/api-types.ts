@@ -119,6 +119,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/workflows/{workflow_id}/trend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Workflow Trend Endpoint
+         * @description The workflow's executions as trend points, newest first, with its definition changes.
+         *
+         *     One row per execution: date, status, cost, duration, tokens and how long
+         *     each phase took. The workflow id may be a unique prefix.
+         */
+        get: operations["get_workflow_trend_endpoint_workflows__workflow_id__trend_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/workflows/{workflow_id}/history": {
         parameters: {
             query?: never;
@@ -741,6 +764,29 @@ export interface paths {
          *     matching no eval is a 404. An eval with no runs is an empty page.
          */
         get: operations["list_eval_runs_endpoint_evals__eval_id__runs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/evals/{eval_id}/trend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Eval Trend Endpoint
+         * @description The eval's current runs as trend points, newest first, with its definition changes.
+         *
+         *     One row per run: date, verifier and judge model, score (0 to 100), verdict,
+         *     cost, duration and tokens. The same runs as `GET /evals/{eval_id}/runs`.
+         */
+        get: operations["get_eval_trend_endpoint_evals__eval_id__trend_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3430,6 +3476,23 @@ export interface components {
             workflow_scope: boolean;
         };
         /**
+         * DefinitionChangeKind
+         * @description What changed the definition.
+         * @enum {string}
+         */
+        DefinitionChangeKind: "created" | "updated" | "phase_updated";
+        /**
+         * DefinitionChangeResponse
+         * @description A change to an eval's or workflow's definition: a trend chart's annotation (#1788).
+         */
+        DefinitionChangeResponse: {
+            /** Definition Version */
+            definition_version: string | null;
+            /** Changed At */
+            changed_at: string;
+            kind: components["schemas"]["DefinitionChangeKind"];
+        };
+        /**
          * DegradedReason
          * @description Reasons the API may enter degraded mode.
          *
@@ -3782,6 +3845,8 @@ export interface components {
             scorer_version: string | null;
             /** Scored At */
             scored_at: string | null;
+            /** Judge Model */
+            judge_model?: string | null;
         };
         /**
          * EvalRunScoreRequest
@@ -3800,6 +3865,8 @@ export interface components {
             scorer: string;
             /** Scorer Version */
             scorer_version: string;
+            /** Judge Model */
+            judge_model?: string | null;
         };
         /**
          * EvalRunScoreResponse
@@ -3821,6 +3888,8 @@ export interface components {
             scorer_version: string;
             /** Scored At */
             scored_at: string;
+            /** Judge Model */
+            judge_model?: string | null;
         };
         /**
          * EvalRunStatsResponse
@@ -3845,6 +3914,67 @@ export interface components {
             cost_per_pass_usd: string | null;
             /** Cost Per Pass Display */
             cost_per_pass_display: string;
+        };
+        /**
+         * EvalTrendPointResponse
+         * @description One run of an eval as one point on its trend charts (#1788).
+         */
+        EvalTrendPointResponse: {
+            /** Execution Id */
+            execution_id: string;
+            /** Date */
+            date: string | null;
+            /** Workflow Id */
+            workflow_id: string;
+            /** Workflow Version */
+            workflow_version: string | null;
+            /** Eval Definition Version */
+            eval_definition_version: string | null;
+            /** Verifier Model */
+            verifier_model: string | null;
+            /** Observed Models */
+            observed_models: string[];
+            /** Judge Model */
+            judge_model: string | null;
+            /** Score */
+            score: number | null;
+            verdict: components["schemas"]["Verdict"] | null;
+            /** Cost Usd */
+            cost_usd: string | null;
+            /** Cost Is Lower Bound */
+            cost_is_lower_bound: boolean;
+            /** Cost Display */
+            cost_display: string;
+            /** Duration Seconds */
+            duration_seconds: number | null;
+            /** Duration Is Lower Bound */
+            duration_is_lower_bound: boolean;
+            /** Duration Display */
+            duration_display: string;
+            /** Tokens */
+            tokens: number;
+        };
+        /**
+         * EvalTrendResponse
+         * @description One page of an eval's current runs as trend points, newest first (#1788).
+         */
+        EvalTrendResponse: {
+            /** Definition Version */
+            definition_version: string | null;
+            /** Definition Changed At */
+            definition_changed_at: string | null;
+            /** Definition Changes */
+            definition_changes: components["schemas"]["DefinitionChangeResponse"][];
+            /** Eval Id */
+            eval_id: string;
+            /** Items */
+            items: components["schemas"]["EvalTrendPointResponse"][];
+            /** Total */
+            total: number;
+            /** Page */
+            page: number;
+            /** Page Size */
+            page_size: number;
         };
         /**
          * EvalVariantResponse
@@ -6107,6 +6237,18 @@ export interface components {
             input_artifact_types?: string[];
             /** Output Artifact Types */
             output_artifact_types?: string[];
+        };
+        /**
+         * PhaseDurationResponse
+         * @description How long one phase of a run took.
+         */
+        PhaseDurationResponse: {
+            /** Phase Id */
+            phase_id: string;
+            /** Phase Name */
+            phase_name: string;
+            /** Duration Seconds */
+            duration_seconds: number | null;
         };
         /** PhaseExecutionInfo */
         PhaseExecutionInfo: {
@@ -9536,6 +9678,58 @@ export interface components {
             tags: string[];
         };
         /**
+         * WorkflowTrendPointResponse
+         * @description One execution of a workflow as one point on its trend charts (#1788).
+         */
+        WorkflowTrendPointResponse: {
+            /** Execution Id */
+            execution_id: string;
+            /** Date */
+            date: string | null;
+            /** Status */
+            status: string;
+            /** Workflow Version */
+            workflow_version: string | null;
+            /** Cost Usd */
+            cost_usd: string | null;
+            /** Cost Is Lower Bound */
+            cost_is_lower_bound: boolean;
+            /** Cost Display */
+            cost_display: string;
+            /** Duration Seconds */
+            duration_seconds: number | null;
+            /** Duration Is Lower Bound */
+            duration_is_lower_bound: boolean;
+            /** Duration Display */
+            duration_display: string;
+            /** Tokens */
+            tokens: number;
+            /** Phase Durations */
+            phase_durations: components["schemas"]["PhaseDurationResponse"][];
+        };
+        /**
+         * WorkflowTrendResponse
+         * @description One page of a workflow's executions as trend points, newest first (#1788).
+         */
+        WorkflowTrendResponse: {
+            /** Definition Version */
+            definition_version: string | null;
+            /** Definition Changed At */
+            definition_changed_at: string | null;
+            /** Definition Changes */
+            definition_changes: components["schemas"]["DefinitionChangeResponse"][];
+            /** Workflow Id */
+            workflow_id: string;
+            /** Items */
+            items: components["schemas"]["WorkflowTrendPointResponse"][];
+            /** Total */
+            total: number;
+            /** Page */
+            page: number;
+            /** Page Size */
+            page_size: number;
+        };
+        /**
          * CostSummaryResponse
          * @description Summary of all costs across sessions/executions.
          */
@@ -9851,6 +10045,47 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["WorkflowLatestOutputsResponse"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_workflow_trend_endpoint_workflows__workflow_id__trend_get: {
+        parameters: {
+            query?: {
+                page?: number;
+                page_size?: number;
+            };
+            header?: never;
+            path: {
+                workflow_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowTrendResponse"];
+                };
+            };
+            /** @description No workflow has this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -11129,6 +11364,45 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EvalRunListResponse"];
+                };
+            };
+            /** @description No eval has this id in the eval read model (it may still be catching up) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The eval id is not a valid eval id */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_eval_trend_endpoint_evals__eval_id__trend_get: {
+        parameters: {
+            query?: {
+                page?: number;
+                page_size?: number;
+            };
+            header?: never;
+            path: {
+                eval_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvalTrendResponse"];
                 };
             };
             /** @description No eval has this id in the eval read model (it may still be catching up) */

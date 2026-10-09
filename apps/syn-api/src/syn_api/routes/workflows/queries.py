@@ -11,6 +11,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
 from syn_api._wiring import ensure_connected, get_projection_mgr
+from syn_api.list_query import MAX_PAGE_SIZE
 from syn_api.routes.artifacts import ArtifactSummaryResponse  # noqa: TC001 - pydantic field type
 from syn_api.types import (
     DeclaredSkillResponse,
@@ -25,6 +26,7 @@ from syn_api.types import (
     WorkflowDetail,
     WorkflowError,
     WorkflowSummary,
+    WorkflowTrendResponse,
 )
 
 # Imported from the context's public surface, not its internals (ADR-062).
@@ -1025,6 +1027,32 @@ async def get_workflow_latest_outputs_endpoint(workflow_id: str) -> WorkflowLate
             for p in phases
         ],
     )
+
+
+@router.get(
+    "/{workflow_id}/trend",
+    response_model=WorkflowTrendResponse,
+    responses={404: {"description": "No workflow has this id"}},
+)
+async def get_workflow_trend_endpoint(
+    workflow_id: str,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=MAX_PAGE_SIZE),
+) -> WorkflowTrendResponse:
+    """The workflow's executions as trend points, newest first, with its definition changes.
+
+    One row per execution: date, status, cost, duration, tokens and how long
+    each phase took. The workflow id may be a unique prefix.
+    """
+    from syn_api.prefix_resolver import resolve_or_raise
+    from syn_api.routes.trends import workflow_trend
+
+    await ensure_connected()
+    mgr = get_projection_mgr()
+    workflow_id = await resolve_or_raise(mgr.store, "workflow_details", workflow_id, "Workflow")
+    if await mgr.workflow_detail.get_by_id(workflow_id) is None:
+        raise HTTPException(status_code=404, detail=f"Workflow {workflow_id} not found")
+    return await workflow_trend(mgr, workflow_id, page=page, page_size=page_size)
 
 
 @router.get("/{workflow_id}/history", response_model=ExecutionHistoryResponse)

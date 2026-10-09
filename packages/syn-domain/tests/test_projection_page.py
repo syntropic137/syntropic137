@@ -155,6 +155,7 @@ async def test_the_executions_page_hands_every_filter_and_the_page_to_the_store(
                 before=None,
                 offset=0,
                 limit=1,
+                key_field="workflow_execution_id",
             ),
         )
     ]

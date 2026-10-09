@@ -874,3 +874,202 @@ class TestAResumedRunsVersion:
         runs = (await client.get(f"/evals/{eval_id}/runs")).json()["items"]
 
         assert [(r["execution_id"], r["workflow_version"]) for r in runs] == [("exec-child", None)]
+
+
+class TestEvalTrend:
+    """``GET /evals/{id}/trend``: one point per run for the trend charts (#1788)."""
+
+    async def test_one_point_per_run_newest_first_with_score_out_of_100(
+        self, client: AsyncClient, lane2: _Lane2
+    ) -> None:
+        eval_id = await _two_by_two(client, lane2)
+
+        body = (await client.get(f"/evals/{eval_id}/trend")).json()
+
+        assert body["eval_id"] == eval_id
+        assert body["total"] == 5
+        assert [p["execution_id"] for p in body["items"]] == ["r5", "r4", "r3", "r2", "r1"]
+        points = {p["execution_id"]: p for p in body["items"]}
+        assert (points["r1"]["verdict"], points["r1"]["score"]) == ("PASS", 100)
+        assert (points["r2"]["verdict"], points["r2"]["score"]) == ("FAIL", 0)
+        assert (points["r5"]["verdict"], points["r5"]["score"]) == (None, None)
+        assert points["r1"]["date"] == "2026-10-01T00:00:00+00:00"
+        assert points["r3"]["verifier_model"] == SONNET
+        assert points["r3"]["observed_models"] == [SONNET]
+        assert Decimal(points["r2"]["cost_usd"]) == Decimal("3.00")
+        assert points["r2"]["cost_is_lower_bound"] is False
+        assert points["r2"]["workflow_version"] == "2.0.0"
+        assert isinstance(points["r2"]["tokens"], int)
+
+    async def test_it_pages_like_the_runs_view(self, client: AsyncClient, lane2: _Lane2) -> None:
+        eval_id = await _two_by_two(client, lane2)
+
+        body = (await client.get(f"/evals/{eval_id}/trend?page=2&page_size=2")).json()
+
+        assert (body["total"], body["page"], body["page_size"]) == (5, 2, 2)
+        assert [p["execution_id"] for p in body["items"]] == ["r3", "r2"]
+
+    async def test_the_judge_model_is_carried_from_the_score(
+        self, client: AsyncClient, lane2: _Lane2
+    ) -> None:
+        eval_id = await _create(client)
+        await _run(lane2, eval_id, "j1", "wf-a", OPUS, "1.00", "2026-10-01T00:00:00+00:00")
+        scored = await client.post(
+            f"/evals/{eval_id}/runs/j1/score",
+            json={
+                "verdict": "PASS",
+                "score": 0.873,
+                "scorer": "judge",
+                "scorer_version": "1",
+                "judge_model": "gpt-5.6-sol",
+            },
+        )
+        assert scored.status_code == 200, scored.text
+        assert scored.json()["judge_model"] == "gpt-5.6-sol"
+        await _catch_up()
+
+        [point] = (await client.get(f"/evals/{eval_id}/trend")).json()["items"]
+        [run] = (await client.get(f"/evals/{eval_id}/runs")).json()["items"]
+
+        assert (point["judge_model"], point["score"]) == ("gpt-5.6-sol", 87)
+        assert run["judge_model"] == "gpt-5.6-sol"
+
+    async def test_change_markers_come_from_the_eval_definition(
+        self, client: AsyncClient, lane2: _Lane2
+    ) -> None:
+        eval_id = await _create(client)
+        # Before the eval existed (an attached run, say) and long after it.
+        await _run(lane2, eval_id, "early", "wf-a", OPUS, "1.00", "2020-01-01T00:00:00+00:00")
+        await _run(lane2, eval_id, "late", "wf-a", OPUS, "1.00", "2099-01-01T00:00:00+00:00")
+        await _catch_up()
+
+        body = (await client.get(f"/evals/{eval_id}/trend")).json()
+
+        assert body["definition_version"] == "1"
+        [change] = body["definition_changes"]
+        assert (change["definition_version"], change["kind"]) == ("1", "created")
+        assert body["definition_changed_at"] == change["changed_at"]
+        points = {p["execution_id"]: p for p in body["items"]}
+        assert points["early"]["eval_definition_version"] is None
+        assert points["late"]["eval_definition_version"] == "1"
+
+    async def test_an_unknown_eval_is_404(self, client: AsyncClient, lane2: _Lane2) -> None:
+        await _two_by_two(client, lane2)
+
+        response = await client.get("/evals/eval-nope/trend")
+
+        assert response.status_code == 404
+
+
+async def _install(workflow_id: str, version: str, *, reinstall_at: str | None = None) -> None:
+    """A template installed at ``version`` and, optionally, reinstalled; projected."""
+    from event_sourcing.stores.memory_checkpoint import MemoryCheckpointStore
+
+    from syn_adapters.projections.manager import get_projection_manager
+    from syn_adapters.storage.event_store_client import get_event_store_client
+    from syn_api._wiring import get_workflow_repository
+    from syn_domain.contexts.orchestration import (
+        CreateWorkflowTemplateCommand,
+        UpdateWorkflowTemplateCommand,
+        WorkflowTemplateAggregate,
+    )
+    from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
+        PhaseDefinition,
+        WorkflowClassification,
+        WorkflowType,
+    )
+    from syn_domain.testing.stored_replay import replay
+
+    templates = get_workflow_repository()
+    created = CreateWorkflowTemplateCommand(
+        aggregate_id=workflow_id,
+        name="Trend",
+        workflow_type=WorkflowType.RESEARCH,
+        classification=WorkflowClassification.SIMPLE,
+        repository_url="",
+        requires_repos=False,
+        phases=[PhaseDefinition(phase_id="verify", name="Verify", order=1)],
+        version=version,
+    )
+    template = WorkflowTemplateAggregate()
+    template._handle_command(created)  # pyright: ignore[reportPrivateUsage]
+    await templates.save(template)
+    if reinstall_at is not None:
+        stored = await templates.get_by_id(workflow_id)
+        assert stored is not None
+        stored._handle_command(  # pyright: ignore[reportPrivateUsage]
+            UpdateWorkflowTemplateCommand(
+                **created.model_dump(exclude={"force", "version", "source_digest"}),
+                version=reinstall_at,
+                force=True,
+            )
+        )
+        await templates.save(stored)
+    await replay(
+        get_event_store_client(),  # type: ignore[arg-type]  # memory client in tests
+        MemoryCheckpointStore(),
+        get_projection_manager().workflow_detail,
+    )
+
+
+class TestWorkflowTrend:
+    """``GET /workflows/{id}/trend``: one point per execution (#1788)."""
+
+    async def test_one_point_per_execution_with_phase_durations(
+        self, client: AsyncClient, lane2: _Lane2
+    ) -> None:
+        await _install("wf-trend", "1.0.0", reinstall_at="2.0.0")
+        await _run(lane2, None, "w1", "wf-trend", OPUS, "1.50", "2026-10-01T00:00:00+00:00")
+        await _run(lane2, None, "w2", "wf-trend", OPUS, "0.75", "2026-10-02T00:00:00+00:00")
+        await _run(lane2, None, "other", "wf-other", OPUS, "9.00", "2026-10-03T00:00:00+00:00")
+        await _complete_with_an_unmeasured_phase("w1", verify_seconds=300.0)
+
+        body = (await client.get("/workflows/wf-trend/trend")).json()
+
+        assert body["workflow_id"] == "wf-trend"
+        assert body["total"] == 2
+        assert [p["execution_id"] for p in body["items"]] == ["w2", "w1"]
+        w1 = body["items"][1]
+        # The list row's status, as `GET /executions` shows it; the helper
+        # above rewrites only the detail record.
+        assert w1["status"] == "running"
+        assert w1["date"] == "2026-10-01T00:00:00+00:00"
+        assert Decimal(w1["cost_usd"]) == Decimal("1.50")
+        assert w1["phase_durations"] == [
+            {"phase_id": "verify", "phase_name": "Verify", "duration_seconds": 300.0},
+            {"phase_id": "review", "phase_name": "Review", "duration_seconds": None},
+        ]
+        assert w1["duration_is_lower_bound"] is True
+        assert isinstance(w1["tokens"], int)
+
+    async def test_change_markers_are_the_installs(
+        self, client: AsyncClient, lane2: _Lane2
+    ) -> None:
+        await _install("wf-trend", "1.0.0", reinstall_at="2.0.0")
+
+        body = (await client.get("/workflows/wf-trend/trend")).json()
+
+        assert [(c["definition_version"], c["kind"]) for c in body["definition_changes"]] == [
+            ("1.0.0", "created"),
+            ("2.0.0", "updated"),
+        ]
+        assert body["definition_version"] == "2.0.0"
+        assert body["definition_changed_at"] == body["definition_changes"][-1]["changed_at"]
+        assert body["items"] == []
+        assert body["total"] == 0
+
+    async def test_it_pages(self, client: AsyncClient, lane2: _Lane2) -> None:
+        await _install("wf-trend", "1.0.0")
+        for n in range(3):
+            started = f"2026-10-0{n + 1}T00:00:00+00:00"
+            await _run(lane2, None, f"w{n}", "wf-trend", OPUS, "1.00", started)
+
+        body = (await client.get("/workflows/wf-trend/trend?page=2&page_size=2")).json()
+
+        assert (body["total"], body["page"], body["page_size"]) == (3, 2, 2)
+        assert [p["execution_id"] for p in body["items"]] == ["w0"]
+
+    async def test_an_unknown_workflow_is_404(self, client: AsyncClient, lane2: _Lane2) -> None:
+        response = await client.get("/workflows/wf-nope/trend")
+
+        assert response.status_code == 404
