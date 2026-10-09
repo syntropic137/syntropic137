@@ -7,6 +7,7 @@ import GitHubTriggers from "./components/GitHubTriggers";
 import Observability from "./components/Observability";
 import Security from "./components/Security";
 import Evals from "./sections/Evals";
+import UseCases from "./sections/UseCases";
 import GetStarted from "./components/GetStarted";
 import Footer from "./components/Footer";
 
@@ -30,6 +31,7 @@ export default function App() {
         <hr className="section-divider" />
         <Security />
         <Evals />
+        <UseCases />
         <hr className="section-divider" />
         <GetStarted />
       </main>

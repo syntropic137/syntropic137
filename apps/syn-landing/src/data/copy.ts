@@ -70,3 +70,4 @@ export const FOOTER_COLUMNS: readonly FooterColumn[] = [
   },
 ];
 export * from "./copy/evals";
+export * from "./copy/useCases";
