@@ -3,8 +3,11 @@
 The socket proxy filters on method and path only, so ``POST /containers/create``
 reaches the daemon whatever its HostConfig says. This policy reads the body and
 refuses the shapes that hand a container the host: privilege, added
-capabilities, host namespaces, devices, host paths outside the workspaces root,
-other containers' volumes, and images the platform does not run.
+capabilities, host namespaces or another container's, devices, unmasked
+``/proc``, seccomp profiles that allow by default, host paths outside the
+workspaces root, other containers' volumes, and images the platform does not
+run. The deprecated top-level HostConfig fields some daemons still honour are
+checked the same way.
 
 It is an allowlist of what the platform's own create paths send today:
 
@@ -17,7 +20,15 @@ It is an allowlist of what the platform's own create paths send today:
 Anything else passes untouched: the policy refuses named shapes, it does not
 enumerate every field. To let a new shape through, extend the allowlist here
 and pin it in ``tests/docker_create_guard/test_policy.py``. To let an operator
-image through, set ``SYN_DOCKER_CREATE_GUARD_IMAGE_PREFIXES``.
+image through, set ``SYN_DOCKER_CREATE_GUARD_IMAGE_PREFIXES``. An entry ending
+in ``/`` or ``-`` matches every repository it starts; any other entry matches
+that repository exactly (``syn-sidecar-proxy`` allows neither
+``syn-sidecar-proxy-evil`` nor the Docker Hub namespace ``syn-sidecar-proxy/x``).
+
+The image check is a name check, so it holds only while the API cannot name an
+image itself: the socket proxy refuses ``POST /images/load``,
+``POST /images/{name}/tag`` and ``POST /images/create`` without ``fromImage``
+(an import), so an image reaches the daemon only by pull or by the operator.
 
 Bind sources must sit under ``SYN_WORKSPACE_HOST_DIR`` both as written and
 after symlinks are resolved (the guard mounts that root read-only), and a bind
@@ -59,7 +70,23 @@ _HOST_NAMESPACE_FIELDS = (
     "UsernsMode",
     "CgroupnsMode",
 )
+# A container: value joins that container's namespace; joining the guard's or
+# the socket proxy's PID namespace reaches the unfiltered socket via /proc.
+_FOREIGN_NAMESPACE_PREFIXES = ("host", "container:")
 _DEVICE_FIELDS = ("Devices", "DeviceRequests", "DeviceCgroupRules")
+# Present, even empty, they replace the daemon's /proc masks; the docker CLI
+# sends them empty for ``--security-opt systempaths=unconfined``.
+_PROC_MASK_FIELDS = ("MaskedPaths", "ReadonlyPaths")
+# Seccomp default actions that deny; any other default lets unlisted syscalls through.
+_DENYING_SECCOMP_ACTIONS = frozenset(
+    {
+        "SCMP_ACT_ERRNO",
+        "SCMP_ACT_KILL",
+        "SCMP_ACT_KILL_THREAD",
+        "SCMP_ACT_KILL_PROCESS",
+        "SCMP_ACT_TRAP",
+    }
+)
 _UNCONFINED_SECURITY_OPTS = frozenset(
     {
         "seccomp=unconfined",
@@ -113,6 +140,8 @@ class CreatePolicy:
             if not isinstance(request, dict):
                 _refuse("the create body is not a JSON object")
             self._check_image(_field(request, "Image"), host)
+            # Older daemons fall back to HostConfig fields given at the top level.
+            self._check_host_config(request, host)
             host_config = _field(request, "HostConfig")
             if host_config is not None:
                 if not isinstance(host_config, dict):
@@ -137,7 +166,7 @@ class CreatePolicy:
 
     def _image_allowed(self, image: str) -> bool:
         repository = image_repository(image)
-        return any(repository.startswith(prefix) for prefix in self.image_prefixes)
+        return any(_repository_matches(repository, prefix) for prefix in self.image_prefixes)
 
     def _check_host_config(self, host_config: Mapping[str, JsonValue], host: HostView) -> None:
         _expect(
@@ -150,18 +179,26 @@ class CreatePolicy:
         for name in _HOST_NAMESPACE_FIELDS:
             mode = _field(host_config, name)
             _expect(
-                not (isinstance(mode, str) and mode.lower() == "host"), f"{name}=host is refused"
+                not (
+                    isinstance(mode, str) and mode.lower().startswith(_FOREIGN_NAMESPACE_PREFIXES)
+                ),
+                f"{name}={mode} is refused: no platform container joins another namespace",
             )
         for name in _DEVICE_FIELDS:
             _expect(
                 not _field(host_config, name),
                 f"{name} is refused: no platform container maps devices",
             )
-        for opt in _list(host_config, "SecurityOpt"):
+        for name in _PROC_MASK_FIELDS:
             _expect(
-                not (isinstance(opt, str) and opt.lower() in _UNCONFINED_SECURITY_OPTS),
-                f"SecurityOpt {opt!r} is refused",
+                _field(host_config, name) is None,
+                f"{name} is refused: no platform container changes the /proc masks",
             )
+        for opt in _list(host_config, "SecurityOpt"):
+            if not isinstance(opt, str):
+                _refuse("a SecurityOpt entry is not a string")
+            _expect(opt.lower() not in _UNCONFINED_SECURITY_OPTS, f"SecurityOpt {opt!r} is refused")
+            _check_seccomp(opt)
         self._check_storage(host_config, host)
 
     def _check_storage(self, host_config: Mapping[str, JsonValue], host: HostView) -> None:
@@ -242,6 +279,32 @@ class CreatePolicy:
                 "host" not in {str(name).lower() for name in endpoints},
                 "the host network is refused",
             )
+
+
+def _check_seccomp(opt: str) -> None:
+    """Refuse an inline seccomp profile whose default action lets syscalls through."""
+    key, sep, profile = opt.partition("=")
+    if not sep:
+        key, sep, profile = opt.partition(":")
+    if key.lower() != "seccomp" or profile.lower() in ("", "builtin"):
+        return
+    try:
+        parsed = json.loads(profile)
+    except ValueError:
+        _refuse("a seccomp profile is not JSON")
+    if not isinstance(parsed, dict):
+        _refuse("a seccomp profile is not a JSON object")
+    action = _field(parsed, "defaultAction")
+    _expect(
+        isinstance(action, str) and action.upper() in _DENYING_SECCOMP_ACTIONS,
+        f"a seccomp profile with defaultAction {action!r} is refused: it does not deny by default",
+    )
+
+
+def _repository_matches(repository: str, entry: str) -> bool:
+    if entry.endswith(("/", "-")):
+        return repository.startswith(entry)
+    return repository == entry
 
 
 def _field(obj: Mapping[str, JsonValue], name: str) -> JsonValue:

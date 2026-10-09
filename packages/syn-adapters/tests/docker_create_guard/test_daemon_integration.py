@@ -50,9 +50,13 @@ def guard(tmp_path: Path) -> Iterator[tuple[int, DockerSocket, Path]]:
     server.shutdown()
 
 
-def _create(port: int, name: str, host_config: JsonObject) -> int:
+def _create(port: int, name: str, host_config: JsonObject, *, top_level: bool = False) -> int:
     conn = http.client.HTTPConnection("127.0.0.1", port, timeout=60)
-    body = {"Image": IMAGE, "Cmd": ["true"], "HostConfig": host_config}
+    body: JsonObject = {"Image": IMAGE, "Cmd": ["true"]}
+    if top_level:
+        body.update(host_config)
+    else:
+        body["HostConfig"] = host_config
     conn.request(
         "POST",
         f"/containers/create?name={name}",
@@ -126,8 +130,19 @@ def test_symlink_out_of_the_root_is_refused(guard: tuple[int, DockerSocket, Path
         {"Binds": ["/:/host"]},
         {"NetworkMode": "host"},
         {"Binds": [f"{SOCKET}:/var/run/docker.sock"]},
+        {"PidMode": "container:syn137-docker-create-guard"},
+        {"MaskedPaths": [], "ReadonlyPaths": []},
+        {"SecurityOpt": ['seccomp={"defaultAction":"SCMP_ACT_ALLOW"}']},
     ],
-    ids=["privileged", "bind-root", "host-network", "docker-sock"],
+    ids=[
+        "privileged",
+        "bind-root",
+        "host-network",
+        "docker-sock",
+        "join-guard-pid",
+        "unmasked-proc",
+        "allow-all-seccomp",
+    ],
 )
 def test_host_access_is_refused_and_nothing_is_created(
     guard: tuple[int, DockerSocket, Path], host_config: JsonObject
@@ -136,6 +151,23 @@ def test_host_access_is_refused_and_nothing_is_created(
     name = f"syn-guard-it-{uuid.uuid4().hex[:8]}"
     try:
         assert _create(port, name, host_config) == 403
+        assert not _exists(daemon, name)
+    finally:
+        _remove(daemon, name)
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [{"Privileged": True}, {"Binds": ["/:/host"]}],
+    ids=["privileged", "bind-root"],
+)
+def test_deprecated_top_level_host_config_is_refused(
+    guard: tuple[int, DockerSocket, Path], fields: JsonObject
+) -> None:
+    port, daemon, _ = guard
+    name = f"syn-guard-it-{uuid.uuid4().hex[:8]}"
+    try:
+        assert _create(port, name, fields, top_level=True) == 403
         assert not _exists(daemon, name)
     finally:
         _remove(daemon, name)

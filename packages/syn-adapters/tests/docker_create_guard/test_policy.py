@@ -12,9 +12,19 @@ import copy
 import json
 
 import pytest
+from agentic_isolation.config import codex_sandbox_seccomp_profile
 
 from syn_adapters.docker_create_guard.__main__ import policy_from_env
-from syn_adapters.docker_create_guard.policy import CreatePolicy, JsonObject, JsonValue, Refusal
+from syn_adapters.docker_create_guard.policy import (
+    _DEVICE_FIELDS,
+    _HOST_NAMESPACE_FIELDS,
+    _PROC_MASK_FIELDS,
+    _UNCONFINED_SECURITY_OPTS,
+    CreatePolicy,
+    JsonObject,
+    JsonValue,
+    Refusal,
+)
 from syn_adapters.workspace_backends.docker.docker_sidecar_adapter import DEFAULT_SIDECAR_IMAGE
 from syn_shared.settings.workspace_images import (
     DEFAULT_WORKSPACE_IMAGE,
@@ -265,3 +275,78 @@ class TestHostAccessIsRefused:
 
     def test_not_json(self) -> None:
         assert POLICY.check(b"{nope", FakeHost()) is not None
+
+
+class TestEveryNamedShapeIsRefused:
+    """Iterates the policy's own lists, so dropping any member fails the case named for it."""
+
+    @pytest.mark.parametrize("name", _HOST_NAMESPACE_FIELDS)
+    @pytest.mark.parametrize("mode", ["host", "container:syn137-docker-create-guard"])
+    def test_namespace_join(self, name: str, mode: str) -> None:
+        refusal = _check(_with(workspace_body(), **{name: mode}))
+        assert refusal is not None and f"{name}={mode}" in refusal.reason
+
+    @pytest.mark.parametrize("name", _DEVICE_FIELDS)
+    def test_device_field(self, name: str) -> None:
+        refusal = _check(_with(workspace_body(), **{name: ["c 1:3 rwm"]}))
+        assert refusal is not None and name in refusal.reason
+
+    @pytest.mark.parametrize("opt", sorted(_UNCONFINED_SECURITY_OPTS))
+    def test_unconfined_security_opt(self, opt: str) -> None:
+        refusal = _check(_with(workspace_body(), SecurityOpt=[opt]))
+        assert refusal is not None and repr(opt) in refusal.reason
+
+    @pytest.mark.parametrize("name", _PROC_MASK_FIELDS)
+    def test_proc_masks(self, name: str) -> None:
+        refusal = _check(_with(workspace_body(), **{name: []}))
+        assert refusal is not None and name in refusal.reason
+
+    def test_systempaths_unconfined_as_the_cli_sends_it(self) -> None:
+        # docker/cli parseSystemPaths strips the option and sends both lists empty.
+        assert _check(_with(workspace_body(), MaskedPaths=[], ReadonlyPaths=[])) is not None
+
+    def test_volume_driver(self) -> None:
+        refusal = _check(_with(workspace_body(), VolumeDriver="local"))
+        assert refusal is not None and "VolumeDriver" in refusal.reason
+
+    def test_root_configured_as_slash_allows_no_bind(self) -> None:
+        refusal = _check(
+            _with(workspace_body(), Binds=["/etc:/x"]), CreatePolicy(workspace_root="/")
+        )
+        assert refusal is not None and "only paths under" in refusal.reason
+
+
+class TestSeccompProfile:
+    @pytest.mark.parametrize("action", ["SCMP_ACT_ALLOW", "SCMP_ACT_LOG", "SCMP_ACT_TRACE"])
+    def test_profile_that_does_not_deny_by_default(self, action: str) -> None:
+        opt = "seccomp=" + json.dumps({"defaultAction": action})
+        refusal = _check(_with(workspace_body(), SecurityOpt=[opt]))
+        assert refusal is not None and action in refusal.reason
+
+    @pytest.mark.parametrize("opt", ["seccomp={nope", "seccomp=[]", "seccomp:{}"])
+    def test_unreadable_profile(self, opt: str) -> None:
+        assert _check(_with(workspace_body(), SecurityOpt=[opt])) is not None
+
+    def test_the_shipped_workspace_profile_passes(self) -> None:
+        # What the CLI sends for --security-opt seccomp=<file>: the file's contents inline.
+        opt = "seccomp=" + codex_sandbox_seccomp_profile().read_text()
+        assert _check(_with(workspace_body(), SecurityOpt=["no-new-privileges", opt])) is None
+
+
+class TestImageNames:
+    @pytest.mark.parametrize("image", ["syn-sidecar-proxy-evil:latest", "syn-sidecar-proxy/x:1"])
+    def test_exact_entry_has_a_boundary(self, image: str) -> None:
+        refusal = _check(workspace_body(image))
+        assert refusal is not None and "allowlist" in refusal.reason
+
+
+class TestDeprecatedTopLevelHostConfig:
+    @pytest.mark.parametrize(
+        "fields",
+        [{"Privileged": True}, {"Binds": ["/:/host"]}, {"PidMode": "host"}, {"CapAdd": ["ALL"]}],
+    )
+    def test_top_level_host_fields_are_checked(self, fields: JsonObject) -> None:
+        body = sidecar_body()
+        del body["HostConfig"]
+        body.update(fields)
+        assert _check(body) is not None

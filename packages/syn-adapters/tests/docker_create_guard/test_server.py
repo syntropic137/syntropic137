@@ -90,10 +90,13 @@ def test_refused_create_never_reaches_the_daemon(
     assert daemon.creates == []
 
 
-def test_only_create_is_served(guard: tuple[int, _FakeDaemon]) -> None:
+@pytest.mark.parametrize("path", ["/v1.47/containers/abc/start", "/v1.47/swarm/init"])
+def test_only_create_is_served(guard: tuple[int, _FakeDaemon], path: str) -> None:
+    # A body the policy allows, so only the path check can refuse it.
     port, daemon = guard
-    status, _ = _post(port, "/v1.47/containers/abc/start", {})
-    assert status == 403 and daemon.creates == []
+    status, payload = _post(port, path, sidecar_body())
+    assert status == 403 and "only serves container create" in str(payload["message"])
+    assert daemon.creates == []
 
 
 class TestGuardHostResolvesThroughTheMount:

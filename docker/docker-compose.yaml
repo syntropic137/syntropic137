@@ -109,11 +109,18 @@ services:
         template=/usr/local/etc/haproxy/haproxy.cfg.template
         [ "$$(grep -c '^[[:space:]]*http-request deny$$' "$$template")" = 1 ]
         [ "$$(grep -c '^[[:space:]]*default_backend dockerbackend$$' "$$template")" = 1 ]
+        [ "$$(grep -c '^frontend dockerfrontend$$' "$$template")" = 1 ]
         awk '
         /^[[:space:]]*http-request deny$$/ {
             print "    http-request allow if { method GET DELETE } { path -m reg ^(/v[0-9.]+)?/volumes/syn-capture-[a-f0-9]{64}$$ }"
         }
         { print }
+        # Ahead of every upstream allow: the API may pull images, never name one itself.
+        /^frontend dockerfrontend$$/ {
+            print "    http-request deny if { method POST } { path,url_dec -m reg -i /images/(load|.+/tag)/*$$ }"
+            print "    http-request deny if { method POST } { path,url_dec -m reg -i /images/create/*$$ } !{ url_param(fromImage) -m reg . }"
+            print "    http-request deny if { method POST } { path,url_dec -m reg -i /images/create/*$$ } { req.hdr(content-type) -m sub -i x-www-form-urlencoded }"
+        }
         /^[[:space:]]*default_backend dockerbackend$$/ {
             print "    use_backend docker-create-guard if { method POST } { path,url_dec -m reg -i /containers/create/*$$ }"
         }

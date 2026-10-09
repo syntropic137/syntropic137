@@ -12,7 +12,7 @@ from __future__ import annotations
 import re
 import subprocess
 from pathlib import Path
-from urllib.parse import unquote
+from urllib.parse import parse_qs, unquote
 
 import pytest
 import yaml
@@ -24,10 +24,11 @@ _COMPOSE = [
     _ROOT / "docker" / "docker-compose.yaml",
     _ROOT / "docker" / "docker-compose.syntropic137.yaml",
 ]
-# The tail of tecnativa/docker-socket-proxy 0.3.0's haproxy.cfg frontend.
+# The shape of tecnativa/docker-socket-proxy 0.3.0's haproxy.cfg frontend.
 _TEMPLATE = (
     "frontend dockerfrontend\n"
     "    http-request deny unless METH_GET || { env(POST) -m bool }\n"
+    "    http-request allow if { path,url_dec -m reg -i ^(/v[\\d\\.]+)?/images } { env(IMAGES) -m bool }\n"
     "    http-request deny\n"
     "    default_backend dockerbackend\n"
     "\n"
@@ -57,6 +58,78 @@ def _routed(config: str, method: str, path: str) -> bool:
     assert match is not None, "no use_backend docker-create-guard rule was inserted"
     route_method, pattern = match.groups()
     return method == route_method and re.search(pattern, unquote(path), re.IGNORECASE) is not None
+
+
+_DENY = re.compile(
+    r"^\s*http-request deny if \{ method POST \} \{ path,url_dec -m reg -i (\S+) \}(.*)$",
+    re.MULTILINE,
+)
+
+
+def _denied(config: str, path: str, query: str = "", content_type: str = "") -> bool:
+    """Evaluate the inserted POST deny rules; any condition this does not model fails the test."""
+    frontend = config.split("frontend dockerfrontend", 1)[1]
+    for pattern, condition in _DENY.findall(frontend):
+        if re.search(pattern, unquote(path), re.IGNORECASE) is None:
+            continue
+        condition = condition.strip()
+        if condition == "":
+            return True
+        if condition == "!{ url_param(fromImage) -m reg . }":
+            if not parse_qs(query).get("fromImage", [""])[0]:
+                return True
+        elif condition == "{ req.hdr(content-type) -m sub -i x-www-form-urlencoded }":
+            if "x-www-form-urlencoded" in content_type.lower():
+                return True
+        else:
+            raise AssertionError(f"unmodelled deny condition {condition!r}")
+    return False
+
+
+@pytest.mark.parametrize("compose", _COMPOSE, ids=lambda p: p.name)
+class TestImageNaming:
+    """The create guard's image allowlist is a name check; the API must not be able to name images."""
+
+    @pytest.mark.parametrize(
+        ("path", "query", "content_type"),
+        [
+            ("/v1.47/images/load", "", ""),
+            ("/images/load", "quiet=1", ""),
+            ("/v1.47/images/alpine:3/tag", "repo=ghcr.io/syntropic137/x&tag=1", ""),
+            ("/v1.47/images/ghcr.io/evil/x/tag", "repo=syn-sidecar-proxy", ""),
+            ("/v1.47/images/%6coad", "", ""),
+            ("/v1.47/images/create", "fromSrc=-&repo=ghcr.io/syntropic137/x", ""),
+            ("/v1.47/images/create", "fromImage=&fromSrc=http://evil/x.tar", ""),
+            (
+                "/v1.47/images/create",
+                "fromImage=alpine",
+                "application/x-www-form-urlencoded",
+            ),
+        ],
+    )
+    def test_load_tag_and_import_are_denied(
+        self, compose: Path, tmp_path: Path, path: str, query: str, content_type: str
+    ) -> None:
+        assert _denied(_patched(compose, tmp_path), path, query, content_type)
+
+    @pytest.mark.parametrize(
+        ("path", "query"),
+        [
+            ("/v1.47/images/create", "fromImage=ghcr.io/syntropic137/x&tag=1"),
+            ("/images/create", "fromImage=alpine"),
+            ("/v1.47/containers/create", ""),
+        ],
+    )
+    def test_pull_and_create_are_not_denied(
+        self, compose: Path, tmp_path: Path, path: str, query: str
+    ) -> None:
+        assert not _denied(_patched(compose, tmp_path), path, query)
+
+    def test_denies_precede_every_upstream_allow(self, compose: Path, tmp_path: Path) -> None:
+        frontend = _patched(compose, tmp_path).split("frontend dockerfrontend", 1)[1]
+        last_deny = max(m.start() for m in _DENY.finditer(frontend))
+        assert len(_DENY.findall(frontend)) == 3
+        assert last_deny < frontend.index("http-request allow")
 
 
 @pytest.mark.parametrize("compose", _COMPOSE, ids=lambda p: p.name)
