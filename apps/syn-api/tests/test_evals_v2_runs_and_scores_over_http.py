@@ -35,7 +35,7 @@ from syn_domain.testing.fake_revision_resolver import FakeRevisionResolver
 from syn_shared.observed_model import UNKNOWN_MODEL_KEY
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Iterator
+    from collections.abc import AsyncIterator, Iterator, Sequence
 
 pytestmark = [pytest.mark.unit, pytest.mark.anyio]
 
@@ -80,6 +80,11 @@ class _Lane2:
             session_id=session_id, agent_model=model, requested_model=_ALIAS_OF[model]
         )
 
+    async def get_session_costs(self, session_ids: Sequence[str]) -> dict[str, SessionCost]:
+        """The batch read the eval run views use (#1811), same answers as one at a time."""
+        found = {sid: await self.get_session_cost(sid) for sid in session_ids}
+        return {sid: cost for sid, cost in found.items() if cost is not None}
+
     async def get_execution_cost(self, execution_id: str) -> ExecutionCost | None:
         cost = self.costs.get(execution_id)
         if cost is None:
@@ -102,6 +107,7 @@ async def lane2(monkeypatch: pytest.MonkeyPatch) -> _Lane2:
     fake = _Lane2()
     manager = get_projection_mgr()
     monkeypatch.setattr(manager.session_cost, "get_session_cost", fake.get_session_cost)
+    monkeypatch.setattr(manager.session_cost, "get_session_costs", fake.get_session_costs)
     monkeypatch.setattr(manager.execution_cost, "get_execution_cost", fake.get_execution_cost)
     return fake
 

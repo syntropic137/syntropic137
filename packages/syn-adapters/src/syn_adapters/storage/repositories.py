@@ -23,6 +23,7 @@ if TYPE_CHECKING:
         BaseAggregate,
         DomainEvent,
         EventEnvelope,
+        EventStoreClient,
         EventStoreRepository,
         RepositoryFactory,
     )
@@ -194,10 +195,54 @@ def get_workflow_execution_repository() -> RepositoryAdapter[WorkflowExecutionAg
     factory = _get_repository_factory()
     sdk_repo = factory.create_repository(
         WorkflowExecutionAggregate,  # type: ignore[arg-type]  # ESP SDK TEvent invariance
-        aggregate_type="WorkflowExecution",
+        aggregate_type=_WORKFLOW_EXECUTION,
     )
     _workflow_execution_repository = RepositoryAdapter(sdk_repo)
     return _workflow_execution_repository
+
+
+_WORKFLOW_EXECUTION = "WorkflowExecution"
+
+
+class EventStoreExecutionEventStream:
+    """One execution's stored domain events, for seeding a run's to-do fold (ADR-072 D8).
+
+    Satisfies `ExecutionEventStream`. Reads the same stream
+    `get_workflow_execution_repository` writes, by the same aggregate type.
+    """
+
+    def __init__(self, client: EventStoreClient) -> None:
+        self._client = client
+
+    async def read(self, execution_id: str) -> list[DomainEvent]:
+        """The whole stream, page by page.
+
+        One `read_events` call is one page: the gRPC client asks for at most
+        1,000 events, so a single call silently drops the rest of a long
+        stream. The clients also disagree on `from_version` (gRPC reads from
+        that nonce inclusive, the memory client after it), so each page asks
+        from the last nonce seen and keeps only nonces beyond it. A page
+        that adds nothing ends the read.
+        """
+        stream = f"{_WORKFLOW_EXECUTION}-{execution_id}"
+        events: list[DomainEvent] = []
+        last_nonce: int | None = None
+        while True:
+            page = await self._client.read_events(stream, last_nonce)
+            fresh = [
+                e for e in page if last_nonce is None or e.metadata.aggregate_nonce > last_nonce
+            ]
+            if not fresh:
+                return events
+            events.extend(envelope.event for envelope in fresh)
+            last_nonce = fresh[-1].metadata.aggregate_nonce
+
+
+def get_execution_event_stream() -> EventStoreExecutionEventStream:
+    """Get the reader for one execution's stored events."""
+    from syn_adapters.storage.event_store_client import get_event_store_client
+
+    return EventStoreExecutionEventStream(get_event_store_client())
 
 
 def get_execution_request_repository() -> RepositoryAdapter[ExecutionRequestAggregate]:

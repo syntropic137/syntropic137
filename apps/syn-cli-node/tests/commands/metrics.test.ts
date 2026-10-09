@@ -114,4 +114,48 @@ describe("metrics commands", () => {
       expect(out).toContain("implementation");
     });
   });
+
+  describe("profiles", () => {
+    const handler = metricsGroup.getCommand("profiles")!.handler;
+
+    const pct = (n: number) => ({ n, p50: null, p95: null, p50_display: "insufficient", p95_display: "insufficient" });
+
+    it("prints every coverage count and each measure's sample size", async () => {
+      mockFetch.mockResolvedValue(
+        jsonResponse({
+          workflow_id: "wf-1",
+          since: "2026-10-01T00:00:00Z",
+          until: "2026-10-08T00:00:00Z",
+          window_days: 7,
+          executions: 40,
+          tokens: [],
+          resources: [
+            {
+              phase_id: "plan",
+              cpu_seconds_per_wall_second: pct(23),
+              cpu_throttled_seconds: pct(29),
+              memory_peak_bytes: pct(31),
+              disk_bytes_at_teardown: pct(37),
+              coverage: {
+                phases: 41,
+                phases_without_usage_row: 2,
+                cpu_usage_seconds_missing: 3,
+                cpu_throttled_seconds_missing: 5,
+                memory_peak_bytes_missing: 7,
+                disk_bytes_at_teardown_missing: 11,
+                wall_seconds_missing: 13,
+                coverage_display: "39/41 phases measured",
+              },
+            },
+          ],
+        }),
+      );
+
+      await handler({ positionals: [], values: { workflow: "wf-1" } });
+      const row = stdout().split("\n").filter((l) => l.includes("plan")).at(-1) ?? "";
+      for (const cell of ["41", "2", "23 / 3", "13", "29 / 5", "31 / 7", "37 / 11"]) {
+        expect(row).toContain(cell);
+      }
+    });
+  });
 });

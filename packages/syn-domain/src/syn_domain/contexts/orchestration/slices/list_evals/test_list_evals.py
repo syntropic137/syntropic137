@@ -261,6 +261,21 @@ class TestReplay:
         assert detail.runs.total == 2
         assert detail.runs.status_counts == {"failed": 1, "running": 1}
 
+    async def test_members_of_many_evals_is_what_members_answers_for_each(self) -> None:
+        """The eval list reads every eval's runs in one query (#1811), the same rows."""
+        evals = await _replayed(await _fixture(), times=1)
+        ids = [str(_EVAL), str(_OTHER), "eval-never-created"]
+
+        many = await evals.members_of(ids)
+
+        assert set(many) == set(ids)
+        for eval_id in ids:
+            one = await evals.members(eval_id)
+            assert sorted(r.workflow_execution_id for r in many[eval_id]) == sorted(
+                r.workflow_execution_id for r in one.rows
+            )
+        assert many["eval-never-created"] == []
+
     async def test_eval_list_counts_runs_by_status(self) -> None:
         evals = await _replayed(await _fixture(), times=1)
 
@@ -383,3 +398,28 @@ class TestDefinitionChanges:
 
         assert once is not None and twice is not None
         assert once.definition_changes == twice.definition_changes
+
+async def test_scores_in_many_evals_is_what_scores_answers_for_each() -> None:
+    """One read for every eval on a list page (#1811), keyed by (eval, execution)."""
+    from syn_domain.contexts.orchestration.domain.read_models.eval_runs import EvalRunScore
+
+    store = InMemoryProjectionStore()
+    evals = EvalListProjection(store)
+    for eval_id, execution_id in [("e1", "x1"), ("e1", "x2"), ("e2", "x1"), ("e3", "x9")]:
+        score = EvalRunScore(
+            eval_id=eval_id,
+            execution_id=execution_id,
+            verdict="PASS",
+            scorer="t",
+            scorer_version="1",
+            scored_at="2026-10-08T00:00:00Z",
+        )
+        await store.save(EvalListProjection.SCORES, f"{eval_id}/{execution_id}", score.model_dump())
+
+    many = await evals.scores_in(["e1", "e2"])
+
+    assert set(many) == {("e1", "x1"), ("e1", "x2"), ("e2", "x1")}
+    for eval_id in ("e1", "e2"):
+        one = await evals.scores(eval_id)
+        assert {k[1]: v for k, v in many.items() if k[0] == eval_id} == one
+    assert await evals.scores_in([]) == {}

@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from syn_shared.settings.execution import ExecutionSettings
     from syn_shared.settings.github import GitHubAppSettings
     from syn_shared.settings.image_verification import ImageVerificationSettings
+    from syn_shared.settings.platform_access import PlatformAccessSettings
     from syn_shared.settings.polling import PollingSettings
     from syn_shared.settings.session_inventory import SessionInventorySettings
     from syn_shared.settings.session_store import SessionStoreSettings
@@ -202,12 +203,27 @@ class Settings(BaseSettings):
         ),
     )
 
+    syn_host_id: str | None = Field(
+        default=None,
+        description=(
+            "Identity of the host whose workspace and sidecar containers this API "
+            "creates, stamped on them as the syn.host_id label. Defaults to the "
+            "API container's hostname. Set it explicitly when that hostname is not "
+            "stable: without a compose `hostname:` it is the container id, which "
+            "changes every time the API container is recreated."
+        ),
+    )
+
     # =========================================================================
     # VALIDATORS - Convert empty strings to None
     # =========================================================================
 
     @field_validator(
-        "esp_event_store_db_url", "syn_observability_db_url", "event_store_url", mode="before"
+        "esp_event_store_db_url",
+        "syn_observability_db_url",
+        "event_store_url",
+        "syn_host_id",
+        mode="before",
     )
     @classmethod
     def empty_str_to_none(cls, v: str | None) -> str | None:
@@ -243,6 +259,26 @@ class Settings(BaseSettings):
             "API requests whose response takes at least this many milliseconds are "
             "logged with method, route template, status, duration and DB-pool wait "
             "(#1583). Faster requests are not logged individually."
+        ),
+    )
+
+    request_latency_io_timeout_s: float = Field(
+        default=5.0,
+        gt=0,
+        description=(
+            "Deadline in seconds for each request-latency telemetry database step "
+            "(acquiring a connection, writing one batch, readying the table) (ADR-075). "
+            "A step that overruns is abandoned and its samples are counted as lost."
+        ),
+    )
+
+    request_latency_shutdown_timeout_s: float = Field(
+        default=10.0,
+        gt=0,
+        description=(
+            "How long shutdown waits for buffered request-latency samples to be "
+            "written (ADR-075). Samples still unwritten at the deadline are counted "
+            "as discarded and shutdown proceeds."
         ),
     )
 
@@ -694,6 +730,13 @@ class Settings(BaseSettings):
         from syn_shared.settings.workspace import WorkspaceSecuritySettings
 
         return WorkspaceSecuritySettings()
+
+    @property
+    def platform_access(self) -> PlatformAccessSettings:
+        """Workspace access to the Syntropic137 API. Default OFF (ADR-072)."""
+        from syn_shared.settings.platform_access import PlatformAccessSettings
+
+        return PlatformAccessSettings()
 
     @property
     def git_identity(self) -> GitIdentitySettings:

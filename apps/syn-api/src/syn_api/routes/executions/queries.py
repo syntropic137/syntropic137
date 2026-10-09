@@ -95,7 +95,7 @@ def _to_str(val: object | None) -> str | None:
 
 
 @dataclass(frozen=True)
-class _DurationTotal:
+class DurationTotal:
     """An execution's wall-clock total, with the coverage of that total.
 
     Same shape as the unpriced-cost totals alongside it (#890): a bare number
@@ -111,7 +111,7 @@ class _DurationTotal:
     """Phases that contributed nothing because their duration is unknown."""
 
     @classmethod
-    def over(cls, durations: Iterable[float | None]) -> _DurationTotal:
+    def over(cls, durations: Iterable[float | None]) -> DurationTotal:
         """Fold per-phase durations into a total that admits what it is missing."""
         resolved = list(durations)
         known = [d for d in resolved if d is not None]
@@ -121,7 +121,7 @@ class _DurationTotal:
         )
 
 
-def _phase_duration(phase: PhaseExecutionDetail) -> float | None:
+def phase_duration(phase: PhaseExecutionDetail) -> float | None:
     """Resolve one domain phase's duration the way every read surface must."""
     return resolve_duration_seconds(
         phase.status,
@@ -418,7 +418,7 @@ async def get(
     # sum, so the total and the phase list can never disagree: the sum only
     # counts phases that have COMPLETED, which silently excluded the one still
     # running and presented the shortfall as the final figure.
-    duration = _DurationTotal.over(_phase_duration(p) for p in detail.phases)
+    duration = DurationTotal.over(phase_duration(p) for p in detail.phases)
 
     with contextlib.suppress(Exception):
         exec_cost = await manager.execution_cost.get_execution_cost(execution_id)
@@ -537,7 +537,7 @@ async def get_detail(
     ]
     # Folded from the phases this response already carries, so the header total
     # and the timeline below it are the same numbers by construction.
-    duration = _DurationTotal.over(p.duration_seconds for p in phases)
+    duration = DurationTotal.over(p.duration_seconds for p in phases)
 
     enriched = await _enrich_costs(
         execution_id,

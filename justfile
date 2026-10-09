@@ -687,6 +687,14 @@ workspace-versions:
 check-pinned-image-channels:
     @uv run python scripts/check_pinned_image_channels.py
 
+# The event-store image for the ESP version at the lib/event-sourcing-platform
+# gitlink must be published as a multi-arch index (#1515). The release pins
+# exactly that tag with no `latest` fallback, so this fails a PR that moves the
+# gitlink to an unreleased ESP version instead of failing the release later.
+# Same script the release job runs. Needs network and docker buildx.
+check-event-store-pin:
+    @uv run python scripts/resolve_event_store_digest.py
+
 # Every fixed (non-${VAR}) image in the compose files must pull anonymously.
 # quay.io/minio/minio withdrew public pulls on 2026-09-24 with no diff on our
 # side; only the post-merge smoke test noticed. Needs network, no credentials.
@@ -1054,7 +1062,7 @@ fitness-invariants-agent:
 #
 # Add a gate here, never to CI alone. `test_ci_and_preflight_agree.py` fails
 # if a `just` target CI runs is not in this closure.
-preflight: preflight-portable check-submodules vsa-validate fitness codegen-check check-architecture-docs check-compose-overlays check-default-workspace-image check-pinned-image-channels check-compose-images-public
+preflight: preflight-portable check-submodules vsa-validate fitness codegen-check check-architecture-docs check-compose-overlays check-default-workspace-image check-pinned-image-channels check-event-store-pin check-compose-images-public
     @echo "✅ preflight: every STATIC CI gate passed locally"
     @echo "   Not covered here: unit tests, dashboard build, CLI checks and"
     @echo "   the docs build. Run 'just qa-ci' for all of those."
@@ -1095,6 +1103,8 @@ preflight-portable: check-agent-docs lint format-check typecheck validate-domain
 #   check-compose-overlays             exit 127  no docker CLI
 #   check-default-workspace-image      exit 127  no docker CLI
 #   check-pinned-image-channels        exit 1    no registry credentials
+#   check-event-store-pin              (added 2026-10-04, not measured in the
+#                                      image; needs the docker CLI, absent)
 #
 # Re-measure before moving a recipe across the line. "It should work" is how
 # a gate ends up passing because it never ran.
@@ -1141,7 +1151,7 @@ preflight-agent: preflight-portable fitness-agent fitness-invariants-agent
     @echo "   Not run here (no toolchain in the image): vsa-validate,"
     @echo "   codegen-check, check-submodules, check-compose-overlays,"
     @echo "   check-default-workspace-image, check-pinned-image-channels,"
-    @echo "   check-compose-images-public."
+    @echo "   check-event-store-pin, check-compose-images-public."
     @echo "   CI runs all of those. Run 'just preflight' on a dev machine."
 
 # Regenerate CLAUDE.md from AGENTS.md.

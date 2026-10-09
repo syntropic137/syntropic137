@@ -59,9 +59,9 @@ dispatch and resume. Starts beyond it wait in a first-come queue and show as
 
 The limit is about memory. Every running execution holds a workspace container
 and roughly 96MiB of API memory, and an API that exceeds `API_MEMORY_LIMIT` is
-killed along with every execution it hosts. The default fits the `512m` API
-default; size it as `(API_MEMORY_LIMIT in MiB - 128) / 96`, for example `20`
-for `2g`, and make sure the host has RAM for that many workspaces. The API logs
+killed along with every execution it hosts. The default of `4` is conservative
+for the `2g` API default; size it as `(API_MEMORY_LIMIT in MiB - 128) / 96`,
+for example `20` for `2g`, and make sure the host has RAM for that many workspaces. The API logs
 a warning at startup when the two disagree.
 
 ## Event Polling

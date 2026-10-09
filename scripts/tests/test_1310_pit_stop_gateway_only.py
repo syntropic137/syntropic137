@@ -53,7 +53,11 @@ esac
 
 # The prechecks read /workflows (the probe's) and /health (the disk), and the
 # drain reads /health and /executions; a dry run still makes every one of them.
+# It reads stdin first, as `curl -K -` does: api_curl pipes the credentials in
+# under pipefail, and a stub that exits unread SIGPIPEs that printf, which
+# fails the call whenever the stub wins the race (a dropped `(drained)` line).
 _CURL = """#!/usr/bin/env bash
+cat > /dev/null
 echo "$*" >> "$PIT_LOG/curl"
 out=""; url=""
 while [ $# -gt 0 ]; do

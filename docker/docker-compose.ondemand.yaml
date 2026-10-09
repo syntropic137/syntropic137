@@ -45,7 +45,7 @@ services:
       - "${SYN_ENV_BIND:-127.0.0.1}:${SYN_ENV_PORT_API}:8000"
     entrypoint: ["/bin/sh", "/selfhost-entrypoint.sh"]
     # root-path /api/v1 matches selfhost - gateway proxies /api/v1/* to here
-    command: ["sh", "-c", "uvicorn syn_api.main:app --host $${SYN_API_HOST:-0.0.0.0} --port $${SYN_API_PORT:-8000} --root-path /api/v1"]
+    command: ["sh", "-c", "uvicorn syn_api.main:app --host $${SYN_API_HOST:-0.0.0.0} --port $${SYN_API_PORT:-8000} --root-path /api/v1 --timeout-graceful-shutdown 30"]
     env_file:
       - ../.env  # Shared secrets (GitHub App, Anthropic, etc.)
     environment:

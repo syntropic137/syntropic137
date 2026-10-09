@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime  # noqa: TC003 — needed at runtime for Pydantic
 from decimal import Decimal
 from enum import StrEnum
-from typing import Generic, Literal, TypeVar
+from typing import TYPE_CHECKING, Generic, Literal, TypeVar
 
 from pydantic import (
     AliasChoices,
@@ -104,8 +104,16 @@ from syn_domain.contexts.orchestration import (
 from syn_shared.agents import DEFAULT_PHASE_SANDBOX, AliasResolutionBasis
 from syn_shared.codex_auth_status import CodexAuthStatus  # noqa: TC001
 from syn_shared.display import format_utc_timestamp
-from syn_shared.display.formatters import EM_DASH
+from syn_shared.display.formatters import EM_DASH, format_cost, format_tokens
 from syn_shared.observed_model import format_observed_model
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from syn_domain.contexts.orchestration.slices.phase_profiles import (
+        Percentiles,
+        PhaseProfiles,
+    )
 
 # ---------------------------------------------------------------------------
 # Result type
@@ -908,6 +916,9 @@ class SessionSummary(BaseModel):
     total_cost_usd: Decimal = Decimal("0")
     started_at: datetime | None = None
     completed_at: datetime | None = None
+    #: The model the workflow ASKED for, from SessionStarted. Never what ran;
+    #: served when Lane 2 has reported nothing yet (#1785).
+    requested_model: str | None = None
 
 
 class ArtifactSummary(BaseModel):
@@ -1745,6 +1756,121 @@ class PhaseSkillUseInfo(BaseModel):
         used = {s.name for s in self.invoked}
         return [name for name in self.declared if name not in used]
 
+    provider: str | None = None
+    """The harness the phase ran on, from its start pins. Named so
+    ``status_display`` can say WHICH harness hides skill use; None when the
+    pins were not read."""
+
+    @computed_field(
+        description="What `status` means for this phase, in plain words. Render verbatim."
+    )
+    @property
+    def status_display(self) -> str:
+        if self.status == "observed":
+            return "observed: read from this phase's Skill tool calls"
+        if self.status == "not_observable":
+            return f"not observable: {self.provider or 'this harness'} has no Skill tool"
+        return "unavailable: no record for this run"
+
+    @computed_field(
+        description="One line on this phase's skill use. Never a count of zero "
+        "for a phase whose use could not be seen. Render verbatim."
+    )
+    @property
+    def summary_display(self) -> str:
+        if self.status != "observed":
+            if not self.declared:
+                return f"skill use {self.status_display}"
+            return f"{_count(len(self.declared), 'skill')} declared; use {self.status_display}"
+        undeclared = len({s.name for s in self.invoked} - set(self.declared))
+        if not self.declared:
+            return (
+                f"no skills declared; {undeclared} invoked anyway"
+                if undeclared
+                else ("no skills declared")
+            )
+        extra = f", plus {undeclared} undeclared" if undeclared else ""
+        hit = len(self.declared) - len(self.declared_not_invoked)
+        return f"{hit} of {_count(len(self.declared), 'declared skill')} invoked{extra}"
+
+
+def _count(n: int, noun: str) -> str:
+    return f"{n} {noun}" if n == 1 else f"{n} {noun}s"
+
+
+class ExecutionSkillUseSummary(BaseModel):
+    """Skill use across every phase of one execution (feedback 01308bcf).
+
+    A declared skill is only ``never_invoked`` when EVERY phase was observed.
+    A phase may invoke a skill it never declared, so one phase that ran where
+    use cannot be seen (codex), or could not be read, could have used any of
+    them: every declared skill no observed phase invoked is then ``not_known``
+    - the #1269 misreading this model exists to refuse, one level up.
+    """
+
+    declared: list[str] = Field(default_factory=list)
+    """Every skill some phase declared, in first-declared order."""
+    invoked: list[InvokedSkillInfo] = Field(default_factory=list)
+    """Every skill an observed phase invoked, counts summed across phases.
+    May include a skill no phase declared."""
+    never_invoked: list[str] = Field(default_factory=list)
+    """Declared, every phase observed, and no phase invoked it."""
+    not_known: list[str] = Field(default_factory=list)
+    """Declared, not invoked where observed, and some phase (declaring it or
+    not) could not be observed - so whether it was used is unknown, never zero."""
+    summary_display: str = "no phase has started"
+
+    @classmethod
+    def of(cls, phases: Sequence[PhaseSkillUseInfo]) -> ExecutionSkillUseSummary:
+        declared = list(dict.fromkeys(name for p in phases for name in p.declared))
+        counts: dict[str, int] = {}
+        for p in phases:
+            if p.status == "observed":
+                for s in p.invoked:
+                    counts[s.name] = counts.get(s.name, 0) + s.count
+        # Undeclared invocations are real, so a blind phase hides use of ANY
+        # skill, not only the ones it declared.
+        blind = any(p.status != "observed" for p in phases)
+        unused = [name for name in declared if name not in counts]
+        never = [] if blind else unused
+        not_known = unused if blind else []
+        return cls(
+            declared=declared,
+            invoked=[InvokedSkillInfo(name=n, count=c) for n, c in sorted(counts.items())],
+            never_invoked=never,
+            not_known=not_known,
+            summary_display=_execution_summary(phases, declared, counts, never, not_known),
+        )
+
+
+def _execution_summary(
+    phases: Sequence[PhaseSkillUseInfo],
+    declared: list[str],
+    counts: dict[str, int],
+    never: list[str],
+    not_known: list[str],
+) -> str:
+    if not phases:
+        return "no phase has started"
+    if all(p.status == "unavailable" for p in phases):
+        return "unavailable: no record for this run"
+    if not any(p.status == "observed" for p in phases):
+        return (
+            f"{_count(len(declared), 'skill')} declared; use not observable on any phase"
+            if declared
+            else "no skills declared; use not observable on any phase"
+        )
+    parts = [f"{_count(len(declared), 'skill')} declared"]
+    parts.append(f"{sum(1 for n in declared if n in counts)} invoked")
+    if never or not not_known:
+        parts.append(f"{len(never)} never invoked")
+    if not_known:
+        parts.append(f"{len(not_known)} use unknown")
+    undeclared = len(set(counts) - set(declared))
+    if undeclared:
+        parts.append(f"{undeclared} undeclared invoked")
+    return " · ".join(parts)
+
 
 class BranchObservationInfo(BaseModel):
     """One branch of a failed phase's workspace, as git had it (#1200).
@@ -2005,7 +2131,7 @@ class PhaseExecution(BaseModel):
     agent_provider: str | None = None
     """The provider of the agent that PRODUCED this phase's result, or null
     (PC-83). Differs from the declared provider when the phase fell back to its
-    ``fallback_agent`` on capacity or quota; ``requested_model`` is then the
+    ``fallback_agent`` on capacity, quota or a content refusal; ``requested_model`` is then the
     fallback's model. Null when nothing recorded it."""
     cost_by_model: dict[CostModelKey, Decimal] = Field(default_factory=dict)
     agent_session_ids: list[str] | None = None
@@ -2067,7 +2193,7 @@ class PhaseExecution(BaseModel):
 
     @computed_field(
         description="The model for humans: the reported id verbatim, or "
-        "'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9)."
+        "'<alias> (requested)', or 'unknown' (ADR-067 D9)."
     )
     @property
     def model_display(self) -> str:
@@ -2265,7 +2391,7 @@ class SessionDetail(BaseModel):
 
     @computed_field(
         description="The model for humans: the reported id verbatim, or "
-        "'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9)."
+        "'<alias> (requested)', or 'unknown' (ADR-067 D9)."
     )
     @property
     def agent_model_display(self) -> str:
@@ -2533,7 +2659,7 @@ class ConversationMeta(BaseModel):
 
     @computed_field(
         description="The model for humans: the reported id verbatim, or "
-        "'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9)."
+        "'<alias> (requested)', or 'unknown' (ADR-067 D9)."
     )
     @property
     def model_display(self) -> str:
@@ -3858,3 +3984,264 @@ class FeatureDisabledResponse(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     detail: FeatureDisabledDetail
+
+
+# =============================================================================
+# Phase profiles (#1716) - capacity sizing from what phases actually used
+# =============================================================================
+
+INSUFFICIENT = "insufficient"
+"""Rendered for a percentile computed over fewer phases than it needs."""
+
+
+def _format_bytes(n: float) -> str:
+    for unit, size in (("GiB", 1 << 30), ("MiB", 1 << 20), ("KiB", 1 << 10)):
+        if n >= size:
+            return f"{n / size:.1f} {unit}"
+    return f"{n:.0f} B"
+
+
+def _display(
+    value: float | None, kind: Literal["tokens", "cost", "ratio", "seconds", "bytes"]
+) -> str:
+    if value is None:
+        return INSUFFICIENT
+    if kind == "tokens":
+        return format_tokens(round(value))
+    if kind == "cost":
+        return format_cost(Decimal(str(value)))
+    if kind == "bytes":
+        return _format_bytes(value)
+    if kind == "seconds":
+        return f"{value:.1f}s"
+    return f"{value:.2f}"
+
+
+class TokenPercentilesResponse(BaseModel):
+    """p50/p90 of one measure over ``n`` phases; null below ten phases."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    n: int
+    p50: float | None
+    p90: float | None
+    p50_display: str
+    """``"insufficient"`` when ``n < 10``."""
+    p90_display: str
+
+    @classmethod
+    def of(cls, stat: Percentiles, kind: Literal["tokens", "cost"]) -> TokenPercentilesResponse:
+        return cls(
+            n=stat.n,
+            p50=stat.p50,
+            p90=stat.p90,
+            p50_display=_display(stat.p50, kind),
+            p90_display=_display(stat.p90, kind),
+        )
+
+
+class ResourcePercentilesResponse(BaseModel):
+    """p50/p95 of one measure over ``n`` measured phases; null below ten."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    n: int
+    p50: float | None
+    p95: float | None
+    p50_display: str
+    """``"insufficient"`` when ``n < 10``."""
+    p95_display: str
+
+    @classmethod
+    def of(
+        cls, stat: Percentiles, kind: Literal["ratio", "seconds", "bytes"]
+    ) -> ResourcePercentilesResponse:
+        return cls(
+            n=stat.n,
+            p50=stat.p50,
+            p95=stat.p95,
+            p50_display=_display(stat.p50, kind),
+            p95_display=_display(stat.p95, kind),
+        )
+
+
+class PhaseTokenProfileResponse(BaseModel):
+    """One (phase type, model). A sample is one execution's phase on that model.
+
+    A phase that fell back to another model mid-phase is a sample under BOTH
+    models, each holding only the tokens that model consumed.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    phase_id: str
+    model: CostModelKey
+    """The model the harness reported running; the unknown bucket when it reported none."""
+    input_tokens: TokenPercentilesResponse
+    output_tokens: TokenPercentilesResponse
+    cache_creation_tokens: TokenPercentilesResponse
+    cache_read_tokens: TokenPercentilesResponse
+    cost_usd: TokenPercentilesResponse
+    unpriced_phases: int
+    """Samples whose cost omits tokens no rate could price: those costs are floors."""
+
+
+class ResourceCoverageResponse(BaseModel):
+    """What the resource percentiles stand on. Every count is over the whole window."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    phases: int
+    """Phases of this type with any telemetry in the window."""
+    phases_without_usage_row: int
+    """Phases whose teardown recorded no ``workspace_resource_usage`` row."""
+    cpu_usage_seconds_missing: int
+    cpu_throttled_seconds_missing: int
+    memory_peak_bytes_missing: int
+    disk_bytes_at_teardown_missing: int
+    wall_seconds_missing: int
+    """Usage rows recording no workspace lifetime, so CPU per wall-second is undefined."""
+    coverage_display: str
+    """e.g. ``"0/42 phases measured"``."""
+
+
+class PhaseResourceProfileResponse(BaseModel):
+    """One phase type's workspace resource use at teardown (cgroup counters)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    phase_id: str
+    cpu_seconds_per_wall_second: ResourcePercentilesResponse
+    """CPU-seconds over the workspace lifetime recorded with them, creation to termination."""
+    cpu_throttled_seconds: ResourcePercentilesResponse
+    memory_peak_bytes: ResourcePercentilesResponse
+    disk_bytes_at_teardown: ResourcePercentilesResponse
+    coverage: ResourceCoverageResponse
+
+
+class PhaseProfilesResponse(BaseModel):
+    """Per-phase-type usage profiles for one workflow over a window (#1716).
+
+    Percentiles are over EVERY phase of the workflow with telemetry in
+    ``[since, until)`` - nothing is paged.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    workflow_id: str
+    since: datetime
+    until: datetime
+    window_days: int
+    executions: int
+    """Executions of the workflow considered; phases are filtered to the window."""
+    tokens: list[PhaseTokenProfileResponse]
+    resources: list[PhaseResourceProfileResponse]
+
+    @classmethod
+    def from_profiles(cls, profiles: PhaseProfiles, window_days: int) -> PhaseProfilesResponse:
+        return cls(
+            workflow_id=profiles.workflow_id,
+            since=profiles.since,
+            until=profiles.until,
+            window_days=window_days,
+            executions=profiles.executions,
+            tokens=[
+                PhaseTokenProfileResponse(
+                    phase_id=t.phase_id,
+                    model=t.model,
+                    input_tokens=TokenPercentilesResponse.of(t.input_tokens, "tokens"),
+                    output_tokens=TokenPercentilesResponse.of(t.output_tokens, "tokens"),
+                    cache_creation_tokens=TokenPercentilesResponse.of(
+                        t.cache_creation_tokens, "tokens"
+                    ),
+                    cache_read_tokens=TokenPercentilesResponse.of(t.cache_read_tokens, "tokens"),
+                    cost_usd=TokenPercentilesResponse.of(t.cost_usd, "cost"),
+                    unpriced_phases=t.unpriced_phases,
+                )
+                for t in profiles.tokens
+            ],
+            resources=[
+                PhaseResourceProfileResponse(
+                    phase_id=r.phase_id,
+                    cpu_seconds_per_wall_second=ResourcePercentilesResponse.of(
+                        r.cpu_seconds_per_wall_second, "ratio"
+                    ),
+                    cpu_throttled_seconds=ResourcePercentilesResponse.of(
+                        r.cpu_throttled_seconds, "seconds"
+                    ),
+                    memory_peak_bytes=ResourcePercentilesResponse.of(r.memory_peak_bytes, "bytes"),
+                    disk_bytes_at_teardown=ResourcePercentilesResponse.of(
+                        r.disk_bytes_at_teardown, "bytes"
+                    ),
+                    coverage=ResourceCoverageResponse(
+                        phases=r.coverage.phases,
+                        phases_without_usage_row=r.coverage.phases_without_usage_row,
+                        cpu_usage_seconds_missing=r.coverage.cpu_usage_seconds_missing,
+                        cpu_throttled_seconds_missing=r.coverage.cpu_throttled_seconds_missing,
+                        memory_peak_bytes_missing=r.coverage.memory_peak_bytes_missing,
+                        disk_bytes_at_teardown_missing=r.coverage.disk_bytes_at_teardown_missing,
+                        wall_seconds_missing=r.coverage.wall_seconds_missing,
+                        coverage_display=(
+                            f"{r.coverage.phases - r.coverage.phases_without_usage_row}"
+                            f"/{r.coverage.phases} phases measured"
+                        ),
+                    ),
+                )
+                for r in profiles.resources
+            ],
+        )
+
+
+# =============================================================================
+# Request latency (ADR-075)
+# =============================================================================
+
+LatencyWindow = Literal["1h", "24h", "7d", "30d"]
+"""How far back ``GET /observability/latency`` looks. 30d is the retention."""
+
+
+class RouteLatencyResponse(BaseModel):
+    """Exact latency percentiles of one (method, route template) over the window.
+
+    Latency here is ARRIVAL TO RESPONSE START (time to first byte), not to the
+    last byte, so a long-lived stream counts as fast if it answered promptly.
+    """
+
+    method: str
+    route: str
+    """The route TEMPLATE, e.g. ``/evals/{eval_id}``; ``<unmatched>`` for no route."""
+    count: int
+    p50_ms: float
+    """Arrival-to-response-start latency, ms; likewise every ``*_ms`` field here."""
+    p95_ms: float
+    p99_ms: float
+    max_ms: float
+    p99_display: str
+
+
+class LatencyRecorderStatusResponse(BaseModel):
+    """What this API process's recorder did with its samples since it started."""
+
+    running: bool
+    written: int
+    dropped: int
+    """Offered while the buffer was full or the recorder was not running."""
+    write_failures: int
+    """Samples lost because their batch failed or overran its deadline."""
+    discarded: int
+    """Samples still unwritten when a shutdown's deadline expired."""
+    cleanup_failures: int
+    """Written batches whose connection could not be released in time (terminated)."""
+    buffered: int
+
+
+class RequestLatencyResponse(BaseModel):
+    """Per-route arrival-to-response-start latency from ``api_request_latency``, slowest p99 first."""
+
+    window: LatencyWindow
+    since: str
+    """ISO 8601 UTC start of the window."""
+    available: bool
+    """False when the observability store could not be read; ``routes`` is then empty."""
+    routes: list[RouteLatencyResponse]
+    recorder: LatencyRecorderStatusResponse

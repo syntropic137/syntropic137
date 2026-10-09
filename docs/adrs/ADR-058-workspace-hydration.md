@@ -265,6 +265,8 @@ Add `requires_repos: bool` to workflow templates as an execution-time gate.
 
 > **v0.25.2 update (2026-04-18):** The original inference rule was "infer from `repository` presence" -- workflows without a `repository:` block defaulted to `false`. With v0.25.2's ADR-063 typed-repos channel, the legacy `repository:` block is being phased out (workflows now declare `requires_repos: true` and accept repos via runtime `-R`), so inferring from its presence no longer matches the platform's primary use case. The new default is opt-out: omit `requires_repos`, get `true`. Migrated marketplace workflows (`code-review`, `sdlc-trunk` v0.2.0+) rely on this.
 
+> **#955 update (2026-10-08):** `requires_repos: false` now means "this workflow needs no repos", not "clone none". The template's own repos still do not apply. Repos passed explicitly at dispatch (`-R`) are honoured and access-checked regardless of `requires_repos` (#1776), and are checked out only in phases with `clone_repos: true` (the default; see the addendum below). A phase with `clone_repos: false` still gets their credentials but no checkout, so a workspace can be bare even when repos were passed. The CLI no longer warns that `-R` repos will not be cloned.
+
 **Placeholder removal:** `SeedWorkflowService` no longer injects a `placeholder/not-configured` URL. Workflows without repos get `repository_url: ""`.
 
 ### Design Philosophy

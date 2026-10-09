@@ -79,6 +79,10 @@ both SHAs, and stop.
    - each mutation that was run and what it killed
    - what was deliberately not done, and why
    - anything that could not be verified
+   - which agent ran each verification round, from the `Verifier:` line of
+     every report you read. If any round names a verifier that is not codex,
+     say plainly that the verifier fell back to that agent, so the review was
+     not cross-family
    - the `## Screenshots` section from `reverify.md`, row for row, when the
      change touches a UI app
    - a `## Release notes` section: user-facing, a few lines. The release gate

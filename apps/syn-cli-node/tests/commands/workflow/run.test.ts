@@ -648,7 +648,10 @@ describe("workflow run commands", () => {
       expect(stdout()).not.toContain("Warning:");
     });
 
-    it("warns when -R is passed to a requires_repos: false workflow, including under --dry-run (issue #1081)", async () => {
+    it("sends -R to a requires_repos: false workflow without warning, because the server clones them (#955)", async () => {
+      // requires_repos: false only stops the template's own repos applying;
+      // explicit -R repos are cloned (#955, #1776). A warning saying otherwise
+      // would tell the user their repos are dropped when they are not.
       mockFetch
         .mockResolvedValueOnce(jsonResponse({ detail: "Not found" }, 404))
         .mockResolvedValueOnce(
@@ -668,19 +671,23 @@ describe("workflow run commands", () => {
             input_declarations: [],
             requires_repos: false,
           }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({ status: "started", execution_id: "exec-955" }),
         );
 
       await runCommand.handler({
         positionals: ["wf-norepo"],
-        values: { repo: ["syntropic137/syntropic137"], "dry-run": true },
+        values: { repo: ["syntropic137/syntropic137"] },
       });
 
       const out = stdout();
-      expect(out).toContain("Warning:");
-      expect(out).toContain("Research WF");
-      expect(out).toContain("DRY RUN");
-      // dry-run must never reach execute
-      expect(mockFetch).toHaveBeenCalledTimes(3);
+      expect(out).not.toContain("Warning:");
+      expect(out).not.toContain("will not be cloned");
+      expect(mockFetch).toHaveBeenCalledTimes(4);
+      const executeReq = mockFetch.mock.calls[3]![0] as Request;
+      const body = JSON.parse(await executeReq.clone().text());
+      expect(body.repos).toEqual(["syntropic137/syntropic137"]);
     });
 
     it("does not warn about -R when requires_repos: true", async () => {

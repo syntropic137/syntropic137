@@ -143,6 +143,13 @@ phases:
       # cost figures in this file were measured under gpt-5.6-sol
       # (pre-2026-09-24); re-measure before tuning them against this model.
       model: gpt-sol
+    # Cross-family review: opus implements, codex verifies. When codex's provider
+    # cannot or will not serve the request (capacity, quota, a content-filter
+    # refusal) before the review did any work, the phase runs once on claude
+    # instead (PC-83), and the report says the review was not cross-family.
+    fallback_agent:
+      provider: claude
+      model: opus
     skills:
       - syntropic137/software-leverage-points/testing@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
       - syntropic137/software-leverage-points/error-handling@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
@@ -207,6 +214,13 @@ phases:
       # cost figures in this file were measured under gpt-5.6-sol
       # (pre-2026-09-24); re-measure before tuning them against this model.
       model: gpt-sol
+    # Cross-family review: opus implements, codex verifies. When codex's provider
+    # cannot or will not serve the request (capacity, quota, a content-filter
+    # refusal) before the review did any work, the phase runs once on claude
+    # instead (PC-83), and the report says the review was not cross-family.
+    fallback_agent:
+      provider: claude
+      model: opus
     skills:
       - syntropic137/software-leverage-points/testing@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
       - syntropic137/software-leverage-points/error-handling@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
