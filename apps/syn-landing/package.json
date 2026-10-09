@@ -4,6 +4,9 @@
   "private": true,
   "description": "syntropic137.com, the marketing site (Vite + React 19, deployed on Vercel).",
   "type": "module",
+  "engines": {
+    "node": "22.x"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build",

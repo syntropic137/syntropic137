@@ -1,14 +1,4 @@
 # Security Policy
 
-## Reporting a Vulnerability
-
-Please do not report security vulnerabilities through public GitHub issues.
-
-Report vulnerabilities by opening a [GitHub Security Advisory](../../security/advisories/new)
-in this repository. You will receive a response within 72 hours.
-
-Please include:
-- Description of the vulnerability
-- Steps to reproduce
-- Potential impact
-- Suggested fix (if any)
+syntropic137.com is part of the syntropic137/syntropic137 monorepo. See the
+repository's [SECURITY.md](../../SECURITY.md) for how to report a vulnerability.
