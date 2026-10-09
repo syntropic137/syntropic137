@@ -291,6 +291,7 @@ class EvalListProjection(RecordedTimeProjection):
             before=created_before,
             offset=offset,
             limit=limit,
+            key_field="eval_id",
         )
         records = await page_projection(
             self._store, self.PROJECTION_NAME, query, to_row=_from_document

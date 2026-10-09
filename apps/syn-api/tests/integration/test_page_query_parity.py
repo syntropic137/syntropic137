@@ -238,3 +238,40 @@ async def test_the_execution_window_is_answered_from_its_index(e2_database: str)
         assert await store.page_keys(projection, query) == expected
     finally:
         await pool.close()
+
+
+async def test_a_tie_split_across_a_page_boundary_survives_a_rewrite_between_requests(
+    e2_database: str,
+) -> None:
+    """Tied rows, page size 1, the second rewritten between requests (#1800 review).
+
+    ``updated_at`` moves on that write; the key does not. The store and
+    ``PageQuery.run`` (over ``get_all``'s now-reordered read) both page x then y.
+    """
+    tied = "2026-10-01T10:00:00+00:00"
+    query = PageQuery(status=TEXT, timestamp_field="at", limit=1)
+    pool = await asyncpg.create_pool(e2_database, min_size=1, max_size=2)
+    try:
+        store = PostgresProjectionStore(pool)
+        projection = "page_query_tie"
+        for key in ("x", "y"):
+            await store.save(projection, key, {"name": key, "status": "completed", "at": tied})
+
+        page_1 = await store.page_keys(projection, query)
+        await store.save(projection, "y", {"name": "y", "status": "failed", "at": tied})
+        second = PageQuery(status=TEXT, timestamp_field="at", offset=1, limit=1)
+        page_2 = await store.page_keys(projection, second)
+        stored = await store.get_all(projection)
+        fallback = [
+            second.run(
+                [(str(doc["name"]), doc) for doc in stored],
+                document_of=lambda kv: kv[1],
+                to_row=lambda kv: kv[0],
+                key_of=lambda kv: kv[0],
+            ).rows
+        ]
+
+        assert page_1.rows + page_2.rows == ["x", "y"]
+        assert fallback == [page_2.rows]
+    finally:
+        await pool.close()

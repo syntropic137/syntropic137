@@ -208,6 +208,7 @@ async def _replayed(stream: _Stream, *, times: int) -> EvalListProjection:
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
+    from syn_domain.pagination import ProjectionRecord
     from syn_domain.projection_count import GroupKey
 
 
@@ -467,3 +468,42 @@ def test_an_eval_definition_change_rejects_an_unknown_field() -> None:
         EvalDefinitionChange.model_validate(
             {"sequence": 1, "definition_version": 1, "changed_at": "2026-10-01T00:00:00Z", "x": 1}
         )
+
+
+class _NewestWriteFirst(InMemoryProjectionStore):
+    """``get_all`` in ``updated_at DESC`` order, as Postgres reads it: a write moves a row first.
+
+    Not a ``ProjectionPager``, so ``page`` takes the Python fallback.
+    """
+
+    async def save(self, projection: str, key: str, data: ProjectionRecord) -> None:
+        await super().save(projection, key, dict(data))
+        rows = self._data[projection]  # pyright: ignore[reportPrivateUsage]  # the double's own state
+        written = rows.pop(key)
+        self._data[projection] = {key: written, **rows}  # pyright: ignore[reportPrivateUsage]
+
+
+async def test_tied_evals_rewritten_between_pages_neither_repeat_nor_vanish() -> None:
+    """Equal ``created_at``, page size 1, B rewritten between requests: A then B (#1800 review).
+
+    The fallback broke the tie by ``get_all`` order, which a write changes, so
+    page 2 was A again; the key is immutable.
+    """
+    from syn_domain.contexts.orchestration.domain.read_models.eval_summary import EvalRecord
+
+    store = _NewestWriteFirst()
+    evals = EvalListProjection(store)
+    created = "2026-10-01T00:00:00+00:00"
+    for eval_id in ("eval-a", "eval-b"):
+        record = EvalRecord(eval_id=eval_id, name=eval_id, goal="g", created_at=created)
+        await store.save(
+            EvalListProjection.PROJECTION_NAME, eval_id, record.model_dump(mode="json")
+        )
+
+    page_1 = await evals.page(offset=0, limit=1)
+    renamed = EvalRecord(eval_id="eval-b", name="renamed", goal="g", created_at=created)
+    await store.save(EvalListProjection.PROJECTION_NAME, "eval-b", renamed.model_dump(mode="json"))
+    page_2 = await evals.page(offset=1, limit=1)
+
+    assert [row.record.eval_id for row in page_1.rows] == ["eval-a"]
+    assert [row.record.eval_id for row in page_2.rows] == ["eval-b"]
