@@ -318,9 +318,7 @@ async def test_execution_summary_never_calls_a_codex_declared_skill_unused() -> 
     assert [(s.name, s.count) for s in summary.invoked] == [("architecture", 1)]
     assert summary.never_invoked == []
     assert summary.not_known == ["principles-and-patterns"]
-    assert summary.summary_display == (
-        "2 skills declared · 1 invoked · 1 use unknown"
-    )
+    assert summary.summary_display == ("2 skills declared · 1 invoked · 1 use unknown")
 
 
 async def _blind_review(start_configs: dict[str, PhaseStartConfig]) -> PhaseExecutionInfo:
