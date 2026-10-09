@@ -77,20 +77,22 @@ function summarizeRaw(raw: string): string | undefined {
   return undefined
 }
 
-export function summarizeToolInput(input: Record<string, unknown> | null | undefined): string {
-  if (!input) return ''
-  if (typeof input.raw === 'string' && Object.keys(input).length === 1) {
-    const fromRaw = summarizeRaw(input.raw)
-    if (fromRaw) return fromRaw
-  }
+/** The first summary key with a usable string (or string list) value. */
+function summaryKeyValue(input: Record<string, unknown>): string | undefined {
   for (const key of SUMMARY_KEYS) {
     const v = input[key]
     if (typeof v === 'string' && v.trim()) return v
     if (Array.isArray(v) && v.every((x) => typeof x === 'string')) return v.join(' ')
   }
-  const keys = Object.keys(input)
-  if (keys.length === 0) return ''
-  return JSON.stringify(input)
+  return undefined
+}
+
+export function summarizeToolInput(input: Record<string, unknown> | null | undefined): string {
+  if (!input) return ''
+  const fromRaw = typeof input.raw === 'string' && Object.keys(input).length === 1 ? summarizeRaw(input.raw) : undefined
+  const found = fromRaw ?? summaryKeyValue(input)
+  if (found) return found
+  return Object.keys(input).length === 0 ? '' : JSON.stringify(input)
 }
 
 function durationText(seconds: number | null | undefined): string | undefined {
@@ -500,18 +502,23 @@ export interface SessionListRow {
   model: string
 }
 
+const rowPhase = (s: SessionListRowInput): string => s.phase_display || s.phase_id || s.workflow_name || s.workflow_id || `Session ${shortId(s.id)}`
+const rowProvider = (p: string | null | undefined): string | null => (p ? (PROVIDER_LABEL[p.toLowerCase()] ?? p) : null)
+const rowSub = (s: SessionListRowInput): string =>
+  [shortId(s.id), s.parent_session_id ? `child of ${shortId(s.parent_session_id)}` : s.repos_display || null].filter(Boolean).join(' · ')
+
 /** One Sessions-board row: the phase leads, the workflow and execution sit in their own column. */
 export function sessionListRow(s: SessionListRowInput): SessionListRow {
   const delegated = !!s.parent_session_id
-  const phase = s.phase_display || s.phase_id || s.workflow_name || s.workflow_id || `Session ${shortId(s.id)}`
+  const phase = rowPhase(s)
   return {
     title: delegated ? `${phase} (delegated)` : phase,
     delegated,
-    sub: [shortId(s.id), delegated ? `child of ${shortId(s.parent_session_id ?? '')}` : s.repos_display || null].filter(Boolean).join(' · '),
+    sub: rowSub(s),
     workflow: s.workflow_name || s.workflow_id || 'Unknown workflow',
     execution: s.execution_id ? `exec ${shortId(s.execution_id)}` : '',
     agent: agentLabel(s.agent_provider, s.agent_model_display, s.agent_model),
-    provider: s.agent_provider ? (PROVIDER_LABEL[s.agent_provider.toLowerCase()] ?? s.agent_provider) : null,
+    provider: rowProvider(s.agent_provider),
     model: observedModel(s.agent_model, s.agent_model_display) ?? MODEL_NOT_REPORTED,
   }
 }
