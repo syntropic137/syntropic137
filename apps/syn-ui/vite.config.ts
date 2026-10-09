@@ -10,7 +10,9 @@ const API_TARGET = process.env.VITE_API_PROXY_TARGET ?? 'http://127.0.0.1:9137'
 // a credential under that prefix would ship to the browser. This one is read
 // server-side only and applied to proxied requests.
 const API_AUTH = process.env.SYN_UI_PROXY_AUTH
-const API_HEADERS = API_AUTH ? { authorization: `Basic ${Buffer.from(API_AUTH).toString('base64')}` } : undefined
+// Kept out of the resolved config object: Vite serialises `server.proxy` (DEBUG=vite:*
+// prints it), so the header is injected per request in `configure` instead.
+const API_AUTH_HEADER = API_AUTH ? `Basic ${Buffer.from(API_AUTH).toString('base64')}` : undefined
 
 // The app is served at /next until it takes over / (spec, Migration plan).
 // Set SYN_UI_BASE=/next/ for that build; the router reads import.meta.env.BASE_URL.
@@ -27,9 +29,9 @@ export default defineConfig({
       '/api/v1': {
         target: API_TARGET,
         changeOrigin: true,
-        headers: API_HEADERS,
         rewrite: (path) => path.replace(/^\/api\/v1/, ''),
         configure: (proxy) => {
+          if (API_AUTH_HEADER) proxy.on('proxyReq', (req) => req.setHeader('authorization', API_AUTH_HEADER))
           proxy.on('error', (err: NodeJS.ErrnoException) => {
             console.log(`\x1b[33m[proxy:api]\x1b[0m ${err.code ?? err.message} (is the API running on ${API_TARGET}? or use pnpm dev:fixtures)`)
           })
