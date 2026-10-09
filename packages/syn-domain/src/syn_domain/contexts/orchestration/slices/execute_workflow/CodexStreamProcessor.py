@@ -52,7 +52,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final, Protocol, TypedDict
@@ -64,12 +63,14 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.announced_model i
 from syn_domain.contexts.orchestration.slices.execute_workflow.CancelSignalPoller import (
     CancelSignalPoller,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.codex_faults import (
+    codex_fault_reason,
+    codex_login_fault_in,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
-    ApiErrorType,
     InterruptibleWorkspace,
     ReportedUsage,
     StreamResult,
-    api_error_label,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.held_token_rows import HeldTokenRows
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_cost_limit import (
@@ -80,7 +81,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.phase_verdict imp
     VerdictReader,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.side_effect_free import (
-    command_changes_nothing,
+    codex_item_changes_nothing,
 )
 from syn_shared.agents import AgentProvider
 from syn_shared.codex_stream import (
@@ -125,99 +126,7 @@ MISSING_TERMINAL_TURN_REASON: Final[str] = (
 # This processor drives a CODEX primary, so its declared delegate is claude -p.
 DELEGATION_TARGET: DelegationTarget = DELEGATION_TARGET_BY_PRIMARY[AgentProvider.CODEX]
 
-# --- Terminal faults the codex CLI reports on stdout as NON-JSON log lines ----
-#
-# The codex CLI writes tracing lines to the same stdout as its JSON events. Most
-# are inert noise (see module docstring) and are rightly discarded, but a login
-# failure is announced ONLY there:
-#
-#   ERROR codex_login::auth::manager: Failed to refresh token: 401 Unauthorized
-#   ... "code": "refresh_token_reused"
-#
-# Discarding it meant an expired codex login surfaced downstream as "codex
-# stream ended without a terminal turn.completed event" - a true statement
-# about a symptom that names the wrong subsystem and gives an operator nothing
-# to act on (issue #891).
-#
-# THREE conditions, ALL required. Each rejects lines the other two accept.
-#
-#   1. error severity, ANCHORED to the tracing-line format,
-#   2. auth CONTEXT (the codex_login target, or an auth:: module path),
-#   3. an explicit auth-FAILURE marker.
-#
-# Why each is needed, with the line that motivates it:
-#
-# (1) anchored severity. A severity word can appear anywhere in a line,
-#     including inside captured command output:
-#
-#       INFO codex_exec: command output: ERROR deleting file: unauthorized operation
-#
-#     A file-deletion failure is not an auth failure. Matching `ERROR`
-#     anywhere would diagnose it as one. The tracing format puts the severity
-#     first, so that is where it is required.
-#
-# (2) auth context. The golden fixture carries a routine
-#     `ERROR codex_models_manager::manager: ...` diagnostic; without an auth
-#     requirement, a severity+marker filter would promote unrelated subsystem
-#     errors into authentication verdicts.
-#
-# (3) a failure marker. The subsystem NAME is not evidence of a fault -
-#     healthy lines carry it too:
-#
-#       INFO codex_login::auth::manager: loaded cached credentials
-#
-#     An early draft ORed its alternatives, so the bare name matched. Because
-#     AgentExecutionHandler forces exit code 1 whenever a codex stream carries
-#     any error_reason, that draft would have failed SUCCESSFUL codex phases -
-#     a worse defect than the missing reason it set out to fix.
-#
-# The marker list is deliberately broader than the single production line that
-# prompted #891. Real auth failures the CLI spells differently -
-# "Authentication failed: HTTP 401", "token expired" - were falling through to
-# the generic "stream ended without a terminal turn" message, which is exactly
-# the misdiagnosis this exists to remove.
-_TRACING_ERROR_SEVERITY_RE = re.compile(r"^\s*(?:ERROR|FATAL)\b")
-_AUTH_CONTEXT_RE = re.compile(r"codex_login|auth::", re.IGNORECASE)
-_AUTH_FAILURE_MARKER_RE = re.compile(
-    r"failed to refresh token"
-    r"|refresh_token_reused"
-    r"|invalid_grant"
-    r"|unauthorized"
-    r"|authentication failed"
-    r"|token expired"
-    r"|login required"
-    r"|\b(?:401|403)\b",
-    re.IGNORECASE,
-)
-_HTTP_AUTH_STATUS_RE = re.compile(r"\b(401|403)\b")
-_MAX_FAULT_LINE_LEN = 160
-
 _MAX_PREVIEW_LEN = 500
-
-
-def codex_fault_reason(message: str) -> str:
-    """The reason text codex's own words about a failed turn are reported under.
-
-    A function rather than an f-string at the one call site because it is not
-    only written here: `busy_upstream` has to RECOGNISE a specific sentence
-    codex says about its own capacity, and it can only do that against the
-    exact spelling this produces. Two copies of that spelling would drift the
-    first time either the prefix or the truncation changed, and the failure
-    would be silent - a phase that stopped being retried, with nothing to read
-    but the reason it was never retried for.
-    """
-    return f"codex reported: {message[:_MAX_FAULT_LINE_LEN]}"
-
-
-def codex_login_fault_reason(status: str, line: str) -> str:
-    """The reason text a codex CLI login fault on stdout is reported under.
-
-    A function for the same reason as `codex_fault_reason`: the upstream
-    failure reader recognises this shape as `auth` by the prefix this writes
-    with an empty `line`, so the two cannot drift apart.
-    """
-    label = api_error_label(ApiErrorType.AUTHENTICATION, status)
-    return f"{label}: codex CLI login - {line[:_MAX_FAULT_LINE_LEN]}"
 
 
 def _as_int(value: object) -> int:
@@ -259,27 +168,6 @@ class _CodexItem(TypedDict, total=False):
     #: conclusion, and the only copy of that conclusion when the file the
     #: phase was supposed to write turns out to be empty (#1195).
     text: str
-
-
-#: Item types that are the model's words, so can change nothing (#1825).
-#: ``reasoning`` is codex's summarised thinking. It is named here rather than in
-#: `CodexItemType` because nothing else in the platform reads it.
-_WORDS_ONLY_ITEMS: frozenset[str] = frozenset({CodexItemType.AGENT_MESSAGE, "reasoning"})
-
-
-def _item_changes_nothing(item: _CodexItem) -> bool:
-    """Whether a codex item is known to leave the workspace as it was (#1825).
-
-    Words, and a shell command `side_effect_free` reads as read-only in full.
-    Every other type, ``file_change`` and types not yet known included, may
-    have written.
-    """
-    item_type = item.get("type")
-    if item_type in _WORDS_ONLY_ITEMS:
-        return True
-    if item_type == CodexItemType.COMMAND_EXECUTION:
-        return command_changes_nothing(str(item.get("command", "")))
-    return False
 
 
 def _changed_paths_preview(item: _CodexItem) -> str:
@@ -811,17 +699,9 @@ class CodexStreamProcessor:
         """
         if self._auth_fault_candidate is not None:
             return
-        if not _TRACING_ERROR_SEVERITY_RE.search(line):
-            return
-        if not _AUTH_CONTEXT_RE.search(line):
-            return
-        if not _AUTH_FAILURE_MARKER_RE.search(line):
-            return
-        status = _HTTP_AUTH_STATUS_RE.search(line)
-        self._auth_fault_candidate = codex_login_fault_reason(
-            status.group(1) if status else "", line
-        )
-        logger.warning("Codex auth fault seen on stdout: %s", line[:_MAX_FAULT_LINE_LEN])
+        self._auth_fault_candidate = codex_login_fault_in(line)
+        if self._auth_fault_candidate is not None:
+            logger.warning("Codex auth fault seen on stdout: %s", self._auth_fault_candidate)
 
     def _note_delegation_attempt(self, tool_use_id: str, command: str) -> None:
         """Record a codex command_execution that invokes `claude -p` (#894)."""
@@ -965,7 +845,7 @@ class CodexStreamProcessor:
         # run a second time over whatever the item did (#1303). Whether it
         # may also have WRITTEN is a narrower fact, and only an item read in
         # full can claim it did not (#1825).
-        changes_nothing = _item_changes_nothing(item)
+        changes_nothing = codex_item_changes_nothing(item.get("type"), item.get("command"))
         self._collector.note_agent_activity(changed_nothing=changes_nothing)
 
         item_type = item.get("type")
@@ -997,7 +877,7 @@ class CodexStreamProcessor:
         # announce a `file_change` only once it has happened (#1064), so the
         # completion can be the first and last the stream says about a
         # workspace mutation. Same rule as the start: any type counts.
-        changes_nothing = _item_changes_nothing(item)
+        changes_nothing = codex_item_changes_nothing(item.get("type"), item.get("command"))
         self._collector.note_agent_activity(changed_nothing=changes_nothing)
 
         item_type = item.get("type")

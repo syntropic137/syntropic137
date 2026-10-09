@@ -29,7 +29,7 @@ __all__ = [
     "UpstreamFailureReader",
 ]
 
-from syn_domain.contexts.orchestration.slices.execute_workflow.CodexStreamProcessor import (
+from syn_domain.contexts.orchestration.slices.execute_workflow.codex_faults import (
     codex_fault_reason,
     codex_login_fault_reason,
 )

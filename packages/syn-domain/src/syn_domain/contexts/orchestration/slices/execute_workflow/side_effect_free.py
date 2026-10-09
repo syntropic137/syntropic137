@@ -23,6 +23,8 @@ import re
 import shlex
 from pathlib import PurePosixPath
 
+from syn_shared.codex_stream import CodexItemType
+
 #: Claude tools that only read. Anything not listed is treated as work.
 READ_ONLY_TOOLS: frozenset[str] = frozenset({"Read", "Grep", "Glob", "LS"})
 
@@ -74,6 +76,26 @@ def tool_call_changes_nothing(tool_name: str, command: object = None) -> bool:
     if tool_name in READ_ONLY_TOOLS:
         return True
     if tool_name in SHELL_TOOLS:
+        return isinstance(command, str) and command_changes_nothing(command)
+    return False
+
+
+#: Codex item types that are the model's words, so can change nothing.
+#: ``reasoning`` is codex's summarised thinking; nothing else in the platform
+#: reads it, so it has no `CodexItemType` member.
+_CODEX_WORDS_ONLY_ITEMS: frozenset[str] = frozenset({CodexItemType.AGENT_MESSAGE, "reasoning"})
+
+
+def codex_item_changes_nothing(item_type: object, command: object) -> bool:
+    """Whether a codex item is known to leave the workspace as it was.
+
+    Words, and a ``command_execution`` whose command reads in full. Every
+    other type, ``file_change`` and types not yet known included, may have
+    written.
+    """
+    if item_type in _CODEX_WORDS_ONLY_ITEMS:
+        return True
+    if item_type == CodexItemType.COMMAND_EXECUTION:
         return isinstance(command, str) and command_changes_nothing(command)
     return False
 
