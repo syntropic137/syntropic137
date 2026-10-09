@@ -1,56 +1,49 @@
-import { useState } from "react";
-import { Menu, X } from "lucide-react";
 import GitHubStars from "./GitHubStars";
+import GitHubIcon from "./GitHubIcon";
+import SMark from "./SMark";
+import Wordmark from "./Wordmark";
+import { GITHUB_URL, NAV_CTA, NAV_GITHUB_LABEL, NAV_LINKS, REPO, isExternal } from "../data/copy";
 
-const GitHubIcon = ({ size = 16 }: { size?: number }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor">
-    <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
-  </svg>
-);
-
-const REPO = "syntropic137/syntropic137";
-
+/**
+ * Site header (Landing and PhoneLanding boards): the S and wordmark, the
+ * capsule of section links, GitHub with its live star count, and the call to
+ * action. It sits over the top of the hero, whose ground runs behind it.
+ * Phones keep the S, the wordmark and the GitHub button.
+ */
 export default function Nav() {
-  const [open, setOpen] = useState(false);
-
   return (
-    <nav className="nav" aria-label="Main navigation">
-      <div className="container nav-inner">
-        <div className="nav-left">
-          <a href="/" className="nav-brand">Syntropic137</a>
-          <span className="nav-tagline">Agentic Engineering</span>
-        </div>
-        <div className="nav-right">
-          <a href="#features" className="nav-link">Features</a>
-          <a href="#how-it-works" className="nav-link">Workflows</a>
-          <a href="#observability" className="nav-link">Observability</a>
-          <a href="https://docs.syntropic137.com" className="nav-link" target="_blank" rel="noopener noreferrer">Docs</a>
-          <a href="https://github.com/syntropic137/syntropic137" className="nav-github-btn" target="_blank" rel="noopener noreferrer">
-            <GitHubIcon size={16} />
-            <span>GitHub</span>
-            <GitHubStars repo={REPO} />
+    <header className="site-header">
+      <a href="/" className="site-header__brand" aria-label="Syntropic137 home">
+        <SMark size={26} label="" />
+        <Wordmark />
+      </a>
+      <nav aria-label="Site" className="site-nav">
+        {NAV_LINKS.map((link) => (
+          <a
+            key={link.label}
+            href={link.href}
+            className="site-nav__link"
+            {...(isExternal(link.href) ? { target: "_blank", rel: "noopener noreferrer" } : {})}
+          >
+            {link.label}
           </a>
-        </div>
-        <button
-          className="nav-toggle"
-          onClick={() => setOpen(!open)}
-          aria-label={open ? "Close menu" : "Open menu"}
-          aria-expanded={open}
+        ))}
+      </nav>
+      <div className="site-header__actions">
+        <a
+          href={GITHUB_URL}
+          className="site-header__github"
+          target="_blank"
+          rel="noopener noreferrer"
         >
-          {open ? <X size={20} /> : <Menu size={20} />}
-        </button>
-        <div className={`nav-drawer${open ? " open" : ""}`}>
-          <a href="#features" className="nav-link" onClick={() => setOpen(false)}>Features</a>
-          <a href="#how-it-works" className="nav-link" onClick={() => setOpen(false)}>Workflows</a>
-          <a href="#observability" className="nav-link" onClick={() => setOpen(false)}>Observability</a>
-          <a href="https://docs.syntropic137.com" className="nav-link" target="_blank" rel="noopener noreferrer" onClick={() => setOpen(false)}>Docs</a>
-          <a href="https://github.com/syntropic137/syntropic137" className="nav-github-btn" target="_blank" rel="noopener noreferrer" onClick={() => setOpen(false)}>
-            <GitHubIcon size={16} />
-            <span>GitHub</span>
-            <GitHubStars repo={REPO} />
-          </a>
-        </div>
+          <GitHubIcon />
+          <span className="site-header__github-label">{NAV_GITHUB_LABEL}</span>
+          <GitHubStars repo={REPO} />
+        </a>
+        <a href={NAV_CTA.href} className="site-header__cta">
+          {NAV_CTA.label}
+        </a>
       </div>
-    </nav>
+    </header>
   );
 }
