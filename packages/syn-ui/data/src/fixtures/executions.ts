@@ -151,7 +151,7 @@ function phaseDetail(r: CatalogRun): PhaseExecutionDetail[] {
       model: null,
       requested_model: o.requested,
       model_display: `unknown (requested: ${o.requested})`,
-      cost_by_model: { unattributed: o.cost.toFixed(6) },
+      cost_by_model: { 'unattributed-model': o.cost.toFixed(6) },
     }
   })
 }

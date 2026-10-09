@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { usageModel } from '../../patterns/usage'
 import {
   ageGroupTitle,
   calendarDaysAgo,
@@ -7,6 +8,7 @@ import {
   phaseProgressText,
   isExecutionEvent,
   canCancel,
+  costRowsByModel,
   costRowsByPhase,
   executionsLede,
   executionsLedeShort,
@@ -159,6 +161,24 @@ describe('detail', () => {
     expect(costRowsByPhase([phase()])).toEqual([{ label: '01 Discovery', value: 0.0557, tone: 'accent' }])
     // The live API sends Decimal as a string; the meter needs a number for its bars and shares.
     expect(costRowsByPhase([phase({ cost_usd: '0.3480798' })])[0]!.value).toBe(0.3480798)
+  })
+
+  it('sums cost by model across phases (exec-0f9f25d20055 live, 2026-10-09: opus $4.57, sol $3.84)', () => {
+    const phases = [
+      phase({ cost_by_model: { 'claude-opus-5-5': '0.3480798' } }),
+      phase({ cost_by_model: { 'gpt-6.1-sol': '2.7898268' } }),
+      phase({ cost_by_model: { 'claude-opus-5-5': '3.5115558' } }),
+      phase({ cost_by_model: { 'gpt-6.1-sol': '1.0506504' } }),
+      phase({ cost_by_model: { 'claude-opus-5-5': '0.7092122', 'unattributed-model': '0.01' } }),
+      phase({ cost_by_model: {} }),
+    ]
+    const rows = costRowsByModel(phases)
+    expect(rows.map((r) => r.label)).toEqual(['claude-opus-5-5', 'gpt-6.1-sol', 'unknown model'])
+    expect(rows[0]!.value).toBeCloseTo(4.5688478, 7)
+    expect(rows[1]!.value).toBeCloseTo(3.8404772, 7)
+    const m = usageModel({ tokens: { input: 1, output: 1, cacheRead: 1, cacheWrite: 1 }, costBy: 'phase', costRows: [], modelRows: rows })
+    expect(m.modelRows.map((r) => [r.display, r.percent])).toEqual([['$4.57', '54%'], ['$3.84', '46%'], ['$0.0100', '0%']])
+    expect(costRowsByModel([phase()])).toEqual([])
   })
 
   it('notes an unknown model', () => {

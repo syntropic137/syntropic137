@@ -10,9 +10,9 @@
   import { usageModel } from '@syn137/skyline-core/patterns'
   import type { UsageMeterProps } from './types'
 
-  let { cost, tokens, costRows, costBy, note, rates, title = 'Usage', ...rest }: UsageMeterProps = $props()
+  let { cost, tokens, costRows, costBy, note, rates, modelRows, title = 'Usage', ...rest }: UsageMeterProps = $props()
 
-  const m = $derived(usageModel({ cost, tokens, costRows, costBy, rates }))
+  const m = $derived(usageModel({ cost, tokens, costRows, costBy, rates, modelRows }))
   const band = $derived(layoutUsageBand(TOKEN_SERIES.map((s) => ({ key: s.key, value: tokens[s.key] }))))
   const colour = (key: string) => {
     const s = TOKEN_SERIES.find((x) => x.key === key)
@@ -67,6 +67,21 @@
     </ul>
     {#if note}<p class="sky-usage__note">{note}</p>{/if}
   </div>
+
+  {#if m.modelRows.length}
+    <div class="sky-usage__zone" data-zone="cost">
+      <span class="sky-usage__label">Cost by model</span>
+      <ul class="sky-usage__rows">
+        {#each m.modelRows as r, i (i)}
+          <li class="sky-usage__row">
+            <span class="sky-usage__row-label">{r.label}</span>
+            <span class="sky-usage__bar" aria-hidden="true"><span data-tone={r.tone} style:width={`${r.fill}%`}></span></span>
+            <span class="sky-usage__row-value">{r.display} <span class="sky-usage__pct">{r.percent}</span></span>
+          </li>
+        {/each}
+      </ul>
+    </div>
+  {/if}
 </section>
 
 <style>

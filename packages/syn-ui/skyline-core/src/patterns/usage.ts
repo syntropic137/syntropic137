@@ -31,6 +31,11 @@ export interface UsageMeterProps {
   rates?: Partial<Record<keyof TokenBreakdown, string>>
   /** Section heading (default "Usage"). */
   title?: string
+  /**
+   * Skyline: a second cost zone, "Cost by model", beside a by-phase one (the
+   * React execution page's Cost by Model card). Omitted or empty: no zone.
+   */
+  modelRows?: readonly CostRowInput[]
 }
 
 export interface UsageSeriesRow {
@@ -62,11 +67,28 @@ export interface UsageModel {
   tokensLabel: string
   series: UsageSeriesRow[]
   costRows: UsageCostRow[]
+  /** The "Cost by model" zone's rows; empty when none were given. */
+  modelRows: UsageCostRow[]
   /** "Tokens by type: Cache read 81.9 percent, Input 17.0 percent, Output 1.1 percent". */
   bandLabel: string
 }
 
-export function usageModel(p: Pick<UsageMeterProps, 'cost' | 'tokens' | 'costRows' | 'rates' | 'costBy'>): UsageModel {
+/** Cost rows with their share of the rows' total and a bar fill relative to the largest. */
+function costRowModels(rows: readonly CostRowInput[], fallbackTone: CostRowTone): { rows: UsageCostRow[]; sum: number } {
+  const values = rows.map((r) => (typeof r.value === 'number' && r.value > 0 ? r.value : 0))
+  const sum = values.reduce((s, v) => s + v, 0)
+  const max = Math.max(0, ...values)
+  const out = rows.map((r, i) => ({
+    label: r.label,
+    display: r.display ?? formatCostPrecise(r.value),
+    percent: sum > 0 ? `${Math.round((values[i]! / sum) * 100)}%` : '—',
+    fill: max > 0 ? Math.round((values[i]! / max) * 100) : 0,
+    tone: r.tone ?? fallbackTone,
+  }))
+  return { rows: out, sum }
+}
+
+export function usageModel(p: Pick<UsageMeterProps, 'cost' | 'tokens' | 'costRows' | 'rates' | 'costBy' | 'modelRows'>): UsageModel {
   const t = p.tokens
   const total = t.input + t.output + t.cacheWrite + t.cacheRead
   const series = TOKEN_SERIES.filter((s) => t[s.key] > 0).map((s) => {
@@ -76,22 +98,14 @@ export function usageModel(p: Pick<UsageMeterProps, 'cost' | 'tokens' | 'costRow
     if (rate) row.rate = rate
     return row
   })
-  const values = p.costRows.map((r) => (typeof r.value === 'number' && r.value > 0 ? r.value : 0))
-  const sum = values.reduce((s, v) => s + v, 0)
-  const max = Math.max(0, ...values)
-  const costRows = p.costRows.map((r, i) => ({
-    label: r.label,
-    display: r.display ?? formatCostPrecise(r.value),
-    percent: sum > 0 ? `${Math.round((values[i]! / sum) * 100)}%` : '—',
-    fill: max > 0 ? Math.round((values[i]! / max) * 100) : 0,
-    tone: r.tone ?? (p.costBy === 'phase' ? 'accent' : 'neutral'),
-  }))
+  const { rows: costRows, sum } = costRowModels(p.costRows, p.costBy === 'phase' ? 'accent' : 'neutral')
   return {
     cost: p.cost ?? formatCostPrecise(sum),
     tokensTotal: total,
     tokensLabel: `${formatTokens(total, { case: 'upper' })} tokens`,
     series,
     costRows,
+    modelRows: costRowModels(p.modelRows ?? [], 'neutral').rows,
     bandLabel:
       total > 0
         ? `Tokens by type: ${series.map((s) => `${s.label} ${s.percent.replace('%', ' percent')}`).join(', ')}`

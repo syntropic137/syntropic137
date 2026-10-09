@@ -12,6 +12,7 @@
     evalBadge,
     phaseProgressText,
     canCancel,
+    costRowsByModel,
     costRowsByPhase,
     isExecutionEvent,
     phaseKit,
@@ -262,6 +263,7 @@
             {tokens}
             costBy="phase"
             costRows={costRowsByPhase(phases)}
+            modelRows={costRowsByModel(phases)}
             note={usageNote(phases)}
             rates={{
               ...(d.cache_read_rate_display ? { cacheRead: d.cache_read_rate_display } : {}),

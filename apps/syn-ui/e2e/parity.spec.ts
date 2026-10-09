@@ -65,3 +65,11 @@ test('Executions shows a correct refusal as Refused, not Failed', async ({ page 
   await expect(main.getByRole('link', { name: /, Refused, started/ })).toHaveCount(1)
   await expect(main.getByRole('link', { name: /, Failed, started/ }).first()).toBeVisible()
 })
+
+test('Execution detail has a Cost by model block beside cost by phase', async ({ page }) => {
+  await page.goto('./executions?window=all')
+  await page.locator('#sky-main li[data-sky-row] a').nth(2).click()
+  const usage = page.getByRole('region', { name: 'Usage' })
+  await expect(usage.getByText('Cost by phase')).toBeVisible()
+  await expect(usage.getByText('Cost by model')).toBeVisible()
+})

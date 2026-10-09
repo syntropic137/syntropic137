@@ -27,6 +27,8 @@ export interface PhaseLike {
   model: string | null
   requested_model: string | null
   model_display?: string
+  /** USD per observed model id, or `unattributed-model`; empty while a phase runs. */
+  cost_by_model?: Readonly<Record<string, string | number>> | null
   start_pins_status?: 'recorded' | 'not_recorded' | 'unavailable'
   pinned_at_start?: {
     provider: string
@@ -120,6 +122,26 @@ export function shortPhaseName(name: string): string {
 /** Usage Meter rows: "01 Discovery" with each phase's cost. */
 export function costRowsByPhase(phases: readonly PhaseLike[]): CostRowInput[] {
   return phases.map((p, i) => ({ label: `${phaseNumber(i)} ${shortPhaseName(p.name)}`, value: toNumber(p.cost_usd), tone: 'accent' }))
+}
+
+/** The API's key for cost no model was observed for (React constants/models UNATTRIBUTED_MODEL_KEY). */
+export const UNATTRIBUTED_MODEL_KEY = 'unattributed-model'
+
+/**
+ * "Cost by model": each phase's `cost_by_model` summed per model, largest
+ * first (the React execution page's aggregateCostByModel). A running phase
+ * has an empty map, so mid-run these add up to less than the total.
+ */
+export function costRowsByModel(phases: readonly PhaseLike[]): CostRowInput[] {
+  const totals = new Map<string, number>()
+  for (const p of phases)
+    for (const [model, cost] of Object.entries(p.cost_by_model ?? {})) {
+      const n = toNumber(cost)
+      if (n !== null) totals.set(model, (totals.get(model) ?? 0) + n)
+    }
+  return [...totals]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([model, value]) => ({ label: model === UNATTRIBUTED_MODEL_KEY ? 'unknown model' : model, value }))
 }
 
 const WORDS = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten']
