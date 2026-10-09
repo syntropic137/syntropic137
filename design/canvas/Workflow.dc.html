@@ -79,6 +79,110 @@ textarea::placeholder,input::placeholder{color:#6F7FA3}
 </div>
 </section>
 
+<section aria-label="Performance" style="display: flex; flex-direction: column; gap: 18px; padding: 24px; border-radius: 20px; border: 1px solid #1A2032; background: #0D101A; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04)">
+<div style="display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px 24px">
+<div style="display: flex; flex-direction: column; gap: 2px; min-width: 0">
+<h2 style="margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -0.015em">Performance</h2>
+<span style="font-size: 14px; color: #9AA8C7">{{perf.sub}}</span>
+</div>
+<div role="group" aria-label="Metric" style="display: flex; gap: 2px; padding: 3px; border-radius: 12px; border: 1px solid #1A2032; background: #0A0C14">
+<sc-for list="{{tabs}}" as="t" hint-placeholder-count="3">
+<button type="button" aria-pressed="{{t.on}}" onClick="{{t.pick}}" style="min-height: 34px; padding: 0 14px; border: 0; border-radius: 9px; background: {{t.bg}}; color: {{t.fg}}; font-size: 13px; font-weight: 600; cursor: pointer">{{t.label}}</button>
+</sc-for>
+</div>
+</div>
+<div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px">
+<sc-for list="{{kpis}}" as="g" hint-placeholder-count="3">
+<div style="display: flex; flex-direction: column; gap: 6px; padding: 14px 16px; border-radius: 14px; border: 1px solid #1A2032; background: #0A0C14">
+<span style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 12px; color: #9AA8C7">{{g.label}}</span><span style="font-size: 24px; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums">{{g.value}}</span></span>
+<span style="display: flex; flex-direction: column; gap: 4px">
+<span style="align-self: flex-start; display: flex; align-items: center; gap: 4px; height: 20px; padding: 0 7px; border-radius: 10px; background: {{g.wbg}}; color: {{g.wfg}}; font-size: 11.5px; font-weight: 600"><svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{g.icon}}"></path></svg>{{g.word}}</span>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #9AA8C7">{{g.delta}}</span>
+</span>
+</div>
+</sc-for>
+</div>
+<div style="display: flex; gap: 20px; align-items: stretch">
+<div style="flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 4px">
+<span style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 16px"><span style="font-size: 12.5px; color: #9AA8C7"><span style="font-weight: 600; color: #E8EEFB">{{perf.title}}</span> · {{perf.unit}}</span><span style="display: flex; flex-wrap: wrap; gap: 6px 12px; font-size: 12px; color: #9AA8C7">
+<span style="display: flex; align-items: center; gap: 5px"><span aria-hidden="true" style="width: 9px; height: 9px; border-radius: 50%; background: var(--ac)"></span>Completed</span>
+<span style="display: flex; align-items: center; gap: 5px"><span aria-hidden="true" style="width: 9px; height: 9px; border-radius: 50%; background: #FF6F61"></span>Failed</span>
+<span style="display: flex; align-items: center; gap: 5px"><span aria-hidden="true" style="width: 9px; height: 9px; border-radius: 50%; background: #6F7FA3"></span>Cancelled</span>
+</span></span>
+<div style="padding-top: 30px"><div style="display: grid; grid-template-columns: 48px minmax(0, 1fr) 0px; column-gap: 8px">
+<div aria-hidden="true" style="position: relative; height: 220px">
+<sc-for list="{{yTicks}}" as="y" hint-placeholder-count="5">
+<span style="position: absolute; right: 0; top: {{y.t}}; transform: translateY(-50%); font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; color: #6F7FA3; white-space: nowrap">{{y.label}}</span>
+</sc-for>
+</div>
+<div style="display: flex; flex-direction: column; gap: 8px; min-width: 0">
+<div style="position: relative; height: 220px">
+<svg viewBox="0 0 1000 220" preserveAspectRatio="none" aria-hidden="true" style="position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible">
+<line x1="0" x2="1000" y1="0" y2="0" stroke="#161B2B" stroke-width="1" vector-effect="non-scaling-stroke"></line>
+<line x1="0" x2="1000" y1="55.0" y2="55.0" stroke="#161B2B" stroke-width="1" vector-effect="non-scaling-stroke"></line>
+<line x1="0" x2="1000" y1="110.0" y2="110.0" stroke="#161B2B" stroke-width="1" vector-effect="non-scaling-stroke"></line>
+<line x1="0" x2="1000" y1="165.0" y2="165.0" stroke="#161B2B" stroke-width="1" vector-effect="non-scaling-stroke"></line>
+<line x1="0" x2="1000" y1="220" y2="220" stroke="#283048" stroke-width="1" vector-effect="non-scaling-stroke"></line>
+<path d="{{perf.line}}" fill="none" stroke="var(--ac)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"></path>
+</svg>
+
+<sc-for list="{{notes}}" as="n" hint-placeholder-count="1">
+<span aria-hidden="true" style="position: absolute; left: {{n.l}}; top: -6px; bottom: 0; width: 0; border-left: 1px dashed #34406A"></span>
+<span style="position: absolute; left: {{n.l}}; top: -30px; transform: translateX(-50%); height: 22px; padding: 0 9px; border-radius: 11px; border: 1px solid #283048; background: #111626; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; line-height: 20px; color: #C3CCE2; white-space: nowrap">{{n.label}}</span>
+</sc-for>
+<span aria-hidden="true" style="position: absolute; left: {{readout.hair}}; top: 0; bottom: 0; width: 0; border-left: 1px solid #34406A"></span>
+<sc-for list="{{dots}}" as="p" hint-placeholder-count="12">
+<button type="button" aria-label="{{p.label}}" aria-pressed="{{p.on}}" onMouseEnter="{{p.pick}}" onFocus="{{p.pick}}" onClick="{{p.pick}}" style="position: absolute; left: {{p.l}}; top: {{p.t}}; z-index: {{p.z}}; display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; margin: -14px 0 0 -14px; padding: 0; border: 0; border-radius: 50%; background: transparent; cursor: pointer">
+<span style="width: {{p.size}}; height: {{p.size}}; border-radius: 50%; background: {{p.c}}; box-shadow: {{p.ring}}"></span>
+</button>
+</sc-for>
+</div>
+<div aria-hidden="true" style="position: relative; height: 16px">
+<sc-for list="{{xTicks}}" as="x" hint-placeholder-count="5">
+<span style="position: absolute; left: {{x.l}}; transform: translateX(-50%); font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; color: #6F7FA3; white-space: nowrap">{{x.label}}</span>
+</sc-for>
+</div>
+</div>
+
+</div></div>
+</div>
+<div role="status" aria-live="polite" style="display: flex; flex-direction: column; gap: 12px; padding: 16px; border-radius: 16px; border: 1px solid #1A2032; background: #0A0C14; width: 248px; flex-shrink: 0; box-sizing: border-box">
+<div style="display: flex; align-items: center; justify-content: space-between; gap: 8px">
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3">Run</span>
+<span style="display: flex; gap: 4px">
+<button type="button" aria-label="Previous run" onClick="{{pprev}}" class="ghost" style="display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; border: 1px solid #283048; border-radius: 9px; background: #0F121C; color: #C3CCE2; cursor: pointer"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 3.5L5.5 8 10 12.5"></path></svg></button>
+<button type="button" aria-label="Next run" onClick="{{pnext}}" class="ghost" style="display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; border: 1px solid #283048; border-radius: 9px; background: #0F121C; color: #C3CCE2; cursor: pointer"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3.5L10.5 8 6 12.5"></path></svg></button>
+</span>
+</div>
+<div style="display: flex; flex-direction: column; gap: 4px">
+<span style="font-size: 16px; font-weight: 600">{{readout.date}}</span>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #9AA8C7">{{readout.id}}</span>
+</div>
+<span style="align-self: flex-start; height: 24px; padding: 0 11px; border-radius: 12px; background: {{readout.sbg}}; color: {{readout.sfg}}; font-size: 12.5px; font-weight: 600; line-height: 24px">{{readout.status}}</span>
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px">
+<span style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 11.5px; color: #6F7FA3">Duration</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px">{{readout.speed}}</span></span>
+<span style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 11.5px; color: #6F7FA3">Cost</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px">{{readout.cost}}</span></span>
+<span style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 11.5px; color: #6F7FA3">Success</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px">{{readout.success}}</span></span>
+</div>
+<a href="Execution.dc.html" style="display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; text-decoration: none">Open this run <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3.5L10.5 8 6 12.5"></path></svg></a>
+</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 10px; padding-top: 14px; border-top: 1px solid #1A2032">
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3">Phase duration, completed runs</span>
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px">
+<sc-for list="{{phases}}" as="ph" hint-placeholder-count="3">
+<div aria-label="{{ph.label}}" style="display: grid; grid-template-columns: minmax(0, 1fr) 96px; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 14px; border: 1px solid #1A2032; background: #0A0C14">
+<span style="display: flex; flex-direction: column; gap: 3px; min-width: 0">
+<span style="font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{ph.name}}</span>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px">{{ph.now}} <span style="color: {{ph.wfg}}">{{ph.delta}}</span></span>
+</span>
+<svg viewBox="0 0 200 48" preserveAspectRatio="none" aria-hidden="true" style="width: 96px; height: 32px; overflow: visible"><path d="{{ph.spark}}" fill="none" stroke="var(--ac)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"></path></svg>
+</div>
+</sc-for>
+</div>
+</div>
+</section>
+
 <div style="display: flex; flex-wrap: wrap; gap: 32px 40px">
 
 <div style="flex: 999 1 620px; min-width: 0; display: flex; flex-direction: column; gap: 36px">
@@ -253,7 +357,7 @@ textarea::placeholder,input::placeholder{color:#6F7FA3}
 </main>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#4D80FF","options":["#4D80FF","#4CC9F0","#45E0A0","#A78BFA"]},"$preview":{"width":1440,"height":1780}}'>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#4D80FF","options":["#4D80FF","#4CC9F0","#45E0A0","#A78BFA"]},"$preview":{"width":1440,"height":2380}}'>
 class Component extends DCLogic {
 renderVals() {
 const copied = !!(this.state && this.state.copied);
@@ -299,7 +403,110 @@ mk('completed', 'exec-7aa…', 3, '365,326', '$0.16', 158, '2m 38s'),
 mk('cancelled', 'exec-8fb…', 2, '156,599', '$0.17', 242, '4m 2s'),
 mk('cancelled', 'exec-e0e…', 0, '0', '$0.00', 56, '56s')
 ];
+const __t = (() => {
+const T = { y: 2026, m: 8, d: 1, span: 34, h: 220 };
+
+const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const dayLabel = (d) => { const t = new Date(Date.UTC(T.y, T.m, T.d + d)); return MON[t.getUTCMonth()] + ' ' + t.getUTCDate(); };
+const xPct = (d) => 2 + (d / T.span) * 96;
+const mins = (s) => { s = Math.round(s); return s < 60 ? s + 's' : Math.floor(s / 60) + 'm ' + String(s % 60).padStart(2, '0') + 's'; };
+const tickMin = (s) => (s === 0 ? '0' : s % 60 ? mins(s) : s / 60 + 'm');
+const niceMax = (v, steps) => { for (const s of steps) if (v <= s) return s; return steps[steps.length - 1]; };
+const pathOf = (pts) => pts.map((p, i) => (i ? 'L' : 'M') + (p[0] * 10).toFixed(1) + ' ' + (T.h - (p[1] * T.h) / 100).toFixed(1)).join(' ');
+
+const RAW = [[0, "completed", 0.162, 418, [96, 188, 134]], [3, "completed", 0.151, 402, [92, 181, 129]], [6, "failed", 0.071, 196, [88, 108, 0]], [9, "completed", 0.148, 389, [90, 172, 127]], [12, "completed", 0.139, 371, [84, 166, 121]], [15, "cancelled", 0.044, 120, [80, 40, 0]], [18, "completed", 0.124, 333, [71, 150, 112]], [21, "completed", 0.118, 318, [66, 146, 106]], [25, "completed", 0.113, 301, [62, 139, 100]], [28, "completed", 0.109, 289, [58, 134, 97]], [31, "completed", 0.106, 276, [55, 128, 93]], [34, "completed", 0.104, 266, [52, 124, 90]]];
+const NOTES = [{"d": 16, "label": "v2 published"}];
+const PHASES = ["Discovery Phase", "Deep Dive Analysis", "Synthesis & Documentation"];
+const SLOOK = {
+completed: { word: 'Completed', c: 'var(--ac)', fg: 'color-mix(in oklab, var(--ac) 40%, white)', bg: 'color-mix(in oklab, var(--ac) 18%, transparent)' },
+failed: { word: 'Failed', c: '#FF6F61', fg: '#FF8A7D', bg: '#2A1513' },
+cancelled: { word: 'Cancelled', c: '#6F7FA3', fg: '#9AA8C7', bg: '#171C2B' }
+};
+const st = this.state || {};
+const metric = st.pmetric || 'cost';
+const runs = RAW.map((r, i) => ({ i, d: r[0], status: r[1], cost: r[2], secs: r[3], ph: r[4], tokens: Math.round(r[2] / 0.5e-6) }));
+const ktok = (n) => (n >= 1e6 ? (n / 1e6).toFixed(2) + 'M' : Math.round(n / 1000) + 'k');
+const okSoFar = [];
+runs.forEach((r) => { okSoFar.push(r.status === 'completed' ? 1 : 0); const w = okSoFar.slice(-5); r.ok = Math.round((100 * w.reduce((a, b) => a + b, 0)) / w.length); });
+const done = runs.filter((r) => r.status === 'completed');
+const METRICS = {
+success: { label: 'Success', unit: 'completed, last 5 runs', max: 100, val: (r) => r.ok, fmt: (v) => v + '%', set: runs, better: 'up' },
+speed: { label: 'Speed', unit: 'duration of completed runs', max: niceMax(Math.max(...done.map((r) => r.secs)) / 60, [4, 6, 8, 10, 12]) * 60, val: (r) => r.secs, fmt: mins, set: done, better: 'down' },
+cost: { label: 'Cost', unit: 'per completed run', max: niceMax(Math.max(...done.map((r) => r.cost)), [0.1, 0.2, 0.3, 0.5, 1]), val: (r) => r.cost, fmt: (v) => '$' + v.toFixed(3), set: done, better: 'down' },
+tokens: { label: 'Tokens', unit: 'per completed run', max: niceMax(Math.max(...done.map((r) => r.tokens)), [100e3, 200e3, 300e3, 400e3, 600e3]), val: (r) => r.tokens, fmt: ktok, set: done, better: 'down' }
+};
+const M = METRICS[metric];
+const yOf = (v) => (v / M.max) * 100;
+const line = pathOf(M.set.map((r) => [xPct(r.d), yOf(M.val(r))]));
+const selIdx = typeof st.psel === 'number' ? st.psel : runs.length - 1;
+const sel = runs[selIdx];
+const tabs = Object.keys(METRICS).map((k) => ({
+label: METRICS[k].label,
+on: k === metric ? 'true' : 'false',
+bg: k === metric ? '#1A2032' : 'transparent',
+fg: k === metric ? '#E8EEFB' : '#9AA8C7',
+pick: () => this.setState({ pmetric: k })
+}));
+const dots = runs.map((r) => {
+const k = SLOOK[r.status];
+const on = r.i === selIdx;
+const inSet = M.set.indexOf(r) >= 0;
 return {
+l: xPct(r.d) + '%',
+t: inSet ? 100 - yOf(M.val(r)) + '%' : '100%',
+c: k.c,
+size: on ? '14px' : inSet ? '10px' : '8px',
+ring: on ? '0 0 0 3px #0D101A, 0 0 0 5px ' + k.c : '0 0 0 2px #0D101A',
+z: on ? 3 : 2,
+on: on ? 'true' : 'false',
+label: dayLabel(r.d) + ': ' + k.word + (inSet ? ', ' + M.fmt(M.val(r)) : ', not counted'),
+pick: () => this.setState({ psel: r.i })
+};
+});
+const yTicks = [0, 1, 2, 3, 4].map((k) => ({ t: 100 - k * 25 + '%', label: metric === 'speed' ? tickMin(Math.round((M.max * k) / 4)) : metric === 'cost' ? '$' + ((M.max * k) / 4).toFixed(2) : metric === 'tokens' ? (k ? ktok((M.max * k) / 4) : '0') : M.fmt((M.max * k) / 4) }));
+const xTicks = [0, 7, 14, 21, 28].map((d) => ({ l: xPct(d) + '%', label: dayLabel(d) }));
+const notes = NOTES.map((n) => ({ l: xPct(n.d) + '%', label: n.label + ' · ' + dayLabel(n.d) }));
+const first = done.slice(0, 3), last = done.slice(-3);
+const avg = (xs, f) => xs.reduce((a, r) => a + f(r), 0) / xs.length;
+const kpi = (label, now, then, fmt, better, unitWord, dfmt) => {
+const diff = now - then;
+const good = better === 'up' ? diff > 0 : diff < 0;
+const bad = better === 'up' ? diff < 0 : diff > 0;
+return { label, value: fmt(now), delta: (diff === 0 ? 'no change' : (diff > 0 ? '+' : '−') + (dfmt || fmt)(Math.abs(diff)) + ' ' + unitWord), word: good ? 'Improving' : bad ? 'Regressing' : 'Flat', wfg: good ? '#7FE3B8' : bad ? '#FF8A7D' : '#9AA8C7', wbg: good ? '#0F241C' : bad ? '#2A1513' : '#171C2B', icon: good ? 'M3 10.5l3.5-3.5 2.5 2.5L13 5.5M9.5 5.5H13V9' : bad ? 'M3 5.5L6.5 9 9 6.5l4 4M9.5 10.5H13V7' : 'M3 8h10' };
+};
+const kpis = [
+kpi('Success, last 5', runs[runs.length - 1].ok, runs[4].ok, (v) => Math.round(v) + '%', 'up', 'vs first 5 runs', (v) => Math.round(v) + ' pts'),
+kpi('Median duration', avg(last, (r) => r.secs), avg(first, (r) => r.secs), mins, 'down', 'vs first runs'),
+kpi('Cost per run', avg(last, (r) => r.cost), avg(first, (r) => r.cost), (v) => '$' + v.toFixed(3), 'down', 'vs first runs'),
+kpi('Tokens per run', avg(last, (r) => r.tokens), avg(first, (r) => r.tokens), ktok, 'down', 'vs first runs')
+];
+const phases = PHASES.map((name, pi) => {
+const xs = done.map((r) => r.ph[pi]);
+const mx = Math.max(...xs) * 1.1;
+const spark = done.map((r, j) => (j ? 'L' : 'M') + ((j / (done.length - 1)) * 200).toFixed(1) + ' ' + (44 - (r.ph[pi] / mx) * 40).toFixed(1)).join(' ');
+const a = avg(done.slice(0, 3), (r) => r.ph[pi]), b = avg(done.slice(-3), (r) => r.ph[pi]);
+const pct = Math.round(((b - a) / a) * 100);
+return { name, spark, now: mins(b), delta: (pct < 0 ? '−' : '+') + Math.abs(pct) + '% vs first runs', wfg: pct < -2 ? '#7FE3B8' : pct > 2 ? '#FF8A7D' : '#9AA8C7', label: name + ': median ' + mins(b) + ', ' + (pct < 0 ? Math.abs(pct) + '% faster' : pct + '% slower') };
+});
+const sk = SLOOK[sel.status];
+const readout = {
+date: dayLabel(sel.d) + ', 2026',
+status: sk.word,
+sfg: sk.fg,
+sbg: sk.bg,
+speed: mins(sel.secs),
+cost: '$' + sel.cost.toFixed(3),
+success: sel.ok + '%',
+id: 'exec-' + (0x66e14f23 - (runs.length - 1 - sel.i) * 4099).toString(16).slice(0, 8),
+hair: xPct(sel.d) + '%'
+};
+const perf = { line, title: M.label, unit: M.unit, sub: runs.length + ' runs over 5 weeks. ' + (M.better === 'up' ? 'Higher is better.' : 'Lower is better.') + (metric === 'success' ? '' : ' Failed and cancelled runs sit on the baseline and are not counted.') };
+const pprev = () => this.setState({ psel: (selIdx + runs.length - 1) % runs.length });
+const pnext = () => this.setState({ psel: (selIdx + 1) % runs.length });
+return { perf, tabs, kpis, dots, yTicks, xTicks, notes, phases, readout, pprev, pnext };
+})();
+
+return { ...__t,
 accent: this.props.accent ?? '#4D80FF',
 runs,
 copyPrompt,
