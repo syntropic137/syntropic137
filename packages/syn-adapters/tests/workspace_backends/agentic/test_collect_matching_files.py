@@ -13,10 +13,13 @@ import os
 import stat
 import time
 import tracemalloc
+from contextlib import contextmanager
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
 
+from syn_adapters.workspace_backends.agentic import workspace_walk
 from syn_adapters.workspace_backends.agentic.adapter_copy import (
     MAX_DIRECTORY_ENTRIES,
     _normalize_pattern,
@@ -24,7 +27,7 @@ from syn_adapters.workspace_backends.agentic.adapter_copy import (
 )
 
 if TYPE_CHECKING:
-    from pathlib import Path
+    from collections.abc import Iterator
 
 pytestmark = [pytest.mark.unit]
 
@@ -248,8 +251,42 @@ def test_several_patterns_select_each_file_once(tree: Path) -> None:
     )
 
 
+class _EntriesTaken:
+    """Wraps os.scandir(fd) to count the entries the walk takes from each listing.
+
+    Counts are keyed by directory relative to the workspace. Stopping at a cap
+    takes one entry past it, to learn that the listing was cut short.
+    """
+
+    def __init__(self, workspace: Path) -> None:
+        self.by_directory: dict[str, int] = {}
+        self._root = workspace.resolve()
+        self._scandir = os.scandir
+
+    @contextmanager
+    def __call__(self, fd: int) -> Iterator[Iterator[os.DirEntry[str]]]:
+        directory = str(Path(f"/proc/self/fd/{fd}").readlink().relative_to(self._root))
+        self.by_directory[directory] = 0
+        with self._scandir(fd) as listing:
+            yield self._count(directory, listing)
+
+    def _count(
+        self, directory: str, listing: Iterator[os.DirEntry[str]]
+    ) -> Iterator[os.DirEntry[str]]:
+        for entry in listing:
+            self.by_directory[directory] += 1
+            yield entry
+
+
+@pytest.fixture
+def entries_taken(workspace: Path, monkeypatch: pytest.MonkeyPatch) -> _EntriesTaken:
+    taken = _EntriesTaken(workspace)
+    monkeypatch.setattr(workspace_walk.os, "scandir", taken)
+    return taken
+
+
 def test_huge_directory_is_listed_only_up_to_the_cap(
-    workspace: Path, caplog: pytest.LogCaptureFixture
+    workspace: Path, entries_taken: _EntriesTaken, caplog: pytest.LogCaptureFixture
 ) -> None:
     out = workspace / "artifacts" / "output"
     (out / "a.md").write_bytes(b"alpha")
@@ -262,6 +299,8 @@ def test_huge_directory_is_listed_only_up_to_the_cap(
     started = time.monotonic()
     try:
         with caplog.at_level(logging.WARNING):
+            # The total cap (default 100k) is above the 50k entries here, so
+            # only the per-directory cap can stop the listing.
             collected = collect_matching_files(
                 workspace, ["artifacts/output/**/*.md"], max_bytes=_LIMIT
             )
@@ -270,6 +309,7 @@ def test_huge_directory_is_listed_only_up_to_the_cap(
         tracemalloc.stop()
 
     assert collected == [("artifacts/output/a.md", b"alpha")]
+    assert entries_taken.by_directory["artifacts/output/big"] == MAX_DIRECTORY_ENTRIES + 1
     assert f"Stopped listing artifacts/output/big after {MAX_DIRECTORY_ENTRIES} entries" in (
         caplog.text
     )
@@ -279,8 +319,31 @@ def test_huge_directory_is_listed_only_up_to_the_cap(
     assert time.monotonic() - started < 30
 
 
+def test_every_directory_is_listed_only_up_to_the_cap(
+    workspace: Path, entries_taken: _EntriesTaken, caplog: pytest.LogCaptureFixture
+) -> None:
+    out = workspace / "artifacts" / "output"
+    for d in range(4):
+        (out / f"d{d}").mkdir()
+        for i in range(20):
+            (out / f"d{d}" / f"f{i}.txt").write_bytes(b"x")
+
+    with caplog.at_level(logging.WARNING):
+        collect_matching_files(
+            workspace,
+            ["artifacts/output/**/*.md"],
+            max_bytes=_LIMIT,
+            max_directory_entries=8,
+            max_entries=1_000,
+        )
+
+    for d in range(4):
+        assert entries_taken.by_directory[f"artifacts/output/d{d}"] == 8 + 1
+        assert f"Stopped listing artifacts/output/d{d} after 8 entries" in caplog.text
+
+
 def test_entries_examined_across_directories_are_bounded(
-    workspace: Path, caplog: pytest.LogCaptureFixture
+    workspace: Path, entries_taken: _EntriesTaken, caplog: pytest.LogCaptureFixture
 ) -> None:
     out = workspace / "artifacts" / "output"
     for d in range(4):
@@ -290,11 +353,20 @@ def test_entries_examined_across_directories_are_bounded(
 
     with caplog.at_level(logging.WARNING):
         collected = collect_matching_files(
-            workspace, ["artifacts/output/**/*.md"], max_bytes=_LIMIT, max_entries=12
+            workspace,
+            ["artifacts/output/**/*.md"],
+            max_bytes=_LIMIT,
+            max_entries=12,
+            max_directory_entries=1_000,
         )
 
     assert collected == []
+    # 6 entries lead down to the four d* directories, so the cap falls
+    # inside the second one listed and the last two are never opened.
+    assert sum(entries_taken.by_directory.values()) == 12 + 1
+    assert len([d for d in entries_taken.by_directory if "/d" in d]) == 2
     assert "Stopped after examining 12 entries" in caplog.text
+    assert "Stopped listing" not in caplog.text
 
 
 def test_symlinked_prefix_directory_is_not_listed(
