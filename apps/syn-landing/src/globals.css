@@ -191,8 +191,8 @@ img, video {
 .site-header[data-scrolled] .site-header__bar::before {
   opacity: 1;
   transform: none;
-  backdrop-filter: blur(var(--sky-blur-glass)) saturate(1.4);
   -webkit-backdrop-filter: blur(var(--sky-blur-glass)) saturate(1.4);
+  backdrop-filter: blur(var(--sky-blur-glass)) saturate(1.4);
 }
 
 @media (forced-colors: active) {
@@ -261,8 +261,8 @@ img, video {
   border-radius: var(--sky-radius-row);
   border: var(--ds-border-width) solid var(--sky-color-highlight-strong);
   background: color-mix(in oklab, var(--ds-color-surface) 55%, transparent);
-  backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
   transition: background-color var(--sky-duration-slow) ease, border-color var(--sky-duration-slow) ease;
 }
 
@@ -279,8 +279,8 @@ img, video {
 .site-header[data-scrolled] .site-nav {
   border-color: transparent;
   background: transparent;
-  backdrop-filter: none;
   -webkit-backdrop-filter: none;
+  backdrop-filter: none;
 }
 
 .site-nav__link:hover {
