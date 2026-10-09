@@ -338,6 +338,13 @@ context and their use leaves no signal, so a codex Phase reports skill use
 **not observable**, never zero invocations. **Unavailable** means the Pin or the
 timeline could not be read, so nothing is known either way.
 
+Across an Execution (`skill_use` on the execution detail), a declared skill is
+**never invoked** only when every Phase of the Execution was observed and none
+invoked it. An agent can invoke a skill its Phase did not declare, so if any
+Phase was not observable or unavailable and no observed Phase invoked it, its
+use is **not known**: the same refusal to read an unobservable use as a
+non-use, one level up.
+
 ## Starting Checkout
 
 The commit each pinned repository was actually found at once a Phase's

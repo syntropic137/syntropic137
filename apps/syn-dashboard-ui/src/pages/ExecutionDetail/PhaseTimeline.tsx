@@ -2,7 +2,7 @@ import { clsx } from 'clsx'
 import { Clock, DollarSign, Layers, Zap } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
-import { Card, CardContent, CardHeader, ObservedModel, PhaseStartPins } from '../../components'
+import { Card, CardContent, CardHeader, ObservedModel, PhaseStartPins, SkillUseLine } from '../../components'
 import { TokenInOut } from '../../components/TokenInOut'
 import type { ExecutionDetailResponse } from '../../types'
 import { executionTokenTotals, phaseTokenTotals } from '../../utils/executionTokens'
@@ -269,6 +269,7 @@ export function PhaseTimeline({ execution, now }: PhaseTimelineProps) {
                     <PhaseCard phase={phase} tone={phaseTone(phase)} now={now} />
                     {/* Outside the card: the card is a link, and this expands in place. */}
                     <PhaseStartPins pins={phase.pinned_at_start} status={phase.start_pins_status} />
+                    <SkillUseLine use={phase.skill_use} />
                     <Link
                       className="phase-inventory-link"
                       to={sessionInventoryHref(execution.workflow_execution_id, phase.phase_id)}
