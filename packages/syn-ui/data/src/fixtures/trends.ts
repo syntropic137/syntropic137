@@ -103,6 +103,25 @@ function shapedDurations(w: CatalogWorkflow, finished: readonly CatalogRun[]): n
   return finished.map((_, j) => Math.round((base * (1 + (change * j) / (n - 1)) + wob[j]! * 0.02 * base) * 10) / 10)
 }
 
+/** Workflow board Performance sample: each phase's share of a run (96 : 188 : 134 seconds). */
+const PHASE_SHARE: Record<string, readonly number[]> = { 'research-workflow': [0.23, 0.45, 0.32] }
+
+/** A phase's seconds: its share of the run, null for phases the run never reached. */
+function phaseSeconds(w: CatalogWorkflow, r: CatalogRun, d: number | null, k: number): number | null {
+  if (d === null || (r.status !== 'completed' && k > r.done)) return null
+  const share = PHASE_SHARE[w.id]?.[k] ?? 1 / w.phases.length
+  return Math.round(d * share * 10) / 10
+}
+
+/** Definition changes inside a workflow's run history (the board's "v2 published" marker). */
+function workflowChanges(w: CatalogWorkflow): DefinitionChange[] {
+  const created: DefinitionChange = { definition_version: 'v1', changed_at: new Date(DAY0 - 60 * DAY).toISOString(), kind: 'created' }
+  if (w.id !== 'research-workflow') return [created]
+  const dates = RUNS.filter((r) => r.workflowId === w.id).map((r) => Date.parse(r.startedAt)).sort((a, b) => a - b)
+  const mid = (dates[0]! + dates.at(-1)!) / 2
+  return [created, { definition_version: 'v2', changed_at: new Date(mid).toISOString(), kind: 'updated' }]
+}
+
 function workflowRows(w: CatalogWorkflow): WorkflowTrendRow[] {
   const runs = RUNS.filter((r) => r.workflowId === w.id).sort((a, b) => a.startedAt.localeCompare(b.startedAt))
   const finished = runs.filter((r) => r.status !== 'running')
@@ -117,7 +136,7 @@ function workflowRows(w: CatalogWorkflow): WorkflowTrendRow[] {
         status: r.status,
         workflow_version: 'v1',
         ...money(r.cost, d, r.tokens),
-        phase_durations: w.phases.map((p) => ({ phase_id: p.id, phase_name: p.name, duration_seconds: d === null ? null : Math.round((d / w.phases.length) * 10) / 10 })),
+        phase_durations: w.phases.map((p, k) => ({ phase_id: p.id, phase_name: p.name, duration_seconds: phaseSeconds(w, r, d, k) })),
       }
     })
     .reverse()
@@ -138,7 +157,6 @@ export const trendRoutes: FixtureRoute[] = [
   route('GET', '/workflows/:workflowId/trend', ({ params, query }): WorkflowTrendResponse => {
     const w = [...WORKFLOWS, ...EXTRA_WORKFLOWS].find((x) => x.id === params.workflowId) ?? notFound('Workflow')
     const page = paginate(workflowRows(w), query, 50)
-    const created: DefinitionChange = { definition_version: 'v1', changed_at: new Date(DAY0 - 60 * DAY).toISOString(), kind: 'created' }
-    return { workflow_id: w.id, items: page.rows, total: page.total, page: page.page, page_size: page.page_size, ...definition([created]) }
+    return { workflow_id: w.id, items: page.rows, total: page.total, page: page.page, page_size: page.page_size, ...definition(workflowChanges(w)) }
   }),
 ]

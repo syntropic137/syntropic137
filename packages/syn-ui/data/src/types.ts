@@ -69,6 +69,11 @@ export interface WorkflowResponse {
   created_at: string | null
   runs_count: number
   runs_link: string | null
+  /** Whether runs check out repositories (ADR-058); older servers leave it out. */
+  requires_repos?: boolean
+  /** Default repository URLs for a run. */
+  repos?: string[]
+  tags?: string[]
 }
 
 export interface WorkflowListResponse {

@@ -28,6 +28,7 @@ import {
   getToolTimeline,
   getEvalTrend,
   getWorkflowTrend,
+  getWorkflowLatestOutputs,
 } from '../index'
 import { RUNS, matchFixture } from './index'
 
@@ -163,5 +164,18 @@ describe('paginate honours the API page-size limit', () => {
     try { paginate(rows, new URLSearchParams(`page_size=${MAX_PAGE_SIZE + 1}`)) } catch (e) { caught = e }
     expect(caught).toBeInstanceOf(ApiError)
     expect((caught as InstanceType<typeof ApiError>).status).toBe(422)
+  })
+})
+
+describe('workflow latest outputs (Workflow board, api-gaps shape)', () => {
+  it('returns every phase in order with its newest artifact, null when none', async () => {
+    const res = await getWorkflowLatestOutputs('research-workflow')
+    expect(res.workflow_id).toBe('research-workflow')
+    expect(res.phases.map((p) => p.phase_name)).toEqual(['Research', 'Synthesize', 'Report'])
+    const report = res.phases[2]!.artifact!
+    expect(report).toMatchObject({ workflow_id: 'research-workflow', phase_id: 'report', title: 'report.md' })
+    expect(RUNS.some((r) => r.id === report.execution_id)).toBe(true)
+    expect((await getWorkflowLatestOutputs('code-review')).phases.every((p) => p.artifact === null)).toBe(true)
+    await expect(getWorkflowLatestOutputs('missing')).rejects.toMatchObject({ status: 404 })
   })
 })

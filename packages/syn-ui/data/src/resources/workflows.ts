@@ -1,5 +1,5 @@
 import { request, seg } from '../client'
-import type { ExecutionHistoryResponse, WorkflowListResponse, WorkflowResponse } from '../types'
+import type { ArtifactListResponse, ExecutionHistoryResponse, WorkflowListResponse, WorkflowResponse } from '../types'
 import { cached, thenInvalidate } from '../keys'
 
 export interface ListWorkflowsParams {
@@ -20,6 +20,30 @@ export function getWorkflow(workflowId: string, signal?: AbortSignal): Promise<W
 
 export function getWorkflowHistory(workflowId: string, signal?: AbortSignal): Promise<ExecutionHistoryResponse> {
   return cached('getWorkflowHistory', [workflowId], (s) => request(`/workflows/${seg(workflowId)}/history`, { signal: s }), { signal, staleAfter: 'list' })
+}
+
+/** An artifact as GET /workflows/{id}/latest-outputs returns it: the list's ArtifactSummaryResponse. */
+export type LatestArtifact = NonNullable<ArtifactListResponse['artifacts']>[number]
+
+export interface PhaseLatestOutput {
+  phase_id: string
+  phase_name: string
+  /** The phase's newest primary deliverable across every run; null when none yet. */
+  artifact?: LatestArtifact | null
+}
+
+export interface WorkflowLatestOutputsResponse {
+  workflow_id: string
+  phases: PhaseLatestOutput[]
+}
+
+/**
+ * Each phase's latest output in one request (api-gaps PR). Servers older
+ * than that PR answer 404; callers show "not available on this server".
+ * TODO(#624): alias the generated schema once api-types.ts is regenerated.
+ */
+export function getWorkflowLatestOutputs(workflowId: string, signal?: AbortSignal): Promise<WorkflowLatestOutputsResponse> {
+  return cached('getWorkflowLatestOutputs', [workflowId], (s) => request(`/workflows/${seg(workflowId)}/latest-outputs`, { signal: s }), { signal })
 }
 
 export interface ExecuteWorkflowRequest {

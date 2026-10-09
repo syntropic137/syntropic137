@@ -133,3 +133,6 @@ export const artifactRoutes: FixtureRoute[] = [
     return { artifact_id: p.artifactId, content: contentOf(p), content_type: 'text/markdown' }
   }),
 ]
+
+/** One artifact as the list (and GET /workflows/{id}/latest-outputs) returns it. */
+export { row as artifactRow }

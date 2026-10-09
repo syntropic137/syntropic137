@@ -8,6 +8,8 @@ import type {
 } from '../types'
 import { type CatalogRun, type CatalogWorkflow, RUNS, WORKFLOWS, phaseRuns, workflowOf } from './catalog'
 import { EXTRA_WORKFLOWS, PHASE_DETAILS } from './workflowDetails'
+import type { WorkflowLatestOutputsResponse } from '../resources/workflows'
+import { artifactRow } from './artifacts'
 import { type FixtureRoute, notFound, route } from './define'
 import { FIXTURE_NOW, paginate } from './seed'
 
@@ -55,6 +57,9 @@ export function workflowDetail(w: CatalogWorkflow): WorkflowResponse {
     created_at: createdAt(w),
     runs_count: runsOf(w.id).length,
     runs_link: `/workflows/${w.id}/runs`,
+    requires_repos: w.type !== 'research',
+    repos: [],
+    tags: [],
   }
 }
 
@@ -113,6 +118,20 @@ export const workflowRoutes: FixtureRoute[] = [
   route('GET', '/workflows/:workflowId/runs', ({ params }) => {
     findWorkflow(params.workflowId!) ?? notFound('Workflow')
     return { runs: runsOf(params.workflowId!).map(runSummary) }
+  }),
+  route('GET', '/workflows/:workflowId/latest-outputs', ({ params }): WorkflowLatestOutputsResponse => {
+    const w = findWorkflow(params.workflowId!) ?? notFound('Workflow')
+    const done = runsOf(w.id)
+      .flatMap(phaseRuns)
+      .filter((p) => p.artifactId && p.completedAt)
+      .sort((a, b) => (b.completedAt ?? '').localeCompare(a.completedAt ?? ''))
+    return {
+      workflow_id: w.id,
+      phases: w.phases.map((p) => {
+        const latest = done.find((d) => d.phase.id === p.id)
+        return { phase_id: p.id, phase_name: p.name, artifact: latest ? artifactRow(latest) : null }
+      }),
+    }
   }),
   route('GET', '/workflows/:workflowId/history', ({ params }): ExecutionHistoryResponse => {
     const w = findWorkflow(params.workflowId!) ?? notFound('Workflow')

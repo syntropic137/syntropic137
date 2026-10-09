@@ -21,6 +21,7 @@ export type ResourceName =
   | 'getMetrics' | 'getToolTimeline' | 'getTokenMetrics' | 'getConversationLog' | 'getSSEHealth' | 'getFeatures' | 'getBuildInfo'
   | 'getContributionHeatmap'
   | 'getEvalTrend' | 'getWorkflowTrend'
+  | 'getWorkflowLatestOutputs'
 
 export interface QueryTarget {
   name: ResourceName
