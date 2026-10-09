@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ApiError, configureClient } from '../client'
 import { fixtureFeedback, fixtureFeedbackMedia } from '../fixtures/feedback'
 import { getFeatures } from './observability'
-import { FEEDBACK_TYPES, createFeedback, getFeedbackStats, listFeedback, uploadFeedbackMedia, type FeedbackCreate } from './feedback'
+import { FEEDBACK_TYPES, createFeedback, feedbackMediaSrc, getFeedback, getFeedbackStats, listFeedback, updateFeedback, uploadFeedbackMedia, type FeedbackCreate } from './feedback'
 
 const realFetch = globalThis.fetch
 afterEach(() => {
@@ -107,5 +107,28 @@ describe('feedback media fixture', () => {
     const item = await createFeedback(body)
     await expect(uploadFeedbackMedia(item.id, new Blob(['<svg/>'], { type: 'image/svg+xml' }), 'screenshot', 'x.svg')).rejects.toMatchObject({ status: 400 })
     await expect(uploadFeedbackMedia('nope', new Blob([PNG], { type: 'image/png' }), 'screenshot', 'x.png')).rejects.toMatchObject({ status: 404 })
+  })
+})
+
+describe('feedback detail', () => {
+  it('GETs one item and PATCHes its status', async () => {
+    const fetch = vi.fn(async (_u: string | URL | Request, _i?: RequestInit) => new Response(JSON.stringify({ id: 'f-1' }), { status: 200 }))
+    configureClient({ fetch, baseUrl: '/api/v1' })
+    await getFeedback('f-1')
+    expect(fetch.mock.calls[0]![0]).toBe('/api/v1/feedback/f-1')
+    await updateFeedback('f-1', { status: 'resolved' })
+    expect(fetch.mock.calls[1]).toEqual(['/api/v1/feedback/f-1', expect.objectContaining({ method: 'PATCH', body: '{"status":"resolved"}' })])
+    await expect(feedbackMediaSrc('f-1', 'm-1')).resolves.toBe('/api/v1/feedback/f-1/media/m-1')
+  })
+  it('fixture: item with media, status toggle, media bytes', async () => {
+    configureClient({ fixtures: true, fixtureLatencyMs: 0 })
+    const item = await createFeedback(body)
+    const media = await uploadFeedbackMedia(item.id, new Blob([PNG], { type: 'image/png' }), 'screenshot', 'shot.png')
+    const full = await getFeedback(item.id)
+    expect(full.media?.map((m) => m.id)).toEqual([media.id])
+    await expect(updateFeedback(item.id, { status: 'resolved' })).resolves.toMatchObject({ status: 'resolved' })
+    await expect(updateFeedback(item.id, { status: 'open' })).resolves.toMatchObject({ status: 'open', resolved_at: null })
+    const src = await feedbackMediaSrc(item.id, media.id)
+    expect(src.startsWith('blob:')).toBe(true)
   })
 })

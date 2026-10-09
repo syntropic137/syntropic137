@@ -5,6 +5,8 @@
 <script lang="ts">
   import { KEYMAP, keymapGroups, sequenceLabel } from '@syn137/skyline-core/state'
   import { Dialog } from '@syn137/skyline-svelte-v5'
+  import { Keycaps } from '@syn137/skyline-svelte-v5/patterns'
+  import { tokenCaps } from './keycaps'
   import { DOCS_URL, FEATURE_REQUESTS_URL, ISSUES_URL } from '../lib/links'
   import { feedbackUi } from './feedback.svelte'
   import { APPLE, overlays } from './overlays.svelte'
@@ -25,7 +27,7 @@
               <dd class="sky-keys__keys">
                 {#each b.keys as seq, i (i)}
                   {#if i > 0}<span class="sky-keys__or">or</span>{/if}
-                  {#each seq as token, j (j)}<kbd class="sky-keys__kbd">{sequenceLabel([token], APPLE)}</kbd>{/each}
+                  {#each seq as token, j (j)}<Keycaps keys={tokenCaps(token, APPLE)} label={sequenceLabel([token], APPLE)} />{/each}
                 {/each}
               </dd>
             </div>
@@ -88,16 +90,6 @@
   .sky-keys__or {
     font-size: var(--sky-text-label);
     color: var(--ds-color-text-subtle);
-  }
-  .sky-keys__kbd {
-    min-width: 1.5em;
-    padding: 1px 6px;
-    border-radius: var(--ds-radius-xs);
-    border: var(--ds-border-width) solid var(--sky-color-border-strong);
-    font-family: var(--ds-font-mono);
-    font-size: var(--sky-text-label);
-    text-align: center;
-    color: var(--ds-color-text-muted);
   }
   .sky-keys__links {
     display: flex;

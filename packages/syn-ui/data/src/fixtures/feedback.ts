@@ -9,6 +9,7 @@ import {
   FEEDBACK_MAX_UPLOAD_BYTES,
   type FeedbackCreate,
   type FeedbackItem,
+  type FeedbackItemWithMedia,
   type FeedbackMedia,
   type FeedbackMediaType,
   type FeedbackStats,
@@ -18,6 +19,26 @@ import { FIXTURE_NOW, fakeId } from './seed'
 
 export const fixtureFeedback: FeedbackItem[] = []
 export const fixtureFeedbackMedia: FeedbackMedia[] = []
+/** Uploaded bytes by media id, so GET .../media/:id can answer with them. */
+const mediaBlobs = new Map<string, Blob>()
+const STATUSES = ['open', 'in_progress', 'resolved', 'closed', 'wont_fix'] as const
+
+function findItem(id: string): FeedbackItem {
+  const item = fixtureFeedback.find((i) => i.id === id)
+  if (!item) notFound('Feedback')
+  return item
+}
+
+function applyUpdate(item: FeedbackItem, body: unknown): void {
+  if (typeof body !== 'object' || body === null) throw new ApiError(422, 'JSON body required')
+  const status = 'status' in body ? body.status : undefined
+  if (status !== undefined && status !== null) {
+    if (!(STATUSES as readonly unknown[]).includes(status)) throw new ApiError(422, 'invalid status')
+    item.status = status as FeedbackItem['status']
+    item.resolved_at = status === 'resolved' ? new Date(FIXTURE_NOW).toISOString() : null
+  }
+  item.updated_at = new Date(FIXTURE_NOW).toISOString()
+}
 
 function isCreate(body: unknown): body is FeedbackCreate {
   if (typeof body !== 'object' || body === null) return false
@@ -54,6 +75,23 @@ export const feedbackRoutes = [
     const items = fixtureFeedback.filter((i) => (!app || i.app_name === app) && (!status || i.status === status)).reverse()
     return { items: items.slice(0, limit), total: items.length, page: 1, page_size: limit }
   }),
+  route('GET', '/feedback/:feedbackId', ({ params }): FeedbackItemWithMedia => {
+    const item = findItem(params.feedbackId ?? '')
+    const media = fixtureFeedbackMedia
+      .filter((m) => m.feedback_id === item.id)
+      .map((m) => ({ id: m.id, media_type: m.media_type, mime_type: m.mime_type, file_name: m.file_name, file_size: m.file_size, created_at: m.created_at }))
+    return { ...item, media }
+  }),
+  route('PATCH', '/feedback/:feedbackId', ({ params, body }): FeedbackItem => {
+    const item = findItem(params.feedbackId ?? '')
+    applyUpdate(item, body)
+    return item
+  }),
+  route('GET', '/feedback/:feedbackId/media/:mediaId', ({ params }): Blob => {
+    const blob = mediaBlobs.get(params.mediaId ?? '')
+    if (!blob) notFound('Media')
+    return blob
+  }),
   route('POST', '/feedback', ({ body }): FeedbackItem => {
     if (!isCreate(body)) {
       throw new ApiError(422, [{ loc: ['body'], msg: 'url and app_name are required', type: 'missing' }])
@@ -73,8 +111,7 @@ export const feedbackRoutes = [
     return item
   }),
   route('POST', '/feedback/:feedbackId/media', ({ params, body }): FeedbackMedia => {
-    const item = fixtureFeedback.find((i) => i.id === params.feedbackId)
-    if (!item) notFound('Feedback')
+    const item = findItem(params.feedbackId ?? '')
     if (!(body instanceof FormData)) throw new ApiError(422, 'multipart/form-data body required')
     const file = body.get('file')
     const mediaType = body.get('media_type')
@@ -91,6 +128,7 @@ export const feedbackRoutes = [
       created_at: new Date(FIXTURE_NOW).toISOString(),
     }
     fixtureFeedbackMedia.push(media)
+    mediaBlobs.set(media.id, file)
     item.media_count += 1
     return media
   }),
