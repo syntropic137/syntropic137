@@ -6,6 +6,7 @@
    puts the syn137 palette in scope; the .dark block below maps Fumadocs onto it. */
 @import '@syn137/skyline-themes/all.css';
 @import './docs-brand.css';
+@import './components.css';
 
 /* Fumadocs v16 --color-fd-* variables.
    Light mode keeps the docs' own values: Skyline is dark only for v1. */

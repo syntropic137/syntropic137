@@ -19,20 +19,23 @@ export function LLMCopyButton({ content, title, editUrl, mdUrl }: { content: str
   };
 
   return (
-    <div className="flex items-center gap-2 mb-4 not-prose">
+    <div className="syn-llm-actions not-prose">
       <button
         onClick={handleCopy}
-        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border border-zinc-700 hover:border-fd-primary/30 text-fd-muted-foreground hover:text-fd-foreground hover:bg-zinc-800/50 transition-all"
+        type="button"
+        className="syn-llm-action"
+        data-variant="control"
+        data-state={copied ? 'copied' : undefined}
       >
-        {copied ? <Check className="w-3.5 h-3.5 text-teal-400" /> : <Copy className="w-3.5 h-3.5" />}
+        {copied ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
         {copied ? 'Copied for LLM' : 'Copy for LLM'}
       </button>
       <Link
         href={mdUrl}
         target="_blank"
-        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-fd-muted-foreground hover:text-fd-primary transition-colors"
+        className="syn-llm-action"
       >
-        <FileText className="w-3.5 h-3.5" />
+        <FileText aria-hidden="true" />
         View as Markdown
       </Link>
       {editUrl && (
@@ -40,9 +43,9 @@ export function LLMCopyButton({ content, title, editUrl, mdUrl }: { content: str
           href={editUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-fd-muted-foreground hover:text-fd-primary transition-colors"
+          className="syn-llm-action"
         >
-          <Pencil className="w-3.5 h-3.5" />
+          <Pencil aria-hidden="true" />
           Edit on GitHub
         </Link>
       )}
