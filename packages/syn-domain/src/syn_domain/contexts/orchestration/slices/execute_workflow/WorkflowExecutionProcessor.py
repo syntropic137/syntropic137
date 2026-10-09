@@ -455,7 +455,7 @@ class WorkflowExecutionProcessor:
             await self._run_queue.mark_admitted(execution_id)
         return phase_outputs
 
-    async def run_claimed(self, run: ClaimedRun) -> WorkflowExecutionResult:
+    async def run_claimed(self, claimed: ClaimedRun) -> WorkflowExecutionResult:
         """Drain a run an Executor claimed, from its stream alone (#1310 1.3).
 
         Everything `run` was handed is read back from the start pins: phases,
@@ -465,9 +465,9 @@ class WorkflowExecutionProcessor:
         start was projected into; the run-scoped fold that replaces it is
         #1310 1.4. Closing the run row is the claimer's (1.5), not this.
         """
-        aggregate = await self._journal.reload(run.execution_id)
+        aggregate = await self._journal.reload(claimed.execution_id)
         if aggregate is None:
-            msg = f"Claimed run {run.execution_id} has no execution stream"
+            msg = f"Claimed run {claimed.execution_id} has no execution stream"
             raise LookupError(msg)
         pins = aggregate.start_pins
         repos = [RepositoryRef.from_slug(c.repository) for c in pins.source_commits]
