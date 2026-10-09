@@ -56,12 +56,23 @@
     min-width: 0;
     font-size: var(--ds-text-md);
     line-height: 1.8;
+    container-type: inline-size;
   }
+  /* Narrow (PhoneTriggers): the clause key sits above its sentence. */
   .sky-rule__clause {
     display: grid;
-    grid-template-columns: 2.75rem minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
     gap: var(--ds-space-2) var(--ds-space-4);
     align-items: start;
+    justify-items: start;
+  }
+  .sky-rule__body {
+    justify-self: stretch;
+  }
+  @container (min-width: 30rem) {
+    .sky-rule__clause {
+      grid-template-columns: 2.75rem minmax(0, 1fr);
+    }
   }
   .sky-rule[data-size='full'] {
     gap: 0;
@@ -142,19 +153,41 @@
   .sky-rule__mapping {
     display: flex;
     flex-direction: column;
-    min-width: 22rem;
     margin: var(--ds-space-2) 0 0;
     font-family: var(--ds-font-mono);
     font-size: var(--sky-text-data);
     line-height: 1.4;
   }
+  /* Narrow: the input name over its source (PhoneTriggers); wide: one row. */
   .sky-rule__map-row {
     display: grid;
-    grid-template-columns: minmax(8rem, 1fr) 1.25rem minmax(10rem, 1.6fr);
-    column-gap: var(--ds-space-3);
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-areas: 'key key' 'arrow from';
+    column-gap: var(--ds-space-1-5);
     align-items: center;
-    min-height: 2.25rem;
+    padding: var(--ds-space-2) 0;
     border-bottom: var(--ds-border-width) solid var(--sky-color-divider);
+  }
+  .sky-rule__map-row dt {
+    grid-area: key;
+  }
+  .sky-rule__map-row .sky-rule__from-arrow {
+    grid-area: arrow;
+  }
+  .sky-rule__map-row dd {
+    grid-area: from;
+  }
+  @container (min-width: 30rem) {
+    .sky-rule__mapping {
+      min-width: 22rem;
+    }
+    .sky-rule__map-row {
+      grid-template-columns: minmax(8rem, 1fr) 1.25rem minmax(10rem, 1.6fr);
+      grid-template-areas: 'key arrow from';
+      column-gap: var(--ds-space-3);
+      min-height: 2.25rem;
+      padding: 0;
+    }
   }
   .sky-rule__map-row dd {
     margin: 0;

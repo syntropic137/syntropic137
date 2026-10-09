@@ -41,8 +41,9 @@
   const openId = $derived(selectedId ?? (wide ? (shown[0]?.trigger_id ?? null) : null))
   const selectedMissing = $derived(Boolean(selectedId && list.data && !all.some((t) => t.trigger_id === selectedId)))
 
+  // A wide screen always shows a rule, so its panel owns the trail (Triggers > rule), as on the board.
   $effect(() => {
-    if (!selectedId) setPage({ title: 'Triggers', crumbs: [{ label: 'Triggers' }] })
+    if (!selectedId && !(wide && openId)) setPage({ title: 'Triggers', crumbs: [{ label: 'Triggers' }] })
   })
 
   const pending = $state<Record<string, boolean>>({})
@@ -70,7 +71,7 @@
       <span class="sky-triggers__icon"><ObjectIcon kind="trigger" size={84} /></span>
       <div>
         <h1 id="sky-triggers-title" class="sky-triggers__title">Triggers</h1>
-        <p class="sky-triggers__lead">GitHub events that start a workflow on their own. {list.data ? triggerSummary(all) : ''}</p>
+        <p class="sky-triggers__lead"><span class="sky-triggers__what">GitHub events that start a workflow on their own.</span> {list.data ? triggerSummary(all) : ''}</p>
       </div>
     </div>
     <div class="sky-triggers__filters">
@@ -97,7 +98,7 @@
     </Callout>
   {:else if !list.data}
     <div class="sky-triggers__body" aria-busy="true">
-      <div class="sky-triggers__list"><Skeleton lines={7} label="Loading triggers" /></div>
+      <div class="sky-triggers__list"><div class="sky-triggers__group"><Skeleton lines={7} label="Loading triggers" /></div></div>
       {#if wide}<div class="sky-triggers__detail"><Skeleton lines={6} /></div>{/if}
     </div>
   {:else if all.length === 0}
@@ -153,7 +154,7 @@
       {#if wide && openId}
         <div class="sky-triggers__detail">
           {#key openId}
-            <TriggerPanel triggerId={openId} setCrumbs={Boolean(selectedId)} onchanged={() => list.refresh()} />
+            <TriggerPanel triggerId={openId} setCrumbs onchanged={() => list.refresh()} />
           {/key}
         </div>
       {/if}
@@ -217,11 +218,17 @@
     gap: var(--ds-space-5);
     min-width: 0;
   }
-  .sky-triggers__list,
-  .sky-triggers__detail {
+  .sky-triggers__list {
     display: flex;
     flex-direction: column;
     gap: var(--ds-space-4);
+    min-width: 0;
+  }
+  /* One card per repo, as on the board. */
+  .sky-triggers__group,
+  .sky-triggers__detail {
+    display: flex;
+    flex-direction: column;
     min-width: 0;
     padding: var(--ds-space-3);
     border-radius: var(--sky-radius-card-lg);
@@ -233,9 +240,10 @@
     padding: var(--ds-space-6);
   }
   .sky-triggers__group {
-    display: flex;
-    flex-direction: column;
     gap: var(--ds-space-1);
+  }
+  .sky-triggers__detail {
+    gap: var(--ds-space-4);
   }
   .sky-triggers__repo {
     display: flex;
@@ -246,7 +254,12 @@
     font-family: var(--ds-font-mono);
     font-size: var(--ds-text-xs);
     color: var(--ds-color-text-muted);
-    overflow-wrap: anywhere;
+  }
+  .sky-triggers__repo > span:first-child {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .sky-triggers__n {
     flex-shrink: 0;
@@ -303,11 +316,21 @@
     font-family: var(--ds-font-mono);
     font-size: var(--ds-text-sm);
     font-weight: var(--ds-font-weight-medium);
-    overflow-wrap: anywhere;
   }
   .sky-triggers__sub {
     font-size: var(--ds-text-xs);
     color: var(--ds-color-text-subtle);
+  }
+  /* One line each, truncated, as on the board; the full text is in the panel. */
+  .sky-triggers__event,
+  .sky-triggers__sub {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  /* The phone board keeps only the count line under the title. */
+  .sky-triggers__what {
+    display: none;
   }
   .sky-triggers__inplace {
     margin: var(--ds-space-2) 0 var(--ds-space-3);
@@ -336,8 +359,18 @@
     .sky-triggers__icon {
       width: 5.25rem;
     }
+    .sky-triggers__what {
+      display: inline;
+    }
     .sky-triggers__filters {
-      flex: 0 1 26rem;
+      flex: 0 1 36rem;
+      flex-direction: row;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: flex-end;
+    }
+    .sky-triggers__filters > :global(:first-child) {
+      flex: 1 1 14rem;
     }
   }
   @media (min-width: 64rem) {

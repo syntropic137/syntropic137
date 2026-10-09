@@ -84,6 +84,26 @@
   const errorText = $derived(trig.error instanceof Error ? trig.error.message : 'The server did not answer.')
 </script>
 
+{#snippet acts()}
+  {#if t && t.status !== 'deleted'}
+    <Button size="sm" loading={busy} onclick={toggle}>
+      {#snippet icon()}
+        {#if t?.status === 'active'}
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M5.5 3.5v9M10.5 3.5v9"></path></svg>
+        {:else}
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M5 3.25v9.5L12.5 8z"></path></svg>
+        {/if}
+      {/snippet}
+      {t.status === 'active' ? 'Pause' : 'Resume'}
+    </Button>
+    <Button size="sm" tone="danger" aria-label="Delete trigger" onclick={() => (confirmOpen = true)}>
+      {#snippet icon()}
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.75 4.25h10.5M6.25 4.25V2.75h3.5v1.5M4.25 4.25l.6 9h6.3l.6-9"></path></svg>
+      {/snippet}
+    </Button>
+  {/if}
+{/snippet}
+
 <section class="sky-trigger" aria-label="Trigger detail" aria-busy={!t}>
   {#if trig.error && !t}
     <Callout tone="danger" title="Couldn't load this trigger." role="alert">
@@ -116,14 +136,7 @@
             { value: 'json', label: 'JSON' },
           ]}
         />
-        {#if t.status !== 'deleted'}
-          <Button size="sm" loading={busy} onclick={toggle}>{t.status === 'active' ? 'Pause' : 'Resume'}</Button>
-          <Button size="sm" tone="danger" aria-label="Delete trigger" onclick={() => (confirmOpen = true)}>
-            {#snippet icon()}
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.75 4.25h10.5M6.25 4.25V2.75h3.5v1.5M4.25 4.25l.6 9h6.3l.6-9"></path></svg>
-            {/snippet}
-          </Button>
-        {/if}
+        <span class="sky-trigger__acts" data-at="head">{@render acts()}</span>
       </div>
     </header>
 
@@ -164,6 +177,9 @@
         {/each}
       </ol>
     {/if}
+
+    <!-- The phone board puts Pause and Delete at the foot of the opened rule. -->
+    <div class="sky-trigger__acts" data-at="foot">{@render acts()}</div>
 
     <AlertDialog
       bind:open={confirmOpen}
@@ -259,6 +275,21 @@
     flex-wrap: wrap;
     align-items: center;
     gap: var(--ds-space-2);
+  }
+  .sky-trigger__acts {
+    display: flex;
+    align-items: center;
+    gap: var(--ds-space-2);
+  }
+  .sky-trigger__acts[data-at='head'] {
+    display: none;
+  }
+  .sky-trigger__acts[data-at='foot'] {
+    padding-top: var(--ds-space-4);
+    border-top: var(--ds-border-width) solid var(--sky-color-divider);
+  }
+  .sky-trigger__acts[data-at='foot'] > :global(:first-child) {
+    flex-grow: 1;
   }
   .sky-trigger__json {
     display: flex;
@@ -356,6 +387,17 @@
     }
     .sky-trigger__title {
       font-size: var(--ds-text-2xl);
+    }
+    /* Board: Readable/JSON, Pause and Delete sit on one row. */
+    .sky-trigger__tools {
+      flex-wrap: nowrap;
+      flex-shrink: 0;
+    }
+    .sky-trigger__acts[data-at='head'] {
+      display: flex;
+    }
+    .sky-trigger__acts[data-at='foot'] {
+      display: none;
     }
   }
 </style>
