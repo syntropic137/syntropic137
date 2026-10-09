@@ -24,3 +24,5 @@ export { skylineTone, skylineLegend, SKYLINE_TONE_FILL, SKYLINE_TONE_LABEL } fro
 export type { SkylineOutcomes, SkylineTone, SkylineLegendItem } from './skylineTone'
 export { sMark, S_GRID } from './sMark'
 export type { SMarkCube, SMarkLayout, SMarkOptions, SMarkTone } from './sMark'
+export { isoCity, cityActivitySample, sampleCityDays, CITY_TONE_FILL, SAMPLE_SESSIONS } from './isoCity'
+export type { CityBlock, CityTone, IsoCityLayout, IsoCityOptions } from './isoCity'
