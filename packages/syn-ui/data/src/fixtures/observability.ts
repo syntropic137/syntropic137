@@ -9,13 +9,35 @@ import { phaseMetrics } from './workflows'
 
 const findSession = (id: string) => allPhaseRuns().find((p) => p.sessionId === id) ?? notFound('Session')
 
-function metrics(): MetricsResponse {
-  const sessions = allPhaseRuns()
+type PhaseMetricsRow = MetricsResponse['phases'][number]
+
+/** One row per phase id over the runs, as GET /metrics?workflow_id= aggregates them. */
+function workflowPhases(runs: readonly (typeof RUNS)[number][]): PhaseMetricsRow[] {
+  const byId = new Map<string, PhaseMetricsRow>()
+  for (const row of runs.flatMap(phaseMetrics)) {
+    const cur = byId.get(row.phase_id)
+    if (!cur) {
+      byId.set(row.phase_id, { ...row })
+      continue
+    }
+    cur.input_tokens += row.input_tokens
+    cur.output_tokens += row.output_tokens
+    cur.total_tokens += row.total_tokens
+    cur.cost_usd = (Number(cur.cost_usd) + Number(row.cost_usd)).toFixed(6)
+    cur.cost_in_progress = cur.cost_in_progress || row.cost_in_progress
+    cur.artifact_count += row.artifact_count
+  }
+  return [...byId.values()]
+}
+
+function metrics(workflowId: string | null = null): MetricsResponse {
+  const runs = workflowId ? RUNS.filter((r) => r.workflowId === workflowId) : RUNS
+  const sessions = workflowId ? allPhaseRuns().filter((p) => p.run.workflowId === workflowId) : allPhaseRuns()
   const sum = (k: 'input' | 'output' | 'cacheWrite' | 'cacheRead') => sessions.reduce((n, p) => n + p.tokens[k], 0)
-  const count = (s: string) => RUNS.filter((r) => r.status === s).length
+  const count = (s: string) => runs.filter((r) => r.status === s).length
   const tokens = { input: sum('input'), output: sum('output'), cacheWrite: sum('cacheWrite'), cacheRead: sum('cacheRead') }
   return {
-    total_workflows: RUNS.length,
+    total_workflows: runs.length,
     completed_workflows: count('completed'),
     failed_workflows: count('failed'),
     execution_status_counts: { not_started: 0, running: count('running'), completed: count('completed'), failed: count('failed'), cancelled: count('cancelled'), interrupted: 0 },
@@ -25,10 +47,10 @@ function metrics(): MetricsResponse {
     total_cache_creation_tokens: tokens.cacheWrite,
     total_cache_read_tokens: tokens.cacheRead,
     total_tokens: tokens.input + tokens.output + tokens.cacheWrite + tokens.cacheRead,
-    total_cost_usd: RUNS.reduce((n, r) => n + r.cost, 0),
+    total_cost_usd: runs.reduce((n, r) => n + r.cost, 0),
     total_artifacts: sessions.filter((p) => p.artifactId).length,
     total_artifact_bytes: sessions.filter((p) => p.artifactId).length * 20_275,
-    phases: RUNS.slice(0, 3).flatMap(phaseMetrics),
+    phases: workflowId ? workflowPhases(runs) : RUNS.slice(0, 3).flatMap(phaseMetrics),
   }
 }
 
@@ -95,7 +117,7 @@ function executionCost(id: string): ExecutionCost {
 }
 
 export const observabilityRoutes: FixtureRoute[] = [
-  route('GET', '/metrics', () => metrics()),
+  route('GET', '/metrics', ({ query }) => metrics(query.get('workflow_id'))),
   route('GET', '/costs/summary', (): CostSummary => {
     const m = metrics()
     return {

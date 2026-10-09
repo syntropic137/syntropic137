@@ -9,7 +9,12 @@
     kit, timeout, latest output (GET /workflows/{id}/latest-outputs) and
     prompt. Token shares come from GET /workflows/{id}/history when it has
     runs (API gap: the history endpoint is deprecated and often empty).
-  - Recent runs: the newest five, linking to the Runs page.
+  - Header figures: tokens, spend and sessions from GET /metrics?workflow_id=
+    (every phase, failed ones included, as the React page), artifacts from
+    the artifact list's total.
+  - Recent runs: the newest five, linking to the Runs page. Tokens and cost
+    come from the Executions list rows (GET /executions?q=<id>), because
+    /workflows/{id}/runs leaves out failed-phase usage (#1843).
   Endpoints a server does not have yet (404) degrade to a note.
 -->
 <script lang="ts">
@@ -23,6 +28,7 @@
     phaseModelChip,
     phaseShares,
     runDurationMs,
+    withListUsage,
     workflowFigures,
     workflowPromptSpec,
     workflowSkillRefs,
@@ -30,7 +36,7 @@
   } from '@syn137/skyline-core/screens/workflows'
   import { Button, Callout, EmptyState, Skeleton } from '@syn137/skyline-svelte-v5'
   import { AgentPromptButton, PageHeader, PhaseKit, PhaseKitChips, RunRow, SkillRef } from '@syn137/skyline-svelte-v5/patterns'
-  import { ApiError, TREND_PAGE_SIZE, getWorkflow, getWorkflowHistory, getWorkflowLatestOutputs, getWorkflowTrend, listWorkflowRuns } from '@syn137/syn-ui-data'
+  import { ApiError, TREND_PAGE_SIZE, getMetrics, getWorkflow, getWorkflowHistory, getWorkflowLatestOutputs, getWorkflowTrend, listArtifacts, listExecutions, listWorkflowRuns } from '@syn137/syn-ui-data'
   import { isRunEvent } from '@syn137/syn-ui-data/live'
   import { resource } from '../../lib/load.svelte'
   import { setPage } from '../../lib/page.svelte'
@@ -47,6 +53,10 @@
   const trend = resource((signal) => getWorkflowTrend(id, { page_size: TREND_PAGE_SIZE }, signal), { live: isRunEvent })
   const outputs = resource((signal) => getWorkflowLatestOutputs(id, signal))
   const history = resource((signal) => getWorkflowHistory(id, signal))
+  const usage = resource((signal) => getMetrics(id, signal), { live: isRunEvent })
+  const artifactsTotal = resource((signal) => listArtifacts({ page: 1, page_size: 1 }, { workflow_id: id }, signal))
+  // The Executions list has no workflow filter; q matches the workflow id, and rows are kept by id below.
+  const listed = resource((signal) => listExecutions({ q: id, page: 1, page_size: 25 }, signal), { live: isRunEvent })
 
   $effect(() => {
     if (wf.data) setPage({ title: wf.data.name, crumbs: [{ label: 'Workflows', href: '/workflows' }, { label: wf.data.name }] })
@@ -58,7 +68,7 @@
   const w = $derived(wf.data)
   const phases = $derived(w ? [...w.phases].sort((a, b) => a.order - b.order) : [])
   const current = $derived(phases.find((p) => p.phase_id === selected) ?? phases[0])
-  const figures = $derived(w ? workflowFigures(phases.length, w.runs_count, runs.data ?? null) : [])
+  const figures = $derived(w ? workflowFigures(phases.length, Math.max(w.runs_count, runs.data?.length ?? 0), usage.data ?? null, artifactsTotal.data?.total ?? null) : [])
   const skills = $derived(workflowSkillRefs(phases))
   const prompt = $derived(w ? workflowPromptSpec({ id: w.id, name: w.name, phases, input_declarations: w.input_declarations }) : null)
   const shares = $derived(history.data?.executions.length ? phaseShares(phases.map((p) => p.phase_id), history.data.executions) : null)
@@ -67,7 +77,7 @@
   const notFound = $derived(wf.error instanceof ApiError && wf.error.status === 404)
 
   const now = $derived(runs.data ? Date.now() : 0)
-  const recent = $derived((runs.data ?? []).slice(0, 5))
+  const recent = $derived(withListUsage((runs.data ?? []).slice(0, 5), listed.data?.executions.filter((e) => e.workflow_id === id)))
   const longest = $derived(Math.max(0, ...recent.map((r) => runDurationMs(r, now || Date.now()) ?? 0)))
   const slots = $derived(runSlots(recent.map((r) => r.phase_progress?.possible ?? r.total_phases)))
   const runsHref = $derived(href(`/workflows/${id}/runs`))

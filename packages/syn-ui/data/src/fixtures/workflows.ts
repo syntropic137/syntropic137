@@ -79,6 +79,13 @@ export function phaseMetrics(r: CatalogRun): PhaseMetrics[] {
   }))
 }
 
+function usageWithoutFailedPhases(r: CatalogRun): { total_tokens: number; total_cost_usd: number } {
+  const failed = phaseRuns(r).filter((p) => p.status === 'failed')
+  const tokens = failed.reduce((n, p) => n + p.tokens.input + p.tokens.output + p.tokens.cacheWrite + p.tokens.cacheRead, 0)
+  const cost = failed.reduce((n, p) => n + p.cost, 0)
+  return { total_tokens: r.tokens - tokens, total_cost_usd: Math.round((r.cost - cost) * 1e6) / 1e6 }
+}
+
 export function runSummary(r: CatalogRun): WorkflowExecutionSummary {
   const total = workflowOf(r.workflowId)?.phases.length ?? 0
   return {
@@ -97,8 +104,8 @@ export function runSummary(r: CatalogRun): WorkflowExecutionSummary {
       percent: total ? Math.round((r.done / total) * 100) : 0,
       display: `${r.done} of ${total}`,
     },
-    total_tokens: r.tokens,
-    total_cost_usd: r.cost,
+    // TODO(#1843): mirrors the API, whose /runs rows leave out a failed phase's usage (the Executions list and /metrics count it).
+    ...usageWithoutFailedPhases(r),
     failure_classification: 'unclassified',
   }
 }

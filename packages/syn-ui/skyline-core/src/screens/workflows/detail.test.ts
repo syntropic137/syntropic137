@@ -14,6 +14,7 @@ import {
   workflowPromptSpec,
   workflowTags,
   workflowTotals,
+  withListUsage,
 } from './detail'
 
 const NOW = Date.parse('2026-10-08T12:00:00Z')
@@ -30,9 +31,24 @@ describe('workflow header', () => {
   it('sums tokens and spend from the run list, and waits for it', () => {
     const runs = [run('a', 'completed', 1, 10, 396_791, '0.2162'), run('b', 'cancelled', 2, 10, 156_600, 0.17)]
     expect(workflowTotals(12, runs)).toEqual({ runs: 12, tokens: 553_391, cost: 0.3862 })
-    expect(workflowFigures(3, 12, runs).map((f) => f.label)).toEqual(['Runs', 'Phases', 'Tokens', 'Spend'])
-    expect(workflowFigures(3, 12, runs)[3]!.value).toBe('$0.3862')
-    expect(workflowFigures(3, 12, null).slice(2).map((f) => f.value)).toEqual(['—', '—'])
+  })
+
+  it('reads tokens, spend and sessions from /metrics?workflow_id=, failed phases included (sdlc-implement-v3, 2026-10-09)', () => {
+    // /workflows/{id}/runs summed to 3,849,702,274 / $1682.18; the metrics (and the React page) say:
+    const metrics = { total_tokens: 4_326_539_089, total_cost_usd: '1712.6300000', total_sessions: 1344 }
+    const figs = workflowFigures(8, 317, metrics, 4872)
+    expect(figs.map((f) => f.label)).toEqual(['Runs', 'Phases', 'Sessions', 'Artifacts', 'Tokens', 'Spend'])
+    expect(figs.map((f) => f.value)).toEqual(['317', '8', '1,344', '4,872', '4.33B', '$1,712.63'])
+    expect(workflowFigures(3, 12, null).slice(2).map((f) => f.value)).toEqual(['—', '—', '—', '—'])
+  })
+
+  it('takes recent-run usage from the Executions list rows of the same id', () => {
+    const runs = [run('exec-0fd655b9617b', 'failed', 1, 10, 648_928, '0.21'), run('exec-other', 'completed', 2, 10, 5, '0.01')]
+    const rows = [{ workflow_execution_id: 'exec-0fd655b9617b', total_tokens: 738_712, total_cost_usd: '0.3300000' }]
+    const out = withListUsage(runs, rows)
+    expect(out[0]).toMatchObject({ total_tokens: 738_712, total_cost_usd: '0.3300000', status: 'failed' })
+    expect(out[1]).toMatchObject({ total_tokens: 5, total_cost_usd: '0.01' })
+    expect(withListUsage(runs, undefined)).toEqual(runs)
   })
 
   it('builds the agent prompt from the declared inputs and phases', () => {

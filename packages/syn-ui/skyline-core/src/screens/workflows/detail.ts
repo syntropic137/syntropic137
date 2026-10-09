@@ -8,6 +8,7 @@ import { formatBytes } from '../../format/bytes'
 import { formatCostPrecise } from '../../format/cost'
 import { toNumber, toTime } from '../../format/shared'
 import { formatTokens } from '../../format/tokens'
+import { formatInteger } from '../../format/number'
 import type { Figure } from '../../patterns/headers'
 import type { AgentPromptSpec } from '../../patterns/agentPrompt'
 import { statusKind, type StatusKind } from '../../patterns/status'
@@ -41,15 +42,52 @@ export function workflowTotals(runsCount: number, runs: readonly WorkflowRunLike
   }
 }
 
-/** Header figures: Runs, Phases, Tokens, Spend. Tokens and spend wait for the run list. */
-export function workflowFigures(phaseCount: number, runsCount: number, runs: readonly WorkflowRunLike[] | null): Figure[] {
-  const t = workflowTotals(runsCount, runs)
+/**
+ * What GET /metrics?workflow_id= returns, structurally: the workflow's
+ * totals over every run and phase, failed phases included. The React page
+ * reads these; the /workflows/{id}/runs sums drop failed-phase usage.
+ */
+export interface WorkflowMetricsLike {
+  total_tokens: number
+  total_cost_usd: number | string
+  total_sessions: number
+}
+
+/**
+ * Header figures: Runs, Phases, Sessions, Artifacts, Tokens, Spend. Sessions,
+ * tokens and spend come from the workflow's metrics, artifacts from the
+ * artifact list's total; each waits for its own source.
+ */
+export function workflowFigures(phaseCount: number, runsCount: number, metrics: WorkflowMetricsLike | null, artifacts: number | null = null): Figure[] {
   return [
-    { label: 'Runs', value: String(t.runs) },
+    { label: 'Runs', value: String(runsCount) },
     { label: 'Phases', value: String(phaseCount) },
-    { label: 'Tokens', value: runs ? formatTokens(t.tokens, { case: 'upper' }) : '—' },
-    { label: 'Spend', value: runs ? formatCostPrecise(t.cost) : '—' },
+    { label: 'Sessions', value: metrics ? formatInteger(metrics.total_sessions) : '—' },
+    { label: 'Artifacts', value: artifacts === null ? '—' : formatInteger(artifacts) },
+    { label: 'Tokens', value: metrics ? formatTokens(metrics.total_tokens, { case: 'upper' }) : '—' },
+    { label: 'Spend', value: metrics ? formatCostPrecise(metrics.total_cost_usd) : '—' },
   ]
+}
+
+/** A row of GET /executions: the per-run usage the Executions list shows. */
+export interface RunUsageLike {
+  workflow_execution_id: string
+  total_tokens?: number | null
+  total_cost_usd?: number | string | null
+}
+
+/**
+ * Recent runs with tokens and cost taken from the Executions list rows of the
+ * same id, so a run reads the same here and on Executions. A run with no list
+ * row keeps its own values.
+ */
+// TODO(#1843): /workflows/{id}/runs drops failed-phase usage; drop this overlay once it agrees with /executions.
+export function withListUsage<R extends WorkflowRunLike>(runs: readonly R[], rows: readonly RunUsageLike[] | null | undefined): R[] {
+  const byId = new Map((rows ?? []).map((r) => [r.workflow_execution_id, r]))
+  return runs.map((r) => {
+    const row = byId.get(r.workflow_execution_id)
+    return row ? { ...r, total_tokens: row.total_tokens ?? r.total_tokens, total_cost_usd: row.total_cost_usd ?? r.total_cost_usd } : r
+  })
 }
 
 export interface InputDeclarationLike {

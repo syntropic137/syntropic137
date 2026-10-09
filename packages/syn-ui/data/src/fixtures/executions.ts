@@ -225,7 +225,7 @@ function inventory(r: CatalogRun): InventoryStatus {
 export const executionRoutes: FixtureRoute[] = [
   route('GET', '/executions', ({ query }): ExecutionListResponse => {
     const items = [...RUNS].sort((a, b) => b.startedAt.localeCompare(a.startedAt)).map(executionListItem)
-    const textOf = (e: ExecutionListItem) => `${e.workflow_name} ${e.workflow_execution_id} ${e.repos_display ?? ''}`
+    const textOf = (e: ExecutionListItem) => `${e.workflow_name} ${e.workflow_id} ${e.workflow_execution_id} ${e.repos_display ?? ''}`
     const after = fixtureWindowStart(query)
     const timed = Number.isNaN(after) ? items : items.filter((e) => e.started_at && Date.parse(e.started_at) >= after)
     const inWindow = query.get('in_eval') === 'true' ? timed.filter((e) => e.eval) : timed

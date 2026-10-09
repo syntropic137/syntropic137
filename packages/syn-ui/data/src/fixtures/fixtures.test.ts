@@ -136,6 +136,15 @@ describe('every screen has data in fixtures mode', () => {
     expect(commits.events.every((e) => e.event_type === 'git_commit')).toBe(true)
     expect((commits.events[0]!.data.git as { sha: string }).sha).toMatch(/^922a6b2/)
     expect((await getMetrics()).total_workflows).toBeGreaterThan(0)
+    // /metrics?workflow_id= counts every phase; /workflows/{id}/runs drops failed-phase usage, as the API does (#1843).
+    const wm = await getMetrics('skills-matrix')
+    const runs = await listWorkflowRuns('skills-matrix')
+    const listed = (await listExecutions({ q: 'skills-matrix', page: 1, page_size: 50 })).executions.filter((e) => e.workflow_id === 'skills-matrix')
+    const failed = runs.find((r) => r.status === 'failed')!
+    const failedListed = listed.find((e) => e.workflow_execution_id === failed.workflow_execution_id)!
+    expect(failedListed.total_tokens).toBeGreaterThan(failed.total_tokens ?? 0)
+    expect(wm.total_tokens).toBe(listed.reduce((n, e) => n + (e.total_tokens ?? 0), 0))
+    expect(new Set(wm.phases.map((p) => p.phase_id)).size).toBe(wm.phases.length)
     expect((await getCostSummary()).total_cost_usd).toBeGreaterThan(0)
   })
   it('returns copies, so callers cannot edit the store', async () => {
