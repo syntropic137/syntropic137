@@ -311,18 +311,22 @@ async def test_an_eval_run_names_the_models_and_cost_its_execution_page_names(
     )
     await store.save("workflow_execution_details", execution_id, detail.to_dict())
 
-    page = (await client.get(f"/executions/{execution_id}")).json()
-    runs = (await client.get(f"/evals/{eval_id}/runs")).json()["items"]
+    from syn_api.routes.executions.models import ExecutionDetailResponse
+    from syn_api.types import EvalRunListResponse
 
-    def observed(phase: dict[str, object]) -> set[str]:
-        split = phase.get("cost_by_model") or {}
-        assert isinstance(split, dict)
-        models = {str(k) for k in split if k != UNKNOWN_MODEL_KEY}
-        return models | ({str(phase["model"])} if phase.get("model") else set())
+    page = ExecutionDetailResponse.model_validate(
+        (await client.get(f"/executions/{execution_id}")).json()
+    )
+    runs = EvalRunListResponse.model_validate((await client.get(f"/evals/{eval_id}/runs")).json())
 
-    expected = sorted((str(p["phase_id"]), m) for p in page["phases"] for m in observed(p))
+    expected = sorted(
+        (p.phase_id, m)
+        for p in page.phases
+        for m in {k for k in p.cost_by_model if k != UNKNOWN_MODEL_KEY}
+        | ({p.model} if p.model else set())
+    )
     assert expected == sorted([("p0", CODEX), ("p0", OPUS), ("p1", SONNET)])
-    (run,) = runs
-    assert sorted((m["phase_id"], m["model"]) for m in run["models"]) == expected
-    assert run["total_cost_usd"] == page["total_cost_usd"]
-    assert run["duration_seconds"] == page["total_duration_seconds"]
+    (run,) = runs.items
+    assert sorted((m.phase_id, m.model) for m in run.models) == expected
+    assert run.total_cost_usd == page.total_cost_usd
+    assert run.duration_seconds == page.total_duration_seconds
