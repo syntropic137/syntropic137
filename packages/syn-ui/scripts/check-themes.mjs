@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Theme parity gate: every theme file must define exactly the same set of
 // custom properties, so switching data-theme never leaves a token unset.
-// Also checks that tokens.css (structural) holds no colour literals.
+// Also checks that tokens.css and motion.css (structural) hold no colour literals.
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
@@ -20,9 +20,13 @@ for (const [name, set] of rest) {
   for (const t of set) if (!first[1].has(t)) { console.error(`${first[0]}: missing ${t} (defined in ${name})`); failed = true }
 }
 
-const tokens = readFileSync(join(src, 'tokens.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '')
-const literal = tokens.match(/#[0-9a-fA-F]{3,8}\b|\brgba?\(|\bhsla?\(|\boklch\(/)
-if (literal) { console.error(`tokens.css: colour literal ${literal[0]} (colours belong in a theme file)`); failed = true }
+const strip = (css) => css.replace(/\/\*[\s\S]*?\*\//g, '')
+const tokens = strip(readFileSync(join(src, 'tokens.css'), 'utf8'))
+// Structural files (tokens.css, motion.css) hold no colour literals.
+for (const [name, css] of [['tokens.css', tokens], ['motion.css', strip(readFileSync(join(src, 'motion.css'), 'utf8'))]]) {
+  const literal = css.match(/#[0-9a-fA-F]{3,8}\b|\brgba?\(|\bhsla?\(|\boklch\(/)
+  if (literal) { console.error(`${name}: colour literal ${literal[0]} (colours belong in a theme file)`); failed = true }
+}
 
 // Upstream parity: every --ds-* name Skyline defines is an upstream
 // @syntropic137/design-tokens name, or one of the extensions documented in

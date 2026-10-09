@@ -30,7 +30,7 @@ Before you hand work back, check, test and build must all pass with zero warning
 
 | Package | Path | Holds | Depends on |
 |---|---|---|---|
-| `@syn137/skyline-themes` | `packages/syn-ui/themes` | CSS only: `tokens.css` (structure), `skyline.css` and `syn137.css` (colour), `all.css` (upstream `@syntropic137/design-tokens` CSS, then all three) | `@syntropic137/design-tokens` (pinned) |
+| `@syn137/skyline-themes` | `packages/syn-ui/themes` | CSS only: `tokens.css` (structure), `skyline.css` and `syn137.css` (colour), `all.css` (upstream `@syntropic137/design-tokens` CSS, then all three), `motion.css` (opt-in landing keyframes) | `@syntropic137/design-tokens` (pinned) |
 | `@syn137/skyline-core` | `packages/syn-ui/skyline-core` | Plain TypeScript with no DOM and no Svelte. Holds the contract re-exports, formatters, chart geometry, state reducers and pattern prop types | `@syntropic137/design-contracts` (pinned, types only) |
 | `@syn137/skyline-svelte-v5` | `packages/syn-ui/skyline-svelte-v5` | Svelte 5 components (`.`), patterns (`./patterns`) and `styles.css` | core, themes |
 | `@syn137/syn-ui-data` | `packages/syn-ui/data` | Plain TypeScript: the typed API client, fixtures, live SSE stream, request coalescing and the query cache | nothing |
@@ -65,7 +65,7 @@ These rules are enforced by `packages/syn-ui/scripts/check-css.mjs`, which runs 
 - **Mobile first.** Base styles are the phone layout. Media queries use `min-width` only and are written in rem: `48rem` (capsule nav, list columns) and `64rem` (detail side column). Components prefer container queries. Page structure uses viewport queries.
 - **Touch:** interactive targets reach `var(--sky-size-touch)` (44px) under `@media (pointer: coarse)`. Nothing is reachable by hover alone.
 - **Focus:** every interactive element has its own `:focus-visible` rule: `outline: var(--sky-focus-ring-width) solid var(--sky-color-focus); outline-offset: var(--sky-focus-ring-offset);`.
-- **Motion** goes inside `@media (prefers-reduced-motion: no-preference)`, or uses the `--sky-duration-*` tokens, which drop to 0 under reduced motion.
+- **Motion** goes inside `@media (prefers-reduced-motion: no-preference)`, or uses the `--sky-duration-*` or `--sky-dur-*` tokens, which drop to 0 under reduced motion. Landing keyframes (rise, sdrop, pulse, flash, drift, bob, type, blink, draw, scroll) live in the opt-in `@syn137/skyline-themes/motion.css` as `sky-*` classes; `check-motion.mjs` keeps every keyframe and animation there inside the guard and bans `infinite`.
 - Titles and figures size with the fluid tokens `--sky-text-page`, `--sky-text-hero` and `--sky-text-figure` (`clamp()`).
 - No horizontal page scroll at 320px. Wide content scrolls inside its own box.
 - 3D faces: use `extrudeColors(base)` from `@syn137/skyline-core/geometry`, or the `--sky-face-top`, `--sky-face-front` and `--sky-face-side` tokens for the accent. Never hand-mix toward white or black.
