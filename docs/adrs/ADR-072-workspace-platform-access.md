@@ -102,7 +102,7 @@ eval writes are the opposite, per route and exact (section 5).
 | Scope | Reaches |
 |---|---|
 | `read` | GET, HEAD on first path segment `executions`, `sessions`, `artifacts`, `evals`, `insights`, `health` |
-| `eval` | everything `read` reaches, plus exactly `POST /workflows/{id}/execute` whose body names an `eval_id`, and `POST /evals/{id}/runs/{execution}/score` |
+| `eval` | everything `read` reaches, plus exactly `POST /workflows/{id}/execute` whose body names the token's own `eval_id`, and `POST /evals/{id}/runs/{execution}/score` for that same eval |
 
 `workflows`, `triggers`, `github`, `organizations`, `costs`, `conversations`,
 `events`, `maintenance` and every other write method are refused, for both
@@ -154,13 +154,20 @@ stored before #1744 replay as `read`. It is per phase, not per workflow,
 because the token is minted per phase. A workflow whose scoring phase needs
 `eval` does not hand it to its implement phase.
 
+**Pinned to the execution's own eval.** The grant records the eval the
+issuing execution belongs to (`PlatformTokenGrant.eval_id`), read off the
+execution aggregate's eval membership when the phase's workspace is
+provisioned, never from anything the workspace sends. Both writes must name
+that eval. An `eval` phase whose execution is in no eval gets a token that
+reaches neither write: it fails closed rather than falling back to any eval.
+
 **Exactly two writes, judged before routing:**
 
 - `POST /evals/{id}/runs/{execution}/score`: matched as exactly those five
-  segments. The route itself refuses (409) an execution that is not a run of
-  that eval.
-- `POST /workflows/{id}/execute`, and only when the JSON body names an
-  `eval_id` explicitly: a non-blank string, and `no_eval` not true. "Not opted
+  segments, with `{id}` equal to the token's eval. The route itself refuses
+  (409) an execution that is not a run of that eval.
+- `POST /workflows/{id}/execute`, and only when the JSON body names the
+  token's eval as `eval_id` explicitly, and `no_eval` is not true. "Not opted
   out" is not enough. With no `eval_id` the route falls back to the workflow's
   `default_eval_id`, and a workflow with none starts an ordinary execution,
   which is what this boundary exists to prevent. The fields are parsed the way
@@ -186,13 +193,13 @@ phase that declared it.
 
 **What "bound" does NOT mean here, deliberately:**
 
-- *Not pinned to one eval.* The token can launch into, and score runs of, any
-  non-archived eval on the instance. An eval's comparison runs span workflows
-  (an A/B is two workflows in one eval), and `starting_workflow_id` is
-  optional. So "the eval's workflow" is not a single value the enforcer could
-  check. A phase whose job is to optimise one eval has no field naming that
-  eval yet. Pinning would need one (for example `platform_access: {eval: <id>}`)
-  and a lookup at authorize time.
+- *Not pinned to one workflow.* The token is pinned to an eval, not to a
+  workflow inside it. An eval's comparison runs span workflows (an A/B is two
+  workflows in one eval), and `starting_workflow_id` is optional, so "the
+  eval's workflow" is not a single value the enforcer could check.
+- *Membership is read once.* The eval is the execution's membership when the
+  phase is provisioned. Detaching the execution from its eval mid-phase does
+  not narrow a token already issued; the phase deadline still ends it.
 - *No per-token launch budget.* Every launch from an eval token goes through
   the execute route, so it claims a slot from the same Execution Budget as any
   other start (`SYN_EXECUTION_MAX_CONCURRENT`, per Executor) and passes eval

@@ -81,8 +81,9 @@ What a Phase's workspace may do against the Syntropic137 API, declared per
 Phase as `platform_access` (ADR-072, #1744). It is carried as the scope of the
 platform token minted for that Phase's workspace, and it dies with the Phase.
 `read` is the default and reads executions, sessions, artifacts, evals and
-insights. `eval` adds exactly two writes: launching a workflow into an eval the
-request names, and scoring a run of an eval. A Phase that declares nothing is
+insights. `eval` adds exactly two writes, both into the eval the Phase's own
+Execution belongs to: launching a workflow into that eval, and scoring a run
+of it. An `eval` Phase whose Execution is in no eval can write nothing. A Phase that declares nothing is
 `read`. The declaration is per Phase, not per Workflow, so the one Phase that
 scores does not lend that power to the others.
 
