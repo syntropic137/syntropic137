@@ -119,9 +119,12 @@ def _instance_names(scope: ast.AST, class_name: str) -> set[str]:
     for node in _own_nodes(scope):
         if isinstance(node, ast.Assign) and _constructs(node.value, class_name):
             names.update(t.id for t in node.targets if isinstance(t, ast.Name))
-        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
-            if _names_class(node.annotation, class_name) or _constructs(node.value, class_name):
-                names.add(node.target.id)
+        elif (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and (_names_class(node.annotation, class_name) or _constructs(node.value, class_name))
+        ):
+            names.add(node.target.id)
     return names
 
 
