@@ -254,33 +254,48 @@ def test_several_patterns_select_each_file_once(tree: Path) -> None:
 class _EntriesTaken:
     """Wraps os.scandir(fd) to count the entries the walk takes from each listing.
 
-    Counts are keyed by directory relative to the workspace. Stopping at a cap
-    takes one entry past it, to learn that the listing was cut short.
+    Listings are identified by the (device, inode) of the directory fd, so the
+    spy never turns an fd back into a path: that needs /proc (Linux only) and
+    the walk itself never does it either. Stopping at a cap takes one entry
+    past it, to learn that the listing was cut short.
     """
 
-    def __init__(self, workspace: Path) -> None:
-        self.by_directory: dict[str, int] = {}
-        self._root = workspace.resolve()
+    def __init__(self) -> None:
+        self._by_inode: dict[tuple[int, int], int] = {}
         self._scandir = os.scandir
+
+    def of(self, directory: Path) -> int:
+        """Entries taken from the listing of `directory`; KeyError if never listed."""
+        st = os.stat(directory, follow_symlinks=False)
+        return self._by_inode[(st.st_dev, st.st_ino)]
+
+    def was_listed(self, directory: Path) -> bool:
+        st = os.stat(directory, follow_symlinks=False)
+        return (st.st_dev, st.st_ino) in self._by_inode
+
+    @property
+    def total(self) -> int:
+        return sum(self._by_inode.values())
 
     @contextmanager
     def __call__(self, fd: int) -> Iterator[Iterator[os.DirEntry[str]]]:
-        directory = str(Path(f"/proc/self/fd/{fd}").readlink().relative_to(self._root))
-        self.by_directory[directory] = 0
+        st = os.fstat(fd)
+        key = (st.st_dev, st.st_ino)
+        self._by_inode[key] = 0
         with self._scandir(fd) as listing:
-            yield self._count(directory, listing)
+            yield self._count(key, listing)
 
     def _count(
-        self, directory: str, listing: Iterator[os.DirEntry[str]]
+        self, key: tuple[int, int], listing: Iterator[os.DirEntry[str]]
     ) -> Iterator[os.DirEntry[str]]:
         for entry in listing:
-            self.by_directory[directory] += 1
+            self._by_inode[key] += 1
             yield entry
 
 
 @pytest.fixture
 def entries_taken(workspace: Path, monkeypatch: pytest.MonkeyPatch) -> _EntriesTaken:
-    taken = _EntriesTaken(workspace)
+    taken = _EntriesTaken()
     monkeypatch.setattr(workspace_walk.os, "scandir", taken)
     return taken
 
@@ -309,7 +324,7 @@ def test_huge_directory_is_listed_only_up_to_the_cap(
         tracemalloc.stop()
 
     assert collected == [("artifacts/output/a.md", b"alpha")]
-    assert entries_taken.by_directory["artifacts/output/big"] == MAX_DIRECTORY_ENTRIES + 1
+    assert entries_taken.of(big) == MAX_DIRECTORY_ENTRIES + 1
     assert f"Stopped listing artifacts/output/big after {MAX_DIRECTORY_ENTRIES} entries" in (
         caplog.text
     )
@@ -338,7 +353,7 @@ def test_every_directory_is_listed_only_up_to_the_cap(
         )
 
     for d in range(4):
-        assert entries_taken.by_directory[f"artifacts/output/d{d}"] == 8 + 1
+        assert entries_taken.of(out / f"d{d}") == 8 + 1
         assert f"Stopped listing artifacts/output/d{d} after 8 entries" in caplog.text
 
 
@@ -363,8 +378,8 @@ def test_entries_examined_across_directories_are_bounded(
     assert collected == []
     # 6 entries lead down to the four d* directories, so the cap falls
     # inside the second one listed and the last two are never opened.
-    assert sum(entries_taken.by_directory.values()) == 12 + 1
-    assert len([d for d in entries_taken.by_directory if "/d" in d]) == 2
+    assert entries_taken.total == 12 + 1
+    assert sum(entries_taken.was_listed(out / f"d{d}") for d in range(4)) == 2
     assert "Stopped after examining 12 entries" in caplog.text
     assert "Stopped listing" not in caplog.text
 
@@ -382,3 +397,16 @@ def test_symlinked_prefix_directory_is_not_listed(
         assert _collect(workspace, ["artifacts/output/*"]) == []
     assert "secret.txt" not in caplog.text
     assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+
+
+def test_walk_relies_only_on_posix_fd_primitives() -> None:
+    """The walk lists by fd and opens children by dir_fd, never via /proc.
+
+    Both primitives exist on Linux and macOS. This suite runs on both, so a
+    Linux-only construct (such as resolving an fd through /proc/self/fd)
+    fails here on a developer Mac rather than only in production.
+    """
+    assert os.scandir in os.supports_fd
+    assert os.open in os.supports_dir_fd
+    source = Path(workspace_walk.__file__).read_text()
+    assert "/proc" not in source
