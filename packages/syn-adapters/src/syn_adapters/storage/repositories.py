@@ -23,6 +23,7 @@ if TYPE_CHECKING:
         BaseAggregate,
         DomainEvent,
         EventEnvelope,
+        EventStoreClient,
         EventStoreRepository,
         RepositoryFactory,
     )
@@ -194,10 +195,35 @@ def get_workflow_execution_repository() -> RepositoryAdapter[WorkflowExecutionAg
     factory = _get_repository_factory()
     sdk_repo = factory.create_repository(
         WorkflowExecutionAggregate,  # type: ignore[arg-type]  # ESP SDK TEvent invariance
-        aggregate_type="WorkflowExecution",
+        aggregate_type=_WORKFLOW_EXECUTION,
     )
     _workflow_execution_repository = RepositoryAdapter(sdk_repo)
     return _workflow_execution_repository
+
+
+_WORKFLOW_EXECUTION = "WorkflowExecution"
+
+
+class EventStoreExecutionEventStream:
+    """One execution's stored domain events, for seeding a run's to-do fold (ADR-072 D8).
+
+    Satisfies `ExecutionEventStream`. Reads the same stream
+    `get_workflow_execution_repository` writes, by the same aggregate type.
+    """
+
+    def __init__(self, client: EventStoreClient) -> None:
+        self._client = client
+
+    async def read(self, execution_id: str) -> list[DomainEvent]:
+        envelopes = await self._client.read_events(f"{_WORKFLOW_EXECUTION}-{execution_id}")
+        return [envelope.event for envelope in envelopes]
+
+
+def get_execution_event_stream() -> EventStoreExecutionEventStream:
+    """Get the reader for one execution's stored events."""
+    from syn_adapters.storage.event_store_client import get_event_store_client
+
+    return EventStoreExecutionEventStream(get_event_store_client())
 
 
 def get_execution_request_repository() -> RepositoryAdapter[ExecutionRequestAggregate]:
