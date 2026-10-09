@@ -470,15 +470,11 @@ class CodexStreamProcessor:
         # so the candidate is only promoted at end-of-stream and only when no
         # terminal turn arrived.
         self._auth_fault_candidate: str | None = None
-        #: A fault codex reported on an `error` event, held until
+        #: A fault codex reported on `error` / `turn.failed`, held until
         #: end-of-stream so a recovered turn is not failed by it (#1117).
         self._turn_fault_candidate: str | None = None
-        #: The fault codex gave on `turn.failed`: its verdict on the turn,
-        #: where `error` is only something that happened during it. Held for
-        #: the same reason, and outranks every `error` (see `_note_stream_fault`).
-        self._turn_failed_candidate: str | None = None
         #: A `{`-leading line that would not parse, held until end-of-stream
-        #: for the same reason (#1146). LAST one wins, unlike those above:
+        #: for the same reason (#1146). LAST one wins, unlike the two above:
         #: these lines carry no specificity gradient to preserve, and when the
         #: candidate is informative at all it is because the stream was cut
         #: off - which is the last such line, not the first.
@@ -563,9 +559,8 @@ class CodexStreamProcessor:
             # and settled here, so a stream that recovers and reaches
             # `turn.completed` cannot be failed by something it recovered from.
             #
-            # Order is deliberate, most specific first: the fault codex said
-            # ended the turn beats a fault it reported during it, which beats
-            # an inferred auth fault, which beats an unparseable
+            # Order is deliberate, most specific first: a fault codex itself
+            # reported beats an inferred auth fault, which beats an unparseable
             # `{`-leading line, which beats the generic "it just stopped".
             #
             # The parse fault ranks LAST of the three because it is the weakest
@@ -575,8 +570,7 @@ class CodexStreamProcessor:
             # mid-event, quoting the truncated line names the cause and the
             # generic reason does not.
             self._error_reason = (
-                self._turn_failed_candidate
-                or self._turn_fault_candidate
+                self._turn_fault_candidate
                 or self._auth_fault_candidate
                 or self._parse_fault_candidate
                 or MISSING_TERMINAL_TURN_REASON
@@ -883,35 +877,20 @@ class CodexStreamProcessor:
         makes an ordinary prompt rejection look like the same unexplained
         failure as a stream that stopped for reasons nobody has established.
 
-        This is #891 again for a different event type, so it takes the same
-        shape: keep the FIRST fault, because a later generic one must not
-        overwrite the specific one that ended the run.
+        This is #891 again, so it keeps the FIRST fault: a later generic one
+        must not overwrite the specific one that ended the run. Except that
+        `turn.failed` replaces any `error`: it is codex's verdict on the turn,
+        and an `error` before a different fault did not end it - holding that
+        hiccup hid a refusal and lost its fallback (verification of #1819).
 
-        AND IT IS A CANDIDATE, NOT A VERDICT. Setting `_error_reason` here
-        directly would be worse than the bug it fixes. `AgentExecutionHandler`
-        forces a non-zero phase exit whenever a codex stream carries ANY
-        `error_reason`, and it does not consult `saw_terminal_turn`. So an
-        `error` event the CLI then recovers from - `error` ... `turn.completed`
-        - would fail a phase that finished cleanly, and would report the
-        mid-turn hiccup as its cause. That does not mask a failure; it invents
-        one. This module's own comment already names that class as the worse
-        defect (an early #891 draft "would have failed SUCCESSFUL codex
-        phases"), and the sibling `_note_non_json_fault` holds its result as a
-        candidate for exactly this reason.
-
-        So the message is held and promoted at end-of-stream only when no
-        `turn.completed` arrived. A turn that genuinely failed emits no terminal
-        turn, so the reason still surfaces; a turn that recovered keeps its
-        success. Found by the cross-model review of #1117.
-
-        `turn.failed` IS THE VERDICT, `error` IS NOT. First-wins holds among
-        `error` events, but an `error` codex went on past - a hiccup, then a
-        different fault - did not end the turn, and `turn.failed` says what
-        did. Keeping the first `error` over it reported the hiccup and hid a
-        content refusal behind it, so the phase died `unknown` instead of
-        running its declared fallback (PC-83, verification of #1819). In every
-        recorded failure `turn.failed` repeats the specific `error` before it,
-        so this costs nothing there.
+        AND IT IS A CANDIDATE, NOT A VERDICT. `AgentExecutionHandler` forces a
+        non-zero exit whenever a codex stream carries ANY `error_reason`,
+        without consulting `saw_terminal_turn`, so setting it here would fail a
+        phase that recovered (`error` ... `turn.completed`) and blame the
+        hiccup - inventing a failure, the class an early #891 draft hit ("would
+        have failed SUCCESSFUL codex phases"); `_note_non_json_fault` holds its
+        result for the same reason. So the message is promoted at end-of-stream
+        only when no `turn.completed` arrived. Found by the review of #1117.
         """
         message = event.get("message")
         if not message:
@@ -924,7 +903,7 @@ class CodexStreamProcessor:
         # A CANDIDATE, not a verdict - promoted at end-of-stream only if no
         # terminal turn arrived. See the class comment above for why.
         if event.get("type") == CodexStreamType.TURN_FAILED:
-            self._turn_failed_candidate = self._turn_failed_candidate or reason
+            self._turn_fault_candidate = reason
         else:
             self._turn_fault_candidate = self._turn_fault_candidate or reason
 
