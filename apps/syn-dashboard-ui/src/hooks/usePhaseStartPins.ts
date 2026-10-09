@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { getExecution } from '../api/executions'
-import type { ExecutionDetailResponse, PhaseStartConfig, StartPinsStatus } from '../types'
+import type { ExecutionDetailResponse, PhaseSkillUse, PhaseStartConfig, StartPinsStatus } from '../types'
 
 /** How long to wait before asking again while the answer is still unknown. */
 const RETRY_MS = 3000
@@ -10,6 +10,8 @@ const MAX_ATTEMPTS = 20
 export interface PhaseStartPinsAnswer {
   pins: PhaseStartConfig | null
   status: StartPinsStatus
+  /** Which of those skills the agent invoked (#1269); absent from an older server. */
+  skillUse?: PhaseSkillUse
 }
 
 /** The answer for the given session's phase, or `undefined` if the phase is not listed yet. */
@@ -19,7 +21,11 @@ function answerFor(
 ): PhaseStartPinsAnswer | undefined {
   const phase = execution.phases.find((p) => p.session_id === sessionId)
   if (!phase) return undefined
-  return { pins: phase.pinned_at_start ?? null, status: phase.start_pins_status ?? 'unavailable' }
+  return {
+    pins: phase.pinned_at_start ?? null,
+    status: phase.start_pins_status ?? 'unavailable',
+    skillUse: phase.skill_use,
+  }
 }
 
 /**
