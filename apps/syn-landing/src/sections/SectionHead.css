@@ -1,0 +1,101 @@
+/* P7-local section header (see SectionHead.tsx). Phone first; 48rem up is the desktop board. */
+.p7-head {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 820px;
+}
+.p7-head[data-align="center"] {
+  align-items: flex-start;
+}
+.p7-head__eyebrow {
+  font-family: var(--ds-font-mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: color-mix(in oklab, var(--ds-color-accent) 55%, var(--sky-color-display-hi));
+}
+.p7-head__title {
+  font-family: var(--sky-font-display);
+  font-weight: var(--sky-font-weight-display);
+  font-size: var(--sky-font-display-phone-m);
+  line-height: var(--sky-line-height-display-section);
+  letter-spacing: var(--sky-tracking-display-section);
+  text-wrap: balance;
+  color: var(--sky-color-display-hi);
+}
+.p7-head__title[data-size="closing"] {
+  font-size: var(--sky-font-display-phone-l);
+  line-height: var(--sky-line-height-display);
+  letter-spacing: var(--sky-tracking-display-tight);
+  text-wrap: wrap;
+}
+@supports (-webkit-background-clip: text) or (background-clip: text) {
+  .p7-head__title {
+    background: var(--sky-gradient-text);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+}
+@media (forced-colors: active) {
+  .p7-head__title {
+    background: none;
+    color: CanvasText;
+  }
+}
+.p7-head__lede {
+  font-size: 1rem;
+  line-height: 1.55;
+  color: var(--ds-color-text-muted);
+}
+@media (min-width: 48rem) {
+  .p7-head[data-align="center"] {
+    margin: 0 auto;
+    align-items: center;
+    text-align: center;
+  }
+  .p7-head__title {
+    font-size: var(--sky-font-display-m);
+  }
+  .p7-head__title[data-size="closing"] {
+    font-size: var(--sky-font-display-l);
+  }
+  .p7-head__lede {
+    font-size: 1.1875rem;
+  }
+}
+
+/* P7-local section frame: hairline on top, the board's 1320px column. */
+.p7-section {
+  position: relative;
+  border-top: var(--ds-border-width) solid var(--sky-color-section-rule);
+  background: var(--sky-color-ground-deep);
+  scroll-margin-top: var(--ds-space-16);
+}
+.p7-section[data-ground="band"] {
+  background: var(--sky-texture-dots), var(--sky-color-ground-band);
+}
+.p7-section__inner {
+  max-width: 1320px;
+  margin: 0 auto;
+  padding: 56px var(--sky-gutter);
+}
+@media (min-width: 48rem) {
+  .p7-section__inner {
+    padding-block: 120px;
+  }
+}
+
+/* Visually hidden, still read by screen readers. */
+.p7-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}

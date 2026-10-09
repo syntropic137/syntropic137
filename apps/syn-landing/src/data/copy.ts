@@ -20,14 +20,13 @@ export const isExternal = (href: string): boolean => /^https?:\/\//.test(href);
 
 /**
  * Nav links, in the board's order. The in-page targets are today's sections
- * until P6 and P7 rebuild them; Evals points at the docs until P7 adds the
- * "04 Compounding improvement" section (#evals).
+ * until P6 rebuilds them; Evals is the "04 Compounding improvement" section.
  */
 export const NAV_LINKS: readonly SiteLink[] = [
   { label: "Workflows", href: "#how-it-works" },
   { label: "Harnesses", href: "#orchestrator" },
   { label: "Observability", href: "#observability" },
-  { label: "Evals", href: `${DOCS_URL}/docs/guide/evals` },
+  { label: "Evals", href: "#evals" },
   { label: "Docs", href: DOCS_URL },
 ];
 
@@ -70,3 +69,4 @@ export const FOOTER_COLUMNS: readonly FooterColumn[] = [
     ],
   },
 ];
+export * from "./copy/evals";
