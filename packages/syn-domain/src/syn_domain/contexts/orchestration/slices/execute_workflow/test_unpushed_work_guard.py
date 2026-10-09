@@ -4361,6 +4361,26 @@ async def test_ignore_settings_cannot_pass_a_dirty_moved_submodule_as_clean(
     assert run.completed_phase_ids == []
 
 
+@pytest.mark.parametrize("where", ["superproject", "submodule"])
+async def test_hiding_untracked_files_cannot_pass_a_moved_submodule_as_clean(
+    superproject: _WithSubmodule, where: str
+) -> None:
+    """``status.showUntrackedFiles=no`` drops the ``u`` of the token, wherever it is set."""
+    _publish_a_tag_no_origin_branch_contains(superproject)
+    superproject.move_the_gitlink()
+    configure = superproject.clone.git if where == "superproject" else superproject.git
+    configure("config", "status.showUntrackedFiles", "no")
+    (superproject.path / "never-committed.txt").write_text("an agent wrote this\n")
+    assert superproject.v2_token() == "SC..", "the setting should hide the file from plain status"
+    run = _PhaseRun(superproject.clone.workspace)
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await run.complete()
+
+    assert _SUBMODULE in str(raised.value)
+    assert run.completed_phase_ids == []
+
+
 async def test_ignore_all_cannot_hide_a_dirty_submodule_whose_gitlink_never_moved(
     superproject: _WithSubmodule,
 ) -> None:

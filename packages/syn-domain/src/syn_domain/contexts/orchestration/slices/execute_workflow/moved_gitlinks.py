@@ -94,8 +94,10 @@ async def _moved_gitlinks(workspace: GitWorkspace, repo: str) -> frozenset[str]:
     ``submodule.<path>.ignore`` (in .git/config or a committed .gitmodules)
     and ``diff.ignoreSubmodules`` make git print ``SC..`` over a submodule
     with edits and untracked files in it, and ``status.showUntrackedFiles=no``
-    drops the ``u``. So the status asked here overrides every one of them on
-    its own command line, and runs `hardened` (#1815).
+    drops the ``u`` - set in the SUBMODULE's own config too, which only a
+    ``-c`` reaches, since git asks the submodule with a status of its own. So
+    the status asked here overrides every one of them on its own command line,
+    and runs `hardened` (#1815).
 
     Paths come back DECODED (`_unquote`), because v1 and v2 do not quote the
     same paths the same way. Everything else - a staged gitlink, a rename - is
@@ -104,6 +106,8 @@ async def _moved_gitlinks(workspace: GitWorkspace, repo: str) -> frozenset[str]:
     status = await git(
         workspace,
         repo,
+        "-c",
+        "status.showUntrackedFiles=all",
         "status",
         "--porcelain=v2",
         "--ignore-submodules=none",
