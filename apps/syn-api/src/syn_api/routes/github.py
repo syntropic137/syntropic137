@@ -196,22 +196,22 @@ async def _aggregate_all_installations(
 ) -> tuple[list[GitHubRepoResponse], GitHubRepoLookup]:
     """Return the repos every installation reaches, from the cache when it can.
 
-    A listing younger than ``FRESH_FOR`` is served as complete without asking
-    GitHub, and past ``REFRESH_AFTER`` a background refresh starts. Otherwise
-    GitHub is asked live, as before the cache existed, so nothing older than
-    ``FRESH_FOR`` is ever served as complete. If GitHub cannot be asked at all,
-    an older listing is served as ``partial``.
+    Any retained listing is served without waiting on GitHub: one younger than
+    ``FRESH_FOR`` as complete, an older one as ``partial``, because a repo
+    added since may be missing from it. Past ``REFRESH_AFTER`` a background
+    refresh starts, so the next request finds a fresh listing. Only with no
+    listing retained at all (first use, or a webhook just invalidated it) is
+    GitHub asked live, since then there is nothing to serve.
     """
     cache = get_repo_listing_cache()
     cached = await cache.get()
-    if cached is not None and cached.is_fresh():
+    if cached is None:
+        repos, lookup = await _ask_github(client, cache)
+    else:
         if cached.age() >= REFRESH_AFTER:
             _revalidate_in_background(client, cache)
-        repos, lookup = cached.repos, GitHubRepoLookup.COMPLETE
-    else:
-        repos, lookup = await _ask_github(client, cache)
-        if lookup == GitHubRepoLookup.UNAVAILABLE and cached is not None:
-            repos, lookup = cached.repos, GitHubRepoLookup.PARTIAL
+        repos = cached.repos
+        lookup = GitHubRepoLookup.COMPLETE if cached.is_fresh() else GitHubRepoLookup.PARTIAL
     if not include_private:
         repos = [r for r in repos if not r.private]
     return repos, lookup
@@ -336,11 +336,11 @@ async def list_accessible_repos_endpoint(
     """List repositories accessible to the GitHub App.
 
     With no installation_id, aggregates every installation. The last complete
-    listing is cached and served as ``complete`` while under a minute old;
-    otherwise GitHub is asked live, and an older listing is served as
-    ``partial`` only if GitHub cannot be asked. The GitHub App's
-    ``installation`` and ``installation_repositories`` webhooks invalidate the
-    cache at once. A single installation_id is always asked live.
+    listing is cached and served without waiting on GitHub: as ``complete``
+    while under a minute old, as ``partial`` once older, with a background
+    refresh behind it. GitHub is asked live only when no listing is cached. The
+    GitHub App's ``installation`` and ``installation_repositories`` webhooks
+    invalidate the cache at once. A single installation_id is always asked live.
 
     ``lookup`` says whether a repo missing from ``repos`` is known to be out of
     the App's reach (``complete``) or merely went unseen because GitHub failed.

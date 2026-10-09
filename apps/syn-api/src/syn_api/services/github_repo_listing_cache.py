@@ -4,7 +4,7 @@ Asking GitHub costs one round-trip for the installation list plus one per
 installation, which is seconds, not milliseconds. This cache holds the last
 listing GitHub confirmed as ``complete`` (every installation answered) and
 when it was fetched. The route decides what that age means; this module only
-stores it.
+stores it. The page never waits on GitHub while any listing is retained.
 
 Only complete listings are stored, so a cached listing never claims more than
 GitHub once confirmed. Each listing carries the cache generation read before
@@ -13,7 +13,7 @@ GitHub before a webhook and writes after it stores nothing. The write is a
 compare-and-set on the generation, so that late refresh cannot overwrite a
 newer refresh's listing either. Production keeps it in Redis, shared across replicas and
 surviving a restart; a lost or unreachable Redis costs speed, never
-correctness, because a miss means asking GitHub live as before (ADR-060: no
+correctness, because a miss means asking GitHub live (ADR-060: no
 in-memory store outside test/offline).
 """
 
@@ -34,18 +34,20 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # How long a listing may be served as complete, aged from when GitHub was asked.
-# Past this the route asks GitHub live, so a repo added to an installation is in
-# every complete listing within this however requests arrive, or at once via the
-# installation_repositories webhook, which invalidates the cache.
+# Past this it is served as partial while a background refresh runs, so a repo
+# added to an installation is labelled possibly missing within this however
+# requests arrive, or is listed at once via the installation_repositories
+# webhook, which invalidates the cache.
 FRESH_FOR = timedelta(seconds=60)
 
 # Past this a listing is still served, and a background refresh starts so a page
 # in use keeps finding a fresh one rather than waiting on GitHub.
 REFRESH_AFTER = FRESH_FOR / 2
 
-# How long a listing is kept at all. Older than FRESH_FOR it is served only, as
-# partial, when GitHub cannot be asked.
-_RETAINED_FOR = timedelta(hours=1)
+# How long a listing is kept at all. Older than FRESH_FOR it is served as
+# partial, so a page opened after a long time away answers from it instead of
+# waiting on GitHub; a day covers an overnight absence.
+_RETAINED_FOR = timedelta(days=1)
 
 _KEY = "syn:github:repo_listing"
 _GENERATION_KEY = "syn:github:repo_listing:generation"

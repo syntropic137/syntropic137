@@ -133,19 +133,28 @@ async def test_a_fresh_cache_answers_without_asking_github(github: _GitHub) -> N
     assert (_names(second), second.lookup) == (_names(first), GitHubRepoLookup.COMPLETE)
 
 
-async def test_the_first_request_after_expiry_asks_github_and_has_the_new_repo(
-    github: _GitHub,
+@pytest.mark.parametrize("age", [FRESH_FOR + timedelta(seconds=1), timedelta(hours=12)])
+async def test_an_expired_listing_is_served_partial_without_waiting_on_github(
+    github: _GitHub, age: timedelta
 ) -> None:
-    """No webhook: a repo added is in the first listing served once FRESH_FOR runs out."""
+    """Owner feedback 0afb5d92: /repos opened after a while away must not wait on GitHub.
+
+    No webhook: a repo added is missing from the stale listing, which says so by
+    being partial, and is in the listing served once the background refresh lands.
+    """
     await _listing()
     github.repos["inst-1"].append("acme/new")
-    await _age_cache(FRESH_FOR + timedelta(seconds=1))
+    await _age_cache(age)
     asked = len(github.calls)
 
-    first = await _listing()
+    stale = await _listing()
 
-    assert len(github.calls) > asked
-    assert (first.lookup, "acme/new" in _names(first)) == (GitHubRepoLookup.COMPLETE, True)
+    assert len(github.calls) == asked  # nothing asked of GitHub on the request
+    assert (stale.lookup, "acme/new" in _names(stale)) == (GitHubRepoLookup.PARTIAL, False)
+
+    await _finish_revalidation()
+    refreshed = await _listing()
+    assert (refreshed.lookup, "acme/new" in _names(refreshed)) == (GitHubRepoLookup.COMPLETE, True)
 
 
 async def test_a_listing_past_refresh_after_is_served_and_refreshed_behind(
@@ -227,6 +236,7 @@ async def test_github_down_with_a_warm_cache_serves_it_stale_and_keeps_it(
     github.down = True
 
     stale = await _listing()
+    await _finish_revalidation()
 
     assert (_names(stale), stale.lookup) == (_names(before), GitHubRepoLookup.PARTIAL)
     kept = await get_repo_listing_cache().get()
@@ -345,7 +355,7 @@ async def test_redis_cache_round_trips_and_expires_the_key() -> None:
     listing = _cached()
     await cache.put(listing)
     assert await cache.get() == listing
-    assert list(redis.ttls.values()) == [3600]
+    assert list(redis.ttls.values()) == [86400]  # a day
     await cache.invalidate()
     assert await cache.get() is None
 
