@@ -116,7 +116,7 @@ _SCRIPT_MODULES = frozenset({"inotify"})
 
 #: Code that makes the string literal right after it a module specifier:
 #: ``from "x"``, ``import "x"``, ``require("x")``, ``import("x")``. Not
-#: ``Array.from("x")``: the keyword must not follow a member access.
+#: ``cache.require("x")``: the keyword must not follow a member access.
 _SPECIFIER_LEAD = re.compile(r"(?<![\w.$])(?:from|import|(?:require|import)\s*\()\s*$")
 
 
@@ -420,7 +420,7 @@ CLEAN_SCRIPT = (
     "const s = `pr" + "ctl and O_" + "PATH are Linux-only`;",
     "const s = `${safe} uses pr" + "ctl, ${other} does not`;",
     'log("ino' + 'tify");',
-    'const m = Array.from("ino' + 'tify");',
+    'const m = cache.require("ino' + 'tify");',
     'const s = "watch from"; const m = "ino' + 'tify";',
 )
 
