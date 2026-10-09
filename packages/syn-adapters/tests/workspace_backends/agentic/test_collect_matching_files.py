@@ -228,6 +228,8 @@ def tree(tmp_path: Path) -> Path:
         "**/*.md",
         "**/*",
         "**",
+        "artifacts/output/*/",  # a trailing slash names directories only
+        "**/",
         "artifacts/*/*.md",
         "artifacts/output/?.md",
         "artifacts/output/[ab].*",

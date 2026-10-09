@@ -14,8 +14,8 @@ turning an fd back into a path, so the walk needs only `os.scandir(fd)` and
 
 Patterns mean what `Path.glob` makes them mean, per path segment: `*`, `?`
 and `[...]` never cross a `/`, and a `**` segment matches zero or more
-directories. As with glob, a pattern whose last segment is `**` names
-directories only, so it selects no files.
+directories. As with glob, a pattern whose last segment is `**`, or that
+ends in `/`, names directories only, so it selects no files.
 """
 
 from __future__ import annotations
@@ -80,8 +80,12 @@ class _Patterns:
     """Collection patterns split into segments, matched one name at a time."""
 
     def __init__(self, patterns: list[str]) -> None:
+        # As with glob, a trailing "/" names directories only, so such a
+        # pattern selects no files and is dropped before its slash is lost.
         self._segments = [
-            tuple(s for s in pattern.split("/") if s not in ("", ".")) for pattern in patterns
+            tuple(s for s in pattern.split("/") if s not in ("", "."))
+            for pattern in patterns
+            if not pattern.endswith("/")
         ]
 
     def start(self) -> frozenset[_State]:
