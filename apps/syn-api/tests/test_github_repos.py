@@ -3,14 +3,48 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from syn_api.routes import github as github_routes
 from syn_api.routes.github import list_accessible_repos
-from syn_api.types import Err, GitHubError, GitHubRepoLookup, Ok
+from syn_api.services.github_repo_listing_cache import reset_repo_listing_cache
+from syn_api.types import (
+    Err,
+    GitHubError,
+    GitHubRepoListResponse,
+    GitHubRepoLookup,
+    Ok,
+    Result,
+)
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 pytestmark = pytest.mark.unit
+
+
+@pytest.fixture(autouse=True)
+def _no_cached_listing() -> Iterator[None]:
+    reset_repo_listing_cache()
+    with (
+        patch.object(github_routes, "_revalidation", None),
+        patch.object(github_routes, "_revalidation_generation", None),
+    ):
+        yield
+
+
+async def _aggregate() -> Result[GitHubRepoListResponse, GitHubError]:
+    """Load the page with no listing cached, then return what the refresh it starts found."""
+    served = await list_accessible_repos(installation_id=None)
+    assert isinstance(served, Ok)
+    assert served.value.lookup == GitHubRepoLookup.UNAVAILABLE
+    task = github_routes._revalidation
+    assert task is not None
+    repos, lookup = await task
+    return Ok(GitHubRepoListResponse(repos=repos, total=len(repos), lookup=lookup))
 
 
 def _make_repo(idx: int, *, private: bool = False) -> dict:
@@ -86,7 +120,7 @@ async def test_all_installations_aggregated() -> None:
             return_value=mock_projection,
         ),
     ):
-        result = await list_accessible_repos(installation_id=None)
+        result = await _aggregate()
         mock_ensure.assert_awaited_once()
 
     assert isinstance(result, Ok)
@@ -200,7 +234,7 @@ async def test_empty_projection_triggers_github_api_sync() -> None:
             return_value=mock_projection,
         ),
     ):
-        result = await list_accessible_repos(installation_id=None)
+        result = await _aggregate()
         mock_ensure.assert_awaited_once()
 
     mock_client.list_installations.assert_awaited_once()
@@ -234,7 +268,7 @@ async def test_recently_synced_projection_still_refreshes() -> None:
             return_value=mock_projection,
         ),
     ):
-        await list_accessible_repos(installation_id=None)
+        await _aggregate()
 
     mock_ensure.assert_awaited_once()
     mock_client.list_installations.assert_awaited_once()
@@ -257,7 +291,7 @@ async def test_sync_failure_returns_empty_gracefully() -> None:
             return_value=mock_projection,
         ),
     ):
-        result = await list_accessible_repos(installation_id=None)
+        result = await _aggregate()
         mock_ensure.assert_awaited_once()
 
     # Ok([]) alone is vacuous here: an empty projection produces [] whether or
