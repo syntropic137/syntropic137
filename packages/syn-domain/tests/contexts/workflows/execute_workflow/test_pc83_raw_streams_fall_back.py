@@ -18,6 +18,7 @@ return of the primary's result fails (a), (b) and (e) below; dropping the
 from __future__ import annotations
 
 import json
+import subprocess
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -515,8 +516,8 @@ class TestRawStreamsFallBack:
             pytest.param(("git diff --ext-diff",), id="git-ext-diff"),
             pytest.param(("git diff --textconv",), id="git-textconv"),
             pytest.param(("git grep --open-files-in-pager=touch pattern",), id="git-grep-pager"),
-            # A plain `git diff` runs whatever driver is configured. The attempt
-            # that configured one wrote, so the plain diff after it changes nothing.
+            # Installing a driver is itself work. A driver installed BEFORE the
+            # attempt is covered by (e4), with no installing command in the attempt.
             pytest.param(
                 ("git config diff.external ./touch-driver", "git diff"), id="configured-driver"
             ),
@@ -547,6 +548,59 @@ class TestRawStreamsFallBack:
         assert result.status == "failed"
         (row,) = (await _detail(repository, "exec-refusal-raw-after-write")).phases
         assert row.agent_provider != AgentProvider.CLAUDE
+
+    @pytest.mark.parametrize(
+        ("diff", "runs_driver", "provider"),
+        [
+            pytest.param("git diff", True, AgentProvider.CODEX, id="plain-diff-is-work"),
+            pytest.param(
+                "git --no-pager diff --no-ext-diff --no-textconv",
+                False,
+                AgentProvider.CLAUDE,
+                id="constrained-diff-falls-back",
+            ),
+        ],
+    )
+    async def test_e4_a_driver_configured_before_the_attempt_is_the_attempts_write(
+        self, tmp_path: Path, diff: str, runs_driver: bool, provider: AgentProvider
+    ) -> None:
+        """(e4) #1825 review round 2: `diff.external` set up OUTSIDE the attempt.
+
+        The attempt itself installs nothing: it runs only `diff`, then the exact
+        refusal and exit 1. A real repository shows what that diff does with
+        the driver already configured, and the handler must agree: a diff that
+        ran the driver wrote, so only codex runs and the phase records codex; a
+        diff that switched drivers off changed nothing, so claude runs it.
+        """
+        marker = tmp_path / "driver-ran"
+        driver = tmp_path / "touch-driver"
+        driver.write_text(f"#!/bin/sh\ntouch {marker}\n")
+        driver.chmod(0o755)
+        repo = tmp_path / "repo"
+        for args in (
+            ("init", "-q", str(repo)),
+            ("-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t", "commit",
+             "-q", "--allow-empty", "-m", "base"),
+            ("-C", str(repo), "config", "diff.external", str(driver)),
+        ):  # fmt: skip
+            subprocess.run(["git", *args], check=True)
+        (repo / "a.txt").write_text("one\n")
+        subprocess.run(["git", "-C", str(repo), "add", "-N", "a.txt"], check=True)
+        subprocess.run(diff, shell=True, cwd=repo, check=True, capture_output=True)
+        assert marker.exists() is runs_driver, "the real diff did not behave as assumed"
+
+        primary = (*_codex_read("item_d1", f"/bin/zsh -lc '{diff}'"), *CODEX_REFUSED_AS_OBSERVED)
+        agent = _ProductionHandlerAgent(attempts=(primary, (CLAUDE_SUCCEEDS,)), exit_codes=(1, 0))
+        phase = _phase(AgentConfiguration(provider=AgentProvider.CODEX), CLAUDE_FALLBACK)
+
+        result, repository = await _run(agent, phase, "exec-refusal-preconfigured-driver")
+
+        expected = [AgentRunner.CODEX] if runs_driver else [AgentRunner.CODEX, AgentRunner.CLAUDE]
+        assert agent.runners == expected
+        assert result.status == ("failed" if runs_driver else "completed"), result.error_message
+        (row,) = (await _detail(repository, "exec-refusal-preconfigured-driver")).phases
+        # A failed phase records no provider at all, only a completed one does.
+        assert (row.agent_provider == AgentProvider.CLAUDE) is (provider == AgentProvider.CLAUDE)
 
     async def test_f_a_codex_refusal_after_work_does_not_fall_back(self) -> None:
         """(f) Codex edited a file, then was refused. No fallback: that was work."""

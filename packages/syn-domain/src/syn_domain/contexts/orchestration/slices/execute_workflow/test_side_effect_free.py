@@ -20,13 +20,15 @@ pytestmark = pytest.mark.unit
     [
         "/bin/zsh -lc 'cat one.txt'",
         "/bin/bash -lc 'sed -n 1,200p a.py'",
-        "/bin/zsh -lc 'rg -n fallback packages | head -20'",
-        "/bin/zsh -lc 'git -C repo diff origin/main...HEAD'",
-        "/bin/zsh -lc 'git log --oneline -5 && git status'",
+        "/bin/zsh -lc 'rg --no-config -n fallback packages | head -20'",
+        "/bin/zsh -lc 'git -C repo --no-pager diff --no-ext-diff --no-textconv origin/main...HEAD'",
+        "/bin/zsh -lc 'git -P log --no-ext-diff --no-textconv --no-show-signature -p -5'",
+        "/bin/zsh -lc 'git --no-pager show --no-ext-diff --no-textconv --no-show-signature HEAD'",
+        "/bin/zsh -lc 'git --no-pager blame --no-textconv a.py && git -P rev-parse HEAD'",
         "/bin/zsh -lc 'gh pr diff 1819'",
         "/bin/zsh -lc 'ls -1 2>/dev/null; find . -name \"*.py\"'",
         "grep -rn x .",
-        "/bin/zsh -lc 'git diff 2>&1 | head; ls >/dev/null'",
+        "/bin/zsh -lc 'git --no-pager diff --no-ext-diff --no-textconv 2>&1 | head; ls >/dev/null'",
     ],
 )
 def test_a_command_that_only_reads_changes_nothing(command: str) -> None:
@@ -72,6 +74,19 @@ def test_a_command_that_only_reads_changes_nothing(command: str) -> None:
         "export GIT_EXTERNAL_DIFF=./driver",
         "GIT_EXTERNAL_DIFF=./driver git diff",
         "git -c diff.external=./driver diff",
+        # Review round 2 of #1825: git and rg run what their CONFIGURATION names,
+        # wherever it was installed, unless the invocation switches it off.
+        "git diff",
+        "git --no-pager diff",
+        "git --no-pager diff --no-ext-diff",
+        "git --no-pager diff --no-textconv",
+        "git diff --no-ext-diff --no-textconv",
+        "git --no-pager log --no-ext-diff --no-textconv -p",
+        "git --no-pager show --no-ext-diff --no-textconv",
+        "git --no-pager blame a.py",
+        "git --no-pager status",
+        "git rev-parse HEAD",
+        "rg -n x .",
     ],
 )
 def test_a_command_that_may_write_is_work(command: str) -> None:

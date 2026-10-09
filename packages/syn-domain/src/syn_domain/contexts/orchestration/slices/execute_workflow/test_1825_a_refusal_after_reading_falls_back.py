@@ -152,7 +152,10 @@ class TestARefusalAfterOnlyReadingFallsBack:
                 (
                     *_command("item_2", "/bin/zsh -lc 'gh pr diff 1819'"),
                     *_command("item_3", "/bin/zsh -lc 'sed -n 1,200p agent_attempts.py'"),
-                    *_command("item_4", "/bin/zsh -lc 'rg -n fallback_attempt packages | head'"),
+                    *_command(
+                        "item_4",
+                        "/bin/zsh -lc 'rg --no-config -n fallback_attempt packages | head'",
+                    ),
                     _reasoning("item_5"),
                 ),
                 id="read-only-commands-and-reasoning",

@@ -34,20 +34,40 @@ SHELL_TOOLS: frozenset[str] = frozenset({"Bash"})
 
 #: Programs that read, whatever their arguments, short of a redirect (refused
 #: below for every program). `sed`, `find`, `git` and `gh` are absent on
-#: purpose: each has a writing mode and is decided in `_segment_reads`. So are
+#: purpose: each has a writing mode and is decided in `_segment_reads`. `rg` is
+#: decided there too: ``RIPGREP_CONFIG_PATH`` can add ``--pre``. So are
 #: `sort -o`, `uniq IN OUT` and `tree -o`, which write a file by argument.
 _READ_ONLY_PROGRAMS: frozenset[str] = frozenset(
     {
-        "cat", "head", "tail", "grep", "egrep", "fgrep", "rg", "ls", "wc", "nl",
+        "cat", "head", "tail", "grep", "egrep", "fgrep", "ls", "wc", "nl",
         "pwd", "echo", "cd", "stat", "file", "diff", "which", "true", "cut",
         "tr", "jq", "basename", "dirname", "realpath",
     }
 )  # fmt: skip
 
-#: `git` subcommands that read the repository and never move a ref.
-_READ_ONLY_GIT: frozenset[str] = frozenset(
-    {"status", "log", "diff", "show", "rev-parse", "ls-files", "blame", "grep", "cat-file"}
-)
+#: `git` subcommands that read the repository and never move a ref, each with
+#: the switches that stop it running a program git CONFIGURATION names. Git
+#: reads that configuration when the command runs, wherever it came from: a
+#: driver installed before the attempt runs inside the attempt's plain `git
+#: diff` all the same, so only an invocation that switches it off is certified.
+#: ``diff`` runs ``diff.external`` / ``GIT_EXTERNAL_DIFF`` and textconv filters
+#: by default; ``log`` and ``show`` run textconv and ``gpg.program`` (for
+#: ``log.showSignature``); ``blame`` runs textconv. `status` is absent: it
+#: runs ``core.fsmonitor`` and no option turns that off.
+_READ_ONLY_GIT: dict[str, frozenset[str]] = {
+    "diff": frozenset({"--no-ext-diff", "--no-textconv"}),
+    "log": frozenset({"--no-ext-diff", "--no-textconv", "--no-show-signature"}),
+    "show": frozenset({"--no-ext-diff", "--no-textconv", "--no-show-signature"}),
+    "blame": frozenset({"--no-textconv"}),
+    "rev-parse": frozenset(),
+    "ls-files": frozenset(),
+    "grep": frozenset(),
+    "cat-file": frozenset(),
+}
+
+#: Before the subcommand, the switch that stops ANY git command running the
+#: configured pager (``core.pager``, ``GIT_PAGER``, ``pager.<cmd>``).
+_GIT_NO_PAGER: frozenset[str] = frozenset({"--no-pager", "-P"})
 
 #: `gh` subcommand pairs that only read from GitHub.
 _READ_ONLY_GH: frozenset[tuple[str, str]] = frozenset(
@@ -128,10 +148,8 @@ def _unwrap_shell(command: str) -> str | None:
 _WRITING_OPTIONS: tuple[str, ...] = ("--output", "--pre")
 
 #: Options that make a reading git subcommand RUN another program: an external
-#: diff driver, a textconv filter, a pager for the matched files. A driver
-#: that git runs from configuration alone (``diff.external``,
-#: ``GIT_EXTERNAL_DIFF``) is not decided here: installing one is a command this
-#: module calls work, so an attempt that set it up has already written.
+#: diff driver, a textconv filter, a pager for the matched files. What git runs
+#: from configuration alone is switched off by `_READ_ONLY_GIT`'s switches.
 _GIT_EXECUTING_OPTIONS: tuple[str, ...] = (
     "--ext-diff", "--textconv", "--filters", "--open-files-in-pager", "-O",
 )  # fmt: skip
@@ -158,6 +176,8 @@ def _segment_reads(segment: str) -> bool:
         return not any(a.startswith(_FIND_ACTIONS) for a in args)
     if program == "git":
         return _git_reads(args)
+    if program == "rg":
+        return "--no-config" in args
     if program == "gh":
         return len(args) >= 2 and (args[0], args[1]) in _READ_ONLY_GH
     return False
@@ -178,23 +198,33 @@ def _sed_prints(args: list[str]) -> bool:
 
 
 def _git_reads(args: list[str]) -> bool:
-    """A read-only git subcommand, with no option that runs another program."""
-    return _git_subcommand(args) in _READ_ONLY_GIT and not any(
-        a.startswith(_GIT_EXECUTING_OPTIONS) for a in args
+    """A read-only git subcommand that can run no program, configured or named.
+
+    The pager is switched off before the subcommand, every switch
+    `_READ_ONLY_GIT` lists for it is present, and no option runs a program.
+    """
+    index = _git_subcommand_index(args)
+    if index is None or args[index] not in _READ_ONLY_GIT:
+        return False
+    switches = set(args[index + 1 :])
+    return (
+        not _GIT_NO_PAGER.isdisjoint(args[:index])
+        and _READ_ONLY_GIT[args[index]] <= switches
+        and not any(a.startswith(_GIT_EXECUTING_OPTIONS) for a in args)
     )
 
 
-def _git_subcommand(args: list[str]) -> str | None:
-    """The git subcommand after any ``-C <dir>`` / ``--no-pager`` options."""
+def _git_subcommand_index(args: list[str]) -> int | None:
+    """Where the git subcommand is, after any ``-C <dir>`` / ``--no-pager`` options."""
     index = 0
     while index < len(args):
         arg = args[index]
         if arg == "-C":
             index += 2
-        elif arg in {"--no-pager", "-P"}:
+        elif arg in _GIT_NO_PAGER:
             index += 1
         elif arg.startswith("-"):
             return None
         else:
-            return arg
+            return index
     return None

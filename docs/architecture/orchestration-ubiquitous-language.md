@@ -154,7 +154,8 @@ command not recognised in full as read-only, hook and subagent events, and any
 stream shape the parser does not know are all work. The model's words
 (assistant text, thinking, codex `reasoning` and `agent_message` items) and
 tool calls recognised as read-only (`Read`, `Grep`, `Glob`, `LS`, and shell
-commands such as `cat`, `rg`, `sed -n 1,80p`, `git diff`, `gh pr view`) are not.
+commands such as `cat`, `rg --no-config`, `sed -n 1,80p`,
+`git --no-pager diff --no-ext-diff --no-textconv`, `gh pr view`) are not.
 Measured by `ObservabilityCollector.may_have_written`, with the read-only
 recognition in `side_effect_free`. It fails safe: only a positive recognition
 says "no work". It decides the [Fallback Agent](#fallback-agent) only. A
@@ -164,9 +165,15 @@ attempt showed any activity at all (#1303), because it resends the same prompt.
 A shell command is read-only only when its WHOLE line is: a background `&`, a
 redirect to anything but exactly `/dev/null`, or a git option that runs
 another program (`--ext-diff`, `--textconv`, `--filters`, `-O`) makes it work.
-A driver git runs from configuration alone is judged where it is installed:
-`git config`, `export` and `VAR=value cmd` are work, so the attempt that set
-one up has already done work before its plain `git diff` runs it.
+A command's side effects are what IT runs, including any program its
+configuration names, whoever installed that configuration and whenever. A plain
+`git diff` runs a configured `diff.external` driver, textconv filter or pager,
+so it is work; it is read-only only when it switches each of those off
+(`--no-pager`, `--no-ext-diff`, `--no-textconv`, and `--no-show-signature` for
+`log` and `show`). `git status` is always work: it runs `core.fsmonitor`, and
+no option turns that off. `rg` is read-only only with `--no-config`, since its
+config file can add `--pre`. Installing configuration (`git config`, `export`,
+`VAR=value cmd`) is work as well.
 
 ## Review Verdict
 
