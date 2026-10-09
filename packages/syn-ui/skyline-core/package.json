@@ -22,9 +22,11 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "og-image": "tsx scripts/og-image.ts"
   },
   "devDependencies": {
+    "tsx": "4.21.0",
     "typescript": "5.9.3",
     "vitest": "4.1.11"
   },
