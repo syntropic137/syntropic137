@@ -3,10 +3,10 @@ import '@syn137/skyline-svelte-v5/styles.css'
 import './app.css'
 
 import { mount } from 'svelte'
-import { configureClient } from '@syn137/syn-ui-data'
 import App from './App.svelte'
+import { startClient } from './lib/client'
 
-configureClient({ fixtures: import.meta.env.VITE_SYN_FIXTURES === '1' })
+startClient(import.meta.env.VITE_SYN_FIXTURES === '1')
 
 // Desktop app (apps/syn-desktop): Tauri exposes window.__TAURI__ (withGlobalTauri).
 // The bridge is a lazy chunk, so the plain browser build pays only this check.

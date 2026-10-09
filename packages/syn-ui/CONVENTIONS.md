@@ -33,7 +33,7 @@ Before you hand work back, check, test and build must all pass with zero warning
 | `@syn137/skyline-themes` | `packages/syn-ui/themes` | CSS only: `tokens.css` (structure), `skyline.css` and `syn137.css` (colour), `all.css` (upstream `@syntropic137/design-tokens` CSS, then all three) | `@syntropic137/design-tokens` (pinned) |
 | `@syn137/skyline-core` | `packages/syn-ui/skyline-core` | Plain TypeScript with no DOM and no Svelte. Holds the contract re-exports, formatters, chart geometry, state reducers and pattern prop types | `@syntropic137/design-contracts` (pinned, types only) |
 | `@syn137/skyline-svelte-v5` | `packages/syn-ui/skyline-svelte-v5` | Svelte 5 components (`.`), patterns (`./patterns`) and `styles.css` | core, themes |
-| `@syn137/syn-ui-data` | `packages/syn-ui/data` | Plain TypeScript: the typed API client, fixtures, live SSE stream and request coalescing | nothing |
+| `@syn137/syn-ui-data` | `packages/syn-ui/data` | Plain TypeScript: the typed API client, fixtures, live SSE stream, request coalescing and the query cache | nothing |
 | `syn-ui` | `apps/syn-ui` | The Vite app: shell, router, route pages, data loading | all four |
 
 All workspace packages export TypeScript and Svelte source directly, so they have no build step. Vite compiles them inside the app, and `check` is their build. Arrows only point down the table: core and data never import Svelte, and the component library never imports data.
@@ -131,6 +131,9 @@ import { subscribeActivity, subscribeExecution } from '@syn137/syn-ui-data/live'
 - Every resource function takes an optional `AbortSignal` as its last argument and calls `request(path, { query, body, method, signal })`. Paths are relative to the base (`/api/v1`).
 - Types: generated OpenAPI types live in `src/generated/api-types.ts` (regenerate with `pnpm --filter @syn137/syn-ui-data generate:types`). Hand-written types are ported in `src/types.ts`. Prefer aliasing the generated schema, `components['schemas']['X']`, to restating it.
 - Concurrent identical GETs are coalesced into one request. Each caller's abort only cancels that caller.
+- Every read goes through the query cache (`src/client/queryCache.ts`, ADR-074). Wrap a new read in `cached(name, params, (s) => request(path, { signal: s }), { signal, staleAfter })` from `src/keys.ts`, where `name` is the function's own name (add it to the `ResourceName` union) and `params` are its arguments minus the signal. `staleAfter` is `'list'` (15 s), `'detail'` (60 s, the default), `'metrics'` (5 s) or ms. Fresh data is served without a request, stale data is served and refreshed in the background, and fixtures mode never goes stale on its own.
+- A mutation wraps its request in `thenInvalidate(request(...), [{ name: 'getX', id }, { name: 'listX' }])`. Live events invalidate through the pure map in `src/live/invalidate.ts` (`invalidationsFor`); add a case there, with a test, when a new event should refresh a resource.
+- Callers get a copy of cached data, so editing a response never edits the cache.
 - Avoid N+1 fan-out. If you must fan out, use `mapLimit(items, 4, fn)` and record the API gap in your result.
 - Errors are `ApiError` with `status`, `code` and `detail`. Ignore `isAbortError(e)`.
 - Live: `subscribeActivity({ filter, onFrames, onState })` shares one EventSource per URL per tab and delivers frames batched per animation frame. Fixtures mode never connects and reports `'fixtures'`.
@@ -157,6 +160,8 @@ Fixtures mode (`VITE_SYN_FIXTURES=1`, or `configureClient({ fixtures: true })`) 
 - Sample values come from the canvas board's `renderVals()` data: names, durations, tokens, costs. Keep them recognisable.
 - Add a case to `fixtures/fixtures.test.ts` when you add an endpoint.
 
+**The rule the fitness check enforces** (`ci/fitness/code_quality/test_syn_ui_every_resource_has_a_fixture.py`, ADR-074 rule 2): a resource is an exported function in `src/resources/*.ts` that sends a request. It calls `request(path, ...)` with the path written as a string or template literal, directly or through a non-exported helper in the same file. Every request it sends needs a `route(method, path, ...)` with the same method and path shape in a `fixtures/*.ts` file imported by `fixtures/routes.ts`: a template substitution such as `${seg(id)}` and a `:param` are the same segment, and the query string is ignored. Exported functions that send nothing (URL builders such as `executionStreamUrl`) are not resources. Resources never call `fetch` or `fetchJSON` themselves. An endpoint the fixtures world has no data for still gets a route: throw `notFound(...)`, as the session-inventory pages do.
+
 ## The app (apps/syn-ui)
 
 ### Routing
@@ -166,6 +171,19 @@ Fixtures mode (`VITE_SYN_FIXTURES=1`, or `configureClient({ fixtures: true })`) 
 - Use plain `<a href={href('/executions/' + id)}>` links. `href()` adds the deploy base. Clicks are intercepted, and hover or focus preloads the target route's chunk. To force a full reload, add `data-sky-reload`.
 - `router.navigate(path)`, `router.path`, `router.query` (URLSearchParams) and `router.setQuery({ status: 'failed' })`. Filters live in the query string and replace history rather than push to it.
 - A page component receives `{ params }: PageProps`, typed as `Record<string, string>`. A page is remounted when its params change.
+
+### Layer checks (ADR-074)
+
+Fitness functions in `ci/fitness/code_quality/` keep the layers apart, with no exceptions:
+
+| Check | Rule |
+|---|---|
+| `test_syn_ui_no_fetch_outside_data.py` | No `fetch(` call and no `/api/v1` string in `apps/syn-ui/src`, `skyline-svelte-v5/src` or `skyline-core/src`. |
+| `test_syn_ui_data_imports.py` | `@syn137/syn-ui-data` is imported only from `apps/syn-ui/src/{routes,lib,shell}` and tests. `main.ts` calls `startClient()` from `lib/client.ts`. |
+| `test_syn_ui_data_is_framework_agnostic.py` | `packages/syn-ui/data` has no runtime dependencies and imports nothing from Svelte. |
+| `test_syn_ui_every_resource_has_a_fixture.py` | Every resource request has a fixture route (see Fixtures above). |
+
+Run them with `uv run pytest ci/fitness/code_quality/test_syn_ui_*.py -q`.
 
 ### How pages fetch data
 
@@ -198,6 +216,7 @@ Use `resource()` from `src/lib/load.svelte.ts`. Do not fetch in `onMount` and do
 - Reactive values that the fetcher reads **before its first `await`**, such as params, `router.query` or a `$state` filter, are tracked. Changing one aborts the old request and refetches.
 - `data` keeps its previous value while a refetch runs. `loading` and `error` describe the latest request.
 - `live` refetches, throttled to once every 2 seconds, on matching activity events.
+- Reads go through the query cache. A fetcher that returns a resource call directly, `(signal) => getX(id, signal)`, renders cached data on the first frame, so coming back to a page shows no skeleton. A fetcher that awaits or combines several calls still uses the cache but resolves a microtask later. Any invalidation of a key the fetcher read (live event, mutation, `refresh()`) re-runs it.
 - Breadcrumbs and the document title: the route table supplies defaults, and the page refines them with `setPage()`. Overview has no breadcrumbs. Crumb hrefs are app paths, and the trail adds the base itself.
 - Loading, empty and error states are part of every screen. For now, use the `Skeleton`, `EmptyState` and `Callout` components once they exist.
 

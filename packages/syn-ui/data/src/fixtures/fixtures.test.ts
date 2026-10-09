@@ -3,6 +3,9 @@ import { configureClient } from '../client'
 import { ApiError } from '../client/errors'
 import {
   getSessionInventory,
+  getSessionInventoryNode,
+  getSessionInventoryPage,
+  getLocalTranscript,
   getArtifact,
   getContributionHeatmap,
   getEval,
@@ -80,6 +83,16 @@ describe('every screen has data in fixtures mode', () => {
     const inv = await getSessionInventory(RUNS[2]!.id)
     expect(inv.summary.platform_sessions).toBe(3)
     expect(inv.summary.complete).toBe(false)
+  })
+  it('inventory pages, nodes and transcripts 404 like the API when there is no snapshot', async () => {
+    const id = RUNS[2]!.id
+    for (const call of [
+      () => getSessionInventoryPage(id, 'snap', 'node', null),
+      () => getSessionInventoryNode(id, 'snap', 'node-1'),
+      () => getLocalTranscript(id, 'claude', 'native-1', 'rev-1'),
+    ]) {
+      await expect(call()).rejects.toMatchObject({ status: 404 })
+    }
   })
   it('sessions link back to their execution', async () => {
     const list = await listSessions({ page: 1, page_size: 10 })

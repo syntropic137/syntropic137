@@ -233,6 +233,11 @@ export const executionRoutes: FixtureRoute[] = [
     }
   }),
   route('GET', '/executions/:executionId/session-inventory', ({ params }): InventoryStatus => inventory(runOf(params.executionId!) ?? notFound('Execution'))),
+  // Fixture inventories have no snapshot (`snapshot: null` above), so pages,
+  // node lookups and archived transcripts answer the API's 404.
+  route('GET', '/executions/:executionId/session-inventory/:snapshotId/:kind', () => notFound('Inventory snapshot')),
+  route('GET', '/executions/:executionId/session-inventory/:snapshotId/nodes/:nodeKey', () => notFound('Inventory snapshot')),
+  route('GET', '/executions/:executionId/session-transcripts/:revision', () => notFound('Transcript')),
   route('GET', '/executions/:executionId', ({ params }) => executionDetail(runOf(params.executionId!) ?? notFound('Execution'))),
   route('POST', '/executions/:executionId/cancel', ({ params }) => ({
     success: true,
