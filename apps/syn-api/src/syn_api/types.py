@@ -3964,3 +3964,58 @@ class PhaseProfilesResponse(BaseModel):
                 for r in profiles.resources
             ],
         )
+
+
+# =============================================================================
+# Request latency (ADR-075)
+# =============================================================================
+
+LatencyWindow = Literal["1h", "24h", "7d", "30d"]
+"""How far back ``GET /observability/latency`` looks. 30d is the retention."""
+
+
+class RouteLatencyResponse(BaseModel):
+    """Exact latency percentiles of one (method, route template) over the window.
+
+    Latency here is ARRIVAL TO RESPONSE START (time to first byte), not to the
+    last byte, so a long-lived stream counts as fast if it answered promptly.
+    """
+
+    method: str
+    route: str
+    """The route TEMPLATE, e.g. ``/evals/{eval_id}``; ``<unmatched>`` for no route."""
+    count: int
+    p50_ms: float
+    """Arrival-to-response-start latency, ms; likewise every ``*_ms`` field here."""
+    p95_ms: float
+    p99_ms: float
+    max_ms: float
+    p99_display: str
+
+
+class LatencyRecorderStatusResponse(BaseModel):
+    """What this API process's recorder did with its samples since it started."""
+
+    running: bool
+    written: int
+    dropped: int
+    """Offered while the buffer was full or the recorder was not running."""
+    write_failures: int
+    """Samples lost because their batch failed or overran its deadline."""
+    discarded: int
+    """Samples still unwritten when a shutdown's deadline expired."""
+    cleanup_failures: int
+    """Written batches whose connection could not be released in time (terminated)."""
+    buffered: int
+
+
+class RequestLatencyResponse(BaseModel):
+    """Per-route arrival-to-response-start latency from ``api_request_latency``, slowest p99 first."""
+
+    window: LatencyWindow
+    since: str
+    """ISO 8601 UTC start of the window."""
+    available: bool
+    """False when the observability store could not be read; ``routes`` is then empty."""
+    routes: list[RouteLatencyResponse]
+    recorder: LatencyRecorderStatusResponse

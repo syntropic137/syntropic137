@@ -13,11 +13,15 @@ import stat
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from syn_adapters.workspace_backends.agentic.workspace_walk import (
+    UnopenableDirectoryError,
+    WalkLimits,
+    iter_matching_paths,
+    open_directory,
+)
 from syn_shared.settings import get_settings
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
-
     from agentic_isolation import AgenticWorkspace, WorkspaceDockerProvider
 
     from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
@@ -65,15 +69,19 @@ def _normalize_pattern(pattern: str) -> str:
 
 # Every component is opened relative to the fd of its parent with O_NOFOLLOW,
 # so no symlink is followed anywhere on the path, including one swapped in
-# after the glob. O_NONBLOCK keeps a FIFO from blocking the open; the fstat
+# after the walk. O_NONBLOCK keeps a FIFO from blocking the open; the fstat
 # below rejects anything that is not a regular file.
-_DIR_OPEN_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_DIRECTORY
 _FILE_OPEN_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
 _READ_CHUNK = 1024 * 1024
 # Collection-wide bounds, on top of the per-file limit: the total bytes held
-# in memory for one collection, and the number of glob matches examined.
+# in memory for one collection, the number of matches examined, and how many
+# directory entries finding them may list - in all, and in any one directory.
 MAX_COLLECTION_BYTES = 200 * 1024 * 1024
 MAX_COLLECTION_MATCHES = 10_000
+MAX_COLLECTION_ENTRIES = 100_000
+MAX_DIRECTORY_ENTRIES = 10_000
+# How many directories deep the walk goes; also how many it holds open at once.
+MAX_DIRECTORY_DEPTH = 64
 
 
 class _SkipFileError(Exception):
@@ -92,15 +100,11 @@ def _open_contained(root: Path, parts: tuple[str, ...]) -> int:
     """
     if not parts or any(part in ("", ".", "..") for part in parts):
         raise _SkipFileError("not a plain relative path")
-    dir_fd = os.open(root, _DIR_OPEN_FLAGS)
     try:
-        for part in parts[:-1]:
-            try:
-                next_fd = os.open(part, _DIR_OPEN_FLAGS, dir_fd=dir_fd)
-            except OSError as e:
-                raise _SkipFileError("a directory on its path is a symlink") from e
-            os.close(dir_fd)
-            dir_fd = next_fd
+        dir_fd = open_directory(root, parts[:-1])
+    except UnopenableDirectoryError as e:
+        raise _SkipFileError(str(e)) from e
+    try:
         try:
             return os.open(parts[-1], _FILE_OPEN_FLAGS, dir_fd=dir_fd)
         except OSError as e:
@@ -170,34 +174,6 @@ def _try_read_file(
     )
 
 
-def _candidates(root: Path, patterns: list[str], max_matches: int) -> Iterator[tuple[Path, str]]:
-    """Yield (path, relative path) for each distinct non-directory glob match.
-
-    Stops after max_matches matches, so a workspace full of matching entries
-    cannot make collection unbounded.
-    """
-    seen_paths: set[str] = set()
-    examined = 0
-    for pattern in patterns:
-        for file_path in root.glob(_normalize_pattern(pattern)):
-            examined += 1
-            if examined > max_matches:
-                logger.warning(
-                    "copy_from: Stopped after %d matches; the rest were not collected",
-                    max_matches,
-                )
-                return
-            try:
-                if stat.S_ISDIR(file_path.lstat().st_mode):
-                    continue
-            except OSError:
-                continue
-            relative_path = str(file_path.relative_to(root))
-            if relative_path not in seen_paths:
-                seen_paths.add(relative_path)
-                yield file_path, relative_path
-
-
 def collect_matching_files(
     workspace_path: Path,
     patterns: list[str],
@@ -205,22 +181,35 @@ def collect_matching_files(
     max_bytes: int,
     max_total_bytes: int = MAX_COLLECTION_BYTES,
     max_matches: int = MAX_COLLECTION_MATCHES,
+    max_entries: int = MAX_COLLECTION_ENTRIES,
+    max_directory_entries: int = MAX_DIRECTORY_ENTRIES,
+    max_depth: int = MAX_DIRECTORY_DEPTH,
 ) -> list[tuple[str, bytes]]:
-    """Glob patterns against workspace and read matching regular files.
+    """Match glob patterns against workspace and read matching regular files.
 
     Only regular files inside the workspace are collected: no symlink is
     followed, at the file or at any directory on its path, and a file larger
     than max_bytes is skipped. A file that would take the collection past
-    max_total_bytes is skipped, and collection stops after max_matches glob
-    matches.
+    max_total_bytes is skipped, and collection stops after max_matches
+    matches. Finding them lists at most max_entries directory entries, and
+    at most max_directory_entries from any one directory, and enters no
+    directory more than max_depth levels below the workspace.
     """
     results: list[tuple[str, bytes]] = []
     root = workspace_path.resolve(strict=True)
+    limits = WalkLimits(
+        max_matches=max_matches,
+        max_entries=max_entries,
+        max_directory_entries=max_directory_entries,
+        max_depth=max_depth,
+    )
     used = 0
-    for file_path, relative_path in _candidates(root, patterns, max_matches):
+    for relative_path in iter_matching_paths(
+        root, [_normalize_pattern(p) for p in patterns], limits
+    ):
         limit = min(max_bytes, max_total_bytes - used)
         collected_before = len(results)
-        _try_read_file(root, file_path, relative_path, limit, results)
+        _try_read_file(root, root / relative_path, relative_path, limit, results)
         if len(results) > collected_before:
             used += len(results[-1][1])
     return results
@@ -249,7 +238,7 @@ async def copy_from_workspace(
 ) -> list[tuple[str, bytes]]:
     """Copy files from workspace via mounted volume.
 
-    Runs in a worker thread. The glob, the stats and the reads are blocking
+    Runs in a worker thread. The walk, the stats and the reads are blocking
     filesystem calls against a bind mount, and every one of them used to run
     on the API's event loop - the loop that also owns every other execution's
     `docker exec` deadlines. On the selfhost that froze the whole API for

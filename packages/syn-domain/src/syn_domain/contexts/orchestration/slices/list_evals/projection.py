@@ -169,6 +169,19 @@ class EvalListProjection(AutoDispatchProjection):
         scores = (EvalRunScore.model_validate(document) for document in documents)
         return {score.execution_id: score for score in scores}
 
+    async def scores_in(self, eval_ids: Collection[str]) -> dict[tuple[str, str], EvalRunScore]:
+        """Every run's current score in each Eval given, by ``(eval_id, execution_id)``, in one read.
+
+        What ``scores`` answers for each Eval, without a read per Eval (#1811).
+        Filtered by Eval alone: also filtering by every member's execution id
+        multiplies the filter by the size of the page for no fewer rows.
+        """
+        if not eval_ids:
+            return {}
+        documents = await self._store.query(self.SCORES, filters={"eval_id": sorted(set(eval_ids))})
+        scores = (EvalRunScore.model_validate(document) for document in documents)
+        return {(score.eval_id, score.execution_id): score for score in scores}
+
     async def score(self, eval_id: str, execution_id: str) -> EvalRunScore | None:
         """The run's current score in the eval, or None if it was never scored."""
         document = await self._store.get(self.SCORES, _score_key(eval_id, execution_id))
@@ -288,6 +301,16 @@ class EvalListProjection(AutoDispatchProjection):
         own stream is projected, even before the Eval's record catches up.
         """
         return await self._runs.page(eval_id=eval_id, statuses=statuses, offset=offset, limit=limit)
+
+    async def members_of(
+        self, eval_ids: Collection[str]
+    ) -> dict[str, list[WorkflowExecutionSummary]]:
+        """Every current member execution of each Eval given, in one read, unordered.
+
+        A page of the eval list needs every run of every eval on it; asking
+        ``members`` once per eval was a query per row (#1811).
+        """
+        return await self._runs.members_of(eval_ids)
 
     async def _record(self, eval_id: str) -> EvalRecord | None:
         document = await self._store.get(self.PROJECTION_NAME, eval_id)

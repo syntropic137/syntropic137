@@ -100,6 +100,26 @@ class ExecutionListReads:
             return WorkflowExecutionSummary.from_dict(data)
         return None
 
+    async def members_of(
+        self, eval_ids: Collection[str]
+    ) -> dict[str, list[WorkflowExecutionSummary]]:
+        """Each Eval's current member executions, in one read, unordered (#1811).
+
+        Every id given gets an entry, empty when it has no members. The same
+        rows ``page(eval_id=...)`` pages for each id, without a query per Eval.
+        """
+        members: dict[str, list[WorkflowExecutionSummary]] = {eval_id: [] for eval_id in eval_ids}
+        if not members:
+            return members
+        documents = await self._store.query(
+            WORKFLOW_EXECUTIONS, filters={"eval_id": sorted(members)}
+        )
+        for document in documents:
+            row = WorkflowExecutionSummary.from_dict(dict(document))
+            if row.eval_id is not None and row.eval_id in members:
+                members[row.eval_id].append(row)
+        return members
+
     async def run_tallies(self, eval_ids: Collection[str]) -> dict[str, dict[str, int]]:
         """Each Eval's current member executions tallied by status, in one read.
 
