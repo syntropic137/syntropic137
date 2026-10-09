@@ -10,47 +10,58 @@
 import type { QueryTarget } from '../keys'
 import { invalidateTargets } from '../keys'
 import type { SSEEventFrame } from '../types'
+import { isArtifactEvent, isGitEvent, isRunEvent, isRunFinished, isSessionEvent } from './events'
 import { subscribeActivity } from './stream'
 
 const str = (v: unknown): string | undefined => (typeof v === 'string' && v ? v : undefined)
 
-const isExecution = (t: string) => t.startsWith('phase_') || t.startsWith('workflow_') || t.startsWith('execution_')
-const isSession = (t: string) => t.startsWith('session') || t.startsWith('tool_') || t.startsWith('subagent_')
-
-/** The cached reads one live frame makes stale. Metrics go stale on every event. */
+/**
+ * The cached reads one live frame makes stale, keyed by the API's real
+ * `event_type` names (events.ts lists them; a contract test pins that every
+ * one maps here). Metrics go stale on every event; an unknown name stales
+ * metrics only.
+ */
 export function invalidationsFor(frame: SSEEventFrame): QueryTarget[] {
-  if (frame.type !== 'event') return []
+  if (frame.type === 'connected') return []
   const t = frame.event_type
   const data = frame.data ?? {}
   const executionId = str(frame.execution_id) ?? str(data.execution_id)
+  const workflowId = str(data.workflow_id)
+  const sessionId = str(data.session_id)
   const out: QueryTarget[] = [{ name: 'getMetrics' }]
-  if (isExecution(t)) {
-    const workflowId = str(data.workflow_id)
+  if (isRunEvent(t)) {
     out.push(
       { name: 'listExecutions' },
       { name: 'getExecutionBudget' },
       { name: 'listWorkflowRuns', id: workflowId },
+      { name: 'getWorkflowHistory', id: workflowId },
+      { name: 'getWorkflowTrend', id: workflowId },
       { name: 'listExecutionCosts' },
       { name: 'getCostSummary' },
     )
     if (executionId) out.push({ name: 'getExecution', id: executionId }, { name: 'getExecutionCost', id: executionId })
   }
-  if (isSession(t)) {
-    const sessionId = str(data.session_id)
+  if (t === 'WorkflowExecutionStarted' || isRunFinished(t)) {
+    out.push({ name: 'listWorkflows' }, { name: 'getWorkflow', id: workflowId }, { name: 'getContributionHeatmap' })
+  }
+  if (isRunFinished(t)) out.push({ name: 'listEvals' }, { name: 'getEval' }, { name: 'listEvalRuns' }, { name: 'getEvalTrend' })
+  if (isSessionEvent(t)) {
     out.push(
       { name: 'listSessions' },
       { name: 'getSession', id: sessionId },
       { name: 'getToolTimeline', id: sessionId },
       { name: 'getTokenMetrics', id: sessionId },
+      { name: 'getConversationLog', id: sessionId },
     )
   }
-  if (t.startsWith('artifact_')) out.push({ name: 'listArtifacts' }, { name: 'getArtifact', id: str(data.artifact_id) })
-  if (t.startsWith('trigger')) {
-    const triggerId = str(data.trigger_id)
-    out.push({ name: 'listTriggers' }, { name: 'getTrigger', id: triggerId }, { name: 'getTriggerHistory', id: triggerId })
+  if (t === 'SessionStarted' || t === 'SessionCompleted') {
+    out.push({ name: 'listSessionCosts' }, { name: 'getSessionCost', id: sessionId }, { name: 'getCostSummary' }, { name: 'getContributionHeatmap' })
+    if (executionId) out.push({ name: 'getExecution', id: executionId }, { name: 'getSessionInventory', id: executionId })
   }
+  if (isArtifactEvent(t)) out.push({ name: 'listArtifacts' }, { name: 'getArtifact', id: str(data.artifact_id) })
+  if (isGitEvent(t)) out.push({ name: 'getContributionHeatmap' })
   // An absent id means "all of that resource": strip it so the target is unambiguous.
-  return out.map((target) => (target.id === undefined ? { name: target.name } : target))
+  return mergeTargets(out.map((target) => (target.id === undefined ? { name: target.name } : target)))
 }
 
 /** Union of targets, a whole-resource target absorbing that resource's id targets. */
@@ -96,8 +107,10 @@ export function connectLiveInvalidation(options: LiveInvalidationOptions = {}): 
     else timer = setTimeout(flush, wait)
   }
   const unsubscribe = options.subscribe?.(onFrames) ?? subscribeActivity({ onFrames })
+  // Teardown flushes what the throttle was holding, so a queued invalidation is never lost.
   return () => {
-    clearTimeout(timer)
     unsubscribe()
+    clearTimeout(timer)
+    if (pending.length) flush()
   }
 }
