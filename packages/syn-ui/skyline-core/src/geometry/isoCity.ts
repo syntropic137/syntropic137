@@ -9,10 +9,12 @@
  * left. Activity is sessions over the busiest day, height
  * 3 + activity * cell * 2.6, opacity 0.28 + 0.72 * min(1, activity * 1.3).
  * Blocks come back in draw order (back to front, by diagonal then column),
- * with `wave` (the diagonal) for a staggered entrance.
+ * with `wave` (the diagonal) for a staggered entrance. cityBlockPaint()
+ * colours a block: glass (the opacity above) or solid.
  */
 import { type IsoCube, isoCube } from './isoCube'
 import { addDays, type SkylineDay } from './skyline'
+import { extrudeColors } from './extrude'
 
 /** run: a normal day; live: running now (pulses); failed: only failed runs; errored: mixed or scorer errors (amber). */
 export type CityTone = 'run' | 'live' | 'failed' | 'errored'
@@ -197,3 +199,29 @@ export function cityDelay(wave: number): number {
 
 /** Board pulse and flash start this long after a block's rise begins (seconds). */
 export const CITY_SIGNAL_DELAY = 1.6
+
+/**
+ * How a block shows how busy its day was. 'glass' (the board) fades the
+ * whole cube with `opacity`, so the blocks behind and the floor show
+ * through. 'solid' keeps every face opaque and mixes it toward the ground
+ * colour by the same share instead: quiet days read as dark, finished
+ * blocks, with the top, front and side shading intact.
+ */
+export type CityFill = 'glass' | 'solid'
+
+/** Face colours of one block, and the opacity of its group (1 when solid). */
+export interface CityBlockPaint {
+  front: string
+  side: string
+  top: string
+  opacity: number
+}
+
+/** Paint for a block of `tone` at `opacity` (CityBlock.opacity), as token expressions. */
+export function cityBlockPaint(tone: CityTone, opacity: number, fill: CityFill = 'glass'): CityBlockPaint {
+  const faces = extrudeColors(CITY_TONE_FILL[tone])
+  if (fill === 'glass') return { ...faces, opacity }
+  const share = Math.round(Math.min(1, Math.max(0, opacity)) * 100)
+  const mix = (c: string) => (share === 100 ? c : `color-mix(in oklab, ${c} ${share}%, var(--sky-color-ground-deep))`)
+  return { front: mix(faces.front), side: mix(faces.side), top: mix(faces.top), opacity: 1 }
+}
