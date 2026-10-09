@@ -257,6 +257,19 @@ jobs:
       - name: Install just
         uses: extractions/setup-just@dd310ad5a97d8e7b41793f8ef055398d51ad4de6 # v2
 
+      # GitHub runners pull from Docker Hub anonymously and hit its 429 rate
+      # limit on busy days, which failed this job twice on 2026-10-09 before a
+      # single line of ours ran. AWS public ECR mirrors the same official images
+      # without that limit; tagging them locally lets `docker build` resolve the
+      # Dockerfile's `FROM node:22-alpine` / `FROM nginx:...` without a registry
+      # round trip. The Dockerfile itself is unchanged.
+      - name: Pre-pull base images from the ECR mirror of Docker Hub
+        run: |
+          for img in $(grep -E '^FROM ' infra/docker/images/gateway/Dockerfile | awk '{print $2}' | sort -u); do
+            docker pull "public.ecr.aws/docker/library/$img"
+            docker tag "public.ecr.aws/docker/library/$img" "$img"
+          done
+
       # Builds infra/docker/images/gateway (both UI stages, the Skyline size
       # budget included), runs it in each SYN_GATEWAY_UI mode with no API
       # behind it, and checks routing, redirects, caching, headers and the
