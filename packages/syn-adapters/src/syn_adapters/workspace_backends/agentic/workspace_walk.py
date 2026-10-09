@@ -147,17 +147,16 @@ def _is_real_directory(entry: os.DirEntry[str]) -> bool:
         return False
 
 
-def iter_matching_paths(root: Path, patterns: list[str], limits: WalkLimits) -> Iterator[str]:
-    """Yield each distinct non-directory path under root that a pattern selects.
+def _reachable_files(
+    root: Path, matcher: _Patterns, limits: WalkLimits
+) -> Iterator[tuple[tuple[str, ...], frozenset[_State], os.DirEntry[str]]]:
+    """Yield (directory parts, states there, entry) for each non-directory.
 
-    Paths are relative to root, POSIX-style. A symlink is never entered,
-    though a symlink whose name matches is yielded like any other
-    non-directory: refusing to read it is the reader's job.
+    Enters only real directories that a pattern can still match below, and
+    stops after limits.max_entries entries in all.
     """
-    matcher = _Patterns(patterns)
     pending: list[tuple[tuple[str, ...], frozenset[_State]]] = [((), matcher.start())]
     examined = 0
-    matched = 0
     while pending:
         parts, states = pending.pop()
         for entry in _list_directory(root, parts, limits.max_directory_entries):
@@ -168,16 +167,29 @@ def iter_matching_paths(root: Path, patterns: list[str], limits: WalkLimits) -> 
                     limits.max_entries,
                 )
                 return
-            if _is_real_directory(entry):
-                below = matcher.enter(states, entry.name)
-                if below:
-                    pending.append(((*parts, entry.name), below))
-            elif matcher.selects_file(states, entry.name):
-                matched += 1
-                if matched > limits.max_matches:
-                    logger.warning(
-                        "copy_from: Stopped after %d matches; the rest were not collected",
-                        limits.max_matches,
-                    )
-                    return
-                yield "/".join((*parts, entry.name))
+            if not _is_real_directory(entry):
+                yield parts, states, entry
+            elif below := matcher.enter(states, entry.name):
+                pending.append(((*parts, entry.name), below))
+
+
+def iter_matching_paths(root: Path, patterns: list[str], limits: WalkLimits) -> Iterator[str]:
+    """Yield each distinct non-directory path under root that a pattern selects.
+
+    Paths are relative to root, POSIX-style. A symlink is never entered,
+    though a symlink whose name matches is yielded like any other
+    non-directory: refusing to read it is the reader's job.
+    """
+    matcher = _Patterns(patterns)
+    matched = 0
+    for parts, states, entry in _reachable_files(root, matcher, limits):
+        if not matcher.selects_file(states, entry.name):
+            continue
+        matched += 1
+        if matched > limits.max_matches:
+            logger.warning(
+                "copy_from: Stopped after %d matches; the rest were not collected",
+                limits.max_matches,
+            )
+            return
+        yield "/".join((*parts, entry.name))
