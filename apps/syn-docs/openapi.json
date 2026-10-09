@@ -9882,6 +9882,7 @@
             "default": false
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "title": "DeclaredSkillResponse",
         "description": "A skill a workflow declares, once, and where it declares it.\n\nOn the workflow LIST so a card can draw its skill chips without one detail\nrequest per workflow. Same ref shape as a phase's ``skills`` entry, so a\nclient matches a chip to a phase by comparing the ref fields."
@@ -16064,6 +16065,7 @@
             ]
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "phase_id",
@@ -20094,6 +20096,7 @@
             "$ref": "#/components/schemas/CostSplitBasis"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "input_usd",
@@ -21511,6 +21514,7 @@
             "title": "Phases"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "workflow_id",
