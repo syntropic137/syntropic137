@@ -8,10 +8,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from event_sourcing import StreamAlreadyExistsError
-
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
-from syn_domain.contexts.orchestration._shared.event_epoch import ORCHESTRATION_EVENT_EPOCH
 from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoAction, TodoItem
 from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins import (
     phase_definitions_of,
@@ -42,14 +39,11 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.cancel_teardown i
 from syn_domain.contexts.orchestration.slices.execute_workflow.cancelled_work_record import (
     CancelledWorkLedger,
 )
-from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
-    SavedWork,
-)
 from syn_domain.contexts.orchestration.slices.execute_workflow.execution_journal import (
     ExecutionJournal,
 )
-from syn_domain.contexts.orchestration.slices.execute_workflow.failure_teardown import (
-    record_failure_and_release,
+from syn_domain.contexts.orchestration.slices.execute_workflow.failed_execution import (
+    record_failed_execution,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
     AgentExecutionHandler,
@@ -67,7 +61,6 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.phase_delegation 
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_outcome import (
     completed_execution,
     completed_phase,
-    failed_phase_outcome,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_push import push_recorder
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_retry import (
@@ -87,20 +80,16 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types i
     # import time, which is why TC001 is silenced here rather than obeyed.
     WorkflowExecutionResult,
 )
-from syn_domain.contexts.orchestration.slices.execute_workflow.pull_request_observation import (
-    with_open_pull_requests,
-)
 from syn_domain.contexts.orchestration.slices.execute_workflow.resume_handoff import (
     inherited_outputs,
     inherited_phase_ids,
     record_continuation,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.run_reservation import reserve_run
 from syn_domain.contexts.orchestration.slices.execute_workflow.shutdown_interruption import (
     preserve_interrupted_run,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_guard import (
-    already_saved_by_the_completion_gate,
-    quarantined_records,
     refuse_to_complete_unsaved_phase,
 )
 
@@ -134,7 +123,6 @@ if TYPE_CHECKING:
         ExecutionRunQueue,
     )
     from syn_domain.contexts.orchestration.ports.RemoteBranchPort import RemoteBranchPort
-    from syn_domain.contexts.orchestration.slices.execute_workflow.errors import ObservedBranches
     from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
         ObservabilityRecorder,
     )
@@ -447,10 +435,10 @@ class WorkflowExecutionProcessor:
         # must not leave a child that exists and can never run its first phase.
         phase_outputs = await inherited_outputs(self._artifact_query, origin)
         record_continuation(phase_outputs, aggregate.start_pins)
-        if self._run_queue is not None and not await self._run_queue.reserve(
-            execution_id, ORCHESTRATION_EVENT_EPOCH, is_resume=origin is not None
-        ):
-            await self._refuse_if_started(self._run_queue, execution_id)
+        if self._run_queue is not None:
+            await reserve_run(
+                self._run_queue, self._journal, execution_id, is_resume=origin is not None
+            )
         # #1387: durable, therefore visible. From the write the drain counts
         # this execution and a maintenance transition may proceed over it;
         # before it, it existed only as a queued task, and `set_mode(active=True)`
@@ -466,25 +454,6 @@ class WorkflowExecutionProcessor:
         if self._run_queue is not None:
             await self._run_queue.mark_admitted(execution_id)
         return phase_outputs
-
-    async def _refuse_if_started(self, queue: ExecutionRunQueue, execution_id: str) -> None:
-        """Decide what a refused ``reserve`` means, from the stream, not the row.
-
-        A row exists, but a row is a reservation, not a start: an ``opening``
-        or ``abandoned`` row whose stream write failed has no start at all,
-        and calling it a duplicate would confirm a start that never happened.
-        So only a stream that exists is a duplicate - promoted first, in case
-        the earlier start died between its write and ``mark_admitted`` (D2).
-        Absent, the start proceeds: ``journal.open``'s no-stream write is the
-        fence, so a concurrent opener still loses there, honestly.
-
-        Raises:
-            StreamAlreadyExistsError: the execution's stream exists.
-        """
-        if await self._journal.reload(execution_id) is None:
-            return
-        await queue.mark_admitted(execution_id)
-        raise StreamAlreadyExistsError(execution_id, 0)
 
     async def run_claimed(self, run: ClaimedRun) -> WorkflowExecutionResult:
         """Drain a run an Executor claimed, from its stream alone (#1310 1.3).
@@ -709,15 +678,6 @@ class WorkflowExecutionProcessor:
         await self._journal.append(aggregate)
         return completion.execution_result(workflow_id, execution_id, started_at=started_at)
 
-    async def _observe_branches(
-        self, observed: ObservedBranches | None, aggregate: WorkflowExecutionAggregate
-    ) -> ObservedBranches | None:
-        """The failing phase's branches, with the PR open from each when a forge is wired (#1513)."""
-        if self._remote_branches is None:
-            return observed
-        repositories = [c.repository for c in aggregate.start_pins.source_commits]
-        return await with_open_pull_requests(observed, self._remote_branches, repositories)
-
     async def _fail_execution(
         self,
         error: Exception,
@@ -742,94 +702,22 @@ class WorkflowExecutionProcessor:
         execution's own artifact list, the failed phase's record and the
         event - otherwise the artifact exists and nothing points at it.
         """
-        kept = list(kept_artifact_ids or [])
-        for artifact_id in kept:
-            if artifact_id not in all_artifact_ids:
-                all_artifact_ids.append(artifact_id)
-        # BEFORE any await: teardown clears both maps, so reading them
-        # afterwards timed the phase to the end of cleanup and lost the
-        # session_id entirely (#1036).
-        runtime = self._runtimes.of(execution_id)
-        timings = runtime.timings()
-        # Read in the same breath as the timings, and for the same reason: the
-        # counts are the dying phase's own, and this is the last frame in which
-        # anything can still ask for them (#1262). Without this the phase
-        # reported zero tokens no matter what it had burned, so an exit 124
-        # after 735 tokens - a stall - was indistinguishable from one after
-        # 300k, which needed a bigger budget rather than a retry.
-        #
-        # Asked with `execution_id`, not just the phase: this processor is
-        # shared across concurrent dispatches and two runs of one workflow have
-        # the same phase ids, so "what did `implement` spend" names two answers.
-        # The id is the run's own, so it always names this one's.
-        usage = runtime.usage_for(execution_id, failed_phase_id)
-        # Before the teardown below, the only window in which either is
-        # possible: SAVE what would die with the container (#1231), then read
-        # where that leaves the branches (#1200). Saving first is what lets the
-        # branch report point at a quarantine ref instead of at nothing.
-        #
-        # This does not make the phase succeed and must not be read as doing
-        # so. `error` is untouched, `failed_phase_outcome` appends to its reason
-        # rather than replacing it, and the aggregate is still told the
-        # execution failed: a phase killed at its timeout_seconds is still a
-        # phase that ran out of time. What changes is only that the time is now
-        # the whole of what the timeout costs.
-        #
-        # The one failure that arrives with the workspace already emptied is
-        # the completion gate's own refusal, which quarantined before it raised
-        # (#1184). Saving again would push a second, differently-timestamped
-        # commit to the same ref, be rejected as a non-fast-forward, and report
-        # the work as lost directly under the gate's report that it is not.
-        saved = (
-            SavedWork()
-            if already_saved_by_the_completion_gate(error)
-            else await runtime.save_unpushed_work(failed_phase_id, execution_id=execution_id)
-        )
-        # Whichever of the two saved it, the workflow changes a rescue had to
-        # leave out are stored now, while the run still knows them, and
-        # pointed at from the failed phase like everything else it kept (#1437).
-        records = quarantined_records(error, saved)
-        for artifact_id in await self._workspaces_for(execution_id, {}).keep_dropped_workflows(
-            records,
-            workflow_id=workflow_id,
-            phase_id=failed_phase_id,
-            execution_id=execution_id,
-            session_id=timings.session_ids.get(failed_phase_id or "", ""),
-        ):
-            kept.append(artifact_id)
-            if artifact_id not in all_artifact_ids:
-                all_artifact_ids.append(artifact_id)
-        observed = await self._observe_branches(await runtime.observe(failed_phase_id), aggregate)
-        failure = failed_phase_outcome(
+        return await record_failed_execution(
             error,
-            failed_phase_id,
-            timings.started_at,
-            timings.session_ids,
-            observed=observed,
-            kept_artifact_ids=kept,
-            usage=usage,
-            saved=saved,
-            quarantined=records,
-            repositories=[c.repository for c in aggregate.start_pins.source_commits],
-        )
-        if failure.result is not None:
-            phase_results.append(failure.result)
-
-        await record_failure_and_release(
-            failure,
-            aggregate=aggregate,
+            aggregate,
+            runtime=self._runtimes.of(execution_id),
+            workspaces=self._workspaces_for(execution_id, {}),
             journal=self._journal,
-            runtime=runtime,
+            remote_branches=self._remote_branches,
             execution_id=execution_id,
-            completed_phases=len(completed_phase_ids),
+            workflow_id=workflow_id,
             total_phases=len(phases),
-        )
-        return failure.execution_result(
-            workflow_id,
-            execution_id,
-            started_at=started_at,
             phase_results=phase_results,
-            artifact_ids=all_artifact_ids,
+            all_artifact_ids=all_artifact_ids,
+            completed_phase_ids=completed_phase_ids,
+            started_at=started_at,
+            failed_phase_id=failed_phase_id,
+            kept_artifact_ids=kept_artifact_ids,
         )
 
     def _get_agent_handler(self) -> AgentHandlerProtocol:

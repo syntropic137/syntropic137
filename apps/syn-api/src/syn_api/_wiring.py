@@ -31,7 +31,6 @@ if TYPE_CHECKING:
     from syn_api.services.claude_plugin_resolution_service import ClaudePluginResolutionService
     from syn_api.services.skill_materializer import SkillMaterializer
     from syn_api.services.skill_resolution_service import SkillResolutionService
-    from syn_domain.contexts.agent_sessions import ImportLedgerPort
     from syn_domain.contexts.agent_sessions.ports.SessionObservationPort import (
         SessionObservationPort,
     )
@@ -111,6 +110,7 @@ from syn_api._wiring_admission import (
     get_execution_budget,
 )
 from syn_api._wiring_agent_command import _build_agent_command, _build_workspace_prompt
+from syn_api._wiring_import_ledger import get_import_ledger
 from syn_api._wiring_launch import _build_resume_handler, get_execute_workflow_handler
 from syn_domain.contexts.artifacts import ArtifactQueryService
 from syn_domain.contexts.orchestration import WorkflowExecutionProcessor
@@ -309,7 +309,7 @@ async def get_execution_processor() -> WorkflowExecutionProcessor:
         skill_materializer=skill_materializer,
         session_capture=session_capture,
         session_store=_build_session_store(_settings),
-        import_ledger=_create_import_ledger(),
+        import_ledger=get_import_ledger(),
         # #1513: records which PR is open from each branch a failing phase
         # left, so a resume continues that PR and never one opened since.
         remote_branches=GitHubRemoteBranchReader(get_github_client),
@@ -494,61 +494,6 @@ def _create_dedup_adapter() -> DedupPort:
             "Configure SYN_OBSERVABILITY_DB_URL or REDIS_URL for production. "
             "See ADR-060 (docs/adrs/ADR-060-restart-safe-trigger-deduplication.md)."
         ) from exc
-
-
-_import_ledger_singleton: ImportLedgerPort | None = None
-
-
-def _create_import_ledger() -> ImportLedgerPort:
-    """Return the process-wide delegate import ledger (#933, #936).
-
-    A singleton because `get_execution_processor()` builds a NEW processor per
-    dispatch. A fresh Postgres adapter each time would re-issue CREATE TABLE on
-    every execution, and a fresh in-memory one would forget the mark between
-    phases of a single execution - which is precisely the cross-phase recount
-    #936 is about, reintroduced by the wiring rather than the logic.
-
-    Postgres or nothing. Unlike dedup there is no Redis tier: the mark says how
-    much of a session has already been CHARGED, and it has to stay consistent
-    with the cost rows in `agent_events`. A ledger in a different store can
-    disagree with the spend it describes, and nothing in the system would
-    report the disagreement - it would just quietly bill wrong.
-
-    ADR-060: never fall back to in-memory in production. Losing the mark on
-    restart silently reverts to double-billing delegates (#936), which is the
-    overcount failure mode that nobody reports because it just looks expensive.
-    """
-    global _import_ledger_singleton
-    if _import_ledger_singleton is not None:
-        return _import_ledger_singleton
-
-    from syn_shared.settings import get_settings
-
-    settings = get_settings()
-
-    if settings.uses_in_memory_stores:
-        from syn_adapters.import_ledger import InMemoryImportLedger
-
-        _import_ledger_singleton = InMemoryImportLedger()
-        return _import_ledger_singleton
-
-    if settings.syn_observability_db_url:
-        from syn_api._wiring_db import get_shared_db_pool
-
-        pool = get_shared_db_pool()
-        if pool is not None:
-            from syn_adapters.import_ledger import PostgresImportLedger
-
-            logger.info("Delegate import ledger using Postgres (ADR-060)")
-            _import_ledger_singleton = PostgresImportLedger(pool)  # type: ignore[arg-type]  # asyncpg.Pool vs AsyncConnectionPool
-            return _import_ledger_singleton
-
-    raise RuntimeError(
-        "No durable delegate import ledger available. Configure "
-        "SYN_OBSERVABILITY_DB_URL for production. Without it, delegate cost is "
-        "double-billed across phases (#936) and across a crash (#933). "
-        "See ADR-060 (docs/adrs/ADR-060-restart-safe-trigger-deduplication.md)."
-    )
 
 
 _run_queue_singleton: ExecutionRunQueue | None = None

@@ -9,7 +9,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from contextlib import asynccontextmanager
 from datetime import datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING
@@ -25,6 +24,7 @@ from syn_api._wiring import (
     get_projection_mgr,
     get_workflow_repo,
 )
+from syn_api.routes.executions.admission_gate import admit_or_409, refuse_while_paused
 from syn_api.routes.executions.direct_start import (
     queue_direct_start,
     record_execution_request,
@@ -68,8 +68,6 @@ from syn_shared.agents import (
 from syn_shared.tools import UnsupportedToolNameError
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
-
     from syn_domain.contexts._shared import AdmissionTicket
     from syn_domain.contexts.orchestration import WorkflowTemplateAggregate
 
@@ -647,54 +645,6 @@ async def _reject_unresolvable_skill_refs(workflow: WorkflowTemplateAggregate) -
         ) from None
 
 
-async def _refuse_while_paused() -> None:
-    """Translate a paused admission gate into 409 (#1387).
-
-    409 rather than 503: the request is well-formed and the service is up, the
-    system state simply forbids it right now. A caller can tell that apart from
-    a failure and retry after the deploy, which is the whole point of the gate
-    having an answer at all.
-
-    The cheap half of the check. It runs before validation so a caller during a
-    deploy is told the gate is shut rather than told its workflow is missing,
-    and so a paused system pays for no preflight. It decides nothing:
-    :func:`_admit_or_409` is what actually admits.
-    """
-    from syn_api._wiring_admission import get_admission_gate
-    from syn_domain.contexts._shared import InsufficientDiskSpaceError, MaintenancePausedError
-
-    try:
-        await get_admission_gate().refuse_early()
-    except MaintenancePausedError as exc:
-        raise HTTPException(status_code=409, detail=exc.mode.refusal_detail) from None
-    except InsufficientDiskSpaceError as exc:
-        # #1560: 507 Insufficient Storage, before anything was written.
-        raise HTTPException(status_code=507, detail=str(exc)) from None
-
-
-@asynccontextmanager
-async def _admit_or_409() -> AsyncIterator[AdmissionTicket]:
-    """Hold the gate open across the decisive step, or answer 409 (#1387).
-
-    The decisive step for this route is ``background_tasks.add_task``: after it
-    the response says 200 and the execution WILL run, whatever the flag says a
-    moment later. So that one line goes inside here, and validation stays
-    outside - a repo preflight held inside the gate would stall the operator's
-    ``PUT /maintenance`` behind a network round trip.
-    """
-    from syn_api._wiring_admission import get_admission_gate
-    from syn_domain.contexts._shared import InsufficientDiskSpaceError, MaintenancePausedError
-
-    try:
-        async with get_admission_gate().admitting() as ticket:
-            yield ticket
-    except MaintenancePausedError as exc:
-        raise HTTPException(status_code=409, detail=exc.mode.refusal_detail) from None
-    except InsufficientDiskSpaceError as exc:
-        # #1560: 507 Insufficient Storage, before anything was written.
-        raise HTTPException(status_code=507, detail=str(exc)) from None
-
-
 async def _launch_eval(
     workflow: WorkflowTemplateAggregate, request: ExecuteWorkflowRequest
 ) -> LaunchEval:
@@ -812,7 +762,7 @@ async def execute_workflow_endpoint(
     # arrive as a 200 followed by an execution that never happened. Before
     # validation too, so a caller during a deploy is told the gate is shut
     # rather than being told its workflow does not exist.
-    await _refuse_while_paused()
+    await refuse_while_paused()
     workflow, effective_inputs, typed_repos = await _validate_execution_request(
         workflow_id, request
     )
@@ -861,7 +811,7 @@ async def execute_workflow_endpoint(
     # second and final 409, and it is still reachable by the caller because
     # nothing has been queued yet. Leaving this block does NOT release the
     # ticket: the queued task owns the lease from here.
-    async with _admit_or_409() as admitted:
+    async with admit_or_409() as admitted:
         # #1557: durable BEFORE the 200, so a start waiting for a budget slot
         # survives a restart; the request ProcessManager starts it from here.
         await record_execution_request(

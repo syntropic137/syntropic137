@@ -12,7 +12,8 @@ import logging
 import weakref
 from typing import TYPE_CHECKING
 
-from syn_api._wiring_admission import get_execution_budget, request_withdrawn
+from syn_api._wiring_admission import get_execution_budget
+from syn_api.dispatched_start import request_withdrawn
 from syn_api.execution_budget import StartAlreadyClaimedError, StartPath
 from syn_domain.contexts._shared.admission_refusal import AdmissionRefusedError
 from syn_domain.contexts._shared.maintenance import carrying, guarantee_settled

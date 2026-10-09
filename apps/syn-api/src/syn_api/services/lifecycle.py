@@ -517,9 +517,9 @@ async def _init_import_ledger() -> Result[None, LifecycleError]:
     unusable.
     """
     try:
-        from syn_api._wiring import _create_import_ledger
+        from syn_api._wiring_import_ledger import get_import_ledger
 
-        ledger = _create_import_ledger()
+        ledger = get_import_ledger()
         ensure_ready = getattr(ledger, "ensure_ready", None)
         if ensure_ready is not None:
             await ensure_ready()
