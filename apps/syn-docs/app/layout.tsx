@@ -1,12 +1,12 @@
 import './global.css';
 import { RootProvider } from 'fumadocs-ui/provider/next';
-import { Inter, JetBrains_Mono, Orbitron } from 'next/font/google';
+import { Instrument_Sans, JetBrains_Mono, Orbitron } from 'next/font/google';
 import type { ReactNode } from 'react';
 import type { Metadata } from 'next';
 
-const inter = Inter({
+const instrumentSans = Instrument_Sans({
   subsets: ['latin'],
-  variable: '--font-inter',
+  variable: '--font-instrument',
 });
 
 const jetbrainsMono = JetBrains_Mono({
@@ -35,7 +35,12 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en" className={`${inter.variable} ${jetbrainsMono.variable} ${orbitron.variable} ${inter.className}`} suppressHydrationWarning>
+    <html
+      lang="en"
+      data-theme="syn137"
+      className={`${instrumentSans.variable} ${jetbrainsMono.variable} ${orbitron.variable} font-sans`}
+      suppressHydrationWarning
+    >
       <body className="flex min-h-screen flex-col">
         <RootProvider
           theme={{
