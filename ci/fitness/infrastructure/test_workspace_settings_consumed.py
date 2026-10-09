@@ -156,32 +156,84 @@ def _bound_names(scope: ast.AST) -> set[str]:
     return names
 
 
-def _imports_get_settings(tree: ast.Module) -> bool:
-    """True when the module imports `get_settings` from `syn_shared.settings`."""
-    return any(
-        isinstance(node, ast.ImportFrom)
-        and (node.module or "").startswith("syn_shared.settings")
-        and any(alias.name == "get_settings" and alias.asname is None for alias in node.names)
-        for node in ast.walk(tree)
-    )
+_FACTORY = "get_settings"
 
 
-def _root_names(scope: ast.AST, has_get_settings: bool) -> set[str]:
+def _binds_factory(scope: ast.AST) -> bool | None:
+    """How `scope` itself binds the name `get_settings`.
+
+    True when its only bindings import the factory from `syn_shared.settings`,
+    False when anything else binds it (a parameter, an assignment, another
+    module's import), None when `scope` does not bind it and the enclosing
+    scope decides.
+    """
+    bindings: list[bool] = []
+    if isinstance(scope, ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda):
+        args = scope.args
+        params = [*args.posonlyargs, *args.args, *args.kwonlyargs, args.vararg, args.kwarg]
+        bindings.extend(False for a in params if a is not None and a.arg == _FACTORY)
+    for node in _own_nodes(scope):
+        if isinstance(node, ast.ImportFrom):
+            bindings.extend(
+                (node.module or "").startswith("syn_shared.settings") and alias.name == _FACTORY
+                for alias in node.names
+                if (alias.asname or alias.name) == _FACTORY
+            )
+        elif isinstance(node, ast.Import):
+            bindings.extend(
+                False for alias in node.names if (alias.asname or alias.name) == _FACTORY
+            )
+        elif (
+            (isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store) and node.id == _FACTORY)
+            or (
+                isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef)
+                and node.name == _FACTORY
+            )
+            or (isinstance(node, ast.ExceptHandler) and node.name == _FACTORY)
+        ):
+            bindings.append(False)
+    return all(bindings) if bindings else None
+
+
+def _factory_scopes(tree: ast.Module) -> dict[ast.AST, bool]:
+    """For the module and every function in it: does `get_settings` there name the factory?
+
+    Resolved lexically, as Python does: the scope's own binding if it has one,
+    otherwise the nearest enclosing function's, otherwise the module's. Class
+    bodies do not enclose their methods, so they are skipped. An import inside
+    one function says nothing about its siblings (#1805 verify B2).
+    """
+    visible: dict[ast.AST, bool] = {tree: bool(_binds_factory(tree))}
+    stack: list[tuple[ast.AST, bool]] = [(tree, visible[tree])]
+    while stack:
+        parent, inherited = stack.pop()
+        for node in _own_nodes(parent):
+            if isinstance(node, ast.ClassDef):
+                stack.append((node, inherited))
+            elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda):
+                own = _binds_factory(node)
+                visible[node] = inherited if own is None else own
+                stack.append((node, visible[node]))
+    return visible
+
+
+def _root_names(scope: ast.AST, factory: bool) -> set[str]:
     """Names bound to the root `Settings` directly inside `scope`."""
     names = _instance_names(scope, "Settings")
-    if has_get_settings:
+    if factory:
         for node in _own_nodes(scope):
-            if isinstance(node, ast.Assign) and _is_get_settings(node.value, has_get_settings):
+            if isinstance(node, ast.Assign) and _is_get_settings(node.value, factory):
                 names.update(t.id for t in node.targets if isinstance(t, ast.Name))
     return names
 
 
-def _is_get_settings(node: ast.AST | None, has_get_settings: bool) -> bool:
+def _is_get_settings(node: ast.AST | None, factory: bool) -> bool:
+    """A call of `get_settings`, where that name is the factory in this scope."""
     return (
-        has_get_settings
+        factory
         and isinstance(node, ast.Call)
         and isinstance(node.func, ast.Name)
-        and node.func.id == "get_settings"
+        and node.func.id == _FACTORY
     )
 
 
@@ -192,33 +244,28 @@ def settings_reads(source: str, class_name: str, accessors: frozenset[str]) -> s
     it in the same scope or (unless a local binding shadows it) the module,
     `Cls().field`, or `<root>.<accessor>.field` where `<root>` is itself
     identifiably the root `Settings`: a name bound to one, `Settings()`, or
-    `get_settings()` imported from `syn_shared.settings`. An attribute of the
+    `get_settings()` where that name resolves, in the calling scope, to the
+    import from `syn_shared.settings`. An attribute of the
     same name on any other object is not a read of the setting, and neither
     is a comment or docstring that mentions the class (#1805 verify B2).
     """
     tree = ast.parse(source)
-    has_get_settings = _imports_get_settings(tree)
+    factory_in = _factory_scopes(tree)
     module_names = _instance_names(tree, class_name)
-    module_roots = _root_names(tree, has_get_settings)
-    scopes: list[ast.AST] = [tree]
-    scopes += [
-        n
-        for n in ast.walk(tree)
-        if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda)
-    ]
+    module_roots = _root_names(tree, factory_in[tree])
     reads: set[str] = set()
-    for scope in scopes:
+    for scope, factory in factory_in.items():
         shadowed = _bound_names(scope)
         local = _instance_names(scope, class_name) if scope is not tree else set()
         bound = (module_names - shadowed) | local
-        local_roots = _root_names(scope, has_get_settings) if scope is not tree else set()
+        local_roots = _root_names(scope, factory) if scope is not tree else set()
         roots = (module_roots - shadowed) | local_roots
 
-        def is_root(node: ast.AST, roots: set[str] = roots) -> bool:
+        def is_root(node: ast.AST, roots: set[str] = roots, factory: bool = factory) -> bool:
             return (
                 (isinstance(node, ast.Name) and node.id in roots)
                 or _constructs(node, "Settings")
-                or _is_get_settings(node, has_get_settings)
+                or _is_get_settings(node, factory)
             )
 
         for node in _own_nodes(scope):
@@ -251,11 +298,14 @@ def _consumed_attributes(cls: type[BaseSettings]) -> frozenset[str]:
     return frozenset(attrs)
 
 
+def _dead_fields(cls: type[BaseSettings], consumed: frozenset[str]) -> set[str]:
+    return {f"{cls.__name__}.{name}" for name in cls.model_fields if name not in consumed}
+
+
 def _unconsumed() -> set[str]:
     dead: set[str] = set()
     for cls in _governed_settings():
-        consumed = _consumed_attributes(cls)
-        dead.update(f"{cls.__name__}.{name}" for name in cls.model_fields if name not in consumed)
+        dead.update(_dead_fields(cls, _consumed_attributes(cls)))
     return dead
 
 
@@ -377,3 +427,93 @@ class TestSettingsReceiver:
         from syn_shared.settings.workspace import WorkspaceSettings
 
         assert "workspace" in _settings_accessors(WorkspaceSettings)
+
+
+#: `get_settings` that is NOT the syn_shared factory in the calling scope. Each
+#: must not count `environment` (#1805 verify B2).
+_NOT_THE_FACTORY = {
+    "parameter": (
+        "from syn_shared.settings import get_settings\n"
+        "def unrelated(get_settings):\n"
+        "    return get_settings().workspace.environment\n"
+    ),
+    "local_assignment": (
+        "from syn_shared.settings import get_settings\n"
+        "def unrelated():\n"
+        "    get_settings = lambda: None\n"
+        "    return get_settings().workspace.environment\n"
+    ),
+    "root_from_shadowed_factory": (
+        "from syn_shared.settings import get_settings\n"
+        "def unrelated(get_settings):\n"
+        "    root = get_settings()\n"
+        "    return root.workspace.environment\n"
+    ),
+    "import_only_in_sibling": (
+        "def real():\n"
+        "    from syn_shared.settings import get_settings\n"
+        "    return get_settings().workspace.real\n"
+        "def unrelated():\n"
+        "    return get_settings().workspace.environment\n"
+    ),
+    "module_factory_is_another_module": (
+        "from unrelated_module import get_settings\n"
+        "def real():\n"
+        "    from syn_shared.settings import get_settings\n"
+        "    return get_settings().workspace.real\n"
+        "def unrelated():\n"
+        "    return get_settings().workspace.environment\n"
+    ),
+}
+
+
+@pytest.mark.architecture
+class TestFactoryResolution:
+    """`get_settings` counts only where it lexically names the syn_shared factory."""
+
+    @pytest.mark.parametrize("shape", sorted(_NOT_THE_FACTORY))
+    def test_a_factory_that_is_not_in_scope_does_not_count(self, shape: str) -> None:
+        reads = settings_reads(
+            _NOT_THE_FACTORY[shape], "WorkspaceSettings", frozenset({"workspace"})
+        )
+        assert "environment" not in reads, (shape, reads)
+
+    def test_the_factory_in_scope_counts(self) -> None:
+        source = (
+            "from syn_shared.settings import get_settings\n"
+            "def module_import():\n"
+            "    return get_settings().workspace.a\n"
+            "def bound_root():\n"
+            "    root = get_settings()\n"
+            "    return root.workspace.b\n"
+            "class C:\n"
+            "    def method(self):\n"
+            "        return get_settings().workspace.c\n"
+        )
+        local = (
+            "def outer():\n"
+            "    from syn_shared.settings.config import get_settings\n"
+            "    def inner():\n"
+            "        return get_settings().workspace.d\n"
+            "    return get_settings().workspace.e, inner\n"
+        )
+        accessors = frozenset({"workspace"})
+        assert settings_reads(source, "WorkspaceSettings", accessors) == {"a", "b", "c"}
+        assert settings_reads(local, "WorkspaceSettings", accessors) == {"d", "e"}
+
+    def test_an_unconsumed_field_still_fails_the_inventory(self) -> None:
+        # The inventory-level property: a governed field read only through a
+        # factory that is not in scope stays dead, so the gate would fail.
+        from pydantic_settings import SettingsConfigDict
+
+        class WorkspaceSettings(BaseSettings):
+            model_config = SettingsConfigDict(env_prefix="SYN_WORKSPACE_")
+            environment: str = "x"
+            real: str = "y"
+
+        consumed: set[str] = set()
+        for source in _NOT_THE_FACTORY.values():
+            consumed |= settings_reads(source, "WorkspaceSettings", frozenset({"workspace"}))
+        assert _dead_fields(WorkspaceSettings, frozenset(consumed)) == {
+            "WorkspaceSettings.environment"
+        }
