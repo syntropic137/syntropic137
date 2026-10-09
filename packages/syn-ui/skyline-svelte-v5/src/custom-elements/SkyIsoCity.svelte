@@ -17,6 +17,7 @@
     errored = [],
     animate = false,
     drift = false,
+    fill,
     cols,
     rows,
     cell,
@@ -37,6 +38,7 @@
   {errored}
   {animate}
   {drift}
+  {fill}
   {cols}
   {rows}
   {cell}

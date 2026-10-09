@@ -107,6 +107,7 @@ export const CUSTOM_ELEMENT_OPTIONS: Record<string, CustomElementOptions> = {
       errored: { type: 'Array' },
       animate: { type: 'Boolean' },
       drift: { type: 'Boolean' },
+      fill: { type: 'String' },
       cols: { type: 'Number' },
       rows: { type: 'Number' },
       cell: { type: 'Number' },

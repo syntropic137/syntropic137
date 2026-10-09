@@ -22,4 +22,12 @@ describe('Iso City', () => {
     const live = container.querySelector<SVGGElement>('g.sky-pulse')!
     expect(live.style.animationDelay).toMatch(/^[\d.]+s, [\d.]+s$/)
   })
+  it('fades quiet blocks by default and keeps them opaque when solid', () => {
+    const glass = render(IsoCity, { ...hero, animate: false })
+    const faded = [...glass.container.querySelectorAll<SVGGElement>('g[data-tone]')].filter((g) => g.style.opacity !== '')
+    expect(faded.length).toBeGreaterThan(0)
+    const solid = render(IsoCity, { ...hero, animate: false, fill: 'solid' })
+    const groups = [...solid.container.querySelectorAll<SVGGElement>('g[data-tone]')]
+    expect(groups.every((g) => g.style.opacity === '')).toBe(true)
+  })
 })

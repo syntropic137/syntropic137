@@ -8,9 +8,12 @@
   the blocks back to front (sky-rise) and lets live and failed blocks
   pulse or flash a few times; `drift` drifts and zooms the stage once
   (sky-drift, 30s). The static city is the end state.
+
+  `fill` picks how a quiet day shows: glass (default, the board) fades the
+  whole block; solid keeps the faces opaque and darkens them instead.
 -->
 <script lang="ts">
-  import { CITY_SIGNAL_DELAY, CITY_TONE_FILL, cityDelay, extrudeColors, isoCity, type CityBlock } from '@syn137/skyline-core/geometry'
+  import { CITY_SIGNAL_DELAY, cityBlockPaint, cityDelay, isoCity, type CityBlock } from '@syn137/skyline-core/geometry'
   import type { IsoCityProps } from './types'
 
   let {
@@ -20,6 +23,7 @@
     errored = [],
     animate = false,
     drift = false,
+    fill = 'glass',
     cols = 26,
     rows = 11,
     cell = 36,
@@ -31,12 +35,7 @@
 
   const uid = $props.id()
   const city = $derived(isoCity(days, { cols, rows, cell, live, failed, errored, maxSessions }))
-  const FACES = {
-    run: extrudeColors(CITY_TONE_FILL.run),
-    live: extrudeColors(CITY_TONE_FILL.live),
-    failed: extrudeColors(CITY_TONE_FILL.failed),
-    errored: extrudeColors(CITY_TONE_FILL.errored),
-  }
+  const paint = (b: CityBlock) => cityBlockPaint(b.tone, b.opacity, fill)
 
   function motion(b: CityBlock): { cls: string | undefined; delay: string | undefined } {
     if (!animate) return { cls: undefined, delay: undefined }
@@ -59,9 +58,9 @@
       <ellipse cx={city.glow.cx} cy={city.glow.cy} rx={city.glow.rx} ry={city.glow.ry} fill="url(#{uid}-glow)" />
       <polygon class="sky-iso-city__floor" points={city.floor} />
       {#each city.blocks as b (b.index)}
-        {@const f = FACES[b.tone]}
+        {@const f = paint(b)}
         {@const m = motion(b)}
-        <g class={m.cls} style:animation-delay={m.delay} style:opacity={b.opacity} data-tone={b.tone}>
+        <g class={m.cls} style:animation-delay={m.delay} style:opacity={f.opacity === 1 ? undefined : f.opacity} data-tone={b.tone}>
           <polygon points={b.left} style:fill={f.front} />
           <polygon points={b.right} style:fill={f.side} />
           <polygon points={b.top} style:fill={f.top} />
