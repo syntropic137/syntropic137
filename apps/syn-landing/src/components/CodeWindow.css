@@ -1,0 +1,118 @@
+/* CodeWindow, Tile, LiveDot: the window chrome of the v4 boards. */
+.code-window {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--ds-color-border);
+  border-radius: var(--sky-radius-2xl);
+  background: var(--sky-gradient-panel);
+  box-shadow: var(--sky-shadow-raised-strong);
+  color: var(--ds-color-fg);
+}
+
+.code-window--glow {
+  background:
+    radial-gradient(80% 80% at 100% 0%, color-mix(in oklab, var(--ds-color-accent) 16%, transparent), transparent 70%),
+    var(--sky-gradient-panel);
+}
+
+.code-window__bar {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-2-5);
+  padding: var(--ds-space-2-5) var(--ds-space-3-5);
+  border-bottom: 1px solid var(--sky-color-divider);
+}
+
+.code-window__dots {
+  display: flex;
+  gap: 6px;
+}
+
+.code-window__dots span {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--sky-color-border-strong);
+}
+
+.code-window__title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--ds-font-mono);
+  font-size: 11.5px;
+  color: var(--ds-color-text-subtle);
+}
+
+.code-window__body[data-pad="panel"],
+.code-window__body[data-pad="roomy"] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-3);
+  padding: 18px;
+}
+
+.code-window__body[data-pad="code"] {
+  padding: 0;
+}
+
+.code-window pre {
+  margin: 0;
+  overflow-x: auto;
+  padding: 18px;
+  font-family: var(--ds-font-mono);
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--ds-color-fg);
+}
+
+@media (min-width: 64rem) {
+  .code-window__body[data-pad="roomy"] {
+    gap: var(--ds-space-4);
+    padding: 28px;
+  }
+}
+
+.code-tile {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-1);
+  min-width: 0;
+  padding: var(--ds-space-3) var(--ds-space-3-5);
+  border: 1px solid var(--ds-color-border);
+  border-radius: var(--sky-radius-row);
+  background: var(--ds-color-bg);
+  color: var(--ds-color-fg);
+}
+
+.code-tile__label {
+  font-size: 12px;
+  color: var(--ds-color-text-subtle);
+}
+
+.code-tile code {
+  font-family: var(--ds-font-mono);
+  font-size: 12px;
+  color: var(--ds-color-fg);
+  overflow-wrap: anywhere;
+}
+
+.live-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ds-color-accent);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--ds-color-accent) 24%, transparent);
+}
+
+/* Mono status line above a panel ("live · implement-and-review · run #142"). */
+.panel-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+  font-family: var(--ds-font-mono);
+  font-size: 11.5px;
+  color: var(--ds-color-text-muted);
+}
