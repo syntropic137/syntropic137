@@ -445,9 +445,9 @@ img, video {
 
 .hero h1 {
   font-size: var(--landing-text-h1);
-  font-weight: var(--ds-font-weight-bold);
-  letter-spacing: -0.02em;
-  line-height: 1.1;
+  font-weight: var(--sky-font-weight-display);
+  letter-spacing: var(--sky-tracking-display-tight);
+  line-height: 1.05;
 }
 
 .hero h1 .accent {
