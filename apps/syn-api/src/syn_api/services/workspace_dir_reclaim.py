@@ -27,6 +27,8 @@ or edit made during archival is in no archive). Any difference puts the
 directory back; otherwise the claimed directory is deleted. Any doubt about the
 inputs - docker unreadable, the execution list unreadable - skips the whole
 pass, because "I could not look" must never read as "nothing is running".
+So does a rebuild of either read model a pass trusts - the execution list or
+the ownership links - which empties it while the coordinator stays live.
 """
 
 from __future__ import annotations
@@ -94,12 +96,15 @@ class WorkspaceDirReclaimer:
     is_live: Callable[[], bool] = field(default=lambda: True)
     #: Rename a directory out of its workspace path; return where (blocking).
     claim: Callable[[str], str] = field(default=lambda host_dir: _claim(host_dir))
-    #: Put a claimed directory back (blocking).
-    release: Callable[[str, str], None] = field(
-        default=lambda claimed, host_dir: _release(claimed, host_dir)
-    )
+    #: Put a claimed directory back at its workspace path (blocking).
+    release: Callable[[str], None] = field(default=lambda claimed: _release(claimed))
     #: Durable provisioning links survive the removal of Docker labels.
     workspace_owners: Callable[[str], Awaitable[set[str]]] | None = None
+    #: Why the read models this pass trusts may be incomplete, or None when
+    #: they are known whole. A rebuild clears them while `is_live` stays true.
+    read_models_rebuilding: Callable[[], Awaitable[str | None]] = field(
+        default=lambda: _known_whole()
+    )
 
     async def _observe(
         self,
@@ -122,6 +127,10 @@ class WorkspaceDirReclaimer:
     async def run_once(self) -> ReclaimPass:
         """Guard and reclaim every stale directory. Never raises."""
         try:
+            rebuilding = await self.read_models_rebuilding()
+            if rebuilding is not None:
+                logger.info("Workspace reclaim pass skipped: %s", rebuilding)
+                return ReclaimPass(skipped=rebuilding)
             containers, running, listings = await self._observe()
         except Exception as exc:
             logger.warning("Skipping workspace reclaim pass: %s", exc, exc_info=True)
@@ -186,7 +195,11 @@ class WorkspaceDirReclaimer:
         )
 
     async def _reclaim(self, stale: StaleWorkspaceDir) -> bool:
-        """Guard, claim, look again, then delete. Whether the directory is gone."""
+        """Guard, claim, look again, then delete. Whether the directory is gone.
+
+        ``stale.host_dir`` is already claimed when a pass died holding it, so
+        every way of keeping the directory puts it back (`_keep`).
+        """
         from syn_domain.contexts.orchestration import (
             guard_stale_workspace_dir,
             remove_reclaimed_dir,
@@ -195,32 +208,29 @@ class WorkspaceDirReclaimer:
         try:
             before = await self._git_state(stale.host_dir)
         except Exception as exc:
-            logger.warning("Keeping workspace directory %s: %s", stale.host_dir, exc)
-            return False
+            return await self._keep(stale.host_dir, str(exc))
         reclaimable = await guard_stale_workspace_dir(stale, self.git, self.archive)
         if reclaimable is None:
-            return False
+            return await self._keep(stale.host_dir, "the guard refused it")
         try:
             claimed = await asyncio.to_thread(self.claim, stale.host_dir)
         except OSError as exc:
-            logger.warning(
-                "Keeping workspace directory %s: could not claim it (%s)", stale.host_dir, exc
-            )
-            return False
+            return await self._keep(stale.host_dir, f"could not claim it ({exc})")
         why = await self._why_not_still_stale(stale, claimed, before)
         if why is not None:
-            logger.warning("Keeping workspace directory %s: %s", stale.host_dir, why)
-            try:
-                await asyncio.to_thread(self.release, claimed, stale.host_dir)
-            except OSError:
-                logger.exception(
-                    "Claimed workspace directory %s could not be put back at %s; "
-                    "it stays where it is",
-                    claimed,
-                    stale.host_dir,
-                )
-            return False
+            return await self._keep(claimed, why)
         return await asyncio.to_thread(remove_reclaimed_dir, reclaimable, self.remover, at=claimed)
+
+    async def _keep(self, path: str, why: str) -> bool:
+        """Keep the directory at ``path``, back at its workspace path if claimed. False."""
+        logger.warning("Keeping workspace directory %s: %s", path, why)
+        try:
+            await asyncio.to_thread(self.release, path)
+        except OSError:
+            logger.exception(
+                "Claimed workspace directory %s could not be put back; it stays where it is", path
+            )
+        return False
 
     async def _git_state(self, host_dir: str) -> _WorkspaceSnapshot:
         """Repository state and unversioned contents, independent of the workspace path.
@@ -252,8 +262,11 @@ class WorkspaceDirReclaimer:
         try:
             containers, running, listings = await self._observe()
             after = await self._git_state(claimed)
+            rebuilding = await self.read_models_rebuilding()
         except Exception as exc:
             return f"could not look again ({type(exc).__name__}: {exc})"
+        if rebuilding is not None:
+            return f"read models began rebuilding during archival: {rebuilding}"
         listing = next((x for x in listings if x.host_dir == claimed), None)
         if listing is None:
             return "it is no longer listed"
@@ -273,10 +286,29 @@ def _claim(host_dir: str) -> str:
     return claim_workspace_dir(host_dir)
 
 
-def _release(claimed: str, host_dir: str) -> None:
+def _release(claimed: str) -> None:
     from syn_adapters.workspace_backends.stale_dirs import release_workspace_dir
 
-    release_workspace_dir(claimed, host_dir)
+    release_workspace_dir(claimed)
+
+
+async def _known_whole() -> str | None:
+    return None
+
+
+async def _reclaim_inputs_rebuilding() -> str | None:
+    """Whether the execution list or the ownership links are being rebuilt."""
+    from syn_api.services.read_model_status import read_models_rebuilding
+    from syn_domain.contexts.orchestration._shared.execution_list_reads import (
+        WORKFLOW_EXECUTIONS,
+    )
+    from syn_domain.contexts.orchestration.slices.workspace_ownership.projection import (
+        WorkspaceOwnershipProjection,
+    )
+
+    return await read_models_rebuilding(
+        {WORKFLOW_EXECUTIONS, WorkspaceOwnershipProjection.PROJECTION_NAME}
+    )
 
 
 async def _running_execution_ids() -> set[str]:
@@ -321,6 +353,7 @@ def default_reclaimer(is_live: Callable[[], bool]) -> WorkspaceDirReclaimer:
         remover=ShutilWorkspaceDirRemover(),
         is_live=is_live,
         workspace_owners=WorkspaceOwnershipProjection(get_projection_store()).owners,
+        read_models_rebuilding=_reclaim_inputs_rebuilding,
     )
 
 
