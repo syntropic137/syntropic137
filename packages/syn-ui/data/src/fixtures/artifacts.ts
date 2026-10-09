@@ -111,7 +111,7 @@ const find = (id: string) => withArtifacts().find((p) => p.artifactId === id) ??
 export const artifactRoutes: FixtureRoute[] = [
   route('GET', '/artifacts', ({ query }): ArtifactListResponse => {
     let rows = withArtifacts().map(row)
-    for (const key of ['workflow_id', 'phase_id', 'artifact_type'] as const) {
+    for (const key of ['workflow_id', 'phase_id', 'artifact_type', 'execution_id'] as const) {
       const v = query.get(key)
       if (v) rows = rows.filter((r) => r[key] === v)
     }

@@ -99,6 +99,7 @@
 <script lang="ts">
   import Download from '@lucide/svelte/icons/download'
   import { formatBytes, formatDateTime, shortId } from '@syn137/skyline-core/format'
+  import { artifactName } from '@syn137/skyline-core/screens/artifacts'
   import { Button, Callout, EmptyState, Skeleton, ToggleGroup } from '@syn137/skyline-svelte-v5'
   import { CopyButton, LineageTrail, PageHeader } from '@syn137/skyline-svelte-v5/patterns'
   import type { LineageStep } from '@syn137/skyline-core/patterns'
@@ -115,20 +116,36 @@
 
   const meta = $derived(art.data?.metadata ?? {})
   const str = (v: unknown): string | null => (typeof v === 'string' && v.length > 0 ? v : null)
-  const executionId = $derived(str(meta.execution_id))
-  const path = $derived(str(meta.path))
   const phaseName = $derived(str(meta.phase_name))
-  const title = $derived(art.data ? art.data.title || phaseName || shortId(art.data.id) : '')
-  const fileName = $derived(path ? (path.split('/').pop() ?? path) : title)
+  /** The title is often "<phase label>: <path>"; split it so the path reads as a path (board: Artifact). */
+  const named = $derived(art.data ? artifactName(art.data.title, str(meta.path), shortId(art.data.id)) : null)
+  const path = $derived(named?.path ?? null)
+  const title = $derived(named ? (named.label ?? (named.path ? named.name : null) ?? phaseName ?? named.name) : '')
+  const fileName = $derived(named?.name ?? '')
 
-  /** Siblings: the same workflow's artifacts, narrowed to this execution when the rows say which it was. */
-  const siblings = resource(async (signal) => {
-    const wf = art.data?.workflow_id
-    if (!wf) return [] as ArtifactSummary[]
-    const page = await listArtifacts({ page: 1, page_size: 50 }, { workflow_id: wf }, signal)
-    const exec = executionId
-    return page.artifacts.filter((a) => !exec || !('execution_id' in a) || a.execution_id === exec)
+  const execOf = (a: ArtifactSummary): string | null => ('execution_id' in a && typeof a.execution_id === 'string' ? a.execution_id : null)
+
+  /**
+   * The run that wrote this file and its other files. The detail read has no
+   * execution_id (only fixtures put one in metadata), so it comes from this
+   * file's own list row; the siblings are then that execution's files, oldest first.
+   */
+  const run = resource(async (signal) => {
+    const a = art.data
+    if (!a) return { exec: null as string | null, files: [] as ArtifactSummary[] }
+    let exec = str(a.metadata?.execution_id)
+    if (!exec && a.workflow_id) {
+      const page = await listArtifacts({ page: 1, page_size: 100 }, { workflow_id: a.workflow_id }, signal)
+      const own = page.artifacts.find((r) => r.id === a.id)
+      exec = own ? execOf(own) : null
+    }
+    if (!exec) return { exec: null, files: [] }
+    const page = await listArtifacts({ page: 1, page_size: 100 }, { execution_id: exec }, signal)
+    const files = [...page.artifacts].sort((x, y) => (x.created_at ?? '').localeCompare(y.created_at ?? ''))
+    return { exec, files }
   })
+  const executionId = $derived(run.data?.exec ?? str(meta.execution_id))
+  const siblings = $derived(run.data?.files ?? [])
 
   $effect(() => {
     const a = art.data
@@ -136,6 +153,7 @@
     const crumbs: { label: string; href?: string; id?: string }[] = [{ label: 'Artifacts', href: '/artifacts' }]
     if (executionId) crumbs.push({ label: 'Execution', href: `/executions/${encodeURIComponent(executionId)}`, id: shortId(executionId) })
     if (a.session_id) crumbs.push({ label: phaseName ?? a.phase_id ?? 'Session', href: `/sessions/${encodeURIComponent(a.session_id)}` })
+    else if (a.phase_id) crumbs.push({ label: phaseName ?? a.phase_id })
     crumbs.push({ label: fileName })
     setPage({ title, crumbs })
   })
@@ -197,7 +215,7 @@
       {#if lineage.length}<LineageTrail steps={lineage} />{/if}
       {#snippet actions()}
         <CopyButton variant="label" text={() => content} label="Copy" copiedLabel="Copied" disabled={!content} />
-        <Button size="sm" onclick={download} disabled={a.content === null}>
+        <Button size="sm" variant="primary" onclick={download} disabled={a.content === null}>
           {#snippet icon()}<Download size={14} aria-hidden="true" />{/snippet}
           Download
         </Button>
@@ -267,19 +285,19 @@
             </ul>
           </section>
         {/if}
-        {#if siblings.data && siblings.data.length > 1}
+        {#if siblings.length > 1}
           <section class="sky-art__card" aria-label="From the same execution">
             <h2>From the same execution</h2>
             <ul class="sky-art__links">
-              {#each siblings.data as s, i (s.id)}
+              {#each siblings as s, i (s.id)}
                 <li>
                   {#if s.id === a.id}
                     <div class="sky-art__sib" aria-current="true">
-                      <span class="sky-art__n">{String(i + 1).padStart(2, '0')}</span><span class="sky-art__sib-name">{s.title || shortId(s.id)}</span><span class="sky-art__n">{formatBytes(s.size_bytes)}</span>
+                      <span class="sky-art__n">{String(i + 1).padStart(2, '0')}</span><span class="sky-art__sib-name">{artifactName(s.title, null, shortId(s.id)).name}</span><span class="sky-art__n">{formatBytes(s.size_bytes)}</span>
                     </div>
                   {:else}
                     <a class="sky-art__sib" href={href(`/artifacts/${encodeURIComponent(s.id)}`)}>
-                      <span class="sky-art__n">{String(i + 1).padStart(2, '0')}</span><span class="sky-art__sib-name">{s.title || shortId(s.id)}</span><span class="sky-art__n">{formatBytes(s.size_bytes)}</span>
+                      <span class="sky-art__n">{String(i + 1).padStart(2, '0')}</span><span class="sky-art__sib-name">{artifactName(s.title, null, shortId(s.id)).name}</span><span class="sky-art__n">{formatBytes(s.size_bytes)}</span>
                     </a>
                   {/if}
                 </li>

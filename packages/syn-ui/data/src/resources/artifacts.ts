@@ -7,6 +7,8 @@ export interface ArtifactScope {
   workflow_id?: string
   phase_id?: string
   artifact_type?: string
+  /** The run that wrote it; `/artifacts` filters on it. */
+  execution_id?: string
 }
 
 /** One page of artifacts with the total and type facets it was cut from (#1204). */
@@ -33,6 +35,7 @@ async function fetchArtifactPage(query: ListQuery, scope: ArtifactScope, signal:
   if (scope.workflow_id) params.set('workflow_id', scope.workflow_id)
   if (scope.phase_id) params.set('phase_id', scope.phase_id)
   if (scope.artifact_type) params.set('artifact_type', scope.artifact_type)
+  if (scope.execution_id) params.set('execution_id', scope.execution_id)
   const response = await request<ArtifactListResponse>('/artifacts', { query: params, signal })
   return {
     ...response,

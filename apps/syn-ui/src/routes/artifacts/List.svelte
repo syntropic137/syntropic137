@@ -8,6 +8,7 @@
   import { formatBytes, formatInteger, formatRelativeTime, shortId } from '@syn137/skyline-core/format'
   import { Button, Callout, EmptyState, Input, Pagination, Skeleton, ToggleGroup } from '@syn137/skyline-svelte-v5'
   import { PageHeader } from '@syn137/skyline-svelte-v5/patterns'
+  import { artifactGlyph, artifactName } from '@syn137/skyline-core/screens/artifacts'
   import { ApiError, listArtifacts } from '@syn137/syn-ui-data'
   import type { ArtifactSummary } from '@syn137/syn-ui-data/types'
   import { isArtifactEvent, isRunEvent } from '@syn137/syn-ui-data/live'
@@ -108,10 +109,21 @@
     router.setQuery({ type: null, q: null, page: null })
   }
 
+  const runCount = $derived(groups.filter((g) => g.exec).length)
   const summary = $derived(
-    rows.length ? `${formatInteger((page - 1) * PAGE_SIZE + 1)}-${formatInteger((page - 1) * PAGE_SIZE + rows.length)} of ${formatInteger(total)} artifacts` : '',
+    rows.length
+      ? `${formatInteger((page - 1) * PAGE_SIZE + 1)}-${formatInteger((page - 1) * PAGE_SIZE + rows.length)} of ${formatInteger(total)} artifacts${runCount ? ` from ${formatInteger(runCount)} ${runCount === 1 ? 'execution' : 'executions'}` : ''}`
+      : '',
   )
 </script>
+
+{#snippet glyph(kind: 'doc' | 'code' | 'data')}
+  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+    {#if kind === 'code'}<path d="M5.5 4.5L2 8l3.5 3.5M10.5 4.5L14 8l-3.5 3.5"></path>
+    {:else if kind === 'data'}<ellipse cx="8" cy="3.75" rx="5" ry="1.75"></ellipse><path d="M3 3.75v8.5c0 .97 2.24 1.75 5 1.75s5-.78 5-1.75v-8.5M3 8c0 .97 2.24 1.75 5 1.75S13 8.97 13 8"></path>
+    {:else}<path d="M4 1.75h5l3 3v9.5H4zM9 1.75v3h3M6 8h4M6 10.75h4"></path>{/if}
+  </svg>
+{/snippet}
 
 <div class="sky-arts">
   <PageHeader
@@ -121,6 +133,7 @@
       ? `Everything phases wrote to artifacts/output, grouped by the run that made it. ${formatInteger(total)} ${total === 1 ? 'file' : 'files'}${rows.length ? `, ${formatBytes(pageBytes)} on this page` : ''}.`
       : 'Everything phases wrote to artifacts/output, grouped by the run that made it.'}
   >
+    {#snippet actions()}
     {#if facets.length}
       <div class="sky-arts__mix">
         <div class="sky-arts__bar" role="img" aria-label={facetLabel}>
@@ -136,6 +149,7 @@
         </dl>
       </div>
     {/if}
+    {/snippet}
   </PageHeader>
 
   <div class="sky-arts__toolbar">
@@ -152,6 +166,7 @@
       <div class="sky-arts__search">
         <Input type="search" aria-label="Search artifacts" placeholder="File name, phase or session" bind:value={search} />
       </div>
+      <div class="sky-arts__layout">
       <ToggleGroup
         type="single"
         variant="segmented"
@@ -163,6 +178,7 @@
         value={[view]}
         onValueChange={(v) => router.setQuery({ view: v[0] === 'list' ? 'list' : null })}
       />
+      </div>
     </div>
   </div>
 
@@ -208,22 +224,21 @@
               {#if g.when}<span class="sky-arts__mono">{formatRelativeTime(g.when)}</span>{/if}
             </div>
             <ul class="sky-arts__cards">
-              {#each g.files as a, i (a.id)}
+              {#each g.files as a (a.id)}
+                {@const n = artifactName(a.title, null, shortId(a.id))}
                 <li data-sky-row>
                   <a class="sky-arts__card" href={artifactHref(a)}>
                     <span class="sky-arts__card-top">
-                      <span class="sky-arts__glyph" data-tone={tone(a.artifact_type)} aria-hidden="true">
-                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 1.75h5l3 3v9.5H4zM9 1.75v3h3M6 8h4M6 10.75h4"></path></svg>
-                      </span>
+                      <span class="sky-arts__glyph" data-tone={tone(a.artifact_type)} aria-hidden="true">{@render glyph(artifactGlyph(a.artifact_type, n.path))}</span>
                       <span class="sky-arts__card-titles">
-                        <span class="sky-arts__card-title">{titleOf(a)}</span>
-                        <span class="sky-arts__mono">{a.phase_id ?? 'no phase'}</span>
+                        <span class="sky-arts__card-title" title={a.title ?? undefined}>{n.name}</span>
+                        <span class="sky-arts__mono">{n.path ?? a.phase_id ?? 'no phase'}</span>
                       </span>
                     </span>
                     <span class="sky-arts__card-meta">
                       <span class="sky-arts__type" data-tone={tone(a.artifact_type)}><span class="sky-arts__dot" data-tone={tone(a.artifact_type)}></span>{a.artifact_type}</span>
                       <span>{formatBytes(a.size_bytes)}</span>
-                      <span class="sky-arts__card-n">phase {String(i + 1).padStart(2, '0')}</span>
+                      {#if n.path && a.phase_id}<span class="sky-arts__card-n">{a.phase_id}</span>{/if}
                     </span>
                   </a>
                 </li>
@@ -242,9 +257,7 @@
             {@const exec = execOf(a)}
             <li data-sky-row>
               <a class="sky-arts__row" href={artifactHref(a)}>
-                <span class="sky-arts__glyph" data-tone={tone(a.artifact_type)} aria-hidden="true">
-                  <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 1.75h5l3 3v9.5H4zM9 1.75v3h3M6 8h4M6 10.75h4"></path></svg>
-                </span>
+                <span class="sky-arts__glyph" data-tone={tone(a.artifact_type)} aria-hidden="true">{@render glyph(artifactGlyph(a.artifact_type))}</span>
                 <span class="sky-arts__cell-main">
                   <span class="sky-arts__card-title">{titleOf(a)}</span>
                   <span class="sky-arts__mono">{shortId(a.id)}</span>
@@ -279,6 +292,7 @@
     display: flex;
     flex-direction: column;
     gap: var(--ds-space-3);
+    width: 100%;
     min-width: 0;
     max-width: 30rem;
   }
@@ -293,7 +307,7 @@
   }
   .sky-arts__facets {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: var(--ds-space-2) var(--ds-space-4);
     margin: 0;
   }
@@ -355,6 +369,10 @@
     align-items: center;
     gap: var(--ds-space-3);
     min-width: 0;
+    order: -1;
+  }
+  .sky-arts__layout {
+    display: none;
   }
   .sky-arts__search {
     flex: 1 1 auto;
@@ -403,6 +421,7 @@
     letter-spacing: var(--sky-tracking-title);
   }
   .sky-arts__rule {
+    display: none;
     flex: 1 1 2rem;
     height: 1px;
     background: var(--sky-color-divider);
@@ -548,6 +567,15 @@
       flex-wrap: wrap;
       align-items: center;
       justify-content: space-between;
+    }
+    .sky-arts__tools {
+      order: 0;
+    }
+    .sky-arts__layout {
+      display: block;
+    }
+    .sky-arts__rule {
+      display: block;
     }
     .sky-arts__search {
       width: 18rem;
