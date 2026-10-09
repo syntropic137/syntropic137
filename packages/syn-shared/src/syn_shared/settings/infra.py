@@ -180,7 +180,16 @@ class InfraSettings(BaseSettings):
     # RESOURCE LIMITS
     # =========================================================================
 
-    api_memory_limit: str = Field(default="512m", description="API memory limit.")
+    api_memory_limit: str = Field(
+        default="2g",
+        description=(
+            "API memory limit. The API hosts every execution, so when the kernel"
+            " OOM-kills it every in-flight run dies with it (#1552: killed at"
+            " ~443MB anon RSS with 8 runs under the previous default). 2g is the"
+            " value flywheel was mitigated with, not one derived from a"
+            " measured per-run slope. Size SYN_EXECUTION_MAX_CONCURRENT to it."
+        ),
+    )
     api_cpu_limit: str = Field(
         default="2.0",
         description=(
@@ -208,7 +217,16 @@ class InfraSettings(BaseSettings):
         ),
     )
 
-    event_store_memory_limit: str = Field(default="512m", description="Event Store memory limit.")
+    event_store_memory_limit: str = Field(
+        default="2g",
+        description=(
+            "Event Store memory limit. A projection rebuild replays from nonce"
+            " 0 and the store's memory grows with stream length x subscribers"
+            " (#1553: OOM-killed in a loop at ~520MB under the previous default;"
+            " stable at 749MB under 2g for a 46k-event store). A stopgap until"
+            " the store streams catch-up reads with bounded buffers."
+        ),
+    )
 
     control_plane_cpu_shares: int = Field(
         default=4096,

@@ -5,6 +5,23 @@ description: "View aggregated workflow and session metrics"
 
 View aggregated workflow and session metrics
 
+## `syn metrics profiles`
+
+Per-phase p50/p90 token and cost, p50/p95 resource profiles for a workflow
+
+```bash
+syn metrics profiles [options]
+```
+
+**Options:**
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--workflow`, `-w` | `text` | --- | Workflow ID (required) |
+| `--days`, `-d` | `text` | `7` | Look-back window in days |
+
+---
+
 ## `syn metrics show`
 
 Show aggregated workflow and session metrics

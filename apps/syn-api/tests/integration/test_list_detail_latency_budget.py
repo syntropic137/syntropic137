@@ -60,6 +60,13 @@ WARMUP = 2
 LIST_BUDGET_MS = 200.0
 DETAIL_BUDGET_MS = 300.0
 
+# Feedback 60d9f990: a list opens at 100 rows only if 100 costs at most 1.5x
+# of 50. On the VPS Sessions measured 0.85-1.22x, so Sessions opens at 100 and
+# that page is gated; Executions measured up to 2.04x, so it opens at 50 and
+# 100 is the operator's choice, timed for its ratio. The ratios are printed so
+# the next measurement is one run away.
+MAX_100_OVER_50 = 1.5
+
 # The execution the detail endpoint is timed on: mid-history, so its rows sit
 # in a compressed chunk like almost every execution an operator opens.
 DETAIL_EXECUTION = 777
@@ -73,6 +80,8 @@ class Endpoint:
     path: str
     params: dict[str, str]
     budget_ms: float
+    #: False for a size no page opens at: timed for its ratio, not gated.
+    gated: bool = True
 
 
 ENDPOINTS: tuple[Endpoint, ...] = (
@@ -81,6 +90,15 @@ ENDPOINTS: tuple[Endpoint, ...] = (
         "/executions",
         {"page": "1", "page_size": "50"},
         LIST_BUDGET_MS,
+    ),
+    # 100 rows, timed beside 50 so the cost of the larger page is a number
+    # (feedback 60d9f990). Executions opens at 50, so this is not gated.
+    Endpoint(
+        "/executions?page_size=100",
+        "/executions",
+        {"page": "1", "page_size": "100"},
+        LIST_BUDGET_MS,
+        gated=False,
     ),
     Endpoint(
         "/executions/{id}",
@@ -93,6 +111,13 @@ ENDPOINTS: tuple[Endpoint, ...] = (
     ),
     Endpoint(
         "/sessions?page_size=50", "/sessions", {"page": "1", "page_size": "50"}, LIST_BUDGET_MS
+    ),
+    # Sessions opens at 100 (SESSION_LIST_PAGE_SIZE), so this one is gated.
+    Endpoint(
+        "/sessions?page_size=100",
+        "/sessions",
+        {"page": "1", "page_size": "100"},
+        LIST_BUDGET_MS,
     ),
     Endpoint("/artifacts?page_size=20", "/artifacts", {"page_size": "20"}, LIST_BUDGET_MS),
 )
@@ -396,16 +421,25 @@ async def assert_timing_real_work(client: httpx.AsyncClient) -> None:
     assert executions["executions"][-1]["total_cost_usd"] not in (0, "0", "0.0"), executions[
         "executions"
     ][-1]
-    detail = (await client.get(ENDPOINTS[1].path)).json()
+    detail = (await client.get(f"/executions/{execution_id(DETAIL_EXECUTION)}")).json()
     assert len(detail["phases"]) == PHASES, detail
     assert all(p["operations"] for p in detail["phases"]), detail["phases"]
     assert all(p["agent_session_ids"] for p in detail["phases"]), detail["phases"]
     sessions = (await client.get("/sessions", params={"page_size": "50"})).json()
     assert sessions["total"] == EXECUTIONS * PHASES, sessions["total"]
     assert len(sessions["sessions"]) == 50
+    # The 100-row pages are timed over 100 rows, not a short page.
+    for path, rows in (("/executions", "executions"), ("/sessions", "sessions")):
+        page = (await client.get(path, params={"page_size": "100"})).json()
+        assert len(page[rows]) == 100, (path, len(page[rows]))
     artifacts = (await client.get("/artifacts", params={"page_size": "20"})).json()
     assert artifacts["total"] == EXECUTIONS * PHASES, artifacts["total"]
     assert len(artifacts["artifacts"]) == 20
+
+
+def over_budget(measured: dict[str, float]) -> list[str]:
+    """The gated endpoints whose measured p95 is over their budget."""
+    return [e.name for e in ENDPOINTS if e.gated and measured[e.name] > e.budget_ms]
 
 
 async def test_list_and_detail_endpoints_stay_inside_their_p95_budget(
@@ -421,5 +455,12 @@ async def test_list_and_detail_endpoints_stay_inside_their_p95_budget(
         for e in ENDPOINTS
     )
     print(f"\nE2 latency gate ({RUNS} runs per endpoint):\n{table}")
-    over = [e.name for e in ENDPOINTS if measured[e.name] > e.budget_ms]
+    ratios = {
+        name: measured[f"{name}?page_size=100"] / measured[f"{name}?page_size=50"]
+        for name in ("/executions", "/sessions")
+    }
+    for name, ratio in ratios.items():
+        verdict = "within" if ratio <= MAX_100_OVER_50 else "OVER"
+        print(f"  {name} p95 at 100 rows / at 50 rows: {ratio:.2f}x ({verdict} {MAX_100_OVER_50}x)")
+    over = over_budget(measured)
     assert not over, f"p95 over budget for {over}:\n{table}"

@@ -34,6 +34,9 @@ export interface ListPaginationProps {
   onPageChange: (page: number) => void
   /** Singular noun for the count, e.g. "execution". */
   itemLabel: string
+  /** Sizes the operator may pick. Fewer than two and no picker is shown. */
+  pageSizeChoices?: readonly number[]
+  onPageSizeChange?: (size: number) => void
 }
 
 const BUTTON_CLASS =
@@ -46,6 +49,8 @@ export function ListPagination({
   excludedUndated = 0,
   onPageChange,
   itemLabel,
+  pageSizeChoices = [],
+  onPageSizeChange,
 }: ListPaginationProps) {
   // A window that matched nothing but excluded 274 rows is the case the reader
   // most needs this line for, so an empty page is not silent unless there is
@@ -70,6 +75,23 @@ export function ListPagination({
           </span>
         )}
       </span>
+      <div className="flex flex-wrap items-center gap-2">
+        {onPageSizeChange && pageSizeChoices.length > 1 && (
+          <label className="flex items-center gap-2 text-sm text-[var(--color-text-secondary)]">
+            Rows per page
+            <select
+              value={pageSize}
+              onChange={(e) => onPageSizeChange(Number(e.target.value))}
+              className={BUTTON_CLASS}
+            >
+              {pageSizeChoices.map((size) => (
+                <option key={size} value={size}>
+                  {size}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
       {totalPages > 1 && (
         <div className="flex items-center gap-2">
           <button
@@ -93,6 +115,7 @@ export function ListPagination({
           </button>
         </div>
       )}
+      </div>
     </div>
   )
 }

@@ -32,6 +32,13 @@ Statuses: `not_started`, `running`, `completed`, `failed`, `cancelled`,
 describes a start that has no Execution yet (see Queued Start). There is no paused Execution - see
 "Words we do not use".
 
+`interrupted` is what the platform records when it shuts down under a running
+Execution (#1381). The in-flight Phase's unpushed work is saved to a quarantine
+ref first. Nobody decided the work should stop, so it can be resumed, like
+`failed`. When the shutdown budget (`SYN_EXECUTION_INTERRUPT_BUDGET_S`) runs
+out before the event is written, the Execution stays `running`, and the next
+start's reconciliation fails it as `OrphanedByRestart`.
+
 ## Phase
 
 One step of a Workflow inside an Execution, with its own agent, model, prompt
@@ -67,6 +74,18 @@ its run has ended, so a limit on a codex Phase could never stop it and is
 refused at install. Not a separate budget from the
 [Execution Budget](#execution-budget), which counts concurrent Executions, not
 money.
+
+## Phase Profile
+
+What a Phase of one type usually uses, read over every Phase of a Workflow in a
+window (#1716): per model, p50/p90 input, output, cache-write and cache-read
+tokens and cost; per Phase, p50/p95 CPU-seconds per wall-second, throttled
+seconds, memory peak and disk at teardown, each with the `n` it stands on and
+coverage counts for Phases that recorded no usage. A "phase type" is a Phase id:
+every Execution of a Workflow runs the same Phase definitions. Lane 2 only:
+read from observations, never from an aggregate. Below ten Phases a percentile
+reads `insufficient`. Sizes the capacity model and the
+[Execution Budget](#execution-budget); it is not itself a limit.
 
 ## Quota Exhaustion
 
@@ -484,7 +503,9 @@ runs it beside the API in one process). It Claims admitted Executions from the
 Run Queue and runs each to a terminal status. The API process admits
 Executions and never runs one. Implemented by `ExecutionHost`. One host has a
 `host_id` and a generation (its image tag), recorded in `executor_hosts` and
-on every container it creates (`syn.host_id`, `syn.host_generation`).
+on every container it creates (`syn.host_id`, `syn.host_generation`). The
+Run Queue's value for a registered host is `ExecutorHost`: its `host_id`,
+container, generation and Event Epoch.
 Specified in ADR-072.
 
 An Executor is a host, not an Execution: nothing about an Execution's stream
@@ -506,7 +527,10 @@ or a later sweep that finds the stream, promotes it to `admitted`. An expired
 Lease goes `claimed` -> `fencing` -> `reaped` -> `interrupted` (see Fencing). A
 resume whose inherited artifacts cannot yet be read is deferred back to
 `admitted` with a `retry_at`, releasing its slot (see Claim). `RunCounts` is the
-number of rows in each state.
+number of rows in each state. The sweep reads each stream through an
+`ExecutionStreamProbe`, whose answer is a `StreamPresence`: present, absent or
+**unknown**, and unknown is never read as absent. One sweep turn reports what it
+resolved as an `OpeningSweep`.
 
 A run row is not an Execution and its states are not Execution statuses.
 
@@ -834,6 +858,31 @@ failed measurement or write never fails a Phase. Each field is independently
 unknown rather than zero when its read failed. A Phase retried after a failed
 attempt held one workspace per attempt, so it has one usage per attempt. It
 exists to size the platform against `docs/north-star.md`.
+
+## Stale Workspace Directory
+
+A workspace directory on the host that nothing will come back for
+(`StaleWorkspaceDir`, PC-130): no running container mounts it, the Execution
+that owns it (when anything still names one) is not running, and nothing in it
+has changed for the reclaim grace period. Its container is already gone, so
+unlike an **Orphaned Workspace** (`OrphanedWorkspace`, #1560) it cannot be
+guarded from inside.
+
+**Reclaiming** one means deleting it, and only through a `ReclaimableDir`,
+which only a guard can produce. The host-side guard
+(`guard_stale_workspace_dir`) keeps the directory if any commit is not on a
+remote, and archives an uncommitted change as a patch artifact under the
+Execution before the delete. Each deletion is logged as `WorkspaceReclaimed`
+with its size. It is housekeeping, not domain state: no event, no aggregate.
+
+**Workspace ownership** is the durable association from a
+`WorkspaceProvisionedForPhase` event's Workspace to its Execution. The
+`workspace_ownership` projection retains this association after a container
+is removed and rebuilds it during replay. Conflicting owners protect the
+directory. Authored work with no known owner is retained, so its archive
+cannot disappear into an unattributed storage prefix. Only a directory with
+an explicit `CACHEDIR.TAG` is treated as disposable cache data; an installed
+dependency directory can still contain authored changes.
 
 ## Scripted Agent
 

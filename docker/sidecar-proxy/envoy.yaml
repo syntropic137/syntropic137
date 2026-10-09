@@ -7,14 +7,69 @@
 # 3. Logs all requests for observability
 # 4. Enforces rate limits
 
+# The only runtime value this proxy reads from disk is the platform-access
+# switch, written by entrypoint.sh from SYN_PLATFORM_ACCESS_ENABLED (ADR-072).
+# There is deliberately NO admin_layer: port 9901 is reachable from
+# agent-net, and an admin layer would let a workspace POST /runtime_modify and
+# turn the platform route on while the setting is OFF.
+layered_runtime:
+  layers:
+    - name: static
+      static_layer: {}
+    - name: syn_platform_switch
+      disk_layer:
+        symlink_root: /var/lib/syn-envoy-runtime
+        subdirectory: envoy
+
+# The admin interface is LOOPBACK ONLY (ADR-072). Port 9901 is reachable from
+# agent-net, and admin on it would let any workspace raise the log level
+# (POST /logging?level=trace) and have Envoy print every request's headers,
+# including other workspaces' Authorization: Bearer platform tokens, or end the
+# proxy (POST /quitquitquit). The `admin_ready` listener below keeps 9901
+# answering GET /ready, the only admin path anything outside this container uses.
 admin:
   address:
     socket_address:
-      address: 0.0.0.0
-      port_value: 9901
+      address: 127.0.0.1
+      port_value: 9900
 
 static_resources:
   listeners:
+    # Readiness only, for the healthcheck, the API's shared-proxy check and
+    # the smoke test. Every other path is a local 404: never the admin API.
+    - name: admin_ready
+      address:
+        socket_address:
+          address: 0.0.0.0
+          port_value: 9901
+      filter_chains:
+        - filters:
+            - name: envoy.filters.network.http_connection_manager
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                stat_prefix: admin_ready
+                codec_type: AUTO
+                route_config:
+                  name: admin_ready
+                  virtual_hosts:
+                    - name: admin_ready
+                      domains:
+                        - "*"
+                      routes:
+                        - match:
+                            path: "/ready"
+                          route:
+                            cluster: envoy_admin_loopback
+                            timeout: 5s
+                        - match:
+                            prefix: "/"
+                          direct_response:
+                            status: 404
+                http_filters:
+                  - name: envoy.filters.http.router
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+
     # HTTP Proxy listener (agents connect here)
     - name: http_proxy
       address:
@@ -56,6 +111,72 @@ static_resources:
                         - "envoy-proxy:8081"
                         - "envoy-proxy"
                       routes:
+                        # Syntropic137 API, workspace ingress (PC-127, ADR-072).
+                        # SYN_API_URL=http://envoy-proxy:8081/syn-platform; the
+                        # CLI appends /api/v1. Sent straight to api:8000, never
+                        # through the gateway (gateway:80 has no auth).
+                        # x-syn-workspace-ingress is OVERWRITTEN, so the API
+                        # knows a workspace sent this whatever the workspace
+                        # set, and refuses it without a platform token whose
+                        # scope allows the route. ext_authz is OFF here so no
+                        # provider credential is ever added to an API request;
+                        # the workspace's own Bearer token passes unchanged.
+                        - match:
+                            prefix: "/syn-platform/api/v1/"
+                            runtime_fraction:
+                              # OFF unless entrypoint.sh found
+                              # SYN_PLATFORM_ACCESS_ENABLED true: no route, so
+                              # nothing reaches the API (ADR-072).
+                              default_value:
+                                numerator: 0
+                                denominator: HUNDRED
+                              runtime_key: syn_platform.access_enabled
+                          route:
+                            cluster: syn_platform_api
+                            timeout: 30s
+                            prefix_rewrite: "/"
+                          request_headers_to_add:
+                            - header:
+                                key: "x-syn-workspace-ingress"
+                                value: "envoy"
+                              append_action: OVERWRITE_IF_EXISTS_OR_ADD
+                          typed_per_filter_config:
+                            envoy.filters.http.ext_authz:
+                              "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthzPerRoute
+                              disabled: true
+                        - match:
+                            path: "/syn-platform/health"
+                            runtime_fraction:
+                              # OFF unless entrypoint.sh found
+                              # SYN_PLATFORM_ACCESS_ENABLED true: no route, so
+                              # nothing reaches the API (ADR-072).
+                              default_value:
+                                numerator: 0
+                                denominator: HUNDRED
+                              runtime_key: syn_platform.access_enabled
+                          route:
+                            cluster: syn_platform_api
+                            timeout: 10s
+                            prefix_rewrite: "/health"
+                          request_headers_to_add:
+                            - header:
+                                key: "x-syn-workspace-ingress"
+                                value: "envoy"
+                              append_action: OVERWRITE_IF_EXISTS_OR_ADD
+                          typed_per_filter_config:
+                            envoy.filters.http.ext_authz:
+                              "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthzPerRoute
+                              disabled: true
+                        - match:
+                            prefix: "/syn-platform/"
+                          direct_response:
+                            status: 404
+                            body:
+                              inline_string: '{"error": "Not found", "message": "Only /syn-platform/api/v1/ and /syn-platform/health reach the platform"}'
+                          typed_per_filter_config:
+                            envoy.filters.http.ext_authz:
+                              "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthzPerRoute
+                              disabled: true
                         - match:
                             prefix: "/"
                           route:
@@ -172,6 +293,19 @@ static_resources:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
 
   clusters:
+    # Envoy's own admin interface, loopback only (see `admin` above).
+    - name: envoy_admin_loopback
+      type: STATIC
+      load_assignment:
+        cluster_name: envoy_admin_loopback
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: 127.0.0.1
+                      port_value: 9900
+
     # Anthropic API cluster
     - name: anthropic_api
       type: STRICT_DNS
@@ -263,6 +397,20 @@ static_resources:
             validation_context:
               trusted_ca:
                 filename: /etc/ssl/certs/ca-certificates.crt
+
+    # Syntropic137 API (PC-127, ADR-072). Reached directly, never through the
+    # gateway: gateway:80 serves the internal network with no auth at all.
+    - name: syn_platform_api
+      type: STRICT_DNS
+      load_assignment:
+        cluster_name: syn_platform_api
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: api
+                      port_value: 8000
 
     # Token Injector Service (separate container on same Docker network)
     - name: token_injector

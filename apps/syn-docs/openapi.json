@@ -3981,6 +3981,65 @@
         }
       }
     },
+    "/metrics/phase-profiles": {
+      "get": {
+        "tags": [
+          "metrics"
+        ],
+        "summary": "Get Phase Profiles Endpoint",
+        "description": "Per phase type and model: p50/p90 tokens and cost; per phase type: p50/p95 resources.\n\nSizes the capacity model and the execution budget from what phases of\nthis workflow actually used (#1716). Every percentile is over every phase\nin the window; below ten phases it reads ``insufficient``.",
+        "operationId": "get_phase_profiles_endpoint_metrics_phase_profiles_get",
+        "parameters": [
+          {
+            "name": "workflow_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Workflow whose phases to profile",
+              "title": "Workflow Id"
+            },
+            "description": "Workflow whose phases to profile"
+          },
+          {
+            "name": "window_days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 90,
+              "minimum": 1,
+              "description": "Look-back window in days",
+              "default": 7,
+              "title": "Window Days"
+            },
+            "description": "Look-back window in days"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhaseProfilesResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/capture/status": {
       "get": {
         "tags": [
@@ -9236,7 +9295,7 @@
           "model_display": {
             "type": "string",
             "title": "Model Display",
-            "description": "The model for humans: the reported id verbatim, or 'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9).",
+            "description": "The model for humans: the reported id verbatim, or '<alias> (requested)', or 'unknown' (ADR-067 D9).",
             "readOnly": true
           }
         },
@@ -16242,7 +16301,7 @@
           "model_display": {
             "type": "string",
             "title": "Model Display",
-            "description": "The model for humans: the reported id verbatim, or 'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9).",
+            "description": "The model for humans: the reported id verbatim, or '<alias> (requested)', or 'unknown' (ADR-067 D9).",
             "readOnly": true
           }
         },
@@ -16399,6 +16458,59 @@
         ],
         "title": "PhaseOperationInfo"
       },
+      "PhaseProfilesResponse": {
+        "properties": {
+          "workflow_id": {
+            "type": "string",
+            "title": "Workflow Id"
+          },
+          "since": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Since"
+          },
+          "until": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Until"
+          },
+          "window_days": {
+            "type": "integer",
+            "title": "Window Days"
+          },
+          "executions": {
+            "type": "integer",
+            "title": "Executions"
+          },
+          "tokens": {
+            "items": {
+              "$ref": "#/components/schemas/PhaseTokenProfileResponse"
+            },
+            "type": "array",
+            "title": "Tokens"
+          },
+          "resources": {
+            "items": {
+              "$ref": "#/components/schemas/PhaseResourceProfileResponse"
+            },
+            "type": "array",
+            "title": "Resources"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "workflow_id",
+          "since",
+          "until",
+          "window_days",
+          "executions",
+          "tokens",
+          "resources"
+        ],
+        "title": "PhaseProfilesResponse",
+        "description": "Per-phase-type usage profiles for one workflow over a window (#1716).\n\nPercentiles are over EVERY phase of the workflow with telemetry in\n``[since, until)`` - nothing is paged."
+      },
       "PhaseProgressInfo": {
         "properties": {
           "completed": {
@@ -16495,6 +16607,41 @@
         "title": "PhaseRefResponse",
         "description": "A plugin or skill reference. Structured, never a joined string.\n\nJoining source and name is not reversible: a ref whose source already\nends in the repo name reparses to a different repository (#1013)."
       },
+      "PhaseResourceProfileResponse": {
+        "properties": {
+          "phase_id": {
+            "type": "string",
+            "title": "Phase Id"
+          },
+          "cpu_seconds_per_wall_second": {
+            "$ref": "#/components/schemas/ResourcePercentilesResponse"
+          },
+          "cpu_throttled_seconds": {
+            "$ref": "#/components/schemas/ResourcePercentilesResponse"
+          },
+          "memory_peak_bytes": {
+            "$ref": "#/components/schemas/ResourcePercentilesResponse"
+          },
+          "disk_bytes_at_teardown": {
+            "$ref": "#/components/schemas/ResourcePercentilesResponse"
+          },
+          "coverage": {
+            "$ref": "#/components/schemas/ResourceCoverageResponse"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "phase_id",
+          "cpu_seconds_per_wall_second",
+          "cpu_throttled_seconds",
+          "memory_peak_bytes",
+          "disk_bytes_at_teardown",
+          "coverage"
+        ],
+        "title": "PhaseResourceProfileResponse",
+        "description": "One phase type's workspace resource use at teardown (cgroup counters)."
+      },
       "PhaseSkillUseInfo": {
         "properties": {
           "status": {
@@ -16576,6 +16723,51 @@
         ],
         "title": "PhaseStartConfig",
         "description": "What a phase was configured with when its execution STARTED.\n\nRead from the execution's own start event (`StartPins`, #1454), never from\nthe workflow template, which may have been edited since. That is the whole\npoint: this answers \"what did the agent have\", not \"what would it get now\"."
+      },
+      "PhaseTokenProfileResponse": {
+        "properties": {
+          "phase_id": {
+            "type": "string",
+            "title": "Phase Id"
+          },
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "input_tokens": {
+            "$ref": "#/components/schemas/TokenPercentilesResponse"
+          },
+          "output_tokens": {
+            "$ref": "#/components/schemas/TokenPercentilesResponse"
+          },
+          "cache_creation_tokens": {
+            "$ref": "#/components/schemas/TokenPercentilesResponse"
+          },
+          "cache_read_tokens": {
+            "$ref": "#/components/schemas/TokenPercentilesResponse"
+          },
+          "cost_usd": {
+            "$ref": "#/components/schemas/TokenPercentilesResponse"
+          },
+          "unpriced_phases": {
+            "type": "integer",
+            "title": "Unpriced Phases"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "phase_id",
+          "model",
+          "input_tokens",
+          "output_tokens",
+          "cache_creation_tokens",
+          "cache_read_tokens",
+          "cost_usd",
+          "unpriced_phases"
+        ],
+        "title": "PhaseTokenProfileResponse",
+        "description": "One (phase type, model). A sample is one execution's phase on that model.\n\nA phase that fell back to another model mid-phase is a sample under BOTH\nmodels, each holding only the tokens that model consumed."
       },
       "PinnedSkillInfo": {
         "properties": {
@@ -17688,6 +17880,105 @@
         ],
         "title": "ReportedFailureReason",
         "description": "What a phase says CAUSED the failure it is reporting (#1372).\n\nTHE QUESTION THIS ANSWERS, and why it had to be asked rather than worked\nout. A readable ``success=false`` says THAT a phase failed and nothing\nmore, so every reported failure was recorded as a correct refusal - the\nsystem working - including the one whose agent had just written \"GH_TOKEN\nis not set\", which is the system not working, and the one that said the\ntask was impossible, which is neither. Those three take opposite responses:\nretry, fix the platform, rewrite the brief. An operator re-dispatching off\na record that cannot tell them apart spends a whole run to find out.\n\nTHE SPELLINGS ARE classify.md's, which is the vocabulary analysts already\nsort failures into by hand and the one `FailureClassification` was built\nfrom. Three words, closed, written here and nowhere else - a closed set in\none place is what separates a contract from the habit of adding one more\nstring every time a run is lost, and it is the definition the negative\ntests are written against.\n\nIT IS THE AGENT'S OWN WORD, NEVER AN INFERENCE. Nothing reads ``comments``,\nan exception message or an exit status to reach a member of this; the only\nway into one is a phase that wrote it.\n\nAND BECAUSE IT IS THE AGENT'S OWN WORD, IT IS A REPORT AND NOT A\nMEASUREMENT (#1392). This is the whole of what the type means, and the\nreason it is spelled `reported_failure_reason` everywhere it is carried:\nthe platform's only corroboration of anything written here is that the\nprocess exited cleanly and its stream arrived intact, which is evidence\nabout the HARNESS and not about whether the task was possible. A run that\nnamed itself ``task`` established nothing about the request; it said\nsomething about it. So the word travels the whole way to the operator - who\nwants to know what the agent said - and `FailureClassification`, which is\nwhat failure NUMBERS are computed from, is never decided by it. The one\nthing a phase can do to that record is WITHDRAW a claim; see\n`_corroborated_classification`, which holds the whole rule.\n\nAND IT CANNOT CHANGE WHETHER A PHASE COMPLETES - the property to keep when\nediting anything here. This decides a LABEL on a failure already decided by\n``success``. A word nobody recognises, a sentence, a number, or no key at\nall all read as \"no reason given\" and leave the verdict exactly as it was.\nMaking a misspelling fatal would let a tally field refuse a finished run,\nwhich is #1324's defect bought back in exchange for nothing."
+      },
+      "ResourceCoverageResponse": {
+        "properties": {
+          "phases": {
+            "type": "integer",
+            "title": "Phases"
+          },
+          "phases_without_usage_row": {
+            "type": "integer",
+            "title": "Phases Without Usage Row"
+          },
+          "cpu_usage_seconds_missing": {
+            "type": "integer",
+            "title": "Cpu Usage Seconds Missing"
+          },
+          "cpu_throttled_seconds_missing": {
+            "type": "integer",
+            "title": "Cpu Throttled Seconds Missing"
+          },
+          "memory_peak_bytes_missing": {
+            "type": "integer",
+            "title": "Memory Peak Bytes Missing"
+          },
+          "disk_bytes_at_teardown_missing": {
+            "type": "integer",
+            "title": "Disk Bytes At Teardown Missing"
+          },
+          "wall_seconds_missing": {
+            "type": "integer",
+            "title": "Wall Seconds Missing"
+          },
+          "coverage_display": {
+            "type": "string",
+            "title": "Coverage Display"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "phases",
+          "phases_without_usage_row",
+          "cpu_usage_seconds_missing",
+          "cpu_throttled_seconds_missing",
+          "memory_peak_bytes_missing",
+          "disk_bytes_at_teardown_missing",
+          "wall_seconds_missing",
+          "coverage_display"
+        ],
+        "title": "ResourceCoverageResponse",
+        "description": "What the resource percentiles stand on. Every count is over the whole window."
+      },
+      "ResourcePercentilesResponse": {
+        "properties": {
+          "n": {
+            "type": "integer",
+            "title": "N"
+          },
+          "p50": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P50"
+          },
+          "p95": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P95"
+          },
+          "p50_display": {
+            "type": "string",
+            "title": "P50 Display"
+          },
+          "p95_display": {
+            "type": "string",
+            "title": "P95 Display"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "n",
+          "p50",
+          "p95",
+          "p50_display",
+          "p95_display"
+        ],
+        "title": "ResourcePercentilesResponse",
+        "description": "p50/p95 of one measure over ``n`` measured phases; null below ten."
       },
       "ResumeRequest": {
         "properties": {
@@ -19120,7 +19411,7 @@
           "agent_model_display": {
             "type": "string",
             "title": "Agent Model Display",
-            "description": "The model for humans: the reported id verbatim, or 'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9).",
+            "description": "The model for humans: the reported id verbatim, or '<alias> (requested)', or 'unknown' (ADR-067 D9).",
             "readOnly": true
           }
         },
@@ -19364,7 +19655,7 @@
           "agent_model_display": {
             "type": "string",
             "title": "Agent Model Display",
-            "description": "The model for humans: the reported id verbatim, or 'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9).",
+            "description": "The model for humans: the reported id verbatim, or '<alias> (requested)', or 'unknown' (ADR-067 D9).",
             "readOnly": true
           }
         },
@@ -20386,6 +20677,55 @@
         ],
         "title": "TimelineEntryResponse",
         "description": "Timeline entry for visualization."
+      },
+      "TokenPercentilesResponse": {
+        "properties": {
+          "n": {
+            "type": "integer",
+            "title": "N"
+          },
+          "p50": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P50"
+          },
+          "p90": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P90"
+          },
+          "p50_display": {
+            "type": "string",
+            "title": "P50 Display"
+          },
+          "p90_display": {
+            "type": "string",
+            "title": "P90 Display"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "n",
+          "p50",
+          "p90",
+          "p50_display",
+          "p90_display"
+        ],
+        "title": "TokenPercentilesResponse",
+        "description": "p50/p90 of one measure over ``n`` phases; null below ten phases."
       },
       "ToolSummary": {
         "properties": {

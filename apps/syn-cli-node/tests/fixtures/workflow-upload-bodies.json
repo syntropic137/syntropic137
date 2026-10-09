@@ -379,6 +379,7 @@
         ],
         "timeout_seconds": 3600,
         "delivers_repo_changes": false,
+        "requires_verdict": true,
         "allowed_tools": [
           "Read",
           "Grep",
@@ -420,6 +421,7 @@
         ],
         "timeout_seconds": 3600,
         "delivers_repo_changes": false,
+        "requires_verdict": true,
         "agent": {
           "provider": "codex",
           "model": "gpt-sol",
@@ -455,6 +457,7 @@
         ],
         "timeout_seconds": 3600,
         "delivers_repo_changes": false,
+        "requires_verdict": true,
         "agent": {
           "provider": "codex",
           "model": "gpt-5.6-luna",
@@ -490,6 +493,7 @@
         ],
         "timeout_seconds": 3600,
         "delivers_repo_changes": false,
+        "requires_verdict": true,
         "agent": {
           "provider": "codex",
           "model": "gpt-5.6-terra",
@@ -525,6 +529,7 @@
         ],
         "timeout_seconds": 3600,
         "delivers_repo_changes": false,
+        "requires_verdict": true,
         "agent": {
           "provider": "codex",
           "model": "gpt-6-luna",
@@ -560,6 +565,7 @@
         ],
         "timeout_seconds": 3600,
         "delivers_repo_changes": false,
+        "requires_verdict": true,
         "allowed_tools": [
           "Read",
           "Grep",

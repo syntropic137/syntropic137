@@ -62,6 +62,7 @@ class DockerExecWorkspace:
 class _Inspected:
     labels: dict[str, str]
     workspace_source: str | None
+    running: bool = False
 
 
 async def find_orphaned_workspaces(container_ids: list[str]) -> list[OrphanedWorkspace]:
@@ -97,6 +98,11 @@ class ShutilWorkspaceDirRemover:
         shutil.rmtree(host_dir)
 
 
+def workspace_base_dir() -> str:
+    """The workspace base directory as this process sees it."""
+    return os.environ.get(ENV_SYN_WORKSPACE_CONTAINER_DIR, "/workspaces")
+
+
 def _local_path(workspace_id: str) -> str:
     """Where this process sees the directory docker mounted from the host.
 
@@ -104,11 +110,16 @@ def _local_path(workspace_id: str) -> str:
     one base (SYN_WORKSPACE_HOST_DIR on the host, SYN_WORKSPACE_CONTAINER_DIR
     here), so the basename of the mount source is the same on both sides.
     """
-    base = os.environ.get(ENV_SYN_WORKSPACE_CONTAINER_DIR, "/workspaces")
-    return str(Path(base) / workspace_id)
+    return str(Path(workspace_base_dir()) / workspace_id)
 
 
 async def _inspect(container_id: str) -> _Inspected | None:
+    raw = await docker_inspect_raw(container_id)
+    return None if raw is None else parse_inspect(raw)
+
+
+async def docker_inspect_raw(container_id: str) -> str | None:
+    """``docker inspect`` output for one container, or None if it could not be read."""
     proc = await asyncio.create_subprocess_exec(
         "docker",
         "inspect",
@@ -124,7 +135,7 @@ async def _inspect(container_id: str) -> _Inspected | None:
         return None
     if proc.returncode != 0:
         return None
-    return parse_inspect(stdout.decode(errors="replace"))
+    return stdout.decode(errors="replace")
 
 
 def parse_inspect(raw: str) -> _Inspected | None:
@@ -136,7 +147,11 @@ def parse_inspect(raw: str) -> _Inspected | None:
     if not isinstance(documents, list) or not documents or not isinstance(documents[0], dict):
         return None
     document: dict[object, object] = documents[0]
-    return _Inspected(labels=_labels(document), workspace_source=_workspace_source(document))
+    state = document.get("State")
+    running = isinstance(state, dict) and state.get("Running") is True
+    return _Inspected(
+        labels=_labels(document), workspace_source=_workspace_source(document), running=running
+    )
 
 
 def _labels(document: dict[object, object]) -> dict[str, str]:
