@@ -115,6 +115,13 @@ _WORKSPACE_CACHE_ENV: Final[dict[str, str]] = {
     "XDG_CACHE_HOME": "/workspace/.cache",
     "UV_CACHE_DIR": "/workspace/.cache/uv",
     "npm_config_cache": "/workspace/.cache/npm",
+    # pnpm's content-addressable store, where a dependency seed (#1714) is
+    # copied. Unset, pnpm puts it under $HOME (~/.local/share/pnpm/store),
+    # which is the 128 MB tmpfs above, and this repository's store is 1.2 GB.
+    # pnpm 11+ reads only the `pnpm_config_` spelling (12.10.1 verified:
+    # `npm_config_store_dir` is ignored); older pnpm reads only `npm_config_`.
+    "pnpm_config_store_dir": "/workspace/.cache/pnpm",
+    "npm_config_store_dir": "/workspace/.cache/pnpm",
 }
 
 

@@ -42,6 +42,7 @@ if TYPE_CHECKING:
         WorkspaceAggregate,
     )
 
+from syn_adapters.workspace_backends.dependency_seed import seed_dependency_caches
 from syn_adapters.workspace_backends.service.codex_rollout import read_codex_rollout
 from syn_adapters.workspace_backends.service.credential_keeper import keep_credential_fresh
 from syn_adapters.workspace_backends.service.git_credential_renewal import (
@@ -297,6 +298,9 @@ class ManagedWorkspace:
         result = await _run_setup_phase(self, secrets, setup_script)
         if result.exit_code == 0:
             self._ledger.installed(secrets.issued)
+            # After the clone, before the agent: the lockfiles that key the
+            # seeds exist only now, and nothing has run in the workspace yet.
+            await seed_dependency_caches(self, secrets.clones_under(self.path))
         return result
 
     @property
