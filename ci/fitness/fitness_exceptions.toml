@@ -493,3 +493,20 @@ allowed_prefixes = [
 # TODO(#1424): the API conversation log parses Claude message content and Codex
 # stream items (imports syn_shared.codex_stream). Predates #1398.
 "apps/syn-api/src/syn_api/routes/conversations.py" = { violations = 1, issue = "#1424" }
+
+[workspace_settings_consumed]
+# ci/fitness/infrastructure/test_workspace_settings_consumed.py (#1805).
+# SYN_WORKSPACE_* fields that no production module reads. Found by this gate on
+# its first run; SYN_SECURITY_* (the original #1805 finding) was deleted in the
+# same change. "Class.field" = { issue = "#NNN" }. EXACT: a field that gains a
+# consumer, or is deleted, fails as stale.
+# TODO(#1805): the cloud backend fields describe a backend nothing provisions;
+# docker_runtime/docker_network are not passed to the provider (the network
+# comes from agentic_isolation's SecurityConfig); isolation_backend is not read
+# by WorkspaceService, which picks the backend from WorkspaceServiceConfig.
+"WorkspaceSettings.cloud_api_key" = { issue = "#1805" }
+"WorkspaceSettings.cloud_provider" = { issue = "#1805" }
+"WorkspaceSettings.cloud_template" = { issue = "#1805" }
+"WorkspaceSettings.docker_network" = { issue = "#1805" }
+"WorkspaceSettings.docker_runtime" = { issue = "#1805" }
+"WorkspaceSettings.isolation_backend" = { issue = "#1805" }
