@@ -5537,6 +5537,8 @@ export interface components {
             dropped: number;
             /** Write Failures */
             write_failures: number;
+            /** Discarded */
+            discarded: number;
             /** Buffered */
             buffered: number;
         };

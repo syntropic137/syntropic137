@@ -262,6 +262,7 @@ async def get_request_latency(
         written=counters.written,
         dropped=counters.dropped,
         write_failures=counters.write_failures,
+        discarded=counters.discarded,
         buffered=counters.buffered,
     )
     try:

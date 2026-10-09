@@ -149,19 +149,6 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # Per-route request-timing (Lane 2 observability - see #1070). Always on:
-    # in-process only, no event store or aggregate interaction, negligible cost.
-    # Requests slower than the threshold are also logged (#1583). The setting
-    # is read here, not in the middleware: Starlette builds the middleware
-    # stack on the first request, long after the app was configured.
-    from syn_api.middleware.request_timing import RequestTimingMiddleware
-    from syn_shared.settings import get_settings
-
-    app.add_middleware(
-        RequestTimingMiddleware,
-        slow_request_ms=get_settings().slow_request_log_threshold_ms,
-    )
-
     # Webhook recording middleware (opt-in via SYN_RECORD_WEBHOOKS=true)
     import os
 
@@ -175,7 +162,7 @@ def create_app() -> FastAPI:
     # and /health must answer without waiting on anything that startup builds.
     app.add_middleware(StartupGateMiddleware, gate=gate)
 
-    # Outermost of all: a request from a workspace (ADR-072) is refused unless
+    # Outermost but one: a request from a workspace (ADR-072) is refused unless
     # its platform token's scope allows the route - before the gate, before
     # any router. Always installed; with platform access OFF it refuses every
     # workspace request, so the setting cannot open a route by being unset.
@@ -183,6 +170,20 @@ def create_app() -> FastAPI:
     from syn_api.middleware.workspace_ingress import WorkspaceIngressMiddleware
 
     app.add_middleware(WorkspaceIngressMiddleware, tokens=get_platform_token_service())
+
+    # Wraps EVERYTHING above (ADR-075): a startup-gate 503 and an ingress
+    # refusal are answers too, so they are timed, recorded and carry
+    # x-request-id like any other. Lane 2 only (#1070); slow requests are also
+    # logged (#1583). The setting is read here, not in the middleware: Starlette
+    # builds the middleware stack on the first request, long after the app was
+    # configured.
+    from syn_api.middleware.request_timing import RequestTimingMiddleware
+    from syn_shared.settings import get_settings
+
+    app.add_middleware(
+        RequestTimingMiddleware,
+        slow_request_ms=get_settings().slow_request_log_threshold_ms,
+    )
 
     # ── API routers ────────────────────────────────────────────────────
     # No prefix here — versioning is handled at the routing layer (nginx).

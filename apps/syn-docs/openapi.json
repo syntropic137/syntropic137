@@ -15002,6 +15002,10 @@
             "type": "integer",
             "title": "Write Failures"
           },
+          "discarded": {
+            "type": "integer",
+            "title": "Discarded"
+          },
           "buffered": {
             "type": "integer",
             "title": "Buffered"
@@ -15013,6 +15017,7 @@
           "written",
           "dropped",
           "write_failures",
+          "discarded",
           "buffered"
         ],
         "title": "LatencyRecorderStatusResponse",

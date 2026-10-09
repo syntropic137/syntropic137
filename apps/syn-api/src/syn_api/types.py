@@ -3996,7 +3996,9 @@ class LatencyRecorderStatusResponse(BaseModel):
     dropped: int
     """Offered while the buffer was full or the recorder was not running."""
     write_failures: int
-    """Samples lost because their batch could not be written."""
+    """Samples lost because their batch failed or overran its deadline."""
+    discarded: int
+    """Samples still unwritten when a shutdown's deadline expired."""
     buffered: int
 
 

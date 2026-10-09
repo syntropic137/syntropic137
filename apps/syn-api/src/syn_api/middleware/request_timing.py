@@ -27,6 +27,7 @@ on the slow-request line, so a slow line and its row can be joined.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import time
 import uuid
@@ -34,6 +35,8 @@ from collections import deque
 from datetime import UTC, datetime
 from threading import Lock
 from typing import TYPE_CHECKING
+
+from starlette.responses import PlainTextResponse
 
 from syn_adapters.postgres_pool import tally_pool_wait
 from syn_adapters.request_latency import (
@@ -127,6 +130,8 @@ def _route_template(scope: Scope) -> str:
 #: logged, so an unmatched path carrying an id or a token cannot leak through.
 UNMATCHED_ROUTE = "<unmatched>"
 
+_REQUEST_ID_HEADER = b"x-request-id"
+
 
 def _logged_route(scope: Scope) -> str:
     route = scope.get("route")
@@ -157,6 +162,22 @@ class RequestTimingMiddleware:
         self._recorder = recorder if recorder is not None else request_latency_recorder
         self._slow_request_ms = slow_request_ms
 
+    def _offer(self, scope: Scope, arrived: datetime, status: int, ms: float, rid: str) -> None:
+        """Hand one sample to the recorder. Telemetry never fails a request."""
+        try:
+            self._recorder.offer(
+                RequestSample(
+                    time=arrived,
+                    method=scope["method"],
+                    route=_logged_route(scope),
+                    status=status,
+                    duration_ms=ms,
+                    request_id=rid,
+                )
+            )
+        except Exception:
+            logger.debug("request latency sample not offered", exc_info=True)
+
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
@@ -165,6 +186,7 @@ class RequestTimingMiddleware:
         start = time.perf_counter()
         arrived = datetime.now(UTC)
         request_id = uuid.uuid4().hex
+        request_id_header = (_REQUEST_ID_HEADER, request_id.encode())
         responded_at: float | None = None
         status: int | None = None
 
@@ -172,46 +194,52 @@ class RequestTimingMiddleware:
             nonlocal responded_at, status
             if message["type"] == "http.response.start":
                 responded_at = time.perf_counter()
-                status = message["status"]
-                headers = list(message.get("headers", []))
-                headers.append((b"x-request-id", request_id.encode()))
+                started_status: int = message["status"]
+                status = started_status
+                # Ours replaces any the app set: one id per response, and the
+                # one the stored sample carries.
+                headers = [
+                    (name, value)
+                    for name, value in message.get("headers", [])
+                    if name.lower() != _REQUEST_ID_HEADER
+                ]
+                headers.append(request_id_header)
                 message["headers"] = headers
+                # Offered at response START, so a stream that stays open for
+                # an hour is recorded when it answered, not when it closed.
+                self._offer(scope, arrived, started_status, (responded_at - start) * 1000, request_id)
             await send(message)
 
         with tally_pool_wait() as pool_wait:
             try:
                 await self.app(scope, receive, send_noting_response_start)
             except Exception:
-                # An unhandled exception propagates past this middleware to
-                # Starlette's ServerErrorMiddleware, which answers 500. Record
-                # the status the client will see; the exception still raises.
+                # Unhandled: answer the 500 here, so it carries x-request-id
+                # and is recorded like any response, then re-raise so
+                # Starlette's ServerErrorMiddleware still logs it (it sends
+                # nothing once a response has started).
+                if status is None:
+                    with contextlib.suppress(Exception):
+                        await PlainTextResponse("Internal Server Error", status_code=500)(
+                            scope, receive, send_noting_response_start
+                        )
                 if status is None:
                     status = 500
                 raise
             finally:
                 end = time.perf_counter()
                 self._aggregator.record(_route_template(scope), (end - start) * 1000)
-                # No response started means the handler raised or the client
-                # went away: the whole time was spent without an answer.
+                # No response started means the client went away (or the 500
+                # above could not be sent): the whole time was spent unanswered.
                 duration_ms = ((responded_at or end) - start) * 1000
-                route = _logged_route(scope)
-                self._recorder.offer(
-                    RequestSample(
-                        time=arrived,
-                        method=scope["method"],
-                        route=route,
-                        # No response started: the client got the 500 or nothing.
-                        status=status if status is not None else 500,
-                        duration_ms=duration_ms,
-                        request_id=request_id,
-                    )
-                )
+                if responded_at is None:
+                    self._offer(scope, arrived, status or 500, duration_ms, request_id)
                 if duration_ms >= self._slow_request_ms:
                     logger.warning(
                         "slow request method=%s route=%s status=%s duration_ms=%d "
                         "pool_wait_ms=%d request_id=%s",
                         scope["method"],
-                        route,
+                        _logged_route(scope),
                         status if status is not None else "-",
                         duration_ms,
                         pool_wait.wait_ms,
