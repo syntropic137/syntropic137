@@ -37,6 +37,8 @@
   import { FEEDBACK_UI_ATTR, type PinnedElement } from './feedback/element'
   import { APP_NAME, DEFAULT_PRIORITY, DEFAULT_TYPE, PRIORITY_CHOICES, TYPE_CHOICES, type Choice } from './feedback/meta'
   import { feedbackUi } from './feedback.svelte'
+  import { buildView } from '@syn137/skyline-core/screens/version'
+  import { UI_VERSION } from './build.svelte'
 
   type Phase = { kind: 'editing' } | { kind: 'sending' } | { kind: 'sent'; item: FeedbackItem; media: number; mediaFailed: number } | { kind: 'failed'; message: string }
   type Overlay = 'none' | 'element' | 'area'
@@ -174,8 +176,8 @@
     return 'The feedback could not be sent.'
   }
 
-  function contextFooter(theme: string): string {
-    const lines: string[] = []
+  function contextFooter(theme: string, buildText: string): string {
+    const lines: string[] = [buildText]
     if (element) {
       const b = element.box
       lines.push(`element: ${element.label} at ${b.x},${b.y} ${b.width}x${b.height}`)
@@ -206,7 +208,7 @@
         subject_id: page.subject?.id,
         feedback_type: type,
         priority,
-        comment: body + contextFooter(page.theme),
+        comment: body + contextFooter(page.theme, buildView(info, UI_VERSION).text),
         app_name: APP_NAME,
         app_version: info?.version ?? undefined,
         git_commit: info?.commit ?? undefined,
@@ -347,7 +349,7 @@
             <code class="sky-fb__pill" title={location.href}>{route}</code>
             {#if subject}<span class="sky-fb__pill sky-fb__pill--soft">{subject.kind}</span>{/if}
             <span class="sky-fb__pill sky-fb__pill--soft">{innerWidth}×{innerHeight}</span>
-            {#await build then info}{#if info?.version}<span class="sky-fb__pill sky-fb__pill--soft">v{info.version}{info.commit ? ` · ${info.commit.slice(0, 7)}` : ''}</span>{/if}{/await}
+            {#await build then info}{@const v = buildView(info, UI_VERSION)}{#if v.label}<span class="sky-fb__pill sky-fb__pill--soft" data-state={v.mismatch ? 'mismatch' : undefined}>{v.label}{v.commit ? ` · ${v.commit}` : ''}{v.mismatch ? ` · ui v${v.ui}` : ''}</span>{/if}{/await}
             </div>
           </div>
 

@@ -7,6 +7,7 @@
   import { Dialog } from '@syn137/skyline-svelte-v5'
   import { Keycaps } from '@syn137/skyline-svelte-v5/patterns'
   import { tokenCaps } from './keycaps'
+  import BuildInfo from './BuildInfo.svelte'
   import { DOCS_URL, FEATURE_REQUESTS_URL, ISSUES_URL } from '../lib/links'
   import { feedbackUi } from './feedback.svelte'
   import { APPLE, overlays } from './overlays.svelte'
@@ -42,6 +43,7 @@
       <a href={FEATURE_REQUESTS_URL} target="_blank" rel="noopener">Request a feature</a>
       <a href={ISSUES_URL} target="_blank" rel="noopener">Report an issue</a>
     </nav>
+    <div class="sky-keys__build"><BuildInfo variant="block" /></div>
   {/snippet}
 </Dialog>
 
@@ -96,6 +98,11 @@
     flex-wrap: wrap;
     gap: var(--ds-space-2) var(--ds-space-4);
     font-size: var(--ds-text-sm);
+  }
+  .sky-keys__build {
+    flex-basis: 100%;
+    padding-top: var(--ds-space-3);
+    border-top: var(--ds-border-width) solid var(--sky-color-divider);
   }
   .sky-keys__links a {
     color: var(--ds-color-text-muted);

@@ -171,12 +171,13 @@ export const observabilityRoutes: FixtureRoute[] = [
   }),
   route('GET', '/sse/health', () => ({ status: 'ok', active_executions: 1, active_connections: 0 })),
   route('GET', '/features', () => ({ ui_feedback: true })),
+  // Shaped like a real beta deploy: PEP 440 version, semver image tag, a full sha, live 2h13m before FIXTURE_NOW.
   route('GET', '/version', () => ({
-    version: '0.33.1',
-    image_tag: 'fixtures',
-    commit: 'fixtures',
-    started_at: new Date(FIXTURE_NOW).toISOString(),
+    version: '0.33.2b23',
+    image_tag: 'v0.33.2-beta.23',
+    commit: '4f2a9c81d03e6b57a1c9e0f4b8d27365ce1a90b4',
+    started_at: new Date(FIXTURE_NOW - (2 * 60 + 13) * 60_000).toISOString(),
     version_status: 'installed',
-    started_at_display: 'fixtures',
+    started_at_display: '2026-10-08 06:47 UTC',
   })),
 ]

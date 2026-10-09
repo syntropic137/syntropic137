@@ -20,7 +20,11 @@
 </script>
 
 <header class="sky-topnav">
-  <Wordmark href={href('/')} />
+  <div class="sky-topnav__brand">
+    <Wordmark href={href('/')} />
+    <!-- Lazy: the build mark shares the query cache with the route chunk, so the first load stays the same size. -->
+    <div class="sky-topnav__version">{#await import('./BuildInfo.svelte') then { default: BuildInfo }}<BuildInfo />{/await}</div>
+  </div>
 
   <nav class="sky-capsule" aria-label="Primary">
     {#each SECTIONS as s (s.key)}
@@ -59,6 +63,18 @@
     font-size: var(--ds-text-sm);
     line-height: var(--ds-line-height-snug);
     color: var(--ds-color-text-muted);
+  }
+
+  /* The version sits under the wordmark text, outside the row's flow, so the one-row bar keeps its width and height. */
+  .sky-topnav__brand {
+    position: relative;
+    flex-shrink: 0;
+  }
+  .sky-topnav__version {
+    position: absolute;
+    top: calc(100% - var(--ds-space-2-5));
+    left: calc(26px + var(--ds-space-2-5) - var(--ds-space-1));
+    display: flex;
   }
 
   .sky-capsule {

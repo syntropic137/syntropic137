@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { svelte } from '@sveltejs/vite-plugin-svelte'
 import { defineConfig } from 'vitest/config'
 
@@ -18,9 +19,14 @@ const API_AUTH_HEADER = API_AUTH ? `Basic ${Buffer.from(API_AUTH).toString('base
 // Set SYN_UI_BASE=/next/ for that build; the router reads import.meta.env.BASE_URL.
 const BASE = process.env.SYN_UI_BASE ?? '/'
 
+// The bundle's own release, for the shell's "ui" beside the API's version (shell/build.svelte.ts).
+// The product version always comes from the API (getBuildInfo), never from here.
+const { version: UI_VERSION } = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf-8')) as { version: string }
+
 export default defineConfig({
   base: BASE,
   plugins: [svelte()],
+  define: { __SYN_UI_VERSION__: JSON.stringify(UI_VERSION) },
   // Tests run the binding's runes ($effect) on Svelte's client runtime, not the SSR one.
   ...(process.env.VITEST ? { resolve: { conditions: ['browser'] } } : {}),
   server: {

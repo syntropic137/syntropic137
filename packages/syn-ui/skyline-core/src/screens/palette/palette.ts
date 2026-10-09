@@ -7,7 +7,7 @@
 import { commandScore, filterCommandGroups, type CommandFilterItem } from '../../state/commandFilter'
 import { shortcutFor, type KeymapSection } from '../../state/keymap'
 
-export type PaletteCommand = 'run-workflow' | 'copy-page' | 'shortcuts'
+export type PaletteCommand = 'run-workflow' | 'copy-page' | 'copy-build' | 'shortcuts'
 
 export type PaletteTarget = { kind: 'href'; href: string } | { kind: 'external'; url: string } | { kind: 'command'; command: PaletteCommand }
 
@@ -52,6 +52,8 @@ export interface PaletteInput {
   apple?: boolean
   /** How many recent rows per kind. */
   recent?: number
+  /** The running build's short mark (buildView().label), shown as the Help group's Version row. */
+  version?: string | null
 }
 
 const recentItems = (kind: string, base: string, rows: readonly PaletteRecent[] | undefined, n: number): PaletteItem[] =>
@@ -95,6 +97,9 @@ export function buildPalette(input: PaletteInput): PaletteGroup[] {
         { id: 'help-docs', label: 'Documentation', keywords: ['help', 'docs', 'guide'], target: { kind: 'external', url: input.help.docs } },
         { id: 'help-feature', label: 'Request a feature', keywords: ['help', 'feedback', 'idea', 'canny'], target: { kind: 'external', url: input.help.featureRequests } },
         { id: 'help-issue', label: 'Report an issue', keywords: ['help', 'bug', 'github', 'issues'], target: { kind: 'external', url: input.help.issues } },
+        ...(input.version
+          ? [{ id: 'help-version', label: 'Version', meta: input.version, keywords: ['help', 'version', 'build', 'release', 'about', 'copy'], target: { kind: 'command', command: 'copy-build' } } satisfies PaletteItem]
+          : []),
       ],
     },
   ]
@@ -119,6 +124,8 @@ export interface PageSnapshot {
   crumbs: readonly string[]
   /** The page's visible text. */
   text: string
+  /** The running build (buildView().text), so an agent knows which release it is reading. */
+  build?: string
 }
 
 export const PAGE_TEXT_LIMIT = 12_000
@@ -132,5 +139,6 @@ export function pageForAgent(page: PageSnapshot, limit = PAGE_TEXT_LIMIT): strin
     .join('\n')
   const clipped = text.length > limit ? `${text.slice(0, limit)}\n[truncated at ${limit} characters]` : text
   const trail = page.crumbs.length ? `\nTrail: ${page.crumbs.join(' / ')}` : ''
-  return `Syntropic137 page: ${page.title || 'Untitled'}\nURL: ${page.url}${trail}\n\n${clipped}\n`
+  const build = page.build ? `\n${page.build}` : ''
+  return `Syntropic137 page: ${page.title || 'Untitled'}\nURL: ${page.url}${build}${trail}\n\n${clipped}\n`
 }

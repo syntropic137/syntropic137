@@ -64,3 +64,16 @@ describe('pageForAgent', () => {
     expect(out).not.toContain('Trail:')
   })
 })
+
+describe('build in the palette', () => {
+  it('adds a Version row to Help only once the build is known', () => {
+    const help = (version?: string | null) => buildPalette({ sections, help: { docs: 'd', featureRequests: 'f', issues: 'i' }, version }).find((g) => g.heading === 'Help')!
+    expect(help(null).items.map((i) => i.id)).not.toContain('help-version')
+    expect(help('v0.33.2b23').items.at(-1)).toMatchObject({ id: 'help-version', label: 'Version', meta: 'v0.33.2b23', target: { kind: 'command', command: 'copy-build' } })
+    expect(filterPalette(buildPalette({ sections, help: { docs: 'd', featureRequests: 'f', issues: 'i' }, version: 'v1' }), 'version')[0]!.items[0]!.id).toBe('help-version')
+  })
+  it('puts the build line under the URL in the agent block', () => {
+    const out = pageForAgent({ title: 'Overview', url: 'u', crumbs: [], text: 'x', build: 'Build: API v0.33.2b23' })
+    expect(out).toBe('Syntropic137 page: Overview\nURL: u\nBuild: API v0.33.2b23\n\nx\n')
+  })
+})

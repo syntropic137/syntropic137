@@ -72,6 +72,7 @@
           </button>
         </li>
       </ul>
+      <div class="sky-more__build">{#await import('./BuildInfo.svelte') then { default: BuildInfo }}<BuildInfo variant="block" />{/await}</div>
     </div>
   {/if}
 
@@ -172,6 +173,11 @@
     border: var(--ds-border-width) solid var(--sky-color-border-strong);
     background: var(--ds-color-surface-raised);
     box-shadow: var(--sky-shadow-overlay);
+  }
+  .sky-more__build {
+    margin-top: var(--ds-space-1-5);
+    padding: var(--ds-space-2-5) var(--ds-space-2-5) var(--ds-space-1);
+    border-top: var(--ds-border-width) solid var(--sky-color-divider);
   }
   .sky-more__list {
     display: flex;

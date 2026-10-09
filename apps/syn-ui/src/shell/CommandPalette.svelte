@@ -11,6 +11,7 @@
   import { resource } from '../lib/load.svelte'
   import { page } from '../lib/page.svelte'
   import { href, router } from '../lib/router'
+  import { useBuild } from './build.svelte'
   import { SECTIONS } from './nav'
   import { APPLE, overlays } from './overlays.svelte'
 
@@ -18,6 +19,8 @@
   const executions = resource((signal) => listExecutions({ page: 1, page_size: 6 }, signal))
   const workflows = resource((signal) => listWorkflows({ page_size: 100 }, signal))
   const sessions = resource((signal) => listSessions({ page: 1, page_size: 6 }, signal))
+  /** The running build: the Help group's Version row, and the first lines of every copied page. */
+  const build = useBuild()
 
   let search = $state('')
 
@@ -26,6 +29,7 @@
       sections: SECTIONS,
       apple: APPLE,
       help: HELP_LINKS,
+      version: build.view.label,
       executions: executions.data?.executions.map((e) => ({
         id: e.workflow_execution_id,
         label: e.workflow_name,
@@ -42,14 +46,7 @@
     }),
   )
 
-  async function copyPage() {
-    const main = document.getElementById('sky-main')
-    const text = pageForAgent({
-      title: page.title || document.title,
-      url: location.href,
-      crumbs: page.crumbs.map((c) => c.label),
-      text: main?.innerText ?? '',
-    })
+  async function copy(text: string) {
     try {
       await navigator.clipboard.writeText(text)
     } catch {
@@ -57,9 +54,22 @@
     }
   }
 
+  async function copyPage() {
+    const main = document.getElementById('sky-main')
+    const text = pageForAgent({
+      title: page.title || document.title,
+      url: location.href,
+      crumbs: page.crumbs.map((c) => c.label),
+      build: build.view.text,
+      text: main?.innerText ?? '',
+    })
+    await copy(text)
+  }
+
   const COMMANDS: Record<PaletteCommand, () => void> = {
     'run-workflow': () => router.navigate(href('/workflows')),
     'copy-page': () => void copyPage(),
+    'copy-build': () => void copy(build.view.text),
     shortcuts: () => overlays.openShortcuts(),
   }
 
