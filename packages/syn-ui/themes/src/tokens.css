@@ -110,6 +110,7 @@
   --sky-size-touch: 2.75rem;
   --sky-size-nav-item: 2.125rem;  /* 34 capsule items */
   --sky-size-dock-item: 3.25rem;  /* 52 dock items */
+  --sky-size-feedback-bubble: 2.5rem; /* 40 floating feedback bubble */
   --sky-size-icon-sm: 0.875rem;   /* 14 */
   --sky-size-icon-md: 0.9375rem;  /* 15 */
   --sky-size-icon-lg: 1.125rem;   /* 18 */

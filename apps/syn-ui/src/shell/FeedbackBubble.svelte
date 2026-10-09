@@ -1,8 +1,9 @@
 <!--
   Floating feedback bubble (#1385), bottom right, above the dock on phones.
   Port of the React widget's WidgetButton: a menu with Quick note, Pin to
-  element and Recent feedback, and an open-count badge. Shortcuts: `f`
-  (KEYMAP) opens a note; the React widget's Ctrl+Shift+Q / F / T still work.
+  element and Recent feedback, and an open-count badge. Shortcuts (`f`, and
+  the React widget's Ctrl+Shift+Q / F / T) live in skyline-core's KEYMAP and
+  are handled once, by shell/keyboard.ts; this file only reacts to them.
   Lazy-loaded by AppShell on a developer machine only.
 -->
 <script lang="ts">
@@ -75,34 +76,22 @@
     void loadRecent()
   }
 
-  // A closed <dialog role="dialog"> stays in the DOM, so only open ones count.
-  const MODAL = 'dialog[open], [role="dialog"]:not(dialog), [role="alertdialog"]:not(dialog), [role="menu"]'
-
-  function typing(t: EventTarget | null): boolean {
-    if (!(t instanceof HTMLElement)) return false
-    return t.isContentEditable || t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement || t instanceof HTMLInputElement
-  }
+  // The Recent feedback shortcut (KEYMAP `feedback-recent`) bumps this.
+  let seenRecent = feedbackUi.recentRequest
+  $effect(() => {
+    if (feedbackUi.recentRequest === seenRecent) return
+    seenRecent = feedbackUi.recentRequest
+    showRecent()
+  })
 
   function onKey(e: KeyboardEvent) {
     if (!feedbackUi.enabled || e.defaultPrevented) return
     if (e.key === 'Escape' && menu) {
+      // Consumed, so the app keymap does not also go back.
+      e.preventDefault()
       close()
       trigger?.focus()
-      return
     }
-    // `f` (KEYMAP id `feedback`): a note, from the page, never while typing or with a dialog open.
-    if (e.key === 'f' && !e.ctrlKey && !e.metaKey && !e.altKey && !typing(e.target) && !document.querySelector(MODAL)) {
-      e.preventDefault()
-      note()
-      return
-    }
-    if (!e.ctrlKey || !e.shiftKey || e.altKey || e.metaKey) return
-    const k = e.key.toLowerCase()
-    if (k === 'q') note()
-    else if (k === 'f') pick()
-    else if (k === 't') showRecent()
-    else return
-    e.preventDefault()
   }
 
   function onDocClick(e: MouseEvent) {
@@ -170,7 +159,7 @@
       title="Feedback (F)"
       onclick={() => (menu ? close() : (menu = true))}
     >
-      {#if menu}<X size={20} aria-hidden="true" />{:else}<MessageSquarePlus size={20} aria-hidden="true" />{/if}
+      {#if menu}<X size={18} aria-hidden="true" />{:else}<MessageSquarePlus size={18} aria-hidden="true" />{/if}
     </button>
     {#if openCount > 0 && !menu}<span class="sky-fb-bubble__badge" aria-label="{openCount} open">{openCount}</span>{/if}
   </div>
@@ -190,17 +179,25 @@
   .sky-fb-bubble__btn {
     display: grid;
     place-items: center;
-    width: var(--ds-space-12);
-    height: var(--ds-space-12);
-    border-radius: 50%;
-    border: var(--ds-border-width) solid var(--sky-color-border-strong);
-    background: var(--sky-color-accent-solid);
-    color: var(--sky-color-accent-solid-contrast);
+    width: var(--sky-size-feedback-bubble);
+    height: var(--sky-size-feedback-bubble);
+    border-radius: var(--ds-radius-full);
+    border: var(--ds-border-width) solid var(--ds-color-border);
+    background: var(--sky-color-control);
+    color: var(--ds-color-fg);
     cursor: pointer;
-    box-shadow: var(--ds-shadow-md);
+    box-shadow: var(--sky-shadow-float);
+    transition:
+      background-color var(--sky-duration-fast) var(--sky-ease-out),
+      border-color var(--sky-duration-fast) var(--sky-ease-out),
+      color var(--sky-duration-fast) var(--sky-ease-out);
   }
-  .sky-fb-bubble__btn:hover {
-    background: var(--sky-color-accent-solid-highlight);
+  .sky-fb-bubble__btn:hover,
+  .sky-fb-bubble__btn:focus-visible,
+  .sky-fb-bubble__btn[aria-expanded='true'] {
+    border-color: var(--sky-color-border-hover);
+    background: var(--sky-color-control-hover);
+    color: var(--ds-color-accent);
   }
   .sky-fb-bubble__btn:focus-visible,
   .sky-fb-bubble__item:focus-visible,
@@ -211,16 +208,19 @@
   .sky-fb-bubble__badge {
     position: absolute;
     right: calc(var(--ds-space-1) * -1);
-    bottom: calc(var(--ds-space-12) - var(--ds-space-3));
-    min-width: var(--ds-space-5);
+    bottom: calc(var(--sky-size-feedback-bubble) - var(--ds-space-2-5));
+    min-width: var(--ds-space-4);
     padding: 0 var(--ds-space-1);
     border-radius: var(--ds-radius-full);
-    background: var(--ds-color-danger);
-    color: var(--ds-color-bg);
-    font-size: var(--ds-text-xs);
-    font-weight: 600;
-    line-height: 1.5;
+    border: var(--ds-border-width) solid var(--ds-color-bg);
+    background: var(--ds-color-accent);
+    color: var(--ds-color-accent-contrast);
+    font-family: var(--ds-font-mono);
+    font-size: var(--sky-text-label);
+    font-variant-numeric: tabular-nums;
+    line-height: 1.45;
     text-align: center;
+    pointer-events: none;
   }
   .sky-fb-bubble__panel {
     display: flex;
@@ -232,7 +232,7 @@
     border-radius: var(--ds-radius-lg);
     border: var(--ds-border-width) solid var(--sky-color-border-strong);
     background: var(--ds-color-surface-raised);
-    box-shadow: var(--ds-shadow-md);
+    box-shadow: var(--sky-shadow-overlay);
   }
   .sky-fb-bubble__item {
     display: flex;
@@ -260,8 +260,9 @@
     color: var(--ds-color-text-subtle);
   }
   .sky-fb-bubble__count {
+    font-family: var(--ds-font-mono);
     font-size: var(--ds-text-xs);
-    color: var(--ds-color-danger);
+    color: var(--ds-color-accent);
   }
   .sky-fb-bubble__recent-head {
     display: flex;
