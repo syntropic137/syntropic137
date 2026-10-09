@@ -41,7 +41,7 @@ import logging
 import os
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -376,12 +376,26 @@ async def reclaim_on_a_clock(
 _reclaim_task: asyncio.Task[None] | None = None
 
 
-def start_workspace_reclaim(is_live: Callable[[], bool]) -> None:
-    """Start the clock, once. Called after subscriptions are live."""
+class _Subscriptions(Protocol):
+    @property
+    def is_live(self) -> bool: ...
+
+
+def start_workspace_reclaim(subscriptions: Callable[[], _Subscriptions | None]) -> None:
+    """Start the clock, once. Called after subscriptions are live.
+
+    ``subscriptions`` returns the coordinator the API holds at each call, not
+    the one it held at start: the clock starts once, and a recovery re-run of
+    the init replaces the coordinator under it. None is not live.
+    """
     global _reclaim_task
     if _reclaim_task is not None and not _reclaim_task.done():
         return
     from syn_shared.settings import get_settings
+
+    def is_live() -> bool:
+        current = subscriptions()
+        return current is not None and current.is_live
 
     _reclaim_task = asyncio.create_task(
         reclaim_on_a_clock(

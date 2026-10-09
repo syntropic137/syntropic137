@@ -3,6 +3,7 @@ directory could stay claimed or a pass could trust a stale or emptied input."""
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock
@@ -17,6 +18,7 @@ from syn_api.services import lifecycle, workspace_dir_reclaim
 from syn_api.services.read_model_status import read_models_rebuilding
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
 pytestmark = pytest.mark.unit
@@ -197,11 +199,11 @@ async def test_reclaim_follows_the_coordinator_a_recovery_re_init_installs(
     first, second = AsyncMock(), AsyncMock()
     first.is_live, second.is_live = True, False
     coordinators = iter([first, second])
-    started: list[object] = []
+    clocks: list[Callable[[], bool]] = []
 
-    def start_once(is_live: object) -> None:
-        if not started:  # as the real one: a running clock is not restarted
-            started.append(is_live)
+    async def clock(_reclaimer: object, *, is_live: Callable[[], bool], **_kw: object) -> None:
+        clocks.append(is_live)
+        await asyncio.Event().wait()
 
     pager_calls: list[None] = []
 
@@ -214,22 +216,25 @@ async def test_reclaim_follows_the_coordinator_a_recovery_re_init_installs(
     monkeypatch.setattr(lifecycle, "get_subscription_coordinator", lambda **_kw: next(coordinators))
     monkeypatch.setattr(lifecycle, "announce_admission_if_open", AsyncMock())
     monkeypatch.setattr(lifecycle, "start_disk_recovery_watch", lambda: None)
-    monkeypatch.setattr(lifecycle, "start_workspace_reclaim", start_once)
     monkeypatch.setattr(lifecycle, "start_disk_pager", pager_fails_first_time)
+    monkeypatch.setattr(workspace_dir_reclaim, "default_reclaimer", lambda _is_live: None)
+    monkeypatch.setattr(workspace_dir_reclaim, "reclaim_on_a_clock", clock)
     monkeypatch.setattr("syn_api._wiring_inventory.get_inventory_runtime", AsyncMock)
     state = lifecycle.LifecycleState(workflow_dispatcher=AsyncMock())
-    with pytest.raises(RuntimeError):
-        await lifecycle._init_subscriptions(state)
-    await lifecycle._init_subscriptions(state)  # the recovery loop's retry
-
-    assert state.subscription_service is second
-    (is_live,) = started
-    assert callable(is_live)
-    assert is_live() is False  # the first coordinator is live; the current one is not
-    second.is_live = True
-    assert is_live() is True
-    state.subscription_service = None
-    assert is_live() is False
+    try:
+        with pytest.raises(RuntimeError):
+            await lifecycle._init_subscriptions(state)
+        await lifecycle._init_subscriptions(state)  # the recovery loop's retry
+        await asyncio.sleep(0)
+        assert state.subscription_service is second
+        (is_live,) = clocks  # one clock, started by the first init
+        assert is_live() is False  # the first coordinator is live; the current one is not
+        second.is_live = True
+        assert is_live() is True
+        state.subscription_service = None
+        assert is_live() is False
+    finally:
+        await workspace_dir_reclaim.stop_workspace_reclaim()
 
 
 # -- 4: a rebuilding read model skips the pass, and fails closed --
