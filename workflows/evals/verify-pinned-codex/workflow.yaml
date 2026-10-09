@@ -36,6 +36,9 @@ phases:
       - markdown
     timeout_seconds: 3600
     delivers_repo_changes: false
+    # A review: no review_verdict fails the phase instead of completing it, so
+    # the eval scores ERROR rather than a FAIL nobody judged (PC-116, #1780).
+    requires_verdict: true
     # No allowed_tools: codex enforces a filesystem sandbox, not a tool
     # vocabulary, so the validator refuses a tool list on it. The sandbox is
     # workspace-write, not read-only: read-only is refused at authoring and at

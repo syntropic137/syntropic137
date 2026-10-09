@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 from event_sourcing import AutoDispatchProjection
 
 from syn_domain.contexts.orchestration._shared.tags import TagSet, replay_tag_edit
+from syn_domain.contexts.orchestration._shared.unapplied_start import UnappliableStartError
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     DelegationFailure,
     FailureClassification,
@@ -269,7 +270,7 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         """
         execution_id = event_data.get("execution_id", "")
         if not execution_id:
-            return
+            raise UnappliableStartError(self.PROJECTION_NAME)
 
         # What the run was dispatched with. Kept whole (#1307): this is the only
         # record of what the run was ASKED to do, and a reader retrying a run

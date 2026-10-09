@@ -28,6 +28,20 @@ Started by `SessionStarted`, ended by `SessionCompleted`. A Session that never
 completed is not an error in itself - the run may have been killed - but it has
 no final totals.
 
+## Requested Model and Observed Model
+
+Two different facts about which model a Session used, never conflated
+(ADR-067 D9). The **requested model** is what the phase asked for, often an
+alias such as `gpt-sol`; `SessionStarted` records it (as `agent_model`, its
+historical name) and the session summary keeps it as `requested_model`. The
+**observed model** is what the harness reported it ran, such as
+`gpt-6.1-sol`, carried on Lane 2 observations as `model` and served as
+`agent_model`.
+
+A running codex Session has only the requested model until its stream ends,
+and is displayed as `gpt-sol (requested)`. The observed model replaces that
+display once it is known.
+
 ## Operation
 
 One thing an agent did inside a Session: a tool call, a file edit, a command.

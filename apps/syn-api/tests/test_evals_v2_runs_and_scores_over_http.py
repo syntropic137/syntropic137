@@ -20,6 +20,8 @@ from typing import TYPE_CHECKING
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from syn_api.routes.executions.models import ExecutionListResponse
+from syn_api.types import ExecutionEvalRunResponse
 from syn_domain.contexts.agent_sessions.domain.read_models.session_cost import SessionCost
 from syn_domain.contexts.orchestration import TagSet, WorkflowExecutionAggregate
 from syn_domain.contexts.orchestration._shared.eval_choice import EvalSelection, LaunchEval
@@ -68,6 +70,7 @@ class _Lane2:
         self.observed: dict[str, str] = {}
         self.costs: dict[str, Decimal] = {}
         self.by_phase: dict[str, dict[str, dict[str, Decimal]]] = {}
+        self.unpriced: dict[str, int] = {}
 
     async def get_session_cost(self, session_id: str) -> SessionCost | None:
         model = self.observed.get(session_id)
@@ -87,6 +90,7 @@ class _Lane2:
             input_tokens=10,
             output_tokens=10,
             models_by_phase=self.by_phase.get(execution_id, {}),
+            unpriced_observation_count=self.unpriced.get(execution_id, 0),
         )
 
 
@@ -197,6 +201,46 @@ async def _pin_started_at(execution_id: str, started_at: str) -> None:
     row = await store.get("workflow_executions", execution_id)
     assert row is not None
     await store.save("workflow_executions", execution_id, {**row, "started_at": started_at})
+
+
+async def _complete_with_an_unmeasured_phase(execution_id: str, *, verify_seconds: float) -> None:
+    """Rewrite the run's DETAIL record as a completed execution with two phases:
+    ``verify`` took ``verify_seconds``; ``review`` finished with no recorded
+    duration and no timestamps, so nobody knows how long it took (#890).
+
+    Stored exactly as the projection stores phases, so the real ``get_detail``
+    resolves the durations and counts the unknown phase itself.
+    """
+    from syn_adapters.projections.manager import get_projection_manager
+
+    store = get_projection_manager().store
+    row = await store.get("workflow_execution_details", execution_id)
+    assert row is not None
+    [verify] = row["phases"]
+    phases = [
+        {
+            **verify,
+            "status": "completed",
+            "started_at": "2026-10-01T00:00:00+00:00",
+            "completed_at": "2026-10-01T00:05:00+00:00",
+            "duration_seconds": verify_seconds,
+        },
+        {
+            **verify,
+            "workflow_phase_id": "review",
+            "name": "Review",
+            "status": "completed",
+            "session_id": None,
+            "started_at": None,
+            "completed_at": None,
+            "duration_seconds": None,
+        },
+    ]
+    await store.save(
+        "workflow_execution_details",
+        execution_id,
+        {**row, "status": "completed", "phases": phases},
+    )
 
 
 async def _score(client: AsyncClient, eval_id: str, execution_id: str, verdict: str):
@@ -405,6 +449,65 @@ class TestSummary:
             # ERROR-only: nothing was judged, so no rate rather than 0%.
             assert variants["wf-b", "1.0.0", (OPUS,)]["pass_count"] == 0
             assert variants["wf-b", "1.0.0", (OPUS,)]["pass_rate"] is None
+            assert variants["wf-b", "1.0.0", (OPUS,)]["last_verdict"] == "ERROR"
+            assert v1_opus["stats"]["median_cost_display"] == "$1.00"
+            assert v1_opus["stats"]["cost_per_pass_display"] == "$1.00"
+            assert v2_opus["stats"]["cost_per_pass_display"] == "—"
+
+    async def test_eval_figures_cover_every_run_not_one_page_of_runs(
+        self, client: AsyncClient, lane2: _Lane2
+    ) -> None:
+        """The detail's aggregates are the eval's, whatever page of runs the page shows."""
+        eval_id = await _two_by_two(client, lane2)
+
+        page = (await client.get(f"/evals/{eval_id}/runs", params={"page_size": 1})).json()
+        shown = (await client.get(f"/evals/{eval_id}")).json()
+
+        assert (len(page["items"]), page["total"]) == (1, 5)
+        assert sum(v["run_count"] for v in shown["variants"]) == 5
+        # Costs 1.00, 3.00, 0.50, 2.00, 0.25: median 1.00 over every run. Cost per
+        # PASS is the SCORED spend 6.50 (ERROR's 2.00 in, unscored r5's 0.25 out)
+        # over two PASS runs.
+        assert shown["stats"]["median_cost_display"] == "$1.00"
+        assert Decimal(shown["stats"]["cost_per_pass_usd"]) == Decimal("3.25")
+        assert shown["stats"]["cost_per_pass_display"] == "$3.25"
+
+    async def test_a_lower_bound_is_never_shown_as_a_whole_cost_or_duration(
+        self, client: AsyncClient, lane2: _Lane2
+    ) -> None:
+        """r1 (PASS, $1.00) had an unpriced observation and a phase of unknown
+        duration, so both its figures are lower bounds (#890). They must say so
+        on the run, stay out of the medians, and make cost per PASS partial."""
+        lane2.unpriced["r1"] = 1
+        eval_id = await _two_by_two(client, lane2)
+        await _complete_with_an_unmeasured_phase("r1", verify_seconds=300.0)
+
+        runs = (await client.get(f"/evals/{eval_id}/runs")).json()["items"]
+        shown = (await client.get(f"/evals/{eval_id}")).json()
+
+        r1 = next(r for r in runs if r["execution_id"] == "r1")
+        assert r1["total_cost_display"] == ">=$1.00 (partial)"
+        # The real get_detail folded 300s known + one unmeasured phase.
+        assert r1["duration_seconds"] == 300.0
+        assert r1["duration_display"] == ">=5m (partial)"
+        # The four complete costs 3.00, 0.50, 2.00, 0.25: median 1.25, not 1.00.
+        assert Decimal(shown["stats"]["median_cost_usd"]) == Decimal("1.25")
+        assert shown["stats"]["median_cost_display"] == "$1.25 (excl. 1 incomplete)"
+        assert shown["stats"]["incomplete_duration_count"] == 1
+        # The other four are still running, so their live durations are the median.
+        assert shown["stats"]["median_duration_display"].endswith(" (excl. 1 incomplete)")
+        assert shown["stats"]["cost_per_pass_display"] == ">=$3.25 (partial)"
+        [v1_opus] = [
+            v
+            for v in shown["variants"]
+            if (v["workflow_id"], v["workflow_version"], v["models"]) == ("wf-a", "1.0.0", [OPUS])
+        ]
+        # Its only run is a lower bound: no median to show, and it cannot win on cost.
+        assert v1_opus["stats"]["median_cost_usd"] is None
+        assert v1_opus["avg_cost_usd"] is None
+        assert v1_opus["stats"]["cost_per_pass_display"] == ">=$1.00 (partial)"
+        assert v1_opus["stats"]["incomplete_duration_count"] == 1
+        assert v1_opus["stats"]["median_duration_seconds"] is None
 
 
 class TestScore:
@@ -507,6 +610,110 @@ class TestExecutionDetailCarriesItsEval:
 
         assert detached.status_code == 200, detached.text
         assert (await client.get("/executions/r2")).json()["eval"] is None
+
+
+class TestExecutionListCarriesItsEval:
+    """``GET /executions``'s ``eval``: the badge on each row of the execution list."""
+
+    async def _evals(self, client: AsyncClient) -> dict[str, ExecutionEvalRunResponse | None]:
+        """Each listed execution's ``eval``, read back through the response model."""
+        response = await client.get("/executions")
+        assert response.status_code == 200, response.text
+        listed = ExecutionListResponse.model_validate(response.json())
+        return {row.workflow_execution_id: row.eval for row in listed.executions}
+
+    async def test_each_row_carries_its_eval_and_verdict_and_an_ordinary_run_none(
+        self, client: AsyncClient, lane2: _Lane2
+    ) -> None:
+        eval_id = await _two_by_two(client, lane2)
+        await _run(lane2, None, "ordinary", "wf-a", OPUS, "1", "2026-10-06T00:00:00+00:00")
+
+        evals = await self._evals(client)
+
+        assert evals["ordinary"] is None
+        detail = (await client.get("/executions/r2")).json()["eval"]
+        assert evals["r2"] == ExecutionEvalRunResponse.model_validate(detail)
+        verdicts = {key: run.verdict for key, run in evals.items() if run is not None}
+        assert verdicts == {"r1": "PASS", "r2": "FAIL", "r3": "PASS", "r4": "ERROR", "r5": None}
+        assert {run.eval_name for run in evals.values() if run is not None} == {
+            "verifier-seed: case-1"
+        }
+        r5 = evals["r5"]
+        assert r5 is not None and r5.eval_id == eval_id
+
+    async def test_a_score_from_an_eval_the_run_left_is_not_its_verdict(
+        self, client: AsyncClient, lane2: _Lane2
+    ) -> None:
+        first = await _two_by_two(client, lane2)
+        created = await client.post("/evals", json={"name": "second", "goal": "Another goal"})
+        assert created.status_code == 201, created.text
+        second = created.json()["eval_id"]
+
+        assert (await client.delete("/executions/r2/eval", params={"eval_id": first})).is_success
+        assert (await client.post("/executions/r2/eval", json={"eval_id": second})).is_success
+        await _project_executions()
+        await _catch_up()
+
+        shown = (await self._evals(client))["r2"]
+
+        assert shown == ExecutionEvalRunResponse(
+            eval_id=second,
+            eval_name="second",
+            association_kind="attached",
+            verdict=None,
+            score=None,
+            scored_at=None,
+        )
+
+    async def test_in_eval_keeps_eval_runs_or_everything_else(
+        self, client: AsyncClient, lane2: _Lane2
+    ) -> None:
+        await _two_by_two(client, lane2)
+        await _run(lane2, None, "ordinary", "wf-a", OPUS, "1", "2026-10-06T00:00:00+00:00")
+
+        evals_only = await client.get("/executions", params={"in_eval": "true"})
+        hide_evals = await client.get("/executions", params={"in_eval": "false"})
+
+        assert sorted(r["workflow_execution_id"] for r in evals_only.json()["executions"]) == [
+            "r1",
+            "r2",
+            "r3",
+            "r4",
+            "r5",
+        ]
+        assert evals_only.json()["total"] == 5
+        assert [r["workflow_execution_id"] for r in hide_evals.json()["executions"]] == ["ordinary"]
+        assert hide_evals.json()["total"] == 1
+        assert len(await self._evals(client)) == 6
+
+    async def test_a_page_of_eval_runs_reads_the_eval_model_twice_not_per_row(
+        self, client: AsyncClient, lane2: _Lane2, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from syn_adapters.projections.manager import get_projection_manager
+
+        await _two_by_two(client, lane2)
+        store = get_projection_manager().store
+        reads: list[str] = []
+        real_get, real_query = store.get, store.query
+
+        async def get(projection: str, key: str):
+            reads.append(projection)
+            return await real_get(projection, key)
+
+        async def query(projection: str, *args, **kwargs):
+            reads.append(projection)
+            return await real_query(projection, *args, **kwargs)
+
+        monkeypatch.setattr(store, "get", get)
+        monkeypatch.setattr(store, "query", query)
+
+        evals = await self._evals(client)
+
+        assert len([run for run in evals.values() if run is not None]) == 5
+        assert sorted(r for r in reads if r in ("evals", "eval_run_scores")) == [
+            "eval_run_scores",
+            "evals",
+        ]
 
 
 async def _start_resumed_child(

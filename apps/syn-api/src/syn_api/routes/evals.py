@@ -47,14 +47,17 @@ from syn_api.routes.eval_runs import (
     eval_run_page,
     eval_summary,
     pass_rate_display,
+    stats_response,
     variant_responses,
 )
+from syn_api.services.read_model_status import read_model_status
 from syn_api.types import (
     AttachEvalRequest,
     CreateEvalRequest,
     EvalArchivedResponse,
     EvalBaselineRepoResponse,
     EvalCreatedResponse,
+    EvalDetailResponse,
     EvalListResponse,
     EvalResponse,
     EvalRunListResponse,
@@ -82,6 +85,7 @@ from syn_domain.contexts.orchestration import (
     SetWorkflowDefaultEvalCommand,
     SetWorkflowDefaultEvalHandler,
 )
+from syn_domain.contexts.orchestration.slices.list_evals.projection import EvalListProjection
 
 if TYPE_CHECKING:
     from syn_adapters.projections.manager import ProjectionManager
@@ -259,6 +263,7 @@ async def _response(
         last_run_at=summary.last_run_at,
         last_verdict=summary.last_verdict,
         variants=variant_responses(summary),
+        stats=stats_response(summary.stats),
     )
 
 
@@ -357,11 +362,12 @@ async def list_evals_endpoint(
         page=page,
         page_size=page_size,
         status_counts=result.status_counts,
+        read_model_status=await read_model_status(EvalListProjection.PROJECTION_NAME),
     )
 
 
-@router.get("/evals/{eval_id}", response_model=EvalResponse, responses=_EVAL_RESPONSES)
-async def get_eval_endpoint(eval_id: str) -> EvalResponse:
+@router.get("/evals/{eval_id}", response_model=EvalDetailResponse, responses=_EVAL_RESPONSES)
+async def get_eval_endpoint(eval_id: str) -> EvalDetailResponse:
     """One eval with its Baseline and run tally. Its runs are `GET /evals/{eval_id}/runs`."""
     from syn_api.prefix_resolver import resolve_or_raise
 
@@ -371,7 +377,11 @@ async def get_eval_endpoint(eval_id: str) -> EvalResponse:
     detail = await manager.eval_list.detail(eval_id, limit=0)
     if detail is None:
         raise HTTPException(status_code=404, detail=f"Eval not found: {eval_id}")
-    return await _response(manager, detail.record, detail.runs.total, detail.runs.status_counts)
+    row = await _response(manager, detail.record, detail.runs.total, detail.runs.status_counts)
+    return EvalDetailResponse(
+        **row.model_dump(),
+        read_model_status=await read_model_status(EvalListProjection.PROJECTION_NAME),
+    )
 
 
 @router.get("/evals/{eval_id}/runs", response_model=EvalRunListResponse, responses=_EVAL_RESPONSES)

@@ -44,7 +44,7 @@ help:
 
 # Self-host onboarding: use the NPX CLI — zero-clone, zero-dep, interactive wizard
 # npx @syntropic137/setup init
-# See https://github.com/syntropic137/syntropic137-npx for full documentation.
+# See https://github.com/syntropic137/syntropic137-setup for full documentation.
 
 # Dev onboarding: submodules → .env → deps → webhook URL → GitHub App → stack
 # GitHub App setup runs by default (use --skip-github to skip).
@@ -693,6 +693,14 @@ workspace-versions:
 check-pinned-image-channels:
     @uv run python scripts/check_pinned_image_channels.py
 
+# The event-store image for the ESP version at the lib/event-sourcing-platform
+# gitlink must be published as a multi-arch index (#1515). The release pins
+# exactly that tag with no `latest` fallback, so this fails a PR that moves the
+# gitlink to an unreleased ESP version instead of failing the release later.
+# Same script the release job runs. Needs network and docker buildx.
+check-event-store-pin:
+    @uv run python scripts/resolve_event_store_digest.py
+
 # Every fixed (non-${VAR}) image in the compose files must pull anonymously.
 # quay.io/minio/minio withdrew public pulls on 2026-09-24 with no diff on our
 # side; only the post-merge smoke test noticed. Needs network, no credentials.
@@ -1060,7 +1068,7 @@ fitness-invariants-agent:
 #
 # Add a gate here, never to CI alone. `test_ci_and_preflight_agree.py` fails
 # if a `just` target CI runs is not in this closure.
-preflight: preflight-portable check-submodules vsa-validate fitness codegen-check check-compose-overlays check-default-workspace-image check-pinned-image-channels check-compose-images-public
+preflight: preflight-portable check-submodules vsa-validate fitness codegen-check check-architecture-docs check-compose-overlays check-default-workspace-image check-pinned-image-channels check-event-store-pin check-compose-images-public
     @echo "✅ preflight: every STATIC CI gate passed locally"
     @echo "   Not covered here: unit tests, dashboard build, CLI checks and"
     @echo "   the docs build. Run 'just qa-ci' for all of those."
@@ -1101,6 +1109,8 @@ preflight-portable: check-agent-docs lint format-check typecheck validate-domain
 #   check-compose-overlays             exit 127  no docker CLI
 #   check-default-workspace-image      exit 127  no docker CLI
 #   check-pinned-image-channels        exit 1    no registry credentials
+#   check-event-store-pin              (added 2026-10-04, not measured in the
+#                                      image; needs the docker CLI, absent)
 #
 # Re-measure before moving a recipe across the line. "It should work" is how
 # a gate ends up passing because it never ran.
@@ -1147,7 +1157,7 @@ preflight-agent: preflight-portable fitness-agent fitness-invariants-agent
     @echo "   Not run here (no toolchain in the image): vsa-validate,"
     @echo "   codegen-check, check-submodules, check-compose-overlays,"
     @echo "   check-default-workspace-image, check-pinned-image-channels,"
-    @echo "   check-compose-images-public."
+    @echo "   check-event-store-pin, check-compose-images-public."
     @echo "   CI runs all of those. Run 'just preflight' on a dev machine."
 
 # Regenerate CLAUDE.md from AGENTS.md.
@@ -1852,12 +1862,6 @@ health-json:
 
 # --- Documentation ---
 
-# Generate architecture diagram (SVG from VSA manifest)
-diagram:
-    @echo "🏗️  Generating architecture diagrams..."
-    @cd lib/event-sourcing-platform/vsa/vsa-visualizer && npm run build > /dev/null 2>&1
-    @node lib/event-sourcing-platform/vsa/vsa-visualizer/dist/index.js .topology/syn-manifest.json --format svg --type architecture --output docs/architecture
-
 # Generate CLI reference docs from Node CLI command metadata
 docs-cli-gen:
     @echo "📄 Generating CLI reference docs..."
@@ -1867,27 +1871,21 @@ docs-cli-gen:
 docs: docs-cli-gen
     cd apps/syn-docs && pnpm run dev
 
-# Generate auto-generated architecture documentation
-docs-gen:
-    @echo "🤖 Generating architecture documentation..."
-    @uv run python scripts/generate-architecture-docs.py
+# Regenerate ALL generated architecture docs from the source tree: rebuilds the
+# VSA manifest, then vsa-overview.svg, projection-subscriptions.md,
+# event-flows/README.md and the README counts row. Hand-written docs under
+# docs/architecture/ are not touched.
+docs-regen:
+    @scripts/architecture-docs.sh
 
-# Regenerate ALL architecture documentation (diagram + auto-generated docs)
-docs-regen: diagram docs-gen
-    @echo ""
-    @echo "✅ All architecture documentation regenerated!"
-    @echo ""
-    @echo "📊 Auto-generated:"
-    @echo "   • docs/architecture/vsa-overview.svg"
-    @echo "   • docs/architecture/projection-subscriptions.md"
-    @echo "   • docs/architecture/event-flows/README.md"
-    @echo "   • README.md (counts updated)"
-    @echo ""
-    @echo "📝 Manual (edit directly):"
-    @echo "   • docs/architecture/event-architecture.md"
-    @echo "   • docs/architecture/realtime-communication.md"
-    @echo "   • docs/architecture/docker-workspace-lifecycle.md"
-    @echo "   • docs/architecture/infrastructure-data-flow.md"
+alias diagram := docs-regen
+alias docs-gen := docs-regen
+
+# Fail when the committed architecture docs differ from a fresh regeneration
+# (temp dir, never the working tree). In `preflight`, so CI's preflight job
+# runs it; needs vsa, so it cannot be in preflight-portable/-agent.
+check-architecture-docs:
+    @scripts/architecture-docs.sh --check
 
 # Regenerate all derived artifacts and fail if any are uncommitted.
 # Runs `just codegen` once, then checks architecture docs, CLI docs, and API artifacts.
@@ -1895,16 +1893,7 @@ docs-regen: diagram docs-gen
 # Settings classes, so it drifts exactly like the OpenAPI spec and the CLI
 # types this recipe already guards. It was previously reachable from no
 # local recipe at all, so a stale file could only be caught by CI (#931).
-docs-sync: check-env-example
-    @echo "🔄 Regenerating architecture documentation..."
-    @uv run python scripts/generate-architecture-docs.py > /tmp/docs-gen.txt 2>&1
-    @if git diff --quiet docs/architecture/projection-subscriptions.md docs/architecture/event-flows/README.md README.md 2>/dev/null; then \
-        echo "✅ Architecture docs are up-to-date"; \
-    else \
-        echo "❌ Architecture docs need to be committed:"; \
-        echo "   git add docs/architecture/ README.md && git commit -m 'docs: update generated architecture docs'"; \
-        exit 1; \
-    fi
+docs-sync: check-env-example check-architecture-docs
     @echo "🔄 Running codegen (CLI docs + OpenAPI spec + API docs + CLI types)..."
     @just codegen > /dev/null 2>&1
     @if git diff --quiet apps/syn-docs/content/docs/cli/ 2>/dev/null && [ -z "$(git ls-files --others --exclude-standard apps/syn-docs/content/docs/cli/)" ]; then \
@@ -2123,7 +2112,7 @@ github-reconfigure:
     @echo ""
     @echo "  npx @syntropic137/setup init --skip-docker"
     @echo ""
-    @echo "See https://github.com/syntropic137/syntropic137-npx for documentation."
+    @echo "See https://github.com/syntropic137/syntropic137-setup for documentation."
 
 # --- Security & Audit ---
 
@@ -2487,6 +2476,7 @@ changelog-check *args:
 #   just pit-stop 0.29.1-beta.5 --stage-only    # safe while executions run
 #   just pit-stop 0.29.1-beta.5 --swap-only     # after staging: drain, swap, verify
 #   just pit-stop 0.29.1-beta.5 --dry-run       # echo every mutating command
+#   just pit-stop 0.29.1-beta.5 --service gateway  # the gateway alone: no gate, no drain, no probe
 #   just pit-stop 0.29.1-beta.5 --skip-probe    # EMERGENCIES ONLY: no proof a run starts
 # The drain gives up after SYN_PIT_DRAIN_TIMEOUT seconds (default 2700) and lists
 # what is still running; it never cancels anything.

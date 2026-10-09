@@ -409,6 +409,23 @@ async def capture_and_import_phase(
         leader_native_ids.pop((execution_id, phase_id), None)
 
 
+WORKSPACE_LIFETIME_KEY: Final = "workspace_lifetime_seconds"
+"""The interval the usage counters cover, recorded beside them (#1716)."""
+
+
+def _workspace_lifetime_seconds(workspace: ManagedWorkspace) -> float | None:
+    """Creation to termination: the interval the cumulative counters span.
+
+    The counters run from container start to teardown, so a rate over any
+    other span - the phase's telemetry, a query window - divides a whole
+    lifetime's CPU by part of it. None when termination was not recorded.
+    """
+    aggregate = workspace.aggregate
+    if aggregate.terminated_at is None:
+        return None
+    return aggregate.lifetime_seconds
+
+
 async def record_workspace_usage(
     writer: ObservabilityRecorder | None,
     workspace: ManagedWorkspace | None,
@@ -443,7 +460,10 @@ async def record_workspace_usage(
         await writer.record_observation(
             session_id=session_id,
             observation_type=ObservationType.WORKSPACE_RESOURCE_USAGE,
-            data=dataclasses.asdict(usage),
+            data={
+                **dataclasses.asdict(usage),
+                WORKSPACE_LIFETIME_KEY: _workspace_lifetime_seconds(workspace),
+            },
             execution_id=workspace.execution_id,
             phase_id=phase_id,
             workspace_id=workspace.workspace_id,

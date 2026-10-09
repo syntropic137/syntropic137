@@ -40,19 +40,46 @@ def _reset_storage():
 
 
 async def _seed() -> None:
-    """15 templates, newest first, so `wf-00` lands last: on page 3 of 5-row pages."""
-    from syn_api._wiring import get_projection_mgr
+    """15 templates, newest first, so `wf-00` lands last: on page 3 of 5-row pages.
 
-    projection = get_projection_mgr().workflow_list
+    Dated by the envelope's recorded time and dispatched the way the API's own
+    writes are (#959): the payload has no `created_at` to seed.
+    """
+    from datetime import UTC, datetime
+
+    from event_sourcing import EventEnvelope, EventMetadata
+
+    from syn_api._wiring import get_projection_mgr
+    from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
+        WorkflowClassification,
+        WorkflowType,
+    )
+    from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateCreatedEvent import (
+        WorkflowTemplateCreatedEvent,
+    )
+
     for i in range(TOTAL):
         name = "Needle Release Train" if i == 0 else f"Workflow {i:02d}"
-        await projection.on_workflow_template_created(
-            {
-                "workflow_id": f"wf-{i:02d}",
-                "name": name,
-                "workflow_type": "custom",
-                "created_at": f"2026-01-{i + 1:02d}T00:00:00+00:00",
-            }
+        await get_projection_mgr().process_event_envelope(
+            EventEnvelope(
+                event=WorkflowTemplateCreatedEvent(
+                    workflow_id=f"wf-{i:02d}",
+                    name=name,
+                    workflow_type=WorkflowType.CUSTOM,
+                    classification=WorkflowClassification.SIMPLE,
+                    repository_url="",
+                    repository_ref="main",
+                    phases=[],
+                ),
+                metadata=EventMetadata(
+                    aggregate_id=f"wf-{i:02d}",
+                    aggregate_type="WorkflowTemplate",
+                    aggregate_nonce=1,
+                    global_nonce=i + 1,
+                    event_type="WorkflowTemplateCreated",
+                    recorded_timestamp=datetime(2026, 1, i + 1, tzinfo=UTC),
+                ),
+            )
         )
 
 
@@ -108,3 +135,15 @@ async def test_unknown_search_returns_nothing() -> None:
     body = await _get(page=1, search="no-such-workflow")
     assert _ids(body) == []
     assert body.total == 0
+
+
+async def test_created_at_is_the_recorded_time_in_iso_utc() -> None:
+    """The default order is newest first, and created_at reaches the response (#959)."""
+    await _seed()
+
+    body = await _get(page=1)
+
+    assert [(w.id, w.created_at) for w in body.workflows[:2]] == [
+        ("wf-14", "2026-01-15T00:00:00+00:00"),
+        ("wf-13", "2026-01-14T00:00:00+00:00"),
+    ]

@@ -15,8 +15,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from event_sourcing import ProjectionStore
 
-from event_sourcing import AutoDispatchProjection
-
+from syn_domain.contexts.orchestration._shared.recorded_time import RecordedTimeProjection
 from syn_domain.contexts.orchestration._shared.tags import TagSet, replay_tag_edit
 from syn_domain.contexts.orchestration.domain.events.WorkflowTagsAddedEvent import (
     WorkflowTagsAddedEvent,
@@ -28,18 +27,18 @@ from syn_domain.contexts.orchestration.domain.read_models import WorkflowSummary
 from syn_domain.pagination import matches_search
 
 
-class WorkflowListProjection(AutoDispatchProjection):
+class WorkflowListProjection(RecordedTimeProjection):
     """Builds workflow TEMPLATE list read model from events.
 
     This projection handles workflow template events only.
     Execution events are handled by WorkflowExecutionListProjection.
 
-    Uses AutoDispatchProjection: define on_<snake_case_event> methods to
+    Uses AutoDispatchProjection (via RecordedTimeProjection): define on_<snake_case_event> methods to
     subscribe and handle events — no separate subscription set needed.
     """
 
     PROJECTION_NAME = "workflow_summaries"
-    VERSION = 5  # v5: tags (#967)
+    VERSION = 6  # v6: created_at from the envelope's recorded time (#959)
 
     def __init__(self, store: ProjectionStore):
         """Initialize with a projection store."""
@@ -71,7 +70,7 @@ class WorkflowListProjection(AutoDispatchProjection):
             classification=event_data.get("classification", ""),
             phase_count=len(event_data.get("phases", [])),
             description=event_data.get("description"),
-            created_at=event_data.get("created_at"),
+            created_at=self.recorded_at,
             runs_count=0,
             is_archived=False,
             requires_repos=event_data.get("requires_repos", True),
@@ -102,7 +101,8 @@ class WorkflowListProjection(AutoDispatchProjection):
             classification=event_data.get("classification", ""),
             phase_count=len(event_data.get("phases", [])),
             description=event_data.get("description"),
-            created_at=(existing or {}).get("created_at") or event_data.get("created_at"),
+            # An update that finds no row dates the template itself.
+            created_at=(existing or {}).get("created_at") or self.recorded_at,
             runs_count=(existing or {}).get("runs_count", 0),
             is_archived=False,
             requires_repos=event_data.get("requires_repos", True),

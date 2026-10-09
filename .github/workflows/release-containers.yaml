@@ -298,8 +298,16 @@ jobs:
       id-token: write  # cosign signing of SHA256SUMS
 
     steps:
+      # Submodules are needed: the event-store pin is derived from the ESP
+      # version at the lib/event-sourcing-platform gitlink (#1515), read from
+      # the submodule's objects.
       - name: Checkout repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          submodules: true
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
 
       # -----------------------------------------------------------------------
       # Docker Buildx
@@ -352,128 +360,23 @@ jobs:
       # -----------------------------------------------------------------------
       # Resolve event-store digest from upstream (published by ESP repo)
       # -----------------------------------------------------------------------
+      # The pin is derived from the lib/event-sourcing-platform GITLINK, not
+      # from this release's version (#1515). ESP tags its image with ESP's own
+      # version, so the old `event-store:${VERSION}` lookup could never match
+      # and every release silently pinned whatever `latest` pointed at.
+      #
+      # The script reads ESP's version at the gitlink, resolves exactly
+      # `event-store:v<that version>` to its INDEX digest (#1519), verifies the
+      # index covers linux/amd64 + linux/arm64, and FAILS if the tag is not
+      # published. There is no fallback: ESP must release first.
+      #
+      # The same script runs in `just preflight` (check-event-store-pin), so a
+      # PR that moves the gitlink to an unreleased ESP version fails there, long
+      # before a release does. Stdlib only, hence --no-project: it needs no
+      # workspace sync.
       - name: Resolve event-store digest from GHCR
         id: event-store-digest
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          IMAGE="ghcr.io/syntropic137/event-store"
-
-          # Resolve the INDEX digest, not a child manifest.
-          #
-          # This used to be `docker manifest inspect --verbose | jq .[0]`, which
-          # is the #1519 defect: for a multi-arch image that command returns one
-          # array ENTRY PER PLATFORM, and each entry's .Descriptor.digest is that
-          # platform's CHILD manifest. `.[0]` therefore pinned whichever child
-          # happened to sort first (arm64), and v0.33.0 shipped a compose file
-          # that gave every amd64 self-host `exec format error`. The index digest
-          # is not reachable from `--verbose` output at all.
-          #
-          # `buildx imagetools inspect --format '{{.Manifest.Digest}}'` returns
-          # the digest of the thing the tag actually points at, which is the
-          # index for a multi-arch image.
-          if ! docker buildx version >/dev/null 2>&1; then
-            echo "::error::docker buildx is unavailable, so the event-store index digest cannot be resolved."
-            echo "::error::Refusing to release: the fallback path would pin a child manifest (#1519)."
-            exit 1
-          fi
-
-          # Sets DIGEST. Writes to a global instead of echoing, because a
-          # hard failure must be able to `exit` the step - inside $(...) it
-          # would only exit the subshell and the caller would read it as
-          # "tag absent".
-          #
-          # An absent tag and a failed lookup are NOT the same thing. The old
-          # code collapsed them with `|| true`, so an auth failure, a registry
-          # outage or a missing plugin all read as "version not found" and fell
-          # through to `latest`, pinning a version nobody asked for. Only a
-          # genuine "this tag does not exist" may fall through.
-          DIGEST=""
-          resolve() {
-            local ref="$1" out rc
-            set +e
-            out="$(docker buildx imagetools inspect "$ref" --format '{{.Manifest.Digest}}' 2>&1)"
-            rc=$?
-            set -e
-
-            if [[ $rc -eq 0 ]]; then
-              DIGEST="$out"
-              return 0
-            fi
-
-            # Match the absent-tag response EXACTLY, as a whole line. buildx
-            # emits precisely "ERROR: <ref>: not found" for a missing tag, a
-            # missing repository and a missing digest alike (measured against
-            # GHCR, 2026-10-03).
-            #
-            # A keyword search would be the wrong shape here. Any failure whose
-            # diagnostic happens to contain "not found" would be classified as
-            # an absent tag and fall through to `latest`, which is exactly the
-            # wrong-pin outcome this step exists to prevent. Matching the whole
-            # line against the ref we actually asked for cannot do that, and if
-            # buildx ever rewords this the step fails loudly instead of
-            # guessing - the safe direction.
-            if grep -Fxq "ERROR: ${ref}: not found" <<<"$out"; then
-              DIGEST=""
-              return 0
-            fi
-
-            echo "::error::Looking up ${ref} failed, and NOT because the tag is missing."
-            echo "::error::Refusing to fall back to 'latest' - that would pin an unintended version."
-            echo "${out}"
-            exit 1
-          }
-
-          resolve "${IMAGE}:${VERSION}"
-
-          if [[ -z "$DIGEST" ]]; then
-            # Expected today: ESP tags this image on its own scheme, so the
-            # exact-version lookup can never match (#1515). The fallback is
-            # deliberate until that is fixed, and #1515 owns tightening it.
-            echo "::warning::event-store:${VERSION} not present in GHCR, falling back to 'latest' (#1515)"
-            resolve "${IMAGE}:latest"
-          fi
-
-          if [[ -z "$DIGEST" ]]; then
-            echo "::error::Could not resolve event-store digest from GHCR - refusing to release without supply chain pinning"
-            exit 1
-          fi
-
-          # A malformed digest would be pinned verbatim into the compose asset
-          # and fail at `docker compose up` in a user's terminal, not here.
-          if [[ ! "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
-            echo "::error::Resolved event-store digest is not a well-formed sha256 reference: '${DIGEST}'"
-            exit 1
-          fi
-
-          # Fail closed if what we resolved is not a multi-arch index that can
-          # actually run on the platforms we publish for. This is the guard that
-          # makes #1519 unshippable rather than merely fixed: any future change
-          # that reintroduces a single-platform digest dies here instead of in a
-          # user's `docker compose up`.
-          RAW="$(docker buildx imagetools inspect "${IMAGE}@${DIGEST}" --raw)"
-          MEDIA_TYPE="$(jq -r '.mediaType // empty' <<<"$RAW")"
-          case "$MEDIA_TYPE" in
-            application/vnd.oci.image.index.v1+json | \
-            application/vnd.docker.distribution.manifest.list.v2+json) ;;
-            *)
-              echo "::error::event-store ${DIGEST} is '${MEDIA_TYPE}', not a manifest index."
-              echo "::error::A single-platform digest here breaks every self-host on another architecture (#1519)."
-              exit 1
-              ;;
-          esac
-
-          for REQUIRED_ARCH in amd64 arm64; do
-            if ! jq -e --arg a "$REQUIRED_ARCH" \
-                 '[.manifests[]? | select(.platform.os == "linux" and .platform.architecture == $a)] | length > 0' \
-                 <<<"$RAW" >/dev/null; then
-              echo "::error::event-store index ${DIGEST} has no linux/${REQUIRED_ARCH} manifest (#1519)."
-              exit 1
-            fi
-          done
-
-          echo "Resolved event-store index digest: ${DIGEST} (linux/amd64 + linux/arm64 verified)"
-          mkdir -p /tmp/digests
-          echo "$DIGEST" > /tmp/digests/event-store
+        run: uv run --no-project python scripts/resolve_event_store_digest.py --out /tmp/digests/event-store
 
       - name: Pin image digests in compose file
         run: |
@@ -543,7 +446,7 @@ jobs:
       # -----------------------------------------------------------------------
       # Notify downstream repos
       # -----------------------------------------------------------------------
-      - name: Notify syntropic137-npx to sync templates
+      - name: Notify syntropic137-setup to sync templates
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.NPX_DISPATCH_TOKEN }}
@@ -553,7 +456,7 @@ jobs:
             exit 0
           fi
           gh workflow run template-sync.yml \
-            --repo syntropic137/syntropic137-npx \
+            --repo syntropic137/syntropic137-setup \
             --field ref="${{ steps.version.outputs.version }}" \
           && echo "✓ Template sync triggered for ${{ steps.version.outputs.version }}" \
           || echo "::warning::Failed to trigger template sync — release assets are published, sync manually"

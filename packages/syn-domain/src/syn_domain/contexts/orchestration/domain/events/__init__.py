@@ -60,6 +60,9 @@ from syn_domain.contexts.orchestration.domain.events.IsolationStartedEvent impor
 from syn_domain.contexts.orchestration.domain.events.NextPhaseReadyEvent import (
     NextPhaseReadyEvent,
 )
+from syn_domain.contexts.orchestration.domain.events.PhaseCommitPushedEvent import (
+    PhaseCommitPushedEvent,
+)
 from syn_domain.contexts.orchestration.domain.events.PhaseCompletedEvent import (
     PhaseCompletedEvent,
 )
@@ -143,6 +146,7 @@ __all__ = [
     "GlobalClaudePluginRemovedEvent",
     "IsolationStartedEvent",
     "NextPhaseReadyEvent",
+    "PhaseCommitPushedEvent",
     "PhaseCompletedEvent",
     "PhaseRetryScheduledEvent",
     "PhaseStartedEvent",

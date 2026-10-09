@@ -27,6 +27,7 @@ from syn_api.types import (
     EvalRunListResponse,
     EvalRunModelResponse,
     EvalRunResponse,
+    EvalRunStatsResponse,
     EvalVariantResponse,
     ExecutionEvalRunResponse,
     Ok,
@@ -35,6 +36,7 @@ from syn_domain.contexts.orchestration import ExecutionListReads
 from syn_domain.contexts.orchestration.domain.read_models.eval_runs import (
     EvalRunFacts,
     EvalRunsSummary,
+    EvalRunStats,
     PhaseModel,
     summarize,
 )
@@ -42,6 +44,8 @@ from syn_domain.contexts.orchestration.slices.list_evals.projection import EvalL
 from syn_shared.display.formatters import EM_DASH, format_cost, format_duration_seconds
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
     from syn_adapters.projections.manager import ProjectionManager
     from syn_api.types import PhaseExecution
@@ -90,8 +94,12 @@ async def _facts(row: WorkflowExecutionSummary, scores: dict[str, EvalRunScore])
         models = tuple(m for p in full.phases for m in _phase_models(p))
         cost = _cost(full.total_cost_usd)
         duration = full.total_duration_seconds
+        unpriced, unknown_phases = (
+            full.unpriced_observation_count,
+            full.unknown_duration_phase_count,
+        )
     else:
-        models, cost, duration = (), None, None
+        models, cost, duration, unpriced, unknown_phases = (), None, None, 0, 0
     return EvalRunFacts(
         execution_id=execution_id,
         workflow_id=row.workflow_id,
@@ -103,6 +111,8 @@ async def _facts(row: WorkflowExecutionSummary, scores: dict[str, EvalRunScore])
         total_cost_usd=cost,
         duration_seconds=duration,
         score=scores.get(execution_id),
+        unpriced_observation_count=unpriced,
+        unknown_duration_phase_count=unknown_phases,
     )
 
 
@@ -132,6 +142,34 @@ def pass_rate_display(rate: float | None) -> str:
     return EM_DASH if rate is None else f"{rate:.0%}"
 
 
+def _excluding(display: str, incomplete: int) -> str:
+    """A median's display, saying how many runs it left out for being incomplete."""
+    return f"{display} (excl. {incomplete} incomplete)" if incomplete else display
+
+
+def _duration_display(seconds: float | None, unknown_phases: int) -> str:
+    """A run's duration, marked as a lower bound the way ``format_cost`` marks cost."""
+    display = format_duration_seconds(seconds)
+    return f">={display} (partial)" if seconds is not None and unknown_phases else display
+
+
+def stats_response(stats: EvalRunStats) -> EvalRunStatsResponse:
+    return EvalRunStatsResponse(
+        median_duration_seconds=stats.median_duration_seconds,
+        median_duration_display=_excluding(
+            format_duration_seconds(stats.median_duration_seconds), stats.incomplete_duration_count
+        ),
+        incomplete_duration_count=stats.incomplete_duration_count,
+        median_cost_usd=stats.median_cost_usd,
+        median_cost_display=_excluding(
+            format_cost(stats.median_cost_usd), stats.incomplete_cost_count
+        ),
+        incomplete_cost_count=stats.incomplete_cost_count,
+        cost_per_pass_usd=stats.cost_per_pass_usd,
+        cost_per_pass_display=format_cost(stats.cost_per_pass_usd, stats.incomplete_spend_count),
+    )
+
+
 def variant_responses(summary: EvalRunsSummary) -> list[EvalVariantResponse]:
     return [
         EvalVariantResponse(
@@ -145,6 +183,8 @@ def variant_responses(summary: EvalRunsSummary) -> list[EvalVariantResponse]:
             avg_cost_usd=v.avg_cost_usd,
             avg_cost_display=format_cost(v.avg_cost_usd),
             last_run_at=v.last_run_at,
+            last_verdict=v.last_verdict,
+            stats=stats_response(v.stats),
         )
         for v in summary.variants
     ]
@@ -161,9 +201,9 @@ def _run_response(run: EvalRunFacts) -> EvalRunResponse:
         workflow_version=run.workflow_version,
         models=[EvalRunModelResponse(phase_id=m.phase_id, model=m.model) for m in run.models],
         total_cost_usd=run.total_cost_usd,
-        total_cost_display=format_cost(run.total_cost_usd),
+        total_cost_display=format_cost(run.total_cost_usd, run.unpriced_observation_count),
         duration_seconds=run.duration_seconds,
-        duration_display=format_duration_seconds(run.duration_seconds),
+        duration_display=_duration_display(run.duration_seconds, run.unknown_duration_phase_count),
         verdict=None if score is None else score.verdict,
         score=None if score is None else score.score,
         evidence_excerpt=None if score is None else score.evidence[:EVIDENCE_EXCERPT_CHARS],
@@ -201,19 +241,42 @@ async def execution_eval_run(
     route already holds, like its resume-start record. None in no eval.
     """
     row = await ExecutionListReads(store).get_by_id(execution_id)
-    if row is None or row.eval_id is None:
+    if row is None:
         return None
-    kind = row.association_kind
-    if kind not in ("launched", "attached"):
-        return None
+    return (await execution_eval_runs(store, [row])).get(execution_id)
+
+
+async def execution_eval_runs(
+    store: ProjectionStoreProtocol, rows: Iterable[WorkflowExecutionSummary]
+) -> dict[str, ExecutionEvalRunResponse]:
+    """The eval each execution row is a current run of, with its verdict, by execution id.
+
+    Two reads for any number of rows, one for the evals' names and one for the
+    runs' scores, so a page of executions costs what one execution costs.
+    Rows in no eval are omitted.
+    """
+    runs = {
+        row.workflow_execution_id: (row.eval_id, kind)
+        for row in rows
+        if row.eval_id is not None and (kind := row.association_kind) in ("launched", "attached")
+    }
+    if not runs:
+        return {}
     evals = EvalListProjection(store)
-    record = await evals.record(row.eval_id)
-    score = await evals.score(row.eval_id, execution_id)
-    return ExecutionEvalRunResponse(
-        eval_id=row.eval_id,
-        eval_name=None if record is None else record.name,
-        association_kind=kind,
-        verdict=None if score is None else score.verdict,
-        score=None if score is None else score.score,
-        scored_at=None if score is None else score.scored_at,
+    records = await evals.records({eval_id for eval_id, _ in runs.values()})
+    scores = await evals.scores_of(
+        {(eval_id, execution_id) for execution_id, (eval_id, _) in runs.items()}
     )
+    responses: dict[str, ExecutionEvalRunResponse] = {}
+    for execution_id, (eval_id, kind) in runs.items():
+        record = records.get(eval_id)
+        score = scores.get((eval_id, execution_id))
+        responses[execution_id] = ExecutionEvalRunResponse(
+            eval_id=eval_id,
+            eval_name=None if record is None else record.name,
+            association_kind="launched" if kind == "launched" else "attached",
+            verdict=None if score is None else score.verdict,
+            score=None if score is None else score.score,
+            scored_at=None if score is None else score.scored_at,
+        )
+    return responses

@@ -1,0 +1,22 @@
+id: input-alias-independent-resolution
+polarity: defect
+source_pr: 1245
+# Mined from the fix: the first fix commit's first parent, so the bug is
+# present and nothing of the fix is. Evidence at the pin:
+# `_inject_and_log` resolves the flat alias with `_resolve_phase_outputs` and
+# the tree with `_resolve_phase_files` independently (lines 232/235); after
+# the fix the alias is derived from the tree.
+commit: bdbc56d1a99e0b8050d7e179cdff824db0d7ea27
+fix_commit: 9d8efdce17a63043c909da6ca7df25babf7e6ac9
+first_fix_commit: 747c4d4c58d980729f63d10121780ec702244399
+task: >
+  Review how the artifact collector injects a previous phase's outputs into
+  the next phase's workspace: the nested artifacts/input/<phase-id>/ tree and
+  the flat artifacts/input/<phase-id>.md alias.
+expected:
+  files:
+    - packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/ArtifactCollector.py
+  keywords:
+    - ["alias", "flat", "<phase id>.md", "phase id .md"]
+    - ["independent", "separately", "two resolution", "two lookups", "disagree", "diverge", "inconsistent", "out of sync", "not derived", "different source", "mismatch"]
+split: train

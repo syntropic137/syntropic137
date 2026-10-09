@@ -10,7 +10,9 @@ import { Link, useSearchParams } from 'react-router-dom'
 
 import { Card, EmptyState, ListPagination, PageLoader } from '../../components'
 import { EvalVariantsStrip, VerdictSparkline } from '../../components/evals'
+import { ReadModelNotice } from '../../components/ReadPathBanner'
 import { useEvalList, type EvalListRow, type EvalListState } from '../../hooks/useEvalList'
+import { useRebuildingReadModel } from '../../hooks/useReadPathHealth'
 import { formatRelativeTime } from '../../utils/dateFormatters'
 
 function TagButton({ tag, onSelect }: { tag: string; onSelect: (tag: string) => void }) {
@@ -154,6 +156,7 @@ export function EvalList() {
   const { tag, page, setTag, setPage } = useEvalListQuery()
   const state = useEvalList(tag, page)
   const total = state.kind === 'ready' ? state.total : 0
+  const rebuilding = useRebuildingReadModel('evals')
 
   return (
     <div className="space-y-6">
@@ -164,6 +167,7 @@ export function EvalList() {
           {total > 0 && <span className="text-[var(--color-text-muted)]"> · {total} evals</span>}
         </p>
       </div>
+      <ReadModelNotice status={rebuilding} />
       {tag && <TagFilter tag={tag} onClear={() => setTag(null)} />}
       <EvalListBody state={state} tag={tag} onTag={setTag} onPage={setPage} />
     </div>

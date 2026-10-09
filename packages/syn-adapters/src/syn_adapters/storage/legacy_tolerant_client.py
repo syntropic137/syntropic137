@@ -15,6 +15,7 @@ when the domain names it as a legacy shape it reads on purpose
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from event_sourcing.client.grpc_client import GrpcEventStoreClient
@@ -45,11 +46,37 @@ class LegacyShapeTolerantGrpcClient(GrpcEventStoreClient):
         event_types: EventTypeFilter | None = None,
     ) -> EventEnvelope[DomainEvent]:
         try:
-            return super()._proto_to_envelope(event_data, event_types)
+            envelope = super()._proto_to_envelope(event_data, event_types)
         except EventPayloadError:
             if not replays_generic(event_data.meta.event_type, _json_object(event_data.payload)):
                 raise
-            return self._admitted._proto_to_envelope(event_data, event_types)  # pyright: ignore[reportPrivateUsage]
+            envelope = self._admitted._proto_to_envelope(event_data, event_types)  # pyright: ignore[reportPrivateUsage]
+        return _with_stored_times(envelope, event_data.meta)
+
+
+def _with_stored_times(
+    envelope: EventEnvelope[DomainEvent], meta: eventstore_pb2.EventMetadata
+) -> EventEnvelope[DomainEvent]:
+    """The envelope dated by the store's clocks, not by the time it was read.
+
+    ESP v0.17.0 drops ``timestamp_unix_ms`` and ``recorded_time_unix_ms`` on
+    decode, and ``EventMetadata`` defaults both to ``now()``: every read
+    re-stamps history, so a projection using them differs on every rebuild
+    (#959). Zero means the store has no value; the default is left alone.
+
+    TODO(#924): delete once the pinned ESP decodes them itself.
+    """
+    stored = {
+        name: datetime.fromtimestamp(unix_ms / 1000, UTC)
+        for name, unix_ms in (
+            ("timestamp", meta.timestamp_unix_ms),
+            ("recorded_timestamp", meta.recorded_time_unix_ms),
+        )
+        if unix_ms
+    }
+    if not stored:
+        return envelope
+    return envelope.model_copy(update={"metadata": envelope.metadata.model_copy(update=stored)})
 
 
 def _json_object(payload: bytes) -> object:
