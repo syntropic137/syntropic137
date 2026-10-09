@@ -4,7 +4,6 @@ See ADR-021: Isolated Workspace Architecture
 
 Environment Variables:
     SYN_WORKSPACE_* - Workspace backend configuration
-    SYN_SECURITY_* - Security policies for all workspaces
     SYN_GIT_* - Git identity and credentials
     SYN_LOGGING_* - Container logging configuration
 """
@@ -33,7 +32,6 @@ from syn_shared.settings.workspace_images import (
 )
 from syn_shared.settings.workspace_security import (  # noqa: F401
     ContainerLoggingSettings,
-    WorkspaceSecuritySettings,
 )
 
 DEFAULT_WORKSPACE_MEMORY_LIMIT_MB = 4096

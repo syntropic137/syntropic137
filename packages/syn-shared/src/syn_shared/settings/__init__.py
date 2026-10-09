@@ -86,7 +86,6 @@ from syn_shared.settings.workspace_images import (
 )
 from syn_shared.settings.workspace_security import (
     ContainerLoggingSettings,
-    WorkspaceSecuritySettings,
 )
 
 __all__ = [
@@ -112,7 +111,6 @@ __all__ = [
     "StorageProvider",
     "StorageSettings",
     "WorkspaceImageProvider",
-    "WorkspaceSecuritySettings",
     "WorkspaceSettings",
     "get_default_isolation_backend",
     "get_github_settings",

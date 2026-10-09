@@ -19,7 +19,6 @@ from syn_shared.settings import (
     GitIdentityResolver,
     GitIdentitySettings,
     IsolationBackend,
-    WorkspaceSecuritySettings,
     WorkspaceSettings,
     get_default_isolation_backend,
     reset_settings,
@@ -59,63 +58,6 @@ class TestCloudProvider:
         """All expected cloud providers should be defined."""
         assert CloudProvider.E2B == "e2b"
         assert CloudProvider.MODAL == "modal"
-
-
-@pytest.mark.unit
-class TestWorkspaceSecuritySettings:
-    """Test WorkspaceSecuritySettings class."""
-
-    def test_default_values_are_restrictive(self) -> None:
-        """Default values should be maximally restrictive."""
-        with patch.dict(os.environ, {}, clear=True):
-            security = WorkspaceSecuritySettings(_env_file=None)
-
-            # Network isolated by default
-            assert security.allow_network is False
-            assert security.allowed_hosts == ""
-            assert security.get_allowed_hosts_list() == []
-
-            # Filesystem protected
-            assert security.read_only_root is True
-            assert security.max_workspace_size == "1Gi"
-
-            # Resource limits set
-            assert security.max_pids == 100
-            assert security.max_execution_time == 3600
-
-    def test_environment_override(self) -> None:
-        """Environment variables should override defaults."""
-        env = {
-            "SYN_SECURITY_ALLOW_NETWORK": "true",
-            "SYN_SECURITY_MAX_PIDS": "500",
-        }
-        with patch.dict(os.environ, env, clear=True):
-            security = WorkspaceSecuritySettings(_env_file=None)
-
-            assert security.allow_network is True
-            assert security.max_pids == 500
-
-    def test_allowed_hosts_comma_format(self) -> None:
-        """allowed_hosts should parse comma-separated format."""
-        env = {
-            "SYN_SECURITY_ALLOWED_HOSTS": "pypi.org, api.github.com",
-        }
-        with patch.dict(os.environ, env, clear=True):
-            security = WorkspaceSecuritySettings(_env_file=None)
-
-            assert security.allowed_hosts == "pypi.org, api.github.com"
-            assert security.get_allowed_hosts_list() == ["pypi.org", "api.github.com"]
-
-    def test_allowed_hosts_empty_string(self) -> None:
-        """allowed_hosts should handle empty string."""
-        env = {
-            "SYN_SECURITY_ALLOWED_HOSTS": "",
-        }
-        with patch.dict(os.environ, env, clear=True):
-            security = WorkspaceSecuritySettings(_env_file=None)
-
-            assert security.allowed_hosts == ""
-            assert security.get_allowed_hosts_list() == []
 
 
 @pytest.mark.unit
@@ -319,24 +261,15 @@ class TestSettingsWorkspaceIntegration:
             workspace = WorkspaceSettings(_env_file=None)
             assert isinstance(workspace, WorkspaceSettings)
 
-    def test_workspace_security_settings_creation(self) -> None:
-        """WorkspaceSecuritySettings should be creatable with defaults."""
-        with patch.dict(os.environ, {}, clear=True):
-            security = WorkspaceSecuritySettings(_env_file=None)
-            assert isinstance(security, WorkspaceSecuritySettings)
-
     def test_workspace_respects_env_vars(self) -> None:
         """Workspace settings should respect env vars."""
         env = {
             "SYN_WORKSPACE_MEMORY_LIMIT_MB": "2000",
-            "SYN_SECURITY_MAX_PIDS": "200",
         }
         with patch.dict(os.environ, env, clear=True):
             workspace = WorkspaceSettings(_env_file=None)
-            security = WorkspaceSecuritySettings(_env_file=None)
 
             assert workspace.memory_limit_mb == 2000
-            assert security.max_pids == 200
 
 
 # =============================================================================
