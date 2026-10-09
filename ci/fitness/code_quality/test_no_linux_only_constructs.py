@@ -307,7 +307,7 @@ _SYS = "/s" + "ys"
 #: One planted example per form; each must be caught on its own.
 PLANTED_PYTHON = {
     "#1809's literal": f'Path(f"{_PROC}/self/fd/{{fd}}").readlink()',
-    "bare /proc": f'"{_PROC}" in source',
+    "bare procfs root": f'"{_PROC}" in source',
     "sysfs": f'open("{_SYS}/fs/cgroup/cpu.stat")',
     "joined path": f'Path("{_PROC}") / "self"',
     "os.O_PATH": "os.open(p, os." + "O_PATH)",
