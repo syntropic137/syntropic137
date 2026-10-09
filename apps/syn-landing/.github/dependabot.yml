@@ -1,0 +1,16 @@
+version: 2
+# Version bump PRs disabled — CI runs OSV vulnerability scan on every PR.
+# Security updates (GitHub Advisory Database) are still enabled via repo
+# Security settings and will open PRs automatically when needed.
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0

@@ -1,0 +1,3 @@
+# CI/CD workflows — arbitrary code execution risk; any change here can
+# exfiltrate secrets or backdoor the pipeline. Require maintainer review.
+.github/                     @syntropic137

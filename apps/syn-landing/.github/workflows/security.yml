@@ -1,0 +1,92 @@
+name: Security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Run weekly on Monday at 08:00 UTC — catches new CVEs against pinned deps
+    - cron: "0 8 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  osv-scan:
+    name: OSV Vulnerability Scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      # OSV checks package-lock.json against the OSV database (npm, PyPI, crates.io, Go, Maven).
+      # continue-on-error during rollout — flip to false after first clean baseline.
+      - uses: google/osv-scanner-action/osv-scanner-action@c51854704019a247608d928f370c98740469d4b5 # v2.3.5
+        continue-on-error: true
+        with:
+          scan-args: |-
+            --lockfile=package-lock.json
+
+  dependency-review:
+    name: Dependency Review
+    runs-on: ubuntu-latest
+    # Only meaningful on PRs — compares introduced deps against known vulnerabilities.
+    # Requires Dependency Graph to be enabled: Settings > Security > Code security and analysis.
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      # Blocks PRs that introduce newly vulnerable packages. Free for public repos.
+      - uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4.9.0
+
+  npm-audit:
+    name: npm Audit
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      # npm audit checks against the npm advisory database.
+      # --omit=dev: only audit production dependencies.
+      # --audit-level=moderate: fail on moderate+ severity.
+      - run: npm audit --omit=dev --audit-level=moderate
+        continue-on-error: true # TODO: remove after first clean baseline
+
+  codeql:
+    name: CodeQL SAST
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write # Required to upload SARIF results
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      # CodeQL: GitHub-native SAST, free for public repos.
+      # Finds XSS, injection, path traversal, insecure deserialization, etc.
+      - uses: github/codeql-action/init@f94817b9f0deeb3871261446912ae8f854d1b675 # codeql-bundle-v2.25.1
+        with:
+          languages: javascript-typescript
+          queries: security-extended
+      - uses: github/codeql-action/autobuild@f94817b9f0deeb3871261446912ae8f854d1b675 # codeql-bundle-v2.25.1
+      - uses: github/codeql-action/analyze@f94817b9f0deeb3871261446912ae8f854d1b675 # codeql-bundle-v2.25.1
+
+  secret-scan:
+    name: Secret Scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0 # Full history — scan all commits, not just HEAD
+      # gitleaks CLI: scans git history for accidentally committed secrets.
+      # Using the CLI directly avoids the gitleaks-action org license requirement.
+      - name: Install gitleaks
+        run: |
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz" \
+            | tar -xz gitleaks
+          sudo mv gitleaks /usr/local/bin/gitleaks
+      - name: Run gitleaks
+        run: gitleaks detect --source . --exit-code 1

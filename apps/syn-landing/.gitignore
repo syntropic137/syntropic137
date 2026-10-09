@@ -1,0 +1,25 @@
+node_modules
+dist
+*.tsbuildinfo
+test-results
+playwright-report
+.next
+
+# Private keys and certificates — passive safety net against accidental commits
+*.pem
+*.key
+*.p12
+*.pfx
+*.cer
+*.crt
+id_rsa
+id_rsa.pub
+id_ed25519
+id_ed25519.pub
+*.keystore
+
+# Environment files (use .env.example for documentation)
+.env
+.env.local
+.env.*.local
+.vercel
