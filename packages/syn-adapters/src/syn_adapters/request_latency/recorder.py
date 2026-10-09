@@ -24,7 +24,7 @@ import contextlib
 import logging
 from collections import deque
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol, cast
+from typing import TYPE_CHECKING, cast
 
 from syn_adapters.request_latency.bounded import BoundedPool, run_bounded
 from syn_adapters.request_latency.schema import TABLE
@@ -37,14 +37,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _COLUMNS = ("time", "method", "route", "status", "duration_ms", "request_id")
-
-
-class _CopyConnection(Protocol):
-    def terminate(self) -> None: ...
-
-    async def copy_records_to_table(
-        self, table_name: str, *, records: list[tuple[object, ...]], columns: tuple[str, ...]
-    ) -> str: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,7 +87,7 @@ class RequestLatencyRecorder:
         self._io_timeout_s = io_timeout_s
         self._buffer: deque[RequestSample] = deque()
         self._in_flight: list[RequestSample] = []
-        self._pool: BoundedPool[_CopyConnection] | None = None
+        self._pool: BoundedPool[asyncpg.Connection] | None = None
         self._task: asyncio.Task[None] | None = None
         self._wake = asyncio.Event()
         self._stopping = False
@@ -137,7 +129,7 @@ class RequestLatencyRecorder:
         """Begin draining into ``pool``. Idempotent."""
         if self.running:
             return
-        self._pool = cast("BoundedPool[_CopyConnection]", pool)
+        self._pool = cast("BoundedPool[asyncpg.Connection]", pool)
         self._stopping = False
         self._wake = asyncio.Event()
         self._task = asyncio.create_task(self._run(), name="request-latency-recorder")
@@ -188,12 +180,14 @@ class RequestLatencyRecorder:
             await self._write(self._pool, self._in_flight)
             self._in_flight = []
 
-    async def _write(self, pool: BoundedPool[_CopyConnection], batch: list[RequestSample]) -> None:
+    async def _write(
+        self, pool: BoundedPool[asyncpg.Connection], batch: list[RequestSample]
+    ) -> None:
         records: list[tuple[object, ...]] = [
             (s.time, s.method, s.route, s.status, s.duration_ms, s.request_id) for s in batch
         ]
 
-        async def copy(conn: _CopyConnection) -> str:
+        async def copy(conn: asyncpg.Connection) -> str:
             return await conn.copy_records_to_table(TABLE, records=records, columns=_COLUMNS)
 
         try:
