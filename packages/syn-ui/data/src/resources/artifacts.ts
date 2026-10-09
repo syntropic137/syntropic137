@@ -1,5 +1,6 @@
 import { type ListQuery, listQueryParams, request, seg } from '../client'
 import type { ArtifactListResponse, ArtifactResponse, ArtifactSummary } from '../types'
+import { cached } from '../keys'
 
 /** The narrowing the artifacts page applies on top of the shared list query. */
 export interface ArtifactScope {
@@ -20,7 +21,11 @@ function toArtifactSummary(row: ApiArtifactSummary): ArtifactSummary {
   return { ...row, title: row.title ?? null, created_at: row.created_at ?? null }
 }
 
-export async function listArtifacts(query: ListQuery, scope: ArtifactScope = {}, signal?: AbortSignal): Promise<ArtifactPage> {
+export function listArtifacts(query: ListQuery, scope: ArtifactScope = {}, signal?: AbortSignal): Promise<ArtifactPage> {
+  return cached('listArtifacts', [query, scope], (s) => fetchArtifactPage(query, scope, s), { signal, staleAfter: 'list' })
+}
+
+async function fetchArtifactPage(query: ListQuery, scope: ArtifactScope, signal: AbortSignal): Promise<ArtifactPage> {
   const params = listQueryParams(query, 'created')
   // Artifacts have no status and `/artifacts` refuses `statuses` (#1313).
   params.delete('statuses')
@@ -36,7 +41,8 @@ export async function listArtifacts(query: ListQuery, scope: ArtifactScope = {},
 }
 
 export function getArtifact(artifactId: string, includeContent = false, signal?: AbortSignal): Promise<ArtifactResponse> {
-  return request(`/artifacts/${seg(artifactId)}`, { query: { include_content: includeContent || undefined }, signal })
+  return cached('getArtifact', [artifactId, includeContent], (s) =>
+    request(`/artifacts/${seg(artifactId)}`, { query: { include_content: includeContent || undefined }, signal: s }), { signal })
 }
 
 export interface ArtifactContent {
@@ -46,5 +52,5 @@ export interface ArtifactContent {
 }
 
 export function getArtifactContent(artifactId: string, signal?: AbortSignal): Promise<ArtifactContent> {
-  return request(`/artifacts/${seg(artifactId)}/content`, { signal })
+  return cached('getArtifactContent', [artifactId], (s) => request(`/artifacts/${seg(artifactId)}/content`, { signal: s }), { signal })
 }

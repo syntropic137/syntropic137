@@ -5,6 +5,7 @@
  */
 import { request, seg } from '../client'
 import type { components } from '../generated/api-types'
+import { cached } from '../keys'
 
 type Schemas = components['schemas']
 
@@ -20,16 +21,14 @@ export type EvalRunListResponse = Schemas['EvalRunListResponse']
 export type ExecutionEvalRun = Schemas['ExecutionEvalRunResponse']
 
 export function listEvals(params: { tag?: string; page?: number; page_size?: number } = {}, signal?: AbortSignal): Promise<EvalListResponse> {
-  return request('/evals', {
-    query: { tag: params.tag, page: params.page && params.page > 1 ? params.page : undefined, page_size: params.page_size },
-    signal,
-  })
+  const query = { tag: params.tag, page: params.page && params.page > 1 ? params.page : undefined, page_size: params.page_size }
+  return cached('listEvals', [query], (s) => request('/evals', { query, signal: s }), { signal, staleAfter: 'list' })
 }
 
 export function getEval(evalId: string, signal?: AbortSignal): Promise<EvalSummary> {
-  return request(`/evals/${seg(evalId)}`, { signal })
+  return cached('getEval', [evalId], (s) => request(`/evals/${seg(evalId)}`, { signal: s }), { signal })
 }
 
 export function listEvalRuns(evalId: string, params: { page?: number; page_size?: number } = {}, signal?: AbortSignal): Promise<EvalRunListResponse> {
-  return request(`/evals/${seg(evalId)}/runs`, { query: { ...params }, signal })
+  return cached('listEvalRuns', [evalId, params], (s) => request(`/evals/${seg(evalId)}/runs`, { query: { ...params }, signal: s }), { signal, staleAfter: 'list' })
 }

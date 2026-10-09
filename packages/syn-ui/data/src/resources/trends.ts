@@ -10,6 +10,7 @@
  */
 import { request, seg } from '../client'
 import type { EvalVerdict } from './evals'
+import { cached } from '../keys'
 
 /** Largest page the API serves (list_query.MAX_PAGE_SIZE). */
 export const TREND_PAGE_SIZE = 200
@@ -87,9 +88,11 @@ export interface WorkflowTrendResponse extends TrendPage<WorkflowTrendRow> {
 }
 
 export function getEvalTrend(evalId: string, signal?: AbortSignal): Promise<EvalTrendResponse> {
-  return request(`/evals/${seg(evalId)}/trend`, { query: { page_size: TREND_PAGE_SIZE }, signal })
+  return cached('getEvalTrend', [evalId], (s) => request(`/evals/${seg(evalId)}/trend`, { query: { page_size: TREND_PAGE_SIZE }, signal: s }), { signal, staleAfter: 'list' })
 }
 
 export function getWorkflowTrend(workflowId: string, params: { page_size?: number } = {}, signal?: AbortSignal): Promise<WorkflowTrendResponse> {
-  return request(`/workflows/${seg(workflowId)}/trend`, { query: { page_size: params.page_size ?? TREND_PAGE_SIZE }, signal })
+  const pageSize = params.page_size ?? TREND_PAGE_SIZE
+  return cached('getWorkflowTrend', [workflowId, pageSize], (s) =>
+    request(`/workflows/${seg(workflowId)}/trend`, { query: { page_size: pageSize }, signal: s }), { signal, staleAfter: 'list' })
 }

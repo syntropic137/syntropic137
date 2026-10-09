@@ -1,5 +1,6 @@
 import { request } from '../client'
 import type { components } from '../generated/api-types'
+import { cached } from '../keys'
 
 export type ContributionHeatmap = components['schemas']['ContributionHeatmapResponse']
 export type HeatmapDay = components['schemas']['HeatmapDayBucketResponse']
@@ -32,5 +33,6 @@ export interface HeatmapParams {
 
 /** The Overview Skyline's data: one bucket per day with its full breakdown. */
 export function getContributionHeatmap(params: HeatmapParams = {}, signal?: AbortSignal): Promise<ContributionHeatmap> {
-  return request('/insights/contribution-heatmap', { query: { metric: 'sessions', ...params }, signal })
+  const query = { metric: 'sessions', ...params }
+  return cached('getContributionHeatmap', [query], (s) => request('/insights/contribution-heatmap', { query, signal: s }), { signal, staleAfter: 'list' })
 }

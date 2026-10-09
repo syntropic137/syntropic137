@@ -1,5 +1,6 @@
 import { request, seg } from '../client'
 import type { components } from '../generated/api-types'
+import { cached } from '../keys'
 
 export type InventoryStatus = components['schemas']['SessionInventoryResponse']
 export type InventorySummary = components['schemas']['SessionInventorySummary']
@@ -19,10 +20,8 @@ export interface InventoryFilters {
 /** The API maximum; traversal follows `next_cursor`. */
 export const INVENTORY_PAGE_LIMIT = 500
 
-const runPath = (executionId: string) => `/executions/${seg(executionId)}/session-inventory`
-
 export function getSessionInventory(executionId: string, signal?: AbortSignal): Promise<InventoryStatus> {
-  return request(runPath(executionId), { signal })
+  return cached('getSessionInventory', [executionId], (s) => request(`/executions/${seg(executionId)}/session-inventory`, { signal: s }), { signal })
 }
 
 /** `cursor` is the opaque server `next_cursor`; null reads the first page. */
@@ -35,14 +34,14 @@ export function getSessionInventoryPage(
   limit: number = INVENTORY_PAGE_LIMIT,
   signal?: AbortSignal,
 ): Promise<InventoryPage> {
-  return request(`${runPath(executionId)}/${seg(snapshotId)}/${kind}`, {
-    query: { limit, phase_id: filters.phase_id, attempt_id: filters.attempt_id, cursor },
-    signal,
-  })
+  const query = { limit, phase_id: filters.phase_id, attempt_id: filters.attempt_id, cursor }
+  return cached('getSessionInventoryPage', [executionId, snapshotId, kind, query], (s) =>
+    request(`/executions/${seg(executionId)}/session-inventory/${seg(snapshotId)}/${kind}`, { query, signal: s }), { signal })
 }
 
 export function getSessionInventoryNode(executionId: string, snapshotId: string, nodeKey: string, signal?: AbortSignal): Promise<InventoryNodeLookup> {
-  return request(`${runPath(executionId)}/${seg(snapshotId)}/nodes/${seg(nodeKey)}`, { signal })
+  return cached('getSessionInventoryNode', [executionId, snapshotId, nodeKey], (s) =>
+    request(`/executions/${seg(executionId)}/session-inventory/${seg(snapshotId)}/nodes/${seg(nodeKey)}`, { signal: s }), { signal })
 }
 
 export function getLocalTranscript(

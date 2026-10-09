@@ -5,29 +5,34 @@ import type {
   ExecutionListResponse,
   WorkflowExecutionSummary,
 } from '../types'
+import { cached, thenInvalidate } from '../keys'
 
 /**
  * Every run of one workflow. `/workflows/{id}/runs` declares no paging and
  * returns the full list (the server refuses undeclared params, #1313).
  */
-export async function listWorkflowRuns(workflowId: string, signal?: AbortSignal): Promise<WorkflowExecutionSummary[]> {
-  const response = await request<{ runs?: WorkflowExecutionSummary[] }>(`/workflows/${seg(workflowId)}/runs`, { signal })
-  return response.runs ?? []
+export function listWorkflowRuns(workflowId: string, signal?: AbortSignal): Promise<WorkflowExecutionSummary[]> {
+  return cached('listWorkflowRuns', [workflowId], async (s) => {
+    const response = await request<{ runs?: WorkflowExecutionSummary[] }>(`/workflows/${seg(workflowId)}/runs`, { signal: s })
+    return response.runs ?? []
+  }, { signal, staleAfter: 'list' })
 }
 
 export function getExecution(executionId: string, signal?: AbortSignal): Promise<ExecutionDetailResponse> {
-  return request(`/executions/${seg(executionId)}`, { signal })
+  return cached('getExecution', [executionId], (s) => request(`/executions/${seg(executionId)}`, { signal: s }), { signal })
 }
 
 /** One page of executions across every workflow (shared list query, #1159). */
 export function listExecutions(query: ListQuery, signal?: AbortSignal): Promise<ExecutionListResponse> {
-  return request('/executions', { query: listQueryParams(query), signal })
+  return cached('listExecutions', [query], (s) => request('/executions', { query: listQueryParams(query), signal: s }), { signal, staleAfter: 'list' })
 }
 
 /** The execution budget's occupancy, which the list reports beside every page (PC-124). */
-export async function getExecutionBudget(signal?: AbortSignal): Promise<ExecutionBudgetInfo | null> {
-  const response = await request<ExecutionListResponse>('/executions', { query: { page_size: 1 }, signal })
-  return response.budget ?? null
+export function getExecutionBudget(signal?: AbortSignal): Promise<ExecutionBudgetInfo | null> {
+  return cached('getExecutionBudget', [], async (s) => {
+    const response = await request<ExecutionListResponse>('/executions', { query: { page_size: 1 }, signal: s })
+    return response.budget ?? null
+  }, { signal, staleAfter: 'metrics' })
 }
 
 export interface CancelExecutionResponse {
@@ -38,5 +43,10 @@ export interface CancelExecutionResponse {
 }
 
 export function cancelExecution(executionId: string, reason = 'Cancelled from UI'): Promise<CancelExecutionResponse> {
-  return request(`/executions/${seg(executionId)}/cancel`, { method: 'POST', body: { reason } })
+  return thenInvalidate(request(`/executions/${seg(executionId)}/cancel`, { method: 'POST', body: { reason } }), [
+    { name: 'getExecution', id: executionId },
+    { name: 'listExecutions' },
+    { name: 'listWorkflowRuns' },
+    { name: 'getExecutionBudget' },
+  ])
 }

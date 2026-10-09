@@ -1,9 +1,10 @@
 import { clientConfig, request, seg } from '../client'
 import type { components } from '../generated/api-types'
 import type { MetricsResponse } from '../types'
+import { cached } from '../keys'
 
 export function getMetrics(workflowId?: string, signal?: AbortSignal): Promise<MetricsResponse> {
-  return request('/metrics', { query: { workflow_id: workflowId }, signal })
+  return cached('getMetrics', [workflowId], (s) => request('/metrics', { query: { workflow_id: workflowId }, signal: s }), { signal, staleAfter: 'metrics' })
 }
 
 export interface ToolExecution {
@@ -35,9 +36,10 @@ export function getToolTimeline(
   options: { limit?: number; includeBlocked?: boolean } = {},
   signal?: AbortSignal,
 ): Promise<ToolTimelineResponse> {
-  return request(`/observability/sessions/${seg(sessionId)}/tools`, {
-    query: { limit: options.limit, include_blocked: options.includeBlocked },
+  const query = { limit: options.limit, include_blocked: options.includeBlocked }
+  return cached('getToolTimeline', [sessionId, query], (s) => request(`/observability/sessions/${seg(sessionId)}/tools`, { query, signal: s }), {
     signal,
+    staleAfter: 'list',
   })
 }
 
@@ -50,7 +52,7 @@ export interface TokenMetricsResponse {
 }
 
 export function getTokenMetrics(sessionId: string, signal?: AbortSignal): Promise<TokenMetricsResponse> {
-  return request(`/observability/sessions/${seg(sessionId)}/tokens`, { signal })
+  return cached('getTokenMetrics', [sessionId], (s) => request(`/observability/sessions/${seg(sessionId)}/tokens`, { signal: s }), { signal, staleAfter: 'list' })
 }
 
 export interface ConversationLine {
@@ -74,7 +76,7 @@ export function getConversationLog(
   options: { offset?: number; limit?: number } = {},
   signal?: AbortSignal,
 ): Promise<ConversationLogResponse> {
-  return request(`/conversations/${seg(sessionId)}`, { query: { ...options }, signal })
+  return cached('getConversationLog', [sessionId, options], (s) => request(`/conversations/${seg(sessionId)}`, { query: { ...options }, signal: s }), { signal, staleAfter: 'list' })
 }
 
 export interface SSEHealth {
@@ -84,7 +86,7 @@ export interface SSEHealth {
 }
 
 export function getSSEHealth(signal?: AbortSignal): Promise<SSEHealth> {
-  return request('/sse/health', { signal })
+  return cached('getSSEHealth', [], (s) => request('/sse/health', { signal: s }), { signal, staleAfter: 'metrics' })
 }
 
 /** URL of one execution's event stream. */
@@ -101,12 +103,12 @@ export function activityStreamUrl(): string {
 export type Features = components['schemas']['FeaturesResponse']
 
 export function getFeatures(signal?: AbortSignal): Promise<Features> {
-  return request('/features', { signal })
+  return cached('getFeatures', [], (s) => request('/features', { signal: s }), { signal })
 }
 
 /** Which build of the API is answering, and when it went live. */
 export type BuildInfo = components['schemas']['BuildInfo']
 
 export function getBuildInfo(signal?: AbortSignal): Promise<BuildInfo> {
-  return request('/version', { signal })
+  return cached('getBuildInfo', [], (s) => request('/version', { signal: s }), { signal })
 }

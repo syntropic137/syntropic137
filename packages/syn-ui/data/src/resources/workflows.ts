@@ -1,5 +1,6 @@
 import { request, seg } from '../client'
 import type { ExecutionHistoryResponse, WorkflowListResponse, WorkflowResponse } from '../types'
+import { cached, thenInvalidate } from '../keys'
 
 export interface ListWorkflowsParams {
   workflow_type?: string
@@ -10,15 +11,15 @@ export interface ListWorkflowsParams {
 }
 
 export function listWorkflows(params: ListWorkflowsParams = {}, signal?: AbortSignal): Promise<WorkflowListResponse> {
-  return request('/workflows', { query: { ...params }, signal })
+  return cached('listWorkflows', [params], (s) => request('/workflows', { query: { ...params }, signal: s }), { signal, staleAfter: 'list' })
 }
 
 export function getWorkflow(workflowId: string, signal?: AbortSignal): Promise<WorkflowResponse> {
-  return request(`/workflows/${seg(workflowId)}`, { signal })
+  return cached('getWorkflow', [workflowId], (s) => request(`/workflows/${seg(workflowId)}`, { signal: s }), { signal })
 }
 
 export function getWorkflowHistory(workflowId: string, signal?: AbortSignal): Promise<ExecutionHistoryResponse> {
-  return request(`/workflows/${seg(workflowId)}/history`, { signal })
+  return cached('getWorkflowHistory', [workflowId], (s) => request(`/workflows/${seg(workflowId)}/history`, { signal: s }), { signal, staleAfter: 'list' })
 }
 
 export interface ExecuteWorkflowRequest {
@@ -36,7 +37,13 @@ export interface ExecuteWorkflowResponse {
 }
 
 export function executeWorkflow(workflowId: string, body: ExecuteWorkflowRequest = {}): Promise<ExecuteWorkflowResponse> {
-  return request(`/workflows/${seg(workflowId)}/execute`, { method: 'POST', body })
+  return thenInvalidate(request(`/workflows/${seg(workflowId)}/execute`, { method: 'POST', body }), [
+    { name: 'listExecutions' },
+    { name: 'listWorkflowRuns', id: workflowId },
+    { name: 'getWorkflowHistory', id: workflowId },
+    { name: 'getExecutionBudget' },
+    { name: 'getMetrics' },
+  ])
 }
 
 export interface UpdatePhasePromptRequest {
@@ -54,5 +61,8 @@ export interface UpdatePhaseResponse {
 }
 
 export function updatePhasePrompt(workflowId: string, phaseId: string, body: UpdatePhasePromptRequest): Promise<UpdatePhaseResponse> {
-  return request(`/workflows/${seg(workflowId)}/phases/${seg(phaseId)}`, { method: 'PUT', body })
+  return thenInvalidate(request(`/workflows/${seg(workflowId)}/phases/${seg(phaseId)}`, { method: 'PUT', body }), [
+    { name: 'getWorkflow', id: workflowId },
+    { name: 'listWorkflows' },
+  ])
 }

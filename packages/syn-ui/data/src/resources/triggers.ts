@@ -1,4 +1,5 @@
 import { request, seg } from '../client'
+import { type QueryTarget, cached, thenInvalidate } from '../keys'
 
 export interface TriggerSummary {
   trigger_id: string
@@ -36,15 +37,15 @@ export interface TriggerListResponse {
 }
 
 export function listTriggers(params: { repository?: string; status?: string } = {}, signal?: AbortSignal): Promise<TriggerListResponse> {
-  return request('/triggers', { query: { ...params }, signal })
+  return cached('listTriggers', [params], (s) => request('/triggers', { query: { ...params }, signal: s }), { signal, staleAfter: 'list' })
 }
 
 export function getTrigger(triggerId: string, signal?: AbortSignal): Promise<TriggerDetail> {
-  return request(`/triggers/${seg(triggerId)}`, { signal })
+  return cached('getTrigger', [triggerId], (s) => request(`/triggers/${seg(triggerId)}`, { signal: s }), { signal })
 }
 
 export function deleteTrigger(triggerId: string): Promise<{ trigger_id: string; status: string }> {
-  return request(`/triggers/${seg(triggerId)}`, { method: 'DELETE' })
+  return thenInvalidate(request(`/triggers/${seg(triggerId)}`, { method: 'DELETE' }), triggerTargets(triggerId))
 }
 
 export function updateTrigger(
@@ -52,7 +53,7 @@ export function updateTrigger(
   action: 'pause' | 'resume',
   reason?: string,
 ): Promise<{ trigger_id: string; status: string; action: string }> {
-  return request(`/triggers/${seg(triggerId)}`, { method: 'PATCH', body: { action, reason } })
+  return thenInvalidate(request(`/triggers/${seg(triggerId)}`, { method: 'PATCH', body: { action, reason } }), triggerTargets(triggerId))
 }
 
 export function getTriggerHistory(
@@ -60,5 +61,14 @@ export function getTriggerHistory(
   limit = 50,
   signal?: AbortSignal,
 ): Promise<{ trigger_id: string; entries: TriggerHistoryEntry[] }> {
-  return request(`/triggers/${seg(triggerId)}/history`, { query: { limit }, signal })
+  return cached('getTriggerHistory', [triggerId, limit], (s) => request(`/triggers/${seg(triggerId)}/history`, { query: { limit }, signal: s }), {
+    signal,
+    staleAfter: 'list',
+  })
 }
+
+const triggerTargets = (triggerId: string): QueryTarget[] => [
+  { name: 'listTriggers' },
+  { name: 'getTrigger', id: triggerId },
+  { name: 'getTriggerHistory', id: triggerId },
+]
