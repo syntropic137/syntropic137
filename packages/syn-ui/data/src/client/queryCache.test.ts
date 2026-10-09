@@ -141,6 +141,23 @@ describe('QueryCache', () => {
     expect(fetcher).toHaveBeenCalledTimes(2)
   })
 
+  it('settled exposes a cache hit synchronously, never a load', async () => {
+    const { cache } = setup()
+    const miss = cache.get('getWorkflow', ['w'], async () => ({ n: 1 }))
+    expect(cache.settled(miss)).toBeUndefined()
+    await miss
+    const hit = cache.get('getWorkflow', ['w'], async () => ({ n: 2 }))
+    expect(cache.settled(hit)).toEqual({ value: { n: 1 } })
+    expect(cache.settled(hit.then((v) => v))).toBeUndefined()
+  })
+
+  it('hands every caller its own copy', async () => {
+    const { cache } = setup()
+    const first = await cache.get('getWorkflow', ['w'], async () => ({ name: 'a' }))
+    first.name = 'changed'
+    expect((await cache.get('getWorkflow', ['w'], async () => ({ name: 'b' }))).name).toBe('a')
+  })
+
   it('track reports the keys a fetcher read synchronously, nested included', () => {
     const { cache } = setup()
     const f = async () => 0

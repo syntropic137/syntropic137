@@ -4,9 +4,8 @@
  * refreshed in the background, and the key's listeners hear when it lands.
  * Concurrent loads share one request (Coalescer; each signal cancels only its
  * caller). `invalidate` marks entries stale and notifies: the live stream
- * (live/invalidate.ts) and mutations use it. Fixtures mode never goes stale on
- * its own, so only invalidation refreshes; loads are still de-duplicated.
- * A binding uses `track` to learn the keys a fetcher read, then `subscribe`.
+ * (live/invalidate.ts) and mutations use it. Fixtures mode never goes stale by
+ * time; loads still de-dupe. Bindings `track` a fetcher's keys, then `subscribe`.
  */
 import { Coalescer } from './coalesce'
 import { clientConfig } from './config'
@@ -26,25 +25,21 @@ export type QueryMatch = string | ((entry: QueryEntryInfo) => boolean)
 export interface QueryGetOptions {
   /** ms, or a shape whose default applies. Default 'detail'. */
   staleAfter?: number | StaleKind
-  /** Cancels this caller only. */
-  signal?: AbortSignal
+  signal?: AbortSignal // cancels this caller only
 }
 
 interface Entry extends QueryEntryInfo {
   data: unknown
-  has: boolean
   fetchedAt: number
   staleAfter: number
-  /** Bumped by invalidate; data is valid only when loaded at the current gen. */
-  gen: number
-  dataGen: number
+  gen: number // bumped by invalidate; data is fresh only if loaded at the current gen
+  dataGen: number // -1 until the first load lands
 }
 
 export interface QueryCacheOptions {
   now?: () => number
   fixtures?: () => boolean
-  /** Oldest unwatched entries are dropped past this many (default 300). */
-  maxEntries?: number
+  maxEntries?: number // oldest unwatched entries go past this (default 300)
 }
 
 /** Stable text for any JSON-ish value: object keys sorted, undefined dropped. */
@@ -69,6 +64,7 @@ export class QueryCache {
   private flights = new Coalescer()
   private listeners = new Map<string, Set<() => void>>()
   private collector: Set<string> | null = null
+  private served = new WeakMap<Promise<unknown>, { value: unknown }>()
 
   constructor(private readonly options: QueryCacheOptions = {}) {}
 
@@ -84,15 +80,23 @@ export class QueryCache {
     const stale = options.staleAfter ?? 'detail'
     entry.staleAfter = typeof stale === 'number' ? stale : STALE_AFTER[stale]
     // Every caller gets its own copy, so a screen editing a response never edits the cache.
-    if (!entry.has) return this.load(entry, fetcher, options.signal).then(structuredClone)
+    if (entry.dataGen < 0) return this.load(entry, fetcher, options.signal).then((data) => structuredClone(data))
     if (this.isStale(entry)) this.load(entry, fetcher).catch(() => {}) // keep serving stale on failure
-    return Promise.resolve(structuredClone(entry.data as T))
+    const value = structuredClone(entry.data as T)
+    const served = Promise.resolve(value)
+    this.served.set(served, { value })
+    return served
+  }
+
+  /** The value of a promise `get` answered from cache, readable synchronously (no first-render flash). */
+  settled<T>(promise: Promise<T>): { value: T } | undefined {
+    return this.served.get(promise) as { value: T } | undefined
   }
 
   /** The cached value, fresh or stale, without loading or tracking. */
   peek<T>(name: string, params: readonly unknown[]): T | undefined {
     const entry = this.entries.get(queryKey(name, params))
-    return entry?.has ? structuredClone(entry.data as T) : undefined
+    return entry && entry.dataGen >= 0 ? structuredClone(entry.data as T) : undefined
   }
 
   /** Mark matching entries stale and notify their listeners. Returns how many matched. */
@@ -155,7 +159,7 @@ export class QueryCache {
   private entryFor(key: string, name: string, params: readonly unknown[]): Entry {
     const existing = this.entries.get(key)
     if (existing) return existing
-    const entry: Entry = { key, name, params, data: undefined, has: false, fetchedAt: 0, staleAfter: 0, gen: 0, dataGen: -1 }
+    const entry: Entry = { key, name, params, data: undefined, fetchedAt: 0, staleAfter: 0, gen: 0, dataGen: -1 }
     this.entries.set(key, entry)
     this.evict()
     return entry
@@ -174,8 +178,8 @@ export class QueryCache {
     const gen = entry.gen
     const start = (s: AbortSignal) =>
       fetcher(s).then((data) => {
-        const refreshed = entry.has
-        Object.assign(entry, { data, has: true, fetchedAt: this.now(), dataGen: gen })
+        const refreshed = entry.dataGen >= 0
+        Object.assign(entry, { data, fetchedAt: this.now(), dataGen: gen })
         if (refreshed && this.entries.get(entry.key) === entry) this.emit(entry.key)
         return data
       })
@@ -186,9 +190,7 @@ export class QueryCache {
     for (const listener of [...(this.listeners.get(key) ?? [])]) {
       try {
         listener()
-      } catch {
-        // one listener's error never blocks the others
-      }
+      } catch {} // one listener's error never blocks the others
     }
   }
 }

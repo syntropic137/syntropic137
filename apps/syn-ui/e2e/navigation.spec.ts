@@ -105,6 +105,29 @@ test.describe('Skyline only', () => {
     await expect(page).toHaveTitle(/Overview/)
   })
 
+  test('back to a list renders cached data on the first frame (ADR-074 query cache)', async ({ page }) => {
+    await open(page, '/executions')
+    const id = await firstDetailId(page, 'execution')
+    expect(id, 'a link to an execution').not.toBeNull()
+    await page.locator(`a[href$="/executions/${encodeURIComponent(id!)}"]`).first().click()
+    await expect(page).toHaveURL(urlFor(`/executions/${encodeURIComponent(id!)}`))
+    await expect(mainHeading(page)).toBeVisible()
+    // Count every skeleton inserted from here on: a cache hit never mounts one.
+    await page.evaluate(() => {
+      const w = window as unknown as { skeletonsSeen: number }
+      w.skeletonsSeen = 0
+      new MutationObserver((records) => {
+        for (const r of records)
+          for (const n of r.addedNodes)
+            if (n instanceof Element && (n.matches('.sky-skeleton') || n.querySelector('.sky-skeleton'))) w.skeletonsSeen++
+      }).observe(document.body, { childList: true, subtree: true })
+    })
+    await page.goBack()
+    await expect(page).toHaveURL(urlFor('/executions'))
+    await expect(page.locator(`a[href$="/executions/${encodeURIComponent(id!)}"]`).first()).toBeVisible()
+    expect(await page.evaluate(() => (window as unknown as { skeletonsSeen: number }).skeletonsSeen), 'skeletons mounted on the way back').toBe(0)
+  })
+
   test('unknown path shows not found', async ({ page }) => {
     await page.goto('no-such-page')
     await expect(mainHeading(page)).toBeVisible()
