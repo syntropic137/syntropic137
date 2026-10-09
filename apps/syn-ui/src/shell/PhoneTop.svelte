@@ -2,6 +2,7 @@
 <script lang="ts">
   import type { LiveState } from '@syn137/skyline-core/patterns'
   import { href } from '../lib/router'
+  import FeedbackButton from './FeedbackButton.svelte'
   import LiveBadge from './LiveBadge.svelte'
   import NavIcon from './NavIcon.svelte'
   import Wordmark from './Wordmark.svelte'
@@ -13,6 +14,7 @@
   <Wordmark href={href('/')} compact />
   <div class="sky-phonetop__actions">
     <span class="sky-phonetop__live"><LiveBadge state={live} size="sm" /></span>
+    <FeedbackButton compact />
     <button class="sky-phonetop__btn" type="button" aria-label="Search or jump to" onclick={onsearch}>
       <NavIcon name="search" size={17} />
     </button>

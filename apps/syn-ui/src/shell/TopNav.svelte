@@ -6,6 +6,7 @@
 <script lang="ts">
   import type { LiveState } from '@syn137/skyline-core/patterns'
   import { href } from '../lib/router'
+  import FeedbackButton from './FeedbackButton.svelte'
   import LiveBadge from './LiveBadge.svelte'
   import NavIcon from './NavIcon.svelte'
   import Wordmark from './Wordmark.svelte'
@@ -28,6 +29,7 @@
 
   <div class="sky-topnav__actions">
     <LiveBadge state={live} />
+    <FeedbackButton />
     <button class="sky-topnav__search" type="button" aria-label="Search or jump to" aria-keyshortcuts="Meta+K Control+K" onclick={onsearch}>
       <NavIcon name="search" size={14} />
       <kbd class="sky-topnav__kbd">⌘K</kbd>
