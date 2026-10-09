@@ -19,6 +19,7 @@ import json
 import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -26,9 +27,13 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import BaseModel, ConfigDict, JsonValue
 
+from syn_api.routes import github as github_routes
 from syn_api.routes.github import router
 from syn_api.services.github_repo_listing_cache import reset_repo_listing_cache
-from syn_api.types import GitHubRepoListResponse, GitHubRepoLookup
+from syn_api.types import GitHubRepoListResponse, GitHubRepoLookup, GitHubRepoResponse
+
+if TYPE_CHECKING:
+    import asyncio
 
 pytestmark = pytest.mark.unit
 
@@ -68,7 +73,8 @@ def _get(
     ``installations_sync`` scripts GitHub's installation list; by default it
     lists exactly the cached installations. ``upserted`` scripts persisting
     each synced installation, in order; by default every upsert succeeds.
-    Each call starts with no cached listing, so GitHub is asked.
+    Each call starts with no cached listing, so the request starts a refresh
+    that asks GitHub.
     """
     reset_repo_listing_cache()
     client = MagicMock()
@@ -93,11 +99,26 @@ def _get(
         patch("syn_api.routes.github.ensure_connected", new_callable=AsyncMock),
         patch("syn_adapters.github.client.get_github_client", return_value=client),
         patch(_PROJECTION, return_value=projection),
+        patch.object(github_routes, "_revalidation", None),
+        patch.object(github_routes, "_revalidation_generation", None),
+        TestClient(app) as http,
     ):
-        response = TestClient(app).get("/github/repos")
-    assert response.status_code == 200
-    body: JsonValue = response.json()
+        # The request answers from the empty cache and asks GitHub behind it;
+        # what GitHub said is what that refresh returns, in the route's model.
+        assert http.get("/github/repos").json()["lookup"] == "unavailable"
+        task = github_routes._revalidation
+        assert task is not None
+        repos, lookup = http.portal.call(_awaited, task)
+    body: JsonValue = GitHubRepoListResponse(
+        repos=repos, total=len(repos), lookup=lookup
+    ).model_dump(mode="json")
     return body
+
+
+async def _awaited(
+    task: asyncio.Task[tuple[list[GitHubRepoResponse], GitHubRepoLookup]],
+) -> tuple[list[GitHubRepoResponse], GitHubRepoLookup]:
+    return await task
 
 
 def _lookup(body: JsonValue) -> GitHubRepoListResponse:
