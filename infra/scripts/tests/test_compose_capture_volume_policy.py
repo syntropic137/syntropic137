@@ -31,6 +31,7 @@ _COMPOSE = [
 _VOLUME = "syn-capture-" + "ab" * 32
 _TEMPLATE = (
     "frontend dockerfrontend\n    http-request deny unless METH_GET\n    http-request deny\n"
+    "    default_backend dockerbackend\n"
 )
 _RULE = re.compile(r"http-request allow if \{ method ([A-Z ]+) \} \{ path -m reg (\S+) \}")
 
