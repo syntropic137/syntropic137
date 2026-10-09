@@ -2,7 +2,8 @@
 
 Exposes query endpoints for GitHub App data (accessible repos, installations).
 These answer from the GitHub API, not projections; the all-installations
-listing is cached briefly (see ``github_repo_listing_cache``).
+listing is served from a cache refreshed behind the request, so a page load
+never waits on GitHub (see ``github_repo_listing_cache``).
 """
 
 from __future__ import annotations
@@ -194,24 +195,24 @@ async def _aggregate_all_installations(
     client: _RepoLister,
     include_private: bool,
 ) -> tuple[list[GitHubRepoResponse], GitHubRepoLookup]:
-    """Return the repos every installation reaches, from the cache when it can.
+    """Return the repos every installation reaches, from the cache, never waiting on GitHub.
 
-    Any retained listing is served without waiting on GitHub: one younger than
-    ``FRESH_FOR`` as complete, an older one as ``partial``, because a repo
-    added since may be missing from it. Past ``REFRESH_AFTER`` a background
-    refresh starts, so the next request finds a fresh listing. Only with no
-    listing retained at all (first use, or a webhook just invalidated it) is
-    GitHub asked live, since then there is nothing to serve.
+    A retained listing younger than ``FRESH_FOR`` is served as complete, an
+    older one as ``partial``, because a repo added since may be missing from
+    it. With none retained (first use, a webhook just invalidated it, or the
+    cache is unreadable) nothing is known, so the answer is ``unavailable``.
+    Past ``REFRESH_AFTER``, or on a miss, a background refresh starts, so the
+    next request finds a fresh listing.
     """
     cache = get_repo_listing_cache()
     cached = await cache.get()
     if cached is None:
-        repos, lookup = await _ask_github(client, cache)
-    else:
-        if cached.age() >= REFRESH_AFTER:
-            _revalidate_in_background(client, cache)
-        repos = cached.repos
-        lookup = GitHubRepoLookup.COMPLETE if cached.is_fresh() else GitHubRepoLookup.PARTIAL
+        await _revalidate_in_background(client, cache)
+        return [], GitHubRepoLookup.UNAVAILABLE
+    if cached.age() >= REFRESH_AFTER:
+        await _revalidate_in_background(client, cache)
+    repos = cached.repos
+    lookup = GitHubRepoLookup.COMPLETE if cached.is_fresh() else GitHubRepoLookup.PARTIAL
     if not include_private:
         repos = [r for r in repos if not r.private]
     return repos, lookup
@@ -219,14 +220,22 @@ async def _aggregate_all_installations(
 
 _Listing = tuple[list[GitHubRepoResponse], GitHubRepoLookup]
 _revalidation: asyncio.Task[_Listing] | None = None
+_revalidation_generation: int | None = None
 
 
-def _revalidate_in_background(client: _RepoLister, cache: RepoListingCache) -> None:
-    """Start refreshing the cache unless this process already is."""
-    global _revalidation
-    if _revalidation is not None and not _revalidation.done():
+async def _revalidate_in_background(client: _RepoLister, cache: RepoListingCache) -> None:
+    """Start refreshing the cache unless this process already is, for this generation.
+
+    A refresh started before an invalidation can store nothing, so one for the
+    new generation starts beside it rather than waiting it out.
+    """
+    global _revalidation, _revalidation_generation
+    generation = await cache.generation()
+    in_flight = _revalidation is not None and not _revalidation.done()
+    if in_flight and _revalidation_generation == generation:
         return
-    _revalidation = asyncio.create_task(_ask_github(client, cache))
+    _revalidation_generation = generation
+    _revalidation = asyncio.create_task(_ask_github(client, cache, generation))
     _revalidation.add_done_callback(_log_revalidation_failure)
 
 
@@ -238,19 +247,19 @@ def _log_revalidation_failure(task: asyncio.Task[_Listing]) -> None:
 async def _ask_github(
     client: _RepoLister,
     cache: RepoListingCache,
+    generation: int | None,
 ) -> tuple[list[GitHubRepoResponse], GitHubRepoLookup]:
     """Ask GitHub for every installation's repos, and cache a complete answer.
 
     Installations are asked concurrently. A listing that is not complete is
     returned but never cached, so the cache only ever holds what GitHub
-    confirmed in full. The generation is read before GitHub is asked, so an
+    confirmed in full. ``generation`` was read before GitHub is asked, so an
     invalidation that lands while GitHub answers outranks this answer.
     """
     from syn_domain.contexts.github.slices.get_installation.projection import (
         get_installation_projection,
     )
 
-    generation = await cache.generation()
     started_at = datetime.now(UTC)
     installations, installations_current = await _known_installations(
         client, get_installation_projection()
@@ -335,12 +344,13 @@ async def list_accessible_repos_endpoint(
 ) -> GitHubRepoListResponse:
     """List repositories accessible to the GitHub App.
 
-    With no installation_id, aggregates every installation. The last complete
-    listing is cached and served without waiting on GitHub: as ``complete``
+    With no installation_id, aggregates every installation and never waits on
+    GitHub. The last complete listing is cached and served as ``complete``
     while under a minute old, as ``partial`` once older, with a background
-    refresh behind it. GitHub is asked live only when no listing is cached. The
-    GitHub App's ``installation`` and ``installation_repositories`` webhooks
-    invalidate the cache at once. A single installation_id is always asked live.
+    refresh behind it. With no listing cached the answer is ``unavailable``
+    while a background refresh fetches one. The GitHub App's ``installation``
+    and ``installation_repositories`` webhooks invalidate the cache at once. A
+    single installation_id is always asked live.
 
     ``lookup`` says whether a repo missing from ``repos`` is known to be out of
     the App's reach (``complete``) or merely went unseen because GitHub failed.

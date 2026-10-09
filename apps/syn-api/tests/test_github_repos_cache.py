@@ -96,6 +96,7 @@ def github() -> Iterator[_GitHub]:
             "syn_domain.contexts.github.get_installation_projection", return_value=_projection([])
         ),
         patch.object(github_routes, "_revalidation", None),
+        patch.object(github_routes, "_revalidation_generation", None),
     ):
         yield gh
 
@@ -117,20 +118,112 @@ async def _age_cache(by: timedelta) -> None:
     await cache.put(cached.model_copy(update={"fetched_at": cached.fetched_at - by}))
 
 
-async def _finish_revalidation() -> None:
+async def _finish_revalidation() -> GitHubRepoListResponse:
     task = github_routes._revalidation
     assert task is not None, "no background refresh was started"
-    await asyncio.wait_for(task, timeout=5)
+    repos, lookup = await asyncio.wait_for(task, timeout=5)
+    return GitHubRepoListResponse(repos=repos, total=len(repos), lookup=lookup)
+
+
+async def _warm() -> GitHubRepoListResponse:
+    """Load the page once and let the refresh it starts land, as a first visit does."""
+    await _listing()
+    return await _finish_revalidation()
+
+
+async def _listing_while_github_hangs(github: _GitHub) -> GitHubRepoListResponse:
+    """One page request while every GitHub call hangs: it must answer regardless."""
+    gate = asyncio.Event()
+    original_installations, original_repos = github.list_installations, github.list_accessible_repos
+
+    async def hangs_installations() -> list[dict]:
+        await gate.wait()
+        return await original_installations()
+
+    async def hangs_repos(installation_id: str | None = None) -> list[dict]:
+        await gate.wait()
+        return await original_repos(installation_id)
+
+    with (
+        patch.object(github, "list_installations", hangs_installations),
+        patch.object(github, "list_accessible_repos", hangs_repos),
+    ):
+        try:
+            return await asyncio.wait_for(_listing(), timeout=1)
+        finally:
+            gate.set()
 
 
 async def test_a_fresh_cache_answers_without_asking_github(github: _GitHub) -> None:
-    first = await _listing()
+    first = await _warm()
     asked = len(github.calls)
     second = await _listing()
 
     assert asked == 3  # the installation list, then each installation
     assert len(github.calls) == asked
     assert (_names(second), second.lookup) == (_names(first), GitHubRepoLookup.COMPLETE)
+
+
+async def test_a_cold_cache_is_unavailable_at_once_and_refreshed_behind(github: _GitHub) -> None:
+    """Owner feedback 0afb5d92: first use must not wait on GitHub either."""
+    cold = await _listing_while_github_hangs(github)
+    assert (cold.repos, cold.lookup) == ([], GitHubRepoLookup.UNAVAILABLE)
+
+    await _finish_revalidation()
+    asked = len(github.calls)
+    warm = await _listing()
+    assert len(github.calls) == asked
+    assert (_names(warm), warm.lookup) == (
+        ["acme/billing", "acme/payments"],
+        GitHubRepoLookup.COMPLETE,
+    )
+
+
+async def test_a_page_load_after_a_webhook_does_not_wait_on_github(github: _GitHub) -> None:
+    await _warm()
+    github.repos["inst-2"].append("acme/new")
+    await _handle_installation_event(
+        "installation_repositories",
+        "added",
+        {"installation": {"id": "inst-2"}, "repositories_added": [{"full_name": "acme/new"}]},
+    )
+
+    after = await _listing_while_github_hangs(github)
+    assert (after.repos, after.lookup) == ([], GitHubRepoLookup.UNAVAILABLE)
+
+    await _finish_revalidation()
+    refreshed = await _listing()
+    assert (refreshed.lookup, "acme/new" in _names(refreshed)) == (GitHubRepoLookup.COMPLETE, True)
+
+
+async def test_an_unreadable_cache_does_not_wait_on_github(github: _GitHub) -> None:
+    listing_cache_module._cache_singleton = RedisRepoListingCache(
+        _Redis(broken=True)  # type: ignore[arg-type]  # stand-in for redis.asyncio.Redis
+    )
+    served = await _listing_while_github_hangs(github)
+    assert (served.repos, served.lookup) == ([], GitHubRepoLookup.UNAVAILABLE)
+
+    # The refresh still asks GitHub, but with no generation to store under it stores nothing.
+    refreshed = await _finish_revalidation()
+    assert refreshed.lookup == GitHubRepoLookup.COMPLETE
+    assert await get_repo_listing_cache().get() is None
+
+
+async def test_page_loads_during_a_refresh_start_no_second_one(github: _GitHub) -> None:
+    gate = asyncio.Event()
+    original = github.list_installations
+
+    async def hangs() -> list[dict]:
+        await gate.wait()
+        return await original()
+
+    with patch.object(github, "list_installations", hangs):
+        await _listing()
+        first = github_routes._revalidation
+        await _listing()
+        assert github_routes._revalidation is first
+        gate.set()
+        await _finish_revalidation()
 
 
 @pytest.mark.parametrize("age", [FRESH_FOR + timedelta(seconds=1), timedelta(hours=12)])
@@ -142,7 +235,7 @@ async def test_an_expired_listing_is_served_partial_without_waiting_on_github(
     No webhook: a repo added is missing from the stale listing, which says so by
     being partial, and is in the listing served once the background refresh lands.
     """
-    await _listing()
+    await _warm()
     github.repos["inst-1"].append("acme/new")
     await _age_cache(age)
     asked = len(github.calls)
@@ -160,7 +253,7 @@ async def test_an_expired_listing_is_served_partial_without_waiting_on_github(
 async def test_a_listing_past_refresh_after_is_served_and_refreshed_behind(
     github: _GitHub,
 ) -> None:
-    await _listing()
+    await _warm()
     github.repos["inst-1"].append("acme/new")
     await _age_cache(REFRESH_AFTER + timedelta(seconds=1))
 
@@ -176,7 +269,7 @@ async def test_a_listing_past_refresh_after_is_served_and_refreshed_behind(
 
 async def test_a_webhook_during_a_refresh_outranks_the_refresh(github: _GitHub) -> None:
     """A refresh that read GitHub before the webhook must not be served after it."""
-    await _listing()
+    await _warm()
     await _age_cache(REFRESH_AFTER + timedelta(seconds=1))
     original = github.list_accessible_repos
     read_old_answer, release = asyncio.Event(), asyncio.Event()
@@ -198,7 +291,12 @@ async def test_a_webhook_during_a_refresh_outranks_the_refresh(github: _GitHub) 
             "added",
             {"installation": {"id": "inst-2"}, "repositories_added": [{"full_name": "acme/new"}]},
         )
+        stale_refresh = github_routes._revalidation
+        await _listing()  # the cache is gone: unavailable, and a refresh for the new generation
+        assert github_routes._revalidation is not stale_refresh
         release.set()
+        assert stale_refresh is not None
+        await asyncio.wait_for(stale_refresh, timeout=5)
         await _finish_revalidation()
 
         after = await _listing()
@@ -207,7 +305,7 @@ async def test_a_webhook_during_a_refresh_outranks_the_refresh(github: _GitHub) 
 
 
 async def test_an_installation_webhook_drops_the_cache(github: _GitHub) -> None:
-    await _listing()
+    await _warm()
     github.repos["inst-2"].append("acme/new")
 
     await _handle_installation_event(
@@ -215,6 +313,8 @@ async def test_an_installation_webhook_drops_the_cache(github: _GitHub) -> None:
         "added",
         {"installation": {"id": "inst-2"}, "repositories_added": [{"full_name": "acme/new"}]},
     )
+    assert (await _listing()).lookup == GitHubRepoLookup.UNAVAILABLE
+    await _finish_revalidation()
     after = await _listing()
 
     assert (after.lookup, "acme/new" in _names(after)) == (GitHubRepoLookup.COMPLETE, True)
@@ -222,7 +322,7 @@ async def test_an_installation_webhook_drops_the_cache(github: _GitHub) -> None:
 
 @pytest.mark.parametrize("action", ["created", "deleted", "suspend", "unsuspend"])
 async def test_every_installation_action_drops_the_cache(github: _GitHub, action: str) -> None:
-    await _listing()
+    await _warm()
     with patch("syn_api.routes.webhooks.handlers._apply_installation_created", AsyncMock()):
         await _handle_installation_event("installation", action, {"installation": {"id": 1}})
     assert await get_repo_listing_cache().get() is None
@@ -231,7 +331,7 @@ async def test_every_installation_action_drops_the_cache(github: _GitHub, action
 async def test_github_down_with_a_warm_cache_serves_it_stale_and_keeps_it(
     github: _GitHub,
 ) -> None:
-    before = await _listing()
+    before = await _warm()
     await _age_cache(FRESH_FOR + timedelta(seconds=1))
     github.down = True
 
@@ -248,6 +348,8 @@ async def test_github_down_with_a_cold_cache_is_unavailable_as_before(github: _G
     github.down = True
     listing = await _listing()
     assert (listing.repos, listing.lookup) == ([], GitHubRepoLookup.UNAVAILABLE)
+    refreshed = await _finish_revalidation()
+    assert (refreshed.repos, refreshed.lookup) == ([], GitHubRepoLookup.UNAVAILABLE)
     assert await get_repo_listing_cache().get() is None
 
 
@@ -260,14 +362,15 @@ async def test_a_partial_answer_is_not_cached(github: _GitHub) -> None:
         return await original(installation_id)
 
     with patch.object(github, "list_accessible_repos", inst_2_fails):
-        partial = await _listing()
+        await _listing()
+        partial = await _finish_revalidation()
     assert partial.lookup == GitHubRepoLookup.PARTIAL
     assert await get_repo_listing_cache().get() is None
 
 
 async def test_private_repos_are_filtered_from_the_cached_listing(github: _GitHub) -> None:
     github.repos["inst-1"].append("acme/secret-private")
-    await _listing()
+    await _warm()
     public = await _listing(include_private=False)
     assert "acme/secret-private" not in _names(public)
     assert "acme/payments" in _names(public)
@@ -424,7 +527,7 @@ async def test_a_late_refresh_does_not_cost_the_newer_listing_its_stale_fallback
         if backend == "redis"
         else InMemoryRepoListingCache()
     )
-    await _listing()
+    await _warm()
     await _age_cache(REFRESH_AFTER + timedelta(seconds=1))
     original = github.list_accessible_repos
     a_read_old_answer, release_a = asyncio.Event(), asyncio.Event()
@@ -439,6 +542,7 @@ async def test_a_late_refresh_does_not_cost_the_newer_listing_its_stale_fallback
     with patch.object(github, "list_accessible_repos", a_pauses_after_reading):
         await _listing()  # serves the cache and starts refresh A behind it
         await asyncio.wait_for(a_read_old_answer.wait(), timeout=5)
+        refresh_a = github_routes._revalidation
 
         github.repos["inst-2"].append("acme/new")
         await _handle_installation_event(
@@ -446,11 +550,13 @@ async def test_a_late_refresh_does_not_cost_the_newer_listing_its_stale_fallback
             "added",
             {"installation": {"id": "inst-2"}, "repositories_added": [{"full_name": "acme/new"}]},
         )
-        b = await _listing()  # the cache is gone, so B asks GitHub and stores its answer
+        await _listing()  # the cache is gone, so refresh B starts beside A
+        b = await _finish_revalidation()
         assert (b.lookup, "acme/new" in _names(b)) == (GitHubRepoLookup.COMPLETE, True)
 
         release_a.set()
-        await _finish_revalidation()
+        assert refresh_a is not None
+        await asyncio.wait_for(refresh_a, timeout=5)
 
     await _age_cache(FRESH_FOR + timedelta(seconds=1))
     github.down = True

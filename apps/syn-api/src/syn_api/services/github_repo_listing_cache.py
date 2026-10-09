@@ -4,7 +4,8 @@ Asking GitHub costs one round-trip for the installation list plus one per
 installation, which is seconds, not milliseconds. This cache holds the last
 listing GitHub confirmed as ``complete`` (every installation answered) and
 when it was fetched. The route decides what that age means; this module only
-stores it. The page never waits on GitHub while any listing is retained.
+stores it. The page never waits on GitHub: with no listing retained it is
+answered ``unavailable`` while a refresh runs behind it.
 
 Only complete listings are stored, so a cached listing never claims more than
 GitHub once confirmed. Each listing carries the cache generation read before
@@ -13,7 +14,7 @@ GitHub before a webhook and writes after it stores nothing. The write is a
 compare-and-set on the generation, so that late refresh cannot overwrite a
 newer refresh's listing either. Production keeps it in Redis, shared across replicas and
 surviving a restart; a lost or unreachable Redis costs speed, never
-correctness, because a miss means asking GitHub live (ADR-060: no
+correctness, because a miss is answered ``unavailable`` (ADR-060: no
 in-memory store outside test/offline).
 """
 
@@ -120,7 +121,7 @@ class RedisRepoListingCache:
         try:
             raw, generation = await self._redis.mget(_KEY, _GENERATION_KEY)
         except Exception:
-            logger.warning("GitHub repo listing cache unreadable; asking GitHub", exc_info=True)
+            logger.warning("GitHub repo listing cache unreadable", exc_info=True)
             return None
         if raw is None:
             return None
