@@ -299,15 +299,18 @@ async def _known_whole() -> str | None:
 async def _reclaim_inputs_rebuilding() -> str | None:
     """Whether the execution list or the ownership links are being rebuilt."""
     from syn_api.services.read_model_status import read_models_rebuilding
-    from syn_domain.contexts.orchestration._shared.execution_list_reads import (
-        WORKFLOW_EXECUTIONS,
+    from syn_domain.contexts.orchestration.slices.list_executions.projection import (
+        WorkflowExecutionListProjection,
     )
     from syn_domain.contexts.orchestration.slices.workspace_ownership.projection import (
         WorkspaceOwnershipProjection,
     )
 
     return await read_models_rebuilding(
-        {WORKFLOW_EXECUTIONS, WorkspaceOwnershipProjection.PROJECTION_NAME}
+        {
+            WorkflowExecutionListProjection.PROJECTION_NAME,
+            WorkspaceOwnershipProjection.PROJECTION_NAME,
+        }
     )
 
 
