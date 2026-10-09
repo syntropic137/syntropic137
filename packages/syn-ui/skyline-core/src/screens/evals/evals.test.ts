@@ -12,6 +12,9 @@ import {
   variantPassed,
   withLatestRun,
   workflowLabel,
+  filterEvals,
+  pageOf,
+  recentVerdicts,
   NOT_SCORED,
   parseEvidence,
   runOutcome,
@@ -235,5 +238,33 @@ describe('eval detail runs', () => {
     expect(variantPassed({ run_count: 1, pass_count: 0, pass_rate: null })).toEqual({ fraction: 'Not scored yet', fill: null })
     expect(variantPassed({ run_count: 4, pass_count: 2, pass_rate: 2 / 3 })).toEqual({ fraction: '2/3', fill: 67 })
     expect(variantPassed({ run_count: 2, pass_count: 0, pass_rate: 0 })).toEqual({ fraction: '0 passed', fill: 0 })
+  })
+})
+
+describe('evals list from one load', () => {
+  const a = ev('a', 'shared-esp-stream', 'wf-a', 'm', 'PASS', '2026-10-01T00:00:00Z')
+  const b = ev('b', 'codex-cost-limit', 'wf-b', 'm', 'FAIL', '2026-10-02T00:00:00Z')
+  it('filters by exact tag or substring of name and tags', () => {
+    expect(filterEvals([a, b], '').map((e) => e.eval_id)).toEqual(['a', 'b'])
+    expect(filterEvals([a, b], 'case:codex-cost-limit').map((e) => e.eval_id)).toEqual(['b'])
+    expect(filterEvals([a, b], 'ESP').map((e) => e.eval_id)).toEqual(['a'])
+    expect(filterEvals([a, b], 'wf-')).toHaveLength(2)
+    expect(filterEvals([a, b], 'nope')).toEqual([])
+  })
+  it('pages client-side', () => {
+    const rows = Array.from({ length: 45 }, (_, i) => i)
+    expect(pageOf(rows, 1, 20)).toEqual({ rows: rows.slice(0, 20), pageCount: 3, from: 1 })
+    expect(pageOf(rows, 3, 20).rows).toEqual([40, 41, 42, 43, 44])
+    expect(pageOf([], 1, 20)).toEqual({ rows: [], pageCount: 1, from: 1 })
+  })
+  it('builds sparklines from variant verdicts, oldest first', () => {
+    const s = stable('s', 'c', [
+      ['w1', 'm', 'FAIL', '2026-10-08T02:00:00Z'],
+      ['w2', 'm', 'PASS', '2026-10-08T01:00:00Z'],
+      ['w3', 'm', null, '2026-10-08T03:00:00Z', 0],
+    ])
+    expect(recentVerdicts(s)).toEqual(['pass', 'fail'])
+    expect(recentVerdicts({ ...a, variants: [] })).toEqual(['pass'])
+    expect(recentVerdicts({ ...a, run_count: 0 })).toEqual([])
   })
 })

@@ -116,7 +116,6 @@
                   aria-label={verdictCellLabel(c, v, cell)}
                   aria-pressed={on}
                   tabindex={on ? 0 : -1}
-                  onmouseenter={() => select(r, col)}
                   onfocus={() => select(r, col)}
                   onclick={() => select(r, col)}
                   onkeydown={onkey}

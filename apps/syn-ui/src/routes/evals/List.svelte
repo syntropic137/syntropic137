@@ -1,12 +1,12 @@
 <!-- Evals list. Boards: Evals · PhoneEvals. Verdict board over every eval, then the tag-filterable list. -->
 <script lang="ts">
-  import { listEvalRuns, listEvals, mapLimit, MAX_PAGE_SIZE } from '@syn137/syn-ui-data'
-  import type { EvalSummary, EvalVerdict } from '@syn137/syn-ui-data'
+  import { listEvalRuns, listEvals, MAX_PAGE_SIZE } from '@syn137/syn-ui-data'
+  import type { EvalSummary } from '@syn137/syn-ui-data'
   import { Callout, EmptyState, Pagination, Skeleton } from '@syn137/skyline-svelte-v5'
   import { PageHeader, VerdictBlock, VerdictBoard, VerdictSparkline } from '@syn137/skyline-svelte-v5/patterns'
   import { formatDate, formatRelativeTime } from '@syn137/skyline-core/format'
   import { cellKey, normalizeVerdict } from '@syn137/skyline-core/patterns'
-  import { buildEvalBoard, sortEvalsByLastRun, tagValue, withLatestRun } from '@syn137/skyline-core/screens/evals'
+  import { buildEvalBoard, filterEvals, pageOf, recentVerdicts, sortEvalsByLastRun, tagValue, withLatestRun } from '@syn137/skyline-core/screens/evals'
   import { isRunFinished } from '@syn137/syn-ui-data/live'
   import { resource } from '../../lib/load.svelte'
   import { href, router } from '../../lib/router'
@@ -17,7 +17,6 @@
   let { params: _params }: PageProps = $props()
 
   const PAGE_SIZE = 20
-  const SPARK_RUNS = 8
 
   const tag = $derived(router.query.get('tag') ?? '')
   const page = $derived.by(() => {
@@ -25,28 +24,12 @@
     return Number.isInteger(n) && n > 0 ? n : 1
   })
 
-  // Every eval feeds the board; the list below follows the tag filter and page.
+  // One /evals load per visit (it takes ~20 s on a large deployment): the
+  // board, the tag filter, the list and its pages are all derived from it.
   const all = resource((signal) => listEvals({ page_size: MAX_PAGE_SIZE }, signal), { live: isRunFinished })
-  const list = resource(
-    async (signal) => {
-      const t = tag
-      const p = page
-      const res = await listEvals({ tag: t || undefined, page: p, page_size: PAGE_SIZE }, signal)
-      const rows = sortEvalsByLastRun(res.evals)
-      // TODO(#624): N+1 for sparklines, as in the React list. Ask the API for recent verdicts on EvalResponse.
-      const recent = await mapLimit(rows, 4, async (e): Promise<(EvalVerdict | null)[]> => {
-        if (e.run_count === 0) return []
-        try {
-          const runs = await listEvalRuns(e.eval_id, { page_size: SPARK_RUNS }, signal)
-          return runs.items.map((r) => r.verdict).reverse()
-        } catch {
-          return [e.last_verdict ?? null]
-        }
-      })
-      return { ...res, rows: rows.map((e, i) => ({ eval: e, recent: recent[i] ?? [] })) }
-    },
-    { live: isRunFinished },
-  )
+  const sorted = $derived(sortEvalsByLastRun(all.data?.evals ?? []))
+  const filtered = $derived(filterEvals(sorted, tag))
+  const paged = $derived(pageOf(filtered, page, PAGE_SIZE))
 
   const board = $derived(
     buildEvalBoard(all.data?.evals ?? [], {
@@ -104,12 +87,12 @@
   const boardDescription = $derived(
     `Does the verifier block a change that carries a known escaped bug, and name the defect and the file it lives in? ${caseCount} ${caseCount === 1 ? 'case' : 'cases'}, each pinned to the commit before its fix, under ${board.verifiers.length} ${board.verifiers.length === 1 ? 'verifier' : 'verifiers'}.`,
   )
-  const pageCount = $derived(list.data ? Math.max(1, Math.ceil(list.data.total / PAGE_SIZE)) : 1)
+  const pageCount = $derived(paged.pageCount)
   const rangeSummary = $derived.by(() => {
-    if (!list.data || list.data.total === 0) return ''
-    const from = (page - 1) * PAGE_SIZE + 1
-    const to = Math.min(list.data.total, from + list.data.rows.length - 1)
-    return `Showing ${from}–${to} of ${list.data.total} evals`
+    if (filtered.length === 0) return ''
+    const to = paged.from + paged.rows.length - 1
+    const loaded = all.data && all.data.total > all.data.evals.length ? ` (first ${all.data.evals.length} of ${all.data.total} loaded)` : ''
+    return `Showing ${paged.from}–${to} of ${filtered.length} evals${loaded}`
   })
 
   function variantLine(e: EvalSummary) {
@@ -124,7 +107,7 @@
 >
   <form class="sky-evals__search" role="search" {onsubmit}>
     <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="7" cy="7" r="4.25"></circle><path d="M10.25 10.25L13.5 13.5"></path></svg>
-    <input type="search" aria-label="Filter evals by tag" placeholder="Filter by tag, e.g. case:codex-cost-limit" bind:value={search} />
+    <input type="search" aria-label="Filter evals by name or tag" placeholder="Filter, e.g. case:codex-cost-limit or esp" bind:value={search} />
   </form>
 </PageHeader>
 
@@ -132,6 +115,7 @@
   <Callout tone="danger" title="Could not load evals">{all.error instanceof Error ? all.error.message : String(all.error)}</Callout>
 {:else if !all.data}
   <section class="sky-evals__panel" aria-busy="true" aria-label="Loading verdict board">
+    <p class="sky-evals__wait" role="status">Loading every eval. On a large deployment this can take about 20 s.</p>
     <Skeleton variant="title" width="12rem" />
     <Skeleton variant="text" lines={2} />
     <Skeleton variant="block" height="18rem" />
@@ -151,7 +135,7 @@
   <div class="sky-evals__all-head">
     <div class="sky-evals__all-title">
       <h2 id="sky-evals-all">All evals</h2>
-      <span>Newest run first. Select a tag to filter.</span>
+      <span>Newest run first. Select a tag, or type part of a name or tag, to filter.</span>
     </div>
     {#if tag}
       <div class="sky-evals__tagged">
@@ -161,24 +145,24 @@
     {/if}
   </div>
 
-  {#if list.error && !list.data}
-    <Callout tone="danger" title="Could not load evals">{list.error instanceof Error ? list.error.message : String(list.error)}</Callout>
-  {:else if !list.data}
+  {#if all.error && !all.data}
+    <Callout tone="danger" title="Could not load evals">{all.error instanceof Error ? all.error.message : String(all.error)}</Callout>
+  {:else if !all.data}
     <div class="sky-evals__list" aria-busy="true" aria-label="Loading evals">
       {#each [0, 1, 2, 3] as i (i)}
         <div class="sky-evals__row"><Skeleton variant="block" width="2.75rem" height="2.4rem" /><div class="sky-evals__row-body"><Skeleton variant="text" lines={3} /></div></div>
       {/each}
     </div>
-  {:else if list.data.rows.length === 0}
+  {:else if paged.rows.length === 0}
     <div class="sky-evals__list">
-      {#if list.data.total > 0}
-        <EmptyState title="No evals on this page" description={`There are ${list.data.total} evals.`}>
+      {#if filtered.length > 0}
+        <EmptyState title="No evals on this page" description={`There are ${filtered.length} evals.`}>
           {#snippet icon()}<FlaskIcon />{/snippet}
           {#snippet action()}<a href={href(tag ? `/evals?tag=${encodeURIComponent(tag)}` : '/evals')}>Back to page 1</a>{/snippet}
         </EmptyState>
       {:else}
         <EmptyState
-          title={tag ? `No evals tagged ${tag}` : 'No evals yet'}
+          title={tag ? `No evals match ${tag}` : 'No evals yet'}
           description="Create one with scripts/eval_suite.py launch, or POST /evals with a goal and a pinned baseline repo. Each execution launched into it becomes a run here."
         >
           {#snippet icon()}<FlaskIcon />{/snippet}
@@ -186,9 +170,9 @@
       {/if}
     </div>
   {:else}
-    <ul class="sky-evals__list" aria-busy={list.loading}>
-      {#each list.data.rows as row (row.eval.eval_id)}
-        {@const e = row.eval}
+    <ul class="sky-evals__list" aria-busy={all.loading}>
+      {#each paged.rows as e (e.eval_id)}
+        {@const recent = recentVerdicts(e)}
         {@const verdict = e.run_count > 0 ? normalizeVerdict(e.last_verdict) : 'unscored'}
         <li class="sky-evals__row" data-sky-row>
           <VerdictBlock class="sky-evals__block" {verdict} size={44} />
@@ -200,7 +184,7 @@
               </span>
               <div class="sky-evals__facts">
                 <span>{e.run_count} {e.run_count === 1 ? 'run' : 'runs'}</span>
-                <VerdictSparkline verdicts={(row.recent.length ? row.recent : [e.last_verdict ?? null]).map((v) => normalizeVerdict(v))} />
+                {#if recent.length}<VerdictSparkline verdicts={recent} />{/if}
                 <span class="sky-evals__pass" title="Pass rate of scored runs">{e.pass_rate_display}</span>
                 <span class="sky-evals__when" title={e.last_run_at ?? undefined}>{formatRelativeTime(e.last_run_at)}</span>
               </div>
@@ -266,6 +250,11 @@
     border-radius: var(--sky-radius-card-lg);
     border: var(--ds-border-width) solid var(--ds-color-border);
     background: var(--ds-color-surface);
+  }
+  .sky-evals__wait {
+    margin: 0;
+    font-size: var(--ds-text-sm);
+    color: var(--ds-color-text-muted);
   }
   .sky-evals__all {
     display: flex;

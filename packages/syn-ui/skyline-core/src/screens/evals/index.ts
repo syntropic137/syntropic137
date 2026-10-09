@@ -276,6 +276,37 @@ export function sortEvalsByLastRun<T extends EvalLike>(evals: readonly T[]): T[]
   return [...evals].sort((a, b) => (time(b.last_run_at) ?? -Infinity) - (time(a.last_run_at) ?? -Infinity))
 }
 
+/**
+ * The list's filter, run over evals already loaded: an exact tag
+ * (`case:codex-cost-limit`) or any case-insensitive substring of the name or
+ * a tag (`esp`). Empty matches everything.
+ */
+export function filterEvals<T extends EvalLike>(evals: readonly T[], query: string): T[] {
+  const q = query.trim().toLowerCase()
+  if (!q) return [...evals]
+  return evals.filter((e) => e.name.toLowerCase().includes(q) || e.tags.some((t) => t.toLowerCase().includes(q)))
+}
+
+/** One page of rows (1-based), plus the page count (at least 1). */
+export function pageOf<T>(rows: readonly T[], page: number, size: number): { rows: T[]; pageCount: number; from: number } {
+  const pageCount = Math.max(1, Math.ceil(rows.length / size))
+  const from = (page - 1) * size
+  return { rows: rows.slice(from, from + size), pageCount, from: from + 1 }
+}
+
+/**
+ * Sparkline verdicts from what the list already carries: the latest verdict
+ * of each variant, oldest first. An eval with no variants falls back to its
+ * own last verdict, and one that never ran has none.
+ */
+export function recentVerdicts(e: EvalLike): Verdict[] {
+  if (e.run_count <= 0) return []
+  const vs = [...(e.variants ?? [])].filter((v) => v.run_count > 0 && v.last_verdict !== undefined)
+  if (!vs.length) return [normalizeVerdict(e.last_verdict)]
+  vs.sort((a, b) => (time(a.last_run_at) ?? 0) - (time(b.last_run_at) ?? 0))
+  return vs.map((v) => normalizeVerdict(v.last_verdict))
+}
+
 /** Other evals of the same case (tag `case:<id>`), current one included, in verifier order. */
 export function sameCaseSiblings<T extends EvalLike>(current: EvalLike, all: readonly T[]): T[] {
   const caseId = tagValue(current.tags, 'case')
