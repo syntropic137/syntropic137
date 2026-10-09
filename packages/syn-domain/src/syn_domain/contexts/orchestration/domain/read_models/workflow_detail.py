@@ -20,6 +20,11 @@ from syn_domain.contexts.orchestration.domain.constants import (
 from syn_shared.agents import DEFAULT_PHASE_SANDBOX
 
 
+def _text(value: object) -> str | None:
+    """A stored ref part: a non-empty string, or None."""
+    return value if isinstance(value, str) and value else None
+
+
 @dataclass(frozen=True)
 class PhaseRefDetail:
     """A plugin or skill reference as a reader sees it.
@@ -62,19 +67,18 @@ class PhaseRefDetail:
             return cls(raw=ref)
         if not isinstance(ref, dict):
             return None
-        source = ref.get("source_url") or ref.get("source")
+        source = _text(ref.get("source_url")) or _text(ref.get("source"))
         # SkillRef spells it `skill_name`; ClaudePluginRef spells it `name`.
-        name = ref.get("skill_name") or ref.get("name")
+        name = _text(ref.get("skill_name")) or _text(ref.get("name"))
         # `to_dict` writes a shorthand ref as a mapping holding only `raw`, so
         # a row this class wrote must read back as the same ref, not as nothing.
-        stored_raw = ref.get("raw")
-        raw = stored_raw if isinstance(stored_raw, str) and stored_raw else None
-        if not source and not name and raw is None:
+        raw = _text(ref.get("raw"))
+        if source is None and name is None and raw is None:
             return None
         return cls(
-            source_url=source if isinstance(source, str) else None,
-            name=name if isinstance(name, str) else None,
-            version=ref.get("version") if isinstance(ref.get("version"), str) else None,
+            source_url=source,
+            name=name,
+            version=_text(ref.get("version")),
             name_overridden=ref.get("name_overridden") is True,
             raw=raw,
         )
