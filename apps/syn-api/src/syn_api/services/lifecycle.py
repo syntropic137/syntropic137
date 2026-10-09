@@ -500,7 +500,7 @@ async def _init_durable_stores() -> Result[None, LifecycleError]:
 
     if isinstance(ledger := await _init_import_ledger(), Err):
         return ledger
-    await start_request_latency()  # ADR-075: best-effort, on the observability pool
+    await start_request_latency()  # ADR-075: background, retried; never blocks startup
     return await inventory_lifecycle.initialize_session_inventory()
 
 

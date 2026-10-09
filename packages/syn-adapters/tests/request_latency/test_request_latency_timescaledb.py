@@ -44,7 +44,7 @@ async def test_recorded_samples_come_back_as_exact_percentiles(pool) -> None:
     for ms in range(1, 101):  # 1..100 ms
         recorder.offer(RequestSample(now, "GET", route, 200, float(ms), uuid4().hex))
     recorder.offer(RequestSample(now - timedelta(days=2), "GET", route, 200, 9_999.0, "old"))
-    await recorder.stop()
+    await recorder.stop(timeout_s=5)
     assert recorder.counters().written == 101
 
     (row,) = await latency_by_route(pool, since=now - timedelta(hours=1), route=route)
