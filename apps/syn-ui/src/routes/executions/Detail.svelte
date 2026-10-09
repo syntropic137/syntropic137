@@ -7,7 +7,7 @@
 <script lang="ts">
   import { phaseTone } from '@syn137/skyline-core/geometry'
   import { formatBytes, formatCostPrecise, formatDateTime, formatDuration, formatInteger, shortId, durationBetween } from '@syn137/skyline-core/format'
-  import { statusSemantics } from '@syn137/skyline-core/patterns'
+  import { outcomeStatus, statusSemantics } from '@syn137/skyline-core/patterns'
   import {
     evalBadge,
     phaseProgressText,
@@ -201,7 +201,7 @@
       data-long-title={longTask ? (taskOpen ? 'open' : 'folded') : undefined}
       kind="execution"
       eyebrow={d.workflow_execution_id}
-      status={d.status}
+      status={outcomeStatus(d.status, d.failure_classification)}
       meta={`${phaseProgressText(d.phase_progress?.display, d.completed_phases, d.total_phases)} · ${formatDateTime(d.started_at)}`}
       titleLabel={d.task ? 'Task' : undefined}
       title={d.task || d.workflow_name}

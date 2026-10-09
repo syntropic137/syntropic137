@@ -6,7 +6,7 @@
 -->
 <script lang="ts">
   import { formatCost, formatRelativeTime, formatTokens } from '@syn137/skyline-core/format'
-  import { runBarPercent, runSegments, runSlots, runSubline } from '@syn137/skyline-core/patterns'
+  import { outcomeStatus, runBarPercent, runSegments, runSlots, runSubline, statusSemantics } from '@syn137/skyline-core/patterns'
   import {
     EXECUTION_FILTERS,
     evalBadge,
@@ -231,7 +231,7 @@
             <li data-sky-row>
               <RunRow
                 href={href(`/executions/${r.workflow_execution_id}`)}
-                status={r.status}
+                status={outcomeStatus(r.status, r.failure_classification)}
                 name={r.workflow_name || r.workflow_id}
                 tag={evalBadge(r.eval)}
                 sub={rowSub(r)}
@@ -242,7 +242,7 @@
                 tokens={r.total_tokens_display ?? formatTokens(r.total_tokens)}
                 cost={r.total_cost_display ?? formatCost(r.total_cost_usd)}
                 when={when(r)}
-                aria-label={`${r.workflow_name}, ${r.status}, started ${when(r)}`}
+                aria-label={`${r.workflow_name}, ${statusSemantics(outcomeStatus(r.status, r.failure_classification)).label}, started ${when(r)}`}
               />
             </li>
           {/each}

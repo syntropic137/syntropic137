@@ -20,7 +20,7 @@
 -->
 <script lang="ts">
   import { formatCost, formatInteger, formatPercent, formatRelativeTime, formatTokens, formatDuration } from '@syn137/skyline-core/format'
-  import { runBarPercent, runSegments, runSlots } from '@syn137/skyline-core/patterns'
+  import { outcomeStatus, runBarPercent, runSegments, runSlots } from '@syn137/skyline-core/patterns'
   import {
     formatTimeout,
     latestOutputsByPhase,
@@ -236,7 +236,7 @@
             <li>
               <RunRow
                 href={href(`/executions/${r.workflow_execution_id}`)}
-                status={r.status}
+                status={outcomeStatus(r.status, r.failure_classification)}
                 name={r.workflow_execution_id}
                 sub={r.phase_progress?.display ?? `${r.completed_phases} of ${r.total_phases} phases`}
                 segments={runSegments({ status: r.status, done: r.phase_progress?.completed ?? r.completed_phases, total: r.phase_progress?.possible ?? r.total_phases })}

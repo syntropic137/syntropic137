@@ -183,6 +183,7 @@
      skyline-core's statusSemantics() names these; nothing else picks status colours. */
   --sky-status-completed: var(--ds-color-success);
   --sky-status-failed: var(--ds-color-danger);
+  --sky-status-refused: var(--ds-color-warning);
   --sky-status-running: var(--ds-color-accent);
   --sky-status-pending: var(--ds-color-text-subtle);
   --sky-status-cancelled: var(--ds-color-text-muted);

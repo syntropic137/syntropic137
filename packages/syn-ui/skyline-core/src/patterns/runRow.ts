@@ -55,6 +55,7 @@ export function runSegments({ status, done, total }: RunSegmentsInput): RunSegme
 /** Tone of the segment where the run stopped, by status kind; other kinds leave it empty. */
 const STOP_TONE: Partial<Record<StatusKind, RunSegmentTone>> = {
   failed: 'failed',
+  refused: 'cancelled',
   cancelled: 'cancelled',
   interrupted: 'cancelled',
   running: 'running',

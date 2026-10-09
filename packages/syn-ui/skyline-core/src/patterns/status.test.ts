@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { humanize, statusKind, statusSemantics } from './index'
+import { humanize, outcomeStatus, statusKind, statusSemantics } from './index'
 import { statusToken, type StatusKind } from './status'
 
 describe('statusSemantics', () => {
@@ -31,5 +31,15 @@ describe('statusSemantics', () => {
     expect(statusSemantics('interrupted').tone).toBe('warning')
     expect(statusToken('skipped')).toBe('var(--sky-status-skipped)')
     expect(statusSemantics('nope').token).toBe('var(--sky-status-unknown)')
+  })
+  it('draws a correct refusal as Refused, amber, never as a red failure (React outcomeTone, #1357)', () => {
+    const s = statusSemantics(outcomeStatus('failed', 'correct_refusal'))
+    expect(s).toMatchObject({ kind: 'refused', label: 'Refused', tone: 'warning', token: 'var(--sky-status-refused)', terminal: true })
+    expect(s.glyph).not.toBe(statusSemantics('failed').glyph)
+    expect(outcomeStatus('failed', 'unclassified')).toBe('failed')
+    expect(outcomeStatus('failed', 'platform')).toBe('failed')
+    expect(outcomeStatus('failed', null)).toBe('failed')
+    expect(outcomeStatus('completed', 'correct_refusal')).toBe('completed')
+    expect(statusKind('refused')).toBe('refused')
   })
 })

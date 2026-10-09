@@ -12,7 +12,7 @@
 <script lang="ts">
   import { formatCost, formatInteger, formatRelativeTime, formatTokens } from '@syn137/skyline-core/format'
   import { dayFromMs, type SkylineDay } from '@syn137/skyline-core/geometry'
-  import { runBarPercent, runSegments, runSlots, runSubline } from '@syn137/skyline-core/patterns'
+  import { outcomeStatus, runBarPercent, runSegments, runSlots, runSubline } from '@syn137/skyline-core/patterns'
   import {
     activeDayCount,
     attentionRuns,
@@ -160,7 +160,7 @@
             {#each attention as r (r.workflow_execution_id)}
               <li>
                 <a class="sky-ov-chip" href={execHref(r.workflow_execution_id)}>
-                  <StatusBadge status={r.status} shape="glyph" />
+                  <StatusBadge status={outcomeStatus(r.status, r.failure_classification)} shape="glyph" />
                   <span class="sky-ov-chip__name">{r.workflow_name}</span>
                   <span class="sky-ov-chip__meta">
                     <span class="sky-ov-chip__verb">failed in </span>{r.duration_display || '—'} · {formatRelativeTime(r.started_at)}
@@ -232,7 +232,7 @@
         <div class="sky-ov-runs__list">
           {#each rows as r (r.workflow_execution_id)}
             <RunRow
-              status={r.status}
+              status={outcomeStatus(r.status, r.failure_classification)}
               name={r.workflow_name}
               tag={evalBadge(r.eval)}
               sub={runSubline(r.repos_display ?? r.repos?.[0] ?? null, r.phase_progress?.completed ?? r.completed_phases, r.phase_progress?.possible ?? r.total_phases)}

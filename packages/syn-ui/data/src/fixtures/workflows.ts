@@ -10,6 +10,7 @@ import { type CatalogRun, type CatalogWorkflow, RUNS, WORKFLOWS, phaseRuns, work
 import { EXTRA_WORKFLOWS, PHASE_DETAILS } from './workflowDetails'
 import type { WorkflowLatestOutputsResponse } from '../resources/workflows'
 import { artifactRow } from './artifacts'
+import { failureClassOf } from './executions'
 import { type FixtureRoute, notFound, route } from './define'
 import { FIXTURE_NOW, paginate } from './seed'
 
@@ -106,7 +107,7 @@ export function runSummary(r: CatalogRun): WorkflowExecutionSummary {
     },
     // TODO(#1843): mirrors the API, whose /runs rows leave out a failed phase's usage (the Executions list and /metrics count it).
     ...usageWithoutFailedPhases(r),
-    failure_classification: 'unclassified',
+    failure_classification: failureClassOf(r),
   }
 }
 

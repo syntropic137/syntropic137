@@ -58,3 +58,10 @@ test('Artifacts cards name the phase that wrote the file, never an ordinal "phas
   const texts = await cards.allInnerTexts()
   expect(texts.some((t) => /\n(research|synthesize|report|review|plan|implement|summarize)\b/i.test(`\n${t}`))).toBe(true)
 })
+
+test('Executions shows a correct refusal as Refused, not Failed', async ({ page }) => {
+  await page.goto('./executions?window=all&status=failed')
+  const main = page.locator('#sky-main')
+  await expect(main.getByRole('link', { name: /, Refused, started/ })).toHaveCount(1)
+  await expect(main.getByRole('link', { name: /, Failed, started/ }).first()).toBeVisible()
+})

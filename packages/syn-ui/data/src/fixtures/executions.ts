@@ -82,13 +82,23 @@ export function executionListItem(r: CatalogRun): ExecutionListItem {
     duration_display: durationDisplay(r.seconds),
     tool_call_count: r.done * 14,
     error_message: r.status === 'failed' ? 'Phase exited with a non-zero status' : null,
-    failure_classification: 'unclassified',
+    failure_classification: failureClassOf(r),
     repos: r.repo ? [r.repo] : [],
     tags: [],
     repos_display: r.repo ? r.repo.replace('https://github.com/', '') : null,
     start_queue: null,
     eval: evalOf(r),
   }
+}
+
+/**
+ * Why a failed run failed. The pr-review run a week ago is a correct refusal
+ * (the agent judged the work should not be done), as 4 of the 10 failed runs
+ * on the VPS were on 2026-10-09; the rest stay unclassified.
+ */
+const REFUSED_RUN = 4
+export function failureClassOf(r: CatalogRun): 'correct_refusal' | 'unclassified' {
+  return RUNS.indexOf(r) === REFUSED_RUN && r.status === 'failed' ? 'correct_refusal' : 'unclassified'
 }
 
 /** The pr-review run an hour ago was launched by an eval, so the Eval marker and filter have a row. */
@@ -202,7 +212,7 @@ export function executionDetail(r: CatalogRun): ExecutionDetailResponse {
     unpriced_observation_count: 0,
     artifact_ids: phases.flatMap((p) => (p.artifact_id ? [p.artifact_id] : [])),
     error_message: item.error_message ?? null,
-    failure_classification: 'unclassified',
+    failure_classification: failureClassOf(r),
     repos: item.repos ?? [],
     workspace: null,
     task: taskOf(r),

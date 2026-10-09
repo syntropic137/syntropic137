@@ -7,7 +7,7 @@
 -->
 <script lang="ts">
   import { formatCost, formatDuration, formatRelativeTime, formatTokens } from '@syn137/skyline-core/format'
-  import { runBarPercent, runSegments, runSlots } from '@syn137/skyline-core/patterns'
+  import { outcomeStatus, runBarPercent, runSegments, runSlots } from '@syn137/skyline-core/patterns'
   import { TIME_WINDOWS, groupByAge, parseTimeWindow } from '@syn137/skyline-core/screens/executions'
   import { RUN_FILTERS, parseRunFilter, runDurationMs, runsSummary, runsView } from '@syn137/skyline-core/screens/workflows'
   import { Button, Callout, EmptyState, Pagination, Skeleton, ToggleGroup } from '@syn137/skyline-svelte-v5'
@@ -133,7 +133,7 @@
             <li>
               <RunRow
                 href={href(`/executions/${r.workflow_execution_id}`)}
-                status={r.status}
+                status={outcomeStatus(r.status, r.failure_classification)}
                 name={r.workflow_execution_id}
                 sub={r.phase_progress?.display ?? `${r.completed_phases} of ${r.total_phases} phases`}
                 segments={runSegments({ status: r.status, done: r.phase_progress?.completed ?? r.completed_phases, total: r.phase_progress?.possible ?? r.total_phases })}
