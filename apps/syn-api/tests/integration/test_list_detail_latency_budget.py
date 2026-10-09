@@ -21,17 +21,25 @@ neither compression key, so a compressed chunk cannot be narrowed by it.
 
 THE BUDGETS are the E2 targets: p95 <= 200ms for a list, <= 300ms for a detail.
 Measured numbers, before and after, are in the PR description.
+
+THE REPOS PAGE (owner feedback 0afb5d92: "takes like five seconds to load")
+waits on /repos, /systems and /github/repos together. The first two read the
+seeded organization projections. /github/repos answers from the App's cached
+listing, seeded here as EXPIRED, the state a page opened after a while away
+finds, while every GitHub call takes GITHUB_ROUND_TRIP_S: a request that waited
+on GitHub cannot fit its budget.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import math
 import os
 import time
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 import pytest
@@ -66,6 +74,14 @@ DETAIL_BUDGET_MS = 300.0
 # 100 is the operator's choice, timed for its ratio. The ratios are printed so
 # the next measurement is one run away.
 MAX_100_OVER_50 = 1.5
+
+# The repos page: registered repos spread over systems, and an App that reaches
+# them plus some only it knows about.
+REPOS = 500
+SYSTEMS = 25
+APP_ONLY_REPOS = 100
+REPOS_PAGE_BUDGET_MS = 300.0
+GITHUB_ROUND_TRIP_S = 2.0
 
 # The execution the detail endpoint is timed on: mid-history, so its rows sit
 # in a compressed chunk like almost every execution an operator opens.
@@ -120,10 +136,18 @@ ENDPOINTS: tuple[Endpoint, ...] = (
         LIST_BUDGET_MS,
     ),
     Endpoint("/artifacts?page_size=20", "/artifacts", {"page_size": "20"}, LIST_BUDGET_MS),
+    # The three requests the repos page makes together (feedback 0afb5d92).
+    Endpoint("/repos", "/repos", {}, REPOS_PAGE_BUDGET_MS),
+    Endpoint("/systems", "/systems", {}, REPOS_PAGE_BUDGET_MS),
+    Endpoint("/github/repos", "/github/repos", {}, REPOS_PAGE_BUDGET_MS),
 )
 
 _COLUMNS = ("time", "event_type", "session_id", "execution_id", "phase_id", "data")
 _Row = tuple[datetime, str, str, str, str, str]
+
+
+def repo_name(n: int) -> str:
+    return f"acme/repo-{n:04d}"
 
 
 def execution_id(n: int) -> str:
@@ -347,7 +371,35 @@ async def projection_documents(now: datetime) -> dict[str, dict[str, ProjectionR
             }
             await listing.on_workflow_completed(done)
             await detail.on_workflow_completed(done)
+    await seed_organization(store)
     return store.tables
+
+
+async def seed_organization(store: _DictStore) -> None:
+    """Systems and registered repos, built by the organization projections' handlers."""
+    from syn_domain.contexts.organization.slices.list_repos.projection import RepoProjection
+    from syn_domain.contexts.organization.slices.list_systems.projection import SystemProjection
+
+    repos = RepoProjection(store)  # type: ignore[arg-type]  # duck-typed store
+    systems = SystemProjection(store)  # type: ignore[arg-type]
+    for s in range(SYSTEMS):
+        await systems.on_system_created(
+            {"system_id": f"sys-{s:02d}", "organization_id": "org-1", "name": f"System {s}"}
+        )
+    for n in range(REPOS):
+        # Every fifth repo belongs to no system.
+        system = f"sys-{n % SYSTEMS:02d}" if n % 5 else ""
+        registered = {
+            "repo_id": f"repo-{n:04d}",
+            "organization_id": "org-1",
+            "system_id": system,
+            "provider": "github",
+            "full_name": repo_name(n),
+            "owner": "acme",
+            "installation_id": "inst-1",
+        }
+        await repos.on_repo_registered(registered)
+        await systems.on_repo_registered_increment(registered)
 
 
 async def seed(pool: asyncpg.Pool, now: datetime) -> None:
@@ -382,6 +434,55 @@ async def seed(pool: asyncpg.Pool, now: datetime) -> None:
             "FROM show_chunks('agent_events', older_than => INTERVAL '1 day') c"
         )
         await conn.execute("VACUUM ANALYZE")
+
+
+class SlowGitHub:
+    """A GitHub App whose every call takes GITHUB_ROUND_TRIP_S, as a real round-trip does.
+
+    The installation list then fails, so a background refresh never replaces
+    the expired listing and every timed request meets the expired-cache path.
+    """
+
+    async def list_installations(self) -> list[dict[str, object]]:
+        await asyncio.sleep(GITHUB_ROUND_TRIP_S)
+        raise RuntimeError("GitHub 502")
+
+    async def list_accessible_repos(
+        self, installation_id: str | None = None
+    ) -> list[dict[str, object]]:
+        await asyncio.sleep(GITHUB_ROUND_TRIP_S)
+        return [
+            {"id": n, "name": repo_name(n).split("/")[1], "full_name": repo_name(n)}
+            for n in range(REPOS + APP_ONLY_REPOS)
+        ]
+
+
+async def seed_expired_app_listing() -> None:
+    """The App listing a page opened after a while away finds: cached, but expired."""
+    from syn_api.services.github_repo_listing_cache import (
+        FRESH_FOR,
+        CachedRepoListing,
+        get_repo_listing_cache,
+    )
+    from syn_api.types import GitHubRepoResponse
+
+    cache = get_repo_listing_cache()
+    generation = await cache.generation()
+    assert generation is not None
+    repos = [
+        GitHubRepoResponse(
+            github_id=n,
+            name=repo_name(n).split("/")[1],
+            full_name=repo_name(n),
+            private=False,
+            default_branch="main",
+            owner="acme",
+            installation_id="inst-1",
+        )
+        for n in range(REPOS + APP_ONLY_REPOS)
+    ]
+    expired_at = datetime.now(UTC) - FRESH_FOR - timedelta(minutes=30)
+    await cache.put(CachedRepoListing(repos=repos, fetched_at=expired_at, generation=generation))
 
 
 def use_timescale_timeline(pool: asyncpg.Pool) -> None:
@@ -435,6 +536,13 @@ async def assert_timing_real_work(client: httpx.AsyncClient) -> None:
     artifacts = (await client.get("/artifacts", params={"page_size": "20"})).json()
     assert artifacts["total"] == EXECUTIONS * PHASES, artifacts["total"]
     assert len(artifacts["artifacts"]) == 20
+    repos = (await client.get("/repos")).json()
+    assert repos["total"] == REPOS, repos["total"]
+    systems = (await client.get("/systems")).json()
+    assert systems["total"] == SYSTEMS, systems["total"]
+    assert sum(s["repo_count"] for s in systems["systems"]) == REPOS * 4 // 5
+    app = (await client.get("/github/repos")).json()
+    assert (app["total"], app["lookup"]) == (REPOS + APP_ONLY_REPOS, "partial"), app["lookup"]
 
 
 def over_budget(measured: dict[str, float]) -> list[str]:

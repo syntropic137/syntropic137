@@ -56,6 +56,12 @@ async def e2_seeded_client(
     from syn_adapters.projection_stores import PostgresProjectionStore
     from syn_adapters.projections.manager import reset_projection_manager
     from syn_api.main import create_app
+    from syn_api.services import github_repo_listing_cache as repo_listing_cache
+    from syn_domain.contexts.github.slices.get_installation import (
+        projection as get_installation,
+    )
+    from syn_domain.contexts.organization.slices.list_repos import projection as list_repos
+    from syn_domain.contexts.organization.slices.list_systems import projection as list_systems
 
     store = AgentEventStore(e2_database)
     await store.initialize()
@@ -67,6 +73,13 @@ async def e2_seeded_client(
     gate.use_timescale_timeline(pool)
 
     await gate.seed(pool, datetime.now(UTC).replace(microsecond=0))
+    # GitHub answers slowly; the repos page must not be waiting on it.
+    monkeypatch.setattr("syn_adapters.github.client.get_github_client", gate.SlowGitHub)
+    monkeypatch.setattr(repo_listing_cache, "_cache_singleton", None)
+    for projection in (list_repos, list_systems, get_installation):
+        # Module singletons: built on first use, so on the store patched above.
+        monkeypatch.setattr(projection, "_projection", None)
+    await gate.seed_expired_app_listing()
 
     try:
         transport = httpx.ASGITransport(app=create_app())
