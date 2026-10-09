@@ -1,11 +1,13 @@
-<!-- Syntropic137 wordmark: the original "S" mark (public/logo_syntropic137.png) and Orbitron type, as in the React dashboard. -->
+<!-- Syntropic137 wordmark: the S mark (SMark, eleven isometric cubes) and Orbitron type. -->
 <script lang="ts">
+  import { SMark } from '@syn137/skyline-svelte-v5/patterns'
+
   let { href = '/', compact = false }: { href?: string; compact?: boolean } = $props()
-  const logo = `${import.meta.env.BASE_URL}logo_syntropic137.png`
 </script>
 
 <a class="sky-wordmark" data-compact={compact || undefined} {href} aria-label="Syntropic137 overview">
-  <img class="sky-wordmark__mark" src={logo} width="26" height="26" alt="" />
+  <!-- The S is about half as wide as tall: 12.4px wide fills the 26px box's height. -->
+  <span class="sky-wordmark__mark"><SMark size={12.4} label="" /></span>
   <span class="sky-wordmark__text">Syntropic<span class="sky-wordmark__num">137</span></span>
 </a>
 
@@ -24,7 +26,8 @@
     outline-offset: var(--sky-focus-ring-offset);
   }
   .sky-wordmark__mark {
-    display: block;
+    display: grid;
+    place-items: center;
     flex-shrink: 0;
     width: 26px;
     height: 26px;
