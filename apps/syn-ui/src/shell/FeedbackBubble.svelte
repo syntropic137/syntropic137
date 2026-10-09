@@ -13,12 +13,23 @@
   import StickyNote from '@lucide/svelte/icons/sticky-note'
   import X from '@lucide/svelte/icons/x'
   import { getFeatures, getFeedbackStats, listFeedback, type FeedbackItem } from '@syn137/syn-ui-data'
+  import { Keycaps } from '@syn137/skyline-svelte-v5/patterns'
   import { FEEDBACK_UI_ATTR } from './feedback/element'
+  import FeedbackDetail from './feedback/FeedbackDetail.svelte'
+  import { bindingCaps } from './keycaps'
   import { APP_NAME, STATUS_LABEL, typeChoice } from './feedback/meta'
   import { feedbackUi, openFeedback } from './feedback.svelte'
 
   let menu = $state(false)
-  let view = $state<'menu' | 'recent'>('menu')
+  let view = $state<'menu' | 'recent' | 'detail'>('menu')
+  let selected = $state<FeedbackItem | null>(null)
+  let listEl: HTMLUListElement | undefined = $state()
+  /** Row to refocus when the detail view backs out. */
+  let lastIndex = 0
+
+  const NOTE_KEYS = bindingCaps('feedback')
+  const PICK_KEYS = bindingCaps('feedback-pick')
+  const RECENT_KEYS = bindingCaps('feedback-recent')
   let openCount = $state(0)
   let recent = $state<FeedbackItem[] | null>(null)
   let recentError = $state<string | null>(null)
@@ -73,6 +84,7 @@
   function showRecent() {
     menu = true
     view = 'recent'
+    selected = null
     void loadRecent()
   }
 
@@ -87,16 +99,46 @@
   function onKey(e: KeyboardEvent) {
     if (!feedbackUi.enabled || e.defaultPrevented) return
     if (e.key === 'Escape' && menu) {
-      // Consumed, so the app keymap does not also go back.
+      // Consumed, so the app keymap does not also go back. Steps out one view at a time.
       e.preventDefault()
-      close()
-      trigger?.focus()
+      if (view === 'detail') backToList()
+      else if (view === 'recent') view = 'menu'
+      else {
+        close()
+        trigger?.focus()
+      }
     }
   }
 
   function onDocClick(e: MouseEvent) {
     // composedPath: the clicked icon may already be swapped out of the DOM by the time this runs.
     if (menu && root && !e.composedPath().includes(root)) close()
+  }
+
+  function openItem(item: FeedbackItem, index: number) {
+    lastIndex = index
+    selected = item
+    view = 'detail'
+  }
+
+  function backToList() {
+    view = 'recent'
+    selected = null
+    queueMicrotask(() => listEl?.querySelectorAll<HTMLButtonElement>('button')[lastIndex]?.focus())
+  }
+
+  function onListKey(e: KeyboardEvent) {
+    const step = e.key === 'ArrowDown' ? 1 : e.key === 'ArrowUp' ? -1 : 0
+    if (!step || !listEl) return
+    e.preventDefault()
+    const rows = [...listEl.querySelectorAll<HTMLButtonElement>('button')]
+    const at = rows.findIndex((r) => r === document.activeElement)
+    rows[(at + step + rows.length) % rows.length]?.focus()
+  }
+
+  function onItemChange(next: FeedbackItem) {
+    recent = recent?.map((r) => (r.id === next.id ? next : r)) ?? null
+    void refreshCount()
   }
 
   const firstLine = (c: string | null | undefined) => (c ?? '').split('\n')[0] || '(no comment)'
@@ -108,18 +150,20 @@
 {#if feedbackUi.enabled && !feedbackUi.open && !feedbackUi.picking}
   <div class="sky-fb-bubble" bind:this={root} {...{ [FEEDBACK_UI_ATTR]: '' }}>
     {#if menu}
-      <div class="sky-fb-bubble__panel" role="menu" aria-label="Feedback">
+      <div class="sky-fb-bubble__panel" role={view === 'menu' ? 'menu' : 'dialog'} aria-label={view === 'menu' ? 'Feedback' : view === 'detail' ? 'Feedback item' : 'Recent feedback'}>
         {#if view === 'menu'}
           <button type="button" role="menuitem" class="sky-fb-bubble__item" onclick={note}>
-            <StickyNote size={15} aria-hidden="true" /><span>Quick note</span><kbd>F</kbd>
+            <StickyNote size={15} aria-hidden="true" /><span>Quick note</span><Keycaps keys={NOTE_KEYS} />
           </button>
           <button type="button" role="menuitem" class="sky-fb-bubble__item" onclick={pick}>
-            <MousePointerClick size={15} aria-hidden="true" /><span>Pin to element</span><kbd>⌃⇧F</kbd>
+            <MousePointerClick size={15} aria-hidden="true" /><span>Pin to element</span><Keycaps keys={PICK_KEYS} />
           </button>
           <button type="button" role="menuitem" class="sky-fb-bubble__item" onclick={showRecent}>
             <List size={15} aria-hidden="true" /><span>Recent feedback</span>
-            {#if openCount > 0}<span class="sky-fb-bubble__count">{openCount} open</span>{/if}<kbd>⌃⇧T</kbd>
+            {#if openCount > 0}<span class="sky-fb-bubble__count">{openCount} open</span>{/if}<Keycaps keys={RECENT_KEYS} />
           </button>
+        {:else if view === 'detail' && selected}
+          <FeedbackDetail item={selected} onback={backToList} onchange={onItemChange} />
         {:else}
           <div class="sky-fb-bubble__recent">
             <div class="sky-fb-bubble__recent-head">
@@ -133,14 +177,17 @@
             {:else if recent.length === 0}
               <p class="sky-fb-bubble__muted">Nothing filed yet.</p>
             {:else}
-              <ul class="sky-fb-bubble__list">
-                {#each recent as item (item.id)}
-                  <li class="sky-fb-bubble__row" style:--fb-color={typeChoice(item.feedback_type).color}>
-                    <span class="sky-fb-bubble__dot" aria-hidden="true"></span>
-                    <span class="sky-fb-bubble__row-text">
-                      <span class="sky-fb-bubble__row-title">{firstLine(item.comment)}</span>
-                      <span class="sky-fb-bubble__muted">{typeChoice(item.feedback_type).label} · {item.priority} · {STATUS_LABEL[item.status]} · {item.route ?? item.url}</span>
-                    </span>
+              <!-- svelte-ignore a11y_no_noninteractive_element_interactions: arrow keys move between the row buttons -->
+              <ul class="sky-fb-bubble__list" bind:this={listEl} onkeydown={onListKey} aria-label="Recent feedback">
+                {#each recent as item, i (item.id)}
+                  <li>
+                    <button type="button" class="sky-fb-bubble__row" style:--fb-color={typeChoice(item.feedback_type).color} onclick={() => openItem(item, i)}>
+                      <span class="sky-fb-bubble__dot" aria-hidden="true"></span>
+                      <span class="sky-fb-bubble__row-text">
+                        <span class="sky-fb-bubble__row-title">{firstLine(item.comment)}</span>
+                        <span class="sky-fb-bubble__muted">{typeChoice(item.feedback_type).label} · {item.priority} · {STATUS_LABEL[item.status]} · {item.route ?? item.url}</span>
+                      </span>
+                    </button>
                   </li>
                 {/each}
               </ul>
@@ -254,11 +301,6 @@
   .sky-fb-bubble__item span:first-of-type {
     flex: 1;
   }
-  .sky-fb-bubble__item kbd {
-    font-family: var(--ds-font-mono);
-    font-size: var(--ds-text-xs);
-    color: var(--ds-color-text-subtle);
-  }
   .sky-fb-bubble__count {
     font-family: var(--ds-font-mono);
     font-size: var(--ds-text-xs);
@@ -292,8 +334,23 @@
   .sky-fb-bubble__row {
     display: flex;
     gap: var(--ds-space-2);
+    width: 100%;
     padding: var(--ds-space-1-5) var(--ds-space-1);
+    border: 0;
     border-top: var(--ds-border-width) solid var(--sky-color-divider);
+    border-radius: var(--ds-radius-sm);
+    background: transparent;
+    color: var(--ds-color-fg);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  .sky-fb-bubble__row:hover {
+    background: var(--sky-color-control-hover);
+  }
+  .sky-fb-bubble__row:focus-visible {
+    outline: var(--sky-focus-ring-width) solid var(--sky-color-focus);
+    outline-offset: calc(var(--sky-focus-ring-width) * -1);
   }
   .sky-fb-bubble__dot {
     flex: none;

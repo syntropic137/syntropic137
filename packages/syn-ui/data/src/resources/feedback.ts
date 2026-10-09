@@ -6,7 +6,7 @@
  * The routes exist only on an API built with the feedback extra, and answer
  * 404 while SYN_UI_FEEDBACK_ENABLED is off. Gate the UI on `getFeatures()`.
  */
-import { request, requestForm } from '../client'
+import { clientConfig, request, requestForm, usingFixtures } from '../client'
 import type { components } from '../generated/api-types'
 
 export type FeedbackCreate = components['schemas']['FeedbackCreate']
@@ -63,4 +63,28 @@ export function uploadFeedbackMedia(feedbackId: string, file: Blob, mediaType: F
   form.append('file', file, fileName)
   form.append('media_type', mediaType)
   return requestForm(`/feedback/${encodeURIComponent(feedbackId)}/media`, form, { signal })
+}
+
+export type FeedbackItemWithMedia = components['schemas']['FeedbackItemWithMedia']
+export type FeedbackUpdate = components['schemas']['FeedbackUpdate']
+
+/** One item with its media list (no bytes). */
+export function getFeedback(feedbackId: string, signal?: AbortSignal): Promise<FeedbackItemWithMedia> {
+  return request(`/feedback/${encodeURIComponent(feedbackId)}`, { signal, coalesce: false })
+}
+
+/** PATCH status, priority, assignee, notes or comment; returns the updated item. */
+export function updateFeedback(feedbackId: string, body: FeedbackUpdate, signal?: AbortSignal): Promise<FeedbackItem> {
+  return request(`/feedback/${encodeURIComponent(feedbackId)}`, { method: 'PATCH', body, signal })
+}
+
+/**
+ * A URL an <img> can load for one media item: the API route itself, or in
+ * fixtures mode an object URL for the stored upload (fixtures have no
+ * server to serve bytes). The caller revokes `blob:` URLs it no longer shows.
+ */
+export async function feedbackMediaSrc(feedbackId: string, mediaId: string, signal?: AbortSignal): Promise<string> {
+  if (!usingFixtures()) return `${clientConfig().baseUrl}/feedback/${encodeURIComponent(feedbackId)}/media/${encodeURIComponent(mediaId)}`
+  const blob = await request<Blob>(`/feedback/${encodeURIComponent(feedbackId)}/media/${encodeURIComponent(mediaId)}`, { signal, coalesce: false })
+  return URL.createObjectURL(blob)
 }
