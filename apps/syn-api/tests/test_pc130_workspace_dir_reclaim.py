@@ -733,7 +733,9 @@ async def test_a_core_worktree_outside_the_workspace_is_refused_and_kept(
     assert archive.files == []
 
 
-async def test_git_never_searches_above_a_found_repository(base: Path, tmp_path: Path) -> None:
+async def test_git_never_searches_above_a_found_repository(
+    base: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
     """A directory shaped like a bare clone but not one must not resolve to an enclosing repo."""
     _outside_repo(tmp_path)
     # The workspace base is inside that clean, "pushed" repository.
@@ -748,6 +750,8 @@ async def test_git_never_searches_above_a_found_repository(base: Path, tmp_path:
     result = await _reclaimer(enclosed).run_once()
     assert result.kept == ("ws-climb",)
     assert (fake / "notes.txt").read_text() == "only copy\n"
+    # Kept because git found no repository there, not by luck in the enclosing one.
+    assert "not a git repository" in caplog.text
 
 
 _RISKY_CONFIG = [
@@ -836,3 +840,34 @@ async def test_a_repository_with_a_submodule_is_still_salvaged(
     result = await _reclaimer(base, archive=archive).run_once()
     assert result.reclaimed == ("ws-sub",)
     assert any(b"edited in the submodule" in patch for _, patch in archive.saved)
+
+
+async def test_a_linked_worktree_whose_commondir_is_outside_is_refused_and_kept(
+    base: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    ws = _workspace(base, "ws-commondir", tmp_path)
+    outside = _outside_repo(tmp_path)
+    linked = ws / "repos" / "linked"
+    _git(outside, "worktree", "add", "-b", "linked", str(linked))
+    # Its git dir moved into the workspace; only `commondir` still leads out.
+    git_dir = ws / ".linked-git"
+    (outside / ".git" / "worktrees" / "linked").rename(git_dir)
+    (git_dir / "commondir").write_text(f"{outside / '.git'}\n")
+    (linked / ".git").write_text(f"gitdir: {git_dir}\n")
+    result = await _reclaimer(base).run_once()
+    assert result.kept == ("ws-commondir",)
+    assert f"{linked} reads {outside / '.git'}, outside the workspace" in caplog.text
+
+
+async def test_alternates_outside_the_workspace_are_refused_and_kept(
+    base: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    ws = _workspace(base, "ws-alternates", tmp_path)
+    outside = _outside_repo(tmp_path)
+    app = ws / "repos" / "app"
+    (app / ".git" / "objects" / "info" / "alternates").write_text(
+        f"{outside / '.git' / 'objects'}\n"
+    )
+    result = await _reclaimer(base).run_once()
+    assert result.kept == ("ws-alternates",)
+    assert f"{app} reads {outside / '.git' / 'objects'}, outside the workspace" in caplog.text
