@@ -21,6 +21,7 @@ import {
   runSubline,
   shortDigest,
   skillRefDisplay,
+  skillSourceHref,
   toolGlyph,
   usageModel,
   verdictCellLabel,
@@ -199,6 +200,25 @@ describe('phase kit and skill refs', () => {
     expect(d.ref).toBe('3b3fad9')
     expect(d.linkLabel).toBe('Source of doc-coauthoring at 3b3fad9')
     expect(skillRefDisplay({ name: 'x', source: './x' }).linkLabel).toBeNull()
+  })
+  it('links a skill to its SKILL.md at the pinned ref (feedback 28e8baea)', () => {
+    const sha = '7e48aad9c7186bb03b8b0df899f56b7cd3b2a454'
+    // Live payload shape: source_url is the repo, name the skill folder.
+    expect(skillSourceHref({ name: 'testing', source: 'https://github.com/syntropic137/software-leverage-points', ref: sha })).toEqual({
+      href: `https://github.com/syntropic137/software-leverage-points/blob/${sha}/skills/testing/SKILL.md`,
+      reason: null,
+    })
+    const d = skillRefDisplay({ name: 'testing', source: 'https://github.com/syntropic137/software-leverage-points', ref: sha })
+    expect(d.ref).toBe('7e48aad')
+    expect(d.title).toBe(d.href)
+    // Shorthand org/repo/skill and single-skill repos.
+    expect(skillSourceHref({ name: 'x', source: 'org/repo/remote-herald', ref: 'main' }).href).toBe('https://github.com/org/repo/blob/main/skills/remote-herald/SKILL.md')
+    expect(skillSourceHref({ name: 'herald', source: 'https://github.com/org/herald.git', ref: 'v1' }).href).toBe('https://github.com/org/herald/blob/v1/SKILL.md')
+    // No link, with the reason in the tooltip.
+    expect(skillSourceHref({ name: 's', source: './skills/s', ref: 'main' }).href).toBeNull()
+    expect(skillSourceHref({ name: 's', source: 'https://github.com/o/r', ref: null }).reason).toMatch(/No pinned version/)
+    expect(skillSourceHref({ name: 's', source: 'https://gitlab.com/o/r', ref: 'main' }).reason).toMatch(/not a GitHub/)
+    expect(skillRefDisplay({ name: 's', source: './skills/s', ref: 'main' }).title).toBe('./skills/s@main: Vendored in the workflow package: no public source to link')
   })
   it('writes the compact forms', () => {
     expect(phaseKitChips({ model: 'claude-haiku-4-5', tools: ['Read', 'Glob', 'Grep', 'Bash', 'WebSearch'], skills: [{ name: 'a', source: 'b' }] })).toEqual([

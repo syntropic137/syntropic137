@@ -102,6 +102,13 @@ export function workflowSkillNames(phases: readonly { skills?: readonly SkillLik
   return [...seen]
 }
 
+/** Unique skills declared across a workflow's phases (first-seen by name), as Skill Ref props for linked chips. */
+export function workflowSkillRefs(phases: readonly { skills?: readonly SkillLike[] | null }[]): SkillRefProps[] {
+  const seen = new Map<string, SkillRefProps>()
+  for (const p of phases) for (const s of p.skills ?? []) if (!seen.has(skillName(s))) seen.set(skillName(s), skillRef(s))
+  return [...seen.values()]
+}
+
 // ---------------------------------------------------------------- detail
 
 export interface SkillLike {

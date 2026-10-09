@@ -25,11 +25,11 @@
     runDurationMs,
     workflowFigures,
     workflowPromptSpec,
-    workflowSkillNames,
+    workflowSkillRefs,
     workflowTags,
   } from '@syn137/skyline-core/screens/workflows'
   import { Button, Callout, EmptyState, Skeleton } from '@syn137/skyline-svelte-v5'
-  import { AgentPromptButton, PageHeader, PhaseKit, PhaseKitChips, RunRow } from '@syn137/skyline-svelte-v5/patterns'
+  import { AgentPromptButton, PageHeader, PhaseKit, PhaseKitChips, RunRow, SkillRef } from '@syn137/skyline-svelte-v5/patterns'
   import { ApiError, TREND_PAGE_SIZE, getWorkflow, getWorkflowHistory, getWorkflowLatestOutputs, getWorkflowTrend, listWorkflowRuns } from '@syn137/syn-ui-data'
   import { isRunEvent } from '@syn137/syn-ui-data/live'
   import { resource } from '../../lib/load.svelte'
@@ -59,7 +59,7 @@
   const phases = $derived(w ? [...w.phases].sort((a, b) => a.order - b.order) : [])
   const current = $derived(phases.find((p) => p.phase_id === selected) ?? phases[0])
   const figures = $derived(w ? workflowFigures(phases.length, w.runs_count, runs.data ?? null) : [])
-  const skills = $derived(workflowSkillNames(phases))
+  const skills = $derived(workflowSkillRefs(phases))
   const prompt = $derived(w ? workflowPromptSpec({ id: w.id, name: w.name, phases, input_declarations: w.input_declarations }) : null)
   const shares = $derived(history.data?.executions.length ? phaseShares(phases.map((p) => p.phase_id), history.data.executions) : null)
   const latest = $derived(outputs.data ? latestOutputsByPhase(outputs.data.phases) : null)
@@ -108,8 +108,8 @@
       </ul>
       {#if skills.length}
         <ul class="sky-wf__skills" aria-label="Declared skills">
-          {#each skills as s (s)}
-            <li><svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round" aria-hidden="true"><path d="M8 1.75L14.25 8 8 14.25 1.75 8z"></path></svg>{s}</li>
+          {#each skills as s (s.name)}
+            <li><SkillRef variant="chip" {...s} /></li>
           {/each}
         </ul>
       {/if}
@@ -271,18 +271,6 @@
   }
   .sky-wf__skills li {
     display: flex;
-    align-items: center;
-    gap: 6px;
-    height: 1.5rem;
-    padding: 0 9px 0 7px;
-    border-radius: 8px;
-    border: var(--ds-border-width) solid var(--sky-color-border-strong);
-    background: var(--ds-color-surface-raised);
-    font-family: var(--ds-font-mono);
-    font-size: var(--ds-text-xs);
-  }
-  .sky-wf__skills svg {
-    color: var(--ds-color-accent);
   }
   .sky-wf__prompt-copy {
     flex: 1 1 100%;

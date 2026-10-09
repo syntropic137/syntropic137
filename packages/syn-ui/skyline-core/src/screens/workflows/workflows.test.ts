@@ -12,6 +12,7 @@ import {
   runsLabel,
   workflowCategory,
   workflowSkillNames,
+  workflowSkillRefs,
   workflowsSummary,
 } from './index'
 
@@ -45,6 +46,9 @@ describe('workflows list', () => {
   })
   it('collects unique skill names', () => {
     expect(workflowSkillNames([{ skills: [{ name: 'a' }, { source_url: 'gh/org/remote-herald@main' }] }, { skills: [{ name: 'a' }] }, {}])).toEqual(['a', 'remote-herald'])
+    expect(workflowSkillRefs([{ skills: [{ name: 'a', source_url: 'https://github.com/o/r', version: 'abc' }] }, { skills: [{ name: 'a', source_url: 'x/y', version: 'z' }] }])).toEqual([
+      { name: 'a', source: 'https://github.com/o/r', ref: 'abc' },
+    ])
   })
 })
 

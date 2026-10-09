@@ -1,7 +1,9 @@
 <!--
   Skill Ref (PhaseKit board): a skill's name, source and ref, a link to the
   source at that ref, and its content digest once pinned at run start. The
-  `chip` variant is the compact form on workflow cards.
+  `chip` variant is the compact form on workflow cards. The name links to the
+  skill's SKILL.md at its pinned ref (skillSourceHref()); with no link the
+  tooltip says why.
 -->
 <script lang="ts">
   import { GLYPH, skillRefDisplay } from '@syn137/skyline-core/patterns'
@@ -14,15 +16,29 @@
 </script>
 
 {#if variant === 'chip'}
-  <span {...rest} class="sky-skill-chip" title={`${s.source}${s.ref ? `@${s.ref}` : ''}`}>
+  <svelte:element
+    this={s.href ? 'a' : 'span'}
+    {...rest}
+    class="sky-skill-chip"
+    href={s.href ?? undefined}
+    target={s.href ? '_blank' : undefined}
+    rel={s.href ? 'noreferrer noopener' : undefined}
+    title={s.title}
+    aria-label={s.linkLabel ?? undefined}
+  >
     <span class="sky-skill-chip__icon"><Glyph d={GLYPH.diamond} size={11} weight={1.75} /></span>
     <span>{s.name}</span>
-  </span>
+    {#if s.ref}<span class="sky-skill-chip__ref">@{s.ref}</span>{/if}
+  </svelte:element>
 {:else}
   <span {...rest} class="sky-skill">
     <span class="sky-skill__tile"><Glyph d={GLYPH.diamond} size={13} weight={1.75} /></span>
     <span class="sky-skill__text">
-      <span class="sky-skill__name">{s.name}</span>
+      {#if s.href}
+        <a class="sky-skill__name" href={s.href} title={s.title} target="_blank" rel="noreferrer noopener">{s.name}</a>
+      {:else}
+        <span class="sky-skill__name" title={s.title}>{s.name}</span>
+      {/if}
       <span class="sky-skill__source">
         <span>{s.source}</span>
         {#if s.ref}<span class="sky-skill__at">@</span><span class="sky-skill__ref">{s.ref}</span>{/if}
@@ -66,6 +82,29 @@
     font-size: var(--ds-text-sm);
     font-weight: var(--ds-font-weight-semibold);
     overflow-wrap: anywhere;
+  }
+  a.sky-skill__name {
+    color: var(--ds-color-fg);
+    text-decoration: underline;
+    text-decoration-color: var(--sky-color-border-hover);
+    text-underline-offset: 3px;
+  }
+  a.sky-skill__name:hover {
+    text-decoration-color: currentColor;
+  }
+  a.sky-skill__name:focus-visible,
+  a.sky-skill-chip:focus-visible {
+    outline: var(--sky-focus-ring-width) solid var(--sky-color-focus);
+    outline-offset: var(--sky-focus-ring-offset);
+  }
+  a.sky-skill-chip {
+    text-decoration: none;
+  }
+  a.sky-skill-chip:hover {
+    border-color: var(--sky-color-border-hover);
+  }
+  .sky-skill-chip__ref {
+    color: var(--ds-color-text-subtle);
   }
   .sky-skill__source,
   .sky-skill__digest {

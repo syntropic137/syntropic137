@@ -27,6 +27,36 @@ export interface SkillRefDisplay {
   digest: string | null
   /** "Source of remote-herald at main". */
   linkLabel: string | null
+  /** Hover text: the URL it opens, or why there is no link ("Vendored in the workflow package: no public source"). */
+  title: string
+}
+
+export interface SkillSource {
+  href: string | null
+  /** Why `href` is null; null when there is a link. */
+  reason: string | null
+}
+
+const GITHUB_URL = /^(?:https?:\/\/)?(?:www\.)?github\.com\/([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/i
+const GITHUB_SHORT = /^([\w.-]+)\/([\w.-]+)(?:\/([\w.-]+))?$/
+
+/**
+ * Link to a skill's SKILL.md at its pinned ref (feedback 28e8baea).
+ * The API carries source repo, name and version but no path, so the path
+ * follows the skills repo convention the CLI resolves second
+ * (skill-tree.ts: `<name>/`, `skills/<name>/`, root): `skills/<name>`,
+ * or the repo root when the name is the repo (a single-skill repo).
+ */
+export function skillSourceHref(s: { name: string; source: string; ref?: string | null }): SkillSource {
+  const src = s.source.trim()
+  if (src.startsWith('.') || src.startsWith('/')) return { href: null, reason: 'Vendored in the workflow package: no public source to link' }
+  const m = GITHUB_URL.exec(src) ?? GITHUB_SHORT.exec(src)
+  if (!m) return { href: null, reason: 'Source is not a GitHub repository' }
+  if (!s.ref) return { href: null, reason: 'No pinned version: the link would not show the skill this phase runs' }
+  const [, owner, repo, folder] = m
+  const name = folder ?? s.name
+  const path = name && name !== repo ? `skills/${name}/SKILL.md` : 'SKILL.md'
+  return { href: `https://github.com/${owner}/${repo}/blob/${encodeURIComponent(s.ref)}/${path}`, reason: null }
 }
 
 const HEX = /^[0-9a-f]{12,}$/i
@@ -41,13 +71,15 @@ export function shortDigest(value: string | null | undefined, length = 7): strin
 
 export function skillRefDisplay(s: SkillRefProps): SkillRefDisplay {
   const ref = shortDigest(s.ref ?? null)
+  const derived = s.href ? { href: s.href, reason: null } : skillSourceHref(s)
   return {
     name: s.name,
     source: s.source,
     ref,
-    href: s.href ?? null,
+    href: derived.href,
     digest: shortDigest(s.digest ?? null),
-    linkLabel: s.href ? `Source of ${s.name}${ref ? ` at ${ref}` : ''}` : null,
+    linkLabel: derived.href ? `Source of ${s.name}${ref ? ` at ${ref}` : ''}` : null,
+    title: derived.href ?? `${s.source}${ref ? `@${ref}` : ''}: ${derived.reason ?? 'no link'}`,
   }
 }
 
