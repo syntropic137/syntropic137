@@ -17,6 +17,7 @@ Run from the repo root.
 | Prove the gates catch drift (applies each mutation, expects failure, restores) | `just skyline-mutations` |
 | Unit tests | `just skyline-test`, or `pnpm --filter syn-ui --filter './packages/syn-ui/*' run test` |
 | Production build with the size budget | `just skyline-build`, or `pnpm --filter syn-ui run build` |
+| Landing `<sky-*>` elements build with the 45 KB gzip budget | `just skyline-elements`, or `pnpm --filter @syn137/skyline-svelte-v5 run build:elements` |
 | All of the above | `just skyline-qa` |
 | Dev server on the real API (proxied to `http://127.0.0.1:9137`) | `just skyline-dev` |
 | Dev server with no backend (fixtures) | `just skyline-dev-fixtures`, or `pnpm --filter syn-ui run dev:fixtures` |
@@ -32,11 +33,11 @@ Before you hand work back, check, test and build must all pass with zero warning
 |---|---|---|---|
 | `@syn137/skyline-themes` | `packages/syn-ui/themes` | CSS only: `tokens.css` (structure), `skyline.css` and `syn137.css` (colour), `all.css` (upstream `@syntropic137/design-tokens` CSS, then all three), `motion.css` (opt-in landing keyframes) | `@syntropic137/design-tokens` (pinned) |
 | `@syn137/skyline-core` | `packages/syn-ui/skyline-core` | Plain TypeScript with no DOM and no Svelte. Holds the contract re-exports, formatters, chart geometry, state reducers and pattern prop types | `@syntropic137/design-contracts` (pinned, types only) |
-| `@syn137/skyline-svelte-v5` | `packages/syn-ui/skyline-svelte-v5` | Svelte 5 components (`.`), patterns (`./patterns`) and `styles.css` | core, themes |
+| `@syn137/skyline-svelte-v5` | `packages/syn-ui/skyline-svelte-v5` | Svelte 5 components (`.`), patterns (`./patterns`), their example states (`./examples`), `styles.css`, and the built landing elements (`./elements`, `./elements/<name>`) | core, themes |
 | `@syn137/syn-ui-data` | `packages/syn-ui/data` | Plain TypeScript: the typed API client, fixtures, live SSE stream, request coalescing and the query cache | nothing |
 | `syn-ui` | `apps/syn-ui` | The Vite app: shell, router, route pages, data loading | all four |
 
-All workspace packages export TypeScript and Svelte source directly, so they have no build step. Vite compiles them inside the app, and `check` is their build. Arrows only point down the table: core and data never import Svelte, and the component library never imports data.
+All workspace packages export TypeScript and Svelte source directly, so they have no build step (the one exception is the elements build below). Vite compiles them inside the app, and `check` is their build. Arrows only point down the table: core and data never import Svelte, and the component library never imports data.
 
 ### Which package does this code belong in?
 
@@ -124,6 +125,16 @@ Required-contract conformance lives in `src/contract-adapter.ts` (the file name 
 
 Contract-only callers: Svelte's HTML attribute types carry a symbol index signature (attachments), so a plain `ButtonContract` value is not assignable to `ButtonProps`.
 Spread it, `<Button {...props} />` or `consume({ ...props })`; that is expected, not a contract break.
+
+## Landing elements (`<sky-*>` for React)
+
+The landing page (`apps/syn-landing`, React 19) and the docs cannot render Svelte components, so the shared product visuals ship as custom elements: `sky-s-mark`, `sky-iso-city`, `sky-eval-explorer`, `sky-harness-chip`, `sky-harness-lanes`, `sky-tool-log`, `sky-usage-band`. Each is a thin wrapper in `skyline-svelte-v5/src/custom-elements/Sky<Name>.svelte` around the pattern (options in `options.ts`), with an entry in `src/elements/<name>.ts`.
+
+- **Build:** `pnpm --filter @syn137/skyline-svelte-v5 run build:elements` (`vite.elements.config.ts`) writes `dist-elements/` (git-ignored): one minified ES module per element, `index.js` with all seven, and one shared `chunks/runtime.js` (the Svelte runtime and every module two or more elements use). `scripts/elements-size.mjs` then fails above 45 KB gzip for all seven plus the runtime. An app that imports the elements builds them first (its `predev`/`prebuild`).
+- **Import:** `import '@syn137/skyline-svelte-v5/elements/s-mark'` registers the tag. Types: `src/elements/types.ts` (properties, `HTMLElementTagNameMap`, the explorer's `verifierchange` event) and, for React JSX, `import type {} from '@syn137/skyline-svelte-v5/elements/react'` (`types/react-jsx.d.ts`; the package does not depend on React).
+- **Shadow DOM:** each element renders into an open shadow root. Tokens are inherited custom properties, so the page loads `@syn137/skyline-themes/all.css` once and the elements follow it. Page CSS does not reach inside: style from outside with `::part()` (`sky-usage-band::part(band)`), and the elements adopt `styles.css` and `motion.css` into their own roots.
+- **Static first render:** an element renders its static SVG in the same task it connects (a microtask after upgrade); motion only ever comes from motion.css classes, whose default is the static end state. Before the element's module runs, its light-DOM children show, so a page can put a fallback inside (the brand SVG in `<sky-s-mark>`) and reserve space with `sky-iso-city:not(:defined) { aspect-ratio: ... }`. The upgraded element renders no default slot, so the fallback disappears; only `slot="overlay"` children of `<sky-iso-city>` stay (the hero's S). See `examples/landing-elements.html`.
+- **Energy (landing plan, section 7):** every animation is finite. City rise, pulses and flashes, the S drop and the 30s drift each run a few cycles and stop; the tool-log ticker plays only while on screen (IntersectionObserver) for about 20s. `apps/syn-ui/e2e/landing-motion.spec.ts` checks reduced motion (no animation) and that everything ends within 35s.
 
 ## The data client (syn-ui-data)
 
