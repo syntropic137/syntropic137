@@ -275,23 +275,47 @@ export function perfKpis(runs: readonly PerfRun[]): PerfKpi[] {
 }
 
 /** A duration graph per phase over completed runs, with the latest window against the first. */
-export function phaseDurationGraphs(runs: readonly PerfRun[]): PhaseDurationGraph[] {
-  const done = runs.filter((r) => r.counted)
+function phaseOrder(done: readonly PerfRun[]): { key: string; name: string }[] {
   const order: { key: string; name: string }[] = []
   for (const r of done) for (const p of r.phases) if (!order.some((o) => o.key === p.phase_id)) order.push({ key: p.phase_id, name: p.phase_name })
-  return order.map(({ key, name }) => {
-    const xs = done.flatMap((r) => {
-      const d = r.phases.find((p) => p.phase_id === key)?.duration_seconds
-      return typeof d === 'number' && Number.isFinite(d) ? [d] : []
-    })
-    const a = median(xs.slice(0, KPI_WINDOW))
-    const b = median(xs.slice(-KPI_WINDOW))
-    const change = a > 0 && xs.length >= KPI_WINDOW * 2 ? Math.round(((b - a) / a) * 100) : null
-    const tone: PerfTone = change === null ? 'neutral' : change < -2 ? 'good' : change > 2 ? 'bad' : 'neutral'
-    const delta = change === null ? (xs.length ? 'first runs' : 'no runs') : `${change < 0 ? '−' : '+'}${Math.abs(change)}% vs first runs`
-    const how = change === null ? '' : change < 0 ? `, ${Math.abs(change)}% faster` : change > 0 ? `, ${change}% slower` : ', steady'
-    return { key, name, now: xs.length ? minutesSeconds(b) : '—', delta, tone, spark: sparkPath(xs, 200, 48), label: `${name}: median ${xs.length ? minutesSeconds(b) : 'unknown'}${how}` }
+  return order
+}
+
+function phaseSeconds(done: readonly PerfRun[], key: string): number[] {
+  return done.flatMap((r) => {
+    const d = r.phases.find((p) => p.phase_id === key)?.duration_seconds
+    return typeof d === 'number' && Number.isFinite(d) ? [d] : []
   })
+}
+
+function phaseTone(change: number | null): PerfTone {
+  if (change === null) return 'neutral'
+  if (change < -2) return 'good'
+  return change > 2 ? 'bad' : 'neutral'
+}
+
+function phaseDelta(change: number | null, count: number): string {
+  if (change === null) return count ? 'first runs' : 'no runs'
+  return `${change < 0 ? '−' : '+'}${Math.abs(change)}% vs first runs`
+}
+
+function phaseHow(change: number | null): string {
+  if (change === null) return ''
+  if (change < 0) return `, ${Math.abs(change)}% faster`
+  return change > 0 ? `, ${change}% slower` : ', steady'
+}
+
+function phaseGraph(key: string, name: string, xs: readonly number[]): PhaseDurationGraph {
+  const a = median(xs.slice(0, KPI_WINDOW))
+  const b = median(xs.slice(-KPI_WINDOW))
+  const change = a > 0 && xs.length >= KPI_WINDOW * 2 ? Math.round(((b - a) / a) * 100) : null
+  const median_ = xs.length ? minutesSeconds(b) : null
+  return { key, name, now: median_ ?? '—', delta: phaseDelta(change, xs.length), tone: phaseTone(change), spark: sparkPath(xs, 200, 48), label: `${name}: median ${median_ ?? 'unknown'}${phaseHow(change)}` }
+}
+
+export function phaseDurationGraphs(runs: readonly PerfRun[]): PhaseDurationGraph[] {
+  const done = runs.filter((r) => r.counted)
+  return phaseOrder(done).map(({ key, name }) => phaseGraph(key, name, phaseSeconds(done, key)))
 }
 
 function xTicksOf(t0: number, t1: number): TrendTick[] {
@@ -314,6 +338,24 @@ function emptyPerformance(metric: PerfMetric): PerformanceModel {
   return { empty: true, runs: [], metric, title: M.label, unit: M.unit, subtitle: 'No runs yet. Each finished run adds a dot here.', kpis: [], lines: [], dots: [], ends: [], yTicks: [], xTicks: [], notes: [], phases: [], initial: -1 }
 }
 
+function perfSubtitle(count: number, t0: number, t1: number, better: MetricDef['better'], metric: PerfMetric): string {
+  const note = metric === 'success' ? '' : ' Failed and cancelled runs sit on the baseline and are not counted.'
+  return `${count} ${count === 1 ? 'run' : 'runs'} over ${spanText(t0, t1)}. ${better === 'up' ? 'Higher' : 'Lower'} is better.${note}`
+}
+
+function perfDot(r: PerfRun, M: MetricDef, y: (r: PerfRun) => number): PerformanceModel['dots'][number] {
+  const inSet = M.inSet(r)
+  return {
+      i: r.i,
+      x: r.x,
+      top: inSet ? 100 - y(r) : 100,
+      color: 1,
+      tone: r.outcome === 'other' ? 'running' : r.outcome,
+      muted: !inSet,
+      label: `${shortDay(r.t)}: ${OUTCOME_WORD[r.outcome]}${inSet ? `, ${M.format(M.value(r))}` : ', not counted'}`,
+  }
+}
+
 export function workflowPerformance(rows: readonly PerfRowLike[], metric: PerfMetric = 'cost', changes: readonly DefinitionChangeLike[] = []): PerformanceModel {
   const runs = perfRuns(rows)
   if (runs.length === 0) return emptyPerformance(metric)
@@ -324,28 +366,16 @@ export function workflowPerformance(rows: readonly PerfRowLike[], metric: PerfMe
   const t0 = runs[0]!.t
   const t1 = runs.at(-1)!.t
   const last = set.at(-1)
-  const note = metric === 'success' ? '' : ' Failed and cancelled runs sit on the baseline and are not counted.'
   return {
     empty: false,
     runs,
     metric,
     title: M.label,
     unit: M.unit,
-    subtitle: `${runs.length} ${runs.length === 1 ? 'run' : 'runs'} over ${spanText(t0, t1)}. ${M.better === 'up' ? 'Higher' : 'Lower'} is better.${note}`,
+    subtitle: perfSubtitle(runs.length, t0, t1, M.better, metric),
     kpis: perfKpis(runs),
     lines: [{ key: metric, color: 1, d: linePath(set.map((r) => ({ x: r.x, y: y(r) })), 1000, PERF_VIEW_HEIGHT) }],
-    dots: runs.map((r) => {
-      const inSet = M.inSet(r)
-      return {
-        i: r.i,
-        x: r.x,
-        top: inSet ? 100 - y(r) : 100,
-        color: 1,
-        tone: r.outcome === 'other' ? 'running' : r.outcome,
-        muted: !inSet,
-        label: `${shortDay(r.t)}: ${OUTCOME_WORD[r.outcome]}${inSet ? `, ${M.format(M.value(r))}` : ', not counted'}`,
-      }
-    }),
+    dots: runs.map((r) => perfDot(r, M, y)),
     ends: last ? [{ key: metric, label: M.format(M.value(last)), color: 1, top: 100 - y(last) }] : [],
     yTicks: axisTicks(max, 4).map((v) => ({ at: 100 - valueY(v, max), label: M.tick(v) })),
     xTicks: xTicksOf(t0, t1),
