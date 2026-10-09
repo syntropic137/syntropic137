@@ -262,7 +262,16 @@
 
   /* Landing light and depth (Landing board). */
   --sky-glow-accent: 0 30px 80px -30px color-mix(in oklab, var(--ds-color-accent) 60%, transparent); /* box-shadow under the install box and hero panels */
+  --sky-glow-accent-strong: 0 60px 120px -40px color-mix(in oklab, var(--ds-color-accent) 45%, transparent); /* box-shadow under the explorer window */
   --sky-glow-accent-wash: radial-gradient(60% 50% at 50% 0%, color-mix(in oklab, var(--ds-color-accent) 22%, transparent), transparent 70%); /* hero top light, a background layer */
+  --sky-glow-accent-wash-bottom: radial-gradient(50% 70% at 50% 100%, color-mix(in oklab, var(--ds-color-accent) 28%, transparent), transparent 70%); /* closing call to action, a background layer */
+  --sky-gradient-panel: linear-gradient(180deg, var(--sky-color-panel-top), var(--ds-color-bg)); /* cards, tiles, code windows */
+  --sky-gradient-window: linear-gradient(180deg, var(--sky-color-panel-top), var(--sky-color-window-bottom)); /* the explorer window inside --sky-border-gradient */
+  --sky-gradient-glass-raised: linear-gradient(180deg, color-mix(in oklab, var(--sky-color-glass-top) 85%, transparent), color-mix(in oklab, var(--ds-color-bg) 85%, transparent)); /* install box, with backdrop blur */
+  --sky-fade-to-ground: linear-gradient(180deg, transparent, var(--sky-color-ground-deep)); /* hero bottom fade into the page */
+  --sky-mask-fade-y: linear-gradient(180deg, transparent, var(--ds-color-fg) 18%, var(--ds-color-fg) 82%, transparent); /* mask-image: soft top and bottom edges (only alpha counts) */
+  --sky-cube-glass-left: color-mix(in oklab, var(--ds-color-fg) 32%, transparent); /* S mark glass cube faces; top is --sky-color-cube-glass-edge */
+  --sky-cube-glass-right: color-mix(in oklab, var(--ds-color-fg) 18%, transparent);
   --sky-gradient-text: linear-gradient(180deg, var(--sky-color-display-hi) 0%, var(--sky-color-display-mid) 55%, color-mix(in oklab, var(--ds-color-accent) 70%, var(--sky-color-display-hi)) 100%); /* headlines, with background-clip: text */
   --sky-surface-glass: color-mix(in oklab, var(--ds-color-surface) 66%, transparent); /* floating cards, with backdrop-filter: blur(var(--sky-blur-glass)) */
   --sky-border-gradient: linear-gradient(140deg, color-mix(in oklab, var(--ds-color-accent) 70%, var(--sky-color-display-hi)), color-mix(in oklab, var(--sky-color-border-strong) 60%, transparent) 35%, color-mix(in oklab, var(--sky-color-border-strong) 30%, transparent) 70%, color-mix(in oklab, var(--ds-color-accent) 50%, transparent)); /* 1px frame: a padded wrapper with this background */
