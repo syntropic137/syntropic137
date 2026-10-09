@@ -1467,9 +1467,9 @@ img, video {
 
 @media (max-width: 768px) {
   :root {
-    --text-h1: 36px;
-    --text-h2: 28px;
-    --section-padding: 48px;
+    --landing-text-h1: 36px;
+    --landing-text-h2: 28px;
+    --landing-section-padding: 48px;
   }
 
   .hero-section {
