@@ -221,7 +221,7 @@ def build_page_query(
     # "C" so the text compares by code point, as Python's ``str`` sort does.
     # Ties break on the key, never ``updated_at``: that moves when a row is
     # written, so a row could repeat on one page and vanish from the next.
-    order = "COALESCE(stamp, '') COLLATE \"C\" DESC, id COLLATE \"C\""
+    order = 'COALESCE(stamp, \'\') COLLATE "C" DESC, id COLLATE "C"'
     sql = (
         "WITH judged AS ("
         f"SELECT id, data->>'{stamp}' AS stamp, {_status_sql(query.status)} AS status, "
