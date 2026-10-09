@@ -9,17 +9,18 @@ before review instead of after.
 **What counts.** In Python, read through the AST so docstrings, comments and
 look-alike names (``_REPO_PATH`` is not ``O_PATH``) are not hits:
 
-* a string literal (f-string parts included) naming ``/proc`` or ``/sys`` as a
-  path, not as part of a longer word or URL segment;
+* a string or bytes literal (f-string parts included) naming ``/proc`` or
+  ``/sys`` as a path, not as part of a longer word or URL segment;
 * an attribute, ``from`` import, or bare name from ``LINUX_ONLY_NAMES``
   (``os.O_PATH``, ``os.sched_getaffinity``, ``select.epoll``, a ctypes
   ``libc.prctl`` ...);
 * an import of a ``LINUX_ONLY_MODULES`` module (``prctl``, ``inotify`` ...).
 
-In TypeScript/JavaScript, comments are skipped by a small lexer and the same
-two kinds of construct are matched: path literals inside string or template
-literals, and the Linux-only flags and syscalls a Node binding could expose as
-identifiers in code.
+In TypeScript/JavaScript, comments are skipped by a small lexer and three
+kinds of construct are matched: path literals inside string or template
+literals, the Linux-only flags and syscalls a Node binding could expose as
+identifiers in code (template ``${...}`` interpolations are code), and an
+``import``/``require`` of a ``_SCRIPT_MODULES`` package.
 
 ``getattr(os, "sched_getaffinity", None)`` is the portable spelling of a
 Linux-only call (it degrades instead of raising) and is deliberately not a hit.
@@ -40,6 +41,7 @@ Standard: ADR-062 (architectural fitness function standard).
 from __future__ import annotations
 
 import ast
+import bisect
 import re
 import subprocess
 from dataclasses import dataclass
@@ -58,8 +60,13 @@ _SCRIPT_SUFFIXES = frozenset({".ts", ".tsx", ".mts", ".cts", ".js", ".mjs", ".cj
 #: ``/system``).
 _PSEUDO_FS = re.compile(r"(?<![\w./-])/(?:proc|sys)(?![\w.-])")
 
+#: The inotify syscalls, shared by both scanners so neither can drop one.
+_INOTIFY_CALLS = frozenset(
+    {"inotify_init", "inotify_init1", "inotify_add_watch", "inotify_rm_watch"}
+)
+
 #: Names that exist only on Linux, wherever they are reached from.
-LINUX_ONLY_NAMES = frozenset(
+LINUX_ONLY_NAMES = _INOTIFY_CALLS | frozenset(
     {
         # os: open flags and calls macOS does not have
         "O_PATH",
@@ -88,9 +95,6 @@ LINUX_ONLY_NAMES = frozenset(
         "pidfd_send_signal",
         # syscalls reached through ctypes or a binding
         "prctl",
-        "inotify_init",
-        "inotify_init1",
-        "inotify_add_watch",
         "unshare",
         "setns",
     }
@@ -104,10 +108,16 @@ LINUX_ONLY_MODULES = frozenset(
 #: The subset worth matching as a bare TS/JS identifier. Node exposes none of
 #: the os calls above, and generic names (``splice`` is ``Array.prototype``'s)
 #: would read every array edit as a syscall.
-_SCRIPT_NAMES = frozenset(
-    {"O_PATH", "O_TMPFILE", "O_NOATIME", "prctl", "inotify_init", "inotify_add_watch"}
-)
+_SCRIPT_NAMES = _INOTIFY_CALLS | frozenset({"O_PATH", "O_TMPFILE", "O_NOATIME", "prctl"})
 _SCRIPT_IDENTIFIER = re.compile(r"\b(?:" + "|".join(sorted(_SCRIPT_NAMES)) + r")\b")
+
+#: npm packages that only build or load on Linux.
+_SCRIPT_MODULES = frozenset({"inotify"})
+
+#: Code that makes the string literal right after it a module specifier:
+#: ``from "x"``, ``import "x"``, ``require("x")``, ``import("x")``. Not
+#: ``Array.from("x")``: the keyword must not follow a member access.
+_SPECIFIER_LEAD = re.compile(r"(?<![\w.$])(?:from|import|(?:require|import)\s*\()\s*$")
 
 
 @dataclass(frozen=True)
@@ -135,8 +145,10 @@ def scan_python(source: str) -> list[Hit]:
     docstrings = _docstring_nodes(tree)
     hits: list[Hit] = []
     for node in ast.walk(tree):
-        if isinstance(node, ast.Constant) and isinstance(node.value, str):
-            if id(node) not in docstrings and _PSEUDO_FS.search(node.value):
+        if isinstance(node, ast.Constant) and isinstance(node.value, (str, bytes)):
+            # A bytes path reaches the same filesystem; latin-1 decodes any byte.
+            text = node.value.decode("latin-1") if isinstance(node.value, bytes) else node.value
+            if id(node) not in docstrings and _PSEUDO_FS.search(text):
                 hits.append(Hit(node.lineno, f"path literal {node.value[:60]!r}"))
         elif isinstance(node, ast.Attribute) and node.attr in LINUX_ONLY_NAMES:
             hits.append(Hit(node.lineno, f"attribute .{node.attr}"))
@@ -159,60 +171,107 @@ def scan_python(source: str) -> list[Hit]:
     return hits
 
 
-def _lex_script(source: str) -> tuple[list[tuple[int, str]], list[tuple[int, str]]]:
-    """Split TS/JS into (code runs, string-literal bodies), each with its start line.
+@dataclass(frozen=True)
+class _Run:
+    """A stretch of TS/JS source that is either code or a string-literal body."""
 
-    Comments are dropped. Template ``${...}`` bodies stay in the literal, which
-    can only add path-literal hits, never hide one. Regex literals are read as
-    code: a pseudo-filesystem path in one is still worth a look.
+    line: int
+    text: str
+    is_string: bool
+
+
+def _lex_script(source: str) -> list[_Run]:
+    """Split TS/JS into code runs and string-literal bodies, in source order.
+
+    Comments are dropped. A template literal's text is a string, and each of
+    its ``${...}`` interpolations is lexed as code, nested templates included,
+    so an identifier inside one is seen. Regex literals are read as code: a
+    pseudo-filesystem path in one is still worth a look.
     """
-    code: list[tuple[int, str]] = []
-    strings: list[tuple[int, str]] = []
-    i, line, start, start_line, n = 0, 1, 0, 1, len(source)
-    while i < n:
-        two = source[i : i + 2]
-        char = source[i]
-        if two in ("//", "/*") or char in "'\"`":
-            code.append((start_line, source[start:i]))
-            if two == "//":
-                end = source.find("\n", i)
-                end = n if end == -1 else end
-            elif two == "/*":
-                end = source.find("*/", i + 2)
-                end = n if end == -1 else end + 2
+    newlines = [i for i, char in enumerate(source) if char == "\n"]
+    runs: list[_Run] = []
+    n = len(source)
+
+    def emit(start: int, end: int, *, is_string: bool) -> None:
+        runs.append(_Run(bisect.bisect_left(newlines, start) + 1, source[start:end], is_string))
+
+    def quoted(i: int, quote: str) -> int:
+        end = i + 1
+        while end < n and source[end] != quote:
+            if source[end] == "\\":
+                end += 1
+            elif source[end] == "\n":
+                break
+            end += 1
+        emit(i + 1, end, is_string=True)
+        return min(end + 1, n)
+
+    def template(i: int) -> int:
+        j = start = i + 1
+        while j < n and source[j] != "`":
+            if source[j] == "\\":
+                j += 2
+            elif source.startswith("${", j):
+                emit(start, j, is_string=True)
+                j = start = code(j + 2, nested=True)
             else:
-                end = i + 1
-                while end < n and source[end] != char:
-                    if source[end] == "\\":
-                        end += 1
-                    elif source[end] == "\n" and char != "`":
-                        break
-                    end += 1
-                strings.append((line, source[i + 1 : end]))
-                end = min(end + 1, n)
-            line += source.count("\n", i, end)
-            i = start = end
-            start_line = line
-            continue
-        if char == "\n":
-            line += 1
-        i += 1
-    code.append((start_line, source[start:]))
-    return code, strings
+                j += 1
+        emit(start, min(j, n), is_string=True)
+        return min(j + 1, n)
+
+    def code(i: int, *, nested: bool) -> int:
+        """Lex code from ``i``; nested, stop after the ``}`` closing an interpolation."""
+        start, depth = i, 0
+        while i < n:
+            two, char = source[i : i + 2], source[i]
+            if two in ("//", "/*") or char in "'\"`":
+                emit(start, i, is_string=False)
+                if two == "//":
+                    end = source.find("\n", i)
+                    i = n if end == -1 else end
+                elif two == "/*":
+                    end = source.find("*/", i + 2)
+                    i = n if end == -1 else end + 2
+                else:
+                    i = template(i) if char == "`" else quoted(i, char)
+                start = i
+                continue
+            if nested and char == "{":
+                depth += 1
+            elif nested and char == "}":
+                if depth == 0:
+                    emit(start, i, is_string=False)
+                    return i + 1
+                depth -= 1
+            i += 1
+        emit(start, n, is_string=False)
+        return n
+
+    code(0, nested=False)
+    return runs
 
 
 def scan_script(source: str) -> list[Hit]:
     """Every Linux-only construct in a TS/JS module's code."""
-    code, strings = _lex_script(source)
     hits: list[Hit] = []
-    for line, body in strings:
-        for match in _PSEUDO_FS.finditer(body):
-            hits.append(
-                Hit(line + body.count("\n", 0, match.start()), f"path literal {body[:60]!r}")
-            )
-    for line, run in code:
-        for match in _SCRIPT_IDENTIFIER.finditer(run):
-            hits.append(Hit(line + run.count("\n", 0, match.start()), f"name {match.group()}"))
+    previous: _Run | None = None
+    for run in _lex_script(source):
+        if run.is_string:
+            for match in _PSEUDO_FS.finditer(run.text):
+                line = run.line + run.text.count("\n", 0, match.start())
+                hits.append(Hit(line, f"path literal {run.text[:60]!r}"))
+            if (
+                previous is not None
+                and not previous.is_string
+                and _SPECIFIER_LEAD.search(previous.text)
+                and run.text.split("/")[0] in _SCRIPT_MODULES
+            ):
+                hits.append(Hit(run.line, f"import {run.text}"))
+        else:
+            for match in _SCRIPT_IDENTIFIER.finditer(run.text):
+                line = run.line + run.text.count("\n", 0, match.start())
+                hits.append(Hit(line, f"name {match.group()}"))
+        previous = run
     return hits
 
 
@@ -317,6 +376,9 @@ PLANTED_PYTHON = {
     "ctypes prctl": "libc." + "prctl(15, b'x')",
     "inotify module": "import inotify" + "_simple",
     "prctl module": "from " + "prctl import set_name",
+    "bytes procfs": f'open(b"{_PROC}/self/fd")',
+    "bytes sysfs": f'open(b"{_SYS}/fs/cgroup/cpu.max")',
+    "inotify_rm_watch": "libc.inotify" + "_rm_watch(fd, wd)",
 }
 
 PLANTED_SCRIPT = {
@@ -324,6 +386,16 @@ PLANTED_SCRIPT = {
     "ts template": f"readlinkSync(`{_PROC}/self/fd/${{fd}}`)",
     "ts single quote": f"existsSync('{_SYS}/class/net')",
     "ts identifier": "os.constants." + "O_PATH",
+    "ts interpolated flag": "const x = `${os.constants." + "O_PATH}`;",
+    "ts interpolated call": "const x = `${pr" + "ctl(15)}`;",
+    "ts second interpolation": "const x = `${safe} and ${pr" + "ctl(15)}`;",
+    "ts nested template": "const x = `a ${`b ${os.constants." + "O_PATH}`} c`;",
+    "ts inotify_init1": "ino" + "tify_init1();",
+    "ts inotify_rm_watch": "libc.ino" + "tify_rm_watch(fd, wd);",
+    "ts import from": 'import { watch } from "ino' + 'tify";',
+    "ts side-effect import": "import 'ino" + "tify';",
+    "ts require": 'const I = require("ino' + 'tify");',
+    "ts dynamic import": "await import(`ino" + "tify`);",
 }
 
 #: Must stay clean: look-alikes, prose, and the portable spelling.
@@ -345,6 +417,11 @@ CLEAN_SCRIPT = (
     'fetch("/system/info")',
     'const url = "https://x.dev/proc/1";',
     "items.splice(index, 1);",
+    "const s = `pr" + "ctl and O_" + "PATH are Linux-only`;",
+    "const s = `${safe} uses pr" + "ctl, ${other} does not`;",
+    'log("ino' + 'tify");',
+    'const m = Array.from("ino' + 'tify");',
+    'const s = "watch from"; const m = "ino' + 'tify";',
 )
 
 
@@ -376,3 +453,9 @@ def test_script_look_alikes_stay_clean(source: str) -> None:
 def test_script_hit_reports_the_line_it_is_on() -> None:
     source = f"// {_PROC}\nconst a = 1;\nconst b = `x\n{_PROC}/self`;\n"
     assert [hit.line for hit in scan_script(source)] == [4]
+
+
+@pytest.mark.architecture
+def test_script_interpolation_hit_reports_the_line_it_is_on() -> None:
+    source = "const a = `x ${safe}\n" + "y ${\n  os.constants.O_" + "PATH}`;\n"
+    assert [hit.line for hit in scan_script(source)] == [3]
