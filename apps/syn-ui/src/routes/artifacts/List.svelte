@@ -10,6 +10,7 @@
   import { PageHeader } from '@syn137/skyline-svelte-v5/patterns'
   import { ApiError, listArtifacts } from '@syn137/syn-ui-data'
   import type { ArtifactSummary } from '@syn137/syn-ui-data/types'
+  import { isArtifactEvent, isRunEvent } from '@syn137/syn-ui-data/live'
   import { resource } from '../../lib/load.svelte'
   import { setPage } from '../../lib/page.svelte'
   import { href, router } from '../../lib/router'
@@ -34,7 +35,7 @@
 
   const list = resource(
     (signal) => listArtifacts({ page, page_size: PAGE_SIZE, q: q || undefined }, { artifact_type: type === 'all' ? undefined : type }, signal),
-    { live: (t) => t.startsWith('artifact_') || t === 'phase_completed' },
+    { live: (t) => isArtifactEvent(t) || isRunEvent(t) },
   )
 
   const rows = $derived(list.data?.artifacts ?? [])

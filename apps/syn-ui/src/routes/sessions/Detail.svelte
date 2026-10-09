@@ -25,6 +25,7 @@
   import { ApiError, getSession } from '@syn137/syn-ui-data'
   import { Button, Callout, Card, EmptyState, Skeleton, Tag, ToggleGroup } from '@syn137/skyline-svelte-v5'
   import { CopyButton, OperationTimeline, PageHeader, UsageMeter } from '@syn137/skyline-svelte-v5/patterns'
+  import { isRunEvent, isSessionEvent } from '@syn137/syn-ui-data/live'
   import { resource } from '../../lib/load.svelte'
   import { setPage } from '../../lib/page.svelte'
   import { href } from '../../lib/router'
@@ -34,7 +35,7 @@
   let { params }: PageProps = $props()
 
   const session = resource((signal) => getSession(params.sessionId ?? '', signal), {
-    live: (type) => type.startsWith('session') || type.startsWith('tool') || type.startsWith('phase'),
+    live: (type) => isSessionEvent(type) || isRunEvent(type),
   })
 
   const s = $derived(session.data)

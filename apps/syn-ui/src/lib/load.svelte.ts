@@ -6,7 +6,7 @@
  *     import { resource } from '../../lib/load.svelte'
  *     let { params }: PageProps = $props()
  *     const exec = resource((signal) => getExecution(params.executionId, signal), {
- *       live: (type) => type.startsWith('phase_') || type.startsWith('workflow_'),
+ *       live: isRunEvent, // from '@syn137/syn-ui-data/live': the API's real event_type names
  *     })
  *   </script>
  *   {#if exec.error}...{:else if exec.data}...{:else}...{/if}

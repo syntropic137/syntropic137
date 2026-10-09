@@ -11,6 +11,7 @@
   import { listSessions } from '@syn137/syn-ui-data'
   import { Button, Callout, EmptyState, Input, Pagination, Skeleton, ToggleGroup } from '@syn137/skyline-svelte-v5'
   import { CopyButton, StatusBadge } from '@syn137/skyline-svelte-v5/patterns'
+  import { isRunEvent, isSessionEvent } from '@syn137/syn-ui-data/live'
   import { resource } from '../../lib/load.svelte'
   import { href, router } from '../../lib/router'
   import type { PageProps } from '../../lib/routes'
@@ -32,7 +33,7 @@
         { page, page_size: PAGE_SIZE, q: q || undefined, statuses: status === 'all' ? undefined : [status], ...(workflowId ? { workflow_id: workflowId } : {}) },
         signal,
       ),
-    { live: (type) => type.startsWith('session') || type.startsWith('phase') },
+    { live: (type) => isSessionEvent(type) || isRunEvent(type) },
   )
 
   let search = $state('')

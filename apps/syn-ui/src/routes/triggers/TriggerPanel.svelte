@@ -10,6 +10,7 @@
   import { formatCostPrecise, formatRelativeTime, shortId } from '@syn137/skyline-core/format'
   import { buildRuleClauses } from '@syn137/skyline-core/patterns'
   import { normalizeConditions, triggerLogLine, triggerRuleInput, triggerTitle } from '@syn137/skyline-core/screens/triggers'
+  import { isRunEvent } from '@syn137/syn-ui-data/live'
   import { resource } from '../../lib/load.svelte'
   import { setPage } from '../../lib/page.svelte'
   import { href, router } from '../../lib/router'
@@ -26,9 +27,9 @@
     setCrumbs?: boolean
   } = $props()
 
-  const trig = resource((signal) => getTrigger(triggerId, signal), { live: (t) => t.startsWith('trigger') })
+  const trig = resource((signal) => getTrigger(triggerId, signal), { live: isRunEvent })
   const hist = resource((signal) => getTriggerHistory(triggerId, 20, signal).catch(() => ({ trigger_id: triggerId, entries: [] })), {
-    live: (t) => t.startsWith('trigger'),
+    live: isRunEvent,
   })
   const t = $derived(trig.data?.trigger_id === triggerId ? trig.data : undefined)
   const entries = $derived(hist.data?.entries ?? [])

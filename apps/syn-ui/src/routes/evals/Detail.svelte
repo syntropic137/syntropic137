@@ -6,6 +6,7 @@
   import { formatCost, formatDateTime, formatDuration, formatRelativeTime } from '@syn137/skyline-core/format'
   import { VERDICT_LOOK, normalizeVerdict } from '@syn137/skyline-core/patterns'
   import { agentOfModel, averageEvalCost, evidenceFallback, runModels, sameCaseSiblings, tagValue, variantPassed } from '@syn137/skyline-core/screens/evals'
+  import { isRunFinished } from '@syn137/syn-ui-data/live'
   import { resource } from '../../lib/load.svelte'
   import { setPage } from '../../lib/page.svelte'
   import { href } from '../../lib/router'
@@ -18,7 +19,7 @@
 
   const RUNS_PAGE = 20
 
-  const live = { live: (t: string) => t.startsWith('eval') || t === 'workflow_completed' || t === 'workflow_failed' }
+  const live = { live: isRunFinished }
   const ev = resource((signal) => getEval(params.evalId ?? '', signal), live)
   let runsPage = $state(1)
   // A sibling link reuses this page: start its runs at page 1.

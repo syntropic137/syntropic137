@@ -31,6 +31,7 @@
   import { ObjectIcon, TrendSpark } from '@syn137/skyline-svelte-v5/patterns'
   import { ApiError, getWorkflow, getWorkflowTrend, isAbortError, listWorkflows, mapLimit, type WorkflowSummary, type WorkflowTrendRow, MAX_PAGE_SIZE } from '@syn137/syn-ui-data'
   import { untrack } from 'svelte'
+  import { isRunEvent } from '@syn137/syn-ui-data/live'
   import { resource } from '../../lib/load.svelte'
   import { setPage } from '../../lib/page.svelte'
   import { href, router } from '../../lib/router'
@@ -54,7 +55,7 @@
   })
 
   // Whole catalogue at once: filtering by skills and sorting by runs are client side.
-  const list = resource((signal) => listWorkflows({ page_size: MAX_PAGE_SIZE }, signal), { live: (t) => t.startsWith('workflow_') })
+  const list = resource((signal) => listWorkflows({ page_size: MAX_PAGE_SIZE }, signal), { live: isRunEvent })
 
   let skills = $state<Record<string, string[]>>({})
   $effect(() => {

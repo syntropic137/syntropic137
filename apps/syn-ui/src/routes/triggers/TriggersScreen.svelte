@@ -11,6 +11,7 @@
   import { ObjectIcon } from '@syn137/skyline-svelte-v5/patterns'
   import { filterTriggers, groupTriggersByRepo, triggerSummary, triggerTitle } from '@syn137/skyline-core/screens/triggers'
   import { onMount } from 'svelte'
+  import { isRunEvent } from '@syn137/syn-ui-data/live'
   import { resource } from '../../lib/load.svelte'
   import { setPage } from '../../lib/page.svelte'
   import { href, router } from '../../lib/router'
@@ -18,7 +19,7 @@
 
   let { selectedId }: { selectedId: string | null } = $props()
 
-  const list = resource((signal) => listTriggers({}, signal), { live: (t) => t.startsWith('trigger') })
+  const list = resource((signal) => listTriggers({}, signal), { live: isRunEvent })
 
   let wide = $state(false)
   onMount(() => {

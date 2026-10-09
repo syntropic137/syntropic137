@@ -218,7 +218,8 @@ export function canCancel(status: string | null | undefined): boolean {
   return s === 'running' || s === 'queued' || s === 'in_progress'
 }
 
-/** Activity events that should refresh an execution page or list. */
+/** Activity events that should refresh an execution page or list: the API's real `event_type` names (data live/events.ts). */
+const EXECUTION_EVENTS = new Set(['WorkflowExecutionStarted', 'WorkflowCompleted', 'WorkflowFailed', 'PhaseStarted', 'PhaseCompleted'])
 export function isExecutionEvent(type: string): boolean {
-  return type.startsWith('phase_') || type.startsWith('workflow_') || type.startsWith('execution_')
+  return EXECUTION_EVENTS.has(type)
 }

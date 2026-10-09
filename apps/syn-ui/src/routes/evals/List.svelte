@@ -7,6 +7,7 @@
   import { formatDate, formatRelativeTime } from '@syn137/skyline-core/format'
   import { cellKey, normalizeVerdict } from '@syn137/skyline-core/patterns'
   import { buildEvalBoard, sortEvalsByLastRun, tagValue, withLatestRun } from '@syn137/skyline-core/screens/evals'
+  import { isRunFinished } from '@syn137/syn-ui-data/live'
   import { resource } from '../../lib/load.svelte'
   import { href, router } from '../../lib/router'
   import type { PageProps } from '../../lib/routes'
@@ -25,7 +26,7 @@
   })
 
   // Every eval feeds the board; the list below follows the tag filter and page.
-  const all = resource((signal) => listEvals({ page_size: MAX_PAGE_SIZE }, signal), { live: (t) => t.startsWith('eval') })
+  const all = resource((signal) => listEvals({ page_size: MAX_PAGE_SIZE }, signal), { live: isRunFinished })
   const list = resource(
     async (signal) => {
       const t = tag
@@ -44,7 +45,7 @@
       })
       return { ...res, rows: rows.map((e, i) => ({ eval: e, recent: recent[i] ?? [] })) }
     },
-    { live: (t) => t.startsWith('eval') },
+    { live: isRunFinished },
   )
 
   const board = $derived(

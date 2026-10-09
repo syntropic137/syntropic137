@@ -32,7 +32,7 @@
   import { Button, Callout, EmptyState, Skeleton } from '@syn137/skyline-svelte-v5'
   import { OutcomeRing, RunRow, Skyline, StatusBadge } from '@syn137/skyline-svelte-v5/patterns'
   import { getContributionHeatmap, getMetrics, listExecutions, listTriggers, listWorkflows } from '@syn137/syn-ui-data'
-  import { subscribeActivity } from '@syn137/syn-ui-data/live'
+  import { isGitEvent, isRunEvent, isRunFinished, subscribeActivity } from '@syn137/syn-ui-data/live'
   import { live } from '../../lib/live.svelte'
   import { resource } from '../../lib/load.svelte'
   import { setPage } from '../../lib/page.svelte'
@@ -52,11 +52,10 @@
   const thisYear = Number(today.slice(0, 4))
   const RECENT = 6
 
-  const isRunEvent = (t: string) => t.startsWith('workflow_') || t.startsWith('phase_') || t.startsWith('execution_')
   const metrics = resource((signal) => getMetrics(undefined, signal), { live: isRunEvent })
   const runs = resource((signal) => listExecutions({ page: 1, page_size: RECENT }, signal), { live: isRunEvent })
   const heatmap = resource((signal) => getContributionHeatmap({ start_date: `${thisYear - 1}-01-01`, end_date: today }, signal), {
-    live: (t) => t === 'workflow_completed' || t === 'workflow_failed',
+    live: isRunFinished,
     liveIntervalMs: 15_000,
   })
   const workflows = resource((signal) => listWorkflows({ page_size: 100 }, signal))
@@ -105,7 +104,7 @@
   let commits = $state<LiveCommit[]>([])
   $effect(() =>
     subscribeActivity({
-      filter: (t) => t.startsWith('git_'),
+      filter: isGitEvent,
       onFrames: (frames) => {
         const incoming = frames.map(toLiveCommit).filter((c): c is LiveCommit => c !== null)
         if (incoming.length) commits = mergeLiveCommits(commits, incoming)
