@@ -1258,6 +1258,8 @@ class EvalRunScoreResponse(BaseModel):
 class DefinitionChangeResponse(BaseModel):
     """A change to an eval's or workflow's definition: a trend chart's annotation (#1788)."""
 
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
     definition_version: str | None
     """Eval: "1" at creation, one more per goal or baseline change. Workflow: the
     package version, else the source digest, as its runs record it; null if neither."""
@@ -1269,6 +1271,8 @@ class DefinitionChangeResponse(BaseModel):
 class TrendDefinition(BaseModel):
     """The current definition version, when it last changed, and every change."""
 
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
     definition_version: str | None
     definition_changed_at: str | None
     """ISO 8601 UTC; null when no change was recorded."""
@@ -1278,6 +1282,8 @@ class TrendDefinition(BaseModel):
 
 class EvalTrendPointResponse(BaseModel):
     """One run of an eval as one point on its trend charts (#1788)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     execution_id: str
     date: str | None
@@ -1321,6 +1327,8 @@ class EvalTrendResponse(TrendDefinition):
 class PhaseDurationResponse(BaseModel):
     """How long one phase of a run took."""
 
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
     phase_id: str
     phase_name: str
     duration_seconds: float | None
@@ -1329,6 +1337,8 @@ class PhaseDurationResponse(BaseModel):
 
 class WorkflowTrendPointResponse(BaseModel):
     """One execution of a workflow as one point on its trend charts (#1788)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     execution_id: str
     date: str | None

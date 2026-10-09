@@ -10075,6 +10075,7 @@
             "$ref": "#/components/schemas/DefinitionChangeKind"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "definition_version",
@@ -11362,6 +11363,7 @@
             "title": "Tokens"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "execution_id",
@@ -11440,6 +11442,7 @@
             "title": "Page Size"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "definition_version",
@@ -16656,6 +16659,7 @@
             "title": "Duration Seconds"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "phase_id",
@@ -23189,6 +23193,7 @@
             "title": "Phase Durations"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "execution_id",
@@ -23262,6 +23267,7 @@
             "title": "Page Size"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "definition_version",
