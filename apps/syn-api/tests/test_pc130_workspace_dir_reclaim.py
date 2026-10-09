@@ -890,12 +890,32 @@ def _workspace_with_submodule(base: Path, workspace_id: str, tmp_path: Path) -> 
     return app
 
 
+def _record_git_calls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> list[tuple[tuple[str, ...], dict[str, str]]]:
+    """Every subprocess host git starts, as (argv, env); each still runs."""
+    calls: list[tuple[tuple[str, ...], dict[str, str]]] = []
+    real = asyncio.create_subprocess_exec
+
+    async def recording(*argv: str, env: dict[str, str], **kwargs: object) -> object:
+        calls.append((argv, env))
+        return await real(*argv, env=env, **kwargs)
+
+    monkeypatch.setattr(stale_dirs.asyncio, "create_subprocess_exec", recording)
+    return calls
+
+
 @pytest.mark.parametrize(
     ("key", "attributes"),
     [("filter.pc130.clean", "* filter=pc130\n"), ("core.fsmonitor", None)],
 )
 async def test_a_submodule_config_never_runs_through_its_superproject(
-    base: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture, key: str, attributes: str | None
+    base: Path,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+    key: str,
+    attributes: str | None,
 ) -> None:
     """The superproject's diff runs git inside the submodule, under the submodule's config."""
     app = _workspace_with_submodule(base, "ws-subconfig", tmp_path)
@@ -907,10 +927,13 @@ async def test_a_submodule_config_never_runs_through_its_superproject(
     # Same size, newer mtime: git has to hash the file, which runs a clean filter.
     later = time.time() + 60
     os.utime(lib / "lib.txt", (later, later))
+    calls = _record_git_calls(monkeypatch)
     result = await _reclaimer(base).run_once()
     assert result.kept == ("ws-subconfig",)
     assert f"{lib} sets {key.lower()}, which is not on the host-git allowlist" in caplog.text
     assert not marker.exists()
+    # Refused before any repository in the workspace was read, not after.
+    assert {argv[argv.index("-C") + 2] for argv, _ in calls} == {"config"}
 
 
 @pytest.mark.parametrize("holder", ["chained", "bare"])
@@ -947,14 +970,7 @@ async def test_every_host_git_call_runs_guarded(
     (app / "lib" / "lib.txt").write_text("edited in the submodule\n")
     bare = _workspace(base, "ws-calls-bare", tmp_path)
     _git(bare / "repos", "clone", "--bare", str(bare / "repos" / "app"), "mirror.git")
-    calls: list[tuple[tuple[str, ...], dict[str, str]]] = []
-    real = asyncio.create_subprocess_exec
-
-    async def recording(*argv: str, env: dict[str, str], **kwargs: object) -> object:
-        calls.append((argv, env))
-        return await real(*argv, env=env, **kwargs)
-
-    monkeypatch.setattr(stale_dirs.asyncio, "create_subprocess_exec", recording)
+    calls = _record_git_calls(monkeypatch)
     result = await _reclaimer(base).run_once()
     assert result.reclaimed == ("ws-calls",)
     assert result.kept == ("ws-calls-bare",)
@@ -969,6 +985,8 @@ async def test_every_host_git_call_runs_guarded(
         else:
             assert "core.hooksPath=/dev/null" in overrides, argv
             assert "core.fsmonitor=false" in overrides, argv
+        if "diff" in argv and "--no-index" not in argv:
+            assert "--ignore-submodules=dirty" in argv, argv
         assert env["GIT_CONFIG_NOSYSTEM"] == "1", argv
         assert env["GIT_CONFIG_GLOBAL"] == "/dev/null", argv
         assert env["HOME"] == "/nonexistent", argv
