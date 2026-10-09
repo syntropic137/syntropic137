@@ -17,7 +17,7 @@ import os
 import shutil
 import subprocess
 import sys
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass, field, replace
 from decimal import Decimal
 from pathlib import Path
 
@@ -38,6 +38,7 @@ from eval_suite import (
     Launch,
     LoadedSuite,
     Score,
+    blocking_findings,
     ScoredRun,
     check_commits,
     install_provenance,
@@ -2873,3 +2874,169 @@ def test_a_report_verdict_the_engine_did_not_record_is_only_a_warning() -> None:
     )
     # The score is the engine's, whatever the report says.
     assert run_verdict("completed", score_case(_case(_CASE), None, _FINDING)) == "ERROR"
+
+
+# ---------------------------------------------------------------------------
+# Judges: keyword (deterministic, unchanged) and LLM (fake model, no network)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _FakeModel:
+    """A `ModelClient` that answers with a canned reply and records what it was asked."""
+
+    reply: str
+    calls: list[dict[str, str]] = field(default_factory=list)
+
+    def complete(self, *, model: str, system: str, prompt: str) -> str:
+        self.calls.append({"model": model, "system": system, "prompt": prompt})
+        return self.reply
+
+
+def _reply(verdict: str, quote: str = "", reason: str = "r") -> str:
+    return json.dumps({"verdict": verdict, "quote": quote, "reason": reason})
+
+
+# The seeded defect, said in words the keyword judge does not know.
+_PARAPHRASED = _report(
+    ("minio.py:212", "download() derives the object path without the execution prefix, "
+     "so every fetch misses the object written by upload().")
+)
+_PARAPHRASE_QUOTE = "derives the object path without the execution prefix"
+# A real but DIFFERENT bug in the same file: the calibration case for precision.
+_OTHER_BUG = _report(("minio.py:88", "list_objects() is not paginated past 1000 entries."))
+
+
+@pytest.mark.unit
+def test_the_keyword_judge_is_unchanged_when_no_llm_judge_is_given() -> None:
+    case = _case(_CASE)
+    for report in (_FINDING, _PARAPHRASED, _OTHER_BUG):
+        assert score_case(case, "blocked", report) == score_report(case.expected, "blocked", report)
+    assert score_case(case, "blocked", _PARAPHRASED).llm is None
+    assert not score_case(case, "blocked", _PARAPHRASED).passed
+
+
+@pytest.mark.unit
+def test_keyword_judge_answers_as_score_report_does() -> None:
+    judge = eval_suite.KeywordJudge()
+    assert judge.judge(_EXPECTED, blocking_findings(_FINDING)).verdict == "match"
+    assert judge.judge(_EXPECTED, blocking_findings(_PARAPHRASED)).verdict == "no_match"
+
+
+@pytest.mark.unit
+def test_llm_judge_credits_a_paraphrase_the_keyword_judge_misses() -> None:
+    model = _FakeModel(_reply("match", _PARAPHRASE_QUOTE, "same root cause"))
+    score = score_case(_case(_CASE), "blocked", _PARAPHRASED, eval_suite.LlmJudge(model))
+
+    assert not score.matched
+    assert score.llm is not None and score.llm.verdict == "match"
+    assert score.llm.quote == _PARAPHRASE_QUOTE
+    assert score.passed and score.caught
+    [call] = model.calls
+    assert call["model"] == eval_suite.JUDGE_MODEL
+    assert "minio.py" in call["prompt"] and _PARAPHRASE_QUOTE in call["prompt"]
+
+
+@pytest.mark.unit
+def test_an_unclear_llm_answer_is_not_caught() -> None:
+    model = _FakeModel(_reply("unclear"))
+    score = score_case(_case(_CASE), "blocked", _PARAPHRASED, eval_suite.LlmJudge(model))
+    assert score.llm is not None and score.llm.verdict == "unclear"
+    assert not score.passed
+
+
+@pytest.mark.unit
+def test_a_match_quoting_text_no_finding_holds_is_unclear() -> None:
+    model = _FakeModel(_reply("match", "download keys by id only and 404s"))
+    judgement = eval_suite.LlmJudge(model).judge(_EXPECTED, blocking_findings(_OTHER_BUG))
+    assert judgement.verdict == "unclear"
+    assert judgement.quote == ""
+
+
+@pytest.mark.unit
+def test_calibration_a_different_bug_in_the_same_file_is_not_credited() -> None:
+    """Precision: the judge must answer the model's no_match, never credit by default.
+
+    Mutation check: make `LlmJudge.judge` return `match` unconditionally and this fails.
+    """
+    model = _FakeModel(_reply("no_match", reason="pagination, not the download key"))
+    score = score_case(_case(_CASE), "blocked", _OTHER_BUG, eval_suite.LlmJudge(model))
+    assert score.llm is not None and score.llm.verdict == "no_match"
+    assert not score.caught and not score.passed
+
+
+@pytest.mark.unit
+def test_llm_judge_is_not_asked_about_a_run_that_did_not_block() -> None:
+    model = _FakeModel(_reply("match", _PARAPHRASE_QUOTE))
+    score = score_case(_case(_CASE), "certified", _PARAPHRASED, eval_suite.LlmJudge(model))
+    assert score.llm is None and not model.calls
+
+
+@pytest.mark.unit
+def test_an_unreadable_llm_reply_raises_rather_than_scoring() -> None:
+    with pytest.raises(eval_suite.JudgeError, match="no readable verdict"):
+        eval_suite.LlmJudge(_FakeModel("I think it matches")).judge(
+            _EXPECTED, blocking_findings(_PARAPHRASED)
+        )
+
+
+@pytest.mark.unit
+def test_llm_judged_score_is_recorded_under_the_judges_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(globals(), "_FINDING", _PARAPHRASED)
+    loaded = load_suite(DEFAULT_SUITE)
+    server = _Server(loaded)
+    model = _FakeModel(_reply("match", _PARAPHRASE_QUOTE))
+
+    rows, _ = score_suite(loaded, server.client(), [_LAUNCHED], eval_suite.LlmJudge(model))
+
+    [(_, body)] = server.scores
+    assert body["scorer_version"] == "6+llm:claude-sonnet-5-5@prompt-v1"
+    assert body["verdict"] == "PASS"
+    assert "LLM judge (`llm:claude-sonnet-5-5@prompt-v1`): `match`" in str(body["evidence"])
+    assert "keyword judge: no match" in str(body["evidence"])
+    table = render(loaded, rows)
+    assert "keyword OR LLM match, unclear not caught): 1/1" in table
+    assert "keyword judge alone: 0/1" in table
+    assert "LLM judge alone: 1/1" in table
+
+
+@pytest.mark.unit
+def test_keyword_only_scoring_records_the_plain_suite_version(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(globals(), "_FINDING", _PARAPHRASED)
+    loaded = load_suite(DEFAULT_SUITE)
+    server = _Server(loaded)
+
+    score_suite(loaded, server.client(), [_LAUNCHED])
+
+    [(_, body)] = server.scores
+    assert (body["scorer_version"], body["verdict"]) == ("6", "FAIL")
+    assert "LLM judge" not in str(body["evidence"])
+
+
+@pytest.mark.unit
+def test_llm_judge_flag_without_a_key_fails_before_any_call(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    assert eval_suite.main(["score", "--llm-judge", "--api-url", "http://unreachable.invalid"]) == 1
+    assert "needs ANTHROPIC_API_KEY" in capsys.readouterr().err
+
+
+@pytest.mark.unit
+def test_anthropic_client_sends_the_pinned_model_at_temperature_zero() -> None:
+    sent: list[dict[str, object]] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        sent.append(json.loads(request.content))
+        assert request.headers["x-api-key"] == "test-key"
+        return httpx.Response(200, json={"content": [{"type": "text", "text": "ok"}]})
+
+    client = eval_suite.AnthropicMessages(
+        "test-key", httpx.Client(transport=httpx.MockTransport(handle))
+    )
+    assert client.complete(model="claude-sonnet-5-5", system="s", prompt="p") == "ok"
+    assert (sent[0]["model"], sent[0]["temperature"]) == ("claude-sonnet-5-5", 0)
