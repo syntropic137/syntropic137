@@ -54,11 +54,24 @@ export const EXECUTION_FILTERS: readonly { value: string; label: string }[] = [
 
 const DAY = 86_400_000
 
-/** Group heading for a run's age: "Today", "Yesterday", "This week", "Last week", "6 weeks ago", "3 months ago". */
+/** Whole local calendar days from `t`'s day to `now`'s day (DST-safe): 0 today, 1 yesterday. */
+export function calendarDaysAgo(t: number, now: number): number {
+  const day = (ms: number) => {
+    const d = new Date(ms)
+    return Date.UTC(d.getFullYear(), d.getMonth(), d.getDate())
+  }
+  return Math.round((day(now) - day(t)) / DAY)
+}
+
+/**
+ * Group heading for a run's age: "Today", "Yesterday", "This week", "Last
+ * week", "6 weeks ago", "3 months ago". Days are local calendar days, so a
+ * run from 23:00 last night is "Yesterday" even inside a 24h window.
+ */
 export function ageGroupTitle(startedAt: string | number | null | undefined, now: number): string {
   const t = toTime(startedAt ?? null)
   if (t === null) return 'Undated'
-  const days = Math.floor((now - t) / DAY)
+  const days = calendarDaysAgo(t, now)
   if (days < 1) return 'Today'
   if (days < 2) return 'Yesterday'
   if (days < 7) return 'This week'

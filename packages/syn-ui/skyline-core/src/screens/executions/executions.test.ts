@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   ageGroupTitle,
+  calendarDaysAgo,
   evalBadge,
   parseEvalFilter,
   phaseProgressText,
@@ -69,11 +70,28 @@ describe('list', () => {
   })
 
   it('names age groups like the board', () => {
-    expect(ageGroupTitle(new Date(NOW - 3_600_000).toISOString(), NOW)).toBe('Today')
-    expect(ageGroupTitle(NOW - 1.5 * DAY, NOW)).toBe('Yesterday')
-    expect(ageGroupTitle(NOW - 8 * DAY, NOW)).toBe('Last week')
-    expect(ageGroupTitle(NOW - 43 * DAY, NOW)).toBe('6 weeks ago')
-    expect(ageGroupTitle(null, NOW)).toBe('Undated')
+    // Local noon, so the cases hold in any time zone.
+    const noon = new Date(2026, 9, 8, 12).getTime()
+    expect(ageGroupTitle(new Date(noon - 3_600_000).toISOString(), noon)).toBe('Today')
+    expect(ageGroupTitle(noon - 1.5 * DAY, noon)).toBe('Yesterday')
+    expect(ageGroupTitle(noon - 8 * DAY, noon)).toBe('Last week')
+    expect(ageGroupTitle(noon - 43 * DAY, noon)).toBe('6 weeks ago')
+    expect(ageGroupTitle(null, noon)).toBe('Undated')
+  })
+
+  it('groups by local calendar day, not a rolling 24h (parity 2026-10-09: 38 rows all under Today)', () => {
+    const now = new Date(2026, 9, 9, 13, 0).getTime()
+    expect(ageGroupTitle(new Date(2026, 9, 9, 0, 5).getTime(), now)).toBe('Today')
+    // Inside the 24h window but before today's local midnight.
+    expect(ageGroupTitle(new Date(2026, 9, 8, 23, 59).getTime(), now)).toBe('Yesterday')
+    expect(ageGroupTitle(new Date(2026, 9, 8, 14, 0).getTime(), now)).toBe('Yesterday')
+    expect(ageGroupTitle(new Date(2026, 9, 7, 23, 0).getTime(), now)).toBe('This week')
+    expect(calendarDaysAgo(new Date(2026, 9, 9, 0, 1).getTime(), new Date(2026, 9, 9, 23, 59).getTime())).toBe(0)
+    const rows = [new Date(2026, 9, 9, 9).getTime(), new Date(2026, 9, 8, 22).getTime(), new Date(2026, 9, 8, 19).getTime()].map((t) => ({ t: new Date(t).toISOString() }))
+    expect(groupByAge(rows, (r) => r.t, now).map((g) => [g.title, g.count])).toEqual([
+      ['Today', '1 run'],
+      ['Yesterday', '2 runs'],
+    ])
   })
 
   it('groups consecutive rows and counts them', () => {
