@@ -2,7 +2,7 @@
 
 ## How to use
 
-- Next available number: **ADR-073**
+- Next available number: **ADR-076**
 - Template: Status, Date, Context, Decision, Consequences (Nygard format)
 - ADR-025 was never created (numbering gap)
 - ADR-027 has two files: `ADR-027-sdk-wrapper-architecture.md` (superseded) and `ADR-027-unified-workflow-executor.md` (accepted)
@@ -66,6 +66,7 @@
 | [ADR-066](ADR-066-separation-of-concerns.md) | Separation of Concerns Across Components | Accepted |
 | [ADR-067](ADR-067-model-registry-and-cost-attribution.md) | Model Registry and Rate-at-Write Cost Attribution | Proposed |
 | [ADR-070](ADR-070-credential-rotation.md) | Credential Rotation Without a Restart | Proposed |
+| [ADR-075](ADR-075-request-latency-telemetry.md) | Durable Request Latency Telemetry | Accepted |
 
 ### Testing & Quality
 
@@ -118,6 +119,7 @@
 | [ADR-065](ADR-065-claude-plugin-injection.md) | Skills as the Workflow Capability Unit | Accepted |
 | [ADR-068](ADR-068-remove-interactive-tmux-path.md) | Remove the Interactive tmux Agent Path | Accepted |
 | [ADR-071](ADR-071-session-inventory-and-discovery.md) | Session Inventory and Discovery | Accepted |
+| [ADR-072](ADR-072-workspace-platform-access.md) | Workspace Access to the Syntropic137 API | Accepted |
 
 ### Organization & Repos
 

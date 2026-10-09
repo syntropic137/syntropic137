@@ -344,6 +344,20 @@ MODEL_PRICING_TABLE: dict[ModelId, ModelPricing] = {
         cache_creation_per_million=Decimal("2.50"),
         cache_read_per_million=Decimal("0.20"),
     ),
+    # GPT-6-Luna (codex slug `gpt-6-luna`): $0.10 in / $0.01 cached / $0.125
+    # cache write / $0.50 out per MTok, SHORT-CONTEXT (<=272K input) Standard
+    # tier. Source, retrieved 2026-10-07:
+    # https://developers.openai.com/api/docs/pricing and
+    # https://developers.openai.com/api/docs/models/gpt-6-luna . All four
+    # rates are published. Above 272K input OpenAI bills 2x input/cache and
+    # 1.5x output for the whole request; not modelled, as for gpt-6.1-sol.
+    ModelId.GPT_6_LUNA: ModelPricing(
+        model_id=ModelId.GPT_6_LUNA,
+        input_per_million=Decimal("0.10"),
+        output_per_million=Decimal("0.50"),
+        cache_creation_per_million=Decimal("0.125"),
+        cache_read_per_million=Decimal("0.01"),
+    ),
     # --- ADR-067 phase 0 generation ---
     # ANTHROPIC ROWS ONLY: verified 2026-08-16 against the vendor pricing pages
     # and cross-checked against the OpenRouter models API; both agreed. Cache

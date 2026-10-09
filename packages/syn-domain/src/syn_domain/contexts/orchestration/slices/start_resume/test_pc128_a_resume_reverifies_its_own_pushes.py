@@ -1,0 +1,654 @@
+"""A resume continues at commits its own interrupted phase pushed (PC-128).
+
+A deploy orphaned runs mid-fix after the fix phase had pushed. The failure
+reconciliation writes observes nothing, the fix phase's branch existed before
+the phase started, so nothing said the run had moved the branch - and the
+resumed fix saw a head past its verified SHA and refused. Each cost a fresh
+reverify-pr run (exec-26837be532a8, exec-5aa538f2f450, exec-051e420018d5).
+
+These drive the parent's push in through the production path - the workspace
+hook's `git_push` line in a tool result, beside the status line git prints for
+the ref it updated, read by the real `EmbeddedEventScanner`
+and recorded by `push_recorder` through the real `ExecutionJournal` - then fail
+it the way `reconciliation._reconcile_one` does, with no observed branches,
+store everything through JSON, and start the resume through the real
+`StartResumeHandler`. Only the forge (one branch reading) and the processor's
+`run_resume` (which here only starts the child aggregate) are doubles.
+
+    hook line -> EmbeddedEventScanner -> push_recorder -> PhaseCommitPushed
+      -> OrphanedByRestart failure -> left branches -> resume candidates
+      -> StartResumeHandler asks the forge -> child's start event
+      -> StartPins.checkout_for -> record_continuation (what the phase is told)
+"""
+
+from __future__ import annotations
+
+import json
+from typing import TYPE_CHECKING
+
+import pytest
+from event_sourcing import DomainEvent, EventEnvelope, StreamAlreadyExistsError
+
+from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
+from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continuation import (
+    RemoteBranchReading,
+)
+from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins import (
+    SourceCommit,
+    phase_definitions_of,
+)
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    AgentConfiguration,
+    ExecutablePhase,
+    FailureClassification,
+)
+from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
+    CompletePhaseCommand,
+    FailExecutionCommand,
+    ResumeExecutionCommand,
+    StartExecutionCommand,
+    StartPhaseCommand,
+    WorkflowExecutionAggregate,
+)
+from syn_domain.contexts.orchestration.domain.events.PhaseCommitPushedEvent import (
+    PhaseCommitPushedEvent,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.EmbeddedEventScanner import (
+    EmbeddedEventScanner,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.execution_journal import (
+    ExecutionJournal,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.ObservabilityCollector import (
+    ObservabilityCollector,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.phase_push import push_recorder
+from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
+    PhaseOutputCache,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.resume_handoff import (
+    CONTINUATION_OUTPUT_ID,
+    OWN_UNVERIFIED_PUSH,
+    record_continuation,
+)
+from syn_domain.contexts.orchestration.slices.execution_todo.projection import (
+    ExecutionTodoProjection,
+)
+from syn_domain.contexts.orchestration.slices.start_resume import StartResumeHandler
+
+if TYPE_CHECKING:
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
+        StartResumeCommand,
+    )
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins import (
+        StartPins,
+    )
+
+pytestmark = [pytest.mark.unit, pytest.mark.anyio]
+
+PARENT = "exec-pc128-parent"
+CHILD = "exec-pc128-child"
+WORKFLOW = "wf-pc128"
+PHASE_IDS = ("verify", "fix", "finalize")
+REPO = "acme/widgets"
+BRANCH = "fix/1738-the-pr-under-review"
+PR = 1738
+#: The SHA the verify phase certified; the fix phase starts here.
+VERIFIED = "a128a128a128a128a128a128a128a128a128a128"
+#: The two commits the parent's fix phase pushed before the deploy killed it.
+FIRST_PUSH = "b128b128b128b128b128b128b128b128b128b128"
+LAST_PUSH = "c128c128c128c128c128c128c128c128c128c128"
+#: A commit somebody else pushed to the branch after the run died.
+FOREIGN = "f128f128f128f128f128f128f128f128f128f128"
+#: A ref the phase pushed that is not the branch under review.
+UNRELATED = "unrelated"
+#: origin's URL as the hook is handed it, and as git prints it after `To`.
+ORIGIN_URL = "github.com:acme/widgets.git"
+
+
+class _Store:
+    """Execution streams, every save read back through JSON as the store would."""
+
+    def __init__(self) -> None:
+        self.events: dict[str, list[EventEnvelope[DomainEvent]]] = {}
+
+    async def save(self, aggregate: WorkflowExecutionAggregate) -> None:
+        self.events.setdefault(aggregate.id or "", []).extend(
+            EventEnvelope(
+                event=type(e.event).model_validate_json(e.event.model_dump_json()),
+                metadata=e.metadata,
+            )
+            for e in aggregate.get_uncommitted_events()
+        )
+        aggregate.mark_events_as_committed()
+
+    async def save_new(self, aggregate: WorkflowExecutionAggregate) -> None:
+        if aggregate.id in self.events:
+            raise StreamAlreadyExistsError(aggregate.id or "", 0)
+        await self.save(aggregate)
+
+    async def get_by_id(self, aggregate_id: str) -> WorkflowExecutionAggregate | None:
+        if aggregate_id not in self.events:
+            return None
+        fresh = WorkflowExecutionAggregate()
+        fresh.rehydrate(list(self.events[aggregate_id]))
+        return fresh
+
+
+class _Forge:
+    """Where origin has the branch now, and the PR open from it."""
+
+    def __init__(self, head_sha: str) -> None:
+        self.head_sha = head_sha
+
+    async def read_branch(self, repository: str, branch: str) -> RemoteBranchReading:
+        return RemoteBranchReading(
+            repository=repository,
+            branch=branch,
+            readable=True,
+            head_sha=self.head_sha,
+            open_pull_request=PR,
+        )
+
+
+class _StartsTheChild:
+    """`run_resume`, reduced to the start the processor would open the child with."""
+
+    def __init__(self, store: _Store) -> None:
+        self._store = store
+
+    async def run_resume(self, command: StartResumeCommand, **_: object) -> None:
+        child = WorkflowExecutionAggregate()
+        child.start_resume(command)
+        await self._store.save_new(child)
+
+
+def _phases() -> list[ExecutablePhase]:
+    return [
+        ExecutablePhase(
+            phase_id=p,
+            name=p.title(),
+            order=i + 1,
+            agent_config=AgentConfiguration(),
+            prompt_template=f"{p} prompt",
+            timeout_seconds=1800,
+        )
+        for i, p in enumerate(PHASE_IDS)
+    ]
+
+
+def _hook_line(sha: str, remote_url: str = ORIGIN_URL) -> str:
+    """What the workspace's pre-push hook prints into the tool result."""
+    return json.dumps(
+        {
+            "event_type": "git_push",
+            "timestamp": "2026-10-08T01:00:00+00:00",
+            "session_id": "sess-pc128",
+            "provider": "claude",
+            "context": {
+                "git": {
+                    "operation": "push",
+                    "remote": "origin",
+                    "branch": BRANCH,
+                    "sha": sha,
+                    "repo": "widgets",
+                    "remote_url": remote_url,
+                    "commits_count": 1,
+                }
+            },
+            "metadata": None,
+        }
+    )
+
+
+def _pushed(old: str, new: str) -> str:
+    """The tool result of a `git push` that origin accepted, moving BRANCH ``old`` -> ``new``."""
+    return (
+        f"{_hook_line(new)}\nTo github.com:acme/widgets.git\n"
+        f"   {old[:7]}..{new[:7]}  {BRANCH} -> {BRANCH}\n"
+    )
+
+
+def _own_pushes(*shas: str) -> tuple[str, ...]:
+    olds = (VERIFIED, *shas)
+    return tuple(_pushed(old, new) for old, new in zip(olds, shas, strict=False))
+
+
+async def _orphaned_mid_fix(store: _Store, *, outputs: tuple[str, ...]) -> None:
+    """A parent that verified, ran ``outputs`` in fix, and was orphaned by a deploy."""
+    parent = WorkflowExecutionAggregate()
+    phases = _phases()
+    parent.start_execution(
+        StartExecutionCommand(
+            execution_id=PARENT,
+            workflow_id=WORKFLOW,
+            workflow_name="reverify-pr",
+            total_phases=len(phases),
+            inputs={"pr": str(PR)},
+            phase_definitions=phase_definitions_of(phases),
+            pinned_phases=phases,
+            source_commits=[SourceCommit(repository=REPO, sha=VERIFIED)],
+        )
+    )
+    for order, phase_id in enumerate(("verify", "fix"), start=1):
+        parent.start_phase(
+            StartPhaseCommand(
+                execution_id=PARENT,
+                workflow_id=WORKFLOW,
+                phase_id=phase_id,
+                phase_name=phase_id.title(),
+                phase_order=order,
+            )
+        )
+        if phase_id == "verify":
+            parent.complete_phase(
+                CompletePhaseCommand(
+                    execution_id=PARENT,
+                    workflow_id=WORKFLOW,
+                    phase_id="verify",
+                    session_id=None,
+                    artifact_id=None,
+                    input_tokens=0,
+                    output_tokens=0,
+                    cache_creation_tokens=0,
+                    cache_read_tokens=0,
+                    total_tokens=0,
+                    duration_seconds=1.0,
+                )
+            )
+    journal = ExecutionJournal(store, ExecutionTodoProjection(InMemoryProjectionStore()))
+    await journal.open(parent)
+    scanner = EmbeddedEventScanner(
+        collector=ObservabilityCollector(
+            writer=None,
+            session_id="sess-pc128",
+            execution_id=PARENT,
+            phase_id="fix",
+            workspace_id=None,
+            requested_model=None,
+        ),
+        execution_id=PARENT,
+        phase_id="fix",
+        on_push=push_recorder(parent, journal, "fix"),
+    )
+    for output in outputs:
+        await scanner.scan_and_record(output, "Bash")
+    # What `reconciliation._reconcile_one` records: no observed branches.
+    parent.fail_execution(
+        FailExecutionCommand(
+            execution_id=PARENT,
+            error="Execution was running when the API restarted",
+            error_type="OrphanedByRestart",
+            failed_phase_id="fix",
+            completed_phases=1,
+            total_phases=len(phases),
+            classification=FailureClassification.UNCLASSIFIED,
+        )
+    )
+    parent.resume_execution(
+        ResumeExecutionCommand(
+            execution_id=PARENT, resume_execution_id=CHILD, acknowledge_external_effects=True
+        )
+    )
+    await journal.append(parent)
+
+
+async def _resume(store: _Store, forge_head: str) -> StartPins:
+    handler = StartResumeHandler(
+        processor=_StartsTheChild(store),  # type: ignore[arg-type]
+        execution_repository=store,  # type: ignore[arg-type]
+        remote_branches=_Forge(forge_head),
+    )
+    await handler.handle(PARENT)
+    child = await store.get_by_id(CHILD)
+    assert child is not None
+    return child.start_pins
+
+
+def _told(pins: StartPins) -> str:
+    cache = PhaseOutputCache()
+    record_continuation(cache, pins)
+    return cache.primary.get(CONTINUATION_OUTPUT_ID, "")
+
+
+class TestOwnPushesAreReverified:
+    async def test_a_head_at_the_runs_last_push_is_continued_and_reverified(self) -> None:
+        store = _Store()
+        await _orphaned_mid_fix(store, outputs=_own_pushes(FIRST_PUSH, LAST_PUSH))
+
+        pins = await _resume(store, forge_head=LAST_PUSH)
+
+        checkout = pins.checkout_for("fix")
+        assert checkout.commits[REPO] == LAST_PUSH
+        assert checkout.branches[REPO] == BRANCH
+        assert pins.abandoned_branches == []
+        [continued] = pins.continued_branches
+        assert continued.pull_request == PR
+        told = _told(pins)
+        assert OWN_UNVERIFIED_PUSH in told
+        assert LAST_PUSH in told
+
+    async def test_a_head_at_an_earlier_own_push_is_still_the_runs_own(self) -> None:
+        """The last push may not have landed; the one before it did."""
+        store = _Store()
+        await _orphaned_mid_fix(store, outputs=_own_pushes(FIRST_PUSH, LAST_PUSH))
+
+        pins = await _resume(store, forge_head=FIRST_PUSH)
+
+        assert pins.checkout_for("fix").commits[REPO] == FIRST_PUSH
+        assert OWN_UNVERIFIED_PUSH in _told(pins)
+
+
+class TestAForeignHeadIsStillRefused:
+    async def test_a_commit_this_run_did_not_push_abandons_the_branch(self) -> None:
+        store = _Store()
+        await _orphaned_mid_fix(store, outputs=_own_pushes(FIRST_PUSH, LAST_PUSH))
+
+        pins = await _resume(store, forge_head=FOREIGN)
+
+        checkout = pins.checkout_for("fix")
+        assert pins.continued_branches == []
+        assert REPO not in checkout.branches
+        assert checkout.commits[REPO] == VERIFIED
+        [abandoned] = pins.abandoned_branches
+        assert FOREIGN in abandoned.reason
+        assert OWN_UNVERIFIED_PUSH not in _told(pins)
+
+
+class TestOnlyAPushGitAcceptedToTheBranchIsTheRuns:
+    """The hook runs before git pushes and reads HEAD, not the ref pushed.
+
+    The phase fetched a foreign head of the branch and is checked out on it,
+    so every hook line below names BRANCH at FOREIGN. Only git's status line
+    says which ref, if any, origin updated.
+    """
+
+    async def _resumed_after(self, output: str) -> StartPins:
+        store = _Store()
+        await _orphaned_mid_fix(store, outputs=(output,))
+        return await _resume(store, forge_head=FOREIGN)
+
+    def _refused(self, pins: StartPins) -> None:
+        """No push recorded: the resume is the no-push one, and the fix gate refuses FOREIGN."""
+        checkout = pins.checkout_for("fix")
+        assert pins.continued_branches == []
+        assert pins.abandoned_branches == []
+        assert REPO not in checkout.branches
+        assert checkout.commits[REPO] == VERIFIED
+        assert _told(pins) == ""
+
+    async def test_a_rejected_push_establishes_nothing(self) -> None:
+        pins = await self._resumed_after(
+            f"{_hook_line(FOREIGN)}\nTo github.com:acme/widgets.git\n"
+            f" ! [remote rejected] {UNRELATED} -> {UNRELATED} (pre-receive hook declined)\n"
+            "error: failed to push some refs to 'github.com:acme/widgets.git'\n"
+        )
+
+        self._refused(pins)
+
+    async def test_pushing_another_ref_does_not_claim_the_checked_out_branch(self) -> None:
+        pins = await self._resumed_after(
+            f"{_hook_line(FOREIGN)}\nTo github.com:acme/widgets.git\n"
+            f" * [new branch]      {UNRELATED} -> {UNRELATED}\n"
+        )
+
+        self._refused(pins)
+
+    async def test_pushing_head_to_another_ref_does_not_claim_the_branch(self) -> None:
+        """`git push origin HEAD:unrelated`: HEAD's commit landed, but on another ref."""
+        pins = await self._resumed_after(
+            f"{_hook_line(FOREIGN)}\nTo github.com:acme/widgets.git\n"
+            f" * [new branch]      HEAD -> {UNRELATED}\n"
+        )
+
+        self._refused(pins)
+
+    async def test_an_up_to_date_push_moved_nothing(self) -> None:
+        pins = await self._resumed_after(f"{_hook_line(FOREIGN)}\nEverything up-to-date\n")
+
+        self._refused(pins)
+
+    async def test_an_update_of_the_branch_to_a_different_commit_is_not_the_hooks_sha(
+        self,
+    ) -> None:
+        """`git push origin HEAD~1:BRANCH`: the branch moved, but not to HEAD."""
+        pins = await self._resumed_after(
+            f"{_hook_line(FOREIGN)}\nTo github.com:acme/widgets.git\n"
+            f"   {VERIFIED[:7]}..{FIRST_PUSH[:7]}  HEAD~1 -> {BRANCH}\n"
+        )
+
+        self._refused(pins)
+
+    async def test_a_forced_update_establishes_nothing(self) -> None:
+        """git prints a tag by its short name: this is also `HEAD:refs/tags/BRANCH` forced."""
+        pins = await self._resumed_after(
+            f"{_hook_line(FOREIGN)}\nTo github.com:acme/widgets.git\n"
+            f" + {VERIFIED[:7]}...{FOREIGN[:7]} HEAD -> {BRANCH} (forced update)\n"
+        )
+
+        self._refused(pins)
+
+    async def test_a_hook_that_names_no_remote_url_establishes_nothing(self) -> None:
+        pins = await self._resumed_after(
+            f"{_hook_line(FOREIGN, remote_url='')}\nTo github.com:acme/widgets.git\n"
+            f"   {VERIFIED[:7]}..{FOREIGN[:7]}  {BRANCH} -> {BRANCH}\n"
+        )
+
+        self._refused(pins)
+
+    async def test_credentials_git_leaves_out_of_the_to_line_still_match(self) -> None:
+        url = "https://github.com/acme/widgets.git"
+        store = _Store()
+        await _orphaned_mid_fix(
+            store,
+            outputs=(
+                f"{_hook_line(LAST_PUSH, 'https://x-access-token:tok@github.com/acme/widgets.git')}"
+                f"\nTo {url}\n   {VERIFIED[:7]}..{LAST_PUSH[:7]}  {BRANCH} -> {BRANCH}\n",
+            ),
+        )
+
+        pins = await _resume(store, forge_head=LAST_PUSH)
+
+        assert pins.checkout_for("fix").commits[REPO] == LAST_PUSH
+        assert OWN_UNVERIFIED_PUSH in _told(pins)
+
+    async def test_creating_the_branch_names_no_commit_so_establishes_nothing(self) -> None:
+        """A quiet push's hook then a hookless creation print exactly this (round 3).
+
+        See test_pc128_a_created_branch_is_not_an_own_push.py for it in real git.
+        """
+        pins = await self._resumed_after(
+            f"{_hook_line(FOREIGN)}\nTo github.com:acme/widgets.git\n"
+            f" * [new branch]      HEAD -> {BRANCH}\n"
+        )
+
+        self._refused(pins)
+
+
+class TestEachHookIsConfirmedOnlyByItsOwnPush:
+    """Several pushes in one tool result: git's line for one confirms no other's hook.
+
+    The phase moved BRANCH to FIRST_PUSH, someone else then moved it to
+    FOREIGN, and the phase fetched that head and pushed `HEAD:unrelated`,
+    which origin rejected. The second hook names BRANCH at FOREIGN, and the
+    first push's `HEAD -> BRANCH` update line is in the same output.
+    """
+
+    BATCH = (
+        f"{_hook_line(FIRST_PUSH)}\nTo github.com:acme/widgets.git\n"
+        f"   {VERIFIED[:7]}..{FIRST_PUSH[:7]}  HEAD -> {BRANCH}\n"
+        f"{_hook_line(FOREIGN)}\nTo github.com:acme/widgets.git\n"
+        f" ! [remote rejected] HEAD -> {UNRELATED} (pre-receive hook declined)\n"
+        "error: failed to push some refs to 'github.com:acme/widgets.git'\n"
+    )
+
+    async def test_only_the_accepted_push_is_recorded_and_the_foreign_head_is_refused(
+        self,
+    ) -> None:
+        store = _Store()
+        await _orphaned_mid_fix(store, outputs=(self.BATCH,))
+
+        recorded = [
+            e.event.sha for e in store.events[PARENT] if isinstance(e.event, PhaseCommitPushedEvent)
+        ]
+        assert recorded == [FIRST_PUSH]
+
+        pins = await _resume(store, forge_head=FOREIGN)
+
+        checkout = pins.checkout_for("fix")
+        assert pins.continued_branches == []
+        assert REPO not in checkout.branches
+        assert checkout.commits[REPO] == VERIFIED
+        [abandoned] = pins.abandoned_branches
+        assert FOREIGN in abandoned.reason
+        assert OWN_UNVERIFIED_PUSH not in _told(pins)
+
+    async def test_the_accepted_push_in_the_batch_is_still_the_runs_own(self) -> None:
+        store = _Store()
+        await _orphaned_mid_fix(store, outputs=(self.BATCH,))
+
+        pins = await _resume(store, forge_head=FIRST_PUSH)
+
+        assert pins.checkout_for("fix").commits[REPO] == FIRST_PUSH
+        assert OWN_UNVERIFIED_PUSH in _told(pins)
+
+    async def test_two_pushes_after_one_hook_line_confirm_neither(self) -> None:
+        """`git push --no-verify` prints no hook line, so two `To` blocks follow one hook.
+
+        The hook's own `git push -q` printed nothing; two hookless pushes
+        followed it. At most one of them is the hook's, and nothing says which.
+        """
+        pins = await TestOnlyAPushGitAcceptedToTheBranchIsTheRuns()._resumed_after(
+            f"{_hook_line(FOREIGN)}\n"
+            "To github.com:acme/widgets.git\n"
+            f"   {VERIFIED[:7]}..{FOREIGN[:7]}  HEAD -> {BRANCH}\n"
+            "To github.com:acme/widgets.git\n"
+            f" ! [remote rejected] HEAD -> {UNRELATED} (pre-receive hook declined)\n"
+        )
+
+        assert pins.continued_branches == []
+        assert pins.checkout_for("fix").commits[REPO] == VERIFIED
+        assert _told(pins) == ""
+
+    async def test_a_push_to_another_repository_confirms_nothing_here(self) -> None:
+        pins = await TestOnlyAPushGitAcceptedToTheBranchIsTheRuns()._resumed_after(
+            f"{_hook_line(FOREIGN)}\nTo github.com:acme/gadgets.git\n"
+            f"   {VERIFIED[:7]}..{FOREIGN[:7]}  HEAD -> {BRANCH}\n"
+        )
+
+        assert pins.continued_branches == []
+        assert pins.checkout_for("fix").commits[REPO] == VERIFIED
+        assert _told(pins) == ""
+
+
+class TestNoPushIsUnchanged:
+    async def test_a_fix_that_pushed_nothing_continues_nothing(self) -> None:
+        store = _Store()
+        await _orphaned_mid_fix(store, outputs=())
+
+        pins = await _resume(store, forge_head=FOREIGN)
+
+        assert pins.continued_branches == []
+        assert pins.abandoned_branches == []
+        assert pins.checkout_for("fix").commits[REPO] == VERIFIED
+        assert _told(pins) == ""
+
+
+class TestAnObservationDoesNotOverwriteOwnPushes:
+    """Someone moved the branch after the phase's last push, before failure was observed."""
+
+    @staticmethod
+    def _observed_at(head: str, *, at_phase_start: str | None) -> object:
+        from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+            BranchObservation,
+        )
+
+        return BranchObservation(
+            repo="widgets",
+            branch=BRANCH,
+            remote="origin",
+            remote_commit=head,
+            remote_commit_at_phase_start=at_phase_start,
+            unpushed_commits=0,
+            pull_request=PR,
+        )
+
+    def test_a_branch_owned_only_by_its_pushes_stays_at_them(self) -> None:
+        from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continuation import (
+            PushedCommit,
+            branches_left_by,
+        )
+
+        [left] = branches_left_by(
+            [self._observed_at(FOREIGN, at_phase_start=VERIFIED)],
+            repositories=[REPO],
+            continued=[],
+            pushed=[
+                PushedCommit(phase_id="fix", repository="widgets", branch=BRANCH, sha=FIRST_PUSH)
+            ],
+        )
+
+        assert left.head_sha == FIRST_PUSH
+        assert left.pushed_shas == [FIRST_PUSH]
+
+    def test_a_continued_branch_takes_the_observed_head_but_claims_no_push(self) -> None:
+        from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continuation import (
+            ContinuedBranch,
+            PushedCommit,
+            branches_left_by,
+        )
+
+        [left] = branches_left_by(
+            [self._observed_at(FOREIGN, at_phase_start=VERIFIED)],
+            repositories=[REPO],
+            continued=[ContinuedBranch(repository=REPO, branch=BRANCH, head_sha=VERIFIED)],
+            pushed=[
+                PushedCommit(phase_id="fix", repository="widgets", branch=BRANCH, sha=FIRST_PUSH)
+            ],
+        )
+
+        assert left.head_sha == FOREIGN
+        assert not left.is_own_unverified_push
+
+    def test_an_observed_head_the_phase_pushed_keeps_its_pushes(self) -> None:
+        from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continuation import (
+            PushedCommit,
+            branches_left_by,
+        )
+
+        [left] = branches_left_by(
+            [self._observed_at(LAST_PUSH, at_phase_start=VERIFIED)],
+            repositories=[REPO],
+            continued=[],
+            pushed=[
+                PushedCommit(phase_id="fix", repository="widgets", branch=BRANCH, sha=FIRST_PUSH),
+                PushedCommit(phase_id="fix", repository="widgets", branch=BRANCH, sha=LAST_PUSH),
+            ],
+        )
+
+        assert left.head_sha == LAST_PUSH
+        assert left.is_own_unverified_push
+
+
+class TestAResumeOfAResumeKeepsEveryOwnPush:
+    def test_the_parents_pushes_and_the_childs_are_both_the_runs_own(self) -> None:
+        from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continuation import (
+            ContinuedBranch,
+            PushedCommit,
+            branches_left_by,
+        )
+
+        continued = ContinuedBranch(
+            repository=REPO, branch=BRANCH, head_sha=FIRST_PUSH, pushed_shas=[FIRST_PUSH]
+        )
+        [left] = branches_left_by(
+            None,
+            repositories=[REPO],
+            continued=[continued],
+            pushed=[
+                PushedCommit(phase_id="fix", repository="widgets", branch=BRANCH, sha=LAST_PUSH)
+            ],
+        )
+
+        assert left.head_sha == LAST_PUSH
+        assert left.pushed_shas == [FIRST_PUSH, LAST_PUSH]

@@ -168,7 +168,7 @@ const showCommand: CommandDef = {
           ph.deliverable_recovered
             ? `${formatStatus(ph.status)} ${style("(recovered)", YELLOW)}`
             : formatStatus(ph.status),
-          // What RAN, or "unknown (requested: X)" - never the alias (ADR-067 D9).
+          // What RAN, or "X (requested)" - never the alias (ADR-067 D9).
           ph.model_display,
           formatTimestamp(ph.started_at),
           formatTokens(ph.total_tokens),

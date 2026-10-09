@@ -171,6 +171,9 @@ class PhaseDefinitionDetail:
     delivers_repo_changes: bool = True
     """Whether repository changes are part of this phase's deliverable (#1308)."""
 
+    requires_verdict: bool = False
+    """Whether this phase fails when it reports no ``review_verdict`` (PC-116)."""
+
     sandbox: str = DEFAULT_PHASE_SANDBOX
     """The agent sandbox level this phase declares (``agent.sandbox``).
 
@@ -303,6 +306,7 @@ class WorkflowDetail:
                 # half the path broken while the tests passed.
                 clone_repos=bool(p.get("clone_repos", True)),
                 delivers_repo_changes=bool(p.get("delivers_repo_changes", True)),
+                requires_verdict=bool(p.get("requires_verdict", False)),
                 sandbox=str(p.get("sandbox", DEFAULT_PHASE_SANDBOX)),
                 claude_plugins=_stored_refs(p.get("claude_plugins")),
                 skills=_stored_refs(p.get("skills")),
@@ -390,6 +394,7 @@ class WorkflowDetail:
                 # LESS restricted than the phase actually runs.
                 "clone_repos": p.clone_repos,
                 "delivers_repo_changes": p.delivers_repo_changes,
+                "requires_verdict": p.requires_verdict,
                 "sandbox": p.sandbox,
                 "claude_plugins": [r.to_dict() for r in p.claude_plugins],
                 "skills": [r.to_dict() for r in p.skills],

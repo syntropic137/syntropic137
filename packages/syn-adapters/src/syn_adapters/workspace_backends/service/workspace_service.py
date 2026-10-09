@@ -49,6 +49,7 @@ if TYPE_CHECKING:
 
     from agentic_events import Recording
 
+    from syn_adapters.platform_access import PlatformTokenService
     from syn_adapters.workspace_backends.tokens.token_injection_adapter import (
         SidecarTokenInjectionAdapter,
     )
@@ -156,6 +157,9 @@ class WorkspaceService:
         self._token_injection = token_injection
         self._event_stream = event_stream
         self._config = config or WorkspaceServiceConfig()
+        #: Mints each workspace's read-only API token (ADR-072). None, or a
+        #: disabled service, means workspaces get no token at all.
+        self._platform_tokens: PlatformTokenService | None = None
 
     @classmethod
     def create(
@@ -165,6 +169,7 @@ class WorkspaceService:
         token_service: object | None = None,
         environment: dict[str, str] | None = None,
         capture_source_instance_id: str | None = None,
+        platform_tokens: PlatformTokenService | None = None,
     ) -> WorkspaceService:
         """Create WorkspaceService with explicit backend selection.
 
@@ -177,6 +182,7 @@ class WorkspaceService:
             config: Optional service configuration
             token_service: Optional TokenVendingService
             environment: Environment variables for containers
+            platform_tokens: Issues each workspace's read-only API token (ADR-072)
 
         Returns:
             Configured WorkspaceService
@@ -192,18 +198,18 @@ class WorkspaceService:
             service = WorkspaceService.create(backend=WorkspaceBackend.MEMORY)
         """
         if backend == WorkspaceBackend.MEMORY:
-            return cls._create_memory_impl(config=config)
-
-        if backend == WorkspaceBackend.LOCAL:
-            return cls._create_local_impl(config=config)
-
-        # Default: DOCKER
-        return cls._create_docker_impl(
-            config=config,
-            token_service=token_service,
-            environment=environment,
-            capture_source_instance_id=capture_source_instance_id,
-        )
+            service = cls._create_memory_impl(config=config)
+        elif backend == WorkspaceBackend.LOCAL:
+            service = cls._create_local_impl(config=config)
+        else:
+            service = cls._create_docker_impl(
+                config=config,
+                token_service=token_service,
+                environment=environment,
+                capture_source_instance_id=capture_source_instance_id,
+            )
+        service._platform_tokens = platform_tokens
+        return service
 
     @classmethod
     def _create_docker_impl(
@@ -429,6 +435,20 @@ class WorkspaceService:
 
         return aggregate, isolation_config
 
+    async def _revoke_platform_grant(self, workspace: ManagedWorkspace) -> None:
+        """The phase is over, so its API token is too (ADR-072). Never raises."""
+        grant = workspace.platform_grant
+        if grant is None or self._platform_tokens is None:
+            return
+        try:
+            await self._platform_tokens.revoke(grant.token)
+        except Exception:
+            logger.exception(
+                "Could not revoke the platform token of workspace %s; it stays usable "
+                "until it expires (SYN_PLATFORM_ACCESS_TOKEN_TTL_SECONDS).",
+                workspace.workspace_id,
+            )
+
     @asynccontextmanager
     async def create_workspace(
         self,
@@ -498,6 +518,9 @@ class WorkspaceService:
                 types = token_types or [TokenType.ANTHROPIC]
                 await workspace.inject_tokens(types)
 
+            if self._platform_tokens is not None:
+                workspace.platform_grant = await self._platform_tokens.grant_workspace(execution_id)
+
             yield workspace
 
         except Exception as e:
@@ -511,6 +534,7 @@ class WorkspaceService:
             # quarantine push: nothing left in the container needs a token (#725).
             if workspace is not None:
                 await workspace.revoke_issued_credentials()
+                await self._revoke_platform_grant(workspace)
             usage = await cleanup_workspace(
                 self,
                 aggregate,

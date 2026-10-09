@@ -1,7 +1,7 @@
 {
-  "cli_version": "2.1.258",
-  "pinned_image_cli_version": "2.1.281",
-  "provenance": "Each name below was passed as `--tools <name>` to the real command builder and the resulting `init` line's `tools` array was read back. Observed by running the CLI DIRECTLY in an agent workspace container - the pinned workspace image was NOT probed, because Docker is not installed there (#1207, and the reason the unit half of this check has to exist at all). `pinned_image_cli_version` is read from `ARG CLAUDE_CLI_VERSION` in lib/agentic-workspace/implementations/docker/images/omni-agent/Dockerfile; it is not verified against the pinned digest until TestTheVocabularyMatchesThePinnedCli runs somewhere Docker exists.",
+  "cli_version": "2.1.293",
+  "pinned_image_cli_version": "2.1.293",
+  "provenance": "Each name below was passed as `--tools <name>` (argv shape from the real command builder) to the CLI in the PINNED image ghcr.io/agentparadise/agentic-workspace-toolchain@sha256:4a76c184a8d36b8663a0f0191842410304ea1e10b0e719516817949ae8c862f8 (docker pull of the digest first), and the resulting `init` line's `tools` array was read back; `claude_code_version` on that line reported 2.1.293. Re-probed 2026-10-08 after the AW #42 pin bump. Every granted name resolved to exactly itself and every ungranted name to an empty grant, identically on the previous pinned toolchain digest 7eb278fd (2.1.281); the default (no --tools) grant was also identical across both versions (24 tools), so 2.1.281 -> 2.1.293 added and removed nothing. Earlier history: the lists were first observed on 2.1.258 run directly in an agent workspace container (#1207).",
   "granted": [
     "Bash",
     "Edit",

@@ -282,6 +282,24 @@ class RetryPhaseCommand:
         self.reason = reason
 
 
+class RecordPhasePushCommand:
+    """Command to record a commit the running phase's workspace pushed (PC-128)."""
+
+    def __init__(
+        self,
+        execution_id: str,
+        phase_id: str,
+        repository: str,
+        branch: str,
+        sha: str,
+    ) -> None:
+        self.aggregate_id = execution_id
+        self.phase_id = phase_id
+        self.repository = repository
+        self.branch = branch
+        self.sha = sha
+
+
 class CompletePhaseCommand:
     """Command to mark a phase as completed with metrics.
 

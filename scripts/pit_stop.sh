@@ -16,9 +16,12 @@
 #   --swap-only   skip to `gate`; the version must already be staged
 #   --dry-run     echo every mutating command; still run read-only checks
 #   --skip-probe  EMERGENCIES ONLY: do not prove a real execution starts after ungate
+#   --service gateway   build, ship, stage and swap the gateway alone, with no
+#                 gate, no drain and no probe: it is on syn-internal only, never
+#                 agent-net, so no execution depends on it (#1310). Default: all
 set -euo pipefail
 
-usage() { sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+usage() { sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 [ $# -ge 1 ] || usage
 VERSION="${1#v}"; shift
 TAG="v${VERSION}"
@@ -32,7 +35,7 @@ API_READY_TIMEOUT="${SYN_PIT_API_READY_TIMEOUT:-900}"
 PROBE_WORKFLOW="${SYN_PIT_PROBE_WORKFLOW:-telemetry-lag-probe-v1}"
 PROBE_TIMEOUT="${SYN_PIT_PROBE_TIMEOUT:-600}"
 PROBE_CANCEL_TIMEOUT="${SYN_PIT_PROBE_CANCEL_TIMEOUT:-300}"
-MODE="all"; DRY=0; STAGE_ONLY=0; SWAP_ONLY=0; SKIP_PROBE=0
+MODE="all"; DRY=0; STAGE_ONLY=0; SWAP_ONLY=0; SKIP_PROBE=0; SERVICE="all"
 while [ $# -gt 0 ]; do
     case "$1" in
         --ref) [ $# -ge 2 ] || usage; REF="$2"; shift 2 ;;
@@ -40,6 +43,7 @@ while [ $# -gt 0 ]; do
         --swap-only) SWAP_ONLY=1; shift ;;
         --dry-run) DRY=1; shift ;;
         --skip-probe) SKIP_PROBE=1; shift ;;
+        --service) [ $# -ge 2 ] || usage; SERVICE="$2"; shift 2 ;;
         *) usage ;;
     esac
 done
@@ -51,6 +55,8 @@ done
 COMMON="$(git -C "$(dirname "$0")" rev-parse --path-format=absolute --git-common-dir)"
 if [ "$(basename "$COMMON")" = ".git" ]; then REPO_TOP="$(dirname "$COMMON")"; else REPO_TOP="$COMMON"; fi
 WT_BASE="$(dirname "$REPO_TOP")/$(basename "$REPO_TOP")_worktrees"
+# Reads and rewrites the compose image pins; the stage and every pin count use it.
+REPOINT_PY="$(dirname "$0")/pit_stop_repoint.py"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 T0=$(date +%s)
 step() { printf '\n==> [%s +%ss] %s\n' "$(date -u +%H:%M:%SZ)" "$(( $(date +%s) - T0 ))" "$*"; }
@@ -106,6 +112,18 @@ esac
 case "$VERSION" in
     *[!0-9A-Za-z.+-]*) die "version carries characters no image tag may: $VERSION" ;;
 esac
+# What this pit stop ships: the containers it recreates, the images behind
+# them, and how many of each every count below must find.
+case "$SERVICE" in
+    all) SWAPPED="api gateway"; SHIPS="syn-api + syn-gateway"; REPOINTS="both pins"; N=2
+         ALREADY="both pins are already $TAG" ;;
+    gateway) SWAPPED="gateway"; SHIPS="syn-gateway"; REPOINTS="the syn-gateway pin"; N=1
+         ALREADY="the syn-gateway pin is already $TAG" ;;
+    *) die "--service must be all or gateway (got: $SERVICE)" ;;
+esac
+IMAGES=""
+for svc in $SWAPPED; do IMAGES="$IMAGES ghcr.io/syntropic137/syn-$svc:$TAG"; done
+IMAGES="${IMAGES# }"
 case "$DRAIN_TIMEOUT" in
     ""|*[!0-9]*) die "SYN_PIT_DRAIN_TIMEOUT must be whole seconds (got: $DRAIN_TIMEOUT)" ;;
 esac
@@ -266,6 +284,35 @@ sys.exit(0 if mode["active"] is (sys.argv[2] == "true") else 1)
 GATE
 }
 
+# How many of the services this pit stop swaps are on $TAG, counted PER
+# SERVICE, never as one total across both: a total cannot tell the gateway's
+# pin from the API's, so a gateway-only stage on a host whose API is already on
+# $TAG would count 2, and one whose API alone is there would pass at 1 with the
+# gateway still old (#1310). Each service must name $TAG exactly once.
+#
+# Both compare WHOLE values, never a pattern: a substring grep counted
+# `syn-gateway:v0.33.2-beta.10` and a commented-out `# image:` line as staged
+# for v0.33.2-beta.1, and an unescaped `.` let `ghcrxio/...` stand in for
+# `ghcr.io/...`. The pin is read by the repoint's own parser, so the precheck
+# and the stage agree on what an image line is.
+pins_on_tag() {
+    local n=0 svc c
+    remote "cat $COMPOSE_DIR/$COMPOSE" > "$TMP/compose.check" || { echo 0; return 0; }
+    for svc in $SWAPPED; do
+        c="$(python3 "$REPOINT_PY" --on-tag "$TAG" "$TMP/compose.check" "$svc" || true)"
+        if [ "$c" = 1 ]; then n=$((n + 1)); fi
+    done
+    echo "$n"
+}
+images_on_tag() {
+    local n=0 svc c
+    for svc in $SWAPPED; do
+        c="$(remote "docker images --format '{{.Repository}}:{{.Tag}}' | grep -cxF 'ghcr.io/syntropic137/syn-$svc:$TAG'" || true)"
+        if [ "$c" = 1 ]; then n=$((n + 1)); fi
+    done
+    echo "$n"
+}
+
 # The executions still running, one per line, for an operator deciding what to
 # do about them. EVERY one: 200 is the API's largest page, so this follows the
 # pages until `total` is listed. Read-only: the pit stop never cancels anyone's
@@ -364,8 +411,10 @@ or, in an emergency only, re-run with --skip-probe."
     fi
 }
 
-# Only when this run will dispatch the probe: --stage-only never does.
-if [ "$SKIP_PROBE" = 0 ] && [ "$MODE" != "stage" ]; then
+# Only when this run will dispatch the probe: --stage-only never does, and
+# neither does --service gateway, which exits after its own verify: it does not
+# touch the path an execution starts on (#1310).
+if [ "$SKIP_PROBE" = 0 ] && [ "$MODE" != "stage" ] && [ "$SERVICE" = all ]; then
     step "precheck: the probe workflow $PROBE_WORKFLOW is installed and active"
     probe_workflow_ready
 fi
@@ -397,33 +446,43 @@ if [ "$MODE" != "swap" ]; then
         BUILT_SHA="<the bump commit on $REF>"
     fi
 
-    step "build: syn-api + syn-gateway $TAG for linux/amd64 (commit $BUILT_SHA)"
-    # SYN_BUILD_* are what /version reports as image_tag and commit, and verify
-    # reads them back below. The fitness test in
-    # ci/fitness/infrastructure/test_release_build_args.py fails if they go.
-    run docker buildx build --platform linux/amd64 --build-arg INCLUDE_DOCKER_CLI=1 \
-        --build-arg SYN_BUILD_IMAGE_TAG="$TAG" --build-arg SYN_BUILD_COMMIT="$BUILT_SHA" \
-        -t "ghcr.io/syntropic137/syn-api:$TAG" --load -f "$WT/infra/docker/images/syn-api/Dockerfile" "$WT"
+    step "build: $SHIPS $TAG for linux/amd64 (commit $BUILT_SHA)"
+    if [ "$SERVICE" = all ]; then
+        # SYN_BUILD_* are what /version reports as image_tag and commit, and verify
+        # reads them back below. The fitness test in
+        # ci/fitness/infrastructure/test_release_build_args.py fails if they go.
+        run docker buildx build --platform linux/amd64 --build-arg INCLUDE_DOCKER_CLI=1 \
+            --build-arg SYN_BUILD_IMAGE_TAG="$TAG" --build-arg SYN_BUILD_COMMIT="$BUILT_SHA" \
+            -t "ghcr.io/syntropic137/syn-api:$TAG" --load -f "$WT/infra/docker/images/syn-api/Dockerfile" "$WT"
+    fi
     run docker buildx build --platform linux/amd64 \
         -t "ghcr.io/syntropic137/syn-gateway:$TAG" --load -f "$WT/infra/docker/images/gateway/Dockerfile" "$WT"
     # The #1216 trap: /health stays green while every execution fails at bootstrap.
-    [ "$DRY" = 1 ] || (cd "$WT" && just verify-image-capabilities syn-api "ghcr.io/syntropic137/syn-api:$TAG")
+    # Only syn-api runs executions, so only syn-api needs the capabilities.
+    if [ "$SERVICE" = all ] && [ "$DRY" = 0 ]; then
+        (cd "$WT" && just verify-image-capabilities syn-api "ghcr.io/syntropic137/syn-api:$TAG")
+    fi
 
     step "ship: docker save | docker load on $HOST"
+    # shellcheck disable=SC2086 # $IMAGES is a list of refs, validated above
     if [ "$DRY" = 0 ]; then
-        docker save "ghcr.io/syntropic137/syn-api:$TAG" "ghcr.io/syntropic137/syn-gateway:$TAG" | remote 'docker load' | tail -2
-    else
+        docker save $IMAGES | remote 'docker load' | tail -2
+    elif [ "$SERVICE" = all ]; then
+        # The line the two-image path has always printed, kept byte-for-byte
+        # (scripts/tests/fixtures/pit_stop/dry-run-all.txt).
         printf '   (dry-run) docker save ... | ssh %s docker load\n' "$HOST"
+    else
+        printf '   (dry-run) docker save %s | ssh %s docker load\n' "$IMAGES" "$HOST"
     fi
-    [ "$DRY" = 1 ] || [ "$(remote "docker images --format '{{.Repository}}:{{.Tag}}' | grep -c ':$TAG\$'")" = 2 ] \
-        || die "expected TWO images tagged $TAG on the host; the deploy would be half old"
+    [ "$DRY" = 1 ] || [ "$(images_on_tag)" = "$N" ] \
+        || die "expected $N image(s) tagged $TAG on the host; the deploy would be half old"
 
-    step "stage: back up the deployed compose and repoint both pins"
+    step "stage: back up the deployed compose and repoint $REPOINTS"
     # Read here, repointed locally, written back whole: a release-installed host
     # pins each image by its own digest and a hotfixed one by its own tag, so no
     # single substitution covers both services (scripts/pit_stop_repoint.py).
     remote "cat $COMPOSE_DIR/$COMPOSE" > "$TMP/compose.deployed" || die "could not read the deployed compose file"
-    BAK="$(python3 "$(dirname "$0")/pit_stop_repoint.py" "$TAG" "$TMP/compose.deployed" "$TMP/compose.staged")" \
+    BAK="$(python3 "$REPOINT_PY" "$TAG" "$TMP/compose.deployed" "$TMP/compose.staged" --service "$SERVICE")" \
         || die "could not repoint the syn-api/syn-gateway pins in the deployed compose file"
     if [ -n "$BAK" ]; then
         # Written beside the file, checked against the staged checksum, and only
@@ -437,12 +496,14 @@ if [ "$MODE" != "swap" ]; then
             echo "   backed up to $COMPOSE.bak-$BAK"
         fi
     else
-        echo "   both pins are already $TAG"
+        echo "   $ALREADY"
     fi
     # The same count --swap-only prechecks, so a stage it would refuse fails here.
+    # Only the swapped services are counted, so syn-api's pin, old or new, says
+    # nothing about a gateway-only stage.
     if [ "$DRY" = 0 ]; then
-        new_n="$(remote "grep -c 'syn-\(api\|gateway\):$TAG' $COMPOSE_DIR/$COMPOSE" || true)"
-        [ "$new_n" = 2 ] || die "the deployed compose pins $new_n/2 services to $TAG after the repoint"
+        new_n="$(pins_on_tag)"
+        [ "$new_n" = "$N" ] || die "the deployed compose pins $new_n/$N services to $TAG after the repoint"
     fi
     if [ "$MODE" = "stage" ]; then
         step "staged $TAG; run with --swap-only once drained"
@@ -455,11 +516,87 @@ if [ "$MODE" = "swap" ] && [ "$DRY" = 0 ]; then
     # --swap-only recreates whatever the compose file names. Without this it
     # would drain the platform and disrupt production containers before
     # discovering, at verify, that the file pins something else entirely.
-    pins="$(remote "grep -c 'syn-\(api\|gateway\):$TAG' $COMPOSE_DIR/$COMPOSE" || true)"
-    [ "$pins" = 2 ] || die "the deployed compose file pins $pins/2 services to $TAG; stage it first"
-    staged="$(remote "docker images --format '{{.Repository}}:{{.Tag}}' | grep -c ':$TAG\$'" || true)"
-    [ "$staged" = 2 ] || die "$staged/2 images tagged $TAG on $HOST; stage it first"
-    echo "   pins=2 images=2"
+    pins="$(pins_on_tag)"
+    [ "$pins" = "$N" ] || die "the deployed compose file pins $pins/$N services to $TAG; stage it first"
+    staged="$(images_on_tag)"
+    [ "$staged" = "$N" ] || die "$staged/$N images tagged $TAG on $HOST; stage it first"
+    echo "   pins=$N images=$N"
+fi
+
+# The container runs the image tagged $TAG on the host. BY IMAGE ID, NOT BY
+# TAG: `{{.Config.Image}}` reports the string the container was created from,
+# and a tag is mutable, so a container built from the PREVIOUS bytes behind
+# this same tag prints exactly what a correct deploy prints. The id is the
+# thing that actually changed.
+#
+# Every read guarded with `|| die`: under `set -e` a failed assignment exits on
+# the spot, skipping die() and the RECOVERY it prints. An unreachable host is
+# exactly when the operator needs it (#1575).
+swapped_is_running() {  # $1: api|gateway
+    local svc="$1" want got up
+    want="$(remote "docker image inspect ghcr.io/syntropic137/syn-$svc:$TAG --format '{{.Id}}'")" \
+        || die "could not read the id of image syn-$svc:$TAG on $HOST"
+    got="$(remote "docker inspect syn137-$svc --format '{{.Image}}'")" \
+        || die "could not inspect syn137-$svc on $HOST"
+    up="$(remote "docker inspect syn137-$svc --format '{{.State.Running}}'")" \
+        || die "could not inspect syn137-$svc on $HOST"
+    printf '   syn137-%s: running=%s image=%s\n' "$svc" "$up" "$got"
+    [ "$up" = true ] || die "syn137-$svc is not running after the swap"
+    [ "$got" = "$want" ] || die "syn137-$svc is not running the image tagged $TAG (has $got, wanted $want)"
+}
+
+# Compose can exit 0 and still leave the gateway `Created`: twice on
+# 2026-10-07/08 an API swap ended that way and the dashboard was down ~4min
+# until someone ran `docker start`. So the gateway is started explicitly after
+# every swap, never left to compose, and the operator is told which it was.
+start_gateway() {
+    local up
+    up="$(remote "docker inspect syn137-gateway --format '{{.State.Running}}'")" \
+        || die "could not inspect syn137-gateway on $HOST"
+    if [ "$up" = true ]; then
+        echo "   syn137-gateway: running after compose up"
+        return 0
+    fi
+    echo "   syn137-gateway: running=$up after compose up (left Created); starting it"
+    remote "docker start syn137-gateway" >/dev/null || die "docker start syn137-gateway failed on $HOST"
+    echo "   syn137-gateway: docker start issued"
+}
+
+if [ "$SERVICE" = gateway ]; then
+    # NO GATE AND NO DRAIN, deliberately. The gateway is on syn-internal only,
+    # never agent-net (docker/docker-compose.syntropic137.yaml), so no execution
+    # reaches it and recreating it cannot kill one. --no-deps is what keeps the
+    # API, and every execution it is running, exactly as it was (#1310).
+    step "swap: recreate the gateway alone (no pull, no deps: the API and its executions are untouched)"
+    RECOVERY="RECOVERY: admission was never paused and the API was not recreated. To put the previous gateway back:
+   ssh $HOST 'cd $COMPOSE_DIR && ls -t $COMPOSE.bak-*'     # the newest is the compose this pit stop replaced
+   ssh $HOST 'cd $COMPOSE_DIR && cp $COMPOSE.bak-<suffix> $COMPOSE && docker compose -f $COMPOSE up -d --no-deps gateway'"
+    run remote "cd $COMPOSE_DIR && docker compose -f $COMPOSE up -d --no-deps gateway" 2>&1 | tail -4 \
+        || die "compose up failed for the gateway"
+    step "verify: gateway image, GET /health through it"
+    if [ "$DRY" = 0 ]; then
+        start_gateway
+        swapped_is_running gateway
+        # Not /version: that reports the API's build, which this did not touch.
+        # /health through the gateway proves the new one is routing. nginx can
+        # be a moment behind its container, hence the short bounded retry.
+        # The STATUS is read, not curl's exit: `-f` passes a 204 or a 302, and
+        # a gateway answering either is not routing /health to the API.
+        routed=0 code=none
+        for _ in $(seq 1 10); do
+            code="$(api_curl -m 90 "$API/health" -o "$TMP/gateway.json" -w '%{http_code}' 2>/dev/null)" || code="${code:-none}"
+            if [ "$code" = 200 ]; then routed=1; break; fi
+            sleep 3
+        done
+        [ "$routed" = 1 ] || die "GET $API/health did not answer 200 through the new gateway (last status: $code)"
+        echo "   GET /health through syn137-gateway: $code"
+    fi
+    if [ "$DRY" = 1 ]; then
+        step "DRY RUN DONE: nothing was built, shipped, staged or swapped. $TAG is NOT live."
+    else
+        step "PIT STOP DONE: syn-gateway $TAG live in $(( $(date +%s) - T0 ))s. The API was not recreated and admission was never paused."
+    fi
+    exit 0
 fi
 
 step "gate: pausing execution admission for the rest of the pit stop"
@@ -518,28 +655,12 @@ if ! swap_up; then
     step "swap: syn137-api is healthy; re-running compose up for its dependents"
     swap_up || die "compose up failed again after syn137-api reported healthy"
 fi
+# Started even when compose exited 0: that is exactly how it was left Created.
+[ "$DRY" = 1 ] || start_gateway
 
 step "verify: images, docker CLI, projections, build identity"
 if [ "$DRY" = 0 ]; then
-    # BY IMAGE ID, NOT BY TAG. `{{.Config.Image}}` reports the string the
-    # container was created from, and a tag is mutable: a container built from
-    # the PREVIOUS bytes behind this same tag prints exactly what a correct
-    # deploy prints. The id is the thing that actually changed.
-    #
-    # Every read guarded with `|| die`: under `set -e` a failed assignment exits
-    # on the spot, skipping die() and the RECOVERY it prints while admission is
-    # paused. An unreachable host is exactly when the operator needs it (#1575).
-    for svc in api gateway; do
-        want="$(remote "docker image inspect ghcr.io/syntropic137/syn-$svc:$TAG --format '{{.Id}}'")" \
-            || die "could not read the id of image syn-$svc:$TAG on $HOST"
-        got="$(remote "docker inspect syn137-$svc --format '{{.Image}}'")" \
-            || die "could not inspect syn137-$svc on $HOST"
-        up="$(remote "docker inspect syn137-$svc --format '{{.State.Running}}'")" \
-            || die "could not inspect syn137-$svc on $HOST"
-        printf '   syn137-%s: running=%s image=%s\n' "$svc" "$up" "$got"
-        [ "$up" = true ] || die "syn137-$svc is not running after the swap"
-        [ "$got" = "$want" ] || die "syn137-$svc is not running the image tagged $TAG (has $got, wanted $want)"
-    done
+    for svc in api gateway; do swapped_is_running "$svc"; done
     wait_for_api_ready || die "the API did not finish starting within ${API_READY_TIMEOUT}s"
     remote "docker exec syn137-api sh -c 'command -v docker'" >/dev/null || die "no docker CLI in syn-api (#1216): every execution will fail at bootstrap"
     # A `for` loop reports its LAST command, which here is `sleep`. Written as

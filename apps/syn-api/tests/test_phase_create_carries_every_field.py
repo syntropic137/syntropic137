@@ -75,6 +75,8 @@ _EVERY_FIELD: Mapping[str, object] = {
     # turns the unpushed-work gate's reading of an uncommitted change from
     # "unsaved deliverable" into "build-tool side effect" (#1308).
     "delivers_repo_changes": False,
+    # Not the default, which is False: a dropped mapping reads False (PC-116).
+    "requires_verdict": True,
     "argument_hint": "[task]",
     "model": "claude-opus-5-5",
     # NOT the default (None). Claude, not codex: a codex phase cannot carry
@@ -152,6 +154,7 @@ def test_every_field_a_caller_sends_survives_into_the_domain() -> None:
     # default and `PhaseYamlDefinition` all default to True, because a phase
     # nobody has thought about must keep the gate (#1308).
     assert phase.delivers_repo_changes is False
+    assert phase.requires_verdict is True
     assert phase.argument_hint == "[task]"
     assert phase.model == "claude-opus-5-5"
     assert phase.provider == "claude"

@@ -48,6 +48,14 @@ for _var in list(os.environ):
     if _var in _GIT_LOCAL_ENV_VARS or _var.startswith(("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_")):
         os.environ.pop(_var, None)
 
+# Nor may a test see the developer's own git config: a global
+# `commit.gpgsign = true` fails every fixture commit before the behaviour under
+# test runs, and CI's clean config never shows it. Read only the repo's config,
+# as the CLI suite's tests/setup-env.ts does. A test that needs a global config
+# still sets GIT_CONFIG_GLOBAL or builds its own env.
+os.environ["GIT_CONFIG_GLOBAL"] = os.devnull
+os.environ["GIT_CONFIG_NOSYSTEM"] = "1"
+
 # Register test infrastructure fixtures (ADR-034)
 pytest_plugins = [
     "syn_tests.fixtures.infrastructure",

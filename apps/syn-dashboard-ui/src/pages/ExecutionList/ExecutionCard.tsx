@@ -8,23 +8,13 @@
  * See: docs/adrs/ADR-064-observability-monitor-ui.md
  */
 
-import { StatusBadge } from '../../components'
+import { CardMetric, StatusBadge } from '../../components'
+import { ExecutionEvalBadge } from '../../components/evals'
 import type { ExecutionListItem } from '../../types'
 import { formatRelativeTime, formatTimestampLocale } from '../../utils/formatters'
 import { queueLabel } from './queueLabel'
 
 const EM_DASH = '—'
-
-function MetricCell({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <div className="text-[10px] uppercase tracking-wide text-[var(--color-text-muted)]">
-        {label}
-      </div>
-      <div className="font-mono text-xs text-[var(--color-text-primary)]">{value}</div>
-    </div>
-  )
-}
 
 export function ExecutionCard({ exec }: { exec: ExecutionListItem }) {
   const workflowLabel = exec.workflow_name || exec.workflow_id
@@ -51,12 +41,17 @@ export function ExecutionCard({ exec }: { exec: ExecutionListItem }) {
           {exec.start_queue ? queueLabel(exec.start_queue) : formatRelativeTime(exec.started_at)}
           {exec.total_phases > 0 && <> &middot; {exec.phase_progress.display}</>}
         </div>
+        {exec.eval && (
+          <div className="flex min-w-0">
+            <ExecutionEvalBadge evalRun={exec.eval} />
+          </div>
+        )}
       </div>
       <div className="grid grid-cols-2 gap-3">
-        <MetricCell label="Repos" value={exec.repos_display ?? EM_DASH} />
-        <MetricCell label="Tokens" value={exec.total_tokens_display} />
-        <MetricCell label="Cost" value={exec.total_cost_display} />
-        <MetricCell label="Duration" value={exec.duration_display} />
+        <CardMetric wide label="Repos" value={exec.repos_display ?? EM_DASH} />
+        <CardMetric label="Tokens" value={exec.total_tokens_display} />
+        <CardMetric label="Cost" value={exec.total_cost_display} />
+        <CardMetric label="Duration" value={exec.duration_display} />
       </div>
     </div>
   )

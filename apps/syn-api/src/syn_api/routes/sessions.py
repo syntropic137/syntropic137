@@ -144,7 +144,7 @@ class SessionSummaryResponse(BaseModel):
 
     @computed_field(
         description="The model for humans: the reported id verbatim, or "
-        "'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9)."
+        "'<alias> (requested)', or 'unknown' (ADR-067 D9)."
     )
     @property
     def agent_model_display(self) -> str:
@@ -299,7 +299,7 @@ class SessionResponse(BaseModel):
 
     @computed_field(
         description="The model for humans: the reported id verbatim, or "
-        "'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9)."
+        "'<alias> (requested)', or 'unknown' (ADR-067 D9)."
     )
     @property
     def agent_model_display(self) -> str:
@@ -430,6 +430,7 @@ def _to_session_summary(s: DomainSessionSummary) -> SessionSummary:
         total_cost_usd=Decimal("0"),
         started_at=s.started_at,
         completed_at=s.completed_at,
+        requested_model=s.requested_model,
     )
 
 
@@ -597,6 +598,11 @@ def _lane1_tokens(session: DomainSessionSummary) -> _CostData:
         cache_read_tokens=session.cache_read_tokens,
         total_tokens=session.total_tokens,
         total_cost_usd=Decimal("0"),
+        # Nothing has REPORTED a model yet, so agent_model stays None; the
+        # request SessionStarted recorded is still true and is served as one.
+        # Dropping it is what made every running codex session read
+        # "unknown" (#1785).
+        requested_model=session.requested_model,
     )
 
 
@@ -634,7 +640,7 @@ async def _load_cost_data(session: DomainSessionSummary) -> _CostData:
         # confident dollar figure for work nobody could price (#890).
         unpriced_observation_count=cost.unpriced_observation_count,
         agent_model=recorded.observed,
-        requested_model=recorded.requested,
+        requested_model=recorded.requested or session.requested_model,
         cost_by_model=cost_by_observed_model(cost.cost_by_model),
         cost_by_token_type=(
             TokenTypeCostResponse.from_split(cost.cost_by_token_type, cost.cost_by_token_type_basis)
@@ -767,7 +773,10 @@ def _build_session_summary_response(
         status=s.status,
         agent_provider=s.agent_type,
         agent_model=info.agent_model,
-        requested_model=info.requested_model,
+        # Lane 2 names the request once it has a row; before that - a running
+        # codex phase, which reports usage only at the end - the request comes
+        # from SessionStarted, so the row never reads "unknown" (#1785).
+        requested_model=info.requested_model or s.requested_model,
         repos=list(s.repos),
         repos_display=format_repos(s.repos),
         input_tokens=input_tokens,

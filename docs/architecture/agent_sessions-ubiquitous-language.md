@@ -17,6 +17,20 @@ This context is Lane 2: observability. Nothing here is replayed to decide state.
 
 ---
 
+## Observability
+
+Telemetry about how the running platform and its agents behave: tokens, cost,
+tool calls, timing, and operational signals such as API request latency
+(ADR-075). Lane 2: append-only, never replayed, never read by an aggregate.
+Served under `GET /observability/*` and the `syn observe` command group
+(`tools`, `tokens`, `latency`). Observability is the concept; `observe` is the
+CLI verb for it.
+
+Not **Insight**. "Insights" is reserved for learning-loop analytics, lessons
+about how to improve workflows, speed and cost, owned by `organization` (see
+`organization-ubiquitous-language.md`). We do NOT call request latency an
+insight.
+
 ## Session
 
 One agent run inside one workspace, identified by a `session_id` the harness
@@ -27,6 +41,20 @@ cost, tool calls, the transcript.
 Started by `SessionStarted`, ended by `SessionCompleted`. A Session that never
 completed is not an error in itself - the run may have been killed - but it has
 no final totals.
+
+## Requested Model and Observed Model
+
+Two different facts about which model a Session used, never conflated
+(ADR-067 D9). The **requested model** is what the phase asked for, often an
+alias such as `gpt-sol`; `SessionStarted` records it (as `agent_model`, its
+historical name) and the session summary keeps it as `requested_model`. The
+**observed model** is what the harness reported it ran, such as
+`gpt-6.1-sol`, carried on Lane 2 observations as `model` and served as
+`agent_model`.
+
+A running codex Session has only the requested model until its stream ends,
+and is displayed as `gpt-sol (requested)`. The observed model replaces that
+display once it is known.
 
 ## Operation
 

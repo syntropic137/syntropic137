@@ -7,10 +7,15 @@ polarity: clean
 source_pr: 1083
 commit: 2af77227449663381d0ed128d1f5989e8593c03d
 merge_commit: 1e4d7c79774f00edd134427b18d34089565ff7d4
-clean_through: 6cb76a7f9aa881aff20ecaa8fefeeb690ce92673
+clean_through: 4108b74fc2f7f74b280aed08a49f6eb91c796a3f
 task: >
   The change under review adds a retry policy to the platform's Redis clients
   and makes signal queue reads fail open when Redis is unavailable, moving
   the resilient client factory out of the API wiring into syn-adapters.
   Review whether a Redis outage is now survived where it should be, and
   refused where it must be.
+split: train
+# Not clean: both strong verifiers blocked it for a real defect, the retry of
+# non-idempotent GETDEL / SET NX on timeout (#1756, fixed by #1757). It scores
+# in v3 as it ran; from v5 that defect is the case redis-retry-non-idempotent.
+retired: v5 - not clean; carries the #1756 defect, now case redis-retry-non-idempotent

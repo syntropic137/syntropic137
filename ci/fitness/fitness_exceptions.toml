@@ -63,6 +63,7 @@ allowed_prefixes = [
 "packages/syn-shared/src/syn_shared/in_memory.py::InMemoryAdapterError" = { reason = "The exception the guard raises, not an adapter. Holds no state." }
 "packages/syn-adapters/src/syn_adapters/workspace_backends/memory/memory_adapter.py::MemoryIsolationState" = { reason = "Per-workspace state record, constructed only inside the guarded MemoryIsolationAdapter. Not an adapter and implements no port." }
 "packages/syn-adapters/src/syn_adapters/workspace_backends/memory/memory_sidecar.py::MemorySidecarState" = { reason = "Per-sidecar state record, constructed only inside the guarded MemorySidecarAdapter. Not an adapter and implements no port." }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/run_todo_fold.py::RunTodoStore" = { reason = "ADR-072 D8: one run's to-do record, a cache derived wholly from the execution's durable events and rebuilt at every claim, so losing it loses nothing. Must construct in production; named in _NAMED_CANDIDATES so a guard added to it fails this entry as stale." }
 
 [aggregate_guards]
 # @command_handler methods exempt from the guard requirement.

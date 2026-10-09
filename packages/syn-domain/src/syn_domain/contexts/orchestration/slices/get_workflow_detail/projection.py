@@ -15,8 +15,7 @@ if TYPE_CHECKING:
 
     from event_sourcing import ProjectionStore
 
-from event_sourcing import AutoDispatchProjection
-
+from syn_domain.contexts.orchestration._shared.recorded_time import RecordedTimeProjection
 from syn_domain.contexts.orchestration._shared.tags import TagSet, replay_tag_edit
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
     stored_fallback_agent,
@@ -81,7 +80,7 @@ def _apply_phase_fields(phase: dict[str, Any], event_data: dict[str, Any]) -> No
             phase[phase_key] = event_data[event_key]
 
 
-class WorkflowDetailProjection(AutoDispatchProjection):
+class WorkflowDetailProjection(RecordedTimeProjection):
     """Builds workflow TEMPLATE detail read model from events.
 
     Templates don't have execution status. They only track:
@@ -90,7 +89,7 @@ class WorkflowDetailProjection(AutoDispatchProjection):
 
     For execution status, see WorkflowExecutionDetailProjection.
 
-    Uses AutoDispatchProjection: define on_<snake_case_event> methods to
+    Uses AutoDispatchProjection (via RecordedTimeProjection): define on_<snake_case_event> methods to
     subscribe and handle events — no separate subscription set needed.
     """
 
@@ -126,7 +125,11 @@ class WorkflowDetailProjection(AutoDispatchProjection):
     #
     # v11 is the same case for `default_eval_id` (#967): a v10 row would report
     # no default for a workflow that has one, and the export would drop it.
-    VERSION = 11  # v11: default_eval_id (#967)
+    #
+    # v12 (#959): `created_at` was read from a payload that never carried it,
+    # so every row has None. It now comes from the envelope's recorded time,
+    # and only a replay can supply that for existing rows.
+    VERSION = 12  # v12: created_at from the envelope's recorded time (#959)
 
     def __init__(self, store: ProjectionStore):
         """Initialize with a projection store."""
@@ -184,6 +187,7 @@ class WorkflowDetailProjection(AutoDispatchProjection):
                 # so patching one is patching half.
                 clone_repos=bool(p.get("clone_repos", True)),
                 delivers_repo_changes=bool(p.get("delivers_repo_changes", True)),
+                requires_verdict=bool(p.get("requires_verdict", False)),
                 sandbox=str(p.get("sandbox", DEFAULT_PHASE_SANDBOX)),
                 claude_plugins=_refs(p.get("claude_plugins")),
                 skills=_refs(p.get("skills")),
@@ -215,7 +219,7 @@ class WorkflowDetailProjection(AutoDispatchProjection):
             description=event_data.get("description"),
             phases=phases,
             input_declarations=input_decls,
-            created_at=event_data.get("created_at"),
+            created_at=self.recorded_at,
             runs_count=0,
             repository_url=event_data.get("repository_url"),
             repos=tuple(event_data.get("repos", [])),

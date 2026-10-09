@@ -20,8 +20,8 @@ list is the case's history. What differs between runs goes on the RUN as tags:
 ``suite-version:<n>`` and ``verifier:<workflow id>``.
 
     uv run python scripts/eval_suite.py check  [--suite DIR]   # offline dry run
-    uv run python scripts/eval_suite.py launch [--suite DIR] [--workflow ID] [--api-url URL]
-    uv run python scripts/eval_suite.py score  [--suite DIR] [--workflow ID] [--version N] [--api-url URL]
+    uv run python scripts/eval_suite.py launch [--suite DIR] [--workflow ID] [--split S] [--api-url URL]
+    uv run python scripts/eval_suite.py score  [--suite DIR] [--workflow ID] [--version N] [--split S] [--api-url URL]
 
 SAME CASES, DIFFERENT VERIFIER. A suite lists one or more workflows; each
 differs from the others only in who verifies. ``--workflow`` picks one (the
@@ -36,6 +36,14 @@ cases it held. ``score`` prints one table per version the selected workflow
 ran - each version's runs against its own case set, never another's - and
 ``--version N`` scores one. ``launch`` only ever launches the current version.
 
+TRAIN AND HOLDOUT. Every case declares ``split: train`` or ``split: holdout``,
+written once when the case is added. ``--split train`` launches or scores the
+train cases only: anything that tunes a verifier (a prompt, a model, a
+workflow) reads only those, and the holdout cases are run to report the
+result, never to choose it. ``check`` refuses a suite whose holdout share
+falls outside 25-35% (rounded outward to whole cases). A case never moves from holdout to train: it has been
+seen.
+
 ``check`` needs only git. ``launch`` installs the suite's workflow from the
 checked-in file (refusing to go on unless the server then holds exactly that
 definition), creates any missing case eval and starts real agent runs, which
@@ -45,10 +53,10 @@ verdict on its eval (``POST /evals/{id}/runs/{run}/score``, scorer
 eval's current score and the history stays in its events.
 
 INSTALL PROVENANCE. ``launch`` installs with ``version`` = the suite version
-(``<n>.0.0``) and ``source_digest`` = sha256 of the exact YAML document it
+and the workflow's install ``revision`` (``<n>.<revision>.0``) and ``source_digest`` = sha256 of the exact YAML document it
 uploads. The server's install rules then do the rest: a byte-identical
 re-launch is a no-op, an archived workflow is restored, and a workflow file
-changed without a suite version bump is refused (409, digest mismatch) before
+changed without a suite version or revision bump is refused (409, digest mismatch) before
 any eval exists. Never install without provenance: once the server records a
 version, an install that declares none is refused by design.
 
@@ -67,7 +75,9 @@ Exit status: 0 on success (for ``score``: every case scored pass), 1 otherwise.
 from __future__ import annotations
 
 import argparse
+import ast
 import hashlib
+import math
 import os
 import re
 import subprocess
@@ -96,6 +106,10 @@ ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_SUITE = ROOT / "evals" / "verifier-seed-v1"
 _SHA = re.compile(r"^[0-9a-f]{40}$")
 
+type Split = Literal["train", "holdout"]
+HOLDOUT_SHARE = (0.25, 0.35)
+"""The bounds `check` holds a suite's holdout fraction to, rounded outward to whole cases."""
+
 
 # ---------------------------------------------------------------------------
 # Definition
@@ -112,6 +126,12 @@ class WorkflowRef(_Frozen):
     """Repo-relative path of the workflow file the suite runs."""
     models: dict[str, str] = Field(min_length=1)
     """Phase id -> the model that phase declares. Must match the workflow file."""
+    revision: int = Field(default=0, ge=0)
+    """Install revision of the workflow file within the suite version; installed as
+    ``<suite version>.<revision>.0``. Raise it for an edit that is not part of the
+    experiment (no case, prompt or model), so the server takes it as a new version
+    instead of refusing a republish. #1780's ``requires_verdict`` is revision 1.
+    """
 
 
 class PastVersion(_Frozen):
@@ -190,10 +210,17 @@ FullSha = Annotated[str, AfterValidator(_full_sha)]
 class _CaseBase(_Frozen):
     id: str = Field(pattern=r"^[a-z0-9-]+$")
     source_pr: int = Field(ge=1)
-    """The PR the case is cut from. Never put it in `task`: the agent could fetch its history."""
+    """The PR the case is cut from: the one that shipped the bug, or, for a case mined
+    from a fix, the one that fixed it. Never put it in `task`: the agent could fetch its history."""
     commit: FullSha
     """The SHA the run is pinned to."""
     task: str = Field(min_length=1)
+    split: Split
+    """`train` cases may tune a verifier; `holdout` cases only measure it. Never moved."""
+    retired: str | None = Field(default=None, min_length=1)
+    """Why the case left the suite, and in which version. A retired case is not part
+    of the current version: it is kept so the history versions that held it still
+    score their runs against it, as it was. Never re-polarise a case in place."""
 
     @property
     def tag(self) -> str:
@@ -216,6 +243,10 @@ class DefectCase(_CaseBase):
     so the bug is present and nothing of the fix is.
     """
     expected: Expected
+    reclassified_from: str | None = Field(default=None, min_length=1)
+    """The retired clean control this defect was found in, when the case is that
+    control reclassified. Its pin is then the control's own commit, kept so the
+    reviewed tree does not change: an ancestor of the fix, not its first parent."""
 
     @property
     def fix_start(self) -> str:
@@ -301,11 +332,12 @@ def load_suite(
     root: Path = ROOT,
     workflow: str | None = None,
     version: int | None = None,
+    split: Split | None = None,
 ) -> LoadedSuite:
-    """Parse and cross-check a suite, selecting `workflow` and `version`.
+    """Parse and cross-check a suite, selecting `workflow`, `version` and `split`.
 
     `workflow` defaults to the first listed (for a past version: the one it
-    ran), `version` to the current one. Every listed workflow and every
+    ran), `version` to the current one, `split` to every case. Every listed workflow and every
     history entry is checked, not only the selected ones. Raises
     `DefinitionError` naming every problem found.
     """
@@ -317,33 +349,56 @@ def load_suite(
         raise DefinitionError(str(exc)) from exc
 
     problems: list[str] = []
+    retired = {c.id for c in cases if c.retired}
+    if stray := sorted(retired - {i for h in suite.history for i in h.cases}):
+        problems.append(f"retired case(s) {stray} are in no history version: delete them")
+    every_case, cases = cases, tuple(c for c in cases if not c.retired)
     if not cases:
         problems.append(f"{directory}/cases holds no case")
-    for path, case in zip(case_files, cases, strict=True):
+    for path, case in zip(case_files, every_case, strict=True):
         if path.stem != case.id:
             problems.append(f"{path.name}: file name must be the case id {case.id!r}")
         if f"#{case.source_pr}" in case.task:
             problems.append(
                 f"{case.id}: task names #{case.source_pr}; the agent could fetch the fix"
             )
-    ids = [c.id for c in cases]
+    for case in every_case:
+        if isinstance(case, DefectCase) and case.reclassified_from:
+            source = next((c for c in every_case if c.id == case.reclassified_from), None)
+            if not (isinstance(source, CleanCase) and source.retired):
+                problems.append(
+                    f"{case.id}: reclassified_from {case.reclassified_from!r} "
+                    "is not a retired clean case"
+                )
+            elif source.commit != case.commit:
+                problems.append(
+                    f"{case.id}: pins {case.commit[:12]}, but {source.id} pins "
+                    f"{source.commit[:12]}; a reclassified control keeps its pin"
+                )
+    ids = [c.id for c in every_case]
     if len(set(ids)) != len(ids):
         problems.append(f"duplicate case ids: {sorted(ids)}")
+    holdout = sum(c.split == "holdout" for c in cases)
+    low, high = HOLDOUT_SHARE
+    if not math.floor(low * len(cases)) <= holdout <= math.ceil(high * len(cases)):
+        problems.append(
+            f"{holdout} of {len(cases)} cases are holdout; the share must be {low:.0%}-{high:.0%}"
+        )
 
     for ref in suite.workflows:
         problems.extend(_workflow_problems(ref, root))
     problems.extend(_history_problems(suite, set(ids)))
 
-    past = next((h for h in suite.history if h.version == version), None)
-    if version is not None and version != suite.version and past is None:
-        known = sorted([h.version for h in suite.history] + [suite.version])
+    # A past version may have run several workflows, one entry each; with no
+    # `workflow` given, the first entry listed for it is the default.
+    ran = [h for h in suite.history if h.version == version]
+    past = next((h for h in ran if workflow is None or h.workflow == workflow), None)
+    if version is not None and version != suite.version and not ran:
+        known = sorted({h.version for h in suite.history} | {suite.version})
         problems.append(f"version {version} is not one of the suite's {known}")
-    if past is None:
-        chosen = suite.workflows[0].id if workflow is None else workflow
-    else:
-        chosen = past.workflow if workflow is None else workflow
-        if chosen != past.workflow:
-            problems.append(f"version {past.version} ran only {past.workflow!r}, not {chosen!r}")
+    if ran and past is None:
+        problems.append(f"version {version} ran only {[h.workflow for h in ran]}, not {workflow!r}")
+    chosen = past.workflow if past is not None else workflow or suite.workflows[0].id
     selected = next((ref for ref in suite.workflows if ref.id == chosen), None)
     if selected is None:
         problems.append(
@@ -351,6 +406,9 @@ def load_suite(
         )
     if problems or selected is None:
         raise DefinitionError("\n".join(problems))
+    if split is not None:
+        cases = tuple(c for c in cases if c.split == split)
+        every_case = tuple(c for c in every_case if c.split == split)
     if past is None:
         return LoadedSuite(
             suite=suite,
@@ -361,7 +419,7 @@ def load_suite(
         )
     return LoadedSuite(
         suite=suite,
-        cases=tuple(c for c in cases if c.id in past.cases),
+        cases=tuple(c for c in every_case if c.id in past.cases),
         workflow=selected,
         version=past.version,
         tag=past.tag,
@@ -371,9 +429,12 @@ def load_suite(
 def _history_problems(suite: Suite, case_ids: set[str]) -> list[str]:
     """Where `history` contradicts itself, the current version or the case files."""
     problems: list[str] = []
-    versions = [h.version for h in suite.history]
-    if len(set(versions)) != len(versions):
-        problems.append(f"duplicate history versions: {sorted(versions)}")
+    runs = [(h.version, h.workflow) for h in suite.history]
+    if len(set(runs)) != len(runs):
+        problems.append(f"duplicate history version and workflow: {sorted(runs)}")
+    tags = [h.tag for h in suite.history]
+    if len(set(tags)) != len(tags):
+        problems.append(f"duplicate history tags: {sorted(tags)}")
     workflow_ids = {r.id for r in suite.workflows}
     for h in suite.history:
         if h.version >= suite.version:
@@ -440,15 +501,24 @@ def check_commits(loaded: LoadedSuite, repo: Path) -> list[str]:
 
 def _defect_problems(case: DefectCase, repo: Path) -> list[str]:
     """Every SHA is a commit here, the pin is the first parent of the fix's first
-    commit (the tree just before the fix, not merely some ancestor of it), that
-    commit leads to the fix, every expected file exists at the pin, and the fix
+    commit (the tree just before the fix, not merely some ancestor of it) - or,
+    for a reclassified control, a strict ancestor of it - that commit leads to
+    the fix, every expected file exists at the pin, and the fix
     changes at least one of them - so the files are where the bug lived, not a guess.
     """
     if missing := _missing_commits(repo, case.commit, case.fix_start, case.fix_commit):
         return [f"{case.id}: no such commit {', '.join(missing)} (try `git fetch origin`)"]
     problems: list[str] = []
     parent = _git_out(repo, "rev-parse", f"{case.fix_start}^1").strip()
-    if parent != case.commit:
+    if case.reclassified_from:
+        if case.commit == case.fix_start or not _git_ok(
+            repo, "merge-base", "--is-ancestor", case.commit, case.fix_start
+        ):
+            problems.append(
+                f"{case.id}: pins {case.commit[:12]}, which is not before the fix "
+                f"{case.fix_start[:12]}; a reclassified control's pin must precede it"
+            )
+    elif parent != case.commit:
         problems.append(
             f"{case.id}: pins {case.commit[:12]}, but the fix {case.fix_start[:12]}'s "
             f"first parent is {parent[:12] or '(none)'}; pin the tree just before the fix"
@@ -473,11 +543,85 @@ def _defect_problems(case: DefectCase, repo: Path) -> list[str]:
 _FIX_SUBJECT = re.compile(r"^(fix|revert)\b", re.IGNORECASE)
 
 
+QUIET_DAYS = 30
+"""How long after a clean control merged no mainline commit may touch what it changed."""
+
+
+def _functions(repo: Path, commit: str, path: str) -> dict[str, tuple[str, ...]]:
+    """Qualified name (``Class.method``) -> the source of each Python function so named in `path`.
+
+    Every definition is found, wherever it sits (under an ``if``, a ``try``, a
+    ``with``); only classes and functions qualify a name. Same-named definitions,
+    such as a property's getter and setter, are all kept, in order.
+    """
+    text = _git_out(repo, "show", f"{commit}:{path}")
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return {}
+    lines = text.splitlines()
+    found: dict[str, list[str]] = {}
+
+    def visit(node: ast.AST, prefix: str) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+                name = f"{prefix}{child.name}"
+                if not isinstance(child, ast.ClassDef):
+                    first = min([child.lineno, *(d.lineno for d in child.decorator_list)])
+                    last = child.end_lineno or child.lineno
+                    found.setdefault(name, []).append("\n".join(lines[first - 1 : last]))
+                visit(child, f"{name}.")
+            else:
+                visit(child, prefix)
+
+    visit(tree, "")
+    return {name: tuple(sources) for name, sources in found.items()}
+
+
+def _changed_functions(repo: Path, commit: str) -> dict[str, set[str]]:
+    """Python path -> each function whose source `commit` changes against its first parent.
+
+    A function is changed when its source differs, appears or disappears, so a
+    line inserted next to a function is not a change to it and one inserted
+    inside it is.
+    """
+    paths = _git_out(repo, "diff", "--name-only", "--no-renames", f"{commit}^1", commit).split()
+    changed: dict[str, set[str]] = {}
+    for path in (p for p in paths if p.endswith(".py")):
+        before, after = _functions(repo, f"{commit}^1", path), _functions(repo, commit, path)
+        if names := {n for n in before.keys() | after.keys() if before.get(n) != after.get(n)}:
+            changed[path] = names
+    return changed
+
+
+def _touched(repo: Path, merge: str, until: str) -> list[str]:
+    """Each mainline commit after `merge`, up to `until`, that touches what `merge` changed.
+
+    "What it changed" is every Python function whose source the PR changed,
+    found again by qualified name in each later commit, so a function that
+    moves within its file is still followed. Only Python functions can be found
+    again here: a non-Python change is the selector's to read by hand. One line
+    per hit.
+    """
+    functions = _changed_functions(repo, merge)
+    hits: list[str] = []
+    later = _git_out(repo, "rev-list", "--reverse", "--first-parent", f"{merge}..{until}")
+    for commit in later.split():
+        for path, names in _changed_functions(repo, commit).items():
+            hits.extend(
+                f"{commit[:12]} changes {path}:{name}"
+                for name in sorted(names & functions.get(path, set()))
+            )
+    return hits
+
+
 def _clean_problems(case: CleanCase, repo: Path) -> list[str]:
     """Every SHA is a commit here, the pin is the merge's second parent (the PR
     head exactly as main took it), the merge is on `clean_through`'s first-parent
-    chain (a mainline merge, not one inside a branch), and no commit between the
-    merge and `clean_through` is a fix or revert naming the PR.
+    chain (a mainline merge, not one inside a branch), no commit between the
+    merge and `clean_through` is a fix or revert naming the PR, `clean_through`
+    is at least `QUIET_DAYS` after the merge, and no mainline commit in those
+    days touches a Python function the PR changed.
     """
     if missing := _missing_commits(repo, case.commit, case.merge_commit, case.clean_through):
         return [f"{case.id}: no such commit {', '.join(missing)} (try `git fetch origin`)"]
@@ -507,6 +651,21 @@ def _clean_problems(case: CleanCase, repo: Path) -> list[str]:
                 f"{case.id}: {sha[:12]} fixes or reverts #{case.source_pr} after it merged; "
                 "a clean control must have no known defect"
             )
+    merged_at = int(_git_out(repo, "show", "-s", "--format=%ct", case.merge_commit))
+    quiet_until = merged_at + QUIET_DAYS * 86400
+    if int(_git_out(repo, "show", "-s", "--format=%ct", case.clean_through)) < quiet_until:
+        problems.append(
+            f"{case.id}: clean_through {case.clean_through[:12]} is under {QUIET_DAYS} days "
+            "after the merge; a clean control needs that long untouched"
+        )
+    window_end = _git_out(
+        repo, "rev-list", "-1", "--first-parent", f"--before={quiet_until}", case.clean_through
+    ).strip()
+    problems.extend(
+        f"{case.id}: {hit} within {QUIET_DAYS} days of the merge; "
+        "a clean control's code must stay untouched that long"
+        for hit in _touched(repo, case.merge_commit, window_end)
+    )
     return problems
 
 
@@ -536,7 +695,11 @@ class Score(_Frozen):
 
     @property
     def passed(self) -> bool:
-        """A defect passes blocked and named; a clean control passes only certified."""
+        """A defect passes blocked and named; a clean control passes only certified.
+
+        False with no verdict, but such a run is never a FAIL: `run_verdict`
+        makes it ERROR, and ERROR is in no pass, catch or false-block rate.
+        """
         if self.polarity == "clean":
             return self.verdict == "certified"
         return self.verdict == "blocked" and self.matched
@@ -812,6 +975,13 @@ class ScoredRun(_Frozen):
     cost_usd: Decimal | None
     duration: str
     models: str
+    warning: str | None = None
+    """Where the report's own `VERDICT:` line and the engine's verdict disagree."""
+
+    @property
+    def verdict(self) -> RunVerdict | None:
+        """The verdict `score` records; None for a run never scored (not launched, rejected)."""
+        return run_verdict(self.status, self.score) if self.score else None
 
 
 def _get[M: BaseModel](client: httpx.Client, model: type[M], path: str, **params: str | int) -> M:
@@ -900,7 +1070,8 @@ def score_suite(
             if problem:
                 rows.append(_row(case.id, ev.eval_id, launch.run_id, f"rejected: {problem}"))
                 continue
-            score = score_case(case, run.review_verdict, _report_of(client, run))
+            report = _report_of(client, run)
+            score = score_case(case, run.review_verdict, report)
             _record_score(client, loaded, case, ev.eval_id, run, score)
             rows.append(
                 ScoredRun(
@@ -912,6 +1083,7 @@ def score_suite(
                     cost_usd=run.total_cost_usd,
                     duration=_duration_of(run),
                     models=_models_of(run),
+                    warning=verdict_mismatch(run.review_verdict, report),
                 )
             )
 
@@ -969,16 +1141,41 @@ def _case_evals(client: httpx.Client, loaded: LoadedSuite, case: Case) -> list[_
     return _EvalList.model_validate(response.json()).evals
 
 
-def run_verdict(run: _Execution, score: Score) -> RunVerdict:
-    """The verdict recorded on the eval. ERROR: the run never finished, so it was not judged."""
-    if run.status != "completed":
+def run_verdict(status: str, score: Score) -> RunVerdict:
+    """The verdict recorded on the eval: ERROR when the run was not judged.
+
+    A run is judged only when it completed AND the engine recorded a review
+    verdict. A completed run with none (#1780) failed to report, it did not
+    review badly, so it is ERROR, never FAIL, whatever its report text says.
+    """
+    if status != "completed" or score.verdict is None:
         return "ERROR"
     return "PASS" if score.passed else "FAIL"
 
 
+_REPORT_VERDICT = re.compile(r"^\W*VERDICT:\W*(\w+)", re.MULTILINE)
+
+
+def verdict_mismatch(engine: Verdict | None, report: str) -> str | None:
+    """A warning when the report's first `VERDICT:` line disagrees with the engine.
+
+    For a human to read only: the score never comes from the report text, since
+    the engine verdict is what the workflow actually reported (#1780).
+    """
+    said = _REPORT_VERDICT.search(report)
+    if said is None or said.group(1).lower() == engine:
+        return None
+    return f"report says VERDICT: {said.group(1)}, engine recorded {engine or 'no verdict'}"
+
+
 def evidence_of(case: Case, run: _Execution, score: Score) -> str:
     """Why the verdict, as markdown: what the scorer looked for and what it found."""
-    head = [f"## {case.id} ({case.polarity})", "", f"- run status: `{run.status}`"]
+    head = [
+        f"## {case.id} ({case.polarity})",
+        "",
+        f"- run status: `{run.status}`",
+        f"- recorded: `{run_verdict(run.status, score)}` (ERROR: not completed, or no review verdict)",
+    ]
     tail = [f"- models: {_models_of(run) or '-'}"]
     if isinstance(case, CleanCase):
         return "\n".join(
@@ -1015,7 +1212,7 @@ def _record_score(
     response = client.post(
         f"/evals/{eval_id}/runs/{run.workflow_execution_id}/score",
         json={
-            "verdict": run_verdict(run, score),
+            "verdict": run_verdict(run.status, score),
             "score": 1.0 if score.passed else 0.0,
             "evidence": evidence_of(case, run, score),
             "scorer": SCORER,
@@ -1036,18 +1233,20 @@ def _ratio(part: int, whole: int) -> str:
 def rates(rows: list[ScoredRun]) -> str:
     """The catch rate over defect cases and the false-block rate over clean controls.
 
-    Over scored runs only; a run with no verdict is in the denominator and is
-    neither a catch nor a false block. A table with no clean controls says so:
-    its catch rate alone cannot tell a careful verifier from one that blocks all.
+    Over judged runs only (PASS or FAIL), as the API's pass rate: an ERROR run
+    was not judged, so it is in no denominator. A table with no clean controls
+    says so: its catch rate alone cannot tell a careful verifier from one that
+    blocks all.
     """
-    scores = [r.score for r in rows if r.score]
+    scores = [r.score for r in rows if r.score and r.verdict != "ERROR"]
     defects = [s for s in scores if s.polarity == "defect"]
     clean = [s for s in scores if s.polarity == "clean"]
     caught = sum(1 for s in defects if s.passed)
     blocked = sum(1 for s in clean if s.false_block)
+    has_clean = any(r.score and r.score.polarity == "clean" for r in rows)
     return f"catch rate (defect cases blocked and named): {_ratio(caught, len(defects))}\n" + (
         f"false-block rate (clean controls blocked): {_ratio(blocked, len(clean))}"
-        if clean
+        if has_clean
         else "false-block rate: not measured, no clean control in this version"
     )
 
@@ -1086,7 +1285,7 @@ def render(loaded: LoadedSuite, rows: list[ScoredRun], unrecorded: tuple[str, ..
                 )
                 if s
                 else "-",
-                ("PASS" if s.passed else "FAIL") if s else "-",
+                r.verdict or "-",
                 f"${r.cost_usd:.2f}" if r.cost_usd is not None else "-",
                 r.duration,
                 r.models,
@@ -1096,11 +1295,17 @@ def render(loaded: LoadedSuite, rows: list[ScoredRun], unrecorded: tuple[str, ..
     table = "\n".join(
         "  ".join(c.ljust(w) for c, w in zip(row, widths, strict=True)).rstrip() for row in lines
     )
-    passed = sum(1 for r in rows if r.score and r.score.passed)
+    verdicts = [r.verdict for r in rows]
+    judged = sum(1 for v in verdicts if v in ("PASS", "FAIL"))
+    errors = verdicts.count("ERROR")
     return (
         f"suite {loaded.tag}  version {loaded.version}  workflow {loaded.workflow.id}  "
-        f"declared models {loaded.workflow.models}\n\n{table}\n\n{passed}/{len(rows)} passed\n"
+        f"declared models {loaded.workflow.models}\n\n{table}\n\n"
+        f"{verdicts.count('PASS')}/{judged} passed (ERROR excluded, as in the API)"
+        f"{f'; {errors} ERROR' if errors else ''}"
+        f"{f'; {len(rows) - judged - errors} not scored' if len(rows) > judged + errors else ''}\n"
         + rates(rows)
+        + "".join(f"\nwarning: {r.case} {r.run_id}: {r.warning}" for r in rows if r.warning)
         + "".join(f"\nignored: {line}" for line in unrecorded)
     )
 
@@ -1166,13 +1371,16 @@ class Provenance(_Frozen):
 def install_provenance(loaded: LoadedSuite, document: str) -> Provenance:
     """Deterministic install provenance for the suite's workflow document.
 
-    The version is the suite's, so changing a listed workflow without bumping
-    the suite reuses a version under a new digest, which the server refuses as
-    a republish. The digest covers the uploaded bytes, prompts inlined, so a
+    The version is the suite's, with the workflow's install `revision` as the
+    minor, so changing a listed workflow without bumping either reuses a
+    version under a new digest, which the server refuses as a republish. The digest covers the uploaded bytes, prompts inlined, so a
     prompt-file edit changes it too.
     """
     digest = hashlib.sha256(document.encode("utf-8")).hexdigest()
-    return Provenance(version=f"{loaded.suite.version}.0.0", source_digest=f"sha256:{digest}")
+    return Provenance(
+        version=f"{loaded.suite.version}.{loaded.workflow.revision}.0",
+        source_digest=f"sha256:{digest}",
+    )
 
 
 def install_workflow(loaded: LoadedSuite, client: httpx.Client, root: Path = ROOT) -> str:
@@ -1199,7 +1407,8 @@ def install_workflow(loaded: LoadedSuite, client: httpx.Client, root: Path = ROO
         raise RuntimeError(
             f"server refused to install {w.id} as version {provenance.version} "
             f"({provenance.source_digest}): {_detail(response)}. If {w.path} changed, "
-            "bump the suite version; no eval was created"
+            "bump the suite version (or, for an edit outside the experiment, the workflow's "
+            "revision); no eval was created"
         )
     response.raise_for_status()
     installed = _Installed.model_validate(response.json())
@@ -1341,6 +1550,12 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="score this version only (default: every version the workflow ran)",
     )
+    parser.add_argument(
+        "--split",
+        choices=("train", "holdout"),
+        default=None,
+        help="launch or score only these cases (default: all); tune on train only",
+    )
     parser.add_argument("--api-url", default=None, help="defaults to DEV__API_URL / localhost")
     parser.add_argument(
         "--launches",
@@ -1352,7 +1567,7 @@ def main(argv: list[str] | None = None) -> int:
 
     to_score: list[LoadedSuite] = []
     try:
-        loaded = load_suite(args.suite, workflow=args.workflow)
+        loaded = load_suite(args.suite, workflow=args.workflow, split=args.split)
         if args.command == "score":
             versions = (
                 [args.version]
@@ -1360,7 +1575,8 @@ def main(argv: list[str] | None = None) -> int:
                 else versions_run(loaded.suite, loaded.workflow.id)
             )
             to_score = [
-                load_suite(args.suite, workflow=loaded.workflow.id, version=v) for v in versions
+                load_suite(args.suite, workflow=loaded.workflow.id, version=v, split=args.split)
+                for v in versions
             ]
     except DefinitionError as exc:
         print(f"❌ {args.suite}:\n{exc}", file=sys.stderr)

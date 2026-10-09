@@ -90,6 +90,9 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.slices.execute_workflow.phase_cost_limit import (
         PhaseCostLimit,
     )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.phase_push import (
+        PushObserver,
+    )
     from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import Runner
     from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor import (
         WorkflowExecutionProcessor,
@@ -282,6 +285,7 @@ class _Acts(_ReadsItsSetup):
         runner: Runner = AgentRunner.CLAUDE,
         on_launch: AgentLaunchObserver | None = None,
         cost_limit: PhaseCostLimit | None = None,
+        on_push: PushObserver | None = None,
     ) -> AgentExecutionResult:
         # The prompt is one argv element of the production command.
         prompt = "\n".join(claude_cmd)

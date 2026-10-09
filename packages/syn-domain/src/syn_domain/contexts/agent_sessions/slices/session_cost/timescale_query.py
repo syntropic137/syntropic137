@@ -612,6 +612,17 @@ class TimescaleSessionCostQuery:
                     results[sid] = cost
         return results
 
+    async def calculate_many_by_given_id(
+        self, session_ids: Sequence[str]
+    ) -> dict[str, SessionCost]:
+        """``calculate_many``, keyed by each id as the CALLER spelled it (#1811).
+
+        ``calculate_many`` keys by the stored (``pg_safe``) spelling; a caller
+        that holds the ids a read model named looks them up by those.
+        """
+        stored = await self.calculate_many(session_ids)
+        return {sid: cost for sid in session_ids if (cost := stored.get(pg_safe(sid))) is not None}
+
     async def _fetch_page(self, ids: list[str]) -> _PageRows:
         """The three ``agent_events`` queries, once, plus the tool-call tally."""
         async with self._pool.acquire() as conn, agent_event_span.custom_plans(conn):  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime

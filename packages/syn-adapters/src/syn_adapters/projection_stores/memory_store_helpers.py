@@ -60,7 +60,10 @@ def apply_filters(
     """
     if not filters:
         return results
-    return [r for r in results if all(r.get(k) in filter_values(v) for k, v in filters.items())]
+    # Sanitised once per query, not once per row: a filter of N ids over M
+    # rows was N x M ``pg_safe`` calls (#1811).
+    accepted = [(k, filter_values(v)) for k, v in filters.items()]
+    return [r for r in results if all(r.get(k) in values for k, values in accepted)]
 
 
 def apply_sorting(results: list[dict[str, Any]], order_by: str | None) -> list[dict[str, Any]]:

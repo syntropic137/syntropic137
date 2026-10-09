@@ -1,6 +1,6 @@
 # Projection Subscriptions
 
-🤖 **Auto-generated from VSA manifest** - Run `just docs-gen` to update
+🤖 **Auto-generated from VSA manifest** - Run `just docs-regen` to update
 
 **Data Source:** `.topology/syn-manifest.json`
 
@@ -10,69 +10,68 @@
 
 This diagram shows which events feed which projections in the Syn137 system.
 
-**Total Relationships:** 65 events → 25 projections
+**Total Relationships:** 77 events → 27 projections
 
 ```mermaid
 graph LR
     subgraph events["Key Events"]
-        e1[workflow_failed]
-        e2[workflow_execution_started]
+        e1[workflow_execution_started]
+        e2[workflow_failed]
         e3[workflow_completed]
-        e4[phase_completed]
-        e5[execution_cancelled]
+        e4[execution_cancelled]
+        e5[phase_completed]
         e6[workflow_interrupted]
-        e7[trigger_fired]
-        e8[workflow_template_created]
-        e9[phase_started]
-        e10[session_summary]
+        e7[next_phase_ready]
+        e8[phase_started]
+        e9[trigger_fired]
+        e10[workflow_template_created]
     end
 
     subgraph projections["Projections"]
         p1[ArtifactListProjection]
         p2[ClaudePluginLockProjection]
         p3[DashboardMetricsProjection]
-        p4[ExecutionCostProjection]
-        p5[ExecutionTodoProjection]
-        p6[GlobalClaudePluginsProjection]
-        p7[InstallationProjection]
-        p8[RepoCorrelationProjection]
-        p9[RepoCostProjection]
-        p10[RepoHealthProjection]
-        p11[RepoProjection]
-        p12[SessionCostProjection]
-        p13[SessionListProjection]
-        p14[SkillLockProjection]
-        p15[SystemProjection]
+        p4[EvalListProjection]
+        p5[ExecutionCostProjection]
+        p6[ExecutionTodoProjection]
+        p7[GlobalClaudePluginsProjection]
+        p8[InstallationProjection]
+        p9[RepoCorrelationProjection]
+        p10[RepoCostProjection]
+        p11[RepoHealthProjection]
+        p12[RepoProjection]
+        p13[SessionCostProjection]
+        p14[SessionListProjection]
+        p15[SkillLockProjection]
     end
 
-    e7 --> p8
-    e10 --> p12
-    e10 --> p4
-    e3 --> p10
-    e3 --> p9
-    e3 --> p5
-    e3 --> p3
-    e1 --> p10
-    e1 --> p9
-    e1 --> p5
-    e1 --> p3
+    e4 --> p6
+    e7 --> p6
+    e5 --> p6
     e8 --> p3
-    e4 --> p5
-    e5 --> p5
-    e6 --> p5
-    e2 --> p8
-    e2 --> p5
+    e9 --> p9
+    e3 --> p3
+    e3 --> p6
+    e3 --> p10
+    e3 --> p11
+    e1 --> p3
+    e1 --> p6
+    e1 --> p9
     e2 --> p3
-    e9 --> p3
+    e2 --> p6
+    e2 --> p10
+    e2 --> p11
+    e6 --> p6
+    e10 --> p3
 ```
 
 ---
 
 ## Statistics
 
-- **Events with projections:** 65
-- **Unique projections:** 25
-- **Total event-to-projection mappings:** 104
+- **Events with projections:** 77
+- **Unique projections:** 27
+- **Total event-to-projection mappings:** 125
 
 ---
 
@@ -80,16 +79,16 @@ graph LR
 
 | Event | Projections | Count |
 |-------|-------------|-------|
-| workflow_failed | RepoHealthProjection, RepoCostProjection, WorkflowExecutionDetailProjection... | 7 |
-| workflow_execution_started | RepoCorrelationProjection, WorkflowExecutionDetailProjection, WorkflowDetailProjection... | 7 |
-| workflow_completed | RepoHealthProjection, RepoCostProjection, WorkflowExecutionDetailProjection... | 6 |
-| phase_completed | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection, ExecutionTodoProjection... | 4 |
-| execution_cancelled | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection, ExecutionTodoProjection... | 4 |
-| workflow_interrupted | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection, ExecutionTodoProjection... | 4 |
+| workflow_execution_started | DashboardMetricsProjection, ExecutionTodoProjection, RepoCorrelationProjection... | 7 |
+| workflow_failed | DashboardMetricsProjection, ExecutionTodoProjection, RepoCostProjection... | 7 |
+| workflow_completed | DashboardMetricsProjection, ExecutionTodoProjection, RepoCostProjection... | 6 |
+| execution_cancelled | ExecutionTodoProjection, WorkflowExecutionDetailProjection, WorkflowExecutionListProjection... | 4 |
+| phase_completed | ExecutionTodoProjection, WorkflowExecutionDetailProjection, WorkflowExecutionListProjection... | 4 |
+| workflow_interrupted | ExecutionTodoProjection, WorkflowExecutionDetailProjection, WorkflowExecutionListProjection... | 4 |
+| next_phase_ready | ExecutionTodoProjection, WorkflowExecutionDetailProjection, WorkflowExecutionListProjection | 3 |
+| phase_started | DashboardMetricsProjection, WorkflowExecutionDetailProjection, WorkflowPhaseMetricsProjection | 3 |
 | trigger_fired | RepoCorrelationProjection, TriggerHistoryProjection, TriggerRuleProjection | 3 |
-| workflow_template_created | WorkflowDetailProjection, WorkflowListProjection, DashboardMetricsProjection | 3 |
-| phase_started | WorkflowExecutionDetailProjection, WorkflowPhaseMetricsProjection, DashboardMetricsProjection | 3 |
-| session_summary | SessionCostProjection, ExecutionCostProjection | 2 |
+| workflow_template_created | DashboardMetricsProjection, WorkflowDetailProjection, WorkflowListProjection | 3 |
 
 ---
 
@@ -103,12 +102,5 @@ graph LR
 🤖 **This file is auto-generated** - Do not edit manually. To regenerate:
 
 ```bash
-just docs-gen
-```
-
-Or regenerate the manifest first:
-
-```bash
-vsa manifest --config vsa.yaml --output .topology/syn-manifest.json --include-domain
-just docs-gen
+just docs-regen
 ```

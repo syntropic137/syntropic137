@@ -26,6 +26,7 @@ from syn_adapters.projection_stores.memory_store_helpers import (
     clear_projection as _clear_projection,
 )
 from syn_adapters.projection_stores.record_match import holds
+from syn_domain.pagination import ProjectionRecord
 from syn_domain.projection_newest import newest_per_group
 from syn_domain.projection_scan import JsonValue
 
@@ -93,6 +94,16 @@ class InMemoryProjectionStore:
         if projection not in self._data:
             return None
         return self._data[projection].get(pg_safe(key))
+
+    async def get_many(self, projection: str, keys: Sequence[str]) -> dict[str, ProjectionRecord]:
+        """The documents stored under ``keys``, by stored key, in one call (#1816).
+
+        The same keyed lookup the Postgres store answers with one
+        ``id = ANY(...)`` query, so ``read_by_keys`` takes the same path here.
+        """
+        stored = self._data.get(projection, {})
+        found = ((pg_safe(key), stored.get(pg_safe(key))) for key in keys)
+        return {key: document for key, document in found if document is not None}
 
     async def get_all(self, projection: str) -> list[dict[str, Any]]:
         """Get all records for a projection."""

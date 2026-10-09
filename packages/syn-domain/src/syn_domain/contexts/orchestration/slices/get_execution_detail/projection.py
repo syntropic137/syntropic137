@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 from event_sourcing import AutoDispatchProjection
 
 from syn_domain.contexts.orchestration._shared.tags import TagSet, replay_tag_edit
+from syn_domain.contexts.orchestration._shared.unapplied_start import UnappliableStartError
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     DelegationFailure,
     FailureClassification,
@@ -269,7 +270,7 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         """
         execution_id = event_data.get("execution_id", "")
         if not execution_id:
-            return
+            raise UnappliableStartError(self.PROJECTION_NAME)
 
         # What the run was dispatched with. Kept whole (#1307): this is the only
         # record of what the run was ASKED to do, and a reader retrying a run
@@ -802,6 +803,18 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         documents = await read_by_keys(self._store, self.PROJECTION_NAME, execution_ids)
         return {
             key for key, document in documents.items() if document.get("started_at") is not None
+        }
+
+    async def get_many(self, execution_ids: Sequence[str]) -> dict[str, WorkflowExecutionDetail]:
+        """Each execution's detail, by id, in one primary-key read; absent ids are omitted.
+
+        What ``get_by_id`` answers for each id, without a read per id (#1811).
+        """
+        documents = await read_by_keys(self._store, self.PROJECTION_NAME, list(execution_ids))
+        return {
+            key: WorkflowExecutionDetail.from_dict(dict(doc))
+            for key, doc in documents.items()
+            if doc
         }
 
     async def get_by_id(self, execution_id: str) -> WorkflowExecutionDetail | None:

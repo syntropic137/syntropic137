@@ -166,6 +166,14 @@ class SessionSummary:
     to say, and must not be read as saying "no".
     """
 
+    requested_model: str | None = None
+    """The model the workflow asked for, from SessionStarted (often an alias).
+
+    Never what ran: the reported model is Lane 2's, merged at the API
+    boundary. This is what a session that has reported nothing yet - a
+    running codex phase - can still truthfully show (#1785).
+    """
+
     @classmethod
     def from_dict(cls, data: dict) -> "SessionSummary":
         """Create from dictionary data."""
@@ -200,6 +208,7 @@ class SessionSummary:
             duration_api_ms=data.get("duration_api_ms"),
             error_message=data.get("error_message"),
             agent_launch=AgentLaunch.read(data.get("agent_launch")),
+            requested_model=data.get("requested_model"),
         )
 
     def to_dict(self) -> dict:
@@ -249,4 +258,5 @@ class SessionSummary:
             "duration_api_ms": self.duration_api_ms,
             "error_message": self.error_message,
             "agent_launch": self.agent_launch.value,
+            "requested_model": self.requested_model,
         }

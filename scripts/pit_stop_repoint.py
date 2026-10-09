@@ -2,12 +2,20 @@
 
 Called by scripts/pit_stop.sh at `stage`:
 
-    python3 scripts/pit_stop_repoint.py <tag> <deployed-compose> <staged-compose>
+    python3 scripts/pit_stop_repoint.py <tag> <deployed-compose> <staged-compose> [--service gateway]
+    python3 scripts/pit_stop_repoint.py --on-tag <tag> <compose> <service>
+
+The second form prints 1 when <service> (`api` or `gateway`) has exactly one
+image line and it names exactly the ref `ship` loaded, else 0. It is the count
+the stage and --swap-only prechecks trust, so it reads the image lines the same
+way the repoint writes them: a commented-out line, a longer tag that merely
+starts with <tag> (`beta.1` vs `beta.10`) or a suffixed one is not on the tag.
 
 It writes the staged compose and prints, on stdout, the name to back the
-deployed file up under (empty when both pins are already the shipped refs, so
-there is nothing to stage). Anything it cannot repoint safely exits 1 with the
-reason on stderr, and nothing is written.
+deployed file up under (empty when every pin is already the shipped ref, so
+there is nothing to stage). `--service gateway` repoints the syn-gateway pin
+alone and leaves syn-api's exactly as deployed (#1310). Anything it cannot
+repoint safely exits 1 with the reason on stderr, and nothing is written.
 
 WHY THIS IS NOT A sed. A host installed from a release pins every image BY
 DIGEST (`ghcr.io/syntropic137/syn-api@sha256:<64 hex>`), and the two digests
@@ -28,6 +36,8 @@ from pathlib import Path
 
 #: What `ship` loads, and therefore what the compose must name, per service.
 SERVICES = ("syn-api", "syn-gateway")
+#: `--service` as pit_stop.sh spells it, to the images that pit stop ships.
+SHIPPED = {"all": SERVICES, "gateway": ("syn-gateway",)}
 REGISTRY = "ghcr.io/syntropic137"
 
 _IMAGE_LINE = re.compile(r"^(?P<lead>\s*image:\s*[\"']?)(?P<ref>[^\s\"'#]+)", re.MULTILINE)
@@ -63,7 +73,8 @@ class Repoint:
 
     @property
     def backup_suffix(self) -> str:
-        """The syn-api pin, filesystem-safe: `v0.33.1` or `sha256-bf783882d031`."""
+        """The first repointed pin (syn-api's, unless only the gateway was
+        shipped), filesystem-safe: `v0.33.1` or `sha256-bf783882d031`."""
         pin = self.old[0].pin
         if _DIGEST.fullmatch(pin):
             return "sha256-" + pin.removeprefix("sha256:")[:12]
@@ -74,11 +85,11 @@ def _image_name(ref: str) -> str:
     return ref.partition("@")[0].rsplit("/", 1)[-1].partition(":")[0]
 
 
-def repoint(compose: str, tag: str) -> Repoint:
-    """Point both services at `REGISTRY/<service>:<tag>`, or raise RepointError."""
+def repoint(compose: str, tag: str, services: tuple[str, ...] = SERVICES) -> Repoint:
+    """Point `services` at `REGISTRY/<service>:<tag>`, or raise RepointError."""
     lines = {
         s: [m for m in _IMAGE_LINE.finditer(compose) if _image_name(m["ref"]) == s]
-        for s in SERVICES
+        for s in services
     }
     old: list[Pin] = []
     for service, found in lines.items():
@@ -95,19 +106,38 @@ def repoint(compose: str, tag: str) -> Repoint:
 
     def new_ref(m: re.Match[str]) -> str:
         service = _image_name(m["ref"])
-        return m["lead"] + (f"{REGISTRY}/{service}:{tag}" if service in SERVICES else m["ref"])
+        return m["lead"] + (f"{REGISTRY}/{service}:{tag}" if service in services else m["ref"])
 
     text = _IMAGE_LINE.sub(new_ref, compose)
     return Repoint(old=tuple(old), text=text, changed=text != compose)
 
 
+def on_tag(compose: str, tag: str, service: str) -> bool:
+    """Whether `service`'s one image line names `REGISTRY/<service>:<tag>`
+    exactly. Compared whole, never as a pattern.
+
+    A digest-qualified `...:<tag>@sha256:...` is NOT on the tag: Docker
+    resolves a tag-plus-digest reference by the digest alone, and the image
+    `ship` loaded is unpushed, so no digest in a compose file is proven to be
+    it. The repoint writes the bare ref, so a staged file never has one."""
+    found = [m["ref"] for m in _IMAGE_LINE.finditer(compose) if _image_name(m["ref"]) == service]
+    return found == [f"{REGISTRY}/{service}:{tag}"]
+
+
 def main(argv: list[str]) -> int:
-    if len(argv) != 3:
+    if len(argv) == 4 and argv[0] == "--on-tag":
+        _, tag, compose, svc = argv
+        print(1 if on_tag(Path(compose).read_text(), tag, f"syn-{svc}") else 0)
+        return 0
+    service = "all"
+    if len(argv) == 5 and argv[3] == "--service":
+        service, argv = argv[4], argv[:3]
+    if len(argv) != 3 or service not in SHIPPED:
         print(__doc__, file=sys.stderr)
         return 2
     tag, deployed, staged = argv
     try:
-        result = repoint(Path(deployed).read_text(), tag)
+        result = repoint(Path(deployed).read_text(), tag, SHIPPED[service])
     except RepointError as e:
         print(f"   cannot repoint: {e}", file=sys.stderr)
         return 1

@@ -42,7 +42,7 @@ Create `@syntropic137` at https://www.npmjs.com/org/create (if not already done)
 4. Create the `npm-publish-cli` GitHub environment: repo Settings > Environments > New > `npm-publish-cli`
 5. After Trusted Publishing is configured, the `CLI_PUBLISH_NPM_TOKEN` secret is no longer needed and can be deleted.
 
-#### 3. @syntropic137/setup (npx repo - `syntropic137-npx`)
+#### 3. @syntropic137/setup (setup repo - `syntropic137-setup`)
 
 1. Login (same org scope as above):
    ```bash
@@ -50,14 +50,16 @@ Create `@syntropic137` at https://www.npmjs.com/org/create (if not already done)
    ```
 2. Initial manual publish to claim the package name:
    ```bash
-   cd /path/to/syntropic137-npx
+   cd /path/to/syntropic137-setup
    npm install && npm run build
    npm publish --access public
    ```
 3. Configure Trusted Publisher on npmjs.com:
    - Go to https://www.npmjs.com/package/@syntropic137/setup/access
-   - Add Trusted Publisher: repo=`syntropic137/syntropic137-npx`, workflow=`publish.yml`, environment=`npm-publish`
-4. Create the `npm-publish` GitHub environment on the `syntropic137-npx` repo.
+   - Add Trusted Publisher: repo=`syntropic137/syntropic137-setup`, workflow=`publish.yml`, environment=`npm-publish`
+   - Under Allowed actions, enable direct publish (`publish.yml` runs `npm publish`). Without it the publish fails with `403 OIDC permission denied for this action`. Leave dist-tags off.
+   - Changing the repo name later means deleting and recreating the entry (the fields are fixed once saved).
+4. Create the `npm-publish` GitHub environment on the `syntropic137-setup` repo.
 
 ### NPM Trusted Publishing Requirements
 
@@ -74,11 +76,11 @@ Two environments are needed across the two repos:
 | Environment | Repository | Purpose |
 |-------------|------------|---------|
 | `npm-publish-cli` | `syntropic137/syntropic137` | CLI publishes via `release-cli.yaml` |
-| `npm-publish` | `syntropic137/syntropic137-npx` | npx setup publishes via `publish.yml` |
+| `npm-publish` | `syntropic137/syntropic137-setup` | setup package publishes via `publish.yml` |
 
 ### NPX Template Sync Setup
 
-1. Create a fine-grained PAT with these permissions, scoped to the `syntropic137-npx` repo only:
+1. Create a fine-grained PAT with these permissions, scoped to the `syntropic137-setup` repo only:
    - Actions: Read & Write
    - Contents: Read-only
    - Metadata: Read-only
@@ -100,6 +102,13 @@ Two environments are needed across the two repos:
 - **GHCR authentication** uses the built-in `GITHUB_TOKEN` - no additional setup needed.
 - **Cosign keyless signing** uses Sigstore OIDC - no additional setup needed.
 - **Multi-arch builds** (amd64 + arm64) use QEMU emulation via `docker/setup-qemu-action`.
+- **event-store is not built here.** ESP publishes it. The release pins
+  `event-store:v<ESP version>`, where the version is read from ESP's root
+  `package.json` at the `lib/event-sourcing-platform` gitlink, and fails if that
+  tag is not published. There is no `latest` fallback (#1515), so **ESP must
+  release before syn137 does** whenever the gitlink names a new ESP version.
+  `just check-event-store-pin` (part of `preflight`, so every PR) runs the same
+  check. Logic: `scripts/resolve_event_store_digest.py`.
 
 ## v0.28.0 Rollout Constraints
 
@@ -536,7 +545,7 @@ Merge the PR as a merge commit (not squash, not rebase). This triggers `release-
 3. Creates GitHub Release with the PR body as release notes
 4. Calls `release-containers.yaml` → builds 6 multi-arch Docker images, signs with cosign, pushes to GHCR, attaches release assets (digest-pinned compose, SHA256SUMS)
 5. Calls `release-cli.yaml` → builds and publishes `@syntropic137/cli` to npm with Sigstore provenance
-6. Dispatches template sync to `syntropic137-npx`
+6. Dispatches template sync to `syntropic137-setup`
 7. Vercel deploys docs from `release` branch
 
 ### 6. Post-Release Verification
@@ -548,24 +557,24 @@ Merge the PR as a merge commit (not squash, not rebase). This triggers `release-
 
 ### 7. Publish the npx setup package
 
-The release pipeline only *opens* a template-sync PR on `syntropic137-npx`. It
+The release pipeline only *opens* a template-sync PR on `syntropic137-setup`. It
 cannot finish the job: that repo requires code-owner review, and its
 `publish.yml` is `workflow_dispatch`-only on purpose for supply-chain reasons.
 Both remaining steps are human, and until they happen
 `npx @syntropic137/setup` keeps handing new users the PREVIOUS release's
 templates.
 
-This step used to read "Template sync PR opened on syntropic137-npx", which is
+This step used to read "Template sync PR opened on syntropic137-setup", which is
 satisfied by the one part that already automates itself. Opening a PR is not
 publishing, so the box could be ticked on every release while npm stayed
 behind - which is how v0.28.0 shipped with `@syntropic137/setup` still on
 0.27.0 (#1227).
 
-- [ ] Merge the sync PR on `syntropic137-npx`
-      (`gh pr list --repo syntropic137/syntropic137-npx`)
+- [ ] Merge the sync PR on `syntropic137-setup`
+      (`gh pr list --repo syntropic137/syntropic137-setup`)
 - [ ] Confirm the merged `package.json` version equals this release
 - [ ] Dispatch the publish workflow:
-      `gh workflow run publish.yml --repo syntropic137/syntropic137-npx`
+      `gh workflow run publish.yml --repo syntropic137/syntropic137-setup`
 - [ ] **Verify against npm, not the workflow's exit code:**
       `npm view @syntropic137/setup version` returns this release
 
@@ -640,7 +649,7 @@ The bump files the fix under `## [0.19.1]` in `CHANGELOG.md` like any release.
 | `release-create.yml` fails | Investigate logs, re-run workflow manually |
 | Container build fails | Fix Dockerfile on `main`, bump patch, new release PR |
 | npm publish fails | Fix package issue, bump patch, new release PR |
-| Template sync fails | Manually trigger on syntropic137-npx |
+| Template sync fails | Manually trigger on syntropic137-setup |
 
 ## Version Files Reference
 

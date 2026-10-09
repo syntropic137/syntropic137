@@ -11,7 +11,7 @@
  * The counting one - `total` is the server's number, not the length of what
  * arrived - is the #1159/#1204 defect itself, and it lives in the hop between
  * the wire and the hook. So that one runs against the real `/api/v1/executions`
- * client over a 120-row endpoint, where `listQueryParams` and the response
+ * client over a 240-row endpoint, where `listQueryParams` and the response
  * envelope actually execute.
  *
  * This is also the only hook of the three whose page size a caller chooses:
@@ -27,7 +27,7 @@ import type { ListPage, ListQuery } from '../../api/listQuery'
 import { serveListEndpoint } from '../../test/fakeListServer'
 import { EXECUTIONS, matchesExecutionSearch } from '../../test/listFixtures'
 import type { ExecutionListResponse } from '../../types'
-import { LIST_PAGE_SIZE } from '../useListQuery'
+import { EXECUTION_LIST_PAGE_SIZE, LIST_PAGE_SIZE } from '../useListQuery'
 import { useLatestPage } from '../useLatestPage'
 
 serveListEndpoint({
@@ -99,7 +99,7 @@ describe('useLatestPage', () => {
     const { result } = renderHook(() => useLatestPage(fetchPage, FIRST_PAGE))
 
     await waitFor(() => expect(result.current.loading).toBe(false))
-    // The page is 50 rows; the collection is 120. A hook that reported what it
+    // The page is 50 rows; the collection is 240. A hook that reported what it
     // was holding would say 50, and every count downstream would be a page.
     expect(result.current.result.rows).toHaveLength(LIST_PAGE_SIZE)
     expect(result.current.result.total).toBe(EXECUTIONS.length)
@@ -125,12 +125,13 @@ describe('useLatestPage', () => {
     // This is the property that tells a real count from a page length: change
     // how much you ask for and the answer to "how many are there" must not
     // move. `rows.length` would have tracked the page size exactly.
-    expect(observed.map((o) => o.total)).toEqual([120, 120, 120])
+    expect(observed.map((o) => o.total)).toEqual([EXECUTIONS.length, EXECUTIONS.length, EXECUTIONS.length])
     expect(observed.map((o) => o.rows)).toEqual([1, 10, LIST_PAGE_SIZE])
   })
 
   it('reaches the last page, and the arithmetic closes on the total', async () => {
-    const pageSize = LIST_PAGE_SIZE
+    // The executions fixture is three pages at the size its surface asks for.
+    const pageSize = EXECUTION_LIST_PAGE_SIZE
     const total = EXECUTIONS.length
     const lastPage = Math.ceil(total / pageSize)
     const query: ListQuery = { page: lastPage, page_size: pageSize }

@@ -52,7 +52,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final, Protocol, TypedDict
@@ -64,12 +63,14 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.announced_model i
 from syn_domain.contexts.orchestration.slices.execute_workflow.CancelSignalPoller import (
     CancelSignalPoller,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.codex_faults import (
+    codex_fault_reason,
+    codex_login_fault_in,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
-    ApiErrorType,
     InterruptibleWorkspace,
     ReportedUsage,
     StreamResult,
-    api_error_label,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.held_token_rows import HeldTokenRows
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_cost_limit import (
@@ -78,6 +79,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.phase_cost_limit 
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_verdict import (
     VerdictReader,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.side_effect_free import (
+    codex_item_changes_nothing,
 )
 from syn_shared.agents import AgentProvider
 from syn_shared.codex_stream import (
@@ -122,99 +126,7 @@ MISSING_TERMINAL_TURN_REASON: Final[str] = (
 # This processor drives a CODEX primary, so its declared delegate is claude -p.
 DELEGATION_TARGET: DelegationTarget = DELEGATION_TARGET_BY_PRIMARY[AgentProvider.CODEX]
 
-# --- Terminal faults the codex CLI reports on stdout as NON-JSON log lines ----
-#
-# The codex CLI writes tracing lines to the same stdout as its JSON events. Most
-# are inert noise (see module docstring) and are rightly discarded, but a login
-# failure is announced ONLY there:
-#
-#   ERROR codex_login::auth::manager: Failed to refresh token: 401 Unauthorized
-#   ... "code": "refresh_token_reused"
-#
-# Discarding it meant an expired codex login surfaced downstream as "codex
-# stream ended without a terminal turn.completed event" - a true statement
-# about a symptom that names the wrong subsystem and gives an operator nothing
-# to act on (issue #891).
-#
-# THREE conditions, ALL required. Each rejects lines the other two accept.
-#
-#   1. error severity, ANCHORED to the tracing-line format,
-#   2. auth CONTEXT (the codex_login target, or an auth:: module path),
-#   3. an explicit auth-FAILURE marker.
-#
-# Why each is needed, with the line that motivates it:
-#
-# (1) anchored severity. A severity word can appear anywhere in a line,
-#     including inside captured command output:
-#
-#       INFO codex_exec: command output: ERROR deleting file: unauthorized operation
-#
-#     A file-deletion failure is not an auth failure. Matching `ERROR`
-#     anywhere would diagnose it as one. The tracing format puts the severity
-#     first, so that is where it is required.
-#
-# (2) auth context. The golden fixture carries a routine
-#     `ERROR codex_models_manager::manager: ...` diagnostic; without an auth
-#     requirement, a severity+marker filter would promote unrelated subsystem
-#     errors into authentication verdicts.
-#
-# (3) a failure marker. The subsystem NAME is not evidence of a fault -
-#     healthy lines carry it too:
-#
-#       INFO codex_login::auth::manager: loaded cached credentials
-#
-#     An early draft ORed its alternatives, so the bare name matched. Because
-#     AgentExecutionHandler forces exit code 1 whenever a codex stream carries
-#     any error_reason, that draft would have failed SUCCESSFUL codex phases -
-#     a worse defect than the missing reason it set out to fix.
-#
-# The marker list is deliberately broader than the single production line that
-# prompted #891. Real auth failures the CLI spells differently -
-# "Authentication failed: HTTP 401", "token expired" - were falling through to
-# the generic "stream ended without a terminal turn" message, which is exactly
-# the misdiagnosis this exists to remove.
-_TRACING_ERROR_SEVERITY_RE = re.compile(r"^\s*(?:ERROR|FATAL)\b")
-_AUTH_CONTEXT_RE = re.compile(r"codex_login|auth::", re.IGNORECASE)
-_AUTH_FAILURE_MARKER_RE = re.compile(
-    r"failed to refresh token"
-    r"|refresh_token_reused"
-    r"|invalid_grant"
-    r"|unauthorized"
-    r"|authentication failed"
-    r"|token expired"
-    r"|login required"
-    r"|\b(?:401|403)\b",
-    re.IGNORECASE,
-)
-_HTTP_AUTH_STATUS_RE = re.compile(r"\b(401|403)\b")
-_MAX_FAULT_LINE_LEN = 160
-
 _MAX_PREVIEW_LEN = 500
-
-
-def codex_fault_reason(message: str) -> str:
-    """The reason text codex's own words about a failed turn are reported under.
-
-    A function rather than an f-string at the one call site because it is not
-    only written here: `busy_upstream` has to RECOGNISE a specific sentence
-    codex says about its own capacity, and it can only do that against the
-    exact spelling this produces. Two copies of that spelling would drift the
-    first time either the prefix or the truncation changed, and the failure
-    would be silent - a phase that stopped being retried, with nothing to read
-    but the reason it was never retried for.
-    """
-    return f"codex reported: {message[:_MAX_FAULT_LINE_LEN]}"
-
-
-def codex_login_fault_reason(status: str, line: str) -> str:
-    """The reason text a codex CLI login fault on stdout is reported under.
-
-    A function for the same reason as `codex_fault_reason`: the upstream
-    failure reader recognises this shape as `auth` by the prefix this writes
-    with an empty `line`, so the two cannot drift apart.
-    """
-    label = api_error_label(ApiErrorType.AUTHENTICATION, status)
-    return f"{label}: codex CLI login - {line[:_MAX_FAULT_LINE_LEN]}"
 
 
 def _as_int(value: object) -> int:
@@ -313,8 +225,8 @@ class CodexObservabilityRecorder(Protocol):
     ``EventStreamProcessor.ObservabilityRecorder``.
     """
 
-    def note_agent_activity(self) -> None:
-        """See ``ObservabilityCollector.note_agent_activity`` (#1303)."""
+    def note_agent_activity(self, *, changed_nothing: bool = False) -> None:
+        """See ``ObservabilityCollector.note_agent_activity`` (#1303, #1825)."""
         ...
 
     def note_observed_model(self, model: str | None) -> None:
@@ -326,6 +238,9 @@ class CodexObservabilityRecorder(Protocol):
         tool_name: str,
         tool_use_id: str,
         input_preview: str,
+        skill_name: str | None = None,
+        *,
+        changes_nothing: bool = False,
     ) -> None: ...
 
     async def record_tool_completed(
@@ -334,6 +249,8 @@ class CodexObservabilityRecorder(Protocol):
         tool_use_id: str,
         success: bool,
         output_preview: str | None,
+        *,
+        changes_nothing: bool = False,
     ) -> None: ...
 
     async def record_token_usage(
@@ -782,17 +699,9 @@ class CodexStreamProcessor:
         """
         if self._auth_fault_candidate is not None:
             return
-        if not _TRACING_ERROR_SEVERITY_RE.search(line):
-            return
-        if not _AUTH_CONTEXT_RE.search(line):
-            return
-        if not _AUTH_FAILURE_MARKER_RE.search(line):
-            return
-        status = _HTTP_AUTH_STATUS_RE.search(line)
-        self._auth_fault_candidate = codex_login_fault_reason(
-            status.group(1) if status else "", line
-        )
-        logger.warning("Codex auth fault seen on stdout: %s", line[:_MAX_FAULT_LINE_LEN])
+        self._auth_fault_candidate = codex_login_fault_in(line)
+        if self._auth_fault_candidate is not None:
+            logger.warning("Codex auth fault seen on stdout: %s", self._auth_fault_candidate)
 
     def _note_delegation_attempt(self, tool_use_id: str, command: str) -> None:
         """Record a codex command_execution that invokes `claude -p` (#894)."""
@@ -876,26 +785,20 @@ class CodexStreamProcessor:
         makes an ordinary prompt rejection look like the same unexplained
         failure as a stream that stopped for reasons nobody has established.
 
-        This is #891 again for a different event type, so it takes the same
-        shape: keep the FIRST fault, because a later generic one must not
-        overwrite the specific one that ended the run.
+        This is #891 again, so it keeps the FIRST fault: a later generic one
+        must not overwrite the specific one that ended the run. Except that
+        `turn.failed` replaces any `error`: it is codex's verdict on the turn,
+        and an `error` before a different fault did not end it - holding that
+        hiccup hid a refusal and lost its fallback (verification of #1819).
 
-        AND IT IS A CANDIDATE, NOT A VERDICT. Setting `_error_reason` here
-        directly would be worse than the bug it fixes. `AgentExecutionHandler`
-        forces a non-zero phase exit whenever a codex stream carries ANY
-        `error_reason`, and it does not consult `saw_terminal_turn`. So an
-        `error` event the CLI then recovers from - `error` ... `turn.completed`
-        - would fail a phase that finished cleanly, and would report the
-        mid-turn hiccup as its cause. That does not mask a failure; it invents
-        one. This module's own comment already names that class as the worse
-        defect (an early #891 draft "would have failed SUCCESSFUL codex
-        phases"), and the sibling `_note_non_json_fault` holds its result as a
-        candidate for exactly this reason.
-
-        So the message is held and promoted at end-of-stream only when no
-        `turn.completed` arrived. A turn that genuinely failed emits no terminal
-        turn, so the reason still surfaces; a turn that recovered keeps its
-        success. Found by the cross-model review of #1117.
+        AND IT IS A CANDIDATE, NOT A VERDICT. `AgentExecutionHandler` forces a
+        non-zero exit whenever a codex stream carries ANY `error_reason`,
+        without consulting `saw_terminal_turn`, so setting it here would fail a
+        phase that recovered (`error` ... `turn.completed`) and blame the
+        hiccup - inventing a failure, the class an early #891 draft hit ("would
+        have failed SUCCESSFUL codex phases"); `_note_non_json_fault` holds its
+        result for the same reason. So the message is promoted at end-of-stream
+        only when no `turn.completed` arrived. Found by the review of #1117.
         """
         message = event.get("message")
         if not message:
@@ -907,7 +810,10 @@ class CodexStreamProcessor:
         logger.error("Codex turn failed: %s", message)
         # A CANDIDATE, not a verdict - promoted at end-of-stream only if no
         # terminal turn arrived. See the class comment above for why.
-        self._turn_fault_candidate = self._turn_fault_candidate or reason
+        if event.get("type") == CodexStreamType.TURN_FAILED:
+            self._turn_fault_candidate = reason
+        else:
+            self._turn_fault_candidate = self._turn_fault_candidate or reason
 
     async def _handle_item_started(self, event: _CodexEvent) -> None:
         """Handle ``item.started``: record the start codex announced, if any.
@@ -936,8 +842,11 @@ class CodexStreamProcessor:
         # branch has never heard of - is the model having got somewhere. Only
         # the two below are worth an observation; all of them are worth the
         # fact, and that fact is what decides whether the whole prompt may be
-        # run a second time over whatever the item did (#1303).
-        self._collector.note_agent_activity()
+        # run a second time over whatever the item did (#1303). Whether it
+        # may also have WRITTEN is a narrower fact, and only an item read in
+        # full can claim it did not (#1825).
+        changes_nothing = codex_item_changes_nothing(item.get("type"), item.get("command"))
+        self._collector.note_agent_activity(changed_nothing=changes_nothing)
 
         item_type = item.get("type")
         tool_use_id = str(item.get("id", "unknown"))
@@ -949,6 +858,7 @@ class CodexStreamProcessor:
                 tool_name=CODEX_TOOL_NAME_COMMAND,
                 tool_use_id=tool_use_id,
                 input_preview=command[:_MAX_PREVIEW_LEN],
+                changes_nothing=changes_nothing,
             )
         elif item_type == CodexItemType.FILE_CHANGE:
             await self._collector.record_tool_started(
@@ -967,11 +877,12 @@ class CodexStreamProcessor:
         # announce a `file_change` only once it has happened (#1064), so the
         # completion can be the first and last the stream says about a
         # workspace mutation. Same rule as the start: any type counts.
-        self._collector.note_agent_activity()
+        changes_nothing = codex_item_changes_nothing(item.get("type"), item.get("command"))
+        self._collector.note_agent_activity(changed_nothing=changes_nothing)
 
         item_type = item.get("type")
         if item_type == CodexItemType.COMMAND_EXECUTION:
-            await self._handle_command_execution_completed(item)
+            await self._handle_command_execution_completed(item, changes_nothing=changes_nothing)
         elif item_type == CodexItemType.FILE_CHANGE:
             await self._handle_file_change_completed(item)
         elif item_type == CodexItemType.AGENT_MESSAGE:
@@ -988,7 +899,9 @@ class CodexStreamProcessor:
                 # it takes the identical fix rather than being left behind.
                 self._verdict_reader.read(said)
 
-    async def _handle_command_execution_completed(self, item: _CodexItem) -> None:
+    async def _handle_command_execution_completed(
+        self, item: _CodexItem, *, changes_nothing: bool
+    ) -> None:
         tool_use_id = str(item.get("id", "unknown"))
         exit_code = item.get("exit_code")
         success = exit_code == 0
@@ -1020,6 +933,7 @@ class CodexStreamProcessor:
             tool_use_id=tool_use_id,
             success=success,
             output_preview=output[:_MAX_PREVIEW_LEN] if output else None,
+            changes_nothing=changes_nothing,
         )
 
     async def _handle_file_change_completed(self, item: _CodexItem) -> None:

@@ -8,6 +8,7 @@ coordinator uses, twice, so an appending handler would show up.
 from __future__ import annotations
 
 import os
+from dataclasses import replace
 from decimal import Decimal
 
 os.environ.setdefault("APP_ENVIRONMENT", "test")
@@ -26,6 +27,7 @@ from syn_domain.contexts.orchestration.domain.commands.RecordEvalRunScoreCommand
 from syn_domain.contexts.orchestration.domain.read_models.eval_runs import (
     EvalRunFacts,
     EvalRunScore,
+    EvalRunStats,
     PhaseModel,
     summarize,
 )
@@ -149,6 +151,7 @@ def _run(
     cost: str | None,
     started_at: str,
     version: str | None = None,
+    duration: float | None = None,
 ) -> EvalRunFacts:
     return EvalRunFacts(
         execution_id=execution_id,
@@ -159,7 +162,7 @@ def _run(
         completed_at=None,
         models=tuple(PhaseModel(f"p{i}", m) for i, m in enumerate(models)),
         total_cost_usd=None if cost is None else Decimal(cost),
-        duration_seconds=None,
+        duration_seconds=duration,
         score=None
         if verdict is None
         else EvalRunScore(
@@ -237,3 +240,139 @@ class TestSummarize:
 
         assert (summary.run_count, summary.pass_rate, summary.last_verdict) == (0, None, None)
         assert summary.variants == ()
+        assert summary.stats == EvalRunStats(None, 0, None, 0, None, 0, 0, 0, 0, 0)
+
+    def test_duration_and_cost_are_medians_and_cost_per_pass_pays_for_every_scored_run(
+        self,
+    ) -> None:
+        opus = "claude-opus-5-5"
+        runs = [
+            _run("1", "wf-a", [opus], Verdict.PASS, "1.00", "2026-10-01T00:00:00+00:00", None, 60),
+            _run("2", "wf-a", [opus], Verdict.FAIL, "3.00", "2026-10-02T00:00:00+00:00", None, 600),
+            _run(
+                "3", "wf-a", [opus], Verdict.ERROR, "2.00", "2026-10-03T00:00:00+00:00", None, 120
+            ),
+            _run("4", "wf-a", [opus], None, "6.00", "2026-10-04T00:00:00+00:00", None, 3000),
+            _run("5", "wf-a", [opus], Verdict.PASS, None, "2026-10-05T00:00:00+00:00", None, None),
+        ]
+
+        [variant] = summarize(runs).variants
+
+        # Even count of known durations (60, 120, 600, 3000): the mean of the middle two.
+        assert variant.stats.median_duration_seconds == pytest.approx(360)
+        assert variant.stats.median_cost_usd == Decimal("2.50")
+        # 6.00 known spend of the scored runs - the FAIL and the ERROR included,
+        # the unscored run's 6.00 not - over 2 PASS runs. Run 5 is scored and its
+        # cost is unknown, so this is a lower bound.
+        assert variant.stats.cost_per_pass_usd == Decimal("3.00")
+        assert variant.stats.incomplete_cost_count == 1
+        assert variant.stats.incomplete_spend_count == 1
+        s = variant.stats
+        assert (s.pass_count, s.fail_count, s.error_count, s.unscored_count) == (2, 1, 1, 1)
+        assert variant.stats.judged_count == 3
+        assert variant.stats.incomplete_duration_count == 1
+        assert variant.last_verdict is Verdict.PASS
+
+    def test_nothing_passed_has_no_cost_per_pass_and_each_variant_its_own_last_verdict(
+        self,
+    ) -> None:
+        opus, sonnet = "claude-opus-5-5", "claude-sonnet-5"
+        runs = [
+            _run("1", "wf-a", [opus], Verdict.FAIL, "1.00", "2026-10-01T00:00:00+00:00"),
+            _run("2", "wf-a", [opus], Verdict.ERROR, "1.00", "2026-10-02T00:00:00+00:00"),
+            _run("3", "wf-a", [sonnet], Verdict.PASS, "4.00", "2026-10-03T00:00:00+00:00"),
+        ]
+
+        summary = summarize(runs)
+
+        by_models = {v.models: v for v in summary.variants}
+        assert by_models[opus,].stats.cost_per_pass_usd is None
+        assert by_models[opus,].last_verdict is Verdict.ERROR
+        assert by_models[sonnet,].last_verdict is Verdict.PASS
+        # Across the eval: 6.00 over one PASS.
+        assert summary.stats.cost_per_pass_usd == Decimal("6.00")
+        assert summary.stats.median_duration_seconds is None
+
+    def test_a_lower_bound_is_spend_but_never_a_median(self) -> None:
+        """A run with unpriced observations or a phase of unknown duration has only
+        a lower bound (#890). It is real spend for cost per PASS, which then says it
+        is partial, but it must not stand in for a whole run's cost or duration."""
+        opus = "claude-opus-5-5"
+        complete = _run("1", "wf-a", [opus], Verdict.PASS, "4.00", "2026-10-01T00:00:00+00:00")
+        partial = replace(
+            _run("2", "wf-a", [opus], Verdict.PASS, "1.00", "2026-10-02T00:00:00+00:00"),
+            unpriced_observation_count=2,
+            unknown_duration_phase_count=1,
+        )
+        runs = [replace(complete, duration_seconds=300.0), replace(partial, duration_seconds=20.0)]
+
+        stats = summarize(runs).stats
+        [variant] = summarize(runs).variants
+
+        assert (stats.median_cost_usd, stats.incomplete_cost_count) == (Decimal("4.00"), 1)
+        assert (stats.median_duration_seconds, stats.incomplete_duration_count) == (300.0, 1)
+        assert stats.cost_per_pass_usd == Decimal("2.50")
+        assert stats.incomplete_spend_count == 1
+        assert variant.avg_cost_usd == Decimal("4.00")
+
+    def test_cost_per_pass_ignores_unscored_spend_and_keeps_error_spend(self) -> None:
+        """An unscored run has no verdict, so its spend is not the price of a PASS.
+        An ERROR run was scored, and what it cost is."""
+        opus = "claude-opus-5-5"
+        passed = _run("1", "wf-a", [opus], Verdict.PASS, "0.33", "2026-10-01T00:00:00+00:00")
+        errored = _run("2", "wf-a", [opus], Verdict.ERROR, "0.22", "2026-10-02T00:00:00+00:00")
+        baseline = summarize([passed, errored]).stats
+        assert baseline.cost_per_pass_usd == Decimal("0.55")
+
+        for cost in ("0.38", "1.03", "1000.00", None):
+            unscored = _run("3", "wf-a", [opus], None, cost, "2026-10-03T00:00:00+00:00")
+            partial = replace(unscored, unpriced_observation_count=1)
+            for extra in (unscored, partial):
+                stats = summarize([passed, errored, extra]).stats
+                assert stats.cost_per_pass_usd == baseline.cost_per_pass_usd, (cost, extra)
+                assert stats.incomplete_spend_count == 0
+                assert stats.unscored_count == 1
+
+        dearer_error = replace(errored, total_cost_usd=Decimal("1.22"))
+        assert summarize([passed, dearer_error]).stats.cost_per_pass_usd == Decimal("1.55")
+
+
+class TestBatchReadsForAPageOfRuns:
+    """``scores_of`` and ``records``: what a page of executions reads, once each."""
+
+    async def test_scores_of_answers_exactly_the_runs_asked_about(self) -> None:
+        stream, handler = await _scored_stream()
+        await handler.handle(_score("run-a", Verdict.FAIL))
+        await handler.handle(_score("run-b", Verdict.PASS))
+        evals = await _replayed(stream, times=1)
+
+        # (_EVAL, run-b) is scored and lies inside the product of the ids
+        # asked about, but was not itself asked about.
+        scores = await evals.scores_of({(str(_EVAL), "run-a"), (str(_OTHER), "run-b")})
+
+        assert {key: score.verdict for key, score in scores.items()} == {
+            (str(_EVAL), "run-a"): Verdict.FAIL
+        }
+        assert await evals.scores_of(set()) == {}
+
+    async def test_records_names_each_projected_eval_and_omits_the_rest(self) -> None:
+        stream, _handler = await _scored_stream()
+        evals = await _replayed(stream, times=1)
+
+        records = await evals.records({str(_EVAL), str(_OTHER), "eval-not-projected"})
+
+        assert {eval_id: record.name for eval_id, record in records.items()} == {
+            str(_EVAL): "Refactor quality",
+            str(_OTHER): "Other",
+        }
+
+    async def test_records_leaves_out_a_projected_eval_nobody_asked_about(self) -> None:
+        stream, _handler = await _scored_stream()
+        evals = await _replayed(stream, times=1)
+
+        # _OTHER is projected too; asking for _EVAL alone must not return it.
+        records = await evals.records({str(_EVAL), "eval-not-projected"})
+
+        assert {eval_id: record.name for eval_id, record in records.items()} == {
+            str(_EVAL): "Refactor quality"
+        }

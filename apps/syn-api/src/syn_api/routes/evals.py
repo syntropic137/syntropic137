@@ -45,16 +45,20 @@ from syn_api._wiring_evals import get_revision_resolver
 from syn_api.list_query import MAX_PAGE_SIZE
 from syn_api.routes.eval_runs import (
     eval_run_page,
+    eval_summaries,
     eval_summary,
     pass_rate_display,
+    stats_response,
     variant_responses,
 )
+from syn_api.services.read_model_status import read_model_status
 from syn_api.types import (
     AttachEvalRequest,
     CreateEvalRequest,
     EvalArchivedResponse,
     EvalBaselineRepoResponse,
     EvalCreatedResponse,
+    EvalDetailResponse,
     EvalListResponse,
     EvalResponse,
     EvalRunListResponse,
@@ -82,10 +86,11 @@ from syn_domain.contexts.orchestration import (
     SetWorkflowDefaultEvalCommand,
     SetWorkflowDefaultEvalHandler,
 )
+from syn_domain.contexts.orchestration.slices.list_evals.projection import EvalListProjection
 
 if TYPE_CHECKING:
-    from syn_adapters.projections.manager import ProjectionManager
     from syn_domain.contexts.orchestration import EvalMembershipResult
+    from syn_domain.contexts.orchestration.domain.read_models.eval_runs import EvalRunsSummary
     from syn_domain.contexts.orchestration.domain.read_models.eval_summary import EvalRecord
 
 router = APIRouter(tags=["evals"])
@@ -229,10 +234,9 @@ _EVAL_RESPONSES: dict[int | str, dict[str, str]] = {
 }
 
 
-async def _response(
-    manager: ProjectionManager, record: EvalRecord, run_count: int, tally: dict[str, int]
+def _response(
+    record: EvalRecord, run_count: int, tally: dict[str, int], summary: EvalRunsSummary
 ) -> EvalResponse:
-    summary = await eval_summary(manager, record.eval_id)
     return EvalResponse(
         eval_id=record.eval_id,
         name=record.name,
@@ -259,6 +263,7 @@ async def _response(
         last_run_at=summary.last_run_at,
         last_verdict=summary.last_verdict,
         variants=variant_responses(summary),
+        stats=stats_response(summary.stats),
     )
 
 
@@ -348,20 +353,25 @@ async def list_evals_endpoint(
         offset=(page - 1) * page_size,
         limit=page_size,
     )
+    # Every run of every eval on the page, read in one batch per source (#1811).
+    summaries = await eval_summaries(manager, [row.record.eval_id for row in result.rows])
     return EvalListResponse(
         evals=[
-            await _response(manager, row.record, row.run_count, row.run_status_counts)
+            _response(
+                row.record, row.run_count, row.run_status_counts, summaries[row.record.eval_id]
+            )
             for row in result.rows
         ],
         total=result.total,
         page=page,
         page_size=page_size,
         status_counts=result.status_counts,
+        read_model_status=await read_model_status(EvalListProjection.PROJECTION_NAME),
     )
 
 
-@router.get("/evals/{eval_id}", response_model=EvalResponse, responses=_EVAL_RESPONSES)
-async def get_eval_endpoint(eval_id: str) -> EvalResponse:
+@router.get("/evals/{eval_id}", response_model=EvalDetailResponse, responses=_EVAL_RESPONSES)
+async def get_eval_endpoint(eval_id: str) -> EvalDetailResponse:
     """One eval with its Baseline and run tally. Its runs are `GET /evals/{eval_id}/runs`."""
     from syn_api.prefix_resolver import resolve_or_raise
 
@@ -371,7 +381,16 @@ async def get_eval_endpoint(eval_id: str) -> EvalResponse:
     detail = await manager.eval_list.detail(eval_id, limit=0)
     if detail is None:
         raise HTTPException(status_code=404, detail=f"Eval not found: {eval_id}")
-    return await _response(manager, detail.record, detail.runs.total, detail.runs.status_counts)
+    row = _response(
+        detail.record,
+        detail.runs.total,
+        detail.runs.status_counts,
+        await eval_summary(manager, eval_id),
+    )
+    return EvalDetailResponse(
+        **row.model_dump(),
+        read_model_status=await read_model_status(EvalListProjection.PROJECTION_NAME),
+    )
 
 
 @router.get("/evals/{eval_id}/runs", response_model=EvalRunListResponse, responses=_EVAL_RESPONSES)
