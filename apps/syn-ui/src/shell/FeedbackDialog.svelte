@@ -258,6 +258,12 @@
     e.preventDefault()
   }
 
+  /** Footer Cancel / Done: the footer has no `close`, and a parent-side close skips onOpenChange. */
+  function closeDialog() {
+    feedbackUi.open = false
+    reset()
+  }
+
   function onOpenChange(next: boolean) {
     // A user close (Esc, X, Cancel, Done). Closing for the picker sets `open` directly and never lands here.
     if (!next) reset()
@@ -306,7 +312,7 @@
 
 <div {...{ [FEEDBACK_UI_ATTR]: '' }}>
   <Dialog bind:open={feedbackUi.open} {onOpenChange} {initialFocus} title="Send feedback" size="md">
-    {#snippet children({ close })}
+    {#snippet children()}
       {#if phase.kind === 'sent'}
         <div class="sky-fb__done" role="status">
           <Callout tone="note" title="Sent.">
@@ -316,14 +322,11 @@
           {#if phase.mediaFailed > 0}
             <Callout tone="danger" title="Some screenshots did not upload.">{phase.mediaFailed} failed; the item itself was filed.</Callout>
           {/if}
-          <div class="sky-fb__actions">
-            <Button variant="outline" onclick={reset}>Send another</Button>
-            <Button onclick={close}>Done</Button>
-          </div>
         </div>
       {:else}
         <!-- svelte-ignore a11y_no_noninteractive_element_interactions: hotkeys, paste and drop are conveniences over the buttons below -->
         <form
+          id="sky-fb-form"
           class="sky-fb"
           class:sky-fb--drag={dragging}
           onsubmit={submit}
@@ -366,11 +369,15 @@
                 <code class="sky-fb__pill" title={element.selector}>{element.label}</code>
                 <span class="sky-fb__muted">{element.box.width}×{element.box.height}</span>
                 <Button size="sm" variant="ghost" onclick={() => beginOverlay('element')} disabled={sending}>Re-pick</Button>
-                <button type="button" class="sky-fb__icon" aria-label="Remove pinned element" onclick={() => (element = null)} disabled={sending}><X size={14} aria-hidden="true" /></button>
+                <Button size="sm" variant="ghost" aria-label="Remove pinned element" onclick={() => (element = null)} disabled={sending}>
+                  {#snippet icon()}<X size={14} aria-hidden="true" />{/snippet}
+                </Button>
               </div>
             {:else}
               <Button size="sm" variant="outline" onclick={() => beginOverlay('element')} disabled={sending}>
-                <MousePointerClick size={14} aria-hidden="true" /> Pick element <kbd class="sky-fb__kbd">E</kbd>
+                {#snippet icon()}<MousePointerClick size={14} aria-hidden="true" />{/snippet}
+                {#snippet iconEnd()}<kbd class="sky-fb__kbd">E</kbd>{/snippet}
+                Pick element
               </Button>
             {/if}
           </div>
@@ -399,13 +406,18 @@
             <span class="sky-fb__chip-label">Screenshots</span>
             <div class="sky-fb__shot-actions">
               <Button size="sm" variant="outline" onclick={() => void shoot(null)} disabled={sending || capturing}>
-                <Camera size={14} aria-hidden="true" /> Take screenshot <kbd class="sky-fb__kbd">S</kbd>
+                {#snippet icon()}<Camera size={14} aria-hidden="true" />{/snippet}
+                {#snippet iconEnd()}<kbd class="sky-fb__kbd">S</kbd>{/snippet}
+                Take screenshot
               </Button>
               <Button size="sm" variant="outline" onclick={() => beginOverlay('area')} disabled={sending || capturing}>
-                <SquareDashed size={14} aria-hidden="true" /> Capture area <kbd class="sky-fb__kbd">A</kbd>
+                {#snippet icon()}<SquareDashed size={14} aria-hidden="true" />{/snippet}
+                {#snippet iconEnd()}<kbd class="sky-fb__kbd">A</kbd>{/snippet}
+                Capture area
               </Button>
               <Button size="sm" variant="outline" onclick={() => fileInput?.click()} disabled={sending}>
-                <ImageUp size={14} aria-hidden="true" /> Upload image
+                {#snippet icon()}<ImageUp size={14} aria-hidden="true" />{/snippet}
+                Upload image
               </Button>
               <input
                 bind:this={fileInput}
@@ -427,7 +439,7 @@
                 {#each shots as s, i (s.previewUrl)}
                   <li class="sky-fb__shot">
                     <img src={s.previewUrl} alt="Screenshot {i + 1}" />
-                    <button type="button" class="sky-fb__icon sky-fb__shot-remove" aria-label="Remove screenshot {i + 1}" onclick={() => removeShot(i)} disabled={sending}><X size={12} aria-hidden="true" /></button>
+                    <button type="button" class="sky-fb__icon sky-fb__shot-remove" aria-label="Remove screenshot {i + 1}" onclick={() => removeShot(i)} disabled={sending}><X size={14} aria-hidden="true" /></button>
                   </li>
                 {/each}
               </ul>
@@ -438,12 +450,17 @@
           {#if phase.kind === 'failed'}
             <Callout tone="danger" role="alert" title="Not sent.">{phase.message}</Callout>
           {/if}
-          <div class="sky-fb__actions">
-            <span class="sky-fb__muted sky-fb__keys">B F U P Q O type · 1-4 priority · E pin · S shot</span>
-            <Button type="button" variant="ghost" onclick={close} disabled={sending}>Cancel</Button>
-            <Button type="submit" loading={sending}>{sending ? 'Sending' : 'Send feedback'}</Button>
-          </div>
         </form>
+      {/if}
+    {/snippet}
+    {#snippet footer()}
+      {#if phase.kind === 'sent'}
+        <Button variant="outline" onclick={reset}>Send another</Button>
+        <Button variant="solid" onclick={closeDialog}>Done</Button>
+      {:else}
+        <span class="sky-fb__keys">B F U P Q O type · 1-4 priority · E pin · S shot · A area</span>
+        <Button type="button" variant="ghost" onclick={closeDialog} disabled={sending}>Cancel</Button>
+        <Button type="submit" form="sky-fb-form" variant="solid" loading={sending}>{sending ? 'Sending' : 'Send feedback'}</Button>
       {/if}
     {/snippet}
   </Dialog>
@@ -537,12 +554,13 @@
   .sky-fb__chip kbd,
   .sky-fb__kbd {
     font-family: var(--ds-font-mono);
-    font-size: var(--ds-text-xs);
+    font-size: var(--sky-text-label);
     color: var(--ds-color-text-subtle);
   }
   .sky-fb__icon {
     display: grid;
     place-items: center;
+    padding: 0;
     width: var(--ds-space-6);
     height: var(--ds-space-6);
     border: 0;
@@ -550,6 +568,17 @@
     background: var(--sky-color-control-hover);
     color: var(--ds-color-fg);
     cursor: pointer;
+  }
+  /* One control height, one line: the pill shrinks (ellipsis) before anything wraps. */
+  .sky-fb__element {
+    flex-wrap: nowrap;
+  }
+  .sky-fb__element .sky-fb__pill {
+    min-width: 0;
+    flex: 0 1 auto;
+  }
+  .sky-fb__element .sky-fb__muted {
+    flex: none;
   }
   .sky-fb__file {
     position: absolute;
@@ -592,16 +621,17 @@
     color: var(--ds-color-danger);
     font-size: var(--ds-text-sm);
   }
-  .sky-fb__actions {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: flex-end;
-    gap: var(--ds-space-2-5);
-  }
+  /* Lives in the Dialog footer (flex, wrap, gap --ds-space-2): its own line above the buttons. */
   .sky-fb__keys {
-    margin-right: auto;
+    flex: 1 1 100%;
+    color: var(--ds-color-text-subtle);
     font-family: var(--ds-font-mono);
+    font-size: var(--sky-text-label);
+  }
+  @media (pointer: coarse) {
+    .sky-fb__keys {
+      display: none;
+    }
   }
   .sky-fb__id {
     font-family: var(--ds-font-mono);
