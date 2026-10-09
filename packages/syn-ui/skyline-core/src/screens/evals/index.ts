@@ -9,6 +9,17 @@
 import { formatCost } from '../../format/cost'
 import { normalizeVerdict, type Verdict, type VerdictCase, type VerdictCell, type VerdictMatrix, type Verifier, cellKey } from '../../patterns/verdict'
 
+export interface EvalVariantLike {
+  workflow_id: string
+  workflow_version?: string | null
+  models: readonly string[]
+  avg_cost_usd?: string | null
+  run_count: number
+  last_run_at?: string | null
+  last_verdict?: string | null
+  stats?: { median_cost_usd?: string | null } | null
+}
+
 export interface EvalLike {
   eval_id: string
   name: string
@@ -16,10 +27,10 @@ export interface EvalLike {
   last_verdict?: string | null
   last_run_at?: string | null
   run_count: number
+  archived?: boolean
   starting_workflow_id?: string | null
-  variants?: readonly { workflow_id: string; models: readonly string[]; avg_cost_usd?: string | null; run_count: number }[] | null
+  variants?: readonly EvalVariantLike[] | null
 }
-
 export interface EvalRunLike {
   execution_id: string
   started_at?: string | null
@@ -71,7 +82,9 @@ export interface EvalBoardModel {
   cells: VerdictMatrix
   /** Eval id per cell key, for the readout's links and detail fetch. */
   evalIds: Record<string, string>
-  /** Common suite tag prefix ("verifier-seed-v1 · v2"), when every eval shares one. */
+  /** Workflow per cell key: the variant whose latest run the readout shows. */
+  workflows: Record<string, string>
+  /** Common suite ("verifier-seed", "verifier-seed-v1 · v2"), when every eval shares one. */
   suite: string | null
 }
 
@@ -81,43 +94,127 @@ export interface BoardOptions {
   evalHref?: (evalId: string) => string
 }
 
+/** One (case, workflow) result before it is placed on the board. */
+interface BoardEntry {
+  caseId: string
+  workflow: string
+  model: string
+  agentTag: string | null
+  verdict: Verdict
+  costUsd: number | null
+  runs: number
+  at: number
+  /** Stable-id evals (variants carry the verifiers) beat legacy one-per-verifier evals. */
+  stable: boolean
+  e: EvalLike
+}
+
 /**
- * Pivot evals tagged `case:<id>` and `workflow:<id>` into the Verdict
- * Board. Evals missing either tag are left out. When two evals land in one
- * cell the most recently run one wins. Verifiers keep first-seen order of
- * their earliest run so the column order is stable.
+ * Pivot evals into the Verdict Board: one cell per case x workflow.
+ *
+ * Two shapes feed it. A legacy eval is one (case, verifier) pair, tagged
+ * `case:<id>` and `workflow:<id>` (or with a starting workflow). A stable-id
+ * eval (`verifier-seed: <case>`) has only the `case:` tag and holds one
+ * variant per verifier workflow, so it fills a whole row. Archived evals and
+ * evals that never ran are left out. In one cell a stable-id eval beats a
+ * legacy one, then the most recent run wins. Columns keep first-seen order
+ * and never share a header: a model used by two workflows is named with its
+ * workflow ("gpt-6.1-sol · sdlc-lean").
  */
 export function buildEvalBoard(evals: readonly EvalLike[], options: BoardOptions = {}): EvalBoardModel {
-  const board: EvalBoardModel = { cases: [], verifiers: [], cells: {}, evalIds: {}, suite: null }
-  const winner: Record<string, number> = {}
+  const board: EvalBoardModel = { cases: [], verifiers: [], cells: {}, evalIds: {}, workflows: {}, suite: null }
   const byCase = new Map<string, EvalLike[]>()
+  const placed = new Map<string, BoardEntry>()
+  const columns = new Map<string, BoardEntry>()
   const suites = new Set<string>()
 
   for (const e of evals) {
-    const caseId = tagValue(e.tags, 'case')
-    const wf = evalWorkflow(e)
-    if (!caseId || !wf) continue
-    suites.add(suiteOf(e.name) ?? '')
-    addToCase(board.cases, byCase, caseId, e)
-    const variant = evalVariant(e, wf)
-    addVerifier(board.verifiers, e, wf, variant?.models[0] ?? wf)
-    placeCell(board, winner, cellKey(caseId, wf), e, variant, options)
+    const entries = boardEntries(e)
+    if (!entries.length) continue
+    suites.add(tagValue(e.tags, 'suite') ?? suiteOf(e.name) ?? '')
+    addToCase(board.cases, byCase, entries[0]!.caseId, e)
+    for (const entry of entries) {
+      noteColumn(columns, entry)
+      const key = cellKey(entry.caseId, entry.workflow)
+      if (beats(entry, placed.get(key))) placed.set(key, entry)
+    }
   }
 
+  board.verifiers = verifierHeads([...columns.values()])
+  for (const [key, entry] of placed) placeCell(board, key, entry, options)
   if (options.caseSub) for (const c of board.cases) c.sub = options.caseSub(c.id, byCase.get(c.id) ?? [])
   const only = suites.size === 1 ? [...suites][0] : ''
   board.suite = only || null
   return board
 }
 
-type EvalVariant = NonNullable<EvalLike['variants']>[number]
-
-function evalWorkflow(e: EvalLike): string | null {
-  return tagValue(e.tags, 'workflow') ?? e.starting_workflow_id ?? null
+/** The board cells one eval contributes: none, one (legacy) or one per variant workflow (stable id). */
+function boardEntries(e: EvalLike): BoardEntry[] {
+  const caseId = tagValue(e.tags, 'case')
+  if (!caseId || e.archived || e.run_count <= 0) return []
+  const legacy = tagValue(e.tags, 'workflow') ?? e.starting_workflow_id ?? null
+  if (legacy) return [legacyEntry(e, caseId, legacy)]
+  return variantEntries(e, caseId)
 }
 
-function evalVariant(e: EvalLike, wf: string): EvalVariant | undefined {
-  return e.variants?.find((v) => v.workflow_id === wf) ?? e.variants?.[0]
+function legacyEntry(e: EvalLike, caseId: string, wf: string): BoardEntry {
+  const variant = e.variants?.find((v) => v.workflow_id === wf) ?? e.variants?.[0]
+  return {
+    caseId,
+    workflow: wf,
+    model: variant?.models[0] ?? wf,
+    agentTag: tagValue(e.tags, 'agent'),
+    verdict: normalizeVerdict(e.last_verdict),
+    costUsd: toNum(variant?.avg_cost_usd),
+    runs: e.run_count,
+    at: time(e.last_run_at) ?? 0,
+    stable: false,
+    e,
+  }
+}
+
+/** Variants of one workflow (several versions) collapse to the newest, with their runs summed. */
+function variantEntries(e: EvalLike, caseId: string): BoardEntry[] {
+  const out = new Map<string, BoardEntry>()
+  for (const v of e.variants ?? []) {
+    if (v.run_count <= 0) continue
+    const entry = variantEntry(e, caseId, v)
+    const prev = out.get(v.workflow_id)
+    if (!prev) {
+      out.set(v.workflow_id, entry)
+      continue
+    }
+    const newer = entry.at >= prev.at ? entry : prev
+    out.set(v.workflow_id, { ...newer, runs: prev.runs + entry.runs, model: newer.model || prev.model })
+  }
+  return [...out.values()]
+}
+
+function variantEntry(e: EvalLike, caseId: string, v: EvalVariantLike): BoardEntry {
+  return {
+    caseId,
+    workflow: v.workflow_id,
+    model: v.models[0] ?? '',
+    agentTag: null,
+    verdict: normalizeVerdict(v.last_verdict),
+    costUsd: toNum(v.stats?.median_cost_usd) ?? toNum(v.avg_cost_usd),
+    runs: v.run_count,
+    at: time(v.last_run_at) ?? time(e.last_run_at) ?? 0,
+    stable: true,
+    e,
+  }
+}
+
+function beats(next: BoardEntry, prev: BoardEntry | undefined): boolean {
+  if (!prev) return true
+  if (next.stable !== prev.stable) return next.stable
+  return next.at >= prev.at
+}
+
+/** A column remembers the newest entry that names a model. */
+function noteColumn(columns: Map<string, BoardEntry>, entry: BoardEntry): void {
+  const prev = columns.get(entry.workflow)
+  if (!prev || (entry.model && (!prev.model || entry.at > prev.at))) columns.set(entry.workflow, entry)
 }
 
 function addToCase(cases: VerdictCase[], byCase: Map<string, EvalLike[]>, caseId: string, e: EvalLike): void {
@@ -130,25 +227,42 @@ function addToCase(cases: VerdictCase[], byCase: Map<string, EvalLike[]>, caseId
   list.push(e)
 }
 
-function addVerifier(verifiers: Verifier[], e: EvalLike, wf: string, model: string): void {
-  if (verifiers.some((v) => v.id === wf)) return
-  const tagged = tagValue(e.tags, 'agent')
-  const kind = tagged === 'claude' || tagged === 'codex' ? tagged : agentOfModel(model)
-  verifiers.push({ id: wf, agent: AGENT_NAME[kind], agentKind: kind, model, short: shortModel(model), workflow: wf })
+/** "eval-verify-pinned-sdlc-lean-v1" -> "sdlc-lean"; the pinned default -> "pinned". */
+export function workflowLabel(workflowId: string): string {
+  const core = workflowId.replace(/^eval-verify-pinned-?/, '').replace(/-?v\d+$/, '')
+  return core || (workflowId.startsWith('eval-verify-pinned') ? 'pinned' : workflowId)
 }
 
-/** The most recently run eval wins a cell. */
-function placeCell(board: EvalBoardModel, winner: Record<string, number>, key: string, e: EvalLike, variant: EvalVariant | undefined, options: BoardOptions): void {
-  const t = time(e.last_run_at) ?? 0
-  if (winner[key] !== undefined && winner[key]! > t) return
-  winner[key] = t
-  board.evalIds[key] = e.eval_id
-  board.cells[key] = {
-    verdict: e.run_count > 0 ? normalizeVerdict(e.last_verdict) : 'unscored',
-    costUsd: toNum(variant?.avg_cost_usd),
-    runs: e.run_count,
-    evalHref: options.evalHref?.(e.eval_id),
+/** Column heads, made unique: a model shared by two workflows is suffixed with each workflow. */
+function verifierHeads(columns: BoardEntry[]): Verifier[] {
+  const heads = columns.map(verifierOf)
+  const count = (pick: (v: Verifier) => string) => {
+    const n = new Map<string, number>()
+    for (const v of heads) n.set(pick(v), (n.get(pick(v)) ?? 0) + 1)
+    return n
   }
+  const models = count((v) => `${v.agent}|${v.model}`)
+  for (const v of heads) {
+    if ((models.get(`${v.agent}|${v.model}`) ?? 0) < 2) continue
+    const label = workflowLabel(v.id)
+    v.model = `${v.model} · ${label}`
+    v.short = `${v.short} · ${label.split('-').pop()}`
+  }
+  const shorts = count((v) => v.short ?? '')
+  for (const v of heads) if ((shorts.get(v.short ?? '') ?? 0) > 1) v.short = v.model
+  return heads
+}
+
+function verifierOf(entry: BoardEntry): Verifier {
+  const model = entry.model || entry.workflow
+  const kind = entry.agentTag === 'claude' || entry.agentTag === 'codex' ? entry.agentTag : agentOfModel(entry.model || entry.workflow)
+  return { id: entry.workflow, agent: AGENT_NAME[kind], agentKind: kind, model, short: shortModel(model), workflow: entry.workflow }
+}
+
+function placeCell(board: EvalBoardModel, key: string, entry: BoardEntry, options: BoardOptions): void {
+  board.evalIds[key] = entry.e.eval_id
+  board.workflows[key] = entry.workflow
+  board.cells[key] = { verdict: entry.verdict, costUsd: entry.costUsd, runs: entry.runs, evalHref: options.evalHref?.(entry.e.eval_id) }
 }
 
 /** "verifier-seed-v1 v2: shared-esp-stream" -> "verifier-seed-v1 · v2". */

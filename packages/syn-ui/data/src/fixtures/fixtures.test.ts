@@ -104,7 +104,7 @@ describe('every screen has data in fixtures mode', () => {
   })
   it('evals, artifacts, triggers, repos, overview', async () => {
     const evals = await listEvals()
-    expect(evals.total).toBe(24)
+    expect(evals.total).toBe(29)
     expect((await getEval(evals.evals[0]!.eval_id)).tags.some((t) => t.startsWith('case:'))).toBe(true)
     expect((await listEvals({ tag: 'case:codex-cost-limit' })).total).toBe(4)
     const opus = await listEvalRuns('eval-shared-esp-stream-1')

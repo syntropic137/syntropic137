@@ -63,16 +63,19 @@
   const firstKey = $derived(board.cases[0] && board.verifiers[0] ? cellKey(board.cases[0].id, board.verifiers[0].id) : null)
   const pickKey = $derived(selected ?? firstKey)
   const pickEvalId = $derived(pickKey ? board.evalIds[pickKey] : undefined)
+  const pickWorkflow = $derived(pickKey ? board.workflows[pickKey] : undefined)
 
-  // The readout shows the latest run of the selected eval: evidence, duration, links.
+  // The readout shows the latest run of the selected cell's workflow: evidence, duration, links.
+  // A stable-id eval holds every verifier, so its newest run may belong to another column.
   const pickRun = resource((signal) => {
     const id = pickEvalId
-    return id ? listEvalRuns(id, { page_size: 1 }, signal) : Promise.resolve(null)
+    return id ? listEvalRuns(id, { page_size: 50 }, signal) : Promise.resolve(null)
   })
 
   const cells = $derived.by(() => {
     if (!pickKey) return board.cells
-    const run = pickRun.data?.items[0]
+    const items = pickRun.data?.items ?? []
+    const run = items.find((r) => r.workflow_id === pickWorkflow) ?? items[0]
     if (!run || !pickEvalId || board.evalIds[pickKey] !== pickEvalId) return board.cells
     return {
       ...board.cells,
@@ -191,7 +194,10 @@
           <VerdictBlock class="sky-evals__block" {verdict} size={44} />
           <div class="sky-evals__row-body">
             <div class="sky-evals__row-top">
-              <a class="sky-evals__name" href={href(`/evals/${encodeURIComponent(e.eval_id)}`)}>{e.name}</a>
+              <span class="sky-evals__title">
+                <a class="sky-evals__name" href={href(`/evals/${encodeURIComponent(e.eval_id)}`)}>{e.name}</a>
+                {#if e.archived}<span class="sky-evals__archived">Archived</span>{/if}
+              </span>
               <div class="sky-evals__facts">
                 <span>{e.run_count} {e.run_count === 1 ? 'run' : 'runs'}</span>
                 <VerdictSparkline verdicts={(row.recent.length ? row.recent : [e.last_verdict ?? null]).map((v) => normalizeVerdict(v))} />
@@ -344,6 +350,24 @@
     color: var(--ds-color-fg);
     text-decoration: none;
     overflow-wrap: anywhere;
+  }
+  .sky-evals__title {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ds-space-1) var(--ds-space-2);
+    min-width: 0;
+  }
+  .sky-evals__archived {
+    display: inline-flex;
+    align-items: center;
+    height: 1.25rem;
+    padding: 0 var(--ds-space-2);
+    border-radius: var(--ds-radius-full);
+    background: var(--sky-color-neutral-soft);
+    color: var(--ds-color-text-muted);
+    font-size: var(--ds-text-xs);
+    font-weight: var(--ds-font-weight-semibold);
   }
   .sky-evals__name:hover {
     color: var(--ds-color-accent-hover);

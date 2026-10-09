@@ -1,7 +1,13 @@
 /**
- * Evals board sample data: six cases (one per caught bug) by four verifier
- * workflows. Each (case, verifier) pair is one eval tagged `case:<id>` and
- * `workflow:<id>`; the board pivots on those tags.
+ * Evals board sample data, in the two shapes the live API serves:
+ *
+ * - legacy: six cases (one per caught bug) by four verifier workflows. Each
+ *   (case, verifier) pair is one eval tagged `case:<id>` and `workflow:<id>`.
+ * - stable id: one eval per case (`verifier-seed: <case>`, tags `case:` and
+ *   `suite:` only, no starting workflow) whose variants are the verifiers.
+ *   Every scored run on the VPS lives in this shape.
+ *
+ * Plus archived legacy evals that never ran, which the board must skip.
  */
 import type { EvalRun, EvalRunListResponse, EvalSummary, EvalVariant, EvalVerdict } from '../resources/evals'
 import { type FixtureRoute, notFound, route } from './define'
@@ -108,6 +114,35 @@ function variantOf(runs: EvalRun[], workflow: string, version: string, model: st
     avg_cost_usd: avg.toFixed(6),
     avg_cost_display: `$${avg.toFixed(2)}`,
     last_run_at: own[0]?.started_at ?? null,
+    last_verdict: own[0]?.verdict ?? null,
+    stats: statsOf(own),
+  }
+}
+
+const median = (xs: number[]): number | null => {
+  if (!xs.length) return null
+  const s = [...xs].sort((a, b) => a - b)
+  const mid = Math.floor(s.length / 2)
+  return s.length % 2 ? s[mid]! : (s[mid - 1]! + s[mid]!) / 2
+}
+const money = (n: number | null) => (n === null ? '—' : n < 0.01 ? '<$0.01' : `$${n.toFixed(2)}`)
+
+/** EvalRunStatsResponse over runs, as the API derives it. */
+function statsOf(runs: EvalRun[]): EvalSummary['stats'] {
+  const secs = median(runs.map((r) => r.duration_seconds).filter((d): d is number => typeof d === 'number'))
+  const cost = median(runs.map((r) => Number(r.total_cost_usd)).filter((c) => Number.isFinite(c)))
+  const passes = runs.filter((r) => r.verdict === 'PASS').length
+  const total = runs.reduce((s, r) => s + Number(r.total_cost_usd ?? 0), 0)
+  const perPass = passes ? total / passes : null
+  return {
+    median_duration_seconds: secs,
+    median_duration_display: secs === null ? '—' : `${Math.floor(secs / 60)}m ${Math.round(secs % 60)}s`,
+    incomplete_duration_count: 0,
+    median_cost_usd: cost === null ? null : cost.toFixed(6),
+    median_cost_display: money(cost),
+    incomplete_cost_count: 0,
+    cost_per_pass_usd: perPass === null ? null : perPass.toFixed(6),
+    cost_per_pass_display: money(perPass),
   }
 }
 
@@ -155,6 +190,7 @@ function build(): EvalRecord[] {
           last_run_at: latestAt,
           last_verdict: verdict,
           variants,
+          stats: statsOf(runs),
         },
       })
     })
@@ -162,7 +198,153 @@ function build(): EvalRecord[] {
   return out
 }
 
-export const EVALS: EvalRecord[] = build()
+/** Stable-id verifiers: the variants of each `verifier-seed: <case>` eval. */
+export const STABLE_VERIFIERS = [
+  { model: 'claude-opus-5-5', workflow: 'eval-verify-pinned-v1' },
+  { model: 'claude-sonnet-5-5', workflow: 'eval-verify-pinned-sonnet-v1' },
+  { model: 'gpt-6.1-sol', workflow: 'eval-verify-pinned-sdlc-lean-v1' },
+  { model: 'gpt-6.1-sol', workflow: 'eval-verify-pinned-sdlc-baseline-v1' },
+] as const
+
+type StableRun = [verifier: number, verdict: EvalVerdict | null, status: 'completed' | 'failed', cost: number, seconds: number, review: string, findings: number, hoursAgo: number]
+
+interface StableCase {
+  id: string
+  control: boolean
+  sha: string
+  file: string
+  runs: StableRun[]
+}
+
+const STABLE_CASES: StableCase[] = [
+  {
+    id: 'shared-esp-stream',
+    control: false,
+    sha: '6646da278d17a16e16549cf77b0749b25d8e8040',
+    file: 'packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution_request/ExecutionRequestAggregate.py',
+    runs: [
+      [1, P, 'completed', 0.4962644, 163, 'blocked', 1, 3],
+      [0, P, 'completed', 1.0821, 312, 'blocked', 1, 4],
+      [2, F, 'completed', 0.2911, 151, 'none', 1, 5],
+      [3, E, 'failed', 0, 41, 'none', 0, 6],
+      [1, F, 'completed', 0.4711, 170, 'certified', 0, 30],
+    ],
+  },
+  {
+    id: 'clean-merged-change',
+    control: true,
+    sha: 'b5ef79107cbd44d4e2b9dd9a1cbee8c57ee1be80',
+    file: '',
+    runs: [
+      [0, P, 'completed', 0.5888464, 124, 'certified', 0, 2],
+      [1, F, 'completed', 0.4407, 151, 'blocked', 2, 2.5],
+      [2, P, 'completed', 0.1700748, 170, 'certified', 0, 3.5],
+      [3, null, 'completed', 0.2104, 162, 'certified', 0, 4.5],
+    ],
+  },
+]
+
+/** The scorer's markdown excerpt, in the live `eval_suite.py` format (truncated as the API truncates it). */
+function stableEvidence(c: StableCase, run: StableRun): string {
+  const [, , status, , , review, findings] = run
+  const want = c.control ? 'certified' : 'blocked'
+  const lines = [`## ${c.id}${status === 'failed' ? '' : c.control ? ' (control)' : ' (defect)'}`, '', `- run status: \`${status}\``, `- review verdict: \`${review}\` (a pass needs \`${want}\`)`, `- blocking findings: ${findings}`]
+  if (!c.control) lines.push(review === 'blocked' && findings > 0 ? `- expected file named: \`${c.file}\` ` : `- expected file named: no (one of \`${c.file}\`, \`packag`)
+  return lines.join('\n')
+}
+
+function stableRun(c: StableCase, run: StableRun, n: number): EvalRun {
+  const [vi, verdict, status, cost, seconds, , , hoursAgo] = run
+  const v = STABLE_VERIFIERS[vi]!
+  const startedAt = ago(hoursAgo * HOUR)
+  const completedAt = after(startedAt, seconds * 1000)
+  return {
+    execution_id: `exec-stable-${c.id}-${n}`,
+    started_at: startedAt,
+    completed_at: completedAt,
+    status,
+    workflow_id: v.workflow,
+    workflow_version: '6.0.0',
+    models: status === 'failed' ? [] : [{ phase_id: 'verify', model: v.model }],
+    total_cost_usd: cost.toFixed(7),
+    total_cost_display: money(cost),
+    duration_seconds: seconds,
+    duration_display: `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, '0')}s`,
+    verdict,
+    score: verdict === 'PASS' ? 1 : verdict === 'FAIL' ? 0 : null,
+    evidence_excerpt: verdict ? stableEvidence(c, run) : null,
+    scorer: verdict ? 'eval_suite.py' : null,
+    scorer_version: verdict ? '3' : null,
+    scored_at: verdict ? completedAt : null,
+  }
+}
+
+function buildStable(): EvalRecord[] {
+  return STABLE_CASES.map((c) => {
+    const runs = c.runs.map((r, i) => stableRun(c, r, i)).sort((a, b) => Date.parse(b.started_at ?? '') - Date.parse(a.started_at ?? ''))
+    const variants = STABLE_VERIFIERS.map((v) => variantOf(runs, v.workflow, '6.0.0', v.model)).filter((v) => v.run_count > 0)
+    const scored = runs.filter((r) => r.verdict)
+    const pass = runs.filter((r) => r.verdict === 'PASS').length
+    const rate = scored.length ? pass / scored.length : null
+    return {
+      runs,
+      summary: {
+        eval_id: `eval-stable-${c.id}`,
+        name: `verifier-seed: ${c.id}`,
+        goal: 'Does the verifier block a change that carries a known escaped bug, naming the defect and the file it lives in, and certify a merged change that has no known defect?',
+        starting_workflow_id: null,
+        baseline_repos: [{ repository: 'syntropic137/syntropic137', requested_ref: c.sha, commit_sha: c.sha }],
+        tags: [`case:${c.id}`, 'suite:verifier-seed'],
+        frozen: true,
+        archived: false,
+        created_at: ago(2 * DAY),
+        updated_at: runs[0]!.completed_at ?? runs[0]!.started_at!,
+        run_count: runs.length,
+        run_status_counts: countBy(runs, (r) => r.status),
+        scored_count: scored.length,
+        pass_rate: rate,
+        pass_rate_display: rate === null ? '—' : `${Math.round(rate * 100)}%`,
+        last_run_at: runs[0]!.started_at ?? null,
+        last_verdict: runs[0]!.verdict ?? null,
+        variants,
+        stats: statsOf(runs),
+      },
+    }
+  })
+}
+
+/** Archived legacy evals with no runs: on the VPS, 34 of 88 look like this. */
+function buildArchived(): EvalRecord[] {
+  return EVAL_CASES.slice(0, 3).map((c) => {
+    const wf = 'eval-verify-pinned-codex-v1'
+    return {
+      runs: [],
+      summary: {
+        eval_id: `eval-archived-${c.id}`,
+        name: `${SUITE} v1: ${c.id}`,
+        goal: 'Does the verifier block a change that carries a known escaped bug, and name the defect and the file it lives in?',
+        starting_workflow_id: wf,
+        baseline_repos: [{ repository: 'syntropic137/syntropic137', requested_ref: c.sha, commit_sha: `${c.sha}a16e16549cf77b0749b25d8e8040`.slice(0, 40) }],
+        tags: [`case:${c.id}`, `${SUITE}:v1:${wf}`, `workflow:${wf}`],
+        frozen: true,
+        archived: true,
+        created_at: ago(20 * DAY),
+        updated_at: ago(19 * DAY),
+        run_count: 0,
+        run_status_counts: {},
+        scored_count: 0,
+        pass_rate: null,
+        pass_rate_display: '—',
+        last_run_at: null,
+        last_verdict: null,
+        variants: [],
+        stats: statsOf([]),
+      },
+    }
+  })
+}
+
+export const EVALS: EvalRecord[] = [...build(), ...buildStable(), ...buildArchived()]
 
 const find = (id: string) => EVALS.find((e) => e.summary.eval_id === id) ?? notFound('Eval')
 

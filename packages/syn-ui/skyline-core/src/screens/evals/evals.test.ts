@@ -11,6 +11,7 @@ import {
   tagValue,
   variantPassed,
   withLatestRun,
+  workflowLabel,
   type EvalLike,
 } from './index'
 
@@ -22,6 +23,99 @@ const ev = (id: string, caseId: string, wf: string, model: string, verdict: stri
   last_run_at: last,
   run_count: 1,
   variants: [{ workflow_id: wf, models: [model], avg_cost_usd: cost, run_count: 1 }],
+})
+
+/** A stable-id eval in the live shape: tags `case:` and `suite:` only, verifiers as variants. */
+const stable = (id: string, caseId: string, variants: [wf: string, model: string, verdict: string | null, last: string, runs?: number, version?: string][]): EvalLike => ({
+  eval_id: id,
+  name: `verifier-seed: ${caseId}`,
+  tags: [`case:${caseId}`, 'suite:verifier-seed'],
+  starting_workflow_id: null,
+  last_verdict: variants[0]?.[2] ?? null,
+  last_run_at: variants[0]?.[3] ?? null,
+  run_count: variants.reduce((n, v) => n + (v[4] ?? 1), 0),
+  archived: false,
+  variants: variants.map(([wf, model, verdict, last, runs = 1, version = '6.0.0']) => ({
+    workflow_id: wf,
+    workflow_version: version,
+    models: model ? [model] : [],
+    avg_cost_usd: '0.9',
+    run_count: runs,
+    last_run_at: last,
+    last_verdict: verdict,
+    stats: { median_cost_usd: '0.29' },
+  })),
+})
+
+describe('verdict board from stable-id evals', () => {
+  const T1 = '2026-10-08T01:00:00Z'
+  const T2 = '2026-10-08T02:00:00Z'
+  it('places one cell per case x variant workflow', () => {
+    const b = buildEvalBoard([
+      stable('s1', 'shared-esp-stream', [
+        ['eval-verify-pinned-v1', 'claude-opus-5-5', 'PASS', T1],
+        ['eval-verify-pinned-codex-v1', 'gpt-6.1-sol', 'FAIL', T2],
+      ]),
+    ])
+    expect(b.cases.map((c) => c.id)).toEqual(['shared-esp-stream'])
+    expect(b.verifiers.map((v) => v.id)).toEqual(['eval-verify-pinned-v1', 'eval-verify-pinned-codex-v1'])
+    expect(b.cells['shared-esp-stream:eval-verify-pinned-v1']).toMatchObject({ verdict: 'pass', costUsd: 0.29, runs: 1 })
+    expect(b.cells['shared-esp-stream:eval-verify-pinned-codex-v1']!.verdict).toBe('fail')
+    expect(b.evalIds['shared-esp-stream:eval-verify-pinned-codex-v1']).toBe('s1')
+    expect(b.workflows['shared-esp-stream:eval-verify-pinned-codex-v1']).toBe('eval-verify-pinned-codex-v1')
+    expect(b.suite).toBe('verifier-seed')
+  })
+
+  it('lets a stable-id eval beat a newer legacy eval in the same cell', () => {
+    const legacy = ev('l1', 'c1', 'wf-a', 'claude-opus-5-5', null, '2026-10-09T00:00:00Z')
+    const b = buildEvalBoard([legacy, stable('s1', 'c1', [['wf-a', 'claude-opus-5-5', 'FAIL', T1]])])
+    expect(b.evalIds['c1:wf-a']).toBe('s1')
+    expect(b.cells['c1:wf-a']!.verdict).toBe('fail')
+    expect(b.suite).toBeNull()
+  })
+
+  it('collapses versions of one workflow to the newest verdict and sums runs', () => {
+    const b = buildEvalBoard([
+      stable('s1', 'c1', [
+        ['wf-a', '', 'FAIL', T1, 2, '3.0.0'],
+        ['wf-a', 'claude-opus-5-5', 'PASS', T2, 3, '6.0.0'],
+        ['wf-b', 'gpt-6-sol', null, T1, 0],
+      ]),
+    ])
+    expect(b.cells['c1:wf-a']).toMatchObject({ verdict: 'pass', runs: 5 })
+    expect(b.verifiers.map((v) => [v.id, v.model])).toEqual([['wf-a', 'claude-opus-5-5']])
+  })
+
+  it('skips archived evals and evals that never ran', () => {
+    const archived = { ...ev('a', 'c1', 'wf-a', 'm', 'PASS', T1), archived: true }
+    const never = { ...ev('n', 'c2', 'wf-b', 'm', null, ''), run_count: 0, last_run_at: null }
+    const b = buildEvalBoard([archived, never])
+    expect(b.cases).toEqual([])
+    expect(b.verifiers).toEqual([])
+  })
+
+  it('never shows two identical column heads', () => {
+    const b = buildEvalBoard([
+      stable('s1', 'c1', [
+        ['eval-verify-pinned-sdlc-lean-v1', 'gpt-6.1-sol', 'PASS', T1],
+        ['eval-verify-pinned-sdlc-baseline-v1', 'gpt-6.1-sol', 'FAIL', T1],
+        ['eval-verify-pinned-v1', 'claude-opus-5-5', 'PASS', T1],
+      ]),
+    ])
+    const heads = b.verifiers.map((v) => `${v.agent} ${v.model}`)
+    expect(new Set(heads).size).toBe(heads.length)
+    expect(b.verifiers.map((v) => v.model)).toEqual(['gpt-6.1-sol · sdlc-lean', 'gpt-6.1-sol · sdlc-baseline', 'claude-opus-5-5'])
+    expect(b.verifiers.map((v) => v.short)).toEqual(['sol · lean', 'sol · baseline', 'opus'])
+    expect(workflowLabel('eval-verify-pinned-v1')).toBe('pinned')
+    expect(workflowLabel('eval-verify-pinned-codex-gpt-6-luna-v1')).toBe('codex-gpt-6-luna')
+    expect(workflowLabel('other-wf')).toBe('other-wf')
+  })
+
+  it('names a column with no observed model by its workflow', () => {
+    const b = buildEvalBoard([stable('s1', 'c1', [['wf-x', '', 'ERROR', T1]])])
+    expect(b.verifiers[0]).toMatchObject({ id: 'wf-x', model: 'wf-x', agent: 'Agent' })
+    expect(b.cells['c1:wf-x']!.verdict).toBe('error')
+  })
 })
 
 describe('evals screen helpers', () => {
