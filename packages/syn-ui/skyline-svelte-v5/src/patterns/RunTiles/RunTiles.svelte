@@ -38,6 +38,7 @@
           this={artifact.href ? 'a' : 'span'}
           class="sky-run-tiles__tile"
           href={artifact.href}
+          title={artifact.name}
           aria-label={artifact.href ? `Artifact${phase ? ` from ${phase}` : ''}, ${artifact.name}${artifact.size ? `, ${artifact.size}` : ''}` : undefined}
         >
           <span class="sky-run-tiles__icon"><Glyph d={GLYPH.file} weight={1.5} /></span>
@@ -100,12 +101,16 @@
   }
   .sky-run-tiles__icon {
     display: inline-flex;
+    flex-shrink: 0;
     color: var(--ds-color-accent);
   }
   .sky-run-tiles__id {
+    min-width: 0;
     font-family: var(--ds-font-mono);
     font-size: 0.75rem;
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .sky-run-tiles__note {
     min-width: 0;
@@ -116,6 +121,7 @@
     text-overflow: ellipsis;
   }
   .sky-run-tiles__size {
+    flex-shrink: 0;
     font-family: var(--ds-font-mono);
     font-size: var(--ds-text-xs);
     color: var(--ds-color-text-muted);
@@ -142,6 +148,7 @@
     .sky-run-tiles__pair {
       flex-direction: row;
       align-items: center;
+      max-width: 100%;
       gap: var(--ds-space-2-5);
     }
     .sky-run-tiles__arrow {

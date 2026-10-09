@@ -128,8 +128,10 @@
   function artifactTile(p: PhaseExecutionDetail) {
     if (!p.artifact_id) return null
     const a = artifacts.data?.get(p.artifact_id)
+    // Titles repeat the phase ("Open the pull request: artifacts/output/pr.md"); the row already names it.
+    const title = a?.title?.startsWith(`${p.name}: `) ? a.title.slice(p.name.length + 2) : a?.title
     return {
-      name: a?.title ?? `artifact ${shortId(p.artifact_id)}`,
+      name: title || `artifact ${shortId(p.artifact_id)}`,
       size: a?.size_bytes != null ? formatBytes(a.size_bytes) : undefined,
       href: href(`/artifacts/${p.artifact_id}`),
     }
@@ -166,6 +168,11 @@
     if (e instanceof ApiError) return typeof e.detail === 'string' ? e.detail : `The server answered ${e.status}.`
     return e instanceof Error ? e.message : String(e)
   }
+  // A task is often a whole prompt: past a sentence it drops to body size and folds to a few lines.
+  const LONG_TASK = 140
+  const longTask = $derived(!!d?.task && d.task.length > LONG_TASK)
+  let taskOpen = $state(false)
+
   const notFound = $derived(exec.error instanceof ApiError && exec.error.status === 404)
   const repoName = (url: string) => url.replace(/^https?:\/\/github\.com\//, '').replace(/\.git$/, '')
 </script>
@@ -191,6 +198,7 @@
   <div class="sky-exec">
     <PageHeader
       class="sky-exec__header"
+      data-long-title={longTask ? (taskOpen ? 'open' : 'folded') : undefined}
       kind="execution"
       eyebrow={d.workflow_execution_id}
       status={d.status}
@@ -212,6 +220,9 @@
           Run again
         </a>
       {/snippet}
+      {#if longTask}
+        <button type="button" class="sky-exec__more" aria-expanded={taskOpen} onclick={() => (taskOpen = !taskOpen)}>{taskOpen ? 'Show less' : 'Show the whole task'}</button>
+      {/if}
       <div class="sky-exec__context">
         <a href={href(`/workflows/${d.workflow_id}`)}>{d.workflow_name}</a>
         {#each d.repos ?? [] as repo (repo)}
@@ -263,7 +274,7 @@
       <section class="sky-exec__timeline" aria-labelledby="sky-exec-timeline">
         <div class="sky-exec__timeline-head">
           <h2 id="sky-exec-timeline">Phase timeline</h2>
-          <span>Length is time, height is tokens.{caption ? ` ${caption}` : ''} Each phase carries the session it ran in and the artifact it produced.</span>
+          <p>Length is time, height is tokens.{caption ? ` ${caption}` : ''} Each phase carries the session it ran in and the artifact it produced.</p>
         </div>
         {#if blocks.length}
           <div class="sky-exec__blocks"><PhaseBlocks phases={blocks} /></div>
@@ -329,6 +340,44 @@
     gap: var(--ds-space-5);
     min-width: 0;
   }
+  .sky-exec :global(.sky-page-header[data-long-title] .sky-page-header__title) {
+    font-size: var(--ds-text-xl);
+    line-height: var(--ds-line-height-snug);
+    letter-spacing: -0.015em;
+    text-wrap: pretty;
+    white-space: pre-line;
+  }
+  .sky-exec :global(.sky-page-header[data-long-title='folded'] .sky-page-header__title) {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 4;
+    line-clamp: 4;
+    overflow: hidden;
+  }
+  .sky-exec__more {
+    align-self: flex-start;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--sky-color-accent-soft-fg);
+    font: inherit;
+    font-size: var(--ds-text-sm);
+    cursor: pointer;
+  }
+  .sky-exec__more:hover {
+    color: var(--ds-color-fg);
+  }
+  .sky-exec__more:focus-visible {
+    outline: var(--sky-focus-ring-width) solid var(--sky-color-focus);
+    outline-offset: var(--sky-focus-ring-offset);
+  }
+  .sky-exec :global(.sky-page-header__actions .sky-copy[data-variant='label']) {
+    height: var(--sky-size-control-md);
+    padding: 0 var(--ds-space-3-5);
+    border: var(--ds-border-width) solid var(--sky-color-border-strong);
+    border-radius: var(--ds-radius-lg);
+    color: var(--ds-color-fg);
+  }
   .sky-exec__context {
     display: flex;
     flex-wrap: wrap;
@@ -387,6 +436,7 @@
     }
   }
   .sky-exec__primary {
+    flex: 1 1 auto;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -431,11 +481,13 @@
   }
   .sky-exec__timeline-head {
     display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: var(--ds-space-1) var(--ds-space-3);
+    flex-direction: column;
+    gap: var(--ds-space-2);
     color: var(--ds-color-text-muted);
     font-size: var(--ds-text-sm);
+  }
+  .sky-exec__timeline-head p {
+    margin: 0;
   }
   .sky-exec__timeline-head h2 {
     margin: 0;
@@ -444,8 +496,13 @@
     letter-spacing: -0.015em;
     color: var(--ds-color-fg);
   }
+  /* The chart scales to its box; on a phone it keeps a readable width and scrolls sideways inside it. */
   .sky-exec__blocks {
     overflow-x: auto;
+    overscroll-behavior-x: contain;
+  }
+  .sky-exec__blocks > :global(.sky-phase-blocks) {
+    min-width: 36rem;
   }
   .sky-exec__phases {
     display: flex;
@@ -551,6 +608,15 @@
   @media (min-width: 48rem) {
     .sky-exec {
       gap: var(--ds-space-7);
+    }
+    .sky-exec__primary {
+      flex: 0 0 auto;
+    }
+    .sky-exec__blocks > :global(.sky-phase-blocks) {
+      min-width: 0;
+    }
+    .sky-exec__timeline-head {
+      font-size: var(--ds-text-md);
     }
     .sky-exec__timeline {
       padding: var(--ds-space-6) var(--ds-space-6) var(--ds-space-3-5);

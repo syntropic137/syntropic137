@@ -148,8 +148,8 @@
     <div class="sky-execs__search">
       <Input type="search" aria-label="Search executions" placeholder="Workflow, repo or ID" bind:value={search} />
     </div>
+    <div class="sky-execs__filters">
     <ToggleGroup
-      class="sky-execs__chips"
       type="single"
       variant="chips"
       aria-label="Status"
@@ -158,12 +158,12 @@
       onValueChange={(v) => router.setQuery({ status: v[0] && v[0] !== 'all' ? v[0] : null, page: null })}
     />
     <Toggle
-      class="sky-execs__evals"
       size="sm"
       pressed={evalsOnly}
       title="Only runs that belong to an eval"
       onPressedChange={(p) => router.setQuery({ eval: p ? '1' : null, page: null })}>Evals</Toggle
     >
+    </div>
     <ToggleGroup
       class="sky-execs__window"
       type="single"
@@ -249,12 +249,14 @@
         </ul>
       {/each}
     </section>
+    <div class="sky-execs__pager">
     <Pagination
       {page}
       {pageCount}
       summary={listSummary(page, PAGE_SIZE, rows.length, list.data.total, status) + (list.data.excluded_undated ? ` · ${list.data.excluded_undated} undated left out` : '')}
       onPageChange={(p) => router.setQuery({ page: p > 1 ? String(p) : null }, { push: true })}
     />
+    </div>
     {#if list.data.budget}
       <p class="sky-execs__budget">Execution budget: {list.data.budget.display}{list.data.budget.admission_paused ? ' · admission paused' : ''}</p>
     {/if}
@@ -375,8 +377,24 @@
   .sky-execs__toolbar > :global(*) {
     min-width: 0;
   }
-  .sky-execs__toolbar > :global(.sky-execs__evals) {
-    align-self: flex-start;
+  /* Status chips and the Evals toggle share one row, sideways-scrolling on a phone like the board. */
+  .sky-execs__filters {
+    display: flex;
+    align-items: center;
+    gap: var(--ds-space-2);
+    min-width: 0;
+  }
+  .sky-execs__filters > :global(.sky-toggle-group) {
+    min-width: 0;
+  }
+  .sky-execs__filters > :global(.sky-toggle) {
+    flex-shrink: 0;
+  }
+  .sky-execs__toolbar > :global(.sky-toggle-group[data-variant='segmented']) {
+    display: flex;
+  }
+  .sky-execs__toolbar > :global(.sky-toggle-group[data-variant='segmented'] .sky-toggle-group__item) {
+    flex: 1 1 0;
   }
   .sky-execs__list {
     display: flex;
@@ -460,12 +478,23 @@
       align-items: center;
       gap: var(--ds-space-3) var(--ds-space-4);
     }
-    .sky-execs__toolbar > :global(.sky-execs__chips) {
+    /* Board order: chips on the left, search and time window on the right. */
+    .sky-execs__filters {
       order: -1;
       flex: 1 1 auto;
+      flex-wrap: wrap;
     }
     .sky-execs__search {
       width: 15rem;
+    }
+    .sky-execs__toolbar > :global(.sky-toggle-group[data-variant='segmented']) {
+      display: inline-flex;
+    }
+    .sky-execs__toolbar > :global(.sky-toggle-group[data-variant='segmented'] .sky-toggle-group__item) {
+      flex: 0 0 auto;
+    }
+    .sky-execs__pager > :global(.sky-pagination) {
+      justify-content: space-between;
     }
     .sky-execs__list {
       gap: 2px;

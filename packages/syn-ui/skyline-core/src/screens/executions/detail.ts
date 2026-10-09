@@ -9,6 +9,7 @@
 import { formatCostPrecise } from '../../format/cost'
 import { formatDurationPrecise } from '../../format/duration'
 import { formatTokens } from '../../format/tokens'
+import { toNumber } from '../../format/shared'
 import type { CostRowInput } from '../../patterns/usage'
 import type { KitAbsence, ProvenanceStripProps, SkillRefProps } from '../../patterns'
 import { statusKind } from '../../patterns/status'
@@ -21,7 +22,8 @@ export interface PhaseLike {
   cache_creation_tokens: number
   cache_read_tokens: number
   duration_seconds: number | null
-  cost_usd: number
+  /** USD; the live API serialises Decimal as a string, fixtures send a number. */
+  cost_usd: number | string
   model: string | null
   requested_model: string | null
   model_display?: string
@@ -117,7 +119,7 @@ export function shortPhaseName(name: string): string {
 
 /** Usage Meter rows: "01 Discovery" with each phase's cost. */
 export function costRowsByPhase(phases: readonly PhaseLike[]): CostRowInput[] {
-  return phases.map((p, i) => ({ label: `${phaseNumber(i)} ${shortPhaseName(p.name)}`, value: p.cost_usd, tone: 'accent' }))
+  return phases.map((p, i) => ({ label: `${phaseNumber(i)} ${shortPhaseName(p.name)}`, value: toNumber(p.cost_usd), tone: 'accent' }))
 }
 
 const WORDS = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten']

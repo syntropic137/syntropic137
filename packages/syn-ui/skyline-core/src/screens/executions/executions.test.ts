@@ -139,6 +139,8 @@ describe('detail', () => {
     expect(shortPhaseName('Deep Dive Analysis')).toBe('Deep Dive')
     expect(shortPhaseName('Synthesis & Documentation')).toBe('Synthesis')
     expect(costRowsByPhase([phase()])).toEqual([{ label: '01 Discovery', value: 0.0557, tone: 'accent' }])
+    // The live API sends Decimal as a string; the meter needs a number for its bars and shares.
+    expect(costRowsByPhase([phase({ cost_usd: '0.3480798' })])[0]!.value).toBe(0.3480798)
   })
 
   it('notes an unknown model', () => {

@@ -93,6 +93,7 @@
   }
   .sky-page-header__icon {
     display: block;
+    flex-shrink: 0;
     width: var(--sky-size-object-icon-sm);
     height: var(--sky-size-object-icon-sm);
   }
