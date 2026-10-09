@@ -1,9 +1,9 @@
-"""The AUTHORITATIVE capture verdict, as distinct from the diagnostic one.
+"""The AUTHORITATIVE capture verdict.
 
-`capture_status` reads the finalizer's stderr from inside the workspace, where
-the agent runs as the same user and can print anything the finalizer can. This
-module reads a host-invoked `apss-session-exporter --json`, over a channel the
-agent has no handle on. Everything here exists to keep that distinction from
+The finalizer's stderr comes from inside the workspace, where the agent runs as
+the same user and can print anything the finalizer can. This module reads a
+host-invoked `apss-session-exporter --json`, over a channel the agent has no
+handle on. Everything here exists to keep that distinction from
 eroding into a confident wrong answer.
 
 The documents below are REAL exporter output, captured from v0.3.0 runs against

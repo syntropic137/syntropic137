@@ -79,17 +79,19 @@ Every repository a run recorded a commit for (`WorkflowExecutionStarted.source_c
 
 ### 2. Inject Both `/workspace/AGENTS.md` and `/workspace/CLAUDE.md`
 
-After the setup script completes, the Python layer injects both `AGENTS.md` and `CLAUDE.md` at the workspace root with **identical content**: direct `@`-imports of each repo's `AGENTS.md` followed by its `CLAUDE.md`.
+After the setup script completes, the Python layer injects both `AGENTS.md` and `CLAUDE.md` at the workspace root with **identical content**: direct `@`-imports of each repo's **distinct** instruction files, `AGENTS.md` before `CLAUDE.md`.
+
+The handler reads both files from the clone first. A repo's `AGENTS.md` is not imported when it is byte-identical to its `CLAUDE.md`, or when it is a breadcrumb: the whole file is one line that only points at that `CLAUDE.md` (`@CLAUDE.md`, or a Markdown link to it, optionally led by "See", "Read" or "Follow"). A short `AGENTS.md` that says anything else is kept: length is not evidence that content is disposable. Claude Code does not deduplicate imports (see below), so before this rule a repo that kept the two files as copies paid for its instructions twice on every turn. In syntropic137 that was 36,274 bytes, about 9k tokens. A file confirmed not in the checkout is not imported. A read that fails any other way (transport error, timeout, permission) is not absence, so that file is still imported, as before. Two spellings of one repo (`.git`, a trailing slash) are one checkout and are imported once.
 
 ```
-@/workspace/repos/repo-a/AGENTS.md
-@/workspace/repos/repo-a/CLAUDE.md
-@/workspace/repos/repo-b/AGENTS.md
+@/workspace/repos/repo-a/CLAUDE.md          # repo-a: AGENTS.md is a copy or a breadcrumb
+@/workspace/repos/repo-b/AGENTS.md          # repo-b: the two files differ
 @/workspace/repos/repo-b/CLAUDE.md
 ```
 
 ```python
-content = _generate_workspace_context(repos)
+imports = [p for url in repos for p in await _repo_instruction_imports(workspace, name(url))]
+content = _generate_workspace_context(imports)
 await workspace.inject_files([
     ("AGENTS.md", content.encode()),
     ("CLAUDE.md", content.encode()),
@@ -262,6 +264,8 @@ Add `requires_repos: bool` to workflow templates as an execution-time gate.
 **YAML inference:** When `requires_repos` is not explicitly set in the YAML, the flag defaults to `true` (opt-out). An explicit `requires_repos: true/false` in the YAML always takes precedence. Research-style workflows that operate on no repos must opt out with `requires_repos: false`.
 
 > **v0.25.2 update (2026-04-18):** The original inference rule was "infer from `repository` presence" -- workflows without a `repository:` block defaulted to `false`. With v0.25.2's ADR-063 typed-repos channel, the legacy `repository:` block is being phased out (workflows now declare `requires_repos: true` and accept repos via runtime `-R`), so inferring from its presence no longer matches the platform's primary use case. The new default is opt-out: omit `requires_repos`, get `true`. Migrated marketplace workflows (`code-review`, `sdlc-trunk` v0.2.0+) rely on this.
+
+> **#955 update (2026-10-08):** `requires_repos: false` now means "this workflow needs no repos", not "clone none". The template's own repos still do not apply. Repos passed explicitly at dispatch (`-R`) are honoured and access-checked regardless of `requires_repos` (#1776), and are checked out only in phases with `clone_repos: true` (the default; see the addendum below). A phase with `clone_repos: false` still gets their credentials but no checkout, so a workspace can be bare even when repos were passed. The CLI no longer warns that `-R` repos will not be cloned.
 
 **Placeholder removal:** `SeedWorkflowService` no longer injects a `placeholder/not-configured` URL. Workflows without repos get `repository_url: ""`.
 

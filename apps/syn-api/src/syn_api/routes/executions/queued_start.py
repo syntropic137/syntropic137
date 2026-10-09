@@ -9,19 +9,22 @@ read model of the execution, which does not exist until its stream opens.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from syn_api._wiring_admission import get_execution_budget
 from syn_api.execution_budget import StartPath
+from syn_api.types import PhaseProgressInfo
 from syn_domain.contexts.orchestration import (
     OWED_STATUSES,
     ExecutionRequestStartProcessManager,
     ExecutionRequestStartRecord,
     FailureClassification,
+    PhaseProgress,
     read_start_record,
 )
 
-from .models import ExecutionDetailResponse, ExecutionStartQueueInfo
+from .models import ExecutionDetailResponse, ExecutionStartQueueInfo, ExecutionSummaryResponse
 
 if TYPE_CHECKING:
     from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
@@ -175,6 +178,10 @@ async def not_yet_started(
         phases=[],
         total_phases=0,
         completed_phases=0,
+        phase_plan=[],
+        phase_progress=PhaseProgressInfo.of(
+            PhaseProgress(status=_status(position, record), completed=0, skipped=0, defined=0)
+        ),
         artifact_ids=[],
         error_message=_error_message(position, record),
         failure_classification=FailureClassification.UNCLASSIFIED,
@@ -193,3 +200,92 @@ async def not_yet_started(
         quarantined_refs=[],
         start_queue=start_queue_info(position, record),
     )
+
+
+@dataclass(frozen=True)
+class QueuedStart:
+    """One accepted start the execution list reports as ``queued`` (PC-124)."""
+
+    execution_id: str
+    workflow_id: str
+    queue: ExecutionStartQueueInfo
+
+    def as_summary(self, workflow_name: str) -> ExecutionSummaryResponse:
+        """The list row: no read model yet, so every read-model field is empty."""
+        return ExecutionSummaryResponse(
+            workflow_execution_id=self.execution_id,
+            workflow_id=self.workflow_id,
+            workflow_name=workflow_name,
+            status="queued",
+            phase_progress=PhaseProgressInfo.of(
+                PhaseProgress(status="queued", completed=0, skipped=0, defined=0)
+            ),
+            total_tokens=0,
+            total_input_tokens=0,
+            total_output_tokens=0,
+            total_cache_creation_tokens=0,
+            total_cache_read_tokens=0,
+            start_queue=self.queue,
+        )
+
+
+async def queued_starts(store: ProjectionStoreProtocol) -> list[QueuedStart]:
+    """Every start still waiting to open its execution, oldest first (PC-124).
+
+    The same two sources as the detail, merged the same way: each start
+    waiting for a slot in this process, with its position; then each direct
+    request owed a start that no process here holds, from its durable record.
+    A start that holds a slot is ``starting`` rather than queued, and a
+    withdrawn one is cancelled, so neither is listed.
+
+    A resume's durable record is keyed by its parent, which the list already
+    shows, so an unheld resume is reported on the parent (``resume_start``)
+    and not here.
+    """
+    budget = get_execution_budget()
+    found: dict[str, QueuedStart] = {}
+    for position in budget.queued():
+        claim = position.claim
+        record = await _request_record(store, claim.execution_id)
+        if record is not None and record.status == "withdrawn":
+            continue
+        found[claim.execution_id] = QueuedStart(
+            execution_id=claim.execution_id,
+            workflow_id=claim.workflow_id,
+            queue=_info(position, record),
+        )
+    for record in await _owed_and_unheld(store):
+        if record.execution_id not in found:
+            found[record.execution_id] = QueuedStart(
+                execution_id=record.execution_id,
+                workflow_id=record.workflow_id,
+                queue=_info(None, record),
+            )
+    return sorted(found.values(), key=lambda q: q.queue.queued_at)
+
+
+async def _owed_and_unheld(store: ProjectionStoreProtocol) -> list[ExecutionRequestStartRecord]:
+    """Direct requests still owed a start that no process here holds, and not yet started."""
+    budget = get_execution_budget()
+    owed: list[ExecutionRequestStartRecord] = []
+    for status in OWED_STATUSES:
+        rows = await store.query(
+            ExecutionRequestStartProcessManager.PROJECTION_NAME, filters={"status": status}
+        )
+        records = [read_start_record(ExecutionRequestStartRecord, row) for row in rows]
+        for record in records:
+            if record is None or budget.position(record.execution_id) is not None:
+                continue  # unreadable, or held here (queued above, or starting)
+            # The record lags the execution's stream: a start that opened its
+            # execution has a read model, and is listed from that instead.
+            if await store.get("workflow_execution_details", record.execution_id) is None:
+                owed.append(record)
+    return owed
+
+
+def _info(
+    position: StartPosition | None, record: ExecutionRequestStartRecord | None
+) -> ExecutionStartQueueInfo:
+    info = start_queue_info(position, record)
+    assert info is not None  # one of the two is always given
+    return info

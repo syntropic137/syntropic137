@@ -42,6 +42,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_eval.value_objects impor
     EvalId,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
+    FallbackAgent,
     InputDeclaration,
     PhaseDefinition,
     PhaseExecutionType,
@@ -327,6 +328,27 @@ class AgentYamlDefinition(BaseModel):
         return value
 
 
+class FallbackAgentYamlDefinition(BaseModel):
+    """Per-phase ``fallback_agent`` block as parsed from YAML (PC-83).
+
+    The agent the phase is re-run on, once, when its primary provider had no
+    capacity after every retry or its quota is spent. Provider and model only:
+    the phase's sandbox, tools and budget apply to the fallback unchanged, so
+    the provider rules that bind ``agent`` bind this too.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    provider: Literal["claude", "codex"]
+    """Required: a fallback that names no provider has nothing to fall back to."""
+
+    model: str | None = None
+    """Model for the fallback run; omitted resolves to the provider's default."""
+
+    def to_domain(self) -> FallbackAgent:
+        return FallbackAgent(provider=self.provider, model=self.model)
+
+
 class PhaseYamlDefinition(BaseModel):
     """Phase definition as parsed from YAML.
 
@@ -376,8 +398,8 @@ class PhaseYamlDefinition(BaseModel):
 
     Provisioning has been phase-blind: every phase paid the same clone plus
     recursive submodule init, because the only opt-out was the WORKFLOW-level
-    `requires_repos: false`, which turns cloning off for all of them. A
-    workflow whose implement phase needs a working tree and whose open_pr
+    `requires_repos: false`, which turns cloning off for all of them unless
+    repos are passed explicitly at dispatch (#955). A workflow whose implement phase needs a working tree and whose open_pr
     phase does not could not express that, so the phase doing the least work
     paid the same 600s bootstrap - under the shortest budget in the workflow.
 
@@ -411,6 +433,20 @@ class PhaseYamlDefinition(BaseModel):
     or verify phase - one whose deliverable is a report - and leave it alone
     anywhere a branch is the point."""
 
+    requires_verdict: bool = False
+    """Whether this phase MUST report a ``review_verdict`` in its TASK_RESULT (PC-116).
+
+    The verdict steers the review rounds: ``certified`` ends them, and
+    anything else advances by order. "No verdict" advances by order on
+    purpose, which is right for every phase that is not a review - and wrong
+    for one that is, because a verify phase that forgot to say what it found
+    then reads exactly like one that found something. True turns that silence
+    into a failed, resumable phase instead.
+
+    DEFAULTS TO FALSE because the verdict is meaningless outside a review: a
+    phase that never judges anything cannot be asked to report a judgement.
+    Declare it on every verify and reverify phase."""
+
     # Claude Code command extensions (ISS-211)
     argument_hint: str | None = None
     model: str | None = None
@@ -418,6 +454,9 @@ class PhaseYamlDefinition(BaseModel):
     # Per-phase agent provider selection.
     # ``agent.model`` is a fallback for the top-level ``model`` field.
     agent: AgentYamlDefinition | None = None
+    # Re-run once on this agent when the primary's upstream cannot serve the
+    # phase - capacity after retries, or a spent quota (PC-83).
+    fallback_agent: FallbackAgentYamlDefinition | None = None
 
     # Phase-scope claude plugin refs (issue #726). Workflow-scope refs live on
     # WorkflowDefinition. PR1 carries them through; PR2 resolves them.
@@ -542,10 +581,20 @@ class PhaseYamlDefinition(BaseModel):
     @model_validator(mode="after")
     def validate_cost_limit_is_enforceable(self) -> PhaseYamlDefinition:
         """Refuse ``max_cost_usd`` on a provider that cannot be stopped by it (#1376)."""
-        require_enforceable_cost_limit(
-            self.agent.provider if self.agent else None, self.max_cost_usd, phase_id=self.id
-        )
+        for provider in self._declared_providers():
+            require_enforceable_cost_limit(provider, self.max_cost_usd, phase_id=self.id)
         return self
+
+    def _declared_providers(self) -> tuple[str | None, ...]:
+        """Every provider this phase may run on: its own, and its fallback's (PC-83).
+
+        The phase's tools and budget bind whichever agent ends up running it,
+        so a rule about what a provider cannot honour is asked of both.
+        """
+        primary = self.agent.provider if self.agent else None
+        if self.fallback_agent is None:
+            return (primary,)
+        return (primary, self.fallback_agent.provider)
 
     @model_validator(mode="after")
     def validate_tool_policy_is_supported_by_provider(self) -> PhaseYamlDefinition:
@@ -563,17 +612,16 @@ class PhaseYamlDefinition(BaseModel):
         concept of which tools exist (ADR-069 section 3). So the refusal moves
         to creation, beside the tool-vocabulary check.
         """
-        provider = self.agent.provider if self.agent else None
-        if provider is None or not self.allowed_tools:
+        if not self.allowed_tools:
             return self
-        if str(provider) != AgentProvider.CODEX:
+        if AgentProvider.CODEX not in self._declared_providers():
             return self
         declared = ", ".join(str(t) for t in self.allowed_tools)
         msg = (
             f"Phase '{self.id}': provider 'codex' cannot honour allowed_tools "
             f"({declared}). Codex enforces a filesystem sandbox, not a tool "
             "vocabulary, so a tool list would be accepted and never applied. "
-            "Remove allowed_tools, or run this phase on 'claude'."
+            "Remove allowed_tools, or run this phase and any fallback_agent on 'claude'."
         )
         raise ValueError(msg)
 
@@ -591,6 +639,10 @@ class PhaseYamlDefinition(BaseModel):
             msg = f"Phase '{self.id}': specify either 'prompt_template' or 'prompt_file', not both"
             raise ValueError(msg)
         return self
+
+    def _fallback_agent_domain(self) -> FallbackAgent | None:
+        """The declared fallback_agent as a domain value, or None when absent."""
+        return self.fallback_agent.to_domain() if self.fallback_agent else None
 
     def to_domain(self) -> PhaseDefinition:
         """Convert to domain PhaseDefinition.
@@ -631,11 +683,13 @@ class PhaseYamlDefinition(BaseModel):
             allowed_tools=self.allowed_tools,
             clone_repos=self.clone_repos,
             delivers_repo_changes=self.delivers_repo_changes,
+            requires_verdict=self.requires_verdict,
             argument_hint=self.argument_hint,
             model=model,
             provider=provider,
             allow_delegation=allow_delegation,
             require_delegation=require_delegation,
+            fallback_agent=self._fallback_agent_domain(),
             sandbox=sandbox,
             claude_plugins=tuple(self.claude_plugins),
             skills=tuple(self.skills),

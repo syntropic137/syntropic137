@@ -93,6 +93,7 @@ def build_standard_operation(
         success=verdict.success,
         error_message=verdict.error_message,
         input_preview=data.get("input_preview"),
+        skill_name=data.get("skill_name"),
         output_preview=data.get("output_preview") if is_completed else None,
         duration_ms=data.get("duration_ms") if is_completed else None,
     )

@@ -122,6 +122,37 @@
       "title": "EvalId",
       "type": "string"
     },
+    "FallbackAgentYamlDefinition": {
+      "additionalProperties": false,
+      "description": "Per-phase ``fallback_agent`` block as parsed from YAML (PC-83).\n\nThe agent the phase is re-run on, once, when its primary provider had no\ncapacity after every retry or its quota is spent. Provider and model only:\nthe phase's sandbox, tools and budget apply to the fallback unchanged, so\nthe provider rules that bind ``agent`` bind this too.",
+      "properties": {
+        "provider": {
+          "enum": [
+            "claude",
+            "codex"
+          ],
+          "title": "Provider",
+          "type": "string"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model"
+        }
+      },
+      "required": [
+        "provider"
+      ],
+      "title": "FallbackAgentYamlDefinition",
+      "type": "object"
+    },
     "InputYamlDefinition": {
       "additionalProperties": false,
       "description": "Input declaration as parsed from YAML.\n\nMaps to domain InputDeclaration.",
@@ -307,6 +338,11 @@
           "title": "Delivers Repo Changes",
           "type": "boolean"
         },
+        "requires_verdict": {
+          "default": false,
+          "title": "Requires Verdict",
+          "type": "boolean"
+        },
         "argument_hint": {
           "anyOf": [
             {
@@ -335,6 +371,17 @@
           "anyOf": [
             {
               "$ref": "#/$defs/AgentYamlDefinition"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "fallback_agent": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FallbackAgentYamlDefinition"
             },
             {
               "type": "null"

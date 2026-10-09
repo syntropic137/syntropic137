@@ -25,6 +25,8 @@ import json
 from functools import cache
 from typing import TYPE_CHECKING
 
+import asyncpg
+
 from syn_adapters.postgres_text import pg_safe
 from syn_adapters.projection_stores.lean_documents import lean_source
 from syn_adapters.projection_stores.postgres_query_builder import (
@@ -34,8 +36,6 @@ from syn_adapters.projection_stores.postgres_query_builder import (
 from syn_domain.pagination import Page
 
 if TYPE_CHECKING:
-    import asyncpg
-
     from syn_domain.projection_page import PageQuery, StatusOf
 
 #: What ``datetime.fromisoformat`` can read from a stored timestamp. Anything
@@ -92,14 +92,54 @@ def _status_sql(status: StatusOf) -> str:
     return f"COALESCE(data->>'{name}', '')"
 
 
-def _instant_sql(name: str) -> str:
-    text = f"data->>'{name}'"
-    return (
-        f"CASE WHEN {text} ~ '{_ISO_TIMESTAMP}' THEN CASE WHEN {text} ~ '{_HAS_OFFSET}' "
-        f"THEN CASE WHEN pg_input_is_valid({text}, 'timestamptz') THEN ({text})::timestamptz END "
-        f"ELSE CASE WHEN pg_input_is_valid({text}, 'timestamp') "
-        f"THEN ({text})::timestamp AT TIME ZONE 'UTC' END END END"
-    )
+#: The instant a stored timestamp names, or NULL when it names none. A function
+#: rather than the expression inline so the window can be served by an index
+#: (``postgres_page.LIST_WINDOW_INDEXES``), and an index expression must be
+#: IMMUTABLE. The casts it guards are only STABLE in general, because they read
+#: ``TimeZone`` and ``DateStyle``; here they are reached only by year-first ISO
+#: text, which ``DateStyle`` cannot reorder, and the zone is either written in
+#: the value or fixed to UTC, so the declaration is true of every input it sees.
+#: plpgsql so it is never inlined: the planner must see the very call the index
+#: was built on. The suffix is its version - change the body, change the name,
+#: or an index built on the old body would answer for the new one.
+INSTANT_FUNCTION = "syn_page_instant_v1"
+
+INSTANT_FUNCTION_SQL = (
+    f"CREATE OR REPLACE FUNCTION {INSTANT_FUNCTION}(stamp text) RETURNS timestamptz "
+    "LANGUAGE plpgsql IMMUTABLE STRICT PARALLEL SAFE AS $fn$ BEGIN RETURN "
+    f"CASE WHEN stamp ~ '{_ISO_TIMESTAMP}' THEN CASE WHEN stamp ~ '{_HAS_OFFSET}' "
+    "THEN CASE WHEN pg_input_is_valid(stamp, 'timestamptz') THEN stamp::timestamptz END "
+    "ELSE CASE WHEN pg_input_is_valid(stamp, 'timestamp') "
+    "THEN stamp::timestamp AT TIME ZONE 'UTC' END END END; END $fn$"
+)
+
+
+_INSTANT_FUNCTION_EXISTS = (
+    "SELECT EXISTS (SELECT 1 FROM pg_proc "
+    "WHERE proname = $1 AND pronamespace = current_schema()::regnamespace)"
+)
+
+
+async def ensure_instant_function(pool: asyncpg.Pool) -> None:
+    """Create :data:`INSTANT_FUNCTION` if it is missing. Every windowed page calls it.
+
+    The catalogue is read first, so a restart that finds it in place writes
+    nothing. A concurrent start creating it between the read and the write is
+    the one way the write fails that is not a failure.
+    """
+    async with pool.acquire() as conn:
+        if await conn.fetchval(_INSTANT_FUNCTION_EXISTS, INSTANT_FUNCTION):
+            return
+        try:
+            await conn.execute(INSTANT_FUNCTION_SQL)
+        except asyncpg.PostgresError:
+            if not await conn.fetchval(_INSTANT_FUNCTION_EXISTS, INSTANT_FUNCTION):
+                raise
+
+
+def instant_sql(name: str) -> str:
+    """The instant in field ``name``; the exact expression the window index is built on."""
+    return f"{INSTANT_FUNCTION}(data->>'{_field(name)}')"
 
 
 def _fold_sql(text: str, sources: str, targets: str) -> str:
@@ -121,6 +161,9 @@ def _match_sql(query: PageQuery, params: _Params) -> str:
         where, values = _build_where_clause(dict(query.equals), start_idx=len(params.values) + 1)
         params.values.extend(values)
         conditions.append(where.removeprefix(" WHERE "))
+    for name, wanted in query.present.items():
+        # ``->>`` reads a JSON null as SQL NULL, as ``record.get`` reads it as None.
+        conditions.append(f"data->>'{_field(name)}' IS {'NOT ' if wanted else ''}NULL")
     for name, required in query.contains_all.items():
         if required:
             tags = json.dumps(sorted(pg_safe(tag) for tag in required))
@@ -142,18 +185,24 @@ def _match_sql(query: PageQuery, params: _Params) -> str:
     return " AND ".join(conditions)
 
 
-def _verdict_sql(query: PageQuery, params: _Params) -> str:
+def _window_sql(query: PageQuery, params: _Params) -> tuple[str, str]:
+    """The rows the window keeps, and how each kept row is judged.
+
+    A windowed page keeps the rows inside it, which it reports, and the undated
+    ones, which it counts. Nothing reads a row outside it, so the filter drops
+    those in the scan, where an index on the instant can do it, instead of
+    parsing every row's timestamp to judge it afterwards.
+    """
     if query.after is None and query.before is None:
-        return "'inside'"
-    outside = []
+        return "TRUE", "'inside'"
+    instant = instant_sql(query.timestamp_field)
+    bounds = []
     if query.after is not None:
-        outside.append(f"instant < {params.add(query.after)}::timestamptz")
+        bounds.append(f"{instant} >= {params.add(query.after)}::timestamptz")
     if query.before is not None:
-        outside.append(f"instant > {params.add(query.before)}::timestamptz")
-    return (
-        "CASE WHEN instant IS NULL THEN 'undated' "
-        f"WHEN {' OR '.join(outside)} THEN 'outside' ELSE 'inside' END"
-    )
+        bounds.append(f"{instant} <= {params.add(query.before)}::timestamptz")
+    kept = f"({instant} IS NULL OR ({' AND '.join(bounds)}))"
+    return kept, f"CASE WHEN {instant} IS NULL THEN 'undated' ELSE 'inside' END"
 
 
 def build_page_query(
@@ -163,7 +212,7 @@ def build_page_query(
     params = _Params()
     stamp = _field(query.timestamp_field)
     match = _match_sql(query, params)
-    verdict = _verdict_sql(query, params)
+    window, verdict = _window_sql(query, params)
     selected = "TRUE"
     if query.statuses:
         selected = f"status = ANY({params.add(sorted(query.statuses))}::text[])"
@@ -172,12 +221,12 @@ def build_page_query(
     # "C" so the text compares by code point, as Python's ``str`` sort does.
     order = "COALESCE(stamp, '') COLLATE \"C\" DESC, updated_at DESC, id"
     sql = (
-        "WITH matched AS ("
+        "WITH judged AS ("
         f"SELECT id, updated_at, data->>'{stamp}' AS stamp, {_status_sql(query.status)} AS status, "
-        f"{_instant_sql(stamp)} AS instant "
+        f"{verdict} AS verdict "
         f"FROM (SELECT id, updated_at, {lean_source(lean_ready=lean_ready)} AS data "
-        f"FROM {table_name}) AS documents WHERE {match}"
-        f"), judged AS (SELECT id, updated_at, stamp, status, {verdict} AS verdict FROM matched) "
+        f"FROM {table_name}) AS documents WHERE {match} AND {window}"
+        ") "
         "SELECT "
         "(SELECT COALESCE(json_object_agg(status, n), '{}') FROM "
         "(SELECT status, count(*) AS n FROM judged WHERE verdict = 'inside' GROUP BY status) AS f"

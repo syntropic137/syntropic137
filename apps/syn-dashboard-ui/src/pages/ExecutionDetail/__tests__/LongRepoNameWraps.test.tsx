@@ -15,6 +15,7 @@ import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { ExecutionDetailResponse } from '../../../types'
+import { withPlanOfPhases } from '../../../test/phasePlanFixtures'
 
 const useExecutionData = vi.fn()
 
@@ -38,6 +39,14 @@ function withRepos(repos: string[]): ExecutionDetailResponse {
     phases: [],
     total_phases: 0,
     completed_phases: 0,
+    phase_progress: {
+      completed: 0,
+      skipped: 0,
+      possible: 0,
+      remaining_possible: 0,
+      percent: 0,
+      display: '0 of 0',
+    },
     total_input_tokens: 0,
     total_output_tokens: 0,
     total_cache_creation_tokens: 0,
@@ -55,7 +64,7 @@ function withRepos(repos: string[]): ExecutionDetailResponse {
 describe('execution detail at a phone width', () => {
   it('breaks a repository name with no break opportunity inside its card', () => {
     useExecutionData.mockReturnValue({
-      execution: withRepos([LONG_REPO, 'syntropic137/event-sourcing-platform']),
+      execution: withPlanOfPhases(withRepos([LONG_REPO, 'syntropic137/event-sourcing-platform'])),
       artifactDetails: {},
       loading: false,
       error: null,

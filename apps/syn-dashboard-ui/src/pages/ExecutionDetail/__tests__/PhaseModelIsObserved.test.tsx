@@ -4,7 +4,7 @@
  *
  * The card used to print the alias ("opus", "gpt-sol") under each phase, which
  * proves nothing: an alias is a pointer and where it points moves. These cases
- * pin the observed id as the primary label, "unknown (requested: X)" when the
+ * pin the observed id as the primary label, "X (requested)" when the
  * harness reported nothing, and the alias only ever as "requested: X".
  */
 
@@ -15,12 +15,13 @@ import { describe, expect, it } from 'vitest'
 import { UNATTRIBUTED_MODEL_KEY, UNATTRIBUTED_MODEL_LABEL } from '../../../constants/models'
 import type { ExecutionDetailResponse } from '../../../types'
 import { PhaseTimeline } from '../PhaseTimeline'
+import { withPlanOfPhases } from '../../../test/phasePlanFixtures'
 
 type Phase = ExecutionDetailResponse['phases'][number]
 
 function phase(overrides: Partial<Phase>): Phase {
   return {
-    workflow_phase_id: 'p1',
+    phase_id: 'p1',
     name: 'Phase',
     status: 'completed',
     session_id: null,
@@ -46,6 +47,7 @@ function phase(overrides: Partial<Phase>): Phase {
 function renderPhases(phases: Phase[]) {
   const execution = {
     workflow_execution_id: 'exec-1',
+    phase_progress: { completed: 0, skipped: 0, possible: 1, remaining_possible: 1, percent: 0, display: 'phase 1 of up to 1' },
     workflow_id: 'wf-1',
     workflow_name: 'Run',
     status: 'completed',
@@ -62,7 +64,7 @@ function renderPhases(phases: Phase[]) {
   } as unknown as ExecutionDetailResponse
   return render(
     <MemoryRouter>
-      <PhaseTimeline execution={execution} now={Date.now()} />
+      <PhaseTimeline execution={withPlanOfPhases(execution)} now={Date.now()} />
     </MemoryRouter>,
   )
 }
@@ -92,16 +94,16 @@ describe('Phase Pipeline model label', () => {
     expect(screen.queryByText('opus-5-5')).toBeNull()
   })
 
-  it('shows "unknown (requested: gpt-sol)" when no model was observed', () => {
+  it('shows "gpt-sol (requested)" when no model was observed', () => {
     renderPhases([
       phase({
         model: null,
         requested_model: 'gpt-sol',
-        model_display: 'unknown (requested: gpt-sol)',
+        model_display: 'gpt-sol (requested)',
         cost_by_model: { [UNATTRIBUTED_MODEL_KEY]: '0.1' },
       }),
     ])
-    expect(primaryModelLabels()).toEqual(['unknown (requested: gpt-sol)'])
+    expect(primaryModelLabels()).toEqual(['gpt-sol (requested)'])
     expect(screen.queryByText('gpt-sol')).toBeNull()
     // Not repeated as a second line: the display already carries it.
     expect(screen.queryByText('requested: gpt-sol')).toBeNull()
@@ -126,10 +128,10 @@ describe('Phase Pipeline model label', () => {
     renderPhases(
       aliases.map((alias, i) =>
         phase({
-          workflow_phase_id: `p${i}`,
+          phase_id: `p${i}`,
           model: null,
           requested_model: alias,
-          model_display: `unknown (requested: ${alias})`,
+          model_display: `${alias} (requested)`,
         }),
       ),
     )

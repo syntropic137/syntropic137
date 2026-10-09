@@ -33,7 +33,15 @@ TASK_INPUT_KEY = "task"
 
 #: Fields a release before #1513 does not know: omitted when None.
 _WRITTEN_ONLY_WHEN_SET = frozenset(
-    {"continued_branches", "abandoned_branches", "eval_id", "eval_selection", "eval_baseline"}
+    {
+        "continued_branches",
+        "abandoned_branches",
+        "inherited_skipped_phase_ids",
+        "eval_id",
+        "eval_selection",
+        "eval_baseline",
+        "workflow_version",
+    }
 )
 
 
@@ -100,6 +108,13 @@ class WorkflowExecutionStartedEvent(DomainEvent):
     #: written before the field existed. Written only when set.
     eval_baseline: list[EvalBaselinePin] | None = None
 
+    #: The installed version of the workflow this run launched from (Evals v2):
+    #: the template's package version, or its source digest when it has no
+    #: version. A launch snapshot - a later install changes future runs only.
+    #: A resume carries its parent's, from the parent's start pins. None for a
+    #: template with neither and before the field existed. Written only when set.
+    workflow_version: str | None = None
+
     #: Set only on a resume: the parent, what it inherited and where it resumes
     #: (ADR-014 s7). The child's own record of "what was this a resume of".
     resumed_from: ResumeOrigin | None = None
@@ -114,6 +129,12 @@ class WorkflowExecutionStartedEvent(DomainEvent):
     #: Set only on a resume (#1513): branches it could have continued and
     #: started fresh instead, each with why - the recorded warning.
     abandoned_branches: list[AbandonedBranch] | None = None
+
+    #: Set only on a resume (#1681): the phases before `resumed_from`'s resume
+    #: phase that a certified review in the parent skipped, in phase order.
+    #: Top-level for the same reason as `continued_branches`. None on a fresh
+    #: run, on a resume with none, and before the field existed.
+    inherited_skipped_phase_ids: list[str] | None = None
 
     @model_validator(mode="before")
     @classmethod

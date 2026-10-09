@@ -118,7 +118,9 @@ def _run_research(aggregate: WorkflowExecutionAggregate) -> None:
     )
 
 
-def _resumed_parent(*, pinned: list[ExecutablePhase] | None) -> _Stream:
+def _resumed_parent(
+    *, pinned: list[ExecutablePhase] | None, workflow_version: str | None = None
+) -> _Stream:
     """A parent that completed research and failed before plan, then resumed."""
     parent = WorkflowExecutionAggregate()
     phases = _pinned()
@@ -132,6 +134,7 @@ def _resumed_parent(*, pinned: list[ExecutablePhase] | None) -> _Stream:
             phase_definitions=phase_definitions_of(phases),
             pinned_phases=pinned,
             source_commits=[COMMIT],
+            workflow_version=workflow_version,
         )
     )
     _run_research(parent)
@@ -177,6 +180,26 @@ class TestTheParentPinsWhatItStartedWith:
         assert [p.phase_id for p in command.resumed_from.inherited_phases] == ["research"]
         assert command.resumed_from.inherited_phases[0].artifact_ids == ["art-research"]
         assert command.resumed_from.resume_phase_id == "plan"
+
+    def test_the_child_carries_the_parents_workflow_version(self) -> None:
+        """Evals v2: a resume is a new run with KNOWN provenance - its parent's."""
+        parent = _resumed_parent(pinned=_pinned(), workflow_version="1.2.3").load()
+        command = parent.resume_start_command()
+        child = WorkflowExecutionAggregate()
+        child.start_resume(command)
+        stream = _Stream()
+        stream.save(child)
+
+        [started] = [
+            e.event for e in stream.events if isinstance(e.event, WorkflowExecutionStartedEvent)
+        ]
+        assert started.workflow_version == "1.2.3"
+        assert stream.load().start_pins.workflow_version == "1.2.3"
+
+    def test_a_parent_with_no_known_version_gives_the_child_none(self) -> None:
+        command = _resumed_parent(pinned=_pinned()).load().resume_start_command()
+
+        assert command.workflow_version is None
 
     def test_a_parent_that_admitted_no_resume_builds_no_start(self) -> None:
         parent = WorkflowExecutionAggregate()

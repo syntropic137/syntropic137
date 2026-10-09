@@ -6,6 +6,7 @@ Extracted from WorkflowExecutionEngine during M6 cleanup.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import TYPE_CHECKING, Final, NamedTuple
 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
@@ -13,11 +14,13 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
     DelegationFailure,
     DelegationFailureReason,
     FailureClassification,
+    ReviewVerdict,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.upstream_failure import (
     UpstreamFailureError,
 )
 from syn_shared.display import format_exit_code
+from syn_shared.upstream_failure import UpstreamFailureKind
 
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
@@ -28,7 +31,6 @@ if TYPE_CHECKING:
         AgentVerdict,
     )
     from syn_shared.diagnostics import SignalDeath
-    from syn_shared.upstream_failure import UpstreamFailureKind
 
 
 def describe_exception(error: BaseException) -> str:
@@ -122,6 +124,57 @@ class UpstreamExitError(NonZeroExitError, UpstreamFailureError):
         RuntimeError.__init__(self, message)
         self.exit_code = exit_code
         self.upstream_kind = upstream_kind
+
+
+class ProvisionStep(StrEnum):
+    """A provisioning step that runs inside the workspace under a deadline (PC-126)."""
+
+    SECRET_INJECTION = "secret_injection"
+    """The ADR-024 setup script: credentials, token mint and repository clones."""
+
+    SKILL_INSTALL = "skill_install"
+    """`skills add` for one skill declared by the phase."""
+
+    CODEX_SANDBOX_PROBE = "codex_sandbox_probe"
+    """The live `codex sandbox` probe run before a sandboxed codex phase (#1434)."""
+
+    CHECKOUT_VERIFICATION = "checkout_verification"
+    """The read-only `git rev-parse` reads of each cloned repository's HEAD (#967)."""
+
+
+class ProvisionStepTimeoutError(UpstreamFailureError):
+    """A provisioning step ran out of time, every attempt it was allowed (PC-126).
+
+    A timeout is not an answer about the work. Under host load (10 concurrent
+    runs put load ~27 on 16 cores) a `skills add` or a setup script that would
+    finish is killed at its deadline, and the run used to fail as if the step
+    itself were broken. So it is recorded as what it is: the workspace did not
+    answer in time, `UNAVAILABLE`, transient, and a resume - which provisions
+    a fresh workspace - is the remedy. `failure_account` reads that kind off
+    this exception exactly as it does for GitHub; `step` says which step.
+    """
+
+    def __init__(
+        self,
+        step: ProvisionStep,
+        *,
+        subject: str,
+        timeout_seconds: int,
+        attempts: int,
+        detail: str = "",
+    ) -> None:
+        message = (
+            f"Provision step {step.value} ({subject}) timed out after {timeout_seconds}s "
+            f"on each of {attempts} attempt(s); the host is likely overloaded. "
+            "Raise the step's timeout setting if this recurs on an idle host."
+        )
+        super().__init__(
+            f"{message}\n{detail}" if detail else message,
+            upstream_kind=UpstreamFailureKind.UNAVAILABLE,
+        )
+        self.step = step
+        self.timeout_seconds = timeout_seconds
+        self.attempts = attempts
 
 
 class PinnedCommitUnreachableError(NonZeroExitError):
@@ -453,6 +506,31 @@ class FailureAccount(NamedTuple):
     delegation_failure: DelegationFailure | None = None
     """Which required delegate did not happen, and why (#894); `None` for
     every failure that is not a failed delegation."""
+
+
+class PhaseReportedNoVerdictError(RuntimeError):
+    """A phase that must report a review verdict reported none (PC-116).
+
+    THE FAILURE THIS EXISTS TO STOP. No verdict advances by order, on purpose,
+    so a verify phase that forgot ``review_verdict`` was read as "found
+    something" and the run spent a repair round on a fix nobody asked for -
+    or, on the last round, finished as though review had happened.
+
+    Classified `PLATFORM` by `failure_account`, like every failure that is
+    not the phase's own readable refusal: the agent claimed success and the
+    platform detected the gap. It fails the phase through the ordinary path,
+    so the execution is FAILED and resumable at this phase.
+    """
+
+    def __init__(self, *, phase_id: str) -> None:
+        super().__init__(
+            f"verify produced no verdict: phase {phase_id} declares requires_verdict, "
+            f"and its TASK_RESULT named no review_verdict this reader knows "
+            f"(exactly one of {', '.join(v.value for v in ReviewVerdict)}). "
+            f"Without one the review rounds cannot tell a certified change from a "
+            f"blocked one, so the phase fails rather than advancing by order."
+        )
+        self.phase_id = phase_id
 
 
 class DelegationFailedError(RuntimeError):

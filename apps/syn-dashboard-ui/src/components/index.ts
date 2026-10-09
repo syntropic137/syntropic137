@@ -36,6 +36,7 @@ export {
   type ResourceTableProps,
 } from './ResourceTable'
 export { ResourceFilterBar, type ResourceFilterBarProps } from './ResourceFilterBar'
+export { DEFAULT_STATUSES, type StatusChip } from './statusChips'
 export { SelectionActionBar, type SelectionActionBarProps } from './SelectionActionBar'
 export { SelectionCheckbox } from './SelectionCheckbox'
 export { SessionCostCard } from './SessionCostCard'

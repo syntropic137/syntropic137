@@ -1,0 +1,49 @@
+id: eval-implement-pinned-v1
+name: "Eval: implement a task at the pinned checkout, patch only (v1)"
+description: >
+  One implement phase over the commit the workspace was provisioned at. It
+  exists to be measured: the implementer-seed eval suite
+  (evals/implementer-seed-v1) launches it at the first parent of a real merged
+  fix, with the issue's statement of the problem as the task, and scores the
+  patch it writes against the fix's own tests, which the agent never sees.
+type: custom
+classification: standard
+requires_repos: true
+
+inputs:
+  - name: task
+    description: "The problem to fix, as its issue stated it, with no description of the solution"
+    required: true
+
+# WHY THE OUTPUT IS A PATCH AND NOTHING IS PUSHED (#1725). The score is the
+# hidden tests run on the agent's change, so the change has to leave the
+# workspace as data, not as a branch: a pushed branch would publish the eval's
+# answers and give a later case's agent something to fetch. The phase writes
+# `git diff` to artifacts/output/implement.patch; eval_implementer.py `score`
+# applies it at the pin in a separate workspace.
+#
+# THE MODEL IS PART OF THE MEASUREMENT. evals/implementer-seed-v1/suite.yaml
+# records this workflow's id and each phase's model, and
+# scripts/tests/test_eval_implementer.py fails when the two disagree.
+
+phases:
+  - id: implement
+    name: Implement the task at the pinned checkout
+    order: 1
+    execution_type: sequential
+    input_artifacts: []
+    output_artifacts:
+      - patch
+    timeout_seconds: 3600
+    delivers_repo_changes: false
+    allowed_tools:
+      - Read
+      - Grep
+      - Glob
+      - Bash
+      - Edit
+      - Write
+    agent:
+      provider: claude
+      model: opus
+    prompt_file: phases/implement.md

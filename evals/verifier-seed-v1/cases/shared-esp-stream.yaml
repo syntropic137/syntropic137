@@ -1,0 +1,36 @@
+id: shared-esp-stream
+polarity: defect
+source_pr: 1574
+# main just before #1641 merged (b1a162ab9^1), and #1641's branch base.
+commit: 6646da278d17a16e16549cf77b0749b25d8e8040
+fix_commit: 28607c4ec0845d617d9a07440d55407f00776711
+# The fix is two commits: 7aa3779de keys the test store like the ESP server, then
+# 28607c4ec fixes the stream id. The pin is the first one's parent.
+first_fix_commit: 7aa3779dece41e6a6e947029e52877fdacb6dcb4
+task: >
+  The change under review adds an ExecutionRequest aggregate so a direct start
+  is recorded as a request before the WorkflowExecution exists, gives every
+  start one execution concurrency budget, and makes queued starts visible.
+  Review the ExecutionRequest aggregate, the command that creates it and the
+  admission path that dispatches the execution, and judge them against the
+  production ESP event store.
+expected:
+  # Repo-relative. The report must name one of them; it is matched by file
+  # name, because a verifier writes `minio.py:212` as often as the full path.
+  files:
+    - packages/syn-domain/src/syn_domain/contexts/orchestration/domain/commands/RequestExecutionCommand.py
+    - packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution_request/ExecutionRequestAggregate.py
+  # Matched within ONE blocking finding, case-insensitive, with `_`, `-` and
+  # space alike, as substrings: a stem (`collid`) covers its inflections.
+  # Every group must match; within a group, any one word. Each group is one
+  # concept of the defect, written as the ways a correct finding says it.
+  keywords:
+    - [stream]
+    # Two aggregates on one stream id.
+    - [same, shared, share, one stream, single stream, reuse, both, also, aggregate id,
+       execution id, identical, occupy, collid, collision]
+    # What the second write does - or the sharing itself, said outright.
+    - [share a stream, share one stream, shared stream, same stream, one stream, duplicate, drop, conflict, collid, collision, clash, contaminat, interleav,
+       overwrit, corrupt, mix, reject, version, lost, wrong, fail, concurren,
+       optimistic, append, never dispatch, never start, swallow]
+split: train

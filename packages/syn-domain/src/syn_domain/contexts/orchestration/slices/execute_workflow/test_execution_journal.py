@@ -20,6 +20,7 @@ from __future__ import annotations
 from typing import TypedDict
 
 import pytest
+from event_sourcing.core.errors import ConcurrencyConflictError
 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
     StartExecutionCommand,
@@ -29,6 +30,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
     WorkflowExecutionAggregate,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.execution_journal import (
+    EventsNotRecordedError,
     ExecutionJournal,
 )
 
@@ -179,3 +181,45 @@ async def test_an_event_the_projection_ignores_is_not_an_error() -> None:
     await journal.open(aggregate)
 
     assert trace == ["save_new", "on_phase_started"]
+
+
+class _UnacknowledgedRepository(_ClearingRepository):
+    """A save that raises: the repository's exception is the only evidence of what it did."""
+
+    def __init__(self, trace: list[str], error: Exception) -> None:
+        super().__init__(trace)
+        self._error = error
+
+    async def save(self, aggregate: WorkflowExecutionAggregate) -> None:
+        raise self._error
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "error",
+    [
+        ConcurrencyConflictError(expected_version=1, actual_version=2),
+        ConnectionResetError("append sent, response lost"),
+    ],
+    ids=["version-race-not-durable", "lost-ack-unknown"],
+)
+async def test_append_failure_carries_the_repository_error_as_its_cause(
+    error: Exception,
+) -> None:
+    """ADR-072 D5 step 1: a reconciler tells "not written" from "unknown" by `__cause__`.
+
+    Only a `ConcurrencyConflictError` cause proves nothing was written. Dropping
+    or replacing the cause would make a lost acknowledgment look the same.
+    """
+    trace: list[str] = []
+    projection = _RecordingProjection(trace)
+    journal = ExecutionJournal(_UnacknowledgedRepository(trace, error), projection)
+    aggregate = _running_aggregate()
+    aggregate.mark_events_as_committed()
+    _raise_phase_started(aggregate, "phase-a")
+
+    with pytest.raises(EventsNotRecordedError) as raised:
+        await journal.append(aggregate)
+
+    assert raised.value.__cause__ is error
+    assert projection.phases_started == []

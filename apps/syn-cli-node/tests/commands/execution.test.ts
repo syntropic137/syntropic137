@@ -42,8 +42,18 @@ describe("execution commands", () => {
               workflow_name: "my-workflow",
               status: "completed",
               started_at: "2026-01-01T00:00:00Z",
-              completed_phases: 3,
-              total_phases: 3,
+              // Certified at its first review (PC-63): 6 of 10 defined
+              // phases ran, and the 4 repair phases were never needed.
+              completed_phases: 6,
+              total_phases: 10,
+              phase_progress: {
+                completed: 6,
+                skipped: 4,
+                possible: 6,
+                remaining_possible: 0,
+                percent: 100,
+                display: "6 of 6 (4 phases not needed)",
+              },
               total_tokens: 5000,
               total_cost_usd: "0.05",
             },
@@ -56,7 +66,9 @@ describe("execution commands", () => {
       const out = stdout();
       expect(out).toContain("exec-001");
       expect(out).toContain("my-workflow");
-      expect(out).toContain("3/3");
+      // The API's progress, verbatim; the CLI never divides the raw counts.
+      expect(out).toContain("6 of 6 (4 phases not needed)");
+      expect(out).not.toContain("6/10");
     });
 
     it("sends every --tag as a repeated ?tag= query parameter (#967)", async () => {
@@ -71,6 +83,39 @@ describe("execution commands", () => {
       await handler({ positionals: [], values: {} });
       const url = new URL((mockFetch.mock.calls[0]![0] as Request).url);
       expect(url.searchParams.has("tag")).toBe(false);
+    });
+
+    it("shows a queued start's place and reason, and the budget (PC-124)", async () => {
+      mockFetch.mockResolvedValue(
+        jsonResponse({
+          executions: [
+            {
+              workflow_execution_id: "exec-q1",
+              workflow_name: "my-workflow",
+              status: "queued",
+              started_at: null,
+              phase_progress: { completed: 0, skipped: 0, possible: 0, remaining_possible: 0, percent: 0, display: "0 of 0" },
+              total_tokens: 0,
+              total_cost_usd: "0",
+              start_queue: {
+                path: "direct", position: 1, held: true, running: 4, waiting: 2, limit: 4,
+                queued_at: "2026-10-08T00:00:00Z",
+                position_display: "queued 1 of 2 (4/4 running)",
+                reason_display: "slots full 4/4",
+              },
+            },
+          ],
+          total: 1,
+          budget: { running: 4, queued: 2, limit: 4, admission_paused: false, display: "4 running / 2 queued / cap 4" },
+        }),
+      );
+
+      await handler({ values: { status: "queued" }, positionals: [] });
+
+      expect((mockFetch.mock.calls[0]![0] as Request).url).toContain("status=queued");
+      const out = stdout();
+      expect(out).toContain("queued 1 of 2 (4/4 running): slots full 4/4");
+      expect(out).toContain("Budget: 4 running / 2 queued / cap 4");
     });
 
     it("shows empty message when no executions", async () => {
@@ -95,7 +140,7 @@ describe("execution commands", () => {
           total_cost_usd: "0.10",
           phases: [
             { name: "phase-1", status: "completed", started_at: "2026-01-01T00:00:00Z", total_tokens: 5000, cost_usd: "0.05", model: "claude-opus-5-5", requested_model: "opus", model_display: "claude-opus-5-5" },
-            { name: "phase-2", status: "completed", started_at: "2026-01-01T00:30:00Z", total_tokens: 5000, cost_usd: "0.05", model: null, requested_model: "gpt-sol", model_display: "unknown (requested: gpt-sol)" },
+            { name: "phase-2", status: "completed", started_at: "2026-01-01T00:30:00Z", total_tokens: 5000, cost_usd: "0.05", model: null, requested_model: "gpt-sol", model_display: "gpt-sol (requested)" },
           ],
         }),
       );
@@ -107,7 +152,7 @@ describe("execution commands", () => {
       expect(out).toContain("phase-1");
       // The phase table names what RAN (ADR-067 D9).
       expect(out).toContain("claude-opus-5-5");
-      expect(out).toContain("unknown (requested: gpt-sol)");
+      expect(out).toContain("gpt-sol (requested)");
     });
 
     const detail = {

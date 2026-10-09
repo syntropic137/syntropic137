@@ -9,7 +9,9 @@
  * previously been dropped at every hop between the projection and this card.
  *
  * Every fixture here sets `total_phases` to a number `phases.length` cannot
- * produce, so a card that measures the array fails.
+ * produce, so a card that measures the array fails. The card now renders the
+ * API's `phase_progress.display`, which also drops repair rounds a certifying
+ * review skipped (PC-63), so a card that divides the raw counts fails too.
  */
 
 import { render, screen } from '@testing-library/react'
@@ -17,6 +19,7 @@ import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { ExecutionDetailResponse, PhaseExecutionDetail } from '../../../types'
+import { withPlanOfPhases } from '../../../test/phasePlanFixtures'
 
 const useExecutionData = vi.fn()
 
@@ -28,7 +31,7 @@ const { ExecutionDetail } = await import('../ExecutionDetail')
 
 function phase(name: string, status: string): PhaseExecutionDetail {
   return {
-    workflow_phase_id: name,
+    phase_id: name,
     name,
     status,
     session_id: null,
@@ -62,6 +65,14 @@ function diedInPhaseTwo(
     phases: [phase('implement', 'completed'), phase('verify', 'failed')],
     total_phases: 3,
     completed_phases: 1,
+    phase_progress: {
+      completed: 1,
+      skipped: 0,
+      possible: 3,
+      remaining_possible: 0,
+      percent: 33,
+      display: '1 of up to 3, failed',
+    },
     total_input_tokens: 0,
     total_output_tokens: 0,
     total_cache_creation_tokens: 0,
@@ -79,7 +90,7 @@ function diedInPhaseTwo(
 
 function renderExecution(execution: ExecutionDetailResponse) {
   useExecutionData.mockReturnValue({
-    execution,
+    execution: execution && withPlanOfPhases(execution),
     artifactDetails: {},
     loading: false,
     error: null,
@@ -104,25 +115,33 @@ beforeEach(() => {
 })
 
 describe('ExecutionDetail phase count', () => {
-  it('counts the phases the workflow declared, not the ones that started', () => {
+  it('renders the API progress, not the phase array measuring itself', () => {
     renderExecution(diedInPhaseTwo())
 
     // "1/2" is the phase array measuring itself; the run had three phases.
-    expect(metricCardValue('Phases')).toBe('1/3')
+    expect(metricCardValue('Phases')).toBe('1 of up to 3, failed')
   })
 
-  it('still reports the total when the run died before any phase reported', () => {
-    renderExecution(diedInPhaseTwo({ phases: [], completed_phases: 0 }))
+  it('does not divide completed by total when review rounds were skipped', () => {
+    // PC-63: a run certified at its first review completes 6 of its 10
+    // defined phases. Dividing the raw counts rendered "6/10", a finished run
+    // that looked four phases short; the API says what actually happened.
+    renderExecution(
+      diedInPhaseTwo({
+        status: 'completed',
+        total_phases: 10,
+        completed_phases: 6,
+        phase_progress: {
+          completed: 6,
+          skipped: 4,
+          possible: 6,
+          remaining_possible: 0,
+          percent: 100,
+          display: '6 of 6 (4 phases not needed)',
+        },
+      }),
+    )
 
-    // The worst case for the old code: "0/0", a run of no phases at all.
-    expect(metricCardValue('Phases')).toBe('0/3')
-  })
-
-  it('says the total is unknown rather than substituting the phase tally', () => {
-    // total_phases 0 means nothing told the page the count - a projection that
-    // has not rebuilt. Rendering "1/2" here would restate the defect as fact.
-    renderExecution(diedInPhaseTwo({ total_phases: 0 }))
-
-    expect(metricCardValue('Phases')).toBe('1/—')
+    expect(metricCardValue('Phases')).toBe('6 of 6 (4 phases not needed)')
   })
 })

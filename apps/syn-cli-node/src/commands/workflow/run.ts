@@ -276,12 +276,6 @@ export const runCommand: CommandDef = {
         );
       }
     }
-    if (repos.length > 0 && !detail.requires_repos) {
-      print(
-        style("Warning:", YELLOW) +
-          ` '${wf.name}' has requires_repos: false — -R repos will not be cloned.`,
-      );
-    }
 
     // A prompt that consumes `task` and a dispatch that supplies one are two
     // independent facts, and either one alone used to dispatch silently (#1280).
@@ -411,7 +405,7 @@ export const statusCommand: CommandDef = {
       table.addRow(
         run.workflow_execution_id.slice(0, 12) + "...",
         run.status,
-        `${run.completed_phases}/${run.total_phases}`,
+        run.phase_progress.display,
         formatTokens(run.total_tokens),
         formatCost(run.total_cost_usd),
       );

@@ -382,7 +382,7 @@ class ReviewVerdict(StrEnum):
 
     * ``certified`` ends the repair loop. Every phase before the workflow's
       final phase is skipped, so a run that certifies in round 1 does not pay
-      for rounds 2 and 3.
+      for the rounds after it.
     * ``blocked`` - or no verdict at all - advances by order, which is the
       next repair round, or the final phase once the rounds are spent.
 
@@ -1094,6 +1094,11 @@ class ExecutablePhase:
     # which of the two its working tree can possibly hold.
     delivers_repo_changes: bool = True
 
+    # Whether this phase must report a `review_verdict` (PC-116). A review
+    # phase that says nothing about what it found would otherwise advance by
+    # order exactly as if it had found something, so the run fails instead.
+    requires_verdict: bool = False
+
     # Resolved plugins for the workspace materializer (issue #726). PR1 leaves
     # this empty; PR2's resolution service populates it from the workflow- and
     # phase-scope ClaudePluginRefs.
@@ -1104,6 +1109,13 @@ class ExecutablePhase:
     # populates it from the workflow- and phase-scope SkillRefs, with phase
     # scope winning on identity collision.
     skills: tuple[ResolvedSkill, ...] = ()
+
+    # The agent this phase is re-run on, ONCE, when its own provider cannot
+    # serve it at all: capacity that outlived every retry, or a spent quota
+    # (PC-83). Resolved at the execution boundary with the phase's own tools,
+    # sandbox and delegation, so the rerun differs only in who runs it. None is
+    # "no fallback declared", and the phase fails as it always did.
+    fallback_agent: AgentConfiguration | None = None
 
     @property
     def effective_timeout_seconds(self) -> int:

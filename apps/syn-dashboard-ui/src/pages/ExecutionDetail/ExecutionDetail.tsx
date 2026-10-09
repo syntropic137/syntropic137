@@ -15,7 +15,10 @@ import {
 import { TokenBreakdown } from '../../components/TokenBreakdown'
 import type { BreadcrumbItem } from '../../components/Breadcrumbs'
 import { ExecutionControl } from '../../components/ExecutionControl'
+import { ReadModelNotice } from '../../components/ReadPathBanner'
+import { ExecutionEvalBadge } from '../../components/evals'
 import { useExecutionData } from '../../hooks'
+import { useReadModelStatus } from '../../hooks/useReadPathHealth'
 import type { ExecutionDetailResponse, FailureClassification, ReportedFailureReason } from '../../types'
 import { type ExactUsd, exactUsdToString, parseExactUsd } from '../../utils/exactUsd'
 import { executionTokenTotals } from '../../utils/executionTokens'
@@ -175,7 +178,7 @@ function ExecutionErrorCard({
   )
 }
 
-const CONTROLLABLE_STATUSES = new Set(['running'])
+const CONTROLLABLE_STATUSES = new Set(['running', 'queued'])
 
 function ExecutionHeader({ execution, executionId, isConnected, refreshError, now, refreshExecution }: {
   execution: ExecutionDetailResponse
@@ -187,6 +190,7 @@ function ExecutionHeader({ execution, executionId, isConnected, refreshError, no
 }) {
   const showControl = !!executionId && CONTROLLABLE_STATUSES.has(execution.status)
   return (
+    // Wraps so the controls drop below the title at phone width (375px).
     <div className="flex flex-wrap justify-between items-start gap-4">
       <div className="min-w-0">
         <div className="flex items-start gap-4">
@@ -202,6 +206,7 @@ function ExecutionHeader({ execution, executionId, isConnected, refreshError, no
                 size="lg"
                 pulse={execution.status === 'running'}
               />
+              <ExecutionEvalBadge evalRun={execution.eval} />
             </div>
             <p className="mt-1 break-words text-sm text-[var(--color-text-secondary)]">{execution.workflow_name}</p>
             <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[var(--color-text-muted)]">
@@ -216,7 +221,7 @@ function ExecutionHeader({ execution, executionId, isConnected, refreshError, no
         {showControl && (
           <ExecutionControl
             executionId={executionId}
-            initialState={execution.status as 'running'}
+            initialState={execution.status as 'running' | 'queued'}
             onSuccess={refreshExecution}
           />
         )}
@@ -233,15 +238,10 @@ function ExecutionMetricsGrid({
   execution: ExecutionDetailResponse
   hasCostByModel: boolean
 }) {
-  const completedPhases = execution.phases.filter((p) => p.status === 'completed').length
-  // The denominator is what the run SET OUT to do, and `phases` cannot say:
-  // it holds the phases that STARTED, so a three-phase run that died in phase
-  // one rendered as "0/1" - a complete-looking run of one phase, with the two
-  // that never ran indistinguishable from phases that do not exist (#1147).
-  //
-  // An em dash, not the phase tally, when the count is unknown: falling back
-  // to `phases.length` is the number that was wrong, and it looks right.
-  const totalPhases = execution.total_phases > 0 ? execution.total_phases : '—'
+  // The API's progress, not a count of `phases` over `total_phases`: `phases`
+  // holds only the phases that STARTED (#1147), and the total counts repair
+  // rounds a certifying review skipped (PC-63).
+  const progress = execution.phase_progress
   const tokens = executionTokenTotals(execution)
   const attributedIn = tokens.inputTokens + tokens.cacheCreationTokens + tokens.cacheReadTokens
   const inOutSubtitle = `In: ${attributedIn.toLocaleString()} / Out: ${tokens.outputTokens.toLocaleString()}`
@@ -250,10 +250,10 @@ function ExecutionMetricsGrid({
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
       <MetricCard
         title="Phases"
-        value={`${completedPhases}/${totalPhases}`}
+        value={progress.display}
         icon={CheckCircle2}
         color="success"
-        subtitle={`${completedPhases} completed, ${execution.artifact_ids.length} artifact${execution.artifact_ids.length !== 1 ? 's' : ''}`}
+        subtitle={`${progress.completed} completed, ${execution.artifact_ids.length} artifact${execution.artifact_ids.length !== 1 ? 's' : ''}`}
         scrollToId="phase-timeline"
       />
       <MetricCard
@@ -286,6 +286,9 @@ export function ExecutionDetail() {
   const navigate = useNavigate()
   const { execution, artifactDetails, loading, error, isConnected, now, refreshExecution } =
     useExecutionData(executionId)
+  // From /health once measured, so a 404 while the detail read model replays
+  // can say why, and a terminal execution's snapshot cannot outlive catch-up.
+  const rebuilding = useReadModelStatus('workflow_execution_details', execution?.read_model_status)
 
   if (loading) return <PageLoader />
 
@@ -295,6 +298,7 @@ export function ExecutionDetail() {
   if (!execution) {
     return (
       <Card>
+        <ReadModelNotice status={rebuilding} />
         <EmptyState
           icon={Play}
           title="Execution not found"
@@ -315,6 +319,7 @@ export function ExecutionDetail() {
   return (
     <div className="space-y-6">
       <Breadcrumbs items={breadcrumbs} />
+      <ReadModelNotice status={rebuilding} />
       <ExecutionHeader execution={execution} executionId={executionId} isConnected={isConnected} refreshError={error} now={now} refreshExecution={refreshExecution} />
       {execution.error_message && (
         <ExecutionErrorCard

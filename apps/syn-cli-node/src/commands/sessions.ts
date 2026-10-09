@@ -64,7 +64,7 @@ const listCommand: CommandDef = {
       table.addRow(
         s.id.slice(0, 8) + "\u2026",
         formatStatus(s.status),
-        // The model that RAN, or "unknown (requested: X)" (ADR-067 D9). Never
+        // The model that RAN, or "X (requested)" (ADR-067 D9). Never
         // the provider: a harness name is not a model.
         s.agent_model_display,
         formatTimestamp(s.started_at),

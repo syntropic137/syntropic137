@@ -100,4 +100,8 @@ diagnostic), so a verify phase can gate on the exit code.
   `/workspace/artifacts/output/`, which is collected with the phase, and
   describe it (dimensions, size, what it shows) in the PR body.
 - Without a reachable API the pages render their shell with loading or empty
-  states. That still proves layout and routing, not data.
+  states. That still proves layout and routing, not data. To show data, pass
+  `--fixtures api.json`: a JSON object mapping request pathnames
+  (`"/api/v1/workflows/wf-1"`) to response bodies. Shape them from
+  `src/generated/api-types.ts`; any other `/api/` request answers 404. Add `--expand` to open
+  every `<details>` first, so collapsed content is in the shot.

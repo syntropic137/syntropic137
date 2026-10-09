@@ -1,3 +1,6 @@
+import { EXECUTION_LIST_PAGE_SIZE, LIST_PAGE_SIZE } from '../hooks/useListQuery'
+import type { PhaseProgressInfo } from '../types'
+
 /**
  * Collections that do not fit on one page.
  *
@@ -8,13 +11,15 @@
  * alike. No dashboard fixture was ever bigger than a page, so nothing could
  * tell the two apart.
  *
- * So both collections here are 120 rows - three pages at `LIST_PAGE_SIZE` -
- * and are aged so that the windows a test switches between BOTH overflow a
- * page:
+ * So each collection is 2.4 pages of the page size its surface asks for -
+ * three pages, the last one partial - and is aged so that the windows a test
+ * switches between BOTH overflow a page. At a page of 50 (artifacts):
  *
  *   000-029   under 24h        the default window holds 30
  *   030-079   1-7 days old     7d holds 80, more than one page
  *   080-119   older than 7d    All holds 120, also more than one page
+ *
+ * and at a page of 100 every band is doubled.
  *
  * That last property is the difficult one. Widening a lower bound on a
  * newest-first list CANNOT change the first page, so a fixture whose narrow
@@ -29,14 +34,19 @@
 export const HOUR_MS = 60 * 60 * 1000
 export const DAY_MS = 24 * HOUR_MS
 
-/** Three pages at `LIST_PAGE_SIZE`, so the last one is a partial page. */
-const COLLECTION_SIZE = 120
+/** Three pages at `pageSize`, so the last one is a partial page. */
+export function collectionSize(pageSize: number): number {
+  return (pageSize * 12) / 5
+}
 
 /** Age of row `index`, dealt across the three bands described above. */
-function hoursAgo(index: number): number {
-  if (index < 30) return (index + 1) * 0.5
-  if (index < 80) return 25 + (index - 30) * 2
-  return 200 + (index - 80) * 24
+export function hoursAgo(index: number, pageSize: number): number {
+  const under24h = (pageSize * 3) / 5
+  const under7d = (pageSize * 8) / 5
+  // Under 24h spans 0.5h-15.5h and 1-7d spans 25h-124h at either size.
+  if (index < under24h) return (index + 1) * (15 / under24h)
+  if (index < under7d) return 25 + (index - under24h) * (100 / (under7d - under24h))
+  return 200 + (index - under7d) * 24
 }
 
 function isoAgo(ms: number): string {
@@ -76,6 +86,7 @@ export interface FakeExecution {
   completed_at: string | null
   completed_phases: number
   total_phases: number
+  phase_progress: PhaseProgressInfo
   total_tokens: number
   total_tokens_display: string
   total_input_tokens: number
@@ -99,9 +110,10 @@ function makeExecution(index: number): FakeExecution {
     // Every status here is terminal, so nothing on screen is still moving and
     // `listPollIntervalMs` returns no poll cadence under the assertions.
     status: index % 5 === 0 ? 'failed' : index % 17 === 0 ? 'cancelled' : 'completed',
-    started_at: isoAgo(hoursAgo(index) * HOUR_MS),
+    started_at: isoAgo(hoursAgo(index, EXECUTION_LIST_PAGE_SIZE) * HOUR_MS),
     completed_at: null,
     completed_phases: 1,
+    phase_progress: { completed: 1, skipped: 0, possible: 1, remaining_possible: 0, percent: 100, display: '1 of 1' },
     total_phases: 1,
     total_tokens: 10,
     total_tokens_display: '10',
@@ -119,9 +131,9 @@ function makeExecution(index: number): FakeExecution {
   }
 }
 
-/** 120 executions, newest first. */
+/** 120 executions, newest first: three pages at `EXECUTION_LIST_PAGE_SIZE`. */
 export const EXECUTIONS: readonly FakeExecution[] = Array.from(
-  { length: COLLECTION_SIZE },
+  { length: collectionSize(EXECUTION_LIST_PAGE_SIZE) },
   (_, index) => makeExecution(index),
 )
 
@@ -153,13 +165,13 @@ function makeArtifact(index: number): FakeArtifact {
     artifact_type: index % 5 === 0 ? 'log' : index % 17 === 0 ? 'report' : 'deliverable',
     title: `Artifact ${String(index).padStart(3, '0')}`,
     size_bytes: 100 + index,
-    created_at: isoAgo(hoursAgo(index) * HOUR_MS),
+    created_at: isoAgo(hoursAgo(index, LIST_PAGE_SIZE) * HOUR_MS),
   }
 }
 
-/** 120 artifacts, aged exactly as the executions are. */
+/** 120 artifacts: three pages at `LIST_PAGE_SIZE`, aged in the same bands. */
 export const ARTIFACTS: readonly FakeArtifact[] = Array.from(
-  { length: COLLECTION_SIZE },
+  { length: collectionSize(LIST_PAGE_SIZE) },
   (_, index) => makeArtifact(index),
 )
 

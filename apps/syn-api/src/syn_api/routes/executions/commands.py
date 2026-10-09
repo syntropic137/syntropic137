@@ -37,6 +37,7 @@ from syn_api.types import (
     Err,
     ExecutionSummary,
     Ok,
+    PhaseProgressInfo,
     Result,
     WorkflowError,
 )
@@ -341,6 +342,8 @@ class ExecutionStatusResponse(BaseModel):
     current_phase: str | None = None
     completed_phases: int = 0
     total_phases: int = 0
+    phase_progress: PhaseProgressInfo
+    """Progress with skipped repair rounds accounted for; what clients render."""
     started_at: str | None = None
     completed_at: str | None = None
     error: str | None = None
@@ -451,6 +454,9 @@ async def execute(
             status=result.status,
             completed_phases=result.metrics.completed_phases,
             total_phases=result.metrics.total_phases,
+            phase_progress=PhaseProgressInfo.without_skips(
+                str(result.status), result.metrics.completed_phases, result.metrics.total_phases
+            ),
             total_tokens=result.metrics.total_tokens,
             # Lane 2: cost is enriched via execution_cost projection at query time (#695)
             total_cost_usd=Decimal("0"),
@@ -772,7 +778,8 @@ async def _validate_execution_request(
     merged = _merge_inputs(workflow, effective_inputs, request.task)
     _check_missing_declarations(workflow, merged)
 
-    # Repo validation only when the workflow requires repos (ADR-058 #666).
+    # Template repo resolution only when the workflow requires repos (ADR-058 #666);
+    # explicit typed repos are used and access-checked either way (#955).
     # ADR-063: this block fully covers what ExecuteWorkflowHandler._resolve_repos
     # could raise downstream - RepositoryRef.parse runs above for typed repos,
     # _check_repo_url_placeholders catches unresolved {{var}} in workflow.repos,
@@ -783,6 +790,8 @@ async def _validate_execution_request(
         await _preflight_repos_or_reject(
             workflow, workflow_id, typed_repos, effective_inputs, merged, request.task
         )
+    else:
+        await _validate_all_repos_access([r.https_url for r in typed_repos])
 
     return workflow, effective_inputs, typed_repos
 
@@ -927,6 +936,7 @@ async def get_execution_status_endpoint(
         current_phase=current_phase,
         completed_phases=completed_phases,
         total_phases=total_phases,
+        phase_progress=detail.phase_progress,
         started_at=str(_to_datetime(detail.started_at)) if detail.started_at else None,
         completed_at=str(_to_datetime(detail.completed_at)) if detail.completed_at else None,
         error=detail.error_message,
@@ -952,6 +962,7 @@ async def list_active_executions_endpoint(
             current_phase=None,
             completed_phases=s.completed_phases,
             total_phases=s.total_phases,
+            phase_progress=s.phase_progress,
             started_at=str(_to_datetime(s.started_at)) if s.started_at else None,
             completed_at=str(_to_datetime(s.completed_at)) if s.completed_at else None,
             error=s.error_message,

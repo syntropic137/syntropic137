@@ -75,6 +75,8 @@ _EVERY_FIELD: Mapping[str, object] = {
     # turns the unpushed-work gate's reading of an uncommitted change from
     # "unsaved deliverable" into "build-tool side effect" (#1308).
     "delivers_repo_changes": False,
+    # Not the default, which is False: a dropped mapping reads False (PC-116).
+    "requires_verdict": True,
     "argument_hint": "[task]",
     "model": "claude-opus-5-5",
     # NOT the default (None). Claude, not codex: a codex phase cannot carry
@@ -86,6 +88,8 @@ _EVERY_FIELD: Mapping[str, object] = {
     # NOT the default ("full-access"), so only the caller's value arriving
     # satisfies the assertion; a dropped mapping falls back and fails it.
     "sandbox": "workspace-write",
+    # NOT the default (None). Claude for the same #1376 reason as `provider`.
+    "fallback_agent": {"provider": "claude", "model": "claude-sonnet-5"},
     "claude_plugins": ["owner/repo@abc123"],
     # Skill refs name a SKILL inside a repo; plugin refs name the repo.
     # The model rejects the plugin spelling here, which is how I learned it.
@@ -137,6 +141,11 @@ def test_every_field_a_caller_sends_survives_into_the_domain() -> None:
     assert phase.timeout_seconds == 2400
     assert phase.max_cost_usd == 12.5
     assert phase.allowed_tools == ["Read", "Grep"]
+    assert phase.fallback_agent is not None
+    assert (phase.fallback_agent.provider, phase.fallback_agent.model) == (
+        "claude",
+        "claude-sonnet-5",
+    )
     # False cannot be produced by any fallback here: the domain field, the
     # `p.get` default and `PhaseYamlDefinition` all default to True, so only
     # the caller's value arriving satisfies this (#1187).
@@ -145,6 +154,7 @@ def test_every_field_a_caller_sends_survives_into_the_domain() -> None:
     # default and `PhaseYamlDefinition` all default to True, because a phase
     # nobody has thought about must keep the gate (#1308).
     assert phase.delivers_repo_changes is False
+    assert phase.requires_verdict is True
     assert phase.argument_hint == "[task]"
     assert phase.model == "claude-opus-5-5"
     assert phase.provider == "claude"

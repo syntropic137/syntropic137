@@ -78,14 +78,18 @@ const listCommand: CommandDef = {
         ex.workflow_execution_id,
         ex.workflow_name,
         formatStatus(ex.status),
-        formatTimestamp(ex.started_at),
-        `${ex.completed_phases}/${ex.total_phases}`,
+        // A queued start has not started: where it waits, and why (PC-124).
+        ex.start_queue
+          ? `${ex.start_queue.position_display}: ${ex.start_queue.reason_display}`
+          : formatTimestamp(ex.started_at),
+        ex.phase_progress.display,
         formatTokens(ex.total_tokens),
         formatCostWithCoverage(ex.total_cost_usd, ex.unpriced_observation_count),
         reposCell,
       );
     }
     table.print();
+    if (data.budget) printDim(`Budget: ${data.budget.display}`);
     if (total > page * pageSize) printDim(`Showing page ${page}. Use --page ${page + 1} for more.`);
   },
 };
@@ -164,7 +168,7 @@ const showCommand: CommandDef = {
           ph.deliverable_recovered
             ? `${formatStatus(ph.status)} ${style("(recovered)", YELLOW)}`
             : formatStatus(ph.status),
-          // What RAN, or "unknown (requested: X)" - never the alias (ADR-067 D9).
+          // What RAN, or "X (requested)" - never the alias (ADR-067 D9).
           ph.model_display,
           formatTimestamp(ph.started_at),
           formatTokens(ph.total_tokens),

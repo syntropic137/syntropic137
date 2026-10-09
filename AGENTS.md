@@ -298,7 +298,7 @@ All TODO and FIXME comments MUST reference a GitHub issue:
 
 ### Scratch Documentation Policy
 
-Root-level `.md` files (except `README.md`, `AGENTS.md`, `CLAUDE.md`) are scratch - never commit them. Permanent docs go in `docs/` or `docs/adrs/`.
+Root-level `.md` files (except `README.md`, `AGENTS.md`, `CLAUDE.md`, `CHANGELOG.md`) are scratch - never commit them. Permanent docs go in `docs/` or `docs/adrs/`.
 
 ## Key Concepts
 
@@ -616,3 +616,25 @@ not CI-shaped: some of its targets are deliberately more lenient than CI's.
 **Git hooks:** `.githooks/pre-push` runs the fast checks automatically. Wire it up once with `just setup-hooks` after cloning.
 
 **For small fixes on already-merged PRs** (formatting nits, Copilot review comments): push directly to `main` with `git push origin <branch>:main` rather than opening a new PR. Keeps the release chain unblocked.
+
+## Verification gates
+
+The gates an agent workflow's verify and fix phases run on a change to this
+repository, inside an agent workspace. The SDLC workflows read this section
+instead of naming commands themselves, because they run on other repositories
+too ([workflows/sdlc/README.md](workflows/sdlc/README.md#verification-gates)).
+The first fenced block is the list: one command per line, run from the repo root.
+
+```
+just preflight-agent
+uv run pytest -m unit -q
+```
+
+- `preflight-agent`, not `qa-ci` or `preflight`: seven gates need binaries the
+  workspace image lacks (#1109), and CI runs those. Passing here does not
+  promise a green CI.
+- It runs all of fitness. The first run installs Rust and builds `aps` (~6
+  minutes). A `FITNESS NOT RUN:` line is not a pass; a test listed as `NOT RUN`
+  (docker-backed) is settled by CI on the same head SHA.
+- New Python test modules need the `unit` marker (`architecture` under
+  `ci/fitness/`), or the second gate collects zero tests and goes green.

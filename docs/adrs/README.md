@@ -2,7 +2,7 @@
 
 ## How to use
 
-- Next available number: **ADR-072**
+- Next available number: **ADR-073**
 - Template: Status, Date, Context, Decision, Consequences (Nygard format)
 - ADR-025 was never created (numbering gap)
 - ADR-027 has two files: `ADR-027-sdk-wrapper-architecture.md` (superseded) and `ADR-027-unified-workflow-executor.md` (accepted)
@@ -31,7 +31,7 @@
 | ADR | Title | Status |
 |-----|-------|--------|
 | [ADR-009](ADR-009-agentic-execution-architecture.md) | Agentic Execution Architecture | Accepted |
-| [ADR-014](ADR-014-workflow-execution-model.md) | Workflow Execution Model (incl. resume as fork, deliverable vs side effects) | Accepted |
+| [ADR-014](ADR-014-workflow-execution-model.md) | Workflow Execution Model (incl. resume as fork, deliverable vs side effects, who runs an execution) | Accepted |
 | [ADR-019](ADR-019-websocket-control-plane.md) | WebSocket Control Plane Architecture | Accepted |
 | [ADR-023](ADR-023-workspace-first-execution-model.md) | Workspace-First Execution Model | Accepted |
 | [ADR-027](ADR-027-unified-workflow-executor.md) | Unified Workflow Executor Architecture | Accepted |
@@ -39,6 +39,7 @@
 | [ADR-048](ADR-048-workflows-as-cc-commands.md) | Workflows as Claude Code Commands | Accepted |
 | [ADR-049](ADR-049-sse-over-websocket-for-execution-streams.md) | Server-Sent Events (SSE) for Real-Time Execution Streams | Accepted |
 | [ADR-069](ADR-069-harness-neutral-phase-definition.md) | Harness-neutral Phase Definition | Accepted (partially proposed) |
+| [ADR-072](ADR-072-execution-hosting-and-upgrade-without-drain.md) | Execution Hosting, Executors, the Run Queue and Upgrade Without Drain | Accepted |
 
 ### Infrastructure & Storage
 
@@ -117,6 +118,7 @@
 | [ADR-065](ADR-065-claude-plugin-injection.md) | Skills as the Workflow Capability Unit | Accepted |
 | [ADR-068](ADR-068-remove-interactive-tmux-path.md) | Remove the Interactive tmux Agent Path | Accepted |
 | [ADR-071](ADR-071-session-inventory-and-discovery.md) | Session Inventory and Discovery | Accepted |
+| [ADR-072](ADR-072-workspace-platform-access.md) | Workspace Access to the Syntropic137 API | Accepted |
 
 ### Organization & Repos
 

@@ -32,6 +32,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continu
     ContinuedBranch,
     LeftBranches,
     PhaseCheckout,
+    PushedCommit,
     branches_left_by,
     read_abandoned_branches,
     read_continued_branches,
@@ -90,6 +91,11 @@ class StartPins(BaseModel):
     continued_branches: list[ContinuedBranch] = Field(default_factory=list)
     #: Set on a resume only: branches it could have continued and did not, and why.
     abandoned_branches: list[AbandonedBranch] = Field(default_factory=list)
+    #: Set on a resume only: phases its parent's certified review skipped (#1681).
+    inherited_skipped_phase_ids: list[str] = Field(default_factory=list)
+    #: The installed workflow version it launched from (Evals v2); a resume
+    #: carries its parent's, never the template's current one.
+    workflow_version: str | None = None
 
     def inherited_owners(self) -> dict[str, str]:
         """Who holds the artifacts of each phase a resume inherited, by phase id."""
@@ -151,6 +157,7 @@ class AdmittedResume(BaseModel):
     resume_execution_id: str | None = None
     inherited_phases: list[InheritedPhase] = Field(default_factory=list)
     resume_phase_id: str | None = None
+    inherited_skipped_phase_ids: list[str] = Field(default_factory=list)
 
 
 def phase_definitions_of(phases: Sequence[ExecutablePhase]) -> list[PhaseDefinition]:
@@ -236,14 +243,20 @@ def read_start_pins(event: DomainEvent) -> StartPins:
         ),
         continued_branches=read_continued_branches(evt(event, "continued_branches")),
         abandoned_branches=read_abandoned_branches(evt(event, "abandoned_branches")),
+        inherited_skipped_phase_ids=read_phase_ids(evt(event, "inherited_skipped_phase_ids")),
+        workflow_version=evt(event, "workflow_version"),
     )
 
 
-def read_left_branches(pins: StartPins, event: DomainEvent) -> LeftBranches:
+def read_left_branches(
+    pins: StartPins, event: DomainEvent, pushed: Sequence[PushedCommit] = ()
+) -> LeftBranches:
     """The branches a replayed `WorkflowFailed`'s failing phase left on origin (#1513).
 
     A run that was itself continuing branches in the phase that failed owns
-    them still, moved or not, so a resume of it continues them in turn.
+    them still, moved or not, so a resume of it continues them in turn. So
+    does every branch the failing phase's own workspace pushed to, from
+    ``pushed`` (PC-128): the only record a run orphaned by a restart has.
     """
     phase_id = evt(event, "failed_phase_id")
     resuming_same_phase = (
@@ -255,6 +268,7 @@ def read_left_branches(pins: StartPins, event: DomainEvent) -> LeftBranches:
             evt(event, "observed_branches"),
             repositories=[c.repository for c in pins.source_commits],
             continued=pins.continued_branches if resuming_same_phase else [],
+            pushed=[p for p in pushed if p.phase_id == phase_id],
         ),
     )
 
@@ -267,7 +281,15 @@ def read_admitted_resume(event: DomainEvent) -> AdmittedResume:
             evt(event, "inherited_phases"), evt(event, INHERITED_PHASE_OWNERS)
         ),
         resume_phase_id=evt(event, "resume_phase_id"),
+        inherited_skipped_phase_ids=read_phase_ids(evt(event, "inherited_skipped_phase_ids")),
     )
+
+
+def read_phase_ids(value: object) -> list[str]:
+    """A stored list of phase ids; empty when absent, as on events before #1681."""
+    if not isinstance(value, list):
+        return []
+    return [str(v) for v in value]
 
 
 def _stored_str(value: object) -> str | None:

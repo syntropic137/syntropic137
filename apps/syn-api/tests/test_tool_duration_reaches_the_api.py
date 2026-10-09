@@ -154,13 +154,14 @@ class _Connection:
     def __init__(self, rows: Sequence[_Row]) -> None:
         self._rows = rows
 
-    def transaction(self) -> _Transaction:
-        """``agent_event_span.custom_plans`` wraps the bounded read in one."""
+    def transaction(self, *, isolation: str, readonly: bool) -> _Transaction:
+        """``agent_event_span.custom_plans`` wraps the bounded read in one read-only snapshot."""
+        assert (isolation, readonly) == ("repeatable_read", True)
         return _Transaction()
 
     async def execute(self, query: str, *_args: object) -> str:
-        # custom_plans: the read-only snapshot, then the plan setting.
-        assert "REPEATABLE READ, READ ONLY" in query or "plan_cache_mode" in query, query
+        # custom_plans: the plan setting, its one statement after the BEGIN.
+        assert "plan_cache_mode" in query, query
         return "SET"
 
     async def fetch(
@@ -413,7 +414,11 @@ class _CodexRows:
         return
 
     async def record_tool_started(
-        self, tool_name: str, tool_use_id: str, input_preview: str
+        self,
+        tool_name: str,
+        tool_use_id: str,
+        input_preview: str,
+        skill_name: str | None = None,
     ) -> None:
         self._append(
             TOOL_EXECUTION_STARTED,

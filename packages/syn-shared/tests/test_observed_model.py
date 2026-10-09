@@ -68,7 +68,7 @@ class TestDisplay:
         assert format_observed_model("claude-opus-5-5", "opus") == "claude-opus-5-5"
 
     def test_unknown_with_request(self) -> None:
-        assert format_observed_model(None, "gpt-sol") == "unknown (requested: gpt-sol)"
+        assert format_observed_model(None, "gpt-sol") == "gpt-sol (requested)"
 
     def test_unknown(self) -> None:
         assert format_observed_model(None, None) == "unknown"

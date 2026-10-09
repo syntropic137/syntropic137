@@ -16,9 +16,12 @@
 #   --swap-only   skip to `gate`; the version must already be staged
 #   --dry-run     echo every mutating command; still run read-only checks
 #   --skip-probe  EMERGENCIES ONLY: do not prove a real execution starts after ungate
+#   --service gateway   build, ship, stage and swap the gateway alone, with no
+#                 gate, no drain and no probe: it is on syn-internal only, never
+#                 agent-net, so no execution depends on it (#1310). Default: all
 set -euo pipefail
 
-usage() { sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+usage() { sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 [ $# -ge 1 ] || usage
 VERSION="${1#v}"; shift
 TAG="v${VERSION}"
@@ -27,12 +30,12 @@ HOST="${SYN_PIT_HOST:-root@100.114.86.77}"
 API="${SYN_PIT_API:-http://100.114.86.77:8137/api/v1}"
 COMPOSE_DIR="/root/.syntropic137"
 COMPOSE="docker-compose.syntropic137.yaml"
-DRAIN_TIMEOUT="${SYN_PIT_DRAIN_TIMEOUT:-10800}"
+DRAIN_TIMEOUT="${SYN_PIT_DRAIN_TIMEOUT:-2700}"
 API_READY_TIMEOUT="${SYN_PIT_API_READY_TIMEOUT:-900}"
 PROBE_WORKFLOW="${SYN_PIT_PROBE_WORKFLOW:-telemetry-lag-probe-v1}"
 PROBE_TIMEOUT="${SYN_PIT_PROBE_TIMEOUT:-600}"
 PROBE_CANCEL_TIMEOUT="${SYN_PIT_PROBE_CANCEL_TIMEOUT:-300}"
-MODE="all"; DRY=0; STAGE_ONLY=0; SWAP_ONLY=0; SKIP_PROBE=0
+MODE="all"; DRY=0; STAGE_ONLY=0; SWAP_ONLY=0; SKIP_PROBE=0; SERVICE="all"
 while [ $# -gt 0 ]; do
     case "$1" in
         --ref) [ $# -ge 2 ] || usage; REF="$2"; shift 2 ;;
@@ -40,6 +43,7 @@ while [ $# -gt 0 ]; do
         --swap-only) SWAP_ONLY=1; shift ;;
         --dry-run) DRY=1; shift ;;
         --skip-probe) SKIP_PROBE=1; shift ;;
+        --service) [ $# -ge 2 ] || usage; SERVICE="$2"; shift 2 ;;
         *) usage ;;
     esac
 done
@@ -51,6 +55,8 @@ done
 COMMON="$(git -C "$(dirname "$0")" rev-parse --path-format=absolute --git-common-dir)"
 if [ "$(basename "$COMMON")" = ".git" ]; then REPO_TOP="$(dirname "$COMMON")"; else REPO_TOP="$COMMON"; fi
 WT_BASE="$(dirname "$REPO_TOP")/$(basename "$REPO_TOP")_worktrees"
+# Reads and rewrites the compose image pins; the stage and every pin count use it.
+REPOINT_PY="$(dirname "$0")/pit_stop_repoint.py"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 T0=$(date +%s)
 step() { printf '\n==> [%s +%ss] %s\n' "$(date -u +%H:%M:%SZ)" "$(( $(date +%s) - T0 ))" "$*"; }
@@ -65,8 +71,25 @@ die() {
 }
 run() { if [ "$DRY" = 1 ]; then printf '   (dry-run) %s\n' "$*"; else "$@"; fi; }
 remote() { ssh -o ConnectTimeout=15 "$HOST" "$@"; }
+# Every request to the API goes through here. The credential travels as a curl
+# config on stdin, never as an argument: `-u admin:<password>` sits in curl's
+# argv, readable by any user on this machine through `ps` for the whole call
+# (PC-85). Only the literal $SYN_API_PASSWORD in a PRINTED command remains.
+# printf is a builtin, so the password is in no process's argv. A quoted config
+# value treats \ and " as escapes, so both are escaped first.
+api_curl() {
+    # A line break would end the config line and curl echoes the rest of the
+    # line in its parse error, i.e. the password reaches stderr. Refuse it
+    # without ever printing the value.
+    case "$SYN_API_PASSWORD" in
+        *$'\n'*|*$'\r'*) die "SYN_API_PASSWORD contains a line break; refusing to pass it to curl (value not shown)" ;;
+    esac
+    local pw="${SYN_API_PASSWORD//\\/\\\\}"
+    pw="${pw//\"/\\\"}"
+    printf 'user = "admin:%s"\n' "$pw" | curl -K - -fsS "$@"
+}
 # $3, when given, caps the call below the default 90s (the probe's deadlines).
-api() { curl -fsS -u "admin:${SYN_API_PASSWORD}" -m "${3:-90}" "$API$1" -o "$2"; }
+api() { api_curl -m "${3:-90}" "$API$1" -o "$2"; }
 
 # DELIBERATELY NOT "last flag wins". `--stage-only --swap-only` would resolve
 # to whichever came last, so an invocation that asked only to STAGE could
@@ -89,6 +112,18 @@ esac
 case "$VERSION" in
     *[!0-9A-Za-z.+-]*) die "version carries characters no image tag may: $VERSION" ;;
 esac
+# What this pit stop ships: the containers it recreates, the images behind
+# them, and how many of each every count below must find.
+case "$SERVICE" in
+    all) SWAPPED="api gateway"; SHIPS="syn-api + syn-gateway"; REPOINTS="both pins"; N=2
+         ALREADY="both pins are already $TAG" ;;
+    gateway) SWAPPED="gateway"; SHIPS="syn-gateway"; REPOINTS="the syn-gateway pin"; N=1
+         ALREADY="the syn-gateway pin is already $TAG" ;;
+    *) die "--service must be all or gateway (got: $SERVICE)" ;;
+esac
+IMAGES=""
+for svc in $SWAPPED; do IMAGES="$IMAGES ghcr.io/syntropic137/syn-$svc:$TAG"; done
+IMAGES="${IMAGES# }"
 case "$DRAIN_TIMEOUT" in
     ""|*[!0-9]*) die "SYN_PIT_DRAIN_TIMEOUT must be whole seconds (got: $DRAIN_TIMEOUT)" ;;
 esac
@@ -101,6 +136,14 @@ esac
 case "$PROBE_CANCEL_TIMEOUT" in
     ""|*[!0-9]*) die "SYN_PIT_PROBE_CANCEL_TIMEOUT must be whole seconds (got: $PROBE_CANCEL_TIMEOUT)" ;;
 esac
+# Base ten, explicitly: Bash arithmetic reads a leading zero as octal, so `08`
+# passed the digits-only check above and then broke the drain's deadline sum,
+# and an arithmetic error abandons the function it is in WITHOUT tripping
+# `set -e`. The pit stop carried on past an undrained platform.
+DRAIN_TIMEOUT=$(( 10#$DRAIN_TIMEOUT ))
+API_READY_TIMEOUT=$(( 10#$API_READY_TIMEOUT ))
+PROBE_TIMEOUT=$(( 10#$PROBE_TIMEOUT ))
+PROBE_CANCEL_TIMEOUT=$(( 10#$PROBE_CANCEL_TIMEOUT ))
 # Interpolated into an API path below, so checked here rather than trusted there.
 case "$PROBE_WORKFLOW" in
     ""|*[!0-9A-Za-z._-]*) die "SYN_PIT_PROBE_WORKFLOW is not a workflow id (got: $PROBE_WORKFLOW)" ;;
@@ -110,12 +153,24 @@ esac
 # drain verdict is believed, and again after the swap: `status_counts` is
 # tallied from an asynchronous projection, so a lagging one reports a quiet
 # system while the event store knows about work it has not caught up to.
-projections_healthy() {
-    api "/health" "$TMP/health.json" 2>/dev/null || return 1
+# Prints the status and /health's top-level degraded_reasons on every call.
+# Returns 0 at the head, 1 not yet, 2 for `dropped_events`: a read model went
+# past a start without applying it (#1696). That is wrong, not slow, and never
+# heals by waiting (PC-115 waited 2.25h on it), so it gets its own code and the
+# execution ids the repair runbook needs.
+DROPPED_RUNBOOK="docs/runbooks/repair-dropped-execution-start.md"
+projections_healthy() {  # $1: optional curl cap in seconds (the drain's)
+    api "/health" "$TMP/health.json" "${1:-90}" 2>/dev/null || { echo "   subscription: /health unreachable"; return 1; }
     python3 - "$TMP/health.json" <<'PY'
 import json, sys
-s = json.load(open(sys.argv[1])).get("subscription", {})
-print("   subscription:", {k: s.get(k) for k in ("status", "is_catching_up", "lag")})
+h = json.load(open(sys.argv[1]))
+s = h.get("subscription") or {}
+print("   subscription:", {k: s.get(k) for k in ("status", "is_catching_up", "lag")},
+      "degraded_reasons:", h.get("degraded_reasons") or [])
+if s.get("status") == "dropped_events":
+    ids = sorted({u.get("execution_id") for u in s.get("unapplied_starts") or []} - {None})
+    print("   DROPPED STARTS, never applied by the read path:", ids or "none named yet")
+    sys.exit(2)
 sys.exit(0 if s.get("status") == "healthy" and not s.get("is_catching_up") and not s.get("lag") else 1)
 PY
 }
@@ -143,16 +198,65 @@ DISK
 # A drain is a statement about ONE instant: this returns 0 only when every
 # status key present is terminal. Read from status_counts, which is tallied over
 # the whole collection, never from a page of rows (see the runbook, section 1).
-drained() {
-    projections_healthy > /dev/null || { echo "   read path is not at the event-store head yet"; return 1; }
-    api "/executions?page_size=1" "$TMP/counts.json" || return 1
+# Returns 0 drained, 1 not yet, 2 the read path dropped events (see above), 3
+# the deadline passed. $1 is the drain's deadline in ms. No read starts once it
+# has passed, each is capped to what is left of it, and a drained verdict that
+# lands after it is not one: whole-second caps let two prompt reads that each
+# fit the budget finish together past it and drain (#1699).
+drained() {  # $1: deadline from mono_ms
+    local rc=0
+    [ "$(ms_left "$1")" -gt 0 ] || return 3
+    projections_healthy "$(cap "$1")" || rc=$?
+    if [ "$rc" = 2 ]; then return 2; fi
+    if [ "$rc" != 0 ]; then echo "   read path is not at the event-store head yet"; return 1; fi
+    [ "$(ms_left "$1")" -gt 0 ] || return 3
+    status_counts "$(cap "$1")" || return 1
+    if [ "$(ms_left "$1")" -le 0 ]; then echo "   drained only after the deadline: not a drain"; return 3; fi
+}
+
+# The busy-or-not reading of status_counts, printed; 0 only when every status
+# key present is terminal. Also printed at the gate: queued vs running there is
+# how long the drain is about to be.
+status_counts() {  # $1: optional curl cap in seconds (the drain's)
+    api "/executions?page_size=1" "$TMP/counts.json" "${1:-90}" || return 1
     python3 - "$TMP/counts.json" <<'PY'
 import json, sys
 counts = json.load(open(sys.argv[1]))["status_counts"]
 busy = sorted(set(counts) - {"completed", "failed", "cancelled", "interrupted"})
-print(f"   status_counts: {counts}" + (f"  IN FLIGHT: {busy}" if busy else "  (drained)"))
+print(f"   queued={counts.get('queued', 0)} running={counts.get('running', 0)}  status_counts: {counts}"
+      + (f"  IN FLIGHT: {busy}" if busy else "  (drained)"))
 sys.exit(1 if busy else 0)
 PY
+}
+
+# The drain's and the probe's bounds are DEADLINES on this monotonic clock,
+# not counters of sleeps: a counter that adds 10 per poll let one slow GET after
+# another stretch the probe's 600s bound past 90 minutes.
+mono_now() { python3 -c 'import time; print(int(time.monotonic()))'; }
+left() {  # $1: deadline from mono_now; seconds left, at most 90, 0 once passed
+    local l=$(( $1 - $(mono_now) ))
+    if [ "$l" -gt 90 ]; then l=90; fi
+    if [ "$l" -lt 0 ]; then l=0; fi
+    echo "$l"
+}
+# The drain's deadline is in milliseconds: a whole-second clock rounds up to a
+# second of slack per read, which is the late verdict drained() refuses.
+mono_ms() { python3 -c 'import time; print(int(time.monotonic() * 1000))'; }
+ms_left() {  # $1: deadline from mono_ms; ms left, 0 once passed
+    local l=$(( $1 - $(mono_ms) ))
+    if [ "$l" -lt 0 ]; then l=0; fi
+    echo "$l"
+}
+# Milliseconds as decimal seconds, for curl -m and sleep.
+ms_to_s() { printf '%d.%03d\n' "$(( $1 / 1000 ))" "$(( $1 % 1000 ))"; }
+# A curl -m for a read against the drain's deadline, at most 90s. Only asked
+# while time is left, so never 0: `curl -m 0` means NO limit.
+cap() {  # $1: deadline from mono_ms
+    local l
+    l="$(ms_left "$1")"
+    if [ "$l" -gt 90000 ]; then l=90000; fi
+    if [ "$l" -lt 1 ]; then l=1; fi
+    ms_to_s "$l"
 }
 
 # Close or open the admission gate (#1387). THE DRAIN ALONE ONLY OBSERVES:
@@ -165,7 +269,7 @@ PY
 # the deploy does, not something the swap does implicitly.
 maintenance() {  # $1: true|false, $2: reason
     if [ "$DRY" = 1 ]; then printf '   (dry-run) PUT /maintenance active=%s\n' "$1"; return 0; fi
-    curl -fsS -u "admin:${SYN_API_PASSWORD}" -m 30 -X PUT "$API/maintenance" \
+    api_curl -m 30 -X PUT "$API/maintenance" \
         -H 'Content-Type: application/json' \
         -d "{\"active\": $1, \"reason\": \"$2\", \"actor\": \"pit_stop.sh\"}" \
         -o "$TMP/maintenance.json" || return 1
@@ -179,6 +283,141 @@ print(f"   maintenance: active={mode['active']} reason={mode['reason']!r}")
 sys.exit(0 if mode["active"] is (sys.argv[2] == "true") else 1)
 GATE
 }
+
+# How many of the services this pit stop swaps are on $TAG, counted PER
+# SERVICE, never as one total across both: a total cannot tell the gateway's
+# pin from the API's, so a gateway-only stage on a host whose API is already on
+# $TAG would count 2, and one whose API alone is there would pass at 1 with the
+# gateway still old (#1310). Each service must name $TAG exactly once.
+#
+# Both compare WHOLE values, never a pattern: a substring grep counted
+# `syn-gateway:v0.33.2-beta.10` and a commented-out `# image:` line as staged
+# for v0.33.2-beta.1, and an unescaped `.` let `ghcrxio/...` stand in for
+# `ghcr.io/...`. The pin is read by the repoint's own parser, so the precheck
+# and the stage agree on what an image line is.
+pins_on_tag() {
+    local n=0 svc c
+    remote "cat $COMPOSE_DIR/$COMPOSE" > "$TMP/compose.check" || { echo 0; return 0; }
+    for svc in $SWAPPED; do
+        c="$(python3 "$REPOINT_PY" --on-tag "$TAG" "$TMP/compose.check" "$svc" || true)"
+        if [ "$c" = 1 ]; then n=$((n + 1)); fi
+    done
+    echo "$n"
+}
+images_on_tag() {
+    local n=0 svc c
+    for svc in $SWAPPED; do
+        c="$(remote "docker images --format '{{.Repository}}:{{.Tag}}' | grep -cxF 'ghcr.io/syntropic137/syn-$svc:$TAG'" || true)"
+        if [ "$c" = 1 ]; then n=$((n + 1)); fi
+    done
+    echo "$n"
+}
+
+# The executions still running, one per line, for an operator deciding what to
+# do about them. EVERY one: 200 is the API's largest page, so this follows the
+# pages until `total` is listed. Read-only: the pit stop never cancels anyone's
+# work. Each page is capped at 30s, since the budget is already spent.
+running_executions() {
+    local page=1 rc
+    while :; do
+        api "/executions?status=running&page_size=200&page=$page" "$TMP/running.json" 30 \
+            || { echo "   could not list the running executions (page $page)"; return 0; }
+        rc=0
+        python3 - "$TMP/running.json" "$page" <<'RUN' || rc=$?
+import json, sys
+body, page = json.load(open(sys.argv[1])), int(sys.argv[2])
+rows = body.get("executions") or []
+total = body.get("total", len(rows))
+if page == 1:
+    print(f"   STILL RUNNING ({total}):")
+for r in rows:
+    print(f"     {r.get('workflow_execution_id')}  {r.get('workflow_name')}  started {r.get('started_at')}")
+sys.exit(10 if rows and page * 200 < total else 0)
+RUN
+        if [ "$rc" != 10 ]; then return 0; fi
+        page=$(( page + 1 ))
+    done
+}
+
+# A drain that cannot finish ends the pit stop, and RE-OPENS admission first.
+# Nothing has been recreated, so the platform is exactly as it was apart from
+# the gate, and a gate left shut with no pit stop running to clear it is what
+# held admission for 2.25h in PC-115. Re-running with --swap-only closes it
+# again in one step; the stage already on the host is untouched.
+abort_drain() {
+    if maintenance false ""; then
+        echo "   admission is OPEN again" >&2
+    else
+        echo "   WARNING: admission is still PAUSED; clear it with PUT /maintenance" >&2
+    fi
+    die "$*; nothing was recreated"
+}
+
+# Wait, within SYN_PIT_DRAIN_TIMEOUT on a monotonic clock, for drained. Fails
+# fast on dropped events (waiting cannot fix them); on an exhausted budget lists
+# what is still running and stops, so the operator chooses (PC-114: one long
+# repair round held a whole drain for ~2h).
+#
+# Sets DRAINED=1 on the one path that saw drained; the caller checks that flag
+# rather than trusting the call's return, because an expansion error abandons a
+# function without tripping `set -e` and execution resumes after the call.
+DRAINED=0
+drain_loop() {
+    local deadline rc t
+    deadline=$(( $(mono_ms) + DRAIN_TIMEOUT * 1000 ))
+    while :; do
+        rc=0
+        drained "$deadline" || rc=$?
+        if [ "$rc" = 0 ]; then DRAINED=1; return 0; fi
+        if [ "$rc" = 2 ]; then
+            abort_drain "the read path DROPPED execution starts (subscription.status=dropped_events, #1696). Waiting cannot fix it. Repair the executions named above with $DROPPED_RUNBOOK, then re-run with --swap-only"
+        fi
+        t="$(ms_left "$deadline")"
+        if [ "$rc" = 3 ] || [ "$t" -le 0 ]; then
+            running_executions
+            abort_drain "drain budget of ${DRAIN_TIMEOUT}s spent with executions still in flight (listed above); none was cancelled. Choose: WAIT (re-run with --swap-only; SYN_PIT_DRAIN_TIMEOUT sets the budget), or INTERRUPT them yourself, re-run, and resume them after the pit stop"
+        fi
+        if [ "$t" -gt 60000 ]; then t=60000; fi
+        sleep "$(ms_to_s "$t")"
+    done
+}
+
+# The probe's workflow is installed and ACTIVE, asked before anything is built
+# (PC-87). beta.11 built, shipped, gated, drained for 40 minutes, swapped and
+# verified, and only then was refused at dispatch: "Workflow
+# telemetry-lag-probe-v1 is archived and cannot launch executions". Read-only:
+# it touches neither the deployment nor the admission gate.
+#
+# Through the LIST, not GET /workflows/{id}: only the list's summary carries
+# is_archived, and `search` matches ids by substring, so the id is matched
+# exactly here. It does not install the workflow itself: reinstalling is what
+# reactivates an archived template, which would quietly undo an archive someone
+# made on purpose, and the `syn` CLI it needs is not otherwise a dependency.
+probe_workflow_ready() {
+    api "/workflows?search=$PROBE_WORKFLOW&include_archived=true&page_size=100" "$TMP/probe_workflow.json" \
+        || die "could not read the probe workflow $PROBE_WORKFLOW from $API/workflows. Nothing was built or gated."
+    local verdict
+    verdict="$(python3 - "$TMP/probe_workflow.json" "$PROBE_WORKFLOW" <<'WF'
+import json, sys
+found = [w for w in json.load(open(sys.argv[1]))["workflows"] if w.get("id") == sys.argv[2]]
+print("missing" if not found else "archived" if found[0].get("is_archived") else "active")
+WF
+)" || die "could not read the probe workflow $PROBE_WORKFLOW from $API/workflows. Nothing was built or gated."
+    echo "   probe workflow $PROBE_WORKFLOW: $verdict"
+    if [ "$verdict" != active ]; then
+        die "the probe workflow $PROBE_WORKFLOW is $verdict on $API, so the probe after the swap could not launch. Nothing was built or gated. Install it (an install also reactivates an archived one):
+   SYN_API_URL=$API SYN_API_USER=admin SYN_API_PASSWORD=\$SYN_API_PASSWORD syn workflow install workflows/probes/telemetry-lag
+or, in an emergency only, re-run with --skip-probe."
+    fi
+}
+
+# Only when this run will dispatch the probe: --stage-only never does, and
+# neither does --service gateway, which exits after its own verify: it does not
+# touch the path an execution starts on (#1310).
+if [ "$SKIP_PROBE" = 0 ] && [ "$MODE" != "stage" ] && [ "$SERVICE" = all ]; then
+    step "precheck: the probe workflow $PROBE_WORKFLOW is installed and active"
+    probe_workflow_ready
+fi
 
 step "precheck: free space on the data volume"
 disk_space
@@ -207,33 +446,43 @@ if [ "$MODE" != "swap" ]; then
         BUILT_SHA="<the bump commit on $REF>"
     fi
 
-    step "build: syn-api + syn-gateway $TAG for linux/amd64 (commit $BUILT_SHA)"
-    # SYN_BUILD_* are what /version reports as image_tag and commit, and verify
-    # reads them back below. The fitness test in
-    # ci/fitness/infrastructure/test_release_build_args.py fails if they go.
-    run docker buildx build --platform linux/amd64 --build-arg INCLUDE_DOCKER_CLI=1 \
-        --build-arg SYN_BUILD_IMAGE_TAG="$TAG" --build-arg SYN_BUILD_COMMIT="$BUILT_SHA" \
-        -t "ghcr.io/syntropic137/syn-api:$TAG" --load -f "$WT/infra/docker/images/syn-api/Dockerfile" "$WT"
+    step "build: $SHIPS $TAG for linux/amd64 (commit $BUILT_SHA)"
+    if [ "$SERVICE" = all ]; then
+        # SYN_BUILD_* are what /version reports as image_tag and commit, and verify
+        # reads them back below. The fitness test in
+        # ci/fitness/infrastructure/test_release_build_args.py fails if they go.
+        run docker buildx build --platform linux/amd64 --build-arg INCLUDE_DOCKER_CLI=1 \
+            --build-arg SYN_BUILD_IMAGE_TAG="$TAG" --build-arg SYN_BUILD_COMMIT="$BUILT_SHA" \
+            -t "ghcr.io/syntropic137/syn-api:$TAG" --load -f "$WT/infra/docker/images/syn-api/Dockerfile" "$WT"
+    fi
     run docker buildx build --platform linux/amd64 \
         -t "ghcr.io/syntropic137/syn-gateway:$TAG" --load -f "$WT/infra/docker/images/gateway/Dockerfile" "$WT"
     # The #1216 trap: /health stays green while every execution fails at bootstrap.
-    [ "$DRY" = 1 ] || (cd "$WT" && just verify-image-capabilities syn-api "ghcr.io/syntropic137/syn-api:$TAG")
+    # Only syn-api runs executions, so only syn-api needs the capabilities.
+    if [ "$SERVICE" = all ] && [ "$DRY" = 0 ]; then
+        (cd "$WT" && just verify-image-capabilities syn-api "ghcr.io/syntropic137/syn-api:$TAG")
+    fi
 
     step "ship: docker save | docker load on $HOST"
+    # shellcheck disable=SC2086 # $IMAGES is a list of refs, validated above
     if [ "$DRY" = 0 ]; then
-        docker save "ghcr.io/syntropic137/syn-api:$TAG" "ghcr.io/syntropic137/syn-gateway:$TAG" | remote 'docker load' | tail -2
-    else
+        docker save $IMAGES | remote 'docker load' | tail -2
+    elif [ "$SERVICE" = all ]; then
+        # The line the two-image path has always printed, kept byte-for-byte
+        # (scripts/tests/fixtures/pit_stop/dry-run-all.txt).
         printf '   (dry-run) docker save ... | ssh %s docker load\n' "$HOST"
+    else
+        printf '   (dry-run) docker save %s | ssh %s docker load\n' "$IMAGES" "$HOST"
     fi
-    [ "$DRY" = 1 ] || [ "$(remote "docker images --format '{{.Repository}}:{{.Tag}}' | grep -c ':$TAG\$'")" = 2 ] \
-        || die "expected TWO images tagged $TAG on the host; the deploy would be half old"
+    [ "$DRY" = 1 ] || [ "$(images_on_tag)" = "$N" ] \
+        || die "expected $N image(s) tagged $TAG on the host; the deploy would be half old"
 
-    step "stage: back up the deployed compose and repoint both pins"
+    step "stage: back up the deployed compose and repoint $REPOINTS"
     # Read here, repointed locally, written back whole: a release-installed host
     # pins each image by its own digest and a hotfixed one by its own tag, so no
     # single substitution covers both services (scripts/pit_stop_repoint.py).
     remote "cat $COMPOSE_DIR/$COMPOSE" > "$TMP/compose.deployed" || die "could not read the deployed compose file"
-    BAK="$(python3 "$(dirname "$0")/pit_stop_repoint.py" "$TAG" "$TMP/compose.deployed" "$TMP/compose.staged")" \
+    BAK="$(python3 "$REPOINT_PY" "$TAG" "$TMP/compose.deployed" "$TMP/compose.staged" --service "$SERVICE")" \
         || die "could not repoint the syn-api/syn-gateway pins in the deployed compose file"
     if [ -n "$BAK" ]; then
         # Written beside the file, checked against the staged checksum, and only
@@ -247,12 +496,14 @@ if [ "$MODE" != "swap" ]; then
             echo "   backed up to $COMPOSE.bak-$BAK"
         fi
     else
-        echo "   both pins are already $TAG"
+        echo "   $ALREADY"
     fi
     # The same count --swap-only prechecks, so a stage it would refuse fails here.
+    # Only the swapped services are counted, so syn-api's pin, old or new, says
+    # nothing about a gateway-only stage.
     if [ "$DRY" = 0 ]; then
-        new_n="$(remote "grep -c 'syn-\(api\|gateway\):$TAG' $COMPOSE_DIR/$COMPOSE" || true)"
-        [ "$new_n" = 2 ] || die "the deployed compose pins $new_n/2 services to $TAG after the repoint"
+        new_n="$(pins_on_tag)"
+        [ "$new_n" = "$N" ] || die "the deployed compose pins $new_n/$N services to $TAG after the repoint"
     fi
     if [ "$MODE" = "stage" ]; then
         step "staged $TAG; run with --swap-only once drained"
@@ -265,29 +516,96 @@ if [ "$MODE" = "swap" ] && [ "$DRY" = 0 ]; then
     # --swap-only recreates whatever the compose file names. Without this it
     # would drain the platform and disrupt production containers before
     # discovering, at verify, that the file pins something else entirely.
-    pins="$(remote "grep -c 'syn-\(api\|gateway\):$TAG' $COMPOSE_DIR/$COMPOSE" || true)"
-    [ "$pins" = 2 ] || die "the deployed compose file pins $pins/2 services to $TAG; stage it first"
-    staged="$(remote "docker images --format '{{.Repository}}:{{.Tag}}' | grep -c ':$TAG\$'" || true)"
-    [ "$staged" = 2 ] || die "$staged/2 images tagged $TAG on $HOST; stage it first"
-    echo "   pins=2 images=2"
+    pins="$(pins_on_tag)"
+    [ "$pins" = "$N" ] || die "the deployed compose file pins $pins/$N services to $TAG; stage it first"
+    staged="$(images_on_tag)"
+    [ "$staged" = "$N" ] || die "$staged/$N images tagged $TAG on $HOST; stage it first"
+    echo "   pins=$N images=$N"
+fi
+
+# The container runs the image tagged $TAG on the host. BY IMAGE ID, NOT BY
+# TAG: `{{.Config.Image}}` reports the string the container was created from,
+# and a tag is mutable, so a container built from the PREVIOUS bytes behind
+# this same tag prints exactly what a correct deploy prints. The id is the
+# thing that actually changed.
+#
+# Every read guarded with `|| die`: under `set -e` a failed assignment exits on
+# the spot, skipping die() and the RECOVERY it prints. An unreachable host is
+# exactly when the operator needs it (#1575).
+swapped_is_running() {  # $1: api|gateway
+    local svc="$1" want got up
+    want="$(remote "docker image inspect ghcr.io/syntropic137/syn-$svc:$TAG --format '{{.Id}}'")" \
+        || die "could not read the id of image syn-$svc:$TAG on $HOST"
+    got="$(remote "docker inspect syn137-$svc --format '{{.Image}}'")" \
+        || die "could not inspect syn137-$svc on $HOST"
+    up="$(remote "docker inspect syn137-$svc --format '{{.State.Running}}'")" \
+        || die "could not inspect syn137-$svc on $HOST"
+    printf '   syn137-%s: running=%s image=%s\n' "$svc" "$up" "$got"
+    [ "$up" = true ] || die "syn137-$svc is not running after the swap"
+    [ "$got" = "$want" ] || die "syn137-$svc is not running the image tagged $TAG (has $got, wanted $want)"
+}
+
+# Compose can exit 0 and still leave the gateway `Created`: twice on
+# 2026-10-07/08 an API swap ended that way and the dashboard was down ~4min
+# until someone ran `docker start`. So the gateway is started explicitly after
+# every swap, never left to compose, and the operator is told which it was.
+start_gateway() {
+    local up
+    up="$(remote "docker inspect syn137-gateway --format '{{.State.Running}}'")" \
+        || die "could not inspect syn137-gateway on $HOST"
+    if [ "$up" = true ]; then
+        echo "   syn137-gateway: running after compose up"
+        return 0
+    fi
+    echo "   syn137-gateway: running=$up after compose up (left Created); starting it"
+    remote "docker start syn137-gateway" >/dev/null || die "docker start syn137-gateway failed on $HOST"
+    echo "   syn137-gateway: docker start issued"
+}
+
+if [ "$SERVICE" = gateway ]; then
+    # NO GATE AND NO DRAIN, deliberately. The gateway is on syn-internal only,
+    # never agent-net (docker/docker-compose.syntropic137.yaml), so no execution
+    # reaches it and recreating it cannot kill one. --no-deps is what keeps the
+    # API, and every execution it is running, exactly as it was (#1310).
+    step "swap: recreate the gateway alone (no pull, no deps: the API and its executions are untouched)"
+    RECOVERY="RECOVERY: admission was never paused and the API was not recreated. To put the previous gateway back:
+   ssh $HOST 'cd $COMPOSE_DIR && ls -t $COMPOSE.bak-*'     # the newest is the compose this pit stop replaced
+   ssh $HOST 'cd $COMPOSE_DIR && cp $COMPOSE.bak-<suffix> $COMPOSE && docker compose -f $COMPOSE up -d --no-deps gateway'"
+    run remote "cd $COMPOSE_DIR && docker compose -f $COMPOSE up -d --no-deps gateway" 2>&1 | tail -4 \
+        || die "compose up failed for the gateway"
+    step "verify: gateway image, GET /health through it"
+    if [ "$DRY" = 0 ]; then
+        start_gateway
+        swapped_is_running gateway
+        # Not /version: that reports the API's build, which this did not touch.
+        # /health through the gateway proves the new one is routing. nginx can
+        # be a moment behind its container, hence the short bounded retry.
+        # The STATUS is read, not curl's exit: `-f` passes a 204 or a 302, and
+        # a gateway answering either is not routing /health to the API.
+        routed=0 code=none
+        for _ in $(seq 1 10); do
+            code="$(api_curl -m 90 "$API/health" -o "$TMP/gateway.json" -w '%{http_code}' 2>/dev/null)" || code="${code:-none}"
+            if [ "$code" = 200 ]; then routed=1; break; fi
+            sleep 3
+        done
+        [ "$routed" = 1 ] || die "GET $API/health did not answer 200 through the new gateway (last status: $code)"
+        echo "   GET /health through syn137-gateway: $code"
+    fi
+    if [ "$DRY" = 1 ]; then
+        step "DRY RUN DONE: nothing was built, shipped, staged or swapped. $TAG is NOT live."
+    else
+        step "PIT STOP DONE: syn-gateway $TAG live in $(( $(date +%s) - T0 ))s. The API was not recreated and admission was never paused."
+    fi
+    exit 0
 fi
 
 step "gate: pausing execution admission for the rest of the pit stop"
 maintenance true "pit stop $VERSION" || die "could not pause admission; nothing was recreated"
+status_counts || true
 
-step "drain: waiting for every execution to be terminal (timeout ${DRAIN_TIMEOUT}s)"
-waited=0
-until drained; do
-    if [ "$waited" -ge "$DRAIN_TIMEOUT" ]; then
-        # Nothing has been recreated yet, so the platform is exactly as it was
-        # apart from the gate. Leaving it shut would strand admission on a
-        # deploy that never happened.
-        maintenance false "" || \
-            echo "   WARNING: admission is still paused; clear it with PUT /maintenance" >&2
-        die "not drained after ${DRAIN_TIMEOUT}s; nothing was recreated"
-    fi
-    sleep 60; waited=$((waited + 60))
-done
+step "drain: waiting for every execution to be terminal (budget ${DRAIN_TIMEOUT}s)"
+drain_loop
+[ "$DRAINED" = 1 ] || abort_drain "the drain ended without a drained verdict (see the error above)"
 
 # Bring api + gateway up. Idempotent: a second call recreates nothing that
 # already matches the compose file, it only starts what is still `Created`.
@@ -337,28 +655,12 @@ if ! swap_up; then
     step "swap: syn137-api is healthy; re-running compose up for its dependents"
     swap_up || die "compose up failed again after syn137-api reported healthy"
 fi
+# Started even when compose exited 0: that is exactly how it was left Created.
+[ "$DRY" = 1 ] || start_gateway
 
 step "verify: images, docker CLI, projections, build identity"
 if [ "$DRY" = 0 ]; then
-    # BY IMAGE ID, NOT BY TAG. `{{.Config.Image}}` reports the string the
-    # container was created from, and a tag is mutable: a container built from
-    # the PREVIOUS bytes behind this same tag prints exactly what a correct
-    # deploy prints. The id is the thing that actually changed.
-    #
-    # Every read guarded with `|| die`: under `set -e` a failed assignment exits
-    # on the spot, skipping die() and the RECOVERY it prints while admission is
-    # paused. An unreachable host is exactly when the operator needs it (#1575).
-    for svc in api gateway; do
-        want="$(remote "docker image inspect ghcr.io/syntropic137/syn-$svc:$TAG --format '{{.Id}}'")" \
-            || die "could not read the id of image syn-$svc:$TAG on $HOST"
-        got="$(remote "docker inspect syn137-$svc --format '{{.Image}}'")" \
-            || die "could not inspect syn137-$svc on $HOST"
-        up="$(remote "docker inspect syn137-$svc --format '{{.State.Running}}'")" \
-            || die "could not inspect syn137-$svc on $HOST"
-        printf '   syn137-%s: running=%s image=%s\n' "$svc" "$up" "$got"
-        [ "$up" = true ] || die "syn137-$svc is not running after the swap"
-        [ "$got" = "$want" ] || die "syn137-$svc is not running the image tagged $TAG (has $got, wanted $want)"
-    done
+    for svc in api gateway; do swapped_is_running "$svc"; done
     wait_for_api_ready || die "the API did not finish starting within ${API_READY_TIMEOUT}s"
     remote "docker exec syn137-api sh -c 'command -v docker'" >/dev/null || die "no docker CLI in syn-api (#1216): every execution will fail at bootstrap"
     # A `for` loop reports its LAST command, which here is `sleep`. Written as
@@ -395,18 +697,9 @@ maintenance false "" || die "$TAG is live but the clear did not complete; retry 
 # the pit stop dispatches one real run and declares nothing until a PHASE of it
 # is seen `running`. AFTER the ungate, deliberately: the probe goes through the
 # same admission as everyone else's work, and a failed probe never re-closes it.
-api_post() { curl -fsS -u "admin:${SYN_API_PASSWORD}" -m "${4:-90}" -X POST "$API$1" -H 'Content-Type: application/json' -d "$2" -o "$3"; }
+api_post() { api_curl -m "${4:-90}" -X POST "$API$1" -H 'Content-Type: application/json' -d "$2" -o "$3"; }
 
-# The probe's bounds are DEADLINES on a monotonic clock, not counters of sleeps:
-# a counter that adds 10 per poll let one slow GET after another stretch a 600s
-# bound past 90 minutes. Every HTTP call is capped to what is left.
-mono_now() { python3 -c 'import time; print(int(time.monotonic()))'; }
-left() {  # $1: deadline from mono_now; seconds left, at most 90, 0 once passed
-    local l=$(( $1 - $(mono_now) ))
-    if [ "$l" -gt 90 ]; then l=90; fi
-    if [ "$l" -lt 0 ]; then l=0; fi
-    echo "$l"
-}
+# Every probe HTTP call is capped to what is left of its deadline (`left`).
 nap() {  # $1: deadline; sleep the poll interval, never past the deadline
     local t
     t="$(left "$1")"
