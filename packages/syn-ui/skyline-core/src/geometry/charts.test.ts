@@ -26,8 +26,8 @@ import {
 import { SKYLINE_BOARD_ELEVATION } from './skyline'
 
 // The board numbers below were drawn at the board camera; the shipped default looks down more (skylineView.test.ts).
-const BOARD_YEAR = { ...SKYLINE_YEAR, elevation: SKYLINE_BOARD_ELEVATION }
-const BOARD_WEEKS = { ...SKYLINE_WEEKS, elevation: SKYLINE_BOARD_ELEVATION }
+const BOARD_YEAR = { ...SKYLINE_YEAR, elevation: SKYLINE_BOARD_ELEVATION, rowSpread: 1 }
+const BOARD_WEEKS = { ...SKYLINE_WEEKS, elevation: SKYLINE_BOARD_ELEVATION, rowSpread: 1 }
 
 // The Overview board's eleven active days: date, sessions, executions, cost, input, output, cache write, cache read.
 const RAW: [string, number, number, number, number, number, number, number][] = [

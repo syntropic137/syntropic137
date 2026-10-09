@@ -12,6 +12,8 @@
  * SKYLINE_BOARD_ELEVATION degrees. `dims.elevation` raises the camera; the
  * floor rows open up by sin(e) / sin(30) and the bars shorten by
  * cos(e) / cos(30), so back rows peek out from behind the front ones.
+ * `dims.rowSpread` then widens the gap between rows, so a short day behind a
+ * tall one keeps part of its top in view (feedback 75cf7eb2).
  *
  * Pointer picking: each bar's hit shape is its silhouette (floor, front,
  * side and top faces), tested front row first, so the face you see is the
@@ -67,6 +69,8 @@ export interface SkylineDims {
   depthY: number
   /** Camera angle above the ground plane, degrees (0 = side on, 90 = straight down). */
   elevation: number
+  /** Skyline: multiplies the gap between depth rows (1 = the board's floor). */
+  rowSpread: number
   /** x of the first week's back row... front row, j = 0. */
   originX: number
   /** Ground line of the front row. */
@@ -88,11 +92,16 @@ export interface SkylineDims {
 export const SKYLINE_BOARD_ELEVATION = 30
 
 /**
- * Default camera (owner tweak after demo): a little more top-down than the
- * boards, so every bar of the fixtures year keeps part of its top face in
- * view (skylineView.test.ts checks it).
+ * Default camera (owner tweaks after demo): more top-down than the boards,
+ * with the rows spread apart, so every bar of the fixtures year and of a
+ * pinned live year keeps a pickable part of its top face in view
+ * (skylineView.test.ts checks it). 60 degrees with the board's floor hid
+ * live days behind taller ones (feedback 75cf7eb2).
  */
-export const SKYLINE_ELEVATION = 60
+export const SKYLINE_ELEVATION = 68
+
+/** Default row spread: half as much floor again between depth rows. */
+export const SKYLINE_ROW_SPREAD = 1.5
 
 /** Desktop, a full year (Main board). */
 export const SKYLINE_YEAR: SkylineDims = {
@@ -103,6 +112,7 @@ export const SKYLINE_YEAR: SkylineDims = {
   depthX: 5.6,
   depthY: 4.55,
   elevation: SKYLINE_ELEVATION,
+  rowSpread: SKYLINE_ROW_SPREAD,
   originX: 20,
   groundY: 160,
   maxHeight: 90,
@@ -123,6 +133,7 @@ export const SKYLINE_WEEKS: SkylineDims = {
   depthX: 4.2,
   depthY: 3.5,
   elevation: SKYLINE_ELEVATION,
+  rowSpread: SKYLINE_ROW_SPREAD,
   originX: 6,
   groundY: 118,
   maxHeight: 72,
@@ -147,7 +158,7 @@ export function projectSkylineDims(dims: SkylineDims): SkylineDims {
   const e = rad(dims.elevation)
   const floor = Math.sin(e) / Math.sin(board)
   const rise = Math.cos(e) / Math.cos(board)
-  const rowDy = dims.rowDy * floor
+  const rowDy = dims.rowDy * floor * dims.rowSpread
   const depthY = dims.depthY * floor
   const maxHeight = dims.maxHeight * rise
   // Keep the board's headroom above the tallest possible bar: move the top of the view with it.
