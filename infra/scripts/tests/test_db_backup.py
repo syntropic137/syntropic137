@@ -31,6 +31,7 @@ _BASE = _ROOT / "docker" / "docker-compose.yaml"
 
 _DAY = 86400
 _LEDGER = ".syn-db-backup.ledger"
+_LEDGER_HEADER = "# syn-db-backup ledger 1\n"
 
 #: A real `pg_restore --list` excerpt: two TABLE DATA entries among others.
 _LISTING_WITH_DATA = """\
@@ -295,7 +296,9 @@ class TestBackup:
         assert list(racer.iterdir()) == [], "left a link inside a directory it did not create"
         assert (out / "syn-20261008T030000Z-1.dump").is_file()
 
-    @pytest.mark.parametrize("kind", ["symlink-to-file", "dangling-symlink", "directory"])
+    @pytest.mark.parametrize(
+        "kind", ["symlink-to-file", "dangling-symlink", "directory", "operator-file"]
+    )
     def test_ledger_is_never_written_through_what_holds_its_name(self, tmp_path, fake_pg, kind):
         out = tmp_path / "backups"
         out.mkdir()
@@ -306,8 +309,11 @@ class TestBackup:
             ledger.symlink_to(target)
         elif kind == "dangling-symlink":
             ledger.symlink_to(tmp_path / "nowhere")
-        else:
+        elif kind == "directory":
             ledger.mkdir()
+        else:
+            target = ledger
+            target.write_text("operator data\n")
 
         result = _run("backup", str(out), env=fake_pg(_LISTING_WITH_DATA))
 
@@ -315,7 +321,7 @@ class TestBackup:
         assert "will never be pruned" in result.stderr
         assert target.read_text() == "operator data\n"
         assert not (tmp_path / "nowhere").exists()
-        assert ledger.is_symlink() == (kind != "directory")
+        assert ledger.is_symlink() == ("symlink" in kind)
 
     @pytest.mark.parametrize("dump_ok", [True, False], ids=["backup-ok", "backup-fails"])
     def test_temp_files_live_in_a_private_directory_it_removes(self, tmp_path, fake_pg, dump_ok):
@@ -384,6 +390,8 @@ class TestPrune:
             # Temp files are recorded before their content exists; published
             # files with the sha256 of their final content.
             digest = "-" if name.startswith(".") else hashlib.sha256(b"x").hexdigest()
+            if not (directory / _LEDGER).exists():
+                (directory / _LEDGER).write_text(_LEDGER_HEADER)
             with (directory / _LEDGER).open("a") as ledger:
                 ledger.write(f"{path.stat().st_ino} {digest} {name}\n")
         return path
@@ -493,7 +501,7 @@ class TestPrune:
 
     def test_a_published_name_recorded_without_its_checksum_is_kept(self, tmp_path):
         ours = self._make(tmp_path, "syn-20260901T030000Z.dump", 365 * _DAY, tracked=False)
-        (tmp_path / _LEDGER).write_text(f"{ours.stat().st_ino} - {ours.name}\n")
+        (tmp_path / _LEDGER).write_text(f"{_LEDGER_HEADER}{ours.stat().st_ino} - {ours.name}\n")
 
         assert _run("prune", str(tmp_path), "1").returncode == 0
         assert ours.exists()
@@ -531,6 +539,15 @@ class TestPrune:
         assert ours.read_text() == "operator data"
         assert not list(tmp_path.glob(".syn-prune.*")), "left the operator file under a temp name"
 
+    def test_a_ledger_it_did_not_write_prunes_nothing(self, tmp_path):
+        """A file named like the ledger, without its header: not read as one."""
+        old = self._make(tmp_path, "syn-20260901T030000Z.dump", 365 * _DAY, tracked=False)
+        digest = hashlib.sha256(b"x").hexdigest()
+        (tmp_path / _LEDGER).write_text(f"{old.stat().st_ino} {digest} {old.name}\n")
+
+        assert _run("prune", str(tmp_path), "1").returncode == 0
+        assert old.exists()
+
     def test_without_a_ledger_nothing_is_pruned(self, tmp_path):
         old = self._make(tmp_path, "syn-20260901T030000Z.dump", 365 * _DAY, tracked=False)
         result = _run("prune", str(tmp_path), "1")
@@ -550,7 +567,7 @@ class TestPrune:
         # with its target's: neither may delete the link or what it points at.
         digest = hashlib.sha256(b"x").hexdigest()
         (backups / _LEDGER).write_text(
-            f"{os.lstat(link).st_ino} {digest} {link.name}\n"
+            f"{_LEDGER_HEADER}{os.lstat(link).st_ino} {digest} {link.name}\n"
             f"{target.stat().st_ino} {digest} {link.name}\n"
         )
 

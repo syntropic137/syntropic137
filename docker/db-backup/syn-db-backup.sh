@@ -48,6 +48,9 @@ MANIFEST_HEADER="syn-db-backup manifest 1"
 # inode AND its exact content. A file an operator put there, whatever it is
 # called and whatever inode it reuses, is never all three.
 LEDGER=".syn-db-backup.ledger"
+# Its first line. A file of that name without it is not this script's ledger:
+# never appended to, never read.
+LEDGER_HEADER="# syn-db-backup ledger 1"
 
 # The only names this script ever publishes. prune deletes nothing else. Shell patterns are anchored and [..] never matches '/' or a
 # newline, so no other file name can satisfy one.
@@ -72,11 +75,17 @@ inode() {
 # Record DIR/NAME, just published by this script, in DIR's ledger, with SUM
 # (the sha256 of its content). A file that cannot be
 # recorded is only ever kept, never pruned: that is the safe side. The ledger
-# is appended to only as a regular file, never through a symlink.
+# is created exclusively (noclobber: never through or over anything already
+# there) and appended to only while it is a regular file that starts with
+# LEDGER_HEADER.
 track() {
     tr_ledger="$1/$LEDGER"
-    if [ -L "$tr_ledger" ] || { [ -e "$tr_ledger" ] && [ ! -f "$tr_ledger" ]; }; then
-        echo "syn-db-backup: $tr_ledger is not a regular file; not recording $2, which will never be pruned" >&2
+    if [ ! -e "$tr_ledger" ] && [ ! -L "$tr_ledger" ]; then
+        (set -C && printf '%s\n' "$LEDGER_HEADER" >"$tr_ledger") 2>/dev/null || true
+    fi
+    if [ -L "$tr_ledger" ] || [ ! -f "$tr_ledger" ] ||
+        [ "$(sed -n 1p "$tr_ledger")" != "$LEDGER_HEADER" ]; then
+        echo "syn-db-backup: $tr_ledger is not this script's ledger; not recording $2, which will never be pruned" >&2
         return 0
     fi
     tr_ino=$(inode "$1/$2") && [ -n "$tr_ino" ] &&
@@ -253,7 +262,8 @@ prune() {
     require_days "$2"
     [ -d "$dir" ] || fail "backup directory $dir does not exist"
     ledger="$dir/$LEDGER"
-    if [ ! -f "$ledger" ] || [ -L "$ledger" ]; then
+    if [ ! -f "$ledger" ] || [ -L "$ledger" ] ||
+        [ "$(sed -n 1p "$ledger")" != "$LEDGER_HEADER" ]; then
         return 0
     fi
     while read -r ino sum name; do
@@ -265,24 +275,28 @@ prune() {
         is_recorded "$path" "$ino" - || continue
         # -mmin, not -mtime: -mtime truncates to whole days, so +7 keeps 7.9 days.
         [ -n "$(find "$path" -prune -type f -mmin "+$minutes")" ] || continue
-        # Rename it to a name only this run knows, then check what was
-        # renamed: whatever is deleted is exactly what was checked, even if
-        # something else took the name in between.
-        hold=$(mktemp "$dir/.syn-prune.XXXXXX") || fail "cannot create a file in $dir"
-        if ! mv -f -- "$path" "$hold" 2>/dev/null; then
-            rm -f -- "$hold"
+        # Move it into a private (0700) directory only this run created, then
+        # check what was moved: whatever is deleted is exactly what was
+        # checked, even if something else took the name in between, and
+        # nothing outside can swap it once it is there.
+        hold=$(mktemp -d "$dir/.syn-prune.XXXXXX") || fail "cannot create a directory in $dir"
+        if ! mv -- "$path" "$hold/f" 2>/dev/null; then
+            rmdir -- "$hold" 2>/dev/null || true
             continue
         fi
-        if is_recorded "$hold" "$ino" "$sum"; then
-            rm -f -- "$hold"
-            case $name in .syn-*) ;; *) echo "pruned: $name" ;; esac
+        if is_recorded "$hold/f" "$ino" "$sum"; then
+            rm -f -- "$hold/f"
+            rmdir -- "$hold" 2>/dev/null || true
+            echo "pruned: $name"
             continue
         fi
         # Not ours after all: back under its own name, untouched, unless
         # something has taken that name since; then it stays where it is.
-        mv -n -- "$hold" "$path" 2>/dev/null || true
-        if [ -e "$hold" ] || [ -L "$hold" ]; then
-            echo "syn-db-backup: $name is not the file this backup created; its name is taken, so it was kept as $hold" >&2
+        mv -n -- "$hold/f" "$path" 2>/dev/null || true
+        if [ -e "$hold/f" ] || [ -L "$hold/f" ]; then
+            echo "syn-db-backup: $name is not the file this backup created; its name is taken, so it was kept as $hold/f" >&2
+        else
+            rmdir -- "$hold" 2>/dev/null || true
         fi
     done <"$ledger"
 }
