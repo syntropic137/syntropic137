@@ -153,4 +153,17 @@
     gap: 24px;
     margin-top: 56px;
   }
+  /* Title, line and window share rows across the three steps (subgrid), so
+     the windows start on one line and end on one line whatever the copy wraps to. */
+  @supports (grid-template-rows: subgrid) {
+    .what-is__steps {
+      grid-template-rows: auto auto 1fr;
+    }
+    .what-is__step {
+      display: grid;
+      grid-row: span 3;
+      grid-template-rows: subgrid;
+      row-gap: var(--ds-space-3);
+    }
+  }
 }
