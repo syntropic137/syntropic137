@@ -29,6 +29,9 @@ from syn_api.types import (
     WorkflowTrendResponse,
 )
 from syn_domain.contexts.orchestration import DefinitionChangeKind, ExecutionListReads
+from syn_domain.contexts.orchestration.domain.read_models.workflow_definition_changes import (
+    version_at,
+)
 from syn_shared.display.formatters import format_cost
 
 if TYPE_CHECKING:
@@ -98,16 +101,13 @@ def workflow_changes(history: WorkflowDefinitionHistory) -> list[DefinitionChang
 
 
 def _version_at(changes: Sequence[DefinitionChangeResponse], date: str | None) -> str | None:
-    """The definition version current at ``date``: the last change at or before it."""
+    """The definition version current at ``date`` (``version_at``: latest in stream at or before)."""
     if date is None:
         return None
-    at = datetime.fromisoformat(date)
-    current = None
-    for change in changes:
-        if datetime.fromisoformat(change.changed_at) > at:
-            break
-        current = change.definition_version
-    return current
+    return version_at(
+        ((datetime.fromisoformat(c.changed_at), c.definition_version) for c in changes),
+        datetime.fromisoformat(date),
+    )
 
 
 def _eval_point(

@@ -40,8 +40,12 @@ class EvalDefinitionChange(BaseModel):
     measures, so a trend chart has nothing to annotate.
     """
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
+    sequence: int
+    """The event's position in the Eval's stream: the change's identity and its order.
+
+    Never the time: two edits committed together share a millisecond."""
     definition_version: int
     """1 at creation, then one more per goal or baseline change."""
     changed_at: str
@@ -68,7 +72,7 @@ class EvalRecord(BaseModel):
     created_at: str | None = None
     updated_at: str | None = None
     definition_changes: tuple[EvalDefinitionChange, ...] = ()
-    """Every definition change, oldest first; the last is the current definition."""
+    """Every definition change, in stream order; the last is the current definition."""
 
 
 @dataclass(frozen=True)

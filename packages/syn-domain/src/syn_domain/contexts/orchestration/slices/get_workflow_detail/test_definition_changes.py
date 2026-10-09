@@ -112,18 +112,21 @@ class TestDefinitionChanges:
 
         assert history.changes == (
             WorkflowDefinitionChange(
+                sequence=1,
                 definition_version="1.0.0",
                 changed_at=T1.isoformat(),
                 kind=DefinitionChangeKind.CREATED,
             ),
             # A phase edit keeps the version: nothing new was installed.
             WorkflowDefinitionChange(
+                sequence=2,
                 definition_version="1.0.0",
                 changed_at=T2.isoformat(),
                 kind=DefinitionChangeKind.PHASE_UPDATED,
             ),
             # No package version: the source digest, as a run records it.
             WorkflowDefinitionChange(
+                sequence=3,
                 definition_version="d" * 40,
                 changed_at=T3.isoformat(),
                 kind=DefinitionChangeKind.UPDATED,
@@ -151,3 +154,57 @@ class TestDefinitionChanges:
         await projection.clear_all_data()
 
         assert (await projection.definition_history(WF)).changes == ()
+
+
+def _reinstall(version: str, nonce: int, at: datetime) -> EventEnvelope:
+    return _envelope(
+        WorkflowTemplateUpdatedEvent(**_TEMPLATE, version=version),
+        "WorkflowTemplateUpdated",
+        nonce,
+        at,
+    )
+
+
+async def _fed(envelopes: list[EventEnvelope]) -> WorkflowDetailProjection:
+    projection = WorkflowDetailProjection(InMemoryProjectionStore())
+    checkpoints = MemoryCheckpointStore()
+    for envelope in envelopes:
+        await projection.handle_event(envelope, checkpoints)
+    return projection
+
+
+class TestChangeIdentityAndOrder:
+    """A change is identified and ordered by stream position, never by time (#1800 review)."""
+
+    async def test_two_reinstalls_in_the_same_millisecond_are_both_retained(self) -> None:
+        created = _stream()[0]
+        projection = await _fed([created, _reinstall("2.0.0", 2, T2), _reinstall("3.0.0", 3, T2)])
+
+        history = await projection.definition_history(WF)
+
+        assert [c.definition_version for c in history.changes] == ["1.0.0", "2.0.0", "3.0.0"]
+        assert history.current_version == "3.0.0"
+
+    async def test_a_clock_regression_keeps_stream_order_and_dates_lookups_right(self) -> None:
+        oct1 = datetime(2026, 10, 1, tzinfo=UTC)
+        oct2 = datetime(2026, 10, 2, tzinfo=UTC)
+        oct3 = datetime(2026, 10, 3, tzinfo=UTC)
+        created = _envelope(
+            WorkflowTemplateCreatedEvent(**_TEMPLATE, version="1.0.0"),
+            "WorkflowTemplateCreated",
+            1,
+            oct1,
+        )
+        # Recorded Oct 1, Oct 3, then Oct 2: the store's clock stepped back.
+        projection = await _fed(
+            [created, _reinstall("2.0.0", 2, oct3), _reinstall("3.0.0", 3, oct2)]
+        )
+
+        history = await projection.definition_history(WF)
+
+        assert [c.sequence for c in history.changes] == [1, 2, 3]
+        assert [c.definition_version for c in history.changes] == ["1.0.0", "2.0.0", "3.0.0"]
+        # At Oct 2: changes 1 (Oct 1) and 3 (Oct 2) had been recorded; 3 is latest in the stream.
+        assert history.version_at(oct2) == "3.0.0"
+        assert history.version_at(oct1) == "1.0.0"
+        assert history.version_at(oct3) == "3.0.0"

@@ -399,6 +399,36 @@ class TestDefinitionChanges:
         assert once is not None and twice is not None
         assert once.definition_changes == twice.definition_changes
 
+    async def test_two_goal_edits_in_the_same_millisecond_are_two_changes(self) -> None:
+        """Identity is the stream position: edits committed together share a time (#1800)."""
+        from datetime import UTC, datetime
+
+        instant = datetime(2026, 10, 2, 12, 0, 0, 123000, tzinfo=UTC)
+
+        class _Frozen(datetime):
+            @classmethod
+            def now(cls, tz: object = None) -> datetime:  # noqa: ARG003
+                return instant
+
+        stream = _Stream()
+        await stream.create_eval(_EVAL, "Refactor quality", [])
+        aggregate = await stream.evals.get_by_id(str(_EVAL))
+        assert aggregate is not None
+        with patch(f"{EvalAggregate.__module__}.datetime", _Frozen):
+            aggregate.update(UpdateEvalCommand(eval_id=_EVAL, goal=Goal("Goal two")))
+            aggregate.update(UpdateEvalCommand(eval_id=_EVAL, goal=Goal("Goal three")))
+        await stream.evals.save(aggregate)
+
+        record = await (await _replayed(stream, times=2)).record(str(_EVAL))
+
+        assert record is not None
+        assert [c.definition_version for c in record.definition_changes] == [1, 2, 3]
+        assert record.definition_changes[1].changed_at == record.definition_changes[2].changed_at
+        assert [c.sequence for c in record.definition_changes] == sorted(
+            {c.sequence for c in record.definition_changes}
+        )
+
+
 async def test_scores_in_many_evals_is_what_scores_answers_for_each() -> None:
     """One read for every eval on a list page (#1811), keyed by (eval, execution)."""
     from syn_domain.contexts.orchestration.domain.read_models.eval_runs import EvalRunScore
@@ -423,3 +453,17 @@ async def test_scores_in_many_evals_is_what_scores_answers_for_each() -> None:
         one = await evals.scores(eval_id)
         assert {k[1]: v for k, v in many.items() if k[0] == eval_id} == one
     assert await evals.scores_in([]) == {}
+
+
+def test_an_eval_definition_change_rejects_an_unknown_field() -> None:
+    """Stored documents are validated strictly (#1800 review nit)."""
+    from pydantic import ValidationError
+
+    from syn_domain.contexts.orchestration.domain.read_models.eval_summary import (
+        EvalDefinitionChange,
+    )
+
+    with pytest.raises(ValidationError):
+        EvalDefinitionChange.model_validate(
+            {"sequence": 1, "definition_version": 1, "changed_at": "2026-10-01T00:00:00Z", "x": 1}
+        )

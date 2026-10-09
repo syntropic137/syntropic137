@@ -23,9 +23,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from event_sourcing import AutoDispatchProjection
-
 from syn_domain.contexts.orchestration._shared.execution_list_reads import ExecutionListReads
+from syn_domain.contexts.orchestration._shared.recorded_time import RecordedTimeProjection
 from syn_domain.contexts.orchestration._shared.tags import TagSet, replay_tag_edit
 from syn_domain.contexts.orchestration.domain.aggregate_eval.value_objects import Verdict
 from syn_domain.contexts.orchestration.domain.events.EvalArchivedEvent import EvalArchivedEvent
@@ -63,8 +62,13 @@ if TYPE_CHECKING:
     )
 
 
-class EvalListProjection(AutoDispatchProjection):
-    """Builds the eval list and eval detail read models from Eval events."""
+class EvalListProjection(RecordedTimeProjection):
+    """Builds the eval list and eval detail read models from Eval events.
+
+    A ``RecordedTimeProjection`` for the event's stream position only: a
+    definition change is identified and ordered by it (``recorded_sequence``),
+    while its date stays the one the event itself carries.
+    """
 
     PROJECTION_NAME = "evals"
     SCORES = "eval_run_scores"
@@ -87,6 +91,16 @@ class EvalListProjection(AutoDispatchProjection):
             await self._store.delete_all(self.PROJECTION_NAME)
             await self._store.delete_all(self.SCORES)
 
+    def _sequence(self, changes: tuple[EvalDefinitionChange, ...]) -> int:
+        """The handled event's stream position.
+
+        A handler called without an envelope (a unit test calling ``on_*``
+        directly) has none, and nothing to be redelivered: it is the next one.
+        """
+        if self.recorded_sequence is not None:
+            return self.recorded_sequence
+        return changes[-1].sequence + 1 if changes else 1
+
     async def on_eval_created(self, event_data: EvalCreatedEvent) -> None:
         event = EvalCreatedEvent.model_validate(event_data)
         created_at = event.created_at.isoformat()
@@ -101,7 +115,13 @@ class EvalListProjection(AutoDispatchProjection):
             archived=False,
             created_at=created_at,
             updated_at=created_at,
-            definition_changes=(EvalDefinitionChange(definition_version=1, changed_at=created_at),),
+            definition_changes=(
+                EvalDefinitionChange(
+                    sequence=self._sequence(()),
+                    definition_version=1,
+                    changed_at=created_at,
+                ),
+            ),
         )
         await self._save(record)
 
@@ -115,12 +135,15 @@ class EvalListProjection(AutoDispatchProjection):
         updated_at = event.updated_at.isoformat()
         changes = record.definition_changes
         redefines = event.goal is not None or event.baseline_repos is not None
-        # A redelivered event carries the same time: it is not a second change.
-        if redefines and not any(c.changed_at == updated_at for c in changes):
+        sequence = self._sequence(changes)
+        # A redelivered event has the same stream position: not a second change.
+        if redefines and not any(c.sequence == sequence for c in changes):
             version = changes[-1].definition_version + 1 if changes else 1
             changes = (
                 *changes,
-                EvalDefinitionChange(definition_version=version, changed_at=updated_at),
+                EvalDefinitionChange(
+                    sequence=sequence, definition_version=version, changed_at=updated_at
+                ),
             )
         await self._save(
             record.model_copy(

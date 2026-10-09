@@ -12,8 +12,12 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import StrEnum
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 
 class DefinitionChangeKind(StrEnum):
@@ -31,6 +35,8 @@ class WorkflowDefinitionChange(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
+    sequence: int
+    """The event's position in the workflow's stream: its identity and its order."""
     definition_version: str | None
     """The package version, else the source digest, as a run records it; None if neither."""
     changed_at: str
@@ -39,7 +45,12 @@ class WorkflowDefinitionChange(BaseModel):
 
 
 class WorkflowDefinitionHistory(BaseModel):
-    """Every definition change of one workflow, oldest first. Also the stored document."""
+    """Every definition change of one workflow, in stream order. Also the stored document.
+
+    Stream order (``sequence``) is the order of record, never the recorded
+    time: events committed together share a millisecond, and a store's clock
+    can step backwards, so time neither identifies a change nor orders them.
+    """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -47,24 +58,38 @@ class WorkflowDefinitionHistory(BaseModel):
     changes: tuple[WorkflowDefinitionChange, ...] = ()
 
     def with_change(self, change: WorkflowDefinitionChange) -> WorkflowDefinitionHistory:
-        """This history plus ``change``; unchanged when ``change`` is already in it.
+        """This history plus ``change``, kept in stream order; unchanged if already in it.
 
-        Redelivery of the same event carries the same recorded time and kind,
-        so it is recognised by those and not counted twice.
+        A redelivered or replayed event has the same stream position, so it is
+        recognised by that and not counted twice.
         """
-        if any((c.changed_at, c.kind) == (change.changed_at, change.kind) for c in self.changes):
+        if any(c.sequence == change.sequence for c in self.changes):
             return self
-        return self.model_copy(update={"changes": (*self.changes, change)})
+        changes = tuple(sorted((*self.changes, change), key=lambda c: c.sequence))
+        return self.model_copy(update={"changes": changes})
 
     def version_at(self, at: datetime) -> str | None:
-        """The version of the last change recorded at or before ``at``."""
-        current = None
-        for change in self.changes:
-            if datetime.fromisoformat(change.changed_at) > at:
-                break
-            current = change.definition_version
-        return current
+        """The version current at ``at``: see ``version_at`` (module function)."""
+        return version_at(
+            ((datetime.fromisoformat(c.changed_at), c.definition_version) for c in self.changes),
+            at,
+        )
 
     @property
     def current_version(self) -> str | None:
         return self.changes[-1].definition_version if self.changes else None
+
+
+def version_at[V](changes: Iterable[tuple[datetime, V]], at: datetime) -> V | None:
+    """The version current at ``at``, from ``(changed_at, version)`` pairs in stream order.
+
+    Defined as: of the changes recorded at or before ``at``, the one latest in
+    the stream. Times need not be monotonic in the stream, so every change is
+    considered; stopping at the first later time would miss an earlier-dated
+    change recorded after it.
+    """
+    current: V | None = None
+    for changed_at, version in changes:
+        if changed_at <= at:
+            current = version
+    return current

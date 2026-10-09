@@ -163,21 +163,22 @@ class WorkflowDetailProjection(RecordedTimeProjection):
     ) -> None:
         """Append a definition change, dated by the envelope (#1788).
 
-        A phase edit carries no version, so it keeps the one current when it
-        was recorded. A create is recorded only as a workflow's FIRST change:
+        A phase edit carries no version, so it keeps the one current in the
+        stream before it. A create is recorded only as a workflow's FIRST change:
         a reinstall rebuilds the detail through the create handler and records
         itself as an update. Without an envelope (a handler called directly)
         there is no date, so nothing is recorded.
         """
-        recorded_at = self.recorded_at
-        if not workflow_id or recorded_at is None:
+        recorded_at, sequence = self.recorded_at, self.recorded_sequence
+        if not workflow_id or recorded_at is None or sequence is None:
             return
         history = await self.definition_history(workflow_id)
         if kind is DefinitionChangeKind.CREATED and history.changes:
             return
         if kind is DefinitionChangeKind.PHASE_UPDATED:
-            version = history.version_at(recorded_at)
+            version = history.current_version
         change = WorkflowDefinitionChange(
+            sequence=sequence,
             definition_version=version,
             changed_at=recorded_at.isoformat(),
             kind=kind,
@@ -187,7 +188,7 @@ class WorkflowDetailProjection(RecordedTimeProjection):
             await self._store.save(self.CHANGES, workflow_id, updated.model_dump(mode="json"))
 
     async def definition_history(self, workflow_id: str) -> WorkflowDefinitionHistory:
-        """Every definition change of the workflow, oldest first; empty if none recorded."""
+        """Every definition change of the workflow, in stream order; empty if none recorded."""
         document = await self._store.get(self.CHANGES, workflow_id)
         if document is None:
             return WorkflowDefinitionHistory(workflow_id=workflow_id)
