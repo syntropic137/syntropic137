@@ -74,6 +74,19 @@ async def withdraw_execution_request(execution_id: str, reason: str | None) -> b
     return True
 
 
+async def start_direct_now(admitted: AdmissionTicket, start: Callable[[], Awaitable[None]]) -> None:
+    """Run a `POST /execute` start to its admission, inside the caller's gate (#1310 1.3).
+
+    The run-queue path (`SYN_EXECUTION_RUN_QUEUE_ENABLED`): the start ends
+    once the run is ``admitted`` in the run queue, so it is awaited here, the
+    200 follows a durable start, and no task carries the execution. Off, the
+    route uses `queue_direct_start` exactly as before.
+    """
+    with carrying(admitted):
+        await admitted.enter_slot()
+        await start()
+
+
 def queue_direct_start(
     background_tasks: BackgroundTasks,
     *,

@@ -260,8 +260,16 @@ class BackgroundWorkflowDispatcher:
         budget: ExecutionBudget | None = None,
         requests: ExecutionRequests | None = None,
         launch_eval_for_workflow: LaunchEvalResolver | None = None,
+        admits_to_run_queue: bool = False,
     ) -> None:
-        """``budget`` is the ONE execution budget every start path shares (#1557).
+        """``admits_to_run_queue`` is `SYN_EXECUTION_RUN_QUEUE_ENABLED` (#1310 1.3).
+
+        On, every start is awaited inline, inside the gate: the processor only
+        admits it into the run queue, so there is no long work to hand to a
+        task, and the budget, the spawn and the shutdown cancel are not used.
+        Off, everything below is unchanged.
+
+        ``budget`` is the ONE execution budget every start path shares (#1557).
 
         Production passes the process-wide one, which `POST /execute` claims
         from too; a dispatcher with its own budget would bound only itself,
@@ -274,6 +282,7 @@ class BackgroundWorkflowDispatcher:
         out come apart, so it needs the thing that can hold them together.
         """
         self._handler = handler
+        self._admits_to_run_queue = admits_to_run_queue
         # #967: a trigger names no eval, so its run joins the workflow's
         # default. Resolved once per trigger, when it is accepted and before it
         # queues, so neither the queue nor the handler re-resolves it. None:
@@ -347,11 +356,21 @@ class BackgroundWorkflowDispatcher:
         resume_handler = await self._resolved_resume_handler()
         if self._maintenance is None:
             child = await resume_handler.validate(parent_execution_id)
+            if self._admits_to_run_queue:
+                await self._admit_now(
+                    None, lambda: self._start_resume_now(parent_execution_id, None, on_failure)
+                )
+                return None
             self._spawn_resume(parent_execution_id, child, None, on_failure)
             return None
         await self._maintenance.refuse_early()
         child = await resume_handler.validate(parent_execution_id)
         async with self._maintenance.admitting() as ticket:
+            if self._admits_to_run_queue:
+                await self._admit_now(
+                    ticket, lambda: self._start_resume_now(parent_execution_id, ticket, on_failure)
+                )
+                return ticket
             self._spawn_resume(parent_execution_id, child, ticket, on_failure)
             return ticket
 
@@ -448,23 +467,46 @@ class BackgroundWorkflowDispatcher:
         admitted: AdmissionTicket | None,
         on_failure: StartFailureReporter,
     ) -> None:
+        await self._in_slot(
+            claim,
+            admitted,
+            on_failure,
+            lambda: self._start_resume_now(parent_execution_id, admitted, on_failure),
+        )
+
+    async def _start_resume_now(
+        self,
+        parent_execution_id: str,
+        admitted: AdmissionTicket | None,
+        on_failure: StartFailureReporter,
+    ) -> None:
         resume_handler = await self._resolved_resume_handler()
+        try:
+            await resume_handler.handle(parent_execution_id, admitted=admitted)
+        except Exception as exc:
+            logger.exception(
+                "Background resume start raised exception",
+                extra={"parent_execution_id": parent_execution_id},
+            )
+            # A log alone left the to-do `dispatched` and re-offered for
+            # ever, counting no attempt and recording no reason (#1463).
+            # The record decides what the failure means; this only
+            # delivers it.
+            await self._report_start_failure(parent_execution_id, on_failure, exc)
 
-        async def start() -> None:
-            try:
-                await resume_handler.handle(parent_execution_id, admitted=admitted)
-            except Exception as exc:
-                logger.exception(
-                    "Background resume start raised exception",
-                    extra={"parent_execution_id": parent_execution_id},
-                )
-                # A log alone left the to-do `dispatched` and re-offered for
-                # ever, counting no attempt and recording no reason (#1463).
-                # The record decides what the failure means; this only
-                # delivers it.
-                await self._report_start_failure(parent_execution_id, on_failure, exc)
+    async def _admit_now(
+        self, ticket: AdmissionTicket | None, start: Callable[[], Awaitable[None]]
+    ) -> None:
+        """Run a start to its admission, here and now, under its lease (#1310 1.3).
 
-        await self._in_slot(claim, admitted, on_failure, start)
+        With the run queue a start ends at ``admitted``, so it is awaited inline
+        and never spawned: no task carries an execution, and a refusal at the
+        slot re-check is raised to the caller, which can still record it.
+        """
+        with carrying(ticket):
+            if ticket is not None:
+                await ticket.enter_slot()
+            await start()
 
     @staticmethod
     async def _report_start_failure(
@@ -522,9 +564,19 @@ class BackgroundWorkflowDispatcher:
             await self._maintenance.refuse_early()
         await self._handler.validate_stored_declarations(command.aggregate_id)
         if self._maintenance is None:
+            if self._admits_to_run_queue:
+                await self._admit_now(
+                    None, lambda: self._start_requested_now(command, None, on_failure)
+                )
+                return None
             self._spawn_requested(command, None, on_failure)
             return None
         async with self._maintenance.admitting() as ticket:
+            if self._admits_to_run_queue:
+                await self._admit_now(
+                    ticket, lambda: self._start_requested_now(command, ticket, on_failure)
+                )
+                return ticket
             self._spawn_requested(command, ticket, on_failure)
             return ticket
 
@@ -567,35 +619,42 @@ class BackgroundWorkflowDispatcher:
         admitted: AdmissionTicket | None,
         on_failure: StartFailureReporter,
     ) -> None:
+        await self._in_slot(
+            claim,
+            admitted,
+            on_failure,
+            lambda: self._start_requested_now(command, admitted, on_failure),
+        )
+
+    async def _start_requested_now(
+        self,
+        command: ExecuteWorkflowCommand,
+        admitted: AdmissionTicket | None,
+        on_failure: StartFailureReporter,
+    ) -> None:
         from syn_domain.contexts.orchestration import (
             DuplicateExecutionError,
             WorkflowNotFoundError,
         )
 
-        async def start() -> None:
-            if self._requests is not None and await request_withdrawn(
-                self._requests, claim.execution_id
-            ):
-                return
-            try:
-                await self._handler.handle(command, admitted=admitted)
-            except DuplicateExecutionError:
-                # Its stream already exists: started, by this or another
-                # process. The start event settles the record.
-                logger.info("Requested execution %s already started", claim.execution_id)
-            except WorkflowNotFoundError as exc:
-                # A refusal by recorded facts, so terminal: ValueError.
-                await self._report_start_failure(
-                    claim.execution_id, on_failure, ValueError(str(exc))
-                )
-            except Exception as exc:
-                logger.exception(
-                    "Requested execution start raised exception",
-                    extra={"execution_id": claim.execution_id},
-                )
-                await self._report_start_failure(claim.execution_id, on_failure, exc)
-
-        await self._in_slot(claim, admitted, on_failure, start)
+        execution_id = command.execution_id or ""
+        if self._requests is not None and await request_withdrawn(self._requests, execution_id):
+            return
+        try:
+            await self._handler.handle(command, admitted=admitted)
+        except DuplicateExecutionError:
+            # Its stream already exists: started, by this or another
+            # process. The start event settles the record.
+            logger.info("Requested execution %s already started", execution_id)
+        except WorkflowNotFoundError as exc:
+            # A refusal by recorded facts, so terminal: ValueError.
+            await self._report_start_failure(execution_id, on_failure, ValueError(str(exc)))
+        except Exception as exc:
+            logger.exception(
+                "Requested execution start raised exception",
+                extra={"execution_id": execution_id},
+            )
+            await self._report_start_failure(execution_id, on_failure, exc)
 
     async def run_workflow(
         self,
@@ -627,6 +686,22 @@ class BackgroundWorkflowDispatcher:
         if self._maintenance is None:
             await self._handler.validate_stored_declarations(workflow_id)
             launch_eval = await self._launch_eval(workflow_id)
+            if self._admits_to_run_queue:
+                await self._admit_now(
+                    None,
+                    lambda: self._run(
+                        workflow_id,
+                        inputs,
+                        execution_id,
+                        task,
+                        repos,
+                        None,
+                        launch_eval,
+                        on_held,
+                        on_started,
+                    ),
+                )
+                return None
             self._spawn(
                 workflow_id,
                 inputs,
@@ -659,6 +734,22 @@ class BackgroundWorkflowDispatcher:
         # the projection, which is the only place it can still change what the
         # trigger record says.
         async with self._maintenance.admitting() as ticket:
+            if self._admits_to_run_queue:
+                await self._admit_now(
+                    ticket,
+                    lambda: self._run(
+                        workflow_id,
+                        inputs,
+                        execution_id,
+                        task,
+                        repos,
+                        ticket,
+                        launch_eval,
+                        on_held,
+                        on_started,
+                    ),
+                )
+                return ticket
             self._spawn(
                 workflow_id,
                 inputs,

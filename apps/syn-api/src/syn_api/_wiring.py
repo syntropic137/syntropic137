@@ -729,6 +729,8 @@ logger = logging.getLogger(__name__)
 async def get_workflow_dispatcher() -> BackgroundWorkflowDispatcher:
     """Create a BackgroundWorkflowDispatcher backed by the processor."""
     handler = await get_execute_workflow_handler()
+    from syn_shared.settings import get_settings
+
     return BackgroundWorkflowDispatcher(
         handler,
         # #1557: the ONE budget `POST /execute` also claims from, so trigger,
@@ -748,6 +750,8 @@ async def get_workflow_dispatcher() -> BackgroundWorkflowDispatcher:
         # deployment, resuming or not.
         resume_handler=_build_resume_handler,
         launch_eval_for_workflow=admitted_launch_eval,
+        # #1310 1.3: starts end at `admitted` in the run queue, awaited inline.
+        admits_to_run_queue=get_settings().execution.run_queue_enabled,
     )
 
 

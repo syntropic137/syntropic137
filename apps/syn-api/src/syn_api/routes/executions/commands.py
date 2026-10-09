@@ -28,6 +28,7 @@ from syn_api._wiring import (
 from syn_api.routes.executions.direct_start import (
     queue_direct_start,
     record_execution_request,
+    start_direct_now,
 )
 from syn_api.routes.executions.repo_access import (
     _parse_repo_from_url,
@@ -872,13 +873,19 @@ async def execute_workflow_endpoint(
             ),
             admitted,
         )
-        queue_direct_start(
-            background_tasks,
-            execution_id=execution_id,
-            workflow_id=workflow_id,
-            admitted=admitted,
-            start=_start,
-        )
+        from syn_shared.settings import get_settings
+
+        if get_settings().execution.run_queue_enabled:
+            # #1310 1.3: admitted into the run queue before the 200, inline.
+            await start_direct_now(admitted, _start)
+        else:
+            queue_direct_start(
+                background_tasks,
+                execution_id=execution_id,
+                workflow_id=workflow_id,
+                admitted=admitted,
+                start=_start,
+            )
     logger.info(
         "Started workflow execution",
         extra={
