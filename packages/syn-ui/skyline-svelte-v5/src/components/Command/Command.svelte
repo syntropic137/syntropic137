@@ -117,9 +117,9 @@
     {:else if flat.length === 0}
       <div class="sky-command__empty" role="presentation">{empty}</div>
     {/if}
-    {#each shown as group (group.heading)}
-      <div class="sky-command__group" role="group" aria-labelledby={`${uid}-g-${group.heading}`}>
-        <div class="sky-command__heading" id={`${uid}-g-${group.heading}`} role="presentation">{group.heading}</div>
+    {#each shown as group, gi (group.heading)}
+      <div class="sky-command__group" role="group" aria-labelledby={`${uid}-g-${gi}`}>
+        <div class="sky-command__heading" id={`${uid}-g-${gi}`} role="presentation">{group.heading}</div>
         {#each group.items as item (item.id)}
           {@const i = flat.indexOf(item)}
           {@const active = i === activeIndex}

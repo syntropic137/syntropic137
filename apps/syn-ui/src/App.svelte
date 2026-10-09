@@ -6,6 +6,7 @@
   import { router, type Match } from './lib/router'
   import AppShell from './shell/AppShell.svelte'
   import RouteError from './shell/RouteError.svelte'
+  import { COMMAND_EVENT, overlays, requestPalette } from './shell/overlays.svelte'
 
   /** The page on screen; swapped only once the next page's chunk has loaded. */
   let shown = $state<{ match: Match; Page: Component<PageProps> } | null>(null)
@@ -38,32 +39,32 @@
     document.title = page.title ? `${page.title} · Syntropic137` : 'Syntropic137'
   })
 
-  function openCommand() {
-    // TODO(#624): the Command palette (Overlays wave) listens for this event.
-    window.dispatchEvent(new CustomEvent('sky:command'))
-  }
-
   onMount(() => {
     const stopRouter = router.start()
     const stopLive = live.start()
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
-        e.preventDefault()
-        openCommand()
-      }
-    }
-    addEventListener('keydown', onKey)
+    // One keymap (skyline-core KEYMAP) for every shortcut, ⌘K included. Loaded
+    // right after start, beside the first route chunk, so it stays out of the first load.
+    let stopKeys = () => {}
+    let stopped = false
+    void import('./shell/keyboard').then((m) => {
+      if (!stopped) stopKeys = m.startKeyboard()
+    })
+    // Every palette entry point (⌘K, the search buttons, the desktop shortcut) fires this event.
+    const openPalette = () => overlays.openPalette()
+    addEventListener(COMMAND_EVENT, openPalette)
     return () => {
       stopRouter()
       stopLive()
-      removeEventListener('keydown', onKey)
+      stopped = true
+      stopKeys()
+      removeEventListener(COMMAND_EVENT, openPalette)
     }
   })
 
   const area = $derived(shown?.match.route.area ?? router.match.route.area)
 </script>
 
-<AppShell active={area} crumbs={page.crumbs} live={live.state} onsearch={openCommand}>
+<AppShell active={area} crumbs={page.crumbs} live={live.state} onsearch={requestPalette}>
   {#if loadError}
     <RouteError error={loadError} />
   {:else if shown}

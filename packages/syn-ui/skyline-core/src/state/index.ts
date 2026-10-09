@@ -16,3 +16,5 @@ export { dayStepper, initialDayStepper, stepperPosition, stepperKey } from './da
 export type { DayStepperState, DayStepperEvent } from './dayStepper'
 export { gridCursor, gridKey } from './gridCursor'
 export type { GridCursorState, GridCursorEvent } from './gridCursor'
+export { CHORD_MS, GOTO_KEYS, KEYMAP, KEYMAP_IDLE, keyLabel, keymapGroups, keymapStep, keyToken, sequenceLabel, shortcutFor } from './keymap'
+export type { KeyAction, KeyBinding, KeyGroup, KeyInput, KeymapResult, KeymapSection, KeymapState } from './keymap'

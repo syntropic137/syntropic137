@@ -8,7 +8,7 @@
   import NavIcon from './NavIcon.svelte'
   import { DOCK, MORE, type NavKey } from './nav'
 
-  let { active }: { active: NavKey | 'none' } = $props()
+  let { active, onsearch }: { active: NavKey | 'none'; onsearch: () => void } = $props()
 
   let open = $state(false)
   let moreButton: HTMLButtonElement | undefined = $state()
@@ -56,6 +56,19 @@
             </a>
           </li>
         {/each}
+        <li>
+          <button
+            class="sky-more__item"
+            type="button"
+            onclick={() => {
+              open = false
+              onsearch()
+            }}
+          >
+            <span class="sky-more__icon"><NavIcon name="search" size={17} /></span>
+            <span class="sky-more__label">Search or jump to</span>
+          </button>
+        </li>
       </ul>
     </div>
   {/if}
@@ -173,9 +186,15 @@
     min-height: var(--sky-size-touch);
     padding: 0 var(--ds-space-3);
     border-radius: var(--ds-radius-md);
+    width: 100%;
+    border: 0;
+    background: transparent;
     color: var(--ds-color-fg);
+    font: inherit;
     font-size: var(--sky-text-body);
+    text-align: start;
     text-decoration: none;
+    cursor: pointer;
   }
   .sky-more__icon {
     display: flex;

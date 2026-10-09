@@ -7,11 +7,8 @@ import { API_BASE, configureClient } from '@syn137/syn-ui-data'
 import { setLiveState, startDesktop } from '../../../syn-desktop/bridge/index.ts'
 import { live } from './live.svelte'
 import { router } from './router'
-
-function openCommandPalette(): void {
-  // Same event App.svelte dispatches for Cmd/Ctrl+K inside the page.
-  window.dispatchEvent(new CustomEvent('sky:command'))
-}
+// The same entry point as in-page Cmd/Ctrl+K and the search buttons, so web and desktop share one palette.
+import { requestPalette as openCommandPalette } from '../shell/overlays.svelte'
 
 /** Wire shell events, apply the saved API root, and mirror Live into the tray dot. */
 export async function connectDesktop(): Promise<() => void> {

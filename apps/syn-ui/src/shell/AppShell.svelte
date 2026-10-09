@@ -9,6 +9,7 @@
   import type { Crumb, LiveState } from '@syn137/skyline-core/patterns'
   import BreadcrumbTrail from './BreadcrumbTrail.svelte'
   import { FEEDBACK_LOCAL_ONLY, feedbackUi } from './feedback.svelte'
+  import { overlays } from './overlays.svelte'
   import PhoneDock from './PhoneDock.svelte'
   import PhoneTop from './PhoneTop.svelte'
   import TopNav from './TopNav.svelte'
@@ -37,7 +38,7 @@
     {@render children()}
   </main>
 
-  <div class="sky-shell__phone-nav"><PhoneDock {active} /></div>
+  <div class="sky-shell__phone-nav"><PhoneDock {active} {onsearch} /></div>
 </div>
 
 {#if FEEDBACK_LOCAL_ONLY && feedbackUi.mounted}
@@ -45,6 +46,11 @@
   {#await import('./FeedbackDialog.svelte') then { default: FeedbackDialog }}
     <FeedbackDialog bind:open={feedbackUi.open} />
   {/await}
+{/if}
+
+{#if overlays.paletteMounted || overlays.shortcutsMounted}
+  <!-- Lazy: the palette and shortcuts overlay load on first open, never in the first load. -->
+  {#await import('./ShellOverlays.svelte') then { default: ShellOverlays }}<ShellOverlays />{/await}
 {/if}
 
 <style>
