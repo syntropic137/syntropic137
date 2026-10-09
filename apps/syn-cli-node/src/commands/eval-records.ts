@@ -1,5 +1,5 @@
 /**
- * `syn eval create|list|show|runs|archive` (#967).
+ * `syn eval create|list|show|runs|trend|archive` (#967, #1788).
  *
  * `create` and `archive` print the server's receipt, read from the Eval
  * aggregate. `list` and `show` read the eval read model, which can trail a
@@ -22,6 +22,7 @@ type EvalList = components["schemas"]["EvalListResponse"];
 type EvalBaselineRepoRequest = components["schemas"]["EvalBaselineRepoRequest"];
 type EvalBaselineRepo = components["schemas"]["EvalBaselineRepoResponse"];
 type EvalRunList = components["schemas"]["EvalRunListResponse"];
+type EvalTrend = components["schemas"]["EvalTrendResponse"];
 
 const evalIdArg = [{ name: "eval-id", description: "The eval", required: true }] as const;
 
@@ -222,6 +223,60 @@ const runsCommand: CommandDef = {
   },
 };
 
+const trendCommand: CommandDef = {
+  name: "trend",
+  description: "An eval's runs as trend points: score, verdict, models, cost, duration, tokens",
+  args: evalIdArg,
+  options: {
+    json: { type: "boolean", description: "Print the API response as JSON", default: false },
+    page: { type: "string", description: "Page number", default: "1" },
+    "page-size": { type: "string", description: "Items per page", default: "50" },
+  },
+  examples: ["syn eval trend eval-abc123 --json"],
+  handler: async (parsed: ParsedArgs) => {
+    const evalId = requireEvalId(parsed, "trend");
+    const page = parseInt((parsed.values["page"] as string | undefined) ?? "1", 10);
+    const pageSize = parseInt((parsed.values["page-size"] as string | undefined) ?? "50", 10);
+    const data = unwrap<EvalTrend>(
+      await api.GET("/evals/{eval_id}/trend", {
+        params: { path: { eval_id: evalId }, query: { page, page_size: pageSize } },
+      }),
+      "Eval trend",
+    );
+    if (parsed.values["json"] === true) {
+      print(JSON.stringify(data, null, 2));
+      return;
+    }
+    if (data.items.length === 0) { printDim("No runs in this eval."); return; }
+
+    const table = new Table({
+      title: `Trend of ${data.eval_id} (definition v${data.definition_version ?? "?"}, page ${page}, ${data.total} total)`,
+    });
+    table.addColumn("Date");
+    table.addColumn("Verifier");
+    table.addColumn("Judge");
+    table.addColumn("Score", { align: "right" });
+    table.addColumn("Verdict");
+    table.addColumn("Cost", { align: "right" });
+    table.addColumn("Duration", { align: "right" });
+    table.addColumn("Tokens", { align: "right" });
+    for (const point of data.items) {
+      table.addRow(
+        formatTimestamp(point.date),
+        point.verifier_model ?? "-",
+        point.judge_model ?? "-",
+        point.score === null ? "-" : String(point.score),
+        point.verdict ?? "-",
+        point.cost_display,
+        point.duration_display,
+        String(point.tokens),
+      );
+    }
+    table.print();
+    if (data.total > page * pageSize) printDim(`Showing page ${page}. Use --page ${page + 1} for more.`);
+  },
+};
+
 const archiveCommand: CommandDef = {
   name: "archive",
   description: "Archive an eval: it stays readable with its runs and admits no new ones",
@@ -241,5 +296,6 @@ export const evalRecordCommands: CommandDef[] = [
   listCommand,
   showCommand,
   runsCommand,
+  trendCommand,
   archiveCommand,
 ];

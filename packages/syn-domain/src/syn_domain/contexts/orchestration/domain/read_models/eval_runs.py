@@ -44,6 +44,8 @@ class EvalRunScore(BaseModel):
     scorer_version: str
     scored_at: str
     """ISO 8601 UTC."""
+    judge_model: str | None = None
+    """The model that judged the run; None for a deterministic scorer or an older score."""
 
 
 @dataclass(frozen=True)
@@ -74,6 +76,9 @@ class EvalRunFacts:
     """Observations with no usable rate: non-zero makes ``total_cost_usd`` a lower bound (#890)."""
     unknown_duration_phase_count: int = 0
     """Phases with no known duration: non-zero makes ``duration_seconds`` a lower bound."""
+    total_tokens: int = 0
+    final_phase_model: str | None = None
+    """The model the last phase that reported one ran: the verifier model of a verify run."""
 
     @property
     def complete_cost_usd(self) -> Decimal | None:
