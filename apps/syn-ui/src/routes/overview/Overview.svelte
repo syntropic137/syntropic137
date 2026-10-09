@@ -31,9 +31,15 @@
     topWorkflows,
     triggerLine,
     type LiveCommit,
+    OUTCOME_RANGES,
+    OUTCOME_RANGE_STORAGE_KEY,
+    outcomeRangeNoun,
+    outcomeRangeStart,
+    parseOutcomeRange,
+    type OutcomeRange,
   } from '@syn137/skyline-core/screens/overview'
   import { evalBadge } from '@syn137/skyline-core/screens/executions'
-  import { Button, Callout, EmptyState, Skeleton } from '@syn137/skyline-svelte-v5'
+  import { Button, Callout, EmptyState, Skeleton, ToggleGroup } from '@syn137/skyline-svelte-v5'
   import { OutcomeRing, RunRow, Skyline, StatusBadge } from '@syn137/skyline-svelte-v5/patterns'
   import { getContributionHeatmap, getMetrics, listExecutions, listRecentEvents, listTriggers, listWorkflows } from '@syn137/syn-ui-data'
   import { isGitEvent, isRunEvent, isRunFinished, subscribeActivity } from '@syn137/syn-ui-data/live'
@@ -47,6 +53,7 @@
   import TokenMix from './parts/TokenMix.svelte'
   import TopWorkflows from './parts/TopWorkflows.svelte'
   import type { PipelineItem } from './parts/types'
+  import { readViewer, writeViewer } from './parts/viewerStore'
 
   let { params: _params }: PageProps = $props()
 
@@ -78,6 +85,22 @@
   const outcomes = $derived(outcomeCounts(metrics.data?.execution_status_counts))
   const executionsTotal = $derived(runs.data?.total ?? metrics.data?.total_workflows ?? 0)
   const mix = $derived(tokenMix(metrics.data))
+
+  // ---- Outcomes range (feedback 9587ce0c): /metrics has no time window, so a
+  // ranged view reads /executions' status_counts with started_after. ----
+  let outcomeRange = $state<OutcomeRange>(parseOutcomeRange(readViewer(OUTCOME_RANGE_STORAGE_KEY)))
+  const rangedRuns = resource(
+    (signal) => {
+      const after = outcomeRangeStart(outcomeRange, Date.now())
+      return after ? listExecutions({ page: 1, page_size: 1, started_after: after }, signal) : Promise.resolve(null)
+    },
+    { live: isRunEvent },
+  )
+  const rangedOutcomes = $derived(outcomeRange === 'all' ? (metrics.data ? outcomes : null) : rangedRuns.data ? outcomeCounts(rangedRuns.data.status_counts) : null)
+  function onOutcomeRange(v: string | undefined) {
+    outcomeRange = parseOutcomeRange(v)
+    writeViewer(OUTCOME_RANGE_STORAGE_KEY, outcomeRange === 'all' ? null : outcomeRange)
+  }
   const top = $derived(topWorkflows(workflows.data?.workflows))
   const longest = $derived(Math.max(0, ...rows.map((r) => (r.duration_seconds ?? 0) * 1000)))
   const slots = $derived(runSlots(rows.map((r) => r.phase_progress?.possible ?? r.total_phases)))
@@ -252,9 +275,24 @@
     </section>
 
     <div class="sky-ov-side">
-      <section class="sky-ov-card" aria-label="Outcomes">
-        {#if metrics.data}
-          <OutcomeRing completed={outcomes.completed} failed={outcomes.failed} cancelled={outcomes.cancelled} />
+      <section class="sky-ov-card sky-ov-outcomes" aria-label="Outcomes">
+        <ToggleGroup
+          class="sky-ov-outcomes__range"
+          type="single"
+          variant="segmented"
+          size="sm"
+          mono
+          aria-label="Outcomes range"
+          items={OUTCOME_RANGES.map((r) => ({ value: r.value, label: r.label }))}
+          value={[outcomeRange]}
+          onValueChange={(v) => onOutcomeRange(v[0])}
+        />
+        {#if rangedOutcomes}
+          <OutcomeRing completed={rangedOutcomes.completed} failed={rangedOutcomes.failed} cancelled={rangedOutcomes.cancelled} noun={outcomeRangeNoun(outcomeRange)} />
+        {:else if outcomeRange !== 'all' && rangedRuns.error}
+          <Callout tone="warning" title="Outcomes for this range did not load">
+            {#snippet action()}<Button variant="outline" size="sm" onclick={() => rangedRuns.refresh()}>Retry</Button>{/snippet}
+          </Callout>
         {:else}
           <Skeleton variant="block" height="7.5rem" label="Loading outcomes" />
         {/if}
@@ -473,6 +511,9 @@
   }
 
   /* Shared by the parts in ./parts (scoped to this page). */
+  .sky-ov :global(.sky-ov-outcomes__range) {
+    align-self: flex-end;
+  }
   .sky-ov :global(.sky-ov-card) {
     display: flex;
     flex-direction: column;
