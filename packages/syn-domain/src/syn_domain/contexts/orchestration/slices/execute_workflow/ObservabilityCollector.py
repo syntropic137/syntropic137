@@ -90,6 +90,7 @@ class ObservabilityCollector:
         #: and for a harness that never says.
         self._observed_model: str | None = None
         self._saw_agent_activity = False
+        self._may_have_written = False
 
     @property
     def requested_model(self) -> str | None:
@@ -152,7 +153,7 @@ class ObservabilityCollector:
         """
         return self._saw_agent_activity
 
-    def note_agent_activity(self) -> None:
+    def note_agent_activity(self, *, changed_nothing: bool = False) -> None:
         """Record that the agent was seen doing something, whatever it was.
 
         For the stream processors, which see events this collector is never
@@ -163,9 +164,39 @@ class ObservabilityCollector:
         the model started, which is the whole of what `saw_agent_activity` is
         asked for.
 
+        ``changed_nothing`` is the strong claim the fallback rests on (#1825),
+        and a stream processor makes it only for what it recognises in full: an
+        assistant turn's words or thinking, a codex ``reasoning`` or
+        ``agent_message`` item, a tool call `side_effect_free` reads as
+        read-only. Left at its default, the activity may have written. See
+        `may_have_written`.
+
         Idempotent, and one-way: nothing un-sees activity.
         """
         self._saw_agent_activity = True
+        if not changed_nothing:
+            self._may_have_written = True
+
+    @property
+    def may_have_written(self) -> bool:
+        """Whether this phase's agent may have done WORK: changed anything (#1825).
+
+        Narrower than `saw_agent_activity`, and asked by a different decision.
+        A same-agent retry needs "did the attempt do NOTHING at all" (#1303).
+        A fallback to a different agent (PC-83) needs "would a fresh run in
+        this workspace redo or overwrite something". Reading files, searching,
+        viewing a diff and reasoning out loud leave the workspace as they found
+        it. A verify phase that only read before its provider refused it has
+        done no work, and running it again on another agent loses nothing.
+
+        Fails safe in the same direction as `saw_agent_activity`. False is the
+        strong claim, so every activity counts as a possible write unless the
+        processor that saw it said ``changed_nothing``: hook events, subagents,
+        file changes, any command not recognisably read-only, and an item type
+        nobody has taught the parser all count. Cumulative across the phase's
+        attempts, like the collector.
+        """
+        return self._may_have_written
 
     async def record_hook_event(self, enriched: dict[str, Any]) -> None:
         """Record an enriched hook event to observability.
@@ -247,17 +278,21 @@ class ObservabilityCollector:
         tool_use_id: str,
         input_preview: str,
         skill_name: str | None = None,
+        *,
+        changes_nothing: bool = False,
     ) -> None:
         """Record tool execution started.
 
         ``skill_name`` is the skill a `Skill` call invoked, whole (#1269); the
         key is written only when there is one, so other tools' rows are unchanged.
+        ``changes_nothing`` is the caller's verdict from `side_effect_free`, made
+        on the whole input rather than this truncated preview (#1825).
         """
         # Recorded when the tool is ANNOUNCED, not when it returns, so this can
         # only run ahead of the side effect and never behind it. Running ahead
         # costs a retry that would have been safe; running behind would repeat
         # work that was not.
-        self.note_agent_activity()
+        self.note_agent_activity(changed_nothing=changes_nothing)
         if self._writer is None:
             return
 
@@ -281,13 +316,15 @@ class ObservabilityCollector:
         tool_use_id: str,
         success: bool,
         output_preview: str | None,
+        *,
+        changes_nothing: bool = False,
     ) -> None:
-        """Record tool execution completed."""
+        """Record tool execution completed. ``changes_nothing``: see the start."""
         # A completion can arrive with no start before it: some codex versions
         # announce a `file_change` only once it has happened (#1064). That is a
         # workspace mutation, so it counts, and counting only starts would miss
         # exactly the tool op that already changed something.
-        self.note_agent_activity()
+        self.note_agent_activity(changed_nothing=changes_nothing)
         if self._writer is None:
             return
 

@@ -108,9 +108,9 @@ gets the same verdict, so it is never retried; it hands the Phase to its
 [Fallback Agent](#fallback-agent), under the same rule as a capacity or quota
 failure. Recognised from codex's own fault line only. **Unclear:** no real
 claude refusal output exists in this repo or its submodules, so a claude
-refusal is not yet recognised and reads as `unknown`. A codex refusal that
-arrives after codex already completed an item counts as work done and does
-not fall back.
+refusal is not yet recognised and reads as `unknown`. A refusal that arrives
+after the agent only read, searched or spoke still falls back: that is not
+[Attempt Work](#attempt-work) (#1825).
 
 ## Provision Step Timeout
 
@@ -138,10 +138,42 @@ outlived every retry, a Quota Exhaustion (PC-83), or a
 [Content Refusal](#content-refusal). The Phase's tools, budget
 and sandbox bind the fallback too, so the provider rules that refuse an `agent`
 refuse a `fallback_agent` at install. Acted on at execution (#1663): one
-attempt, only when the primary's failed attempt got nowhere, drawn from the
-same phase deadline as every attempt before it. The SDLC workflows declare
-claude/opus as the fallback of their codex verifiers; a verifier that ran on
-it says so in its report, because the review was then not cross-family.
+attempt, only when the primary's failed attempt did no
+[Attempt Work](#attempt-work), drawn from the same phase deadline as every
+attempt before it. The SDLC workflows declare claude/opus as the fallback of
+their codex verifiers; a verifier that ran on it says so in its report, because
+the review was then not cross-family, and the phase's completion records the
+fallback's provider and model as the agent that produced it.
+
+## Attempt Work
+
+What a failed attempt did that a run of a different agent, from the top in the
+same workspace, would redo or overwrite: anything that may have changed the
+workspace or the world beyond it. File edits, commits, pushes, any shell
+command not recognised in full as read-only, hook and subagent events, and any
+stream shape the parser does not know are all work. The model's words
+(assistant text, thinking, codex `reasoning` and `agent_message` items) and
+tool calls recognised as read-only (`Read`, `Grep`, `Glob`, `LS`, and shell
+commands such as `cat`, `rg --no-config`, `sed -n 1,80p`,
+`git --no-pager diff --no-ext-diff --no-textconv`, `gh pr view`) are not.
+Measured by `ObservabilityCollector.may_have_written`, with the read-only
+recognition in `side_effect_free`. It fails safe: only a positive recognition
+says "no work". It decides the [Fallback Agent](#fallback-agent) only. A
+same-agent retry of a busy upstream asks the broader question, whether the
+attempt showed any activity at all (#1303), because it resends the same prompt.
+
+A shell command is read-only only when its WHOLE line is: a background `&`, a
+redirect to anything but exactly `/dev/null`, or a git option that runs
+another program (`--ext-diff`, `--textconv`, `--filters`, `-O`) makes it work.
+A command's side effects are what IT runs, including any program its
+configuration names, whoever installed that configuration and whenever. A plain
+`git diff` runs a configured `diff.external` driver, textconv filter or pager,
+so it is work; it is read-only only when it switches each of those off
+(`--no-pager`, `--no-ext-diff`, `--no-textconv`, and `--no-show-signature` for
+`log` and `show`). `git status` is always work: it runs `core.fsmonitor`, and
+no option turns that off. `rg` is read-only only with `--no-config`, since its
+config file can add `--pre`. Installing configuration (`git config`, `export`,
+`VAR=value cmd`) is work as well.
 
 ## Review Verdict
 
