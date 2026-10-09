@@ -232,7 +232,7 @@ service also takes one on a schedule and prunes old ones:
 | Setting | Default | Effect |
 | --- | --- | --- |
 | `BACKUP_SCHEDULE` | `0 3 * * *` | Five-field cron, in UTC |
-| `BACKUP_RETENTION_DAYS` | `7` | Backups older than this are deleted after each successful backup; nothing else in `BACKUP_DIR` is touched |
+| `BACKUP_RETENTION_DAYS` | `7` | Backups older than this are deleted after each successful backup. Only files the backup recorded creating (in `BACKUP_DIR/.syn-db-backup.ledger`) are ever deleted |
 | `BACKUP_DIR` | `/var/backups/syn` | Host directory for the archives |
 
 `selfhost-restore` stops `api`, `collector`, `event-store` and `gateway`,

@@ -256,6 +256,7 @@ class TestBackup:
             taken.symlink_to(tmp_path / "nowhere")
         else:
             taken.symlink_to(elsewhere / "keep")
+
         def snapshot() -> list[str]:
             return sorted(str(p) for d in (out, elsewhere) for p in d.rglob("*"))
 
@@ -277,9 +278,7 @@ class TestBackup:
         assert (elsewhere / "keep").read_text() == "operator data"
         assert taken.is_symlink() == (occupant != "directory")
 
-    def test_a_directory_appearing_at_the_name_mid_publish_is_left_alone(
-        self, tmp_path, fake_pg
-    ):
+    def test_a_directory_appearing_at_the_name_mid_publish_is_left_alone(self, tmp_path, fake_pg):
         """The check-then-link race: ln itself finds a directory there."""
         out = tmp_path / "backups"
         out.mkdir()
@@ -399,9 +398,7 @@ class TestPrune:
         ],
     )
     @pytest.mark.parametrize("tracked", [False, True], ids=["untracked", "in-ledger"])
-    def test_never_deletes_a_name_it_does_not_generate_however_old(
-        self, tmp_path, name, tracked
-    ):
+    def test_never_deletes_a_name_it_does_not_generate_however_old(self, tmp_path, name, tracked):
         # Even a ledger line naming it (a hand-edited ledger) is not enough.
         foreign = self._make(tmp_path, name, 365 * _DAY, tracked=tracked)
         result = _run("prune", str(tmp_path), "1")
@@ -451,8 +448,11 @@ class TestPrune:
         link = backups / "syn-20260901T030000Z.dump"
         link.symlink_to(target)
         _age(link, 365 * _DAY)
-        # Recorded under the target's inode, the strongest a forged ledger gets.
-        (backups / _LEDGER).write_text(f"{target.stat().st_ino} {link.name}\n")
+        # A forged ledger line naming the link with its own inode, and one
+        # with its target's: neither may delete the link or what it points at.
+        (backups / _LEDGER).write_text(
+            f"{os.lstat(link).st_ino} {link.name}\n{target.stat().st_ino} {link.name}\n"
+        )
 
         assert _run("prune", str(backups), "1").returncode == 0
         assert target.exists()
