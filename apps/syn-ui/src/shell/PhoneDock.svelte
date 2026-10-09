@@ -27,6 +27,8 @@
     sheet?.querySelector<HTMLElement>('a')?.focus()
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        // Consumed: the app keymap leaves a prevented Escape alone (no "go back").
+        e.preventDefault()
         open = false
         moreButton?.focus()
       }

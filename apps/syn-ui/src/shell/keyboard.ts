@@ -65,13 +65,19 @@ function openRow(): boolean {
   return true
 }
 
+/** Only step back within the app: never off to the page (or blank tab) before it. */
+function canGoBack(): boolean {
+  const nav = (globalThis as { navigation?: { canGoBack: boolean } }).navigation
+  return nav ? nav.canGoBack : history.length > 1
+}
+
 function back(): boolean {
   const row = activeRow()
   if (row) {
     row.removeAttribute(ACTIVE)
     return true
   }
-  if (history.length <= 1) return false
+  if (!canGoBack()) return false
   history.back()
   return true
 }
@@ -84,28 +90,22 @@ function focusSearch(): boolean {
   return true
 }
 
-/** Perform an action; false when it did not apply here, so the key keeps its default. */
-function perform(action: KeyAction, key: string): boolean {
-  switch (action.type) {
-    case 'palette':
-      requestPalette()
-      return true
-    case 'help':
-      overlays.openShortcuts()
-      return true
-    case 'goto':
-      router.navigate(href(SECTION_HREF[action.section]))
-      return true
-    case 'search':
-      return focusSearch()
-    case 'row':
-      // Arrows only drive rows when no control has focus; j and k always do.
-      return key.startsWith('Arrow') && !focusIsFree() ? false : moveRow(action.move)
-    case 'open':
-      return focusIsFree() && openRow()
-    case 'back':
-      return back()
-  }
+type Handlers = { [T in KeyAction['type']]: (action: Extract<KeyAction, { type: T }>, key: string) => boolean }
+
+/** One handler per action; each returns false when it did not apply here, so the key keeps its default. */
+const HANDLERS: Handlers = {
+  palette: () => (requestPalette(), true),
+  help: () => (overlays.openShortcuts(), true),
+  goto: (a) => (router.navigate(href(SECTION_HREF[a.section])), true),
+  search: () => focusSearch(),
+  // Arrows only drive rows when no control has focus; j and k always do.
+  row: (a, key) => (key.startsWith('Arrow') && !focusIsFree() ? false : moveRow(a.move)),
+  open: () => focusIsFree() && openRow(),
+  back: () => back(),
+}
+
+function perform<A extends KeyAction>(action: A, key: string): boolean {
+  return (HANDLERS[action.type] as (a: A, key: string) => boolean)(action, key)
 }
 
 /** Install the handler on window; returns the remover. */
