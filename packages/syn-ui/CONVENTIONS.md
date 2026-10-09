@@ -30,7 +30,7 @@ Before you hand work back, check, test and build must all pass with zero warning
 
 | Package | Path | Holds | Depends on |
 |---|---|---|---|
-| `@syn137/skyline-themes` | `packages/syn-ui/themes` | CSS only: `tokens.css` (structure), `skyline.css` and `syn137.css` (colour), `all.css` (upstream `@syntropic137/design-tokens` CSS, then all three) | `@syntropic137/design-tokens` (pinned) |
+| `@syn137/skyline-themes` | `packages/syn-ui/themes` | CSS only: `tokens.css` (structure), `skyline.css` and `syn137.css` (colour), `all.css` (upstream `@syntropic137/design-tokens` CSS, then all three), `motion.css` (opt-in landing keyframes) | `@syntropic137/design-tokens` (pinned) |
 | `@syn137/skyline-core` | `packages/syn-ui/skyline-core` | Plain TypeScript with no DOM and no Svelte. Holds the contract re-exports, formatters, chart geometry, state reducers and pattern prop types | `@syntropic137/design-contracts` (pinned, types only) |
 | `@syn137/skyline-svelte-v5` | `packages/syn-ui/skyline-svelte-v5` | Svelte 5 components (`.`), patterns (`./patterns`) and `styles.css` | core, themes |
 | `@syn137/syn-ui-data` | `packages/syn-ui/data` | Plain TypeScript: the typed API client, fixtures, live SSE stream, request coalescing and the query cache | nothing |
@@ -65,7 +65,7 @@ These rules are enforced by `packages/syn-ui/scripts/check-css.mjs`, which runs 
 - **Mobile first.** Base styles are the phone layout. Media queries use `min-width` only and are written in rem: `48rem` (capsule nav, list columns) and `64rem` (detail side column). Components prefer container queries. Page structure uses viewport queries.
 - **Touch:** interactive targets reach `var(--sky-size-touch)` (44px) under `@media (pointer: coarse)`. Nothing is reachable by hover alone.
 - **Focus:** every interactive element has its own `:focus-visible` rule: `outline: var(--sky-focus-ring-width) solid var(--sky-color-focus); outline-offset: var(--sky-focus-ring-offset);`.
-- **Motion** goes inside `@media (prefers-reduced-motion: no-preference)`, or uses the `--sky-duration-*` tokens, which drop to 0 under reduced motion.
+- **Motion** goes inside `@media (prefers-reduced-motion: no-preference)`, or uses the `--sky-duration-*` or `--sky-dur-*` tokens, which drop to 0 under reduced motion. Landing keyframes (rise, sdrop, pulse, flash, drift, bob, type, blink, draw, scroll) live in the opt-in `@syn137/skyline-themes/motion.css` as `sky-*` classes; `check-motion.mjs` keeps every keyframe and animation there inside the guard and bans `infinite`.
 - Titles and figures size with the fluid tokens `--sky-text-page`, `--sky-text-hero` and `--sky-text-figure` (`clamp()`).
 - No horizontal page scroll at 320px. Wide content scrolls inside its own box.
 - 3D faces: use `extrudeColors(base)` from `@syn137/skyline-core/geometry`, or the `--sky-face-top`, `--sky-face-front` and `--sky-face-side` tokens for the accent. Never hand-mix toward white or black.
@@ -84,6 +84,11 @@ These rules are enforced by `packages/syn-ui/scripts/check-css.mjs`, which runs 
 | Failed, warning, neutral pills | `--sky-color-danger-soft` with `--sky-color-danger-soft-fg`, `--sky-color-warning-soft` with `--sky-color-warning-soft-fg`, `--sky-color-neutral-soft` |
 | Token series (cache read, cache write, output, input) | `--sky-color-data-1` to `--sky-color-data-4` (skyline-core `TOKEN_SERIES` maps them) |
 | Agents | `--sky-color-agent-claude`, `--sky-color-agent-codex` |
+| Harnesses (landing names) | `--sky-harness-claude`, `--sky-harness-codex` (aliases of the agent colours), `--sky-harness-claude-gradient`, `--sky-harness-codex-gradient` for names set as text |
+| Landing display type | `--sky-font-display`, `--sky-font-weight-display`, `--sky-font-display-xl`, `-l`, `-m`, `-s` (104, 84, 64, 44px), `--sky-font-display-phone-xl`, `-l`, `-m` (50, 44, 36px), `--sky-tracking-display-tight` with `--sky-line-height-display` (hero, closing headline), `--sky-tracking-display-section` with `--sky-line-height-display-section` (section titles), `--sky-font-wordmark` |
+| Landing light, glass, texture | `--sky-glow-accent`, `--sky-glow-accent-strong` (box-shadows), `--sky-glow-accent-wash`, `--sky-glow-accent-wash-bottom` (background layers), `--sky-gradient-text`, `--sky-surface-glass` with `--sky-blur-glass` and `--sky-color-border-glass`, `--sky-border-gradient`, `--sky-texture-grain`, `--sky-texture-dots` (both complete background layers) |
+| Landing grounds and panels | `--sky-color-ground-deep` (page), `--sky-color-ground-band` (dotted band), `--sky-color-section-rule` (hairline between sections), `--sky-gradient-panel` (cards, tiles, code windows), `--sky-gradient-window` (explorer window), `--sky-gradient-glass-raised` (install box), `--sky-shadow-glass` (floating cards), `--sky-fade-to-ground`, `--sky-mask-fade-y` |
+| S mark cubes | `--sky-color-cube-dark-top`, `-left`, `-right`, `--sky-color-cube-edge`, `--sky-color-cube-glass-edge`, `--sky-cube-glass-left`, `--sky-cube-glass-right`; blue cubes use the accent |
 | Bars and empty blocks | `--sky-color-track`, `--sky-color-empty`, `--sky-color-running-block`, `--sky-color-unscored` |
 | Raised surface highlight, overlays | `--sky-shadow-raised`, `--sky-shadow-overlay`, `--sky-color-scrim` |
 | Radii | `--ds-radius-md` (10, nav items), `--ds-radius-lg` (11, buttons), `--sky-radius-control` (12), `--sky-radius-row` (14), `--sky-radius-xl` (18, cards), `--sky-radius-card-lg` (20), `--sky-radius-2xl` (24, header panels), `--ds-radius-full` |

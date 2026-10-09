@@ -11,7 +11,7 @@
 // Dynamic names (`var(--sky-status-${kind})`) must match at least one
 // defined token by prefix.
 //
-// Usage: node check-token-usage.mjs [dir...]   (default: Skyline sources)
+// Usage: node check-token-usage.mjs [dir-or-file...]   (default: Skyline sources and themes/src/motion.css)
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join, relative } from 'node:path'
@@ -21,7 +21,7 @@ const here = dirname(fileURLToPath(import.meta.url))
 const repo = join(here, '../../..')
 const themesSrc = join(here, '../themes/src')
 const THEMES = ['skyline.css', 'syn137.css']
-const DEFAULT_DIRS = ['packages/syn-ui/skyline-svelte-v5/src', 'packages/syn-ui/skyline-core/src', 'apps/syn-ui/src']
+const DEFAULT_DIRS = ['packages/syn-ui/skyline-svelte-v5/src', 'packages/syn-ui/skyline-core/src', 'apps/syn-ui/src', 'packages/syn-ui/themes/src/motion.css']
 const EXTS = ['.svelte', '.css', '.ts']
 
 const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' ')).replace(/<!--[\s\S]*?-->/g, (m) => m.replace(/[^\n]/g, ' '))
@@ -33,6 +33,7 @@ const structural = defs(readFileSync(join(themesSrc, 'tokens.css'), 'utf8'))
 const perTheme = THEMES.map((f) => [f, defs(readFileSync(join(themesSrc, f), 'utf8'))])
 
 function walk(dir) {
+  if (statSync(dir).isFile()) return [dir]
   const out = []
   for (const name of readdirSync(dir)) {
     if (name === 'node_modules' || name === 'generated') continue
