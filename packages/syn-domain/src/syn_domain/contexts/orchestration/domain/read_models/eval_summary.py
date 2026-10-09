@@ -33,6 +33,25 @@ class EvalBaselineRepo(BaseModel):
     """The full SHA ``requested_ref`` resolved to when the Baseline was saved."""
 
 
+class EvalDefinitionChange(BaseModel):
+    """One edit to what an Eval measures: its goal or its baseline (#1788).
+
+    A rename or a retag is not one: it describes the experiment, not what it
+    measures, so a trend chart has nothing to annotate.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    sequence: int
+    """The event's position in the Eval's stream: the change's identity and its order.
+
+    Never the time: two edits committed together share a millisecond."""
+    definition_version: int
+    """1 at creation, then one more per goal or baseline change."""
+    changed_at: str
+    """ISO 8601 UTC, from the event that made the change."""
+
+
 class EvalRecord(BaseModel):
     """An Eval as its own stream records it, with no run facts.
 
@@ -52,6 +71,8 @@ class EvalRecord(BaseModel):
     archived: bool = False
     created_at: str | None = None
     updated_at: str | None = None
+    definition_changes: tuple[EvalDefinitionChange, ...] = ()
+    """Every definition change, in stream order; the last is the current definition."""
 
 
 @dataclass(frozen=True)

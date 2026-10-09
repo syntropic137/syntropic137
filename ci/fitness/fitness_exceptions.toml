@@ -39,6 +39,7 @@ allowed_prefixes = [
     "syn_domain.pagination",
     "syn_domain.projection_scan",
     "syn_domain.projection_page",
+    "syn_domain.projection_newest",
     "syn_shared",
     "syn_adapters.projection_stores",
     "time",
@@ -493,3 +494,25 @@ allowed_prefixes = [
 # TODO(#1424): the API conversation log parses Claude message content and Codex
 # stream items (imports syn_shared.codex_stream). Predates #1398.
 "apps/syn-api/src/syn_api/routes/conversations.py" = { violations = 1, issue = "#1424" }
+
+[linux_only_constructs]
+# Modules declared Linux-only by design: each uses a /proc or /sys path or a
+# Linux-only syscall/flag on purpose (PC-145). Gate:
+# ci/fitness/code_quality/test_no_linux_only_constructs.py
+#
+# macOS is a supported dev and self-host platform and no CI job runs on it, so
+# this table is the only place a Linux-only construct is seen at all. An entry
+# says WHERE the code runs and why that makes it safe; "it works in CI" is not a
+# reason. Exact paths only. An entry with no reason, or naming a file with no
+# Linux-only construct left, fails the gate, so the table can only shrink.
+# "<path>" = { reason = "..." }
+"apps/syn-api/src/syn_api/services/cpu_throttling.py" = { reason = "Reads cgroup v2 cpu.stat for /health. A missing file is already the 'unknown' status (no cgroup v2, outside a container, or not Linux), so on macOS it reports unknown rather than failing." }
+"apps/syn-api/src/syn_api/services/execution_posture.py" = { reason = "Reads the cgroup v2/v1 memory limit of the API process. Absent files mean no stated limit, which is the macOS answer too: the API's real home is its Linux container." }
+"packages/syn-adapters/src/syn_adapters/diagnostics/signal_capture.py" = { reason = "Reads /proc/uptime to date kernel fault records from /dev/kmsg, both Linux kernel interfaces by nature. Any OSError resolves to None and the record is kept, so it degrades on macOS instead of raising." }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/skill_install.py" = { reason = "The /proc walk is a shell script sent INTO the Linux workspace container to reap a stuck `skills add`. It never runs on the host." }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/unpushed_work_guard.py" = { reason = "`cat /proc/self/mountinfo` is a command executed INSIDE the Linux workspace container to read its mount table. The host's /proc is never touched." }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/test_unpushed_work_guard.py" = { reason = "A fake workspace that matches the in-container `cat /proc/self/mountinfo` argv and answers with a canned table. Never opens /proc, so it runs on macOS." }
+"scripts/e2e_workspace_test.py" = { reason = "`ls /proc` and `cat /proc/self/status` are argv run INSIDE a Docker workspace container to check its process and capability isolation." }
+"scripts/validate_isolation.py" = { reason = "Every /proc and /sys path is a command run INSIDE a Docker workspace container to verify its isolation and cgroup limits; the script inspects the container, not the host." }
+"scripts/tests/test_eval_suite.py" = { reason = "Prose in an eval fixture describing a finding (a credential visible in /proc/<pid>/cmdline). No code opens it." }
+".claude/hooks/validators/security/file.py" = { reason = "A denylist of paths an agent may not read; /proc/ and /sys/ are entries to refuse, not paths this hook opens." }

@@ -46,6 +46,7 @@ class ExecutionListReads:
         tags: Collection[str] | None = None,
         eval_id: str | None = None,
         in_eval: bool | None = None,
+        workflow_id: str | None = None,
         offset: int = 0,
         limit: int | None = None,
     ) -> Page[WorkflowExecutionSummary]:
@@ -71,11 +72,17 @@ class ExecutionListReads:
 
         `in_eval` keeps only executions in some Eval (`True`) or in none
         (`False`), so eval runs can be shown apart from every other run.
+
+        `workflow_id` keeps only that workflow's executions, applied in the
+        query like `eval_id` (#1788: the workflow trend).
         """
+        equals: dict[str, str] = {} if eval_id is None else {"eval_id": eval_id}
+        if workflow_id is not None:
+            equals["workflow_id"] = workflow_id
         query = PageQuery(
             status=StatusOf.text("status"),
             timestamp_field="started_at",
-            equals={} if eval_id is None else {"eval_id": eval_id},
+            equals=equals,
             present={} if in_eval is None else {"eval_id": in_eval},
             contains_all={"tags": frozenset(tags or ())},
             search=search,
@@ -85,6 +92,7 @@ class ExecutionListReads:
             before=started_before,
             offset=offset,
             limit=limit,
+            key_field="workflow_execution_id",
         )
         return await page_projection(
             self._store,

@@ -23,6 +23,10 @@ from syn_adapters.workspace_backends.service.setup_phase_secrets import (
     _repo_full_name,
     _repo_name,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.workspace_git import (
+    PROVISIONED_CREDENTIAL_FILE,
+    PROVISIONED_REMOTE_SETTINGS,
+)
 
 # =============================================================================
 # _repo_name / _repo_full_name helpers
@@ -678,3 +682,26 @@ class TestClaudeCredentialResolution:
         assert oauth_token == "oauth-token-123"
         assert api_key == "api-key-456"
         assert any("CLAUDE_CODE_OAUTH_TOKEN" in record.message for record in caplog.records)
+
+
+def test_the_lost_work_guard_hands_git_exactly_the_remote_config_provisioning_writes() -> None:
+    """#1815: the guard's no-HOME ``ls-remote`` re-supplies this script's --global config by ``-c``.
+
+    Two spellings of one contract, so this pins them together: a setting added
+    here and not there would silently stop a private origin answering the
+    guard, and a stale one there would hand git a setting nobody provisioned.
+    """
+    secrets = SetupPhaseSecrets(
+        repositories=["https://github.com/org/repo-a"],
+        repo_tokens={"https://github.com/org/repo-a": "tok-abc"},
+    )
+    script = secrets.build_setup_script()
+    written = set()
+    for line in script.splitlines():
+        words = shlex.split(line) if line.startswith("git config --global") else []
+        if words:
+            key, value = [w for w in words[3:] if w != "--add"]
+            written.add(f"{key}={value}")
+
+    assert written == {"credential.helper=store", *PROVISIONED_REMOTE_SETTINGS}
+    assert f'"$syn_staged_secret" ~/{PROVISIONED_CREDENTIAL_FILE}' in script

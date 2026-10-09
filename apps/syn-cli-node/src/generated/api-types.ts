@@ -99,6 +99,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/workflows/{workflow_id}/trend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Workflow Trend Endpoint
+         * @description The workflow's executions as trend points, newest first, with its definition changes.
+         *
+         *     One row per execution: date, status, cost, duration, tokens and how long
+         *     each phase took. The workflow id may be a unique prefix.
+         */
+        get: operations["get_workflow_trend_endpoint_workflows__workflow_id__trend_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/workflows/{workflow_id}/history": {
         parameters: {
             query?: never;
@@ -111,6 +134,26 @@ export interface paths {
          * @description DEPRECATED: Use /workflows/{workflow_id}/runs instead.
          */
         get: operations["get_workflow_history_endpoint_workflows__workflow_id__history_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workflows/{workflow_id}/latest-outputs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Workflow Latest Outputs Endpoint
+         * @description Each phase's latest output: its newest primary deliverable across all runs.
+         */
+        get: operations["get_workflow_latest_outputs_endpoint_workflows__workflow_id__latest_outputs_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -721,6 +764,29 @@ export interface paths {
          *     matching no eval is a 404. An eval with no runs is an empty page.
          */
         get: operations["list_eval_runs_endpoint_evals__eval_id__runs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/evals/{eval_id}/trend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Eval Trend Endpoint
+         * @description The eval's current runs as trend points, newest first, with its definition changes.
+         *
+         *     One row per run: date, verifier and judge model, score (0 to 100), verdict,
+         *     cost, duration and tokens. The same runs as `GET /evals/{eval_id}/runs`.
+         */
+        get: operations["get_eval_trend_endpoint_evals__eval_id__trend_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1498,12 +1564,13 @@ export interface paths {
          * List Accessible Repos Endpoint
          * @description List repositories accessible to the GitHub App.
          *
-         *     With no installation_id, aggregates every installation. The last complete
-         *     listing is cached and served as ``complete`` while under a minute old;
-         *     otherwise GitHub is asked live, and an older listing is served as
-         *     ``partial`` only if GitHub cannot be asked. The GitHub App's
-         *     ``installation`` and ``installation_repositories`` webhooks invalidate the
-         *     cache at once. A single installation_id is always asked live.
+         *     With no installation_id, aggregates every installation and never waits on
+         *     GitHub. The last complete listing is cached and served as ``complete``
+         *     while under a minute old, as ``partial`` once older, with a background
+         *     refresh behind it. With no listing cached the answer is ``unavailable``
+         *     while a background refresh fetches one. The GitHub App's ``installation``
+         *     and ``installation_repositories`` webhooks invalidate the cache at once. A
+         *     single installation_id is always asked live.
          *
          *     ``lookup`` says whether a repo missing from ``repos`` is known to be out of
          *     the App's reach (``complete``) or merely went unseen because GitHub failed.
@@ -3131,6 +3198,15 @@ export interface components {
             executed_at: string;
         };
         /**
+         * CostSplitBasis
+         * @description How a cost-by-token-type breakdown was arrived at.
+         *
+         *     The two are not equally strong claims, so a client must be able to tell
+         *     them apart and label the second one.
+         * @enum {string}
+         */
+        CostSplitBasis: "rate_table" | "allocated";
+        /**
          * CoverageState
          * @enum {string}
          */
@@ -3368,6 +3444,53 @@ export interface components {
              * @description Callers blocked waiting for a connection right now.
              */
             waiting: number;
+        };
+        /**
+         * DeclaredSkillResponse
+         * @description A skill a workflow declares, once, and where it declares it.
+         *
+         *     On the workflow LIST so a card can draw its skill chips without one detail
+         *     request per workflow. Same ref shape as a phase's ``skills`` entry, so a
+         *     client matches a chip to a phase by comparing the ref fields.
+         */
+        DeclaredSkillResponse: {
+            /** Source Url */
+            source_url?: string | null;
+            /** Name */
+            name?: string | null;
+            /** Version */
+            version?: string | null;
+            /**
+             * Name Overridden
+             * @default false
+             */
+            name_overridden: boolean;
+            /** Raw */
+            raw?: string | null;
+            /** Phase Ids */
+            phase_ids?: string[];
+            /**
+             * Workflow Scope
+             * @default false
+             */
+            workflow_scope: boolean;
+        };
+        /**
+         * DefinitionChangeKind
+         * @description What changed the definition.
+         * @enum {string}
+         */
+        DefinitionChangeKind: "created" | "updated" | "phase_updated";
+        /**
+         * DefinitionChangeResponse
+         * @description A change to an eval's or workflow's definition: a trend chart's annotation (#1788).
+         */
+        DefinitionChangeResponse: {
+            /** Definition Version */
+            definition_version: string | null;
+            /** Changed At */
+            changed_at: string;
+            kind: components["schemas"]["DefinitionChangeKind"];
         };
         /**
          * DegradedReason
@@ -3722,6 +3845,8 @@ export interface components {
             scorer_version: string | null;
             /** Scored At */
             scored_at: string | null;
+            /** Judge Model */
+            judge_model?: string | null;
         };
         /**
          * EvalRunScoreRequest
@@ -3740,6 +3865,8 @@ export interface components {
             scorer: string;
             /** Scorer Version */
             scorer_version: string;
+            /** Judge Model */
+            judge_model?: string | null;
         };
         /**
          * EvalRunScoreResponse
@@ -3761,6 +3888,8 @@ export interface components {
             scorer_version: string;
             /** Scored At */
             scored_at: string;
+            /** Judge Model */
+            judge_model?: string | null;
         };
         /**
          * EvalRunStatsResponse
@@ -3785,6 +3914,67 @@ export interface components {
             cost_per_pass_usd: string | null;
             /** Cost Per Pass Display */
             cost_per_pass_display: string;
+        };
+        /**
+         * EvalTrendPointResponse
+         * @description One run of an eval as one point on its trend charts (#1788).
+         */
+        EvalTrendPointResponse: {
+            /** Execution Id */
+            execution_id: string;
+            /** Date */
+            date: string | null;
+            /** Workflow Id */
+            workflow_id: string;
+            /** Workflow Version */
+            workflow_version: string | null;
+            /** Eval Definition Version */
+            eval_definition_version: string | null;
+            /** Verifier Model */
+            verifier_model: string | null;
+            /** Observed Models */
+            observed_models: string[];
+            /** Judge Model */
+            judge_model: string | null;
+            /** Score */
+            score: number | null;
+            verdict: components["schemas"]["Verdict"] | null;
+            /** Cost Usd */
+            cost_usd: string | null;
+            /** Cost Is Lower Bound */
+            cost_is_lower_bound: boolean;
+            /** Cost Display */
+            cost_display: string;
+            /** Duration Seconds */
+            duration_seconds: number | null;
+            /** Duration Is Lower Bound */
+            duration_is_lower_bound: boolean;
+            /** Duration Display */
+            duration_display: string;
+            /** Tokens */
+            tokens: number;
+        };
+        /**
+         * EvalTrendResponse
+         * @description One page of an eval's current runs as trend points, newest first (#1788).
+         */
+        EvalTrendResponse: {
+            /** Definition Version */
+            definition_version: string | null;
+            /** Definition Changed At */
+            definition_changed_at: string | null;
+            /** Definition Changes */
+            definition_changes: components["schemas"]["DefinitionChangeResponse"][];
+            /** Eval Id */
+            eval_id: string;
+            /** Items */
+            items: components["schemas"]["EvalTrendPointResponse"][];
+            /** Total */
+            total: number;
+            /** Page */
+            page: number;
+            /** Page Size */
+            page_size: number;
         };
         /**
          * EvalVariantResponse
@@ -4166,6 +4356,8 @@ export interface components {
             resume_start?: components["schemas"]["ResumeStartInfo"] | null;
             start_queue?: components["schemas"]["ExecutionStartQueueInfo"] | null;
             read_model_status?: components["schemas"]["ReadModelStatus"] | null;
+            /** @description Skill use across every phase that started: declared, invoked anywhere, never invoked, and not knowable (feedback 01308bcf). */
+            readonly skill_use: components["schemas"]["ExecutionSkillUseSummary"];
         };
         /**
          * ExecutionEvalResponse
@@ -4299,6 +4491,31 @@ export interface components {
             /** @default unclassified */
             failure_classification: components["schemas"]["FailureClassification"];
             reported_failure_reason?: components["schemas"]["ReportedFailureReason"] | null;
+        };
+        /**
+         * ExecutionSkillUseSummary
+         * @description Skill use across every phase of one execution (feedback 01308bcf).
+         *
+         *     A declared skill is only ``never_invoked`` when EVERY phase was observed.
+         *     A phase may invoke a skill it never declared, so one phase that ran where
+         *     use cannot be seen (codex), or could not be read, could have used any of
+         *     them: every declared skill no observed phase invoked is then ``not_known``
+         *     - the #1269 misreading this model exists to refuse, one level up.
+         */
+        ExecutionSkillUseSummary: {
+            /** Declared */
+            declared?: string[];
+            /** Invoked */
+            invoked?: components["schemas"]["InvokedSkillInfo"][];
+            /** Never Invoked */
+            never_invoked?: string[];
+            /** Not Known */
+            not_known?: string[];
+            /**
+             * Summary Display
+             * @default no phase has started
+             */
+            summary_display: string;
         };
         /**
          * ExecutionStartQueueInfo
@@ -6049,6 +6266,18 @@ export interface components {
             /** Output Artifact Types */
             output_artifact_types?: string[];
         };
+        /**
+         * PhaseDurationResponse
+         * @description How long one phase of a run took.
+         */
+        PhaseDurationResponse: {
+            /** Phase Id */
+            phase_id: string;
+            /** Phase Name */
+            phase_name: string;
+            /** Duration Seconds */
+            duration_seconds: number | null;
+        };
         /** PhaseExecutionInfo */
         PhaseExecutionInfo: {
             /** Phase Id */
@@ -6129,6 +6358,17 @@ export interface components {
              * @description The model for humans: the reported id verbatim, or '<alias> (requested)', or 'unknown' (ADR-067 D9).
              */
             readonly model_display: string;
+        };
+        /**
+         * PhaseLatestOutputResponse
+         * @description One phase of a workflow and the output it last produced.
+         */
+        PhaseLatestOutputResponse: {
+            /** Phase Id */
+            phase_id: string;
+            /** Phase Name */
+            phase_name: string;
+            artifact?: components["schemas"]["ArtifactSummaryResponse"] | null;
         };
         /**
          * PhaseMetrics
@@ -6304,11 +6544,23 @@ export interface components {
             declared?: string[];
             /** Invoked */
             invoked?: components["schemas"]["InvokedSkillInfo"][];
+            /** Provider */
+            provider?: string | null;
             /**
              * Declared Not Invoked
              * @description Declared skills with no observed invocation. Empty unless status is 'observed': an unobservable use is not a non-use.
              */
             readonly declared_not_invoked: string[];
+            /**
+             * Status Display
+             * @description What `status` means for this phase, in plain words. Render verbatim.
+             */
+            readonly status_display: string;
+            /**
+             * Summary Display
+             * @description One line on this phase's skill use. Never a count of zero for a phase whose use could not be seen. Render verbatim.
+             */
+            readonly summary_display: string;
         };
         /**
          * PhaseStartConfig
@@ -7816,6 +8068,7 @@ export interface components {
             cost_by_model?: {
                 [key: string]: string;
             };
+            cost_by_token_type?: components["schemas"]["TokenTypeCostResponse"] | null;
             /** Cache Read Rate Display */
             cache_read_rate_display?: string | null;
             /** Cache Write Rate Display */
@@ -8640,6 +8893,25 @@ export interface components {
             p90_display: string;
         };
         /**
+         * TokenTypeCostResponse
+         * @description A session's priced cost split by the kind of token it was spent on.
+         *
+         *     The parts sum to ``total_cost_usd`` (to within the canonical quantum per
+         *     part when ``basis`` is ``allocated``). Unpriced work is in neither, exactly
+         *     as with ``cost_by_model``.
+         */
+        TokenTypeCostResponse: {
+            /** Input Usd */
+            input_usd: string;
+            /** Output Usd */
+            output_usd: string;
+            /** Cache Creation Usd */
+            cache_creation_usd: string;
+            /** Cache Read Usd */
+            cache_read_usd: string;
+            basis: components["schemas"]["CostSplitBasis"];
+        };
+        /**
          * ToolSummary
          * @description Tool usage summary.
          */
@@ -9326,6 +9598,19 @@ export interface components {
             /** Default Eval Id */
             default_eval_id: string | null;
         };
+        /**
+         * WorkflowLatestOutputsResponse
+         * @description Every phase of a workflow, in phase order, with its latest output.
+         *
+         *     One request for the whole workflow detail page instead of one artifact
+         *     query per phase.
+         */
+        WorkflowLatestOutputsResponse: {
+            /** Workflow Id */
+            workflow_id: string;
+            /** Phases */
+            phases: components["schemas"]["PhaseLatestOutputResponse"][];
+        };
         /** WorkflowListResponse */
         WorkflowListResponse: {
             /** Workflows */
@@ -9407,6 +9692,8 @@ export interface components {
             requires_repos: boolean;
             /** Tags */
             tags?: string[];
+            /** Skills */
+            skills?: components["schemas"]["DeclaredSkillResponse"][];
         };
         /**
          * WorkflowTagsResponse
@@ -9417,6 +9704,58 @@ export interface components {
             workflow_id: string;
             /** Tags */
             tags: string[];
+        };
+        /**
+         * WorkflowTrendPointResponse
+         * @description One execution of a workflow as one point on its trend charts (#1788).
+         */
+        WorkflowTrendPointResponse: {
+            /** Execution Id */
+            execution_id: string;
+            /** Date */
+            date: string | null;
+            /** Status */
+            status: string;
+            /** Workflow Version */
+            workflow_version: string | null;
+            /** Cost Usd */
+            cost_usd: string | null;
+            /** Cost Is Lower Bound */
+            cost_is_lower_bound: boolean;
+            /** Cost Display */
+            cost_display: string;
+            /** Duration Seconds */
+            duration_seconds: number | null;
+            /** Duration Is Lower Bound */
+            duration_is_lower_bound: boolean;
+            /** Duration Display */
+            duration_display: string;
+            /** Tokens */
+            tokens: number;
+            /** Phase Durations */
+            phase_durations: components["schemas"]["PhaseDurationResponse"][];
+        };
+        /**
+         * WorkflowTrendResponse
+         * @description One page of a workflow's executions as trend points, newest first (#1788).
+         */
+        WorkflowTrendResponse: {
+            /** Definition Version */
+            definition_version: string | null;
+            /** Definition Changed At */
+            definition_changed_at: string | null;
+            /** Definition Changes */
+            definition_changes: components["schemas"]["DefinitionChangeResponse"][];
+            /** Workflow Id */
+            workflow_id: string;
+            /** Items */
+            items: components["schemas"]["WorkflowTrendPointResponse"][];
+            /** Total */
+            total: number;
+            /** Page */
+            page: number;
+            /** Page Size */
+            page_size: number;
         };
         /**
          * CostSummaryResponse
@@ -9715,6 +10054,47 @@ export interface operations {
             };
         };
     };
+    get_workflow_trend_endpoint_workflows__workflow_id__trend_get: {
+        parameters: {
+            query?: {
+                page?: number;
+                page_size?: number;
+            };
+            header?: never;
+            path: {
+                workflow_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowTrendResponse"];
+                };
+            };
+            /** @description No workflow has this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_workflow_history_endpoint_workflows__workflow_id__history_get: {
         parameters: {
             query?: never;
@@ -9733,6 +10113,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ExecutionHistoryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_workflow_latest_outputs_endpoint_workflows__workflow_id__latest_outputs_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workflow_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowLatestOutputsResponse"];
                 };
             };
             /** @description Validation Error */
@@ -10981,6 +11392,45 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EvalRunListResponse"];
+                };
+            };
+            /** @description No eval has this id in the eval read model (it may still be catching up) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The eval id is not a valid eval id */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_eval_trend_endpoint_evals__eval_id__trend_get: {
+        parameters: {
+            query?: {
+                page?: number;
+                page_size?: number;
+            };
+            header?: never;
+            path: {
+                eval_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvalTrendResponse"];
                 };
             };
             /** @description No eval has this id in the eval read model (it may still be catching up) */

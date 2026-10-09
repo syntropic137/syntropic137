@@ -14,6 +14,7 @@ from syn_api.model_identity import CostModelKey, ObservedModelId  # noqa: TC001
 from syn_api.types import (
     BranchObservationInfo,
     ExecutionEvalRunResponse,
+    ExecutionSkillUseSummary,
     PhaseActivityInfo,
     PhaseProgressInfo,
     PhaseSkillUseInfo,
@@ -120,7 +121,7 @@ class PhaseExecutionInfo(BaseModel):
     agent_provider: str | None = None
     """The provider of the agent that PRODUCED this phase's result, or null
     (PC-83). Differs from the declared provider when the phase fell back to its
-    ``fallback_agent`` on capacity or quota; ``requested_model`` is then the
+    ``fallback_agent`` on capacity, quota or a content refusal; ``requested_model`` is then the
     fallback's model. Null when nothing recorded it."""
     cost_by_model: dict[CostModelKey, str] = Field(default_factory=dict)
     agent_session_ids: list[str] | None = None
@@ -326,6 +327,7 @@ class ExecutionDetailResponse(BaseModel):
     phases lists exactly that many. Draw the timeline from this, not from
     ``phases``, which holds only the phases that started.
     """
+
     total_input_tokens: int
     total_output_tokens: int
     total_cache_creation_tokens: int
@@ -444,6 +446,15 @@ class ExecutionDetailResponse(BaseModel):
     read_model_status: ReadModelStatus | None = None
     """Whether the execution detail read model is rebuilding, so a page missing
     recent phases can say why instead of looking broken."""
+
+    @computed_field(
+        description="Skill use across every phase that started: declared, "
+        "invoked anywhere, never invoked, and not knowable (feedback 01308bcf)."
+    )
+    @property
+    def skill_use(self) -> ExecutionSkillUseSummary:
+        """Derived from `phases`, so it cannot disagree with the per-phase rows."""
+        return ExecutionSkillUseSummary.of([p.skill_use for p in self.phases])
 
 
 class ExecutionSummaryResponse(BaseModel):

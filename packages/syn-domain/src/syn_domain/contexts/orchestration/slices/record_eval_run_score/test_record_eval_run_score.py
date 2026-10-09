@@ -376,3 +376,52 @@ class TestBatchReadsForAPageOfRuns:
         assert {eval_id: record.name for eval_id, record in records.items()} == {
             str(_EVAL): "Refactor quality"
         }
+
+
+class TestJudgeModel:
+    """#1788: the model that judged a run is recorded next to its verdict."""
+
+    async def test_the_judge_model_is_recorded_and_replayed(self) -> None:
+        stream, handler = await _scored_stream()
+        command = _score("run-a", Verdict.PASS).model_copy(
+            update={"judge_model": "claude-opus-5-5"}
+        )
+
+        await handler.handle(command)
+        await handler.handle(_score("run-b", Verdict.FAIL))
+
+        aggregate = await stream.evals.get_by_id(str(_EVAL))
+        assert aggregate is not None
+        recorded = aggregate.run_score("run-a")
+        assert recorded is not None and recorded.judge_model == "claude-opus-5-5"
+        scores = await (await _replayed(stream, times=2)).scores(str(_EVAL))
+        assert scores["run-a"].judge_model == "claude-opus-5-5"
+        # A deterministic scorer names no model.
+        assert scores["run-b"].judge_model is None
+
+    def test_an_event_recorded_before_the_field_reads_as_no_judge(self) -> None:
+        from syn_domain.contexts.orchestration.domain.events.EvalRunScoredEvent import (
+            EvalRunScoredEvent,
+        )
+
+        old = EvalRunScoredEvent.model_validate(
+            {
+                "eval_id": str(_EVAL),
+                "execution_id": "run-a",
+                "verdict": "PASS",
+                "score": 1.0,
+                "scorer": "eval_suite.py",
+                "scorer_version": "2",
+                "scored_at": "2026-10-01T00:00:00+00:00",
+            }
+        )
+
+        assert old.judge_model is None
+
+    def test_an_empty_judge_model_is_refused(self) -> None:
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            RecordEvalRunScoreCommand.model_validate(
+                {**_score("run-a", Verdict.PASS).model_dump(), "judge_model": ""}
+            )

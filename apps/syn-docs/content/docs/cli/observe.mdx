@@ -1,9 +1,26 @@
 ---
 title: syn observe
-description: "Session observability: tool timelines and token metrics"
+description: "Observability: session tool timelines, token metrics, API request latency"
 ---
 
-Session observability: tool timelines and token metrics
+Observability: session tool timelines, token metrics, API request latency
+
+## `syn observe latency`
+
+Show API latency to response start (p50/p95/p99) per route
+
+```bash
+syn observe latency [options]
+```
+
+**Options:**
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--window`, `-w` | `text` | `24h` | 1h, 24h, 7d or 30d |
+| `--route`, `-r` | `text` | --- | One route template as the API reports it, e.g. /evals |
+
+---
 
 ## `syn observe tokens`
 
