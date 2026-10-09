@@ -4252,6 +4252,11 @@ def _publish_a_tag_no_origin_branch_contains(superproject: _WithSubmodule, *tag_
     _git("tag", *tag_args, "v1.0.0", cwd=seed, home=home)
     _git("push", str(superproject.clone.root / "plugin.origin.git"), "v1.0.0", cwd=seed, home=home)
     superproject.git("fetch", "--tags", "origin")
+    # Origin then moves on, as it does after every clone: it now advertises a
+    # tip this clone has never fetched, so the guard must ignore what it lacks.
+    (seed / "plugin.txt").write_text("pushed after the workspace cloned\n")
+    _git("commit", "-am", "later", cwd=seed, home=home)
+    _git("push", str(superproject.clone.root / "plugin.origin.git"), "HEAD:later", cwd=seed, home=home)
     assert superproject.git("rev-list", "HEAD", "--all", "--not", "--remotes").split() == [tagged]
     return tagged
 
