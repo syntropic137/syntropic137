@@ -311,6 +311,9 @@ services:
       # a container cannot see its own port mapping, so this is the only way
       # the entrypoint learns whether port 80 is reachable off this host.
       - SYN_GATEWAY_BIND=${SYN_GATEWAY_BIND:-127.0.0.1}
+      # Dashboard at /: next (syn-ui, default) or legacy (React at /, syn-ui at
+      # /next), a one-release opt-out. Any other value stops the gateway.
+      - SYN_GATEWAY_UI=${SYN_GATEWAY_UI:-next}
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:80/health"]
       interval: 10s

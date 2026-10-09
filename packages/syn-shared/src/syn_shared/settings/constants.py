@@ -47,6 +47,9 @@ ENV_SYN_GATEWAY_PORT = "SYN_GATEWAY_PORT"
 ENV_SYN_GATEWAY_BIND = "SYN_GATEWAY_BIND"
 """Env var for the host address the selfhost gateway binds to."""
 
+ENV_SYN_GATEWAY_UI = "SYN_GATEWAY_UI"
+"""Env var selecting the dashboard the gateway serves at / (next or legacy)."""
+
 ENV_ANTHROPIC_API_KEY = "ANTHROPIC_API_KEY"
 """Env var for the Anthropic API key."""
 

@@ -3,7 +3,7 @@ name: Skyline UI
 # Skyline, the Svelte 5 rebuild of the dashboard (apps/syn-ui + packages/syn-ui/*).
 # Conventions: packages/syn-ui/CONVENTIONS.md. The frozen React app keeps its
 # own job in ci.yml; nothing here builds or tests it, except as the gateway
-# image's / that the `gateway` job asserts is unchanged.
+# image's SYN_GATEWAY_UI=legacy opt-out that the `gateway` job asserts.
 #
 # Every job has a recipe that runs the same commands locally
 # (just/skyline-serve.just): skyline-ci, skyline-e2e, skyline-gateway-smoke.
@@ -20,9 +20,9 @@ on:
       # without touching a Skyline file.
       - 'pnpm-lock.yaml'
       - 'pnpm-workspace.yaml'
-      # Serving: the gateway image builds Skyline into /next.
+      # Serving: the gateway image serves Skyline at /.
       - 'infra/docker/images/gateway/**'
-      - 'infra/scripts/check_gateway_next.py'
+      - 'infra/scripts/check_gateway_ui.py'
       - 'just/skyline.just'
       - 'just/skyline-serve.just'
       - '.github/workflows/syn-ui.yml'
@@ -35,7 +35,7 @@ on:
       - 'pnpm-lock.yaml'
       - 'pnpm-workspace.yaml'
       - 'infra/docker/images/gateway/**'
-      - 'infra/scripts/check_gateway_next.py'
+      - 'infra/scripts/check_gateway_ui.py'
       - 'just/skyline.just'
       - 'just/skyline-serve.just'
       - '.github/workflows/syn-ui.yml'
@@ -108,10 +108,10 @@ jobs:
         run: pnpm --filter syn-ui --filter './packages/syn-ui/*' run test
 
       # `build` runs vite build and then scripts/size-budget.mjs, so a budget
-      # breach fails here. Built for /next/, the path production serves.
+      # breach fails here. Built for /, the path production serves.
       - name: Build
         env:
-          SYN_UI_BASE: /next/
+          SYN_UI_BASE: /
         run: pnpm --filter syn-ui run build
 
       - name: Size budget (100 KB gzip first load)
@@ -165,7 +165,7 @@ jobs:
           }
           node node_modules/@playwright/test/cli.js install --with-deps chromium
 
-      # Builds a fixtures bundle at /next/, serves it with vite preview and runs
+      # Builds a fixtures bundle at /, serves it with vite preview and runs
       # e2e/ against it (E2E_DATA=fixtures). CI=true turns on retries and the
       # HTML report in playwright.config.ts.
       - name: E2E suite
@@ -243,12 +243,12 @@ jobs:
           if-no-files-found: ignore
 
   #############################################################################
-  # GATEWAY - production image serves React at / and Skyline at /next
-  # (just skyline-gateway-smoke)
+  # GATEWAY - production image serves Skyline at / (SYN_GATEWAY_UI=next) and
+  # React at / with Skyline at /next (legacy) (just skyline-gateway-smoke)
   #############################################################################
 
   gateway:
-    name: Gateway serves /next
+    name: Gateway serves syn-ui at /
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -258,8 +258,9 @@ jobs:
         uses: extractions/setup-just@dd310ad5a97d8e7b41793f8ef055398d51ad4de6 # v2
 
       # Builds infra/docker/images/gateway (both UI stages, the Skyline size
-      # budget included), runs it with no API behind it, and checks routing,
-      # caching and headers with infra/scripts/check_gateway_next.py.
+      # budget included), runs it in each SYN_GATEWAY_UI mode with no API
+      # behind it, and checks routing, redirects, caching, headers and the
+      # API proxy with infra/scripts/check_gateway_ui.py.
       - name: Build gateway and smoke-test routing
         run: just skyline-gateway-smoke
 

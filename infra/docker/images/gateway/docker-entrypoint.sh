@@ -28,6 +28,17 @@ mkdir -p "$AUTH_DIR"
 
 GATEWAY_BIND="${SYN_GATEWAY_BIND:-127.0.0.1}"
 
+# Which dashboard owns / (docs/syn-ui-rollout.md). Anything else is a typo that
+# would otherwise serve an unexpected UI, so refuse to start.
+GATEWAY_UI="${SYN_GATEWAY_UI:-next}"
+case "$GATEWAY_UI" in
+    next|legacy) ;;
+    *)
+        echo "gateway: refusing to start: SYN_GATEWAY_UI=${GATEWAY_UI} (expected next or legacy)" >&2
+        exit 1
+        ;;
+esac
+
 # 127.0.0.0/8, ::1 (docker accepts it bracketed or bare), and the name that
 # resolves to them. Docker also treats an empty host IP as "every interface",
 # which is emphatically not loopback and falls through to the default branch.
@@ -203,49 +214,87 @@ location ~ ^/healthz?$ {
     include /etc/nginx/conf.d/security-headers.conf;
 }
 
-# Static assets (dashboard)
+LOCATIONS
+
+# --- Dashboard UI, selected by SYN_GATEWAY_UI ---
+#   next (default): syn-ui (apps/syn-ui, built with SYN_UI_BASE=/) owns /.
+#     /next and /next/* answer 301 to the same path under / for bookmarks
+#     from the release that served syn-ui at /next.
+#   legacy: the previous release's layout, kept for one release as an opt-out:
+#     the React dashboard at /, syn-ui (built for /next/) at /next.
+# The React app is not served in next mode: its router has no basename, so it
+# cannot be re-based under /legacy without source edits.
+# Auth and the brute-force backstop come from server scope in every mode.
+case "$GATEWAY_UI" in
+    next)   UI_ROOT=/usr/share/nginx/html ;;
+    legacy) UI_ROOT=/usr/share/nginx/legacy ;;
+esac
+printf 'root %s;\nindex index.html;\n' "$UI_ROOT" > "$AUTH_DIR/ui-root.conf"
+echo "nginx: dashboard UI ${GATEWAY_UI} (root ${UI_ROOT})"
+
+if [ "$GATEWAY_UI" = next ]; then
+cat >> "$AUTH_DIR/locations.conf" <<'LOCATIONS'
+
+# Bookmarks from the /next era. absolute_redirect off keeps Location relative.
+location = /next {
+    return 301 /;
+}
+location ^~ /next/ {
+    rewrite ^/next/(.*)$ /$1 permanent;
+}
+
+# Hashed syn-ui chunks: cache forever. A missing chunk is a real 404, never
+# index.html (the router's preload would otherwise parse HTML as JS).
 location /assets/ {
     expires 1y;
     add_header Cache-Control "public, immutable";
     include /etc/nginx/conf.d/security-headers.conf;
 }
 
+# syn-ui SPA routing. index.html names the current hashed chunks, so it is
+# revalidated on every load; add_header here drops the server-scope headers,
+# hence the include.
+location / {
+    try_files $uri $uri/ /index.html;
+    add_header Cache-Control "no-cache";
+    include /etc/nginx/conf.d/security-headers.conf;
+}
+LOCATIONS
+else
+cat >> "$AUTH_DIR/locations.conf" <<'LOCATIONS'
 
-# Skyline (apps/syn-ui), the Svelte 5 rebuild, at /next until it takes over /
-# (Skyline spec, Migration plan). Built with SYN_UI_BASE=/next/ into
-# /usr/share/nginx/html/next. Longest prefix wins, so /next/* never reaches the
-# React fallback below, and / keeps serving the React dashboard unchanged.
-# Auth and the brute-force backstop come from server scope, as for /.
+# Static assets (React dashboard)
+location /assets/ {
+    expires 1y;
+    add_header Cache-Control "public, immutable";
+    include /etc/nginx/conf.d/security-headers.conf;
+}
+
+# syn-ui at /next, built with SYN_UI_BASE=/next/ into the legacy root's next/.
 location = /next {
     return 301 /next/;
 }
 
-# Hashed Skyline chunks: cache forever. A missing chunk is a real 404, never
-# index.html (the router's preload would otherwise parse HTML as JS).
 location /next/assets/ {
     expires 1y;
     add_header Cache-Control "public, immutable";
     include /etc/nginx/conf.d/security-headers.conf;
 }
 
-# Skyline SPA routing. index.html names the current hashed chunks, so it is
-# revalidated on every load; add_header here drops the server-scope headers,
-# hence the include.
 location /next/ {
     try_files $uri $uri/ /next/index.html;
     add_header Cache-Control "no-cache";
     include /etc/nginx/conf.d/security-headers.conf;
 }
 
-# SPA routing (dashboard — root). The brute-force backstop is applied at server
-# scope for whichever listener is authenticated (8081 in nginx.conf, port 80 via
-# auth-host.conf when it is bound off loopback), so it covers this and every
-# other Basic-Auth path without throttling a loopback-only port 80. Nothing to
-# add here.
+# SPA routing (React dashboard, root).
 location / {
     try_files $uri $uri/ /index.html;
 }
+LOCATIONS
+fi
 
+cat >> "$AUTH_DIR/locations.conf" <<'LOCATIONS'
 # Error pages
 error_page 500 502 503 504 /50x.html;
 location = /50x.html {
