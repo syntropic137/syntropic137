@@ -16,6 +16,8 @@ export interface MenuItem {
   disabled?: boolean
   tone?: 'neutral' | 'danger'
   icon?: Snippet
+  /** Trailing content after `meta`, e.g. a Keycaps shortcut hint. */
+  end?: Snippet
   onSelect?: () => void
 }
 export interface MenuSeparator {

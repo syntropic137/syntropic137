@@ -196,6 +196,7 @@
             {#if item.icon}<span class="sky-menu__icon">{@render item.icon()}</span>{/if}
             <span class="sky-menu__text">{item.label}</span>
             {#if item.meta}<span class="sky-menu__meta">{item.meta}</span>{/if}
+            {#if item.end}<span class="sky-menu__end">{@render item.end()}</span>{/if}
           </a>
         {:else}
           <button
@@ -258,7 +259,7 @@
     background: transparent;
     color: inherit;
     font-family: inherit;
-    font-size: 0.84375rem;
+    font-size: var(--sky-text-control);
     text-align: left;
     text-decoration: none;
     cursor: pointer;
@@ -294,6 +295,10 @@
     font-family: var(--ds-font-mono);
     font-size: 0.71875rem;
     color: var(--ds-color-text-subtle);
+  }
+  .sky-menu__end {
+    display: flex;
+    flex: none;
   }
   .sky-menu__separator {
     height: var(--ds-border-width);

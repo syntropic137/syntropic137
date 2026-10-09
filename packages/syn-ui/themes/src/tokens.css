@@ -40,6 +40,7 @@
   --ds-text-xs: 0.6875rem;      /* 11   mono captions */
   --ds-text-sm: 0.8125rem;      /* 13   controls, secondary copy */
   --sky-text-data: 0.78125rem;  /* 12.5 mono data */
+  --sky-text-control: 0.84375rem; /* 13.5 buttons, inputs, menu items */
   --ds-text-md: 0.875rem;       /* 14   desktop body */
   --sky-text-body: 0.9375rem;   /* 15   phone body, lead copy */
   --ds-text-lg: 1.0625rem;      /* 17   card titles */
@@ -111,6 +112,8 @@
   --sky-size-nav-item: 2.125rem;  /* 34 capsule items */
   --sky-size-dock-item: 3.25rem;  /* 52 dock items */
   --sky-size-feedback-bubble: 2.5rem; /* 40 floating feedback bubble */
+  --sky-size-feedback-thumb-w: 7.5rem; /* 120 feedback screenshot thumbnail */
+  --sky-size-feedback-thumb-h: 4.5rem; /* 72 */
   --sky-size-icon-sm: 0.875rem;   /* 14 */
   --sky-size-icon-md: 0.9375rem;  /* 15 */
   --sky-size-icon-lg: 1.125rem;   /* 18 */
