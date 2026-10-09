@@ -49,6 +49,14 @@ _PAIRS: tuple[tuple[str, tuple[str, str], tuple[tuple[str, str], ...]], ...] = (
         (("syn_api.routes.costs", "SessionCostResponse"),),
     ),
     (
+        "artifacts.py",
+        (
+            "syn_domain.contexts.artifacts.domain.read_models.artifact_summary",
+            "ArtifactSummary",
+        ),
+        (("syn_api.types", "ArtifactSummary"),),
+    ),
+    (
         "evals.py",
         (
             "syn_domain.contexts.orchestration.domain.read_models.eval_summary",
@@ -71,6 +79,22 @@ _PAIRS: tuple[tuple[str, tuple[str, str], tuple[tuple[str, str], ...]], ...] = (
             "EvalVariant",
         ),
         (("syn_api.types", "EvalVariantResponse"),),
+    ),
+    (
+        "trends.py",
+        (
+            "syn_domain.contexts.orchestration.domain.read_models.eval_runs",
+            "EvalRunFacts",
+        ),
+        (("syn_api.types", "EvalTrendPointResponse"),),
+    ),
+    (
+        "trends.py",
+        (
+            "syn_domain.contexts.orchestration.domain.read_models.workflow_definition_changes",
+            "WorkflowDefinitionChange",
+        ),
+        (("syn_api.types", "DefinitionChangeResponse"),),
     ),
 )
 

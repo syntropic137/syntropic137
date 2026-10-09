@@ -84,6 +84,7 @@ from syn_api.model_identity import CostModelKey, ObservedModelId, ResolvedModelI
 from syn_api.services.cpu_throttling import CpuThrottling  # noqa: TC001
 from syn_api.services.degraded_reasons import DegradedReason  # noqa: TC001
 from syn_domain.contexts.orchestration import (
+    DefinitionChangeKind,
     DelegationFailure,
     EvalId,
     FailureClassification,
@@ -105,6 +106,10 @@ from syn_shared.codex_auth_status import CodexAuthStatus  # noqa: TC001
 from syn_shared.display import format_utc_timestamp
 from syn_shared.display.formatters import EM_DASH, format_cost, format_tokens
 from syn_shared.observed_model import format_observed_model
+from syn_shared.pricing import (  # noqa: TC001 - pydantic resolves at runtime
+    CostSplitBasis,
+    TokenTypeCost,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -502,6 +507,8 @@ class WorkflowSummary(BaseModel):
     tags: list[str] = Field(default_factory=list)
     """The workflow's tags, normalised and sorted (#967). Future runs inherit them."""
     """Whether this workflow requires repository access at execution time (ADR-058 #666)."""
+    skills: list[DeclaredSkillResponse] = Field(default_factory=list)
+    """Every distinct skill the workflow's phases declare, first-declared first."""
 
 
 class InputDeclarationResponse(BaseModel):
@@ -525,6 +532,21 @@ class PhaseRefResponse(BaseModel):
     name_overridden: bool = False
     raw: str | None = None
     """The shorthand spelling when the stored row held a bare string."""
+
+
+class DeclaredSkillResponse(PhaseRefResponse):
+    """A skill a workflow declares, once, and where it declares it.
+
+    On the workflow LIST so a card can draw its skill chips without one detail
+    request per workflow. Same ref shape as a phase's ``skills`` entry, so a
+    client matches a chip to a phase by comparing the ref fields."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    phase_ids: list[str] = Field(default_factory=list)
+    """Phases that declare this skill themselves, in phase order."""
+    workflow_scope: bool = False
+    """Declared at workflow scope, so every phase gets it; not listed per phase."""
 
 
 class FallbackAgentResponse(BaseModel):
@@ -1211,6 +1233,8 @@ class EvalRunResponse(BaseModel):
     scorer: str | None
     scorer_version: str | None
     scored_at: str | None
+    judge_model: ObservedModelId | None = None
+    """The model that judged the run; null for a deterministic scorer or an older score."""
 
 
 class EvalRunListResponse(BaseModel):
@@ -1234,6 +1258,8 @@ class EvalRunScoreRequest(BaseModel):
     """Markdown."""
     scorer: str = Field(min_length=1)
     scorer_version: str = Field(min_length=1)
+    judge_model: ObservedModelId | None = Field(default=None, min_length=1)
+    """The model that judged the run, when a model did. Omit for a deterministic scorer."""
 
 
 class EvalRunScoreResponse(BaseModel):
@@ -1247,6 +1273,120 @@ class EvalRunScoreResponse(BaseModel):
     scorer: str
     scorer_version: str
     scored_at: str
+    judge_model: ObservedModelId | None = None
+
+
+class DefinitionChangeResponse(BaseModel):
+    """A change to an eval's or workflow's definition: a trend chart's annotation (#1788)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    definition_version: str | None
+    """Eval: "1" at creation, one more per goal or baseline change. Workflow: the
+    package version, else the source digest, as its runs record it; null if neither."""
+    changed_at: str
+    """ISO 8601 UTC."""
+    kind: DefinitionChangeKind
+
+
+class TrendDefinition(BaseModel):
+    """The current definition version, when it last changed, and every change."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    definition_version: str | None
+    definition_changed_at: str | None
+    """ISO 8601 UTC; null when no change was recorded."""
+    definition_changes: list[DefinitionChangeResponse]
+    """Oldest first."""
+
+
+class EvalTrendPointResponse(BaseModel):
+    """One run of an eval as one point on its trend charts (#1788)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    execution_id: str
+    date: str | None
+    """When the run started, ISO 8601 UTC; null if it never recorded a start."""
+    workflow_id: str
+    workflow_version: str | None
+    """The workflow version the run launched from, as on `GET /evals/{id}/runs`."""
+    eval_definition_version: str | None
+    """The eval's definition version current when the run started."""
+    verifier_model: ObservedModelId | None
+    """The model the run's last reporting phase ran, as its harness reported it."""
+    observed_models: list[ObservedModelId]
+    """Every distinct model the run was observed running, delegates included, sorted."""
+    judge_model: ObservedModelId | None
+    score: int | None
+    """0 to 100; the recorded fraction x 100, rounded. Null when unscored or scored without one."""
+    verdict: Verdict | None
+    cost_usd: Decimal | None
+    cost_is_lower_bound: bool
+    """True when some of the run's work had no price, so `cost_usd` is a floor."""
+    cost_display: str
+    duration_seconds: float | None
+    duration_is_lower_bound: bool
+    """True when some phase has no known duration, so `duration_seconds` is a floor."""
+    duration_display: str
+    tokens: int
+    """Total tokens, the same figure as `total_tokens` on `GET /executions`."""
+
+
+class EvalTrendResponse(TrendDefinition):
+    """One page of an eval's current runs as trend points, newest first (#1788)."""
+
+    eval_id: str
+    items: list[EvalTrendPointResponse]
+    total: int
+    """Every current run of the eval, whatever the page size."""
+    page: int
+    page_size: int
+
+
+class PhaseDurationResponse(BaseModel):
+    """How long one phase of a run took."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    phase_id: str
+    phase_name: str
+    duration_seconds: float | None
+    """Null when the phase has no known duration."""
+
+
+class WorkflowTrendPointResponse(BaseModel):
+    """One execution of a workflow as one point on its trend charts (#1788)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    execution_id: str
+    date: str | None
+    """When the execution started, ISO 8601 UTC."""
+    status: str
+    workflow_version: str | None
+    """The version the execution launched from; compare with `definition_changes`."""
+    cost_usd: Decimal | None
+    cost_is_lower_bound: bool
+    cost_display: str
+    duration_seconds: float | None
+    duration_is_lower_bound: bool
+    duration_display: str
+    tokens: int
+    phase_durations: list[PhaseDurationResponse]
+    """In the order the phases ran."""
+
+
+class WorkflowTrendResponse(TrendDefinition):
+    """One page of a workflow's executions as trend points, newest first (#1788)."""
+
+    workflow_id: str
+    items: list[WorkflowTrendPointResponse]
+    total: int
+    """Every execution of the workflow, whatever the page size."""
+    page: int
+    page_size: int
 
 
 class ExecutionEvalRunResponse(BaseModel):
@@ -2239,6 +2379,37 @@ class ControlResult(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class TokenTypeCostResponse(BaseModel):
+    """A session's priced cost split by the kind of token it was spent on.
+
+    The parts sum to ``total_cost_usd`` (to within the canonical quantum per
+    part when ``basis`` is ``allocated``). Unpriced work is in neither, exactly
+    as with ``cost_by_model``.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    input_usd: Decimal
+    output_usd: Decimal
+    cache_creation_usd: Decimal
+    """Cache WRITES."""
+    cache_read_usd: Decimal
+    basis: CostSplitBasis
+    """``rate_table``: each part is tokens x that type's rate. ``allocated``: a
+    harness-reported total, which states no split, apportioned in the rate
+    table's proportions. Label the second as an estimate."""
+
+    @classmethod
+    def from_split(cls, split: TokenTypeCost, basis: CostSplitBasis) -> TokenTypeCostResponse:
+        return cls(
+            input_usd=split.input_usd,
+            output_usd=split.output_usd,
+            cache_creation_usd=split.cache_creation_usd,
+            cache_read_usd=split.cache_read_usd,
+            basis=basis,
+        )
+
+
 class SessionDetail(BaseModel):
     """Detailed session with tool operations and cost data."""
 
@@ -2274,6 +2445,8 @@ class SessionDetail(BaseModel):
     requested_model: str | None = None
     """The model the session REQUESTED (often an alias), or None (ADR-067 D9)."""
     cost_by_model: dict[CostModelKey, Decimal] = Field(default_factory=dict)
+    cost_by_token_type: TokenTypeCostResponse | None = None
+    """Cost split by token type; None when it could not be split, never zeroes."""
     operations: list[ToolOperation] = Field(default_factory=list)
     started_at: datetime | None = None
     completed_at: datetime | None = None

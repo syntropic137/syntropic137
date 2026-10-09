@@ -30,6 +30,8 @@ class RecordEvalRunScoreCommand(BaseModel):
     """Markdown: why the scorer reached this verdict."""
     scorer: str = Field(min_length=1)
     scorer_version: str = Field(min_length=1)
+    judge_model: str | None = Field(default=None, min_length=1)
+    """The model that judged the run; None for a deterministic scorer (#1788)."""
 
     @property
     def aggregate_id(self) -> str:

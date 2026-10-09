@@ -377,6 +377,75 @@
         }
       }
     },
+    "/workflows/{workflow_id}/trend": {
+      "get": {
+        "tags": [
+          "workflows"
+        ],
+        "summary": "Get Workflow Trend Endpoint",
+        "description": "The workflow's executions as trend points, newest first, with its definition changes.\n\nOne row per execution: date, status, cost, duration, tokens and how long\neach phase took. The workflow id may be a unique prefix.",
+        "operationId": "get_workflow_trend_endpoint_workflows__workflow_id__trend_get",
+        "parameters": [
+          {
+            "name": "workflow_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Workflow Id"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Page Size"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowTrendResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No workflow has this id"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/workflows/{workflow_id}/history": {
       "get": {
         "tags": [
@@ -403,6 +472,49 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ExecutionHistoryResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workflows/{workflow_id}/latest-outputs": {
+      "get": {
+        "tags": [
+          "workflows"
+        ],
+        "summary": "Get Workflow Latest Outputs Endpoint",
+        "description": "Each phase's latest output: its newest primary deliverable across all runs.",
+        "operationId": "get_workflow_latest_outputs_endpoint_workflows__workflow_id__latest_outputs_get",
+        "parameters": [
+          {
+            "name": "workflow_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Workflow Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowLatestOutputsResponse"
                 }
               }
             }
@@ -2574,6 +2686,68 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/EvalRunListResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No eval has this id in the eval read model (it may still be catching up)"
+          },
+          "422": {
+            "description": "The eval id is not a valid eval id"
+          }
+        }
+      }
+    },
+    "/evals/{eval_id}/trend": {
+      "get": {
+        "tags": [
+          "evals"
+        ],
+        "summary": "Get Eval Trend Endpoint",
+        "description": "The eval's current runs as trend points, newest first, with its definition changes.\n\nOne row per run: date, verifier and judge model, score (0 to 100), verdict,\ncost, duration and tokens. The same runs as `GET /evals/{eval_id}/runs`.",
+        "operationId": "get_eval_trend_endpoint_evals__eval_id__trend_get",
+        "parameters": [
+          {
+            "name": "eval_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Eval Id"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Page Size"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalTrendResponse"
                 }
               }
             }
@@ -9419,6 +9593,15 @@
         "title": "CostOutlierResponse",
         "description": "An execution with unusually high cost."
       },
+      "CostSplitBasis": {
+        "type": "string",
+        "enum": [
+          "rate_table",
+          "allocated"
+        ],
+        "title": "CostSplitBasis",
+        "description": "How a cost-by-token-type breakdown was arrived at.\n\nThe two are not equally strong claims, so a client must be able to tell\nthem apart and label the second one."
+      },
       "CoverageState": {
         "type": "string",
         "enum": [
@@ -9912,6 +10095,116 @@
         ],
         "title": "DbPoolHealth",
         "description": "One Postgres connection pool in this API process, at the moment of asking (#1583).\n\n``waiting`` greater than zero, or ``in_use`` equal to ``max_size``, means\nrequests are queueing for a connection rather than for the database itself."
+      },
+      "DeclaredSkillResponse": {
+        "properties": {
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          },
+          "name_overridden": {
+            "type": "boolean",
+            "title": "Name Overridden",
+            "default": false
+          },
+          "raw": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Raw"
+          },
+          "phase_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Phase Ids"
+          },
+          "workflow_scope": {
+            "type": "boolean",
+            "title": "Workflow Scope",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "DeclaredSkillResponse",
+        "description": "A skill a workflow declares, once, and where it declares it.\n\nOn the workflow LIST so a card can draw its skill chips without one detail\nrequest per workflow. Same ref shape as a phase's ``skills`` entry, so a\nclient matches a chip to a phase by comparing the ref fields."
+      },
+      "DefinitionChangeKind": {
+        "type": "string",
+        "enum": [
+          "created",
+          "updated",
+          "phase_updated"
+        ],
+        "title": "DefinitionChangeKind",
+        "description": "What changed the definition."
+      },
+      "DefinitionChangeResponse": {
+        "properties": {
+          "definition_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Definition Version"
+          },
+          "changed_at": {
+            "type": "string",
+            "title": "Changed At"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/DefinitionChangeKind"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "definition_version",
+          "changed_at",
+          "kind"
+        ],
+        "title": "DefinitionChangeResponse",
+        "description": "A change to an eval's or workflow's definition: a trend chart's annotation (#1788)."
       },
       "DegradedReason": {
         "type": "string",
@@ -10825,6 +11118,17 @@
               }
             ],
             "title": "Scored At"
+          },
+          "judge_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Judge Model"
           }
         },
         "type": "object",
@@ -10881,6 +11185,18 @@
             "type": "string",
             "minLength": 1,
             "title": "Scorer Version"
+          },
+          "judge_model": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Judge Model"
           }
         },
         "additionalProperties": false,
@@ -10932,6 +11248,17 @@
           "scored_at": {
             "type": "string",
             "title": "Scored At"
+          },
+          "judge_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Judge Model"
           }
         },
         "type": "object",
@@ -11019,6 +11346,237 @@
         ],
         "title": "EvalRunStatsResponse",
         "description": "How long a set of an eval's runs took and what it cost, over EVERY run in the set.\n\nMedians, not means: one runaway run should not make a variant look slow."
+      },
+      "EvalTrendPointResponse": {
+        "properties": {
+          "execution_id": {
+            "type": "string",
+            "title": "Execution Id"
+          },
+          "date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date"
+          },
+          "workflow_id": {
+            "type": "string",
+            "title": "Workflow Id"
+          },
+          "workflow_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workflow Version"
+          },
+          "eval_definition_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Eval Definition Version"
+          },
+          "verifier_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verifier Model"
+          },
+          "observed_models": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Observed Models"
+          },
+          "judge_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Judge Model"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          },
+          "verdict": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Verdict"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cost_usd": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Usd"
+          },
+          "cost_is_lower_bound": {
+            "type": "boolean",
+            "title": "Cost Is Lower Bound"
+          },
+          "cost_display": {
+            "type": "string",
+            "title": "Cost Display"
+          },
+          "duration_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Seconds"
+          },
+          "duration_is_lower_bound": {
+            "type": "boolean",
+            "title": "Duration Is Lower Bound"
+          },
+          "duration_display": {
+            "type": "string",
+            "title": "Duration Display"
+          },
+          "tokens": {
+            "type": "integer",
+            "title": "Tokens"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "execution_id",
+          "date",
+          "workflow_id",
+          "workflow_version",
+          "eval_definition_version",
+          "verifier_model",
+          "observed_models",
+          "judge_model",
+          "score",
+          "verdict",
+          "cost_usd",
+          "cost_is_lower_bound",
+          "cost_display",
+          "duration_seconds",
+          "duration_is_lower_bound",
+          "duration_display",
+          "tokens"
+        ],
+        "title": "EvalTrendPointResponse",
+        "description": "One run of an eval as one point on its trend charts (#1788)."
+      },
+      "EvalTrendResponse": {
+        "properties": {
+          "definition_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Definition Version"
+          },
+          "definition_changed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Definition Changed At"
+          },
+          "definition_changes": {
+            "items": {
+              "$ref": "#/components/schemas/DefinitionChangeResponse"
+            },
+            "type": "array",
+            "title": "Definition Changes"
+          },
+          "eval_id": {
+            "type": "string",
+            "title": "Eval Id"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/EvalTrendPointResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "page_size": {
+            "type": "integer",
+            "title": "Page Size"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "definition_version",
+          "definition_changed_at",
+          "definition_changes",
+          "eval_id",
+          "items",
+          "total",
+          "page",
+          "page_size"
+        ],
+        "title": "EvalTrendResponse",
+        "description": "One page of an eval's current runs as trend points, newest first (#1788)."
       },
       "EvalVariantResponse": {
         "properties": {
@@ -16200,6 +16758,38 @@
         "title": "PhaseDefinitionResponse",
         "description": "Phase definition within a workflow template."
       },
+      "PhaseDurationResponse": {
+        "properties": {
+          "phase_id": {
+            "type": "string",
+            "title": "Phase Id"
+          },
+          "phase_name": {
+            "type": "string",
+            "title": "Phase Name"
+          },
+          "duration_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Seconds"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "phase_id",
+          "phase_name",
+          "duration_seconds"
+        ],
+        "title": "PhaseDurationResponse",
+        "description": "How long one phase of a run took."
+      },
       "PhaseExecutionInfo": {
         "properties": {
           "phase_id": {
@@ -16479,6 +17069,36 @@
           "model_display"
         ],
         "title": "PhaseExecutionInfo"
+      },
+      "PhaseLatestOutputResponse": {
+        "properties": {
+          "phase_id": {
+            "type": "string",
+            "title": "Phase Id"
+          },
+          "phase_name": {
+            "type": "string",
+            "title": "Phase Name"
+          },
+          "artifact": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ArtifactSummaryResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "phase_id",
+          "phase_name"
+        ],
+        "title": "PhaseLatestOutputResponse",
+        "description": "One phase of a workflow and the output it last produced."
       },
       "PhaseMetrics": {
         "properties": {
@@ -19601,6 +20221,16 @@
             "type": "object",
             "title": "Cost By Model"
           },
+          "cost_by_token_type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TokenTypeCostResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "cache_read_rate_display": {
             "anyOf": [
               {
@@ -21003,6 +21633,44 @@
         "title": "TokenPercentilesResponse",
         "description": "p50/p90 of one measure over ``n`` phases; null below ten phases."
       },
+      "TokenTypeCostResponse": {
+        "properties": {
+          "input_usd": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Input Usd"
+          },
+          "output_usd": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Output Usd"
+          },
+          "cache_creation_usd": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Cache Creation Usd"
+          },
+          "cache_read_usd": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Cache Read Usd"
+          },
+          "basis": {
+            "$ref": "#/components/schemas/CostSplitBasis"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "input_usd",
+          "output_usd",
+          "cache_creation_usd",
+          "cache_read_usd",
+          "basis"
+        ],
+        "title": "TokenTypeCostResponse",
+        "description": "A session's priced cost split by the kind of token it was spent on.\n\nThe parts sum to ``total_cost_usd`` (to within the canonical quantum per\npart when ``basis`` is ``allocated``). Unpriced work is in neither, exactly\nas with ``cost_by_model``."
+      },
       "ToolSummary": {
         "properties": {
           "tool_name": {
@@ -22395,6 +23063,29 @@
         "title": "WorkflowDefaultEvalResponse",
         "description": "A workflow's default eval after an edit, read from the aggregate (#967)."
       },
+      "WorkflowLatestOutputsResponse": {
+        "properties": {
+          "workflow_id": {
+            "type": "string",
+            "title": "Workflow Id"
+          },
+          "phases": {
+            "items": {
+              "$ref": "#/components/schemas/PhaseLatestOutputResponse"
+            },
+            "type": "array",
+            "title": "Phases"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "workflow_id",
+          "phases"
+        ],
+        "title": "WorkflowLatestOutputsResponse",
+        "description": "Every phase of a workflow, in phase order, with its latest output.\n\nOne request for the whole workflow detail page instead of one artifact\nquery per phase."
+      },
       "WorkflowListResponse": {
         "properties": {
           "workflows": {
@@ -22607,6 +23298,13 @@
             },
             "type": "array",
             "title": "Tags"
+          },
+          "skills": {
+            "items": {
+              "$ref": "#/components/schemas/DeclaredSkillResponse"
+            },
+            "type": "array",
+            "title": "Skills"
           }
         },
         "type": "object",
@@ -22640,6 +23338,178 @@
         ],
         "title": "WorkflowTagsResponse",
         "description": "A workflow's tags after an edit, read from the aggregate, not a projection."
+      },
+      "WorkflowTrendPointResponse": {
+        "properties": {
+          "execution_id": {
+            "type": "string",
+            "title": "Execution Id"
+          },
+          "date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "workflow_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workflow Version"
+          },
+          "cost_usd": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Usd"
+          },
+          "cost_is_lower_bound": {
+            "type": "boolean",
+            "title": "Cost Is Lower Bound"
+          },
+          "cost_display": {
+            "type": "string",
+            "title": "Cost Display"
+          },
+          "duration_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Seconds"
+          },
+          "duration_is_lower_bound": {
+            "type": "boolean",
+            "title": "Duration Is Lower Bound"
+          },
+          "duration_display": {
+            "type": "string",
+            "title": "Duration Display"
+          },
+          "tokens": {
+            "type": "integer",
+            "title": "Tokens"
+          },
+          "phase_durations": {
+            "items": {
+              "$ref": "#/components/schemas/PhaseDurationResponse"
+            },
+            "type": "array",
+            "title": "Phase Durations"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "execution_id",
+          "date",
+          "status",
+          "workflow_version",
+          "cost_usd",
+          "cost_is_lower_bound",
+          "cost_display",
+          "duration_seconds",
+          "duration_is_lower_bound",
+          "duration_display",
+          "tokens",
+          "phase_durations"
+        ],
+        "title": "WorkflowTrendPointResponse",
+        "description": "One execution of a workflow as one point on its trend charts (#1788)."
+      },
+      "WorkflowTrendResponse": {
+        "properties": {
+          "definition_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Definition Version"
+          },
+          "definition_changed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Definition Changed At"
+          },
+          "definition_changes": {
+            "items": {
+              "$ref": "#/components/schemas/DefinitionChangeResponse"
+            },
+            "type": "array",
+            "title": "Definition Changes"
+          },
+          "workflow_id": {
+            "type": "string",
+            "title": "Workflow Id"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/WorkflowTrendPointResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "page_size": {
+            "type": "integer",
+            "title": "Page Size"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "definition_version",
+          "definition_changed_at",
+          "definition_changes",
+          "workflow_id",
+          "items",
+          "total",
+          "page",
+          "page_size"
+        ],
+        "title": "WorkflowTrendResponse",
+        "description": "One page of a workflow's executions as trend points, newest first (#1788)."
       },
       "syn_api__routes__costs__CostSummaryResponse": {
         "properties": {

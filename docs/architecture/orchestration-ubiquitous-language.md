@@ -259,6 +259,17 @@ The definition a run is made from - its Phases and their configuration.
 Mutable: installing a Workflow replaces it. An Execution therefore PINS what it
 needs rather than reading the Workflow later.
 
+## Declared Skill
+
+A skill a Workflow names, once, with where it names it: the Phases that list
+it themselves (`phase_ids`), and whether it is declared at **workflow scope**,
+which gives it to every Phase. The two are kept apart: "this Phase asked for
+it" and "the Workflow gave it to every Phase" are different facts. One skill is
+one `(source, version, name)`, the identity `SkillRef` compares by, so two
+versions of a skill are two Declared Skills. Carried on the workflow list as
+`skills` (`WorkflowSkillSummary`) so a list of Workflows needs no detail fetch
+per Workflow.
+
 ## Resume
 
 Continuing an Execution that DID NOT FINISH, by starting a new Execution that
@@ -753,6 +764,46 @@ can be scored (409 otherwise). Scoring is allowed on a Frozen or Archived Eval:
 judging a run is not editing what the Eval measures. Re-scoring REPLACES the
 Run's current Score; the earlier Scores stay in the Eval's events. Unlike
 membership, Scores do grow the Eval's stream, one event per judgement.
+
+The number is STORED as a fraction from 0 to 1 and SHOWN as an integer from 0
+to 100 (the trend's `score`, rounded). One quantity, two scales: never record
+the 0 to 100 form.
+
+## Judge Model
+
+The model that produced a Score, when a model did (`judge_model` on
+`EvalRunScored`, #1788). None for a deterministic scorer such as
+`scripts/eval_suite.py`, and for every Score recorded before the field existed.
+Not the Scorer: the scorer is the program and its version, the judge model is
+the model that program asked.
+
+## Verifier Model
+
+On a trend point, the model the Run's last reporting phase OBSERVED running:
+the verifier of a verify run. Every distinct observed model, delegates
+included, is listed beside it, so a Run that ran several is never collapsed to
+one silently.
+
+## Trend
+
+An Eval's or a Workflow's Runs as chart points, one per Run, newest first and
+paged like every list (`GET /evals/{id}/trend`, `GET /workflows/{id}/trend`).
+Read from the same sources as the runs views, so a point and its run row
+cannot disagree. Carries the Definition Changes to annotate.
+
+## Definition Change
+
+A dated change to what an Eval or Workflow is, recorded from its own stream,
+never inferred from its Runs. An Eval's definition version is 1 at creation
+and one more per Goal or Baseline edit; a rename or retag is not a change. A
+Workflow's is its package version, else its source digest (the same value a
+Run records as its workflow version), changed by a create, a reinstall or a
+phase edit; a phase edit keeps the version, so two changes can share one.
+Dated by the event's recorded time (a Workflow) or the event's own time (an
+Eval), but identified and ordered by its position in the stream
+(`sequence`, the aggregate nonce): two changes can share a millisecond, and a
+clock can step backwards. The version current at a time is the change latest
+in the stream among those dated at or before it.
 
 ## Verdict
 
