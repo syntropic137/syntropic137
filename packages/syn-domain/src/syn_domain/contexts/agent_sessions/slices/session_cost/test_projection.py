@@ -690,7 +690,7 @@ class TestGetSessionCosts:
         class _Query:
             def __init__(self, *_args: object) -> None: ...
 
-            async def calculate_many(self, ids: list[str]) -> dict[str, SessionCost]:
+            async def calculate_many_by_given_id(self, ids: list[str]) -> dict[str, SessionCost]:
                 asked.append(ids)
                 return {sid: SessionCost(session_id=sid) for sid in ids if sid != "s-none"}
 

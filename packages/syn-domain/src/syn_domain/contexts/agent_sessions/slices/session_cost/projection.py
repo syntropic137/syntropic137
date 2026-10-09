@@ -36,7 +36,6 @@ from syn_domain.contexts.agent_sessions.slices.session_cost.cost_calculator impo
 from syn_domain.contexts.agent_sessions.slices.session_cost.timescale_query import (
     TimescaleSessionCostQuery,
 )
-from syn_domain.storable_text import pg_safe
 from syn_shared.observed_model import RecordedModel, split_observation_model
 from syn_shared.pricing import parse_vendor_cost
 
@@ -445,9 +444,7 @@ class SessionCostProjection:
                     found[session_id] = cost
             return found
         query = TimescaleSessionCostQuery(self._pool, self._cost_calculator)
-        stored = await query.calculate_many(wanted)
-        # calculate_many keys by the STORED (pg_safe) spelling of each id.
-        return {sid: cost for sid in wanted if (cost := stored.get(pg_safe(sid))) is not None}
+        return await query.calculate_many_by_given_id(wanted)
 
     async def _calculate_from_timescale(self, session_id: str) -> SessionCost | None:
         """Calculate session cost directly from TimescaleDB observations.
