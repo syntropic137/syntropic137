@@ -16,6 +16,8 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     import asyncpg
     from event_sourcing import ProjectionStore
 
@@ -34,6 +36,7 @@ from syn_domain.contexts.agent_sessions.slices.session_cost.cost_calculator impo
 from syn_domain.contexts.agent_sessions.slices.session_cost.timescale_query import (
     TimescaleSessionCostQuery,
 )
+from syn_domain.storable_text import pg_safe
 from syn_shared.observed_model import RecordedModel, split_observation_model
 from syn_shared.pricing import parse_vendor_cost
 
@@ -424,6 +427,27 @@ class SessionCostProjection:
         if not data:
             return None
         return SessionCost.from_dict(data)
+
+    async def get_session_costs(self, session_ids: Sequence[str]) -> dict[str, SessionCost]:
+        """Each session's cost, keyed by the id as GIVEN; sessions with none are omitted.
+
+        What ``get_session_cost`` answers for each id, in one batch of queries
+        rather than four round trips per session (#1811). ``calculate`` IS
+        ``calculate_many`` of one id, so the two cannot disagree. Without a pool
+        (offline and tests) it asks ``get_session_cost`` per id.
+        """
+        wanted = list(dict.fromkeys(session_ids))
+        if self._pool is None:
+            found: dict[str, SessionCost] = {}
+            for session_id in wanted:
+                cost = await self.get_session_cost(session_id)
+                if cost is not None:
+                    found[session_id] = cost
+            return found
+        query = TimescaleSessionCostQuery(self._pool, self._cost_calculator)
+        stored = await query.calculate_many(wanted)
+        # calculate_many keys by the STORED (pg_safe) spelling of each id.
+        return {sid: cost for sid in wanted if (cost := stored.get(pg_safe(sid))) is not None}
 
     async def _calculate_from_timescale(self, session_id: str) -> SessionCost | None:
         """Calculate session cost directly from TimescaleDB observations.
