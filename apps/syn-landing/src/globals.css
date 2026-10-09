@@ -112,13 +112,40 @@ img, video {
 }
 
 /* ── Site header (Landing / PhoneLanding boards) ──
-   Over the top of the hero: the hero's ground (wash, dots) runs behind it.
    Phone first: S, wordmark and the GitHub button; from 48rem the call to
-   action and the GitHub label; from 64rem the capsule of section links. */
-.site-header {
+   action and the GitHub label; from 64rem the capsule of section links.
+
+   Floating (owner review): fixed from the start, so nothing shifts. At the
+   top of the page it sits over the hero exactly as on the board; once the
+   sentinel (the page's first 24px) leaves the viewport, Nav sets
+   data-scrolled and a glass capsule fades in behind the bar, which moves
+   to --nav-float-top. Only opacity and transform change. */
+.site-header__sentinel {
   position: absolute;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 24px;
+  pointer-events: none;
+}
+
+.site-header {
+  position: fixed;
   inset: 0 0 auto;
   z-index: var(--sky-z-nav);
+  /* The bar takes the clicks; the strip around the capsule does not. */
+  pointer-events: none;
+}
+
+.site-header__bar {
+  /* Bar padding at the top of the page, the capsule's padding around the
+     bar's content, and the capsule's distance from the top once scrolled. */
+  --nav-pad-y: var(--ds-space-3-5);
+  --nav-cap-x: var(--ds-space-2);
+  --nav-cap-y: 6px;
+  --nav-float-top: var(--ds-space-2);
+  position: relative;
+  isolation: isolate;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -126,7 +153,46 @@ img, video {
   width: 100%;
   max-width: 1320px;
   margin: 0 auto;
-  padding: var(--ds-space-3-5) var(--sky-gutter);
+  padding: var(--nav-pad-y) var(--sky-gutter);
+  pointer-events: auto;
+  transition: transform var(--sky-duration-slow) var(--sky-ease-out);
+}
+
+.site-header__bar::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: calc(var(--nav-pad-y) - var(--nav-cap-y)) calc(var(--sky-gutter) - var(--nav-cap-x));
+  border: var(--ds-border-width) solid var(--sky-color-border-glass);
+  border-radius: calc(var(--sky-radius-row) + var(--nav-cap-y));
+  background: color-mix(in oklab, var(--sky-color-ground-deep) 72%, transparent);
+  box-shadow:
+    0 18px 40px -18px color-mix(in oklab, var(--sky-color-ground-deep) 90%, transparent),
+    inset 0 1px 0 color-mix(in oklab, var(--sky-color-display-hi) 6%, transparent);
+  backdrop-filter: blur(var(--sky-blur-glass)) saturate(1.4);
+  -webkit-backdrop-filter: blur(var(--sky-blur-glass)) saturate(1.4);
+  opacity: 0;
+  transform: scale(0.98);
+  transition:
+    opacity var(--sky-duration-slow) var(--sky-ease-out),
+    transform var(--sky-duration-slow) var(--sky-ease-out);
+  pointer-events: none;
+}
+
+.site-header[data-scrolled] .site-header__bar {
+  transform: translateY(calc(var(--nav-float-top) + var(--nav-cap-y) - var(--nav-pad-y)));
+}
+
+.site-header[data-scrolled] .site-header__bar::before {
+  opacity: 1;
+  transform: none;
+}
+
+@media (forced-colors: active) {
+  .site-header__bar::before {
+    background: Canvas;
+    border-color: CanvasText;
+  }
 }
 
 .site-header__brand {
@@ -190,6 +256,7 @@ img, video {
   background: color-mix(in oklab, var(--ds-color-surface) 55%, transparent);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
+  transition: background-color var(--sky-duration-slow) ease, border-color var(--sky-duration-slow) ease;
 }
 
 .site-nav__link {
@@ -199,6 +266,14 @@ img, video {
   color: var(--sky-color-text-code);
   text-decoration: none;
   transition: background-color var(--sky-duration-base) ease, color var(--sky-duration-base) ease;
+}
+
+/* Inside the scrolled capsule the links need no capsule of their own. */
+.site-header[data-scrolled] .site-nav {
+  border-color: transparent;
+  background: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 .site-nav__link:hover {
@@ -264,8 +339,11 @@ img, video {
 }
 
 @media (min-width: 48rem) {
-  .site-header {
-    padding-block: 22px;
+  .site-header__bar {
+    --nav-pad-y: 22px;
+    --nav-cap-x: var(--ds-space-3-5);
+    --nav-cap-y: var(--ds-space-2);
+    --nav-float-top: var(--ds-space-3);
   }
 
   .site-header__brand .s-mark {
