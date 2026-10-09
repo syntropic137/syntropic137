@@ -48,3 +48,13 @@ test('Eval detail "Same case, other verifiers" pairs each verifier with its own 
   await expect(section.getByRole('link', { name: /: Fail$/ })).toHaveCount(1)
   await expect(section.getByRole('link', { name: /: Error$/ })).toHaveCount(1)
 })
+
+test('Artifacts cards name the phase that wrote the file, never an ordinal "phase NN"', async ({ page }) => {
+  await page.goto('./artifacts')
+  const cards = page.locator('#sky-main li[data-sky-row]')
+  await expect(cards.first()).toBeVisible()
+  await expect(page.locator('#sky-main').getByText(/^phase \d+$/)).toHaveCount(0)
+  // Every artifact row in the fixtures (and the API) carries a phase_id; the card prints it.
+  const texts = await cards.allInnerTexts()
+  expect(texts.some((t) => /\n(research|synthesize|report|review|plan|implement|summarize)\b/i.test(`\n${t}`))).toBe(true)
+})
