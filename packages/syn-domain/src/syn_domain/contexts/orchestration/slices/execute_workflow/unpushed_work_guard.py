@@ -607,7 +607,10 @@ async def _unsaved_work(
     question to be re-litigated here - see `quarantine_unpushed_work` for what
     it takes to make it False. Commits are unaffected by it either way.
     """
-    status = await git(workspace, repo, "status", "--porcelain")
+    # --ignore-submodules=none: a repository's `submodule.<path>.ignore` or
+    # `diff.ignoreSubmodules` would otherwise drop a dirty submodule's line
+    # from this listing altogether, and with it the only report of the work.
+    status = await git(workspace, repo, "status", "--porcelain", "--ignore-submodules=none")
     tips = await git(
         workspace, repo, "for-each-ref", "--format=%(objectname) %(refname:short)", "refs/heads"
     )

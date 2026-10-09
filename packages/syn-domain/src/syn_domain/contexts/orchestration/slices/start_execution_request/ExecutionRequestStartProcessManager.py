@@ -67,7 +67,7 @@ class ExecutionRequestStarter(Protocol):
         task are handed to ``on_failure``."""
         ...
 
-    def holds_request(self, execution_id: str) -> bool:
+    def holds_execution(self, execution_id: str) -> bool:
         """Whether this execution's start is already queued or running HERE."""
         ...
 
@@ -202,7 +202,7 @@ class ExecutionRequestStartProcessManager(StartToDoProcessManager[ExecutionReque
 
     def _holds(self, record: ExecutionRequestStartRecord) -> bool:
         assert self._starter is not None
-        return self._starter.holds_request(record.execution_id)
+        return self._starter.holds_execution(record.execution_id)
 
     async def _offer(
         self, record: ExecutionRequestStartRecord, on_failure: StartFailureReporter

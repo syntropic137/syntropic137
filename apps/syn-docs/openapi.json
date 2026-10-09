@@ -789,6 +789,24 @@
             "description": "Keep only executions currently in this eval: an eval's runs (#967). Matched exactly, never as a prefix."
           },
           {
+            "name": "in_eval",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "true keeps only executions that are currently a run of some eval; false keeps only executions in no eval. Omit for both.",
+              "title": "In Eval"
+            },
+            "description": "true keeps only executions that are currently a run of some eval; false keeps only executions in no eval. Omit for both."
+          },
+          {
             "name": "page",
             "in": "query",
             "required": false,
@@ -2475,7 +2493,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/EvalResponse"
+                  "$ref": "#/components/schemas/EvalDetailResponse"
                 }
               }
             }
@@ -3963,6 +3981,65 @@
         }
       }
     },
+    "/metrics/phase-profiles": {
+      "get": {
+        "tags": [
+          "metrics"
+        ],
+        "summary": "Get Phase Profiles Endpoint",
+        "description": "Per phase type and model: p50/p90 tokens and cost; per phase type: p50/p95 resources.\n\nSizes the capacity model and the execution budget from what phases of\nthis workflow actually used (#1716). Every percentile is over every phase\nin the window; below ten phases it reads ``insufficient``.",
+        "operationId": "get_phase_profiles_endpoint_metrics_phase_profiles_get",
+        "parameters": [
+          {
+            "name": "workflow_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Workflow whose phases to profile",
+              "title": "Workflow Id"
+            },
+            "description": "Workflow whose phases to profile"
+          },
+          {
+            "name": "window_days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 90,
+              "minimum": 1,
+              "description": "Look-back window in days",
+              "default": 7,
+              "title": "Window Days"
+            },
+            "description": "Look-back window in days"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhaseProfilesResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/capture/status": {
       "get": {
         "tags": [
@@ -4120,6 +4197,76 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SessionTokenMetrics"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/observability/latency": {
+      "get": {
+        "tags": [
+          "observability"
+        ],
+        "summary": "Get Request Latency",
+        "description": "Exact p50/p95/p99, max and count of arrival-to-response-start latency per (method, route template).\n\nRead from ``api_request_latency`` (Lane 2, ADR-075). Every API process\nrecords its own requests; ``recorder`` describes THIS process's only.",
+        "operationId": "get_request_latency_observability_latency_get",
+        "parameters": [
+          {
+            "name": "route",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "One route TEMPLATE, e.g. /evals/{eval_id}. Every route when omitted.",
+              "title": "Route"
+            },
+            "description": "One route TEMPLATE, e.g. /evals/{eval_id}. Every route when omitted."
+          },
+          {
+            "name": "window",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "1h",
+                "24h",
+                "7d",
+                "30d"
+              ],
+              "type": "string",
+              "description": "How far back to look",
+              "default": "24h",
+              "title": "Window"
+            },
+            "description": "How far back to look"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestLatencyResponse"
                 }
               }
             }
@@ -4714,7 +4861,7 @@
           "github"
         ],
         "summary": "List Accessible Repos Endpoint",
-        "description": "List repositories accessible to the GitHub App.\n\nWith no installation_id, aggregates every installation. The last complete\nlisting is cached and served as ``complete`` while under a minute old;\notherwise GitHub is asked live, and an older listing is served as\n``partial`` only if GitHub cannot be asked. The GitHub App's\n``installation`` and ``installation_repositories`` webhooks invalidate the\ncache at once. A single installation_id is always asked live.\n\n``lookup`` says whether a repo missing from ``repos`` is known to be out of\nthe App's reach (``complete``) or merely went unseen because GitHub failed.",
+        "description": "List repositories accessible to the GitHub App.\n\nWith no installation_id, aggregates every installation and never waits on\nGitHub. The last complete listing is cached and served as ``complete``\nwhile under a minute old, as ``partial`` once older, with a background\nrefresh behind it. With no listing cached the answer is ``unavailable``\nwhile a background refresh fetches one. The GitHub App's ``installation``\nand ``installation_repositories`` webhooks invalidate the cache at once. A\nsingle installation_id is always asked live.\n\n``lookup`` says whether a repo missing from ``repos`` is known to be out of\nthe App's reach (``complete``) or merely went unseen because GitHub failed.",
         "operationId": "list_accessible_repos_endpoint_github_repos_get",
         "parameters": [
           {
@@ -9218,7 +9365,7 @@
           "model_display": {
             "type": "string",
             "title": "Model Display",
-            "description": "The model for humans: the reported id verbatim, or 'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9).",
+            "description": "The model for humans: the reported id verbatim, or '<alias> (requested)', or 'unknown' (ADR-067 D9).",
             "readOnly": true
           }
         },
@@ -10109,6 +10256,168 @@
         "title": "EvalCreatedResponse",
         "description": "The receipt for a create, read from the Eval aggregate, never a projection (#967).\n\nThe eval list and `GET /evals/{eval_id}` are read models and may not show\nthe eval for a moment after this returns. That is lag, not a failed create:\n`eval_id` is authoritative from here on."
       },
+      "EvalDetailResponse": {
+        "properties": {
+          "eval_id": {
+            "type": "string",
+            "title": "Eval Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "goal": {
+            "type": "string",
+            "title": "Goal"
+          },
+          "starting_workflow_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Starting Workflow Id"
+          },
+          "baseline_repos": {
+            "items": {
+              "$ref": "#/components/schemas/EvalBaselineRepoResponse"
+            },
+            "type": "array",
+            "title": "Baseline Repos"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tags"
+          },
+          "frozen": {
+            "type": "boolean",
+            "title": "Frozen"
+          },
+          "archived": {
+            "type": "boolean",
+            "title": "Archived"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "run_count": {
+            "type": "integer",
+            "title": "Run Count"
+          },
+          "run_status_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Run Status Counts"
+          },
+          "scored_count": {
+            "type": "integer",
+            "title": "Scored Count",
+            "default": 0
+          },
+          "pass_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pass Rate"
+          },
+          "pass_rate_display": {
+            "type": "string",
+            "title": "Pass Rate Display",
+            "default": "\u2014"
+          },
+          "last_run_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Run At"
+          },
+          "last_verdict": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Verdict"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "variants": {
+            "items": {
+              "$ref": "#/components/schemas/EvalVariantResponse"
+            },
+            "type": "array",
+            "title": "Variants"
+          },
+          "stats": {
+            "$ref": "#/components/schemas/EvalRunStatsResponse"
+          },
+          "read_model_status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReadModelStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "eval_id",
+          "name",
+          "goal",
+          "starting_workflow_id",
+          "baseline_repos",
+          "tags",
+          "frozen",
+          "archived",
+          "created_at",
+          "updated_at",
+          "run_count",
+          "run_status_counts",
+          "stats"
+        ],
+        "title": "EvalDetailResponse",
+        "description": "One eval, as `GET /evals/{eval_id}` returns it.\n\nThe row model plus whether the evals read model is rebuilding, so a\nmissing or stale eval can say why. Kept off `EvalResponse` so every list\nrow does not repeat the list's own status."
+      },
       "EvalId": {
         "type": "string",
         "title": "EvalId",
@@ -10141,6 +10450,16 @@
             },
             "type": "object",
             "title": "Status Counts"
+          },
+          "read_model_status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReadModelStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -10282,6 +10601,9 @@
             },
             "type": "array",
             "title": "Variants"
+          },
+          "stats": {
+            "$ref": "#/components/schemas/EvalRunStatsResponse"
           }
         },
         "type": "object",
@@ -10297,7 +10619,8 @@
           "created_at",
           "updated_at",
           "run_count",
-          "run_status_counts"
+          "run_status_counts",
+          "stats"
         ],
         "title": "EvalResponse",
         "description": "An eval as the eval read model holds it, with its run tally (#967)."
@@ -10625,6 +10948,78 @@
         "title": "EvalRunScoreResponse",
         "description": "The run's score as recorded (Evals v2)."
       },
+      "EvalRunStatsResponse": {
+        "properties": {
+          "median_duration_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Median Duration Seconds"
+          },
+          "median_duration_display": {
+            "type": "string",
+            "title": "Median Duration Display"
+          },
+          "incomplete_duration_count": {
+            "type": "integer",
+            "title": "Incomplete Duration Count"
+          },
+          "median_cost_usd": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Median Cost Usd"
+          },
+          "median_cost_display": {
+            "type": "string",
+            "title": "Median Cost Display"
+          },
+          "incomplete_cost_count": {
+            "type": "integer",
+            "title": "Incomplete Cost Count"
+          },
+          "cost_per_pass_usd": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Per Pass Usd"
+          },
+          "cost_per_pass_display": {
+            "type": "string",
+            "title": "Cost Per Pass Display"
+          }
+        },
+        "type": "object",
+        "required": [
+          "median_duration_seconds",
+          "median_duration_display",
+          "incomplete_duration_count",
+          "median_cost_usd",
+          "median_cost_display",
+          "incomplete_cost_count",
+          "cost_per_pass_usd",
+          "cost_per_pass_display"
+        ],
+        "title": "EvalRunStatsResponse",
+        "description": "How long a set of an eval's runs took and what it cost, over EVERY run in the set.\n\nMedians, not means: one runaway run should not make a variant look slow."
+      },
       "EvalVariantResponse": {
         "properties": {
           "workflow_id": {
@@ -10698,6 +11093,19 @@
               }
             ],
             "title": "Last Run At"
+          },
+          "last_verdict": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Verdict"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "stats": {
+            "$ref": "#/components/schemas/EvalRunStatsResponse"
           }
         },
         "type": "object",
@@ -10710,7 +11118,9 @@
           "pass_rate_display",
           "avg_cost_usd",
           "avg_cost_display",
-          "last_run_at"
+          "last_run_at",
+          "last_verdict",
+          "stats"
         ],
         "title": "EvalVariantResponse",
         "description": "Every run of an eval with the same workflow, workflow version and OBSERVED models.\n\n(Evals v2.) Two versions of one workflow are two variants: an edit between\nruns is a different treatment, and pooling them would hide its effect."
@@ -11463,6 +11873,21 @@
                 "type": "null"
               }
             ]
+          },
+          "read_model_status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReadModelStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "skill_use": {
+            "$ref": "#/components/schemas/ExecutionSkillUseSummary",
+            "description": "Skill use across every phase that started: declared, invoked anywhere, never invoked, and not knowable (feedback 01308bcf).",
+            "readOnly": true
           }
         },
         "type": "object",
@@ -11477,7 +11902,8 @@
           "total_output_tokens",
           "total_cache_creation_tokens",
           "total_cache_read_tokens",
-          "total_tokens"
+          "total_tokens",
+          "skill_use"
         ],
         "title": "ExecutionDetailResponse"
       },
@@ -11680,6 +12106,16 @@
             },
             "type": "object",
             "title": "Status Counts"
+          },
+          "read_model_status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReadModelStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -11819,6 +12255,46 @@
           "phase_progress"
         ],
         "title": "ExecutionRunSummary"
+      },
+      "ExecutionSkillUseSummary": {
+        "properties": {
+          "declared": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Declared"
+          },
+          "invoked": {
+            "items": {
+              "$ref": "#/components/schemas/InvokedSkillInfo"
+            },
+            "type": "array",
+            "title": "Invoked"
+          },
+          "never_invoked": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Never Invoked"
+          },
+          "not_known": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Not Known"
+          },
+          "summary_display": {
+            "type": "string",
+            "title": "Summary Display",
+            "default": "no phase has started"
+          }
+        },
+        "type": "object",
+        "title": "ExecutionSkillUseSummary",
+        "description": "Skill use across every phase of one execution (feedback 01308bcf).\n\nA declared skill is only ``never_invoked`` when EVERY phase was observed.\nA phase may invoke a skill it never declared, so one phase that ran where\nuse cannot be seen (codex), or could not be read, could have used any of\nthem: every declared skill no observed phase invoked is then ``not_known``\n- the #1269 misreading this model exists to refuse, one level up."
       },
       "ExecutionStartQueueInfo": {
         "properties": {
@@ -12200,6 +12676,16 @@
               }
             ],
             "title": "Repos Display"
+          },
+          "eval": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExecutionEvalRunResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "start_queue": {
             "anyOf": [
@@ -14525,6 +15011,69 @@
         ],
         "title": "InventorySnapshot"
       },
+      "InvokedSkillInfo": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "count"
+        ],
+        "title": "InvokedSkillInfo",
+        "description": "One skill the agent invoked through the Skill tool, and how often (#1269)."
+      },
+      "LatencyRecorderStatusResponse": {
+        "properties": {
+          "running": {
+            "type": "boolean",
+            "title": "Running"
+          },
+          "written": {
+            "type": "integer",
+            "title": "Written"
+          },
+          "dropped": {
+            "type": "integer",
+            "title": "Dropped"
+          },
+          "write_failures": {
+            "type": "integer",
+            "title": "Write Failures"
+          },
+          "discarded": {
+            "type": "integer",
+            "title": "Discarded"
+          },
+          "cleanup_failures": {
+            "type": "integer",
+            "title": "Cleanup Failures"
+          },
+          "buffered": {
+            "type": "integer",
+            "title": "Buffered"
+          }
+        },
+        "type": "object",
+        "required": [
+          "running",
+          "written",
+          "dropped",
+          "write_failures",
+          "discarded",
+          "cleanup_failures",
+          "buffered"
+        ],
+        "title": "LatencyRecorderStatusResponse",
+        "description": "What this API process's recorder did with its samples since it started."
+      },
       "LineageEdge": {
         "properties": {
           "parent": {
@@ -15592,6 +16141,11 @@
             "$ref": "#/components/schemas/PlatformScope",
             "default": "read"
           },
+          "requires_verdict": {
+            "type": "boolean",
+            "title": "Requires Verdict",
+            "default": false
+          },
           "sandbox": {
             "type": "string",
             "title": "Sandbox",
@@ -15895,6 +16449,9 @@
             "title": "Start Pins Status",
             "default": "unavailable"
           },
+          "skill_use": {
+            "$ref": "#/components/schemas/PhaseSkillUseInfo"
+          },
           "operations": {
             "items": {
               "$ref": "#/components/schemas/PhaseOperationInfo"
@@ -15908,7 +16465,7 @@
           "model_display": {
             "type": "string",
             "title": "Model Display",
-            "description": "The model for humans: the reported id verbatim, or 'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9).",
+            "description": "The model for humans: the reported id verbatim, or '<alias> (requested)', or 'unknown' (ADR-067 D9).",
             "readOnly": true
           }
         },
@@ -16065,6 +16622,59 @@
         ],
         "title": "PhaseOperationInfo"
       },
+      "PhaseProfilesResponse": {
+        "properties": {
+          "workflow_id": {
+            "type": "string",
+            "title": "Workflow Id"
+          },
+          "since": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Since"
+          },
+          "until": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Until"
+          },
+          "window_days": {
+            "type": "integer",
+            "title": "Window Days"
+          },
+          "executions": {
+            "type": "integer",
+            "title": "Executions"
+          },
+          "tokens": {
+            "items": {
+              "$ref": "#/components/schemas/PhaseTokenProfileResponse"
+            },
+            "type": "array",
+            "title": "Tokens"
+          },
+          "resources": {
+            "items": {
+              "$ref": "#/components/schemas/PhaseResourceProfileResponse"
+            },
+            "type": "array",
+            "title": "Resources"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "workflow_id",
+          "since",
+          "until",
+          "window_days",
+          "executions",
+          "tokens",
+          "resources"
+        ],
+        "title": "PhaseProfilesResponse",
+        "description": "Per-phase-type usage profiles for one workflow over a window (#1716).\n\nPercentiles are over EVERY phase of the workflow with telemetry in\n``[since, until)`` - nothing is paged."
+      },
       "PhaseProgressInfo": {
         "properties": {
           "completed": {
@@ -16161,6 +16771,109 @@
         "title": "PhaseRefResponse",
         "description": "A plugin or skill reference. Structured, never a joined string.\n\nJoining source and name is not reversible: a ref whose source already\nends in the repo name reparses to a different repository (#1013)."
       },
+      "PhaseResourceProfileResponse": {
+        "properties": {
+          "phase_id": {
+            "type": "string",
+            "title": "Phase Id"
+          },
+          "cpu_seconds_per_wall_second": {
+            "$ref": "#/components/schemas/ResourcePercentilesResponse"
+          },
+          "cpu_throttled_seconds": {
+            "$ref": "#/components/schemas/ResourcePercentilesResponse"
+          },
+          "memory_peak_bytes": {
+            "$ref": "#/components/schemas/ResourcePercentilesResponse"
+          },
+          "disk_bytes_at_teardown": {
+            "$ref": "#/components/schemas/ResourcePercentilesResponse"
+          },
+          "coverage": {
+            "$ref": "#/components/schemas/ResourceCoverageResponse"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "phase_id",
+          "cpu_seconds_per_wall_second",
+          "cpu_throttled_seconds",
+          "memory_peak_bytes",
+          "disk_bytes_at_teardown",
+          "coverage"
+        ],
+        "title": "PhaseResourceProfileResponse",
+        "description": "One phase type's workspace resource use at teardown (cgroup counters)."
+      },
+      "PhaseSkillUseInfo": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "observed",
+              "not_observable",
+              "unavailable"
+            ],
+            "title": "Status",
+            "default": "unavailable"
+          },
+          "declared": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Declared"
+          },
+          "invoked": {
+            "items": {
+              "$ref": "#/components/schemas/InvokedSkillInfo"
+            },
+            "type": "array",
+            "title": "Invoked"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "declared_not_invoked": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Declared Not Invoked",
+            "description": "Declared skills with no observed invocation. Empty unless status is 'observed': an unobservable use is not a non-use.",
+            "readOnly": true
+          },
+          "status_display": {
+            "type": "string",
+            "title": "Status Display",
+            "description": "What `status` means for this phase, in plain words. Render verbatim.",
+            "readOnly": true
+          },
+          "summary_display": {
+            "type": "string",
+            "title": "Summary Display",
+            "description": "One line on this phase's skill use. Never a count of zero for a phase whose use could not be seen. Render verbatim.",
+            "readOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "declared_not_invoked",
+          "status_display",
+          "summary_display"
+        ],
+        "title": "PhaseSkillUseInfo",
+        "description": "Which declared skills this phase actually used (#1269).\n\nDeclaring a skill installs it; only an invocation shows the agent reached\nfor it. This is the fact that tells the two apart, per phase."
+      },
       "PhaseStartConfig": {
         "properties": {
           "provider": {
@@ -16199,6 +16912,51 @@
         ],
         "title": "PhaseStartConfig",
         "description": "What a phase was configured with when its execution STARTED.\n\nRead from the execution's own start event (`StartPins`, #1454), never from\nthe workflow template, which may have been edited since. That is the whole\npoint: this answers \"what did the agent have\", not \"what would it get now\"."
+      },
+      "PhaseTokenProfileResponse": {
+        "properties": {
+          "phase_id": {
+            "type": "string",
+            "title": "Phase Id"
+          },
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "input_tokens": {
+            "$ref": "#/components/schemas/TokenPercentilesResponse"
+          },
+          "output_tokens": {
+            "$ref": "#/components/schemas/TokenPercentilesResponse"
+          },
+          "cache_creation_tokens": {
+            "$ref": "#/components/schemas/TokenPercentilesResponse"
+          },
+          "cache_read_tokens": {
+            "$ref": "#/components/schemas/TokenPercentilesResponse"
+          },
+          "cost_usd": {
+            "$ref": "#/components/schemas/TokenPercentilesResponse"
+          },
+          "unpriced_phases": {
+            "type": "integer",
+            "title": "Unpriced Phases"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "phase_id",
+          "model",
+          "input_tokens",
+          "output_tokens",
+          "cache_creation_tokens",
+          "cache_read_tokens",
+          "cost_usd",
+          "unpriced_phases"
+        ],
+        "title": "PhaseTokenProfileResponse",
+        "description": "One (phase type, model). A sample is one execution's phase on that model.\n\nA phase that fell back to another model mid-phase is a sample under BOTH\nmodels, each holding only the tokens that model consumed."
       },
       "PinnedSkillInfo": {
         "properties": {
@@ -16415,6 +17173,88 @@
         ],
         "title": "QuarantinedRef",
         "description": "Where one repository's unpushed work was saved when its phase ended (#1547).\n\nThe structured half of what `describe_saved_work` writes as prose into\n`error_message`: only work that LANDED, because a ref that does not exist\nis nothing a reviewer can fetch. Travels on ``WorkflowFailedEvent`` so the\nPR the run was working on can be told, by a ProcessManager rather than by\nwhoever happened to read the error."
+      },
+      "ReadModelStatus": {
+        "properties": {
+          "rebuilding": {
+            "type": "boolean",
+            "title": "Rebuilding",
+            "description": "True while this read model is replaying history: it is more than the live-lag threshold (500 events) behind the head. A few events of ordinary live lag is NOT rebuilding, even while another read model replays."
+          },
+          "projection": {
+            "type": "string",
+            "title": "Projection",
+            "description": "Projection name, as in projection_checkpoints."
+          },
+          "label_display": {
+            "type": "string",
+            "title": "Label Display",
+            "description": "What the read model holds, for a sentence, e.g. 'execution history'."
+          },
+          "progress_pct": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Progress Pct",
+            "description": "Checkpoint position as a whole percentage of the store head, 0-99 while rebuilding. Null when not rebuilding."
+          },
+          "progress_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Progress Display",
+            "description": "progress_pct as '72%'."
+          },
+          "events_behind": {
+            "type": "integer",
+            "title": "Events Behind",
+            "description": "Events between the checkpoint and the store head.",
+            "default": 0
+          },
+          "events_behind_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Events Behind Display",
+            "description": "events_behind as '29,476 events behind'."
+          },
+          "summary_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary Display",
+            "description": "One sentence for a banner, e.g. 'Rebuilding execution history - 72% (29,476 events behind).' Null when not rebuilding."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "rebuilding",
+          "projection",
+          "label_display"
+        ],
+        "title": "ReadModelStatus",
+        "description": "Whether one read model is rebuilding, and how far it has got.\n\nCarried on the list and detail responses a read model serves, so a page can\nsay \"this list is incomplete because it is being rebuilt\" instead of\nlooking broken, and listed on ``/health`` for every read model that is\nrebuilding. Judged by ``services.read_model_status``; every number is\nexact (checkpoint position against store head), never estimated."
       },
       "RegisterClaudePluginRequest": {
         "properties": {
@@ -17239,6 +18079,147 @@
         "title": "ReportedFailureReason",
         "description": "What a phase says CAUSED the failure it is reporting (#1372).\n\nTHE QUESTION THIS ANSWERS, and why it had to be asked rather than worked\nout. A readable ``success=false`` says THAT a phase failed and nothing\nmore, so every reported failure was recorded as a correct refusal - the\nsystem working - including the one whose agent had just written \"GH_TOKEN\nis not set\", which is the system not working, and the one that said the\ntask was impossible, which is neither. Those three take opposite responses:\nretry, fix the platform, rewrite the brief. An operator re-dispatching off\na record that cannot tell them apart spends a whole run to find out.\n\nTHE SPELLINGS ARE classify.md's, which is the vocabulary analysts already\nsort failures into by hand and the one `FailureClassification` was built\nfrom. Three words, closed, written here and nowhere else - a closed set in\none place is what separates a contract from the habit of adding one more\nstring every time a run is lost, and it is the definition the negative\ntests are written against.\n\nIT IS THE AGENT'S OWN WORD, NEVER AN INFERENCE. Nothing reads ``comments``,\nan exception message or an exit status to reach a member of this; the only\nway into one is a phase that wrote it.\n\nAND BECAUSE IT IS THE AGENT'S OWN WORD, IT IS A REPORT AND NOT A\nMEASUREMENT (#1392). This is the whole of what the type means, and the\nreason it is spelled `reported_failure_reason` everywhere it is carried:\nthe platform's only corroboration of anything written here is that the\nprocess exited cleanly and its stream arrived intact, which is evidence\nabout the HARNESS and not about whether the task was possible. A run that\nnamed itself ``task`` established nothing about the request; it said\nsomething about it. So the word travels the whole way to the operator - who\nwants to know what the agent said - and `FailureClassification`, which is\nwhat failure NUMBERS are computed from, is never decided by it. The one\nthing a phase can do to that record is WITHDRAW a claim; see\n`_corroborated_classification`, which holds the whole rule.\n\nAND IT CANNOT CHANGE WHETHER A PHASE COMPLETES - the property to keep when\nediting anything here. This decides a LABEL on a failure already decided by\n``success``. A word nobody recognises, a sentence, a number, or no key at\nall all read as \"no reason given\" and leave the verdict exactly as it was.\nMaking a misspelling fatal would let a tally field refuse a finished run,\nwhich is #1324's defect bought back in exchange for nothing."
       },
+      "RequestLatencyResponse": {
+        "properties": {
+          "window": {
+            "type": "string",
+            "enum": [
+              "1h",
+              "24h",
+              "7d",
+              "30d"
+            ],
+            "title": "Window"
+          },
+          "since": {
+            "type": "string",
+            "title": "Since"
+          },
+          "available": {
+            "type": "boolean",
+            "title": "Available"
+          },
+          "routes": {
+            "items": {
+              "$ref": "#/components/schemas/RouteLatencyResponse"
+            },
+            "type": "array",
+            "title": "Routes"
+          },
+          "recorder": {
+            "$ref": "#/components/schemas/LatencyRecorderStatusResponse"
+          }
+        },
+        "type": "object",
+        "required": [
+          "window",
+          "since",
+          "available",
+          "routes",
+          "recorder"
+        ],
+        "title": "RequestLatencyResponse",
+        "description": "Per-route arrival-to-response-start latency from ``api_request_latency``, slowest p99 first."
+      },
+      "ResourceCoverageResponse": {
+        "properties": {
+          "phases": {
+            "type": "integer",
+            "title": "Phases"
+          },
+          "phases_without_usage_row": {
+            "type": "integer",
+            "title": "Phases Without Usage Row"
+          },
+          "cpu_usage_seconds_missing": {
+            "type": "integer",
+            "title": "Cpu Usage Seconds Missing"
+          },
+          "cpu_throttled_seconds_missing": {
+            "type": "integer",
+            "title": "Cpu Throttled Seconds Missing"
+          },
+          "memory_peak_bytes_missing": {
+            "type": "integer",
+            "title": "Memory Peak Bytes Missing"
+          },
+          "disk_bytes_at_teardown_missing": {
+            "type": "integer",
+            "title": "Disk Bytes At Teardown Missing"
+          },
+          "wall_seconds_missing": {
+            "type": "integer",
+            "title": "Wall Seconds Missing"
+          },
+          "coverage_display": {
+            "type": "string",
+            "title": "Coverage Display"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "phases",
+          "phases_without_usage_row",
+          "cpu_usage_seconds_missing",
+          "cpu_throttled_seconds_missing",
+          "memory_peak_bytes_missing",
+          "disk_bytes_at_teardown_missing",
+          "wall_seconds_missing",
+          "coverage_display"
+        ],
+        "title": "ResourceCoverageResponse",
+        "description": "What the resource percentiles stand on. Every count is over the whole window."
+      },
+      "ResourcePercentilesResponse": {
+        "properties": {
+          "n": {
+            "type": "integer",
+            "title": "N"
+          },
+          "p50": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P50"
+          },
+          "p95": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P95"
+          },
+          "p50_display": {
+            "type": "string",
+            "title": "P50 Display"
+          },
+          "p95_display": {
+            "type": "string",
+            "title": "P95 Display"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "n",
+          "p50",
+          "p95",
+          "p50_display",
+          "p95_display"
+        ],
+        "title": "ResourcePercentilesResponse",
+        "description": "p50/p95 of one measure over ``n`` measured phases; null below ten."
+      },
       "ResumeRequest": {
         "properties": {
           "override_cancellation": {
@@ -17380,7 +18361,7 @@
           "blocked"
         ],
         "title": "ReviewVerdict",
-        "description": "What a reviewing phase concluded about the change in front of it (PC-63).\n\nTHE AGGREGATE DECIDES ON IT, THE AGENT ONLY REPORTS IT. A phase writes\n``review_verdict`` in its TASK_RESULT block; the aggregate reads it when\nthe phase's artifacts are collected and chooses the next phase from it\n(see `WorkflowExecutionAggregate.artifacts_collected`):\n\n* ``certified`` ends the repair loop. Every phase before the workflow's\n  final phase is skipped, so a run that certifies in round 1 does not pay\n  for rounds 2 and 3.\n* ``blocked`` - or no verdict at all - advances by order, which is the\n  next repair round, or the final phase once the rounds are spent.\n\nThe latest verdict a run reported is also how it ended: a run completed\non ``blocked`` completed with UNRESOLVED FINDINGS, and says so on\n`WorkflowCompleted` rather than looking certified.\n\nA missing or misspelled verdict is never read as ``certified``: skipping\nreview on a word the reader did not recognise is the one mistake here that\ncosts more than a repair round."
+        "description": "What a reviewing phase concluded about the change in front of it (PC-63).\n\nTHE AGGREGATE DECIDES ON IT, THE AGENT ONLY REPORTS IT. A phase writes\n``review_verdict`` in its TASK_RESULT block; the aggregate reads it when\nthe phase's artifacts are collected and chooses the next phase from it\n(see `WorkflowExecutionAggregate.artifacts_collected`):\n\n* ``certified`` ends the repair loop. Every phase before the workflow's\n  final phase is skipped, so a run that certifies in round 1 does not pay\n  for the rounds after it.\n* ``blocked`` - or no verdict at all - advances by order, which is the\n  next repair round, or the final phase once the rounds are spent.\n\nThe latest verdict a run reported is also how it ended: a run completed\non ``blocked`` completed with UNRESOLVED FINDINGS, and says so on\n`WorkflowCompleted` rather than looking certified.\n\nA missing or misspelled verdict is never read as ``certified``: skipping\nreview on a word the reader did not recognise is the one mistake here that\ncosts more than a repair round."
       },
       "RootResponse": {
         "properties": {
@@ -17433,6 +18414,55 @@
         ],
         "title": "RootResponse",
         "description": "Payload of ``GET /`` \u2014 what this API is, and which build is serving it.\n\nTHE VERSION HERE IS NULLABLE AND COMES WITH A STATUS, like /health's. It was\na flat ``dict[str, str]`` whose version slot held the literal ``\"unknown\"``\nwhen metadata could not be read: a string in a version field, indistinguish-\nable to a client from a release actually called that, and exactly the defect\n#1380 was filed to remove \u2014 just at the endpoint nobody re-read. A typed\nresponse makes the absence a declared state instead of a word.\n\n``openapi.json``'s ``info.version`` remains the one place a sentinel is\nunavoidable; see the comment at that call in ``main.py``."
+      },
+      "RouteLatencyResponse": {
+        "properties": {
+          "method": {
+            "type": "string",
+            "title": "Method"
+          },
+          "route": {
+            "type": "string",
+            "title": "Route"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "p50_ms": {
+            "type": "number",
+            "title": "P50 Ms"
+          },
+          "p95_ms": {
+            "type": "number",
+            "title": "P95 Ms"
+          },
+          "p99_ms": {
+            "type": "number",
+            "title": "P99 Ms"
+          },
+          "max_ms": {
+            "type": "number",
+            "title": "Max Ms"
+          },
+          "p99_display": {
+            "type": "string",
+            "title": "P99 Display"
+          }
+        },
+        "type": "object",
+        "required": [
+          "method",
+          "route",
+          "count",
+          "p50_ms",
+          "p95_ms",
+          "p99_ms",
+          "max_ms",
+          "p99_display"
+        ],
+        "title": "RouteLatencyResponse",
+        "description": "Exact latency percentiles of one (method, route template) over the window.\n\nLatency here is ARRIVAL TO RESPONSE START (time to first byte), not to the\nlast byte, so a long-lived stream counts as fast if it answered promptly."
       },
       "RunIdentity": {
         "properties": {
@@ -18670,7 +19700,7 @@
           "agent_model_display": {
             "type": "string",
             "title": "Agent Model Display",
-            "description": "The model for humans: the reported id verbatim, or 'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9).",
+            "description": "The model for humans: the reported id verbatim, or '<alias> (requested)', or 'unknown' (ADR-067 D9).",
             "readOnly": true
           }
         },
@@ -18914,7 +19944,7 @@
           "agent_model_display": {
             "type": "string",
             "title": "Agent Model Display",
-            "description": "The model for humans: the reported id verbatim, or 'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9).",
+            "description": "The model for humans: the reported id verbatim, or '<alias> (requested)', or 'unknown' (ADR-067 D9).",
             "readOnly": true
           }
         },
@@ -19485,6 +20515,21 @@
             "title": "Lagging Projections",
             "description": "Every projection short of the head, furthest behind first. Empty when all are at the head; null when lag is unmeasurable."
           },
+          "rebuilding_read_models": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ReadModelStatus"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rebuilding Read Models",
+            "description": "Every read model that is rebuilding, furthest behind first, with display strings for a banner. Ordinary live lag is excluded. Null when lag is unmeasurable."
+          },
           "unapplied_starts": {
             "anyOf": [
               {
@@ -19921,6 +20966,55 @@
         ],
         "title": "TimelineEntryResponse",
         "description": "Timeline entry for visualization."
+      },
+      "TokenPercentilesResponse": {
+        "properties": {
+          "n": {
+            "type": "integer",
+            "title": "N"
+          },
+          "p50": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P50"
+          },
+          "p90": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P90"
+          },
+          "p50_display": {
+            "type": "string",
+            "title": "P50 Display"
+          },
+          "p90_display": {
+            "type": "string",
+            "title": "P90 Display"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "n",
+          "p50",
+          "p90",
+          "p50_display",
+          "p90_display"
+        ],
+        "title": "TokenPercentilesResponse",
+        "description": "p50/p90 of one measure over ``n`` phases; null below ten phases."
       },
       "ToolSummary": {
         "properties": {

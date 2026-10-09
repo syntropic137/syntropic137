@@ -30,6 +30,7 @@ from syn_adapters.workspace_backends.agentic.session_store_env import (
     encode_tag_value,
     sanitize_partition_segment,
 )
+from syn_adapters.workspace_backends.host_labels import host_labels
 from syn_shared.env_constants import (
     ENV_AGENTIC_SESSION_STORE_AUTH,
     ENV_AGENTIC_SESSION_STORE_DEPLOYMENT,
@@ -445,6 +446,9 @@ class TestAdapterIntegration:
             # Counts live containers per phase (#1606). An identity, not a
             # secret, so it is safe where `docker inspect` can read it.
             "syn.phase_id": "phase-1",
+            # Which API host created it (#1310 0.4); values pinned in
+            # tests/workspace_backends/test_host_labels.py.
+            **host_labels(),
         }
 
     @pytest.mark.asyncio

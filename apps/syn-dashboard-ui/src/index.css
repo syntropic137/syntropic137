@@ -132,6 +132,12 @@ body {
     width: 1.25rem;
     height: 1.25rem;
   }
+  /* A 40px tap target around the 20px box; clicks on it hit the input. */
+  .selection-checkbox::before {
+    content: "";
+    position: absolute;
+    inset: -10px;
+  }
 }
 
 /* Platform session -> its execution's full session inventory (#1398). */

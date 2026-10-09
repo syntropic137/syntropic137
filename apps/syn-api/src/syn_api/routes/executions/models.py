@@ -14,10 +14,13 @@ from syn_api.model_identity import CostModelKey, ObservedModelId  # noqa: TC001
 from syn_api.types import (
     BranchObservationInfo,
     ExecutionEvalRunResponse,
+    ExecutionSkillUseSummary,
     PhaseActivityInfo,
     PhaseProgressInfo,
+    PhaseSkillUseInfo,
     PhaseStartConfig,
     PlannedPhaseInfo,
+    ReadModelStatus,
     StartPinsStatus,
 )
 from syn_domain.contexts.orchestration import (
@@ -118,7 +121,7 @@ class PhaseExecutionInfo(BaseModel):
     agent_provider: str | None = None
     """The provider of the agent that PRODUCED this phase's result, or null
     (PC-83). Differs from the declared provider when the phase fell back to its
-    ``fallback_agent`` on capacity or quota; ``requested_model`` is then the
+    ``fallback_agent`` on capacity, quota or a content refusal; ``requested_model`` is then the
     fallback's model. Null when nothing recorded it."""
     cost_by_model: dict[CostModelKey, str] = Field(default_factory=dict)
     agent_session_ids: list[str] | None = None
@@ -178,6 +181,9 @@ class PhaseExecutionInfo(BaseModel):
     event could not be read.
     """
     start_pins_status: StartPinsStatus = "unavailable"
+    skill_use: PhaseSkillUseInfo = Field(default_factory=PhaseSkillUseInfo)
+    """Which declared skills this phase invoked, and whether that is knowable
+    at all: codex phases report ``not_observable``, never zero (#1269)."""
     operations: list[PhaseOperationInfo] = Field(default_factory=list)
     activity: PhaseActivityInfo = Field(default_factory=PhaseActivityInfo)
     """What this phase was doing when it ended, and against what budget (#1262).
@@ -194,7 +200,7 @@ class PhaseExecutionInfo(BaseModel):
 
     @computed_field(
         description="The model for humans: the reported id verbatim, or "
-        "'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9)."
+        "'<alias> (requested)', or 'unknown' (ADR-067 D9)."
     )
     @property
     def model_display(self) -> str:
@@ -321,6 +327,7 @@ class ExecutionDetailResponse(BaseModel):
     phases lists exactly that many. Draw the timeline from this, not from
     ``phases``, which holds only the phases that started.
     """
+
     total_input_tokens: int
     total_output_tokens: int
     total_cache_creation_tokens: int
@@ -436,6 +443,18 @@ class ExecutionDetailResponse(BaseModel):
     """Set, with ``status`` ``queued`` or ``starting``, for an execution that has
     been accepted but not yet opened, because it is waiting for a slot in the
     execution budget (#1557). ``None`` for every execution that exists."""
+    read_model_status: ReadModelStatus | None = None
+    """Whether the execution detail read model is rebuilding, so a page missing
+    recent phases can say why instead of looking broken."""
+
+    @computed_field(
+        description="Skill use across every phase that started: declared, "
+        "invoked anywhere, never invoked, and not knowable (feedback 01308bcf)."
+    )
+    @property
+    def skill_use(self) -> ExecutionSkillUseSummary:
+        """Derived from `phases`, so it cannot disagree with the per-phase rows."""
+        return ExecutionSkillUseSummary.of([p.skill_use for p in self.phases])
 
 
 class ExecutionSummaryResponse(BaseModel):
@@ -499,6 +518,11 @@ class ExecutionSummaryResponse(BaseModel):
     tags: list[str] = Field(default_factory=list)
     """The execution's current tags, normalised and sorted (#967)."""
     repos_display: str | None = None
+    eval: ExecutionEvalRunResponse | None = None
+    """The eval this execution is a current run of, with its verdict. Null in no eval.
+
+    The same shape ``GET /executions/{id}`` carries, so a list row and the
+    execution page cannot describe the run differently."""
     start_queue: ExecutionStartQueueInfo | None = None
     """Set exactly when ``status`` is ``queued``: an accepted start with no
     execution yet, and where it stands (PC-124). Same block as on the detail."""
@@ -556,3 +580,6 @@ class ExecutionListResponse(BaseModel):
     rows cannot answer that: it only ever knows about the status already
     selected, and only about one page of it.
     """
+    read_model_status: ReadModelStatus | None = None
+    """Whether the execution list read model is rebuilding. While it is, this
+    page is a partial view of history and the newest runs may be missing."""

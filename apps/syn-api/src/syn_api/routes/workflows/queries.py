@@ -224,6 +224,7 @@ def _map_phase(p: PhaseDefinitionDetail) -> PhaseDefinitionResponse:
         clone_repos=p.clone_repos,
         delivers_repo_changes=p.delivers_repo_changes,
         platform_access=p.platform_access,
+        requires_verdict=p.requires_verdict,
         sandbox=p.sandbox,
         claude_plugins=[_ref_response(r) for r in p.claude_plugins],
         skills=[_ref_response(r) for r in p.skills],
@@ -625,7 +626,7 @@ def _yaml_phase_lines(phase: PhaseDefinitionResponse) -> list[str]:
     # truthy-only test would drop an explicit `false` and reinstall it as
     # `true`, which is the same laundering in the opposite direction. So the
     # guard compares against the default.
-    lines.extend(_yaml_workspace_lines(phase))
+    lines.extend(_yaml_declaration_lines(phase))
     lines.extend(_yaml_agent_lines(phase))
     lines.extend(_yaml_fallback_agent_lines(phase))
     lines.extend(_yaml_ref_lines("claude_plugins", phase.claude_plugins))
@@ -633,8 +634,13 @@ def _yaml_phase_lines(phase: PhaseDefinitionResponse) -> list[str]:
     return lines
 
 
-def _yaml_workspace_lines(phase: PhaseDefinitionResponse) -> list[str]:
-    """What the phase's workspace holds or may do, wherever it differs from the loader default."""
+def _yaml_declaration_lines(phase: PhaseDefinitionResponse) -> list[str]:
+    """The phase's declarations, each emitted only when it differs from its default.
+
+    `clone_repos` and `delivers_repo_changes` default True, `requires_verdict`
+    (PC-116) defaults False and `platform_access` (#1744) defaults `read`, so
+    "differs" is a different value for each.
+    """
     lines: list[str] = []
     if not phase.clone_repos:
         lines.append("    clone_repos: false")
@@ -644,6 +650,8 @@ def _yaml_workspace_lines(phase: PhaseDefinitionResponse) -> list[str]:
     # workflow was written to need.
     if phase.platform_access is not PlatformScope.READ:
         lines.append(f"    platform_access: {phase.platform_access.value}")
+    if phase.requires_verdict:
+        lines.append("    requires_verdict: true")
     return lines
 
 
@@ -791,7 +799,7 @@ async def list_workflows_endpoint(
             name=s.name,
             workflow_type=s.workflow_type,
             phase_count=s.phase_count,
-            created_at=str(s.created_at) if s.created_at else None,
+            created_at=s.created_at.isoformat() if s.created_at else None,
             runs_count=s.runs_count,
             is_archived=s.is_archived,
             # WHY (#955): omitting this let WorkflowSummaryResponse's `= True`
@@ -870,7 +878,7 @@ async def get_workflow_endpoint(workflow_id: str) -> WorkflowResponse:
             )
             for d in detail.input_declarations
         ],
-        created_at=str(detail.created_at) if detail.created_at else None,
+        created_at=detail.created_at.isoformat() if detail.created_at else None,
         runs_count=detail.runs_count,
         runs_link=f"/api/workflows/{detail.id}/runs",
         repository_url=detail.repository_url,

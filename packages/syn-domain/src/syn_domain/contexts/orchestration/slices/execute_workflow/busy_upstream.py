@@ -79,9 +79,9 @@ _MIN_USEFUL_ATTEMPT_SECONDS: float = 30.0
 _MIN_MEANINGFUL_TIMEOUT_SECONDS: int = 1
 
 #: The upstream faults that hand a phase to its declared fallback agent (PC-83):
-#: the primary's provider could not serve the request at all.
+#: the primary's provider could not, or would not, serve the request at all.
 _FALLBACK_KINDS: frozenset[UpstreamFailureKind] = frozenset(
-    {UpstreamFailureKind.CAPACITY, UpstreamFailureKind.QUOTA}
+    {UpstreamFailureKind.CAPACITY, UpstreamFailureKind.QUOTA, UpstreamFailureKind.REFUSAL}
 )
 
 
@@ -257,8 +257,9 @@ class PhaseAttempts:
 
         Asked only once the primary is FINAL - `wait_before_retry` has already
         refused it - so a capacity fault reaching here has outlived every retry.
-        Granted for exactly the two kinds that say the primary's provider could
-        not serve the request at all, CAPACITY and QUOTA: any other failure is
+        Granted for exactly the kinds that say the primary's provider could not,
+        or would not, serve the request at all - CAPACITY, QUOTA, and a content
+        filter's REFUSAL: any other failure is
         the phase's answer and a different model does not get to second-guess
         it. Refused for an attempt that got somewhere, for the reason a retry
         is: the rerun would redo that work over a tree it already changed.

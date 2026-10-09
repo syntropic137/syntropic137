@@ -32,6 +32,13 @@ Statuses: `not_started`, `running`, `completed`, `failed`, `cancelled`,
 describes a start that has no Execution yet (see Queued Start). There is no paused Execution - see
 "Words we do not use".
 
+`interrupted` is what the platform records when it shuts down under a running
+Execution (#1381). The in-flight Phase's unpushed work is saved to a quarantine
+ref first. Nobody decided the work should stop, so it can be resumed, like
+`failed`. When the shutdown budget (`SYN_EXECUTION_INTERRUPT_BUDGET_S`) runs
+out before the event is written, the Execution stays `running`, and the next
+start's reconciliation fails it as `OrphanedByRestart`.
+
 ## Phase
 
 One step of a Workflow inside an Execution, with its own agent, model, prompt
@@ -79,6 +86,18 @@ request names, and scoring a run of an eval. A Phase that declares nothing is
 `read`. The declaration is per Phase, not per Workflow, so the one Phase that
 scores does not lend that power to the others.
 
+## Phase Profile
+
+What a Phase of one type usually uses, read over every Phase of a Workflow in a
+window (#1716): per model, p50/p90 input, output, cache-write and cache-read
+tokens and cost; per Phase, p50/p95 CPU-seconds per wall-second, throttled
+seconds, memory peak and disk at teardown, each with the `n` it stands on and
+coverage counts for Phases that recorded no usage. A "phase type" is a Phase id:
+every Execution of a Workflow runs the same Phase definitions. Lane 2 only:
+read from observations, never from an aggregate. Below ten Phases a percentile
+reads `insufficient`. Sizes the capacity model and the
+[Execution Budget](#execution-budget); it is not itself a limit.
+
 ## Quota Exhaustion
 
 An upstream failure of kind `quota` (PC-83): the provider's usage allowance for
@@ -89,15 +108,83 @@ calendar date, so it is never retried, and the Phase fails with
 line only. **Unclear:** no real claude quota message exists in this repo or its
 submodules, so claude quota text is not yet recognised and reads as `unknown`.
 
+## Content Refusal
+
+An upstream failure of kind `refusal`: the provider's content or safety filter
+declined the request itself, before or while the model worked on it ("This
+content was flagged for possible cybersecurity risk", exec-898cd870650e). It is
+not the agent's answer and says nothing about the change: the same request is
+routinely served by another provider's model. Resending it to the same filter
+gets the same verdict, so it is never retried; it hands the Phase to its
+[Fallback Agent](#fallback-agent), under the same rule as a capacity or quota
+failure. Recognised from codex's own fault line only. **Unclear:** no real
+claude refusal output exists in this repo or its submodules, so a claude
+refusal is not yet recognised and reads as `unknown`. A refusal that arrives
+after the agent only read, searched or spoke still falls back: that is not
+[Attempt Work](#attempt-work) (#1825).
+
+## Provision Step Timeout
+
+A provisioning step that ran inside the workspace and did not finish before its
+deadline (`ProvisionStepTimeoutError`, PC-126). The steps are named by
+`ProvisionStep`: `secret_injection` (the ADR-024 setup script, including the
+repository clones), `skill_install` (one `skills add`), `codex_sandbox_probe`
+and `checkout_verification` (the read-only git reads of each cloned
+repository's HEAD). A timeout says the host was too loaded to answer, not that
+the step is broken. So it is recorded as an upstream failure of kind
+`unavailable`: transient, and the Execution is resumable. A skill install, a
+sandbox probe or a checkout verification is retried once in place. A skill
+install's retry comes only after the timed-out installer is killed inside the
+container: the deadline ends the `docker exec` client, not the installer, and
+the installer deletes its destination before copying, so two of them must
+never run at once. The setup script is not retried, because a clone killed
+mid-transfer would be skipped by the re-run. Resuming provisions a fresh
+workspace instead. Each deadline is a Setting.
+
 ## Fallback Agent
 
 The agent (provider and model) a Phase declares under `fallback_agent`, to be
 re-run on once when its own agent's upstream could not serve it: capacity that
-outlived every retry, or a Quota Exhaustion (PC-83). The Phase's tools, budget
+outlived every retry, a Quota Exhaustion (PC-83), or a
+[Content Refusal](#content-refusal). The Phase's tools, budget
 and sandbox bind the fallback too, so the provider rules that refuse an `agent`
 refuse a `fallback_agent` at install. Acted on at execution (#1663): one
-attempt, only when the primary's failed attempt got nowhere, drawn from the
-same phase deadline as every attempt before it.
+attempt, only when the primary's failed attempt did no
+[Attempt Work](#attempt-work), drawn from the same phase deadline as every
+attempt before it. The SDLC workflows declare claude/opus as the fallback of
+their codex verifiers; a verifier that ran on it says so in its report, because
+the review was then not cross-family, and the phase's completion records the
+fallback's provider and model as the agent that produced it.
+
+## Attempt Work
+
+What a failed attempt did that a run of a different agent, from the top in the
+same workspace, would redo or overwrite: anything that may have changed the
+workspace or the world beyond it. File edits, commits, pushes, any shell
+command not recognised in full as read-only, hook and subagent events, and any
+stream shape the parser does not know are all work. The model's words
+(assistant text, thinking, codex `reasoning` and `agent_message` items) and
+tool calls recognised as read-only (`Read`, `Grep`, `Glob`, `LS`, and shell
+commands such as `cat`, `rg --no-config`, `sed -n 1,80p`,
+`git --no-pager diff --no-ext-diff --no-textconv`, `gh pr view`) are not.
+Measured by `ObservabilityCollector.may_have_written`, with the read-only
+recognition in `side_effect_free`. It fails safe: only a positive recognition
+says "no work". It decides the [Fallback Agent](#fallback-agent) only. A
+same-agent retry of a busy upstream asks the broader question, whether the
+attempt showed any activity at all (#1303), because it resends the same prompt.
+
+A shell command is read-only only when its WHOLE line is: a background `&`, a
+redirect to anything but exactly `/dev/null`, or a git option that runs
+another program (`--ext-diff`, `--textconv`, `--filters`, `-O`) makes it work.
+A command's side effects are what IT runs, including any program its
+configuration names, whoever installed that configuration and whenever. A plain
+`git diff` runs a configured `diff.external` driver, textconv filter or pager,
+so it is work; it is read-only only when it switches each of those off
+(`--no-pager`, `--no-ext-diff`, `--no-textconv`, and `--no-show-signature` for
+`log` and `show`). `git status` is always work: it runs `core.fsmonitor`, and
+no option turns that off. `rg` is read-only only with `--no-config`, since its
+config file can add `--pre`. Installing configuration (`git config`, `export`,
+`VAR=value cmd`) is work as well.
 
 ## Review Verdict
 
@@ -111,6 +198,11 @@ is no verdict - it never skips anything.
 
 Not `success`. A Phase that finished a review that blocks the change
 succeeded; its verdict is `blocked`.
+
+A Phase that declares `requires_verdict` MUST report one (PC-116): with no
+verdict it fails ("verify produced no verdict") instead of advancing by
+`order`, because for a review, silence and `blocked` would otherwise look the
+same. A Phase without the declaration keeps the rule above.
 
 ## Skipped Phase
 
@@ -271,6 +363,31 @@ code the original ran on. A pinned commit no branch or tag of origin still
 reaches refuses the Phase; it is never swapped for the branch's head.
 (#1458, ADR-058.)
 
+## Declared Skill / Invoked Skill
+
+A **Declared Skill** is one a Phase names in its `skills:`. The platform
+installs it into the Phase's workspace and, for a claude Phase that scopes its
+tools, grants the `Skill` tool so it can be invoked (#1269). The declared set
+read back is the Phase's Pin, never the Workflow as it stands now.
+
+An **Invoked Skill** is a declared or installed skill the agent actually called,
+counted per call. Declaring is not using: a Phase can be given a skill and never
+reach for it, and `phases[].skill_use.declared_not_invoked` names those.
+
+The two harnesses differ and the difference is reported, not hidden. Claude
+invokes a skill through its `Skill` tool, so the call is on the timeline and
+skill use is **observed**. Codex has no `Skill` tool: its skills arrive as
+context and their use leaves no signal, so a codex Phase reports skill use
+**not observable**, never zero invocations. **Unavailable** means the Pin or the
+timeline could not be read, so nothing is known either way.
+
+Across an Execution (`skill_use` on the execution detail), a declared skill is
+**never invoked** only when every Phase of the Execution was observed and none
+invoked it. An agent can invoke a skill its Phase did not declare, so if any
+Phase was not observable or unavailable and no observed Phase invoked it, its
+use is **not known**: the same refusal to read an unobservable use as a
+non-use, one level up.
+
 ## Starting Checkout
 
 The commit each pinned repository was actually found at once a Phase's
@@ -291,6 +408,24 @@ Execution's start to be exactly where it was left, together with the PR open
 from it. The Resume Phase is checked out at its head; every other Phase still
 reads the pinned commit. Recorded on the resumed Execution's start. (#1513,
 ADR-058.)
+
+A branch the failing attempt made an Own Push to is also continued when origin's
+head is not where the attempt was last seen but is any SHA it pushed there: the
+Execution's own unverified commits, which the Resume Phase re-verifies at that
+head before changing anything. (PC-128.)
+
+## Own Push
+
+A commit the running Phase's own workspace pushed to origin, recorded as
+`PhaseCommitPushed` while the Phase runs, from the workspace's push hook. It
+attributes the push to this Execution and nothing else: it does not say the push
+landed, and it is not a Branch Observation, which records that a ref moved and
+deliberately not who moved it. A Resume reads it to tell the Execution's own
+commits from someone else's; a head that is not an Own Push is still
+Abandoned. Recorded mid-Phase because the run it exists for, one orphaned by a
+restart, never reaches the end of its Phase. Only a push git reports as an update of
+an existing branch to the hook's commit is one: creating a branch names no
+commit in git's output, so a creation is never an Own Push. (PC-128.)
 
 ## Abandoned Branch
 
@@ -436,7 +571,9 @@ runs it beside the API in one process). It Claims admitted Executions from the
 Run Queue and runs each to a terminal status. The API process admits
 Executions and never runs one. Implemented by `ExecutionHost`. One host has a
 `host_id` and a generation (its image tag), recorded in `executor_hosts` and
-on every container it creates (`syn.host_id`, `syn.host_generation`).
+on every container it creates (`syn.host_id`, `syn.host_generation`). The
+Run Queue's value for a registered host is `ExecutorHost`: its `host_id`,
+container, generation and Event Epoch.
 Specified in ADR-072.
 
 An Executor is a host, not an Execution: nothing about an Execution's stream
@@ -458,7 +595,10 @@ or a later sweep that finds the stream, promotes it to `admitted`. An expired
 Lease goes `claimed` -> `fencing` -> `reaped` -> `interrupted` (see Fencing). A
 resume whose inherited artifacts cannot yet be read is deferred back to
 `admitted` with a `retry_at`, releasing its slot (see Claim). `RunCounts` is the
-number of rows in each state.
+number of rows in each state. The sweep reads each stream through an
+`ExecutionStreamProbe`, whose answer is a `StreamPresence`: present, absent or
+**unknown**, and unknown is never read as absent. One sweep turn reports what it
+resolved as an `OpeningSweep`.
 
 A run row is not an Execution and its states are not Execution statuses.
 
@@ -578,6 +718,12 @@ The to-do list one Executor uses for the one Execution it is running: a fresh
 `ExecutionTodoProjection` over a `RunTodoStore`, seeded from that Execution's
 own events at Claim and discarded with the run. The shared `execution_todo`
 projection feeds dashboards only. Nothing an Executor decides reads it.
+
+In code: `RunScopedTodoFold` is the fold and the `ExecutionJournal` that keeps
+it current, built by `RunScopedTodoFold.for_execution`. Its events come from an
+`ExecutionEventStream`, which is every event one Execution's stream holds, in
+order. Because the fold is rebuilt from those events at every Claim, discarding
+it loses nothing.
 
 ## Eval
 
@@ -786,6 +932,31 @@ failed measurement or write never fails a Phase. Each field is independently
 unknown rather than zero when its read failed. A Phase retried after a failed
 attempt held one workspace per attempt, so it has one usage per attempt. It
 exists to size the platform against `docs/north-star.md`.
+
+## Stale Workspace Directory
+
+A workspace directory on the host that nothing will come back for
+(`StaleWorkspaceDir`, PC-130): no running container mounts it, the Execution
+that owns it (when anything still names one) is not running, and nothing in it
+has changed for the reclaim grace period. Its container is already gone, so
+unlike an **Orphaned Workspace** (`OrphanedWorkspace`, #1560) it cannot be
+guarded from inside.
+
+**Reclaiming** one means deleting it, and only through a `ReclaimableDir`,
+which only a guard can produce. The host-side guard
+(`guard_stale_workspace_dir`) keeps the directory if any commit is not on a
+remote, and archives an uncommitted change as a patch artifact under the
+Execution before the delete. Each deletion is logged as `WorkspaceReclaimed`
+with its size. It is housekeeping, not domain state: no event, no aggregate.
+
+**Workspace ownership** is the durable association from a
+`WorkspaceProvisionedForPhase` event's Workspace to its Execution. The
+`workspace_ownership` projection retains this association after a container
+is removed and rebuilds it during replay. Conflicting owners protect the
+directory. Authored work with no known owner is retained, so its archive
+cannot disappear into an unattributed storage prefix. Only a directory with
+an explicit `CACHEDIR.TAG` is treated as disposable cache data; an installed
+dependency directory can still contain authored changes.
 
 ## Scripted Agent
 

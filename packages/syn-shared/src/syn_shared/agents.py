@@ -327,6 +327,7 @@ class ModelId(StrEnum):
     CLAUDE_SONNET_5_5 = "claude-sonnet-5-5"  # verified 2026-10-07
     GPT_6_1_SOL = "gpt-6.1-sol"
     GPT_6_SOL = "gpt-6-sol"
+    GPT_6_LUNA = "gpt-6-luna"  # verified 2026-10-07
     # --- ADR-067 phase 0 generation (verified 2026-08-16) ---
     CLAUDE_OPUS_5 = "claude-opus-5"
     CLAUDE_SONNET_5 = "claude-sonnet-5"
@@ -529,6 +530,7 @@ CODEX_MODEL_IDS: frozenset[ModelId] = frozenset(
     {
         ModelId.GPT_6_1_SOL,
         ModelId.GPT_6_SOL,
+        ModelId.GPT_6_LUNA,
         ModelId.GPT_5_6_SOL,
         ModelId.GPT_5_6_TERRA,
         ModelId.GPT_5_6_LUNA,

@@ -206,6 +206,12 @@ class PhaseDefinition(BaseModel):
     Sourced from the workflow YAML ``platform_access`` field; see
     ``PhaseYamlDefinition.platform_access``. READ unless the phase declared
     otherwise, which is also what every template stored before #1744 replays as."""
+    requires_verdict: bool = False
+    """Whether this phase must report a ``review_verdict`` (PC-116).
+
+    Sourced from the workflow YAML ``requires_verdict`` field. When True, a
+    run that reports none fails instead of advancing by order. See
+    ``PhaseYamlDefinition.requires_verdict``."""
 
     # Claude Code command extensions (ISS-211)
     argument_hint: str | None = None

@@ -26,11 +26,13 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
     ProvisionWorkspaceCompletedCommand,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.checkout_verification import (
-    verify_checkout,
+    verify_provisioned_checkout,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     NonZeroExitError,
     PinnedCommitUnreachableError,
+    ProvisionStep,
+    ProvisionStepTimeoutError,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.codex_sandbox_probe import (
     require_codex_sandbox,
@@ -116,8 +118,6 @@ _SKILLS_CLI_AGENT_KEYS: dict[str, str] = {
     "codex": "codex",
     "gemini": "gemini-cli",
 }
-
-_SKILL_INSTALL_TIMEOUT_SECONDS = 120
 
 # Baked delegation skills live in the agentic-workspace image under this root
 # (claude-cli manifest plugins.include: delegation). A delegation-enabled phase
@@ -457,7 +457,7 @@ class WorkspaceProvisionHandler:
             # Read back BEFORE anything else is staged and long before the agent
             # is launched: a workspace not at its pins is refused here (#967).
             checked_out = (
-                await verify_checkout(
+                await verify_provisioned_checkout(
                     workspace,
                     _cloned_pins(effective_repos, pinned_commits),
                     continued_branches=continued_branches or {},
@@ -538,6 +538,19 @@ class WorkspaceProvisionHandler:
                 output=setup_result.stderr,
                 timed_out=setup_result.timed_out,
             )
+            if setup_result.timed_out:
+                # Not retried in place (see `_run_setup_script`): a killed clone
+                # leaves a directory its `[ -d ]` guard would then skip. A resume
+                # provisions a fresh workspace, which is the safe retry (PC-126).
+                from syn_shared.settings import get_settings
+
+                raise ProvisionStepTimeoutError(
+                    ProvisionStep.SECRET_INJECTION,
+                    subject=f"phase '{phase_name}'",
+                    timeout_seconds=get_settings().setup_phase_timeout_seconds,
+                    attempts=1,
+                    detail=detail,
+                )
             if setup_result.signal_death is not None:
                 detail = f"{detail}\n{setup_result.signal_death.describe()}"
             if setup_result.exit_code == PINNED_COMMIT_UNREACHABLE_EXIT_CODE:

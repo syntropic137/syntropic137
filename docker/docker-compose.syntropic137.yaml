@@ -109,7 +109,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: ${EVENT_STORE_MEMORY_LIMIT:-512m}
+          memory: ${EVENT_STORE_MEMORY_LIMIT:-2g}
     logging:
       driver: json-file
       options:
@@ -235,6 +235,7 @@ services:
         max-size: 5m
         max-file: "3"
   api:
+    stop_grace_period: 200s
     environment:
       SYN_API_PORT: "8000"
       SYN_API_HOST: 0.0.0.0
@@ -266,12 +267,20 @@ services:
       S3_SECRET_ACCESS_KEY: null
       DEBUG: null
       ESP_EVENT_STORE_DB_URL: null
+      SYN_HOST_ID: null
       SLOW_REQUEST_LOG_THRESHOLD_MS: null
+      REQUEST_LATENCY_IO_TIMEOUT_S: null
+      REQUEST_LATENCY_SHUTDOWN_TIMEOUT_S: null
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
       CODEX_AUTH_JSON: ${CODEX_AUTH_JSON:-}
       SYN_DEFAULT_CLAUDE_MODEL: null
       SYN_DEFAULT_CODEX_MODEL: null
       SETUP_PHASE_TIMEOUT_SECONDS: null
+      SKILL_INSTALL_TIMEOUT_SECONDS: null
+      CODEX_SANDBOX_PROBE_TIMEOUT_SECONDS: null
+      CREDENTIAL_GUARD_EXEC_TIMEOUT_SECONDS: null
+      CHECKOUT_VERIFICATION_TIMEOUT_SECONDS: null
+      GITHUB_API_REQUEST_TIMEOUT_SECONDS: null
       COLLECTOR_URL: null
       COLLECTOR_API_KEY: null
       HOOK_BACKEND_URL: null
@@ -294,6 +303,7 @@ services:
       SYN_WORKSPACE_DOCKER_RUNTIME: null
       SYN_WORKSPACE_DOCKER_NETWORK: null
       SYN_EXECUTION_MAX_CONCURRENT: null
+      SYN_EXECUTION_INTERRUPT_BUDGET_S: null
       SYN_IMAGE_VERIFY_ENABLED: null
       SYN_IMAGE_VERIFY_CERTIFICATE_IDENTITY_REGEXP: null
       SYN_IMAGE_VERIFY_CERTIFICATE_OIDC_ISSUER: null
@@ -322,6 +332,9 @@ services:
       SYN_DISK_PATH: null
       SYN_DISK_DEGRADED_BELOW_PERCENT: null
       SYN_DISK_REFUSE_ADMISSION_BELOW_PERCENT: null
+      SYN_DISK_RECLAIM_GRACE_HOURS: null
+      SYN_DISK_RECLAIM_INTERVAL_MINUTES: null
+      SYN_DISK_PAGE_WEBHOOK_URL: null
       SYN_SESSION_INVENTORY_SOURCE_INSTANCE_ID: ${SYN_SESSION_INVENTORY_SOURCE_INSTANCE_ID:-}
       SYN_SESSION_INVENTORY_SWEEP_INTERVAL_SECONDS: ${SYN_SESSION_INVENTORY_SWEEP_INTERVAL_SECONDS:-30}
       SYN_SESSION_INVENTORY_SETTLEMENT_GRACE_SECONDS: ${SYN_SESSION_INVENTORY_SETTLEMENT_GRACE_SECONDS:-1800}
@@ -409,7 +422,8 @@ services:
     command:
     - sh
     - -c
-    - uvicorn syn_api.main:app --host $$SYN_API_HOST --port $$SYN_API_PORT --root-path /api/v1
+    - uvicorn syn_api.main:app --host $$SYN_API_HOST --port $$SYN_API_PORT --root-path /api/v1 --timeout-graceful-shutdown
+      30
     secrets:
     - db_password
     - redis_password
@@ -428,7 +442,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: ${API_MEMORY_LIMIT:-512m}
+          memory: ${API_MEMORY_LIMIT:-2g}
           cpus: ${API_CPU_LIMIT:-2.0}
     logging:
       driver: json-file

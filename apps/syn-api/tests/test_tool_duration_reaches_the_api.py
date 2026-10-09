@@ -403,7 +403,7 @@ class _CodexRows:
     def __init__(self) -> None:
         self.rows: list[_Row] = []
 
-    def note_agent_activity(self) -> None:
+    def note_agent_activity(self, *, changed_nothing: bool = False) -> None:
         # Part of the recorder protocol; it writes no row, so nothing in this
         # file - which is entirely about rows and their timestamps - reads it (#1303).
         return
@@ -414,7 +414,13 @@ class _CodexRows:
         return
 
     async def record_tool_started(
-        self, tool_name: str, tool_use_id: str, input_preview: str
+        self,
+        tool_name: str,
+        tool_use_id: str,
+        input_preview: str,
+        skill_name: str | None = None,
+        *,
+        changes_nothing: bool = False,
     ) -> None:
         self._append(
             TOOL_EXECUTION_STARTED,
@@ -422,7 +428,13 @@ class _CodexRows:
         )
 
     async def record_tool_completed(
-        self, tool_name: str, tool_use_id: str, success: bool, output_preview: str | None
+        self,
+        tool_name: str,
+        tool_use_id: str,
+        success: bool,
+        output_preview: str | None,
+        *,
+        changes_nothing: bool = False,
     ) -> None:
         self._append(
             TOOL_EXECUTION_COMPLETED,

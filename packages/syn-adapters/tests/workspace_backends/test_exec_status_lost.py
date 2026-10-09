@@ -31,6 +31,7 @@ import logging
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
 import pytest
@@ -47,6 +48,10 @@ from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects 
     IsolationHandle,
 )
 from syn_shared.process_exit import describe_process_failure
+from syn_shared.settings import reset_settings
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 pytestmark = [pytest.mark.unit]
 
@@ -107,6 +112,16 @@ def _workspace(docker: _Docker) -> ManagedWorkspace:
         sidecar_handle=None,
         _service=_Service(adapter),  # type: ignore[arg-type]
     )
+
+
+@pytest.fixture
+def _incident_setup_timeout(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """The incident ran under the then-default 120 s setup timeout (PC-126 raised it)."""
+    monkeypatch.setenv("SETUP_PHASE_TIMEOUT_SECONDS", "120")
+    reset_settings()
+    yield
+    monkeypatch.undo()
+    reset_settings()
 
 
 @pytest.fixture(autouse=True)
@@ -170,7 +185,9 @@ class TestTheSetupPhase:
         assert result.exit_code == 1
         assert docker.setup_runs() == 1
 
-    async def test_a_status_lost_twice_says_why(self, _no_real_docker: list[str]) -> None:
+    async def test_a_status_lost_twice_says_why(
+        self, _no_real_docker: list[str], _incident_setup_timeout: None
+    ) -> None:
         docker = _Docker(setup=[_lost(), _lost()])
 
         result = await run_setup_phase(_workspace(docker), _codex_secrets())
@@ -191,8 +208,16 @@ class TestTheSetupPhase:
 
 
 class TestTheCredentialGuard:
-    async def test_it_still_fails_closed_and_now_says_why(self) -> None:
-        """exec-ff7e0c990b00: every removal attempt lost its status."""
+    async def test_it_still_fails_closed_and_now_says_why(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """exec-ff7e0c990b00: every removal attempt lost its status.
+
+        Pinned to the 5s guard bound that incident ran under (configurable
+        since PC-126), so 7.2s is still past its deadline.
+        """
+        monkeypatch.setenv("CREDENTIAL_GUARD_EXEC_TIMEOUT_SECONDS", "5")
+        reset_settings()
         docker = _Docker(setup=[_ok()], removal=[_lost(7_200.0)] * 4)
 
         with pytest.raises(RuntimeError) as raised:
@@ -211,7 +236,7 @@ class TestTheCause:
     ) -> None:
         """The loop keeps running while a slow filesystem is being read."""
 
-        def _slow(path: Path, patterns: list[str]) -> list[tuple[str, bytes]]:
+        def _slow(path: Path, patterns: list[str], **_kw: int) -> list[tuple[str, bytes]]:
             time.sleep(0.5)
             return []
 

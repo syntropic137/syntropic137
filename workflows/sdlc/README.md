@@ -83,7 +83,7 @@ it.
 ## Re-verifying an existing PR: `reverify-pr`
 
 `sdlc-reverify-pr-v1` runs the verification half of `sdlc-implement-v3` -
-verify, up to three fix/re-verify rounds, `finalize_pr` - against a pull request
+verify, up to two fix/re-verify rounds, `finalize_pr` - against a pull request
 that already exists. Use it when an implement-v3 run finished `implement` and
 then died in verify: resuming re-runs the same dead phase, and dispatching
 implement-v3 again re-runs `implement` on a PR it rightly refuses to redo.
@@ -106,10 +106,10 @@ copy it to `reverify-pr/phases/`.**
 ### Switching the verifier model
 
 The verifier is a property of the workflow YAML, never of a prompt. In
-`reverify-pr/workflow.yaml` it is the `agent:` block of four phases: `verify`,
-`reverify`, `reverify_2` and `reverify_3`. Today it is codex `gpt-sol`. To run
+`reverify-pr/workflow.yaml` it is the `agent:` block of three phases: `verify`,
+`reverify` and `reverify_2`. Today it is codex `gpt-sol`. To run
 verification on Opus instead - for example while codex quota is exhausted -
-change all four to:
+change all three to:
 
 ```yaml
     agent:
@@ -120,9 +120,44 @@ change all four to:
 and re-install (`syn workflow install ./workflows/sdlc/reverify-pr`). Do not
 add `allowed_tools` to them: a claude phase without a list holds every tool,
 which is what a verifier that must run the gates needs. The test above fails if
-the four disagree, so a switch that misses a round cannot certify round 1 on one
-model and round 3 on another. Remember a verifier on the same model as the fix
+the three disagree, so a switch that misses a round cannot certify round 1 on one
+model and round 2 on another. Remember a verifier on the same model as the fix
 phases (`opus`) is no longer a cross-model review; say so when you rely on it.
+
+## Verification gates
+
+`sdlc-implement-v3` and `sdlc-reverify-pr-v1` verify a change by running the
+**target repository's** gates, never a command written into the prompt. A
+workflow can be dispatched on any repository, and a gate that exists here
+(`just preflight-agent`) does not exist in one with no justfile (PC-129).
+
+**Declaring gates.** A repository declares them in its `AGENTS.md` (or
+`CLAUDE.md`, if it has no `AGENTS.md`):
+
+    ## Verification gates
+
+    Any prose the agent should read: what cannot run in a workspace, what CI
+    settles instead.
+
+    ```
+    python3 -m unittest discover -s scripts
+    ```
+
+The first fenced block under the heading is the list: one command per line,
+run in order from the repository root. Lines starting with `#` are comments.
+syntropic137 declares its own at the end of [AGENTS.md](../../AGENTS.md#verification-gates).
+
+**Without a declaration**, verify and fix fall back to what the repository
+treats as its gate - its pull-request CI, then its task runner (`justfile`,
+`Makefile`, `package.json`), then a test command its docs name - and, if none
+exists, say so and run the tests the change touched. Every report names which
+case applied and where each command came from.
+
+**Enforced.** `scripts/check_workflow_definitions.py` reads the gates this
+repository declares and fails any workflow prompt that names one literally
+(`hardcoded_gates`). The workflows written before the convention are listed in
+`_GATES_STILL_NAMED`; that list may only shrink, and a test fails on an entry
+that no longer names a gate.
 
 ## What `timeout_seconds` actually bounds
 
@@ -166,6 +201,28 @@ One caveat worth keeping: #1187's `open_pr` timeouts were real and are
 recorded as ~one run in three. Removing the clone did not necessarily fix
 them, because the clone was never inside the budget that expired. If that
 phase still times out, look at the agent's own work.
+
+## `requires_verdict`: a review must say what it found
+
+A phase's `review_verdict` (`certified` or `blocked`) is what moves the repair
+rounds forward: `certified` goes straight to the final phase, and anything else
+advances by `order`. When a phase reports no verdict, that also advances by
+order, which is right for a phase that judges nothing. For a review it is
+wrong, because a verify phase that forgot to report its verdict then looks
+exactly like one that blocked the change (PC-116).
+
+    requires_verdict: true   # this phase is a review; no verdict fails it
+
+If a phase declares this and its TASK_RESULT names no verdict, or a word other
+than `certified` or `blocked`, the phase fails with "verify produced no
+verdict". That is a `platform` failure and the run can be resumed. A phase
+that reports `success: false` keeps its own failure. Declare it on every
+`verify` and `reverify*` phase. Do not declare it anywhere else; it defaults
+to `false`.
+
+Because the first `verify` now reports a verdict too, a run whose first pass
+certifies skips every repair round. In that case `finalize_pr` reads the
+first `verify` report as round 0 (`Round: 0 of 2`).
 
 ## `delivers_repo_changes`: which phases own a branch
 

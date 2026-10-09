@@ -167,6 +167,8 @@ class PhaseDefinitionDetail:
     platform_access: PlatformScope = PlatformScope.READ
     """The scope of this phase's platform token (ADR-072, #1744). Security-relevant,
     so readable: ``eval`` lets the phase start executions."""
+    requires_verdict: bool = False
+    """Whether this phase fails when it reports no ``review_verdict`` (PC-116)."""
 
     sandbox: str = DEFAULT_PHASE_SANDBOX
     """The agent sandbox level this phase declares (``agent.sandbox``).
@@ -301,6 +303,7 @@ class WorkflowDetail:
                 clone_repos=bool(p.get("clone_repos", True)),
                 delivers_repo_changes=bool(p.get("delivers_repo_changes", True)),
                 platform_access=stored_platform_access(p.get("platform_access")),
+                requires_verdict=bool(p.get("requires_verdict", False)),
                 sandbox=str(p.get("sandbox", DEFAULT_PHASE_SANDBOX)),
                 claude_plugins=_stored_refs(p.get("claude_plugins")),
                 skills=_stored_refs(p.get("skills")),
@@ -389,6 +392,7 @@ class WorkflowDetail:
                 "clone_repos": p.clone_repos,
                 "delivers_repo_changes": p.delivers_repo_changes,
                 "platform_access": p.platform_access.value,
+                "requires_verdict": p.requires_verdict,
                 "sandbox": p.sandbox,
                 "claude_plugins": [r.to_dict() for r in p.claude_plugins],
                 "skills": [r.to_dict() for r in p.skills],

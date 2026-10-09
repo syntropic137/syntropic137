@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from syn_api.services.read_model_status import rebuilding_read_models
 from syn_api.types import HeldProjectionHealth, SubscriptionHealth
 
 if TYPE_CHECKING:
@@ -40,5 +41,6 @@ def render_subscription_health(
         ],
         halted_at=sub_status.halted_at,
         unapplied_starts=unapplied,
+        rebuilding_read_models=rebuilding_read_models(lag) if lag is not None else None,
         **(lag.model_dump() if lag is not None else {}),
     )

@@ -3,6 +3,9 @@
 Without agentic-workspace's Codex sandbox policy (an unlabeled image, a host
 missing the AppArmor profile) codex exits 0 with every command failed. The
 probe turns that silent no-op into a provisioning failure with a reason.
+
+A probe that times out says the host was loaded, not that the sandbox is
+missing (PC-126): it is retried once, then recorded as a transient timeout.
 """
 
 from __future__ import annotations
@@ -18,14 +21,33 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
     ExecutionResult,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
+    ProvisionStep,
+    ProvisionStepTimeoutError,
+    failure_account,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.codex_sandbox_probe import (
     CodexSandboxUnavailableError,
     require_codex_sandbox,
 )
+from syn_shared.settings import get_settings, reset_settings
+from syn_shared.upstream_failure import UpstreamFailureKind
 
 pytestmark = [pytest.mark.unit, pytest.mark.anyio]
 
 BWRAP = "bwrap: No permissions to create a new namespace"
+TIMED_OUT = ExecutionResult(exit_code=-1, success=False, duration_ms=5.0, timed_out=True)
+OK = ExecutionResult(exit_code=0, success=True, duration_ms=5.0)
+
+
+@pytest.fixture
+def probe_timeout(monkeypatch: pytest.MonkeyPatch):
+    """A configured timeout no default could produce, so reading it is proven."""
+    monkeypatch.setenv("CODEX_SANDBOX_PROBE_TIMEOUT_SECONDS", "333")
+    reset_settings()
+    yield 333
+    monkeypatch.delenv("CODEX_SANDBOX_PROBE_TIMEOUT_SECONDS")
+    reset_settings()
 
 
 def _phase(provider: str, sandbox: str) -> ExecutablePhase:
@@ -52,9 +74,48 @@ async def test_a_sandbox_that_does_not_run_refuses_the_phase() -> None:
         await require_codex_sandbox(workspace, _phase("codex", "workspace-write"))
     workspace.execute.assert_awaited_once_with(
         ["codex", "sandbox", "-c", 'sandbox_mode="workspace-write"', "--", "true"],
-        timeout_seconds=60,
+        timeout_seconds=get_settings().codex_sandbox_probe_timeout_seconds,
         working_directory="/workspace",
     )
+
+
+async def test_one_timed_out_probe_is_retried_with_the_configured_timeout(
+    probe_timeout: int,
+) -> None:
+    workspace = AsyncMock()
+    workspace.execute = AsyncMock(side_effect=[TIMED_OUT, OK])
+
+    await require_codex_sandbox(workspace, _phase("codex", "workspace-write"))
+
+    assert [c.kwargs["timeout_seconds"] for c in workspace.execute.await_args_list] == [
+        probe_timeout,
+        probe_timeout,
+    ]
+
+
+async def test_a_second_timeout_is_transient_not_a_missing_sandbox(probe_timeout: int) -> None:
+    workspace = AsyncMock()
+    workspace.execute = AsyncMock(side_effect=[TIMED_OUT, TIMED_OUT, OK])
+
+    with pytest.raises(ProvisionStepTimeoutError, match=r"codex_sandbox_probe.*333s") as raised:
+        await require_codex_sandbox(workspace, _phase("codex", "workspace-write"))
+
+    assert workspace.execute.await_count == 2
+    assert raised.value.step is ProvisionStep.CODEX_SANDBOX_PROBE
+    assert failure_account(raised.value).upstream is UpstreamFailureKind.UNAVAILABLE
+
+
+async def test_a_refusal_after_a_timeout_still_blames_the_sandbox() -> None:
+    workspace = AsyncMock()
+    workspace.execute = AsyncMock(
+        side_effect=[
+            TIMED_OUT,
+            ExecutionResult(exit_code=1, success=False, duration_ms=5.0, stderr=BWRAP),
+        ]
+    )
+
+    with pytest.raises(CodexSandboxUnavailableError, match="bwrap"):
+        await require_codex_sandbox(workspace, _phase("codex", "workspace-write"))
 
 
 async def test_a_sandbox_that_runs_lets_the_phase_proceed() -> None:

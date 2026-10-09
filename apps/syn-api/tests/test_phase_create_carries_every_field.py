@@ -79,6 +79,8 @@ _EVERY_FIELD: Mapping[str, object] = {
     # NOT the default ("read"). Dropping the mapping downgrades a declared eval
     # phase to read-only (#1744), which only this value can tell apart.
     "platform_access": "eval",
+    # Not the default, which is False: a dropped mapping reads False (PC-116).
+    "requires_verdict": True,
     "argument_hint": "[task]",
     "model": "claude-opus-5-5",
     # NOT the default (None). Claude, not codex: a codex phase cannot carry
@@ -159,6 +161,7 @@ def test_every_field_a_caller_sends_survives_into_the_domain() -> None:
     # EVAL cannot be produced by any fallback: every hop defaults to READ, so
     # only the caller's declaration arriving satisfies this (#1744).
     assert phase.platform_access is PlatformScope.EVAL
+    assert phase.requires_verdict is True
     assert phase.argument_hint == "[task]"
     assert phase.model == "claude-opus-5-5"
     assert phase.provider == "claude"

@@ -31,3 +31,4 @@ expected:
     - [exist, present, evalcreated, eval created, not an eval, no eval, isn't an eval,
        accepted, accept, treated as, mistak, satisf, passes, without, wrong type,
        any aggregate, not checked, never checked, admit, attach]
+split: train

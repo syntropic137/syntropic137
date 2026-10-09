@@ -6,7 +6,33 @@
  * test passes only if the page prints the server's string verbatim.
  */
 
-import type { EvalRun, EvalRunListResponse, EvalSummary, EvalVariant } from '../api/evals'
+import type { EvalRun, EvalRunListResponse, EvalRunStats, EvalSummary, EvalVariant } from '../api/evals'
+import { variantKey } from '../utils/evalVariants'
+import type { VerdictCounts } from '../utils/evalVerdictCounts'
+
+export function stats(overrides: Partial<EvalRunStats> = {}): EvalRunStats {
+  return {
+    median_duration_seconds: 1200,
+    median_duration_display: '20m med.',
+    incomplete_duration_count: 0,
+    median_cost_usd: '0.4123',
+    median_cost_display: '$0.41 med.',
+    incomplete_cost_count: 1,
+    cost_per_pass_usd: '0.6185',
+    cost_per_pass_display: '>=$0.62 (partial)',
+    ...overrides,
+  }
+}
+
+/**
+ * The JSON an API deployed before #1772 sends: no `stats` property at all,
+ * not `stats: undefined`, so `'stats' in x` is false as it is over the wire.
+ */
+export function withoutStats<T extends { stats?: EvalRunStats }>(x: T): T {
+  const copy = { ...x }
+  delete copy.stats
+  return copy
+}
 
 export const LONG_MODEL = 'claude-opus-5-5-20261001-with-a-very-long-observed-model-identifier'
 
@@ -22,6 +48,8 @@ export function variant(overrides: Partial<EvalVariant> = {}): EvalVariant {
     avg_cost_usd: '0.4123',
     avg_cost_display: '$0.41 est.',
     last_run_at: '2026-10-06T12:00:00Z',
+    last_verdict: 'FAIL',
+    stats: stats(),
     ...overrides,
   }
 }
@@ -48,6 +76,7 @@ export function evalSummary(overrides: Partial<EvalSummary> = {}): EvalSummary {
     last_run_at: '2026-10-06T12:00:00Z',
     last_verdict: 'PASS',
     variants: [variant()],
+    stats: stats({ median_duration_display: '18m all', median_cost_display: '$0.39 all', cost_per_pass_display: '$0.58 all' }),
     ...overrides,
   }
 }
@@ -73,6 +102,19 @@ export function evalRun(overrides: Partial<EvalRun> = {}): EvalRun {
     scored_at: '2026-10-06T12:30:00Z',
     ...overrides,
   }
+}
+
+/** Defaults to the default variant's runs: 2 PASS and 1 FAIL, 3 judged. */
+export function verdictCounts(overrides: Partial<VerdictCounts> = {}): VerdictCounts {
+  return { pass: 2, fail: 1, error: 0, unscored: 0, ...overrides }
+}
+
+/** Each variant's counts by `variantKey`, overridden per workflow id. */
+export function countsFor(
+  variants: readonly EvalVariant[],
+  by: Record<string, Partial<VerdictCounts>> = {},
+): ReadonlyMap<string, VerdictCounts> {
+  return new Map(variants.map((v) => [variantKey(v), verdictCounts(by[v.workflow_id])]))
 }
 
 export function runPage(items: EvalRun[], total = items.length): EvalRunListResponse {

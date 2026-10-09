@@ -20,6 +20,7 @@ from event_sourcing import (
 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continuation import (
     LeftBranches,
+    PushedCommit,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (  # noqa: TC001 - re-exported + used at runtime by @command_handler
     AgentExecutionCompletedCommand,
@@ -31,6 +32,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.commands impor
     InterruptExecutionCommand,
     ProvisionWorkspaceCompletedCommand,
     RecordCancelledWorkCommand,
+    RecordPhasePushCommand,
     ResumeExecutionCommand,
     RetryPhaseCommand,
     StartExecutionCommand,
@@ -52,6 +54,15 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.lifecycle_even
     completed_event,
     failed_event,
     started_event,
+)
+from syn_domain.contexts.orchestration.domain.aggregate_execution.own_pushes import (
+    push_event,
+    read_pushed_commit,
+)
+from syn_domain.contexts.orchestration.domain.aggregate_execution.phase_step_events import (
+    agent_completed_event,
+    artifacts_collected_event,
+    workspace_provisioned_event,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.replay import (
     evt,
@@ -138,6 +149,9 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.orchestration.domain.events.NextPhaseReadyEvent import (
         NextPhaseReadyEvent,
+    )
+    from syn_domain.contexts.orchestration.domain.events.PhaseCommitPushedEvent import (
+        PhaseCommitPushedEvent,
     )
     from syn_domain.contexts.orchestration.domain.events.PhaseCompletedEvent import (
         PhaseCompletedEvent,
@@ -280,6 +294,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         self._pins = StartPins()
         #: The branches the phase this run failed in left on origin (#1513).
         self._left_branches = LeftBranches()
+        self._pushed: list[PushedCommit] = []
         #: The tags it launched with and the tags it carries now (#967).
         self._tags = ExecutionTags()
         self._eval = EvalMembership()
@@ -584,6 +599,19 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         )
         self._apply(event)
 
+    @command_handler("RecordPhasePushCommand")
+    def record_phase_push(self, command: RecordPhasePushCommand) -> None:
+        """Handle RecordPhasePushCommand - the running phase's workspace pushed (PC-128).
+
+        Refused for any phase but the running one: a push is only this run's when
+        the workspace that made it was running this run's phase.
+        """
+        if self._status != ExecutionStatus.RUNNING or self._running_phase_id != command.phase_id:
+            msg = f"Cannot record a push for {command.phase_id}: it is not the running phase"
+            raise ValueError(msg)
+
+        self._apply(push_event(command, self._workflow_id or ""))
+
     @command_handler("CompletePhaseCommand")
     def complete_phase(self, command: CompletePhaseCommand) -> None:
         """Handle CompletePhaseCommand."""
@@ -623,76 +651,30 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
     @command_handler("ProvisionWorkspaceCompletedCommand")
     def provision_workspace_completed(self, command: ProvisionWorkspaceCompletedCommand) -> None:
         """Handle workspace provisioned for a phase."""
-        from syn_domain.contexts.orchestration.domain.events.WorkspaceProvisionedForPhaseEvent import (
-            WorkspaceProvisionedForPhaseEvent,
-        )
-
         if self._status != ExecutionStatus.RUNNING:
             msg = f"Cannot provision workspace in status {self._status}"
             raise ValueError(msg)
 
-        event = WorkspaceProvisionedForPhaseEvent(
-            workflow_id=self._workflow_id or "",
-            execution_id=command.aggregate_id,
-            phase_id=command.phase_id,
-            workspace_id=command.workspace_id,
-            session_id=command.session_id,
-            provisioned_at=datetime.now(UTC),
-            checked_out_commits=list(command.checked_out_commits) or None,
-        )
-        self._apply(event)
+        self._apply(workspace_provisioned_event(command, self._workflow_id or ""))
 
     @command_handler("AgentExecutionCompletedCommand")
     def agent_execution_completed(self, command: AgentExecutionCompletedCommand) -> None:
         """Handle agent finished executing in workspace."""
-        from syn_domain.contexts.orchestration.domain.events.AgentExecutionCompletedEvent import (
-            AgentExecutionCompletedEvent,
-        )
-
         if self._status != ExecutionStatus.RUNNING:
             msg = f"Cannot complete agent execution in status {self._status}"
             raise ValueError(msg)
 
-        event = AgentExecutionCompletedEvent(
-            workflow_id=self._workflow_id or "",
-            execution_id=command.aggregate_id,
-            phase_id=command.phase_id,
-            session_id=command.session_id,
-            completed_at=datetime.now(UTC),
-            exit_code=command.exit_code,
-            input_tokens=command.input_tokens,
-            output_tokens=command.output_tokens,
-            last_agent_message=command.last_agent_message,
-            reported_side_effects=command.reported_side_effects,
-            reported_review_verdict=command.reported_review_verdict,
-            agent_provider=command.agent_provider,
-            agent_model=command.agent_model,
-        )
-        self._apply(event)
+        self._apply(agent_completed_event(command, self._workflow_id or ""))
 
     @command_handler("ArtifactsCollectedCommand")
     def artifacts_collected(self, command: ArtifactsCollectedCommand) -> None:
         """Handle artifacts collected — aggregate decides if more phases exist."""
-        from syn_domain.contexts.orchestration.domain.events.ArtifactsCollectedForPhaseEvent import (
-            ArtifactsCollectedForPhaseEvent,
-        )
-
         if self._status != ExecutionStatus.RUNNING:
             msg = f"Cannot collect artifacts in status {self._status}"
             raise ValueError(msg)
         self._refuse_if_completed(command.phase_id, "collect artifacts for")
 
-        event = ArtifactsCollectedForPhaseEvent(
-            workflow_id=self._workflow_id or "",
-            execution_id=command.aggregate_id,
-            phase_id=command.phase_id,
-            artifact_ids=command.artifact_ids,
-            collected_at=datetime.now(UTC),
-            first_content_preview=command.first_content_preview,
-            session_id=command.session_id,
-            deliverable_recovered=command.deliverable_recovered,
-        )
-        self._apply(event)
+        self._apply(artifacts_collected_event(command, self._workflow_id or ""))
 
         # The phase's own verdict decides what runs next (PC-63).
         decided = next_phase(
@@ -874,7 +856,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         self._reported_failure_reason = ReportedFailureReason.from_stored(
             evt(event, "reported_failure_reason")
         )
-        self._left_branches = read_left_branches(self._pins, event)
+        self._left_branches = read_left_branches(self._pins, event, self._pushed)
 
     @event_sourcing_handler("PhaseStarted")
     def on_phase_started(self, event: PhaseStartedEvent) -> None:
@@ -904,6 +886,11 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         collected = self._phase_artifact_ids.setdefault(phase_id, [])
         if artifact_id and artifact_id not in collected:
             collected.append(artifact_id)
+
+    @event_sourcing_handler("PhaseCommitPushed")
+    def on_phase_commit_pushed(self, event: PhaseCommitPushedEvent) -> None:
+        """Apply PhaseCommitPushedEvent."""
+        self._pushed.append(read_pushed_commit(event))
 
     @event_sourcing_handler("PhaseRetryScheduled")
     def on_phase_retry_scheduled(self, event: PhaseRetryScheduledEvent) -> None:

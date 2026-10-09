@@ -96,7 +96,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: ${EVENT_STORE_MEMORY_LIMIT:-512m}
+          memory: ${EVENT_STORE_MEMORY_LIMIT:-2g}
     logging:
       driver: "json-file"
       options:
@@ -210,7 +210,7 @@ services:
       - api_logs:/app/logs
       - ../workspaces:/workspaces
     entrypoint: ["/bin/sh", "/selfhost-entrypoint.sh"]
-    command: ["sh", "-c", "uvicorn syn_api.main:app --host $$SYN_API_HOST --port $$SYN_API_PORT --root-path /api/v1"]
+    command: ["sh", "-c", "uvicorn syn_api.main:app --host $$SYN_API_HOST --port $$SYN_API_PORT --root-path /api/v1 --timeout-graceful-shutdown 30"]
     environment:
       - LOG_FORMAT=${LOG_FORMAT:-json}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
@@ -277,7 +277,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: ${API_MEMORY_LIMIT:-512m}
+          memory: ${API_MEMORY_LIMIT:-2g}
           cpus: "${API_CPU_LIMIT:-2.0}"
     logging:
       driver: "json-file"

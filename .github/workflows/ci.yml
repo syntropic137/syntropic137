@@ -338,6 +338,13 @@ jobs:
         working-directory: apps/syn-dashboard-ui
         run: pnpm run build
 
+      # The local mirror of this job (the dashboard-ci recipe) has always run the
+      # tests; CI did not, so dashboard regression tests never gated a merge
+      # (found by verify on #1664, 2026-10-06).
+      - name: Test
+        working-directory: apps/syn-dashboard-ui
+        run: NO_COLOR=1 pnpm run test
+
   #############################################################################
   # DOCS SITE - Fumadocs build check
   #############################################################################

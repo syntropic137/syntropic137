@@ -42,6 +42,8 @@ if TYPE_CHECKING:
     from syn_adapters.dedup.redis_dedup import RedisDedupAdapter
     from syn_adapters.disk_space import StatvfsDiskSpace
     from syn_adapters.events.store import AgentEventStore
+    from syn_adapters.execution_runs import PostgresExecutionRunQueue
+    from syn_adapters.execution_runs.memory import InMemoryExecutionRunQueue
     from syn_adapters.github.checks_api_client import GitHubChecksAPIClient
     from syn_adapters.github.events_api_client import GitHubEventsAPIClient
     from syn_adapters.github.pending_sha_store import InMemoryPendingSHAStore
@@ -229,6 +231,9 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.ports.CodexRolloutPort import CodexRolloutPort
     from syn_domain.contexts.orchestration.ports.DelegationEvidencePort import (
         DelegationEvidencePort,
+    )
+    from syn_domain.contexts.orchestration.ports.ExecutionRunQueuePort import (
+        ExecutionRunQueue,
     )
     from syn_domain.contexts.orchestration.ports.GlobalClaudePluginRegistryRepositoryPort import (
         GlobalClaudePluginRegistryRepositoryPort,
@@ -457,3 +462,11 @@ if TYPE_CHECKING:
         _history_receipts: BackfillReceiptPort = history_receipts
         _history_queue: HistoryBackfillQueuePort = history_queue
         _settlements: SessionSettlementPort = settlements
+
+    def _run_queue(
+        postgres: PostgresExecutionRunQueue,
+        memory: InMemoryExecutionRunQueue,
+    ) -> None:
+        """The Run Queue (ADR-072). The double must keep the port, not just Postgres."""
+        _postgres: ExecutionRunQueue = postgres
+        _memory: ExecutionRunQueue = memory

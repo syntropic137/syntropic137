@@ -399,8 +399,8 @@ class PhaseYamlDefinition(BaseModel):
 
     Provisioning has been phase-blind: every phase paid the same clone plus
     recursive submodule init, because the only opt-out was the WORKFLOW-level
-    `requires_repos: false`, which turns cloning off for all of them. A
-    workflow whose implement phase needs a working tree and whose open_pr
+    `requires_repos: false`, which turns cloning off for all of them unless
+    repos are passed explicitly at dispatch (#955). A workflow whose implement phase needs a working tree and whose open_pr
     phase does not could not express that, so the phase doing the least work
     paid the same 600s bootstrap - under the shortest budget in the workflow.
 
@@ -443,6 +443,20 @@ class PhaseYamlDefinition(BaseModel):
     act that no build tool performs. Declare it on a bootstrap, premise, review
     or verify phase - one whose deliverable is a report - and leave it alone
     anywhere a branch is the point."""
+
+    requires_verdict: bool = False
+    """Whether this phase MUST report a ``review_verdict`` in its TASK_RESULT (PC-116).
+
+    The verdict steers the review rounds: ``certified`` ends them, and
+    anything else advances by order. "No verdict" advances by order on
+    purpose, which is right for every phase that is not a review - and wrong
+    for one that is, because a verify phase that forgot to say what it found
+    then reads exactly like one that found something. True turns that silence
+    into a failed, resumable phase instead.
+
+    DEFAULTS TO FALSE because the verdict is meaningless outside a review: a
+    phase that never judges anything cannot be asked to report a judgement.
+    Declare it on every verify and reverify phase."""
 
     # Claude Code command extensions (ISS-211)
     argument_hint: str | None = None
@@ -681,6 +695,7 @@ class PhaseYamlDefinition(BaseModel):
             clone_repos=self.clone_repos,
             delivers_repo_changes=self.delivers_repo_changes,
             platform_access=self.platform_access,
+            requires_verdict=self.requires_verdict,
             argument_hint=self.argument_hint,
             model=model,
             provider=provider,

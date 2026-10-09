@@ -1180,6 +1180,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/metrics/phase-profiles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Phase Profiles Endpoint
+         * @description Per phase type and model: p50/p90 tokens and cost; per phase type: p50/p95 resources.
+         *
+         *     Sizes the capacity model and the execution budget from what phases of
+         *     this workflow actually used (#1716). Every percentile is over every phase
+         *     in the window; below ten phases it reads ``insufficient``.
+         */
+        get: operations["get_phase_profiles_endpoint_metrics_phase_profiles_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/capture/status": {
         parameters: {
             query?: never;
@@ -1232,6 +1256,29 @@ export interface paths {
          * @description Get token usage metrics for a session.
          */
         get: operations["get_token_metrics_endpoint_observability_sessions__session_id__tokens_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/observability/latency": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Request Latency
+         * @description Exact p50/p95/p99, max and count of arrival-to-response-start latency per (method, route template).
+         *
+         *     Read from ``api_request_latency`` (Lane 2, ADR-075). Every API process
+         *     records its own requests; ``recorder`` describes THIS process's only.
+         */
+        get: operations["get_request_latency_observability_latency_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1451,12 +1498,13 @@ export interface paths {
          * List Accessible Repos Endpoint
          * @description List repositories accessible to the GitHub App.
          *
-         *     With no installation_id, aggregates every installation. The last complete
-         *     listing is cached and served as ``complete`` while under a minute old;
-         *     otherwise GitHub is asked live, and an older listing is served as
-         *     ``partial`` only if GitHub cannot be asked. The GitHub App's
-         *     ``installation`` and ``installation_repositories`` webhooks invalidate the
-         *     cache at once. A single installation_id is always asked live.
+         *     With no installation_id, aggregates every installation and never waits on
+         *     GitHub. The last complete listing is cached and served as ``complete``
+         *     while under a minute old, as ``partial`` once older, with a background
+         *     refresh behind it. With no listing cached the answer is ``unavailable``
+         *     while a background refresh fetches one. The GitHub App's ``installation``
+         *     and ``installation_repositories`` webhooks invalidate the cache at once. A
+         *     single installation_id is always asked live.
          *
          *     ``lookup`` says whether a repo missing from ``repos`` is known to be out of
          *     the App's reach (``complete``) or merely went unseen because GitHub failed.
@@ -3038,7 +3086,7 @@ export interface components {
             size_bytes?: number | null;
             /**
              * Model Display
-             * @description The model for humans: the reported id verbatim, or 'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9).
+             * @description The model for humans: the reported id verbatim, or '<alias> (requested)', or 'unknown' (ADR-067 D9).
              */
             readonly model_display: string;
         };
@@ -3485,6 +3533,61 @@ export interface components {
             tags: string[];
         };
         /**
+         * EvalDetailResponse
+         * @description One eval, as `GET /evals/{eval_id}` returns it.
+         *
+         *     The row model plus whether the evals read model is rebuilding, so a
+         *     missing or stale eval can say why. Kept off `EvalResponse` so every list
+         *     row does not repeat the list's own status.
+         */
+        EvalDetailResponse: {
+            /** Eval Id */
+            eval_id: string;
+            /** Name */
+            name: string;
+            /** Goal */
+            goal: string;
+            /** Starting Workflow Id */
+            starting_workflow_id: string | null;
+            /** Baseline Repos */
+            baseline_repos: components["schemas"]["EvalBaselineRepoResponse"][];
+            /** Tags */
+            tags: string[];
+            /** Frozen */
+            frozen: boolean;
+            /** Archived */
+            archived: boolean;
+            /** Created At */
+            created_at: string | null;
+            /** Updated At */
+            updated_at: string | null;
+            /** Run Count */
+            run_count: number;
+            /** Run Status Counts */
+            run_status_counts: {
+                [key: string]: number;
+            };
+            /**
+             * Scored Count
+             * @default 0
+             */
+            scored_count: number;
+            /** Pass Rate */
+            pass_rate?: number | null;
+            /**
+             * Pass Rate Display
+             * @default —
+             */
+            pass_rate_display: string;
+            /** Last Run At */
+            last_run_at?: string | null;
+            last_verdict?: components["schemas"]["Verdict"] | null;
+            /** Variants */
+            variants?: components["schemas"]["EvalVariantResponse"][];
+            stats: components["schemas"]["EvalRunStatsResponse"];
+            read_model_status?: components["schemas"]["ReadModelStatus"] | null;
+        };
+        /**
          * EvalId
          * @description The identity of one eval, and the id of its stream.
          */
@@ -3506,6 +3609,7 @@ export interface components {
             status_counts: {
                 [key: string]: number;
             };
+            read_model_status?: components["schemas"]["ReadModelStatus"] | null;
         };
         /**
          * EvalResponse
@@ -3555,6 +3659,7 @@ export interface components {
             last_verdict?: components["schemas"]["Verdict"] | null;
             /** Variants */
             variants?: components["schemas"]["EvalVariantResponse"][];
+            stats: components["schemas"]["EvalRunStatsResponse"];
         };
         /**
          * EvalRunListResponse
@@ -3659,6 +3764,30 @@ export interface components {
             scored_at: string;
         };
         /**
+         * EvalRunStatsResponse
+         * @description How long a set of an eval's runs took and what it cost, over EVERY run in the set.
+         *
+         *     Medians, not means: one runaway run should not make a variant look slow.
+         */
+        EvalRunStatsResponse: {
+            /** Median Duration Seconds */
+            median_duration_seconds: number | null;
+            /** Median Duration Display */
+            median_duration_display: string;
+            /** Incomplete Duration Count */
+            incomplete_duration_count: number;
+            /** Median Cost Usd */
+            median_cost_usd: string | null;
+            /** Median Cost Display */
+            median_cost_display: string;
+            /** Incomplete Cost Count */
+            incomplete_cost_count: number;
+            /** Cost Per Pass Usd */
+            cost_per_pass_usd: string | null;
+            /** Cost Per Pass Display */
+            cost_per_pass_display: string;
+        };
+        /**
          * EvalVariantResponse
          * @description Every run of an eval with the same workflow, workflow version and OBSERVED models.
          *
@@ -3686,6 +3815,8 @@ export interface components {
             avg_cost_display: string;
             /** Last Run At */
             last_run_at: string | null;
+            last_verdict: components["schemas"]["Verdict"] | null;
+            stats: components["schemas"]["EvalRunStatsResponse"];
         };
         /**
          * EventListResponse
@@ -4035,6 +4166,9 @@ export interface components {
             eval?: components["schemas"]["ExecutionEvalRunResponse"] | null;
             resume_start?: components["schemas"]["ResumeStartInfo"] | null;
             start_queue?: components["schemas"]["ExecutionStartQueueInfo"] | null;
+            read_model_status?: components["schemas"]["ReadModelStatus"] | null;
+            /** @description Skill use across every phase that started: declared, invoked anywhere, never invoked, and not knowable (feedback 01308bcf). */
+            readonly skill_use: components["schemas"]["ExecutionSkillUseSummary"];
         };
         /**
          * ExecutionEvalResponse
@@ -4115,6 +4249,7 @@ export interface components {
             status_counts?: {
                 [key: string]: number;
             };
+            read_model_status?: components["schemas"]["ReadModelStatus"] | null;
         };
         /** ExecutionRunListResponse */
         ExecutionRunListResponse: {
@@ -4167,6 +4302,31 @@ export interface components {
             /** @default unclassified */
             failure_classification: components["schemas"]["FailureClassification"];
             reported_failure_reason?: components["schemas"]["ReportedFailureReason"] | null;
+        };
+        /**
+         * ExecutionSkillUseSummary
+         * @description Skill use across every phase of one execution (feedback 01308bcf).
+         *
+         *     A declared skill is only ``never_invoked`` when EVERY phase was observed.
+         *     A phase may invoke a skill it never declared, so one phase that ran where
+         *     use cannot be seen (codex), or could not be read, could have used any of
+         *     them: every declared skill no observed phase invoked is then ``not_known``
+         *     - the #1269 misreading this model exists to refuse, one level up.
+         */
+        ExecutionSkillUseSummary: {
+            /** Declared */
+            declared?: string[];
+            /** Invoked */
+            invoked?: components["schemas"]["InvokedSkillInfo"][];
+            /** Never Invoked */
+            never_invoked?: string[];
+            /** Not Known */
+            not_known?: string[];
+            /**
+             * Summary Display
+             * @default no phase has started
+             */
+            summary_display: string;
         };
         /**
          * ExecutionStartQueueInfo
@@ -4372,6 +4532,7 @@ export interface components {
             tags?: string[];
             /** Repos Display */
             repos_display?: string | null;
+            eval?: components["schemas"]["ExecutionEvalRunResponse"] | null;
             start_queue?: components["schemas"]["ExecutionStartQueueInfo"] | null;
         };
         /**
@@ -5409,6 +5570,36 @@ export interface components {
             coverage: components["schemas"]["InventoryCoverage"];
             counts: components["schemas"]["InventoryCounts"];
         };
+        /**
+         * InvokedSkillInfo
+         * @description One skill the agent invoked through the Skill tool, and how often (#1269).
+         */
+        InvokedSkillInfo: {
+            /** Name */
+            name: string;
+            /** Count */
+            count: number;
+        };
+        /**
+         * LatencyRecorderStatusResponse
+         * @description What this API process's recorder did with its samples since it started.
+         */
+        LatencyRecorderStatusResponse: {
+            /** Running */
+            running: boolean;
+            /** Written */
+            written: number;
+            /** Dropped */
+            dropped: number;
+            /** Write Failures */
+            write_failures: number;
+            /** Discarded */
+            discarded: number;
+            /** Cleanup Failures */
+            cleanup_failures: number;
+            /** Buffered */
+            buffered: number;
+        };
         /** LineageEdge */
         LineageEdge: {
             parent: components["schemas"]["InventoryNodeRef"];
@@ -5863,6 +6054,11 @@ export interface components {
             /** @default read */
             platform_access: components["schemas"]["PlatformScope"];
             /**
+             * Requires Verdict
+             * @default false
+             */
+            requires_verdict: boolean;
+            /**
              * Sandbox
              * @default full-access
              */
@@ -5954,12 +6150,13 @@ export interface components {
              * @enum {string}
              */
             start_pins_status: "recorded" | "not_recorded" | "unavailable";
+            skill_use?: components["schemas"]["PhaseSkillUseInfo"];
             /** Operations */
             operations?: components["schemas"]["PhaseOperationInfo"][];
             activity?: components["schemas"]["PhaseActivityInfo"];
             /**
              * Model Display
-             * @description The model for humans: the reported id verbatim, or 'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9).
+             * @description The model for humans: the reported id verbatim, or '<alias> (requested)', or 'unknown' (ADR-067 D9).
              */
             readonly model_display: string;
         };
@@ -6033,6 +6230,35 @@ export interface components {
             error_message?: string | null;
         };
         /**
+         * PhaseProfilesResponse
+         * @description Per-phase-type usage profiles for one workflow over a window (#1716).
+         *
+         *     Percentiles are over EVERY phase of the workflow with telemetry in
+         *     ``[since, until)`` - nothing is paged.
+         */
+        PhaseProfilesResponse: {
+            /** Workflow Id */
+            workflow_id: string;
+            /**
+             * Since
+             * Format: date-time
+             */
+            since: string;
+            /**
+             * Until
+             * Format: date-time
+             */
+            until: string;
+            /** Window Days */
+            window_days: number;
+            /** Executions */
+            executions: number;
+            /** Tokens */
+            tokens: components["schemas"]["PhaseTokenProfileResponse"][];
+            /** Resources */
+            resources: components["schemas"]["PhaseResourceProfileResponse"][];
+        };
+        /**
          * PhaseProgressInfo
          * @description How far through its phases an execution is, skipped phases accounted for.
          *
@@ -6078,6 +6304,55 @@ export interface components {
             raw?: string | null;
         };
         /**
+         * PhaseResourceProfileResponse
+         * @description One phase type's workspace resource use at teardown (cgroup counters).
+         */
+        PhaseResourceProfileResponse: {
+            /** Phase Id */
+            phase_id: string;
+            cpu_seconds_per_wall_second: components["schemas"]["ResourcePercentilesResponse"];
+            cpu_throttled_seconds: components["schemas"]["ResourcePercentilesResponse"];
+            memory_peak_bytes: components["schemas"]["ResourcePercentilesResponse"];
+            disk_bytes_at_teardown: components["schemas"]["ResourcePercentilesResponse"];
+            coverage: components["schemas"]["ResourceCoverageResponse"];
+        };
+        /**
+         * PhaseSkillUseInfo
+         * @description Which declared skills this phase actually used (#1269).
+         *
+         *     Declaring a skill installs it; only an invocation shows the agent reached
+         *     for it. This is the fact that tells the two apart, per phase.
+         */
+        PhaseSkillUseInfo: {
+            /**
+             * Status
+             * @default unavailable
+             * @enum {string}
+             */
+            status: "observed" | "not_observable" | "unavailable";
+            /** Declared */
+            declared?: string[];
+            /** Invoked */
+            invoked?: components["schemas"]["InvokedSkillInfo"][];
+            /** Provider */
+            provider?: string | null;
+            /**
+             * Declared Not Invoked
+             * @description Declared skills with no observed invocation. Empty unless status is 'observed': an unobservable use is not a non-use.
+             */
+            readonly declared_not_invoked: string[];
+            /**
+             * Status Display
+             * @description What `status` means for this phase, in plain words. Render verbatim.
+             */
+            readonly status_display: string;
+            /**
+             * Summary Display
+             * @description One line on this phase's skill use. Never a count of zero for a phase whose use could not be seen. Render verbatim.
+             */
+            readonly summary_display: string;
+        };
+        /**
          * PhaseStartConfig
          * @description What a phase was configured with when its execution STARTED.
          *
@@ -6094,6 +6369,26 @@ export interface components {
             allowed_tools?: string[];
             /** Skills */
             skills?: components["schemas"]["PinnedSkillInfo"][];
+        };
+        /**
+         * PhaseTokenProfileResponse
+         * @description One (phase type, model). A sample is one execution's phase on that model.
+         *
+         *     A phase that fell back to another model mid-phase is a sample under BOTH
+         *     models, each holding only the tokens that model consumed.
+         */
+        PhaseTokenProfileResponse: {
+            /** Phase Id */
+            phase_id: string;
+            /** Model */
+            model: string;
+            input_tokens: components["schemas"]["TokenPercentilesResponse"];
+            output_tokens: components["schemas"]["TokenPercentilesResponse"];
+            cache_creation_tokens: components["schemas"]["TokenPercentilesResponse"];
+            cache_read_tokens: components["schemas"]["TokenPercentilesResponse"];
+            cost_usd: components["schemas"]["TokenPercentilesResponse"];
+            /** Unpriced Phases */
+            unpriced_phases: number;
         };
         /**
          * PinnedSkillInfo
@@ -6228,6 +6523,59 @@ export interface components {
             pull_request?: number | null;
             /** Diffstat */
             diffstat?: string | null;
+        };
+        /**
+         * ReadModelStatus
+         * @description Whether one read model is rebuilding, and how far it has got.
+         *
+         *     Carried on the list and detail responses a read model serves, so a page can
+         *     say "this list is incomplete because it is being rebuilt" instead of
+         *     looking broken, and listed on ``/health`` for every read model that is
+         *     rebuilding. Judged by ``services.read_model_status``; every number is
+         *     exact (checkpoint position against store head), never estimated.
+         */
+        ReadModelStatus: {
+            /**
+             * Rebuilding
+             * @description True while this read model is replaying history: it is more than the live-lag threshold (500 events) behind the head. A few events of ordinary live lag is NOT rebuilding, even while another read model replays.
+             */
+            rebuilding: boolean;
+            /**
+             * Projection
+             * @description Projection name, as in projection_checkpoints.
+             */
+            projection: string;
+            /**
+             * Label Display
+             * @description What the read model holds, for a sentence, e.g. 'execution history'.
+             */
+            label_display: string;
+            /**
+             * Progress Pct
+             * @description Checkpoint position as a whole percentage of the store head, 0-99 while rebuilding. Null when not rebuilding.
+             */
+            progress_pct?: number | null;
+            /**
+             * Progress Display
+             * @description progress_pct as '72%'.
+             */
+            progress_display?: string | null;
+            /**
+             * Events Behind
+             * @description Events between the checkpoint and the store head.
+             * @default 0
+             */
+            events_behind: number;
+            /**
+             * Events Behind Display
+             * @description events_behind as '29,476 events behind'.
+             */
+            events_behind_display?: string | null;
+            /**
+             * Summary Display
+             * @description One sentence for a banner, e.g. 'Rebuilding execution history - 72% (29,476 events behind).' Null when not rebuilding.
+             */
+            summary_display?: string | null;
         };
         /**
          * RegisterClaudePluginRequest
@@ -6812,6 +7160,62 @@ export interface components {
          */
         ReportedFailureReason: "task" | "platform" | "refused" | "unknown";
         /**
+         * RequestLatencyResponse
+         * @description Per-route arrival-to-response-start latency from ``api_request_latency``, slowest p99 first.
+         */
+        RequestLatencyResponse: {
+            /**
+             * Window
+             * @enum {string}
+             */
+            window: "1h" | "24h" | "7d" | "30d";
+            /** Since */
+            since: string;
+            /** Available */
+            available: boolean;
+            /** Routes */
+            routes: components["schemas"]["RouteLatencyResponse"][];
+            recorder: components["schemas"]["LatencyRecorderStatusResponse"];
+        };
+        /**
+         * ResourceCoverageResponse
+         * @description What the resource percentiles stand on. Every count is over the whole window.
+         */
+        ResourceCoverageResponse: {
+            /** Phases */
+            phases: number;
+            /** Phases Without Usage Row */
+            phases_without_usage_row: number;
+            /** Cpu Usage Seconds Missing */
+            cpu_usage_seconds_missing: number;
+            /** Cpu Throttled Seconds Missing */
+            cpu_throttled_seconds_missing: number;
+            /** Memory Peak Bytes Missing */
+            memory_peak_bytes_missing: number;
+            /** Disk Bytes At Teardown Missing */
+            disk_bytes_at_teardown_missing: number;
+            /** Wall Seconds Missing */
+            wall_seconds_missing: number;
+            /** Coverage Display */
+            coverage_display: string;
+        };
+        /**
+         * ResourcePercentilesResponse
+         * @description p50/p95 of one measure over ``n`` measured phases; null below ten.
+         */
+        ResourcePercentilesResponse: {
+            /** N */
+            n: number;
+            /** P50 */
+            p50: number | null;
+            /** P95 */
+            p95: number | null;
+            /** P50 Display */
+            p50_display: string;
+            /** P95 Display */
+            p95_display: string;
+        };
+        /**
          * ResumeRequest
          * @description What an operator must decide before a resume is admitted.
          *
@@ -6894,7 +7298,7 @@ export interface components {
          *
          *     * ``certified`` ends the repair loop. Every phase before the workflow's
          *       final phase is skipped, so a run that certifies in round 1 does not pay
-         *       for rounds 2 and 3.
+         *       for the rounds after it.
          *     * ``blocked`` - or no verdict at all - advances by order, which is the
          *       next repair round, or the final phase once the rounds are spent.
          *
@@ -6949,6 +7353,31 @@ export interface components {
              * @enum {string}
              */
             readonly version_status: "installed" | "unavailable";
+        };
+        /**
+         * RouteLatencyResponse
+         * @description Exact latency percentiles of one (method, route template) over the window.
+         *
+         *     Latency here is ARRIVAL TO RESPONSE START (time to first byte), not to the
+         *     last byte, so a long-lived stream counts as fast if it answered promptly.
+         */
+        RouteLatencyResponse: {
+            /** Method */
+            method: string;
+            /** Route */
+            route: string;
+            /** Count */
+            count: number;
+            /** P50 Ms */
+            p50_ms: number;
+            /** P95 Ms */
+            p95_ms: number;
+            /** P99 Ms */
+            p99_ms: number;
+            /** Max Ms */
+            max_ms: number;
+            /** P99 Display */
+            p99_display: string;
         };
         /** RunIdentity */
         RunIdentity: {
@@ -7466,7 +7895,7 @@ export interface components {
             };
             /**
              * Agent Model Display
-             * @description The model for humans: the reported id verbatim, or 'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9).
+             * @description The model for humans: the reported id verbatim, or '<alias> (requested)', or 'unknown' (ADR-067 D9).
              */
             readonly agent_model_display: string;
         };
@@ -7571,7 +8000,7 @@ export interface components {
             completed_at?: string | null;
             /**
              * Agent Model Display
-             * @description The model for humans: the reported id verbatim, or 'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9).
+             * @description The model for humans: the reported id verbatim, or '<alias> (requested)', or 'unknown' (ADR-067 D9).
              */
             readonly agent_model_display: string;
         };
@@ -7957,6 +8386,11 @@ export interface components {
              */
             lagging_projections?: components["schemas"]["ProjectionLag"][] | null;
             /**
+             * Rebuilding Read Models
+             * @description Every read model that is rebuilding, furthest behind first, with display strings for a banner. Ordinary live lag is excluded. Null when lag is unmeasurable.
+             */
+            rebuilding_read_models?: components["schemas"]["ReadModelStatus"][] | null;
+            /**
              * Unapplied Starts
              * @description Executions whose WorkflowExecutionStarted an execution read model's checkpoint passed without applying (#1545). Lag cannot show these: the read model is at the head and wrong. Non-empty sets status 'dropped_events'; repair per docs/runbooks/repair-dropped-execution-start.md. Null when not measured.
              */
@@ -8242,6 +8676,22 @@ export interface components {
             duration_ms?: number | null;
             /** Success */
             success?: boolean | null;
+        };
+        /**
+         * TokenPercentilesResponse
+         * @description p50/p90 of one measure over ``n`` phases; null below ten phases.
+         */
+        TokenPercentilesResponse: {
+            /** N */
+            n: number;
+            /** P50 */
+            p50: number | null;
+            /** P90 */
+            p90: number | null;
+            /** P50 Display */
+            p50_display: string;
+            /** P90 Display */
+            p90_display: string;
         };
         /**
          * ToolSummary
@@ -9472,6 +9922,8 @@ export interface operations {
                 tag?: string[] | null;
                 /** @description Keep only executions currently in this eval: an eval's runs (#967). Matched exactly, never as a prefix. */
                 eval_id?: string | null;
+                /** @description true keeps only executions that are currently a run of some eval; false keeps only executions in no eval. Omit for both. */
+                in_eval?: boolean | null;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -10541,7 +10993,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["EvalResponse"];
+                    "application/json": components["schemas"]["EvalDetailResponse"];
                 };
             };
             /** @description No eval has this id in the eval read model (it may still be catching up) */
@@ -11447,6 +11899,40 @@ export interface operations {
             };
         };
     };
+    get_phase_profiles_endpoint_metrics_phase_profiles_get: {
+        parameters: {
+            query: {
+                /** @description Workflow whose phases to profile */
+                workflow_id: string;
+                /** @description Look-back window in days */
+                window_days?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PhaseProfilesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_capture_status_capture_status_get: {
         parameters: {
             query?: {
@@ -11534,6 +12020,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SessionTokenMetrics"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_request_latency_observability_latency_get: {
+        parameters: {
+            query?: {
+                /** @description One route TEMPLATE, e.g. /evals/{eval_id}. Every route when omitted. */
+                route?: string | null;
+                /** @description How far back to look */
+                window?: "1h" | "24h" | "7d" | "30d";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestLatencyResponse"];
                 };
             };
             /** @description Validation Error */

@@ -103,7 +103,7 @@ export interface SessionSummary {
   agent_provider: string | null
   // Observed model id (ADR-067 D9); requested_model is what the definition asked for.
   agent_model: string | null
-  /** Explicit model id, or "unknown (requested: X)" / "unknown". Render verbatim. */
+  /** Explicit model id, or "X (requested)" / "unknown". Render verbatim. */
   agent_model_display: string
   /** What the phase definition asked for (an alias such as "opus"). */
   requested_model: string | null
@@ -147,7 +147,7 @@ export interface SessionResponse {
   agent_model: string | null
   /** What the phase definition asked for (an alias such as "opus"). */
   requested_model: string | null
-  /** Explicit model id, or "unknown (requested: X)". Render verbatim. */
+  /** Explicit model id, or "X (requested)". Render verbatim. */
   agent_model_display: string
   status: string
   input_tokens: number
@@ -389,6 +389,8 @@ export interface ExecutionListItem {
   /** Full GitHub URLs of repositories cloned for this execution (ADR-058) */
   repos: string[]
   repos_display: string | null
+  /** The eval this run is a current data point of, with its verdict; null in none. */
+  eval: components['schemas']['ExecutionEvalRunResponse'] | null
   /** Set exactly when `status` is `queued`: where the start waits, and why (PC-124). */
   start_queue: ExecutionStartQueueInfo | null
 }
@@ -445,7 +447,7 @@ export interface PhaseExecutionDetail {
   model: string | null
   /** What the phase definition asked for (an alias such as "opus"). */
   requested_model: string | null
-  /** Explicit model id, or "unknown (requested: X)" / "unknown". Render verbatim. */
+  /** Explicit model id, or "X (requested)" / "unknown". Render verbatim. */
   model_display: string
   /** Keyed by observed model id, or UNATTRIBUTED_MODEL_KEY. */
   cost_by_model: Record<string, string>
@@ -458,6 +460,11 @@ export interface PhaseExecutionDetail {
   pinned_at_start?: PhaseStartConfig | null
   /** Absent from a server that predates the field: treat as `unavailable`. */
   start_pins_status?: StartPinsStatus
+  /**
+   * Which declared skills this phase invoked, and whether that is knowable
+   * (#1269). Absent from a server that predates the field: unavailable.
+   */
+  skill_use?: PhaseSkillUse
   /** Why THIS phase failed, in the server's words; null unless it failed. */
   error_message?: string | null
   /**
@@ -472,6 +479,10 @@ export interface PhaseExecutionDetail {
 
 /** A phase's start config, aliased to the generated schema rather than restated. */
 export type PhaseStartConfig = components['schemas']['PhaseStartConfig']
+/** A phase's skill use (#1269), aliased to the generated schema rather than restated. */
+export type PhaseSkillUse = components['schemas']['PhaseSkillUseInfo']
+/** Skill use across a whole execution (feedback 01308bcf), aliased to the generated schema. */
+export type ExecutionSkillUse = components['schemas']['ExecutionSkillUseSummary']
 /** Why a phase's start pins are or are not shown; only `not_recorded` reads as "not recorded". */
 export type StartPinsStatus = components['schemas']['PhaseExecutionInfo']['start_pins_status']
 
@@ -481,6 +492,8 @@ export type PlannedPhaseInfo = components['schemas']['PlannedPhaseInfo']
 export interface ExecutionDetailResponse {
   /** Explicit naming for OTel correlation (ADR-028) */
   workflow_execution_id: string
+  /** Whether the execution detail read model is rebuilding, judged by the API. */
+  read_model_status?: components['schemas']['ReadModelStatus'] | null
   workflow_id: string
   workflow_name: string
   status: string
@@ -505,6 +518,8 @@ export interface ExecutionDetailResponse {
    * `status_display` and style by `status`; never work the status out here.
    */
   phase_plan: PlannedPhaseInfo[]
+  /** Skill use across every phase that started. Absent from an older server. */
+  skill_use?: ExecutionSkillUse
   total_input_tokens: number
   total_output_tokens: number
   total_cache_creation_tokens: number

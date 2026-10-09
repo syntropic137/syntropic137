@@ -178,7 +178,7 @@ class _GitHubSettings:
 class _SilentRecorder:
     """A codex observability recorder that records nothing: only the verdict is read."""
 
-    def note_agent_activity(self) -> None:
+    def note_agent_activity(self, *, changed_nothing: bool = False) -> None:
         return
 
     def note_observed_model(self, model: str | None) -> None:

@@ -39,6 +39,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.Artifact
     ArtifactCollectionHandler,
 )
 from syn_shared.agents import AgentProvider
+from syn_shared.settings import get_settings
 
 # =========================================================================
 # AgentExecutionHandler
@@ -1941,7 +1942,7 @@ class TestWorkspaceProvisionSkills:
         # timeout and working directory stay exact - that is what is being tested.
         workspace.execute.assert_any_await(
             ["skills", "add", "/workspace/.syn-skills/code-review", "--agent", "codex", "-y"],
-            timeout_seconds=120,
+            timeout_seconds=get_settings().skill_install_timeout_seconds,
             working_directory="/workspace",
         )
 

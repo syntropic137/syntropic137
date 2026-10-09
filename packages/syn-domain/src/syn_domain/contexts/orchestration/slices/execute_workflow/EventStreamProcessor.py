@@ -39,6 +39,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.phase_verdict imp
     AgentVerdict,
     VerdictReader,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.side_effect_free import (
+    tool_call_changes_nothing,
+)
 from syn_shared.agents import AgentProvider
 from syn_shared.delegation import (
     DELEGATION_TARGET_BY_PRIMARY,
@@ -59,6 +62,9 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.orchestration.slices.execute_workflow.phase_cost_limit import (
         PhaseCostLimit,
+    )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.phase_push import (
+        PushObserver,
     )
     from syn_domain.contexts.orchestration.slices.execute_workflow.SubagentTracker import (
         SubagentTracker,
@@ -363,6 +369,17 @@ def _model_under_message(message: object) -> object:
 
 _SUBAGENT_TOOL_NAMES = frozenset({ClaudeToolName.SUBAGENT, ClaudeToolName.SUBAGENT_LEGACY})
 
+#: Assistant content blocks that cannot themselves have written (#1825): the
+#: model's words, and a `tool_use`, which `_handle_tool_use` decides alone.
+_WORDS_OR_TOOL_USE = frozenset({"text", "thinking", "redacted_thinking", "tool_use"})
+
+#: The claude tool that invokes a skill, and the input field naming the skill
+#: (#1269). Recorded as its own field, never read back out of the preview: the
+#: preview is cut at 500 characters and a long ``args`` before ``skill`` would
+#: cut the name off.
+SKILL_TOOL_NAME = "Skill"
+_SKILL_INPUT_FIELD = "skill"
+
 # This processor drives a CLAUDE primary, so its declared delegate is codex.
 DELEGATION_TARGET: DelegationTarget = DELEGATION_TARGET_BY_PRIMARY[AgentProvider.CLAUDE]
 
@@ -405,6 +422,7 @@ class EventStreamProcessor:
         agent_model: str | None,
         collector: ObservabilityCollector | None = None,
         cost_limit: PhaseCostLimit | None = None,
+        on_push: PushObserver | None = None,
     ) -> None:
         self._tokens = tokens
         self._cost_limit = cost_limit
@@ -439,6 +457,9 @@ class EventStreamProcessor:
         # of those invocations so the tool_result can tell "tried and failed"
         # apart from "tried and succeeded".
         self._delegation_tool_use_ids: set[str] = set()
+        #: Tool calls `side_effect_free` read as read-only at their start, so
+        #: their results, which repeat no input, are judged the same (#1825).
+        self._read_only_tool_use_ids: set[str] = set()
         # A tool_result can be replayed for the same tool_use_id; dedup so the
         # same delegation is not counted twice.
         self._delegation_completed_ids: set[str] = set()
@@ -474,6 +495,7 @@ class EventStreamProcessor:
             collector=self._collector,
             execution_id=execution_id,
             phase_id=phase_id,
+            on_push=on_push,
         )
         self._cancel_poller = CancelSignalPoller(
             controller=controller,
@@ -765,7 +787,15 @@ class EventStreamProcessor:
             # "never started" and eligible to be run again from the top, so
             # what is claimed here is only what is certain - the model produced
             # a turn - and recognising the turn is left to the loop (#1303).
-            self._collector.note_agent_activity()
+            # A turn made only of words changed nothing; a tool call is decided
+            # by its own record below, and any other block type may have
+            # written (#1825).
+            self._collector.note_agent_activity(
+                changed_nothing=all(
+                    isinstance(block, dict) and block.get("type") in _WORDS_OR_TOOL_USE
+                    for block in content
+                )
+            )
 
         for item in content:
             if not isinstance(item, dict):
@@ -850,10 +880,16 @@ class EventStreamProcessor:
 
         self._note_delegation_attempt(tool_use_id, tool_input.get("command"))
 
+        skill = tool_input.get(_SKILL_INPUT_FIELD) if tool_name == SKILL_TOOL_NAME else None
+        changes_nothing = tool_call_changes_nothing(tool_name, tool_input.get("command"))
+        if changes_nothing:
+            self._read_only_tool_use_ids.add(tool_use_id)
         await self._collector.record_tool_started(
             tool_name=tool_name,
             tool_use_id=tool_use_id,
             input_preview=json.dumps(tool_input)[:500],
+            skill_name=skill if isinstance(skill, str) and skill else None,
+            changes_nothing=changes_nothing,
         )
         logger.debug("Tool started: %s", tool_name)
 
@@ -920,6 +956,7 @@ class EventStreamProcessor:
             tool_use_id=tool_use_id,
             success=not is_error,
             output_preview=output_preview,
+            changes_nothing=tool_use_id in self._read_only_tool_use_ids,
         )
         logger.debug("Tool completed: %s (%s) success=%s", tool_use_id, tool_name, not is_error)
 
