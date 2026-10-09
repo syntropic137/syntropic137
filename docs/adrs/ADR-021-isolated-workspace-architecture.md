@@ -792,12 +792,19 @@ Extend `tecnativa/docker-socket-proxy` env allow-list with `NETWORKS=1` and
 
 **What still mitigates this:**
 - `cap_drop: [ALL]` and `security_opt: no-new-privileges` on every container
-- The Docker socket itself is mounted **read-only** into the proxy alone; no
-  other container has direct socket access
-- The proxy still blocks images, volumes, secrets, swarm, plugins, and the
-  `/system/*` path-prefix
-- Per-execution networks are namespaced; the API has no way to attach arbitrary
-  containers to host networks
+- The Docker socket is mounted into the proxy and into `docker-create-guard`
+  only; the API has no direct socket access
+- The proxy still blocks secrets, swarm, plugins, and the `/system/*`
+  path-prefix. It no longer blocks images (`IMAGES=1`, #727) or all volumes
+  (GET/DELETE on `syn-capture-<64 hex>`, #1486)
+- Path filtering alone let `POST /containers/create` carry any HostConfig,
+  including `NetworkMode=host` (#1806). The proxy now routes every create to
+  `docker-create-guard`, which refuses privileged containers, `CapAdd`, host
+  network/pid/ipc/uts/userns/cgroupns, devices, binds outside
+  `SYN_WORKSPACE_HOST_DIR`, volumes other than `syn-capture-*`, `VolumesFrom`,
+  volume driver options, unconfined security options, and images outside the
+  allowlist. The allowlist and how to extend it are in
+  `packages/syn-adapters/src/syn_adapters/docker_create_guard/policy.py`
 
 ### Alternatives considered
 
