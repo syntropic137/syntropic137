@@ -134,7 +134,7 @@ const latencyCommand: CommandDef = {
   description: "Show API request latency (p50/p95/p99) per route",
   options: {
     window: { type: "string", short: "w", description: "1h, 24h, 7d or 30d", default: "24h" },
-    route: { type: "string", short: "r", description: "One route template, e.g. /evals/{eval_id}" },
+    route: { type: "string", short: "r", description: "One route template as the API reports it, e.g. /evals" },
   },
   handler: async (parsed: ParsedArgs) => {
     const window = (parsed.values["window"] as string | undefined) ?? "24h";
