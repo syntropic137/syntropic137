@@ -120,8 +120,9 @@ CODEX_QUOTA_SENTENCE = (
 CODEX_QUOTA = json.dumps({"type": "turn.failed", "error": {"message": CODEX_QUOTA_SENTENCE}})
 
 #: The real codex content-filter refusal, as codex streamed it (exec-61dad6055e6f).
-#: Its first lines are an `item.completed` - the agent had started work.
-CODEX_REFUSED_AFTER_WORK: tuple[str, ...] = tuple(
+#: Its first lines are an `item.completed` `agent_message`: the agent had
+#: started, and said something, but had done no work (#1825).
+CODEX_REFUSED_AS_OBSERVED: tuple[str, ...] = tuple(
     (Path(__file__).parents[3] / "fixtures" / "codex" / "codex_turn_failed.jsonl")
     .read_text()
     .splitlines()
@@ -129,7 +130,41 @@ CODEX_REFUSED_AFTER_WORK: tuple[str, ...] = tuple(
 #: The same refusal arriving before codex completed any item: the request was
 #: declined before the agent did anything.
 CODEX_REFUSED_BEFORE_WORK: tuple[str, ...] = tuple(
-    line for line in CODEX_REFUSED_AFTER_WORK if '"item.completed"' not in line
+    line for line in CODEX_REFUSED_AS_OBSERVED if '"item.completed"' not in line
+)
+
+
+def _codex_read(item_id: str, command: str) -> tuple[str, str]:
+    """A read-only codex shell command, opened and closed."""
+    item = {"id": item_id, "type": "command_execution", "command": command}
+    return (
+        json.dumps({"type": "item.started", "item": item}),
+        json.dumps({"type": "item.completed", "item": {**item, "exit_code": 0}}),
+    )
+
+
+#: What a codex verifier does before it is refused (exec-dc6a7109b21b): reads
+#: the change, then the observed refusal.
+CODEX_REFUSED_AFTER_READING: tuple[str, ...] = (
+    *_codex_read("item_r1", "/bin/zsh -lc 'gh pr diff 1819'"),
+    *_codex_read("item_r2", "/bin/zsh -lc 'sed -n 1,200p agent_attempts.py'"),
+    *CODEX_REFUSED_AS_OBSERVED,
+)
+#: The refusal after codex EDITED a file: that is work, and a second agent
+#: from the top would redo it.
+CODEX_REFUSED_AFTER_WORK: tuple[str, ...] = (
+    json.dumps(
+        {
+            "type": "item.completed",
+            "item": {
+                "id": "item_w1",
+                "type": "file_change",
+                "status": "completed",
+                "changes": [{"path": "a.py", "kind": "update"}],
+            },
+        }
+    ),
+    *CODEX_REFUSED_BEFORE_WORK,
 )
 #: The `error` codex recovered from in `codex_error_then_recovered.jsonl`.
 CODEX_HICCUP: str = next(
@@ -450,8 +485,28 @@ class TestRawStreamsFallBack:
         (row,) = (await _detail(repository, "exec-refusal-raw-before-work")).phases
         assert row.agent_provider == AgentProvider.CLAUDE
 
+    async def test_e2_a_codex_refusal_after_only_reading_completes_on_the_fallback(
+        self,
+    ) -> None:
+        """(e2) #1825: codex read the change, spoke, then was refused, and exited 1.
+
+        Driven through the real `AgentExecutionHandler`. Before #1825 any codex
+        item counted as work, so this exact verify run never reached claude.
+        """
+        agent = _ProductionHandlerAgent(
+            attempts=(CODEX_REFUSED_AFTER_READING, (CLAUDE_SUCCEEDS,)), exit_codes=(1, 0)
+        )
+        phase = _phase(AgentConfiguration(provider=AgentProvider.CODEX), CLAUDE_FALLBACK)
+
+        result, repository = await _run(agent, phase, "exec-refusal-raw-after-reading")
+
+        assert result.status == "completed", result.error_message
+        (row,) = (await _detail(repository, "exec-refusal-raw-after-reading")).phases
+        assert row.agent_provider == AgentProvider.CLAUDE
+        assert row.agent_model == "claude-fallback-model"
+
     async def test_f_a_codex_refusal_after_work_does_not_fall_back(self) -> None:
-        """(f) The real stream: codex completed an item, then was refused. No fallback."""
+        """(f) Codex edited a file, then was refused. No fallback: that was work."""
         agent = _RawJsonlAgent(attempts=(CODEX_REFUSED_AFTER_WORK, (CLAUDE_SUCCEEDS,)))
         phase = _phase(AgentConfiguration(provider=AgentProvider.CODEX), CLAUDE_FALLBACK)
 
