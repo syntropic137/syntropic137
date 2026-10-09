@@ -1,6 +1,5 @@
 import Nav from "./components/Nav";
 import Hero from "./components/Hero";
-import WhySyntropic from "./components/WhySyntropic";
 import HowItWorks from "./components/HowItWorks";
 import AgentControlPlane from "./components/AgentControlPlane";
 import GitHubTriggers from "./components/GitHubTriggers";
@@ -8,6 +7,7 @@ import Observability from "./components/Observability";
 import Security from "./components/Security";
 import Evals from "./sections/Evals";
 import UseCases from "./sections/UseCases";
+import WhyPlatform from "./sections/WhyPlatform";
 import GetStarted from "./components/GetStarted";
 import Footer from "./components/Footer";
 
@@ -18,8 +18,6 @@ export default function App() {
       <Nav />
       <main id="main-content">
         <Hero />
-        <hr className="section-divider" />
-        <WhySyntropic />
         <hr className="section-divider" />
         <HowItWorks />
         <hr className="section-divider" />
@@ -32,6 +30,7 @@ export default function App() {
         <Security />
         <Evals />
         <UseCases />
+        <WhyPlatform />
         <hr className="section-divider" />
         <GetStarted />
       </main>
