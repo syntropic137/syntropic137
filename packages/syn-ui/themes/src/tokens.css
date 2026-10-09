@@ -167,6 +167,10 @@
   --sky-dur-2: 900ms;  /* S-mark cube drop */
   --sky-dur-3: 1100ms; /* city block rise */
   --sky-dur-4: 2600ms; /* line draw, live pulse period */
+  /* Hold every motion.css class at its first frame: set paused on an
+     ancestor until the page plays it (e.g. once it scrolls into view), then
+     back to running. Inherited, so it reaches into the elements' shadow roots. */
+  --sky-motion-play: running;
 
   /* ---- Light and texture --------------------------------------------- */
   --sky-blur-glass: 14px;

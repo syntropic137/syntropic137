@@ -30,6 +30,10 @@
  *   sky-blink   typing caret (20 cycles of 1s)
  *   sky-draw    trend line draws in (2.6s); give the path pathLength="1400"
  *   sky-scroll  tool-log ticker scrolls one copy of its duplicated rows (14s)
+ *
+ * Hold: set --sky-motion-play: paused on an ancestor and every class waits
+ * on its first frame (hidden, for the entrances) until it is set back to
+ * running, so an entrance can play when it scrolls into view.
  */
 
 /* Static layout for the typed line, true with or without motion. */
@@ -102,4 +106,21 @@
     animation: sky-draw var(--sky-dur-4) var(--sky-ease-draw) 0.4s both;
   }
   .sky-scroll { animation: sky-scroll 14s linear 1; }
+
+  /* --sky-motion-play (tokens.css) holds every class above until the page plays it. */
+  .sky-rise,
+  .sky-sdrop,
+  .sky-pulse,
+  .sky-flash,
+  .sky-rise.sky-pulse,
+  .sky-rise.sky-flash,
+  .sky-drift,
+  .sky-bob,
+  .sky-bob[data-motion='alt'],
+  .sky-type,
+  .sky-blink,
+  .sky-draw,
+  .sky-scroll {
+    animation-play-state: var(--sky-motion-play);
+  }
 }
