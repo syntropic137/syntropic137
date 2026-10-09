@@ -1,4 +1,4 @@
-/* InstallTerminal: the install box of the v4 boards (hero, links page). */
+/* InstallTerminal: the install box of the v4 boards (hero, closing call to action, links page). */
 .install-box {
   position: relative;
   display: flex;
@@ -79,6 +79,11 @@
   stroke-width: 1.6;
   stroke-linecap: round;
   stroke-linejoin: round;
+}
+
+.install-box[data-state="failed"] .install-box__copy {
+  background: var(--sky-color-danger-soft);
+  color: var(--sky-color-danger-soft-fg);
 }
 
 .install-box__copy:focus-visible {

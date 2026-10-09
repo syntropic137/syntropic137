@@ -991,3 +991,42 @@ img, video {
     justify-content: center;
   }
 }
+
+/* ── Section frame (04 Evals, use cases, why, start) ──
+   Hairline on top and the board's 1320px column; data-ground="band" is the
+   dotted ground of the use-case and comparison bands. */
+.page-section {
+  position: relative;
+  border-top: var(--ds-border-width) solid var(--sky-color-section-rule);
+  background: var(--sky-color-ground-deep);
+  scroll-margin-top: var(--ds-space-4);
+}
+
+.page-section[data-ground="band"] {
+  background: var(--sky-texture-dots), var(--sky-color-ground-band);
+}
+
+.page-section__inner {
+  max-width: 1320px;
+  margin: 0 auto;
+  padding: 56px var(--sky-gutter);
+}
+
+@media (min-width: 48rem) {
+  .page-section__inner {
+    padding-block: 120px;
+  }
+}
+
+/* Visually hidden, still read by screen readers. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}

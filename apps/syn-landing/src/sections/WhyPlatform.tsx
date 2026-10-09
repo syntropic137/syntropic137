@@ -1,4 +1,4 @@
-import SectionHead from "./SectionHead";
+import { SectionIntro } from "../components/PillarHeader";
 import { WHY_PLATFORM_COPY } from "../data/copy";
 import "./WhyPlatform.css";
 
@@ -17,14 +17,14 @@ const Check = () => (
 export default function WhyPlatform() {
   const c = WHY_PLATFORM_COPY;
   return (
-    <section className="p7-section why" data-ground="band" aria-labelledby="why-title">
-      <div className="p7-section__inner why__inner">
+    <section className="page-section why" data-ground="band" aria-labelledby="why-title">
+      <div className="page-section__inner why__inner">
         <div className="why__head">
-          <SectionHead id="why-title" eyebrow={c.eyebrow} title={c.title} lede={c.lede} />
+          <SectionIntro titleId="why-title" eyebrow={c.eyebrow} title={c.title} lede={c.lede} />
         </div>
         <table className="why__table" role="table">
-          <caption className="p7-sr-only">{c.caption}</caption>
-          <thead className="p7-sr-only" role="rowgroup">
+          <caption className="sr-only">{c.caption}</caption>
+          <thead className="sr-only" role="rowgroup">
             <tr role="row">
               <th scope="col" role="columnheader">{c.columns.question}</th>
               <th scope="col" role="columnheader">{c.columns.without}</th>

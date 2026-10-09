@@ -1,5 +1,5 @@
-import SectionHead from "./SectionHead";
-import InstallCmd from "../components/InstallCmd";
+import { SectionIntro } from "../components/PillarHeader";
+import InstallTerminal from "../components/InstallTerminal";
 import SMark from "../components/SMark";
 import { START_COPY } from "../data/copy";
 import "./Start.css";
@@ -11,12 +11,12 @@ import "./Start.css";
 export default function Start() {
   const c = START_COPY;
   return (
-    <section id="start" className="p7-section start" aria-labelledby="start-title">
+    <section id="start" className="page-section start" aria-labelledby="start-title">
       <div className="start__inner">
         <div className="start__main">
-          <SectionHead id="start-title" title={c.title} lede={c.lede} size="closing" />
+          <SectionIntro titleId="start-title" title={c.title} lede={c.lede} size="closing" />
           <div className="start__install">
-            <InstallCmd />
+            <InstallTerminal typing />
             <p className="start__note">{c.note}</p>
           </div>
         </div>

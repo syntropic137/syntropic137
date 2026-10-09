@@ -7,24 +7,27 @@ export interface PillarPoint {
 }
 
 interface SectionIntroProps {
-  eyebrow: string;
+  /** Mono label over the title; the closing call to action has none. */
+  eyebrow?: string;
   title: string;
-  lede: string;
-  /** Centred on every width ("What is Syntropic137?"), or start-aligned (pillars). */
-  align?: "center" | "start";
+  lede?: string;
+  /** Centred on every width ("What is Syntropic137?"), centred from 48rem only (use cases), or start-aligned (pillars). */
+  align?: "center" | "center-wide" | "start";
   /** id for the h2, so the section can be labelled by it. */
   titleId?: string;
+  /** "closing": the larger, tighter headline of the closing call to action. */
+  size?: "section" | "closing";
 }
 
 /** Eyebrow, gradient display title and lede: the head of every section on the v4 boards. */
-export function SectionIntro({ eyebrow, title, lede, align = "start", titleId }: SectionIntroProps) {
+export function SectionIntro({ eyebrow, title, lede, align = "start", titleId, size = "section" }: SectionIntroProps) {
   return (
     <div className="section-intro" data-align={align}>
-      <span className="section-intro__eyebrow">{eyebrow}</span>
-      <h2 id={titleId} className="section-intro__title glow-text">
+      {eyebrow ? <span className="section-intro__eyebrow">{eyebrow}</span> : null}
+      <h2 id={titleId} className="section-intro__title glow-text" data-size={size}>
         {title}
       </h2>
-      <p className="section-intro__lede">{lede}</p>
+      {lede ? <p className="section-intro__lede">{lede}</p> : null}
     </div>
   );
 }

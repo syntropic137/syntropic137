@@ -7,7 +7,7 @@
   flex-direction: column;
   gap: var(--ds-space-6);
 }
-.why__inner.p7-section__inner {
+.why__inner.page-section__inner {
   padding-block: 48px;
 }
 .why__table {
@@ -56,7 +56,7 @@
   stroke: var(--ds-color-accent);
 }
 @media (min-width: 48rem) {
-  .why__inner.p7-section__inner {
+  .why__inner.page-section__inner {
     padding-block: 112px;
   }
   .why__row {

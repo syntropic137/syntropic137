@@ -1,4 +1,5 @@
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useReducer, useRef, useState, type CSSProperties, type RefObject } from "react";
+import { copyFeedback, COPY_FEEDBACK_MS, type CopyState } from "@syn137/skyline-core/state";
 import { HERO, INSTALL_COMMAND } from "../data/copy";
 import "./InstallTerminal.css";
 
@@ -37,22 +38,28 @@ function useTyping(ref: RefObject<HTMLDivElement | null>, enabled: boolean) {
   return state;
 }
 
+/** Copy with skyline-core's copyFeedback states; copied and failed reset after COPY_FEEDBACK_MS. */
 function useCopy(text: string) {
-  const [copied, setCopied] = useState(false);
+  const [state, send] = useReducer(copyFeedback, "idle");
   useEffect(() => {
-    if (!copied) return;
-    const id = window.setTimeout(() => setCopied(false), 1600);
+    if (state !== "copied" && state !== "failed") return;
+    const id = window.setTimeout(() => send({ type: "reset" }), COPY_FEEDBACK_MS);
     return () => window.clearTimeout(id);
-  }, [copied]);
-  const copy = () =>
+  }, [state]);
+  const copy = () => {
+    send({ type: "copy" });
     Promise.resolve()
       .then(() => navigator.clipboard.writeText(text))
       .then(
-      () => setCopied(true),
-      () => setCopied(false),
-    );
-  return { copied, copy };
+        () => send({ type: "success" }),
+        () => send({ type: "error" }),
+      );
+  };
+  return { state, copy };
 }
+
+const COPY_LABEL: Record<CopyState, string> = { idle: HERO.copyLabel, copying: HERO.copyLabel, copied: HERO.copiedLabel, failed: HERO.copyFailedLabel };
+const COPY_ANNOUNCE: Record<CopyState, string> = { idle: "", copying: "", copied: HERO.copiedAnnounce, failed: HERO.copyFailedAnnounce };
 
 function CopyIcon({ done }: { done: boolean }) {
   return (
@@ -89,16 +96,18 @@ function Command({ typing, started }: { typing: boolean; started: boolean }) {
 /**
  * The install box of the v4 boards: prompt, `npx @syntropic137/setup init`
  * and a Copy button. The full command is always in the DOM (and is the
- * static end state); typing only reveals it.
+ * static end state); typing only reveals it. Used by the hero, the closing
+ * call to action and the links page. The button keeps its name ("Copy
+ * install command"); the result is announced in a polite status message.
  */
 export default function InstallTerminal({ className, style, typing = false }: InstallTerminalProps) {
   const ref = useRef<HTMLDivElement>(null);
   const { started, visible } = useTyping(ref, typing);
-  const { copied, copy } = useCopy(INSTALL_COMMAND);
+  const { state, copy } = useCopy(INSTALL_COMMAND);
   const classes = className ? `install-box ${className}` : "install-box";
 
   return (
-    <div ref={ref} className={classes} style={style} data-paused={typing && !visible ? "" : undefined}>
+    <div ref={ref} className={classes} style={style} data-state={state} data-paused={typing && !visible ? "" : undefined}>
       <span className="install-box__prompt" aria-hidden="true">
         ❯
       </span>
@@ -106,9 +115,12 @@ export default function InstallTerminal({ className, style, typing = false }: In
         <Command typing={typing} started={started} />
       </code>
       <button type="button" className="install-box__copy" onClick={copy} aria-label={HERO.copyAria}>
-        <CopyIcon done={copied} />
-        <span aria-live="polite">{copied ? HERO.copiedLabel : HERO.copyLabel}</span>
+        <CopyIcon done={state === "copied"} />
+        <span aria-hidden="true">{COPY_LABEL[state]}</span>
       </button>
+      <span className="sr-only" role="status">
+        {COPY_ANNOUNCE[state]}
+      </span>
     </div>
   );
 }
