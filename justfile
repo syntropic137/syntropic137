@@ -19,6 +19,9 @@ import 'just/skyline.just'
 # Skyline serving (gateway / and the legacy /next), e2e and CI mirrors (skyline-ci, skyline-e2e, skyline-gateway-smoke, skyline-dev-next).
 import 'just/skyline-serve.just'
 
+# syntropic137.com landing page recipes (landing-dev, landing-build, landing-qa, landing-lighthouse, landing-energy).
+import 'just/landing.just'
+
 # Docker Compose shorthand variables
 compose := "docker compose -f docker/docker-compose.yaml"
 compose_dev := compose + " -f docker/docker-compose.dev.yaml"
