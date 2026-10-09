@@ -30,8 +30,11 @@
 #     endpoint is pinned for every later docker call.
 #   - Project: generated (syn137rehearse-<UTC timestamp>-<pid>), never a flag.
 #     It refuses if any container, volume or network whose name starts with
-#     syn137rehearse- already exists, and if the rendered compose names any
-#     volume, network or container outside the generated project.
+#     syn137rehearse- already exists. Each version's compose is rendered in a
+#     staging dir and validated there before it replaces the active config: it
+#     must name no volume, network or container outside the generated project,
+#     bind-mount nothing outside the workdir, use no external or driver_opts
+#     volume, no host namespace and no privileged service.
 #   - Credentials: compose runs under `env -i`, so no host variable reaches
 #     interpolation or a `KEY: null` passthrough; every credential the API or
 #     collector reads is set to "" and 1Password tokens with them. The created
@@ -44,8 +47,10 @@
 #     in a one-off container before anything starts. A version whose resolver
 #     cannot be shown disabled is refused.
 #   - Workdir: created fresh; an existing path (file, dir or symlink) is refused.
-#   - Cleanup: an EXIT trap removes the git worktree and its registration, the
-#     compose project, and only volumes/networks carrying the generated prefix.
+#   - Cleanup: an EXIT trap removes the git worktree and only its own
+#     registration, then containers, networks and volumes by explicit name, each
+#     carrying the generated project prefix. Teardown never runs compose, so no
+#     compose file (validated or not) decides what is deleted.
 #
 # Exit status: 0 PASS, 1 FAIL (lost rows, mismatch, held/halted projection,
 # timeout), 2 usage, 3 refused (a safety property did not hold).
@@ -119,23 +124,53 @@ fi  # VERIFY_ONLY (guards)
 OUT="$WORK/out"; mkdir -p "$OUT"
 API="http://127.0.0.1:${PORT}"
 FAIL=0; fail() { echo "FAIL: $*" | tee -a "$OUT/failures.txt"; FAIL=1; }
-dc() { dk compose -p "$PROJECT" --env-file "$WORK/.env" -f "$WORK/docker-compose.syntropic137.yaml" -f "$WORK/override.yaml" "$@"; }
+# Compose against the config in dir $1. Relative paths always resolve against
+# $WORK, so a staged config renders exactly as it will run once promoted.
+dcin() { local d="$1"; shift; dk compose -p "$PROJECT" --project-directory "$WORK" --env-file "$WORK/.env" -f "$d/docker-compose.syntropic137.yaml" -f "$d/override.yaml" "$@"; }
+dc() { dcin "$WORK" "$@"; }  # the active config: only ever a validated one
 psql_q() { dc exec -T timescaledb psql -U syn -d syn -tAc "$1"; }
 
 SRC=""; COMPOSE_USED=0
+
+# The one place anything docker is deleted. A name is ours only if it carries
+# this run's generated project and a separator: the namespace guard proved no
+# such name existed before this run.
+rm_owned() {  # $1 container|volume|network, $2 name
+    case "$2" in "${PROJECT}-"*|"${PROJECT}_"*) ;; *) echo "teardown: not deleting $1 $2 (not this rehearsal's)" >&2; return 0 ;; esac  # owned-delete
+    case "$1" in
+        container) dk rm -f -v "$2" >/dev/null || true ;;  # -v: anonymous volumes only
+        volume|network) dk "$1" rm "$2" >/dev/null || true ;;
+    esac
+}
+owned_names() {  # $1 container|volume|network -> names carrying this run's project
+    case "$1" in container) dk ps -a --format '{{.Names}}' ;; *) dk "$1" ls --format '{{.Name}}' ;; esac \
+        | grep -E "^${PROJECT}[-_]" || true
+}
+# Removes this run's worktree directory and its own registration only (no
+# global `worktree prune`, which would drop other worktrees' registrations).
+forget_worktree() {
+    local common d
+    [ "$SRC" = "$WORK/src" ] || return 0
+    git -C "$REPO" worktree remove --force "$SRC" >/dev/null 2>&1 && return 0
+    rm -rf "$WORK/src"
+    common="$(git -C "$REPO" rev-parse --path-format=absolute --git-common-dir)" || return 0
+    for d in "$common"/worktrees/*/; do
+        [ "$(cat "${d}gitdir" 2>/dev/null)" = "$WORK/src/.git" ] && rm -rf "${d%/}"
+    done
+    return 0
+}
 cleanup() {
-    local rc=$?
+    local rc=$? kind name
     trap - EXIT
-    if [ -n "$SRC" ]; then
-        git -C "$REPO" worktree remove --force "$SRC" >/dev/null 2>&1 || rm -rf "$SRC"
-        git -C "$REPO" worktree prune
-    fi
-    if [ "$COMPOSE_USED" = 1 ] && [ "$KEEP" = 1 ]; then echo "stack kept: docker compose -p $PROJECT ... down -v"
+    if [ -n "$SRC" ]; then forget_worktree; fi
+    if [ "$COMPOSE_USED" = 1 ] && [ "$KEEP" = 1 ]; then echo "stack kept: remove every container, network and volume named ${PROJECT}-* / ${PROJECT}_* when done"
     elif [ "$COMPOSE_USED" = 1 ]; then
         step "tear down $PROJECT"
-        dc down -v >/dev/null 2>&1 || true  # never --remove-orphans
-        for v in $(dk volume ls --format '{{.Name}}' | grep "^${PROJECT}" || true); do dk volume rm "$v" >/dev/null || true; done
-        for n in $(dk network ls --format '{{.Name}}' | grep "^${PROJECT}" || true); do dk network rm "$n" >/dev/null || true; done
+        # By explicit name, never `compose down`: compose would delete whatever
+        # the current compose file names, validated or not.
+        for kind in container network volume; do
+            for name in $(owned_names "$kind"); do rm_owned "$kind" "$name"; done  # teardown:by-name
+        done
     fi
     exit "$rc"
 }
@@ -206,14 +241,19 @@ check_op_disabled() {  # $1 label
     done
 }
 
-# The rendered compose must name nothing outside this project and mount no
-# docker socket; a new pinned name in a future compose file is caught here.
-check_rendered() {
+# The config staged in dir $1 must name nothing outside this project, touch no
+# host path outside $WORK and mount no docker socket; a new pinned name or
+# mount in a future compose file is caught here, before it is ever active.
+check_rendered() {  # $1 staging dir
     local cfg foreign
-    cfg="$(dc config --format json)"
-    foreign="$(jq -r --arg p "$PROJECT" '[(.volumes // {} | .[] | .name), (.networks // {} | .[] | .name), (.services[] | .container_name // empty)] | .[] | select(startswith($p) | not)' <<<"$cfg")"
+    cfg="$(dcin "$1" config --format json)" || refuse "compose could not render the staged config"
+    foreign="$(jq -r --arg p "^${PROJECT}[-_]" '[(.volumes // {} | .[] | .name), (.networks // {} | .[] | .name), (.services[] | .container_name // empty)] | .[] | select(test($p) | not)' <<<"$cfg")"
     [ -z "$foreign" ] || refuse "compose names resources outside $PROJECT: $(echo $foreign)"  # guard:rendered-names
     ! jq -e '[.services[] | .volumes // [] | .[] | (.source // "")] | any(test("docker\\.sock"))' <<<"$cfg" >/dev/null || refuse "a service mounts a docker socket"  # guard:docker-socket-mount
+    foreign="$(jq -r --arg w "$WORK/" '[(.services[] | .volumes // [] | .[] | select(.type == "bind" or (.type | IN("volume", "tmpfs") | not)) | .source // "?"), ((.secrets // {}), (.configs // {}) | .[] | .file // empty)] | .[] | select(startswith($w) | not)' <<<"$cfg")"
+    [ -z "$foreign" ] || refuse "compose mounts host paths outside $WORK: $(echo $foreign)"  # guard:host-paths
+    foreign="$(jq -r '(.volumes // {} | to_entries[] | select(.value.external or .value.driver_opts != null or ((.value.driver // "local") != "local")) | "volume:" + .key), (.services | to_entries[] | select(.value.privileged or ([.value.network_mode, .value.pid, .value.ipc, .value.userns_mode] | any(. == "host")) or (.value.volumes_from != null)) | "service:" + .key)' <<<"$cfg")"
+    [ -z "$foreign" ] || refuse "compose uses host-backed volumes or host namespaces: $(echo $foreign)"  # guard:host-backed
 }
 
 # --- override: isolation, names, prod-like limits ---------------------------
@@ -229,7 +269,8 @@ blank_credentials() {  # every credential "", no docker host, no usable `op`
     echo "      DOCKER_HOST: \"\""
     for v in $CRED_VARS; do echo "      ${v}: \"\""; done
 }
-write_override() {  # $1 api image, $2 collector image, $3 event-store image ("" = keep)
+write_override() {  # $1 out dir, $2 api image, $3 collector image, $4 event-store image ("" = keep)
+    local out="$1"; shift
     {
         echo "services:"
         for s in timescaledb event-store collector api gateway minio redis envoy-proxy token-injector cloudflared; do
@@ -258,7 +299,7 @@ volumes:
 networks:
   syn-internal: {name: PROJECT_internal}
 EOF
-    } | sed "s/PROJECT/${PROJECT}/g" > "$WORK/override.yaml"
+    } | sed "s/PROJECT/${PROJECT}/g" > "$out/override.yaml"
 }
 
 if [ "$VERIFY_ONLY" = 0 ]; then
@@ -271,8 +312,8 @@ git -C "$REPO" fetch -q origin
 TO_SHA="$(git -C "$REPO" rev-parse --short "$TO_REF")"
 git -C "$REPO" show "$TO_REF:docker/docker-compose.syntropic137.yaml" > to/docker-compose.syntropic137.yaml
 git -C "$REPO" show "$TO_REF:docker/selfhost-entrypoint.sh" > to/selfhost-entrypoint.sh
-rm -rf init-db; mkdir init-db
-git -C "$REPO" archive "$FROM" docker/init-db | tar -x -C init-db --strip-components=2
+mkdir "$WORK/init-db"  # $WORK is fresh, so nothing to remove first
+git -C "$REPO" archive "$FROM" docker/init-db | tar -x -C "$WORK/init-db" --strip-components=2
 write_op_stub
 for s in db-password redis-password minio-password; do openssl rand -hex 24 > "secrets/$s.secret"; done
 : > secrets/github-app-private-key.pem
@@ -308,9 +349,14 @@ fi
 fi  # VERIFY_ONLY (prepare)
 
 use_version() {  # $1 from|to
-    cp "$1/docker-compose.syntropic137.yaml" "$1/selfhost-entrypoint.sh" "$WORK/"
-    if [ "$1" = from ]; then write_override "" "" ""; else write_override "$TO_API" "$TO_COLLECTOR" "$TO_ES"; fi
-    check_rendered
+    # Render and validate in a staging dir; only a validated config is ever
+    # promoted to the active one in $WORK.
+    local stage="$WORK/stage-$1"
+    rm -rf "$stage"; mkdir "$stage"
+    cp "$1/docker-compose.syntropic137.yaml" "$stage/"
+    if [ "$1" = from ]; then write_override "$stage" "" "" ""; else write_override "$stage" "$TO_API" "$TO_COLLECTOR" "$TO_ES"; fi
+    check_rendered "$stage"  # refuses (exit 3) with the active config untouched
+    cp "$stage/docker-compose.syntropic137.yaml" "$stage/override.yaml" "$1/selfhost-entrypoint.sh" "$WORK/"  # promote:validated
     # Create (not start) the containers and read their env before anything
     # runs: restore, API start and upgrade all come after this check.
     COMPOSE_USED=1

@@ -38,7 +38,7 @@ a="$*"; echo "docker ${a//$'\n'/ } | DOCKER_HOST=${DOCKER_HOST-unset} DOCKER_CON
 case "$1" in
     context) cat "$S/context_host"; exit 0 ;;
     info|cp) exit 0 ;;
-    ps) [ -f "$S/fail_ps" ] && exit 42; cat "$S/existing_containers" 2>/dev/null; exit 0 ;;
+    ps) [ -f "$S/fail_ps" ] && exit 42; cat "$S/existing_containers" "$S/created_containers" 2>/dev/null; exit 0 ;;
     volume|network)
         [ "$2" = ls ] || exit 0
         [ -f "$S/fail_$1" ] && exit 42
@@ -50,16 +50,25 @@ case "$1" in
     compose) shift ;;
     *) exit 0 ;;
 esac
-proj=""
-while [ $# -gt 0 ]; do case "$1" in -p) proj="$2"; shift 2 ;; --env-file|-f) shift 2 ;; *) break ;; esac; done
+proj=""; pdir=""; files=()
+while [ $# -gt 0 ]; do case "$1" in -p) proj="$2"; shift 2 ;; --project-directory) pdir="$2"; shift 2 ;; -f) files+=("$2"); shift 2 ;; --env-file) shift 2 ;; *) break ;; esac; done
+# What this compose config renders to, like `compose config --format json`.
+# A compose file carrying FOREIGN_VOLUME names the production volume.
+render() {
+    if [ -f "$S/config_json" ]; then sed -e "s|__P__|$proj|g" -e "s|__W__|$pdir|g" "$S/config_json"; return; fi
+    vol="${proj}_db_data"
+    { [ -f "$S/config_foreign" ] || grep -qs FOREIGN_VOLUME "${files[@]}"; } && vol=syn137_db_data
+    src='{"type":"volume","source":"api_logs"}'; [ -f "$S/config_socket" ] && src='{"type":"bind","source":"/var/run/docker.sock"}'
+    printf '{"services":{"api":{"container_name":"%s-api","volumes":[%s,{"type":"bind","source":"%s/selfhost-entrypoint.sh"}]}},"volumes":{"db_data":{"name":"%s"}},"networks":{"syn-internal":{"name":"%s_internal"}}}\n' \
+        "$proj" "$src" "$pdir" "$vol" "$proj"
+}
 case "$1" in
-    config)
-        vol="${proj}_db_data"; [ -f "$S/config_foreign" ] && vol=syn137_db_data
-        src=api_logs; [ -f "$S/config_socket" ] && src=/var/run/docker.sock
-        printf '{"services":{"api":{"container_name":"%s-api","volumes":[{"source":"%s"}]}},"volumes":{"db_data":{"name":"%s"}},"networks":{"syn-internal":{"name":"%s_internal"}}}\n' \
-            "$proj" "$src" "$vol" "$proj" ;;
+    config) render ;;
+    down)  # compose deletes every named volume of the config it is given
+        case " $* " in *" -v "*) for v in $(render | jq -r '.volumes[] | .name'); do echo "docker volume rm $v | via compose down -v" >> "$S/trace"; done ;; esac ;;
     create)  # the project's named resources now exist
-        echo "${proj}_db_data" >> "$S/created_volumes"; echo "${proj}_internal" >> "$S/created_networks" ;;
+        echo "${proj}_db_data" >> "$S/created_volumes"; echo "${proj}_internal" >> "$S/created_networks"
+        printf '%s-api\n%s-collector\n' "$proj" "$proj" >> "$S/created_containers" ;;
     up) [ -f "$S/up_fail" ] && exit 1 ;;
     run) cat "$S/op_probe" 2>/dev/null || echo op-disabled ;;
     ps) echo "cid-${@: -1}" ;;
@@ -201,6 +210,33 @@ def assert_refused_before_acting(res: Result, reason: str, *, allow_create: bool
     assert acting == [], f"acted on the target before refusing: {acting}"
 
 
+DELETES = (("docker", "rm"), ("docker", "volume", "rm"), ("docker", "network", "rm"))
+
+
+def deleted_names(trace: list[str]) -> list[str]:
+    """Every docker resource a trace deletes by name, including what a
+    `compose down -v` deletes (the stub records each such volume)."""
+    names = []
+    for line in trace:
+        words = line.split(" | ")[0].split()
+        for verb in DELETES:
+            if tuple(words[: len(verb)]) == verb:
+                names.append(words[-1])
+    return names
+
+
+def assert_torn_down_by_name_only(res: Result) -> None:
+    project = next(line for line in res.trace if " create " in line).split(" -p ")[1].split()[0]
+    compose_deletes = [
+        line for line in res.trace if line.startswith("docker compose") and " down" in line
+    ]
+    assert compose_deletes == [], f"teardown went through compose: {compose_deletes}"
+    names = deleted_names(res.trace)
+    assert names, "nothing torn down"
+    foreign = [n for n in names if not n.startswith((f"{project}-", f"{project}_"))]
+    assert foreign == [], f"deleted resources that are not this rehearsal's: {foreign}"
+
+
 @pytest.fixture
 def rig(tmp_path: Path) -> Rig:
     return Rig(tmp_path)
@@ -267,6 +303,32 @@ def scenario_foreign_rendered_name(rig: Rig) -> None:
     assert_refused_before_acting(rig.run(), "compose names resources outside")
 
 
+def scenario_host_path_bind(rig: Rig) -> None:
+    rig.put(
+        "config_json",
+        '{"services":{"api":{"container_name":"__P__-api","volumes":['
+        '{"type":"bind","source":"__W__/workspaces"},{"type":"bind","source":"/opt/syn137/data"}]}}}',
+    )
+    assert_refused_before_acting(rig.run(), "mounts host paths outside")
+
+
+def scenario_host_backed_volume(rig: Rig) -> None:
+    rig.put(
+        "config_json",
+        '{"services":{"api":{"container_name":"__P__-api"}},"volumes":{"db_data":{"name":"__P___db_data",'
+        '"driver_opts":{"type":"none","o":"bind","device":"/var/lib/docker/volumes/syn137_db_data/_data"}}}}',
+    )
+    assert_refused_before_acting(rig.run(), "host-backed volumes or host namespaces")
+
+
+def scenario_host_network(rig: Rig) -> None:
+    rig.put(
+        "config_json",
+        '{"services":{"api":{"container_name":"__P__-api","network_mode":"host"}}}',
+    )
+    assert_refused_before_acting(rig.run(), "host-backed volumes or host namespaces")
+
+
 def scenario_docker_socket_mount(rig: Rig) -> None:
     rig.put("config_socket", "")
     assert_refused_before_acting(rig.run(), "mounts a docker socket")
@@ -327,6 +389,8 @@ SCENARIOS = {
     "fresh-workdir": [scenario_existing_workdir, scenario_symlinked_workdir],
     "rendered-names": [scenario_foreign_rendered_name],
     "docker-socket-mount": [scenario_docker_socket_mount],
+    "host-paths": [scenario_host_path_bind],
+    "host-backed": [scenario_host_backed_volume, scenario_host_network],
     "container-credentials": [scenario_credential_in_container],
 }
 ALL = [(tag, fn) for tag, fns in SCENARIOS.items() for fn in fns]
@@ -376,7 +440,7 @@ def test_safe_path_passes_on_the_pinned_local_daemon_and_cleans_up(rig: Rig) -> 
     up = next(i for i, line in enumerate(res.trace) if " up " in line)
     create = next(i for i, line in enumerate(res.trace) if " create " in line)
     assert create < up, "container env must be checked before anything starts"
-    assert any(" down -v" in line for line in res.trace), "stack not torn down"
+    assert_torn_down_by_name_only(res)
     # Host credentials never reach compose: the override pins each to "".
     override = (rig.root / "work" / "override.yaml").read_text()
     for var in (
@@ -634,39 +698,105 @@ def test_failed_compose_up_tears_down_only_this_project(rig: Rig) -> None:
     assert "timescaledb" in res.trace[up], "the failing compose up was not reached"
     assert not any("pg_restore" in line for line in res.trace)
     after = res.trace[up + 1 :]
-    assert any(f"-p {project}" in line and " down -v" in line for line in after), "not torn down"
-    removed = [
-        line.split()[3]
-        for line in after
-        if line.split()[1:3] in (["volume", "rm"], ["network", "rm"])
-    ]
-    assert sorted(removed) == sorted([f"{project}_db_data", f"{project}_internal"]), removed
+    assert_torn_down_by_name_only(res)
+    removed = deleted_names(after)
+    assert sorted(removed) == sorted(
+        [f"{project}-api", f"{project}-collector", f"{project}_db_data", f"{project}_internal"]
+    ), removed
 
 
+# --- a refused candidate must not steer teardown --------------------------------
+
+
+def test_refused_candidate_never_reaches_teardown_or_the_active_config(rig: Rig) -> None:
+    """Baseline runs, then the candidate's compose names the production volume.
+
+    The refusal must leave the validated baseline config active, and teardown
+    must delete only this rehearsal's resources, by name, never via compose.
+    """
+    compose = rig.repo / "docker" / "docker-compose.syntropic137.yaml"
+    compose.write_text("# FOREIGN_VOLUME: db_data is named syn137_db_data\nservices: {}\n")
+    _git(rig.repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qam", "candidate")
+    _git(rig.repo, "push", "-q", "origin", "main")
+    rig.put("existing_volumes", "syn137_db_data\nsyn137_api_logs\n")
+    rig.put("existing_networks", "syn137_internal\n")
+    rig.put("existing_containers", "syn137-timescaledb\n")
+    res = rig.run()
+    assert res.rc == 3, res.output
+    assert "compose names resources outside" in res.output and "syn137_db_data" in res.output
+    # The baseline really ran: restored and started before the candidate.
+    assert any("pg_restore" in line for line in res.trace), "baseline never ran"
+    assert any(" up " in line and " api" in line for line in res.trace), "baseline api never started"
+    active = (rig.root / "work" / "docker-compose.syntropic137.yaml").read_text()
+    assert "FOREIGN_VOLUME" not in active, "the refused candidate replaced the active config"
+    assert_torn_down_by_name_only(res)
+    project = next(line for line in res.trace if " create " in line).split(" -p ")[1].split()[0]
+    assert sorted(deleted_names(res.trace)) == sorted(
+        [f"{project}-api", f"{project}-collector", f"{project}_db_data", f"{project}_internal"]
+    )
+
+
+def test_unfiltered_listing_is_still_held_by_rm_owned(rig: Rig) -> None:
+    # Defense in depth: even if the listing filter regressed, the delete
+    # chokepoint refuses every name outside this run's project.
+    source = rig.script.read_text()
+    old = '| grep -E "^${PROJECT}[-_]" || true'
+    assert source.count(old) == 1
+    rig.script.write_text(source.replace(old, "|| true"))
+    test_refused_candidate_never_reaches_teardown_or_the_active_config(rig)
+
+
+# Each mutation restores one way cleanup used to (or could) go wrong.
 CLEANUP_MUTATIONS = {
     "worktree": (
-        'git -C "$REPO" worktree remove --force "$SRC" >/dev/null 2>&1 || rm -rf "$SRC"',
-        ":",
+        [('git -C "$REPO" worktree remove --force "$SRC" >/dev/null 2>&1 && return 0', "return 0")],
         test_failed_docker_build_removes_the_worktree_and_its_registration,
     ),
-    "compose-down": (
-        "dc down -v >/dev/null 2>&1 || true",
-        ":",
+    "no-teardown": (
+        [('for name in $(owned_names "$kind"); do rm_owned "$kind" "$name"; done', ":")],
         test_failed_compose_up_tears_down_only_this_project,
     ),
-    "volume-scope": (
-        "for v in $(dk volume ls --format '{{.Name}}' | grep \"^${PROJECT}\" || true)",
-        "for v in $(dk volume ls --format '{{.Name}}' || true)",
-        test_failed_compose_up_tears_down_only_this_project,
+    "old-compose-down-teardown": (
+        [
+            (
+                'for name in $(owned_names "$kind"); do rm_owned "$kind" "$name"; done',
+                "dc down -v >/dev/null 2>&1 || true",
+            )
+        ],
+        test_refused_candidate_never_reaches_teardown_or_the_active_config,
+    ),
+    "copy-before-validate": (
+        [('    check_rendered "$stage"', '    cp "$1/docker-compose.syntropic137.yaml" "$WORK/"\n    check_rendered "$stage"')],
+        test_refused_candidate_never_reaches_teardown_or_the_active_config,
+    ),
+    "old-use-version-and-teardown": (
+        [
+            ('    check_rendered "$stage"', '    cp "$1/docker-compose.syntropic137.yaml" "$WORK/"\n    check_rendered "$WORK"'),
+            (
+                'for name in $(owned_names "$kind"); do rm_owned "$kind" "$name"; done',
+                "dc down -v >/dev/null 2>&1 || true",
+            ),
+        ],
+        test_refused_candidate_never_reaches_teardown_or_the_active_config,
+    ),
+    "delete-scope": (
+        [
+            ('| grep -E "^${PROJECT}[-_]" || true', "|| true"),
+            ('    case "$2" in "${PROJECT}-"*|"${PROJECT}_"*) ;; *) echo', '    case "$2" in *) ;; x) echo'),
+        ],
+        test_refused_candidate_never_reaches_teardown_or_the_active_config,
     ),
 }
 
 
 @pytest.mark.parametrize("name", list(CLEANUP_MUTATIONS))
 def test_breaking_cleanup_fails_its_test(rig: Rig, name: str) -> None:
-    old, new, test = CLEANUP_MUTATIONS[name]
+    edits, test = CLEANUP_MUTATIONS[name]
     source = rig.script.read_text()
-    assert source.count(old) == 1, old
-    rig.script.write_text(source.replace(old, new))
+    for old, new in edits:
+        assert source.count(old) == 1, old
+        source = source.replace(old, new)
+    rig.script.write_text(source)
+    assert rig.script.read_text() != SCRIPT.read_text(), "mutation not applied"
     with pytest.raises(AssertionError):
         test(rig)
