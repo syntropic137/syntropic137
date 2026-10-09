@@ -553,7 +553,8 @@ walks into `/workspace/repos/<name>/AGENTS.md` on its own either.
   agent, its fallback (PC-83) and, under `allow_delegation`, the other CLI.
 - That document is **appended to codex's global instructions file**,
   `${CODEX_HOME:-~/.codex}/AGENTS.md`, after whatever the image ships there.
-  `/workspace/AGENTS.md` becomes a one-line pointer to it. Two reasons, both
+  `/workspace/AGENTS.md` becomes a one-line pointer to it, and so does each
+  clone's `AGENTS.override.md` (see Consequences). Two reasons, both
   measured on codex-cli 0.160.1 with `codex debug prompt-input`:
   - Codex reads the global file from **every** working directory. A delegated
     codex keeps its caller's working directory, often inside a clone; codex
@@ -581,7 +582,14 @@ walks into `/workspace/repos/<name>/AGENTS.md` on its own either.
   the cost: about as many bytes as a claude turn already carries.
 - `@`-imports *inside* a repo's own instruction file are inlined as written.
   Codex still does not follow them.
-- A codex launched inside a clone whose own `AGENTS.md` has instructions of its
-  own reads that file natively as well as from the global file, so it sees
-  those instructions twice. That costs tokens and loses nothing; a clone
-  holding only `CLAUDE.md`, or a breadcrumb `AGENTS.md`, sees them once.
+- A codex launched inside a clone would also read the clone's own `AGENTS.md`
+  natively and see its instructions twice. Codex reads `AGENTS.override.md` in
+  place of `AGENTS.md` in the same directory (codex-cli 0.160.1), so each clone
+  gets a one-line `AGENTS.override.md` pointing at the global file, excluded in
+  the clone's `.git/info/exclude` so it is never committed. Every selected
+  root file then reaches codex once from the clone and from the workspace root,
+  whatever the clone holds: `CLAUDE.md` only, a breadcrumb, a distinct or
+  identical `AGENTS.md`, or `AGENTS.md` only. A repo that ships its own
+  `AGENTS.override.md` keeps it: codex already reads that instead of the
+  `AGENTS.md` made global. Nested `AGENTS.md` files below the clone root are
+  still read natively and are not made global.

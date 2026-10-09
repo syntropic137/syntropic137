@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import re
+import shlex
 from enum import Enum
 from typing import TYPE_CHECKING, Final
 
@@ -148,16 +149,36 @@ async def inline_instruction_files(
 #: moves them: ``inject_files`` can only write under /workspace.
 CODEX_INSTRUCTIONS_STAGED = ".setup/codex-instructions.md"
 
-#: Append ``$1`` to codex's global instructions file and remove it. Codex reads
+#: A clone's root AGENTS.md, as codex reads it once the clone's instructions
+#: are global. Codex reads ``AGENTS.override.md`` in place of ``AGENTS.md`` in
+#: the same directory (codex-cli 0.160.1), so a codex started inside the clone
+#: would otherwise read the clone's AGENTS.md natively and again from the
+#: global file (#1835).
+CLONE_OVERRIDE: Final[str] = (
+    "This repository's root AGENTS.md and CLAUDE.md are already in codex's global "
+    "instructions file (~/.codex/AGENTS.md). The platform wrote this file so codex "
+    "does not read them twice; it is not part of the repository.\n"
+)
+
+#: Append ``$1`` to codex's global instructions file and remove it, then give
+#: each clone directory after it a ``CLONE_OVERRIDE``. Codex reads
 #: ``$CODEX_HOME/AGENTS.md`` from any working directory, so a delegated codex
 #: started inside a clone gets it too, where it never sees /workspace/AGENTS.md;
 #: and ``project_doc_max_bytes`` (32768 by default in codex-cli 0.160.1) does
 #: not cap it, so no launch cuts its tail (#1835). Appended, not overwritten:
-#: the image ships its own global instructions there.
-INSTALL_CODEX_INSTRUCTIONS = (
-    'h="${CODEX_HOME:-$HOME/.codex}"; mkdir -p "$h" && '
-    '{ if [ -s "$h/AGENTS.md" ]; then printf "\\n"; fi; cat -- "$1"; } >> "$h/AGENTS.md" && '
-    'rm -f -- "$1"'
+#: the image ships its own global instructions there. A clone's own override
+#: is left alone: codex already reads it instead of the AGENTS.md made global.
+#: Ours is excluded locally so it never shows as a change to commit.
+INSTALL_CODEX_INSTRUCTIONS: Final[str] = (
+    'h="${CODEX_HOME:-$HOME/.codex}"; s="$1"; shift; mkdir -p "$h" && '
+    '{ if [ -s "$h/AGENTS.md" ]; then printf "\\n"; fi; cat -- "$s"; } >> "$h/AGENTS.md" && '
+    'rm -f -- "$s" || exit 1; '
+    'for d in "$@"; do '
+    '[ -e "$d/AGENTS.override.md" ] && continue; '
+    f'printf %s {shlex.quote(CLONE_OVERRIDE)} > "$d/AGENTS.override.md" || exit 1; '
+    'if [ -d "$d/.git" ]; then mkdir -p "$d/.git/info" && '
+    'printf "/AGENTS.override.md\\n" >> "$d/.git/info/exclude" || exit 1; fi; '
+    "done"
 )
 
 #: /workspace/AGENTS.md when the instructions are codex's global instructions:
@@ -169,14 +190,24 @@ CODEX_POINTER = (
 )
 
 
-async def install_codex_instructions(workspace: ManagedWorkspace) -> None:
+async def install_codex_instructions(workspace: ManagedWorkspace, clones: Sequence[str]) -> None:
     """Move the staged inlined instructions into codex's global instructions.
+
+    ``clones`` are the repo directories whose root files they contain; each gets
+    ``CLONE_OVERRIDE`` so a codex started inside it reads them once.
 
     A failure is raised, not logged: codex would run with none of the
     target repos' instructions, which is the defect this exists to close.
     """
     result = await workspace.execute(
-        ["sh", "-c", INSTALL_CODEX_INSTRUCTIONS, "sh", f"/workspace/{CODEX_INSTRUCTIONS_STAGED}"],
+        [
+            "sh",
+            "-c",
+            INSTALL_CODEX_INSTRUCTIONS,
+            "sh",
+            f"/workspace/{CODEX_INSTRUCTIONS_STAGED}",
+            *clones,
+        ],
         timeout_seconds=30,
     )
     if result.exit_code != 0 or result.timed_out:

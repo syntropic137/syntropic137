@@ -920,11 +920,13 @@ async def _provisioned_files(
     )
 
     installed: list[str] = []
+    clones: list[list[str]] = []
 
     async def execute(command: list[str], **_kwargs: object) -> ExecutionResult:
         if command[:3] == ["sh", "-c", INSTALL_CODEX_INSTRUCTIONS]:
             # Never run for real: it appends to the test runner's own ~/.codex.
-            installed.append(command[-1])
+            installed.append(command[4])
+            clones.append(command[5:])
             return ExecutionResult(exit_code=0, success=True, duration_ms=1.0)
         if execute_error is not None:
             raise execute_error
@@ -1004,6 +1006,12 @@ async def _provisioned_files(
     staged = result.pop(CODEX_INSTRUCTIONS_STAGED, None)
     # Staged exactly when it is installed: a staged file left behind reaches no agent.
     assert installed == ([f"/workspace/{CODEX_INSTRUCTIONS_STAGED}"] if staged else [])
+    # Every clone whose root files went global gets its override, once (#1835).
+    names = dict.fromkeys(
+        url.rstrip("/").removesuffix(".git").rsplit("/", 1)[-1]
+        for url in (repos or ["https://github.com/org/repo-a"])
+    )
+    assert clones == ([[f"/workspace/repos/{n}" for n in names]] if staged else [])
     if staged is not None:
         result[_CODEX_GLOBAL] = staged
     return result
@@ -2314,23 +2322,46 @@ def test_every_provider_declares_whether_it_expands_at_imports() -> None:
     }
 
 
+_BIG = "x" * 40_000
+
+
 @pytest.mark.unit
 @pytest.mark.anyio
 @pytest.mark.skipif(shutil.which("codex") is None, reason="needs the pinned codex CLI")
-@pytest.mark.parametrize("breadcrumb", [False, True], ids=["claude-md-only", "breadcrumb"])
+@pytest.mark.parametrize(
+    "clone_files",
+    [
+        {"CLAUDE.md": f"RULE_HEAD_5b1e\n{_BIG}\nRULE_TAIL_5b1e\n"},
+        {
+            "CLAUDE.md": f"RULE_HEAD_5b1e\n{_BIG}\nRULE_TAIL_5b1e\n",
+            "AGENTS.md": "@CLAUDE.md\n",
+        },
+        {
+            "CLAUDE.md": f"RULE_HEAD_5b1e\n{_BIG}\nRULE_TAIL_5b1e\n",
+            "AGENTS.md": "DISTINCT_AGENTS_RULE_5b1e\n",
+        },
+        {
+            "CLAUDE.md": f"RULE_HEAD_5b1e\n{_BIG}\nRULE_TAIL_5b1e\n",
+            "AGENTS.md": f"RULE_HEAD_5b1e\n{_BIG}\nRULE_TAIL_5b1e\n",
+        },
+        {"AGENTS.md": f"RULE_HEAD_5b1e\n{_BIG}\nRULE_TAIL_5b1e\n"},
+    ],
+    ids=["claude-md-only", "breadcrumb", "distinct-agents-md", "identical-pair", "agents-md-only"],
+)
 async def test_codex_sees_the_repo_rules_once_from_any_directory_past_32_kib(
-    tmp_path: Path, breadcrumb: bool
+    tmp_path: Path, clone_files: dict[str, str]
 ) -> None:
     """The real codex CLI, offline, as a delegated launch sees it (#1835).
 
     A delegated codex keeps its caller's working directory, often inside a
     clone, and gets no ``-c`` overrides, so it reads the image's 32768-byte
     ``project_doc_max_bytes`` default. The repo's instructions must reach the
-    model from the clone and from the workspace root alike, tail included.
+    model from the clone and from the workspace root alike, tail included, and
+    once each: inside the clone codex also discovers the clone's own AGENTS.md.
     """
-    body = "RULE_HEAD_5b1e\n" + "x" * 40_000 + "\nRULE_TAIL_5b1e\n"
     injected = await _provisioned_files(
-        {_REPO_CLAUDE: body}, agent=_agent(AgentProvider.CLAUDE, allow_delegation=True)
+        {f"/workspace/repos/repo-a/{name}": body for name, body in clone_files.items()},
+        agent=_agent(AgentProvider.CLAUDE, allow_delegation=True),
     )
     home, workspace = tmp_path / "codex-home", tmp_path / "workspace"
     clone = workspace / "repos" / "repo-a"
@@ -2338,17 +2369,24 @@ async def test_codex_sees_the_repo_rules_once_from_any_directory_past_32_kib(
     home.mkdir()
     (home / "AGENTS.md").write_text("IMAGE_GLOBAL_RULE\n")
     (workspace / "AGENTS.md").write_text(injected["AGENTS.md"])
-    (clone / "CLAUDE.md").write_text(body)
-    if breadcrumb:
-        (clone / "AGENTS.md").write_text("@CLAUDE.md\n")
+    for name, body in clone_files.items():
+        (clone / name).write_text(body)
     staged = workspace / CODEX_INSTRUCTIONS_STAGED
     staged.parent.mkdir()
     staged.write_text(injected[_CODEX_GLOBAL])
     env = {**os.environ, "CODEX_HOME": str(home)}
     # The handler's real install script, against a stand-in codex home.
-    subprocess.run(["sh", "-c", INSTALL_CODEX_INSTRUCTIONS, "sh", str(staged)], env=env, check=True)
+    subprocess.run(
+        ["sh", "-c", INSTALL_CODEX_INSTRUCTIONS, "sh", str(staged), str(clone)],
+        env=env,
+        check=True,
+    )
     assert not staged.exists()
+    # The override never shows up as a change for the agent to commit.
+    assert "/AGENTS.override.md" in (clone / ".git" / "info" / "exclude").read_text().split()
 
+    rules = {"RULE_HEAD_5b1e", "RULE_TAIL_5b1e", "IMAGE_GLOBAL_RULE"}
+    rules |= {"DISTINCT_AGENTS_RULE_5b1e"} & {b.strip() for b in clone_files.values()}
     for cwd in (clone, workspace):
         prompt = subprocess.run(
             ["codex", "debug", "prompt-input", "probe"],
@@ -2358,6 +2396,24 @@ async def test_codex_sees_the_repo_rules_once_from_any_directory_past_32_kib(
             text=True,
             check=True,
         ).stdout
-        for rule in ("RULE_HEAD_5b1e", "RULE_TAIL_5b1e", "IMAGE_GLOBAL_RULE"):
+        for rule in sorted(rules):
             assert prompt.count(rule) == 1, (cwd, rule)
         assert prompt.count("This phase is killed at") == 1, cwd
+
+
+@pytest.mark.unit
+def test_a_clones_own_override_is_left_alone(tmp_path: Path) -> None:
+    """Codex already reads a repo's AGENTS.override.md instead of its AGENTS.md (#1835)."""
+    clone = tmp_path / "repo-a"
+    (clone / ".git").mkdir(parents=True)
+    (clone / "AGENTS.override.md").write_text("REPO_OWN_OVERRIDE\n")
+    staged = tmp_path / "staged.md"
+    staged.write_text("inlined\n")
+    env = {**os.environ, "CODEX_HOME": str(tmp_path / "home")}
+    subprocess.run(
+        ["sh", "-c", INSTALL_CODEX_INSTRUCTIONS, "sh", str(staged), str(clone)],
+        env=env,
+        check=True,
+    )
+    assert (clone / "AGENTS.override.md").read_text() == "REPO_OWN_OVERRIDE\n"
+    assert not (clone / ".git" / "info" / "exclude").exists()
