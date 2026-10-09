@@ -15,8 +15,9 @@
 #   backup   DIR                 dump DIR/syn-<UTC>.dump and DIR/syn-<UTC>.dump.manifest
 #                                (sha256 of the dump, row count of every table),
 #                                published only after every row was read back
-#   prune    DIR DAYS            delete backups older than DAYS days; only names
-#                                this script generates, nothing else in DIR
+#   prune    DIR DAYS            delete backups older than DAYS days: only files
+#                                this script created and recorded in DIR's ledger
+#                                (.syn-db-backup.ledger), nothing else in DIR
 #   schedule DIR "CRON" DAYS     backup + prune whenever CRON matches (UTC)
 #   restore  FILE [--force]      check FILE against its manifest, restore it into
 #                                a new staging database, verify every table's row
@@ -41,6 +42,11 @@ if [ -n "${POSTGRES_PASSWORD_FILE:-}" ] && [ -z "${PGPASSWORD:-}" ]; then
 fi
 
 MANIFEST_HEADER="syn-db-backup manifest 1"
+# Append-only record of every file this script creates in a backup directory,
+# as `INODE NAME`. prune deletes a file only when its name has the generated
+# shape AND the ledger records that name with that file's inode: a file an
+# operator put there, whatever it is called, is never in it.
+LEDGER=".syn-db-backup.ledger"
 
 # The only names this script ever publishes or leaves behind. prune deletes
 # nothing else. Shell patterns are anchored and [..] never matches '/' or a
@@ -65,6 +71,37 @@ is_partial_name() {
         .syn-$STAMP.dump.partial.$A$A$A$A$A$A) return 0 ;;
     esac
     return 1
+}
+
+inode() {
+    ls -di -- "$1" | awk '{ print $1 }'
+}
+
+# Record DIR/NAME, just created by this script, in DIR's ledger. A file that
+# cannot be recorded is only ever kept, never pruned: that is the safe side.
+track() {
+    tr_ino=$(inode "$1/$2") && [ -n "$tr_ino" ] &&
+        printf '%s %s\n' "$tr_ino" "$2" >>"$1/$LEDGER" ||
+        echo "syn-db-backup: could not record $2 in $1/$LEDGER; it will never be pruned" >&2
+}
+
+# Hard-link SRC to exactly DEST, never replacing or entering anything there:
+# fails, leaving nothing behind, if DEST exists in any form (file, directory,
+# symlink, dangling symlink), including one that appears during the call.
+publish_link() {
+    if [ -e "$2" ] || [ -L "$2" ]; then
+        return 1
+    fi
+    ln "$1" "$2" 2>/dev/null || return 1
+    if [ -L "$2" ] || [ ! -f "$2" ] || ! [ "$2" -ef "$1" ]; then
+        # A directory appeared at DEST, so ln linked inside it under SRC's
+        # own unique name: remove exactly that link, which is ours.
+        pl_stray="$2/${1##*/}"
+        if [ -f "$pl_stray" ] && [ ! -L "$pl_stray" ] && [ "$pl_stray" -ef "$1" ]; then
+            rm -f -- "$pl_stray"
+        fi
+        return 1
+    fi
 }
 
 sha256() {
@@ -150,9 +187,11 @@ backup() {
     partial=$(mktemp "$dir/.syn-$stamp.dump.partial.XXXXXX") ||
         fail "cannot create a file in $dir"
     trap 'rm -f "$partial"' EXIT
+    track "$dir" "${partial##*/}"
     manifest_partial=$(mktemp "$dir/.syn-$stamp.dump.partial.XXXXXX") ||
         fail "cannot create a file in $dir"
     trap 'rm -f "$partial" "$manifest_partial"' EXIT
+    track "$dir" "${manifest_partial##*/}"
     pg_dump --format=custom --file="$partial" || fail "pg_dump failed"
     tables=$(table_data_count "$partial")
     [ "$tables" -gt 0 ] || fail "archive lists no table data; refusing to keep it"
@@ -169,20 +208,25 @@ backup() {
         printf '%s\n' "$rows"
         echo "tables $tables"
     } >"$manifest_partial"
-    # ln refuses an existing name, so publishing never replaces another file:
-    # a same-second collision takes the next free -N suffix. The manifest is
-    # claimed first, so a published dump always has its manifest.
+    # Publishing never replaces or enters anything already there: a taken
+    # name (same-second collision, or anything an operator put there) moves
+    # on to the next free -N suffix. The manifest is claimed first, so a
+    # published dump always has its manifest.
     name="syn-$stamp.dump" n=0
     while :; do
-        if ln "$manifest_partial" "$dir/$name.manifest" 2>/dev/null; then
-            ln "$partial" "$dir/$name" 2>/dev/null && break
-            # Ours: ln just created it.
-            rm -f "$dir/$name.manifest"
+        if publish_link "$manifest_partial" "$dir/$name.manifest"; then
+            publish_link "$partial" "$dir/$name" && break
+            # Remove the manifest just linked, and only if it still is ours.
+            if [ ! -L "$dir/$name.manifest" ] && [ "$dir/$name.manifest" -ef "$manifest_partial" ]; then
+                rm -f -- "$dir/$name.manifest"
+            fi
         fi
         n=$((n + 1))
         [ "$n" -le 99 ] || fail "no free name for a $stamp backup in $dir"
         name="syn-$stamp-$n.dump"
     done
+    track "$dir" "$name.manifest"
+    track "$dir" "$name"
     rm -f "$partial" "$manifest_partial"
     trap - EXIT
     size=$(du -h "$dir/$name" | cut -f1)
@@ -190,14 +234,19 @@ backup() {
     echo "backup ok: $dir/$name ($size, $tables tables, $total rows)"
 }
 
-# Age-based retention over the names this script generates, and only those:
-# anything else in DIR, however old or however named, is never touched.
+# Age-based retention over files this script created, and only those: each
+# must be named in the generated shape and recorded in DIR's ledger with its
+# current inode. Anything else in DIR, however old or however named, is never
+# touched. Without a ledger nothing is pruned.
 prune() {
     dir=$1
     require_days "$2"
     [ -d "$dir" ] || fail "backup directory $dir does not exist"
-    for path in "$dir"/syn-* "$dir"/.syn-*; do
-        name=${path##*/}
+    ledger="$dir/$LEDGER"
+    if [ ! -f "$ledger" ] || [ -L "$ledger" ]; then
+        return 0
+    fi
+    while read -r ino name; do
         if is_published_name "$name"; then
             minutes=$(($2 * 1440))
         elif is_partial_name "$name"; then
@@ -206,13 +255,18 @@ prune() {
         else
             continue
         fi
+        path="$dir/$name"
         # A regular file, never a symlink (which could point anywhere).
-        [ -f "$path" ] && [ ! -L "$path" ] || continue
+        if [ ! -f "$path" ] || [ -L "$path" ]; then
+            continue
+        fi
+        # Still the file this script created, not one put in its place.
+        [ "$(inode "$path")" = "$ino" ] || continue
         # -mmin, not -mtime: -mtime truncates to whole days, so +7 keeps 7.9 days.
         [ -n "$(find "$path" -prune -type f -mmin "+$minutes")" ] || continue
         rm -f -- "$path"
         case $name in .syn-*) ;; *) echo "pruned: $name" ;; esac
-    done
+    done <"$ledger"
 }
 
 # Standard five-field cron: numbers, '*', lists, ranges and '/step'. Day of
