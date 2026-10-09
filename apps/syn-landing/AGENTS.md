@@ -21,7 +21,7 @@ visuals and the plan for architecture.
 | `just landing-dev` | Vite dev server |
 | `just landing-build` | Production build into `apps/syn-landing/dist` |
 | `just landing-preview` | Serve the build (`LANDING_PORT`, default 3000) |
-| `just landing-qa` | Copy lint, typecheck, build |
+| `just landing-qa` | Copy lint, colour lint, typecheck, build |
 | `just landing-lighthouse` | Lighthouse against `vite preview` with the CI minimums |
 | `just landing-energy` | `tests/energy.spec.ts` (about 2 minutes) |
 
@@ -40,6 +40,8 @@ install inputs. They bind every change:
 - **Idle CPU** (`tests/energy.spec.ts`): under 500ms of CPU over 5s of idle,
   measured after 35s, and no infinite CSS animations. Every animation runs a
   few cycles and stops on a static end state.
+- **No colour literals** in `src/` CSS or TSX, and every Skyline token used
+  exists (`scripts/check-colours.sh`).
 - Typecheck (`tsc --noEmit`), build, CodeQL and gitleaks.
 
 ## Deployment
@@ -52,9 +54,10 @@ app, `packages/syn-ui` or the pnpm inputs changed. `VITE_GITHUB_STARS` (see
 
 ## Design system
 
-Skyline: `docs/syntropic137-design-system.md` points at it. The old
-`--color-*` / `--glass-*` tokens in `src/globals.css` are swapped for
-Skyline's in P5; until then, don't add new ones.
+Skyline: `docs/syntropic137-design-system.md` points at it. Styles use only
+Skyline's `--ds-*` / `--sky-*` tokens (`@syn137/skyline-themes`); no colour
+literals in `src/` (`just landing-colour-lint`). Shared visuals are the
+`<sky-*>` elements, built before `dev` and `build`.
 
 <!-- VERCEL BEST PRACTICES START -->
 ## Best practices for developing on Vercel
