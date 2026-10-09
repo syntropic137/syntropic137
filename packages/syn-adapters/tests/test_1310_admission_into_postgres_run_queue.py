@@ -116,6 +116,9 @@ async def test_a_durable_start_reloads_through_a_fresh_event_store_client(
     """
     from syn_adapters.storage.legacy_tolerant_client import LegacyShapeTolerantGrpcClient
     from syn_domain.contexts._shared.repository_ref import RepositoryRef
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins import (
+        SourceCommit,
+    )
 
     address = f"{test_infrastructure.eventstore_host}:{test_infrastructure.eventstore_port}"
     tenant = f"run-queue-{uuid4().hex}"
@@ -159,6 +162,12 @@ async def test_a_durable_start_reloads_through_a_fresh_event_store_client(
             repos=[
                 RepositoryRef.from_slug("acme/one"),
                 RepositoryRef.from_slug("acme/two"),
+            ],
+            # What `ExecuteWorkflowHandler` hands the processor: one entry per
+            # repository, an unknown SHA kept as None (`source_commits_for`).
+            source_commits=[
+                SourceCommit(repository="acme/one", sha="a" * 40),
+                SourceCommit(repository="acme/two", sha=None),
             ],
         )
         assert result.status == "admitted"
