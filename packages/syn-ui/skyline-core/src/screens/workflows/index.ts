@@ -3,6 +3,7 @@
  * PhoneWorkflow): list filters and sort, card labels, phase token shares,
  * the phase kit read from a phase definition, and a small prompt parser.
  */
+import { formatCost } from '../../format/cost'
 import type { PhaseKitProps, SkillRefProps } from '../../patterns/phaseKit'
 
 // ---------------------------------------------------------------- list
@@ -200,6 +201,33 @@ export function phaseShares(phaseIds: readonly string[], runs: readonly { phase_
   const total = Object.values(out).reduce((n, r) => n + r.tokens, 0)
   if (total > 0) for (const r of Object.values(out)) r.share = r.tokens / total
   return out
+}
+
+export interface PhaseMetricsInput extends PhaseUsageInput {
+  /** True while a session of the phase is still running: the cost is a lower bound. */
+  cost_in_progress?: boolean | null
+}
+
+export interface PhaseUsage extends PhaseShare {
+  /** The cost is a lower bound (render "≥"). */
+  partial: boolean
+}
+
+/**
+ * Per-phase tokens and cost from GET /metrics?workflow_id= (`phases`, one row
+ * per phase over every run of the workflow, as the React page charts them).
+ * Shares are of the defined phases' tokens.
+ */
+export function phaseUsage(phaseIds: readonly string[], phases: readonly PhaseMetricsInput[]): Record<string, PhaseUsage> {
+  const shares = phaseShares(phaseIds, [{ phase_results: phases }])
+  const out: Record<string, PhaseUsage> = {}
+  for (const id of phaseIds) out[id] = { ...shares[id]!, partial: phases.some((p) => p.phase_id === id && p.cost_in_progress === true) }
+  return out
+}
+
+/** "≥$267.01" while the phase's cost is still accruing, else "$267.01". */
+export function phaseCostLabel(u: PhaseUsage): string {
+  return `${u.partial ? '≥' : ''}${formatCost(u.cost)}`
 }
 
 /** Which third of a 3-slab icon to light for phase `index` of `count`: 0 top, 1 middle, 2 bottom. */

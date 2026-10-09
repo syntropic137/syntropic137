@@ -23,3 +23,13 @@ test('Workflow detail recent runs read the Executions list usage, failed phases 
   await expect(runs.getByText('92.5k')).toBeVisible()
   await expect(runs.getByText('69.4k')).toHaveCount(0)
 })
+
+test('Workflow detail shows per-phase tokens and cost, sessions and artifacts (from /metrics?workflow_id=)', async ({ page }) => {
+  await page.goto('./workflows/research-workflow')
+  const main = page.locator('#sky-main')
+  await expect(main.getByText('Sessions', { exact: true })).toBeVisible()
+  await expect(main.getByText('Artifacts', { exact: true })).toBeVisible()
+  await expect(main.getByText(/tok · \d+%/).first()).toBeVisible()
+  // The fixture's running Research run: its phase cost still accrues.
+  await expect(main.getByText(/^≥\$/).first()).toBeVisible()
+})

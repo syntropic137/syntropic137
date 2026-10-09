@@ -6,7 +6,9 @@ import {
   parseWorkflowFilter,
   phaseKitOf,
   phaseModelChip,
+  phaseCostLabel,
   phaseShares,
+  phaseUsage,
   phaseSlab,
   runSharePercent,
   runsLabel,
@@ -74,6 +76,18 @@ describe('workflow detail', () => {
     expect(s.a!.share).toBe(0.4)
     expect(s.b!.cost).toBeCloseTo(0.3)
     expect(phaseShares(['a'], []).a!.share).toBe(0)
+  })
+  it('reads per-phase usage from /metrics?workflow_id= phases, a running phase as a lower bound (live rows, 2026-10-09)', () => {
+    const u = phaseUsage(['premise', 'fix', 'never_ran'], [
+      { phase_id: 'premise', total_tokens: 431_048_980, cost_usd: '221.7891426', cost_in_progress: false },
+      { phase_id: 'fix', total_tokens: 344_717_867, cost_usd: '267.0128436', cost_in_progress: true },
+      { phase_id: 'fix_3', total_tokens: 9_723_683, cost_usd: '8.2363026', cost_in_progress: false },
+    ])
+    expect(u.premise).toMatchObject({ tokens: 431_048_980, partial: false })
+    expect(phaseCostLabel(u.premise!)).toBe('$221.79')
+    expect(phaseCostLabel(u.fix!)).toBe('≥$267.01')
+    expect(u.never_ran).toMatchObject({ tokens: 0, share: 0, partial: false })
+    expect(u.premise!.share + u.fix!.share).toBeCloseTo(1)
   })
   it('maps phases onto icon slabs', () => {
     expect([0, 1, 2].map((i) => phaseSlab(i, 3))).toEqual([0, 1, 2])

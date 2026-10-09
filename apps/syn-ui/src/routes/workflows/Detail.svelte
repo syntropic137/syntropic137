@@ -7,8 +7,9 @@
     workflowPerformance (parts/WorkflowPerformance).
   - Pipeline: one card per phase with its kit; the selected phase shows its
     kit, timeout, latest output (GET /workflows/{id}/latest-outputs) and
-    prompt. Token shares come from GET /workflows/{id}/history when it has
-    runs (API gap: the history endpoint is deprecated and often empty).
+    prompt. Per-phase tokens and cost (share of the workflow's tokens) come
+    from GET /metrics?workflow_id= phases, a still-running phase's cost as a
+    lower bound; GET /workflows/{id}/history is the fallback.
   - Header figures: tokens, spend and sessions from GET /metrics?workflow_id=
     (every phase, failed ones included, as the React page), artifacts from
     the artifact list's total.
@@ -26,7 +27,8 @@
     parsePrompt,
     phaseKitOf,
     phaseModelChip,
-    phaseShares,
+    phaseCostLabel,
+    phaseUsage,
     runDurationMs,
     withListUsage,
     workflowFigures,
@@ -71,7 +73,8 @@
   const figures = $derived(w ? workflowFigures(phases.length, Math.max(w.runs_count, runs.data?.length ?? 0), usage.data ?? null, artifactsTotal.data?.total ?? null) : [])
   const skills = $derived(workflowSkillRefs(phases))
   const prompt = $derived(w ? workflowPromptSpec({ id: w.id, name: w.name, phases, input_declarations: w.input_declarations }) : null)
-  const shares = $derived(history.data?.executions.length ? phaseShares(phases.map((p) => p.phase_id), history.data.executions) : null)
+  const phaseRows = $derived(usage.data?.phases.length ? usage.data.phases : (history.data?.executions ?? []).flatMap((e) => e.phase_results))
+  const shares = $derived(phaseRows.length ? phaseUsage(phases.map((p) => p.phase_id), phaseRows) : null)
   const latest = $derived(outputs.data ? latestOutputsByPhase(outputs.data.phases) : null)
   const outputsMissing = $derived(outputs.error instanceof ApiError && outputs.error.status === 404)
   const notFound = $derived(wf.error instanceof ApiError && wf.error.status === 404)
@@ -157,7 +160,7 @@
                 <PhaseKitChips class="sky-wf__chips" model={phaseModelChip(p)} tools={kit.tools === 'not-recorded' ? 'default' : kit.tools} skills={kit.skills} />
                 {#if share}
                   <span class="sky-wf__share" aria-hidden="true"><span style:width={`${Math.round(share.share * 100)}%`}></span></span>
-                  <span class="sky-wf__share-text"><span>{formatInteger(share.tokens)} tok · {formatPercent(share.share)}</span><span>{formatCost(share.cost)}</span></span>
+                  <span class="sky-wf__share-text"><span>{formatInteger(share.tokens)} tok · {formatPercent(share.share)}</span><span>{phaseCostLabel(share)}</span></span>
                 {/if}
               </button>
             </li>
