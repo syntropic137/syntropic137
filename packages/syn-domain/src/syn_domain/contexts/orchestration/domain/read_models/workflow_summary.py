@@ -77,7 +77,7 @@ def _readable_refs(refs: object) -> list[PhaseRefDetail]:
 
 def _phase_order(phase: object) -> tuple[int, int]:
     # A phase with no readable order sorts after every ordered one, keeping its
-    # place among the others: the sort is stable.
+    # place among the others: position breaks every tie.
     order = phase.get(PhaseFields.ORDER) if isinstance(phase, dict) else None
     if isinstance(order, int) and not isinstance(order, bool):
         return (0, order)
@@ -90,7 +90,9 @@ def _in_phase_order(phases: Iterable[object]) -> list[object]:
     The events carry phases in whatever sequence the author wrote them; the
     order a phase runs in is its ``order`` field, and "in phase order" means that.
     """
-    return sorted(phases, key=_phase_order)
+    keyed = [(_phase_order(phase), position, phase) for position, phase in enumerate(phases)]
+    keyed.sort(key=lambda entry: (entry[0], entry[1]))
+    return [phase for _, _, phase in keyed]
 
 
 def declared_skills(
