@@ -170,7 +170,7 @@ export const observabilityRoutes: FixtureRoute[] = [
     }
   }),
   route('GET', '/sse/health', () => ({ status: 'ok', active_executions: 1, active_connections: 0 })),
-  route('GET', '/features', () => ({ ui_feedback: false })),
+  route('GET', '/features', () => ({ ui_feedback: true })),
   route('GET', '/version', () => ({
     version: '0.33.1',
     image_tag: 'fixtures',

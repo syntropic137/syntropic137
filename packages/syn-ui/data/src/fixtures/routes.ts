@@ -6,6 +6,7 @@
 import { artifactRoutes } from './artifacts'
 import { evalRoutes } from './evals'
 import { executionRoutes } from './executions'
+import { feedbackRoutes } from './feedback'
 import { insightRoutes } from './insights'
 import { observabilityRoutes } from './observability'
 import { repoRoutes } from './repos'
@@ -26,4 +27,5 @@ export const routes: FixtureRoute[] = [
   ...repoRoutes,
   ...observabilityRoutes,
   ...insightRoutes,
+  ...feedbackRoutes,
 ]
