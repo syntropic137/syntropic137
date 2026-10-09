@@ -97,7 +97,9 @@ services:
   docker-socket-proxy:
     image: tecnativa/docker-socket-proxy:0.3.0
     # Upstream policy plus inspect (GET) and release (DELETE) of retained
-    # capture volumes, by exact syn-capture-<64 hex> name only (#1398).
+    # capture volumes, by exact syn-capture-<64 hex> name only (#1398), plus
+    # container create routed through docker-create-guard, which refuses
+    # privileged / host-access HostConfig shapes (#1806).
     # Inline so the standalone published compose needs no extra host asset.
     entrypoint:
       - /bin/sh
@@ -106,11 +108,21 @@ services:
         set -eu
         template=/usr/local/etc/haproxy/haproxy.cfg.template
         [ "$$(grep -c '^[[:space:]]*http-request deny$$' "$$template")" = 1 ]
+        [ "$$(grep -c '^[[:space:]]*default_backend dockerbackend$$' "$$template")" = 1 ]
         awk '
         /^[[:space:]]*http-request deny$$/ {
             print "    http-request allow if { method GET DELETE } { path -m reg ^(/v[0-9.]+)?/volumes/syn-capture-[a-f0-9]{64}$$ }"
         }
         { print }
+        /^[[:space:]]*default_backend dockerbackend$$/ {
+            print "    use_backend docker-create-guard if { method POST } { path,url_dec -m reg -i /containers/create/*$$ }"
+        }
+        END {
+            print "resolvers docker"
+            print "    parse-resolv-conf"
+            print "backend docker-create-guard"
+            print "    server guard docker-create-guard:2375 resolvers docker init-addr last,libc,none"
+        }
         ' "$$template" > /tmp/capture-haproxy.template
         cat /tmp/capture-haproxy.template > "$$template"
         exec /docker-entrypoint.sh "$$@"
@@ -140,6 +152,46 @@ services:
       - SETGID
     tmpfs:
       - /tmp
+    networks:
+      - docker-proxy
+    depends_on:
+      docker-create-guard:
+        condition: service_started
+
+  # Container-create guard (#1806): the proxy above filters on path only, so it
+  # routes POST /containers/create here. The guard refuses privileged, CapAdd,
+  # host network/pid/ipc, devices, binds outside the workspaces root, foreign
+  # volumes and non-allowlisted images, then forwards the rest to the socket.
+  # Allowlist and how to extend it: syn_adapters/docker_create_guard/policy.py.
+  docker-create-guard:
+    build:
+      context: ..
+      dockerfile: infra/docker/images/syn-api/Dockerfile
+    command: ["python", "-m", "syn_adapters.docker_create_guard"]
+    # Root only to open the root-owned socket; every capability is dropped.
+    user: "0:0"
+    environment:
+      # HOST path workspace bind mounts must sit under (same value the API gets).
+      SYN_WORKSPACE_HOST_DIR: ${SYN_INSTALL_DIR:-${PWD}}/workspaces
+      # An operator-pinned workspace image is allowed automatically (#954).
+      SYN_WORKSPACE_DOCKER_IMAGE:
+      # Extra comma-separated image repository prefixes to allow.
+      SYN_DOCKER_CREATE_GUARD_IMAGE_PREFIXES: ${SYN_DOCKER_CREATE_GUARD_IMAGE_PREFIXES:-}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 2375), 3).close()"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     networks:
       - docker-proxy
 

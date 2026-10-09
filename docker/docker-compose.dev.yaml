@@ -38,6 +38,10 @@ services:
     container_name: syn-docker-socket-proxy
     restart: unless-stopped
 
+  docker-create-guard:
+    container_name: syn-docker-create-guard
+    restart: unless-stopped
+
   api:
     container_name: syn-api
     build:

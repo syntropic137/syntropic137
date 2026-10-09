@@ -193,6 +193,20 @@ services:
         max-size: "5m"
         max-file: "3"
 
+  docker-create-guard:
+    container_name: syn137-docker-create-guard
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 96m
+          cpus: "0.1"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "3"
+
   # ===========================================================================
   # API
   # ===========================================================================
