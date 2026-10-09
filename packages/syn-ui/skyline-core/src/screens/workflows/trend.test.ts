@@ -39,6 +39,15 @@ describe('workflow duration trend', () => {
     expect(durationTrend([])).toMatchObject({ kind: 'none', word: 'No runs yet', sub: '—' })
     expect(durationTrend(rows([null]))).toMatchObject({ kind: 'none', label: 'No finished runs yet' })
   })
+
+  it('never says "No runs yet" when the card shows runs (317 runs, trend endpoint 404 on the VPS)', () => {
+    const t = durationTrend([], 317)
+    expect(t.word).not.toMatch(/No runs/)
+    expect(t).toMatchObject({ kind: 'none', word: 'No trend', label: 'Duration trend not available' })
+    expect(durationTrend(rows([null]), 3)).toMatchObject({ word: 'No finished runs', label: 'No finished runs yet' })
+    expect(durationTrend([], 0)).toMatchObject({ word: 'No runs yet' })
+    expect(durationTrend(rows([100, 90, 80]), 317).kind).toBe('faster')
+  })
 })
 
 describe('workflow duration trend on API rows', () => {

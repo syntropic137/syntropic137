@@ -96,9 +96,9 @@
     return () => controller.abort()
   })
   const trendOf = (w: WorkflowSummary) => {
-    if (w.runs_count === 0) return durationTrend([])
+    if (w.runs_count === 0) return durationTrend([], 0)
     const t = trends[w.id]
-    return t ? durationTrend(t) : DURATION_TREND_PENDING
+    return t ? durationTrend(t, w.runs_count) : DURATION_TREND_PENDING
   }
   const filtered = $derived(filter !== 'all' || q !== '')
   const skillsPending = $derived(filter === 'skills' && all.some((w) => !(w.id in skills)))

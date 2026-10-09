@@ -63,12 +63,23 @@ export function classifyDuration(pct: number): 'faster' | 'slower' | 'steady' {
 const WORD: Record<DurationTrendKind, string> = { none: 'No runs yet', few: 'Too few runs', faster: 'Faster', slower: 'Slower', steady: 'Steady' }
 const SIGN = { faster: '−', slower: '+', steady: '±' } as const
 
-export function durationTrend(rows: readonly WorkflowTrendRowLike[]): DurationTrend {
+/** No measured duration: says why, and never "No runs yet" when the card counts runs. */
+function emptyTrend(hasRows: boolean, hasRuns: boolean): DurationTrend {
+  const word = hasRows ? (hasRuns ? 'No finished runs' : WORD.none) : hasRuns ? 'No trend' : WORD.none
+  const label = hasRows ? 'No finished runs yet' : hasRuns ? 'Duration trend not available' : 'No runs yet'
+  return { kind: 'none', pct: 0, runs: 0, word, sub: '—', label, spark: sparkPath([]) }
+}
+
+/**
+ * The card's duration trend. `runsCount` is the run count the same card
+ * displays: when it says the workflow has runs, the empty state never reads
+ * "No runs yet" (the trend may be missing because the endpoint is not
+ * deployed, or no run has finished).
+ */
+export function durationTrend(rows: readonly WorkflowTrendRowLike[], runsCount?: number): DurationTrend {
   const ds = recentDurations(rows)
   const n = ds.length
-  if (rows.length === 0 || n === 0) {
-    return { kind: 'none', pct: 0, runs: 0, word: WORD.none, sub: '—', label: rows.length ? 'No finished runs yet' : 'No runs yet', spark: sparkPath([]) }
-  }
+  if (n === 0) return emptyTrend(rows.length > 0, (runsCount ?? 0) > 0)
   if (n < TREND_MIN_RUNS) {
     const runs = `${n} ${n === 1 ? 'run' : 'runs'}`
     return { kind: 'few', pct: 0, runs: n, word: WORD.few, sub: runs, label: `Duration trend: too few runs to tell (${runs})`, spark: sparkPath(ds) }
