@@ -29,9 +29,11 @@ from __future__ import annotations
 import json
 import posixpath
 import re
-from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import NoReturn
+from typing import TYPE_CHECKING, NoReturn, Protocol
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 type JsonValue = str | int | float | bool | None | list[JsonValue] | dict[str, JsonValue]
 """A decoded JSON value. The create body is checked field by field, not modelled:
@@ -80,8 +82,16 @@ class _Refused(Exception):
         self.reason = reason
 
 
-ImageNames = Callable[[str], tuple[str, ...]]
-"""Resolve a local image ID to its repo tags and digests (empty when unknown)."""
+class HostView(Protocol):
+    """What the policy needs to know about the host beyond the request body."""
+
+    def image_names(self, image_id: str) -> tuple[str, ...]:
+        """A local image ID's repo tags and digests (empty when unknown)."""
+        ...
+
+    def real_path(self, path: str) -> str | None:
+        """``path`` with symlinks resolved as the daemon would, or None when it does not exist."""
+        ...
 
 
 @dataclass(frozen=True)
@@ -92,18 +102,18 @@ class CreatePolicy:
     image_prefixes: tuple[str, ...] = DEFAULT_IMAGE_PREFIXES
     volume_prefixes: tuple[str, ...] = DEFAULT_VOLUME_PREFIXES
 
-    def check(self, body: bytes, image_names: ImageNames) -> Refusal | None:
+    def check(self, body: bytes, host: HostView) -> Refusal | None:
         """Return why ``body`` (a ``POST /containers/create`` payload) is refused, or None."""
         try:
             request = json.loads(body)
             if not isinstance(request, dict):
                 _refuse("the create body is not a JSON object")
-            self._check_image(_field(request, "Image"), image_names)
+            self._check_image(_field(request, "Image"), host)
             host_config = _field(request, "HostConfig")
             if host_config is not None:
                 if not isinstance(host_config, dict):
                     _refuse("HostConfig is not an object")
-                self._check_host_config(host_config)
+                self._check_host_config(host_config, host)
             self._check_endpoints(_field(request, "NetworkingConfig"))
         except _Refused as refused:
             return Refusal(refused.reason)
@@ -111,10 +121,10 @@ class CreatePolicy:
             return Refusal(f"the create body is not valid JSON ({exc})")
         return None
 
-    def _check_image(self, image: object, image_names: ImageNames) -> None:
+    def _check_image(self, image: object, host: HostView) -> None:
         if not isinstance(image, str) or image == "":
             _refuse("the create request names no image")
-        candidates = image_names(image) if _is_image_id(image) else (image,)
+        candidates = host.image_names(image) if _is_image_id(image) else (image,)
         if not any(self._image_allowed(name) for name in candidates):
             _refuse(
                 f"image {image!r} is not in the allowlist {list(self.image_prefixes)}; "
@@ -125,7 +135,7 @@ class CreatePolicy:
         repository = image_repository(image)
         return any(repository.startswith(prefix) for prefix in self.image_prefixes)
 
-    def _check_host_config(self, host_config: Mapping[str, JsonValue]) -> None:
+    def _check_host_config(self, host_config: Mapping[str, JsonValue], host: HostView) -> None:
         _expect(
             _field(host_config, "Privileged") in (None, False), "privileged containers are refused"
         )
@@ -155,21 +165,21 @@ class CreatePolicy:
                 _refuse("a Binds entry is not a string")
             source = bind.split(":", 1)[0]
             if source.startswith("/"):
-                self._check_host_path(source)
+                self._check_host_path(source, host)
             else:
                 self._check_volume_name(source)
         for mount in _list(host_config, "Mounts"):
             if not isinstance(mount, dict):
                 _refuse("a Mounts entry is not an object")
-            self._check_mount(mount)
+            self._check_mount(mount, host)
 
-    def _check_mount(self, mount: Mapping[str, JsonValue]) -> None:
+    def _check_mount(self, mount: Mapping[str, JsonValue], host: HostView) -> None:
         kind = _field(mount, "Type")
         source = _field(mount, "Source")
         if kind == "bind":
             if not isinstance(source, str):
                 _refuse("a bind mount has no source")
-            self._check_host_path(source)
+            self._check_host_path(source, host)
         elif kind == "volume":
             options = _field(mount, "VolumeOptions")
             if options is not None:
@@ -183,7 +193,7 @@ class CreatePolicy:
         else:
             _expect(kind == "tmpfs", f"mount type {kind!r} is refused")
 
-    def _check_host_path(self, source: str) -> None:
+    def _check_host_path(self, source: str, host: HostView) -> None:
         root = self.workspace_root
         if root is None:
             _refuse(
@@ -195,6 +205,19 @@ class CreatePolicy:
         _expect(
             normal_root != "/" and normal.startswith(normal_root + "/"),
             f"bind mount of {source!r} is refused: only paths under {normal_root}/ may be bound",
+        )
+        # The API can write a symlink into the workspaces root, and the daemon
+        # follows it, so the lexical check alone would let ``root/x -> /`` through.
+        real_root = host.real_path(normal_root)
+        real = host.real_path(normal)
+        if real_root is None or real is None:
+            _refuse(
+                f"bind mount of {source!r} is refused: the guard cannot see it; mount "
+                f"{normal_root} into the guard read-only at the same path"
+            )
+        _expect(
+            real.startswith(real_root.rstrip("/") + "/"),
+            f"bind mount of {source!r} is refused: it resolves to {real!r}, outside {normal_root}/",
         )
 
     def _check_volume_name(self, name: str) -> None:

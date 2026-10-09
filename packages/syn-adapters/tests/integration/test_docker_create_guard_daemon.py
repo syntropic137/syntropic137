@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
 from syn_adapters.docker_create_guard.policy import DEFAULT_IMAGE_PREFIXES, CreatePolicy, JsonObject
-from syn_adapters.docker_create_guard.server import DockerSocket, make_handler
+from syn_adapters.docker_create_guard.server import DockerSocket, GuardHost, make_handler
 
 SOCKET = os.environ.get("SYN_DOCKER_CREATE_GUARD_SOCKET", "/var/run/docker.sock")
 IMAGE = "alpine:3.20"
@@ -42,7 +42,9 @@ def guard(tmp_path: Path) -> Iterator[tuple[int, DockerSocket, Path]]:
     policy = CreatePolicy(
         workspace_root=str(tmp_path), image_prefixes=(*DEFAULT_IMAGE_PREFIXES, "alpine")
     )
-    server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(policy, daemon))
+    server = ThreadingHTTPServer(
+        ("127.0.0.1", 0), make_handler(policy, GuardHost(daemon, str(tmp_path), str(tmp_path)))
+    )
     threading.Thread(target=server.serve_forever, daemon=True).start()
     yield server.server_address[1], daemon, tmp_path
     server.shutdown()
@@ -102,6 +104,17 @@ def test_sidecar_shape_is_created(guard: tuple[int, DockerSocket, Path]) -> None
             == 201
         )
         assert _exists(daemon, name)
+    finally:
+        _remove(daemon, name)
+
+
+def test_symlink_out_of_the_root_is_refused(guard: tuple[int, DockerSocket, Path]) -> None:
+    port, daemon, root = guard
+    (root / "escape").symlink_to("/")
+    name = f"syn-guard-it-{uuid.uuid4().hex[:8]}"
+    try:
+        assert _create(port, name, {"Binds": [f"{root}/escape:/host"]}) == 403
+        assert not _exists(daemon, name)
     finally:
         _remove(daemon, name)
 

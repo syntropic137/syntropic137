@@ -41,6 +41,12 @@ services:
   docker-create-guard:
     container_name: syn-docker-create-guard
     restart: unless-stopped
+    # The API's workspaces root, read-only, so the guard resolves symlinks in
+    # bind sources the way the daemon will (#1806).
+    environment:
+      SYN_WORKSPACE_CONTAINER_DIR: /workspaces
+    volumes:
+      - ../workspaces:/workspaces:ro
 
   api:
     container_name: syn-api

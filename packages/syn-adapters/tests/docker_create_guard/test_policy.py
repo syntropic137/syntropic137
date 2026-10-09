@@ -30,12 +30,35 @@ LOCAL_ID = "sha256:" + "c" * 64
 CAPTURE = "syn-capture-" + "ab" * 32
 
 
-def _no_local_images(_: str) -> tuple[str, ...]:
-    return ()
+class FakeHost:
+    """Every path exists; ``links`` maps a symlink path to the path it resolves to."""
+
+    def __init__(
+        self,
+        images: dict[str, tuple[str, ...]] | None = None,
+        links: dict[str, str] | None = None,
+        missing: tuple[str, ...] = (),
+    ) -> None:
+        self._images = images or {}
+        self._links = links or {}
+        self._missing = missing
+
+    def image_names(self, image_id: str) -> tuple[str, ...]:
+        return self._images.get(image_id, ())
+
+    def real_path(self, path: str) -> str | None:
+        if path in self._missing:
+            return None
+        for link, target in self._links.items():
+            if path == link or path.startswith(link + "/"):
+                return target + path[len(link) :]
+        return path
 
 
-def _check(body: JsonObject, policy: CreatePolicy = POLICY) -> Refusal | None:
-    return policy.check(json.dumps(body).encode(), _no_local_images)
+def _check(
+    body: JsonObject, policy: CreatePolicy = POLICY, host: FakeHost | None = None
+) -> Refusal | None:
+    return policy.check(json.dumps(body).encode(), host or FakeHost())
 
 
 def workspace_body(image: str = DEFAULT_WORKSPACE_IMAGE) -> JsonObject:
@@ -118,9 +141,11 @@ class TestPlatformShapesPass:
         assert _check(sidecar_body()) is None
 
     def test_recovery_with_a_local_image_id_named_by_an_allowed_tag(self) -> None:
-        names = {LOCAL_ID: ("ghcr.io/agentparadise/agentic-workspace-claude-cli:dev",)}
+        host = FakeHost(
+            images={LOCAL_ID: ("ghcr.io/agentparadise/agentic-workspace-claude-cli:dev",)}
+        )
         body = json.dumps(recovery_body()).encode()
-        assert POLICY.check(body, lambda ref: names.get(ref, ())) is None
+        assert POLICY.check(body, host) is None
 
     def test_operator_pinned_image_is_allowed_from_env(self) -> None:
         policy = policy_from_env(
@@ -220,12 +245,23 @@ class TestHostAccessIsRefused:
     def test_ambiguous_duplicate_field_is_refused(self) -> None:
         image = json.dumps(DEFAULT_WORKSPACE_IMAGE)
         raw = f'{{"Image": {image}, "HostConfig": {{"Privileged": false, "privileged": true}}}}'.encode()
-        refusal = POLICY.check(raw, _no_local_images)
+        refusal = POLICY.check(raw, FakeHost())
         assert refusal is not None and "more than once" in refusal.reason
 
     def test_bind_without_a_configured_root(self) -> None:
         refusal = _check(workspace_body(), CreatePolicy(workspace_root=None))
         assert refusal is not None and "SYN_WORKSPACE_HOST_DIR" in refusal.reason
 
+    def test_symlink_inside_the_root_that_leaves_it(self) -> None:
+        refusal = _check(workspace_body(), host=FakeHost(links={f"{ROOT}/ws-1": "/"}))
+        assert refusal is not None and "resolves to '/'" in refusal.reason
+
+    def test_symlinked_root_still_allows_its_own_paths(self) -> None:
+        assert _check(workspace_body(), host=FakeHost(links={ROOT: "/data/ws"})) is None
+
+    def test_bind_the_guard_cannot_see(self) -> None:
+        refusal = _check(workspace_body(), host=FakeHost(missing=(f"{ROOT}/ws-1",)))
+        assert refusal is not None and "cannot see" in refusal.reason
+
     def test_not_json(self) -> None:
-        assert POLICY.check(b"{nope", _no_local_images) is not None
+        assert POLICY.check(b"{nope", FakeHost()) is not None

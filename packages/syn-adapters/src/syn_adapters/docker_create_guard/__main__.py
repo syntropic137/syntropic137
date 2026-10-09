@@ -2,6 +2,7 @@
 
 Environment:
     SYN_WORKSPACE_HOST_DIR: host path workspace bind mounts must sit under.
+    SYN_WORKSPACE_CONTAINER_DIR: where that root is mounted (read-only) in the guard.
     SYN_WORKSPACE_DOCKER_IMAGE: an operator-pinned workspace image, allowed too.
     SYN_DOCKER_CREATE_GUARD_IMAGE_PREFIXES: extra comma-separated image repository prefixes.
     SYN_DOCKER_CREATE_GUARD_PORT: listen port (default 2375).
@@ -18,7 +19,7 @@ from syn_adapters.docker_create_guard.policy import (
     CreatePolicy,
     image_repository,
 )
-from syn_adapters.docker_create_guard.server import DockerSocket, serve
+from syn_adapters.docker_create_guard.server import DockerSocket, GuardHost, serve
 
 
 def policy_from_env(env: dict[str, str]) -> CreatePolicy:
@@ -37,7 +38,11 @@ def main() -> None:
     env = dict(os.environ)
     serve(
         policy_from_env(env),
-        DockerSocket(env.get("SYN_DOCKER_CREATE_GUARD_SOCKET", "/var/run/docker.sock")),
+        GuardHost(
+            DockerSocket(env.get("SYN_DOCKER_CREATE_GUARD_SOCKET", "/var/run/docker.sock")),
+            host_root=env.get("SYN_WORKSPACE_HOST_DIR") or None,
+            mounted_root=env.get("SYN_WORKSPACE_CONTAINER_DIR") or None,
+        ),
         int(env.get("SYN_DOCKER_CREATE_GUARD_PORT", "2375")),
     )
 

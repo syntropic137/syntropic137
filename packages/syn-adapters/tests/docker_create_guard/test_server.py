@@ -12,9 +12,10 @@ import pytest
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+    from pathlib import Path
 
 from syn_adapters.docker_create_guard.policy import CreatePolicy, JsonObject
-from syn_adapters.docker_create_guard.server import DockerSocket, make_handler
+from syn_adapters.docker_create_guard.server import DockerSocket, GuardHost, make_handler
 
 from .test_policy import ROOT, sidecar_body, workspace_body
 
@@ -41,7 +42,8 @@ class _FakeDaemon(DockerSocket):
 def guard() -> Iterator[tuple[int, _FakeDaemon]]:
     daemon = _FakeDaemon()
     server = ThreadingHTTPServer(
-        ("127.0.0.1", 0), make_handler(CreatePolicy(workspace_root=ROOT), daemon)
+        ("127.0.0.1", 0),
+        make_handler(CreatePolicy(workspace_root=ROOT), GuardHost(daemon, ROOT, None)),
     )
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -92,3 +94,18 @@ def test_only_create_is_served(guard: tuple[int, _FakeDaemon]) -> None:
     port, daemon = guard
     status, _ = _post(port, "/v1.47/containers/abc/start", {})
     assert status == 403 and daemon.creates == []
+
+
+class TestGuardHostResolvesThroughTheMount:
+    def test_paths_translate_and_symlinks_resolve(self, tmp_path: Path) -> None:
+        (tmp_path / "ws-1").mkdir()
+        (tmp_path / "escape").symlink_to("/")
+        host = GuardHost(DockerSocket("/nonexistent"), "/srv/ws", str(tmp_path))
+        assert host.real_path("/srv/ws/ws-1") == "/srv/ws/ws-1"
+        assert host.real_path("/srv/ws/escape") == "/"
+        assert host.real_path("/srv/ws/missing") is None
+        assert host.real_path("/elsewhere") is None
+
+    def test_unmounted_root_sees_nothing(self) -> None:
+        host = GuardHost(DockerSocket("/nonexistent"), "/srv/ws", None)
+        assert host.real_path("/srv/ws/ws-1") is None

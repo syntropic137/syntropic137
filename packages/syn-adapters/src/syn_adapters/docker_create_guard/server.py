@@ -10,6 +10,8 @@ from __future__ import annotations
 import http.client
 import json
 import logging
+import os
+import posixpath
 import re
 import socket
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -69,7 +71,44 @@ class DockerSocket:
         return tuple(name for name in names if isinstance(name, str))
 
 
-def make_handler(policy: CreatePolicy, docker: DockerSocket) -> type[BaseHTTPRequestHandler]:
+class GuardHost:
+    """The guard's view of the host: images from the daemon, paths from the read-only root mount.
+
+    The workspaces root is mounted at ``mounted_root`` (the API's
+    SYN_WORKSPACE_CONTAINER_DIR); host paths under ``host_root`` are resolved
+    there and translated back, so a symlink resolves as the daemon would see it.
+    """
+
+    def __init__(
+        self, docker: DockerSocket, host_root: str | None, mounted_root: str | None
+    ) -> None:
+        self._docker = docker
+        self._host_root = posixpath.normpath(host_root) if host_root else None
+        self._mounted_root = posixpath.normpath(mounted_root) if mounted_root else None
+
+    @property
+    def docker(self) -> DockerSocket:
+        return self._docker
+
+    def image_names(self, image_id: str) -> tuple[str, ...]:
+        return self._docker.image_names(image_id)
+
+    def real_path(self, path: str) -> str | None:
+        host_root, mounted_root = self._host_root, self._mounted_root
+        if host_root is None or mounted_root is None:
+            return None
+        if path != host_root and not path.startswith(host_root + "/"):
+            return None
+        local = mounted_root + path[len(host_root) :]
+        if not os.path.lexists(local):
+            return None
+        real = os.path.realpath(local)
+        if real == mounted_root or real.startswith(mounted_root + "/"):
+            return host_root + real[len(mounted_root) :]
+        return real
+
+
+def make_handler(policy: CreatePolicy, host: GuardHost) -> type[BaseHTTPRequestHandler]:
     class CreateGuardHandler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
@@ -84,7 +123,7 @@ def make_handler(policy: CreatePolicy, docker: DockerSocket) -> type[BaseHTTPReq
                 self._reply(411, "container create needs a Content-Length under 4 MiB")
                 return
             body = self.rfile.read(int(length))
-            refusal = policy.check(body, docker.image_names)
+            refusal = policy.check(body, host)
             if refusal is not None:
                 logger.warning("refused container create: %s", refusal.reason)
                 self._reply(
@@ -93,7 +132,7 @@ def make_handler(policy: CreatePolicy, docker: DockerSocket) -> type[BaseHTTPReq
                 return
             headers = {"Content-Type": self.headers.get("Content-Type", "application/json")}
             try:
-                status, response_headers, response_body = docker.request(
+                status, response_headers, response_body = host.docker.request(
                     "POST", self.path, body, headers
                 )
             except OSError as exc:
@@ -122,7 +161,7 @@ def make_handler(policy: CreatePolicy, docker: DockerSocket) -> type[BaseHTTPReq
     return CreateGuardHandler
 
 
-def serve(policy: CreatePolicy, docker: DockerSocket, port: int) -> None:
-    server = ThreadingHTTPServer(("0.0.0.0", port), make_handler(policy, docker))
+def serve(policy: CreatePolicy, host: GuardHost, port: int) -> None:
+    server = ThreadingHTTPServer(("0.0.0.0", port), make_handler(policy, host))
     logger.info("container-create guard listening on :%d", port)
     server.serve_forever()

@@ -110,3 +110,19 @@ class TestCreateRouting:
             guard["environment"]["SYN_WORKSPACE_HOST_DIR"]
             == "${SYN_INSTALL_DIR:-${PWD}}/workspaces"
         )
+
+
+def test_published_guard_sees_the_api_workspaces_root() -> None:
+    """Without this mount every workspace bind is refused as unseeable."""
+    services = yaml.safe_load((_ROOT / "docker" / "docker-compose.syntropic137.yaml").read_text())[
+        "services"
+    ]
+    guard, api = services["docker-create-guard"], services["api"]
+    assert (
+        guard["environment"]["SYN_WORKSPACE_HOST_DIR"]
+        == api["environment"]["SYN_WORKSPACE_HOST_DIR"]
+    )
+    mounted = guard["environment"]["SYN_WORKSPACE_CONTAINER_DIR"]
+    assert mounted == api["environment"]["SYN_WORKSPACE_CONTAINER_DIR"]
+    api_source = next(v.split(":")[0] for v in api["volumes"] if v.split(":")[1] == mounted)
+    assert f"{api_source}:{mounted}:ro" in guard["volumes"]

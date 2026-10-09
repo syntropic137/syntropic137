@@ -257,8 +257,10 @@ services:
       SYN_WORKSPACE_HOST_DIR: ${SYN_INSTALL_DIR:-${PWD}}/workspaces
       SYN_WORKSPACE_DOCKER_IMAGE: null
       SYN_DOCKER_CREATE_GUARD_IMAGE_PREFIXES: ${SYN_DOCKER_CREATE_GUARD_IMAGE_PREFIXES:-}
+      SYN_WORKSPACE_CONTAINER_DIR: /workspaces
     volumes:
     - /var/run/docker.sock:/var/run/docker.sock
+    - ./workspaces:/workspaces:ro
     read_only: true
     security_opt:
     - no-new-privileges:true
