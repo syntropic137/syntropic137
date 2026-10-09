@@ -32,6 +32,7 @@ import {
   getWorkflowLatestOutputs,
 } from '../index'
 import { RUNS, matchFixture } from './index'
+import { EVALS } from './evals'
 
 beforeEach(() => {
   configureClient({ fixtures: true, fixtureLatencyMs: 0 })
@@ -69,7 +70,8 @@ describe('every screen has data in fixtures mode', () => {
     expect(page.executions.every((e) => e.status === 'failed')).toBe(true)
     expect(page.status_counts?.completed).toBeGreaterThan(0)
     const all = await listExecutions({ page: 1, page_size: 100 })
-    expect(all.total).toBe(RUNS.length)
+    // Every eval run is an execution too, as on the API.
+    expect(all.total).toBe(RUNS.length + EVALS.reduce((n, e) => n + e.runs.length, 0))
     const first = all.executions[0]!
     const detail = await getExecution(first.workflow_execution_id)
     expect(detail.workflow_name).toBe(first.workflow_name)

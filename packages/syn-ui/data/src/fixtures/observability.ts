@@ -1,7 +1,7 @@
 import type { ConversationLogResponse, ToolTimelineResponse, TokenMetricsResponse } from '../resources/observability'
 import type { CostSummary, ExecutionCost, MetricsResponse, SessionCost } from '../types'
 import { RUNS, phaseRuns, runOf } from './catalog'
-import { executionDetail } from './executions'
+import { executionDetail, findRun } from './executions'
 import { type FixtureRoute, notFound, route } from './define'
 import { FIXTURE_NOW } from './seed'
 import { allPhaseRuns, sessionDetail } from './sessions'
@@ -86,7 +86,7 @@ function sessionCost(id: string): SessionCost {
 }
 
 function executionCost(id: string): ExecutionCost {
-  const r = runOf(id) ?? notFound('Execution')
+  const r = findRun(id) ?? notFound('Execution')
   const d = executionDetail(r)
   const phases = phaseRuns(r).filter((p) => p.sessionId)
   return {

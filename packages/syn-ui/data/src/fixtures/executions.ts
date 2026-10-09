@@ -104,6 +104,8 @@ export function failureClassOf(r: CatalogRun): 'correct_refusal' | 'unclassified
 /** The pr-review run an hour ago was launched by an eval, so the Eval marker and filter have a row. */
 const EVAL_RUN = 1
 function evalOf(r: CatalogRun): ExecutionListItem['eval'] {
+  const own = evalRuns().get(r.id)
+  if (own) return own.eval
   if (RUNS.indexOf(r) !== EVAL_RUN) return null
   return { eval_id: 'eval-fixture-pr-review', eval_name: 'verifier-seed: pr-review smoke', association_kind: 'launched', verdict: 'PASS', score: 1, scored_at: r.startedAt }
 }
@@ -113,14 +115,29 @@ function evalOf(r: CatalogRun): ExecutionListItem['eval'] {
  * execution with an `eval` block), so `in_eval=true` lists them as the API
  * does and the Evals board can read each cell's latest-run cost.
  */
-function evalRunItems(): ExecutionListItem[] {
-  return EVALS.flatMap((e) =>
-    e.runs.map((run): ExecutionListItem => {
-      const cost = Number(run.total_cost_usd ?? 0)
-      const base = executionListItem({ id: run.execution_id, workflowId: run.workflow_id ?? '', status: 'completed', done: 1, repo: null, tokens: 0, cost, seconds: run.duration_seconds ?? 0, startedAt: run.started_at ?? '' })
-      return { ...base, total_cost_usd: run.total_cost_usd ?? base.total_cost_usd, eval: { eval_id: e.summary.eval_id, eval_name: e.summary.name, association_kind: 'launched', verdict: run.verdict ?? null, score: run.score ?? null, scored_at: run.scored_at ?? null } }
-    }),
+let EVAL_RUNS: Map<string, { run: CatalogRun; eval: NonNullable<ExecutionListItem['eval']> }> | null = null
+function evalRuns(): Map<string, { run: CatalogRun; eval: NonNullable<ExecutionListItem['eval']> }> {
+  EVAL_RUNS ??= new Map(
+    EVALS.flatMap((e) =>
+      e.runs.map((run) => [
+        run.execution_id,
+        {
+          run: { id: run.execution_id, workflowId: run.workflow_id ?? '', status: 'completed', done: 1, repo: null, tokens: 0, cost: Number(run.total_cost_usd ?? 0), seconds: run.duration_seconds ?? 0, startedAt: run.started_at ?? '' } satisfies CatalogRun,
+          eval: { eval_id: e.summary.eval_id, eval_name: e.summary.name, association_kind: 'launched', verdict: run.verdict ?? null, score: run.score ?? null, scored_at: run.scored_at ?? null },
+        },
+      ] as const),
+    ),
   )
+  return EVAL_RUNS
+}
+
+/** A catalog run or an eval fixture's run: every eval run is an execution too. */
+export function findRun(id: string): CatalogRun | undefined {
+  return runOf(id) ?? evalRuns().get(id)?.run
+}
+
+function evalRunItems(): ExecutionListItem[] {
+  return [...evalRuns().values()].map(({ run }) => executionListItem(run))
 }
 
 function phaseDetail(r: CatalogRun): PhaseExecutionDetail[] {
@@ -253,7 +270,8 @@ export const executionRoutes: FixtureRoute[] = [
     const items = [...RUNS].sort((a, b) => b.startedAt.localeCompare(a.startedAt)).map(executionListItem)
     const textOf = (e: ExecutionListItem) => `${e.workflow_name} ${e.workflow_id} ${e.workflow_execution_id} ${e.repos_display ?? ''}`
     const after = fixtureWindowStart(query)
-    const pool = query.get('in_eval') === 'true' ? [...items, ...evalRunItems()].sort((a, b) => (b.started_at ?? '').localeCompare(a.started_at ?? '')) : items
+    // Every eval run is also an execution, listed with the rest, as on the API.
+    const pool = [...items, ...evalRunItems()].sort((a, b) => (b.started_at ?? '').localeCompare(a.started_at ?? ''))
     const timed = Number.isNaN(after) ? pool : pool.filter((e) => e.started_at && Date.parse(e.started_at) >= after)
     const inWindow = query.get('in_eval') === 'true' ? timed.filter((e) => e.eval) : timed
     const unfiltered = filterList(inWindow, new URLSearchParams({ q: query.get('q') ?? '' }), (e) => e.status, textOf)
@@ -269,13 +287,13 @@ export const executionRoutes: FixtureRoute[] = [
       budget: { running: 1, queued: 0, limit: 20, admission_paused: false, display: '1 of 20 running' },
     }
   }),
-  route('GET', '/executions/:executionId/session-inventory', ({ params }): InventoryStatus => inventory(runOf(params.executionId!) ?? notFound('Execution'))),
+  route('GET', '/executions/:executionId/session-inventory', ({ params }): InventoryStatus => inventory(findRun(params.executionId!) ?? notFound('Execution'))),
   // Fixture inventories have no snapshot (`snapshot: null` above), so pages,
   // node lookups and archived transcripts answer the API's 404.
   route('GET', '/executions/:executionId/session-inventory/:snapshotId/:kind', () => notFound('Inventory snapshot')),
   route('GET', '/executions/:executionId/session-inventory/:snapshotId/nodes/:nodeKey', () => notFound('Inventory snapshot')),
   route('GET', '/executions/:executionId/session-transcripts/:revision', () => notFound('Transcript')),
-  route('GET', '/executions/:executionId', ({ params }) => executionDetail(runOf(params.executionId!) ?? notFound('Execution'))),
+  route('GET', '/executions/:executionId', ({ params }) => executionDetail(findRun(params.executionId!) ?? notFound('Execution'))),
   route('POST', '/executions/:executionId/cancel', ({ params }) => ({
     success: true,
     execution_id: params.executionId,

@@ -5,6 +5,7 @@
  */
 import { expect, test } from './support/test'
 import { isFixtures, isSkyline } from './support/env'
+import { FIXTURE_IDS } from './support/routes'
 
 test.skip(!isSkyline || !isFixtures, 'pins fixture values on syn-ui')
 
@@ -67,8 +68,7 @@ test('Executions shows a correct refusal as Refused, not Failed', async ({ page 
 })
 
 test('Execution detail has a Cost by model block beside cost by phase', async ({ page }) => {
-  await page.goto('./executions?window=all')
-  await page.locator('#sky-main li[data-sky-row] a').nth(2).click()
+  await page.goto(`./executions/${FIXTURE_IDS.execution}`)
   const usage = page.getByRole('region', { name: 'Usage' })
   await expect(usage.getByText('Cost by phase')).toBeVisible()
   await expect(usage.getByText('Cost by model')).toBeVisible()
