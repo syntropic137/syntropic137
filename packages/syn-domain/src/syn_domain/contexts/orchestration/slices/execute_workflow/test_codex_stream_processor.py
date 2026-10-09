@@ -44,7 +44,7 @@ class _RecordingCollector:
     async def record_tool_started(self, **kwargs: object) -> None:
         self.calls.append(("tool_started", kwargs))
 
-    def note_agent_activity(self) -> None:
+    def note_agent_activity(self, *, changed_nothing: bool = False) -> None:
         # Deliberately not recorded as a call: this is a bare fact the stream
         # processors set on anything the agent did, and every assertion in this
         # file is about what was RECOGNISED (#1303).

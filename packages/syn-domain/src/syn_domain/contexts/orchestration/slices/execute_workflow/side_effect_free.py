@@ -1,0 +1,150 @@
+"""Whether an agent's tool call is POSITIVELY known to change nothing (#1825).
+
+The fallback rule (PC-83) needs to know whether a failed attempt may have done
+WORK: changed something a second agent, run from the top in the same
+workspace, would then do again. Reading a file, searching a tree or viewing a
+diff is not work in that sense. A review that read twenty files and was then
+refused leaves the workspace exactly as it found it, so a restart on another
+agent duplicates nothing and loses nothing.
+
+ASKED IN THE DIRECTION THAT FAILS SAFE, like `_phase_got_somewhere`: the
+claim made here is the strong one, "this changed nothing", and it is made only
+for shapes recognised in full. A command this module cannot read completely is
+work. That covers a redirect, a substitution, an interpreter, a tool it has no
+entry for, and any argument it does not understand. The cost of a false "work"
+is a fallback that does not run, which is what happened before this module. The
+cost of a false "nothing" is a second agent writing over the first agent's
+changes, so the asymmetry is deliberate.
+"""
+
+from __future__ import annotations
+
+import re
+import shlex
+from pathlib import PurePosixPath
+
+#: Claude tools that only read. Anything not listed is treated as work.
+READ_ONLY_TOOLS: frozenset[str] = frozenset({"Read", "Grep", "Glob", "LS"})
+
+#: The shell-tool names both harnesses report (codex `command_execution` is
+#: recorded as ``Bash`` too). The command decides for these.
+SHELL_TOOLS: frozenset[str] = frozenset({"Bash"})
+
+#: Programs that read, whatever their arguments, short of a redirect (refused
+#: below for every program). `sed`, `find`, `git` and `gh` are absent on
+#: purpose: each has a writing mode and is decided in `_segment_reads`. So are
+#: `sort -o`, `uniq IN OUT` and `tree -o`, which write a file by argument.
+_READ_ONLY_PROGRAMS: frozenset[str] = frozenset(
+    {
+        "cat", "head", "tail", "grep", "egrep", "fgrep", "rg", "ls", "wc", "nl",
+        "pwd", "echo", "cd", "stat", "file", "diff", "which", "true", "cut",
+        "tr", "jq", "basename", "dirname", "realpath",
+    }
+)  # fmt: skip
+
+#: `git` subcommands that read the repository and never move a ref.
+_READ_ONLY_GIT: frozenset[str] = frozenset(
+    {"status", "log", "diff", "show", "rev-parse", "ls-files", "blame", "grep", "cat-file"}
+)
+
+#: `gh` subcommand pairs that only read from GitHub.
+_READ_ONLY_GH: frozenset[tuple[str, str]] = frozenset(
+    {("pr", "view"), ("pr", "diff"), ("pr", "list"), ("pr", "checks"), ("issue", "view"),
+     ("issue", "list"), ("run", "view"), ("run", "list")}
+)  # fmt: skip
+
+#: Shell syntax that can write or run something this module cannot see. A
+#: redirect to /dev/null is removed before this is asked, since it writes
+#: nowhere anyone reads.
+_UNREADABLE_SYNTAX = re.compile(r"[>`]|\$\(|<\(|\btee\b")
+_DEV_NULL_REDIRECT = re.compile(r"\d?>>?\s*/dev/null|2>&1")
+_SEGMENT_SEPARATOR = re.compile(r"\|\|?|&&|;|\n")
+_SHELLS: frozenset[str] = frozenset({"sh", "bash", "zsh"})
+
+
+def tool_call_changes_nothing(tool_name: str, command: object = None) -> bool:
+    """Whether a call to ``tool_name`` is known to leave the workspace as it was.
+
+    ``command`` is read only for a shell tool, and must be the WHOLE command, not
+    a truncated preview: a preview can end before the part that writes.
+    """
+    if tool_name in READ_ONLY_TOOLS:
+        return True
+    if tool_name in SHELL_TOOLS:
+        return isinstance(command, str) and command_changes_nothing(command)
+    return False
+
+
+def command_changes_nothing(command: str) -> bool:
+    """Whether a shell command line is known to only read."""
+    script = _unwrap_shell(command)
+    if script is None:
+        return False
+    script = _DEV_NULL_REDIRECT.sub(" ", script)
+    if _UNREADABLE_SYNTAX.search(script):
+        return False
+    segments = [s for s in _SEGMENT_SEPARATOR.split(script) if s.strip()]
+    return bool(segments) and all(_segment_reads(s) for s in segments)
+
+
+def _unwrap_shell(command: str) -> str | None:
+    """The script a ``/bin/zsh -lc '...'`` wrapper runs, or the command itself."""
+    try:
+        words = shlex.split(command)
+    except ValueError:
+        return None
+    if len(words) == 3 and PurePosixPath(words[0]).name in _SHELLS and words[1] in {"-c", "-lc"}:
+        return words[2]
+    return command
+
+
+def _segment_reads(segment: str) -> bool:
+    try:
+        words = shlex.split(segment)
+    except ValueError:
+        return False
+    if not words:
+        return False
+    program, args = PurePosixPath(words[0]).name, words[1:]
+    if program in _READ_ONLY_PROGRAMS:
+        return True
+    if program == "sed":
+        return _sed_prints(args)
+    if program == "find":
+        return not any(a in {"-exec", "-execdir", "-ok", "-okdir", "-delete"} or
+                       a.startswith("-fprint") for a in args)  # fmt: skip
+    if program == "git":
+        return _git_subcommand(args) in _READ_ONLY_GIT
+    if program == "gh":
+        return len(args) >= 2 and (args[0], args[1]) in _READ_ONLY_GH
+    return False
+
+
+#: A sed script that only prints a line range, the one shape agents read with.
+_SED_PRINT = re.compile(r"[0-9]+(,[0-9$]+)?p")
+
+
+def _sed_prints(args: list[str]) -> bool:
+    """``sed -n 1,80p FILE...``: options limited to -n/-E/-r, the script a print."""
+    scripts = [a for a in args if not a.startswith("-")]
+    return (
+        all(a in {"-n", "-E", "-r"} for a in args if a.startswith("-"))
+        and bool(scripts)
+        and _SED_PRINT.fullmatch(scripts[0]) is not None
+    )
+
+
+def _git_subcommand(args: list[str]) -> str | None:
+    """The git subcommand after any ``-C <dir>`` / ``--no-pager`` options."""
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        if arg == "-C":
+            index += 2
+        elif arg in {"--no-pager", "-P"}:
+            index += 1
+        elif arg.startswith("-"):
+            return None
+        else:
+            return arg
+    return None

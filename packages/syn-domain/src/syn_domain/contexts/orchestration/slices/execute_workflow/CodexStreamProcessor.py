@@ -79,6 +79,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.phase_cost_limit 
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_verdict import (
     VerdictReader,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.side_effect_free import (
+    command_changes_nothing,
+)
 from syn_shared.agents import AgentProvider
 from syn_shared.codex_stream import (
     CODEX_TOOL_NAME_COMMAND,
@@ -258,6 +261,27 @@ class _CodexItem(TypedDict, total=False):
     text: str
 
 
+#: Item types that are the model's words, so can change nothing (#1825).
+_WORDS_ONLY_ITEMS: frozenset[str] = frozenset(
+    {CodexItemType.AGENT_MESSAGE, CodexItemType.REASONING}
+)
+
+
+def _item_changes_nothing(item: _CodexItem) -> bool:
+    """Whether a codex item is known to leave the workspace as it was (#1825).
+
+    Words, and a shell command `side_effect_free` reads as read-only in full.
+    Every other type, ``file_change`` and types not yet known included, may
+    have written.
+    """
+    item_type = item.get("type")
+    if item_type in _WORDS_ONLY_ITEMS:
+        return True
+    if item_type == CodexItemType.COMMAND_EXECUTION:
+        return command_changes_nothing(str(item.get("command", "")))
+    return False
+
+
 def _changed_paths_preview(item: _CodexItem) -> str:
     """The paths a ``file_change`` item touched, as one preview string.
 
@@ -313,8 +337,8 @@ class CodexObservabilityRecorder(Protocol):
     ``EventStreamProcessor.ObservabilityRecorder``.
     """
 
-    def note_agent_activity(self) -> None:
-        """See ``ObservabilityCollector.note_agent_activity`` (#1303)."""
+    def note_agent_activity(self, *, changed_nothing: bool = False) -> None:
+        """See ``ObservabilityCollector.note_agent_activity`` (#1303, #1825)."""
         ...
 
     def note_observed_model(self, model: str | None) -> None:
@@ -327,6 +351,8 @@ class CodexObservabilityRecorder(Protocol):
         tool_use_id: str,
         input_preview: str,
         skill_name: str | None = None,
+        *,
+        changes_nothing: bool = False,
     ) -> None: ...
 
     async def record_tool_completed(
@@ -335,6 +361,8 @@ class CodexObservabilityRecorder(Protocol):
         tool_use_id: str,
         success: bool,
         output_preview: str | None,
+        *,
+        changes_nothing: bool = False,
     ) -> None: ...
 
     async def record_token_usage(
@@ -934,8 +962,11 @@ class CodexStreamProcessor:
         # branch has never heard of - is the model having got somewhere. Only
         # the two below are worth an observation; all of them are worth the
         # fact, and that fact is what decides whether the whole prompt may be
-        # run a second time over whatever the item did (#1303).
-        self._collector.note_agent_activity()
+        # run a second time over whatever the item did (#1303). Whether it
+        # may also have WRITTEN is a narrower fact, and only an item read in
+        # full can claim it did not (#1825).
+        changes_nothing = _item_changes_nothing(item)
+        self._collector.note_agent_activity(changed_nothing=changes_nothing)
 
         item_type = item.get("type")
         tool_use_id = str(item.get("id", "unknown"))
@@ -947,6 +978,7 @@ class CodexStreamProcessor:
                 tool_name=CODEX_TOOL_NAME_COMMAND,
                 tool_use_id=tool_use_id,
                 input_preview=command[:_MAX_PREVIEW_LEN],
+                changes_nothing=changes_nothing,
             )
         elif item_type == CodexItemType.FILE_CHANGE:
             await self._collector.record_tool_started(
@@ -965,11 +997,12 @@ class CodexStreamProcessor:
         # announce a `file_change` only once it has happened (#1064), so the
         # completion can be the first and last the stream says about a
         # workspace mutation. Same rule as the start: any type counts.
-        self._collector.note_agent_activity()
+        changes_nothing = _item_changes_nothing(item)
+        self._collector.note_agent_activity(changed_nothing=changes_nothing)
 
         item_type = item.get("type")
         if item_type == CodexItemType.COMMAND_EXECUTION:
-            await self._handle_command_execution_completed(item)
+            await self._handle_command_execution_completed(item, changes_nothing=changes_nothing)
         elif item_type == CodexItemType.FILE_CHANGE:
             await self._handle_file_change_completed(item)
         elif item_type == CodexItemType.AGENT_MESSAGE:
@@ -986,7 +1019,9 @@ class CodexStreamProcessor:
                 # it takes the identical fix rather than being left behind.
                 self._verdict_reader.read(said)
 
-    async def _handle_command_execution_completed(self, item: _CodexItem) -> None:
+    async def _handle_command_execution_completed(
+        self, item: _CodexItem, *, changes_nothing: bool
+    ) -> None:
         tool_use_id = str(item.get("id", "unknown"))
         exit_code = item.get("exit_code")
         success = exit_code == 0
@@ -1018,6 +1053,7 @@ class CodexStreamProcessor:
             tool_use_id=tool_use_id,
             success=success,
             output_preview=output[:_MAX_PREVIEW_LEN] if output else None,
+            changes_nothing=changes_nothing,
         )
 
     async def _handle_file_change_completed(self, item: _CodexItem) -> None:

@@ -31,7 +31,11 @@ AND ONE DIFFERENT AGENT, ONCE (PC-83). A phase that declared a
 `fallback_agent` is re-run on it when its own provider could not serve it at
 all - capacity that outlived the retries above, a spent quota, or a content
 filter that refused the request, neither of which is ever retried - and only
-under the same rule: the failed attempt got nowhere.
+when the failed attempt did no WORK: nothing it did may have changed the
+workspace or anything beyond it (`ObservabilityCollector.may_have_written`).
+That is narrower than "got nowhere" on purpose (#1825). A review that read the
+diff and was then refused has done nothing a second agent would redo, and
+refusing it the fallback is what lost exec-dc6a7109b21b.
 The result names the agent that produced it, on the completion command, so the
 execution records the model that actually ran rather than the one declared.
 """
@@ -213,8 +217,11 @@ async def run_phase_agent(
     fallback = launch.fallback
     if fallback is None or _attempt_is_settled(primary.result):
         return primary.result
+    # NOT `got_somewhere`: a fallback runs a DIFFERENT agent, and what it
+    # must not redo is a write. A verify phase that read the PR and was then
+    # refused by a content filter changed nothing (#1825).
     grant = attempts.fallback_attempt(
-        reason=primary.result.stream_result.error_reason, work_done=primary.got_somewhere
+        reason=primary.result.stream_result.error_reason, work_done=primary.may_have_written
     )
     if grant is None:
         return primary.result
@@ -247,13 +254,18 @@ def _why_the_primary_failed(agent: AgentConfiguration, result: AgentExecutionRes
 
 
 class _Ended:
-    """How one agent's run ended: its final result, and whether it got anywhere."""
+    """How one agent's run ended: its final result, and whether it may have written.
 
-    __slots__ = ("got_somewhere", "result")
+    ``may_have_written`` is `ObservabilityCollector.may_have_written`, read when
+    the run ended. It is the witness the fallback rule asks (#1825). Whether the
+    run got anywhere at all is a retry question, answered inside `until_final`.
+    """
 
-    def __init__(self, result: AgentExecutionResult, *, got_somewhere: bool) -> None:
+    __slots__ = ("may_have_written", "result")
+
+    def __init__(self, result: AgentExecutionResult, *, may_have_written: bool) -> None:
         self.result = result
-        self.got_somewhere = got_somewhere
+        self.may_have_written = may_have_written
 
 
 class _AgentRun:
@@ -294,7 +306,7 @@ class _AgentRun:
             result = await self._dispatch(agent, runner, collector, claude_cmd, agent_env, grant)
             got_somewhere = _phase_got_somewhere(result, collector)
             if _attempt_is_settled(result):
-                return _Ended(result, got_somewhere=got_somewhere)
+                return _Ended(result, may_have_written=collector.may_have_written)
             successor = await self._attempts.wait_before_retry(
                 reason=result.stream_result.error_reason, work_done=got_somewhere
             )
@@ -303,7 +315,7 @@ class _AgentRun:
                 # reported by the caller exactly as the agent gave it, whether the
                 # budget ran out, the deadline did, the attempt had already got
                 # somewhere, or the failure never qualified for a retry.
-                return _Ended(result, got_somewhere=got_somewhere)
+                return _Ended(result, may_have_written=collector.may_have_written)
             grant = successor
             logger.warning(
                 "Upstream was busy (phase=%s): %s - attempt %d of %d",
@@ -324,7 +336,7 @@ class _AgentRun:
         """Run ``agent`` exactly once: the fallback is not itself retried."""
         runner, collector = self._for(agent)
         result = await self._dispatch(agent, runner, collector, claude_cmd, agent_env, grant)
-        return _Ended(result, got_somewhere=_phase_got_somewhere(result, collector))
+        return _Ended(result, may_have_written=collector.may_have_written)
 
     def _for(self, agent: AgentConfiguration) -> tuple[Runner, ObservabilityCollector]:
         """The parser and the Lane-2 collector for ``agent``, shared by all its attempts."""

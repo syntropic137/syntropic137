@@ -198,6 +198,4 @@ class TestARefusalAfterAPossibleWriteDoesNot:
 
         assert result.exit_code == 1
         assert _producer(result) == (AgentProvider.CODEX, "gpt-sol")
-        assert "flagged for possible cybersecurity risk" in str(
-            result.stream_result.error_reason
-        )
+        assert "flagged for possible cybersecurity risk" in str(result.stream_result.error_reason)
