@@ -3967,7 +3967,7 @@ class PhaseProfilesResponse(BaseModel):
 
 
 # =============================================================================
-# Request latency (ADR-073)
+# Request latency (ADR-075)
 # =============================================================================
 
 LatencyWindow = Literal["1h", "24h", "7d", "30d"]

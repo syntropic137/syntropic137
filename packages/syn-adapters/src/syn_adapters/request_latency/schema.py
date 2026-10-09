@@ -1,4 +1,4 @@
-"""The ``api_request_latency`` hypertable: one row per API request (ADR-073).
+"""The ``api_request_latency`` hypertable: one row per API request (ADR-075).
 
 Lives in the observability database beside ``agent_events`` and follows the
 same DDL policy: created here at startup unless ``SYN_SKIP_AUTO_CREATE_TABLES``

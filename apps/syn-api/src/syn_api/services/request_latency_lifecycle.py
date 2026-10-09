@@ -1,4 +1,4 @@
-"""Start and stop the durable request latency recorder (ADR-073).
+"""Start and stop the durable request latency recorder (ADR-075).
 
 Best-effort, like every Lane 2 writer: if the table cannot be readied the API
 serves anyway and the recorder counts every sample as dropped, which

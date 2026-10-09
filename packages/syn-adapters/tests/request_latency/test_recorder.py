@@ -1,4 +1,4 @@
-"""The request latency recorder never blocks, never grows unbounded, and says what it lost (ADR-073)."""
+"""The request latency recorder never blocks, never grows unbounded, and says what it lost (ADR-075)."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""A bounded, batched, non-blocking writer of request samples (ADR-073).
+"""A bounded, batched, non-blocking writer of request samples (ADR-075).
 
 ``offer`` is called on the request path, so it does no I/O and never waits: it
 appends to a bounded buffer, or counts a drop when the buffer is full or the
@@ -32,7 +32,7 @@ _COLUMNS = ("time", "method", "route", "status", "duration_ms", "request_id")
 
 @dataclass(frozen=True, slots=True)
 class RequestSample:
-    """One answered request. Never a path, query, header or body (ADR-073)."""
+    """One answered request. Never a path, query, header or body (ADR-075)."""
 
     time: datetime
     method: str

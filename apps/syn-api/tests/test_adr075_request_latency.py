@@ -1,4 +1,4 @@
-"""Every request is recorded by route template, off the request path (ADR-073).
+"""Every request is recorded by route template, off the request path (ADR-075).
 
 The middleware hands each answered request to the recorder and returns: no
 I/O, no await. These pin what is recorded (template, never the raw path), that

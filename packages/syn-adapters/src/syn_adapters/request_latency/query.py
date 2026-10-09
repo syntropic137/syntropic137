@@ -1,8 +1,8 @@
-"""Per-route latency percentiles over a time window (ADR-073).
+"""Per-route latency percentiles over a time window (ADR-075).
 
 Exact: ``percentile_cont`` over every row in the window, not an estimate. At
 the volumes this API serves (a few requests a second, 30 days retained) a
-sort per route is cheap; ADR-073 says when to switch to a sketch.
+sort per route is cheap; ADR-075 says when to switch to a sketch.
 """
 
 from __future__ import annotations

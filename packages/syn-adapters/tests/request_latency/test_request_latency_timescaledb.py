@@ -1,4 +1,4 @@
-"""Samples reach a real TimescaleDB and come back as exact percentiles (ADR-073).
+"""Samples reach a real TimescaleDB and come back as exact percentiles (ADR-075).
 
 Uses the shared ``test_infrastructure`` fixture (ADR-034): test-stack on port
 15432, else testcontainers.

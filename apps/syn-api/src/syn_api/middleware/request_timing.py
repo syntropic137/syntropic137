@@ -18,7 +18,7 @@ everything else - and the line carries the method, the route TEMPLATE, the
 status and two durations, never the raw path, query string, headers or body:
 ids, tokens and credentials all pass through here.
 
-EVERY REQUEST IS ALSO RECORDED DURABLY (ADR-073): the same method, route
+EVERY REQUEST IS ALSO RECORDED DURABLY (ADR-075): the same method, route
 template, status and time-to-response-start, with a request id, are offered to
 the request latency recorder, which batches them into the observability
 database off the request path. The id is returned as ``x-request-id`` and named

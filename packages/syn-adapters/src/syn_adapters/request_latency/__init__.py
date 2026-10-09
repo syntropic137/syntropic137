@@ -1,4 +1,4 @@
-"""Durable per-request API latency, Lane 2 (ADR-073)."""
+"""Durable per-request API latency, Lane 2 (ADR-075)."""
 
 from syn_adapters.request_latency.query import RouteLatency, latency_by_route
 from syn_adapters.request_latency.recorder import (

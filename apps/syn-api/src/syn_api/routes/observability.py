@@ -225,7 +225,7 @@ async def get_token_metrics_endpoint(
 
 
 # =============================================================================
-# Request latency (ADR-073)
+# Request latency (ADR-075)
 # =============================================================================
 
 _WINDOWS: dict[LatencyWindow, timedelta] = {
@@ -249,7 +249,7 @@ async def get_request_latency(
 ) -> RequestLatencyResponse:
     """Exact p50/p95/p99, max and count per (method, route template) over the window.
 
-    Read from ``api_request_latency`` (Lane 2, ADR-073). Every API process
+    Read from ``api_request_latency`` (Lane 2, ADR-075). Every API process
     records its own requests; ``recorder`` describes THIS process's only.
     """
     from syn_adapters.request_latency import latency_by_route, request_latency_recorder

@@ -1,4 +1,4 @@
-# ADR-073: Durable Request Latency Telemetry
+# ADR-075: Durable Request Latency Telemetry
 
 - **Status**: Accepted
 - **Date**: 2026-10-08
@@ -47,7 +47,7 @@ as a batch fills. Backpressure drops, never blocks: a sample offered while the
 buffer is full, or while the recorder is not running, is counted in `dropped`;
 a batch whose write fails is counted in `write_failures` and not retried.
 Shutdown flushes once before the pool closes. Measured overhead in-process is
-about 6 us per request (`test_adr073_request_latency.py` asserts < 1 ms).
+about 6 us per request (`test_adr075_request_latency.py` asserts < 1 ms).
 
 Recording is best-effort (ADR-057 spirit): if the table cannot be readied the
 API serves anyway and every sample is a counted drop.

@@ -2,7 +2,7 @@
 
 Check [README.md](README.md) for the categorized index of all Architecture Decision Records.
 
-- Next available number: **ADR-073** (README.md is authoritative)
+- Next available number: **ADR-075** (README.md is authoritative)
 - Follow the Nygard template: Status, Date, Context, Decision, Consequences
 - Filename format: `ADR-NNN-short-kebab-title.md`
 - After creating, add an entry to README.md in the appropriate category
