@@ -84,9 +84,11 @@ REFUSAL_TAIL: tuple[str, ...] = tuple(
 
 def _command(item_id: str, command: str) -> tuple[str, str]:
     """A codex shell command, opened and closed, exactly as codex emits it."""
-    item: dict[str, object] = {"id": item_id, "type": "command_execution", "command": command}
-    done: dict[str, object] = {**item, "exit_code": 0, "aggregated_output": "..."}
-    return _codex_item("item.started", item), _codex_item("item.completed", done)
+    item = {"id": item_id, "type": "command_execution", "command": command}
+    return (
+        json.dumps({"type": "item.started", "item": item}),
+        json.dumps({"type": "item.completed", "item": {**item, "exit_code": 0}}),
+    )
 
 
 def _reasoning(item_id: str) -> str:
@@ -210,37 +212,34 @@ class TestARefusalAfterAPossibleWriteDoesNot:
         assert "flagged for possible cybersecurity risk" in str(result.stream_result.error_reason)
 
 
+def _claude_tool(name: str, **tool_input: str) -> str:
+    return _claude_assistant({"type": "tool_use", "id": "t1", "name": name, "input": tool_input})
+
+
+_claude_words = _claude_assistant(
+    {"type": "thinking", "thinking": "hm"}, {"type": "text", "text": "reading"}
+)
+
+
 class TestTheClaudeParserDrawsTheSameLine:
     """The claude processor feeds the same witness, from its own stream shapes."""
 
     @pytest.mark.parametrize(
-        ("content", "wrote"),
+        ("line", "wrote"),
         [
-            ([{"type": "thinking", "thinking": "hm"}, {"type": "text", "text": "reading"}], False),
-            (
-                [{"type": "tool_use", "id": "t1", "name": "Read", "input": {"file_path": "a"}}],
-                False,
-            ),
-            (
-                [{"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": "cat a"}}],
-                False,
-            ),
-            ([{"type": "tool_use", "id": "t1", "name": "Edit", "input": {"file_path": "a"}}], True),
-            (
-                [
-                    {
-                        "type": "tool_use",
-                        "id": "t1",
-                        "name": "Bash",
-                        "input": {"command": "git push"},
-                    }
-                ],
+            pytest.param(_claude_words, False, id="thinking-and-text"),
+            pytest.param(_claude_tool("Read", file_path="a"), False, id="read"),
+            pytest.param(_claude_tool("Bash", command="cat a"), False, id="bash-cat"),
+            pytest.param(_claude_tool("Edit", file_path="a"), True, id="edit"),
+            pytest.param(_claude_tool("Bash", command="git push"), True, id="bash-push"),
+            pytest.param(
+                _claude_assistant({"type": "server_tool_use", "id": "t1"}),
                 True,
+                id="a-block-type-nobody-taught-it",
             ),
-            ([{"type": "server_tool_use", "id": "t1"}], True),
         ],
     )
-    async def test_claude_content(self, content: list[dict[str, object]], wrote: bool) -> None:
+    async def test_claude_content(self, line: str, wrote: bool) -> None:
         collector = ObservabilityCollector(
             writer=None,
             session_id="s",
@@ -262,9 +261,7 @@ class TestTheClaudeParserDrawsTheSameLine:
             collector=collector,
         )
 
-        await processor.process_stream(
-            _as_stream((_claude_assistant(*content),)), _NeverCancelledWorkspace()
-        )
+        await processor.process_stream(_as_stream((line,)), _NeverCancelledWorkspace())
 
         assert collector.saw_agent_activity
         assert collector.may_have_written is wrote
