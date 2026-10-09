@@ -326,10 +326,25 @@ export function agentKind(provider: string | null | undefined): 'claude' | 'code
 
 const PROVIDER_LABEL: Record<string, string> = { claude: 'Claude', codex: 'Codex', anthropic: 'Claude', openai: 'Codex' }
 
-/** "Codex · gpt-5.6-sol"; the model string renders verbatim (it may be "unknown (requested: opus)"). */
-export function agentLabel(provider: string | null | undefined, modelDisplay: string | null | undefined): string {
+export const MODEL_NOT_REPORTED = 'model not reported'
+
+/**
+ * The observed model, verbatim, or "model not reported" (feedback
+ * 58868cd8: Codex sessions read "unknown"). Owner rule: only the exact
+ * observed model is ever shown, so a null `agent_model`, or the API's
+ * "unknown" / "unknown (requested: gpt-sol)" display, never shows a model;
+ * the requested alias belongs in a tooltip, not the label.
+ */
+export function observedModel(model: string | null | undefined, display: string | null | undefined): string | null {
+  if (model === null || (display && /^unknown\b/i.test(display.trim()))) return MODEL_NOT_REPORTED
+  return display || model || null
+}
+
+/** "Codex · gpt-5.6-sol", or "Codex · model not reported" when no model was observed (pass `model` = agent_model). */
+export function agentLabel(provider: string | null | undefined, modelDisplay: string | null | undefined, model?: string | null): string {
   const p = provider ? (PROVIDER_LABEL[provider.toLowerCase()] ?? provider) : null
-  return [p, modelDisplay].filter(Boolean).join(' · ') || UNKNOWN
+  const m = observedModel(model, modelDisplay)
+  return [p, p || m !== MODEL_NOT_REPORTED ? m : null].filter(Boolean).join(' · ') || UNKNOWN
 }
 
 export interface SessionCrumbInput {
@@ -400,6 +415,7 @@ export interface SessionRowInput {
   phase_display?: string | null
   phase_id?: string | null
   agent_provider?: string | null
+  agent_model?: string | null
   agent_model_display?: string | null
   repos_display?: string | null
   status: string
@@ -410,7 +426,7 @@ export interface SessionRowInput {
 
 /** "build-and-delegate · Codex · gpt-5.6-sol · syntropic137/syntropic137" (mono line under a list row). */
 export function sessionRowSub(s: SessionRowInput): string {
-  return [s.phase_display || s.phase_id || null, agentLabel(s.agent_provider, s.agent_model_display), s.repos_display || null].filter((x) => x && x !== UNKNOWN).join(' · ')
+  return [s.phase_display || s.phase_id || null, agentLabel(s.agent_provider, s.agent_model_display, s.agent_model), s.repos_display || null].filter((x) => x && x !== UNKNOWN).join(' · ')
 }
 
 /** Markdown an agent can act on: one bullet per session with its id, workflow, phase, status and spend. */

@@ -129,7 +129,7 @@
         </Button>
       {/snippet}
       <div class="sky-session__facts">
-        <Tag variant="agent" agent={agentKind(s.agent_provider)} title={s.requested_model ? `Requested: ${s.requested_model}` : undefined}>{agentLabel(s.agent_provider, s.agent_model_display)}</Tag>
+        <Tag variant="agent" agent={agentKind(s.agent_provider)} title={s.requested_model ? `Requested: ${s.requested_model}` : undefined}>{agentLabel(s.agent_provider, s.agent_model_display, s.agent_model)}</Tag>
         <span class="sky-session__id">{s.id}</span>
         {#if inventoryHref}
           <a class="sky-session__link" href={href(inventoryHref)}>All sessions for this {s.phase_id ? 'phase' : 'run'} →</a>

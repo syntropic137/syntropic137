@@ -118,7 +118,8 @@ describe('detail', () => {
   it('chips the model', () => {
     expect(phaseModelChip(phase())).toBe('Claude · haiku requested')
     expect(phaseModelChip(phase({ model: 'claude-haiku-4-5' }))).toBe('claude-haiku-4-5')
-    expect(phaseModelChip(phase({ requested_model: null, model_display: 'unknown' }))).toBe('unknown')
+    // Never a model that was not observed (feedback 58868cd8).
+    expect(phaseModelChip(phase({ requested_model: null, model_display: 'unknown' }))).toBe('model not reported')
   })
 
   it('reads the kit from start pins', () => {

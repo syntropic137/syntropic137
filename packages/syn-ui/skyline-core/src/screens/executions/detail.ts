@@ -92,7 +92,8 @@ export function phaseModelChip(p: PhaseLike): string {
     const agent = agentOf(p.pinned_at_start?.provider) ?? agentOf(requested)
     return `${agent ? `${agent} · ` : ''}${requested} requested`
   }
-  return p.model_display || 'model unknown'
+  // Never a model that was not observed (feedback 58868cd8): the API's "unknown" reads "model not reported".
+  return p.model_display && !/^unknown\b/i.test(p.model_display) ? p.model_display : 'model not reported'
 }
 
 /** Tools and skills for the phase's kit chips, from what was pinned at start. */

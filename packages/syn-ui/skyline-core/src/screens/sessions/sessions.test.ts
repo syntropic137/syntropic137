@@ -113,6 +113,12 @@ describe('helpers', () => {
   it('labels the agent', () => {
     expect(agentLabel('codex', 'gpt-5.6-sol')).toBe('Codex · gpt-5.6-sol')
     expect(agentLabel(null, null)).toBe('—')
+    // Feedback 58868cd8: never "unknown", never the requested alias; harness plus "model not reported".
+    expect(agentLabel('codex', 'unknown', null)).toBe('Codex · model not reported')
+    expect(agentLabel('codex', 'unknown (requested: gpt-sol)', null)).toBe('Codex · model not reported')
+    expect(agentLabel('codex', 'unknown (requested: gpt-sol)')).toBe('Codex · model not reported')
+    expect(agentLabel('claude', 'claude-opus-5-5', 'claude-opus-5-5')).toBe('Claude · claude-opus-5-5')
+    expect(agentLabel(null, 'unknown', null)).toBe('—')
   })
   it('builds crumbs', () => {
     expect(sessionCrumbs({ id: 'sess-1', workflow_id: 'wf', workflow_name: 'Codex delegates to Claude', execution_id: 'exec-6350e65e', phase_display: 'build-and-delegate' })).toEqual([
