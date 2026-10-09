@@ -26,6 +26,7 @@ pytestmark = pytest.mark.unit
         "/bin/zsh -lc 'gh pr diff 1819'",
         "/bin/zsh -lc 'ls -1 2>/dev/null; find . -name \"*.py\"'",
         "grep -rn x .",
+        "/bin/zsh -lc 'git diff 2>&1 | head; ls >/dev/null'",
     ],
 )
 def test_a_command_that_only_reads_changes_nothing(command: str) -> None:
@@ -56,6 +57,21 @@ def test_a_command_that_only_reads_changes_nothing(command: str) -> None:
         "/bin/zsh -lc 'just test'",
         "/bin/zsh -lc 'cat \"unterminated'",
         "",
+        # Review round 1 of #1825: each of these ran, or could run, a write.
+        "echo reviewed & touch review-output",
+        "echo reviewed & git commit -am reviewed",
+        "echo reviewed & git push origin HEAD",
+        "ls > /dev/null-review-output",
+        "git diff --ext-diff",
+        "git diff --textconv",
+        "git cat-file --filters HEAD:a.py",
+        "git grep --open-files-in-pager=touch pattern",
+        "git grep -Otouch pattern",
+        # Installing a driver that a later plain `git diff` runs is itself work.
+        "git config diff.external ./driver",
+        "export GIT_EXTERNAL_DIFF=./driver",
+        "GIT_EXTERNAL_DIFF=./driver git diff",
+        "git -c diff.external=./driver diff",
     ],
 )
 def test_a_command_that_may_write_is_work(command: str) -> None:

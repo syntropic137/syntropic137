@@ -55,9 +55,12 @@ _READ_ONLY_GH: frozenset[tuple[str, str]] = frozenset(
 
 #: Shell syntax that can write or run something this module cannot see. A
 #: redirect to /dev/null is removed before this is asked, since it writes
-#: nowhere anyone reads.
-_UNREADABLE_SYNTAX = re.compile(r"[>`]|\$\(|<\(|\btee\b")
-_DEV_NULL_REDIRECT = re.compile(r"\d?>>?\s*/dev/null|2>&1")
+#: nowhere anyone reads. A lone ``&`` backgrounds what precedes it and starts
+#: a new command after it, so it is refused rather than parsed: read as an
+#: argument, ``echo x & touch y`` would hide the write inside echo's arguments.
+_UNREADABLE_SYNTAX = re.compile(r"[>`]|\$\(|<\(|\btee\b|(?<!&)&(?!&)")
+#: The target must be /dev/null EXACTLY: ``> /dev/null-out`` writes a file.
+_DEV_NULL_REDIRECT = re.compile(r"\d?>>?\s*/dev/null(?![^\s;&|])|\d>&\d")
 _SEGMENT_SEPARATOR = re.compile(r"\|\|?|&&|;|\n")
 _SHELLS: frozenset[str] = frozenset({"sh", "bash", "zsh"})
 
@@ -102,6 +105,15 @@ def _unwrap_shell(command: str) -> str | None:
 #: one, whichever program carries them: `git diff --output`, `rg --pre`.
 _WRITING_OPTIONS: tuple[str, ...] = ("--output", "--pre")
 
+#: Options that make a reading git subcommand RUN another program: an external
+#: diff driver, a textconv filter, a pager for the matched files. A driver
+#: that git runs from configuration alone (``diff.external``,
+#: ``GIT_EXTERNAL_DIFF``) is not decided here: installing one is a command this
+#: module calls work, so an attempt that set it up has already written.
+_GIT_EXECUTING_OPTIONS: tuple[str, ...] = (
+    "--ext-diff", "--textconv", "--filters", "--open-files-in-pager", "-O",
+)  # fmt: skip
+
 #: `find` actions that run, delete or write (`-fprint`, `-fls`).
 _FIND_ACTIONS: tuple[str, ...] = ("-exec", "-ok", "-delete", "-fprint", "-fls")
 
@@ -123,7 +135,9 @@ def _segment_reads(segment: str) -> bool:
     if program == "find":
         return not any(a.startswith(_FIND_ACTIONS) for a in args)
     if program == "git":
-        return _git_subcommand(args) in _READ_ONLY_GIT
+        return _git_subcommand(args) in _READ_ONLY_GIT and not any(
+            a.startswith(_GIT_EXECUTING_OPTIONS) for a in args
+        )
     if program == "gh":
         return len(args) >= 2 and (args[0], args[1]) in _READ_ONLY_GH
     return False

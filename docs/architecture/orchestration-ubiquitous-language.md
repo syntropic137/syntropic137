@@ -161,6 +161,13 @@ says "no work". It decides the [Fallback Agent](#fallback-agent) only. A
 same-agent retry of a busy upstream asks the broader question, whether the
 attempt showed any activity at all (#1303), because it resends the same prompt.
 
+A shell command is read-only only when its WHOLE line is: a background `&`, a
+redirect to anything but exactly `/dev/null`, or a git option that runs
+another program (`--ext-diff`, `--textconv`, `--filters`, `-O`) makes it work.
+A driver git runs from configuration alone is judged where it is installed:
+`git config`, `export` and `VAR=value cmd` are work, so the attempt that set
+one up has already done work before its plain `git diff` runs it.
+
 ## Review Verdict
 
 What a reviewing Phase concluded about the change in front of it: `certified`

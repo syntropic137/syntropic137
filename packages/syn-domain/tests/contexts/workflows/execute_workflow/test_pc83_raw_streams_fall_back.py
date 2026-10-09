@@ -135,7 +135,7 @@ CODEX_REFUSED_BEFORE_WORK: tuple[str, ...] = tuple(
 
 
 def _codex_read(item_id: str, command: str) -> tuple[str, str]:
-    """A read-only codex shell command, opened and closed."""
+    """A codex shell command, opened and closed, exactly as codex emits it."""
     item = {"id": item_id, "type": "command_execution", "command": command}
     return (
         json.dumps({"type": "item.started", "item": item}),
@@ -504,6 +504,49 @@ class TestRawStreamsFallBack:
         (row,) = (await _detail(repository, "exec-refusal-raw-after-reading")).phases
         assert row.agent_provider == AgentProvider.CLAUDE
         assert row.agent_model == "claude-fallback-model"
+
+    @pytest.mark.parametrize(
+        "commands",
+        [
+            pytest.param(("echo reviewed & touch review-output",), id="background-touch"),
+            pytest.param(("echo reviewed & git commit -am reviewed",), id="background-commit"),
+            pytest.param(("echo reviewed & git push origin HEAD",), id="background-push"),
+            pytest.param(("ls > /dev/null-review-output",), id="redirect-past-dev-null"),
+            pytest.param(("git diff --ext-diff",), id="git-ext-diff"),
+            pytest.param(("git diff --textconv",), id="git-textconv"),
+            pytest.param(("git grep --open-files-in-pager=touch pattern",), id="git-grep-pager"),
+            # A plain `git diff` runs whatever driver is configured. The attempt
+            # that configured one wrote, so the plain diff after it changes nothing.
+            pytest.param(
+                ("git config diff.external ./touch-driver", "git diff"), id="configured-driver"
+            ),
+            pytest.param(
+                ("export GIT_EXTERNAL_DIFF=./touch-driver", "git diff"), id="exported-driver"
+            ),
+            pytest.param(("GIT_EXTERNAL_DIFF=./touch-driver git diff",), id="inline-driver"),
+        ],
+    )
+    async def test_e3_a_codex_refusal_after_a_possible_write_keeps_the_primary_failure(
+        self, commands: tuple[str, ...]
+    ) -> None:
+        """(e3) #1825 review: shells the classifier once misread as read-only.
+
+        The exact refusal and exit code 1, through the real handler. Each
+        command can write or run another program, so the fallback must not run.
+        """
+        primary = (
+            *(line for i, c in enumerate(commands) for line in _codex_read(f"item_w{i}", c)),
+            *CODEX_REFUSED_AS_OBSERVED,
+        )
+        agent = _ProductionHandlerAgent(attempts=(primary, (CLAUDE_SUCCEEDS,)), exit_codes=(1, 0))
+        phase = _phase(AgentConfiguration(provider=AgentProvider.CODEX), CLAUDE_FALLBACK)
+
+        result, repository = await _run(agent, phase, "exec-refusal-raw-after-write")
+
+        assert agent.runners == [AgentRunner.CODEX]
+        assert result.status == "failed"
+        (row,) = (await _detail(repository, "exec-refusal-raw-after-write")).phases
+        assert row.agent_provider != AgentProvider.CLAUDE
 
     async def test_f_a_codex_refusal_after_work_does_not_fall_back(self) -> None:
         """(f) Codex edited a file, then was refused. No fallback: that was work."""
