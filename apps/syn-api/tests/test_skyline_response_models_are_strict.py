@@ -16,7 +16,7 @@ from decimal import Decimal
 import pytest
 from pydantic import BaseModel, ValidationError
 
-from syn_api.routes.workflows.queries import (
+from syn_api.routes.workflows.latest_outputs import (
     PhaseLatestOutputResponse,
     WorkflowLatestOutputsResponse,
 )

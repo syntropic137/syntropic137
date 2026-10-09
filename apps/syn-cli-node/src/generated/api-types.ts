@@ -99,26 +99,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/workflows/{workflow_id}/latest-outputs": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Workflow Latest Outputs Endpoint
-         * @description Each phase's latest output: its newest primary deliverable across all runs.
-         */
-        get: operations["get_workflow_latest_outputs_endpoint_workflows__workflow_id__latest_outputs_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/workflows/{workflow_id}/trend": {
         parameters: {
             query?: never;
@@ -154,6 +134,26 @@ export interface paths {
          * @description DEPRECATED: Use /workflows/{workflow_id}/runs instead.
          */
         get: operations["get_workflow_history_endpoint_workflows__workflow_id__history_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workflows/{workflow_id}/latest-outputs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Workflow Latest Outputs Endpoint
+         * @description Each phase's latest output: its newest primary deliverable across all runs.
+         */
+        get: operations["get_workflow_latest_outputs_endpoint_workflows__workflow_id__latest_outputs_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -10054,37 +10054,6 @@ export interface operations {
             };
         };
     };
-    get_workflow_latest_outputs_endpoint_workflows__workflow_id__latest_outputs_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                workflow_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["WorkflowLatestOutputsResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     get_workflow_trend_endpoint_workflows__workflow_id__trend_get: {
         parameters: {
             query?: {
@@ -10144,6 +10113,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ExecutionHistoryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_workflow_latest_outputs_endpoint_workflows__workflow_id__latest_outputs_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workflow_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowLatestOutputsResponse"];
                 };
             };
             /** @description Validation Error */

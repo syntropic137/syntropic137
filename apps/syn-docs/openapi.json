@@ -377,49 +377,6 @@
         }
       }
     },
-    "/workflows/{workflow_id}/latest-outputs": {
-      "get": {
-        "tags": [
-          "workflows"
-        ],
-        "summary": "Get Workflow Latest Outputs Endpoint",
-        "description": "Each phase's latest output: its newest primary deliverable across all runs.",
-        "operationId": "get_workflow_latest_outputs_endpoint_workflows__workflow_id__latest_outputs_get",
-        "parameters": [
-          {
-            "name": "workflow_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Workflow Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkflowLatestOutputsResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/workflows/{workflow_id}/trend": {
       "get": {
         "tags": [
@@ -515,6 +472,49 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ExecutionHistoryResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workflows/{workflow_id}/latest-outputs": {
+      "get": {
+        "tags": [
+          "workflows"
+        ],
+        "summary": "Get Workflow Latest Outputs Endpoint",
+        "description": "Each phase's latest output: its newest primary deliverable across all runs.",
+        "operationId": "get_workflow_latest_outputs_endpoint_workflows__workflow_id__latest_outputs_get",
+        "parameters": [
+          {
+            "name": "workflow_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Workflow Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowLatestOutputsResponse"
                 }
               }
             }

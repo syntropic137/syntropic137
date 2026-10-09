@@ -21,7 +21,7 @@ import pytest
 from fastapi import HTTPException
 
 from syn_adapters.projection_stores import InMemoryProjectionStore
-from syn_api.routes.workflows.queries import get_workflow_latest_outputs_endpoint
+from syn_api.routes.workflows.latest_outputs import get_workflow_latest_outputs_endpoint
 from syn_api.types import (
     ArtifactError,
     ArtifactSummary,
@@ -57,10 +57,12 @@ async def _call(
     outputs: Ok[dict[str, ArtifactSummary | None]] | Err[ArtifactError],
 ):
     with (
-        patch("syn_api.routes.workflows.queries.get_projection_mgr", return_value=MagicMock()),
+        patch(
+            "syn_api.routes.workflows.latest_outputs.get_projection_mgr", return_value=MagicMock()
+        ),
         patch("syn_api.prefix_resolver.resolve_or_raise", new=AsyncMock(return_value="wf-1")),
         patch(
-            "syn_api.routes.workflows.queries.get_workflow",
+            "syn_api.routes.workflows.latest_outputs.get_workflow",
             new=AsyncMock(return_value=detail_result),
         ),
         patch(
