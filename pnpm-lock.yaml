@@ -266,6 +266,15 @@ importers:
 
   apps/syn-landing:
     dependencies:
+      '@syn137/skyline-core':
+        specifier: workspace:*
+        version: link:../../packages/syn-ui/skyline-core
+      '@syn137/skyline-svelte-v5':
+        specifier: workspace:*
+        version: link:../../packages/syn-ui/skyline-svelte-v5
+      '@syn137/skyline-themes':
+        specifier: workspace:*
+        version: link:../../packages/syn-ui/themes
       react:
         specifier: 19.2.4
         version: 19.2.4

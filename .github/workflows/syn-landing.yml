@@ -96,6 +96,9 @@ jobs:
       - name: Typecheck
         run: pnpm --filter syn-landing run typecheck
 
+      # `build` first runs `elements` (skyline-svelte-v5 build:elements with its
+      # 45 KB gzip budget): the page imports the <sky-*> elements from
+      # dist-elements/, which is git-ignored.
       - name: Build
         run: pnpm --filter syn-landing run build
 

@@ -8,8 +8,9 @@
     "node": "22.x"
   },
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
+    "elements": "pnpm --filter @syn137/skyline-svelte-v5 run build:elements",
+    "dev": "pnpm run elements && vite",
+    "build": "pnpm run elements && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "lint:copy": "bash scripts/check-copy.sh",
@@ -17,6 +18,9 @@
     "test": "playwright test"
   },
   "dependencies": {
+    "@syn137/skyline-core": "workspace:*",
+    "@syn137/skyline-svelte-v5": "workspace:*",
+    "@syn137/skyline-themes": "workspace:*",
     "react": "19.2.4",
     "react-dom": "19.2.4"
   },
