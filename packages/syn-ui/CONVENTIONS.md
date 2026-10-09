@@ -226,16 +226,34 @@ Use `resource()` from `src/lib/load.svelte.ts`. Do not fetch in `onMount` and do
 
 The search button and ⌘K dispatch a `sky:command` window event. The Command palette (Overlays wave) listens for it.
 
-### Feedback modal
+### Feedback bubble
 
-A Feedback button in TopNav (and PhoneTop on phones) opens `src/shell/FeedbackDialog.svelte`, which files one item through `createFeedback()` (`POST /feedback`, lib/ui-feedback, #1385): type, priority, title, description, and the page URL (on by default). The API has no title field, so the title is the comment's first line. No screenshot: the React widget's html2canvas capture and multipart upload are not ported.
+A floating bubble, bottom right (above the dock on phones), is the React widget (`lib/ui-feedback`) ported: `src/shell/FeedbackBubble.svelte`, `FeedbackDialog.svelte` and `src/shell/feedback/`. Its menu has Quick note, Pin to element and Recent feedback (the last 8 from `syn-ui`, with the open count as a badge). The dialog files one item through `createFeedback()` (`POST /feedback`, #1385), then uploads each screenshot with `uploadFeedbackMedia()` (multipart `POST /feedback/{id}/media` through `requestForm()` in the data client).
 
-The button shows only when both hold (`src/shell/feedback.svelte.ts`):
+What it records: coloured type and priority (`--sky-feedback-type-*`, `--sky-feedback-priority-*` in tokens.css; React defaults bug and low), title plus description (the API has no title field, so the title is the comment's first line), the page (url, route, viewport, user agent, hostname, `app_version` and `git_commit` from `GET /version`, `subject_kind`/`subject_id` on detail routes), an optional pinned element (`css_selector` preferring data-testid, then aria-label, then a short CSS path; `xpath`; click point), and screenshots. Element text, box and theme have no API field and are appended to the comment under `---`.
+
+Screenshots: Take screenshot (visible viewport) and Capture area render the DOM with `html2canvas-pro` (the maintained html2canvas fork: html2canvas 1.4.1 throws on the oklab values our color-mix tokens compute to), imported dynamically from `feedback/capture.ts` only, so no byte of it is in a production build. Upload image, paste and drop take PNG, JPEG or WebP up to 10 MB, resized to fit 1920x1080.
+
+Shortcuts:
+
+| Where | Key | Does |
+|---|---|---|
+| Page | `F` | Open a quick note |
+| Page | `Ctrl+Shift+Q` / `Ctrl+Shift+F` / `Ctrl+Shift+T` | Quick note / pin to element / recent (React widget bindings) |
+| Dialog, focus not in a text field | `B F U P Q O` | Type: bug, feature, UI/UX, perf, question, other |
+| Dialog, focus not in a text field | `1`-`4` | Priority: low, medium, high, critical |
+| Dialog, focus not in a text field | `E` / `S` / `A` / `T` | Pick element / take screenshot / capture area / focus title |
+| Dialog | `Shift+Enter` or `Mod+Enter` | Send |
+| Picker | Tab, arrows / Enter / Esc | Cycle candidates / pin / cancel |
+
+`F` is handled by the bubble, not KEYMAP: a KEYMAP entry needs a new `KeyAction` and a case in `keyboard.ts`, which the shell owner adds.
+
+The bubble shows only when both hold (`src/shell/feedback.svelte.ts`):
 
 - `GET /features` answers `ui_feedback: true`, which the API does when `SYN_UI_FEEDBACK_ENABLED=true` and it is built with the `feedback` extra. Off by default for open-source installs.
 - The app runs on a developer machine: the Vite dev server (`import.meta.env.DEV`) or a fixtures build (`VITE_SYN_FIXTURES=1`). A deployed production build never shows it, whatever the flag says.
 
-To see it locally: `just skyline-dev-fixtures` (the fixture answers `ui_feedback: true`), or `just skyline-dev` against an API started with `SYN_UI_FEEDBACK_ENABLED=true`. The dialog is a lazy chunk mounted by AppShell on the first click, so it never joins the first load.
+To enable locally: `just skyline-dev-fixtures` (the fixture answers `ui_feedback: true` and accepts create, list, stats and media), or `just skyline-dev` against an API started with `SYN_UI_FEEDBACK_ENABLED=true`. AppShell mounts the bubble and the dialog as lazy chunks behind `FEEDBACK_LOCAL_ONLY`, so neither joins the first load.
 
 ### Size budget
 
