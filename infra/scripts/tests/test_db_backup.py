@@ -279,6 +279,36 @@ class TestBackup:
         assert (elsewhere / "keep").read_text() == "operator data"
         assert taken.is_symlink() == (occupant != "directory")
 
+    def test_a_file_swapped_in_at_the_published_name_is_never_recorded(self, tmp_path, fake_pg):
+        """Replaced between publish and record: the replacement is not ours to prune."""
+        out = tmp_path / "backups"
+        out.mkdir()
+        bin_dir = tmp_path / "bin"
+        _stub(bin_dir, "date", "echo 20261008T030000Z")
+        manifest = out / "syn-20261008T030000Z.dump.manifest"
+        # track() reads the ledger header just before checking the public
+        # name: swap the manifest out from under it at that moment.
+        real_sed = shutil.which("sed")
+        _stub(
+            bin_dir,
+            "sed",
+            f'if [ ! -e "{tmp_path}/swapped" ]; then touch "{tmp_path}/swapped";'
+            f' printf "operator data" > "{tmp_path}/op" && mv -f "{tmp_path}/op" "{manifest}"; fi\n'
+            f'exec {real_sed} "$@"',
+        )
+
+        result = _run("backup", str(out), env=fake_pg(_LISTING_WITH_DATA))
+
+        assert result.returncode == 0, result.stderr
+        assert manifest.read_text() == "operator data"
+        assert "no longer the file this backup published" in result.stderr
+        ledger = (out / _LEDGER).read_text()
+        assert f" {manifest.name}\n" not in ledger
+        for path in _published(out):
+            _age(path, 365 * _DAY)
+        assert _run("prune", str(out), "1").returncode == 0
+        assert manifest.read_text() == "operator data"
+
     def test_a_directory_appearing_at_the_name_mid_publish_is_left_alone(self, tmp_path, fake_pg):
         """The check-then-link race: ln itself finds a directory there."""
         out = tmp_path / "backups"

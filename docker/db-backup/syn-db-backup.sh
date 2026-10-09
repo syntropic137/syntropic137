@@ -72,8 +72,8 @@ inode() {
     ls -di -- "$1" | awk '{ print $1 }'
 }
 
-# Record DIR/NAME, just published by this script, in DIR's ledger, with SUM
-# (the sha256 of its content). A file that cannot be
+# Record DIR/NAME, just published by this script as a hard link of its private
+# file SRC, in DIR's ledger, with SUM (the sha256 of SRC's content). A file that cannot be
 # recorded is only ever kept, never pruned: that is the safe side. The ledger
 # is created exclusively (noclobber: never through or over anything already
 # there) and appended to only while it is a regular file that starts with
@@ -88,8 +88,15 @@ track() {
         echo "syn-db-backup: $tr_ledger is not this script's ledger; not recording $2, which will never be pruned" >&2
         return 0
     fi
-    tr_ino=$(inode "$1/$2") && [ -n "$tr_ino" ] &&
-        printf '%s %s %s\n' "$tr_ino" "${3:--}" "$2" >>"$tr_ledger" ||
+    # Identity comes from SRC, the private file DIR/NAME was linked from, and
+    # is recorded only while DIR/NAME is still that very file: something
+    # swapped in at the public name is never recorded as ours.
+    if [ -L "$1/$2" ] || ! [ "$1/$2" -ef "$3" ]; then
+        echo "syn-db-backup: $1/$2 is no longer the file this backup published; not recording it" >&2
+        return 0
+    fi
+    tr_ino=$(inode "$3") && [ -n "$tr_ino" ] &&
+        printf '%s %s %s\n' "$tr_ino" "$4" "$2" >>"$tr_ledger" ||
         echo "syn-db-backup: could not record $2 in $tr_ledger; it will never be pruned" >&2
 }
 
@@ -235,8 +242,8 @@ backup() {
         [ "$n" -le 99 ] || fail "no free name for a $stamp backup in $dir"
         name="syn-$stamp-$n.dump"
     done
-    track "$dir" "$name.manifest" "$(sha256 "$dir/$name.manifest")"
-    track "$dir" "$name" "$sum"
+    track "$dir" "$name.manifest" "$manifest_partial" "$(sha256 "$manifest_partial")"
+    track "$dir" "$name" "$partial" "$sum"
     rm -f -- "$partial" "$manifest_partial"
     rmdir -- "$work" 2>/dev/null || echo "syn-db-backup: $work is not empty; left in place" >&2
     trap - EXIT
