@@ -158,6 +158,32 @@ UNPUSHABLE_WORKFLOW_DIR: Final[str] = ".github/workflows"
 #: the guarantee; hooks off is the extra that costs nothing.
 _HOOKS_OFF: Final[tuple[str, ...]] = ("-c", "core.hooksPath=/dev/null")
 
+#: The host-side hardening (#1807), for the commands that JUDGE whether work
+#: is safe to discard (#1815). Those verdicts only ever weaken the lost-work
+#: gate, so the programs and settings git would take from configuration
+#: nobody here chose are switched off rather than merely bounded: no system
+#: config, no fsmonitor, and - for a command that never talks to a remote - no
+#: home directory, so no global config either. `-c` and the environment reach
+#: every git the command starts, so a submodule's `status` gets the same.
+#:
+#: `safe.directory` because, with no global config, nothing else can vouch for
+#: a workspace checkout owned by another uid, and a refusal would read as an
+#: unreachable workspace. It trusts no program: hooks and fsmonitor are off.
+#:
+#: HOME IS KEPT for `git_remote`, deliberately: the workspace's credential and
+#: its `insteadOf` rewrites are written to --global by provisioning
+#: (`setup_phase_secrets`), so a remote command without HOME cannot
+#: authenticate, and a private origin that will not answer keeps every
+#: published tag counted as work - the #1815 failure again.
+_HARDENED_ENV: Final[tuple[str, ...]] = ("GIT_CONFIG_NOSYSTEM=1",)
+_NO_HOME_ENV: Final[tuple[str, ...]] = ("HOME=/nonexistent", "XDG_CONFIG_HOME=/nonexistent")
+_HARDENED_CONFIG: Final[tuple[str, ...]] = (
+    "-c",
+    "core.fsmonitor=false",
+    "-c",
+    "safe.directory=*",
+)
+
 #: `timeout`'s documented exit code for "the bound fired". Named here because
 #: this module is what put the wrapper in the argv, so this module is what can
 #: say that 124 means the command was cut off rather than that it answered
@@ -348,7 +374,14 @@ async def repositories(workspace: GitWorkspace) -> list[str]:
     return sorted(line.strip()[: -len(suffix)] for line in found.splitlines() if line.strip())
 
 
-def git_argv(repo: str, *args: str, index: str | None = None, identity: bool = False) -> list[str]:
+def git_argv(
+    repo: str,
+    *args: str,
+    index: str | None = None,
+    identity: bool = False,
+    hardened: bool = False,
+    keep_home: bool = False,
+) -> list[str]:
     """Argv for one git command in ``repo``, with no hook of the repository's own.
 
     Environment is carried in argv, via ``env``, rather than through the
@@ -361,14 +394,23 @@ def git_argv(repo: str, *args: str, index: str | None = None, identity: bool = F
     that runs a hook today: which subcommands consult hooks is git's business
     and changes between releases, and a prefix applied to all of them cannot
     be left off the one that starts to.
+
+    ``hardened`` adds `_HARDENED_CONFIG` and `_HARDENED_ENV`, and with them
+    `_NO_HOME_ENV` unless ``keep_home``: what `git_remote` passes.
     """
     prefix: list[str] = []
     if index is not None:
         prefix.append(f"GIT_INDEX_FILE={index}")
     if identity:
         prefix.extend(_IDENTITY)
+    config: tuple[str, ...] = ()
+    if hardened:
+        prefix.extend(_HARDENED_ENV)
+        if not keep_home:
+            prefix.extend(_NO_HOME_ENV)
+        config = _HARDENED_CONFIG
     env = ["env", *prefix] if prefix else []
-    return [*env, "git", *_HOOKS_OFF, "-C", repo, *args]
+    return [*env, "git", *_HOOKS_OFF, *config, "-C", repo, *args]
 
 
 async def git(
@@ -378,17 +420,20 @@ async def git(
     index: str | None = None,
     identity: bool = False,
     timeout_seconds: int | None = None,
+    hardened: bool = False,
 ) -> str:
     """Stdout of one git command in ``repo``, or raise if it failed."""
     return await checked(
         workspace,
-        git_argv(repo, *args, index=index, identity=identity),
+        git_argv(repo, *args, index=index, identity=identity, hardened=hardened),
         doing=f"running 'git {args[0]}' in {repo}",
         timeout_seconds=timeout_seconds,
     )
 
 
-async def git_remote(workspace: GitWorkspace, repo: str, *args: str, doing: str) -> str:
+async def git_remote(
+    workspace: GitWorkspace, repo: str, *args: str, doing: str, hardened: bool = False
+) -> str:
     """Stdout of one git command that TALKS TO A REMOTE, under the remote bound.
 
     Exists so that `REMOTE_TIMEOUT_SECONDS` is named in exactly one module.
@@ -402,7 +447,10 @@ async def git_remote(workspace: GitWorkspace, repo: str, *args: str, doing: str)
     is what an operator needs to read, not "running 'git ls-remote'".
     """
     return await checked(
-        workspace, git_argv(repo, *args), doing=doing, timeout_seconds=REMOTE_TIMEOUT_SECONDS
+        workspace,
+        git_argv(repo, *args, hardened=hardened, keep_home=True),
+        doing=doing,
+        timeout_seconds=REMOTE_TIMEOUT_SECONDS,
     )
 
 

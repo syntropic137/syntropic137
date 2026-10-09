@@ -90,11 +90,26 @@ async def _moved_gitlinks(workspace: GitWorkspace, repo: str) -> frozenset[str]:
       origin ADVERTISES as well as the remote-tracking refs: see
       `_stranded_commits` (#1815).
 
+    The token is only evidence when the repository cannot rewrite it.
+    ``submodule.<path>.ignore`` (in .git/config or a committed .gitmodules)
+    and ``diff.ignoreSubmodules`` make git print ``SC..`` over a submodule
+    with edits and untracked files in it, and ``status.showUntrackedFiles=no``
+    drops the ``u``. So the status asked here overrides every one of them on
+    its own command line, and runs `hardened` (#1815).
+
     Paths come back DECODED (`_unquote`), because v1 and v2 do not quote the
     same paths the same way. Everything else - a staged gitlink, a rename - is
     left as the work it looks like.
     """
-    status = await git(workspace, repo, "status", "--porcelain=v2")
+    status = await git(
+        workspace,
+        repo,
+        "status",
+        "--porcelain=v2",
+        "--ignore-submodules=none",
+        "--untracked-files=all",
+        hardened=True,
+    )
     moved: set[str] = set()
     for entry in status.splitlines():
         # `1 <XY> <sub> <mH> <mI> <mW> <hH> <hI> <path>`: the path is the
@@ -126,7 +141,9 @@ async def _stranded_commits(workspace: GitWorkspace, submodule: str) -> bool:
     common clean case stays off the network. An origin that cannot be asked
     subtracts nothing, and the commits stay counted: every doubt keeps the work.
     """
-    local = await git(workspace, submodule, "rev-list", "HEAD", "--all", "--not", "--remotes")
+    local = await git(
+        workspace, submodule, "rev-list", "HEAD", "--all", "--not", "--remotes", hardened=True
+    )
     if not local.strip():
         return False
     published = await _advertised_by_origin(workspace, submodule)
@@ -144,6 +161,7 @@ async def _stranded_commits(workspace: GitWorkspace, submodule: str) -> bool:
         "--not",
         "--remotes",
         *published,
+        hardened=True,
     )
     return bool(remaining.strip())
 
@@ -163,6 +181,7 @@ async def _advertised_by_origin(workspace: GitWorkspace, submodule: str) -> tupl
             "--tags",
             "origin",
             doing=f"asking origin which commits of {submodule} it already has",
+            hardened=True,
         )
     except WorkspaceInspectionFailedError:
         logger.warning(

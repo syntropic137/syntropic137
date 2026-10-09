@@ -61,7 +61,10 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     UnpushedWorkQuarantinedError,
     WorkspaceInspectionFailedError,
 )
-from syn_domain.contexts.orchestration.slices.execute_workflow.moved_gitlinks import _unquote
+from syn_domain.contexts.orchestration.slices.execute_workflow.moved_gitlinks import (
+    _unquote,
+    split_moved_gitlinks,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
     PhaseOutputCache,
 )
@@ -4319,6 +4322,106 @@ async def test_a_published_tag_still_counts_when_origin_cannot_be_asked(
         await superproject.clone.run_gate()
 
     assert _SUBMODULE in str(raised.value)
+
+
+@pytest.mark.parametrize("kind", ["tracked", "untracked"])
+@pytest.mark.parametrize("source", ["git-config", "gitmodules", "diff-config"])
+async def test_ignore_settings_cannot_pass_a_dirty_moved_submodule_as_clean(
+    superproject: _WithSubmodule, kind: str, source: str
+) -> None:
+    """#1815 review: a repository's ignore setting makes git print ``SC..`` over real dirt.
+
+    Built on the published-tag shape, the one #1815 exempts, so the only
+    thing between the dirt and a completed phase is how cleanliness is read.
+    """
+    _publish_a_tag_no_origin_branch_contains(superproject)
+    superproject.move_the_gitlink()
+    if source == "git-config":
+        superproject.clone.git("config", f"submodule.{_SUBMODULE}.ignore", "dirty")
+    elif source == "diff-config":
+        superproject.clone.git("config", "diff.ignoreSubmodules", "dirty")
+    else:
+        superproject.clone.git(
+            "config", "-f", ".gitmodules", f"submodule.{_SUBMODULE}.ignore", "dirty"
+        )
+        superproject.clone.git("add", ".gitmodules")
+        superproject.clone.git("commit", "-m", "record a submodule status policy")
+        superproject.clone.git("push", "origin", "HEAD:refs/heads/with-policy")
+    (superproject.path / ("plugin.txt" if kind == "tracked" else "never-committed.txt")).write_text(
+        "an agent wrote this\n"
+    )
+    assert superproject.git("status", "--porcelain").strip()
+    assert superproject.v2_token() == "SC..", "the setting should hide the dirt from plain status"
+    run = _PhaseRun(superproject.clone.workspace)
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await run.complete()
+
+    assert _SUBMODULE in str(raised.value)
+    assert run.completed_phase_ids == []
+
+
+async def test_ignore_all_cannot_hide_a_dirty_submodule_whose_gitlink_never_moved(
+    superproject: _WithSubmodule,
+) -> None:
+    """``ignore=all`` drops the submodule's line from the guard's own listing altogether."""
+    superproject.clone.git("config", f"submodule.{_SUBMODULE}.ignore", "all")
+    (superproject.path / "plugin.txt").write_text("an agent wrote this\n")
+    assert superproject.clone.git("status", "--porcelain") == ""
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await superproject.clone.run_gate()
+
+    assert _SUBMODULE in str(raised.value)
+
+
+class _RecordsGitCommands:
+    """The real workspace, keeping every argv it ran."""
+
+    def __init__(self, inner: GitWorkspace) -> None:
+        self._inner = inner
+        self.commands: list[list[str]] = []
+
+    async def renew_git_credential(self) -> None:
+        await self._inner.renew_git_credential()
+
+    async def execute(self, command: list[str]) -> ExecutionResult:
+        self.commands.append(command)
+        return await self._inner.execute(command)
+
+
+async def test_every_git_command_judging_a_moved_gitlink_runs_hardened(
+    superproject: _WithSubmodule,
+) -> None:
+    """#1807's hardening on each command whose answer can exempt a line (#1815).
+
+    Driven down the path that runs all three - status, both rev-lists and the
+    ls-remote - against real git, and the argv read as it was executed.
+    ``ls-remote`` alone keeps HOME: the workspace credential lives in its
+    global config.
+    """
+    _publish_a_tag_no_origin_branch_contains(superproject)
+    superproject.move_the_gitlink()
+    workspace = _RecordsGitCommands(superproject.clone.workspace)
+    repo = f"{WORKSPACE_REPOS_DIR}/{superproject.clone.name}"
+
+    split = await split_moved_gitlinks(workspace, repo, (f" M {_SUBMODULE}",))
+
+    assert split.moved == frozenset({_SUBMODULE})
+    judged = [c for c in workspace.commands if {"status", "rev-list", "ls-remote"} & set(c)]
+    assert [next(a for a in c if a in {"status", "rev-list", "ls-remote"}) for c in judged] == [
+        "status",
+        "rev-list",
+        "ls-remote",
+        "rev-list",
+    ]
+    for command in judged:
+        git_at = command.index("git")
+        env, config = command[:git_at], command[git_at:]
+        assert "GIT_CONFIG_NOSYSTEM=1" in env, command
+        for setting in ("core.hooksPath=/dev/null", "core.fsmonitor=false"):
+            assert setting in config, command
+        assert ("HOME=/nonexistent" in env) is ("ls-remote" not in command), command
 
 
 _QUOTED_SUBMODULE = "lib/my plugin"
