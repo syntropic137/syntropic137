@@ -48,7 +48,10 @@ export interface ResourceOptions {
 }
 
 export function resource<T>(fetcher: (signal: AbortSignal) => Promise<T>, options: ResourceOptions = {}): Resource<T> {
-  let data = $state<T | undefined>(undefined)
+  // First frame: run the fetcher once now; a cache hit seeds `data` before the
+  // first render. The effect's own call below joins whatever this started.
+  let seed: AbortController | null = new AbortController()
+  let data = $state<T | undefined>(seedFrom(fetcher, seed)?.value)
   let error = $state<unknown>(undefined)
   let loading = $state(true)
   let version = $state(0)
@@ -61,35 +64,16 @@ export function resource<T>(fetcher: (signal: AbortSignal) => Promise<T>, option
     for (const key of keys) queryCache.invalidate(key)
   }
 
-  // First frame: run the fetcher once now; a cache hit seeds `data` before the
-  // first render. The effect's own call below joins whatever this started.
-  let seed: AbortController | null = new AbortController()
-  try {
-    const first = untrack(() => fetcher(seed!.signal))
-    first.catch(() => {})
-    const hit = queryCache.settled(first)
-    if (hit) data = hit.value
-  } catch {
-    // the effect's run reports it
-  }
-
   $effect(() => {
     void version
     const controller = new AbortController()
     loading = true
-    let promise: Promise<T>
-    try {
-      const run = queryCache.track(() => fetcher(controller.signal))
-      promise = run.value
-      keys = run.keys
-    } catch (e) {
-      promise = Promise.reject(e)
-      keys = []
-    }
+    const run = runTracked(fetcher, controller.signal)
+    keys = run.keys
     seed?.abort()
     seed = null
     const unsubscribe = queryCache.subscribe(keys, rerun)
-    promise.then(
+    run.promise.then(
       (value) => {
         if (controller.signal.aborted) return
         data = value
@@ -108,34 +92,8 @@ export function resource<T>(fetcher: (signal: AbortSignal) => Promise<T>, option
     }
   })
 
-  if (options.live) {
-    const filter = options.live
-    const gap = options.liveIntervalMs ?? 2000
-    $effect(() => {
-      let last = 0
-      let timer: ReturnType<typeof setTimeout> | undefined
-      const unsubscribe = subscribeActivity({
-        filter,
-        onFrames: () => {
-          const wait = last + gap - Date.now()
-          if (wait <= 0) {
-            last = Date.now()
-            kick()
-          } else if (!timer) {
-            timer = setTimeout(() => {
-              timer = undefined
-              last = Date.now()
-              kick()
-            }, wait)
-          }
-        },
-      })
-      return () => {
-        clearTimeout(timer)
-        unsubscribe()
-      }
-    })
-  }
+  const live = options.live
+  if (live) $effect(() => throttledActivity(live, options.liveIntervalMs ?? 2000, kick))
 
   return {
     get data() {
@@ -150,5 +108,50 @@ export function resource<T>(fetcher: (signal: AbortSignal) => Promise<T>, option
     refresh() {
       kick()
     },
+  }
+}
+
+/** A cache hit's value before the first render. A miss starts a load the effect then joins. */
+function seedFrom<T>(fetcher: (signal: AbortSignal) => Promise<T>, controller: AbortController): { value: T } | undefined {
+  try {
+    const first = untrack(() => fetcher(controller.signal))
+    first.catch(() => {}) // the effect's run reports failures
+    return queryCache.settled(first)
+  } catch {
+    return undefined
+  }
+}
+
+/** Call the fetcher, recording the cache keys it read; a synchronous throw becomes a rejection. */
+function runTracked<T>(fetcher: (signal: AbortSignal) => Promise<T>, signal: AbortSignal): { promise: Promise<T>; keys: string[] } {
+  try {
+    const run = queryCache.track(() => fetcher(signal))
+    return { promise: run.value, keys: run.keys }
+  } catch (e) {
+    return { promise: Promise.reject(e), keys: [] }
+  }
+}
+
+/** Call `fire` on matching activity events, at most once per `gap` ms. Returns the stop function. */
+function throttledActivity(filter: (eventType: string) => boolean, gap: number, fire: () => void): () => void {
+  let last = 0
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const run = () => {
+    timer = undefined
+    last = Date.now()
+    fire()
+  }
+  const unsubscribe = subscribeActivity({
+    filter,
+    onFrames: () => {
+      if (timer) return
+      const wait = last + gap - Date.now()
+      if (wait <= 0) run()
+      else timer = setTimeout(run, wait)
+    },
+  })
+  return () => {
+    clearTimeout(timer)
+    unsubscribe()
   }
 }
