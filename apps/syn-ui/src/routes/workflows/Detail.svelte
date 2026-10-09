@@ -29,7 +29,7 @@
     workflowTags,
   } from '@syn137/skyline-core/screens/workflows'
   import { Button, Callout, EmptyState, Skeleton } from '@syn137/skyline-svelte-v5'
-  import { AgentPromptButton, PageHeader, PhaseKit, PhaseKitChips, RunRow, SkillRef } from '@syn137/skyline-svelte-v5/patterns'
+  import { AgentPromptButton, HarnessChip, PageHeader, PhaseKit, PhaseKitChips, RunRow, SkillRef } from '@syn137/skyline-svelte-v5/patterns'
   import { ApiError, TREND_PAGE_SIZE, getWorkflow, getWorkflowHistory, getWorkflowLatestOutputs, getWorkflowTrend, listWorkflowRuns } from '@syn137/syn-ui-data'
   import { isRunEvent } from '@syn137/syn-ui-data/live'
   import { resource } from '../../lib/load.svelte'
@@ -136,11 +136,12 @@
           {#each phases as p, i (p.phase_id)}
             {@const kit = phaseKitOf(p)}
             {@const share = shares?.[p.phase_id]}
+            {@const agent = kit.model && kit.model !== 'not-recorded' ? kit.model : null}
             <li>
               <button type="button" class="sky-wf__phase" aria-pressed={current?.phase_id === p.phase_id} aria-controls="sky-wf-phase-detail" onclick={() => (selected = p.phase_id)}>
                 <span class="sky-wf__phase-top">
                   <span class="sky-wf__phase-num">{String(i + 1).padStart(2, '0')}</span>
-                  <span class="sky-wf__agent" data-agent={kit.model && kit.model !== 'not-recorded' ? (kit.model.agentKind ?? 'other') : 'other'}>{kit.model && kit.model !== 'not-recorded' ? kit.model.agent : 'Agent'}</span>
+                  <HarnessChip provider={agent?.agentKind && agent.agentKind !== 'other' ? agent.agentKind : (agent?.agent ?? '')} label={agent?.agent ?? 'Agent'} />
                 </span>
                 <span class="sky-wf__phase-name">{p.name}</span>
                 {#if p.description}<span class="sky-wf__phase-desc">{p.description}</span>{/if}
@@ -364,26 +365,6 @@
   }
   .sky-wf__phase[aria-pressed='true'] .sky-wf__phase-num {
     color: var(--ds-color-accent);
-  }
-  .sky-wf__agent {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: var(--ds-text-xs);
-    color: var(--ds-color-text-muted);
-  }
-  .sky-wf__agent::before {
-    content: '';
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: var(--ds-color-text-subtle);
-  }
-  .sky-wf__agent[data-agent='claude']::before {
-    background: var(--sky-color-agent-claude);
-  }
-  .sky-wf__agent[data-agent='codex']::before {
-    background: var(--sky-color-agent-codex);
   }
   .sky-wf__phase-name {
     font-size: var(--ds-text-md);

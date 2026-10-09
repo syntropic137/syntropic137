@@ -7,7 +7,6 @@
 <script lang="ts">
   import { formatDurationPrecise, formatInteger, formatTokens } from '@syn137/skyline-core/format'
   import {
-    agentKind,
     agentLabel,
     costByModelRows,
     countToolCalls,
@@ -23,8 +22,8 @@
   } from '@syn137/skyline-core/screens/sessions'
   import { operationsToText } from '@syn137/skyline-core/patterns'
   import { ApiError, getSession } from '@syn137/syn-ui-data'
-  import { Button, Callout, Card, EmptyState, Skeleton, Tag, ToggleGroup } from '@syn137/skyline-svelte-v5'
-  import { CopyButton, OperationTimeline, PageHeader, UsageMeter } from '@syn137/skyline-svelte-v5/patterns'
+  import { Button, Callout, Card, EmptyState, Skeleton, ToggleGroup } from '@syn137/skyline-svelte-v5'
+  import { CopyButton, HarnessChip, OperationTimeline, PageHeader, UsageMeter } from '@syn137/skyline-svelte-v5/patterns'
   import { isRunEvent, isSessionEvent } from '@syn137/syn-ui-data/live'
   import { resource } from '../../lib/load.svelte'
   import { setPage } from '../../lib/page.svelte'
@@ -129,7 +128,7 @@
         </Button>
       {/snippet}
       <div class="sky-session__facts">
-        <Tag variant="agent" agent={agentKind(s.agent_provider)} title={s.requested_model ? `Requested: ${s.requested_model}` : undefined}>{agentLabel(s.agent_provider, s.agent_model_display, s.agent_model)}</Tag>
+        <HarnessChip provider={s.agent_provider ?? ''} label={agentLabel(s.agent_provider, s.agent_model_display, s.agent_model)} title={s.requested_model ? `Requested: ${s.requested_model}` : undefined} />
         <span class="sky-session__id">{s.id}</span>
         {#if inventoryHref}
           <a class="sky-session__link" href={href(inventoryHref)}>All sessions for this {s.phase_id ? 'phase' : 'run'} →</a>

@@ -96,6 +96,12 @@ export function phaseModelChip(p: PhaseLike): string {
   return p.model_display && !/^unknown\b/i.test(p.model_display) ? p.model_display : 'model not reported'
 }
 
+/** The phase's harness for its HarnessChip ("claude", "codex"): the pinned provider, else the observed or requested model; "" when unknown. */
+export function phaseHarness(p: PhaseLike): string {
+  const agent = agentOf(p.pinned_at_start?.provider) ?? agentOf(p.model ?? p.requested_model ?? p.pinned_at_start?.requested_model)
+  return agent?.toLowerCase() ?? ''
+}
+
 /** Tools and skills for the phase's kit chips, from what was pinned at start. */
 export function phaseKit(p: PhaseLike): { tools: readonly string[] | KitAbsence; skills: readonly SkillRefProps[] | KitAbsence } {
   const pins = p.pinned_at_start

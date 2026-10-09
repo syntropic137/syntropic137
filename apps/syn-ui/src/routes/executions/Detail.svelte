@@ -14,6 +14,7 @@
     canCancel,
     costRowsByPhase,
     isExecutionEvent,
+    phaseHarness,
     phaseKit,
     phaseMeta,
     phaseModelChip,
@@ -26,7 +27,7 @@
     usageNote,
   } from '@syn137/skyline-core/screens/executions'
   import { Button, Callout, EmptyState, Skeleton } from '@syn137/skyline-svelte-v5'
-  import { CopyButton, PageHeader, PhaseBlocks, PhaseKitChips, ProvenanceStrip, RunTiles, StatusBadge, UsageMeter } from '@syn137/skyline-svelte-v5/patterns'
+  import { CopyButton, HarnessChip, PageHeader, PhaseBlocks, PhaseKitChips, ProvenanceStrip, RunTiles, StatusBadge, UsageMeter } from '@syn137/skyline-svelte-v5/patterns'
   import { ApiError, cancelExecution, getArtifact, getExecution, getSessionInventory } from '@syn137/syn-ui-data'
   import type { ArtifactResponse, PhaseExecutionDetail } from '@syn137/syn-ui-data/types'
   import { subscribeExecution } from '@syn137/syn-ui-data/live'
@@ -278,7 +279,8 @@
                 <span class="sky-exec__num">{phaseNumber(i)}</span>
                 <span class="sky-exec__phase-name">{p.name}</span>
                 {#if statusSemantics(p.status).kind !== 'completed'}<StatusBadge status={p.status} />{/if}
-                <PhaseKitChips model={phaseModelChip(p)} tools={kit.tools === 'not-recorded' ? 'default' : kit.tools} skills={kit.skills} />
+                <HarnessChip provider={phaseHarness(p)} label={phaseModelChip(p)} />
+                <PhaseKitChips tools={kit.tools === 'not-recorded' ? 'default' : kit.tools} skills={kit.skills} />
                 <span class="sky-exec__grow"></span>
                 <span class="sky-exec__dur">{phaseMeta(p).metaShort}</span>
                 <span class="sky-exec__cost">{formatCostPrecise(p.cost_usd)}{p.unpriced_observation_count ? '+' : ''}</span>
