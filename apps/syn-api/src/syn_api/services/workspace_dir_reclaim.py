@@ -344,14 +344,7 @@ _reclaim_task: asyncio.Task[None] | None = None
 
 
 def start_workspace_reclaim(is_live: Callable[[], bool]) -> None:
-    """Start the clock, once. Called after subscriptions are live.
-
-    The per-workspace disk cap (#1805) runs beside it on its own clock: the
-    same directories, the same live-only rule.
-    """
-    from syn_api.services.workspace_disk_cap import start_workspace_disk_cap
-
-    start_workspace_disk_cap(is_live)
+    """Start the clock, once. Called after subscriptions are live."""
     global _reclaim_task
     if _reclaim_task is not None and not _reclaim_task.done():
         return
@@ -368,10 +361,7 @@ def start_workspace_reclaim(is_live: Callable[[], bool]) -> None:
 
 
 async def stop_workspace_reclaim() -> None:
-    """Stop the clock, and the disk-cap clock; a no-op if never started."""
-    from syn_api.services.workspace_disk_cap import stop_workspace_disk_cap
-
-    await stop_workspace_disk_cap()
+    """Stop the clock; a no-op if never started."""
     global _reclaim_task
     task, _reclaim_task = _reclaim_task, None
     if task is None:

@@ -41,10 +41,6 @@ DEFAULT_WORKSPACE_CPU_LIMIT = 2.0
 """CPU ceiling for one workspace container, in cores."""
 
 
-DEFAULT_WORKSPACE_DISK_LIMIT_MB = 20480
-"""Disk ceiling for one workspace directory, in MB (#1805)."""
-
-
 class IsolationBackend(StrEnum):
     """Available isolation backends for agent workspaces."""
 
@@ -149,17 +145,6 @@ class WorkspaceSettings(BaseSettings):
         default=DEFAULT_WORKSPACE_CPU_LIMIT,
         gt=0,
         description="CPU limit applied to each workspace container, in cores.",
-    )
-
-    disk_limit_mb: int = Field(
-        default=DEFAULT_WORKSPACE_DISK_LIMIT_MB,
-        ge=0,
-        description=(
-            "Disk cap for one workspace directory, in MB; 0 turns it off. Measured "
-            "every minute: a running workspace over it has its unpushed commits, "
-            "changes and files saved to artifact storage, then is stopped. If the "
-            "save fails it is NOT stopped (#1805)."
-        ),
     )
 
     docker_runtime: Literal["runsc", "runc"] = Field(
