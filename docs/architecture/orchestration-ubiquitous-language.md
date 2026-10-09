@@ -651,6 +651,12 @@ The to-do list one Executor uses for the one Execution it is running: a fresh
 own events at Claim and discarded with the run. The shared `execution_todo`
 projection feeds dashboards only. Nothing an Executor decides reads it.
 
+In code: `RunScopedTodoFold` is the fold and the `ExecutionJournal` that keeps
+it current, built by `RunScopedTodoFold.for_execution`. Its events come from an
+`ExecutionEventStream`, which is every event one Execution's stream holds, in
+order. Because the fold is rebuilt from those events at every Claim, discarding
+it loses nothing.
+
 ## Eval
 
 An experiment: a Goal, measured by runs that all start from the same Repository
