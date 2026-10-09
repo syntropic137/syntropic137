@@ -185,6 +185,8 @@ class ExecutionHistoryResponse(BaseModel):
 class PhaseLatestOutputResponse(BaseModel):
     """One phase of a workflow and the output it last produced."""
 
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
     phase_id: str
     phase_name: str
     artifact: ArtifactSummaryResponse | None = None
@@ -197,6 +199,8 @@ class WorkflowLatestOutputsResponse(BaseModel):
 
     One request for the whole workflow detail page instead of one artifact
     query per phase."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     workflow_id: str
     phases: list[PhaseLatestOutputResponse]

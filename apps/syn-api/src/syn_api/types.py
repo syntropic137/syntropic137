@@ -532,6 +532,8 @@ class DeclaredSkillResponse(PhaseRefResponse):
     request per workflow. Same ref shape as a phase's ``skills`` entry, so a
     client matches a chip to a phase by comparing the ref fields."""
 
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
     phase_ids: list[str] = Field(default_factory=list)
     """Phases that declare this skill themselves, in phase order."""
     workflow_scope: bool = False
@@ -1992,6 +1994,8 @@ class TokenTypeCostResponse(BaseModel):
     part when ``basis`` is ``allocated``). Unpriced work is in neither, exactly
     as with ``cost_by_model``.
     """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     input_usd: Decimal
     output_usd: Decimal
