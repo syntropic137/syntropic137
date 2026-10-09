@@ -190,11 +190,11 @@ CODEX_POINTER = (
 )
 
 
-async def install_codex_instructions(workspace: ManagedWorkspace, clones: Sequence[str]) -> None:
+async def install_codex_instructions(workspace: ManagedWorkspace, names: Sequence[str]) -> None:
     """Move the staged inlined instructions into codex's global instructions.
 
-    ``clones`` are the repo directories whose root files they contain; each gets
-    ``CLONE_OVERRIDE`` so a codex started inside it reads them once.
+    ``names`` are the cloned repos whose root files they contain; each clone
+    gets ``CLONE_OVERRIDE`` so a codex started inside it reads them once.
 
     A failure is raised, not logged: codex would run with none of the
     target repos' instructions, which is the defect this exists to close.
@@ -206,7 +206,7 @@ async def install_codex_instructions(workspace: ManagedWorkspace, clones: Sequen
             INSTALL_CODEX_INSTRUCTIONS,
             "sh",
             f"/workspace/{CODEX_INSTRUCTIONS_STAGED}",
-            *clones,
+            *(f"/workspace/repos/{name}" for name in names),
         ],
         timeout_seconds=30,
     )

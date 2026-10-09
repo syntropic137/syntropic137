@@ -622,9 +622,7 @@ class WorkspaceProvisionHandler:
                 ]
             await workspace.inject_files(files)
             if inline_instructions:
-                await install_codex_instructions(
-                    workspace, [f"/workspace/repos/{name}" for name in names]
-                )
+                await install_codex_instructions(workspace, names)
             logger.info(
                 "Injected /workspace/AGENTS.md + CLAUDE.md (%d repo(s), %d import(s))",
                 len(cloned_repos),
