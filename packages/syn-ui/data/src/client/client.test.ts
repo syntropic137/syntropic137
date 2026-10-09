@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ApiError, Coalescer, configureClient, isAbortError, listQueryParams, mapLimit, request, toSearchParams, withQuery } from './index'
+import { ApiError, Coalescer, configureClient, isAbortError, listQueryParams, mapLimit, request, requestForm, toSearchParams, withQuery } from './index'
 
 const realFetch = globalThis.fetch
 afterEach(() => {
@@ -48,6 +48,31 @@ describe('request', () => {
     const [a, b] = await Promise.all([request('/same'), request('/same')])
     expect(a).toEqual(b)
     expect(fetch).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('requestForm', () => {
+  it('POSTs FormData as-is with no JSON Content-Type, and parses the JSON answer', async () => {
+    const fetch = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => json({ id: 'm-1' }, 201))
+    configureClient({ fetch, baseUrl: '/api/v1' })
+    const form = new FormData()
+    form.append('media_type', 'screenshot')
+    await expect(requestForm('/feedback/f-1/media', form)).resolves.toEqual({ id: 'm-1' })
+    const [url, init] = fetch.mock.calls[0]!
+    expect(url).toBe('/api/v1/feedback/f-1/media')
+    expect(init).toMatchObject({ method: 'POST', body: form })
+    expect(init?.headers).toBeUndefined()
+  })
+  it('throws ApiError on non-2xx like request()', async () => {
+    configureClient({ fetch: async () => json({ detail: 'File too large. Maximum size is 10.0MB' }, 413) })
+    await expect(requestForm('/x', new FormData())).rejects.toMatchObject({ status: 413, message: 'File too large. Maximum size is 10.0MB' })
+  })
+  it('never coalesces two identical uploads', async () => {
+    const fetch = vi.fn(async () => json({}))
+    configureClient({ fetch })
+    const form = new FormData()
+    await Promise.all([requestForm('/u', form), requestForm('/u', form)])
+    expect(fetch).toHaveBeenCalledTimes(2)
   })
 })
 

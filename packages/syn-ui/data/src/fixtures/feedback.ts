@@ -1,13 +1,23 @@
 /**
- * Feedback fixture: POST /feedback answers like the API (201 body), so the
- * modal's success path runs offline. Items are kept in memory for tests.
+ * Feedback fixtures: create, list, stats and the multipart media upload
+ * answer like the API (lib/ui-feedback), so the bubble runs offline. Items
+ * and media are kept in memory for tests.
  */
 import { ApiError } from '../client/errors'
-import type { FeedbackCreate, FeedbackItem } from '../resources/feedback'
-import { route } from './define'
+import {
+  FEEDBACK_IMAGE_TYPES,
+  FEEDBACK_MAX_UPLOAD_BYTES,
+  type FeedbackCreate,
+  type FeedbackItem,
+  type FeedbackMedia,
+  type FeedbackMediaType,
+  type FeedbackStats,
+} from '../resources/feedback'
+import { notFound, route } from './define'
 import { FIXTURE_NOW, fakeId } from './seed'
 
 export const fixtureFeedback: FeedbackItem[] = []
+export const fixtureFeedbackMedia: FeedbackMedia[] = []
 
 function isCreate(body: unknown): body is FeedbackCreate {
   if (typeof body !== 'object' || body === null) return false
@@ -15,7 +25,35 @@ function isCreate(body: unknown): body is FeedbackCreate {
   return typeof b.url === 'string' && typeof b.app_name === 'string'
 }
 
+const isMediaType = (v: unknown): v is FeedbackMediaType => v === 'screenshot' || v === 'voice_note'
+const isImageType = (v: string): boolean => (FEEDBACK_IMAGE_TYPES as readonly string[]).includes(v)
+
+function stats(items: readonly FeedbackItem[]): FeedbackStats {
+  const by_status = { open: 0, in_progress: 0, resolved: 0, closed: 0, wont_fix: 0 }
+  const by_type = { bug: 0, feature: 0, ui_ux: 0, performance: 0, question: 0, other: 0 }
+  const by_priority = { low: 0, medium: 0, high: 0, critical: 0 }
+  const by_app: Record<string, number> = {}
+  for (const i of items) {
+    by_status[i.status] += 1
+    by_type[i.feedback_type] += 1
+    by_priority[i.priority] += 1
+    by_app[i.app_name] = (by_app[i.app_name] ?? 0) + 1
+  }
+  return { total: items.length, by_status, by_type, by_priority, by_app }
+}
+
 export const feedbackRoutes = [
+  route('GET', '/feedback/stats', ({ query }): FeedbackStats => {
+    const app = query.get('app')
+    return stats(app ? fixtureFeedback.filter((i) => i.app_name === app) : fixtureFeedback)
+  }),
+  route('GET', '/feedback', ({ query }) => {
+    const app = query.get('app')
+    const status = query.get('status')
+    const limit = Number(query.get('limit') ?? 50)
+    const items = fixtureFeedback.filter((i) => (!app || i.app_name === app) && (!status || i.status === status)).reverse()
+    return { items: items.slice(0, limit), total: items.length, page: 1, page_size: limit }
+  }),
   route('POST', '/feedback', ({ body }): FeedbackItem => {
     if (!isCreate(body)) {
       throw new ApiError(422, [{ loc: ['body'], msg: 'url and app_name are required', type: 'missing' }])
@@ -33,5 +71,27 @@ export const feedbackRoutes = [
     }
     fixtureFeedback.push(item)
     return item
+  }),
+  route('POST', '/feedback/:feedbackId/media', ({ params, body }): FeedbackMedia => {
+    const item = fixtureFeedback.find((i) => i.id === params.feedbackId)
+    if (!item) notFound('Feedback')
+    if (!(body instanceof FormData)) throw new ApiError(422, 'multipart/form-data body required')
+    const file = body.get('file')
+    const mediaType = body.get('media_type')
+    if (!(file instanceof Blob) || !isMediaType(mediaType)) throw new ApiError(422, 'file and media_type are required')
+    if (file.size > FEEDBACK_MAX_UPLOAD_BYTES) throw new ApiError(413, 'File too large. Maximum size is 10.0MB')
+    if (mediaType === 'screenshot' && !isImageType(file.type)) throw new ApiError(400, 'Unsupported media format')
+    const media: FeedbackMedia = {
+      id: `${fakeId(`media-${fixtureFeedbackMedia.length}`, 8)}-0000-4000-8000-${fakeId('md', 12)}`,
+      feedback_id: item.id,
+      media_type: mediaType,
+      mime_type: file.type,
+      file_name: file instanceof File ? file.name : null,
+      file_size: file.size,
+      created_at: new Date(FIXTURE_NOW).toISOString(),
+    }
+    fixtureFeedbackMedia.push(media)
+    item.media_count += 1
+    return media
   }),
 ]

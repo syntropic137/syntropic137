@@ -49,12 +49,39 @@ export function request<T>(path: string, options: RequestOptions = {}): Promise<
   return send(options.signal)
 }
 
+export interface FormRequestOptions {
+  method?: Extract<HttpMethod, 'POST' | 'PUT' | 'PATCH'>
+  query?: QueryInit
+  signal?: AbortSignal
+}
+
+/**
+ * Multipart counterpart of request(): sends `form` as multipart/form-data
+ * (the browser writes the boundary, so no Content-Type is set here) and
+ * parses a JSON answer. Never coalesced. In fixtures mode the FormData is
+ * handed to the fixture route as its body, unserialised.
+ */
+export function requestForm<T>(path: string, form: FormData, options: FormRequestOptions = {}): Promise<T> {
+  const method = options.method ?? 'POST'
+  const query = toSearchParams(options.query)
+  const qs = query.toString()
+  const config = clientConfig()
+  if (config.fixtures) return fixtureRequest<T>(method, path, query, { body: form, signal: options.signal })
+  return parseJSON<T>(config.fetch(`${config.baseUrl}${path}${qs ? `?${qs}` : ''}`, { method, body: form, signal: options.signal }))
+}
+
 /** Low-level JSON fetch with ApiError on non-2xx (React app's fetchJSON). */
 export async function fetchJSON<T>(url: string, init: RequestInit = {}): Promise<T> {
-  const response = await clientConfig().fetch(url, {
-    ...init,
-    headers: { 'Content-Type': 'application/json', ...init.headers },
-  })
+  return parseJSON<T>(
+    clientConfig().fetch(url, {
+      ...init,
+      headers: { 'Content-Type': 'application/json', ...init.headers },
+    }),
+  )
+}
+
+async function parseJSON<T>(pending: Promise<Response>): Promise<T> {
+  const response = await pending
   if (!response.ok) {
     const error = (await response.json().catch(() => ({ detail: response.statusText }))) as { detail?: unknown } | null
     throw new ApiError(response.status, error?.detail)
