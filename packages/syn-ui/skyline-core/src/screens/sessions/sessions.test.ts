@@ -10,6 +10,9 @@ import {
   sessionCost,
   sessionCrumbs,
   sessionOperations,
+  sessionListRow,
+  sessionsLede,
+  sessionsLedeShort,
   summarizeToolInput,
   transcriptAvailable,
   windowRange,
@@ -93,6 +96,12 @@ describe('helpers', () => {
     expect(summarizeToolInput({ file_path: '/a' })).toBe('/a')
     expect(summarizeToolInput({ x: 1 })).toBe('{"x":1}')
     expect(summarizeToolInput(null)).toBe('')
+    expect(summarizeToolInput({ skill: 'documentation', args: 'x' })).toBe('documentation')
+  })
+  it('reads the path out of a raw (unparsed, possibly truncated) tool input', () => {
+    expect(summarizeToolInput({ raw: '{"file_path": "/w/out.md", "content": "ok"}' })).toBe('/w/out.md')
+    expect(summarizeToolInput({ raw: '{"file_path": "/w/pr \\"body\\".md", "content": "Closes #1. cut sh' })).toBe('/w/pr "body".md')
+    expect(summarizeToolInput({ raw: 'not json' })).toBe('{"raw":"not json"}')
   })
   it('builds commit urls only for GitHub repos', () => {
     expect(commitUrl('https://github.com/a/b.git', 'f00')).toBe('https://github.com/a/b/commit/f00')
@@ -165,5 +174,20 @@ describe('list rows', () => {
   it('formats sessions for an agent', async () => {
     const { sessionsForAgent } = await import('./index')
     expect(sessionsForAgent([row])).toBe('- session s1: Codex delegates to Claude / Delegate · completed · 176.0K tokens · $0.2162 · 57s')
+  })
+
+  it('writes the Sessions hero ledes', () => {
+    expect(sessionsLede({ total: 118, running: 0 })).toBe('One agent run per phase, plus any child sessions it hands off to. 118 so far, none running.')
+    expect(sessionsLede({ total: 0, running: 0 })).toMatch(/None yet\.$/)
+    expect(sessionsLedeShort({ total: 1, running: 2 })).toBe('1 agent run, 2 running now')
+  })
+  it('leads a list row with the phase and marks delegated children', () => {
+    const base = { id: 'a41c09e7-1111', status: 'failed', workflow_name: 'PR Review', phase_display: 'review', execution_id: 'exec-e93b07d2aaaa', agent_provider: 'claude', agent_model: 'claude-sonnet-5-5', agent_model_display: 'claude-sonnet-5-5', repos_display: 'syntropic137' }
+    expect(sessionListRow(base)).toEqual({ title: 'review', delegated: false, sub: 'a41c09e7 · syntropic137', workflow: 'PR Review', execution: 'exec e93b07d2', agent: 'Claude · claude-sonnet-5-5', provider: 'Claude', model: 'claude-sonnet-5-5' })
+    const child = sessionListRow({ ...base, id: '35468ba1-x', parent_session_id: '2fd5ec12-y', agent_model: null, agent_model_display: 'gpt-sol (requested)' })
+    expect(child.title).toBe('review (delegated)')
+    expect(child.sub).toBe('35468ba1 · child of 2fd5ec12')
+    expect(child.agent).toBe('Claude · model not reported')
+    expect(child.model).toBe('model not reported')
   })
 })

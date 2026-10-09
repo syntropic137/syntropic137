@@ -14,8 +14,8 @@ for (const path of ['/executions', '/sessions']) {
     await expect(windows.getByRole('radio', { name: '24h' })).toHaveAttribute('aria-checked', 'true')
     const rows = page.locator('#sky-main [data-sky-row]')
     await expect(rows.first()).toBeVisible()
-    // Sessions virtualise their rows, so count by the header total there.
-    const total = async () => (path === '/sessions' ? Number((await page.locator('.sky-sessions__count').innerText()).replace(/\D/g, '')) : rows.count())
+    // Sessions virtualise their rows, so count by the hero's server total there.
+    const total = async () => (path === '/sessions' ? Number(await page.locator('.sky-sessions__hero').getAttribute('data-total')) : rows.count())
     const recent = await total()
 
     await windows.getByRole('radio', { name: 'All' }).click()

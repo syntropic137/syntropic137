@@ -23,6 +23,7 @@
     actions,
     children,
     titleAction,
+    badges,
     level = 1,
     ...rest
   }: PageHeaderProps = $props()
@@ -34,9 +35,10 @@
       <span class="sky-page-header__icon"><ObjectIcon {kind} size={84} /></span>
       <div class="sky-page-header__text">
         {#if eyebrow}<span class="sky-page-header__eyebrow">{eyebrow}</span>{/if}
-        {#if status || meta}
+        {#if status || meta || badges}
           <div class="sky-page-header__meta">
             {#if status}<StatusBadge {status} />{/if}
+            {#if badges}{@render badges()}{/if}
             {#if meta}<span>{meta}</span>{/if}
           </div>
         {/if}

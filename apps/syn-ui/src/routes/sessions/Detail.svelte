@@ -115,6 +115,9 @@
     </div>
   {:else}
     <PageHeader kind="session" title={s.workflow_name ?? `Session ${s.id.slice(0, 8)}`} eyebrow={s.phase_display ?? s.phase_id ?? undefined} status={s.status} {figures}>
+      {#snippet badges()}
+        <Tag variant="agent" agent={agentKind(s.agent_provider)} title={s.requested_model ? `Requested: ${s.requested_model}` : undefined}>{agentLabel(s.agent_provider, s.agent_model_display, s.agent_model)}</Tag>
+      {/snippet}
       {#snippet actions()}
         <Button
           variant="outline"
@@ -129,7 +132,6 @@
         </Button>
       {/snippet}
       <div class="sky-session__facts">
-        <Tag variant="agent" agent={agentKind(s.agent_provider)} title={s.requested_model ? `Requested: ${s.requested_model}` : undefined}>{agentLabel(s.agent_provider, s.agent_model_display, s.agent_model)}</Tag>
         <span class="sky-session__id">{s.id}</span>
         {#if inventoryHref}
           <a class="sky-session__link" href={href(inventoryHref)}>All sessions for this {s.phase_id ? 'phase' : 'run'} →</a>
@@ -288,9 +290,19 @@
     align-items: center;
     gap: var(--ds-space-2);
   }
+  /* Phone board: View transcript spans the card under the figures. */
+  .sky-session :global(.sky-page-header__actions > .sky-button) {
+    width: 100%;
+  }
   .sky-session__more {
     display: flex;
     justify-content: center;
+  }
+
+  @container (min-width: 44rem) {
+    .sky-session :global(.sky-page-header__actions > .sky-button) {
+      width: auto;
+    }
   }
 
   @media (min-width: 48rem) {

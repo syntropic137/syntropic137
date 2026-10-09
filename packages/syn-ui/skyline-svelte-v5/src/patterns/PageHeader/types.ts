@@ -9,6 +9,8 @@ export interface PageHeaderProps extends PageHeaderData, Omit<HTMLAttributes<HTM
   children?: Snippet
   /** Copy control beside the title label, e.g. "Copy task". */
   titleAction?: Snippet
+  /** Skyline: tags beside the status badge in the meta row, e.g. the session's agent and model. */
+  badges?: Snippet
   /** Heading level of the title (default 1). */
   level?: 1 | 2
 }

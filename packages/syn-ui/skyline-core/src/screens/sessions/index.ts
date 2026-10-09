@@ -11,7 +11,7 @@
 import { formatCostPrecise } from '../../format/cost'
 import { formatDurationPrecise } from '../../format/duration'
 import { UNKNOWN, toNumber } from '../../format/shared'
-import { shortId } from '../../format/number'
+import { formatInteger, shortId } from '../../format/number'
 import type { TokenBreakdown } from '../../format/tokens'
 import type { Operation, OperationStatus } from '../../patterns/operations'
 import type { CostRowInput } from '../../patterns/usage'
@@ -53,9 +53,37 @@ const FINISH_TYPES = new Set(['tool_execution_completed', 'tool_completed', 'too
 const SKIP_TYPES = new Set(['token_usage', 'session_started', 'session_completed'])
 
 /** The most useful one-line summary of a tool input: the command, the path, the pattern, else compact JSON. */
+const SUMMARY_KEYS = ['command', 'cmd', 'file_path', 'path', 'pattern', 'url', 'query', 'description', 'prompt', 'skill'] as const
+
+/** A recorder that could not parse the input keeps it as `{ raw: "<json>" }`, often cut short: read the first summary key out of it. */
+function summarizeRaw(raw: string): string | undefined {
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return summarizeToolInput(parsed as Record<string, unknown>) || undefined
+  } catch {
+    // Truncated JSON: fall through to the key scan.
+  }
+  for (const key of SUMMARY_KEYS) {
+    const m = new RegExp(`"${key}"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"`).exec(raw)
+    if (m) {
+      try {
+        const v = JSON.parse(`"${m[1]}"`) as string
+        if (v.trim()) return v
+      } catch {
+        // Not a valid string literal; try the next key.
+      }
+    }
+  }
+  return undefined
+}
+
 export function summarizeToolInput(input: Record<string, unknown> | null | undefined): string {
   if (!input) return ''
-  for (const key of ['command', 'cmd', 'file_path', 'path', 'pattern', 'url', 'query', 'description', 'prompt']) {
+  if (typeof input.raw === 'string' && Object.keys(input).length === 1) {
+    const fromRaw = summarizeRaw(input.raw)
+    if (fromRaw) return fromRaw
+  }
+  for (const key of SUMMARY_KEYS) {
     const v = input[key]
     if (typeof v === 'string' && v.trim()) return v
     if (Array.isArray(v) && v.every((x) => typeof x === 'string')) return v.join(' ')
@@ -434,4 +462,56 @@ export function sessionsForAgent(rows: readonly SessionRowInput[]): string {
   return rows
     .map((s) => `- session ${s.id}: ${s.workflow_name ?? s.workflow_id ?? 'unknown workflow'} / ${s.phase_display ?? s.phase_id ?? 'no phase'} · ${s.status} · ${s.total_tokens_display ?? UNKNOWN} tokens · ${s.total_cost_display ?? UNKNOWN} · ${s.duration_display ?? UNKNOWN}`)
     .join('\n')
+}
+
+const runningNow = (n: number) => (n === 0 ? 'none running' : `${formatInteger(n)} running`)
+
+/** Hero lede (Sessions board): "One agent run per phase, plus any child sessions it hands off to. 118 so far, none running." */
+export function sessionsLede(t: { total: number; running: number }): string {
+  const lead = 'One agent run per phase, plus any child sessions it hands off to.'
+  if (t.total === 0) return `${lead} None yet.`
+  return `${lead} ${formatInteger(t.total)} so far, ${runningNow(t.running)}.`
+}
+
+/** Phone lede (PhoneSessions board): "118 agent runs, none running now". */
+export function sessionsLedeShort(t: { total: number; running: number }): string {
+  return `${formatInteger(t.total)} agent ${t.total === 1 ? 'run' : 'runs'}, ${t.running === 0 ? 'none running now' : `${formatInteger(t.running)} running now`}`
+}
+
+export interface SessionListRowInput extends SessionRowInput {
+  execution_id?: string | null
+  parent_session_id?: string | null
+}
+
+export interface SessionListRow {
+  /** The phase, "(delegated)" for a child session: "review (delegated)". */
+  title: string
+  delegated: boolean
+  /** Mono line under the title: "a41c09e7 · syntropic137", "35468ba1 · child of 2fd5ec12". */
+  sub: string
+  workflow: string
+  /** "exec e93b07d2", or empty. */
+  execution: string
+  /** "Claude · claude-sonnet-5-5" (observed model only). */
+  agent: string
+  /** "Claude", or null when no provider was recorded. */
+  provider: string | null
+  /** The observed model verbatim, or "model not reported". */
+  model: string
+}
+
+/** One Sessions-board row: the phase leads, the workflow and execution sit in their own column. */
+export function sessionListRow(s: SessionListRowInput): SessionListRow {
+  const delegated = !!s.parent_session_id
+  const phase = s.phase_display || s.phase_id || s.workflow_name || s.workflow_id || `Session ${shortId(s.id)}`
+  return {
+    title: delegated ? `${phase} (delegated)` : phase,
+    delegated,
+    sub: [shortId(s.id), delegated ? `child of ${shortId(s.parent_session_id ?? '')}` : s.repos_display || null].filter(Boolean).join(' · '),
+    workflow: s.workflow_name || s.workflow_id || 'Unknown workflow',
+    execution: s.execution_id ? `exec ${shortId(s.execution_id)}` : '',
+    agent: agentLabel(s.agent_provider, s.agent_model_display, s.agent_model),
+    provider: s.agent_provider ? (PROVIDER_LABEL[s.agent_provider.toLowerCase()] ?? s.agent_provider) : null,
+    model: observedModel(s.agent_model, s.agent_model_display) ?? MODEL_NOT_REPORTED,
+  }
 }

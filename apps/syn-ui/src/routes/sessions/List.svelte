@@ -1,17 +1,18 @@
 <!--
-  Sessions list (no board: drawn in the Executions list language). Title and
-  count, search, status chips with server counts, then one row per session:
-  status tile, workflow and phase, agent and repo, tokens, cost, duration and
-  age. Rows have a fixed height so only the ones near the viewport render
+  Sessions (boards: Sessions, PhoneSessions). Hero with the status split,
+  then search, status chips with server counts and the time window, then
+  one row per session: the phase leads (delegated children marked), the
+  workflow and execution, agent and observed model, tokens, cost, duration
+  and age. Rows have a fixed height so only the ones near the viewport render
   (windowRange); Pagination moves through the server's pages.
 -->
 <script lang="ts">
   import { formatInteger, formatRelativeTime } from '@syn137/skyline-core/format'
-  import { sessionRowSub, sessionsForAgent, windowRange } from '@syn137/skyline-core/screens/sessions'
-  import { DEFAULT_LIST_WINDOW, TIME_WINDOWS, parseTimeWindow, timeWindowParam, timeWindowStart } from '@syn137/skyline-core/screens/executions'
+  import { agentKind, sessionListRow, sessionsForAgent, sessionsLede, sessionsLedeShort, windowRange } from '@syn137/skyline-core/screens/sessions'
+  import { DEFAULT_LIST_WINDOW, TIME_WINDOWS, outcomeTotals, parseTimeWindow, timeWindowParam, timeWindowStart } from '@syn137/skyline-core/screens/executions'
   import { MAX_PAGE_SIZE, listSessions } from '@syn137/syn-ui-data'
-  import { Button, Callout, EmptyState, Input, Pagination, Skeleton, ToggleGroup } from '@syn137/skyline-svelte-v5'
-  import { CopyButton, StatusBadge } from '@syn137/skyline-svelte-v5/patterns'
+  import { Button, Callout, EmptyState, Input, Pagination, Skeleton, Tag, ToggleGroup } from '@syn137/skyline-svelte-v5'
+  import { CopyButton, ObjectIcon, StatusBadge } from '@syn137/skyline-svelte-v5/patterns'
   import { isRunEvent, isSessionEvent } from '@syn137/syn-ui-data/live'
   import { resource } from '../../lib/load.svelte'
   import { href, router } from '../../lib/router'
@@ -51,6 +52,8 @@
 
   const counts = $derived((list.data?.status_counts ?? {}) as Record<string, number>)
   const allCount = $derived(Object.values(counts).reduce((a, b) => a + b, 0))
+  const totals = $derived(outcomeTotals(counts))
+  const outcomeLabel = $derived(`${totals.completed} completed, ${totals.failed} failed, ${totals.cancelled} cancelled`)
   const chips = $derived([
     { value: 'all', label: 'All', count: allCount },
     ...STATUSES.map((s) => ({ value: s, label: LABEL[s]!, count: counts[s] ?? 0 })),
@@ -98,19 +101,43 @@
 </script>
 
 <div class="sky-sessions">
-  <header class="sky-sessions__head">
-    <div class="sky-sessions__title">
-      <h1>Sessions</h1>
-      <p>Every agent session across workflows{#if list.data}<span class="sky-sessions__count"> · {formatInteger(list.data.total)}</span>{/if}</p>
+  <section class="sky-sessions__hero" aria-label="Sessions" data-total={list.data?.total}>
+    <div class="sky-sessions__intro">
+      <ObjectIcon kind="session" size={84} />
+      <div class="sky-sessions__titles">
+        <h1>Sessions</h1>
+        {#if list.data}
+          <p class="sky-sessions__lede sky-sessions__lede--long">{sessionsLede(totals)}</p>
+          <p class="sky-sessions__lede sky-sessions__lede--short">{sessionsLedeShort(totals)}</p>
+        {:else}
+          <Skeleton variant="text" width="16rem" />
+        {/if}
+      </div>
     </div>
-    {#if rows.length}
-      <CopyButton variant="label" text={() => sessionsForAgent(rows)} label="Copy for agent" copiedLabel="Copied for agent" />
-    {/if}
-  </header>
+    <div class="sky-sessions__outcomes">
+      <div class="sky-sessions__split" role="img" aria-label={outcomeLabel}>
+        {#if totals.completed + totals.failed + totals.cancelled > 0}
+          <span data-tone="completed" style:flex-grow={totals.completed}></span>
+          <span data-tone="failed" style:flex-grow={totals.failed}></span>
+          <span data-tone="cancelled" style:flex-grow={totals.cancelled}></span>
+        {:else}
+          <span data-tone="empty" style:flex-grow={1}></span>
+        {/if}
+      </div>
+      <div class="sky-sessions__figures">
+        {#each [['completed', totals.completed], ['failed', totals.failed], ['cancelled', totals.cancelled]] as const as [tone, n] (tone)}
+          <div class="sky-sessions__figure">
+            <span class="sky-sessions__figure-value">{list.data ? formatInteger(n) : '—'}</span>
+            <span class="sky-sessions__figure-label"><span class="sky-sessions__swatch" data-tone={tone}></span>{tone}</span>
+          </div>
+        {/each}
+      </div>
+    </div>
+  </section>
 
   <div class="sky-sessions__filters">
-    <Input type="search" aria-label="Search sessions" placeholder="Search workflow, phase or ID" bind:value={search} oninput={(e) => onSearch(e.currentTarget.value)} />
-    <ToggleGroup type="single" variant="chips" aria-label="Filter by status" bind:value={chipValue} items={chips} />
+    <Input type="search" aria-label="Search sessions" placeholder="Phase, workflow, model or ID" bind:value={search} oninput={(e) => onSearch(e.currentTarget.value)} />
+    <ToggleGroup class="sky-sessions__chips" type="single" variant="chips" aria-label="Filter by status" bind:value={chipValue} items={chips} />
     <ToggleGroup
       class="sky-sessions__window"
       type="single"
@@ -121,6 +148,9 @@
       value={[timeWindow]}
       onValueChange={(v) => router.setQuery({ window: timeWindowParam(v[0], DEFAULT_LIST_WINDOW), page: null })}
     />
+    {#if rows.length}
+      <CopyButton variant="label" text={() => sessionsForAgent(rows)} label="Copy for agent" copiedLabel="Copied for agent" />
+    {/if}
   </div>
 
   {#if list.error && !list.data}
@@ -146,25 +176,39 @@
     {#if list.error}
       <Callout tone="warning" title="Showing the last results.">The list could not refresh. <Button size="sm" variant="ghost" onclick={() => list.refresh()}>Retry</Button></Callout>
     {/if}
-    <ol class="sky-sessions__list" bind:this={listEl} aria-label="Sessions" aria-busy={list.loading} style:padding-top="{range.padTop}px" style:padding-bottom="{range.padBottom}px">
-      {#each visible as s, i (s.id)}
-        <li class="sky-sessions__item" data-sky-row aria-setsize={rows.length} aria-posinset={range.start + i + 1}>
-          <a class="sky-sessions__row" href={href(`/sessions/${encodeURIComponent(s.id)}`)} use:measure>
-            <StatusBadge status={s.status} shape="square" />
-            <span class="sky-sessions__name">
-              <span class="sky-sessions__workflow">{s.workflow_name ?? s.workflow_id ?? 'Unknown workflow'}</span>
-              <span class="sky-sessions__sub">{sessionRowSub(s) || s.id}</span>
-            </span>
-            <span class="sky-sessions__nums">
-              <span class="sky-sessions__num" data-col="tokens"><span class="sky-visually-hidden">Tokens </span>{s.total_tokens_display}</span>
+    <section class="sky-sessions__table" aria-label="Session list">
+      <div class="sky-sessions__colhead" aria-hidden="true">
+        <span></span>
+        <span>Session</span>
+        <span>Execution</span>
+        <span>Agent · model</span>
+        <span class="sky-sessions__right">Tokens</span>
+        <span class="sky-sessions__right">Cost</span>
+        <span class="sky-sessions__right">Took</span>
+        <span class="sky-sessions__right sky-sessions__sorted">Started ↓</span>
+      </div>
+      <ol class="sky-sessions__list" bind:this={listEl} aria-label="Sessions" aria-busy={list.loading} style:padding-top="{range.padTop}px" style:padding-bottom="{range.padBottom}px">
+        {#each visible as s, i (s.id)}
+          {@const r = sessionListRow(s)}
+          <li class="sky-sessions__item" data-sky-row aria-setsize={rows.length} aria-posinset={range.start + i + 1}>
+            <a class="sky-sessions__row" href={href(`/sessions/${encodeURIComponent(s.id)}`)} data-delegated={r.delegated || undefined} use:measure>
+              <StatusBadge status={s.status} shape="square" />
+              <span class="sky-sessions__title">{#if r.delegated}<span class="sky-sessions__child" aria-hidden="true">↳ </span>{/if}{r.title}</span>
+              <span class="sky-sessions__workflow">{r.workflow}</span>
+              <span class="sky-sessions__exec">{r.execution}</span>
+              <span class="sky-sessions__num" data-col="tokens"><span class="sky-visually-hidden">Tokens </span>{s.total_tokens_display}<span class="sky-sessions__unit">{' tok'}</span></span>
               <span class="sky-sessions__num" data-col="cost"><span class="sky-visually-hidden">Cost </span>{s.total_cost_display}{#if s.unpriced_observation_count}+{/if}</span>
-              <span class="sky-sessions__num" data-col="duration"><span class="sky-visually-hidden">Duration </span>{s.duration_display}</span>
-              <span class="sky-sessions__num" data-col="when">{formatRelativeTime(s.started_at, { now })}</span>
-            </span>
-          </a>
-        </li>
-      {/each}
-    </ol>
+              <span class="sky-sessions__foot">
+                <span class="sky-sessions__agent"><Tag variant="agent" agent={agentKind(s.agent_provider)} title={s.requested_model ? `${r.agent} (requested: ${s.requested_model})` : r.agent}>{#if r.provider}<span class="sky-sessions__provider">{r.provider} · </span>{/if}{r.model}</Tag></span>
+                <span class="sky-sessions__sub">{r.sub}</span>
+                <span class="sky-sessions__num" data-col="duration"><span class="sky-visually-hidden">Duration </span>{s.duration_display}</span>
+                <span class="sky-sessions__num" data-col="when">{formatRelativeTime(s.started_at, { now })}</span>
+              </span>
+            </a>
+          </li>
+        {/each}
+      </ol>
+    </section>
     {#if list.data.total > PAGE_SIZE}
       <Pagination
         page={page}
@@ -182,31 +226,110 @@
   .sky-sessions {
     display: flex;
     flex-direction: column;
-    gap: var(--ds-space-5);
+    gap: var(--ds-space-4);
     min-width: 0;
   }
-  .sky-sessions__head {
+  .sky-sessions__hero {
     display: flex;
-    flex-wrap: wrap;
-    align-items: flex-end;
-    justify-content: space-between;
-    gap: var(--ds-space-3);
+    flex-direction: column;
+    gap: var(--ds-space-5);
+    padding: var(--ds-space-5);
+    border-radius: var(--sky-radius-2xl);
+    border: var(--ds-border-width) solid var(--ds-color-border);
+    background:
+      radial-gradient(50% 130% at 100% 0%, var(--sky-color-accent-soft), transparent 70%),
+      var(--ds-color-surface);
+    box-shadow: var(--sky-shadow-raised);
   }
-  .sky-sessions__title h1 {
+  .sky-sessions__intro {
+    display: flex;
+    align-items: center;
+    gap: var(--ds-space-4);
+    min-width: 0;
+  }
+  .sky-sessions__intro :global(.sky-object-icon) {
+    flex-shrink: 0;
+    width: var(--sky-size-object-icon-sm);
+    height: var(--sky-size-object-icon-sm);
+  }
+  .sky-sessions__provider {
+    display: none;
+  }
+  .sky-sessions__titles {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ds-space-2);
+    min-width: 0;
+  }
+  h1 {
     margin: 0;
     font-size: var(--sky-text-page);
-    line-height: 1.08;
+    line-height: 1.05;
     font-weight: var(--ds-font-weight-semibold);
     letter-spacing: -0.035em;
   }
-  .sky-sessions__title p {
-    margin: var(--ds-space-1) 0 0;
-    font-size: var(--sky-text-body);
+  .sky-sessions__lede {
+    margin: 0;
     color: var(--ds-color-text-muted);
   }
-  .sky-sessions__count {
-    font-family: var(--ds-font-mono);
-    font-size: var(--sky-text-data);
+  .sky-sessions__lede--long {
+    display: none;
+  }
+  .sky-sessions__outcomes {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ds-space-3-5);
+    min-width: 0;
+  }
+  .sky-sessions__split {
+    display: flex;
+    gap: 3px;
+    height: 12px;
+  }
+  .sky-sessions__split > span {
+    flex-basis: 0;
+    border-radius: 4px;
+  }
+  [data-tone='completed'] {
+    background: var(--sky-status-completed);
+  }
+  [data-tone='failed'] {
+    background: var(--sky-status-failed);
+  }
+  [data-tone='cancelled'] {
+    background: var(--sky-status-cancelled);
+  }
+  [data-tone='empty'] {
+    background: var(--sky-color-track);
+  }
+  .sky-sessions__figures {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--ds-space-4);
+  }
+  .sky-sessions__figure {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .sky-sessions__figure-value {
+    font-size: var(--sky-text-figure);
+    line-height: 1.1;
+    font-weight: var(--ds-font-weight-semibold);
+    letter-spacing: -0.03em;
+    font-variant-numeric: tabular-nums;
+  }
+  .sky-sessions__figure-label {
+    display: flex;
+    align-items: center;
+    gap: var(--ds-space-1-5);
+    font-size: var(--ds-text-sm);
+    color: var(--ds-color-text-muted);
+  }
+  .sky-sessions__swatch {
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
   }
   .sky-sessions__filters {
     display: flex;
@@ -214,10 +337,26 @@
     gap: var(--ds-space-3);
     min-width: 0;
   }
+  .sky-sessions__filters > :global(*) {
+    min-width: 0;
+  }
+  .sky-sessions__filters > :global(:last-child) {
+    align-self: flex-start;
+  }
   .sky-sessions__skeleton {
     display: flex;
     flex-direction: column;
     gap: var(--ds-space-2);
+  }
+  .sky-sessions__table {
+    min-width: 0;
+    border-radius: var(--sky-radius-xl);
+    border: var(--ds-border-width) solid var(--ds-color-border);
+    background: var(--ds-color-surface);
+    box-shadow: var(--sky-shadow-raised);
+  }
+  .sky-sessions__colhead {
+    display: none;
   }
   .sky-sessions__list {
     display: flex;
@@ -225,32 +364,30 @@
     margin: 0;
     padding: 0;
     list-style: none;
-    border-radius: var(--sky-radius-xl);
-    border: var(--ds-border-width) solid var(--ds-color-border);
-    background: var(--ds-color-surface);
-    box-shadow: var(--sky-shadow-raised);
   }
   .sky-sessions__item + .sky-sessions__item {
     border-top: var(--ds-border-width) solid var(--sky-color-divider);
   }
+  /* Phone board: phase and workflow left, cost over tokens right, then model, id and timing. */
   .sky-sessions__row {
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-columns: auto minmax(0, 1fr) auto;
     grid-template-areas:
-      'badge name'
-      'badge nums';
+      'badge title cost'
+      'badge workflow tokens'
+      'foot foot foot';
     align-items: center;
     column-gap: var(--ds-space-3);
     row-gap: var(--ds-space-1);
     box-sizing: border-box;
-    height: 5.5rem;
+    height: 7.25rem;
     padding: var(--ds-space-3) var(--ds-space-4);
     color: var(--ds-color-fg);
     text-decoration: none;
   }
-  .sky-sessions__row :global(.sky-status-badge),
-  .sky-sessions__row > :first-child {
+  .sky-sessions__row > :global(:first-child) {
     grid-area: badge;
+    align-self: start;
   }
   .sky-sessions__row:hover {
     background: var(--sky-color-control-hover);
@@ -260,78 +397,216 @@
     outline-offset: calc(-1 * var(--sky-focus-ring-width));
     border-radius: var(--sky-radius-row);
   }
-  .sky-sessions__name {
-    grid-area: name;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
+  .sky-sessions__title,
+  .sky-sessions__workflow,
+  .sky-sessions__exec,
+  .sky-sessions__sub {
     min-width: 0;
-  }
-  .sky-sessions__workflow {
-    font-size: var(--sky-text-body);
-    font-weight: var(--ds-font-weight-semibold);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .sky-sessions__sub {
+  .sky-sessions__title {
+    grid-area: title;
+    font-size: var(--sky-text-body);
+    font-weight: var(--ds-font-weight-semibold);
+  }
+  .sky-sessions__child {
+    color: var(--ds-color-text-subtle);
+    font-weight: var(--ds-font-weight-regular);
+  }
+  .sky-sessions__workflow {
+    grid-area: workflow;
+    font-size: var(--ds-text-sm);
+    color: var(--ds-color-text-muted);
+  }
+  .sky-sessions__exec {
+    display: none;
+  }
+  .sky-sessions__sub,
+  .sky-sessions__exec {
     font-family: var(--ds-font-mono);
     font-size: var(--ds-text-xs);
     color: var(--ds-color-text-subtle);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
-  .sky-sessions__nums {
-    grid-area: nums;
+  .sky-sessions__foot {
+    grid-area: foot;
     display: flex;
-    gap: var(--ds-space-3);
+    align-items: center;
+    gap: var(--ds-space-2-5);
     min-width: 0;
+    margin-top: var(--ds-space-1-5);
+  }
+  .sky-sessions__agent {
+    flex: 0 0 auto;
+    max-width: 65%;
+    min-width: 0;
+    overflow: hidden;
+  }
+  .sky-sessions__foot .sky-sessions__sub {
+    flex: 1 1 0;
+  }
+  .sky-sessions__num {
     font-family: var(--ds-font-mono);
     font-size: var(--ds-text-xs);
     color: var(--ds-color-text-muted);
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
+    text-align: right;
+  }
+  .sky-sessions__num[data-col='cost'] {
+    grid-area: cost;
+    font-size: var(--sky-text-data);
+    color: var(--ds-color-fg);
+  }
+  .sky-sessions__num[data-col='tokens'] {
+    grid-area: tokens;
+    color: var(--ds-color-text-subtle);
   }
   .sky-sessions__num[data-col='when'] {
     margin-left: auto;
     color: var(--ds-color-text-subtle);
   }
-  .sky-sessions__foot {
-    margin: 0;
-    font-size: var(--ds-text-sm);
-    color: var(--ds-color-text-muted);
+  .sky-sessions__foot .sky-sessions__num {
+    flex-shrink: 0;
+  }
+  .sky-sessions__row[data-delegated] .sky-sessions__title,
+  .sky-sessions__row[data-delegated] .sky-sessions__workflow {
+    padding-inline-start: var(--ds-space-3);
+  }
+  .sky-sessions__right {
+    text-align: right;
+  }
+  .sky-sessions__sorted {
+    color: var(--ds-color-fg);
+  }
+  .sky-sessions__unit {
+    color: var(--ds-color-text-subtle);
   }
 
   @media (min-width: 48rem) {
+    .sky-sessions {
+      gap: var(--ds-space-6);
+    }
+    .sky-sessions__hero {
+      flex-direction: row;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: var(--ds-space-7) var(--ds-space-12);
+      padding: var(--ds-space-8) var(--ds-space-9);
+    }
+    .sky-sessions__intro {
+      gap: var(--ds-space-6);
+    }
+    .sky-sessions__intro :global(.sky-object-icon) {
+      width: var(--sky-size-object-icon-lg);
+      height: var(--sky-size-object-icon-lg);
+    }
+    .sky-sessions__titles {
+      max-width: 36rem;
+    }
+    .sky-sessions__lede--long {
+      display: block;
+    }
+    .sky-sessions__lede--short {
+      display: none;
+    }
+    .sky-sessions__outcomes {
+      width: 22.5rem;
+      max-width: 100%;
+    }
     .sky-sessions__filters {
       flex-direction: row;
       flex-wrap: wrap;
       align-items: center;
+      gap: var(--ds-space-3) var(--ds-space-4);
+    }
+    .sky-sessions__filters > :global(.sky-sessions__chips) {
+      order: -1;
+      flex: 1 1 auto;
     }
     .sky-sessions__filters > :global(:first-child) {
-      flex: 0 1 20rem;
+      flex: 0 1 18rem;
     }
-    .sky-sessions__filters > :global(.sky-sessions__window) {
-      margin-inline-start: auto;
+    .sky-sessions__filters > :global(:last-child) {
+      align-self: auto;
+    }
+    .sky-sessions__table {
+      padding: var(--ds-space-2-5);
+      border-radius: var(--sky-radius-card-lg);
+    }
+    .sky-sessions__colhead,
+    .sky-sessions__row {
+      display: grid;
+      grid-template-columns: var(--sky-size-control-sm) minmax(10rem, 1.3fr) minmax(9rem, 1fr) minmax(0, 15rem) 4.5rem 4.5rem 4.5rem 4.5rem;
+      column-gap: var(--ds-space-4);
+    }
+    .sky-sessions__colhead {
+      align-items: center;
+      height: 36px;
+      padding: 0 var(--ds-space-3);
+      font-family: var(--ds-font-mono);
+      font-size: var(--sky-text-label);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--ds-color-text-subtle);
     }
     .sky-sessions__row {
-      grid-template-columns: auto minmax(0, 1fr) auto;
-      grid-template-areas: 'badge name nums';
-      column-gap: var(--ds-space-4);
-      height: 4.5rem;
-      padding: 0 var(--ds-space-5);
+      grid-template-areas:
+        'badge title workflow agent tokens cost took when'
+        'badge sub exec agent tokens cost took when';
+      row-gap: 2px;
+      height: 4.25rem;
+      padding: 0 var(--ds-space-3);
     }
-    .sky-sessions__nums {
-      display: grid;
-      grid-template-columns: 5rem 5.5rem 4.5rem 5rem;
-      gap: var(--ds-space-4);
-      font-size: var(--sky-text-data);
-      text-align: right;
+    .sky-sessions__row > :global(:first-child) {
+      align-self: center;
     }
-    .sky-sessions__num[data-col='tokens'],
-    .sky-sessions__num[data-col='cost'] {
+    .sky-sessions__foot {
+      display: contents;
+    }
+    .sky-sessions__workflow {
+      align-self: end;
       color: var(--ds-color-fg);
+    }
+    .sky-sessions__title {
+      align-self: end;
+    }
+    .sky-sessions__sub {
+      grid-area: sub;
+      align-self: start;
+    }
+    .sky-sessions__exec {
+      display: block;
+      grid-area: exec;
+      align-self: start;
+    }
+    .sky-sessions__agent {
+      grid-area: agent;
+      max-width: 100%;
+    }
+    .sky-sessions__num {
+      font-size: var(--sky-text-data);
+    }
+    .sky-sessions__num[data-col='tokens'] {
+      color: var(--ds-color-fg);
+    }
+    .sky-sessions__num[data-col='duration'] {
+      grid-area: took;
+    }
+    .sky-sessions__num[data-col='when'] {
+      grid-area: when;
+      margin-left: 0;
+    }
+    .sky-sessions__unit {
+      display: none;
+    }
+    .sky-sessions__provider {
+      display: inline;
+    }
+    .sky-sessions__row[data-delegated] .sky-sessions__sub {
+      padding-inline-start: var(--ds-space-3);
     }
   }
 </style>
