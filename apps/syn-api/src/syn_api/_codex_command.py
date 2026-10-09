@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, TypeGuard
 
 from syn_shared.agents import (
+    CODEX_PROJECT_DOC_MAX_BYTES,
     CODEX_SANDBOX_FLAGS,
     DEFAULT_PHASE_SANDBOX,
     ModelAlias,
@@ -133,6 +134,10 @@ def _build_codex_command(
         "--sandbox",
         CODEX_SANDBOX_FLAGS[sandbox],
         "--skip-git-repo-check",
+        # The staged AGENTS.md inlines the target repos' instructions, which
+        # outgrow codex's 32 KiB default and would lose their tail (#1835).
+        "-c",
+        f"project_doc_max_bytes={CODEX_PROJECT_DOC_MAX_BYTES}",
     ]
     if _is_codex_model(model):
         cmd.extend(["--model", resolve_codex_model_alias(model)])
