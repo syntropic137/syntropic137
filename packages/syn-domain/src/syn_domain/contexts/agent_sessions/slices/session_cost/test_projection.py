@@ -685,12 +685,11 @@ class TestGetSessionCosts:
         reads: list[list[str]] = []
 
         class _KeyedStore(MockProjectionStore):
-            async def get_many(self, projection_name: str, keys: list[str]) -> dict[str, Any]:
+            async def get_many(
+                self, projection_name: str, keys: list[str]
+            ) -> dict[str, dict[str, str]]:
                 reads.append(list(keys))
                 return {k: d for k in keys if (d := await self.get(projection_name, k))}
-
-            async def get(self, projection_name: str, key: str) -> dict[str, Any] | None:
-                return self._data.get(projection_name, {}).get(key)
 
         keyed = _KeyedStore()
         for sid in ("s-1", "s-2"):
