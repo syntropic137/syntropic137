@@ -43,11 +43,11 @@
   ],
   "scripts": {
     "check": "svelte-check --tsconfig ./tsconfig.json --fail-on-warnings && node ../scripts/check-css.mjs src",
-    "build": "pnpm run typecheck && pnpm run check",
+    "build": "pnpm run typecheck && pnpm run check && pnpm run build:elements",
     "typecheck": "svelte-check --tsconfig ./tsconfig.json --threshold error && tsc -p tsconfig.json --noEmit && tsc -p types/tsconfig.json --noEmit",
     "build:ce": "vite build --config vite.ce.config.ts",
     "test": "vitest run --passWithNoTests",
-    "build:elements": "vite build --config vite.elements.config.ts"
+    "build:elements": "vite build --config vite.elements.config.ts && node scripts/elements-size.mjs"
   },
   "peerDependencies": {
     "svelte": "^5.30.0"
