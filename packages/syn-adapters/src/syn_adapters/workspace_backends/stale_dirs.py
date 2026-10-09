@@ -420,7 +420,12 @@ def _refuse_outside(repo: Path, git_dir: Path, root: Path) -> None:
     if (git_dir / "commondir").is_file():
         common = (git_dir / (git_dir / "commondir").read_text().strip()).resolve()
         _confined(repo, common, root)
-    pending = [(common / "objects", 0)]
+    _refuse_alternates_outside(repo, common / "objects", root)
+
+
+def _refuse_alternates_outside(repo: Path, start: Path, root: Path) -> None:
+    """Confine every alternate git would follow from ``start``, at every depth."""
+    pending = [(start, 0)]
     seen: set[Path] = set()
     while pending:
         objects, depth = pending.pop()
@@ -430,13 +435,22 @@ def _refuse_outside(repo: Path, git_dir: Path, root: Path) -> None:
         seen.add(objects)
         if depth >= _MAX_ALTERNATES_DEPTH:
             raise UnsafeRepositoryError(f"{repo} chains alternates past {depth}; not read")
-        for line in alternates.read_text(errors="surrogateescape").splitlines():
-            if not line.strip() or line.startswith("#"):
-                continue
-            if line.startswith('"'):
-                raise UnsafeRepositoryError(f"{repo} has a quoted alternate; not read")
-            # Relative to the objects directory whose file names it.
-            pending.append((_confined(repo, (objects / line.strip()).resolve(), root), depth + 1))
+        # Each entry is relative to the objects directory whose file names it.
+        pending.extend(
+            (_confined(repo, (objects / entry).resolve(), root), depth + 1)
+            for entry in _alternate_entries(repo, alternates)
+        )
+
+
+def _alternate_entries(repo: Path, alternates: Path) -> list[str]:
+    entries: list[str] = []
+    for line in alternates.read_text(errors="surrogateescape").splitlines():
+        if not line.strip() or line.startswith("#"):
+            continue
+        if line.startswith('"'):
+            raise UnsafeRepositoryError(f"{repo} has a quoted alternate; not read")
+        entries.append(line.strip())
+    return entries
 
 
 def _confined(repo: Path, path: Path, root: Path) -> Path:
