@@ -40,3 +40,11 @@ test('Evals board cells show the latest run cost beside the latest verdict', asy
   const cell = page.locator('[data-cell="shared-esp-stream:eval-verify-pinned-sonnet-v1"]')
   await expect(cell).toHaveAttribute('aria-label', /: Pass, \$0\.50$/)
 })
+
+test('Eval detail "Same case, other verifiers" pairs each verifier with its own last verdict', async ({ page }) => {
+  await page.goto('./evals/eval-stable-shared-esp-stream')
+  const section = page.locator('section', { has: page.getByRole('heading', { name: /Same case/ }) })
+  // The stable eval's last verdict is Pass, but its sdlc-lean verifier failed and sdlc-baseline errored.
+  await expect(section.getByRole('link', { name: /: Fail$/ })).toHaveCount(1)
+  await expect(section.getByRole('link', { name: /: Error$/ })).toHaveCount(1)
+})

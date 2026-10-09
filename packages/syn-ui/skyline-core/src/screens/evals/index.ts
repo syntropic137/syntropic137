@@ -347,6 +347,63 @@ export function sameCaseSiblings<T extends EvalLike>(current: EvalLike, all: rea
   return all.filter((e) => tagValue(e.tags, 'case') === caseId)
 }
 
+/** Structural extras the sibling tiles read from a variant (the API's EvalVariantResponse has them). */
+export interface SiblingVariantLike extends EvalVariantLike {
+  avg_cost_display?: string | null
+}
+
+/** One verifier of a case: its own model, last verdict and cost, never the eval-level verdict. */
+export interface SiblingVerifier {
+  key: string
+  evalId: string
+  workflowId: string
+  models: readonly string[]
+  verdict: Verdict
+  lastRunAt: string | null
+  runs: number
+  /** The variant's average cost as the API formats it ("$0.17"), or null. */
+  avgCost: string | null
+  /** The tile is the eval on screen (a legacy one-verifier eval); a stable-id eval's tiles are all its own, so none is marked. */
+  current: boolean
+}
+
+/**
+ * "Same case, other verifiers": one tile per (eval, verifier workflow).
+ * A stable-id eval holds every verifier as a variant, so each variant gets
+ * its own tile with its own last verdict and model; versions of one
+ * workflow collapse to the newest. An eval with no variants keeps one tile
+ * from its eval-level fields.
+ */
+export function sameCaseVerifiers(current: EvalLike, all: readonly (EvalLike & { variants?: readonly SiblingVariantLike[] | null })[]): SiblingVerifier[] {
+  return sameCaseSiblings(current, all).flatMap((e) => {
+    const tiles = siblingTiles(e, e.eval_id === current.eval_id)
+    return tiles.length > 1 ? tiles.map((t) => ({ ...t, current: false })) : tiles
+  })
+}
+
+function siblingTiles(e: EvalLike & { variants?: readonly SiblingVariantLike[] | null }, isCurrent: boolean): SiblingVerifier[] {
+  const newest = new Map<string, SiblingVariantLike>()
+  for (const v of e.variants ?? []) {
+    const prev = newest.get(v.workflow_id)
+    if (!prev || (time(v.last_run_at) ?? 0) >= (time(prev.last_run_at) ?? 0)) newest.set(v.workflow_id, v)
+  }
+  if (newest.size === 0) {
+    const wf = e.starting_workflow_id ?? e.eval_id
+    return [{ key: `${e.eval_id}:${wf}`, evalId: e.eval_id, workflowId: wf, models: [], verdict: e.run_count > 0 ? normalizeVerdict(e.last_verdict) : 'unscored', lastRunAt: e.last_run_at ?? null, runs: e.run_count, avgCost: null, current: isCurrent }]
+  }
+  return [...newest.values()].map((v) => ({
+    key: `${e.eval_id}:${v.workflow_id}`,
+    evalId: e.eval_id,
+    workflowId: v.workflow_id,
+    models: v.models,
+    verdict: v.run_count > 0 ? normalizeVerdict(v.last_verdict) : 'unscored',
+    lastRunAt: v.last_run_at ?? null,
+    runs: (e.variants ?? []).filter((x) => x.workflow_id === v.workflow_id).reduce((n, x) => n + x.run_count, 0),
+    avgCost: v.avg_cost_display ?? null,
+    current: isCurrent,
+  }))
+}
+
 export interface TimelinePoint {
   executionId: string
   verdict: Verdict

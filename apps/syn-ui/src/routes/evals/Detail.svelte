@@ -5,7 +5,7 @@
   import { PageHeader, VerdictBlock } from '@syn137/skyline-svelte-v5/patterns'
   import { formatCost, formatDateTime, formatDuration, formatRelativeTime } from '@syn137/skyline-core/format'
   import { normalizeVerdict } from '@syn137/skyline-core/patterns'
-  import { agentOfModel, averageEvalCost, evidenceFallback, parseEvidence, runModels, runOutcome, sameCaseSiblings, tagValue, variantPassed, verdictWord } from '@syn137/skyline-core/screens/evals'
+  import { agentOfModel, averageEvalCost, evidenceFallback, parseEvidence, runModels, runOutcome, sameCaseVerifiers, tagValue, variantPassed, verdictWord } from '@syn137/skyline-core/screens/evals'
   import { isRunFinished } from '@syn137/syn-ui-data/live'
   import { resource } from '../../lib/load.svelte'
   import { setPage } from '../../lib/page.svelte'
@@ -47,7 +47,7 @@
   })
 
   const e = $derived(ev.data)
-  const siblings = $derived(e && siblingsRes.data ? sameCaseSiblings(e, siblingsRes.data.evals) : [])
+  const siblings = $derived(e && siblingsRes.data ? sameCaseVerifiers(e, siblingsRes.data.evals) : [])
   const figures = $derived(
     e
       ? [
@@ -114,7 +114,7 @@
     <section class="sky-eval__section" aria-labelledby="sky-eval-siblings">
       <div class="sky-eval__head">
         <h2 id="sky-eval-siblings">Same case, other verifiers</h2>
-        <span>Evals that share the tag <code>case:{caseId}</code>, latest run of each.</span>
+        <span>Evals that share the tag <code>case:{caseId}</code>: each verifier with its own latest verdict.</span>
       </div>
       {#if siblingsRes.error && !siblingsRes.data}
         <Callout tone="warning" title="Could not load the other verifiers">{errText(siblingsRes.error)}</Callout>
@@ -124,20 +124,21 @@
         </div>
       {:else}
         <div class="sky-eval__sibs">
-          {#each siblings as s (s.eval_id)}
-            {@const v = s.run_count > 0 ? normalizeVerdict(s.last_verdict) : 'unscored'}
-            {@const models = s.variants?.[0]?.models ?? []}
-            {@const current = s.eval_id === e.eval_id}
+          {#each siblings as s (s.key)}
+            {@const v = s.verdict}
+            {@const models = s.models}
+            {@const name = models.join(', ') || s.workflowId}
+            {@const current = s.current}
             <a
               class="sky-eval__sib"
-              href={href(`/evals/${encodeURIComponent(s.eval_id)}`)}
+              href={href(`/evals/${encodeURIComponent(s.evalId)}`)}
               aria-current={current ? 'page' : undefined}
-              aria-label={`${caseId} under ${models.join(', ') || s.starting_workflow_id}: ${verdictWord(v)}${current ? ' (this eval)' : ''}`}
+              aria-label={`${caseId} under ${name}: ${verdictWord(v)}${current ? ' (this eval)' : ''}`}
             >
               <VerdictBlock verdict={v} size={70} />
-              <span class="sky-eval__model"><span class="sky-eval__dot" data-agent={agentOf(models)}></span>{models.join(', ') || s.starting_workflow_id}</span>
+              <span class="sky-eval__model"><span class="sky-eval__dot" data-agent={agentOf(models)}></span>{name}</span>
               <span class="sky-eval__word" data-verdict={v}>{verdictWord(v)}{current ? ' · this eval' : ''}</span>
-              <span class="sky-eval__meta">{averageEvalCost(s.variants)} · {formatRelativeTime(s.last_run_at)}</span>
+              <span class="sky-eval__meta">{s.avgCost ? `avg ${s.avgCost}` : '—'} · {formatRelativeTime(s.lastRunAt)}</span>
             </a>
           {/each}
         </div>

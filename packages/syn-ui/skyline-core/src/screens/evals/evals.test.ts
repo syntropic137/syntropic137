@@ -6,6 +6,7 @@ import {
   latestRunCosts,
   runsTimeline,
   sameCaseSiblings,
+  sameCaseVerifiers,
   shortModel,
   sortEvalsByLastRun,
   suiteOf,
@@ -300,5 +301,37 @@ describe('board cell cost is the latest run cost (parity 2026-10-09: 27 of 99 ce
   it('shows no cost rather than another run\'s when the runs have not loaded', () => {
     expect(Object.values(buildEvalBoard([e], { costOf: () => undefined }).cells)[0]!.costUsd).toBeNull()
     expect(Object.values(buildEvalBoard([e]).cells)[0]!.costUsd).toBe(0.29)
+  })
+})
+
+describe('same case, other verifiers (parity 2026-10-09: luna tile showed the eval-level Pass)', () => {
+  // eval-dbb1269d…: eval last_verdict PASS (opus); variants luna FAIL, codex PASS, opus PASS.
+  const e = {
+    eval_id: 'eval-dbb1269d51fb4b68b5e258523e4e2d68',
+    name: 'verifier-seed: repo-name-collision-skipped-clone',
+    tags: ['case:repo-name-collision-skipped-clone', 'suite:verifier-seed'],
+    last_verdict: 'PASS',
+    last_run_at: '2026-10-08T15:25:08Z',
+    run_count: 3,
+    variants: [
+      { workflow_id: 'eval-verify-pinned-codex-gpt-6-luna-v1', workflow_version: '6.0.0', models: ['gpt-6-luna'], run_count: 1, last_verdict: 'FAIL', last_run_at: '2026-10-08T15:14:22Z', avg_cost_display: '<$0.01' },
+      { workflow_id: 'eval-verify-pinned-codex-v1', workflow_version: '6.0.0', models: ['gpt-6.1-sol'], run_count: 1, last_verdict: 'PASS', last_run_at: '2026-10-08T15:09:12Z', avg_cost_display: '$0.17' },
+      { workflow_id: 'eval-verify-pinned-v1', workflow_version: '6.0.0', models: ['claude-opus-5-5'], run_count: 1, last_verdict: 'PASS', last_run_at: '2026-10-08T15:25:08Z', avg_cost_display: '$0.59' },
+      { workflow_id: 'eval-verify-pinned-v1', workflow_version: '5.0.0', models: ['claude-opus-5'], run_count: 2, last_verdict: 'FAIL', last_run_at: '2026-10-01T00:00:00Z', avg_cost_display: '$0.70' },
+    ],
+  }
+  it('gives each verifier its own verdict and model', () => {
+    const tiles = sameCaseVerifiers(e, [e])
+    expect(tiles.map((t) => [t.models[0], t.verdict, t.avgCost])).toEqual([
+      ['gpt-6-luna', 'fail', '<$0.01'],
+      ['gpt-6.1-sol', 'pass', '$0.17'],
+      ['claude-opus-5-5', 'pass', '$0.59'],
+    ])
+    expect(tiles[2]!.runs).toBe(3)
+    expect(tiles.some((t) => t.current)).toBe(false)
+  })
+  it('keeps one eval-level tile for an eval with no variants', () => {
+    const legacy: EvalLike = { eval_id: 'old', name: 'x', tags: ['case:repo-name-collision-skipped-clone'], last_verdict: 'PASS', run_count: 0, starting_workflow_id: 'wf-old' }
+    expect(sameCaseVerifiers(e, [e, legacy]).at(-1)).toMatchObject({ workflowId: 'wf-old', verdict: 'unscored', current: false })
   })
 })
