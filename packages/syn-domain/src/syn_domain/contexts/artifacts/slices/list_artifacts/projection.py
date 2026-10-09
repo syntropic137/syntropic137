@@ -220,9 +220,7 @@ class ArtifactListProjection(AutoDispatchProjection):
                 filters=filters,
                 flag_field="is_primary_deliverable",
             )
-            return {
-                phase: ArtifactSummary.from_dict(dict(row)) for phase, row in newest.items()
-            }
+            return {phase: ArtifactSummary.from_dict(dict(row)) for phase, row in newest.items()}
         rows = await self._store.query(self.PROJECTION_NAME, filters=filters)
         picked = newest_per_group(
             ((str(row.get("id", "")), row) for row in rows),
