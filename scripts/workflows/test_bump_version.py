@@ -478,10 +478,14 @@ def _independent_pnpm_members() -> set[str]:
     openclaw-plugin sits inside `packages/`, so nothing about its path tells
     it apart from a package we do version; it is named, and
     `test_the_independent_packages_really_are_independent` keeps the naming
-    honest.
+    honest. apps/syn-landing (syntropic137.com) is named for the same reason:
+    the marketing site keeps its own version, not the product's.
     """
     declared = yaml.safe_load((ROOT / "pnpm-workspace.yaml").read_text())["packages"]
-    return {d for d in declared if d.startswith("lib/")} | {"packages/openclaw-plugin"}
+    return {d for d in declared if d.startswith("lib/")} | {
+        "packages/openclaw-plugin",
+        "apps/syn-landing",
+    }
 
 
 class TestNodeManifestList:

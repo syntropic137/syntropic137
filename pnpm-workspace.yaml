@@ -2,6 +2,10 @@ packages:
   - apps/syn-dashboard-ui
   - apps/syn-docs
   - apps/syn-cli-node
+  # syntropic137.com: the marketing site, a git subtree of
+  # syntropic137/syntropic137-landing-page (design/landing-plan.md). Versioned
+  # on its own, not in lockstep with the product.
+  - apps/syn-landing
   - packages/openclaw-plugin
   # Vendored in-tree (ADR-016), not a submodule - the dashboard consumes it
   # as a workspace package so the widget source and its host move together.
@@ -33,6 +37,10 @@ minimumReleaseAgeExclude:
   - '@syntropic137/design-tokens@0.1.1'
 
 overrides:
+  # vitest takes vite as a peer and pnpm resolves a missing peer to the highest
+  # vite in the workspace. apps/syn-landing brings vite 8; this keeps every
+  # vitest suite on the vite 7 it was locked to before the landing page moved in.
+  vitest>vite: 7.3.6
   '@babel/core@<7.29.6': '>=7.29.6 <8'
   '@humanfs/node@<0.16.8': '>=0.16.8 <0.17'
   baseline-browser-mapping@>=2.0.0 <2.11.0: '>=2.11.0 <3'
