@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
+from syn_domain.contexts.orchestration import SubagentTracker, TokenAccumulator
 from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoAction, TodoItem
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     AgentConfiguration,
@@ -35,6 +36,12 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 from syn_domain.contexts.orchestration.slices.execute_workflow.agent_attempts import (
     run_phase_agent,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
+    EventStreamProcessor,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.ObservabilityCollector import (
+    ObservabilityCollector,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_runtime import (
     FallbackLaunch,
     PhaseLaunch,
@@ -42,6 +49,8 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.phase_runtime imp
 from syn_domain.contexts.orchestration.slices.execute_workflow.test_1344_raw_stream_activity_stops_a_retry import (
     CLAUDE_SUCCEEDS,
     NO_WAITING,
+    _as_stream,
+    _claude_assistant,
     _codex,
     _codex_item,
     _NeverCancelledWorkspace,
@@ -199,3 +208,63 @@ class TestARefusalAfterAPossibleWriteDoesNot:
         assert result.exit_code == 1
         assert _producer(result) == (AgentProvider.CODEX, "gpt-sol")
         assert "flagged for possible cybersecurity risk" in str(result.stream_result.error_reason)
+
+
+class TestTheClaudeParserDrawsTheSameLine:
+    """The claude processor feeds the same witness, from its own stream shapes."""
+
+    @pytest.mark.parametrize(
+        ("content", "wrote"),
+        [
+            ([{"type": "thinking", "thinking": "hm"}, {"type": "text", "text": "reading"}], False),
+            (
+                [{"type": "tool_use", "id": "t1", "name": "Read", "input": {"file_path": "a"}}],
+                False,
+            ),
+            (
+                [{"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": "cat a"}}],
+                False,
+            ),
+            ([{"type": "tool_use", "id": "t1", "name": "Edit", "input": {"file_path": "a"}}], True),
+            (
+                [
+                    {
+                        "type": "tool_use",
+                        "id": "t1",
+                        "name": "Bash",
+                        "input": {"command": "git push"},
+                    }
+                ],
+                True,
+            ),
+            ([{"type": "server_tool_use", "id": "t1"}], True),
+        ],
+    )
+    async def test_claude_content(self, content: list[dict[str, object]], wrote: bool) -> None:
+        collector = ObservabilityCollector(
+            writer=None,
+            session_id="s",
+            execution_id="e",
+            phase_id="verify",
+            workspace_id=None,
+            requested_model=None,
+        )
+        processor = EventStreamProcessor(
+            tokens=TokenAccumulator(),
+            subagents=SubagentTracker(),
+            observability=None,
+            controller=None,
+            execution_id="e",
+            phase_id="verify",
+            session_id="s",
+            workspace_id=None,
+            agent_model=None,
+            collector=collector,
+        )
+
+        await processor.process_stream(
+            _as_stream((_claude_assistant(*content),)), _NeverCancelledWorkspace()
+        )
+
+        assert collector.saw_agent_activity
+        assert collector.may_have_written is wrote
