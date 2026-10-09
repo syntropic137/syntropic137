@@ -29,10 +29,12 @@ test('open, type, Cmd+Enter, Sent, closes itself', async ({ page }) => {
   await expect(dialog.getByText('Write something first.')).toBeVisible()
 
   await box.fill('The run list jumps when a row finishes')
-  // Type and priority stay visible, defaulting to Other / Medium; the page is under Details.
+  // Type and priority stay visible, defaulting to Other / Medium; the page chip is visible too.
   await expect(dialog.getByTestId('feedback-type-other')).toHaveAttribute('aria-checked', 'true')
   await expect(dialog.getByTestId('feedback-priority-medium')).toHaveAttribute('aria-checked', 'true')
-  await expect(dialog.getByTestId('feedback-details')).toContainText('/executions')
+  await expect(dialog.getByTestId('feedback-attached')).toContainText('/executions')
+  await expect(dialog.getByRole('button', { name: /Take screenshot/ })).toBeVisible()
+  await expect(dialog.getByRole('button', { name: /Record voice/ })).toBeVisible()
   await page.keyboard.press('ControlOrMeta+Enter')
   await expect(dialog.getByRole('status')).toContainText('Sent')
   await expect(dialog.getByTestId('feedback-sent-id')).not.toBeEmpty()
@@ -41,6 +43,8 @@ test('open, type, Cmd+Enter, Sent, closes itself', async ({ page }) => {
 
 test('Esc closes the box', async ({ page }) => {
   await open(page, '/executions')
+  // `f` only works once the bubble knows the feature is on.
+  await expect(page.getByRole('button', { name: 'Send feedback' })).toBeVisible()
   await page.locator('#sky-main').focus()
   await page.keyboard.press('f')
   const dialog = page.getByRole('dialog', { name: 'Send feedback' })
@@ -51,6 +55,8 @@ test('Esc closes the box', async ({ page }) => {
 
 test('details: hotkeys pick type and priority, pick an element, upload, send', async ({ page }) => {
   await open(page, '/executions')
+  // `f` only works once the bubble knows the feature is on.
+  await expect(page.getByRole('button', { name: 'Send feedback' })).toBeVisible()
   await page.locator('#sky-main').focus()
   await page.keyboard.press('f')
   const dialog = page.getByRole('dialog', { name: 'Send feedback' })
@@ -62,7 +68,6 @@ test('details: hotkeys pick type and priority, pick an element, upload, send', a
   await expect(dialog.getByTestId('feedback-type-ui_ux')).toHaveAttribute('aria-checked', 'true')
   await expect(dialog.getByTestId('feedback-priority-high')).toHaveAttribute('aria-checked', 'true')
 
-  await dialog.getByTestId('feedback-details').click()
   await page.keyboard.press('e')
   const picker = page.getByTestId('feedback-picker')
   await expect(picker).toBeVisible()
@@ -85,7 +90,7 @@ test('details: hotkeys pick type and priority, pick an element, upload, send', a
   await dialog.getByTestId('feedback-file').setInputFiles({ name: 'stub.png', mimeType: 'image/png', buffer: PNG_1X1 })
   await expect(dialog.getByRole('img', { name: 'Screenshot 1' })).toBeVisible()
   await dialog.getByRole('button', { name: 'Send', exact: true }).click()
-  await expect(dialog.getByRole('status')).toContainText('with 1 screenshot')
+  await expect(dialog.getByRole('status')).toContainText('with 1 attachment')
   await expect(dialog).toBeHidden({ timeout: 3000 })
 })
 
@@ -118,4 +123,75 @@ test('recent feedback: open an item, read the full comment, resolve, back', asyn
   await page.keyboard.press('Escape')
   await expect(detail).toBeHidden()
   await expect(list.getByRole('button').first()).toBeFocused()
+})
+
+/** A fake microphone: getUserMedia resolves (or is denied) and MediaRecorder emits one webm chunk. */
+async function fakeMic(page: import('@playwright/test').Page, deny = false) {
+  await page.addInitScript((denied: boolean) => {
+    const md = navigator.mediaDevices ?? ({} as MediaDevices)
+    Object.defineProperty(navigator, 'mediaDevices', { value: md, configurable: true })
+    md.getUserMedia = async () => {
+      if (denied) throw new DOMException('denied', 'NotAllowedError')
+      return { getTracks: () => [{ stop() {} }] } as unknown as MediaStream
+    }
+    class FakeRecorder {
+      static isTypeSupported(t: string) {
+        return t.startsWith('audio/webm')
+      }
+      state: 'inactive' | 'recording' = 'inactive'
+      mimeType = 'audio/webm;codecs=opus'
+      ondataavailable: ((e: { data: Blob }) => void) | null = null
+      onstop: (() => void) | null = null
+      onerror: (() => void) | null = null
+      start() {
+        this.state = 'recording'
+      }
+      stop() {
+        this.state = 'inactive'
+        this.ondataavailable?.({ data: new Blob([new Uint8Array([0x1a, 0x45, 0xdf, 0xa3, 0, 0, 0, 0])], { type: this.mimeType }) })
+        this.onstop?.()
+      }
+    }
+    Object.defineProperty(window, 'MediaRecorder', { value: FakeRecorder, configurable: true })
+  }, deny)
+}
+
+test('voice note: record, stop, play back, send, hear it in the detail', async ({ page }) => {
+  await fakeMic(page)
+  await open(page, '/executions')
+  // `f` only works once the bubble knows the feature is on.
+  await expect(page.getByRole('button', { name: 'Send feedback' })).toBeVisible()
+  await page.locator('#sky-main').focus()
+  await page.keyboard.press('f')
+  const dialog = page.getByRole('dialog', { name: 'Send feedback' })
+  await dialog.getByRole('textbox', { name: 'Feedback' }).fill('Voice summary')
+  await dialog.getByRole('button', { name: /Record voice/ }).click()
+  await expect(dialog.getByText(/Recording 0:0\d/)).toBeVisible()
+  await dialog.getByRole('button', { name: 'Stop' }).click()
+  await expect(dialog.getByLabel('Voice note', { exact: true })).toBeVisible()
+  // Delete, record again, keep it.
+  await dialog.getByRole('button', { name: 'Delete voice note' }).click()
+  await dialog.getByRole('button', { name: /Record voice/ }).click()
+  await dialog.getByRole('button', { name: 'Stop' }).click()
+  // Focus fell to the page when Stop unmounted; Cmd/Ctrl+Enter still sends.
+  await page.keyboard.press('ControlOrMeta+Enter')
+  await expect(dialog.getByRole('status')).toContainText('with 1 attachment')
+  await expect(dialog).toBeHidden({ timeout: 3000 })
+
+  await page.getByRole('button', { name: 'Send feedback' }).click()
+  await page.getByRole('menuitem', { name: /Recent feedback/ }).click()
+  await page.getByRole('list', { name: 'Recent feedback' }).getByRole('button').first().click()
+  await expect(page.getByTestId('feedback-detail-voice')).toBeVisible()
+})
+
+test('voice note: a denied microphone says so', async ({ page }) => {
+  await fakeMic(page, true)
+  await open(page, '/executions')
+  // `f` only works once the bubble knows the feature is on.
+  await expect(page.getByRole('button', { name: 'Send feedback' })).toBeVisible()
+  await page.locator('#sky-main').focus()
+  await page.keyboard.press('f')
+  const dialog = page.getByRole('dialog', { name: 'Send feedback' })
+  await dialog.getByRole('button', { name: /Record voice/ }).click()
+  await expect(dialog.getByRole('alert')).toContainText('Microphone permission denied')
 })

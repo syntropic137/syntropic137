@@ -132,3 +132,15 @@ describe('feedback detail', () => {
     expect(src.startsWith('blob:')).toBe(true)
   })
 })
+
+describe('voice note fixture', () => {
+  it('accepts webm/opus as voice_note and refuses an image declared as voice', async () => {
+    configureClient({ fixtures: true, fixtureLatencyMs: 0 })
+    const item = await createFeedback(body)
+    const webm = new Blob([new Uint8Array([0x1a, 0x45, 0xdf, 0xa3])], { type: 'audio/webm;codecs=opus' })
+    await expect(uploadFeedbackMedia(item.id, webm, 'voice_note', 'voice-note-1.webm')).resolves.toMatchObject({ media_type: 'voice_note', mime_type: 'audio/webm;codecs=opus' })
+    await expect(uploadFeedbackMedia(item.id, new Blob([PNG], { type: 'image/png' }), 'voice_note', 'x.png')).rejects.toMatchObject({ status: 400 })
+    const full = await getFeedback(item.id)
+    expect(full.media?.map((m) => m.media_type)).toEqual(['voice_note'])
+  })
+})

@@ -17,6 +17,7 @@
 
   let full = $state<FeedbackItemWithMedia | null>(null)
   let srcs = $state<string[]>([])
+  let voices = $state<string[]>([])
   let error = $state<string | null>(null)
   let saving = $state(false)
   let current = $derived<FeedbackItem>(full ?? item)
@@ -36,6 +37,7 @@
         const f = await getFeedback(id, ctl.signal)
         full = f
         srcs = await Promise.all((f.media ?? []).filter((m) => m.media_type === 'screenshot').map((m) => feedbackMediaSrc(id, m.id, ctl.signal)))
+        voices = await Promise.all((f.media ?? []).filter((m) => m.media_type === 'voice_note').map((m) => feedbackMediaSrc(id, m.id, ctl.signal)))
       } catch (e: unknown) {
         if (!ctl.signal.aborted) error = e instanceof Error ? e.message : 'Could not load this item.'
       }
@@ -46,7 +48,7 @@
   onMount(() => head?.querySelector<HTMLElement>('button')?.focus())
 
   onDestroy(() => {
-    for (const s of srcs) if (s.startsWith('blob:')) URL.revokeObjectURL(s)
+    for (const s of [...srcs, ...voices]) if (s.startsWith('blob:')) URL.revokeObjectURL(s)
   })
 
   async function toggle() {
@@ -91,6 +93,10 @@
     <dt>Id</dt>
     <dd><code class="sky-fb-detail__sel">{current.id}</code></dd>
   </dl>
+
+  {#each voices as src, i (src)}
+    <audio class="sky-fb-detail__audio" controls {src} aria-label="Voice note {i + 1}" data-testid="feedback-detail-voice"></audio>
+  {/each}
 
   {#if srcs.length > 0}
     <ul class="sky-fb-detail__shots" aria-label="Screenshots">
@@ -215,6 +221,10 @@
     object-fit: cover;
     border-radius: var(--ds-radius-md);
     border: var(--ds-border-width) solid var(--sky-color-border-strong);
+  }
+  .sky-fb-detail__audio {
+    width: 100%;
+    height: var(--sky-size-control-sm);
   }
   .sky-fb-detail__error {
     margin: 0;

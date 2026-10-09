@@ -5,6 +5,7 @@
  */
 import { ApiError } from '../client/errors'
 import {
+  FEEDBACK_AUDIO_TYPES,
   FEEDBACK_IMAGE_TYPES,
   FEEDBACK_MAX_UPLOAD_BYTES,
   type FeedbackCreate,
@@ -48,6 +49,7 @@ function isCreate(body: unknown): body is FeedbackCreate {
 
 const isMediaType = (v: unknown): v is FeedbackMediaType => v === 'screenshot' || v === 'voice_note'
 const isImageType = (v: string): boolean => (FEEDBACK_IMAGE_TYPES as readonly string[]).includes(v)
+const isAudioType = (v: string): boolean => (FEEDBACK_AUDIO_TYPES as readonly string[]).includes(v.split(';', 1)[0] ?? '')
 
 function stats(items: readonly FeedbackItem[]): FeedbackStats {
   const by_status = { open: 0, in_progress: 0, resolved: 0, closed: 0, wont_fix: 0 }
@@ -118,6 +120,7 @@ export const feedbackRoutes = [
     if (!(file instanceof Blob) || !isMediaType(mediaType)) throw new ApiError(422, 'file and media_type are required')
     if (file.size > FEEDBACK_MAX_UPLOAD_BYTES) throw new ApiError(413, 'File too large. Maximum size is 10.0MB')
     if (mediaType === 'screenshot' && !isImageType(file.type)) throw new ApiError(400, 'Unsupported media format')
+    if (mediaType === 'voice_note' && !isAudioType(file.type)) throw new ApiError(400, 'Unsupported media format')
     const media: FeedbackMedia = {
       id: `${fakeId(`media-${fixtureFeedbackMedia.length}`, 8)}-0000-4000-8000-${fakeId('md', 12)}`,
       feedback_id: item.id,

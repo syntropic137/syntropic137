@@ -34,6 +34,8 @@
   import { captureViewport, fromFile, type Area, type Shot } from './feedback/capture'
   import { pageContext, subjectOf } from './feedback/context'
   import ElementPicker from './feedback/ElementPicker.svelte'
+  import VoiceRecorder from './feedback/VoiceRecorder.svelte'
+  import { voiceFileName, type VoiceNote } from './feedback/voice'
   import { FEEDBACK_UI_ATTR, type PinnedElement } from './feedback/element'
   import { APP_NAME, DEFAULT_PRIORITY, DEFAULT_TYPE, PRIORITY_CHOICES, TYPE_CHOICES, type Choice } from './feedback/meta'
   import { APPLE } from './overlays.svelte'
@@ -52,6 +54,7 @@
   let closeTimer: ReturnType<typeof setTimeout> | undefined
   let element = $state<PinnedElement | null>(null)
   let shots = $state<Shot[]>([])
+  let voice = $state<VoiceNote | null>(null)
   let phase = $state<Phase>({ kind: 'editing' })
   let overlay = $state<Overlay>('none')
   let shotError = $state<string | null>(null)
@@ -86,6 +89,8 @@
     detailsOpen = false
     element = null
     shots = []
+    if (voice) URL.revokeObjectURL(voice.url)
+    voice = null
     commentTouched = false
     shotError = null
     phase = { kind: 'editing' }
@@ -108,7 +113,7 @@
   }
   function onPickCancel() {
     // Cancelled straight from the bubble with nothing drafted: back to the page.
-    const empty = !element && commentMissing && shots.length === 0
+    const empty = !element && commentMissing && shots.length === 0 && !voice
     if (empty && feedbackUi.start === 'pick' && phase.kind !== 'failed') {
       overlay = 'none'
       feedbackUi.picking = false
@@ -228,6 +233,14 @@
           mediaFailed += 1
         }
       }
+      if (voice) {
+        try {
+          await uploadFeedbackMedia(item.id, voice.blob, 'voice_note', voiceFileName(voice.blob.type))
+          media += 1
+        } catch {
+          mediaFailed += 1
+        }
+      }
       phase = { kind: 'sent', item, media, mediaFailed }
       feedbackUi.sent += 1
       // A failed upload stays open so it can be read; otherwise the dialog closes itself.
@@ -235,6 +248,13 @@
     } catch (err: unknown) {
       phase = { kind: 'failed', message: messageOf(err) }
     }
+  }
+
+  /** `http://host/very/long/...ion?x=1`: keeps both ends of a URL. */
+  function midTruncate(text: string, max = 56): string {
+    if (text.length <= max) return text
+    const half = Math.floor((max - 1) / 2)
+    return `${text.slice(0, half)}…${text.slice(text.length - half)}`
   }
 
   function isTextEntry(t: EventTarget | null): boolean {
@@ -245,11 +265,7 @@
   /** Single-key hotkeys while focus is not in a text field; Cmd/Ctrl+Enter submits from anywhere. */
   function onKey(e: KeyboardEvent) {
     if (phase.kind === 'sent' || sending) return
-    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-      e.preventDefault()
-      void submit()
-      return
-    }
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) return // onWindowKey sends
     if (e.ctrlKey || e.metaKey || e.altKey || isTextEntry(e.target)) return
     const k = e.key.toLowerCase()
     const t = TYPE_CHOICES.find((c) => c.key === k)
@@ -262,6 +278,14 @@
     else if (k === 'c') document.getElementById('sky-feedback-comment')?.focus()
     else return
     e.preventDefault()
+  }
+
+  /** Cmd/Ctrl+Enter sends from anywhere while the dialog is open, even after focus fell to the page (e.g. the Stop button unmounting). */
+  function onWindowKey(e: KeyboardEvent) {
+    if (!feedbackUi.open || phase.kind === 'sent' || sending) return
+    if (e.key !== 'Enter' || !(e.metaKey || e.ctrlKey)) return
+    e.preventDefault()
+    void submit()
   }
 
   /** Footer Cancel / Done: the footer has no `close`, and a parent-side close skips onOpenChange. */
@@ -310,6 +334,8 @@
   {/each}
 {/snippet}
 
+<svelte:window onkeydown={onWindowKey} />
+
 {#if overlay === 'element'}
   <ElementPicker onpick={onPick} oncancel={onPickCancel} />
 {:else if overlay === 'area'}
@@ -321,7 +347,7 @@
     {#snippet children()}
       {#if phase.kind === 'sent'}
         <p class="sky-fb__sent" role="status">
-          Sent <code class="sky-fb__id" data-testid="feedback-sent-id">{phase.item.id}</code>{#if phase.media > 0}&nbsp;with {phase.media} screenshot{phase.media === 1 ? '' : 's'}{/if}
+          Sent <code class="sky-fb__id" data-testid="feedback-sent-id">{phase.item.id}</code>{#if phase.media > 0}&nbsp;with {phase.media} attachment{phase.media === 1 ? '' : 's'}{/if}
         </p>
         {#if phase.mediaFailed > 0}
           <Callout tone="danger" title="Some screenshots did not upload.">{phase.mediaFailed} failed; the item itself was filed.</Callout>
@@ -365,91 +391,79 @@
             </div>
           </div>
 
+          <div class="sky-fb__attach" data-testid="feedback-attached">
+            <code class="sky-fb__pill sky-fb__url" title={location.href}><span class="sky-fb__url-route">{route}</span><span class="sky-fb__url-full">{midTruncate(location.href)}</span></code>
+            {#if element}
+              <div class="sky-fb__element" data-testid="feedback-element">
+                <code class="sky-fb__pill" title={element.selector}>{element.label}</code>
+                <span class="sky-fb__muted">{element.box.width}×{element.box.height}</span>
+                <Button size="sm" variant="ghost" onclick={() => beginOverlay('element')} disabled={sending}>Re-pick</Button>
+                <Button size="sm" variant="ghost" aria-label="Remove pinned element" onclick={() => (element = null)} disabled={sending}>
+                  {#snippet icon()}<X size={14} aria-hidden="true" />{/snippet}
+                </Button>
+              </div>
+            {/if}
+          </div>
+
+          <div class="sky-fb__tools">
+            {#if !element}
+              <Button size="sm" variant="outline" onclick={() => beginOverlay('element')} disabled={sending}>
+                {#snippet icon()}<MousePointerClick size={14} aria-hidden="true" />{/snippet}
+                {#snippet iconEnd()}<kbd class="sky-fb__kbd">E</kbd>{/snippet}
+                Pick element
+              </Button>
+            {/if}
+              <Button size="sm" variant="outline" onclick={() => void shoot(null)} disabled={sending || capturing}>
+                {#snippet icon()}<Camera size={14} aria-hidden="true" />{/snippet}
+                {#snippet iconEnd()}<kbd class="sky-fb__kbd">S</kbd>{/snippet}
+                Take screenshot
+              </Button>
+              <Button size="sm" variant="outline" onclick={() => beginOverlay('area')} disabled={sending || capturing}>
+                {#snippet icon()}<SquareDashed size={14} aria-hidden="true" />{/snippet}
+                {#snippet iconEnd()}<kbd class="sky-fb__kbd">A</kbd>{/snippet}
+                Capture area
+              </Button>
+              <Button size="sm" variant="outline" onclick={() => fileInput?.click()} disabled={sending}>
+                {#snippet icon()}<ImageUp size={14} aria-hidden="true" />{/snippet}
+                Upload image
+              </Button>
+              <input
+                bind:this={fileInput}
+                class="sky-fb__file"
+                type="file"
+                accept={FEEDBACK_IMAGE_TYPES.join(',')}
+                multiple
+                aria-label="Upload image"
+                data-testid="feedback-file"
+                onchange={(e) => {
+                  const input = e.currentTarget
+                  void addFiles([...(input.files ?? [])]).then(() => (input.value = ''))
+                }}
+              />
+            <VoiceRecorder bind:note={voice} disabled={sending} />
+          </div>
+          <p class="sky-fb__muted sky-fb__drop-hint">Paste or drop an image anywhere in this box.</p>
+            {#if shots.length > 0}
+              <ul class="sky-fb__shots" aria-label="Screenshots to attach">
+                {#each shots as s, i (s.previewUrl)}
+                  <li class="sky-fb__shot">
+                    <img src={s.previewUrl} alt="Screenshot {i + 1}" />
+                    <button type="button" class="sky-fb__icon sky-fb__shot-remove" aria-label="Remove screenshot {i + 1}" onclick={() => removeShot(i)} disabled={sending}><X size={14} aria-hidden="true" /></button>
+                  </li>
+                {/each}
+              </ul>
+            {/if}
+            {#if shotError}<p class="sky-fb__error" role="alert">{shotError}</p>{/if}
+
           <details class="sky-fb__details" bind:open={detailsOpen}>
             <summary class="sky-fb__summary" data-testid="feedback-details">
               <span class="sky-fb__summary-label">Details</span>
-              <span class="sky-fb__summary-chips">
-                <code class="sky-fb__mini">{route}</code>
-                {#if element}<code class="sky-fb__mini">{element.label}</code>{/if}
-                {#if shots.length > 0}<span class="sky-fb__mini">{shots.length} screenshot{shots.length === 1 ? '' : 's'}</span>{/if}
-              </span>
+              <span class="sky-fb__muted">build, viewport</span>
             </summary>
-            <div class="sky-fb__details-body">
-              <div class="sky-fb__group" data-testid="feedback-attached">
-                <span class="sky-fb__chip-label">Attached to</span>
-                <div class="sky-fb__attached">
-                <code class="sky-fb__pill" title={location.href}>{route}</code>
-                {#if subject}<span class="sky-fb__pill sky-fb__pill--soft">{subject.kind}</span>{/if}
-                <span class="sky-fb__pill sky-fb__pill--soft">{innerWidth}×{innerHeight}</span>
-                {#await build then info}{@const v = buildView(info, UI_VERSION)}{#if v.label}<span class="sky-fb__pill sky-fb__pill--soft" data-state={v.mismatch ? 'mismatch' : undefined}>{v.label}{v.commit ? ` · ${v.commit}` : ''}{v.mismatch ? ` · ui v${v.ui}` : ''}</span>{/if}{/await}
-                </div>
-              </div>
-
-              <div class="sky-fb__group">
-                <span class="sky-fb__chip-label">Element</span>
-                {#if element}
-                  <div class="sky-fb__element" data-testid="feedback-element">
-                    <code class="sky-fb__pill" title={element.selector}>{element.label}</code>
-                    <span class="sky-fb__muted">{element.box.width}×{element.box.height}</span>
-                    <Button size="sm" variant="ghost" onclick={() => beginOverlay('element')} disabled={sending}>Re-pick</Button>
-                    <Button size="sm" variant="ghost" aria-label="Remove pinned element" onclick={() => (element = null)} disabled={sending}>
-                      {#snippet icon()}<X size={14} aria-hidden="true" />{/snippet}
-                    </Button>
-                  </div>
-                {:else}
-                  <Button size="sm" variant="outline" onclick={() => beginOverlay('element')} disabled={sending}>
-                    {#snippet icon()}<MousePointerClick size={14} aria-hidden="true" />{/snippet}
-                    {#snippet iconEnd()}<kbd class="sky-fb__kbd">E</kbd>{/snippet}
-                    Pick element
-                  </Button>
-                {/if}
-              </div>
-
-              <div class="sky-fb__group">
-                <span class="sky-fb__chip-label">Screenshots</span>
-                <div class="sky-fb__shot-actions">
-                  <Button size="sm" variant="outline" onclick={() => void shoot(null)} disabled={sending || capturing}>
-                    {#snippet icon()}<Camera size={14} aria-hidden="true" />{/snippet}
-                    {#snippet iconEnd()}<kbd class="sky-fb__kbd">S</kbd>{/snippet}
-                    Take screenshot
-                  </Button>
-                  <Button size="sm" variant="outline" onclick={() => beginOverlay('area')} disabled={sending || capturing}>
-                    {#snippet icon()}<SquareDashed size={14} aria-hidden="true" />{/snippet}
-                    {#snippet iconEnd()}<kbd class="sky-fb__kbd">A</kbd>{/snippet}
-                    Capture area
-                  </Button>
-                  <Button size="sm" variant="outline" onclick={() => fileInput?.click()} disabled={sending}>
-                    {#snippet icon()}<ImageUp size={14} aria-hidden="true" />{/snippet}
-                    Upload image
-                  </Button>
-                  <input
-                    bind:this={fileInput}
-                    class="sky-fb__file"
-                    type="file"
-                    accept={FEEDBACK_IMAGE_TYPES.join(',')}
-                    multiple
-                    aria-label="Upload image"
-                    data-testid="feedback-file"
-                    onchange={(e) => {
-                      const input = e.currentTarget
-                      void addFiles([...(input.files ?? [])]).then(() => (input.value = ''))
-                    }}
-                  />
-                </div>
-                <p class="sky-fb__muted sky-fb__drop-hint">Or paste or drop an image here.</p>
-                {#if shots.length > 0}
-                  <ul class="sky-fb__shots" aria-label="Screenshots to attach">
-                    {#each shots as s, i (s.previewUrl)}
-                      <li class="sky-fb__shot">
-                        <img src={s.previewUrl} alt="Screenshot {i + 1}" />
-                        <button type="button" class="sky-fb__icon sky-fb__shot-remove" aria-label="Remove screenshot {i + 1}" onclick={() => removeShot(i)} disabled={sending}><X size={14} aria-hidden="true" /></button>
-                      </li>
-                    {/each}
-                  </ul>
-                {/if}
-                {#if shotError}<p class="sky-fb__error" role="alert">{shotError}</p>{/if}
-              </div>
-
+            <div class="sky-fb__details-body sky-fb__attached">
+              {#if subject}<span class="sky-fb__pill sky-fb__pill--soft">{subject.kind} {subject.id}</span>{/if}
+              <span class="sky-fb__pill sky-fb__pill--soft">{innerWidth}×{innerHeight}</span>
+              {#await build then info}{@const v = buildView(info, UI_VERSION)}{#if v.label}<span class="sky-fb__pill sky-fb__pill--soft" data-state={v.mismatch ? 'mismatch' : undefined}>{v.label}{v.commit ? ` · ${v.commit}` : ''}{v.mismatch ? ` · ui v${v.ui}` : ''}</span>{/if}{/await}
             </div>
           </details>
 
@@ -697,34 +711,34 @@
     text-transform: uppercase;
     color: var(--ds-color-text-subtle);
   }
-  .sky-fb__summary-chips {
-    display: flex;
-    align-items: center;
-    gap: var(--ds-space-1-5);
-    min-width: 0;
-    overflow: hidden;
-  }
-  .sky-fb__mini {
-    display: inline-flex;
-    align-items: center;
-    flex: none;
-    gap: var(--ds-space-1-5);
-    max-width: 12rem;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    color: var(--ds-color-text-muted);
-    font-size: var(--ds-text-xs);
-  }
-  code.sky-fb__mini {
-    display: inline-block;
-    font-family: var(--ds-font-mono);
-  }
   .sky-fb__details-body {
+    padding-top: var(--ds-space-3);
+  }
+  /* Visible attachments: the page (route + middle-truncated URL) and a pinned element. */
+  .sky-fb__attach {
     display: flex;
     flex-direction: column;
-    gap: var(--ds-space-4);
-    padding-top: var(--ds-space-4);
+    align-items: flex-start;
+    gap: var(--ds-space-1-5);
+    min-width: 0;
+  }
+  .sky-fb__url {
+    gap: var(--ds-space-2);
+  }
+  .sky-fb__url-route {
+    flex: none;
+  }
+  .sky-fb__url-full {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--ds-color-text-subtle);
+  }
+  .sky-fb__tools {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ds-space-1-5);
   }
   .sky-fb__error {
     margin: 0;

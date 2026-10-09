@@ -24,6 +24,8 @@ export type FeedbackMedia = components['schemas']['MediaItem']
 export const FEEDBACK_MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 /** Screenshot formats the media route accepts (it checks the magic bytes too). */
 export const FEEDBACK_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp'] as const
+/** Voice-note formats the media route accepts (parameters such as `;codecs=opus` are ignored). */
+export const FEEDBACK_AUDIO_TYPES = ['audio/webm', 'audio/ogg', 'audio/mp4', 'audio/wav'] as const
 
 /** Every `FeedbackType`, in the React widget's order. A new upstream member is a compile error here. */
 export const FEEDBACK_TYPES = ['bug', 'feature', 'ui_ux', 'performance', 'question', 'other'] as const satisfies readonly FeedbackType[]
