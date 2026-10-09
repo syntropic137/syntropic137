@@ -49,6 +49,7 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.aggregate_global_claude_plugin_registry.GlobalClaudePluginRegistryAggregate import (
         GlobalClaudePluginRegistryAggregate,
     )
+    from syn_domain.contexts.orchestration.ports import ExecutionRunQueue
     from syn_domain.contexts.orchestration.slices.list_claude_plugins import (
         ListClaudePluginsHandler,
     )
@@ -317,6 +318,8 @@ async def get_execution_processor() -> WorkflowExecutionProcessor:
         delegation_evidence=ChildJournalDelegations(),
         # #1381: how long shutdown waits to record each running run INTERRUPTED.
         interrupt_budget_seconds=_settings.execution.interrupt_budget_s,
+        # #1310 1.3: None (the flag off) is today's path - start and drain here.
+        run_queue=await get_execution_run_queue(),
     )
 
 
@@ -546,6 +549,40 @@ def _create_import_ledger() -> ImportLedgerPort:
         "double-billed across phases (#936) and across a crash (#933). "
         "See ADR-060 (docs/adrs/ADR-060-restart-safe-trigger-deduplication.md)."
     )
+
+
+_run_queue_singleton: ExecutionRunQueue | None = None
+
+
+async def get_execution_run_queue() -> ExecutionRunQueue | None:
+    """The Run Queue when `SYN_EXECUTION_RUN_QUEUE_ENABLED` is on, else None (#1310 1.3).
+
+    Postgres or nothing (ADR-060, ADR-072 D2): a queue held in memory loses
+    every admitted run on restart, which is the failure the queue exists to
+    remove. Its schema is ensured once, on first use.
+    """
+    global _run_queue_singleton
+    from syn_shared.settings import get_settings
+
+    if not get_settings().execution.run_queue_enabled:
+        return None
+    if _run_queue_singleton is not None:
+        return _run_queue_singleton
+    from syn_api._wiring_db import get_shared_db_pool
+
+    pool = get_shared_db_pool()
+    if pool is None:
+        raise RuntimeError(
+            "SYN_EXECUTION_RUN_QUEUE_ENABLED is on but no Postgres pool is available. "
+            "Configure SYN_OBSERVABILITY_DB_URL; the run queue never falls back to "
+            "memory (ADR-060)."
+        )
+    from syn_adapters.execution_runs import PostgresExecutionRunQueue
+
+    queue = PostgresExecutionRunQueue(pool)  # type: ignore[arg-type]  # asyncpg.Pool vs session_inventory Pool
+    await queue.ensure_ready()
+    _run_queue_singleton = queue
+    return queue
 
 
 def get_webhook_health_tracker() -> WebhookHealthTracker:

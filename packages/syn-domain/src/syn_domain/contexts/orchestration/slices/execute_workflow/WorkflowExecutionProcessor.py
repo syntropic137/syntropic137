@@ -8,6 +8,10 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+from event_sourcing import StreamAlreadyExistsError
+
+from syn_domain.contexts._shared.repository_ref import RepositoryRef
+from syn_domain.contexts.orchestration._shared.event_epoch import ORCHESTRATION_EVENT_EPOCH
 from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoAction, TodoItem
 from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins import (
     phase_definitions_of,
@@ -81,7 +85,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types i
     # `from ...WorkflowExecutionProcessor import WorkflowExecutionResult`. Moving
     # it into the type-checking block below would break every one of them at
     # import time, which is why TC001 is silenced here rather than obeyed.
-    WorkflowExecutionResult,  # noqa: TC001
+    WorkflowExecutionResult,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.pull_request_observation import (
     with_open_pull_requests,
@@ -110,7 +114,6 @@ if TYPE_CHECKING:
     )
     from syn_adapters.workspace_backends.service import WorkspaceService
     from syn_domain.contexts._shared.maintenance import AdmissionTicket
-    from syn_domain.contexts._shared.repository_ref import RepositoryRef
     from syn_domain.contexts.agent_sessions.delegate_usage import SessionStorePort
     from syn_domain.contexts.agent_sessions.import_ledger import ImportLedgerPort
     from syn_domain.contexts.artifacts.domain.services.artifact_query_service import (
@@ -125,7 +128,11 @@ if TYPE_CHECKING:
         ResumeOrigin,
         SourceCommit,
     )
-    from syn_domain.contexts.orchestration.ports import DelegationEvidencePort
+    from syn_domain.contexts.orchestration.ports import (
+        ClaimedRun,
+        DelegationEvidencePort,
+        ExecutionRunQueue,
+    )
     from syn_domain.contexts.orchestration.ports.RemoteBranchPort import RemoteBranchPort
     from syn_domain.contexts.orchestration.slices.execute_workflow.errors import ObservedBranches
     from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
@@ -211,7 +218,12 @@ class WorkflowExecutionProcessor:
         owed_cancelled_work: ProjectionStore | None = None,
         delegation_evidence: DelegationEvidencePort | None = None,
         interrupt_budget_seconds: float = 60.0,
+        run_queue: ExecutionRunQueue | None = None,
     ) -> None:
+        #: Where an admitted run waits for an Executor (ADR-072, #1310 1.3).
+        #: None is today's path: `run` starts AND drains in this call. Set,
+        #: `run` and `run_resume` only admit, and `run_claimed` drains.
+        self._run_queue = run_queue
         #: How long a shutdown waits for a run's work to be saved and the run
         #: recorded INTERRUPTED before tearing it down (#1381).
         self._interrupt_budget_seconds = interrupt_budget_seconds
@@ -328,6 +340,10 @@ class WorkflowExecutionProcessor:
         is durable. Nowhere earlier would be true: everything between the
         admission decision and that write is queueing, and a deploy that
         drained over it would count a quiet system and then kill this run.
+
+        With a run queue (#1310 1.3) this only admits: it returns once the
+        start is durable and the run is ``admitted``, with status
+        ``"admitted"``, and an Executor drains it through `run_claimed`.
         """
         # PromptBuilder reads ``inputs["repos"]`` for ``{{repos}}`` template substitution.
         # ADR-063: write the canonical HTTPS form of typed RepositoryRef so the prompt
@@ -388,15 +404,46 @@ class WorkflowExecutionProcessor:
         admitted: AdmissionTicket | None,
         origin: ResumeOrigin | None = None,
     ) -> WorkflowExecutionResult:
-        """Record the start, then drain the to-do list until the run ends."""
-        await self._cancelled_work.settle()
+        """Record the start, then drain here - or, with a run queue, admit and return."""
         started_at = datetime.now(UTC)
+        phase_outputs = await self._start(aggregate, admitted, origin)
+        if self._run_queue is not None:
+            return WorkflowExecutionResult(
+                workflow_id=workflow_id,
+                execution_id=aggregate.id or "",
+                status="admitted",
+                started_at=started_at,
+            )
+        return await self._drain(
+            aggregate, workflow_id, phases, inputs, repos, origin, phase_outputs, started_at
+        )
+
+    async def _start(
+        self,
+        aggregate: WorkflowExecutionAggregate,
+        admitted: AdmissionTicket | None,
+        origin: ResumeOrigin | None,
+    ) -> PhaseOutputCache:
+        """Make the start durable; with a run queue, bracket it as ``opening -> admitted``.
+
+        The row is reserved BEFORE the stream opens and promoted after it, so
+        a crash between the two leaves an ``opening`` row the sweep settles by
+        reading the stream (ADR-072 D2), never a stream no row will run.
+
+        Raises:
+            StreamAlreadyExistsError: the execution already has a run row or a
+                stream - it was started before, by this or another process.
+        """
         execution_id = aggregate.id or ""
-        phase_map = {p.phase_id: p for p in phases}
+        await self._cancelled_work.settle()
         # Before the stream opens: a resume whose inheritance cannot be read
         # must not leave a child that exists and can never run its first phase.
         phase_outputs = await inherited_outputs(self._artifact_query, origin)
         record_continuation(phase_outputs, aggregate.start_pins)
+        if self._run_queue is not None and not await self._run_queue.reserve(
+            execution_id, ORCHESTRATION_EVENT_EPOCH, is_resume=origin is not None
+        ):
+            raise StreamAlreadyExistsError(execution_id, 0)
         # #1387: durable, therefore visible. From the write the drain counts
         # this execution and a maintenance transition may proceed over it;
         # before it, it existed only as a queued task, and `set_mode(active=True)`
@@ -409,6 +456,52 @@ class WorkflowExecutionProcessor:
         await self._journal.open(
             aggregate, written=admitted.mark_durable if admitted is not None else None
         )
+        if self._run_queue is not None:
+            await self._run_queue.mark_admitted(execution_id)
+        return phase_outputs
+
+    async def run_claimed(self, run: ClaimedRun) -> WorkflowExecutionResult:
+        """Drain a run an Executor claimed, from its stream alone (#1310 1.3).
+
+        Everything `run` was handed is read back from the start pins: phases,
+        inputs, the resume origin, and the repositories, rebuilt from the
+        source commits, which keep each repository even where its SHA is
+        unknown. The to-do list is read from the shared projection store the
+        start was projected into; the run-scoped fold that replaces it is
+        #1310 1.4. Closing the run row is the claimer's (1.5), not this.
+        """
+        aggregate = await self._journal.reload(run.execution_id)
+        if aggregate is None:
+            msg = f"Claimed run {run.execution_id} has no execution stream"
+            raise LookupError(msg)
+        pins = aggregate.start_pins
+        repos = [RepositoryRef.from_slug(c.repository) for c in pins.source_commits]
+        phase_outputs = await inherited_outputs(self._artifact_query, pins.resumed_from)
+        return await self._drain(
+            aggregate,
+            aggregate.workflow_id or "",
+            pins.pinned_phases,
+            dict(pins.inputs),
+            repos or None,
+            pins.resumed_from,
+            phase_outputs,
+            datetime.now(UTC),
+        )
+
+    async def _drain(
+        self,
+        aggregate: WorkflowExecutionAggregate,
+        workflow_id: str,
+        phases: list[ExecutablePhase],
+        inputs: dict[str, Any],
+        repos: list[RepositoryRef] | None,
+        origin: ResumeOrigin | None,
+        phase_outputs: PhaseOutputCache,
+        started_at: datetime,
+    ) -> WorkflowExecutionResult:
+        """Drain the to-do list of a started run until it ends."""
+        execution_id = aggregate.id or ""
+        phase_map = {p.phase_id: p for p in phases}
 
         phase_results: list[PhaseResult] = []
         all_artifact_ids: list[str] = []
