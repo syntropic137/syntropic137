@@ -189,3 +189,11 @@ export function sampleCityDays(cols: number, rows: number, end: string): Skyline
     sessions: Math.round(a * SAMPLE_SESSIONS),
   }))
 }
+
+/** Entrance stagger of a city block (seconds), by its diagonal: 0.15s plus 0.035s per wave, as on the board. */
+export function cityDelay(wave: number): number {
+  return Math.round((0.15 + wave * 0.035) * 100) / 100
+}
+
+/** Board pulse and flash start this long after a block's rise begins (seconds). */
+export const CITY_SIGNAL_DELAY = 1.6

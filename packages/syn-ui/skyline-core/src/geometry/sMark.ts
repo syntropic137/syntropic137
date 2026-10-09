@@ -70,3 +70,38 @@ export function sMark(cubeSize = 40, options: SMarkOptions = {}): SMarkLayout {
   const height = Math.round(rows * cubeSize + 5 * hh + 2 * pad)
   return { cubes, width, height, viewBox: `0 0 ${width} ${height}` }
 }
+
+/** Face fills per tone, as token expressions (design/brand/s-mark.themable.svg): left lit, right shaded, top lightest. */
+export interface SMarkFaces {
+  left: string
+  right: string
+  top: string
+  /** Hairline round each face; none on the blue cubes. */
+  stroke: string | null
+}
+
+export const S_MARK_FACES: Record<SMarkTone, SMarkFaces> = {
+  blue: {
+    left: 'var(--ds-color-accent)',
+    right: 'color-mix(in oklab, var(--ds-color-accent) 45%, var(--sky-color-ground-deep))',
+    top: 'color-mix(in oklab, var(--ds-color-accent) 62%, var(--sky-color-display-hi))',
+    stroke: null,
+  },
+  dark: {
+    left: 'var(--sky-color-cube-dark-left)',
+    right: 'var(--sky-color-cube-dark-right)',
+    top: 'var(--sky-color-cube-dark-top)',
+    stroke: 'var(--sky-color-cube-edge)',
+  },
+  glass: {
+    left: 'var(--sky-cube-glass-left)',
+    right: 'var(--sky-cube-glass-right)',
+    top: 'var(--sky-color-cube-glass-edge)',
+    stroke: 'var(--sky-color-cube-glass-edge)',
+  },
+}
+
+/** Entrance stagger of the landing S (seconds): the first cube waits 0.25s, each next one 0.09s more. */
+export function sMarkDelay(order: number): number {
+  return Math.round((0.25 + order * 0.09) * 100) / 100
+}
