@@ -276,6 +276,7 @@ These are the landing page's existing gates, now run by `syn-landing.yml` in the
 4. Open: eval explorer reads `sample.ts` for now.
 
 Also decided:
+- The handoff folder's Landing boards were v3 copies; `design/canvas/Landing.dc.html` and `PhoneLanding.dc.html` are v4, pulled from the live canvas.
 - One-repo version of this plan (landing moves to `apps/syn-landing`); no npm publish of Skyline.
 - Vercel: no PR previews. Docs deploy only from `release` (project ignored-build-step set, plus `git.deploymentEnabled` in `apps/syn-docs/vercel.json`). The landing project builds only `main` until it moves in, then `release` like docs.
 - Assets in this repo: boards in `design/canvas/`, generators in `design/reference/`, the S mark and icons in `design/brand/`. Paths in this plan that say `brand/` mean `design/brand/`.
