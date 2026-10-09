@@ -8,7 +8,7 @@ import Security from "./components/Security";
 import Evals from "./sections/Evals";
 import UseCases from "./sections/UseCases";
 import WhyPlatform from "./sections/WhyPlatform";
-import GetStarted from "./components/GetStarted";
+import Start from "./sections/Start";
 import Footer from "./components/Footer";
 
 export default function App() {
@@ -31,8 +31,7 @@ export default function App() {
         <Evals />
         <UseCases />
         <WhyPlatform />
-        <hr className="section-divider" />
-        <GetStarted />
+        <Start />
       </main>
       <Footer />
     </>

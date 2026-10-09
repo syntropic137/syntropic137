@@ -31,7 +31,7 @@ export const NAV_LINKS: readonly SiteLink[] = [
 ];
 
 export const NAV_GITHUB_LABEL = "Star on GitHub";
-export const NAV_CTA: SiteLink = { label: "Get started", href: "#get-started" };
+export const NAV_CTA: SiteLink = { label: "Get started", href: "#start" };
 
 export const FOOTER_TAGLINE = "The agentic engineering platform. MIT licensed.";
 
@@ -72,3 +72,4 @@ export const FOOTER_COLUMNS: readonly FooterColumn[] = [
 export * from "./copy/evals";
 export * from "./copy/useCases";
 export * from "./copy/whyPlatform";
+export * from "./copy/start";
