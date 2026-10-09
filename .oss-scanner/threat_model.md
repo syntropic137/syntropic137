@@ -124,7 +124,10 @@ database or Docker daemon is available.
 
 - Python unit tests: `uv run pytest -m unit -q` (from `/src`). Tests marked
   `integration`/`e2e` need Postgres, Redis, the event store or Docker and do
-  not run offline.
+  not run offline. Known environment-only failures in this image:
+  `scripts/tests/test_1310_pit_stop_gateway_only.py` assumes the checkout
+  directory is named `syntropic137` (it is `/src` here); it tests operator
+  release tooling and is out of scope.
 - Focused: `uv run pytest -q -m unit apps/syn-api/tests`,
   `packages/syn-domain/tests`, `packages/syn-adapters/tests`,
   `docker/token-injector/tests`.

@@ -30,7 +30,6 @@ COPY --from=ghcr.io/astral-sh/uv:0.10.6 /uv /uvx /usr/local/bin/
 ENV UV_PYTHON_INSTALL_DIR=/opt/uv/python \
     UV_CACHE_DIR=/opt/uv/cache \
     UV_LINK_MODE=copy \
-    UV_FROZEN=1 \
     PNPM_HOME=/opt/pnpm \
     PATH=/opt/pnpm:$PATH
 
@@ -55,7 +54,7 @@ RUN git config --global --add safe.directory '*' \
 
 # Python: interpreter from .python-version, full workspace incl. the dev group (pytest, pyright, ruff).
 RUN uv python install \
-    && uv sync --all-packages --group dev \
+    && uv sync --frozen --all-packages --group dev \
     && uv run python -c "import syn_api, syn_domain, syn_adapters, syn_shared, event_sourcing; print('python workspace ok')"
 
 # Node: whole pnpm workspace (CLI, dashboard, docs, openclaw plugin, ui-feedback widget).
@@ -66,10 +65,11 @@ RUN pnpm install --frozen-lockfile --ignore-scripts
 RUN pnpm --dir apps/syn-cli-node run build || echo "WARNING: syn-cli-node build failed"
 
 # After this point the scan is offline: make uv never try the network.
+# (Not UV_FROZEN: scripts/workflows/test_bump_version.py runs `uv lock` itself.)
 ENV UV_OFFLINE=1
 
 # Cheap tests, bounded, never fatal (the template's rule: a failing test must not abort the build).
-RUN timeout 1200 uv run pytest -m unit -q -x -n auto -p no:cacheprovider \
+RUN timeout 1200 uv run pytest -m unit -q -n auto -p no:cacheprovider \
       || echo "WARNING: python unit tests reported failures"
 RUN timeout 600 pnpm --dir apps/syn-cli-node run test \
       || echo "WARNING: syn-cli-node tests reported failures"
