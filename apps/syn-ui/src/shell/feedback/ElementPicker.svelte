@@ -27,9 +27,15 @@
   onMount(() => {
     list = keyboardCandidates()
     layer?.focus()
+    // The dialog closing hands focus back to the page after this mounts, so keys are read on window (capture), not the layer.
+    requestAnimationFrame(() => layer?.focus())
     const onScroll = () => show(target)
     addEventListener('scroll', onScroll, true)
-    return () => removeEventListener('scroll', onScroll, true)
+    addEventListener('keydown', onKey, true)
+    return () => {
+      removeEventListener('scroll', onScroll, true)
+      removeEventListener('keydown', onKey, true)
+    }
   })
 
   function onMove(e: PointerEvent) {
@@ -63,7 +69,7 @@
   }
 </script>
 
-<!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_click_events_have_key_events: the layer owns keyboard picking in onkeydown -->
+<!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_click_events_have_key_events: keyboard picking is a window keydown listener (onMount) -->
 <div
   bind:this={layer}
   class="sky-fb-pick"
@@ -76,7 +82,6 @@
   onpointermove={onMove}
   onpointerdown={onMove}
   onclick={onClick}
-  onkeydown={onKey}
 >
   {#if rect}
     <div

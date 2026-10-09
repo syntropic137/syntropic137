@@ -106,7 +106,8 @@
   }
 
   function onDocClick(e: MouseEvent) {
-    if (menu && root && e.target instanceof Node && !root.contains(e.target)) close()
+    // composedPath: the clicked icon may already be swapped out of the DOM by the time this runs.
+    if (menu && root && !e.composedPath().includes(root)) close()
   }
 
   const firstLine = (c: string | null | undefined) => (c ?? '').split('\n')[0] || '(no comment)'

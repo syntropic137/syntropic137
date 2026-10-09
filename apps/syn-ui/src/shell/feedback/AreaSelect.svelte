@@ -12,7 +12,17 @@
   let start = $state<{ x: number; y: number } | null>(null)
   let end = $state<{ x: number; y: number } | null>(null)
   let layer: HTMLDivElement | undefined = $state()
-  onMount(() => layer?.focus())
+  onMount(() => {
+    requestAnimationFrame(() => layer?.focus())
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      e.preventDefault()
+      e.stopPropagation()
+      oncancel()
+    }
+    addEventListener('keydown', onKey, true)
+    return () => removeEventListener('keydown', onKey, true)
+  })
 
   const area = $derived<Area | null>(
     start && end
@@ -48,13 +58,6 @@
   onpointerdown={down}
   onpointermove={moveTo}
   onpointerup={up}
-  onkeydown={(e) => {
-    if (e.key === 'Escape') {
-      e.preventDefault()
-      e.stopPropagation()
-      oncancel()
-    }
-  }}
 >
   {#if area}
     <div class="sky-fb-area__box" style:left="{area.x}px" style:top="{area.y}px" style:width="{area.width}px" style:height="{area.height}px"></div>

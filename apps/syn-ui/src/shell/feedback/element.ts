@@ -77,33 +77,49 @@ function step(el: Element): string {
   return same.length > 1 ? `${tag}:nth-of-type(${same.indexOf(el) + 1})` : tag
 }
 
-/** data-testid > aria-label > short CSS path (at most MAX_DEPTH steps, anchored on an id or testid when one is near). */
-export function selectorFor(el: Element): string {
-  const testId = el.getAttribute('data-testid')
-  if (testId) {
-    const s = `[data-testid=${quote(testId)}]`
-    if (unique(s)) return s
-  }
-  const aria = el.getAttribute('aria-label')
-  if (aria) {
-    const s = `${el.tagName.toLowerCase()}[aria-label=${quote(aria)}]`
-    if (unique(s)) return s
-  }
-  const parts: string[] = []
+function byTestId(el: Element): string | null {
+  const v = el.getAttribute('data-testid')
+  return v ? `[data-testid=${quote(v)}]` : null
+}
+
+function byAriaLabel(el: Element): string | null {
+  const v = el.getAttribute('aria-label')
+  return v ? `${el.tagName.toLowerCase()}[aria-label=${quote(v)}]` : null
+}
+
+/** Ancestor steps, closest first, stopping at an id, a testid anchor or MAX_DEPTH. */
+function pathSteps(el: Element): string[] {
+  const steps: string[] = []
   let cur: Element | null = el
-  while (cur && cur !== document.body && cur !== document.documentElement && parts.length < MAX_DEPTH) {
-    const anchorId = cur !== el ? cur.getAttribute('data-testid') : null
-    if (anchorId) {
-      parts.unshift(`[data-testid=${quote(anchorId)}]`)
-      break
-    }
-    const s = step(cur)
-    parts.unshift(s)
-    if (s.startsWith('#')) break
-    if (unique(parts.join(' > '))) break
+  while (cur && cur !== document.body && cur !== document.documentElement && steps.length < MAX_DEPTH) {
+    const anchor = cur !== el ? byTestId(cur) : null
+    const s = anchor ?? step(cur)
+    steps.push(s)
+    if (anchor || s.startsWith('#')) break
     cur = cur.parentElement
   }
-  return parts.join(' > ')
+  return steps
+}
+
+/** Shortest unique suffix of the ancestor path (or the whole capped path). */
+function byCssPath(el: Element): string {
+  const steps = pathSteps(el)
+  for (let n = 1; n <= steps.length; n++) {
+    const s = steps.slice(0, n).reverse().join(' > ')
+    if (unique(s)) return s
+  }
+  return steps.reverse().join(' > ')
+}
+
+const STRATEGIES: readonly ((el: Element) => string | null)[] = [byTestId, byAriaLabel]
+
+/** data-testid > aria-label > short CSS path, first unique one wins. */
+export function selectorFor(el: Element): string {
+  for (const strategy of STRATEGIES) {
+    const s = strategy(el)
+    if (s && unique(s)) return s
+  }
+  return byCssPath(el)
 }
 
 /** Absolute XPath, as the React widget records it. */
