@@ -199,7 +199,7 @@ class PhaseExecutionInfo(BaseModel):
 
     @computed_field(
         description="The model for humans: the reported id verbatim, or "
-        "'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9)."
+        "'<alias> (requested)', or 'unknown' (ADR-067 D9)."
     )
     @property
     def model_display(self) -> str:

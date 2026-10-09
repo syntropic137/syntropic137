@@ -2,7 +2,7 @@
  * The model that ran, as the API displays it, plus optional requested context.
  *
  * `display` is an API `*_display` field (e.g. "claude-opus-5-5" or
- * "unknown (requested: gpt-sol)") and is rendered verbatim. The secondary line
+ * "gpt-sol (requested)") and is rendered verbatim. The secondary line
  * names the requested alias only when a different model was observed.
  */
 

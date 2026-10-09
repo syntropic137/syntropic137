@@ -9295,7 +9295,7 @@
           "model_display": {
             "type": "string",
             "title": "Model Display",
-            "description": "The model for humans: the reported id verbatim, or 'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9).",
+            "description": "The model for humans: the reported id verbatim, or '<alias> (requested)', or 'unknown' (ADR-067 D9).",
             "readOnly": true
           }
         },
@@ -16301,7 +16301,7 @@
           "model_display": {
             "type": "string",
             "title": "Model Display",
-            "description": "The model for humans: the reported id verbatim, or 'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9).",
+            "description": "The model for humans: the reported id verbatim, or '<alias> (requested)', or 'unknown' (ADR-067 D9).",
             "readOnly": true
           }
         },
@@ -19411,7 +19411,7 @@
           "agent_model_display": {
             "type": "string",
             "title": "Agent Model Display",
-            "description": "The model for humans: the reported id verbatim, or 'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9).",
+            "description": "The model for humans: the reported id verbatim, or '<alias> (requested)', or 'unknown' (ADR-067 D9).",
             "readOnly": true
           }
         },
@@ -19655,7 +19655,7 @@
           "agent_model_display": {
             "type": "string",
             "title": "Agent Model Display",
-            "description": "The model for humans: the reported id verbatim, or 'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9).",
+            "description": "The model for humans: the reported id verbatim, or '<alias> (requested)', or 'unknown' (ADR-067 D9).",
             "readOnly": true
           }
         },

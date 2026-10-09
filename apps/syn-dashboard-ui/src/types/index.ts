@@ -103,7 +103,7 @@ export interface SessionSummary {
   agent_provider: string | null
   // Observed model id (ADR-067 D9); requested_model is what the definition asked for.
   agent_model: string | null
-  /** Explicit model id, or "unknown (requested: X)" / "unknown". Render verbatim. */
+  /** Explicit model id, or "X (requested)" / "unknown". Render verbatim. */
   agent_model_display: string
   /** What the phase definition asked for (an alias such as "opus"). */
   requested_model: string | null
@@ -147,7 +147,7 @@ export interface SessionResponse {
   agent_model: string | null
   /** What the phase definition asked for (an alias such as "opus"). */
   requested_model: string | null
-  /** Explicit model id, or "unknown (requested: X)". Render verbatim. */
+  /** Explicit model id, or "X (requested)". Render verbatim. */
   agent_model_display: string
   status: string
   input_tokens: number
@@ -447,7 +447,7 @@ export interface PhaseExecutionDetail {
   model: string | null
   /** What the phase definition asked for (an alias such as "opus"). */
   requested_model: string | null
-  /** Explicit model id, or "unknown (requested: X)" / "unknown". Render verbatim. */
+  /** Explicit model id, or "X (requested)" / "unknown". Render verbatim. */
   model_display: string
   /** Keyed by observed model id, or UNATTRIBUTED_MODEL_KEY. */
   cost_by_model: Record<string, string>
