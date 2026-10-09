@@ -208,5 +208,8 @@
   --sky-feedback-pick-fill: color-mix(in oklab, var(--ds-color-accent) 12%, transparent);
   --sky-feedback-scrim: color-mix(in oklab, var(--ds-color-bg) 55%, transparent);
 
+  --sky-cube-glass-left: color-mix(in oklab, var(--ds-color-fg) 32%, transparent); /* S mark glass cube faces; top is --sky-color-cube-glass-edge */
+  --sky-cube-glass-right: color-mix(in oklab, var(--ds-color-fg) 18%, transparent);
+
   color-scheme: dark;
 }

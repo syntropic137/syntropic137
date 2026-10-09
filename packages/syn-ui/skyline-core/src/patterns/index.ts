@@ -24,3 +24,4 @@ export type { RuleToken, RuleClause, RuleClauseKey, RuleCondition, RuleInput } f
 export { buildAgentPrompt, buildEvalTrendPrompt, evalTrendCommand } from './agentPrompt'
 export type { AgentPromptSpec, AgentPromptInput } from './agentPrompt'
 export type { TrendLine, TrendDot, TrendDotTone, TrendEnd, TrendTick, TrendNote, TrendChartProps, TrendSparkProps } from './trendChart'
+export type { SMarkProps, IsoCityProps } from './brand'

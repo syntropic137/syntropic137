@@ -73,7 +73,7 @@
   .sky-topnav__version {
     position: absolute;
     top: calc(100% - var(--ds-space-2-5));
-    left: calc(26px + var(--ds-space-2-5) - var(--ds-space-1));
+    left: calc(21px + var(--ds-space-2-5) - var(--ds-space-1));
     display: flex;
   }
 
