@@ -346,13 +346,13 @@ function perfSubtitle(count: number, t0: number, t1: number, better: MetricDef['
 function perfDot(r: PerfRun, M: MetricDef, y: (r: PerfRun) => number): PerformanceModel['dots'][number] {
   const inSet = M.inSet(r)
   return {
-      i: r.i,
-      x: r.x,
-      top: inSet ? 100 - y(r) : 100,
-      color: 1,
-      tone: r.outcome === 'other' ? 'running' : r.outcome,
-      muted: !inSet,
-      label: `${shortDay(r.t)}: ${OUTCOME_WORD[r.outcome]}${inSet ? `, ${M.format(M.value(r))}` : ', not counted'}`,
+    i: r.i,
+    x: r.x,
+    top: inSet ? 100 - y(r) : 100,
+    color: 1,
+    tone: r.outcome === 'other' ? 'running' : r.outcome,
+    muted: !inSet,
+    label: `${shortDay(r.t)}: ${OUTCOME_WORD[r.outcome]}${inSet ? `, ${M.format(M.value(r))}` : ', not counted'}`,
   }
 }
 
