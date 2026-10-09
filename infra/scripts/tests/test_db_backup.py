@@ -163,6 +163,7 @@ class TestBackup:
             # The TOC lists two tables, the data holds one.
             (_DATA_STREAM.split("COPY public.\"Agent")[0], 0, "a listed table has no data"),
         ],
+        ids=["cut-inside-copy", "pg-restore-fails", "table-missing"],
     )
     def test_archive_whose_rows_do_not_read_back_is_not_kept(
         self, tmp_path, fake_pg, data, data_exit, why
