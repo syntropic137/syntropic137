@@ -221,10 +221,13 @@ class _AgentWritingDuringUpload(_Archive):
         super().__init__(log)
         self._docker = docker
         self._ws = ws
+        self._worked = False
 
     def _agent_works(self) -> None:
-        if self._ws.name in self._docker.frozen:
+        """One late commit and a rewritten deliverable, during the first upload."""
+        if self._worked or self._ws.name in self._docker.frozen:
             return
+        self._worked = True
         app = self._ws / "repos" / "app"
         (app / "late.py").write_text("late = True\n")
         _git(app, "add", "late.py")
@@ -254,7 +257,6 @@ async def test_every_byte_present_at_the_kill_is_in_the_archive(base: Path, tmp_
     result = await _enforcer(base, docker, archive).run_once()
 
     assert result.stopped == ("ws-big",)
-    assert "ws-big" in docker.frozen  # killed while still frozen
     app = ws / "repos" / "app"
     live_head = _git(app, "rev-parse", "HEAD").strip()
     bundle = next(v for k, v in archive.patches.items() if k.endswith(".bundle"))
@@ -265,6 +267,7 @@ async def test_every_byte_present_at_the_kill_is_in_the_archive(base: Path, tmp_
         assert member is not None
         archived = member.read()
     assert archived == (ws / "artifacts" / "output" / "deliverable.md").read_bytes()
+    assert "ws-big" in docker.frozen  # killed while still frozen
 
 
 async def test_a_workspace_that_cannot_be_frozen_is_not_touched(base: Path, tmp_path: Path) -> None:
