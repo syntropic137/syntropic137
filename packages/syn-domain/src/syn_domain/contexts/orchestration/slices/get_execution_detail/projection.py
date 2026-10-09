@@ -805,6 +805,18 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
             key for key, document in documents.items() if document.get("started_at") is not None
         }
 
+    async def get_many(self, execution_ids: Sequence[str]) -> dict[str, WorkflowExecutionDetail]:
+        """Each execution's detail, by id, in one primary-key read; absent ids are omitted.
+
+        What ``get_by_id`` answers for each id, without a read per id (#1811).
+        """
+        documents = await read_by_keys(self._store, self.PROJECTION_NAME, list(execution_ids))
+        return {
+            key: WorkflowExecutionDetail.from_dict(dict(doc))
+            for key, doc in documents.items()
+            if doc
+        }
+
     async def get_by_id(self, execution_id: str) -> WorkflowExecutionDetail | None:
         """Get execution detail by ID.
 

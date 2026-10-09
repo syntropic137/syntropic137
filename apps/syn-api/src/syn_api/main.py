@@ -52,6 +52,8 @@ from syn_api.types import (
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
+    from starlette.types import ASGIApp
+
 # Initialize structured logging from agentic-workspace
 # Configure via env vars: LOG_LEVEL, LOG_FORMAT (json/human), LOG_LEVEL_<COMPONENT>
 setup_logging()
@@ -97,11 +99,36 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await lifecycle.shutdown()
 
 
+class _TimedFastAPI(FastAPI):
+    """FastAPI with request timing OUTSIDE its whole middleware stack (ADR-075).
+
+    ``add_middleware`` can only place a middleware inside Starlette's
+    ``ServerErrorMiddleware``. Timing has to sit outside it, so the 500 the
+    framework sends for an unhandled exception (its handler, its debug
+    traceback) is observed and stamped with ``x-request-id`` rather than
+    replaced. Inside are the startup gate and workspace ingress too, so their
+    refusals are recorded like any other answer. Lane 2 only (#1070); slow
+    requests are also logged (#1583).
+    """
+
+    #: Set by ``create_app`` from settings. Read there, not here: Starlette
+    #: builds the stack on the first request, long after the app was
+    #: configured, and the threshold is the configured one (#1583).
+    slow_request_ms: int = 1000
+
+    def build_middleware_stack(self) -> ASGIApp:
+        from syn_api.middleware.request_timing import RequestTimingMiddleware
+
+        return RequestTimingMiddleware(
+            super().build_middleware_stack(), slow_request_ms=self.slow_request_ms
+        )
+
+
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
     config = get_api_config()
 
-    app = FastAPI(
+    app = _TimedFastAPI(
         title="Syntropic137 API",
         description=(
             "API for Syntropic137. "
@@ -137,6 +164,9 @@ def create_app() -> FastAPI:
         dependencies=[Depends(reject_unknown_query_params)],
     )
 
+    from syn_shared.settings import get_settings
+
+    app.slow_request_ms = get_settings().slow_request_log_threshold_ms
     gate = StartupGate()
     app.state.startup_gate = gate
 
@@ -147,19 +177,6 @@ def create_app() -> FastAPI:
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
-    )
-
-    # Per-route request-timing (Lane 2 observability - see #1070). Always on:
-    # in-process only, no event store or aggregate interaction, negligible cost.
-    # Requests slower than the threshold are also logged (#1583). The setting
-    # is read here, not in the middleware: Starlette builds the middleware
-    # stack on the first request, long after the app was configured.
-    from syn_api.middleware.request_timing import RequestTimingMiddleware
-    from syn_shared.settings import get_settings
-
-    app.add_middleware(
-        RequestTimingMiddleware,
-        slow_request_ms=get_settings().slow_request_log_threshold_ms,
     )
 
     # Webhook recording middleware (opt-in via SYN_RECORD_WEBHOOKS=true)
@@ -175,7 +192,7 @@ def create_app() -> FastAPI:
     # and /health must answer without waiting on anything that startup builds.
     app.add_middleware(StartupGateMiddleware, gate=gate)
 
-    # Outermost of all: a request from a workspace (ADR-072) is refused unless
+    # Outermost of the app's own: a request from a workspace (ADR-072) is refused unless
     # its platform token's scope allows the route - before the gate, before
     # any router. Always installed; with platform access OFF it refuses every
     # workspace request, so the setting cannot open a route by being unset.
