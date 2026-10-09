@@ -72,11 +72,14 @@ from a workspace back into the platform is untrusted.
    only repo-scoped, 1-hour installation tokens written to
    `~/.git-credentials` and `~/.config/gh/hosts.yml`. Leaking the PEM, or a
    token wider than the workspace's repositories, is in scope.
-5. **Operator -> API and dashboard.** The API has no auth of its own; nginx
-   basic auth on gateway port 8081 is the external boundary, and port 80 is
-   unauthenticated and relies on Docker network isolation (ADR-059). An
-   unauthenticated path to the API from outside, or from `agent-net` other
-   than the ADR-072 route, is in scope.
+5. **Operator -> API and dashboard.** The API has no auth of its own; the
+   nginx gateway is the boundary. Port 8081 (tunnel) uses basic auth. Port 80
+   is unauthenticated only when the gateway binds to loopback
+   (`SYN_GATEWAY_BIND` 127.*); for any other bind the gateway refuses to start
+   without `SYN_API_PASSWORD` and enables basic auth
+   (`infra/docker/images/gateway/docker-entrypoint.sh`, ADR-059). An
+   unauthenticated path to the API from outside loopback, or from `agent-net`
+   other than the ADR-072 route, is in scope.
 6. **API -> Docker engine.** Through `tecnativa/docker-socket-proxy` only
    (`docs/security-practices.md`, ADR-021 addendum). A path from workspace
    or webhook input to influencing what the API asks Docker to create is in
@@ -158,7 +161,9 @@ style of the nearest existing test file. Patches should keep strict typing
 
 ## Anything to leave alone
 
-- Missing auth on gateway port 80 or the API itself: documented design
-  (ADR-059); report only a way to reach it from outside the Docker network.
+- Missing auth on gateway port 80 when bound to loopback, or on the API
+  container itself: documented design (ADR-059). A non-loopback bind that
+  serves without basic auth, or any path to the API that bypasses the gateway
+  from outside the Docker network, is in scope.
 - `InMemory*` adapters: refuse to construct outside test/offline (ADR-060).
 - Dev-only compose files and `.env.example` placeholder values.
