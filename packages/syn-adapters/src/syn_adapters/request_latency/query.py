@@ -18,12 +18,14 @@ if TYPE_CHECKING:
     import asyncpg
 
 _QUERY = f"""
-    SELECT method, route, count(*) AS n,
-           percentile_cont(ARRAY[0.5, 0.95, 0.99]) WITHIN GROUP (ORDER BY duration_ms) AS p,
-           max(duration_ms) AS worst
-    FROM {TABLE}
-    WHERE time >= $1 AND ($2::text IS NULL OR route = $2)
-    GROUP BY method, route
+    SELECT method, route, n, p, worst FROM (
+        SELECT method, route, count(*) AS n,
+               percentile_cont(ARRAY[0.5, 0.95, 0.99]) WITHIN GROUP (ORDER BY duration_ms) AS p,
+               max(duration_ms) AS worst
+        FROM {TABLE}
+        WHERE time >= $1 AND ($2::text IS NULL OR route = $2)
+        GROUP BY method, route
+    ) AS by_route
     ORDER BY p[3] DESC, method, route
 """
 
