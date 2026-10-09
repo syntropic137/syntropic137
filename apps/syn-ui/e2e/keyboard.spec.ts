@@ -3,7 +3,7 @@
  * Skyline only: the React dashboard has neither.
  */
 import type { Page } from '@playwright/test'
-import { isSkyline } from './support/env'
+import { isFixtures, isSkyline } from './support/env'
 import { expect, mainHeading, markWindow, open, test, urlFor, windowStillMarked } from './support/test'
 
 test.skip(!isSkyline, 'Skyline keyboard layer')
@@ -65,6 +65,8 @@ test.describe('keymap', () => {
     const dialog = page.getByRole('dialog', { name: 'Keyboard shortcuts' })
     await expect(dialog).toBeVisible()
     await expect(dialog.locator('[data-binding="goto-executions"]')).toContainText('G')
+    // Fixtures turn the feedback feature on, so its shortcuts are listed too.
+    if (isFixtures) await expect(dialog.locator('[data-binding="feedback"]')).toBeVisible()
     await expect(dialog.getByRole('link', { name: 'Request a feature' })).toHaveAttribute('href', 'https://syntropic137.canny.io/')
     await expect(dialog.getByRole('link', { name: 'Report an issue' })).toHaveAttribute('href', /github\.com\/syntropic137\/syntropic137\/issues/)
     await expect(dialog.getByRole('link', { name: 'Documentation' })).toHaveAttribute('href', /^https:\/\//)

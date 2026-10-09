@@ -50,6 +50,18 @@ describe('keymap', () => {
     expect(keymapStep(KEYMAP_IDLE, press('j', { modal: true })).handled).toBe(false)
   })
 
+  it('maps the feedback widget shortcuts, Shift kept apart from Cmd/Ctrl chords', () => {
+    expect(feed(['f'])[0]!.action).toEqual({ type: 'feedback', mode: 'note' })
+    expect(feed([press('Q', { mod: true, shift: true })])[0]!.action).toEqual({ type: 'feedback', mode: 'note' })
+    expect(feed([press('F', { mod: true, shift: true })])[0]!.action).toEqual({ type: 'feedback', mode: 'pick' })
+    expect(feed([press('T', { mod: true, shift: true })])[0]!.action).toEqual({ type: 'feedback', mode: 'recent' })
+    // Cmd/Ctrl+F (browser find) is not taken.
+    expect(keymapStep(KEYMAP_IDLE, press('f', { mod: true })).handled).toBe(false)
+    expect(keymapStep(KEYMAP_IDLE, press('f', { typing: true })).handled).toBe(false)
+    expect(keyLabel('Mod+Shift+f')).toBe('⇧⌘F')
+    expect(keyLabel('Mod+Shift+f', false)).toBe('Ctrl Shift F')
+  })
+
   it('ignores Alt combos and unbound keys', () => {
     expect(keymapStep(KEYMAP_IDLE, press('g', { alt: true })).handled).toBe(false)
     expect(keymapStep(KEYMAP_IDLE, press('x')).handled).toBe(false)
@@ -85,6 +97,8 @@ describe('keymap', () => {
   it('groups every binding for the overlay', () => {
     const groups = keymapGroups()
     expect(groups.map((g) => g.group)).toEqual(['General', 'Go to', 'Lists'])
-    expect(groups.flatMap((g) => g.bindings)).toHaveLength(KEYMAP.length)
+    const all = keymapGroups(KEYMAP, ['feedback'])
+    expect(all.map((g) => g.group)).toEqual(['General', 'Go to', 'Lists', 'Feedback'])
+    expect(all.flatMap((g) => g.bindings)).toHaveLength(KEYMAP.length)
   })
 })

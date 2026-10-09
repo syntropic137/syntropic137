@@ -10,11 +10,13 @@
 import { KEYMAP_IDLE, keymapStep, moveIndex, type KeyAction, type KeymapSection, type KeymapState } from '@syn137/skyline-core/state'
 import { href, router } from '../lib/router'
 import { SECTIONS } from './nav'
+import { openFeedback, showFeedbackRecent } from './feedback.svelte'
 import { overlays, requestPalette } from './overlays.svelte'
 
 const ROW = '[data-sky-row]'
 const ACTIVE = 'data-sky-active'
-const MODAL = 'dialog[open], [role="dialog"], [role="alertdialog"], [role="menu"]'
+// A closed <dialog role="dialog"> stays in the DOM, so only open ones count.
+const MODAL = 'dialog[open], [role="dialog"]:not(dialog), [role="alertdialog"]:not(dialog), [role="menu"]'
 const TEXT_INPUTS = new Set(['checkbox', 'radio', 'button', 'submit', 'reset', 'range', 'color', 'file', 'image'])
 
 const SECTION_HREF = Object.fromEntries(SECTIONS.map((s) => [s.key, s.href])) as Record<KeymapSection, string>
@@ -102,6 +104,8 @@ const HANDLERS: Handlers = {
   row: (a, key) => (key.startsWith('Arrow') && !focusIsFree() ? false : moveRow(a.move)),
   open: () => focusIsFree() && openRow(),
   back: () => back(),
+  // False while the feedback feature is off, so the key keeps its default.
+  feedback: (a) => (a.mode === 'recent' ? showFeedbackRecent() : openFeedback(a.mode)),
 }
 
 function perform<A extends KeyAction>(action: A, key: string): boolean {
@@ -116,6 +120,7 @@ export function startKeyboard(): () => void {
     const r = keymapStep(state, {
       key: e.key,
       mod: e.metaKey || e.ctrlKey,
+      shift: e.shiftKey,
       alt: e.altKey,
       typing: isTyping(e.target instanceof Element ? e.target : document.activeElement),
       modal: modalOpen(),

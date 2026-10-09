@@ -19,8 +19,15 @@ export type KeyAction =
   | { type: 'back' }
   | { type: 'search' }
   | { type: 'help' }
+  | { type: 'feedback'; mode: FeedbackMode }
 
-export type KeyGroup = 'General' | 'Go to' | 'Lists'
+/** Feedback widget entry points (the React widget's shortcuts, plus `f`). */
+export type FeedbackMode = 'note' | 'pick' | 'recent'
+
+export type KeyGroup = 'General' | 'Go to' | 'Lists' | 'Feedback'
+
+/** A feature a binding needs; the overlay hides bindings whose feature is off. */
+export type KeyFeature = 'feedback'
 
 export interface KeyBinding {
   id: string
@@ -31,6 +38,8 @@ export interface KeyBinding {
   action: KeyAction
   /** Fires even while typing in a field or with a modal open. */
   global?: boolean
+  /** Only live when this feature is on. */
+  requires?: KeyFeature
 }
 
 /** Second key of the `g` chord for each section. */
@@ -75,6 +84,9 @@ export const KEYMAP: readonly KeyBinding[] = [
   { id: 'row-next', keys: [['j'], ['ArrowDown']], label: 'Next row', group: 'Lists', action: { type: 'row', move: 'next' } },
   { id: 'row-prev', keys: [['k'], ['ArrowUp']], label: 'Previous row', group: 'Lists', action: { type: 'row', move: 'prev' } },
   { id: 'open', keys: [['Enter']], label: 'Open the active row', group: 'Lists', action: { type: 'open' } },
+  { id: 'feedback', keys: [['f'], ['Mod+Shift+q']], label: 'Write a feedback note', group: 'Feedback', action: { type: 'feedback', mode: 'note' }, requires: 'feedback' },
+  { id: 'feedback-pick', keys: [['Mod+Shift+f']], label: 'Pin feedback to an element', group: 'Feedback', action: { type: 'feedback', mode: 'pick' }, requires: 'feedback', global: true },
+  { id: 'feedback-recent', keys: [['Mod+Shift+t']], label: 'Recent feedback', group: 'Feedback', action: { type: 'feedback', mode: 'recent' }, requires: 'feedback', global: true },
 ]
 
 export const CHORD_MS = 1200
@@ -84,6 +96,8 @@ export interface KeyInput {
   key: string
   /** Cmd or Ctrl held. */
   mod: boolean
+  /** Shift held; only distinguishes Cmd/Ctrl chords (`?` arrives as itself). */
+  shift?: boolean
   alt: boolean
   /** Focus is in an input, textarea, select or contenteditable. */
   typing: boolean
@@ -108,9 +122,10 @@ export interface KeymapResult {
 }
 
 /** The token a key press matches in KEYMAP: `Mod+k`, `g`, `?`, `ArrowDown`. */
-export function keyToken(key: string, mod: boolean): string {
+export function keyToken(key: string, mod: boolean, shift = false): string {
   // Shift is not folded: `G` (Shift+g) is not `g`, while `?` arrives as itself.
-  return mod ? `Mod+${key.toLocaleLowerCase()}` : key
+  if (!mod) return key
+  return `Mod+${shift ? 'Shift+' : ''}${key.toLocaleLowerCase()}`
 }
 
 const same = (a: readonly string[], b: readonly string[]) => a.length === b.length && a.every((t, i) => t === b[i])
@@ -131,7 +146,7 @@ function match(bindings: readonly KeyBinding[], seq: readonly string[]): { exact
 export function keymapStep(state: KeymapState, input: KeyInput, bindings: readonly KeyBinding[] = KEYMAP): KeymapResult {
   const idle: KeymapResult = { state: KEYMAP_IDLE, action: null, handled: false }
   if (input.alt) return idle
-  const token = keyToken(input.key, input.mod)
+  const token = keyToken(input.key, input.mod, input.shift)
   const blocked = input.typing || input.modal
   const usable = blocked ? bindings.filter((b) => b.global) : bindings
   const live = state.pending.length > 0 && input.at - state.at <= CHORD_MS
@@ -145,9 +160,10 @@ export function keymapStep(state: KeymapState, input: KeyInput, bindings: readon
 }
 
 /** Bindings grouped for the shortcuts overlay, in KEYMAP order. */
-export function keymapGroups(bindings: readonly KeyBinding[] = KEYMAP): { group: KeyGroup; bindings: KeyBinding[] }[] {
+export function keymapGroups(bindings: readonly KeyBinding[] = KEYMAP, features: readonly KeyFeature[] = []): { group: KeyGroup; bindings: KeyBinding[] }[] {
   const out: { group: KeyGroup; bindings: KeyBinding[] }[] = []
   for (const b of bindings) {
+    if (b.requires && !features.includes(b.requires)) continue
     const g = out.find((x) => x.group === b.group)
     if (g) g.bindings.push(b)
     else out.push({ group: b.group, bindings: [b] })
@@ -160,8 +176,10 @@ const KEY_LABEL: Record<string, string> = { ArrowDown: '↓', ArrowUp: '↑', Es
 /** Display form of one key token: `Mod+k` is `⌘K` on Apple platforms and `Ctrl K` elsewhere. */
 export function keyLabel(token: string, apple = true): string {
   if (token.startsWith('Mod+')) {
-    const k = token.slice(4).toLocaleUpperCase()
-    return apple ? `⌘${k}` : `Ctrl ${k}`
+    const shift = token.startsWith('Mod+Shift+')
+    const k = token.slice(shift ? 10 : 4).toLocaleUpperCase()
+    if (apple) return `${shift ? '⇧' : ''}⌘${k}`
+    return `Ctrl ${shift ? 'Shift ' : ''}${k}`
   }
   return KEY_LABEL[token] ?? (token.length === 1 ? token.toLocaleUpperCase() : token)
 }

@@ -6,9 +6,11 @@
   import { KEYMAP, keymapGroups, sequenceLabel } from '@syn137/skyline-core/state'
   import { Dialog } from '@syn137/skyline-svelte-v5'
   import { DOCS_URL, FEATURE_REQUESTS_URL, ISSUES_URL } from '../lib/links'
+  import { feedbackUi } from './feedback.svelte'
   import { APPLE, overlays } from './overlays.svelte'
 
-  const groups = keymapGroups(KEYMAP)
+  // Bindings for a feature that is off (feedback outside a dev machine) are not listed.
+  const groups = $derived(keymapGroups(KEYMAP, feedbackUi.enabled ? ['feedback'] : []))
 </script>
 
 <Dialog bind:open={overlays.shortcuts} title="Keyboard shortcuts" size="md">

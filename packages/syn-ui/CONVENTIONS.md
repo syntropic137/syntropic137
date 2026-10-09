@@ -224,7 +224,9 @@ Use `resource()` from `src/lib/load.svelte.ts`. Do not fetch in `onMount` and do
 
 `src/shell/` holds the App Shell from the TopNav, PhoneTop and PhoneDock boards. That means the capsule nav from 48rem up, and the top bar plus floating dock below it. The dock holds Overview, Executions, Evals, Workflows (the fourth slot, provisional) and More, which opens a sheet with Sessions, Artifacts, Triggers and Repos. The shell also holds the Breadcrumb Trail, which collapses to Home, the ellipsis button, the parent and the current page on phones. `StubPage.svelte` is the placeholder that the route stubs use. Delete its import when you build your screen.
 
-The search button and ⌘K dispatch a `sky:command` window event. The Command palette (Overlays wave) listens for it.
+The search buttons, the More sheet's Search entry, ⌘K and the desktop shortcut all dispatch one `sky:command` window event (`requestPalette()` in `shell/overlays.svelte.ts`); AppShell lazily mounts `CommandPalette.svelte` on it.
+
+Every keyboard shortcut lives in skyline-core's `KEYMAP` (`state/keymap.ts`), and `shell/keyboard.ts` is the only window keydown handler that acts on it; the `?` overlay lists the same table. To add a shortcut, add a binding and an action type there and a handler in `keyboard.ts`; never add another window keydown listener. A list row opts into `j`/`k` and Enter with `data-sky-row` on the element holding its primary link. A component that consumes Escape (a sheet, a menu) calls `preventDefault()` so the keymap does not also go back.
 
 ### Feedback bubble
 

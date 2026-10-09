@@ -28,7 +28,16 @@ export const feedbackUi = $state({
   picking: false,
   /** Bumped after each successful submit, so the bubble recounts. */
   sent: 0,
+  /** Bumped by the Recent feedback shortcut; the bubble opens its list. */
+  recentRequest: 0,
 })
+
+/** Open the bubble's Recent feedback list; false while the feature is off. */
+export function showFeedbackRecent(): boolean {
+  if (!FEEDBACK_LOCAL_ONLY || !feedbackUi.enabled) return false
+  feedbackUi.recentRequest += 1
+  return true
+}
 
 /** Open the dialog; false while the feature is off, so a shortcut keeps its default. */
 export function openFeedback(start: FeedbackStart = 'note'): boolean {

@@ -5,13 +5,12 @@
 
   One row from 64rem, never wrapping: the capsule shows icons only (labels
   stay for screen readers and as tooltips) until 90rem, where the labels
-  fit beside the actions (at 80rem they do not, by about 90px). Feedback is
-  icon-only on desktop; its label would push the row over at 1400px.
+  fit beside the actions (at 80rem they do not, by about 90px). Feedback
+  is the floating bubble, not a top-bar button.
 -->
 <script lang="ts">
   import type { LiveState } from '@syn137/skyline-core/patterns'
   import { href } from '../lib/router'
-  import { FEEDBACK_LOCAL_ONLY } from './feedback.svelte'
   import LiveBadge from './LiveBadge.svelte'
   import NavIcon from './NavIcon.svelte'
   import Wordmark from './Wordmark.svelte'
@@ -34,12 +33,6 @@
 
   <div class="sky-topnav__actions">
     <LiveBadge state={live} />
-    {#if FEEDBACK_LOCAL_ONLY}
-      <!-- Lazy and dev-only: a production build carries none of the feedback code in its first load. -->
-      <span class="sky-topnav__feedback" title="Send feedback">
-        {#await import('./FeedbackButton.svelte') then { default: FeedbackButton }}<FeedbackButton />{/await}
-      </span>
-    {/if}
     <button class="sky-topnav__search" type="button" aria-label="Search or jump to" aria-keyshortcuts="Meta+K Control+K" onclick={onsearch}>
       <NavIcon name="search" size={14} />
       <kbd class="sky-topnav__kbd">⌘K</kbd>
@@ -163,10 +156,6 @@
     outline-offset: var(--sky-focus-ring-offset);
   }
 
-  .sky-topnav__feedback {
-    display: contents;
-  }
-
   /* Desktop: one row, no wrapping (owner tweak, Oct 8 2026). */
   @media (min-width: 64rem) {
     .sky-topnav,
@@ -191,10 +180,6 @@
       overflow: hidden;
       clip-path: inset(50%);
       white-space: nowrap;
-    }
-    /* Icon-only Feedback; its aria-label and the wrapper's title name it. */
-    .sky-topnav__feedback :global(.sky-feedback-btn > span) {
-      display: none;
     }
   }
   @media (min-width: 90rem) {
