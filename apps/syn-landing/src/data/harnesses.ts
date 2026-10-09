@@ -9,9 +9,8 @@
  * Adding a harness should be an edit to this file, not a copy hunt through
  * components. The hero cards, the YAML window, the chips and the 02 lanes
  * fallbacks take names and colours from HARNESSES, so a new entry needs no
- * CSS. Prose that
- * says something specific about ONE harness stays hand-written, because that
- * claim does not generalise.
+ * CSS. Prose that says something specific about ONE harness stays
+ * hand-written, because that claim does not generalise.
  *
  * Keep `controlPlane` honest: it is the difference between a claim we can back
  * and one we cannot.
