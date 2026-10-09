@@ -21,6 +21,32 @@ requires the pin to equal the control's commit and to be a strict ancestor of
 the first fix commit. `redis-retry-non-idempotent` is the only such case. The expected files are ones the fix changed, and a defect that
 only shows at runtime is not a case.
 
+## Judging a blocked defect run
+
+Two judges answer one question: does a blocking finding identify THIS defect?
+
+- **Keyword judge** (always; deterministic, offline): one blocking finding
+  names an expected file and has a word from every `expected.keywords` group.
+- **LLM judge** (`score --llm-judge`; needs `ANTHROPIC_API_KEY`): a pinned
+  model at temperature 0 is given the defect (`expected.defect` when present,
+  plus the expected files and keyword concepts) and the blocking findings, and
+  answers `match`, `no_match` or `unclear`, quoting the finding it matched. A
+  `match` whose quote is not in any finding is turned into `unclear`.
+
+**Headline rule:** caught = blocked AND (keyword match OR LLM `match`).
+`unclear` is not caught. Both judges' catch rates are printed beside the
+headline. Precision matters more than recall here: a judge that credits vague
+findings inflates the number every verifier decision is made on.
+
+The judge is part of the eval's identity. Keyword-only scores keep
+scorer_version `<suite version>`; LLM-judged scores are recorded as
+`<suite version>+llm:<model>@prompt-v<n>`. Change the judge's model or prompt
+and bump `JUDGE_PROMPT_VERSION` in `scripts/eval_suite.py`.
+
+Before trusting a judge change, calibrate it on runs already launched:
+`scripts/eval_judge_calibrate.py` prints keyword verdict vs LLM verdict per
+blocked run, with a column for a human's own reading.
+
 ## Clean controls
 
 A clean control is a merged PR head the verifier must certify. It is only

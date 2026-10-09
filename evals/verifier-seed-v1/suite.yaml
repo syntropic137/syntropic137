@@ -29,6 +29,16 @@
 # different versions are different experiments, and the scorer prints the
 # version beside every row.
 #
+# TWO JUDGES. A blocked defect run counts as caught when the keyword judge
+# matches (one blocking finding names an expected file and every keyword
+# group) OR, under `score --llm-judge`, the LLM judge answers `match` and
+# quotes the finding it matched. `unclear` and `no_match` are not caught. Both
+# judges' catch rates are printed beside the headline. The judge is part of the
+# score: an LLM-judged score is recorded under scorer_version
+# `<version>+llm:<model>@prompt-v<n>`, never the plain version a keyword-only
+# score keeps. `expected.defect`, when a case has it, is prose for the LLM
+# judge only and never enters `task`.
+#
 # SAME CASES, DIFFERENT VERIFIER. `workflows` lists every workflow the cases
 # run under; they differ only in the verify phase's agent. `eval_suite.py
 # --workflow <id>` picks one (default: the first), and the suite tag carries

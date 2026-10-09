@@ -3028,15 +3028,17 @@ def test_llm_judge_flag_without_a_key_fails_before_any_call(
 
 @pytest.mark.unit
 def test_anthropic_client_sends_the_pinned_model_at_temperature_zero() -> None:
-    sent: list[dict[str, object]] = []
+    sent: list[httpx.Request] = []
 
     def handle(request: httpx.Request) -> httpx.Response:
-        sent.append(json.loads(request.content))
-        assert request.headers["x-api-key"] == "test-key"
+        sent.append(request)
         return httpx.Response(200, json={"content": [{"type": "text", "text": "ok"}]})
 
     client = eval_suite.AnthropicMessages(
         "test-key", httpx.Client(transport=httpx.MockTransport(handle))
     )
     assert client.complete(model="claude-sonnet-5-5", system="s", prompt="p") == "ok"
-    assert (sent[0]["model"], sent[0]["temperature"]) == ("claude-sonnet-5-5", 0)
+    [request] = sent
+    assert request.headers["x-api-key"] == "test-key"
+    body = json.loads(request.content)
+    assert (body["model"], body["temperature"]) == ("claude-sonnet-5-5", 0)
