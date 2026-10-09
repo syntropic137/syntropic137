@@ -13,6 +13,7 @@ arguments would make the two sequences differ here.
 
 from __future__ import annotations
 
+import importlib
 import os
 
 os.environ.setdefault("APP_ENVIRONMENT", "test")
@@ -227,3 +228,173 @@ async def test_a_duplicate_whose_start_died_before_mark_admitted_is_promoted() -
     assert await world.event_types("exec-half") == ["WorkflowExecutionStarted"]
     counts = await world.queue.in_use()
     assert (counts.opening, counts.admitted) == (0, 1)
+
+
+class _Heads:
+    """One repository resolves to a head, the other does not (unknown SHA)."""
+
+    async def head_sha(self, repo: RepositoryRef) -> str | None:
+        return {"acme/widgets": "a" * 40}.get(repo.slug)
+
+
+class _Consumed:
+    """What a drain handed the workspace and the prompt, per execution."""
+
+    def __init__(self) -> None:
+        self.secrets: dict[str, tuple[list[str], dict[str, str]]] = {}
+        self.prompts: dict[str, tuple[str | None, dict[str, object]]] = {}
+
+
+_REPOS = [RepositoryRef.from_slug("acme/widgets"), RepositoryRef.from_slug("acme/gadgets")]
+_INPUTS = {"task": "fix {{issue}}", "issue": "#42"}
+
+
+@pytest.fixture
+def consumed(monkeypatch: pytest.MonkeyPatch) -> _Consumed:
+    """Let provisioning reach the agent's prompt, recording what it consumed.
+
+    Setup succeeds, the steps between setup and the prompt are no-ops, and the
+    prompt builder records its arguments and then fails the phase - so the run
+    is still deterministic, but only after every input and repository the
+    agent would be launched with has been handed over.
+    """
+    from syn_adapters.workspace_backends import service
+
+    provisioning = importlib.import_module(
+        "syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler"
+    )
+
+    seen = _Consumed()
+
+    async def create(**kwargs: object) -> object:
+        repos = kwargs["repositories"]
+        pins = kwargs["pinned_commits"]
+        assert isinstance(repos, list) and isinstance(pins, dict)
+        seen.secrets[_current[0]] = (list(repos), dict(pins))
+        return MagicMock()
+
+    async def nothing(*_args: object, **_kwargs: object) -> object:
+        return ()
+
+    _current: list[str] = [""]
+    monkeypatch.setattr(service.SetupPhaseSecrets, "create", staticmethod(create))
+    monkeypatch.setattr(provisioning, "verify_provisioned_checkout", nothing)
+    monkeypatch.setattr(provisioning, "require_codex_sandbox", nothing)
+    for step in (
+        "_materialize_claude_plugins",
+        "_materialize_and_install_skills",
+        "_install_baked_delegation_skill",
+        "_install_attribution_hook",
+        "_inject_phase_artifacts",
+    ):
+        monkeypatch.setattr(provisioning.WorkspaceProvisionHandler, step, nothing)
+    seen.current = _current  # type: ignore[attr-defined]
+    return seen
+
+
+def _agent_reaching_world(seen: _Consumed) -> _World:
+    world = _World()
+    world.workspace.create_workspace.return_value.__aenter__.return_value.run_setup_phase = (
+        AsyncMock(return_value=ExecutionResult(exit_code=0, success=True, duration_ms=0.0))
+    )
+
+    def create_workspace(**kwargs: object) -> object:
+        seen.current[0] = str(kwargs["execution_id"])  # type: ignore[attr-defined]
+        return world.workspace.create_workspace.return_value
+
+    world.workspace.create_workspace.side_effect = create_workspace
+    return world
+
+
+def _prompt_recorder(seen: _Consumed) -> AsyncMock:
+    async def build(
+        _phase: object,
+        execution_id: str,
+        _workflow_id: str,
+        repo_url: str | None,
+        _outputs: object,
+        inputs: dict[str, object],
+    ) -> str:
+        seen.prompts[execution_id] = (repo_url, dict(inputs))
+        msg = "stop at the prompt"
+        raise RuntimeError(msg)
+
+    return AsyncMock(side_effect=build)
+
+
+async def _start(world: _World, processor: WorkflowExecutionProcessor, execution_id: str) -> str:
+    handler = ExecuteWorkflowHandler(
+        processor=processor, workflow_repository=world.templates, commit_resolver=_Heads()
+    )
+    result = await handler.handle(
+        ExecuteWorkflowCommand(
+            aggregate_id=world.definition.id,
+            execution_id=execution_id,
+            repos=list(_REPOS),
+            inputs=dict(_INPUTS),
+        )
+    )
+    return result.status
+
+
+def _normalized(payloads: list[dict[str, object]], execution_id: str) -> list[dict[str, object]]:
+    """Event payloads with what legitimately differs between two runs removed."""
+    volatile = {"execution_id", "session_id", "workspace_id"}
+
+    def scrub(value: object) -> object:
+        if isinstance(value, dict):
+            return {
+                k: scrub(v)
+                for k, v in value.items()
+                if k not in volatile and not str(k).endswith("_at") and "duration" not in str(k)
+            }
+        if isinstance(value, list):
+            return [scrub(v) for v in value]
+        if isinstance(value, str):
+            return value.replace(execution_id, "<exec>")
+        return value
+
+    return [scrub(p) for p in payloads]  # type: ignore[misc]
+
+
+async def _payloads(world: _World, execution_id: str) -> list[dict[str, object]]:
+    return [
+        e.event.model_dump(mode="json")
+        for e in await stored_envelopes(world.store)
+        if e.metadata.aggregate_id == execution_id
+    ]
+
+
+async def test_v5_a_fresh_processor_consumes_every_input_and_repository_identically(
+    consumed: _Consumed,
+) -> None:
+    """Every input and repository the producer recorded survives admission and
+    is handed to the workspace and the prompt identically by a fresh processor:
+    both repositories, in order, the unresolved SHA included, and the inputs."""
+    world = _agent_reaching_world(consumed)
+    await world.install()
+
+    def processor(*, queued: bool) -> WorkflowExecutionProcessor:
+        built = world.processor(queued=queued)
+        built._prompt_builder = _prompt_recorder(consumed)
+        return built
+
+    await _start(world, processor(queued=False), "exec-golden")
+    assert await _start(world, processor(queued=True), "exec-claimed") == "admitted"
+    assert "exec-claimed" not in consumed.prompts, "admission must not run the agent"
+    await world.queue.register(_HOST, capacity=1)
+    await world.queue.heartbeat(_HOST.host_id)
+    claimed = await world.queue.claim(_HOST.host_id)
+    assert claimed is not None
+    await processor(queued=True).run_claimed(claimed)
+
+    golden_repos, golden_pins = consumed.secrets["exec-golden"]
+    assert golden_repos == [r.https_url for r in _REPOS], "the golden run is the reference"
+    assert golden_pins == {"acme/widgets": "a" * 40}
+    assert consumed.secrets["exec-claimed"] == consumed.secrets["exec-golden"]
+    golden_url, golden_inputs = consumed.prompts["exec-golden"]
+    assert golden_inputs["issue"] == "#42"
+    assert consumed.prompts["exec-claimed"] == (golden_url, golden_inputs)
+    assert _normalized(await _payloads(world, "exec-claimed"), "exec-claimed") == _normalized(
+        await _payloads(world, "exec-golden"), "exec-golden"
+    )
