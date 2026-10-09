@@ -20,16 +20,19 @@ _openapi:
           With no installation_id, aggregates every installation. The last
           complete
 
-          listing is cached and served as ``complete`` while under a minute old;
+          listing is cached and served without waiting on GitHub: as
+          ``complete``
 
-          otherwise GitHub is asked live, and an older listing is served as
+          while under a minute old, as ``partial`` once older, with a background
 
-          ``partial`` only if GitHub cannot be asked. The GitHub App's
+          refresh behind it. GitHub is asked live only when no listing is
+          cached. The
 
-          ``installation`` and ``installation_repositories`` webhooks invalidate
-          the
+          GitHub App's ``installation`` and ``installation_repositories``
+          webhooks
 
-          cache at once. A single installation_id is always asked live.
+          invalidate the cache at once. A single installation_id is always asked
+          live.
 
 
           ``lookup`` says whether a repo missing from ``repos`` is known to be

@@ -1476,11 +1476,11 @@ export interface paths {
          * @description List repositories accessible to the GitHub App.
          *
          *     With no installation_id, aggregates every installation. The last complete
-         *     listing is cached and served as ``complete`` while under a minute old;
-         *     otherwise GitHub is asked live, and an older listing is served as
-         *     ``partial`` only if GitHub cannot be asked. The GitHub App's
-         *     ``installation`` and ``installation_repositories`` webhooks invalidate the
-         *     cache at once. A single installation_id is always asked live.
+         *     listing is cached and served without waiting on GitHub: as ``complete``
+         *     while under a minute old, as ``partial`` once older, with a background
+         *     refresh behind it. GitHub is asked live only when no listing is cached. The
+         *     GitHub App's ``installation`` and ``installation_repositories`` webhooks
+         *     invalidate the cache at once. A single installation_id is always asked live.
          *
          *     ``lookup`` says whether a repo missing from ``repos`` is known to be out of
          *     the App's reach (``complete``) or merely went unseen because GitHub failed.
