@@ -6,7 +6,8 @@
   (Skyline days), the newest executions (Recent runs, attention chips,
   running count), workflows (count, most-run) and triggers (count, repos).
   Metrics and runs refetch on workflow and phase events; git events from the
-  activity stream feed Live commits.
+  activity stream feed Live commits, seeded from GET /events/recent
+  (event_type=git_commit) as the React Overview does.
 -->
 <script lang="ts">
   import { formatCost, formatInteger, formatRelativeTime, formatTokens } from '@syn137/skyline-core/format'
@@ -15,12 +16,14 @@
   import {
     activeDayCount,
     attentionRuns,
+    combineCommits,
     distinctRepoCount,
     heatmapToSkylineDays,
     mergeLiveCommits,
     outcomeCounts,
     outcomeLine,
     overviewHeadline,
+    recentCommits,
     runningCount,
     skylineYears,
     toLiveCommit,
@@ -32,7 +35,7 @@
   import { evalBadge } from '@syn137/skyline-core/screens/executions'
   import { Button, Callout, EmptyState, Skeleton } from '@syn137/skyline-svelte-v5'
   import { OutcomeRing, RunRow, Skyline, StatusBadge } from '@syn137/skyline-svelte-v5/patterns'
-  import { getContributionHeatmap, getMetrics, listExecutions, listTriggers, listWorkflows } from '@syn137/syn-ui-data'
+  import { getContributionHeatmap, getMetrics, listExecutions, listRecentEvents, listTriggers, listWorkflows } from '@syn137/syn-ui-data'
   import { isGitEvent, isRunEvent, isRunFinished, subscribeActivity } from '@syn137/syn-ui-data/live'
   import { live } from '../../lib/live.svelte'
   import { resource } from '../../lib/load.svelte'
@@ -102,14 +105,16 @@
   const isEmpty = $derived(!!metrics.data && !!runs.data && runs.data.total === 0 && metrics.data.total_sessions === 0)
   const firstLoad = $derived(!metrics.data && !metrics.error)
 
-  // ---- live commits ----
-  let commits = $state<LiveCommit[]>([])
+  // ---- live commits: the latest from the API, then the activity stream ahead of them ----
+  const recent = resource((signal) => listRecentEvents({ event_type: 'git_commit', limit: 30 }, signal))
+  let liveCommits = $state<LiveCommit[]>([])
+  const commits = $derived(combineCommits(liveCommits, recentCommits(recent.data?.events)))
   $effect(() =>
     subscribeActivity({
       filter: isGitEvent,
       onFrames: (frames) => {
         const incoming = frames.map(toLiveCommit).filter((c): c is LiveCommit => c !== null)
-        if (incoming.length) commits = mergeLiveCommits(commits, incoming)
+        if (incoming.length) liveCommits = mergeLiveCommits(liveCommits, incoming)
       },
     }),
   )
@@ -120,6 +125,7 @@
     heatmap.refresh()
     workflows.refresh()
     triggers.refresh()
+    recent.refresh()
   }
 
   const execHref = (id: string) => href(`/executions/${encodeURIComponent(id)}`)
@@ -242,7 +248,7 @@
           {/each}
         </div>
       {/if}
-      <LiveCommits {commits} state={live.state} />
+      <LiveCommits {commits} state={live.state} loading={!recent.data && !recent.error} />
     </section>
 
     <div class="sky-ov-side">

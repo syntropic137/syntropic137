@@ -5,7 +5,9 @@ import {
   countWord,
   distinctRepoCount,
   heatmapToSkylineDays,
+  combineCommits,
   mergeLiveCommits,
+  recentCommits,
   outcomeCounts,
   outcomeLine,
   overviewHeadline,
@@ -134,5 +136,44 @@ describe('live commits', () => {
     const c = toLiveCommit(frame('ccccccc'))!
     expect(mergeLiveCommits([a], [b, c]).map((x) => x.hash)).toEqual(['ccccccc', 'bbbbbbb', 'aaaaaaa'])
     expect(mergeLiveCommits([a, b], [a], 2).map((x) => x.hash)).toEqual(['aaaaaaa', 'bbbbbbb'])
+  })
+})
+
+describe('recent commits from GET /events/recent (live API shapes, 2026-10-09)', () => {
+  // Agent commit as the VPS returns it: nested `git`, no top-level hash.
+  const agent = {
+    time: '2026-10-09T19:28:07.949896+00:00',
+    event_type: 'git_commit',
+    data: {
+      git: {
+        sha: '922a6b227c8e9f451f88edd1367200dcbf3533b5',
+        repo: 'syntropic137',
+        author: 'syntropic137-swe-mini[bot]',
+        branch: 'chore/pc-145-linux-only-guard',
+        message: 'test(fitness): make the member-access specifier case exercise its lookbehind (PC-145)',
+      },
+      workspace_id: '589ce716-ceee-4526-b9e6-50b27646d408',
+    },
+  }
+  const webhook = {
+    time: '2026-10-09T18:00:00Z',
+    event_type: 'git_commit',
+    data: { commit_hash: 'f68c7d550963202710cefacc9493dd18ca29d0c3', message: 'docs: x', repository: 'syntropic137/syntropic137', branch: 'main' },
+  }
+  it('reads the nested agent shape and the flat webhook shape', () => {
+    const [a, w] = recentCommits([agent, webhook])
+    expect(a).toMatchObject({ hash: '922a6b2', repo: 'syntropic137', branch: 'chore/pc-145-linux-only-guard', author: 'syntropic137-swe-mini[bot]', at: agent.time })
+    expect(a!.message).toContain('PC-145')
+    expect(w).toMatchObject({ hash: 'f68c7d5', repo: 'syntropic137', message: 'docs: x' })
+  })
+  it('drops junk shas and returns none for an empty response', () => {
+    expect(recentCommits([{ event_type: 'git_commit', data: { sha: '???????' } }])).toEqual([])
+    expect(recentCommits([])).toEqual([])
+    expect(recentCommits(undefined)).toEqual([])
+  })
+  it('puts live commits first and dedupes against the fetched ones', () => {
+    const fetched = recentCommits([agent, webhook])
+    const live = [toLiveCommit({ event_type: 'git_commit', timestamp: 't', data: { git: { sha: '922a6b227c8e9f451f88edd1367200dcbf3533b5' } } })!]
+    expect(combineCommits(live, fetched).map((c) => c.hash)).toEqual(['922a6b2', 'f68c7d5'])
   })
 })

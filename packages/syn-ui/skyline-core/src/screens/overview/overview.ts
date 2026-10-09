@@ -233,24 +233,72 @@ export interface LiveCommit {
   at: string
 }
 
-/** Pull the display fields out of a git_* activity frame's data. Null when it is not a commit. */
+const SHA = /^[0-9a-f]{7,40}$/i
+
+function obj(v: unknown): Record<string, unknown> {
+  return v !== null && typeof v === 'object' ? (v as Record<string, unknown>) : {}
+}
+function firstText(...vs: unknown[]): string | null {
+  for (const v of vs) if (typeof v === 'string' && v.trim().length > 0) return v.trim()
+  return null
+}
+
+/**
+ * Pull the display fields out of a git_* event's data. Null when it is not a
+ * commit with a plausible hex sha. Two producers write `git_commit`: the
+ * GitHub push webhook (flat `commit_hash`, `message`, `repository`) and an
+ * agent committing in its workspace (`{git: {sha, message, repo, branch}}`,
+ * flat `sha` / `commit_message`, or legacy `context.*`): the spellings the
+ * React feed reads (useEventFeed toGitCommit).
+ */
 export function toLiveCommit(frame: { event_type: string; data: Record<string, unknown>; timestamp: string }): LiveCommit | null {
   if (!frame.event_type.startsWith('git_')) return null
-  const d = frame.data ?? {}
-  const str = (v: unknown) => (typeof v === 'string' && v.length > 0 ? v : null)
-  const hash = str(d.commit_hash) ?? str(d.sha)
+  const d = obj(frame.data)
+  const git = obj(d.git)
+  const ctx = obj(d.context)
+  const hash = [d.commit_hash, git.sha, d.sha, ctx.sha, d.merge_sha]
+    .map((v) => firstText(v))
+    .find((v): v is string => v !== null && SHA.test(v))
   if (!hash) return null
-  const repo = str(d.repository)
+  const repo = firstText(d.repository, git.repo, d.repo, ctx.repo)
   return {
     id: `${frame.event_type}:${hash}`,
     hash: hash.slice(0, 7),
-    message: str(d.message) ?? frame.event_type.replace(/^git_/, 'git '),
+    message: firstText(d.message, git.message, d.commit_message, ctx.message, d.message_preview) ?? frame.event_type.replace(/^git_/, 'git '),
     repo: repo ? (repo.split('/')[1] ?? repo) : null,
-    branch: str(d.branch),
-    author: str(d.author),
-    url: str(d.url),
-    at: str(d.timestamp) ?? frame.timestamp,
+    branch: firstText(d.branch, git.branch, ctx.branch),
+    author: firstText(d.author, git.author),
+    url: firstText(d.url),
+    at: firstText(d.timestamp) ?? frame.timestamp,
   }
+}
+
+/** A row of GET /events/recent, structurally. */
+export interface RecentEventInput {
+  time?: string | null
+  event_type: string
+  data: Record<string, unknown>
+}
+
+/** Commits from GET /events/recent (newest first), deduped, capped. */
+export function recentCommits(rows: readonly RecentEventInput[] | null | undefined, max = 5): LiveCommit[] {
+  const parsed = (rows ?? [])
+    .map((r) => toLiveCommit({ event_type: r.event_type, data: r.data, timestamp: r.time ?? '' }))
+    .filter((c): c is LiveCommit => c !== null)
+  return combineCommits(parsed, [], max)
+}
+
+/** Live commits (newest first) ahead of the fetched ones, deduped by id, capped. */
+export function combineCommits(live: readonly LiveCommit[], fetched: readonly LiveCommit[], max = 5): LiveCommit[] {
+  const seen = new Set<string>()
+  const out: LiveCommit[] = []
+  for (const c of [...live, ...fetched]) {
+    if (seen.has(c.id)) continue
+    seen.add(c.id)
+    out.push(c)
+    if (out.length >= max) break
+  }
+  return out
 }
 
 /** Prepend new commits, dedupe by id, keep at most `max`. */

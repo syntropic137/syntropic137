@@ -19,7 +19,7 @@ export type ResourceName =
   | 'listRepos' | 'listSystems' | 'lookUpAppAccess'
   | 'listSessionCosts' | 'getSessionCost' | 'listExecutionCosts' | 'getExecutionCost' | 'getCostSummary'
   | 'getMetrics' | 'getToolTimeline' | 'getTokenMetrics' | 'getConversationLog' | 'getSSEHealth' | 'getFeatures' | 'getBuildInfo'
-  | 'getContributionHeatmap'
+  | 'getContributionHeatmap' | 'listRecentEvents'
   | 'getEvalTrend' | 'getWorkflowTrend'
   | 'getWorkflowLatestOutputs'
 

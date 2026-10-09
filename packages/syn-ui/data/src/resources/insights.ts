@@ -36,3 +36,18 @@ export function getContributionHeatmap(params: HeatmapParams = {}, signal?: Abor
   const query = { metric: 'sessions', ...params }
   return cached('getContributionHeatmap', [query], (s) => request('/insights/contribution-heatmap', { query, signal: s }), { signal, staleAfter: 'list' })
 }
+
+export type EventList = components['schemas']['EventListResponse']
+export type RecentEvent = components['schemas']['EventResponse']
+
+export interface RecentEventsParams {
+  /** Max events to return (the API default is 50). */
+  limit?: number
+  /** Only this event type, for example `git_commit`. */
+  event_type?: string
+}
+
+/** GET /events/recent: the global activity feed, newest first (the Overview's Live commits seed). */
+export function listRecentEvents(params: RecentEventsParams = {}, signal?: AbortSignal): Promise<EventList> {
+  return cached('listRecentEvents', [params], (s) => request('/events/recent', { query: { ...params }, signal: s }), { signal, staleAfter: 'list' })
+}

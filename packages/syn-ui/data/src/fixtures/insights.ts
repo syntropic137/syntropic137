@@ -3,9 +3,10 @@
  * first rows are the Overview board's DAYS sample; the rest is generated so
  * a full year renders.
  */
-import type { ContributionHeatmap, HeatmapDay } from '../resources/insights'
+import type { ContributionHeatmap, EventList, HeatmapDay, RecentEvent } from '../resources/insights'
+import { RUNS } from './catalog'
 import { type FixtureRoute, route } from './define'
-import { DAY, FIXTURE_NOW } from './seed'
+import { DAY, FIXTURE_NOW, MINUTE, ago } from './seed'
 
 // [date, sessions, executions, commits, cost_usd, input, output, cache_write, cache_read]
 type Row = [string, number, number, number, number, number, number, number, number]
@@ -54,7 +55,41 @@ function days(): HeatmapDay[] {
   return out
 }
 
+/**
+ * GET /events/recent?event_type=git_commit rows, in the two shapes the VPS
+ * returns (2026-10-09): an agent commit (nested `data.git`, as written by the
+ * workspace hook) and a GitHub push webhook commit (flat `commit_hash`).
+ */
+const COMMITS: Array<[string, string, string, string, number]> = [
+  ['922a6b227c8e9f451f88edd1367200dcbf3533b5', 'test(fitness): make the member-access specifier case exercise its lookbehind (PC-145)', 'chore/pc-145-linux-only-guard', 'syntropic137-swe-mini[bot]', 4 * MINUTE],
+  ['9fa95fb34ae8daed11c9a1aaf9f60b6537d32f2f', 'fix(fitness): catch bytes paths, interpolated code and every inotify form (PC-145)', 'chore/pc-145-linux-only-guard', 'syntropic137-swe-mini[bot]', 7 * MINUTE],
+  ['f68c7d550963202710cefacc9493dd18ca29d0c3', 'docs(adr-058): codex reads the inlined content, not the imports (#1835)', 'fix/1835-codex-inline-instructions', 'syntropic137-swe-mini[bot]', 53 * MINUTE],
+]
+
+function recentEvents(): RecentEvent[] {
+  const agent = COMMITS.map(([sha, message, branch, author, at], i): RecentEvent => ({
+    time: ago(at),
+    event_type: 'git_commit',
+    session_id: null,
+    execution_id: RUNS[i]?.id ?? null,
+    phase_id: null,
+    data: { git: { sha, repo: 'syntropic137', author, branch, message, operation: 'commit', files_changed: 1 }, workspace_id: `ws-${i}` },
+  }))
+  const webhook: RecentEvent = {
+    time: ago(3 * 60 * MINUTE),
+    event_type: 'git_commit',
+    data: { commit_hash: 'a601fcbbf2d4c1e0b9a8f7e6d5c4b3a291807f6e', message: 'Merge pull request #1792 from syntropic137/fix/ui-feedback-settings-ignore-host-env', repository: 'syntropic137/syntropic137', branch: 'main', author: 'NeuralEmpowerment' },
+  }
+  return [...agent, webhook]
+}
+
 export const insightRoutes: FixtureRoute[] = [
+  route('GET', '/events/recent', ({ query }): EventList => {
+    const type = query.get('event_type')
+    const limit = Number(query.get('limit') ?? 50)
+    const rows = recentEvents().filter((e) => !type || e.event_type === type)
+    return { events: rows.slice(0, limit), count: Math.min(rows.length, limit), has_more: rows.length > limit }
+  }),
   route('GET', '/insights/contribution-heatmap', ({ query }): ContributionHeatmap => {
     const all = days()
     const start = query.get('start_date') ?? '2025-10-08'

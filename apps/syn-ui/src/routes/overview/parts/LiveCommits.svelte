@@ -5,10 +5,12 @@
   import type { LiveState } from '@syn137/skyline-core/patterns'
   import type { LiveCommit } from '@syn137/skyline-core/screens/overview'
 
-  let { commits, state }: { commits: LiveCommit[]; state: LiveState } = $props()
+  let { commits, state, loading = false }: { commits: LiveCommit[]; state: LiveState; loading?: boolean } = $props()
 
   const idle = $derived(
-    state === 'fixtures'
+    loading
+      ? 'Loading recent commits.'
+      : state === 'fixtures'
       ? 'Fixtures mode, no live stream.'
       : state === 'live'
         ? 'Listening. No git events yet, push to a connected repo and it shows here.'
