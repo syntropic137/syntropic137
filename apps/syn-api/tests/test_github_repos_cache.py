@@ -218,11 +218,13 @@ async def test_page_loads_during_a_refresh_start_no_second_one(github: _GitHub) 
         return await original()
 
     with patch.object(github, "list_installations", hangs):
-        await _listing()
-        first = github_routes._revalidation
-        await _listing()
-        assert github_routes._revalidation is first
-        gate.set()
+        try:
+            await asyncio.wait_for(_listing(), timeout=1)
+            first = github_routes._revalidation
+            await asyncio.wait_for(_listing(), timeout=1)
+            assert github_routes._revalidation is first
+        finally:
+            gate.set()
         await _finish_revalidation()
 
 
