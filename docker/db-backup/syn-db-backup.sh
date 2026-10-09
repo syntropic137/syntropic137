@@ -12,12 +12,21 @@
 # container; the schedule reads them from SYN_DB_IDENTITY_FILE, which that
 # container's healthcheck writes. No credential is ever printed.
 #
-#   backup   DIR                     dump DIR/syn-<UTC>.dump, verify, report
-#   prune    DIR DAYS                delete backups older than DAYS days
-#   schedule DIR "CRON" DAYS         backup + prune whenever CRON matches (UTC)
-#   restore  FILE [--force]          recreate PGDATABASE from FILE; exits 3,
-#                                    changing nothing, if it holds rows and
-#                                    --force is absent
+#   backup   DIR                 dump DIR/syn-<UTC>.dump and DIR/syn-<UTC>.dump.manifest
+#                                (sha256 of the dump, row count of every table),
+#                                published only after every row was read back
+#   prune    DIR DAYS            delete backups older than DAYS days; only names
+#                                this script generates, nothing else in DIR
+#   schedule DIR "CRON" DAYS     backup + prune whenever CRON matches (UTC)
+#   restore  FILE [--force]      check FILE against its manifest, restore it into
+#                                a new staging database, verify every table's row
+#                                count, then rename PGDATABASE aside (kept, never
+#                                dropped) and the staging database into its
+#                                place. Any failure leaves PGDATABASE untouched.
+#                                Exits 3, changing nothing, if PGDATABASE holds
+#                                rows and --force is absent. --force first backs
+#                                PGDATABASE up into SYN_BACKUP_DIR (default
+#                                /backups) and stops if that backup fails.
 #   cron-match "CRON" "M H DOM MON DOW"   exit 0 match, 1 no match, 2 invalid
 set -eu
 
@@ -31,11 +40,94 @@ if [ -n "${POSTGRES_PASSWORD_FILE:-}" ] && [ -z "${PGPASSWORD:-}" ]; then
     export PGPASSWORD
 fi
 
+MANIFEST_HEADER="syn-db-backup manifest 1"
+
+# The only names this script ever publishes or leaves behind. prune deletes
+# nothing else. Shell patterns are anchored and [..] never matches '/' or a
+# newline, so no other file name can satisfy one.
+D8='[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'
+T6='[0-9][0-9][0-9][0-9][0-9][0-9]'
+STAMP="${D8}T${T6}Z"
+A='[A-Za-z0-9]'
+
+# 0 if $1 (a base name) is a backup or manifest this script published.
+is_published_name() {
+    case $1 in
+        syn-$STAMP.dump | syn-$STAMP-[1-9].dump | syn-$STAMP-[1-9][0-9].dump) return 0 ;;
+        syn-$STAMP.dump.manifest | syn-$STAMP-[1-9].dump.manifest | syn-$STAMP-[1-9][0-9].dump.manifest) return 0 ;;
+    esac
+    return 1
+}
+
+# 0 if $1 (a base name) is a temporary file of an unfinished backup.
+is_partial_name() {
+    case $1 in
+        .syn-$STAMP.dump.partial.$A$A$A$A$A$A) return 0 ;;
+    esac
+    return 1
+}
+
+sha256() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum <"$1"
+    else
+        shasum -a 256 <"$1"
+    fi | cut -d' ' -f1
+}
+
 # Number of TABLE DATA entries in an archive. Fails if pg_restore cannot read
-# it, so a truncated or non-custom-format file never counts as a backup.
+# its table of contents.
 table_data_count() {
     listing=$(pg_restore --list "$1") || fail "pg_restore cannot read $1"
     printf '%s\n' "$listing" | grep -c ' TABLE DATA ' || true
+}
+
+# `rows N TABLE` for every table in the archive, TABLE as pg_dump quotes it.
+# Reads every row of every table, so an archive cut short anywhere fails here:
+# pg_restore errors, or a COPY block never reaches its terminator.
+archive_rows() {
+    rc_file=$(mktemp) || return 1
+    rows=$({
+        rc=0
+        pg_restore --data-only --file=- "$1" || rc=$?
+        echo "$rc" >"$rc_file"
+    } | awk '
+    # The table name of a COPY line: one or more identifiers, bare or
+    # "quoted" (with "" escapes), joined by dots.
+    function ident(s,    out, i, j, c) {
+        out = ""; i = 1
+        while (1) {
+            if (substr(s, i, 1) == "\"") {
+                j = i + 1
+                while (1) {
+                    c = substr(s, j, 1)
+                    if (c == "") return ""
+                    if (c == "\"") { if (substr(s, j + 1, 1) == "\"") { j += 2; continue } break }
+                    j++
+                }
+                out = out substr(s, i, j - i + 1); i = j + 1
+            } else {
+                if (!match(substr(s, i), /^[^ ."]+/)) return ""
+                out = out substr(s, i, RLENGTH); i += RLENGTH
+            }
+            if (substr(s, i, 1) != ".") return out
+            out = out "."; i++
+        }
+    }
+    copying { if ($0 == "\\.") { print "rows " n " " table; copying = 0 } else n++; next }
+    /^COPY / && / FROM stdin;$/ {
+        table = ident(substr($0, 6))
+        if (table == "") { bad = 1; exit 1 }
+        copying = 1; n = 0
+    }
+    END { if (bad || copying) exit 1 }') || {
+        rm -f "$rc_file"
+        return 1
+    }
+    rc=$(cat "$rc_file")
+    rm -f "$rc_file"
+    [ "$rc" = 0 ] || return 1
+    printf '%s\n' "$rows"
 }
 
 require_days() {
@@ -51,37 +143,76 @@ backup() {
     [ -d "$dir" ] || fail "backup directory $dir does not exist"
     stamp=$(date -u +%Y%m%dT%H%M%SZ)
     umask 077
-    # Written under a unique name prune never matches, and published only once
-    # verified: a dump that dies half way never looks like a backup, and two
-    # backups in the same second (schedule + manual) never share a file.
+    # Written under unique temporary names and published only once verified:
+    # a dump that dies half way never looks like a backup, and two backups in
+    # the same second (schedule + manual) never share a file.
     # busybox mktemp (this image) needs the X run at the very end.
     partial=$(mktemp "$dir/.syn-$stamp.dump.partial.XXXXXX") ||
         fail "cannot create a file in $dir"
     trap 'rm -f "$partial"' EXIT
-    pg_dump --format=custom --file="$partial"
+    manifest_partial=$(mktemp "$dir/.syn-$stamp.dump.partial.XXXXXX") ||
+        fail "cannot create a file in $dir"
+    trap 'rm -f "$partial" "$manifest_partial"' EXIT
+    pg_dump --format=custom --file="$partial" || fail "pg_dump failed"
     tables=$(table_data_count "$partial")
     [ "$tables" -gt 0 ] || fail "archive lists no table data; refusing to keep it"
-    # ln refuses an existing name, so publishing never replaces another
-    # backup: a same-second collision takes the next free -N suffix.
+    rows=$(archive_rows "$partial") ||
+        fail "cannot read every row back from the archive; refusing to keep it"
+    copied=$(printf '%s\n' "$rows" | grep -c '^rows ' || true)
+    [ "$copied" -eq "$tables" ] ||
+        fail "archive lists $tables tables but holds data for $copied; refusing to keep it"
+    sum=$(sha256 "$partial")
+    [ "${#sum}" -eq 64 ] || fail "cannot checksum the archive"
+    {
+        echo "$MANIFEST_HEADER"
+        echo "sha256 $sum"
+        printf '%s\n' "$rows"
+        echo "tables $tables"
+    } >"$manifest_partial"
+    # ln refuses an existing name, so publishing never replaces another file:
+    # a same-second collision takes the next free -N suffix. The manifest is
+    # claimed first, so a published dump always has its manifest.
     name="syn-$stamp.dump" n=0
-    until ln "$partial" "$dir/$name" 2>/dev/null; do
+    while :; do
+        if ln "$manifest_partial" "$dir/$name.manifest" 2>/dev/null; then
+            ln "$partial" "$dir/$name" 2>/dev/null && break
+            # Ours: ln just created it.
+            rm -f "$dir/$name.manifest"
+        fi
         n=$((n + 1))
         [ "$n" -le 99 ] || fail "no free name for a $stamp backup in $dir"
         name="syn-$stamp-$n.dump"
     done
-    rm -f "$partial"
+    rm -f "$partial" "$manifest_partial"
     trap - EXIT
     size=$(du -h "$dir/$name" | cut -f1)
-    echo "backup ok: $dir/$name ($size, $tables tables)"
+    total=$(printf '%s\n' "$rows" | awk '{ s += $2 } END { print s + 0 }')
+    echo "backup ok: $dir/$name ($size, $tables tables, $total rows)"
 }
 
+# Age-based retention over the names this script generates, and only those:
+# anything else in DIR, however old or however named, is never touched.
 prune() {
     dir=$1
     require_days "$2"
-    # -mmin, not -mtime: -mtime truncates to whole days, so +7 keeps 7.9 days.
-    find "$dir" -maxdepth 1 -type f -name 'syn-*.dump' -mmin "+$(($2 * 1440))" \
-        -print -exec rm -f {} \; | sed 's|.*/|pruned: |'
-    find "$dir" -maxdepth 1 -type f -name '.syn-*.dump.partial.*' -mmin +1440 -exec rm -f {} \;
+    [ -d "$dir" ] || fail "backup directory $dir does not exist"
+    for path in "$dir"/syn-* "$dir"/.syn-*; do
+        name=${path##*/}
+        if is_published_name "$name"; then
+            minutes=$(($2 * 1440))
+        elif is_partial_name "$name"; then
+            # Abandoned temp files of a backup that died; a live one is minutes old.
+            minutes=1440
+        else
+            continue
+        fi
+        # A regular file, never a symlink (which could point anywhere).
+        [ -f "$path" ] && [ ! -L "$path" ] || continue
+        # -mmin, not -mtime: -mtime truncates to whole days, so +7 keeps 7.9 days.
+        [ -n "$(find "$path" -prune -type f -mmin "+$minutes")" ] || continue
+        rm -f -- "$path"
+        case $name in .syn-*) ;; *) echo "pruned: $name" ;; esac
+    done
 }
 
 # Standard five-field cron: numbers, '*', lists, ranges and '/step'. Day of
@@ -189,10 +320,70 @@ order by 1;
 SQL
 }
 
+# The manifest is whole and the archive is byte for byte the one it describes.
+# Runs before anything is changed, so a truncated or altered file stops here.
+check_manifest() {
+    cm_file=$1 cm_manifest=$2
+    [ "$(sed -n 1p "$cm_manifest")" = "$MANIFEST_HEADER" ] || fail "$cm_manifest is not a backup manifest"
+    want=$(sed -n 's/^sha256 \([0-9a-f]\{64\}\)$/\1/p' "$cm_manifest")
+    [ "${#want}" -eq 64 ] || fail "$cm_manifest has no sha256"
+    have=$(sha256 "$cm_file")
+    [ "$have" = "$want" ] ||
+        fail "$cm_file does not match its manifest (sha256 $have, expected $want): truncated or altered; nothing was changed"
+    listed=$(sed -n 's/^tables \([0-9][0-9]*\)$/\1/p' "$cm_manifest")
+    counted=$(grep -c '^rows [0-9][0-9]* ' "$cm_manifest" || true)
+    [ -n "$listed" ] && [ "$listed" -eq "$counted" ] && [ "$counted" -gt 0 ] ||
+        fail "$cm_manifest is incomplete; nothing was changed"
+}
+
+# Every table in DB holds the rows the manifest recorded, the hypertables
+# answer queries, and TimescaleDB is out of restore mode. Counts are exact,
+# except an extension's own configuration tables (TimescaleDB's catalog), which
+# CREATE EXTENSION seeds before the archive's rows arrive: those must hold at
+# least the archived rows.
+verify_restored() {
+    # POSIX sh has no locals: these names must not shadow restore's.
+    vr_db=$1 vr_manifest=$2
+    checks=$(awk '/^rows [0-9]+ / {
+        t = $0; sub(/^rows [0-9]+ /, "", t); lit = t; gsub(/'\''/, "'\'''\''", lit)
+        print "select count(*) || '\'' '\'' || case when exists (select 1 from pg_depend" \
+            " where classid = '\''pg_class'\''::regclass and objid = to_regclass('\''" lit "'\'')" \
+            " and deptype = '\''e'\'') then '\''extension'\'' else '\''exact'\'' end from only " t ";"
+    }' "$vr_manifest")
+    actual=$(printf '%s\n' "$checks" | psql -X -At -v ON_ERROR_STOP=1 -d "$vr_db") || {
+        echo "syn-db-backup: a table in the manifest is missing from the restored database" >&2
+        return 1
+    }
+    printf '%s\n' "$actual" | awk -v m="$vr_manifest" '
+        BEGIN { while ((getline l < m) > 0) if (l ~ /^rows [0-9]+ /) { n++; want[n] = l } }
+        {
+            split(want[NR], w, " "); t = want[NR]; sub(/^rows [0-9]+ /, "", t)
+            got = $1 + 0; need = w[2] + 0
+            if ($2 == "extension" ? got < need : got != need) {
+                print "syn-db-backup: " t ": restored " got " rows, backup holds " need > "/dev/stderr"
+                bad = 1
+            }
+        }
+        END { if (NR != n) { print "syn-db-backup: checked " NR " tables, manifest lists " n > "/dev/stderr"; bad = 1 }
+              exit bad }' || return 1
+    psql -X -At -v ON_ERROR_STOP=1 -d "$vr_db" >/dev/null <<'SQL' || return 1
+select format('select count(*) from %I.%I', hypertable_schema, hypertable_name)
+from timescaledb_information.hypertables \gexec
+SQL
+    [ "$(psql -X -At -v ON_ERROR_STOP=1 -d "$vr_db" -c 'show timescaledb.restoring')" = off ] || {
+        echo "syn-db-backup: '$vr_db' is still in TimescaleDB restore mode" >&2
+        return 1
+    }
+}
+
 restore() {
     file=$1 force=${2:-}
+    case $force in '' | --force) ;; *) fail "usage: restore FILE [--force]" ;; esac
     [ -f "$file" ] || fail "no such backup: $file"
-    [ "$(table_data_count "$file")" -gt 0 ] || fail "$file lists no table data; not a usable backup"
+    manifest="$file.manifest"
+    [ -f "$manifest" ] ||
+        fail "no manifest at $manifest; refusing to restore an archive that cannot be verified"
+    check_manifest "$file" "$manifest"
     db=${PGDATABASE:?PGDATABASE must name the database to restore}
 
     # psql interpolates :'db' from stdin only, never in -c.
@@ -200,30 +391,68 @@ restore() {
         psql -X -At -v ON_ERROR_STOP=1 -d postgres -v db="$db")
     if [ "$exists" = 1 ]; then
         populated=$(nonempty_tables "$db")
-        if [ -n "$populated" ] && [ "$force" != "--force" ]; then
-            echo "syn-db-backup: database '$db' already holds data in:" >&2
-            printf '%s\n' "$populated" | sed 's/^/  /' >&2
-            echo "syn-db-backup: refusing to replace it; re-run with --force to discard that data" >&2
-            exit 3
+        if [ -n "$populated" ]; then
+            if [ "$force" != "--force" ]; then
+                echo "syn-db-backup: database '$db' already holds data in:" >&2
+                printf '%s\n' "$populated" | sed 's/^/  /' >&2
+                echo "syn-db-backup: refusing to replace it; re-run with --force (which backs it up and keeps it aside)" >&2
+                exit 3
+            fi
+            # A fresh backup of what is about to be replaced, in its own
+            # process so its `set -e` holds. No backup, no restore.
+            echo "backing up '$db' before replacing it"
+            PGDATABASE=$db sh "$0" backup "${SYN_BACKUP_DIR:-/backups}" ||
+                fail "could not back up '$db' first; refusing to restore, nothing was changed"
         fi
     fi
 
-    # Recreate rather than restore over: tables the api created on startup
-    # would otherwise collide with the archive's own CREATE TABLEs.
-    echo "recreating database '$db'"
+    # Unique, generated names: create fails rather than reuse an existing one.
+    stamp=$(date -u +%Y%m%d_%H%M%S)_$$
+    staging="syn_restore_$stamp"
+    aside="syn_pre_restore_$stamp"
     # :"db" quotes the name as an identifier, whatever it contains.
-    printf '%s\n' 'drop database if exists :"db" with (force);' 'create database :"db";' |
-        psql -X -q -v ON_ERROR_STOP=1 -d postgres -v db="$db"
+    echo 'create database :"db";' | psql -X -q -v ON_ERROR_STOP=1 -d postgres -v db="$staging" ||
+        fail "cannot create staging database '$staging'; nothing was changed"
+    # Only ever the database created on the line above, and only until it
+    # has taken the live name.
+    swapped=0
+    trap '[ "$swapped" = 1 ] || echo "drop database if exists :\"db\" with (force);" |
+        psql -X -q -d postgres -v db="$staging" >/dev/null 2>&1' EXIT
+    echo "restoring into staging database '$staging'"
     # Hypertables restore only between pre_restore and post_restore, and only
     # serially (no -j): docs/deployment/timescaledb-2.29-upgrade.md.
-    psql -X -q -v ON_ERROR_STOP=1 -d "$db" \
+    psql -X -q -v ON_ERROR_STOP=1 -d "$staging" \
         -c "create extension if not exists timescaledb" \
         -c "select timescaledb_pre_restore()" >/dev/null
     rc=0
-    pg_restore --no-owner --no-acl --dbname="$db" "$file" || rc=$?
-    psql -X -q -v ON_ERROR_STOP=1 -d "$db" -c "select timescaledb_post_restore()" >/dev/null
-    [ "$rc" -eq 0 ] || fail "pg_restore reported errors (exit $rc); inspect '$db' before starting writers"
+    pg_restore --exit-on-error --no-owner --no-acl --dbname="$staging" "$file" || rc=$?
+    psql -X -q -v ON_ERROR_STOP=1 -d "$staging" -c "select timescaledb_post_restore()" >/dev/null
+    [ "$rc" -eq 0 ] || fail "pg_restore failed (exit $rc); '$db' was not changed"
+    verify_restored "$staging" "$manifest" ||
+        fail "restored data does not match the manifest; '$db' was not changed"
+
+    # One transaction: both renames happen or neither does.
+    if [ "$exists" = 1 ]; then
+        psql -X -q -v ON_ERROR_STOP=1 -d postgres -v live="$db" -v staging="$staging" -v aside="$aside" <<'SQL' >/dev/null ||
+select pg_terminate_backend(pid) from pg_stat_activity
+where datname = :'live' and pid <> pg_backend_pid();
+begin;
+alter database :"live" rename to :"aside";
+alter database :"staging" rename to :"live";
+commit;
+SQL
+            fail "could not swap '$staging' into place; '$db' was not changed"
+    else
+        echo 'alter database :"staging" rename to :"live";' |
+            psql -X -q -v ON_ERROR_STOP=1 -d postgres -v live="$db" -v staging="$staging" ||
+            fail "could not rename '$staging' to '$db'"
+    fi
+    swapped=1
+    trap - EXIT
     echo "restore ok: '$db' from $(basename "$file")"
+    if [ "$exists" = 1 ]; then
+        echo "previous '$db' kept as database '$aside'; drop it yourself once the restore is verified"
+    fi
 }
 
 cmd=${1:-}

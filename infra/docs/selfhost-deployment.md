@@ -411,9 +411,11 @@ just selfhost-backup
 ```
 
 It writes a compressed `pg_dump --format=custom` archive into `BACKUP_DIR`
-(default `/var/backups/syn`, mode `0600`), and reports `ok` only after
-`pg_restore --list` has read the archive back and found table data in it. A
-dump that fails part way leaves no file behind. The dump runs in the
+(default `/var/backups/syn`, mode `0600`) and, beside it, a
+`syn-<UTC>.dump.manifest` holding the archive's sha256 and the row count of
+every table. It reports `ok` only after every row of every table has been read
+back out of the archive. A dump that fails part way leaves no file behind.
+Keep each `.dump` with its `.manifest`: restore refuses an archive without one. The dump runs in the
 `db-backup` service, which uses the same TimescaleDB image as the database, so
 the client tools always match the server. No host PostgreSQL tools are needed.
 
@@ -423,7 +425,7 @@ selfhost-up` starts. Three settings in `infra/.env` control it:
 | Setting | Default | Meaning |
 |---|---|---|
 | `BACKUP_SCHEDULE` | `0 3 * * *` | Five-field cron, evaluated in **UTC**. Numbers, `*`, lists, ranges and `/step` only; names such as `MON` and `@daily` are rejected at startup |
-| `BACKUP_RETENTION_DAYS` | `7` | After each successful backup, delete `syn-*.dump` files older than this. A failed backup deletes nothing |
+| `BACKUP_RETENTION_DAYS` | `7` | After each successful backup, delete backups (and their manifests) older than this. Only names the backup itself generates (`syn-<YYYYMMDDTHHMMSSZ>[-N].dump[.manifest]`) are ever deleted; any other file in `BACKUP_DIR` is left alone. A failed backup deletes nothing |
 | `BACKUP_DIR` | `/var/backups/syn` | Host directory the archives are written to |
 
 Check it with `just selfhost-logs db-backup`. A failed run logs `scheduled
@@ -443,15 +445,27 @@ In order, it:
    is the same set the [TimescaleDB 2.29 upgrade](../../docs/deployment/timescaledb-2.29-upgrade.md)
    stops: they reconnect and write the moment Postgres is reachable.
    `timescaledb`, `redis` and `minio` keep running.
-3. Refuses, changing nothing, if any table in the current database holds a
-   row. It lists those tables. Re-run with `--force` to discard that data;
-   `--force` also overrides the in-flight execution check.
-4. Drops and recreates the `syn` database, then restores between
-   `timescaledb_pre_restore()` and `timescaledb_post_restore()`. Without those
-   calls the hypertables come back broken.
-5. Starts the writers again. If the restore itself failed, they are left
-   stopped so you can inspect the database first. The command prints how to
-   start them.
+3. Checks the archive against its manifest's sha256. A truncated or altered
+   file is refused before anything is touched.
+4. Refuses, changing nothing, if any table in the current database holds a
+   row. It lists those tables. Re-run with `--force` to replace it; `--force`
+   also overrides the in-flight execution check, and first takes a fresh
+   backup of the current database into `BACKUP_DIR`. If that backup fails,
+   nothing is restored.
+5. Restores into a new staging database, between `timescaledb_pre_restore()`
+   and `timescaledb_post_restore()` (without those calls the hypertables come
+   back broken), and checks every table's row count against the manifest. Only
+   then does it rename the current `syn` database aside, to
+   `syn_pre_restore_<UTC>_<pid>`, and the staging database to `syn`, in one
+   transaction. Any failure before that drops only the staging database:
+   the current one is untouched.
+6. Starts the writers again. If the restore failed, they are left stopped;
+   the command prints how to start them.
+
+The replaced database is never dropped. Once the restore is verified, reclaim
+its space yourself: the restore prints its name; then run
+`DROP DATABASE syn_pre_restore_...` in `psql`. Until then the database uses
+twice its usual disk.
 
 A stack that has just been seeded (`just selfhost-seed`) already holds rows,
 so restoring onto it needs `--force`.

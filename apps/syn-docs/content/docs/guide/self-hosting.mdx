@@ -225,19 +225,24 @@ just selfhost-restore /var/backups/syn/syn-20261008T030000Z.dump
 ```
 
 `selfhost-backup` writes a compressed `pg_dump` custom-format archive into
-`BACKUP_DIR` and reports success only after reading it back. The `db-backup`
+`BACKUP_DIR`, with a `.manifest` beside it (sha256 and every table's row
+count), and reports success only after reading every row back. The `db-backup`
 service also takes one on a schedule and prunes old ones:
 
 | Setting | Default | Effect |
 | --- | --- | --- |
 | `BACKUP_SCHEDULE` | `0 3 * * *` | Five-field cron, in UTC |
-| `BACKUP_RETENTION_DAYS` | `7` | Backups older than this are deleted after each successful backup |
+| `BACKUP_RETENTION_DAYS` | `7` | Backups older than this are deleted after each successful backup; nothing else in `BACKUP_DIR` is touched |
 | `BACKUP_DIR` | `/var/backups/syn` | Host directory for the archives |
 
 `selfhost-restore` stops `api`, `collector`, `event-store` and `gateway`,
-recreates the database with TimescaleDB's restore mode around `pg_restore`,
-and starts them again. It refuses to replace a database that already holds
-rows unless you pass `--force`.
+checks the archive against its manifest, restores it into a staging database
+with TimescaleDB's restore mode around `pg_restore`, verifies every table's row
+count, and only then swaps it in and starts the writers again. The replaced
+database is kept as `syn_pre_restore_<timestamp>`, never dropped; drop it
+yourself once satisfied. It refuses to replace a database that already holds
+rows unless you pass `--force`, which first takes a fresh backup of it and
+stops if that backup fails.
 
 **Take a backup before an upgrade** that bumps the event store or
 event-sourcing-platform, changes the PostgreSQL or TimescaleDB image, or runs a

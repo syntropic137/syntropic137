@@ -10,6 +10,7 @@ round trip through a real TimescaleDB, hypertables included, is
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import shutil
@@ -44,6 +45,25 @@ _LISTING_WITHOUT_DATA = """\
 5; 2615 16386 SCHEMA - event_store syn
 241; 1259 16400 TABLE public events syn
 """
+#: `pg_restore --data-only` of an archive matching _LISTING_WITH_DATA.
+_DATA_STREAM = '''\
+--
+-- PostgreSQL database dump
+--
+SET statement_timeout = 0;
+
+COPY public.events (global_nonce, payload) FROM stdin;
+1\t{"n": 1}
+2\t{"n": 2}
+3\t{"n": 3}
+\\.
+
+
+COPY public."Agent Events" ("time", "odd ""col""") FROM stdin;
+2026-10-01 00:00:00+00\tx
+\\.
+
+'''
 
 
 def _stub(bin_dir: Path, name: str, body: str) -> None:
@@ -54,7 +74,7 @@ def _stub(bin_dir: Path, name: str, body: str) -> None:
 
 @pytest.fixture
 def fake_pg(tmp_path: Path):
-    """PATH with pg_dump writing a file and pg_restore listing LISTING."""
+    """PATH with pg_dump writing a file and pg_restore reading LISTING / DATA back."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     _stub(
@@ -64,7 +84,9 @@ def fake_pg(tmp_path: Path):
         ' --file=*) echo "${DUMP_PAYLOAD:-archive}" > "${a#--file=}";; esac; done',
     )
 
-    def configure(listing: str | None) -> dict[str, str]:
+    def configure(
+        listing: str | None, data: str = _DATA_STREAM, data_exit: int = 0
+    ) -> dict[str, str]:
         if listing is None:
             _stub(
                 bin_dir,
@@ -73,7 +95,16 @@ def fake_pg(tmp_path: Path):
             )
         else:
             (tmp_path / "listing").write_text(listing)
-            _stub(bin_dir, "pg_restore", f'cat "{tmp_path / "listing"}"')
+            (tmp_path / "data").write_text(data)
+            _stub(
+                bin_dir,
+                "pg_restore",
+                'case "$*" in\n'
+                f'  *--list*) cat "{tmp_path / "listing"}" ;;\n'
+                f'  *--data-only*) cat "{tmp_path / "data"}"; exit {data_exit} ;;\n'
+                "  *) exit 64 ;;\n"
+                "esac",
+            )
         return {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"}
 
     return configure
@@ -81,7 +112,12 @@ def fake_pg(tmp_path: Path):
 
 def _run(*args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        ["sh", str(_SCRIPT), *args], capture_output=True, text=True, env=env, check=False
+        ["sh", str(_SCRIPT), *args],
+        capture_output=True,
+        text=True,
+        env=env,
+        stdin=subprocess.DEVNULL,
+        check=False,
     )
 
 
@@ -93,12 +129,51 @@ class TestBackup:
 
         assert result.returncode == 0, result.stderr
         files = sorted(p.name for p in out.iterdir())
-        assert len(files) == 1
+        assert len(files) == 2
         assert re.fullmatch(r"syn-\d{8}T\d{6}Z\.dump", files[0]), files
+        assert files[1] == f"{files[0]}.manifest"
         assert f"backup ok: {out}/{files[0]}" in result.stdout
-        assert "2 tables" in result.stdout
+        assert "2 tables, 4 rows" in result.stdout
         # A dump holds every event: never world- or group-readable.
-        assert stat.S_IMODE((out / files[0]).stat().st_mode) == 0o600
+        for name in files:
+            assert stat.S_IMODE((out / name).stat().st_mode) == 0o600
+
+    def test_manifest_records_the_checksum_and_every_tables_rows(self, tmp_path, fake_pg):
+        out = tmp_path / "backups"
+        out.mkdir()
+        assert _run("backup", str(out), env=fake_pg(_LISTING_WITH_DATA)).returncode == 0
+        dump = next(out.glob("syn-*.dump"))
+        manifest = (out / f"{dump.name}.manifest").read_text().splitlines()
+
+        assert manifest == [
+            "syn-db-backup manifest 1",
+            f"sha256 {hashlib.sha256(dump.read_bytes()).hexdigest()}",
+            "rows 3 public.events",
+            'rows 1 public."Agent Events"',
+            "tables 2",
+        ]
+
+    @pytest.mark.parametrize(
+        ("data", "data_exit", "why"),
+        [
+            # Cut inside a COPY block: the terminator never arrives.
+            (_DATA_STREAM.split("2\t")[0], 0, "cut inside the data"),
+            # pg_restore itself reports the archive unreadable part way.
+            (_DATA_STREAM, 1, "pg_restore failed reading the data"),
+            # The TOC lists two tables, the data holds one.
+            (_DATA_STREAM.split("COPY public.\"Agent")[0], 0, "a listed table has no data"),
+        ],
+    )
+    def test_archive_whose_rows_do_not_read_back_is_not_kept(
+        self, tmp_path, fake_pg, data, data_exit, why
+    ):
+        out = tmp_path / "backups"
+        out.mkdir()
+        result = _run("backup", str(out), env=fake_pg(_LISTING_WITH_DATA, data, data_exit))
+
+        assert result.returncode != 0, why
+        assert "refusing to keep it" in result.stderr, why
+        assert list(out.iterdir()) == [], f"{why}: a failed backup must leave nothing behind"
 
     def test_archive_without_table_data_is_not_kept(self, tmp_path, fake_pg):
         out = tmp_path / "backups"
@@ -143,7 +218,9 @@ class TestBackup:
         assert Path(second_path).read_text() == "second-archive\n"
         assert sorted(p.name for p in out.iterdir()) == [
             "syn-20261008T030000Z-1.dump",
+            "syn-20261008T030000Z-1.dump.manifest",
             "syn-20261008T030000Z.dump",
+            "syn-20261008T030000Z.dump.manifest",
         ]
 
     def test_simultaneous_backups_each_keep_their_own_archive(self, tmp_path, fake_pg):
@@ -161,8 +238,12 @@ class TestBackup:
             for i in range(4)
         ]
         assert [p.wait(timeout=30) for p in procs] == [0, 0, 0, 0]
-        payloads = sorted(p.read_text() for p in out.iterdir())
+        payloads = sorted(p.read_text() for p in out.glob("*.dump"))
         assert payloads == [f"archive-{i}\n" for i in range(4)]
+        # Each dump has the manifest of its own bytes.
+        for dump in out.glob("*.dump"):
+            manifest = (out / f"{dump.name}.manifest").read_text()
+            assert f"sha256 {hashlib.sha256(dump.read_bytes()).hexdigest()}" in manifest
 
 
 class TestPrune:
@@ -197,12 +278,183 @@ class TestPrune:
         assert not stale.exists()
         assert live.exists(), "a dump in progress must not be deleted under it"
 
+    def test_manifests_and_suffixed_backups_age_out_with_the_rest(self, tmp_path):
+        old = [
+            self._make(tmp_path, name, 8 * _DAY)
+            for name in (
+                "syn-20260901T030000Z.dump.manifest",
+                "syn-20260901T030000Z-1.dump",
+                "syn-20260901T030000Z-1.dump.manifest",
+                "syn-20260901T030000Z-42.dump",
+            )
+        ]
+        assert _run("prune", str(tmp_path), "7").returncode == 0
+        assert not [p for p in old if p.exists()]
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            # Named like a backup, but not by this script.
+            "syn-manual.dump",
+            "syn-latest.dump",
+            "syn-20260901T030000Z.dump.bak",
+            "syn-20260901T030000Z.dump.manifest.old",
+            "syn-20260901T030000Z-0.dump",
+            "syn-20260901T030000Z-100.dump",
+            "syn-20260901T030000Z-x.dump",
+            "syn-2026090T030000Z.dump",
+            "syn-20260901T030000.dump",
+            "syn-20260901 030000Z.dump",
+            "old-syn-20260901T030000Z.dump",
+            # Named like a temp file, but not by this script.
+            ".syn-operator.dump.partial.keep",
+            ".syn-20260901T030000Z.dump.partial.keep",
+            ".syn-20260901T030000Z.dump.partial.Ab12C",
+            ".syn-20260901T030000Z.dump.partial.Ab12Cd7",
+            ".syn-20260901T030000Z.dump.partial.Ab-2Cd",
+            ".syn-20260901T030000Z.dump.manifest",
+            "notes.txt",
+        ],
+    )
+    def test_never_deletes_a_file_it_did_not_name_however_old(self, tmp_path, name):
+        foreign = self._make(tmp_path, name, 365 * _DAY)
+        result = _run("prune", str(tmp_path), "1")
+        assert result.returncode == 0, result.stderr
+        assert foreign.exists(), f"prune deleted {name}, which it never created"
+        assert name not in result.stdout
+
+    def test_never_follows_a_symlink_named_like_a_backup(self, tmp_path):
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        target = self._make(elsewhere, "precious.dump", 365 * _DAY)
+        backups = tmp_path / "backups"
+        backups.mkdir()
+        link = backups / "syn-20260901T030000Z.dump"
+        link.symlink_to(target)
+        then = time.time() - 365 * _DAY
+        os.utime(link, (then, then), follow_symlinks=False)
+
+        assert _run("prune", str(backups), "1").returncode == 0
+        assert target.exists()
+        assert link.is_symlink()
+
     @pytest.mark.parametrize("days", ["0", "-1", "seven", ""])
     def test_rejects_retention_that_is_not_a_positive_whole_number(self, tmp_path, days):
         kept = self._make(tmp_path, "syn-20260901T030000Z.dump", 30 * _DAY)
         result = _run("prune", str(tmp_path), days)
         assert result.returncode != 0
         assert kept.exists()
+
+
+class TestRestoreGuards:
+    """Refusals that happen before the database is touched at all."""
+
+    @staticmethod
+    def _env(tmp_path: Path, *, populated: bool = True, dump_ok: bool = True) -> dict[str, str]:
+        """psql that logs every statement; pg_dump that succeeds or fails."""
+        bin_dir = tmp_path / "pgbin"
+        bin_dir.mkdir()
+        log = tmp_path / "psql-log"
+        _stub(
+            bin_dir,
+            "psql",
+            f'sql=$(cat; printf "%s\\n" "$@")\nprintf "%s\\n" "$sql" >> "{log}"\n'
+            'case "$sql" in\n'
+            "  *pg_database*) echo 1 ;;\n"
+            f"  *information_schema*) {'echo public.events' if populated else ':'} ;;\n"
+            "esac",
+        )
+        _stub(bin_dir, "pg_dump", "exit 0" if dump_ok else "echo 'pg_dump: boom' >&2; exit 1")
+        _stub(bin_dir, "pg_restore", "exit 64")
+        return {
+            **os.environ,
+            "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+            "PGDATABASE": "syn",
+            "SYN_BACKUP_DIR": str(tmp_path),
+        }
+
+    @staticmethod
+    def _backup(tmp_path: Path, *, manifest: str | None = None) -> Path:
+        dump = tmp_path / "syn-20261008T030000Z.dump"
+        dump.write_bytes(b"archive bytes")
+        if manifest is None:
+            digest = hashlib.sha256(dump.read_bytes()).hexdigest()
+            manifest = (
+                f"syn-db-backup manifest 1\nsha256 {digest}\nrows 3 public.events\ntables 1\n"
+            )
+        (tmp_path / f"{dump.name}.manifest").write_text(manifest)
+        return dump
+
+    @staticmethod
+    def _changed(tmp_path: Path) -> list[str]:
+        log = tmp_path / "psql-log"
+        text = log.read_text().lower() if log.exists() else ""
+        return [w for w in ("create database", "alter database", "drop database") if w in text]
+
+    def test_refuses_an_archive_that_does_not_match_its_checksum(self, tmp_path):
+        env = self._env(tmp_path)
+        dump = self._backup(tmp_path)
+        # Cut short after the manifest was written.
+        dump.write_bytes(dump.read_bytes()[:5])
+
+        result = _run("restore", str(dump), "--force", env=env)
+
+        assert result.returncode != 0
+        assert "does not match its manifest" in result.stderr
+        assert not (tmp_path / "psql-log").exists(), "connected before checking the archive"
+
+    def test_refuses_an_archive_without_a_manifest(self, tmp_path):
+        env = self._env(tmp_path)
+        dump = self._backup(tmp_path)
+        (tmp_path / f"{dump.name}.manifest").unlink()
+
+        result = _run("restore", str(dump), "--force", env=env)
+
+        assert result.returncode != 0
+        assert "no manifest" in result.stderr
+        assert not (tmp_path / "psql-log").exists()
+
+    @pytest.mark.parametrize(
+        "manifest",
+        [
+            "sha256 {d}\nrows 3 public.events\ntables 1\n",
+            "syn-db-backup manifest 1\nrows 3 public.events\ntables 1\n",
+            "syn-db-backup manifest 1\nsha256 {d}\nrows 3 public.events\n",
+            "syn-db-backup manifest 1\nsha256 {d}\nrows 3 public.events\ntables 2\n",
+            "syn-db-backup manifest 1\nsha256 {d}\ntables 0\n",
+        ],
+    )
+    def test_refuses_an_incomplete_manifest(self, tmp_path, manifest):
+        env = self._env(tmp_path)
+        dump = self._backup(tmp_path)
+        digest = hashlib.sha256(dump.read_bytes()).hexdigest()
+        (tmp_path / f"{dump.name}.manifest").write_text(manifest.format(d=digest))
+
+        result = _run("restore", str(dump), "--force", env=env)
+
+        assert result.returncode != 0
+        assert not (tmp_path / "psql-log").exists()
+
+    def test_force_restores_nothing_when_the_backup_first_fails(self, tmp_path):
+        env = self._env(tmp_path, dump_ok=False)
+        dump = self._backup(tmp_path)
+
+        result = _run("restore", str(dump), "--force", env=env)
+
+        assert result.returncode != 0
+        assert "could not back up 'syn' first" in result.stderr
+        assert self._changed(tmp_path) == [], "touched a database after the backup failed"
+
+    def test_without_force_a_populated_database_is_refused_unchanged(self, tmp_path):
+        env = self._env(tmp_path)
+        dump = self._backup(tmp_path)
+
+        result = _run("restore", str(dump), env=env)
+
+        assert result.returncode == 3
+        assert "public.events" in result.stderr
+        assert self._changed(tmp_path) == []
+
 
 
 class TestCronMatch:

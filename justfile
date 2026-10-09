@@ -1724,7 +1724,7 @@ selfhost-backup:
     {{compose_selfhost}} run --rm --no-TTY "${db_identity[@]}" db-backup backup /backups \
         | sed "s|/backups/|${BACKUP_DIR:-/var/backups/syn}/|"
 
-# Replace the syn database with a backup (refuses a populated DB without --force)
+# Replace the syn database with a verified backup; the old one is kept aside (--force for a populated DB)
 [positional-arguments]
 selfhost-restore file *args:
     #!/usr/bin/env bash
@@ -1735,7 +1735,9 @@ selfhost-restore file *args:
     # them again afterwards, unless the restore itself failed. --force is also
     # passed to the in-flight execution check: a restore discards running
     # executions too. Arguments arrive as "$1" "$@", never as recipe text, so a
-    # file name is only ever data.
+    # file name is only ever data. The script restores into a staging database
+    # and swaps it in only once verified; the replaced database is renamed
+    # aside, never dropped, and with --force is backed up into BACKUP_DIR first.
     source infra/scripts/selfhost-env.sh
     [ -f "$1" ] || { echo "❌ No such backup: $1"; exit 1; }
     file="$(cd "$(dirname -- "$1")" && pwd)/$(basename -- "$1")"
@@ -1758,7 +1760,7 @@ selfhost-restore file *args:
         -v "$(dirname -- "$file"):/restore:ro" \
         db-backup restore "/restore/$(basename -- "$file")" "${force[@]}" || rc=$?
     if [ "$rc" -ne 0 ] && [ "$rc" -ne 3 ]; then
-        echo "❌ Restore failed (exit $rc). Writers left STOPPED: inspect the database, then"
+        echo "❌ Restore failed (exit $rc); the database was not replaced. Writers left STOPPED:"
         echo "   {{compose_selfhost}} start $writers"
         exit "$rc"
     fi
