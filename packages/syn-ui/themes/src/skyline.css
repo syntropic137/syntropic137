@@ -59,6 +59,10 @@
   --sky-color-agent-claude: #D97757;
   --sky-color-agent-codex: #8E9BBC;
 
+  --sky-color-display-hi: #FFFFFF;
+  --sky-color-display-mid: #D4D4D8;
+  --sky-color-border-glass: rgba(255, 255, 255, 0.09);
+
   --sky-color-scrim: rgba(0, 0, 0, 0.6);
   --sky-color-highlight: rgba(255, 255, 255, 0.04);
   --sky-color-highlight-strong: rgba(255, 255, 255, 0.07);

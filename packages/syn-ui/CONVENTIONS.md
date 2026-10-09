@@ -84,6 +84,9 @@ These rules are enforced by `packages/syn-ui/scripts/check-css.mjs`, which runs 
 | Failed, warning, neutral pills | `--sky-color-danger-soft` with `--sky-color-danger-soft-fg`, `--sky-color-warning-soft` with `--sky-color-warning-soft-fg`, `--sky-color-neutral-soft` |
 | Token series (cache read, cache write, output, input) | `--sky-color-data-1` to `--sky-color-data-4` (skyline-core `TOKEN_SERIES` maps them) |
 | Agents | `--sky-color-agent-claude`, `--sky-color-agent-codex` |
+| Harnesses (landing names) | `--sky-harness-claude`, `--sky-harness-codex` (aliases of the agent colours), `--sky-harness-claude-gradient`, `--sky-harness-codex-gradient` for names set as text |
+| Landing display type | `--sky-font-display`, `--sky-font-weight-display`, `--sky-font-display-xl`, `-l`, `-m`, `-s` (104, 84, 64, 44px), `--sky-font-display-phone-xl`, `-l`, `-m` (50, 44, 36px), `--sky-tracking-display-tight` with `--sky-line-height-display` (hero, closing headline), `--sky-tracking-display-section` with `--sky-line-height-display-section` (section titles), `--sky-font-wordmark` |
+| Landing light, glass, texture | `--sky-glow-accent` (box-shadow), `--sky-glow-accent-wash` (hero background layer), `--sky-gradient-text`, `--sky-surface-glass` with `--sky-blur-glass` and `--sky-color-border-glass`, `--sky-border-gradient`, `--sky-texture-grain`, `--sky-texture-dots` (both complete background layers) |
 | Bars and empty blocks | `--sky-color-track`, `--sky-color-empty`, `--sky-color-running-block`, `--sky-color-unscored` |
 | Raised surface highlight, overlays | `--sky-shadow-raised`, `--sky-shadow-overlay`, `--sky-color-scrim` |
 | Radii | `--ds-radius-md` (10, nav items), `--ds-radius-lg` (11, buttons), `--sky-radius-control` (12), `--sky-radius-row` (14), `--sky-radius-xl` (18, cards), `--sky-radius-card-lg` (20), `--sky-radius-2xl` (24, header panels), `--ds-radius-full` |

@@ -60,6 +60,11 @@
   --sky-color-agent-claude: #D97757;   /* Claude agent marker */
   --sky-color-agent-codex: #8E9BBC;    /* Codex agent marker (Evals board) */
 
+  /* Landing: gradient headline stops (top, middle) and the glass card edge */
+  --sky-color-display-hi: #FFFFFF;
+  --sky-color-display-mid: #C9D6F5;
+  --sky-color-border-glass: rgba(255, 255, 255, 0.09);
+
   --sky-color-scrim: rgba(5, 7, 12, 0.6);
   --sky-color-highlight: rgba(255, 255, 255, 0.04);
   --sky-color-highlight-strong: rgba(255, 255, 255, 0.07);
