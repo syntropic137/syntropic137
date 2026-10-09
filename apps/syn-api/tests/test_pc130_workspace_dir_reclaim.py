@@ -990,3 +990,28 @@ async def test_every_host_git_call_runs_guarded(
         assert env["GIT_CONFIG_NOSYSTEM"] == "1", argv
         assert env["GIT_CONFIG_GLOBAL"] == "/dev/null", argv
         assert env["HOME"] == "/nonexistent", argv
+
+
+@pytest.mark.parametrize("shape", ["quoted", "too-deep"])
+async def test_alternates_git_would_read_differently_are_refused_and_kept(
+    base: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture, shape: str
+) -> None:
+    """A C-quoted entry is not parsed as a path, and a chain git stops following is not guessed at."""
+    ws = _workspace(base, f"ws-{shape}", tmp_path)
+    app = ws / "repos" / "app"
+    alternates = app / ".git" / "objects" / "info" / "alternates"
+    if shape == "quoted":
+        alternates.write_text('"../../../../plain/objects"\n')
+        expected = f"{app} has a quoted alternate"
+    else:
+        # Six plain object directories inside the workspace, each naming the next.
+        for depth in range(6):
+            info = ws / "plain" / str(depth) / "objects" / "info"
+            info.mkdir(parents=True)
+            if depth < 5:
+                (info / "alternates").write_text(f"../../{depth + 1}/objects\n")
+        alternates.write_text("../../../../plain/0/objects\n")
+        expected = f"{app} chains alternates past 5"
+    result = await _reclaimer(base).run_once()
+    assert result.kept == (f"ws-{shape}",)
+    assert expected in caplog.text
