@@ -831,8 +831,8 @@ async def execute_workflow_endpoint(
     # this function, and the task is queued under it.
     admitted: AdmissionTicket
 
-    async def _start() -> None:
-        result = await execute(
+    async def _execute() -> Result[ExecutionSummary, WorkflowError]:
+        return await execute(
             workflow_id=workflow_id,
             inputs=effective_inputs,
             execution_id=execution_id,
@@ -842,6 +842,9 @@ async def execute_workflow_endpoint(
             tags=request.tags,
             launch_eval=launch_eval,
         )
+
+    async def _start() -> None:
+        result = await _execute()
         if isinstance(result, Err):
             logger.error(
                 "Workflow execution failed",
@@ -877,7 +880,14 @@ async def execute_workflow_endpoint(
 
         if get_settings().execution.run_queue_enabled:
             # #1310 1.3: admitted into the run queue before the 200, inline.
-            await start_direct_now(admitted, _start)
+            # The start has already happened or failed here, so a failure is
+            # the caller's answer, not a log line behind a 200.
+            admission = await start_direct_now(admitted, _execute)
+            if isinstance(admission, Err):
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Execution {execution_id} was not admitted: {admission.message}",
+                )
         else:
             queue_direct_start(
                 background_tasks,
