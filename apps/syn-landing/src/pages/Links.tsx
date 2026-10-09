@@ -70,7 +70,7 @@ export default function Links() {
             </span>
           </div>
         </div>
-        <InstallTerminal showHeader={false} className="links-install" />
+        <InstallTerminal className="links-install" />
         <div className="links-list">
           {links.map((link) => (
             <a

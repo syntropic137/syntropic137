@@ -1,5 +1,5 @@
 import Nav from "./components/Nav";
-import Hero from "./components/Hero";
+import Hero from "./sections/Hero";
 import WhySyntropic from "./components/WhySyntropic";
 import HowItWorks from "./components/HowItWorks";
 import AgentControlPlane from "./components/AgentControlPlane";

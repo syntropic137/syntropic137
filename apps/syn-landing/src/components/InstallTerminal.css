@@ -1,0 +1,103 @@
+/* InstallTerminal: the install box of the v4 boards (hero, links page). */
+.install-box {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-3);
+  width: 100%;
+  min-height: 60px;
+  padding: var(--ds-space-2) var(--ds-space-2) var(--ds-space-2) 18px;
+  border: 1px solid var(--sky-color-border-glass);
+  border-radius: var(--sky-radius-xl);
+  background: var(--sky-gradient-glass-raised);
+  -webkit-backdrop-filter: blur(var(--sky-blur-glass));
+  backdrop-filter: blur(var(--sky-blur-glass));
+  box-shadow: var(--sky-shadow-selected), var(--sky-glow-accent);
+}
+
+.install-box__prompt {
+  font-family: var(--ds-font-mono);
+  font-size: 15px;
+  color: color-mix(in oklab, var(--ds-color-accent) 55%, var(--sky-color-display-hi));
+}
+
+.install-box__code {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  font-family: var(--ds-font-mono);
+  font-size: 12.5px;
+  color: var(--ds-color-fg);
+}
+
+.install-box__cmd {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  vertical-align: bottom;
+  white-space: nowrap;
+}
+
+.install-box__caret {
+  display: inline-block;
+  width: 8px;
+  height: 1.1em;
+  margin-left: 2px;
+  vertical-align: -0.15em;
+  background: var(--ds-color-accent);
+}
+
+/* Off screen: the typing and the caret wait (they run only while visible). */
+.install-box[data-paused] .sky-type,
+.install-box[data-paused] .sky-blink {
+  animation-play-state: paused;
+}
+
+.install-box__copy {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 7px;
+  height: var(--sky-size-control-lg);
+  padding: 0 var(--ds-space-4);
+  border: 0;
+  border-radius: var(--sky-radius-control);
+  background: var(--sky-color-accent-solid);
+  box-shadow: var(--sky-shadow-glow);
+  color: var(--sky-color-accent-solid-contrast);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.install-box__copy svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.install-box__copy:focus-visible {
+  outline: var(--sky-focus-ring-width) solid var(--sky-color-focus);
+  outline-offset: var(--sky-focus-ring-offset);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .install-box__copy {
+    transition: transform var(--sky-duration-fast) ease, box-shadow var(--sky-duration-fast) ease;
+  }
+  .install-box__copy:hover {
+    transform: translateY(-1px);
+    box-shadow: var(--sky-shadow-glow), 0 12px 30px -8px color-mix(in oklab, var(--ds-color-accent) 70%, transparent);
+  }
+}
+
+@media (min-width: 48rem) {
+  .install-box__code {
+    font-size: 15px;
+  }
+}
