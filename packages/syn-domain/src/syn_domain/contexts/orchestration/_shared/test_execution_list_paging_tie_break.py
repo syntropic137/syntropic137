@@ -15,7 +15,7 @@ import os
 
 os.environ.setdefault("APP_ENVIRONMENT", "test")
 
-from typing import Any
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -28,30 +28,25 @@ from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_sum
     WorkflowExecutionSummary,
 )
 
+if TYPE_CHECKING:
+    from syn_domain.pagination import ProjectionRecord
+
 pytestmark = [pytest.mark.unit, pytest.mark.anyio]
 
 STARTED = "2026-10-02T09:00:00+00:00"
 
 
 class _NewestWriteFirst(InMemoryProjectionStore):
-    """``get_all`` in ``updated_at DESC`` order, as Postgres reads it."""
+    """``get_all`` in ``updated_at DESC`` order, as Postgres reads it: a write moves a row first."""
 
-    def __init__(self) -> None:
-        super().__init__()
-        self._writes: list[str] = []
-
-    async def save(self, projection: str, key: str, data: dict[str, Any]) -> None:
-        await super().save(projection, key, data)
-        if key in self._writes:
-            self._writes.remove(key)
-        self._writes.append(key)
-
-    async def get_all(self, projection: str) -> list[dict[str, Any]]:
-        stored = {d["workflow_execution_id"]: d for d in await super().get_all(projection)}
-        return [stored[key] for key in reversed(self._writes) if key in stored]
+    async def save(self, projection: str, key: str, data: ProjectionRecord) -> None:
+        await super().save(projection, key, dict(data))
+        rows = self._data[projection]  # pyright: ignore[reportPrivateUsage]  # the double's own state
+        written = rows.pop(key)
+        self._data[projection] = {key: written, **rows}  # pyright: ignore[reportPrivateUsage]
 
 
-def _row(execution_id: str, status: str) -> dict[str, Any]:
+def _row(execution_id: str, status: str) -> WorkflowExecutionSummary:
     return WorkflowExecutionSummary(
         workflow_execution_id=execution_id,
         workflow_id="wf-1",
@@ -62,17 +57,17 @@ def _row(execution_id: str, status: str) -> dict[str, Any]:
         completed_phases=0,
         total_phases=1,
         total_tokens=0,
-    ).to_dict()
+    )
 
 
 async def test_updating_a_tied_row_between_pages_neither_repeats_nor_drops_a_row() -> None:
     store = _NewestWriteFirst()
     for execution_id in ("exec-a", "exec-b"):
-        await store.save(WORKFLOW_EXECUTIONS, execution_id, _row(execution_id, "running"))
+        await store.save(WORKFLOW_EXECUTIONS, execution_id, _row(execution_id, "running").to_dict())
     reads = ExecutionListReads(store)
 
     page_1 = await reads.page(workflow_id="wf-1", offset=0, limit=1)
-    await store.save(WORKFLOW_EXECUTIONS, "exec-b", _row("exec-b", "completed"))
+    await store.save(WORKFLOW_EXECUTIONS, "exec-b", _row("exec-b", "completed").to_dict())
     page_2 = await reads.page(workflow_id="wf-1", offset=1, limit=1)
 
     assert [r.workflow_execution_id for r in page_1.rows] == ["exec-a"]
