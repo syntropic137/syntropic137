@@ -23,7 +23,8 @@ cd apps/syn-docs && pnpm run generate:openapi
 | Docs engine | fumadocs-core / fumadocs-ui / fumadocs-mdx | ^16.6.2 / ^16.6.2 / ^14.2.7 |
 | API docs | fumadocs-openapi | ^10.3.5 |
 | Styling | Tailwind CSS 4 + fumadocs preset | |
-| 3D hero | @react-three/fiber + drei | ^9.5.0 / ^10.7.7 |
+| Theme | `@syn137/skyline-themes` (workspace) | `workspace:*` |
+| Diagrams | @xyflow/react (React Flow) | 12.x |
 | Icons | lucide-react | ^0.468.0 |
 | Search | Orama (built-in via fumadocs) | |
 
@@ -32,7 +33,7 @@ cd apps/syn-docs && pnpm run generate:openapi
 ```
 apps/syn-docs/
 ├── app/
-│   ├── (home)/page.tsx              # Landing page with hero + features
+│   ├── (home)/page.tsx              # redirect('/docs/guide/getting-started'); no home page
 │   ├── docs/
 │   │   ├── layout.tsx               # DocsLayout with sidebar
 │   │   └── [[...slug]]/page.tsx     # Docs page renderer + LLM buttons
@@ -43,10 +44,14 @@ apps/syn-docs/
 │   │   ├── search/route.ts          # Orama search API
 │   │   └── docs-txt/[...slug]/route.ts  # Per-page plain text endpoint
 │   ├── layout.tsx                   # Root layout (metadata, RootProvider)
-│   └── global.css                   # SR-71 theme variables
+│   ├── global.css                   # Imports Skyline, maps --color-fd-* onto tokens
+│   ├── docs-brand.css               # Brand lockup, site nav capsule, footer
+│   └── components.css               # MDX components, code windows, --syn-code-* vars
 ├── components/
 │   ├── diagrams/                    # Architecture diagram system (see below)
-│   ├── HeroScene.tsx                # Three.js 3D visualization
+│   ├── SMark.tsx                    # S mark (inline SVG, cube tokens) + Wordmark
+│   ├── DocsNav.tsx                  # Landing site nav capsule (Docs selected)
+│   ├── DocsFooter.tsx               # Board footer: lockup, link columns, version
 │   ├── LLMCopyButton.tsx            # Per-page "Copy for LLM" + "View as TXT" + "Edit on GitHub"
 │   ├── Badge.tsx                    # MDX badge component
 │   ├── FeatureCard.tsx              # MDX feature card + grid
@@ -59,7 +64,8 @@ apps/syn-docs/
 │   └── cli/                         # 1 page (index.mdx)
 ├── lib/
 │   ├── source.ts                    # fumadocs loader, openapi, APIPage
-│   ├── layout.shared.tsx            # Shared nav config (logo, links, github)
+│   ├── layout.shared.tsx            # Shared nav config (S mark, site nav, github)
+│   ├── code-theme.ts                # Dark Shiki theme (CSS-variable colours)
 │   └── cn.ts                        # clsx utility
 ├── scripts/generate-api-docs.mjs    # OpenAPI JSON → MDX generator
 ├── mdx-components.tsx               # All custom MDX component registrations
@@ -69,26 +75,22 @@ apps/syn-docs/
 └── package.json
 ```
 
-## Theme: SR-71 Precision
+## Theme: Skyline (syn137)
 
-Cold instrument blues and titanium grays. No purple, no red, no warm colors.
+The docs use the Skyline design tokens from `packages/syn-ui/themes` (`@syn137/skyline-themes`, a `workspace:*` dependency). Read `packages/syn-ui/CONVENTIONS.md` for the token list.
 
-**CSS Variables** (`app/global.css`):
+**How it is wired:**
+- `app/global.css` imports `@syn137/skyline-themes/all.css`; `app/layout.tsx` sets `data-theme="syn137"` on `<html>` so the tokens are in scope in both modes.
+- **Theme by mapping, not rewriting.** Fumadocs keeps its layout, search, sidebar and MDX rendering. The `.dark { }` block maps every `--color-fd-*` variable to a token, e.g. `--color-fd-background: var(--ds-color-bg)`, `--color-fd-primary: var(--ds-color-accent)`, `--color-fd-border: var(--ds-color-border)`, `--color-fd-accent: var(--ds-color-overlay)` (Fumadocs uses accent for hover fills), callouts `--color-fd-info/warning/error/success` to accent, warning, danger, success. `.dark #nd-sidebar` is overridden too, because `fumadocs-ui/css/neutral.css` greys the sidebar.
+- **Light mode stays.** Skyline is dark only for v1, so the `@theme` light values are the docs' own. Dark is the default (`defaultTheme: 'dark'`).
+- **Fonts and radii** (both modes): `--font-sans` is Instrument Sans, `--font-mono` JetBrains Mono, `--font-brand` Orbitron (next/font faces first, then the `--ds-font-*` / `--sky-font-brand` stacks). `--radius-lg/xl/2xl` map to Skyline radii.
+- **Code blocks:** `lib/code-theme.ts` is a dark Shiki theme whose colours are `var(--syn-code-*)`, defined in `app/components.css` from Skyline tokens (keys muted, strings success-soft, keywords accent-soft). It is used by MDX (`source.config.ts` `rehypeCodeOptions.themes`) and the OpenAPI pages (`createAPIPage(openapi, { shikiOptions })`). Light mode keeps `github-light`. Dark code blocks get the landing code-window frame (panel gradient, three window dots, mono title).
 
-| Variable | Dark | Light |
-|----------|------|-------|
-| `--fd-primary` | sky-400 `56 189 248` | sky-400 `56 189 248` |
-| `--fd-accent` | sky-500 `14 165 233` | sky-500 `14 165 233` |
-| `--fd-background` | zinc-950 `9 9 11` | `250 250 250` |
-| `--fd-muted` | zinc-900 `24 24 27` | `244 244 245` |
-| `--fd-muted-foreground` | zinc-400 `161 161 170` | zinc-500 `113 113 122` |
-
-**Design rules:**
-- Primary accent: `sky-400` / `sky-500`
-- Backgrounds: `zinc-950` dark, near-white light
-- Subtle card hovers with `sky-500` glow at 0.08-0.1 opacity
-- Code borders: `sky-500/12` → `sky-500/15`
-- No bouncy transforms. Thin scrollbars. Sharp precision.
+**Rules:**
+- No colour literals in new docs code. Base rules read `--color-fd-*` (so light mode works); `.dark` rules use `--ds-*` / `--sky-*` tokens. Existing light-mode literals stay until Skyline has a light theme.
+- No `var()` fallbacks; every token is defined by the theme. Check with `node packages/syn-ui/scripts/check-token-usage.mjs apps/syn-docs/app`.
+- SVG colours that use CSS variables go in `style`, not presentation attributes (`stroke=`, `fill=`), which ignore `var()`.
+- No Three.js. The old `HeroScene` and `three`/`@react-three/*` deps were removed with the home page.
 
 ## Content Authoring
 
@@ -118,9 +120,12 @@ All registered in `mdx-components.tsx`. Use directly in MDX without imports:
 <Badge variant="cyan" icon="zap">Event-Sourced</Badge>
 
 <FeatureGrid>
-  <FeatureCard icon="workflow" title="Workflows" description="..." gradient="cyan" />
-  <FeatureCard icon="eye" title="Observability" description="..." gradient="green" />
+  <FeatureCard icon="workflow" title="Workflows" description="..." />
+  <FeatureCard icon="eye" title="Observability" description="..." />
 </FeatureGrid>
+{/* FeatureCard's gradient prop is still accepted but ignored: every card is the one Skyline panel.
+    Badge variants collapse to tones: default=neutral, green=success, bright=solid, the rest=accent.
+    GradientButton variants: primary/bright=solid accent, secondary=control, outline=hairline. */}
 
 <GradientButton href="/docs/guide/getting-started" variant="primary" icon="rocket">
   Get Started
@@ -196,6 +201,8 @@ Horizontal flow with auto-inserted arrows between children.
 Gradient horizontal line with optional centered label.
 
 ### Color Variants (7)
+
+The table is the static primitives (Tailwind classes). The interactive React Flow diagrams (`components/diagrams/interactive/theme.ts`) map each variant to one Skyline hue in dark mode (indigo accent, purple data-3, pink series-4, cyan data-1, slate text-subtle, emerald success, amber warning) and mix fills, borders and glows from it; light mode keeps its palette.
 
 | Variant | Border/BG | Icon/Text | Mnemonic |
 |---------|-----------|-----------|----------|
@@ -337,16 +344,11 @@ The `APIPage` component from `fumadocs-openapi` is registered in `lib/source.ts`
 
 ### Nav branding (`lib/layout.shared.tsx`)
 
-```tsx
-<div className="flex flex-col">
-  <span className="font-bold text-sm tracking-tight text-fd-foreground">
-    Syntropic<span className="text-sky-400">137</span>
-  </span>
-  <span className="text-[10px] text-fd-muted-foreground tracking-wide uppercase">
-    Agentic Engineering
-  </span>
-</div>
-```
+- **Title:** `<SMark />` (inline SVG from `design/brand/s-mark.svg` geometry, faces from the `--sky-color-cube-*` and `--sky-face-*` tokens) + `<Wordmark />` (Orbitron, "137" in the accent) + a mono "Docs" tag. Links to `/docs/guide/getting-started`. Swap `SMark` for skyline-core's `sMark()` / `<sky-s-mark>` once the elements build lands.
+- **Site nav:** `components/DocsNav.tsx` is the landing page's capsule nav: Workflows, Harnesses, Observability, Evals (`https://syntropic137.com/#<section>`), Docs (selected, `aria-current="page"`). Passed as a `type: 'custom', on: 'nav'` link; hidden below 80rem (no room beside search). The same links are `on: 'menu'` items for the mobile sidebar.
+- **Footer:** `components/DocsFooter.tsx` (rendered by the docs page) follows the v4 Landing board: lockup, tagline, docs version (links to the release tag), Product / Guides / Community columns. Styles in `app/docs-brand.css`.
+- **Icons:** `public/favicon.svg`, `favicon-32x32.png`, `apple-touch-icon.png`, copied from `design/brand/`.
+- **Home:** `/` redirects (307) to `/docs/guide/getting-started`; `/docs` redirects there too (`next.config.mjs`).
 
 ### Sidebar tabs
 
