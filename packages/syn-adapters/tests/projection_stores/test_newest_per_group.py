@@ -106,7 +106,13 @@ def test_the_sql_orders_by_instant_then_key_and_never_by_text() -> None:
         flag_field="is_primary_deliverable",
         lean_ready=True,
     )
-    assert "ORDER BY data->>'phase_id', syn_page_instant_v1(data->>'created_at') DESC, id" in query
+    assert "syn_page_instant_v1(data->>'created_at') AS at" in query
+    # Ties by code point, as Python compares str, never the database collation.
+    assert "ORDER BY data->>'phase_id', at DESC, id COLLATE \"C\"" in query
+    # A group is a JSON string; ->> alone would give a number or object one.
+    assert "jsonb_typeof(data->'phase_id') = 'string'" in query
+    # Timestamps Postgres cannot resolve are returned for Python to decide.
+    assert "at IS NULL AND jsonb_typeof(data->'created_at') = 'string'" in query
     assert "data->>'created_at' DESC" not in query
     assert "COALESCE(lean, data)" in query
     assert params == ["wf"]
@@ -176,3 +182,72 @@ async def test_postgres_artifacts_answer_without_their_bodies(pool: asyncpg.Pool
     assert {phase: s.id for phase, s in latest.items()} == {"plan": "new"}
     assert latest["plan"].content is None
     assert latest["plan"].size_bytes == 4
+
+
+#: Inputs where SQL and Python could part ways. Each group's newest per the
+#: domain's rule (``coerce_datetime``, code point ties) is in PARITY_EXPECTED.
+PARITY_ROWS: list[tuple[str, dict[str, JsonValue]]] = [
+    # Basic-format ISO: Python reads it, syn_page_instant_v1 does not.
+    ("basic-old", {"g": "basic", "at": "2026-10-02T09:00:00Z"}),
+    ("basic-new", {"g": "basic", "at": "20261002T100000Z"}),
+    # Seven fractional digits: Python truncates to six, the SQL regex refuses.
+    ("frac-old", {"g": "frac7", "at": "2026-10-02T09:00:00Z"}),
+    ("frac-new", {"g": "frac7", "at": "2026-10-02T09:00:00.1234567Z"}),
+    # +16:00 is past what Postgres accepts; it is 04:00 UTC.
+    ("offset-old", {"g": "offset", "at": "2026-10-01T00:00:00Z"}),
+    ("offset-new", {"g": "offset", "at": "2026-10-01T20:00:00+16:00"}),
+    # A group whose only dated row is one SQL cannot read.
+    ("only-basic", {"g": "only-unresolved", "at": "20261002T090000Z"}),
+    # Undated on both sides.
+    ("hour-24", {"g": "undated", "at": "2026-10-01T24:00:00"}),
+    ("words", {"g": "undated", "at": "not a date"}),
+    ("number-at", {"g": "undated", "at": 20261002}),
+    # Not string groups: no group at all.
+    ("number-group", {"g": 7, "at": "2026-10-02T09:00:00Z"}),
+    ("object-group", {"g": {"x": 1}, "at": "2026-10-02T09:00:00Z"}),
+    # One instant, three ids: code point order says "B-1"; most collations
+    # put "a-1" first.
+    ("a-1", {"g": "tie", "at": "2026-10-02T09:00:00Z"}),
+    ("a_1", {"g": "tie", "at": "2026-10-02T09:00:00+00:00"}),
+    ("B-1", {"g": "tie", "at": "2026-10-02T11:00:00+02:00"}),
+    # A tie across a resolved and an unresolved spelling of one instant.
+    ("z-resolved", {"g": "mixed-tie", "at": "2026-10-02T09:00:00Z"}),
+    ("y-basic", {"g": "mixed-tie", "at": "20261002T090000Z"}),
+]
+
+PARITY_EXPECTED = {
+    "basic": "basic-new",
+    "frac7": "frac-new",
+    "offset": "offset-new",
+    "only-unresolved": "only-basic",
+    "tie": "B-1",
+    "mixed-tie": "y-basic",
+}
+
+PARITY = "newest_per_group_parity"
+
+
+async def _parity_answer(
+    store: InMemoryProjectionStore | PostgresProjectionStore,
+) -> dict[str, JsonValue]:
+    for key, row in PARITY_ROWS:
+        await store.save(PARITY, key, {"id": key, **row})
+    answer = await store.newest_per_group(
+        PARITY, group_field="g", timestamp_field="at", fields=("id",)
+    )
+    return {group: row["id"] for group, row in answer.items()}
+
+
+@pytest.mark.unit
+async def test_in_memory_store_follows_the_domain_rule_on_hostile_inputs() -> None:
+    assert await _parity_answer(InMemoryProjectionStore()) == PARITY_EXPECTED
+
+
+@pytest.mark.integration
+async def test_postgres_store_matches_the_in_memory_store_on_hostile_inputs(
+    pool: asyncpg.Pool,
+) -> None:
+    """Parity: the same rows through both stores give the same newest per group."""
+    in_memory = await _parity_answer(InMemoryProjectionStore())
+    postgres = await _parity_answer(PostgresProjectionStore(pool))
+    assert postgres == in_memory == PARITY_EXPECTED

@@ -22,6 +22,7 @@ from syn_adapters.projection_stores.postgres_query_builder import (
     _build_order_clause,
     _build_where_clause,
 )
+from syn_domain.projection_newest import newest_per_group as decide_newest_per_group
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -96,12 +97,23 @@ def build_newest_per_group_query(
     flag_field: str | None,
     lean_ready: bool,
 ) -> tuple[str, list[str]]:
-    """One JSON array of ``[group, {field: value...}]``, the newest per group.
+    """``[id, group, timestamp, {field: value...}]`` per row Python must see.
 
-    ``DISTINCT ON`` the group, ordered by the PARSED instant newest-first and
-    then the key, so a timestamp's offset decides nothing and a tie has one
-    answer (syn_domain.projection_newest). Read from the lean source, so a
-    body nobody renders is never detoasted.
+    Postgres decides only what it reads exactly as Python does. Among rows
+    whose timestamp ``syn_page_instant_v1`` resolves - the ISO subset both
+    sides parse to the same instant - it keeps one per group: ``DISTINCT ON``
+    the group, the parsed instant newest-first, then the id in code point
+    order (``COLLATE "C"``, which is how Python compares ``str``). A string
+    timestamp it does NOT resolve may still be one ``coerce_datetime`` reads
+    (basic format ``20261002T090000Z``, seven fractional digits, a week date,
+    an offset past +15:59), so every such row is returned as well, and
+    :func:`newest_per_group` decides the group in Python with the domain's
+    own rule. Exactly the domain's answer, in one statement; the extra rows
+    are the rare malformed ones.
+
+    A group is a JSON STRING, as the domain requires: ``->>`` would also turn
+    a number or an object into text and give it a group. Read from the lean
+    source, so a body nobody renders is never detoasted.
     """
     for field in (group_field, timestamp_field, *fields, *((flag_field,) if flag_field else ())):
         # Interpolated, not bound: a JSON key cannot be a placeholder.
@@ -115,7 +127,7 @@ def build_newest_per_group_query(
     if filters:
         where_sql, params = _build_where_clause(dict(filters), start_idx=1)
         conditions.append(where_sql.removeprefix(" WHERE "))
-    conditions += [f"data->>'{group_field}' IS NOT NULL", f"{instant} IS NOT NULL"]
+    conditions.append(f"jsonb_typeof(data->'{group_field}') = 'string'")
     if flag_field:
         # Only a real JSON false is false (read_primary_flag); the CASE keeps
         # the boolean cast from ever seeing a string.
@@ -124,12 +136,18 @@ def build_newest_per_group_query(
             f"THEN (data->'{flag_field}')::boolean ELSE true END"
         )
     query = (
-        "SELECT COALESCE(json_agg(json_build_array(grp, picked) ORDER BY grp), '[]') "
-        f"AS newest FROM (SELECT DISTINCT ON (data->>'{group_field}') "
-        f"data->>'{group_field}' AS grp, jsonb_build_object({picked}) AS picked FROM ("
+        f"WITH candidates AS (SELECT id, data, {instant} AS at FROM ("
         f"SELECT id, {lean_source(lean_ready=lean_ready)} AS data FROM {table_name}"
-        f") AS documents WHERE {' AND '.join(conditions)} "
-        f"ORDER BY data->>'{group_field}', {instant} DESC, id) AS newest_rows"
+        f") AS documents WHERE {' AND '.join(conditions)}), "
+        f"resolved AS (SELECT DISTINCT ON (data->>'{group_field}') id, data FROM candidates "
+        f"WHERE at IS NOT NULL "
+        f"ORDER BY data->>'{group_field}', at DESC, id COLLATE \"C\"), "
+        "unresolved AS (SELECT id, data FROM candidates "
+        f"WHERE at IS NULL AND jsonb_typeof(data->'{timestamp_field}') = 'string') "
+        "SELECT COALESCE(json_agg(json_build_array("
+        f"id, data->>'{group_field}', data->'{timestamp_field}', jsonb_build_object({picked})"
+        ")), '[]') AS newest FROM "
+        "(SELECT id, data FROM resolved UNION ALL SELECT id, data FROM unresolved) AS rows"
     )
     return query, params
 
@@ -145,7 +163,7 @@ async def newest_per_group(
     flag_field: str | None,
     lean_ready: bool,
 ) -> dict[str, Mapping[str, JsonValue]]:
-    """Run :func:`build_newest_per_group_query`; each group's newest fields."""
+    """Run :func:`build_newest_per_group_query`; the domain picks each group's newest."""
     query, params = build_newest_per_group_query(
         table_name,
         group_field=group_field,
@@ -157,11 +175,21 @@ async def newest_per_group(
     )
     async with pool.acquire() as conn:
         newest = await conn.fetchval(query, *params)
-    pairs = json.loads(newest) if isinstance(newest, str) else newest
-    if not isinstance(pairs, list):
-        msg = f"expected a JSON array from the query, got {type(pairs).__name__}"
+    rows = json.loads(newest) if isinstance(newest, str) else newest
+    if not isinstance(rows, list):
+        msg = f"expected a JSON array from the query, got {type(rows).__name__}"
         raise TypeError(msg)
-    return {str(group): _json_object(values) for group, values in pairs}
+    picked: dict[str, Mapping[str, JsonValue]] = {}
+    candidates: list[tuple[str, dict[str, JsonValue]]] = []
+    for key, group, stamp, values in rows:
+        picked[str(key)] = _json_object(values)
+        candidates.append((str(key), {group_field: group, timestamp_field: stamp}))
+    # The flag was applied in SQL; group and instant are judged here, by the
+    # same function the in-memory store uses.
+    winners = decide_newest_per_group(
+        candidates, group_field=group_field, timestamp_field=timestamp_field
+    )
+    return {group: picked[key] for group, (key, _) in winners.items()}
 
 
 def build_count_query(
