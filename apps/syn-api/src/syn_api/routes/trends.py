@@ -2,8 +2,9 @@
 
 Built from the same reads the runs views use, so a trend point and its run row
 cannot disagree: an eval's points are ``eval_run_facts`` (``GET /evals/{id}/runs``),
-a workflow's are the execution list filtered by workflow plus ``get_detail``
-(``GET /executions/{id}``). Newest first, paged like every list endpoint, so
+a workflow's are the execution list filtered by workflow plus the same
+batched ``RunReads`` (each source read once per page, never per row; the
+rules ``GET /executions/{id}`` applies). Newest first, paged like every list endpoint, so
 page 1 is the latest runs; a chart reverses it.
 
 Change markers come from the definition's own stream, never from the runs:
@@ -16,13 +17,12 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from syn_api.routes.eval_runs import decimal_or_none, duration_display, eval_run_facts
-from syn_api.routes.executions.queries import get_detail
+from syn_api.routes.eval_runs import RunReads, duration_display, eval_run_facts
+from syn_api.routes.executions.queries import phase_duration
 from syn_api.types import (
     DefinitionChangeResponse,
     EvalTrendPointResponse,
     EvalTrendResponse,
-    Ok,
     PhaseDurationResponse,
     TrendDefinition,
     WorkflowTrendPointResponse,
@@ -154,13 +154,11 @@ async def eval_trend(
     )
 
 
-async def _workflow_point(row: WorkflowExecutionSummary) -> WorkflowTrendPointResponse:
-    detail = await get_detail(row.workflow_execution_id)
-    full = detail.value if isinstance(detail, Ok) else None
-    cost = None if full is None else decimal_or_none(full.total_cost_usd)
-    unpriced = 0 if full is None else full.unpriced_observation_count
-    duration = None if full is None else full.total_duration_seconds
-    unknown = 0 if full is None else full.unknown_duration_phase_count
+def _workflow_point(reads: RunReads, row: WorkflowExecutionSummary) -> WorkflowTrendPointResponse:
+    facts = reads.facts(row, None)
+    detail = reads.details.get(row.workflow_execution_id)
+    cost, unpriced = facts.total_cost_usd, facts.unpriced_observation_count
+    duration, unknown = facts.duration_seconds, facts.unknown_duration_phase_count
     return WorkflowTrendPointResponse(
         execution_id=row.workflow_execution_id,
         date=utc_iso(row.started_at),
@@ -174,12 +172,14 @@ async def _workflow_point(row: WorkflowExecutionSummary) -> WorkflowTrendPointRe
         duration_display=duration_display(duration, unknown),
         tokens=row.total_tokens,
         phase_durations=[]
-        if full is None
+        if detail is None
         else [
             PhaseDurationResponse(
-                phase_id=p.phase_id, phase_name=p.name, duration_seconds=p.duration_seconds
+                phase_id=p.workflow_phase_id,
+                phase_name=p.name,
+                duration_seconds=phase_duration(p),
             )
-            for p in full.phases
+            for p in detail.phases
         ],
     )
 
@@ -191,11 +191,12 @@ async def workflow_trend(
     rows = await ExecutionListReads(manager.store).page(
         workflow_id=workflow_id, offset=(page - 1) * page_size, limit=page_size
     )
+    reads = await RunReads.load(manager, [row.workflow_execution_id for row in rows.rows])
     changes = workflow_changes(await manager.workflow_detail.definition_history(workflow_id))
     return WorkflowTrendResponse(
         **_definition(changes).model_dump(),
         workflow_id=workflow_id,
-        items=[await _workflow_point(row) for row in rows.rows],
+        items=[_workflow_point(reads, row) for row in rows.rows],
         total=rows.total,
         page=page,
         page_size=page_size,
