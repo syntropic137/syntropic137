@@ -41,11 +41,12 @@
   <div class="sky-shell__phone-nav"><PhoneDock {active} {onsearch} /></div>
 </div>
 
-{#if FEEDBACK_LOCAL_ONLY && feedbackUi.mounted}
-  <!-- Lazy: the modal's chunk loads on the first click of a Feedback button, never in the first load. -->
-  {#await import('./FeedbackDialog.svelte') then { default: FeedbackDialog }}
-    <FeedbackDialog bind:open={feedbackUi.open} />
-  {/await}
+{#if FEEDBACK_LOCAL_ONLY}
+  <!-- Lazy, developer machines only: the bubble and its dialog never join a production build's first load. -->
+  {#await import('./FeedbackBubble.svelte') then { default: FeedbackBubble }}<FeedbackBubble />{/await}
+  {#if feedbackUi.mounted}
+    {#await import('./FeedbackDialog.svelte') then { default: FeedbackDialog }}<FeedbackDialog />{/await}
+  {/if}
 {/if}
 
 {#if overlays.paletteMounted || overlays.shortcutsMounted}

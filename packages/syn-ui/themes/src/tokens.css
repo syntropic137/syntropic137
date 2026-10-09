@@ -186,5 +186,22 @@
   --sky-status-skipped: var(--ds-color-text-subtle);
   --sky-status-unknown: var(--ds-color-text-subtle);
 
+  /* Feedback bubble (#1385): one colour per type and priority, after the
+     React widget's palette (bug red, feature violet, UI/UX blue, performance
+     amber, question/other grey; low grey to critical red). */
+  --sky-feedback-type-bug: var(--ds-color-danger);
+  --sky-feedback-type-feature: var(--sky-color-data-3);
+  --sky-feedback-type-ui-ux: var(--sky-color-data-1);
+  --sky-feedback-type-performance: var(--ds-color-warning);
+  --sky-feedback-type-question: var(--ds-color-text-muted);
+  --sky-feedback-type-other: var(--ds-color-text-subtle);
+  --sky-feedback-priority-low: var(--ds-color-text-subtle);
+  --sky-feedback-priority-medium: var(--ds-color-warning);
+  --sky-feedback-priority-high: var(--sky-color-data-2);
+  --sky-feedback-priority-critical: var(--ds-color-danger);
+  --sky-feedback-pick: var(--ds-color-accent);
+  --sky-feedback-pick-fill: color-mix(in oklab, var(--ds-color-accent) 12%, transparent);
+  --sky-feedback-scrim: color-mix(in oklab, var(--ds-color-bg) 55%, transparent);
+
   color-scheme: dark;
 }
