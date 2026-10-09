@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
+  MINUS,
+  formatSigned,
+  formatSignedCost,
+  formatSignedPoints,
+  pointsPerDollar,
+  pointsPerDollarValue,
   UNKNOWN,
   dayKey,
   durationBetween,
@@ -163,5 +169,25 @@ describe('bytes and numbers', () => {
     expect(shortId('exec-66e14f235942')).toBe('66e14f23')
     expect(shortId('2fd5ec12-aaaa')).toBe('2fd5ec12')
     expect(shortId(null)).toBe(UNKNOWN)
+  })
+})
+
+describe('signed deltas and quality per dollar', () => {
+  it('signs with a real minus and ± at zero', () => {
+    expect(formatSignedPoints(24)).toBe('+24 pts')
+    expect(formatSignedPoints(-10)).toBe('−10 pts')
+    expect(formatSignedPoints(0)).toBe('±0 pts')
+    expect(formatSignedPoints(null)).toBe('—')
+    expect(formatSignedCost(-0.11)).toBe('−$0.11')
+    expect(formatSignedCost(0.17333)).toBe('+$0.17')
+    expect(formatSigned(-3, String)).toBe('−3')
+    expect(MINUS).toBe('−')
+  })
+  it('ranks quality per dollar', () => {
+    expect(pointsPerDollar(87, 0.5166666)).toBe('168 pts/$')
+    expect(pointsPerDollar(91, '1.04')).toBe('88 pts/$')
+    expect(pointsPerDollar(91, 0)).toBe('—')
+    expect(pointsPerDollarValue(75, 0.6)).toBe(125)
+    expect(pointsPerDollarValue(75, null)).toBeNull()
   })
 })
