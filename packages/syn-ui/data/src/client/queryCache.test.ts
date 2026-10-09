@@ -23,7 +23,16 @@ describe('queryKey', () => {
     expect(queryKey('a', [new URLSearchParams('b=2&a=1')])).toBe(queryKey('a', [new URLSearchParams('a=1&b=2')]))
     expect(queryKey('getExecution', ['x'])).not.toBe(queryKey('getExecution', ['y']))
     expect(queryKey('getExecution', ['x'])).not.toBe(queryKey('getSession', ['x']))
-    expect(queryKey('a', [undefined])).toBe('a:[null]')
+    expect(queryKey('a', [undefined])).not.toBe(queryKey('a', [null]))
+  })
+
+  it('tags types and encodes pairs as tuples, so different requests never share a key', () => {
+    // Each pair below printed the same under the old string encoding.
+    expect(queryKey('a', [new URLSearchParams([['a=b', 'c']])])).not.toBe(queryKey('a', [new URLSearchParams([['a', 'b=c']])]))
+    expect(queryKey('a', [new URLSearchParams('a=1')])).not.toBe(queryKey('a', [['a=1']]))
+    expect(queryKey('a', [undefined])).not.toBe(queryKey('a', [null]))
+    expect(queryKey('a', ['1'])).not.toBe(queryKey('a', [1]))
+    expect(queryKey('a', [{ k: 'v' }])).not.toBe(queryKey('a', [[['k', 'v']]]))
   })
 })
 
@@ -107,26 +116,95 @@ describe('QueryCache', () => {
     expect(cache.invalidate(queryKey('getExecution', ['a']))).toBe(1)
     expect(heardA).toHaveBeenCalledTimes(1)
     expect(heardB).not.toHaveBeenCalled()
-    // stale: old value served, refresh lands, listener hears it
-    await expect(cache.get('getExecution', ['a'], fetcher)).resolves.toBe(1)
-    await flush()
-    expect(heardA).toHaveBeenCalledTimes(2)
+    // invalidated: the next read waits for the refresh rather than serving the old value
+    await expect(cache.get('getExecution', ['a'], fetcher)).resolves.toBe(3)
     expect(cache.peek('getExecution', ['a'])).toBe(3)
     offB()
     expect(cache.invalidate((e) => e.name === 'getExecution')).toBe(2)
     expect(heardB).not.toHaveBeenCalled()
   })
 
-  it('keeps a load that started before an invalidation stale', async () => {
+  it('never stores a load that started before an invalidation', async () => {
     const { cache } = setup()
     const d = deferred<number>()
     const p = cache.get('getExecution', ['a'], d.fetcher)
     cache.invalidate(queryKey('getExecution', ['a']))
     d.calls[0]!.resolve(1)
-    await p
+    await expect(p).resolves.toBe(1) // its own caller still gets it
+    expect(cache.peek('getExecution', ['a'])).toBeUndefined()
     const next = vi.fn(async () => 2)
-    await expect(cache.get('getExecution', ['a'], next)).resolves.toBe(1)
+    await expect(cache.get('getExecution', ['a'], next)).resolves.toBe(2)
     expect(next).toHaveBeenCalledTimes(1)
+  })
+
+  it('a read after an invalidation never joins the request started before it', async () => {
+    const { cache } = setup()
+    const d = deferred<number>()
+    await cache.get('getExecution', ['a'], async () => 0)
+    cache.invalidate(queryKey('getExecution', ['a']))
+    const before = cache.get('getExecution', ['a'], d.fetcher)
+    cache.invalidate(queryKey('getExecution', ['a']))
+    const after = cache.get('getExecution', ['a'], d.fetcher)
+    expect(d.fetcher).toHaveBeenCalledTimes(2)
+    d.calls[1]!.resolve(2)
+    d.calls[0]!.resolve(1) // the older generation lands last
+    await expect(after).resolves.toBe(2)
+    await before
+    expect(cache.peek('getExecution', ['a'])).toBe(2)
+  })
+
+  it('an abandoned load that resolves anyway publishes nothing', async () => {
+    const { cache } = setup()
+    const d = deferred<number>()
+    const a = new AbortController()
+    const p = cache.get('getSession', ['s'], d.fetcher, { signal: a.signal }).catch(() => {})
+    a.abort()
+    await p
+    d.calls[0]!.resolve(9) // a fetcher that ignored its signal
+    await flush()
+    expect(cache.peek('getSession', ['s'])).toBeUndefined()
+  })
+
+  it('a read after clear() never joins, and is never overwritten by, a load from before it', async () => {
+    const { cache } = setup()
+    const d = deferred<number>()
+    const p = cache.get('getSession', ['s'], d.fetcher)
+    cache.clear()
+    const after = cache.get('getSession', ['s'], d.fetcher)
+    expect(d.fetcher).toHaveBeenCalledTimes(2)
+    d.calls[1]!.resolve(2)
+    d.calls[0]!.resolve(1)
+    await expect(after).resolves.toBe(2)
+    await p
+    expect(cache.peek('getSession', ['s'])).toBe(2)
+  })
+
+  it('a failed refresh after an invalidation rejects the read, offers the old value, and keeps it cached', async () => {
+    const { cache } = setup()
+    await cache.get('getExecution', ['a'], async () => 1)
+    cache.invalidate(queryKey('getExecution', ['a']))
+    const read = cache.get('getExecution', ['a'], async () => Promise.reject(new Error('404')))
+    expect(cache.settled(read)).toEqual({ value: 1, invalidated: true })
+    await expect(read).rejects.toThrow('404')
+    expect(cache.peek('getExecution', ['a'])).toBe(1)
+  })
+
+  it('a failed background refresh of time-stale data keeps serving the old value', async () => {
+    const { cache, advance } = setup()
+    await cache.get('getExecution', ['a'], async () => 1)
+    advance(STALE_AFTER.detail)
+    await expect(cache.get('getExecution', ['a'], async () => Promise.reject(new Error('down')))).resolves.toBe(1)
+  })
+
+  it('snapshots params and copies data on store', async () => {
+    const { cache } = setup()
+    const params = ['a']
+    const returned = { n: 1 }
+    await cache.get('getExecution', params, async () => returned)
+    returned.n = 2
+    expect(cache.peek('getExecution', ['a'])).toEqual({ n: 1 })
+    params[0] = 'b'
+    expect(cache.invalidate((e) => e.params[0] === 'a')).toBe(1)
   })
 
   it('fixtures mode never goes stale by time but still de-dupes and honours invalidation', async () => {
@@ -147,7 +225,7 @@ describe('QueryCache', () => {
     expect(cache.settled(miss)).toBeUndefined()
     await miss
     const hit = cache.get('getWorkflow', ['w'], async () => ({ n: 2 }))
-    expect(cache.settled(hit)).toEqual({ value: { n: 1 } })
+    expect(cache.settled(hit)).toEqual({ value: { n: 1 }, invalidated: false })
     expect(cache.settled(hit.then((v) => v))).toBeUndefined()
   })
 
@@ -180,5 +258,30 @@ describe('QueryCache', () => {
     expect(cache.peek('b', [])).toBeUndefined()
     cache.clear()
     expect(cache.size).toBe(0)
+  })
+})
+
+describe('QueryCache over the real transport', () => {
+  it('a read after an invalidation sends its own HTTP request, not the pre-invalidation one', async () => {
+    const { configureClient } = await import('./config')
+    const { request } = await import('./http')
+    const pending: Array<(r: Response) => void> = []
+    const fetch = vi.fn(() => new Promise<Response>((resolve) => pending.push(resolve)))
+    configureClient({ fixtures: false, baseUrl: '/api/v1', fetch })
+    try {
+      const cache = new QueryCache({ fixtures: () => false })
+      const read = (s: AbortSignal) => request<{ v: number }>('/executions/a', { signal: s })
+      const before = cache.get('getExecution', ['a'], read)
+      cache.invalidate(queryKey('getExecution', ['a']))
+      const after = cache.get('getExecution', ['a'], read)
+      expect(fetch).toHaveBeenCalledTimes(2)
+      pending[0]!(new Response(JSON.stringify({ v: 0 })))
+      pending[1]!(new Response(JSON.stringify({ v: 1 })))
+      await expect(after).resolves.toEqual({ v: 1 })
+      await before
+      expect(cache.peek('getExecution', ['a'])).toEqual({ v: 1 })
+    } finally {
+      configureClient({ fetch: (...a) => globalThis.fetch(...a) })
+    }
   })
 })

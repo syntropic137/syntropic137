@@ -1,14 +1,19 @@
 /**
- * The query cache (ADR-074), keyed by resource name plus normalised params.
- * Fresh data is served without a request; stale data is served at once and
- * refreshed in the background, and the key's listeners hear when it lands.
- * Concurrent loads share one request (Coalescer; each signal cancels only its
- * caller). `invalidate` marks entries stale and notifies: the live stream
- * (live/invalidate.ts) and mutations use it. Fixtures mode never goes stale by
- * time; loads still de-dupe. Bindings `track` a fetcher's keys, then `subscribe`.
+ * The query cache (ADR-074), keyed by resource name plus params (queryKey.ts).
+ * Fresh data is served without a request. Time-stale data is served at once
+ * and refreshed in the background (a failed background refresh keeps the old
+ * data). Invalidated data is different: the next read waits for the refresh,
+ * so a failure rejects that read and the binding shows it. Concurrent loads of
+ * one key and generation share one request (Coalescer; each signal cancels only
+ * its caller); a load publishes only if it was not abandoned, its generation is
+ * still current and its entry is still the cached one. Fixtures mode never goes
+ * stale by time. Bindings `track` a fetcher's keys, then `subscribe`.
  */
-import { Coalescer } from './coalesce'
+import { Coalescer, flightTags } from './coalesce'
 import { clientConfig } from './config'
+import { queryKey, snapshotParams } from './queryKey'
+
+export { queryKey }
 
 /** Default staleness by resource shape, ms. */
 export const STALE_AFTER = { list: 15_000, detail: 60_000, metrics: 5_000 } as const
@@ -28,11 +33,17 @@ export interface QueryGetOptions {
   signal?: AbortSignal // cancels this caller only
 }
 
+/** A value `get` can show before its promise settles. `invalidated`: a refresh is pending and may still fail. */
+export interface SettledValue<T> {
+  value: T
+  invalidated: boolean
+}
+
 interface Entry extends QueryEntryInfo {
   data: unknown
   fetchedAt: number
   staleAfter: number
-  gen: number // bumped by invalidate; data is fresh only if loaded at the current gen
+  gen: number // cache-wide counter, new on create and invalidate; data is fresh only if loaded at the current gen
   dataGen: number // -1 until the first load lands
 }
 
@@ -42,29 +53,13 @@ export interface QueryCacheOptions {
   maxEntries?: number // oldest unwatched entries go past this (default 300)
 }
 
-/** Stable text for any JSON-ish value: object keys sorted, undefined dropped. */
-function stable(value: unknown): string {
-  if (value instanceof URLSearchParams) return JSON.stringify([...value].map(([k, v]) => `${k}=${v}`).sort())
-  if (Array.isArray(value)) return `[${value.map(stable).join(',')}]`
-  if (value && typeof value === 'object') {
-    const obj = value as Record<string, unknown>
-    const keys = Object.keys(obj).filter((k) => obj[k] !== undefined).sort()
-    return `{${keys.map((k) => `${JSON.stringify(k)}:${stable(obj[k])}`).join(',')}}`
-  }
-  return value === undefined ? 'null' : JSON.stringify(value)
-}
-
-/** "getExecution" + ["abc"] -> 'getExecution:["abc"]'. */
-export function queryKey(name: string, params: readonly unknown[]): string {
-  return `${name}:${stable(params)}`
-}
-
 export class QueryCache {
   private entries = new Map<string, Entry>()
   private flights = new Coalescer()
   private listeners = new Map<string, Set<() => void>>()
   private collector: Set<string> | null = null
-  private served = new WeakMap<Promise<unknown>, { value: unknown }>()
+  private gens = 0
+  private served = new WeakMap<Promise<unknown>, SettledValue<unknown>>()
 
   constructor(private readonly options: QueryCacheOptions = {}) {}
 
@@ -81,16 +76,22 @@ export class QueryCache {
     entry.staleAfter = typeof stale === 'number' ? stale : STALE_AFTER[stale]
     // Every caller gets its own copy, so a screen editing a response never edits the cache.
     if (entry.dataGen < 0) return this.load(entry, fetcher, options.signal).then((data) => structuredClone(data))
-    if (this.isStale(entry)) this.load(entry, fetcher).catch(() => {}) // keep serving stale on failure
+    if (entry.dataGen !== entry.gen) {
+      // Invalidated: wait for the refresh so its failure reaches the caller; meanwhile `settled` offers the old value.
+      const refresh = this.load(entry, fetcher, options.signal).then((data) => structuredClone(data))
+      this.served.set(refresh, { value: structuredClone(entry.data), invalidated: true })
+      return refresh
+    }
+    if (this.isStale(entry)) this.load(entry, fetcher).catch(() => {}) // time-stale: keep serving on failure
     const value = structuredClone(entry.data as T)
     const served = Promise.resolve(value)
-    this.served.set(served, { value })
+    this.served.set(served, { value, invalidated: false })
     return served
   }
 
-  /** The value of a promise `get` answered from cache, readable synchronously (no first-render flash). */
-  settled<T>(promise: Promise<T>): { value: T } | undefined {
-    return this.served.get(promise) as { value: T } | undefined
+  /** The value `get` offered for a promise, readable synchronously (no first-render flash). */
+  settled<T>(promise: Promise<T>): SettledValue<T> | undefined {
+    return this.served.get(promise) as SettledValue<T> | undefined
   }
 
   /** The cached value, fresh or stale, without loading or tracking. */
@@ -104,7 +105,7 @@ export class QueryCache {
     let count = 0
     for (const entry of [...this.entries.values()]) {
       if (typeof match === 'string' ? entry.key !== match : !match(entry)) continue
-      entry.gen++
+      entry.gen = ++this.gens
       count++
       this.emit(entry.key)
     }
@@ -151,7 +152,6 @@ export class QueryCache {
   }
 
   private isStale(entry: Entry): boolean {
-    if (entry.dataGen !== entry.gen) return true
     const fixtures = this.options.fixtures?.() ?? clientConfig().fixtures
     return !fixtures && this.now() - entry.fetchedAt >= entry.staleAfter
   }
@@ -159,7 +159,7 @@ export class QueryCache {
   private entryFor(key: string, name: string, params: readonly unknown[]): Entry {
     const existing = this.entries.get(key)
     if (existing) return existing
-    const entry: Entry = { key, name, params, data: undefined, fetchedAt: 0, staleAfter: 0, gen: 0, dataGen: -1 }
+    const entry: Entry = { key, name, params: snapshotParams(params), data: undefined, fetchedAt: 0, staleAfter: 0, gen: ++this.gens, dataGen: -1 }
     this.entries.set(key, entry)
     this.evict()
     return entry
@@ -173,17 +173,21 @@ export class QueryCache {
     }
   }
 
-  /** One shared load per key and generation; a load started before an invalidation stays stale. */
+  /** One shared load per key and generation; publishes only if not abandoned, still current, still cached. */
   private load<T>(entry: Entry, fetcher: (signal: AbortSignal) => Promise<T>, signal?: AbortSignal): Promise<T> {
     const gen = entry.gen
-    const start = (s: AbortSignal) =>
-      fetcher(s).then((data) => {
+    const flight = `${entry.key}#${gen}`
+    const start = (s: AbortSignal) => {
+      flightTags.set(s, flight)
+      return fetcher(s).then((data) => {
+        if (s.aborted || gen !== entry.gen || this.entries.get(entry.key) !== entry) return data
         const refreshed = entry.dataGen >= 0
-        Object.assign(entry, { data, fetchedAt: this.now(), dataGen: gen })
-        if (refreshed && this.entries.get(entry.key) === entry) this.emit(entry.key)
+        Object.assign(entry, { data: structuredClone(data), fetchedAt: this.now(), dataGen: gen })
+        if (refreshed) this.emit(entry.key)
         return data
       })
-    return this.flights.run(`${entry.key}#${gen}`, start, signal)
+    }
+    return this.flights.run(flight, start, signal)
   }
 
   private emit(key: string): void {

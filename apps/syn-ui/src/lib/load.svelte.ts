@@ -17,12 +17,15 @@
  *   previous request. Read them BEFORE the first await.
  * - `data` keeps the previous value while refetching (no flash); `loading`
  *   says a request is in flight; `error` is the last failure (aborts ignored).
+ *   A failed refresh keeps `data` (the last good value) AND sets `error`, so a
+ *   screen can show both; the next success clears `error` (ADR-074).
  * - `live` refetches (throttled, at most once per `liveIntervalMs`) when an
  *   activity-stream event passes the filter.
  * - Reads go through the data package's query cache (ADR-074): fresh data is
- *   served without a request, stale data is served at once and refreshed, and
- *   an invalidation of any key the fetcher read (live stream, mutation,
- *   `refresh()`) re-runs it. `track` records those keys while the fetcher
+ *   served without a request, time-stale data is served at once and refreshed
+ *   in the background, and an invalidation of any key the fetcher read (live
+ *   stream, mutation, `refresh()`) re-runs it and waits for the refresh, so a
+ *   failed refresh reaches `error` instead of vanishing. `track` records those keys while the fetcher
  *   runs synchronously, which is the same "before the first await" rule.
  * - A fetcher that returns a resource call directly (`(s) => getX(id, s)`)
  *   and hits the cache renders its data on the first frame: no skeleton when

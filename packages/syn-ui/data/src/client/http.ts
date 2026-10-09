@@ -1,6 +1,6 @@
 import { clientConfig } from './config'
 import { ApiError, abortError } from './errors'
-import { Coalescer } from './coalesce'
+import { Coalescer, flightTags } from './coalesce'
 import { type QueryInit, toSearchParams } from './query'
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
@@ -12,7 +12,7 @@ export interface RequestOptions {
   body?: unknown
   signal?: AbortSignal
   cache?: RequestCache
-  /** GETs are coalesced by URL unless this is false. */
+  /** GETs are coalesced by URL (plus the cache generation of a cache-managed signal) unless this is false. */
   coalesce?: boolean
 }
 
@@ -42,7 +42,10 @@ export function request<T>(path: string, options: RequestOptions = {}): Promise<
       body: options.body === undefined ? undefined : JSON.stringify(options.body),
     })
 
-  if (method === 'GET' && options.coalesce !== false) return inflight.run(url, send, options.signal)
+  if (method === 'GET' && options.coalesce !== false) {
+    const tag = options.signal ? flightTags.get(options.signal) : undefined
+    return inflight.run(tag ? `${url}\u0000${tag}` : url, send, options.signal)
+  }
   return send(options.signal)
 }
 

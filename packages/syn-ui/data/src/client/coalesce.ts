@@ -14,6 +14,13 @@ interface Flight<T> {
   waiters: number
 }
 
+/**
+ * Identity a cache-managed load stamps on the signal it hands its fetcher
+ * (query key plus generation). The transport adds it to its own coalescing key,
+ * so a request started before an invalidation is never joined by a read after it.
+ */
+export const flightTags = new WeakMap<AbortSignal, string>()
+
 export class Coalescer {
   private flights = new Map<string, Flight<unknown>>()
 

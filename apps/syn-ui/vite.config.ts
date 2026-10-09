@@ -19,6 +19,8 @@ const BASE = process.env.SYN_UI_BASE ?? '/'
 export default defineConfig({
   base: BASE,
   plugins: [svelte()],
+  // Tests run the binding's runes ($effect) on Svelte's client runtime, not the SSR one.
+  ...(process.env.VITEST ? { resolve: { conditions: ['browser'] } } : {}),
   server: {
     port: 5174,
     proxy: {
