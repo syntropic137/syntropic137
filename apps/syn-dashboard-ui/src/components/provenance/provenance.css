@@ -84,8 +84,59 @@
   list-style: none;
 }
 
+/* Skill use (#1269): long skill names wrap rather than widen the page. */
+.skill-use {
+  margin: 0.25rem 0 0;
+  font-size: 0.6875rem;
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.skill-use summary {
+  cursor: pointer;
+}
+
+.skill-use--warn {
+  color: var(--color-warning);
+}
+
+.skill-use__icon {
+  display: inline;
+  width: 0.75rem;
+  height: 0.75rem;
+  margin-right: 0.25rem;
+  vertical-align: -0.125rem;
+}
+
+.skill-use__names {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.skill-use-overview {
+  overflow-wrap: anywhere;
+}
+
+.skill-use-overview__summary {
+  margin: 0.5rem 0 0;
+  font-size: 0.875rem;
+  color: var(--color-text-primary);
+}
+
+.skill-use-overview .provenance-pins__list {
+  font-size: 0.75rem;
+}
+
 /* Phone: a 40px tap target. */
 @media (max-width: 768px) {
+  .skill-use-overview .provenance-pins__list {
+    grid-template-columns: 1fr;
+  }
+
   .provenance-copy {
     top: 0.5rem;
     right: 0.5rem;

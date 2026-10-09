@@ -14,6 +14,7 @@ from syn_api.model_identity import CostModelKey, ObservedModelId  # noqa: TC001
 from syn_api.types import (
     BranchObservationInfo,
     ExecutionEvalRunResponse,
+    ExecutionSkillUseSummary,
     PhaseActivityInfo,
     PhaseProgressInfo,
     PhaseSkillUseInfo,
@@ -326,6 +327,7 @@ class ExecutionDetailResponse(BaseModel):
     phases lists exactly that many. Draw the timeline from this, not from
     ``phases``, which holds only the phases that started.
     """
+
     total_input_tokens: int
     total_output_tokens: int
     total_cache_creation_tokens: int
@@ -444,6 +446,15 @@ class ExecutionDetailResponse(BaseModel):
     read_model_status: ReadModelStatus | None = None
     """Whether the execution detail read model is rebuilding, so a page missing
     recent phases can say why instead of looking broken."""
+
+    @computed_field(
+        description="Skill use across every phase that started: declared, "
+        "invoked anywhere, never invoked, and not knowable (feedback 01308bcf)."
+    )
+    @property
+    def skill_use(self) -> ExecutionSkillUseSummary:
+        """Derived from `phases`, so it cannot disagree with the per-phase rows."""
+        return ExecutionSkillUseSummary.of([p.skill_use for p in self.phases])
 
 
 class ExecutionSummaryResponse(BaseModel):

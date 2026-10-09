@@ -10,6 +10,7 @@ import {
   MetricCard,
   ModelBreakdown,
   PageLoader,
+  SkillUseOverview,
   StatusBadge,
 } from '../../components'
 import { TokenBreakdown } from '../../components/TokenBreakdown'
@@ -331,6 +332,7 @@ export function ExecutionDetail() {
       )}
       <DispatchedTask task={execution.task} />
       <ReposPanel repos={execution.repos ?? []} />
+      <SkillUseOverview use={execution.skill_use} />
       <ExecutionMetricsGrid
         execution={execution}
         hasCostByModel={Object.keys(aggregatedCostByModel).length > 0}

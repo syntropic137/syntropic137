@@ -11883,6 +11883,11 @@
                 "type": "null"
               }
             ]
+          },
+          "skill_use": {
+            "$ref": "#/components/schemas/ExecutionSkillUseSummary",
+            "description": "Skill use across every phase that started: declared, invoked anywhere, never invoked, and not knowable (feedback 01308bcf).",
+            "readOnly": true
           }
         },
         "type": "object",
@@ -11897,7 +11902,8 @@
           "total_output_tokens",
           "total_cache_creation_tokens",
           "total_cache_read_tokens",
-          "total_tokens"
+          "total_tokens",
+          "skill_use"
         ],
         "title": "ExecutionDetailResponse"
       },
@@ -12249,6 +12255,46 @@
           "phase_progress"
         ],
         "title": "ExecutionRunSummary"
+      },
+      "ExecutionSkillUseSummary": {
+        "properties": {
+          "declared": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Declared"
+          },
+          "invoked": {
+            "items": {
+              "$ref": "#/components/schemas/InvokedSkillInfo"
+            },
+            "type": "array",
+            "title": "Invoked"
+          },
+          "never_invoked": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Never Invoked"
+          },
+          "not_known": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Not Known"
+          },
+          "summary_display": {
+            "type": "string",
+            "title": "Summary Display",
+            "default": "no phase has started"
+          }
+        },
+        "type": "object",
+        "title": "ExecutionSkillUseSummary",
+        "description": "Skill use across every phase of one execution (feedback 01308bcf).\n\nA declared skill is only ``never_invoked`` when EVERY phase was observed.\nA phase may invoke a skill it never declared, so one phase that ran where\nuse cannot be seen (codex), or could not be read, could have used any of\nthem: every declared skill no observed phase invoked is then ``not_known``\n- the #1269 misreading this model exists to refuse, one level up."
       },
       "ExecutionStartQueueInfo": {
         "properties": {
@@ -16782,6 +16828,17 @@
             "type": "array",
             "title": "Invoked"
           },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
           "declared_not_invoked": {
             "items": {
               "type": "string"
@@ -16790,11 +16847,25 @@
             "title": "Declared Not Invoked",
             "description": "Declared skills with no observed invocation. Empty unless status is 'observed': an unobservable use is not a non-use.",
             "readOnly": true
+          },
+          "status_display": {
+            "type": "string",
+            "title": "Status Display",
+            "description": "What `status` means for this phase, in plain words. Render verbatim.",
+            "readOnly": true
+          },
+          "summary_display": {
+            "type": "string",
+            "title": "Summary Display",
+            "description": "One line on this phase's skill use. Never a count of zero for a phase whose use could not be seen. Render verbatim.",
+            "readOnly": true
           }
         },
         "type": "object",
         "required": [
-          "declared_not_invoked"
+          "declared_not_invoked",
+          "status_display",
+          "summary_display"
         ],
         "title": "PhaseSkillUseInfo",
         "description": "Which declared skills this phase actually used (#1269).\n\nDeclaring a skill installs it; only an invocation shows the agent reached\nfor it. This is the fact that tells the two apart, per phase."

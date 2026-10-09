@@ -107,6 +107,8 @@ from syn_shared.display.formatters import EM_DASH, format_cost, format_tokens
 from syn_shared.observed_model import format_observed_model
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from syn_domain.contexts.orchestration.slices.phase_profiles import (
         Percentiles,
         PhaseProfiles,
@@ -1644,6 +1646,121 @@ class PhaseSkillUseInfo(BaseModel):
             return []
         used = {s.name for s in self.invoked}
         return [name for name in self.declared if name not in used]
+
+    provider: str | None = None
+    """The harness the phase ran on, from its start pins. Named so
+    ``status_display`` can say WHICH harness hides skill use; None when the
+    pins were not read."""
+
+    @computed_field(
+        description="What `status` means for this phase, in plain words. Render verbatim."
+    )
+    @property
+    def status_display(self) -> str:
+        if self.status == "observed":
+            return "observed: read from this phase's Skill tool calls"
+        if self.status == "not_observable":
+            return f"not observable: {self.provider or 'this harness'} has no Skill tool"
+        return "unavailable: no record for this run"
+
+    @computed_field(
+        description="One line on this phase's skill use. Never a count of zero "
+        "for a phase whose use could not be seen. Render verbatim."
+    )
+    @property
+    def summary_display(self) -> str:
+        if self.status != "observed":
+            if not self.declared:
+                return f"skill use {self.status_display}"
+            return f"{_count(len(self.declared), 'skill')} declared; use {self.status_display}"
+        undeclared = len({s.name for s in self.invoked} - set(self.declared))
+        if not self.declared:
+            return (
+                f"no skills declared; {undeclared} invoked anyway"
+                if undeclared
+                else ("no skills declared")
+            )
+        extra = f", plus {undeclared} undeclared" if undeclared else ""
+        hit = len(self.declared) - len(self.declared_not_invoked)
+        return f"{hit} of {_count(len(self.declared), 'declared skill')} invoked{extra}"
+
+
+def _count(n: int, noun: str) -> str:
+    return f"{n} {noun}" if n == 1 else f"{n} {noun}s"
+
+
+class ExecutionSkillUseSummary(BaseModel):
+    """Skill use across every phase of one execution (feedback 01308bcf).
+
+    A declared skill is only ``never_invoked`` when EVERY phase was observed.
+    A phase may invoke a skill it never declared, so one phase that ran where
+    use cannot be seen (codex), or could not be read, could have used any of
+    them: every declared skill no observed phase invoked is then ``not_known``
+    - the #1269 misreading this model exists to refuse, one level up.
+    """
+
+    declared: list[str] = Field(default_factory=list)
+    """Every skill some phase declared, in first-declared order."""
+    invoked: list[InvokedSkillInfo] = Field(default_factory=list)
+    """Every skill an observed phase invoked, counts summed across phases.
+    May include a skill no phase declared."""
+    never_invoked: list[str] = Field(default_factory=list)
+    """Declared, every phase observed, and no phase invoked it."""
+    not_known: list[str] = Field(default_factory=list)
+    """Declared, not invoked where observed, and some phase (declaring it or
+    not) could not be observed - so whether it was used is unknown, never zero."""
+    summary_display: str = "no phase has started"
+
+    @classmethod
+    def of(cls, phases: Sequence[PhaseSkillUseInfo]) -> ExecutionSkillUseSummary:
+        declared = list(dict.fromkeys(name for p in phases for name in p.declared))
+        counts: dict[str, int] = {}
+        for p in phases:
+            if p.status == "observed":
+                for s in p.invoked:
+                    counts[s.name] = counts.get(s.name, 0) + s.count
+        # Undeclared invocations are real, so a blind phase hides use of ANY
+        # skill, not only the ones it declared.
+        blind = any(p.status != "observed" for p in phases)
+        unused = [name for name in declared if name not in counts]
+        never = [] if blind else unused
+        not_known = unused if blind else []
+        return cls(
+            declared=declared,
+            invoked=[InvokedSkillInfo(name=n, count=c) for n, c in sorted(counts.items())],
+            never_invoked=never,
+            not_known=not_known,
+            summary_display=_execution_summary(phases, declared, counts, never, not_known),
+        )
+
+
+def _execution_summary(
+    phases: Sequence[PhaseSkillUseInfo],
+    declared: list[str],
+    counts: dict[str, int],
+    never: list[str],
+    not_known: list[str],
+) -> str:
+    if not phases:
+        return "no phase has started"
+    if all(p.status == "unavailable" for p in phases):
+        return "unavailable: no record for this run"
+    if not any(p.status == "observed" for p in phases):
+        return (
+            f"{_count(len(declared), 'skill')} declared; use not observable on any phase"
+            if declared
+            else "no skills declared; use not observable on any phase"
+        )
+    parts = [f"{_count(len(declared), 'skill')} declared"]
+    parts.append(f"{sum(1 for n in declared if n in counts)} invoked")
+    if never or not not_known:
+        parts.append(f"{len(never)} never invoked")
+    if not_known:
+        parts.append(f"{len(not_known)} use unknown")
+    undeclared = len(set(counts) - set(declared))
+    if undeclared:
+        parts.append(f"{undeclared} undeclared invoked")
+    return " · ".join(parts)
 
 
 class BranchObservationInfo(BaseModel):

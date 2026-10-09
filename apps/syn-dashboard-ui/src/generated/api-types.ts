@@ -4167,6 +4167,8 @@ export interface components {
             resume_start?: components["schemas"]["ResumeStartInfo"] | null;
             start_queue?: components["schemas"]["ExecutionStartQueueInfo"] | null;
             read_model_status?: components["schemas"]["ReadModelStatus"] | null;
+            /** @description Skill use across every phase that started: declared, invoked anywhere, never invoked, and not knowable (feedback 01308bcf). */
+            readonly skill_use: components["schemas"]["ExecutionSkillUseSummary"];
         };
         /**
          * ExecutionEvalResponse
@@ -4300,6 +4302,31 @@ export interface components {
             /** @default unclassified */
             failure_classification: components["schemas"]["FailureClassification"];
             reported_failure_reason?: components["schemas"]["ReportedFailureReason"] | null;
+        };
+        /**
+         * ExecutionSkillUseSummary
+         * @description Skill use across every phase of one execution (feedback 01308bcf).
+         *
+         *     A declared skill is only ``never_invoked`` when EVERY phase was observed.
+         *     A phase may invoke a skill it never declared, so one phase that ran where
+         *     use cannot be seen (codex), or could not be read, could have used any of
+         *     them: every declared skill no observed phase invoked is then ``not_known``
+         *     - the #1269 misreading this model exists to refuse, one level up.
+         */
+        ExecutionSkillUseSummary: {
+            /** Declared */
+            declared?: string[];
+            /** Invoked */
+            invoked?: components["schemas"]["InvokedSkillInfo"][];
+            /** Never Invoked */
+            never_invoked?: string[];
+            /** Not Known */
+            not_known?: string[];
+            /**
+             * Summary Display
+             * @default no phase has started
+             */
+            summary_display: string;
         };
         /**
          * ExecutionStartQueueInfo
@@ -6277,11 +6304,23 @@ export interface components {
             declared?: string[];
             /** Invoked */
             invoked?: components["schemas"]["InvokedSkillInfo"][];
+            /** Provider */
+            provider?: string | null;
             /**
              * Declared Not Invoked
              * @description Declared skills with no observed invocation. Empty unless status is 'observed': an unobservable use is not a non-use.
              */
             readonly declared_not_invoked: string[];
+            /**
+             * Status Display
+             * @description What `status` means for this phase, in plain words. Render verbatim.
+             */
+            readonly status_display: string;
+            /**
+             * Summary Display
+             * @description One line on this phase's skill use. Never a count of zero for a phase whose use could not be seen. Render verbatim.
+             */
+            readonly summary_display: string;
         };
         /**
          * PhaseStartConfig
