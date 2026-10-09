@@ -6,7 +6,7 @@
 <script lang="ts">
   import type { LiveState } from '@syn137/skyline-core/patterns'
   import { href } from '../lib/router'
-  import FeedbackButton from './FeedbackButton.svelte'
+  import { FEEDBACK_LOCAL_ONLY } from './feedback.svelte'
   import LiveBadge from './LiveBadge.svelte'
   import NavIcon from './NavIcon.svelte'
   import Wordmark from './Wordmark.svelte'
@@ -29,7 +29,10 @@
 
   <div class="sky-topnav__actions">
     <LiveBadge state={live} />
-    <FeedbackButton />
+    {#if FEEDBACK_LOCAL_ONLY}
+      <!-- Lazy and dev-only: a production build carries none of the feedback code in its first load. -->
+      {#await import('./FeedbackButton.svelte') then { default: FeedbackButton }}<FeedbackButton />{/await}
+    {/if}
     <button class="sky-topnav__search" type="button" aria-label="Search or jump to" aria-keyshortcuts="Meta+K Control+K" onclick={onsearch}>
       <NavIcon name="search" size={14} />
       <kbd class="sky-topnav__kbd">⌘K</kbd>

@@ -8,7 +8,7 @@
   import type { Snippet } from 'svelte'
   import type { Crumb, LiveState } from '@syn137/skyline-core/patterns'
   import BreadcrumbTrail from './BreadcrumbTrail.svelte'
-  import { feedbackUi } from './feedback.svelte'
+  import { FEEDBACK_LOCAL_ONLY, feedbackUi } from './feedback.svelte'
   import PhoneDock from './PhoneDock.svelte'
   import PhoneTop from './PhoneTop.svelte'
   import TopNav from './TopNav.svelte'
@@ -40,7 +40,7 @@
   <div class="sky-shell__phone-nav"><PhoneDock {active} /></div>
 </div>
 
-{#if feedbackUi.mounted}
+{#if FEEDBACK_LOCAL_ONLY && feedbackUi.mounted}
   <!-- Lazy: the modal's chunk loads on the first click of a Feedback button, never in the first load. -->
   {#await import('./FeedbackDialog.svelte') then { default: FeedbackDialog }}
     <FeedbackDialog bind:open={feedbackUi.open} />
