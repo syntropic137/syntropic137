@@ -140,7 +140,7 @@ import { subscribeActivity, subscribeExecution } from '@syn137/syn-ui-data/live'
 
 ### Resources
 
-`workflows`, `executions`, `sessions`, `sessionInventory`, `evals`, `artifacts`, `triggers`, `repos`, `costs`, `observability` (metrics, tool timeline, tokens, conversation log, SSE URLs, features, version) and `insights` (`getContributionHeatmap` for the Overview Skyline). Each one ports `apps/syn-dashboard-ui/src/api/<name>.ts`. Function names match the React app except for the ones below, renamed for clarity:
+`workflows`, `executions`, `sessions`, `sessionInventory`, `evals`, `artifacts`, `triggers`, `repos`, `costs`, `feedback` (`createFeedback` only), `observability` (metrics, tool timeline, tokens, conversation log, SSE URLs, features, version) and `insights` (`getContributionHeatmap` for the Overview Skyline). Each one ports `apps/syn-dashboard-ui/src/api/<name>.ts`. Function names match the React app except for the ones below, renamed for clarity:
 
 | React | syn-ui-data |
 |---|---|
@@ -225,6 +225,17 @@ Use `resource()` from `src/lib/load.svelte.ts`. Do not fetch in `onMount` and do
 `src/shell/` holds the App Shell from the TopNav, PhoneTop and PhoneDock boards. That means the capsule nav from 48rem up, and the top bar plus floating dock below it. The dock holds Overview, Executions, Evals, Workflows (the fourth slot, provisional) and More, which opens a sheet with Sessions, Artifacts, Triggers and Repos. The shell also holds the Breadcrumb Trail, which collapses to Home, the ellipsis button, the parent and the current page on phones. `StubPage.svelte` is the placeholder that the route stubs use. Delete its import when you build your screen.
 
 The search button and ⌘K dispatch a `sky:command` window event. The Command palette (Overlays wave) listens for it.
+
+### Feedback modal
+
+A Feedback button in TopNav (and PhoneTop on phones) opens `src/shell/FeedbackDialog.svelte`, which files one item through `createFeedback()` (`POST /feedback`, lib/ui-feedback, #1385): type, priority, title, description, and the page URL (on by default). The API has no title field, so the title is the comment's first line. No screenshot: the React widget's html2canvas capture and multipart upload are not ported.
+
+The button shows only when both hold (`src/shell/feedback.svelte.ts`):
+
+- `GET /features` answers `ui_feedback: true`, which the API does when `SYN_UI_FEEDBACK_ENABLED=true` and it is built with the `feedback` extra. Off by default for open-source installs.
+- The app runs on a developer machine: the Vite dev server (`import.meta.env.DEV`) or a fixtures build (`VITE_SYN_FIXTURES=1`). A deployed production build never shows it, whatever the flag says.
+
+To see it locally: `just skyline-dev-fixtures` (the fixture answers `ui_feedback: true`), or `just skyline-dev` against an API started with `SYN_UI_FEEDBACK_ENABLED=true`. The dialog is a lazy chunk mounted by AppShell on the first click, so it never joins the first load.
 
 ### Size budget
 
