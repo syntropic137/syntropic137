@@ -56,10 +56,6 @@ from syn_api.services.workspace_dir_reclaim import (
     start_workspace_reclaim,
     stop_workspace_reclaim,
 )
-from syn_api.services.workspace_disk_cap import (
-    start_workspace_disk_cap,
-    stop_workspace_disk_cap,
-)
 from syn_api.types import (
     DbPoolHealth,
     Err,
@@ -757,8 +753,6 @@ async def _init_subscriptions(state: LifecycleState) -> None:
     start_disk_recovery_watch()
     # PC-130: and a directory whose container is gone is reclaimed on a clock too.
     start_workspace_reclaim(lambda: coordinator.is_live)
-    # #1805: and a running workspace over its disk cap is saved, then stopped.
-    start_workspace_disk_cap(lambda: coordinator.is_live)
     # PC-130: and a low disk pages someone rather than waiting to be looked at.
     start_disk_pager()
 
@@ -767,7 +761,6 @@ async def _shutdown_subscriptions(state: LifecycleState) -> None:
     """Stop subscription coordinator and workflow dispatcher."""
     await stop_disk_recovery_watch()
     await stop_workspace_reclaim()
-    await stop_workspace_disk_cap()
     await stop_disk_pager()
     await inventory_lifecycle.stop_session_inventory()
     if state.workflow_dispatcher is not None:
