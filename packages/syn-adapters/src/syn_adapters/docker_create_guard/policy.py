@@ -192,7 +192,7 @@ class CreatePolicy:
         for name in _PROC_MASK_FIELDS:
             _expect(
                 _field(host_config, name) is None,
-                f"{name} is refused: no platform container changes the /proc masks",
+                f"{name} is refused: no platform container changes the procfs masks",
             )
         for opt in _list(host_config, "SecurityOpt"):
             if not isinstance(opt, str):
