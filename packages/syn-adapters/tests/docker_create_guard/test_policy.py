@@ -12,15 +12,15 @@ import copy
 import json
 
 import pytest
+
+from syn_adapters.docker_create_guard.__main__ import policy_from_env
+from syn_adapters.docker_create_guard.policy import CreatePolicy, JsonObject, JsonValue, Refusal
+from syn_adapters.workspace_backends.docker.docker_sidecar_adapter import DEFAULT_SIDECAR_IMAGE
 from syn_shared.settings.workspace_images import (
     DEFAULT_WORKSPACE_IMAGE,
     WorkspaceImageProvider,
     workspace_image_ref,
 )
-
-from syn_adapters.docker_create_guard.__main__ import policy_from_env
-from syn_adapters.docker_create_guard.policy import CreatePolicy, Refusal
-from syn_adapters.workspace_backends.docker.docker_sidecar_adapter import DEFAULT_SIDECAR_IMAGE
 
 pytestmark = pytest.mark.unit
 
@@ -28,8 +28,6 @@ ROOT = "/srv/syn137/workspaces"
 POLICY = CreatePolicy(workspace_root=ROOT)
 LOCAL_ID = "sha256:" + "c" * 64
 CAPTURE = "syn-capture-" + "ab" * 32
-
-JsonObject = dict[str, object]
 
 
 def _no_local_images(_: str) -> tuple[str, ...]:
@@ -52,7 +50,11 @@ def workspace_body(image: str = DEFAULT_WORKSPACE_IMAGE) -> JsonObject:
             "Binds": [f"{ROOT}/ws-1:/workspace:rw"],
             "Mounts": [{"Type": "volume", "Source": CAPTURE, "Target": "/spool"}],
             "CapDrop": ["ALL"],
-            "SecurityOpt": ["no-new-privileges", "seccomp={\"defaultAction\":\"SCMP_ACT_ERRNO\"}", "apparmor=syn-workspace"],
+            "SecurityOpt": [
+                "no-new-privileges",
+                'seccomp={"defaultAction":"SCMP_ACT_ERRNO"}',
+                "apparmor=syn-workspace",
+            ],
             "ReadonlyRootfs": True,
             "Tmpfs": {"/tmp": "rw,noexec,nosuid,size=512m", "/home/agent": "rw,size=256m"},
             "PidsLimit": 256,
@@ -71,7 +73,12 @@ def sidecar_body() -> JsonObject:
         "Image": DEFAULT_SIDECAR_IMAGE,
         "Env": ["UPSTREAM=api"],
         "Labels": {"syn.sidecar": "true"},
-        "HostConfig": {"NetworkMode": "agent-net", "AutoRemove": True, "Memory": 134217728, "NanoCpus": 250000000},
+        "HostConfig": {
+            "NetworkMode": "agent-net",
+            "AutoRemove": True,
+            "Memory": 134217728,
+            "NanoCpus": 250000000,
+        },
     }
 
 
@@ -91,7 +98,7 @@ def recovery_body(image: str = LOCAL_ID) -> JsonObject:
     }
 
 
-def _with(body: JsonObject, **host_config: object) -> JsonObject:
+def _with(body: JsonObject, **host_config: JsonValue) -> JsonObject:
     changed = copy.deepcopy(body)
     hc = changed["HostConfig"]
     assert isinstance(hc, dict)
@@ -117,13 +124,21 @@ class TestPlatformShapesPass:
 
     def test_operator_pinned_image_is_allowed_from_env(self) -> None:
         policy = policy_from_env(
-            {"SYN_WORKSPACE_HOST_DIR": ROOT, "SYN_WORKSPACE_DOCKER_IMAGE": "registry.corp/ws:1@sha256:" + "d" * 64}
+            {
+                "SYN_WORKSPACE_HOST_DIR": ROOT,
+                "SYN_WORKSPACE_DOCKER_IMAGE": "registry.corp/ws:1@sha256:" + "d" * 64,
+            }
         )
         assert _check(workspace_body("registry.corp/ws:2"), policy) is None
         assert _check(workspace_body("registry.corp/other:1"), policy) is not None
 
     def test_extra_prefixes_from_env(self) -> None:
-        policy = policy_from_env({"SYN_WORKSPACE_HOST_DIR": ROOT, "SYN_DOCKER_CREATE_GUARD_IMAGE_PREFIXES": "a.io/x/, b.io/y"})
+        policy = policy_from_env(
+            {
+                "SYN_WORKSPACE_HOST_DIR": ROOT,
+                "SYN_DOCKER_CREATE_GUARD_IMAGE_PREFIXES": "a.io/x/, b.io/y",
+            }
+        )
         assert _check(workspace_body("b.io/y:1"), policy) is None
 
 
@@ -146,13 +161,32 @@ class TestHostAccessIsRefused:
             ({"Binds": [f"{ROOT}-evil/x:/x"]}, "only paths under"),
             ({"Binds": ["syn137_postgres-data:/db"]}, "volume 'syn137_postgres-data'"),
             ({"Mounts": [{"Type": "bind", "Source": "/", "Target": "/host"}]}, "'/'"),
-            ({"Mounts": [{"Type": "bind", "Source": "/var/run/docker.sock", "Target": "/s"}]}, "docker.sock"),
             (
-                {"Mounts": [{"Type": "volume", "Source": CAPTURE, "Target": "/s",
-                             "VolumeOptions": {"DriverConfig": {"Name": "local", "Options": {"o": "bind", "device": "/"}}}}]},
+                {"Mounts": [{"Type": "bind", "Source": "/var/run/docker.sock", "Target": "/s"}]},
+                "docker.sock",
+            ),
+            (
+                {
+                    "Mounts": [
+                        {
+                            "Type": "volume",
+                            "Source": CAPTURE,
+                            "Target": "/s",
+                            "VolumeOptions": {
+                                "DriverConfig": {
+                                    "Name": "local",
+                                    "Options": {"o": "bind", "device": "/"},
+                                }
+                            },
+                        }
+                    ]
+                },
                 "DriverConfig",
             ),
-            ({"Mounts": [{"Type": "image", "Source": "alpine", "Target": "/i"}]}, "mount type 'image'"),
+            (
+                {"Mounts": [{"Type": "image", "Source": "alpine", "Target": "/i"}]},
+                "mount type 'image'",
+            ),
             ({"VolumesFrom": ["syn137-docker-socket-proxy"]}, "VolumesFrom"),
             ({"SecurityOpt": ["seccomp=unconfined"]}, "seccomp=unconfined"),
         ],
@@ -166,7 +200,9 @@ class TestHostAccessIsRefused:
         body["NetworkingConfig"] = {"EndpointsConfig": {"host": {}}}
         assert _check(body) is not None
 
-    @pytest.mark.parametrize("image", ["alpine", "docker:cli", "ghcr.io/evil/agentic-workspace-x", "syn-api"])
+    @pytest.mark.parametrize(
+        "image", ["alpine", "docker:cli", "ghcr.io/evil/agentic-workspace-x", "syn-api"]
+    )
     def test_foreign_image(self, image: str) -> None:
         refusal = _check(workspace_body(image))
         assert refusal is not None and "allowlist" in refusal.reason
@@ -177,14 +213,13 @@ class TestHostAccessIsRefused:
     def test_field_names_fold_like_go(self) -> None:
         body: JsonObject = {"image": DEFAULT_WORKSPACE_IMAGE, "hostconfig": {"PRIVILEGED": True}}
         assert _check(body) is not None
-        # Long s folds to s in Go's EqualFold: "Hoſtconfig" still decodes as HostConfig.
+        # U+017F LONG S folds to s in Go's EqualFold, so this still decodes as HostConfig.
         body = {"Image": DEFAULT_WORKSPACE_IMAGE, "Ho\u017ftConfig": {"Privileged": True}}
         assert _check(body) is not None
 
     def test_ambiguous_duplicate_field_is_refused(self) -> None:
-        raw = (
-            '{"Image": "%s", "HostConfig": {"Privileged": false, "privileged": true}}' % DEFAULT_WORKSPACE_IMAGE
-        ).encode()
+        image = json.dumps(DEFAULT_WORKSPACE_IMAGE)
+        raw = f'{{"Image": {image}, "HostConfig": {{"Privileged": false, "privileged": true}}}}'.encode()
         refusal = POLICY.check(raw, _no_local_images)
         assert refusal is not None and "more than once" in refusal.reason
 

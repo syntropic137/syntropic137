@@ -13,7 +13,11 @@ from __future__ import annotations
 import logging
 import os
 
-from syn_adapters.docker_create_guard.policy import DEFAULT_IMAGE_PREFIXES, CreatePolicy, image_repository
+from syn_adapters.docker_create_guard.policy import (
+    DEFAULT_IMAGE_PREFIXES,
+    CreatePolicy,
+    image_repository,
+)
 from syn_adapters.docker_create_guard.server import DockerSocket, serve
 
 

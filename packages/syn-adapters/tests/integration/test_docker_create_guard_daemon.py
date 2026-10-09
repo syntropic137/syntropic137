@@ -13,13 +13,16 @@ import json
 import os
 import threading
 import uuid
-from collections.abc import Iterator
 from http.server import ThreadingHTTPServer
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
-from syn_adapters.docker_create_guard.policy import DEFAULT_IMAGE_PREFIXES, CreatePolicy
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+from syn_adapters.docker_create_guard.policy import DEFAULT_IMAGE_PREFIXES, CreatePolicy, JsonObject
 from syn_adapters.docker_create_guard.server import DockerSocket, make_handler
 
 SOCKET = os.environ.get("SYN_DOCKER_CREATE_GUARD_SOCKET", "/var/run/docker.sock")
@@ -36,17 +39,24 @@ def guard(tmp_path: Path) -> Iterator[tuple[int, DockerSocket, Path]]:
     daemon = DockerSocket(SOCKET)
     status, _, _ = daemon.request("POST", f"/images/create?fromImage={IMAGE}", b"", {})
     assert status == 200, f"could not pull {IMAGE}"
-    policy = CreatePolicy(workspace_root=str(tmp_path), image_prefixes=(*DEFAULT_IMAGE_PREFIXES, "alpine"))
+    policy = CreatePolicy(
+        workspace_root=str(tmp_path), image_prefixes=(*DEFAULT_IMAGE_PREFIXES, "alpine")
+    )
     server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(policy, daemon))
     threading.Thread(target=server.serve_forever, daemon=True).start()
     yield server.server_address[1], daemon, tmp_path
     server.shutdown()
 
 
-def _create(port: int, name: str, host_config: dict[str, object]) -> int:
+def _create(port: int, name: str, host_config: JsonObject) -> int:
     conn = http.client.HTTPConnection("127.0.0.1", port, timeout=60)
     body = {"Image": IMAGE, "Cmd": ["true"], "HostConfig": host_config}
-    conn.request("POST", f"/containers/create?name={name}", body=json.dumps(body), headers={"Content-Type": "application/json"})
+    conn.request(
+        "POST",
+        f"/containers/create?name={name}",
+        body=json.dumps(body),
+        headers={"Content-Type": "application/json"},
+    )
     return conn.getresponse().status
 
 
@@ -64,14 +74,18 @@ def test_workspace_shape_is_created(guard: tuple[int, DockerSocket, Path]) -> No
     (root / "ws-1").mkdir()
     name = f"syn-guard-it-{uuid.uuid4().hex[:8]}"
     try:
-        status = _create(port, name, {
-            "Binds": [f"{root}/ws-1:/workspace:rw"],
-            "CapDrop": ["ALL"],
-            "SecurityOpt": ["no-new-privileges"],
-            "ReadonlyRootfs": True,
-            "Tmpfs": {"/tmp": "rw,size=16m"},
-            "NetworkMode": "none",
-        })
+        status = _create(
+            port,
+            name,
+            {
+                "Binds": [f"{root}/ws-1:/workspace:rw"],
+                "CapDrop": ["ALL"],
+                "SecurityOpt": ["no-new-privileges"],
+                "ReadonlyRootfs": True,
+                "Tmpfs": {"/tmp": "rw,size=16m"},
+                "NetworkMode": "none",
+            },
+        )
         assert status == 201 and _exists(daemon, name)
     finally:
         _remove(daemon, name)
@@ -81,7 +95,12 @@ def test_sidecar_shape_is_created(guard: tuple[int, DockerSocket, Path]) -> None
     port, daemon, _ = guard
     name = f"syn-guard-it-{uuid.uuid4().hex[:8]}"
     try:
-        assert _create(port, name, {"NetworkMode": "bridge", "Memory": 134217728, "NanoCpus": 250000000}) == 201
+        assert (
+            _create(
+                port, name, {"NetworkMode": "bridge", "Memory": 134217728, "NanoCpus": 250000000}
+            )
+            == 201
+        )
         assert _exists(daemon, name)
     finally:
         _remove(daemon, name)
@@ -98,7 +117,7 @@ def test_sidecar_shape_is_created(guard: tuple[int, DockerSocket, Path]) -> None
     ids=["privileged", "bind-root", "host-network", "docker-sock"],
 )
 def test_host_access_is_refused_and_nothing_is_created(
-    guard: tuple[int, DockerSocket, Path], host_config: dict[str, object]
+    guard: tuple[int, DockerSocket, Path], host_config: JsonObject
 ) -> None:
     port, daemon, _ = guard
     name = f"syn-guard-it-{uuid.uuid4().hex[:8]}"

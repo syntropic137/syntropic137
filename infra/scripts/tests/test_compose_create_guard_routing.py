@@ -71,7 +71,9 @@ class TestCreateRouting:
             "/v1.47/containers/%63reate",
         ],
     )
-    def test_every_create_spelling_is_routed(self, compose: Path, tmp_path: Path, path: str) -> None:
+    def test_every_create_spelling_is_routed(
+        self, compose: Path, tmp_path: Path, path: str
+    ) -> None:
         assert _routed(_patched(compose, tmp_path), "POST", path)
 
     @pytest.mark.parametrize(
@@ -96,10 +98,15 @@ class TestCreateRouting:
         assert "use_backend docker-create-guard" in frontend
         assert "backend docker-create-guard\n    server guard docker-create-guard:2375" in config
 
-    def test_guard_service_holds_the_socket_and_no_capabilities(self, compose: Path, tmp_path: Path) -> None:
+    def test_guard_service_holds_the_socket_and_no_capabilities(
+        self, compose: Path, tmp_path: Path
+    ) -> None:
         guard = yaml.safe_load(compose.read_text())["services"]["docker-create-guard"]
         assert guard["command"] == ["python", "-m", "syn_adapters.docker_create_guard"]
         assert "/var/run/docker.sock:/var/run/docker.sock" in guard["volumes"]
         assert guard["cap_drop"] == ["ALL"] and "cap_add" not in guard
         assert guard["networks"] == ["docker-proxy"]
-        assert guard["environment"]["SYN_WORKSPACE_HOST_DIR"] == "${SYN_INSTALL_DIR:-${PWD}}/workspaces"
+        assert (
+            guard["environment"]["SYN_WORKSPACE_HOST_DIR"]
+            == "${SYN_INSTALL_DIR:-${PWD}}/workspaces"
+        )

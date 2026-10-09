@@ -13,14 +13,22 @@ import logging
 import re
 import socket
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import TYPE_CHECKING
 from urllib.parse import quote, unquote, urlsplit
 
-from syn_adapters.docker_create_guard.policy import CreatePolicy
+if TYPE_CHECKING:
+    from syn_adapters.docker_create_guard.policy import CreatePolicy
 
 logger = logging.getLogger(__name__)
 
 CREATE_PATH = re.compile(r"^(/v[0-9.]+)?/containers/create/*$", re.IGNORECASE)
-_FORWARDED_RESPONSE_HEADERS = ("Content-Type", "Api-Version", "Docker-Experimental", "Ostype", "Server")
+_FORWARDED_RESPONSE_HEADERS = (
+    "Content-Type",
+    "Api-Version",
+    "Docker-Experimental",
+    "Ostype",
+    "Server",
+)
 _MAX_BODY_BYTES = 4 * 1024 * 1024
 
 
@@ -67,7 +75,9 @@ def make_handler(policy: CreatePolicy, docker: DockerSocket) -> type[BaseHTTPReq
 
         def do_POST(self) -> None:
             if not CREATE_PATH.match(unquote(urlsplit(self.path).path)):
-                self._reply(403, f"the create guard only serves container create, not {self.path!r}")
+                self._reply(
+                    403, f"the create guard only serves container create, not {self.path!r}"
+                )
                 return
             length = self.headers.get("Content-Length")
             if length is None or not length.isdigit() or int(length) > _MAX_BODY_BYTES:
@@ -77,11 +87,15 @@ def make_handler(policy: CreatePolicy, docker: DockerSocket) -> type[BaseHTTPReq
             refusal = policy.check(body, docker.image_names)
             if refusal is not None:
                 logger.warning("refused container create: %s", refusal.reason)
-                self._reply(403, f"refused by the Syntropic137 container-create guard: {refusal.reason}")
+                self._reply(
+                    403, f"refused by the Syntropic137 container-create guard: {refusal.reason}"
+                )
                 return
             headers = {"Content-Type": self.headers.get("Content-Type", "application/json")}
             try:
-                status, response_headers, response_body = docker.request("POST", self.path, body, headers)
+                status, response_headers, response_body = docker.request(
+                    "POST", self.path, body, headers
+                )
             except OSError as exc:
                 logger.error("container create could not reach the Docker socket: %s", exc)
                 self._reply(502, f"the create guard could not reach the Docker daemon: {exc}")
@@ -102,13 +116,13 @@ def make_handler(policy: CreatePolicy, docker: DockerSocket) -> type[BaseHTTPReq
             self.end_headers()
             self.wfile.write(payload)
 
-        def log_message(self, format: str, *args: object) -> None:  # noqa: A002 - stdlib signature
+        def log_message(self, format: str, *args: object) -> None:
             logger.debug(format, *args)
 
     return CreateGuardHandler
 
 
 def serve(policy: CreatePolicy, docker: DockerSocket, port: int) -> None:
-    server = ThreadingHTTPServer(("0.0.0.0", port), make_handler(policy, docker))  # noqa: S104 - compose-internal network only
+    server = ThreadingHTTPServer(("0.0.0.0", port), make_handler(policy, docker))
     logger.info("container-create guard listening on :%d", port)
     server.serve_forever()

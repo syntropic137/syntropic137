@@ -31,6 +31,12 @@ import posixpath
 import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from typing import NoReturn
+
+type JsonValue = str | int | float | bool | None | list[JsonValue] | dict[str, JsonValue]
+"""A decoded JSON value. The create body is checked field by field, not modelled:
+the daemon decodes it case-insensitively, which a model would not reproduce."""
+type JsonObject = dict[str, JsonValue]
 
 DEFAULT_IMAGE_PREFIXES: tuple[str, ...] = (
     "ghcr.io/agentparadise/agentic-workspace-",
@@ -39,11 +45,25 @@ DEFAULT_IMAGE_PREFIXES: tuple[str, ...] = (
 )
 DEFAULT_VOLUME_PREFIXES: tuple[str, ...] = ("syn-capture-",)
 
-_HOST_NAMESPACE_FIELDS = ("NetworkMode", "PidMode", "IpcMode", "UTSMode", "UsernsMode", "CgroupnsMode")
+_HOST_NAMESPACE_FIELDS = (
+    "NetworkMode",
+    "PidMode",
+    "IpcMode",
+    "UTSMode",
+    "UsernsMode",
+    "CgroupnsMode",
+)
 _DEVICE_FIELDS = ("Devices", "DeviceRequests", "DeviceCgroupRules")
 _UNCONFINED_SECURITY_OPTS = frozenset(
-    {"seccomp=unconfined", "seccomp:unconfined", "apparmor=unconfined", "apparmor:unconfined",
-     "label=disable", "label:disable", "systempaths=unconfined"}
+    {
+        "seccomp=unconfined",
+        "seccomp:unconfined",
+        "apparmor=unconfined",
+        "apparmor:unconfined",
+        "label=disable",
+        "label:disable",
+        "systempaths=unconfined",
+    }
 )
 
 
@@ -76,11 +96,13 @@ class CreatePolicy:
         """Return why ``body`` (a ``POST /containers/create`` payload) is refused, or None."""
         try:
             request = json.loads(body)
-            _expect(isinstance(request, dict), "the create body is not a JSON object")
+            if not isinstance(request, dict):
+                _refuse("the create body is not a JSON object")
             self._check_image(_field(request, "Image"), image_names)
             host_config = _field(request, "HostConfig")
             if host_config is not None:
-                _expect(isinstance(host_config, dict), "HostConfig is not an object")
+                if not isinstance(host_config, dict):
+                    _refuse("HostConfig is not an object")
                 self._check_host_config(host_config)
             self._check_endpoints(_field(request, "NetworkingConfig"))
         except _Refused as refused:
@@ -90,8 +112,8 @@ class CreatePolicy:
         return None
 
     def _check_image(self, image: object, image_names: ImageNames) -> None:
-        _expect(isinstance(image, str) and image != "", "the create request names no image")
-        assert isinstance(image, str)  # narrowed by _expect above
+        if not isinstance(image, str) or image == "":
+            _refuse("the create request names no image")
         candidates = image_names(image) if _is_image_id(image) else (image,)
         if not any(self._image_allowed(name) for name in candidates):
             _refuse(
@@ -103,14 +125,24 @@ class CreatePolicy:
         repository = image_repository(image)
         return any(repository.startswith(prefix) for prefix in self.image_prefixes)
 
-    def _check_host_config(self, host_config: Mapping[str, object]) -> None:
-        _expect(_field(host_config, "Privileged") in (None, False), "privileged containers are refused")
-        _expect(not _field(host_config, "CapAdd"), "CapAdd is refused: no platform container adds capabilities")
+    def _check_host_config(self, host_config: Mapping[str, JsonValue]) -> None:
+        _expect(
+            _field(host_config, "Privileged") in (None, False), "privileged containers are refused"
+        )
+        _expect(
+            not _field(host_config, "CapAdd"),
+            "CapAdd is refused: no platform container adds capabilities",
+        )
         for name in _HOST_NAMESPACE_FIELDS:
             mode = _field(host_config, name)
-            _expect(not (isinstance(mode, str) and mode.lower() == "host"), f"{name}=host is refused")
+            _expect(
+                not (isinstance(mode, str) and mode.lower() == "host"), f"{name}=host is refused"
+            )
         for name in _DEVICE_FIELDS:
-            _expect(not _field(host_config, name), f"{name} is refused: no platform container maps devices")
+            _expect(
+                not _field(host_config, name),
+                f"{name} is refused: no platform container maps devices",
+            )
         _expect(not _field(host_config, "VolumesFrom"), "VolumesFrom is refused")
         _expect(not _field(host_config, "VolumeDriver"), "VolumeDriver is refused")
         for opt in _list(host_config, "SecurityOpt"):
@@ -119,45 +151,44 @@ class CreatePolicy:
                 f"SecurityOpt {opt!r} is refused",
             )
         for bind in _list(host_config, "Binds"):
-            _expect(isinstance(bind, str), "a Binds entry is not a string")
-            assert isinstance(bind, str)  # narrowed by _expect above
+            if not isinstance(bind, str):
+                _refuse("a Binds entry is not a string")
             source = bind.split(":", 1)[0]
             if source.startswith("/"):
                 self._check_host_path(source)
             else:
                 self._check_volume_name(source)
         for mount in _list(host_config, "Mounts"):
-            _expect(isinstance(mount, dict), "a Mounts entry is not an object")
-            assert isinstance(mount, dict)  # narrowed by _expect above
+            if not isinstance(mount, dict):
+                _refuse("a Mounts entry is not an object")
             self._check_mount(mount)
 
-    def _check_mount(self, mount: Mapping[str, object]) -> None:
+    def _check_mount(self, mount: Mapping[str, JsonValue]) -> None:
         kind = _field(mount, "Type")
         source = _field(mount, "Source")
         if kind == "bind":
-            _expect(isinstance(source, str), "a bind mount has no source")
-            assert isinstance(source, str)  # narrowed by _expect above
+            if not isinstance(source, str):
+                _refuse("a bind mount has no source")
             self._check_host_path(source)
         elif kind == "volume":
             options = _field(mount, "VolumeOptions")
             if options is not None:
-                _expect(isinstance(options, dict), "VolumeOptions is not an object")
-                assert isinstance(options, dict)  # narrowed by _expect above
+                if not isinstance(options, dict):
+                    _refuse("VolumeOptions is not an object")
                 _expect(not _field(options, "DriverConfig"), "a volume DriverConfig is refused")
             if source not in (None, ""):
-                _expect(isinstance(source, str), "a volume mount source is not a string")
-                assert isinstance(source, str)  # narrowed by _expect above
+                if not isinstance(source, str):
+                    _refuse("a volume mount source is not a string")
                 self._check_volume_name(source)
         else:
             _expect(kind == "tmpfs", f"mount type {kind!r} is refused")
 
     def _check_host_path(self, source: str) -> None:
         root = self.workspace_root
-        _expect(
-            root is not None,
-            f"bind mount of {source!r} is refused: SYN_WORKSPACE_HOST_DIR is not set for the guard",
-        )
-        assert root is not None  # narrowed by _expect above
+        if root is None:
+            _refuse(
+                f"bind mount of {source!r} is refused: SYN_WORKSPACE_HOST_DIR is not set for the guard"
+            )
         normal_root = posixpath.normpath(root)
         _expect(".." not in source.split("/"), f"bind mount source {source!r} contains '..'")
         normal = posixpath.normpath(source)
@@ -177,10 +208,13 @@ class CreatePolicy:
             return
         endpoints = _field(networking, "EndpointsConfig")
         if isinstance(endpoints, dict):
-            _expect("host" not in {str(name).lower() for name in endpoints}, "the host network is refused")
+            _expect(
+                "host" not in {str(name).lower() for name in endpoints},
+                "the host network is refused",
+            )
 
 
-def _field(obj: Mapping[str, object], name: str) -> object:
+def _field(obj: Mapping[str, JsonValue], name: str) -> JsonValue:
     """Read ``name`` the way Go's encoding/json does: case-insensitively."""
     folded = name.casefold()
     matches = [key for key in obj if key.casefold() == folded]
@@ -188,12 +222,12 @@ def _field(obj: Mapping[str, object], name: str) -> object:
     return obj[matches[0]] if matches else None
 
 
-def _list(obj: Mapping[str, object], name: str) -> list[object]:
+def _list(obj: Mapping[str, JsonValue], name: str) -> list[JsonValue]:
     value = _field(obj, name)
     if value is None:
         return []
-    _expect(isinstance(value, list), f"{name} is not a list")
-    assert isinstance(value, list)  # narrowed by _expect above
+    if not isinstance(value, list):
+        _refuse(f"{name} is not a list")
     return list(value)
 
 
@@ -214,5 +248,5 @@ def _expect(condition: bool, reason: str) -> None:
         raise _Refused(reason)
 
 
-def _refuse(reason: str) -> None:
+def _refuse(reason: str) -> NoReturn:
     raise _Refused(reason)
