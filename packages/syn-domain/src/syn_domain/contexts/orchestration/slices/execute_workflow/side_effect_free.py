@@ -98,6 +98,14 @@ def _unwrap_shell(command: str) -> str | None:
     return command
 
 
+#: Options that make an otherwise reading program write a file or run another
+#: one, whichever program carries them: `git diff --output`, `rg --pre`.
+_WRITING_OPTIONS: tuple[str, ...] = ("--output", "--pre")
+
+#: `find` actions that run, delete or write (`-fprint`, `-fls`).
+_FIND_ACTIONS: tuple[str, ...] = ("-exec", "-ok", "-delete", "-fprint", "-fls")
+
+
 def _segment_reads(segment: str) -> bool:
     try:
         words = shlex.split(segment)
@@ -106,13 +114,14 @@ def _segment_reads(segment: str) -> bool:
     if not words:
         return False
     program, args = PurePosixPath(words[0]).name, words[1:]
+    if any(a.startswith(_WRITING_OPTIONS) for a in args):
+        return False
     if program in _READ_ONLY_PROGRAMS:
         return True
     if program == "sed":
         return _sed_prints(args)
     if program == "find":
-        return not any(a in {"-exec", "-execdir", "-ok", "-okdir", "-delete"} or
-                       a.startswith("-fprint") for a in args)  # fmt: skip
+        return not any(a.startswith(_FIND_ACTIONS) for a in args)
     if program == "git":
         return _git_subcommand(args) in _READ_ONLY_GIT
     if program == "gh":
