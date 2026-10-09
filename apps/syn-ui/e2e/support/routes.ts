@@ -57,6 +57,12 @@ export interface RouteCase {
   title?: RegExp
   /** Stricter heading on fixtures. */
   fixtureHeading?: RegExp
+  /**
+   * The detail opens inside its list's screen and keeps the list's h1
+   * (Triggers board: the rule opens beside or under its row). Arrival is the
+   * current breadcrumb naming the item instead of a new heading.
+   */
+  sharesListHeading?: boolean
   /** Text that must appear on fixtures. */
   fixtureText: (string | RegExp)[]
   /** Breadcrumb parents on desktop; [] means no trail (Overview). */
@@ -205,6 +211,7 @@ export const ROUTES: RouteCase[] = [
     nav: 'Triggers',
     heading: /\S/,
     fixtureHeading: /Triggers|Review requested changes/,
+    sharesListHeading: true,
     fixtureText: ['pull_request_review.submitted', 'PR Review'],
     crumbs: [crumb('Triggers', '/triggers')],
   },

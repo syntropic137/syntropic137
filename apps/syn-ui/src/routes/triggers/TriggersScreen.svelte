@@ -41,9 +41,9 @@
   const openId = $derived(selectedId ?? (wide ? (shown[0]?.trigger_id ?? null) : null))
   const selectedMissing = $derived(Boolean(selectedId && list.data && !all.some((t) => t.trigger_id === selectedId)))
 
-  // A wide screen always shows a rule, so its panel owns the trail (Triggers > rule), as on the board.
+  // The board's "Triggers > rule" trail belongs to /triggers/:id; the auto-opened rule on /triggers is not a page.
   $effect(() => {
-    if (!selectedId && !(wide && openId)) setPage({ title: 'Triggers', crumbs: [{ label: 'Triggers' }] })
+    if (!selectedId) setPage({ title: 'Triggers', crumbs: [{ label: 'Triggers' }] })
   })
 
   const pending = $state<Record<string, boolean>>({})
@@ -154,7 +154,7 @@
       {#if wide && openId}
         <div class="sky-triggers__detail">
           {#key openId}
-            <TriggerPanel triggerId={openId} setCrumbs onchanged={() => list.refresh()} />
+            <TriggerPanel triggerId={openId} setCrumbs={Boolean(selectedId)} onchanged={() => list.refresh()} />
           {/key}
         </div>
       {/if}

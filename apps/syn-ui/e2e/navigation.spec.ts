@@ -48,7 +48,9 @@ test.describe('list to detail and back', () => {
       await page.locator(`a[href$="${listPath}/${encodeURIComponent(id!)}"]`).first().click()
       await expect(page).toHaveURL(urlFor(`${listPath}/${encodeURIComponent(id!)}`))
       // The detail's own heading: its breadcrumb trail is final from here on.
-      await arrived(page, listHeading)
+      // A detail that keeps the list's heading has arrived once the trail names it.
+      if (route.sharesListHeading && isSkyline) await expect(breadcrumbs(page).locator('[aria-current="page"]').first()).not.toHaveText(listHeading ?? '')
+      else await arrived(page, listHeading)
       expect(await windowStillMarked(page), 'client-side navigation (no reload)').toBe(true)
 
       // Back to the list through the breadcrumb.
