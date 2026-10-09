@@ -290,6 +290,8 @@
     gap: var(--ds-space-5) var(--ds-space-6);
   }
   .sky-verdicts__scroll {
+    /* Containing block for the visually hidden column names, so a column past the edge cannot widen the page. */
+    position: relative;
     flex: 999 1 40rem;
     min-width: 0;
     overflow-x: auto;
@@ -578,6 +580,7 @@
     font-size: var(--ds-text-md);
     line-height: 1.5;
     color: var(--sky-color-text-code);
+    overflow-wrap: anywhere;
   }
   .sky-verdicts__stats {
     display: grid;

@@ -12,6 +12,7 @@ import {
   variantPassed,
   withLatestRun,
   workflowLabel,
+  evidenceSummary,
   filterEvals,
   pageOf,
   recentVerdicts,
@@ -266,5 +267,16 @@ describe('evals list from one load', () => {
     expect(recentVerdicts(s)).toEqual(['pass', 'fail'])
     expect(recentVerdicts({ ...a, variants: [] })).toEqual(['pass'])
     expect(recentVerdicts({ ...a, run_count: 0 })).toEqual([])
+  })
+})
+
+describe('board readout evidence', () => {
+  it('summarises a scorer excerpt in one sentence', () => {
+    expect(evidenceSummary('## c (defect)\n\n- run status: `completed`\n- review verdict: `blocked` (a pass needs `blocked`)\n- blocking findings: 1\n- expected file named: `a/b.py` ')).toBe(
+      'Review verdict blocked (pass needs blocked). 1 blocking finding. Expected file: a/b.py.',
+    )
+    expect(evidenceSummary('- run status: `failed`\n- blocking findings: 0')).toBe('Run failed. 0 blocking findings.')
+    expect(evidenceSummary('free text')).toBe('free text')
+    expect(evidenceSummary(null)).toBeNull()
   })
 })

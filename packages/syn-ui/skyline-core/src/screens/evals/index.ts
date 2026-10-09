@@ -520,6 +520,22 @@ export function evidenceFallback(verdict: Verdict): string {
   }
 }
 
+/**
+ * One readable sentence from a scorer excerpt for the board readout:
+ * "Review verdict blocked (pass needs blocked). 1 blocking finding. Expected file: X."
+ * Free text comes back as it is; null stays null.
+ */
+export function evidenceSummary(text: string | null | undefined): string | null {
+  const f = parseEvidence(text)
+  if (!f) return text ?? null
+  const parts: string[] = []
+  if (f.runStatus && f.runStatus !== 'completed') parts.push(`Run ${f.runStatus}`)
+  if (f.reviewVerdict) parts.push(`Review verdict ${f.reviewVerdict}${f.reviewNeeds ? ` (pass needs ${f.reviewNeeds})` : ''}`)
+  if (f.findings !== null) parts.push(`${f.findings} blocking ${f.findings === 1 ? 'finding' : 'findings'}`)
+  if (f.expectedFile) parts.push(`Expected file: ${f.expectedFile}`)
+  return parts.map((x) => `${x}.`).join(' ')
+}
+
 /** Board readout cell enriched with the latest run of the selected eval. */
 export function withLatestRun(cell: VerdictCell | undefined, run: (EvalRunLike & { evidence_excerpt?: string | null; duration_seconds?: number | null; total_cost_usd?: string | null }) | undefined, extra: { date?: string; runHref?: string } = {}): VerdictCell | undefined {
   if (!cell || !run) return cell
@@ -529,7 +545,7 @@ export function withLatestRun(cell: VerdictCell | undefined, run: (EvalRunLike &
     verdict,
     costUsd: toNum(run.total_cost_usd) ?? cell.costUsd,
     durationMs: typeof run.duration_seconds === 'number' ? run.duration_seconds * 1000 : cell.durationMs,
-    evidence: run.evidence_excerpt ?? evidenceFallback(verdict),
+    evidence: evidenceSummary(run.evidence_excerpt) ?? evidenceFallback(verdict),
     ...extra,
   }
 }
