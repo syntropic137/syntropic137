@@ -168,10 +168,7 @@ def paginate[R, T](
             continue
         matched.append(record)
 
-    if key_of is not None:
-        matched.sort(key=key_of)
-    # Stable: equal timestamps keep the key order just established.
-    matched.sort(key=lambda r: str(timestamp_of(r) or ""), reverse=True)
+    _newest_first(matched, timestamp_of, key_of)
     window = matched[offset : offset + limit] if limit is not None else matched[offset:]
     return Page(
         rows=[to_row(r) for r in window],
@@ -179,6 +176,16 @@ def paginate[R, T](
         status_counts=counts,
         excluded_undated=undated,
     )
+
+
+def _newest_first[R](
+    rows: list[R], timestamp_of: Callable[[R], object], key_of: Callable[[R], str] | None
+) -> None:
+    """Sort ``rows`` in place: timestamp descending, ties by ``key_of`` ascending."""
+    if key_of is not None:
+        rows.sort(key=key_of)
+    # Stable: equal timestamps keep the key order just established.
+    rows.sort(key=lambda r: str(timestamp_of(r) or ""), reverse=True)
 
 
 def _status_is_selected(status: str, allowed: set[str] | None) -> bool:
