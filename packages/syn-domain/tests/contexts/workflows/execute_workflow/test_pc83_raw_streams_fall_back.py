@@ -10,13 +10,15 @@ handler. What is asserted is the recorded `AgentExecutionCompleted`, the
 execution detail the API reads, and the message an operator sees.
 
 Mutation check: replacing the fallback dispatch in `run_phase_agent` with a
-return of the primary's result fails (a) and (b) below.
+return of the primary's result fails (a), (b) and (e) below; dropping the
+`work_done` guard from `fallback_attempt` fails (f).
 """
 
 from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field, replace
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -112,6 +114,19 @@ CODEX_QUOTA_SENTENCE = (
     "purchase more credits or try again at Oct 9th, 2026 9:10 PM."
 )
 CODEX_QUOTA = json.dumps({"type": "turn.failed", "error": {"message": CODEX_QUOTA_SENTENCE}})
+
+#: The real codex content-filter refusal, as codex streamed it (exec-61dad6055e6f).
+#: Its first lines are an `item.completed` - the agent had started work.
+CODEX_REFUSED_AFTER_WORK: tuple[str, ...] = tuple(
+    (Path(__file__).parents[3] / "fixtures" / "codex" / "codex_turn_failed.jsonl")
+    .read_text()
+    .splitlines()
+)
+#: The same refusal arriving before codex completed any item: the request was
+#: declined before the agent did anything.
+CODEX_REFUSED_BEFORE_WORK: tuple[str, ...] = tuple(
+    line for line in CODEX_REFUSED_AFTER_WORK if '"item.completed"' not in line
+)
 
 #: A failure that is neither busy nor quota, for the fallback itself to hit.
 CODEX_NOT_LOGGED_IN = json.dumps(
@@ -330,3 +345,33 @@ class TestRawStreamsFallBack:
         assert "overloaded" in message.lower(), message
         assert "Then the fallback agent failed" in message, message
         assert "not logged in" in message, message
+
+    async def test_e_a_codex_refusal_before_any_work_completes_on_the_fallback(self) -> None:
+        """(e) Codex's content filter refuses before any item: not retried, claude runs it."""
+        agent = _RawJsonlAgent(attempts=(CODEX_REFUSED_BEFORE_WORK, (CLAUDE_SUCCEEDS,)))
+        phase = _phase(AgentConfiguration(provider=AgentProvider.CODEX), CLAUDE_FALLBACK)
+
+        result, repository = await _run(agent, phase, "exec-refusal-raw-before-work")
+
+        assert result.status == "completed", result.error_message
+        assert agent.runners == [AgentRunner.CODEX, AgentRunner.CLAUDE], (
+            "a refusal was retried on the primary, or the fallback never ran"
+        )
+        completed = _completed(repository)
+        assert completed.agent_provider == AgentProvider.CLAUDE
+        assert completed.agent_model == "claude-fallback-model"
+        (row,) = (await _detail(repository, "exec-refusal-raw-before-work")).phases
+        assert row.agent_provider == AgentProvider.CLAUDE
+
+    async def test_f_a_codex_refusal_after_work_does_not_fall_back(self) -> None:
+        """(f) The real stream: codex completed an item, then was refused. No fallback."""
+        agent = _RawJsonlAgent(attempts=(CODEX_REFUSED_AFTER_WORK, (CLAUDE_SUCCEEDS,)))
+        phase = _phase(AgentConfiguration(provider=AgentProvider.CODEX), CLAUDE_FALLBACK)
+
+        result, _repository = await _run(agent, phase, "exec-refusal-raw-after-work")
+
+        assert result.status == "failed"
+        assert agent.runners == [AgentRunner.CODEX], (
+            "the fallback re-ran a phase whose primary had already done work"
+        )
+        assert "flagged for possible cybersecurity risk" in (result.error_message or "")
