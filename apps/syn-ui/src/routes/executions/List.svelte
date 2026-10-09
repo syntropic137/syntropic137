@@ -1,7 +1,7 @@
 <!--
   Executions (boards: Executions, PhoneExecutions). One responsive page:
   base styles are the phone board, the table header and wider hero arrive
-  at 48rem. Filters live in the URL (?status=, ?q=, ?window=, ?page=) so a
+  at 48rem. Filters live in the URL (?status=, ?q=, ?window=, ?eval=, ?page=) so a
   link reproduces the view. Live: refetches when an execution event lands.
 -->
 <script lang="ts">
@@ -9,6 +9,8 @@
   import { runBarPercent, runSegments, runSlots, runSubline } from '@syn137/skyline-core/patterns'
   import {
     EXECUTION_FILTERS,
+    evalBadge,
+    parseEvalFilter,
     TIME_WINDOWS,
     executionsLede,
     executionsLedeShort,
@@ -21,7 +23,7 @@
     timeWindowParam,
     timeWindowStart,
   } from '@syn137/skyline-core/screens/executions'
-  import { Button, Callout, EmptyState, Input, Pagination, Skeleton, ToggleGroup } from '@syn137/skyline-svelte-v5'
+  import { Button, Callout, EmptyState, Input, Pagination, Skeleton, Toggle, ToggleGroup } from '@syn137/skyline-svelte-v5'
   import { ObjectIcon, RunRow } from '@syn137/skyline-svelte-v5/patterns'
   import { ApiError, MAX_PAGE_SIZE, listExecutions } from '@syn137/syn-ui-data'
   import type { ExecutionListResponse } from '@syn137/syn-ui-data/types'
@@ -41,6 +43,7 @@
   const window = $derived(parseTimeWindow(router.query.get('window'), DEFAULT_LIST_WINDOW))
   const page = $derived(Math.max(1, Number(router.query.get('page')) || 1))
   const q = $derived(router.query.get('q') ?? '')
+  const evalsOnly = $derived(parseEvalFilter(router.query.get('eval')))
 
   // The search box is local while typing; the URL follows after a pause.
   let search = $state(router.query.get('q') ?? '')
@@ -59,6 +62,7 @@
         statuses: status === 'all' ? undefined : [status],
         started_after: timeWindowStart(window, Date.now()),
         q: q || undefined,
+        in_eval: evalsOnly || undefined,
       }
       return listExecutions(query, signal)
     },
@@ -82,7 +86,7 @@
     })),
   )
 
-  const filtered = $derived(status !== 'all' || window !== DEFAULT_LIST_WINDOW || q !== '')
+  const filtered = $derived(status !== 'all' || window !== DEFAULT_LIST_WINDOW || q !== '' || evalsOnly)
 
   function rowSub(r: Row): string {
     const repo = r.repos_display ?? null
@@ -101,7 +105,7 @@
 
   function clearFilters() {
     search = ''
-    router.setQuery({ status: null, window: null, q: null, page: null })
+    router.setQuery({ status: null, window: null, q: null, eval: null, page: null })
   }
 </script>
 
@@ -153,6 +157,13 @@
       value={[status]}
       onValueChange={(v) => router.setQuery({ status: v[0] && v[0] !== 'all' ? v[0] : null, page: null })}
     />
+    <Toggle
+      class="sky-execs__evals"
+      size="sm"
+      pressed={evalsOnly}
+      title="Only runs that belong to an eval"
+      onPressedChange={(p) => router.setQuery({ eval: p ? '1' : null, page: null })}>Evals</Toggle
+    >
     <ToggleGroup
       class="sky-execs__window"
       type="single"
@@ -222,6 +233,7 @@
                 href={href(`/executions/${r.workflow_execution_id}`)}
                 status={r.status}
                 name={r.workflow_name || r.workflow_id}
+                tag={evalBadge(r.eval)}
                 sub={rowSub(r)}
                 segments={runSegments({ status: r.status, done: r.phase_progress?.completed ?? r.completed_phases, total: r.phase_progress?.possible ?? r.total_phases })}
                 barPercent={runBarPercent((r.duration_seconds ?? 0) * 1000, longest)}
@@ -362,6 +374,9 @@
   }
   .sky-execs__toolbar > :global(*) {
     min-width: 0;
+  }
+  .sky-execs__toolbar > :global(.sky-execs__evals) {
+    align-self: flex-start;
   }
   .sky-execs__list {
     display: flex;

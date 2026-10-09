@@ -136,3 +136,33 @@ export function listSummary(page: number, pageSize: number, shown: number, total
   const from = (Math.max(1, page) - 1) * pageSize + 1
   return `Showing ${from}–${from + shown - 1} of ${total} ${noun}`
 }
+
+/** The eval an execution belongs to, as ExecutionSummaryResponse.eval / ExecutionDetailResponse.eval carry it. */
+export interface ExecutionEvalLike {
+  eval_id: string
+  eval_name?: string | null
+  association_kind?: string | null
+  verdict?: string | null
+  score?: number | null
+}
+
+export interface EvalBadge {
+  label: string
+  /** "Eval run of verifier-seed: x (launched) · verdict PASS". */
+  title: string
+  /** App path of the eval. */
+  href: string
+}
+
+/** Eval marker for a run row or execution header (feedback 4df2bfc9); null when the run is not part of an eval. */
+export function evalBadge(e: ExecutionEvalLike | null | undefined): EvalBadge | null {
+  if (!e?.eval_id) return null
+  const kind = e.association_kind ? ` (${e.association_kind})` : ''
+  const verdict = e.verdict ? ` · verdict ${e.verdict}` : ' · not scored yet'
+  return { label: 'Eval', title: `Eval run of ${e.eval_name || e.eval_id}${kind}${verdict}`, href: `/evals/${encodeURIComponent(e.eval_id)}` }
+}
+
+/** `?eval=1` <-> the list's in-eval filter. */
+export function parseEvalFilter(value: string | null | undefined): boolean {
+  return value === '1' || value === 'true'
+}

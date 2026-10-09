@@ -84,6 +84,10 @@ describe('every screen has data in fixtures mode', () => {
     const recent = await listExecutions({ page: 1, page_size: 50, started_after: dayAgo })
     expect(recent.total).toBeLessThan(RUNS.length)
     expect(recent.total).toBeGreaterThanOrEqual(5)
+    // in_eval narrows to runs that belong to an eval; each carries its eval link (feedback 4df2bfc9).
+    const evals = await listExecutions({ page: 1, page_size: 100, in_eval: true })
+    expect(evals.total).toBeGreaterThan(0)
+    expect(evals.executions.every((e) => e.eval?.eval_id)).toBe(true)
     const allSessions = await listSessions({ page: 1, page_size: 100 })
     const recentSessions = await listSessions({ page: 1, page_size: 100, started_after: dayAgo })
     expect(recentSessions.total).toBeGreaterThanOrEqual(5)

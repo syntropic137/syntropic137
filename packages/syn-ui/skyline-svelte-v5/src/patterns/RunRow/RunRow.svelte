@@ -13,7 +13,7 @@
   import StatusBadge from '../StatusBadge/StatusBadge.svelte'
   import type { RunRowProps } from './types'
 
-  let { status, name, sub, href, segments, barPercent, slots, duration, tokens, cost, when, ...rest }: RunRowProps = $props()
+  let { status, name, tag, sub, href, segments, barPercent, slots, duration, tokens, cost, when, ...rest }: RunRowProps = $props()
   const columns = $derived(runBarColumns(segments.length, slots))
 </script>
 
@@ -21,7 +21,10 @@
   <svelte:element this={href ? 'a' : 'div'} {...rest} class="sky-run-row" {href} data-interactive={href ? true : undefined}>
     <StatusBadge {status} shape="square" />
     <span class="sky-run-row__name">
-      <span class="sky-run-row__title">{name}</span>
+      <span class="sky-run-row__headline">
+        <span class="sky-run-row__title">{name}</span>
+        {#if tag}<span class="sky-run-row__tag" title={tag.title}>{tag.label}</span>{/if}
+      </span>
       {#if sub}<span class="sky-run-row__sub">{sub}</span>{/if}
     </span>
     <span class="sky-run-row__bar">
@@ -78,6 +81,23 @@
     display: flex;
     flex-direction: column;
     min-width: 0;
+  }
+  .sky-run-row__headline {
+    display: flex;
+    align-items: center;
+    gap: var(--ds-space-1-5);
+    min-width: 0;
+  }
+  .sky-run-row__tag {
+    flex-shrink: 0;
+    padding: 0 var(--ds-space-1-5);
+    border-radius: var(--ds-radius-full);
+    border: var(--ds-border-width) solid var(--sky-color-accent-ring);
+    background: var(--sky-color-accent-soft);
+    color: var(--sky-color-accent-soft-fg);
+    font-family: var(--ds-font-mono);
+    font-size: var(--ds-text-xs);
+    line-height: 1.125rem;
   }
   .sky-run-row__title {
     font-size: var(--sky-text-body);

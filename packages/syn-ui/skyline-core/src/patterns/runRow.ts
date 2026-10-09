@@ -10,6 +10,8 @@ export interface RunRowProps {
   /** Raw API status; mapped once by statusSemantics(). */
   status: string
   name: string
+  /** Skyline: a small marker after the name, such as "Eval" for a run that belongs to an eval (evalBadge()). */
+  tag?: { label: string; title?: string } | null
   /** Mono line under the name; build it with runSubline() when you have repo and phase counts. */
   sub?: string
   href?: string

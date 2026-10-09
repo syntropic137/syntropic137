@@ -22,10 +22,21 @@ export function getExecution(executionId: string, signal?: AbortSignal): Promise
   return cached('getExecution', [executionId], (s) => request(`/executions/${seg(executionId)}`, { signal: s }), { signal })
 }
 
+/** The executions list query: the shared list query plus `in_eval` (only runs that belong to an eval). */
+export interface ExecutionListQuery extends ListQuery {
+  in_eval?: boolean
+}
+
+function executionListParams(q: ExecutionListQuery): URLSearchParams {
+  const params = listQueryParams(q)
+  if (q.in_eval) params.set('in_eval', 'true')
+  return params
+}
+
 /** One page of executions across every workflow (shared list query, #1159). */
-export function listExecutions(query: ListQuery, signal?: AbortSignal): Promise<ExecutionListResponse> {
+export function listExecutions(query: ExecutionListQuery, signal?: AbortSignal): Promise<ExecutionListResponse> {
   const q = bucketTimeWindow(query)
-  return cached('listExecutions', [q], (s) => request('/executions', { query: listQueryParams(q), signal: s }), { signal, staleAfter: 'list' })
+  return cached('listExecutions', [q], (s) => request('/executions', { query: executionListParams(q), signal: s }), { signal, staleAfter: 'list' })
 }
 
 /** The execution budget's occupancy, which the list reports beside every page (PC-124). */

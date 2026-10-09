@@ -223,3 +223,13 @@ const EXECUTION_EVENTS = new Set(['WorkflowExecutionStarted', 'WorkflowCompleted
 export function isExecutionEvent(type: string): boolean {
   return EXECUTION_EVENTS.has(type)
 }
+
+/**
+ * Header progress, counted the same way the phase list is drawn (every
+ * planned phase, feedback 9a95d8f7): the API's display ("phase 2 of up to
+ * 8", "3 of up to 10, failed") when present, else "1 of 3 phases".
+ */
+export function phaseProgressText(display: string | null | undefined, completed: number, total: number): string {
+  if (!display) return `${completed} of ${total} ${total === 1 ? 'phase' : 'phases'}`
+  return /\bphases?\b/i.test(display) ? display : `phases ${display}`
+}

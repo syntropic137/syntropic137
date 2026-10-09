@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
   ageGroupTitle,
+  evalBadge,
+  parseEvalFilter,
+  phaseProgressText,
   isExecutionEvent,
   canCancel,
   costRowsByPhase,
@@ -179,5 +182,26 @@ describe('isExecutionEvent', () => {
   it("matches the API's real event_type names, not snake_case guesses", () => {
     for (const t of ['WorkflowExecutionStarted', 'WorkflowCompleted', 'WorkflowFailed', 'PhaseStarted', 'PhaseCompleted']) expect(isExecutionEvent(t)).toBe(true)
     for (const t of ['SessionStarted', 'git_commit', 'connected']) expect(isExecutionEvent(t)).toBe(false)
+  })
+})
+
+describe('eval marker and progress text', () => {
+  it('marks a run that belongs to an eval (feedback 4df2bfc9)', () => {
+    expect(evalBadge(null)).toBeNull()
+    expect(evalBadge(undefined)).toBeNull()
+    expect(evalBadge({ eval_id: 'eval-1', eval_name: 'verifier-seed: x', association_kind: 'launched', verdict: 'PASS', score: 1 })).toEqual({
+      label: 'Eval',
+      title: 'Eval run of verifier-seed: x (launched) · verdict PASS',
+      href: '/evals/eval-1',
+    })
+    expect(evalBadge({ eval_id: 'eval-2' })?.title).toBe('Eval run of eval-2 · not scored yet')
+    expect(parseEvalFilter('1')).toBe(true)
+    expect(parseEvalFilter(null)).toBe(false)
+  })
+  it('writes header progress from the same plan the phase list draws (feedback 9a95d8f7)', () => {
+    expect(phaseProgressText('phase 2 of up to 8', 1, 8)).toBe('phase 2 of up to 8')
+    expect(phaseProgressText('3 of up to 10, failed', 3, 10)).toBe('phases 3 of up to 10, failed')
+    expect(phaseProgressText(null, 1, 3)).toBe('1 of 3 phases')
+    expect(phaseProgressText(undefined, 0, 1)).toBe('0 of 1 phase')
   })
 })

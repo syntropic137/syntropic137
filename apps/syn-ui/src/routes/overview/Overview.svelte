@@ -29,6 +29,7 @@
     triggerLine,
     type LiveCommit,
   } from '@syn137/skyline-core/screens/overview'
+  import { evalBadge } from '@syn137/skyline-core/screens/executions'
   import { Button, Callout, EmptyState, Skeleton } from '@syn137/skyline-svelte-v5'
   import { OutcomeRing, RunRow, Skyline, StatusBadge } from '@syn137/skyline-svelte-v5/patterns'
   import { getContributionHeatmap, getMetrics, listExecutions, listTriggers, listWorkflows } from '@syn137/syn-ui-data'
@@ -227,6 +228,7 @@
             <RunRow
               status={r.status}
               name={r.workflow_name}
+              tag={evalBadge(r.eval)}
               sub={runSubline(r.repos_display ?? r.repos?.[0] ?? null, r.phase_progress?.completed ?? r.completed_phases, r.phase_progress?.possible ?? r.total_phases)}
               href={execHref(r.workflow_execution_id)}
               segments={runSegments({ status: r.status, done: r.phase_progress?.completed ?? r.completed_phases, total: r.phase_progress?.possible ?? r.total_phases })}

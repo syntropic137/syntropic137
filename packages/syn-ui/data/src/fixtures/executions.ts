@@ -86,7 +86,15 @@ export function executionListItem(r: CatalogRun): ExecutionListItem {
     tags: [],
     repos_display: r.repo ? r.repo.replace('https://github.com/', '') : null,
     start_queue: null,
+    eval: evalOf(r),
   }
+}
+
+/** The pr-review run an hour ago was launched by an eval, so the Eval marker and filter have a row. */
+const EVAL_RUN = 1
+function evalOf(r: CatalogRun): ExecutionListItem['eval'] {
+  if (RUNS.indexOf(r) !== EVAL_RUN) return null
+  return { eval_id: 'eval-fixture-pr-review', eval_name: 'verifier-seed: pr-review smoke', association_kind: 'launched', verdict: 'PASS', score: 1, scored_at: r.startedAt }
 }
 
 function phaseDetail(r: CatalogRun): PhaseExecutionDetail[] {
@@ -182,6 +190,7 @@ export function executionDetail(r: CatalogRun): ExecutionDetailResponse {
     repos: item.repos ?? [],
     workspace: null,
     task: taskOf(r),
+    eval: item.eval ?? null,
   }
 }
 
@@ -218,7 +227,8 @@ export const executionRoutes: FixtureRoute[] = [
     const items = [...RUNS].sort((a, b) => b.startedAt.localeCompare(a.startedAt)).map(executionListItem)
     const textOf = (e: ExecutionListItem) => `${e.workflow_name} ${e.workflow_execution_id} ${e.repos_display ?? ''}`
     const after = fixtureWindowStart(query)
-    const inWindow = Number.isNaN(after) ? items : items.filter((e) => e.started_at && Date.parse(e.started_at) >= after)
+    const timed = Number.isNaN(after) ? items : items.filter((e) => e.started_at && Date.parse(e.started_at) >= after)
+    const inWindow = query.get('in_eval') === 'true' ? timed.filter((e) => e.eval) : timed
     const unfiltered = filterList(inWindow, new URLSearchParams({ q: query.get('q') ?? '' }), (e) => e.status, textOf)
     const rows = filterList(inWindow, query, (e) => e.status, textOf)
     const page = paginate(rows, query, 50)

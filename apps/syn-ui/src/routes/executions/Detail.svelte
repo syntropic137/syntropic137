@@ -9,6 +9,8 @@
   import { formatBytes, formatCostPrecise, formatDateTime, formatDuration, formatInteger, shortId, durationBetween } from '@syn137/skyline-core/format'
   import { statusSemantics } from '@syn137/skyline-core/patterns'
   import {
+    evalBadge,
+    phaseProgressText,
     canCancel,
     costRowsByPhase,
     isExecutionEvent,
@@ -86,6 +88,7 @@
   })
 
   const d = $derived(exec.data)
+  const ev = $derived(evalBadge(d?.eval))
   const phases = $derived(d?.phases ?? [])
   /** Declared phases that have not started yet (phases holds only started ones). */
   const notStarted = $derived(d ? d.phase_plan.filter((p) => !phases.some((x) => x.phase_id === p.phase_id)) : [])
@@ -191,7 +194,7 @@
       kind="execution"
       eyebrow={d.workflow_execution_id}
       status={d.status}
-      meta={`${d.phase_progress?.display ?? `${d.completed_phases} of ${d.total_phases}`} phases · ${formatDateTime(d.started_at)}`}
+      meta={`${phaseProgressText(d.phase_progress?.display, d.completed_phases, d.total_phases)} · ${formatDateTime(d.started_at)}`}
       titleLabel={d.task ? 'Task' : undefined}
       title={d.task || d.workflow_name}
       {figures}
@@ -215,6 +218,10 @@
           <span aria-hidden="true">·</span>
           <a href={repo} target="_blank" rel="noopener noreferrer">{repoName(repo)}</a>
         {/each}
+        {#if ev}
+          <span aria-hidden="true">·</span>
+          <a class="sky-exec__eval" href={href(ev.href)} title={ev.title}>{ev.label}: {d.eval?.eval_name || d.eval?.eval_id}</a>
+        {/if}
         {#if live}
           <span class="sky-exec__live" role="status"><span class="sky-exec__pulse" aria-hidden="true"></span>Live</span>
         {/if}
@@ -332,6 +339,20 @@
   }
   .sky-exec__context a {
     color: var(--ds-color-text-muted);
+  }
+  .sky-exec__context a.sky-exec__eval {
+    padding: 0 var(--ds-space-2);
+    border-radius: var(--ds-radius-full);
+    border: var(--ds-border-width) solid var(--sky-color-accent-ring);
+    background: var(--sky-color-accent-soft);
+    color: var(--sky-color-accent-soft-fg);
+    font-family: var(--ds-font-mono);
+    font-size: var(--ds-text-xs);
+    text-decoration: none;
+  }
+  .sky-exec__context a:focus-visible {
+    outline: var(--sky-focus-ring-width) solid var(--sky-color-focus);
+    outline-offset: var(--sky-focus-ring-offset);
   }
   .sky-exec__context a:hover {
     color: var(--ds-color-fg);
