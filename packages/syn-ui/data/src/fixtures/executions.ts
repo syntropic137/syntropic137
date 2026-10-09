@@ -40,7 +40,8 @@ const TASKS: Record<string, string> = {
   'starter-research': 'Research the trade-offs of SSE versus WebSockets for live dashboards.',
   'subagent-observability-demo': 'Spawn two subagents and collect their lifecycle events.',
   'codex-bridge-demo': 'Say hello through the Codex bridge.',
-  'multi-agent': 'Plan and implement a palindrome checker with tests.',
+  // A task written as a Markdown prompt (feedback 525d15c0): the detail renders it as body copy, not a heading.
+  'multi-agent': 'Plan and implement a palindrome checker with tests.\n\n## Steps\n1. Write `is_palindrome(text)` in `palindrome.py`\n   - ignore case and punctuation\n   - an empty string counts\n2. Add tests, then hand review to Claude.',
 }
 
 const taskOf = (r: CatalogRun) => (RUNS.indexOf(r) === CANONICAL_RUN ? 'one sentence on sorting' : (TASKS[r.workflowId] ?? 'Run the workflow.'))

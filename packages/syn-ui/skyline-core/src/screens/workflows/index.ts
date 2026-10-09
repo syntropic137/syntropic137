@@ -239,84 +239,9 @@ export function phaseSlab(index: number, count: number): 0 | 1 | 2 {
 
 // ---------------------------------------------------------------- prompt
 
-export type PromptBlock =
-  | { kind: 'heading'; text: string }
-  | { kind: 'paragraph'; text: string }
-  | { kind: 'list'; items: string[] }
-  | { kind: 'argument'; name: string }
-
-/**
- * Split a phase prompt template into display blocks: "#" headings, "-"/"*"
- * lists, a line that is only `$ARGUMENTS` or `{{task}}` becomes the
- * argument slot, everything else paragraphs.
- */
-export function parsePrompt(template: string | null | undefined): PromptBlock[] {
-  const acc = new PromptAccumulator()
-  for (const raw of (template ?? '').split('\n')) acc.line(raw.trim())
-  acc.flush()
-  return acc.blocks
-}
-
-const PROMPT_ARGUMENT = /^(\$[A-Z_]+|\{\{\s*[a-z_]+\s*\}\})$/
-const PROMPT_HEADING = /^#{1,6}\s+(.*)$/
-const PROMPT_LIST_ITEM = /^[-*]\s+(.*)$/
-
-/** parsePrompt's line state: the open paragraph and the open list. */
-class PromptAccumulator {
-  readonly blocks: PromptBlock[] = []
-  private para: string[] = []
-  private list: string[] | null = null
-
-  line(line: string): void {
-    if (!line) {
-      this.flush()
-      return
-    }
-    const arg = PROMPT_ARGUMENT.exec(line)
-    if (arg) {
-      this.block({ kind: 'argument', name: arg[1]!.replace(/[{}\s]/g, '') })
-      return
-    }
-    const h = PROMPT_HEADING.exec(line)
-    if (h) {
-      this.block({ kind: 'heading', text: h[1]! })
-      return
-    }
-    const li = PROMPT_LIST_ITEM.exec(line)
-    if (li) this.listItem(li[1]!)
-    else this.paragraphLine(line)
-  }
-
-  flush(): void {
-    this.flushParagraph()
-    this.flushList()
-  }
-
-  private block(b: PromptBlock): void {
-    this.flush()
-    this.blocks.push(b)
-  }
-
-  private flushParagraph(): void {
-    if (this.para.length) this.blocks.push({ kind: 'paragraph', text: this.para.join(' ') })
-    this.para = []
-  }
-
-  private flushList(): void {
-    if (this.list) this.blocks.push({ kind: 'list', items: this.list })
-    this.list = null
-  }
-
-  private listItem(text: string): void {
-    this.flushParagraph()
-    ;(this.list ??= []).push(text)
-  }
-
-  private paragraphLine(line: string): void {
-    this.flushList()
-    this.para.push(line)
-  }
-}
+// The prompt parser is shared with the Execution detail's task (feedback 525d15c0).
+export { parsePrompt } from '../prompt'
+export type { PromptBlock, PromptListItem, PromptSpan } from '../prompt'
 
 export * from './trend'
 

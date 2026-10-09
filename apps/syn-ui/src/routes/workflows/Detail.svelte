@@ -24,7 +24,6 @@
   import {
     formatTimeout,
     latestOutputsByPhase,
-    parsePrompt,
     phaseKitOf,
     phaseModelChip,
     phaseCostLabel,
@@ -37,7 +36,7 @@
     workflowTags,
   } from '@syn137/skyline-core/screens/workflows'
   import { Button, Callout, EmptyState, Skeleton } from '@syn137/skyline-svelte-v5'
-  import { AgentPromptButton, PageHeader, PhaseKit, PhaseKitChips, RunRow, SkillRef } from '@syn137/skyline-svelte-v5/patterns'
+  import { AgentPromptButton, PageHeader, PhaseKit, PhaseKitChips, PromptText, RunRow, SkillRef } from '@syn137/skyline-svelte-v5/patterns'
   import { ApiError, TREND_PAGE_SIZE, getMetrics, getWorkflow, getWorkflowHistory, getWorkflowLatestOutputs, getWorkflowTrend, listArtifacts, listExecutions, listWorkflowRuns } from '@syn137/syn-ui-data'
   import { isRunEvent } from '@syn137/syn-ui-data/live'
   import { resource } from '../../lib/load.svelte'
@@ -198,19 +197,15 @@
               </dl>
             </div>
             <div class="sky-wf__prompt">
-              {#each parsePrompt(current.prompt_template) as b, k (k)}
-                {#if b.kind === 'heading'}
-                  <h3>{b.text}</h3>
-                {:else if b.kind === 'paragraph'}
-                  <p>{b.text}</p>
-                {:else if b.kind === 'list'}
-                  <ul>{#each b.items as item, j (j)}<li>{item}</li>{/each}</ul>
-                {:else}
-                  <p><code class="sky-wf__arg">{b.name}</code> <span class="sky-wf__muted">filled from the task you enter at kickoff</span></p>
-                {/if}
+              {#if current.prompt_template?.trim()}
+                <PromptText text={current.prompt_template}>
+                  {#snippet argument(name)}
+                    <p class="sky-wf__argline"><code class="sky-wf__arg">{name}</code> <span class="sky-wf__muted">filled from the task you enter at kickoff</span></p>
+                  {/snippet}
+                </PromptText>
               {:else}
                 <p class="sky-wf__muted">This phase has no prompt template.</p>
-              {/each}
+              {/if}
             </div>
           </div>
         {/if}
@@ -504,20 +499,8 @@
     line-height: 1.6;
     overflow-wrap: anywhere;
   }
-  .sky-wf__prompt h3 {
-    margin: var(--ds-space-1-5) 0 0;
-    font-size: var(--ds-text-md);
-    font-weight: var(--ds-font-weight-semibold);
-  }
-  .sky-wf__prompt p,
-  .sky-wf__prompt ul {
+  .sky-wf__argline {
     margin: 0;
-  }
-  .sky-wf__prompt ul {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    padding-left: 20px;
   }
   .sky-wf__arg {
     padding: 4px 10px;

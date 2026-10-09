@@ -142,3 +142,19 @@ test.describe('Skyline only', () => {
     await expect(page.getByRole('link', { name: new RegExp(esc('Overview')) }).first()).toBeVisible()
   })
 })
+
+// Feedback 525d15c0: a task written as Markdown renders as body copy under a
+// section-scale title, never as a page-sized heading.
+test('a Markdown task renders as body copy', async ({ page }) => {
+  test.skip(!isSkyline, 'Skyline task body')
+  await open(page, '/workflows/multi-agent')
+  await page.locator('a[href*="/executions/"]').first().click()
+  const title = page.getByRole('heading', { level: 1, name: 'Plan and implement a palindrome checker with tests.' })
+  await expect(title).toBeVisible()
+  expect(parseFloat(await title.evaluate((el) => getComputedStyle(el).fontSize))).toBeLessThanOrEqual(20)
+  // The "## Steps" heading is a label in the body, not another heading.
+  await expect(page.getByRole('heading', { name: 'Steps' })).toHaveCount(0)
+  await expect(page.locator('ol li').filter({ hasText: 'is_palindrome(text)' })).toBeVisible()
+  await expect(page.locator('ol li ul li')).toHaveCount(2)
+  await expect(page.locator('ol li code').first()).toHaveText('is_palindrome(text)')
+})

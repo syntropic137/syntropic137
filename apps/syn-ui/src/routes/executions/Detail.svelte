@@ -26,8 +26,9 @@
     timelineCaption,
     usageNote,
   } from '@syn137/skyline-core/screens/executions'
+  import { splitTask } from '@syn137/skyline-core/screens/prompt'
   import { Button, Callout, EmptyState, Skeleton } from '@syn137/skyline-svelte-v5'
-  import { CopyButton, PageHeader, PhaseBlocks, PhaseKitChips, ProvenanceStrip, RunTiles, StatusBadge, UsageMeter } from '@syn137/skyline-svelte-v5/patterns'
+  import { CopyButton, PageHeader, PhaseBlocks, PhaseKitChips, PromptText, ProvenanceStrip, RunTiles, StatusBadge, UsageMeter } from '@syn137/skyline-svelte-v5/patterns'
   import { ApiError, cancelExecution, getArtifact, getExecution, getSessionInventory } from '@syn137/syn-ui-data'
   import type { ArtifactResponse, PhaseExecutionDetail } from '@syn137/syn-ui-data/types'
   import { subscribeExecution } from '@syn137/syn-ui-data/live'
@@ -169,10 +170,8 @@
     if (e instanceof ApiError) return typeof e.detail === 'string' ? e.detail : `The server answered ${e.status}.`
     return e instanceof Error ? e.message : String(e)
   }
-  // A task is often a whole prompt: past a sentence it drops to body size and folds to a few lines.
-  const LONG_TASK = 140
-  const longTask = $derived(!!d?.task && d.task.length > LONG_TASK)
-  let taskOpen = $state(false)
+  // A task is often a whole prompt: its first line is the title, the rest renders as body copy (feedback 525d15c0).
+  const task = $derived(splitTask(d?.task))
 
   const notFound = $derived(exec.error instanceof ApiError && exec.error.status === 404)
   const repoName = (url: string) => url.replace(/^https?:\/\/github\.com\//, '').replace(/\.git$/, '')
@@ -199,13 +198,13 @@
   <div class="sky-exec">
     <PageHeader
       class="sky-exec__header"
-      data-long-title={longTask ? (taskOpen ? 'open' : 'folded') : undefined}
+      data-long-title={task.body ? '' : undefined}
       kind="execution"
       eyebrow={d.workflow_execution_id}
       status={outcomeStatus(d.status, d.failure_classification)}
       meta={`${phaseProgressText(d.phase_progress?.display, d.completed_phases, d.total_phases)} · ${formatDateTime(d.started_at)}`}
       titleLabel={d.task ? 'Task' : undefined}
-      title={d.task || d.workflow_name}
+      title={task.title || d.workflow_name}
       {figures}
     >
       {#snippet titleAction()}
@@ -221,8 +220,8 @@
           Run again
         </a>
       {/snippet}
-      {#if longTask}
-        <button type="button" class="sky-exec__more" aria-expanded={taskOpen} onclick={() => (taskOpen = !taskOpen)}>{taskOpen ? 'Show less' : 'Show the whole task'}</button>
+      {#if task.body}
+        <PromptText class="sky-exec__task" text={task.body} clampLines={8} moreLabel="Show the whole task" />
       {/if}
       <div class="sky-exec__context">
         <a href={href(`/workflows/${d.workflow_id}`)}>{d.workflow_name}</a>
@@ -342,36 +341,17 @@
     gap: var(--ds-space-5);
     min-width: 0;
   }
+  /* A task with a body: the title is its first line, at section scale rather than page scale. */
   .sky-exec :global(.sky-page-header[data-long-title] .sky-page-header__title) {
     font-size: var(--ds-text-xl);
     line-height: var(--ds-line-height-snug);
     letter-spacing: -0.015em;
     text-wrap: pretty;
-    white-space: pre-line;
   }
-  .sky-exec :global(.sky-page-header[data-long-title='folded'] .sky-page-header__title) {
-    display: -webkit-box;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 4;
-    line-clamp: 4;
-    overflow: hidden;
-  }
-  .sky-exec__more {
-    align-self: flex-start;
-    padding: 0;
-    border: 0;
-    background: none;
-    color: var(--sky-color-accent-soft-fg);
-    font: inherit;
+  .sky-exec :global(.sky-exec__task) {
+    max-width: 48rem;
+    color: var(--ds-color-text-muted);
     font-size: var(--ds-text-sm);
-    cursor: pointer;
-  }
-  .sky-exec__more:hover {
-    color: var(--ds-color-fg);
-  }
-  .sky-exec__more:focus-visible {
-    outline: var(--sky-focus-ring-width) solid var(--sky-color-focus);
-    outline-offset: var(--sky-focus-ring-offset);
   }
   .sky-exec :global(.sky-page-header__actions .sky-copy[data-variant='label']) {
     height: var(--sky-size-control-md);

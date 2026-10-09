@@ -101,7 +101,7 @@ describe('workflow detail', () => {
       { kind: 'heading', text: 'Your Task' },
       { kind: 'argument', name: '$ARGUMENTS' },
       { kind: 'heading', text: 'How' },
-      { kind: 'list', items: ['one', 'two'] },
+      { kind: 'list', ordered: false, items: [{ text: 'one', items: [] }, { text: 'two', items: [] }] },
       { kind: 'paragraph', text: 'Done.' },
     ])
     expect(parsePrompt('Task: {{task}}')).toEqual([{ kind: 'paragraph', text: 'Task: {{task}}' }])
