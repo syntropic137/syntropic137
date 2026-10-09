@@ -109,7 +109,7 @@ RUNNABLE_BUT_EXCLUDED: Final[dict[str, str]] = {
     "syn-landing.yml:lighthouse": "path-filtered, needs Chrome and a network fetch of @lhci/cli; `just landing-lighthouse`",
     "syn-landing.yml:energy": "path-filtered, needs a Playwright browser and ~2 minutes; `just landing-energy`",
     "syn-landing.yml:codeql": "path-filtered, needs the CodeQL CLI and query packs; `codeql database create` by hand",
-    "syn-landing.yml:secret-scan": "path-filtered; `gitleaks detect --log-opts=\"--full-history -m -- apps/syn-landing\"`",
+    "syn-landing.yml:secret-scan": 'path-filtered; `gitleaks detect --log-opts="--full-history -m -- apps/syn-landing"`',
 }
 
 
