@@ -9,9 +9,10 @@ rest.
 
 So this measures it. For every Settings class in `syn_shared.settings` whose
 env prefix is in GOVERNED_PREFIXES, each field must be read by production code:
-an attribute access `.<field>` in a non-test module outside `syn_shared/settings`
-that names the class. Naming the class is what separates
-`settings.memory_limit_mb` from some other object's `memory_limit_mb`.
+an attribute read in a non-test module outside `syn_shared/settings` whose
+receiver is identifiably an instance of the class (see `settings_reads`). The
+receiver is what separates `settings.memory_limit_mb` from some other object's
+`memory_limit_mb`; mentioning the class name in the same file is not enough.
 
 Fields that are known to be inert are listed in `fitness_exceptions.toml`
 under `[workspace_settings_consumed]` with an issue. The list is exact: a field
@@ -32,14 +33,10 @@ import importlib
 import inspect
 import pkgutil
 from functools import cache
-from typing import TYPE_CHECKING
 
 import pytest
 from ci.fitness.conftest import load_exceptions, production_files, rel_path
 from pydantic_settings import BaseSettings
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 pytestmark = [pytest.mark.unit, pytest.mark.architecture]
 
@@ -65,33 +62,132 @@ def _governed_settings() -> list[type[BaseSettings]]:
     return [found[k] for k in sorted(found)]
 
 
+def _settings_accessors(cls: type[BaseSettings]) -> frozenset[str]:
+    """Properties on the root `Settings` that return an instance of `cls`.
+
+    `get_settings().workspace` is a `WorkspaceSettings`; a read through that
+    property is a read on the settings instance like any other.
+    """
+    from syn_shared.settings.config import Settings
+
+    names: set[str] = set()
+    for name, member in inspect.getmembers(Settings, lambda m: isinstance(m, property)):
+        # Annotations are unevaluated strings here (`from __future__ import
+        # annotations`, TYPE_CHECKING-only imports), so match the spelling.
+        returns = getattr(member.fget, "__annotations__", {}).get("return")
+        if returns in (cls, cls.__name__):
+            names.add(name)
+    return frozenset(names)
+
+
+def _names_class(node: ast.AST | None, class_name: str) -> bool:
+    """True when an annotation spells `class_name`, bare, dotted, quoted or in a union."""
+    if node is None:
+        return False
+    for sub in ast.walk(node):
+        if isinstance(sub, ast.Name) and sub.id == class_name:
+            return True
+        if isinstance(sub, ast.Attribute) and sub.attr == class_name:
+            return True
+        if isinstance(sub, ast.Constant) and isinstance(sub.value, str):
+            try:
+                quoted = ast.parse(sub.value, mode="eval")
+            except SyntaxError:
+                continue  # a Literal["..."] value, not a quoted annotation
+            if _names_class(quoted, class_name):
+                return True
+    return False
+
+
+def _constructs(node: ast.AST | None, class_name: str) -> bool:
+    """True for `Cls(...)` or `module.Cls(...)`."""
+    return isinstance(node, ast.Call) and _names_class(node.func, class_name)
+
+
+def _instance_names(scope: ast.AST, class_name: str) -> set[str]:
+    """Names bound to a `class_name` instance directly inside `scope`.
+
+    A parameter annotated with the class, `x = Cls()`, or `x: Cls = ...`.
+    Nested functions are their own scope and are not descended into.
+    """
+    names: set[str] = set()
+    if isinstance(scope, ast.FunctionDef | ast.AsyncFunctionDef):
+        args = scope.args
+        for arg in [*args.posonlyargs, *args.args, *args.kwonlyargs]:
+            if _names_class(arg.annotation, class_name):
+                names.add(arg.arg)
+    for node in _own_nodes(scope):
+        if isinstance(node, ast.Assign) and _constructs(node.value, class_name):
+            names.update(t.id for t in node.targets if isinstance(t, ast.Name))
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            if _names_class(node.annotation, class_name) or _constructs(node.value, class_name):
+                names.add(node.target.id)
+    return names
+
+
+def _own_nodes(scope: ast.AST) -> list[ast.AST]:
+    """Every node in `scope` that is not inside a nested function or class."""
+    out: list[ast.AST] = []
+    stack = list(ast.iter_child_nodes(scope))
+    while stack:
+        node = stack.pop()
+        out.append(node)
+        if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef | ast.Lambda):
+            stack.extend(ast.iter_child_nodes(node))
+    return out
+
+
+def settings_reads(source: str, class_name: str, accessors: frozenset[str]) -> set[str]:
+    """Attributes read on a `class_name` instance in `source`.
+
+    The receiver must be identifiably the settings instance: a name bound to
+    it in the same scope or the module, `Cls().field`, or
+    `<root settings>.<accessor>.field`. An attribute of the same name on any
+    other object is not a read of the setting, and neither is a comment or
+    docstring that mentions the class (#1805 verify B2).
+    """
+    tree = ast.parse(source)
+    module_names = _instance_names(tree, class_name)
+    scopes: list[ast.AST] = [tree]
+    scopes += [
+        n
+        for n in ast.walk(tree)
+        if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda)
+    ]
+    reads: set[str] = set()
+    for scope in scopes:
+        local = _instance_names(scope, class_name) if scope is not tree else set()
+        bound = module_names | local
+        for node in _own_nodes(scope):
+            if not (isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load)):
+                continue
+            receiver = node.value
+            if (
+                (isinstance(receiver, ast.Name) and receiver.id in bound)
+                or _constructs(receiver, class_name)
+                or (isinstance(receiver, ast.Attribute) and receiver.attr in accessors)
+            ):
+                reads.add(node.attr)
+    return reads
+
+
 @cache
-def _consumed_attributes(class_name: str) -> frozenset[str]:
-    """Attribute names read in production modules that name `class_name`."""
+def _consumed_attributes(cls: type[BaseSettings]) -> frozenset[str]:
+    """Fields read on a `cls` instance by production code outside the settings package."""
+    accessors = _settings_accessors(cls)
     attrs: set[str] = set()
     for path in production_files():
         if rel_path(path).startswith(_SETTINGS_DIR):
             continue
         source = path.read_text(encoding="utf-8")
-        if class_name not in source:
-            continue
-        attrs.update(_attribute_reads(path, source))
+        attrs.update(settings_reads(source, cls.__name__, accessors))
     return frozenset(attrs)
-
-
-def _attribute_reads(path: Path, source: str) -> set[str]:
-    tree = ast.parse(source, filename=str(path))
-    return {
-        node.attr
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load)
-    }
 
 
 def _unconsumed() -> set[str]:
     dead: set[str] = set()
     for cls in _governed_settings():
-        consumed = _consumed_attributes(cls.__name__)
+        consumed = _consumed_attributes(cls)
         dead.update(f"{cls.__name__}.{name}" for name in cls.model_fields if name not in consumed)
     return dead
 
@@ -137,3 +233,52 @@ class TestWorkspaceSettingsConsumed:
             if cls.model_config.get("env_prefix") == "SYN_SECURITY_"
         ]
         assert not revived, revived
+
+
+_RECEIVER_FIXTURE = '''
+from syn_shared.settings.workspace import WorkspaceSettings
+
+# WorkspaceSettings.second_limit is mentioned here, in a comment, and must not count.
+
+
+def build(settings: WorkspaceSettings, config: object) -> tuple[object, object]:
+    """WorkspaceSettings.second_limit in a docstring does not count either."""
+    return settings.first_limit, config.second_limit
+
+
+def unrelated(event: object) -> object:
+    return event.second_limit
+'''
+
+
+@pytest.mark.architecture
+class TestSettingsReceiver:
+    """The consumer relation is a read ON the settings instance (#1805 verify B2)."""
+
+    def test_only_reads_on_the_settings_instance_count(self) -> None:
+        reads = settings_reads(_RECEIVER_FIXTURE, "WorkspaceSettings", frozenset())
+        assert "first_limit" in reads
+        assert "second_limit" not in reads
+
+    def test_constructed_and_accessor_receivers_count(self) -> None:
+        source = (
+            "def f():\n"
+            "    ws = WorkspaceSettings()\n"
+            "    return ws.a, WorkspaceSettings().b, get_settings().workspace.c, other.d\n"
+        )
+        reads = settings_reads(source, "WorkspaceSettings", frozenset({"workspace"}))
+        assert reads == {"a", "b", "c"}
+
+    def test_a_binding_does_not_leak_into_another_function(self) -> None:
+        source = (
+            "def f(settings: WorkspaceSettings):\n"
+            "    return settings.a\n"
+            "def g(settings):\n"
+            "    return settings.b\n"
+        )
+        assert settings_reads(source, "WorkspaceSettings", frozenset()) == {"a"}
+
+    def test_root_settings_property_is_discovered(self) -> None:
+        from syn_shared.settings.workspace import WorkspaceSettings
+
+        assert "workspace" in _settings_accessors(WorkspaceSettings)
