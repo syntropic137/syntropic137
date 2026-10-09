@@ -149,6 +149,39 @@ class _EntryBudget:
         return not self.spent
 
 
+def _listing(dir_fd: int, parts: tuple[str, ...], max_entries: int) -> Iterator[os.DirEntry[str]]:
+    """Yield up to max_entries entries of the open directory dir_fd, streamed."""
+    with os.scandir(dir_fd) as entries:
+        for listed, entry in enumerate(entries):
+            if listed == max_entries:
+                logger.warning(
+                    "copy_from: Stopped listing %s after %d entries; the rest were not examined",
+                    "/".join(parts) or ".",
+                    max_entries,
+                )
+                return
+            yield entry
+
+
+def _open_child(dir_fd: int, child: tuple[str, ...], max_depth: int) -> int | None:
+    """Open child (named by its last part) relative to dir_fd, never following a symlink.
+
+    Returns None, after a warning, when it is too deep or cannot be opened
+    as a directory; the caller closes a returned fd.
+    """
+    relative = "/".join(child)
+    if len(child) > max_depth:
+        logger.warning(
+            "copy_from: Did not enter %s: deeper than %d directories", relative, max_depth
+        )
+        return None
+    try:
+        return os.open(child[-1], _DIR_OPEN_FLAGS, dir_fd=dir_fd)
+    except OSError as e:
+        logger.warning("copy_from: Did not list %s: %s", relative, e)
+        return None
+
+
 def _walk_directory(
     dir_fd: int,
     parts: tuple[str, ...],
@@ -163,43 +196,23 @@ def _walk_directory(
     held open only while it is being walked: at most max_depth directories
     are open at a time, and no directory is reopened from the root.
     """
-    relative = "/".join(parts) or "."
-    with os.scandir(dir_fd) as entries:
-        for listed, entry in enumerate(entries):
-            if listed == limits.max_directory_entries:
-                logger.warning(
-                    "copy_from: Stopped listing %s after %d entries; the rest were not examined",
-                    relative,
-                    limits.max_directory_entries,
-                )
-                return
-            if not budget.take():
-                return
-            if not _is_real_directory(entry):
-                yield parts, states, entry
-                continue
-            below = matcher.enter(states, entry.name)
-            if not below:
-                continue
-            child = (*parts, entry.name)
-            if len(child) > limits.max_depth:
-                logger.warning(
-                    "copy_from: Did not enter %s: deeper than %d directories",
-                    "/".join(child),
-                    limits.max_depth,
-                )
-                continue
-            try:
-                child_fd = os.open(entry.name, _DIR_OPEN_FLAGS, dir_fd=dir_fd)
-            except OSError as e:
-                logger.warning("copy_from: Did not list %s: %s", "/".join(child), e)
-                continue
-            try:
-                yield from _walk_directory(child_fd, child, below, matcher, limits, budget)
-            finally:
-                os.close(child_fd)
-            if budget.spent:
-                return
+    for entry in _listing(dir_fd, parts, limits.max_directory_entries):
+        if not budget.take():
+            return
+        if not _is_real_directory(entry):
+            yield parts, states, entry
+            continue
+        below = matcher.enter(states, entry.name)
+        child = (*parts, entry.name)
+        child_fd = _open_child(dir_fd, child, limits.max_depth) if below else None
+        if child_fd is None:
+            continue
+        try:
+            yield from _walk_directory(child_fd, child, below, matcher, limits, budget)
+        finally:
+            os.close(child_fd)
+        if budget.spent:
+            return
 
 
 def _reachable_files(
