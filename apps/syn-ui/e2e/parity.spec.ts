@@ -33,3 +33,10 @@ test('Workflow detail shows per-phase tokens and cost, sessions and artifacts (f
   // The fixture's running Research run: its phase cost still accrues.
   await expect(main.getByText(/^≥\$/).first()).toBeVisible()
 })
+
+test('Evals board cells show the latest run cost beside the latest verdict', async ({ page }) => {
+  await page.goto('./evals')
+  // shared-esp-stream under sonnet: runs $0.4963 (latest, PASS) and $0.4711; the median, shown before, is $0.48.
+  const cell = page.locator('[data-cell="shared-esp-stream:eval-verify-pinned-sonnet-v1"]')
+  await expect(cell).toHaveAttribute('aria-label', /: Pass, \$0\.50$/)
+})

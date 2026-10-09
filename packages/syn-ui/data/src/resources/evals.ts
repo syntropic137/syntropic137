@@ -3,7 +3,8 @@
  * model (#1710), so a renamed field fails the build instead of rendering
  * `undefined`.
  */
-import { request, seg } from '../client'
+import { MAX_PAGE_SIZE, request, seg } from '../client'
+import type { ExecutionListResponse } from '../types'
 import type { components } from '../generated/api-types'
 import { cached } from '../keys'
 
@@ -31,4 +32,25 @@ export function getEval(evalId: string, signal?: AbortSignal): Promise<EvalSumma
 
 export function listEvalRuns(evalId: string, params: { page?: number; page_size?: number } = {}, signal?: AbortSignal): Promise<EvalRunListResponse> {
   return cached('listEvalRuns', [evalId, params], (s) => request(`/evals/${seg(evalId)}/runs`, { query: { ...params }, signal: s }), { signal, staleAfter: 'list' })
+}
+
+/** A row of GET /executions, as the API sends it. */
+export type EvalExecutionRow = ExecutionListResponse['executions'][number]
+
+/**
+ * Every execution an eval launched or claimed (GET /executions?in_eval=true,
+ * all pages), newest first. The Evals board reads each cell's latest-run
+ * cost from these rows: the eval list carries only per-variant median and
+ * average costs, and one request per eval would be an N+1.
+ */
+export function listEvalExecutions(signal?: AbortSignal): Promise<EvalExecutionRow[]> {
+  return cached('listEvalExecutions', [], async (s) => {
+    const rows: EvalExecutionRow[] = []
+    for (let page = 1; page <= 50; page++) {
+      const res = await request<ExecutionListResponse>('/executions', { query: { in_eval: 'true', page, page_size: MAX_PAGE_SIZE }, signal: s })
+      rows.push(...res.executions)
+      if (res.executions.length < MAX_PAGE_SIZE || rows.length >= (res.total ?? 0)) break
+    }
+    return rows
+  }, { signal, staleAfter: 'list' })
 }

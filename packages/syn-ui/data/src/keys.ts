@@ -13,7 +13,7 @@ export type ResourceName =
   | 'listWorkflowRuns' | 'getExecution' | 'listExecutions' | 'getExecutionBudget'
   | 'listSessions' | 'getSession'
   | 'getSessionInventory' | 'getSessionInventoryPage' | 'getSessionInventoryNode'
-  | 'listEvals' | 'getEval' | 'listEvalRuns'
+  | 'listEvals' | 'getEval' | 'listEvalRuns' | 'listEvalExecutions'
   | 'listArtifacts' | 'getArtifact' | 'getArtifactContent'
   | 'listTriggers' | 'getTrigger' | 'getTriggerHistory'
   | 'listRepos' | 'listSystems' | 'lookUpAppAccess'

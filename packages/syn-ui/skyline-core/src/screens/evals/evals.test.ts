@@ -3,6 +3,7 @@ import {
   agentOfModel,
   averageEvalCost,
   buildEvalBoard,
+  latestRunCosts,
   runsTimeline,
   sameCaseSiblings,
   shortModel,
@@ -278,5 +279,26 @@ describe('board readout evidence', () => {
     expect(evidenceSummary('- run status: `failed`\n- blocking findings: 0')).toBe('Run failed. 0 blocking findings.')
     expect(evidenceSummary('free text')).toBe('free text')
     expect(evidenceSummary(null)).toBeNull()
+  })
+})
+
+describe('board cell cost is the latest run cost (parity 2026-10-09: 27 of 99 cells showed the median)', () => {
+  // clean-remote-source under eval-verify-pinned-codex-v1: runs $0.16 (latest, PASS), $0.22, $0.33; median $0.22.
+  const e = stable('eval-clean', 'clean-remote-source', [['eval-verify-pinned-codex-v1', 'gpt-6.1-sol', 'PASS', '2026-10-08T15:09:12Z', 3]])
+  const rows = [
+    { workflow_id: 'eval-verify-pinned-codex-v1', started_at: '2026-10-07T10:00:00Z', total_cost_usd: '0.2200000', eval: { eval_id: 'eval-clean' } },
+    { workflow_id: 'eval-verify-pinned-codex-v1', started_at: '2026-10-08T15:09:12Z', total_cost_usd: '0.1600000', eval: { eval_id: 'eval-clean' } },
+    { workflow_id: 'eval-verify-pinned-codex-v1', started_at: '2026-10-06T10:00:00Z', total_cost_usd: '0.3300000', eval: { eval_id: 'eval-clean' } },
+    { workflow_id: 'other', started_at: '2026-10-09T00:00:00Z', total_cost_usd: '9', eval: null },
+  ]
+  it('picks the newest run per eval and workflow', () => {
+    const costs = latestRunCosts(rows)
+    expect(costs.size).toBe(1)
+    const board = buildEvalBoard([e], { costOf: (id, wf) => costs.get(`${id}\u0000${wf}`) })
+    expect(Object.values(board.cells)[0]).toMatchObject({ verdict: 'pass', costUsd: 0.16 })
+  })
+  it('shows no cost rather than another run\'s when the runs have not loaded', () => {
+    expect(Object.values(buildEvalBoard([e], { costOf: () => undefined }).cells)[0]!.costUsd).toBeNull()
+    expect(Object.values(buildEvalBoard([e]).cells)[0]!.costUsd).toBe(0.29)
   })
 })

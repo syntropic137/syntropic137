@@ -92,6 +92,38 @@ export interface BoardOptions {
   /** Case sub line: "PR #1574 · 6646da2". */
   caseSub?: (caseId: string, evals: readonly EvalLike[]) => string | undefined
   evalHref?: (evalId: string) => string
+  /**
+   * The cell's cost: the latest run's, so it agrees with the verdict shown
+   * (`latestRunCosts`). Given, it wins; a cell it has no run for shows no
+   * cost. Absent, cells fall back to the variant's median cost.
+   */
+  costOf?: (evalId: string, workflowId: string) => number | null | undefined
+}
+
+/** An /executions row as the board reads it (structural: the API row satisfies it). */
+export interface EvalExecutionLike {
+  workflow_id: string
+  started_at?: string | null
+  total_cost_usd?: number | string | null
+  eval?: { eval_id: string } | null
+}
+
+/** Key `latestRunCosts` uses: eval id and workflow id. */
+export function evalRunKey(evalId: string, workflowId: string): string {
+  return `${evalId}\u0000${workflowId}`
+}
+
+/** Each (eval, workflow)'s newest run cost, from the eval executions (any order). */
+export function latestRunCosts(rows: readonly EvalExecutionLike[]): Map<string, number | null> {
+  const newest = new Map<string, { at: number; cost: number | null }>()
+  for (const row of rows) {
+    if (!row.eval) continue
+    const key = evalRunKey(row.eval.eval_id, row.workflow_id)
+    const at = time(row.started_at) ?? 0
+    const prev = newest.get(key)
+    if (!prev || at > prev.at) newest.set(key, { at, cost: toNum(row.total_cost_usd ?? null) })
+  }
+  return new Map([...newest].map(([k, v]) => [k, v.cost]))
 }
 
 /** One (case, workflow) result before it is placed on the board. */
@@ -262,7 +294,8 @@ function verifierOf(entry: BoardEntry): Verifier {
 function placeCell(board: EvalBoardModel, key: string, entry: BoardEntry, options: BoardOptions): void {
   board.evalIds[key] = entry.e.eval_id
   board.workflows[key] = entry.workflow
-  board.cells[key] = { verdict: entry.verdict, costUsd: entry.costUsd, runs: entry.runs, evalHref: options.evalHref?.(entry.e.eval_id) }
+  const costUsd = options.costOf ? (options.costOf(entry.e.eval_id, entry.workflow) ?? null) : entry.costUsd
+  board.cells[key] = { verdict: entry.verdict, costUsd, runs: entry.runs, evalHref: options.evalHref?.(entry.e.eval_id) }
 }
 
 /** "verifier-seed-v1 v2: shared-esp-stream" -> "verifier-seed-v1 · v2". */

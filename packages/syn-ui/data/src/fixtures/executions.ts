@@ -2,6 +2,7 @@ import type { InventoryStatus } from '../resources/sessionInventory'
 import type { ExecutionDetailResponse, ExecutionListResponse, PhaseExecutionDetail } from '../types'
 import { type CatalogRun, RUNS, phaseRuns, runOf, workflowOf } from './catalog'
 import { type FixtureRoute, notFound, route } from './define'
+import { EVALS } from './evals'
 import { costDisplay, countBy, durationDisplay, fakeId, filterList, fixtureWindowStart, paginate, tokensDisplay } from './seed'
 
 /**
@@ -95,6 +96,21 @@ const EVAL_RUN = 1
 function evalOf(r: CatalogRun): ExecutionListItem['eval'] {
   if (RUNS.indexOf(r) !== EVAL_RUN) return null
   return { eval_id: 'eval-fixture-pr-review', eval_name: 'verifier-seed: pr-review smoke', association_kind: 'launched', verdict: 'PASS', score: 1, scored_at: r.startedAt }
+}
+
+/**
+ * The eval fixtures' runs as /executions rows (live: every eval run is an
+ * execution with an `eval` block), so `in_eval=true` lists them as the API
+ * does and the Evals board can read each cell's latest-run cost.
+ */
+function evalRunItems(): ExecutionListItem[] {
+  return EVALS.flatMap((e) =>
+    e.runs.map((run): ExecutionListItem => {
+      const cost = Number(run.total_cost_usd ?? 0)
+      const base = executionListItem({ id: run.execution_id, workflowId: run.workflow_id ?? '', status: 'completed', done: 1, repo: null, tokens: 0, cost, seconds: run.duration_seconds ?? 0, startedAt: run.started_at ?? '' })
+      return { ...base, total_cost_usd: run.total_cost_usd ?? base.total_cost_usd, eval: { eval_id: e.summary.eval_id, eval_name: e.summary.name, association_kind: 'launched', verdict: run.verdict ?? null, score: run.score ?? null, scored_at: run.scored_at ?? null } }
+    }),
+  )
 }
 
 function phaseDetail(r: CatalogRun): PhaseExecutionDetail[] {
@@ -227,7 +243,8 @@ export const executionRoutes: FixtureRoute[] = [
     const items = [...RUNS].sort((a, b) => b.startedAt.localeCompare(a.startedAt)).map(executionListItem)
     const textOf = (e: ExecutionListItem) => `${e.workflow_name} ${e.workflow_id} ${e.workflow_execution_id} ${e.repos_display ?? ''}`
     const after = fixtureWindowStart(query)
-    const timed = Number.isNaN(after) ? items : items.filter((e) => e.started_at && Date.parse(e.started_at) >= after)
+    const pool = query.get('in_eval') === 'true' ? [...items, ...evalRunItems()].sort((a, b) => (b.started_at ?? '').localeCompare(a.started_at ?? '')) : items
+    const timed = Number.isNaN(after) ? pool : pool.filter((e) => e.started_at && Date.parse(e.started_at) >= after)
     const inWindow = query.get('in_eval') === 'true' ? timed.filter((e) => e.eval) : timed
     const unfiltered = filterList(inWindow, new URLSearchParams({ q: query.get('q') ?? '' }), (e) => e.status, textOf)
     const rows = filterList(inWindow, query, (e) => e.status, textOf)
