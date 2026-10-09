@@ -1,12 +1,13 @@
-<!-- Syntropic137 wordmark: the rebrand blue cube "S" (public/logo_syntropic137.png, the landing page mark cropped to the cube; its
-     background is baked in, so the tile is rounded with a radius token rather than shown as a square) and Orbitron type. -->
+<!-- Syntropic137 wordmark: the S mark (SMark, eleven isometric cubes from skyline-core's sMark()) and Orbitron type, as in the
+     landing nav. The S is 21px wide (44px tall, about 1:2.1): the tallest it gets without growing the 44px top bar row. -->
 <script lang="ts">
+  import { SMark } from '@syn137/skyline-svelte-v5/patterns'
+
   let { href = '/', compact = false }: { href?: string; compact?: boolean } = $props()
-  const logo = `${import.meta.env.BASE_URL}logo_syntropic137.png`
 </script>
 
 <a class="sky-wordmark" data-compact={compact || undefined} {href} aria-label="Syntropic137 overview">
-  <img class="sky-wordmark__mark" src={logo} width="26" height="26" alt="" />
+  <span class="sky-wordmark__mark"><SMark size={21} label="" /></span>
   <span class="sky-wordmark__text">Syntropic<span class="sky-wordmark__num">137</span></span>
 </a>
 
@@ -26,11 +27,7 @@
   }
   .sky-wordmark__mark {
     display: block;
-    flex-shrink: 0;
-    width: 26px;
-    height: 26px;
-    border-radius: var(--ds-radius-sm);
-    object-fit: cover;
+    flex: none;
   }
   .sky-wordmark__text {
     font-family: var(--sky-font-brand);
