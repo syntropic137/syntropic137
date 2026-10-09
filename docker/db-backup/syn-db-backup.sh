@@ -42,21 +42,18 @@ if [ -n "${POSTGRES_PASSWORD_FILE:-}" ] && [ -z "${PGPASSWORD:-}" ]; then
 fi
 
 MANIFEST_HEADER="syn-db-backup manifest 1"
-# Append-only record of every file this script creates in a backup directory,
-# as `INODE SHA256 NAME` (SHA256 is `-` for a temp file, whose content is
-# still being written). prune deletes a file only when its name has the
-# generated shape AND the ledger records that name with that file's inode AND,
-# for a published file, its exact content. A file an operator put there,
-# whatever it is called and whatever inode it reuses, is never all three.
+# Append-only record of every file this script publishes in a backup
+# directory, as `INODE SHA256 NAME`. prune deletes a file only when its name
+# has the generated shape AND the ledger records that name with that file's
+# inode AND its exact content. A file an operator put there, whatever it is
+# called and whatever inode it reuses, is never all three.
 LEDGER=".syn-db-backup.ledger"
 
-# The only names this script ever publishes or leaves behind. prune deletes
-# nothing else. Shell patterns are anchored and [..] never matches '/' or a
+# The only names this script ever publishes. prune deletes nothing else. Shell patterns are anchored and [..] never matches '/' or a
 # newline, so no other file name can satisfy one.
 D8='[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'
 T6='[0-9][0-9][0-9][0-9][0-9][0-9]'
 STAMP="${D8}T${T6}Z"
-A='[A-Za-z0-9]'
 
 # 0 if $1 (a base name) is a backup or manifest this script published.
 is_published_name() {
@@ -67,20 +64,13 @@ is_published_name() {
     return 1
 }
 
-# 0 if $1 (a base name) is a temporary file of an unfinished backup.
-is_partial_name() {
-    case $1 in
-        .syn-$STAMP.dump.partial.$A$A$A$A$A$A) return 0 ;;
-    esac
-    return 1
-}
 
 inode() {
     ls -di -- "$1" | awk '{ print $1 }'
 }
 
-# Record DIR/NAME, just created by this script, in DIR's ledger, with SUM (the
-# sha256 of its final content, or - for a temp file). A file that cannot be
+# Record DIR/NAME, just published by this script, in DIR's ledger, with SUM
+# (the sha256 of its content). A file that cannot be
 # recorded is only ever kept, never pruned: that is the safe side. The ledger
 # is appended to only as a regular file, never through a symlink.
 track() {
@@ -189,18 +179,20 @@ backup() {
     [ -d "$dir" ] || fail "backup directory $dir does not exist"
     stamp=$(date -u +%Y%m%dT%H%M%SZ)
     umask 077
-    # Written under unique temporary names and published only once verified:
-    # a dump that dies half way never looks like a backup, and two backups in
-    # the same second (schedule + manual) never share a file.
-    # busybox mktemp (this image) needs the X run at the very end.
-    partial=$(mktemp "$dir/.syn-$stamp.dump.partial.XXXXXX") ||
-        fail "cannot create a file in $dir"
-    trap 'rm -f "$partial"' EXIT
-    track "$dir" "${partial##*/}"
-    manifest_partial=$(mktemp "$dir/.syn-$stamp.dump.partial.XXXXXX") ||
-        fail "cannot create a file in $dir"
-    trap 'rm -f "$partial" "$manifest_partial"' EXIT
-    track "$dir" "${manifest_partial##*/}"
+    # Written inside a private (0700) directory this run creates, under a
+    # unique name, and published only once verified: a dump that dies half
+    # way never looks like a backup, two backups in the same second
+    # (schedule + manual) never share a file, and nothing else in DIR is ever
+    # a temp file this script cleans up. busybox mktemp (this image) needs
+    # the X run at the very end.
+    work=$(mktemp -d "$dir/.syn-$stamp.backup.XXXXXX") ||
+        fail "cannot create a directory in $dir"
+    partial="$work/dump" manifest_partial="$work/manifest"
+    # Only the two files this run writes, and the directory only if that
+    # leaves it empty. A backup killed outright (SIGKILL, OOM) leaves the
+    # directory behind for an operator to remove: prune never guesses.
+    trap 'rm -f -- "$partial" "$manifest_partial"; rmdir -- "$work" 2>/dev/null ||
+        echo "syn-db-backup: $work is not empty; left in place" >&2' EXIT
     pg_dump --format=custom --file="$partial" || fail "pg_dump failed"
     tables=$(table_data_count "$partial")
     [ "$tables" -gt 0 ] || fail "archive lists no table data; refusing to keep it"
@@ -236,7 +228,8 @@ backup() {
     done
     track "$dir" "$name.manifest" "$(sha256 "$dir/$name.manifest")"
     track "$dir" "$name" "$sum"
-    rm -f "$partial" "$manifest_partial"
+    rm -f -- "$partial" "$manifest_partial"
+    rmdir -- "$work" 2>/dev/null || echo "syn-db-backup: $work is not empty; left in place" >&2
     trap - EXIT
     size=$(du -h "$dir/$name" | cut -f1)
     total=$(printf '%s\n' "$rows" | awk '{ s += $2 } END { print s + 0 }')
@@ -244,7 +237,8 @@ backup() {
 }
 
 # 0 if PATH is still the file the ledger recorded: a regular file, not a
-# symlink, with inode INO and (unless SUM is -) content SUM.
+# symlink, with inode INO and (unless SUM is -, for a first cheap look)
+# content SUM.
 is_recorded() {
     [ -f "$1" ] && [ ! -L "$1" ] && [ "$(inode "$1")" = "$2" ] &&
         { [ "$3" = - ] || [ "$(sha256 "$1")" = "$3" ]; }
@@ -263,16 +257,10 @@ prune() {
         return 0
     fi
     while read -r ino sum name; do
-        if is_published_name "$name"; then
-            minutes=$(($2 * 1440))
-            # A published file's content is final: it must still match.
-            case $sum in - | '') continue ;; esac
-        elif is_partial_name "$name"; then
-            # Abandoned temp files of a backup that died; a live one is minutes old.
-            minutes=1440
-        else
-            continue
-        fi
+        is_published_name "$name" || continue
+        # A published file's content is final: it must still match.
+        case $sum in - | '') continue ;; esac
+        minutes=$(($2 * 1440))
         path="$dir/$name"
         is_recorded "$path" "$ino" - || continue
         # -mmin, not -mtime: -mtime truncates to whole days, so +7 keeps 7.9 days.

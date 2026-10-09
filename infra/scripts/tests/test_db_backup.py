@@ -317,6 +317,34 @@ class TestBackup:
         assert not (tmp_path / "nowhere").exists()
         assert ledger.is_symlink() == (kind != "directory")
 
+    @pytest.mark.parametrize("dump_ok", [True, False], ids=["backup-ok", "backup-fails"])
+    def test_temp_files_live_in_a_private_directory_it_removes(self, tmp_path, fake_pg, dump_ok):
+        out = tmp_path / "backups"
+        out.mkdir()
+        # Anything else in DIR, even named like a temp file, is never cleaned up.
+        foreign = out / ".syn-20261008T030000Z.dump.partial.Ab12Cd"
+        foreign.write_text("operator data")
+        env = fake_pg(_LISTING_WITH_DATA)
+        seen = tmp_path / "seen"
+        _stub(
+            Path(env["PATH"].split(os.pathsep)[0]),
+            "pg_dump",
+            'for a in "$@"; do case $a in --file=*) f=${a#--file=};; esac; done\n'
+            f'ls -ld "$(dirname "$f")" > "{seen}"\n'
+            f'echo "$(dirname "$f")" >> "{seen}"\n'
+            'echo archive > "$f"\n'
+            f"exit {0 if dump_ok else 1}",
+        )
+
+        result = _run("backup", str(out), env=env)
+
+        assert (result.returncode == 0) == dump_ok, result.stderr
+        mode, work = seen.read_text().splitlines()
+        assert mode.startswith("drwx------"), mode
+        assert Path(work).parent == out
+        assert not Path(work).exists(), "temp directory left behind"
+        assert foreign.read_text() == "operator data"
+
     def test_simultaneous_backups_each_keep_their_own_archive(self, tmp_path, fake_pg):
         out = tmp_path / "backups"
         out.mkdir()
@@ -376,13 +404,18 @@ class TestPrune:
         assert foreign.exists(), "prune must only touch files it named itself"
         assert f"pruned: {old.name}" in result.stdout
 
-    def test_abandoned_partial_dumps_are_cleared_after_a_day(self, tmp_path):
-        stale = self._make(tmp_path, ".syn-20260901T030000Z.dump.partial.Ab12Cd", 2 * _DAY)
-        live = self._make(tmp_path, ".syn-20261008T030000Z.dump.partial.Ef34Gh", 60)
+    def test_never_prunes_temp_files_even_when_recorded(self, tmp_path):
+        """Temp content is never final, so ownership cannot be proven: left for a human."""
+        recorded = self._make(tmp_path, ".syn-20260901T030000Z.dump.partial.Ab12Cd", 365 * _DAY)
+        abandoned = tmp_path / ".syn-20260901T030000Z.backup.Ef34Gh"
+        abandoned.mkdir()
+        (abandoned / "dump").write_text("half a dump")
+        _age(abandoned / "dump", 365 * _DAY)
+        _age(abandoned, 365 * _DAY)
 
-        assert _run("prune", str(tmp_path), "7").returncode == 0
-        assert not stale.exists()
-        assert live.exists(), "a dump in progress must not be deleted under it"
+        assert _run("prune", str(tmp_path), "1").returncode == 0
+        assert recorded.exists()
+        assert (abandoned / "dump").exists()
 
     def test_manifests_and_suffixed_backups_age_out_with_the_rest(self, tmp_path):
         old = [
@@ -457,18 +490,6 @@ class TestPrune:
 
         assert _run("prune", str(tmp_path), "1").returncode == 0
         assert ours.read_text() == "operator data"
-
-    def test_never_deletes_a_file_put_in_place_of_a_temp_file_it_created(self, tmp_path):
-        """A temp file has no final content to check: its inode is the ownership."""
-        name = ".syn-20260901T030000Z.dump.partial.Ab12Cd"
-        ours = self._make(tmp_path, name, 365 * _DAY)
-        replacement = tmp_path / "operator-copy"
-        replacement.write_text("x")
-        replacement.replace(ours)
-        _age(ours, 365 * _DAY)
-
-        assert _run("prune", str(tmp_path), "1").returncode == 0
-        assert ours.exists()
 
     def test_a_published_name_recorded_without_its_checksum_is_kept(self, tmp_path):
         ours = self._make(tmp_path, "syn-20260901T030000Z.dump", 365 * _DAY, tracked=False)
