@@ -788,7 +788,11 @@ and one more per Goal or Baseline edit; a rename or retag is not a change. A
 Workflow's is its package version, else its source digest (the same value a
 Run records as its workflow version), changed by a create, a reinstall or a
 phase edit; a phase edit keeps the version, so two changes can share one.
-Dated by the event's recorded time.
+Dated by the event's recorded time (a Workflow) or the event's own time (an
+Eval), but identified and ordered by its position in the stream
+(`sequence`, the aggregate nonce): two changes can share a millisecond, and a
+clock can step backwards. The version current at a time is the change latest
+in the stream among those dated at or before it.
 
 ## Verdict
 
