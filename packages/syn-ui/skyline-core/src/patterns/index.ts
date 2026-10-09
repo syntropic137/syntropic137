@@ -31,3 +31,5 @@ export { harnessLanes, harnessLook, harnessProvider, HARNESS_PROVIDERS } from '.
 export type { HarnessProvider, HarnessLook, HarnessChipProps, HarnessPhase, HarnessLanesProps, HarnessLane, HarnessLaneCell } from './harness'
 export { tickerTiming, TOOL_LOG_SPEED, TOOL_LOG_PLAY_SECONDS } from './toolLog'
 export type { ToolLogRow, ToolLogProps, TickerTiming } from './toolLog'
+export { explorerModel, explorerColour, explorerStep, explorerX, EXPLORER_CHART, EXPLORER_SLOTS } from './evalExplorer'
+export type { ExplorerVerifier, EvalExplorerProps, ExplorerLine, ExplorerRow, ExplorerModel } from './evalExplorer'
