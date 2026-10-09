@@ -104,7 +104,7 @@ issue = "#185"
 
 [untyped-dicts.syn-domain]
 path = "packages/syn-domain"
-value = 440
+value = 439
 issue = "#673"
 
 [untyped-dicts.syn-adapters]
