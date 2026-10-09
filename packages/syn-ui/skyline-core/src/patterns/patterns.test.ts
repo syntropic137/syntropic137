@@ -115,9 +115,9 @@ describe('usageModel', () => {
     expect(m.cost).toBe('$0.2100')
     expect(m.tokensLabel).toBe('396.8K tokens')
     expect(m.series.map((s) => [s.label, s.display, s.percent])).toEqual([
-      ['Cache read', '313,560', '79.0%'],
-      ['Cache write', '64,884', '16.4%'],
-      ['Output', '18,254', '4.6%'],
+      ['Cache read', '313.6K', '79.0%'],
+      ['Cache write', '64.9K', '16.4%'],
+      ['Output', '18.3K', '4.6%'],
       ['Input', '93', '0.0%'],
     ])
     expect(m.costRows.map((r) => [r.display, r.percent, r.fill, r.tone])).toEqual([

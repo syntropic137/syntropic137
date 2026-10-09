@@ -4,7 +4,7 @@
  * model or by phase.
  */
 import { formatCostPrecise } from '../format/cost'
-import { formatInteger, formatPercent } from '../format/number'
+import { formatPercent } from '../format/number'
 import { formatTokens, TOKEN_SERIES, type TokenBreakdown } from '../format/tokens'
 
 export type CostRowTone = 'accent' | 'neutral' | 'claude' | 'codex'
@@ -93,7 +93,7 @@ export function usageModel(p: Pick<UsageMeterProps, 'cost' | 'tokens' | 'costRow
   const total = t.input + t.output + t.cacheWrite + t.cacheRead
   const series = TOKEN_SERIES.filter((s) => t[s.key] > 0).map((s) => {
     const ratio = total > 0 ? t[s.key] / total : 0
-    const row: UsageSeriesRow = { key: s.key, label: s.label, token: s.token, value: t[s.key], display: formatInteger(t[s.key]), percent: formatPercent(ratio, 1) }
+    const row: UsageSeriesRow = { key: s.key, label: s.label, token: s.token, value: t[s.key], display: formatTokens(t[s.key], { case: 'upper' }), percent: formatPercent(ratio, 1) }
     const rate = p.rates?.[s.key]
     if (rate) row.rate = rate
     return row

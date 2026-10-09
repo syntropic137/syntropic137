@@ -65,6 +65,16 @@ describe('formatTokens', () => {
     expect(formatTokens('1500')).toBe('1.5k')
     expect(formatTokens(0)).toBe('0')
   })
+  it('condenses at each tier boundary (feedback 418d59db)', () => {
+    expect(formatTokens(999)).toBe('999')
+    expect(formatTokens(1_000)).toBe('1.0k')
+    expect(formatTokens(999_999)).toBe('1.00M')
+    expect(formatTokens(1_000_000)).toBe('1.00M')
+    expect(formatTokens(19_824_689)).toBe('19.82M')
+    expect(formatTokens(999_999_999)).toBe('1.00B')
+    expect(formatTokens(1e9)).toBe('1.00B')
+    expect(formatTokens(14_540_000_000)).toBe('14.54B')
+  })
   it('breaks tokens down and totals them', () => {
     const b = { input: 12_100, output: 3_400, cacheWrite: 40_000, cacheRead: 200_000 }
     expect(totalTokens(b)).toBe(255_500)

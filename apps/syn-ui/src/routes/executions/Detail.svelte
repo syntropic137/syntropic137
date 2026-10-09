@@ -6,7 +6,7 @@
 -->
 <script lang="ts">
   import { phaseTone } from '@syn137/skyline-core/geometry'
-  import { formatBytes, formatCostPrecise, formatDateTime, formatDuration, formatInteger, shortId, durationBetween } from '@syn137/skyline-core/format'
+  import { formatBytes, formatCostPrecise, formatDateTime, formatDuration, formatInteger, formatTokens, shortId, durationBetween } from '@syn137/skyline-core/format'
   import { outcomeStatus, statusSemantics } from '@syn137/skyline-core/patterns'
   import {
     evalBadge,
@@ -106,7 +106,7 @@
       ? [
           { label: 'Duration', value: durationText },
           { label: 'Cost', value: formatCostPrecise(d.total_cost_usd) + (d.unpriced_observation_count ? '+' : '') },
-          { label: 'Tokens', value: formatInteger(d.total_tokens) },
+          { label: 'Tokens', value: formatTokens(d.total_tokens) },
           { label: 'Artifacts', value: String(d.artifact_ids.length) },
         ]
       : [],

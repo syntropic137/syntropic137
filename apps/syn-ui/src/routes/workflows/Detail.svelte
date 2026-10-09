@@ -159,7 +159,7 @@
                 <PhaseKitChips class="sky-wf__chips" model={phaseModelChip(p)} tools={kit.tools === 'not-recorded' ? 'default' : kit.tools} skills={kit.skills} />
                 {#if share}
                   <span class="sky-wf__share" aria-hidden="true"><span style:width={`${Math.round(share.share * 100)}%`}></span></span>
-                  <span class="sky-wf__share-text"><span>{formatInteger(share.tokens)} tok · {formatPercent(share.share)}</span><span>{phaseCostLabel(share)}</span></span>
+                  <span class="sky-wf__share-text"><span>{formatTokens(share.tokens)} tok · {formatPercent(share.share)}</span><span>{phaseCostLabel(share)}</span></span>
                 {/if}
               </button>
             </li>

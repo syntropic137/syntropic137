@@ -158,3 +158,13 @@ test('a Markdown task renders as body copy', async ({ page }) => {
   await expect(page.locator('ol li ul li')).toHaveCount(2)
   await expect(page.locator('ol li code').first()).toHaveText('is_palindrome(text)')
 })
+
+// Feedback 418d59db: token totals are condensed (k, M, B), never a raw count.
+test('execution token figure is condensed', async ({ page }) => {
+  test.skip(!isSkyline, 'Skyline figures')
+  await open(page, '/workflows/multi-agent')
+  await page.locator('a[href*="/executions/"]').first().click()
+  const header = page.locator('section[aria-label="Plan and implement a palindrome checker with tests."]')
+  await expect(header.getByText(/^\d+(\.\d+)?[kMB]$/).first()).toBeVisible()
+  await expect(header.getByText(/^\d{1,3}(,\d{3})+$/)).toHaveCount(0)
+})

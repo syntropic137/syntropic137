@@ -1,6 +1,6 @@
 <!-- Token mix card: one stacked bar plus a legend, series colours from TOKEN_SERIES. -->
 <script lang="ts">
-  import { formatInteger } from '@syn137/skyline-core/format'
+  import { formatTokens } from '@syn137/skyline-core/format'
   import type { TokenMixPart } from '@syn137/skyline-core/screens/overview'
 
   let { total, parts }: { total: number; parts: TokenMixPart[] } = $props()
@@ -11,7 +11,7 @@
 <section class="sky-ov-card" aria-labelledby="sky-ov-mix-title">
   <div class="sky-ov-card__head">
     <h2 id="sky-ov-mix-title">Token mix</h2>
-    <span class="sky-ov-mono">{formatInteger(total)}</span>
+    <span class="sky-ov-mono">{formatTokens(total)}</span>
   </div>
   {#if parts.length === 0}
     <p class="sky-ov-mix__empty">No tokens recorded yet.</p>
