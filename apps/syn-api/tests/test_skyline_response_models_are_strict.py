@@ -21,37 +21,32 @@ from syn_api.routes.workflows.queries import (
     WorkflowLatestOutputsResponse,
 )
 from syn_api.types import DeclaredSkillResponse, TokenTypeCostResponse
+from syn_shared.pricing import CostSplitBasis
 
 pytestmark = pytest.mark.unit
 
-VALID: list[tuple[type[BaseModel], dict[str, object]]] = [
-    (DeclaredSkillResponse, {"name": "review"}),
-    (
-        TokenTypeCostResponse,
-        {
-            "input_usd": Decimal(1),
-            "output_usd": Decimal(1),
-            "cache_creation_usd": Decimal(0),
-            "cache_read_usd": Decimal(0),
-            "basis": "rate_table",
-        },
+VALID: list[BaseModel] = [
+    DeclaredSkillResponse(name="review"),
+    TokenTypeCostResponse(
+        input_usd=Decimal(1),
+        output_usd=Decimal(1),
+        cache_creation_usd=Decimal(0),
+        cache_read_usd=Decimal(0),
+        basis=CostSplitBasis.RATE_TABLE,
     ),
-    (PhaseLatestOutputResponse, {"phase_id": "plan", "phase_name": "Plan"}),
-    (WorkflowLatestOutputsResponse, {"workflow_id": "wf", "phases": []}),
+    PhaseLatestOutputResponse(phase_id="plan", phase_name="Plan"),
+    WorkflowLatestOutputsResponse(workflow_id="wf", phases=[]),
 ]
 
 
-@pytest.mark.parametrize(("model", "fields"), VALID, ids=lambda v: getattr(v, "__name__", ""))
-def test_an_unknown_field_is_rejected(model: type[BaseModel], fields: dict[str, object]) -> None:
+@pytest.mark.parametrize("built", VALID, ids=lambda m: type(m).__name__)
+def test_an_unknown_field_is_rejected(built: BaseModel) -> None:
     with pytest.raises(ValidationError, match="extra_forbidden"):
-        model.model_validate({**fields, "not_a_field": 1})
+        type(built).model_validate({**built.model_dump(), "not_a_field": 1})
 
 
-@pytest.mark.parametrize(("model", "fields"), VALID, ids=lambda v: getattr(v, "__name__", ""))
-def test_a_built_response_cannot_be_mutated(
-    model: type[BaseModel], fields: dict[str, object]
-) -> None:
-    built = model.model_validate(fields)
-    first = next(iter(fields))
+@pytest.mark.parametrize("built", VALID, ids=lambda m: type(m).__name__)
+def test_a_built_response_cannot_be_mutated(built: BaseModel) -> None:
+    first = next(iter(type(built).model_fields))
     with pytest.raises(ValidationError, match="frozen_instance"):
-        setattr(built, first, fields[first])
+        setattr(built, first, getattr(built, first))
