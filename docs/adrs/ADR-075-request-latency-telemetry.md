@@ -39,15 +39,17 @@ a query pass through this middleware; only the template leaves it. An incoming
 
 ### How it is written
 
-`RequestTimingMiddleware` is the OUTERMOST app middleware, so a startup-gate
-503 and a workspace-ingress refusal are timed and recorded like any response.
-At response START it builds a sample, sets `x-request-id` (replacing any the
-app set) and calls `RequestLatencyRecorder.offer`. A long-lived stream is
-therefore recorded when it answered, not when it closed. If no response
-starts, a sample is offered when the request ends. An unhandled exception gets
-its 500 sent here, with the id, before the exception is re-raised to
-Starlette's error middleware. A recorder that raises is logged and ignored, so
-telemetry never fails a request and never masks the application's exception.
+`RequestTimingMiddleware` wraps the app's WHOLE middleware stack, including
+Starlette's `ServerErrorMiddleware` (`_TimedFastAPI.build_middleware_stack`).
+So a startup-gate 503, a workspace-ingress refusal and the framework's own 500
+(a custom exception handler's body and headers, or the debug traceback) are
+observed, recorded and stamped with `x-request-id`, never replaced. At
+response START it builds a sample, sets `x-request-id` (replacing any the app
+set) and calls `RequestLatencyRecorder.offer`. A long-lived stream is
+therefore recorded when it answered, not when it closed. Only if nothing was
+sent at all does it synthesize a 500, and a sample is then offered when the
+request ends. A recorder that raises is logged and ignored, so telemetry never
+fails a request and never masks the application's exception.
 
 `offer` appends to a bounded in-memory buffer (10,000) and returns: no I/O and
 no await on the request path. A background task drains it with one `COPY` per
@@ -58,9 +60,18 @@ drops, never blocks. Every loss is counted in `GET /observability/latency`:
 |---|---|
 | `dropped` | Offered while the buffer was full or the recorder was not running |
 | `write_failures` | In a batch that failed or overran `REQUEST_LATENCY_IO_TIMEOUT_S` |
-| `discarded` | Still buffered or mid-write when `REQUEST_LATENCY_SHUTDOWN_TIMEOUT_S` expired |
+| `discarded` | Still buffered or mid-write (not confirmed written) when `REQUEST_LATENCY_SHUTDOWN_TIMEOUT_S` expired |
+| `cleanup_failures` | Batches that WERE written (and counted in `written`) whose connection could not be released in time and was terminated |
 
-Every database step has a deadline from settings, never a literal.
+Every database step has a deadline from settings, never a literal, and the
+steps are separate because `async with pool.acquire()` cannot be bounded:
+asyncpg shields the release (and the connection reset inside it) from
+cancellation and gives it no timeout, so a stalled reset outlives any timeout
+around the block and later holds up `pool.close()`. `run_bounded` therefore
+calls `pool.acquire(timeout=)`, runs the operation under `wait_for`, and
+releases with `pool.release(conn, timeout=)` under `wait_for`; on any overrun
+or cancellation the connection is terminated, so the pending release sees it
+closed and finishes at once.
 `request_latency_io_timeout_s` (default 5 s) bounds connection acquisition, each
 batch write and each attempt to ready the table.
 `request_latency_shutdown_timeout_s` (default 10 s) bounds the final flush. A

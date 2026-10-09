@@ -109,7 +109,7 @@ describe("insights commands", () => {
         since: "2026-10-07T00:00:00+00:00",
         available: true,
         routes: [],
-        recorder: { running: false, written: 0, dropped: 42, write_failures: 3, discarded: 5, buffered: 0 },
+        recorder: { running: false, written: 0, dropped: 42, write_failures: 3, discarded: 5, cleanup_failures: 2, buffered: 0 },
       }),
     );
 
@@ -119,6 +119,7 @@ describe("insights commands", () => {
     expect(out).toContain("42 dropped");
     expect(out).toContain("3 failed writes");
     expect(out).toContain("5 discarded");
+    expect(out).toContain("2 connection cleanups failed");
   });
 
   it("latency prints one row per route", async () => {
@@ -130,7 +131,7 @@ describe("insights commands", () => {
         routes: [
           { method: "GET", route: "/evals", count: 12, p50_ms: 40, p95_ms: 900, p99_ms: 24500, max_ms: 26000, p99_display: "24.5 s" },
         ],
-        recorder: { running: true, written: 12, dropped: 0, write_failures: 0, discarded: 0, buffered: 0 },
+        recorder: { running: true, written: 12, dropped: 0, write_failures: 0, discarded: 0, cleanup_failures: 0, buffered: 0 },
       }),
     );
 
@@ -138,6 +139,7 @@ describe("insights commands", () => {
     const out = stdout();
     expect(out).toContain("/evals");
     expect(out).toContain("24500");
+    expect(out).toContain("arrival to response start");
     expect(out).not.toContain("dropped");
   });
 });

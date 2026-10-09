@@ -131,7 +131,7 @@ function isLatencyWindow(value: string): value is LatencyWindow {
 
 const latencyCommand: CommandDef = {
   name: "latency",
-  description: "Show API request latency (p50/p95/p99) per route",
+  description: "Show API latency to response start (p50/p95/p99) per route",
   options: {
     window: { type: "string", short: "w", description: "1h, 24h, 7d or 30d", default: "24h" },
     route: { type: "string", short: "r", description: "One route template as the API reports it, e.g. /evals" },
@@ -148,10 +148,11 @@ const latencyCommand: CommandDef = {
 
     // Recorder health first: an empty table is exactly when the drop counters matter.
     const rec = d.recorder;
-    if (!rec.running || rec.dropped > 0 || rec.write_failures > 0 || rec.discarded > 0) {
+    if (!rec.running || rec.dropped > 0 || rec.write_failures > 0 || rec.discarded > 0 || rec.cleanup_failures > 0) {
       print(style(
         `  recorder ${rec.running ? "running" : "NOT running"} on this API process: `
-          + `${rec.dropped} dropped, ${rec.write_failures} failed writes, ${rec.discarded} discarded`,
+          + `${rec.dropped} dropped, ${rec.write_failures} failed writes, ${rec.discarded} discarded, `
+          + `${rec.cleanup_failures} connection cleanups failed`,
         YELLOW,
       ));
     }
@@ -159,7 +160,7 @@ const latencyCommand: CommandDef = {
     if (d.routes.length === 0) { printDim(`No requests recorded in the last ${d.window}.`); return; }
 
     const ms = (v: number) => `${Math.round(v)}`;
-    const table = new Table({ title: `Request latency, last ${d.window} (ms)` });
+    const table = new Table({ title: `Latency, arrival to response start, last ${d.window} (ms)` });
     table.addColumn("Method");
     table.addColumn("Route", { style: CYAN });
     table.addColumn("Count", { align: "right" });
