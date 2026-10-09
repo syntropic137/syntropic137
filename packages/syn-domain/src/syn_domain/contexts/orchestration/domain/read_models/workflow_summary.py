@@ -75,6 +75,24 @@ def _readable_refs(refs: object) -> list[PhaseRefDetail]:
     return [ref for ref in read if ref is not None]
 
 
+def _phase_order(phase: object) -> tuple[int, int]:
+    # A phase with no readable order sorts after every ordered one, keeping its
+    # place among the others: the sort is stable.
+    order = phase.get(PhaseFields.ORDER) if isinstance(phase, dict) else None
+    if isinstance(order, int) and not isinstance(order, bool):
+        return (0, order)
+    return (1, 0)
+
+
+def _in_phase_order(phases: Iterable[object]) -> list[object]:
+    """The phases sorted by their declared ``order``, not as supplied.
+
+    The events carry phases in whatever sequence the author wrote them; the
+    order a phase runs in is its ``order`` field, and "in phase order" means that.
+    """
+    return sorted(phases, key=_phase_order)
+
+
 def declared_skills(
     phases: Iterable[object], workflow_skills: Iterable[object] = ()
 ) -> tuple[WorkflowSkillSummary, ...]:
@@ -95,7 +113,7 @@ def declared_skills(
 
     for ref in _readable_refs(list(workflow_skills)):
         workflow_scope.add(note(ref))
-    for phase in phases:
+    for phase in _in_phase_order(phases):
         if not isinstance(phase, dict):
             continue
         phase_id = phase.get(PhaseFields.ID) or phase.get(PhaseFields.PHASE_ID) or ""

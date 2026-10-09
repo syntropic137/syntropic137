@@ -65,13 +65,18 @@ class PhaseRefDetail:
         source = ref.get("source_url") or ref.get("source")
         # SkillRef spells it `skill_name`; ClaudePluginRef spells it `name`.
         name = ref.get("skill_name") or ref.get("name")
-        if not source and not name:
+        # `to_dict` writes a shorthand ref as a mapping holding only `raw`, so
+        # a row this class wrote must read back as the same ref, not as nothing.
+        stored_raw = ref.get("raw")
+        raw = stored_raw if isinstance(stored_raw, str) and stored_raw else None
+        if not source and not name and raw is None:
             return None
         return cls(
             source_url=source if isinstance(source, str) else None,
             name=name if isinstance(name, str) else None,
             version=ref.get("version") if isinstance(ref.get("version"), str) else None,
             name_overridden=ref.get("name_overridden") is True,
+            raw=raw,
         )
 
     def to_dict(self) -> dict[str, str | bool | None]:

@@ -221,3 +221,32 @@ class TestStoredRows:
             ]
         )
         assert skill.phase_ids == ("p1", "p2")
+
+    def test_a_shorthand_ref_survives_the_storage_round_trip(self) -> None:
+        """``to_dict`` writes a shorthand ref as ``{"raw": ...}``; it must read back."""
+        (skill,) = declared_skills([{"id": "p1", "skills": ["acme/skills/review@v1"]}])
+        summary = WorkflowSummary(
+            id="wf",
+            name="wf",
+            workflow_type="custom",
+            classification="simple",
+            phase_count=1,
+            description=None,
+            created_at=None,
+            skills=(skill,),
+        )
+        assert WorkflowSummary.from_dict(summary.to_dict()).skills == (skill,)
+
+    def test_declaring_phases_follow_phase_order_not_supplied_sequence(self) -> None:
+        ref = {"skill_name": "review", "source_url": SOURCE, "version": "v1"}
+        lint = {"skill_name": "lint", "source_url": SOURCE, "version": "v1"}
+        skills = declared_skills(
+            [
+                {"id": "second", "order": 2, "skills": [ref]},
+                {"id": "first", "order": 1, "skills": [lint, ref]},
+            ]
+        )
+        assert [(s.ref.name, s.phase_ids) for s in skills] == [
+            ("lint", ("first",)),
+            ("review", ("first", "second")),
+        ]
