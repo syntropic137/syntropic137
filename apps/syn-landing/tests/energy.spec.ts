@@ -25,7 +25,7 @@ test.describe("Energy & Performance", () => {
     await cdp.send("Performance.enable");
 
     // Load page and wait for ALL finite animations to complete
-    // Longest: glow-drift-2 (30s × 2) and border-orbit (6s × 10) = ~60s
+    // Longest: glow-drift-2 (one 30s cycle); nothing loops forever
     await page.goto("/");
     await page.waitForTimeout(35_000); // wait for all finite animations to complete (longest: 30s)
 
@@ -62,9 +62,9 @@ test.describe("Energy & Performance", () => {
     await page.goto("/");
     await page.waitForTimeout(35_000); // wait for all finite animations to complete (longest: 30s)
 
-    // Check if any animations are still running
-    // border-orbit is intentionally infinite (transform:rotate is compositor-only, ~0 CPU)
-    const allowedInfinite = new Set(["border-orbit"]);
+    // Check if any animations are still running. No animation may loop
+    // forever (design/landing-plan.md, section 7), so nothing is allowed.
+    const allowedInfinite = new Set<string>();
     const runningAnimations = await page.evaluate((allowed) => {
       const all = document.getAnimations();
       return all

@@ -24,21 +24,9 @@
 # `just fitness-check` now fails when the tool reports a stale exception, so
 # this cannot silently accumulate again.
 
-# apps/syn-landing arrived by git subtree with its EntropyAnimation hero
-# canvas (design/landing-plan.md, P4). P5 deletes the component outright, which
-# turns both waivers stale, and fitness-check then fails until they are removed.
-[max-cognitive."tsx:apps/syn-landing/src/components/EntropyAnimation::EntropyAnimation"]
-value = 50
-issue = "#1764"
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # Maximum Cyclomatic Complexity (function-level, threshold: 10)
 # ═══════════════════════════════════════════════════════════════════════════════
-
-# Same component, same removal in P5 (see the max-cognitive waiver above).
-[max-cyclomatic."tsx:apps/syn-landing/src/components/EntropyAnimation::EntropyAnimation"]
-value = 20
-issue = "#1764"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Maximum LOC (function-level, threshold: 100)

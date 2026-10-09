@@ -38,8 +38,8 @@ install inputs. They bind every change:
 - **Lighthouse minimums** (desktop): Performance 90, Accessibility 90,
   Best Practices 85, SEO 90 (`lighthouserc.json`).
 - **Idle CPU** (`tests/energy.spec.ts`): under 500ms of CPU over 5s of idle,
-  measured after 35s, and no infinite CSS animations (only `border-orbit` is
-  allowed). Every animation runs a few cycles and stops on a static end state.
+  measured after 35s, and no infinite CSS animations. Every animation runs a
+  few cycles and stops on a static end state.
 - Typecheck (`tsc --noEmit`), build, CodeQL and gitleaks.
 
 ## Deployment

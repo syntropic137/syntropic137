@@ -1,5 +1,4 @@
 import { Scale, Link } from "lucide-react";
-import EntropyAnimation from "./EntropyAnimation";
 
 const GitHubIcon = ({ size = 14 }: { size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor">
@@ -18,7 +17,6 @@ const iconStyle = { verticalAlign: '-2px' as const, marginRight: '6px' };
 export default function Footer() {
   return (
     <footer className="footer">
-      <EntropyAnimation />
       <div className="container footer-grid">
         <div className="footer-brand">
           <span className="footer-name">Syntropic137</span>

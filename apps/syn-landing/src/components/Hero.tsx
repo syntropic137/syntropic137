@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import TextShimmer from "./TextShimmer";
 import InstallTerminal from "./InstallTerminal";
 import { ArrowRight, BookOpen, Scale } from "lucide-react";
@@ -70,31 +70,9 @@ function TypingText({ text, delay = 0 }: { text: string; delay?: number }) {
   );
 }
 
-function useVideoToStill() {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const [posterSrc, setPosterSrc] = useState<string | null>(null);
-
-  const handleEnded = useCallback(() => {
-    const video = videoRef.current;
-    if (!video) return;
-    const canvas = document.createElement("canvas");
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    ctx.drawImage(video, 0, 0);
-    canvas.toBlob((blob) => {
-      if (blob) setPosterSrc(URL.createObjectURL(blob));
-    }, "image/webp");
-  }, []);
-
-  return { videoRef, posterSrc, handleEnded };
-}
-
 export default function Hero() {
   const hero = useStaggerReveal(7, 100, 150);
   const defs = useStaggerReveal(3, 200, 200);
-  const { videoRef, posterSrc, handleEnded } = useVideoToStill();
 
   return (
     <section className="hero-section" ref={hero.ref}>
@@ -156,30 +134,6 @@ export default function Hero() {
           </div>
         </div>
 
-        <div className="hero-visual" style={hero.getStyle(2)}>
-          <div className="hero-visual-glow">
-            <div className="hero-visual-frame">
-              {posterSrc ? (
-                <img
-                  className="hero-video"
-                  src={posterSrc}
-                  alt="Syntropic137 logo"
-                />
-              ) : (
-                <video
-                  ref={videoRef}
-                  className="hero-video"
-                  autoPlay
-                  muted
-                  playsInline
-                  aria-label="Syntropic137 logo"
-                  src="/assets/hero_syntropic137.webm"
-                  onEnded={handleEnded}
-                />
-              )}
-            </div>
-          </div>
-        </div>
       </div>
 
       <div className="container hero-definitions" ref={defs.ref}>
