@@ -102,14 +102,26 @@ function path(points: [number, number][]): string {
 }
 
 /** Everything the explorer draws, from plain verifier series. */
-export function explorerModel(p: EvalExplorerProps): ExplorerModel {
-  const { quality: QH, cost: CH } = EXPLORER_CHART
-  const passAt = p.passAt ?? PASS_SCORE
+/** The x span in days (the last run day, else the longest series) and the cost axis top. */
+function explorerScales(p: EvalExplorerProps): { span: number; costMax: number } {
   const lastDay = Math.max(0, ...p.verifiers.flatMap((v) => v.days ?? []))
   const longest = Math.max(0, ...p.verifiers.map((v) => Math.max(v.scores.length, v.costs.length) - 1))
   const span = p.span ?? (lastDay > 0 ? lastDay : Math.max(1, longest))
   const dearest = Math.max(0, ...p.verifiers.flatMap((v) => v.costs.filter((c) => Number.isFinite(c))))
   const costMax = p.costMax ?? (dearest > 0 ? Math.ceil(dearest * 1.28 * 10) / 10 : 1)
+  return { span, costMax }
+}
+
+/** The requested verifier when it is a valid index, else the best ranked, else the first. */
+function explorerSelected(selected: number | undefined, n: number, best: number | null): number {
+  const valid = typeof selected === 'number' && Number.isInteger(selected) && selected >= 0 && selected < n
+  return valid ? selected : (best ?? 0)
+}
+
+export function explorerModel(p: EvalExplorerProps): ExplorerModel {
+  const { quality: QH, cost: CH } = EXPLORER_CHART
+  const passAt = p.passAt ?? PASS_SCORE
+  const { span, costMax } = explorerScales(p)
 
   const quality: ExplorerLine[] = []
   const cost: ExplorerLine[] = []
@@ -133,9 +145,7 @@ export function explorerModel(p: EvalExplorerProps): ExplorerModel {
     runs: Array.from({ length: Math.max(v.scores.length, v.costs.length) }, (_, i) => ({ score: v.scores[i] ?? null, costUsd: v.costs[i] ?? 0 })),
   }))
   const ranking = rankVerifiers(inputs)
-  const n = p.verifiers.length
-  const requested = typeof p.selected === 'number' && Number.isInteger(p.selected) && p.selected >= 0 && p.selected < n ? p.selected : null
-  const selected = requested ?? ranking.best ?? 0
+  const selected = explorerSelected(p.selected, p.verifiers.length, ranking.best)
   const stats = ranking.stats[selected]
   const verdict = stats ? rankVerdict(stats) : null
   const grid = (h: number) => [0, 0.25, 0.5, 0.75, 1].map((f) => h * f)
