@@ -35,9 +35,8 @@ from functools import cache
 from typing import TYPE_CHECKING
 
 import pytest
-from pydantic_settings import BaseSettings
-
 from ci.fitness.conftest import load_exceptions, production_files, rel_path
+from pydantic_settings import BaseSettings
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -93,9 +92,7 @@ def _unconsumed() -> set[str]:
     dead: set[str] = set()
     for cls in _governed_settings():
         consumed = _consumed_attributes(cls.__name__)
-        dead.update(
-            f"{cls.__name__}.{name}" for name in cls.model_fields if name not in consumed
-        )
+        dead.update(f"{cls.__name__}.{name}" for name in cls.model_fields if name not in consumed)
     return dead
 
 
