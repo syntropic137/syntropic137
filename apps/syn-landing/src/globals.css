@@ -434,7 +434,7 @@ img, video {
     width: 26px;
   }
 
-  .wordmark {
+  .site-header__brand .wordmark {
     font-size: 15px;
   }
 
@@ -1278,72 +1278,110 @@ img, video {
   font-style: normal;
 }
 
-/* ── Footer ── */
-.footer {
-  position: relative;
-  overflow: hidden;
-  padding-top: var(--ds-space-12);
-  background: color-mix(in oklab, var(--ds-color-bg) 90%, transparent);
-  border-top: 1px solid var(--ds-color-border);
+/* ── Site footer (Landing / PhoneLanding boards) ──
+   Phone first: brand over a two-column link grid; from 48rem brand left,
+   three columns right. */
+.site-footer {
+  border-top: var(--ds-border-width) solid var(--sky-color-section-rule);
 }
 
-.footer-grid,
-.footer-bottom {
-  position: relative;
-  z-index: 1;
-}
-
-.footer-grid {
+.site-footer__inner {
   display: flex;
+  flex-direction: column;
   justify-content: space-between;
-  gap: var(--ds-space-12);
-  padding-block: var(--ds-space-12);
+  gap: var(--ds-space-8);
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: var(--ds-space-8) var(--sky-gutter) var(--ds-space-10);
 }
 
-.footer-brand {
+.site-footer__brand {
   display: flex;
   flex-direction: column;
-  gap: var(--ds-space-1);
+  gap: var(--ds-space-3);
+  max-width: 320px;
 }
 
-.footer-name {
-  font-family: var(--sky-font-brand);
-  font-size: var(--landing-text-card-title);
-  font-weight: var(--ds-font-weight-bold);
-  color: var(--ds-color-accent);
-}
-
-.footer-tagline {
-  font-size: var(--landing-text-body);
-  color: var(--ds-color-text-muted);
-}
-
-.footer-links {
+.site-footer__mark {
   display: flex;
-  gap: var(--ds-space-16);
+  align-items: center;
+  gap: var(--ds-space-2-5);
 }
 
-.footer-col {
+.site-footer__mark .s-mark {
+  width: 22px;
+}
+
+.site-footer__tagline {
+  font-size: var(--sky-text-control);
+  line-height: 1.5;
+  color: var(--ds-color-text-subtle);
+}
+
+.site-footer__columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--ds-space-6) var(--ds-space-4);
+}
+
+.site-footer__col {
   display: flex;
   flex-direction: column;
-  gap: var(--ds-space-2);
+  align-items: flex-start;
+  gap: var(--ds-space-2-5);
 }
 
-.footer-col-title {
-  font-size: var(--landing-text-code);
-  font-weight: var(--ds-font-weight-semibold);
-  color: var(--ds-color-fg);
+.site-footer__title {
+  font-family: var(--ds-font-mono);
+  font-size: var(--ds-text-xs);
+  font-weight: var(--ds-font-weight-regular);
+  line-height: var(--ds-line-height-normal);
+  letter-spacing: 0.12em;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
-  margin-bottom: var(--ds-space-1);
+  color: var(--ds-color-text-subtle);
 }
 
-.footer-link {
-  font-size: var(--landing-text-body);
+.site-footer__link {
+  font-size: var(--ds-text-md);
+  line-height: var(--ds-line-height-normal);
   color: var(--ds-color-text-muted);
   text-decoration: none;
-  cursor: pointer;
-  transition: color 0.2s ease-out;
+  border-radius: var(--ds-radius-xs);
+  transition: color var(--sky-duration-base) ease;
+}
+
+.site-footer__link:hover {
+  color: var(--ds-color-fg);
+}
+
+.site-footer__link:focus-visible {
+  outline: var(--sky-focus-ring-width) solid var(--sky-color-focus);
+  outline-offset: var(--sky-focus-ring-offset);
+}
+
+@media (pointer: coarse) {
+  .site-footer__link {
+    display: inline-flex;
+    align-items: center;
+    min-height: var(--sky-size-touch);
+  }
+
+  .site-footer__col {
+    gap: 0;
+  }
+}
+
+@media (min-width: 48rem) {
+  .site-footer__inner {
+    flex-direction: row;
+    gap: var(--ds-space-8);
+    padding: var(--ds-space-12) var(--sky-gutter) var(--ds-space-14);
+  }
+
+  .site-footer__columns {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--ds-space-6) 72px;
+  }
 }
 
 /* ── Links Page ── */
@@ -1424,21 +1462,6 @@ img, video {
   color: var(--ds-color-text-subtle);
   margin-top: 2px;
 }
-
-.footer-link:hover {
-  color: var(--ds-color-fg);
-}
-
-.footer-bottom {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding-block: var(--ds-space-6);
-  border-top: 1px solid var(--ds-color-border);
-  font-size: var(--landing-text-code);
-  color: var(--ds-color-text-muted);
-}
-
 
 /* ── Skip Link ── */
 .skip-link {
@@ -1678,21 +1701,6 @@ img, video {
     padding: 14px 24px;
     font-size: 15px;
     justify-content: center;
-  }
-
-  .footer-grid {
-    flex-direction: column;
-    gap: var(--ds-space-8);
-  }
-
-  .footer-links {
-    gap: var(--ds-space-8);
-  }
-
-  .footer-bottom {
-    flex-direction: column;
-    gap: var(--ds-space-2);
-    text-align: center;
   }
 
   .install-cmd {

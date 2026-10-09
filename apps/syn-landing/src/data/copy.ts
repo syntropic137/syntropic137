@@ -33,3 +33,40 @@ export const NAV_LINKS: readonly SiteLink[] = [
 
 export const NAV_GITHUB_LABEL = "Star on GitHub";
 export const NAV_CTA: SiteLink = { label: "Get started", href: "#get-started" };
+
+export const FOOTER_TAGLINE = "The agentic engineering platform. MIT licensed.";
+
+export interface FooterColumn {
+  title: string;
+  links: readonly SiteLink[];
+}
+
+export const FOOTER_COLUMNS: readonly FooterColumn[] = [
+  {
+    title: "Product",
+    links: [
+      { label: "Docs", href: DOCS_URL },
+      { label: "CLI reference", href: `${DOCS_URL}/docs/cli` },
+      { label: "API reference", href: `${DOCS_URL}/docs/api` },
+      { label: "Docs for agents", href: `${DOCS_URL}/llms.txt` },
+    ],
+  },
+  {
+    title: "Guides",
+    links: [
+      { label: "Getting started", href: `${DOCS_URL}/docs/guide/getting-started` },
+      { label: "Workflows", href: `${DOCS_URL}/docs/guide/workflows` },
+      { label: "Evals", href: `${DOCS_URL}/docs/guide/evals` },
+      { label: "Self-hosting", href: `${DOCS_URL}/docs/guide/self-hosting` },
+    ],
+  },
+  {
+    title: "Community",
+    links: [
+      { label: "GitHub", href: GITHUB_URL },
+      { label: "X", href: X_URL },
+      { label: "Changelog", href: `${GITHUB_URL}/blob/main/CHANGELOG.md` },
+      { label: "Security", href: `${GITHUB_URL}/security/policy` },
+    ],
+  },
+];
