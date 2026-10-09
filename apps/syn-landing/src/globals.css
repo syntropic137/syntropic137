@@ -742,7 +742,9 @@ img, video {
   background-clip: text;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
-  animation: text-shimmer 7s ease-in-out infinite;
+  /* Finite (4 x 7s, done before the energy test's 35s settle); ends at the
+     0%/100% keyframe, the shimmer off-text, so the static end state is plain text. */
+  animation: text-shimmer 7s ease-in-out 4;
   animation-delay: 0.5s;
 }
 
