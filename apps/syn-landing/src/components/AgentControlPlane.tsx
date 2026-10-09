@@ -6,7 +6,7 @@ const capabilities = [
   {
     icon: PenLine,
     num: "01",
-    accent: "#E08A5F",
+    accent: "var(--sky-harness-claude)",
     title: "Design Workflows",
     desc: (
       <>
@@ -20,7 +20,7 @@ const capabilities = [
   {
     icon: Play,
     num: "02",
-    accent: "#4D80FF",
+    accent: "var(--ds-color-accent)",
     title: "Run and Control",
     desc: (
       <>
@@ -34,7 +34,7 @@ const capabilities = [
   {
     icon: BarChart2,
     num: "03",
-    accent: "#34d399",
+    accent: "var(--ds-color-success)",
     title: "Review Outputs",
     desc: (
       <>

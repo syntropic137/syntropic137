@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import TextShimmer from "./TextShimmer";
 import InstallTerminal from "./InstallTerminal";
 import { ArrowRight, BookOpen, Scale } from "lucide-react";
-import { HARNESSES } from "../data/harnesses";
+import { HARNESSES, harnessStyle } from "../data/harnesses";
 
 const GitHubIcon = ({ size = 16 }: { size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor">
@@ -76,10 +76,6 @@ export default function Hero() {
 
   return (
     <section className="hero-section" ref={hero.ref}>
-      {/* Ambient glow orbs */}
-      <div className="hero-glow hero-glow--primary" aria-hidden="true" />
-      <div className="hero-glow hero-glow--secondary" aria-hidden="true" />
-
       <div className="container hero">
         <div className="hero-text">
           <div style={hero.getStyle(0)}>
@@ -109,7 +105,7 @@ export default function Hero() {
             {HARNESSES.map((h, i) => (
               <span key={h.id}>
                 {i > 0 && (i === HARNESSES.length - 1 ? " and " : ", ")}
-                <span className={`harness ${h.accentClass}`}>{h.name}</span>
+                <span className="harness" style={harnessStyle(h)}>{h.name}</span>
               </span>
             ))}{" "}
             across workflows, with every tool call and conversation captured.

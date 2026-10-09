@@ -104,8 +104,8 @@ RUNNABLE_BUT_EXCLUDED: Final[dict[str, str]] = {
     "syn-ui.yml:desktop": "path-filtered, needs Tauri system libraries (webkit2gtk); `pnpm --dir apps/syn-desktop test`",
     # syntropic137.com (apps/syn-landing) runs only on PRs touching its paths
     # or packages/syn-ui. Each job has a mirror recipe in just/landing.just.
-    "syn-landing.yml:copy-lint": "path-filtered to the landing page; `just landing-copy-lint`",
-    "syn-landing.yml:build": "path-filtered to the landing page; `just landing-typecheck landing-build`",
+    "syn-landing.yml:copy-lint": "path-filtered to the landing page; `just landing-copy-lint landing-colour-lint`",
+    "syn-landing.yml:build": "path-filtered to the landing page; `just landing-colour-lint landing-typecheck landing-build`",
     "syn-landing.yml:lighthouse": "path-filtered, needs Chrome and a network fetch of @lhci/cli; `just landing-lighthouse`",
     "syn-landing.yml:energy": "path-filtered, needs a Playwright browser and ~2 minutes; `just landing-energy`",
     "syn-landing.yml:codeql": "path-filtered, needs the CodeQL CLI and query packs; `codeql database create` by hand",

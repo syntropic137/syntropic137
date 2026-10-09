@@ -2,10 +2,10 @@ import { Search, FileText, Code2, MessageSquareText, ArrowRight } from "lucide-r
 import FadeIn from "./FadeIn";
 
 const phases = [
-  { icon: Search,            title: "Research",   subtitle: "/research $ARGUMENTS",  stepNum: "01", stepColor: "#4D80FF" },
-  { icon: FileText,          title: "Plan",        subtitle: "/plan $ARGUMENTS",       stepNum: "02", stepColor: "#a78bfa" },
-  { icon: Code2,             title: "Implement",   subtitle: "/implement $ARGUMENTS",  stepNum: "03", stepColor: "#34d399" },
-  { icon: MessageSquareText, title: "Review",      subtitle: "/review $ARGUMENTS",     stepNum: "04", stepColor: "#f59e0b" },
+  { icon: Search,            title: "Research",   subtitle: "/research $ARGUMENTS",  stepNum: "01", stepColor: "var(--sky-color-series-1)" },
+  { icon: FileText,          title: "Plan",        subtitle: "/plan $ARGUMENTS",       stepNum: "02", stepColor: "var(--sky-color-series-3)" },
+  { icon: Code2,             title: "Implement",   subtitle: "/implement $ARGUMENTS",  stepNum: "03", stepColor: "var(--sky-color-series-2)" },
+  { icon: MessageSquareText, title: "Review",      subtitle: "/review $ARGUMENTS",     stepNum: "04", stepColor: "var(--ds-color-warning)" },
 ];
 
 export default function HowItWorks() {

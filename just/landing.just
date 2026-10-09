@@ -20,6 +20,10 @@ landing-preview:
 landing-copy-lint:
     bash apps/syn-landing/scripts/check-copy.sh
 
+# No colour literals in src/ CSS or TSX, and every Skyline token used exists (syn-landing.yml `copy-lint`, `build`)
+landing-colour-lint:
+    bash apps/syn-landing/scripts/check-colours.sh --tokens
+
 # tsc --noEmit over src/ (syn-landing.yml `build`; vite build itself does not type-check)
 landing-typecheck:
     pnpm --filter syn-landing run typecheck
@@ -33,5 +37,5 @@ landing-lighthouse: landing-build
 landing-energy: landing-build
     LANDING_PORT={{_landing_port}} pnpm --filter syn-landing run test:energy
 
-# Fast local gate: copy lint, typecheck, build
-landing-qa: landing-copy-lint landing-typecheck landing-build
+# Fast local gate: copy lint, colour lint, typecheck, build
+landing-qa: landing-copy-lint landing-colour-lint landing-typecheck landing-build

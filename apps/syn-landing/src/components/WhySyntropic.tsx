@@ -7,7 +7,7 @@ const cards = [
     title: "Repeatable Workflows",
     href: "#how-it-works",
     num: "01",
-    accent: "#4D80FF", // signature blue
+    accent: "var(--ds-color-accent)", // signature blue
     desc: <>Multi-phase pipelines defined as commands. Research, plan, implement, review. Every phase picks its own harness, Claude Code or Codex, and every workflow runs the same way, every time.</>,
   },
   {
@@ -15,7 +15,7 @@ const cards = [
     title: "Immutable Event Store",
     href: "#observability",
     num: "02",
-    accent: "#60a5fa",
+    accent: "var(--sky-color-data-1)",
     desc: <>Every state change is a permanent, queryable event. Domain events, observability telemetry, and conversation logs. Nothing is ever lost. Data compounds with every run.</>,
   },
   {
@@ -23,7 +23,7 @@ const cards = [
     title: "GitHub-Native Triggers",
     href: "#triggers",
     num: "03",
-    accent: "#818cf8",
+    accent: "var(--sky-color-series-3)",
     desc: <>Webhook triggers enable self-healing CI, auto-responses to review comments, and PR-driven workflows. Agents respond in minutes. Developers stay out of the loop.</>,
   },
 ];

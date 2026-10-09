@@ -23,24 +23,21 @@ const triggers = [
     label: "CI Check",
     event: "check_run.completed",
     action: "Self-healing CI: auto-fix and open PR",
-    color: "#34d399",
-    bg: "rgba(52, 211, 153, 0.12)",
+    color: "var(--ds-color-success)",
   },
   {
     icon: GitPullRequest,
     label: "Pull Request",
     event: "pull_request.opened",
     action: "Automated code review in minutes",
-    color: "#4D80FF",
-    bg: "rgba(77, 128, 255, 0.12)",
+    color: "var(--ds-color-accent)",
   },
   {
     icon: MessageSquare,
     label: "Issue Comment",
     event: "issue_comment.created",
     action: "Auto-respond to review comments",
-    color: "#a78bfa",
-    bg: "rgba(167, 139, 250, 0.12)",
+    color: "var(--sky-color-series-3)",
   },
 ];
 
@@ -82,7 +79,6 @@ export default function GitHubTriggers() {
                 className="glass trigger-card-v2"
                 style={{
                   "--trigger-color": t.color,
-                  "--trigger-bg": t.bg,
                 } as React.CSSProperties}
               >
                 <div className="trigger-icon-chip">

@@ -14,8 +14,8 @@ name: Landing page
 # below, scoped to apps/syn-landing.
 #
 # Every job has a recipe that runs the same commands locally (just/landing.just):
-# landing-copy-lint, landing-typecheck + landing-build, landing-lighthouse,
-# landing-energy.
+# landing-copy-lint + landing-colour-lint, landing-typecheck + landing-build,
+# landing-lighthouse, landing-energy.
 
 on:
   pull_request:
@@ -51,7 +51,8 @@ permissions:
 
 jobs:
   #############################################################################
-  # COPY LINT - no em dashes in user-facing copy (just landing-copy-lint)
+  # COPY LINT - no em dashes in user-facing copy, no colour literals
+  # (just landing-copy-lint, just landing-colour-lint)
   #############################################################################
 
   copy-lint:
@@ -63,6 +64,11 @@ jobs:
 
       - name: Check for em dashes in user-facing content
         run: bash apps/syn-landing/scripts/check-copy.sh
+
+      # Colours only from Skyline tokens: no hex/rgb()/named colours in src/
+      # CSS or TSX (Skyline's check-css.mjs plus a TSX grep; plain node).
+      - name: Check for colour literals
+        run: bash apps/syn-landing/scripts/check-colours.sh
 
   #############################################################################
   # BUILD - typecheck and vite build; the dist/ artifact feeds lighthouse and
@@ -91,6 +97,10 @@ jobs:
       # landing page's graph.
       - name: Install
         run: pnpm install --frozen-lockfile --ignore-scripts --filter 'syn-landing...'
+
+      # Every var(--ds-*) / var(--sky-*) the page uses exists in the themes.
+      - name: Token usage
+        run: bash apps/syn-landing/scripts/check-colours.sh --tokens
 
       # vite build does not type-check; tsc --noEmit does (just landing-typecheck).
       - name: Typecheck

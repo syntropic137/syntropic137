@@ -47,11 +47,11 @@ export default function GitHubStars({ repo, size = 11 }: GitHubStarsProps) {
         alignItems: "center",
         gap: "3px",
         fontSize: "11px",
-        color: "#f59e0b",
+        color: "var(--ds-color-warning)",
         fontWeight: 500,
       }}
     >
-      <Star size={size} fill="#f59e0b" color="#f59e0b" />
+      <Star size={size} fill="currentColor" color="currentColor" aria-hidden="true" />
       {formatStars(stars)}
     </span>
   );

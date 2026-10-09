@@ -21,7 +21,7 @@ export default function GetStarted() {
 
           <InstallTerminal className="get-started-install" />
 
-          <div className="hero-ctas" style={{ justifyContent: "center", marginTop: "var(--space-xl)" }}>
+          <div className="hero-ctas" style={{ justifyContent: "center", marginTop: "var(--ds-space-8)" }}>
             <a
               href="https://github.com/syntropic137/syntropic137"
               className="btn-primary"

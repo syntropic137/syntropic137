@@ -5,28 +5,19 @@ const cards = [
   {
     icon: Shield,
     title: "Isolated by Default",
-    iconColor: "#34d399",
-    iconBg: "rgba(52, 211, 153, 0.08)",
-    iconBgHover: "rgba(52, 211, 153, 0.16)",
-    iconGlow: "rgba(52, 211, 153, 0.28)",
+    iconColor: "var(--ds-color-success)",
     desc: "Every agent runs in an ephemeral Docker container. Harness credentials are provider-scoped, and setup tokens are cleared before the agent starts. Outbound traffic routes through an Envoy sidecar. Read-only filesystems. No new privileges. Supply chain signed with cosign.",
   },
   {
     icon: Server,
     title: "Built to Recover",
-    iconColor: "#10b981",
-    iconBg: "rgba(16, 185, 129, 0.08)",
-    iconBgHover: "rgba(16, 185, 129, 0.16)",
-    iconGlow: "rgba(16, 185, 129, 0.28)",
+    iconColor: "var(--sky-color-series-2)",
     desc: "Event-sourced state survives crashes. Idempotent handlers replay safely. Single-machine Docker Compose deployment. No Kubernetes required.",
   },
   {
     icon: Globe,
     title: "Accessible from Anywhere",
-    iconColor: "#6ee7b7",
-    iconBg: "rgba(110, 231, 183, 0.08)",
-    iconBgHover: "rgba(110, 231, 183, 0.16)",
-    iconGlow: "rgba(110, 231, 183, 0.28)",
+    iconColor: "var(--sky-color-success-soft-fg)",
     desc: "Built-in Cloudflare Tunnel support. Receive GitHub webhooks and access your system from anywhere without exposing ports or managing DNS.",
   },
 ];
@@ -48,9 +39,6 @@ export default function Security() {
                 className="card glass card-security"
                 style={{
                   "--icon-color": card.iconColor,
-                  "--icon-bg": card.iconBg,
-                  "--icon-bg-hover": card.iconBgHover,
-                  "--icon-glow": card.iconGlow,
                 } as React.CSSProperties}
               >
                 <div className="security-icon-ring">

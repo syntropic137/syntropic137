@@ -16,16 +16,13 @@
  * and one we cannot.
  */
 
-/**
- * Every value here must have a matching `.harness--*` rule in globals.css.
- * Keeping it a union rather than `string` means a typo fails the build
- * instead of silently falling back to the generic gradient.
- */
-export type HarnessAccentClass = "harness--claude" | "harness--codex";
+import type { CSSProperties } from "react";
+
+export type HarnessId = "claude" | "codex";
 
 export interface Harness {
   /** Value used by `agent.provider` in workflow YAML. */
-  id: "claude" | "codex";
+  id: HarnessId;
   /** Display name in prose and UI. */
   name: string;
   /** Vendor, for the "works with" strip. */
@@ -33,11 +30,14 @@ export interface Harness {
   /** True when the harness can also drive the platform, not just execute phases. */
   controlPlane: boolean;
   /**
-   * Modifier class for the name's gradient, defined in globals.css.
-   * Each harness wears its own vendor colour so the two read as distinct
-   * products rather than one branded pair.
+   * The harness colour: Skyline's `--sky-harness-<id>` token
+   * (@syn137/skyline-themes), the same colour the dashboard and the
+   * `<sky-harness-chip>` element use. Each harness wears its own vendor
+   * colour so the two read as distinct products rather than one branded pair.
    */
-  accentClass: HarnessAccentClass;
+  color: `var(--sky-harness-${HarnessId})`;
+  /** Gradient for the name set as text (`background-clip: text`), `--sky-harness-<id>-gradient`. */
+  gradient: `var(--sky-harness-${HarnessId}-gradient)`;
 }
 
 export const HARNESSES: readonly Harness[] = [
@@ -46,16 +46,26 @@ export const HARNESSES: readonly Harness[] = [
     name: "Claude Code",
     vendor: "Anthropic",
     controlPlane: true,
-    accentClass: "harness--claude",
+    color: "var(--sky-harness-claude)",
+    gradient: "var(--sky-harness-claude-gradient)",
   },
   {
     id: "codex",
     name: "Codex",
     vendor: "OpenAI",
     controlPlane: false,
-    accentClass: "harness--codex",
+    color: "var(--sky-harness-codex)",
+    gradient: "var(--sky-harness-codex-gradient)",
   },
 ] as const;
+
+/**
+ * Inline style for a `.harness` name: hands the harness colour and gradient
+ * to globals.css as `--harness-color` and `--harness-gradient`, so a new
+ * harness needs an entry here and nothing in CSS.
+ */
+export const harnessStyle = (h: Harness): CSSProperties =>
+  ({ "--harness-color": h.color, "--harness-gradient": h.gradient }) as CSSProperties;
 
 /** "Claude Code and Codex", for inline prose. */
 export const harnessList = (): string => {
