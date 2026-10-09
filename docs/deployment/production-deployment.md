@@ -394,7 +394,7 @@ EOF
 Every API request's method, route template, status and time to first byte go
 to `api_request_latency` in the observability database. Rows are kept for 30
 days. Read them with `GET /api/v1/observability/latency?window=24h` or
-`syn observability latency --window 7d`. Both show exact p50/p95/p99 per route and
+`syn observe latency --window 7d`. Both show exact p50/p95/p99 per route and
 this API process's `dropped` / `write_failures` / `discarded` counters.
 
 - **`SYN_SKIP_AUTO_CREATE_TABLES` set: provision the table yourself.** There is

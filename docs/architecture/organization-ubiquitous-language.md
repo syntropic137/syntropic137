@@ -128,6 +128,6 @@ for the same treatment as the orchestration Pause.
 - **Insight, for operational telemetry.** We do NOT call request latency an
   insight. API request latency (ADR-075), recorder drop counters, SSE health
   and build info are **Observability**: how the running platform behaves, Lane
-  2 telemetry. They live under `GET /observability/*` and `syn observability`,
+  2 telemetry. They live under `GET /observability/*` and `syn observe`,
   never under `/insights` or `syn insights`. See "Observability" in
   `agent_sessions-ubiquitous-language.md`.

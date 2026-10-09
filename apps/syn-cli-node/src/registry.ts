@@ -25,7 +25,6 @@ import { githubGroup } from "./commands/github.js";
 import { insightsGroup } from "./commands/insights.js";
 import { marketplaceGroup } from "./commands/marketplace/index.js";
 import { metricsGroup } from "./commands/metrics.js";
-import { observabilityGroup } from "./commands/observability.js";
 import { observeGroup } from "./commands/observe.js";
 import { orgGroup } from "./commands/org.js";
 import { repoGroup } from "./commands/repo.js";
@@ -56,7 +55,6 @@ export const commandGroups: readonly CommandGroup[] = [
   insightsGroup,
   marketplaceGroup,
   metricsGroup,
-  observabilityGroup,
   observeGroup,
   orgGroup,
   repoGroup,
