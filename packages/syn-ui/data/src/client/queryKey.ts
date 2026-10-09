@@ -9,25 +9,32 @@
  */
 type Encoded = string | number | boolean | null | Encoded[]
 
+const SCALARS: Record<string, (v: never) => Encoded> = {
+  string: (v: string) => ['s', v],
+  number: (v: number) => ['d', String(v)], // String keeps NaN / -0 / Infinity apart from null
+  boolean: (v: boolean) => ['b', v],
+  bigint: (v: bigint) => ['i', v.toString()],
+}
+
 function encode(value: unknown): Encoded {
   if (value === undefined) return ['u']
   if (value === null) return ['n']
-  if (typeof value === 'string') return ['s', value]
-  if (typeof value === 'number') return ['d', String(value)] // String keeps NaN / -0 / Infinity apart from null
-  if (typeof value === 'boolean') return ['b', value]
-  if (typeof value === 'bigint') return ['i', value.toString()]
+  const scalar = SCALARS[typeof value]
+  if (scalar) return scalar(value as never)
+  if (typeof value !== 'object') return ['x', String(value)] // functions and symbols: not real params
+  return encodeObject(value)
+}
+
+function encodeObject(value: object): Encoded {
   if (value instanceof URLSearchParams) {
     const pairs = [...value].map(([k, v]): Encoded => [k, v])
     return ['q', pairs.sort((x, y) => cmp(JSON.stringify(x), JSON.stringify(y)))]
   }
   if (value instanceof Date) return ['t', value.toISOString()]
   if (Array.isArray(value)) return ['a', value.map(encode)]
-  if (typeof value === 'object') {
-    const obj = value as Record<string, unknown>
-    const keys = Object.keys(obj).filter((k) => obj[k] !== undefined).sort(cmp)
-    return ['o', keys.map((k): Encoded => [k, encode(obj[k])])]
-  }
-  return ['x', String(value)] // functions and symbols: not real params; never collide with data
+  const obj = value as Record<string, unknown>
+  const keys = Object.keys(obj).filter((k) => obj[k] !== undefined).sort(cmp)
+  return ['o', keys.map((k): Encoded => [k, encode(obj[k])])]
 }
 
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)

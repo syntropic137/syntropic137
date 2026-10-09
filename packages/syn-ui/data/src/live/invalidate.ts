@@ -15,6 +15,58 @@ import { subscribeActivity } from './stream'
 
 const str = (v: unknown): string | undefined => (typeof v === 'string' && v ? v : undefined)
 
+interface FrameIds {
+  executionId?: string
+  workflowId?: string
+  sessionId?: string
+  artifactId?: string
+}
+
+const isRunEdge = (t: string) => t === 'WorkflowExecutionStarted' || isRunFinished(t)
+const isSessionEdge = (t: string) => t === 'SessionStarted' || t === 'SessionCompleted'
+const when = (ok: boolean, targets: QueryTarget[]): QueryTarget[] => (ok ? targets : [])
+
+/** Event predicate -> the reads it stales. Order is irrelevant: targets are merged. */
+const RULES: ReadonlyArray<readonly [(t: string) => boolean, (ids: FrameIds) => QueryTarget[]]> = [
+  [
+    isRunEvent,
+    ({ executionId, workflowId }) => [
+      { name: 'listExecutions' },
+      { name: 'getExecutionBudget' },
+      { name: 'listWorkflowRuns', id: workflowId },
+      { name: 'getWorkflowHistory', id: workflowId },
+      { name: 'getWorkflowTrend', id: workflowId },
+      { name: 'listExecutionCosts' },
+      { name: 'getCostSummary' },
+      ...when(!!executionId, [{ name: 'getExecution', id: executionId }, { name: 'getExecutionCost', id: executionId }]),
+    ],
+  ],
+  [isRunEdge, ({ workflowId }) => [{ name: 'listWorkflows' }, { name: 'getWorkflow', id: workflowId }, { name: 'getContributionHeatmap' }]],
+  [isRunFinished, () => [{ name: 'listEvals' }, { name: 'getEval' }, { name: 'listEvalRuns' }, { name: 'getEvalTrend' }]],
+  [
+    isSessionEvent,
+    ({ sessionId }) => [
+      { name: 'listSessions' },
+      { name: 'getSession', id: sessionId },
+      { name: 'getToolTimeline', id: sessionId },
+      { name: 'getTokenMetrics', id: sessionId },
+      { name: 'getConversationLog', id: sessionId },
+    ],
+  ],
+  [
+    isSessionEdge,
+    ({ sessionId, executionId }) => [
+      { name: 'listSessionCosts' },
+      { name: 'getSessionCost', id: sessionId },
+      { name: 'getCostSummary' },
+      { name: 'getContributionHeatmap' },
+      ...when(!!executionId, [{ name: 'getExecution', id: executionId }, { name: 'getSessionInventory', id: executionId }]),
+    ],
+  ],
+  [isArtifactEvent, ({ artifactId }) => [{ name: 'listArtifacts' }, { name: 'getArtifact', id: artifactId }]],
+  [isGitEvent, () => [{ name: 'getContributionHeatmap' }]],
+]
+
 /**
  * The cached reads one live frame makes stale, keyed by the API's real
  * `event_type` names (events.ts lists them; a contract test pins that every
@@ -25,41 +77,14 @@ export function invalidationsFor(frame: SSEEventFrame): QueryTarget[] {
   if (frame.type === 'connected') return []
   const t = frame.event_type
   const data = frame.data ?? {}
-  const executionId = str(frame.execution_id) ?? str(data.execution_id)
-  const workflowId = str(data.workflow_id)
-  const sessionId = str(data.session_id)
+  const ids: FrameIds = {
+    executionId: str(frame.execution_id) ?? str(data.execution_id),
+    workflowId: str(data.workflow_id),
+    sessionId: str(data.session_id),
+    artifactId: str(data.artifact_id),
+  }
   const out: QueryTarget[] = [{ name: 'getMetrics' }]
-  if (isRunEvent(t)) {
-    out.push(
-      { name: 'listExecutions' },
-      { name: 'getExecutionBudget' },
-      { name: 'listWorkflowRuns', id: workflowId },
-      { name: 'getWorkflowHistory', id: workflowId },
-      { name: 'getWorkflowTrend', id: workflowId },
-      { name: 'listExecutionCosts' },
-      { name: 'getCostSummary' },
-    )
-    if (executionId) out.push({ name: 'getExecution', id: executionId }, { name: 'getExecutionCost', id: executionId })
-  }
-  if (t === 'WorkflowExecutionStarted' || isRunFinished(t)) {
-    out.push({ name: 'listWorkflows' }, { name: 'getWorkflow', id: workflowId }, { name: 'getContributionHeatmap' })
-  }
-  if (isRunFinished(t)) out.push({ name: 'listEvals' }, { name: 'getEval' }, { name: 'listEvalRuns' }, { name: 'getEvalTrend' })
-  if (isSessionEvent(t)) {
-    out.push(
-      { name: 'listSessions' },
-      { name: 'getSession', id: sessionId },
-      { name: 'getToolTimeline', id: sessionId },
-      { name: 'getTokenMetrics', id: sessionId },
-      { name: 'getConversationLog', id: sessionId },
-    )
-  }
-  if (t === 'SessionStarted' || t === 'SessionCompleted') {
-    out.push({ name: 'listSessionCosts' }, { name: 'getSessionCost', id: sessionId }, { name: 'getCostSummary' }, { name: 'getContributionHeatmap' })
-    if (executionId) out.push({ name: 'getExecution', id: executionId }, { name: 'getSessionInventory', id: executionId })
-  }
-  if (isArtifactEvent(t)) out.push({ name: 'listArtifacts' }, { name: 'getArtifact', id: str(data.artifact_id) })
-  if (isGitEvent(t)) out.push({ name: 'getContributionHeatmap' })
+  for (const [applies, targets] of RULES) if (applies(t)) out.push(...targets(ids))
   // An absent id means "all of that resource": strip it so the target is unambiguous.
   return mergeTargets(out.map((target) => (target.id === undefined ? { name: target.name } : target)))
 }
