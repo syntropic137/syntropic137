@@ -15,7 +15,7 @@ import posixpath
 import re
 import socket
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 from urllib.parse import quote, unquote, urlsplit
 
 if TYPE_CHECKING:
@@ -108,57 +108,63 @@ class GuardHost:
         return real
 
 
-def make_handler(policy: CreatePolicy, host: GuardHost) -> type[BaseHTTPRequestHandler]:
-    class CreateGuardHandler(BaseHTTPRequestHandler):
-        protocol_version = "HTTP/1.1"
+class CreateGuardHandler(BaseHTTPRequestHandler):
+    """Checks one create body against ``policy``; ``make_handler`` binds policy and host."""
 
-        def do_POST(self) -> None:
-            if not CREATE_PATH.match(unquote(urlsplit(self.path).path)):
-                self._reply(
-                    403, f"the create guard only serves container create, not {self.path!r}"
-                )
-                return
-            length = self.headers.get("Content-Length")
-            if length is None or not length.isdigit() or int(length) > _MAX_BODY_BYTES:
-                self._reply(411, "container create needs a Content-Length under 4 MiB")
-                return
-            body = self.rfile.read(int(length))
-            refusal = policy.check(body, host)
-            if refusal is not None:
-                logger.warning("refused container create: %s", refusal.reason)
-                self._reply(
-                    403, f"refused by the Syntropic137 container-create guard: {refusal.reason}"
-                )
-                return
-            headers = {"Content-Type": self.headers.get("Content-Type", "application/json")}
-            try:
-                status, response_headers, response_body = host.docker.request(
-                    "POST", self.path, body, headers
-                )
-            except OSError as exc:
-                logger.error("container create could not reach the Docker socket: %s", exc)
-                self._reply(502, f"the create guard could not reach the Docker daemon: {exc}")
-                return
-            self.send_response(status)
-            for name, value in response_headers:
-                if name.title() in _FORWARDED_RESPONSE_HEADERS:
-                    self.send_header(name, value)
-            self.send_header("Content-Length", str(len(response_body)))
-            self.end_headers()
-            self.wfile.write(response_body)
+    protocol_version = "HTTP/1.1"
+    policy: ClassVar[CreatePolicy]
+    host: ClassVar[GuardHost]
 
-        def _reply(self, status: int, message: str) -> None:
-            payload = json.dumps({"message": message}).encode()
-            self.send_response(status)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(payload)))
-            self.end_headers()
-            self.wfile.write(payload)
+    def do_POST(self) -> None:
+        if not CREATE_PATH.match(unquote(urlsplit(self.path).path)):
+            self._reply(403, f"the create guard only serves container create, not {self.path!r}")
+            return
+        length = self.headers.get("Content-Length")
+        if length is None or not length.isdigit() or int(length) > _MAX_BODY_BYTES:
+            self._reply(411, "container create needs a Content-Length under 4 MiB")
+            return
+        body = self.rfile.read(int(length))
+        refusal = self.policy.check(body, self.host)
+        if refusal is not None:
+            logger.warning("refused container create: %s", refusal.reason)
+            self._reply(
+                403, f"refused by the Syntropic137 container-create guard: {refusal.reason}"
+            )
+            return
+        self._forward(body)
 
-        def log_message(self, format: str, *args: object) -> None:
-            logger.debug(format, *args)
+    def _forward(self, body: bytes) -> None:
+        headers = {"Content-Type": self.headers.get("Content-Type", "application/json")}
+        try:
+            status, response_headers, response_body = self.host.docker.request(
+                "POST", self.path, body, headers
+            )
+        except OSError as exc:
+            logger.error("container create could not reach the Docker socket: %s", exc)
+            self._reply(502, f"the create guard could not reach the Docker daemon: {exc}")
+            return
+        self.send_response(status)
+        for name, value in response_headers:
+            if name.title() in _FORWARDED_RESPONSE_HEADERS:
+                self.send_header(name, value)
+        self.send_header("Content-Length", str(len(response_body)))
+        self.end_headers()
+        self.wfile.write(response_body)
 
-    return CreateGuardHandler
+    def _reply(self, status: int, message: str) -> None:
+        payload = json.dumps({"message": message}).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def log_message(self, format: str, *args: object) -> None:
+        logger.debug(format, *args)
+
+
+def make_handler(policy: CreatePolicy, host: GuardHost) -> type[CreateGuardHandler]:
+    return type("BoundCreateGuardHandler", (CreateGuardHandler,), {"policy": policy, "host": host})
 
 
 def serve(policy: CreatePolicy, host: GuardHost, port: int) -> None:

@@ -157,13 +157,16 @@ class CreatePolicy:
                 not _field(host_config, name),
                 f"{name} is refused: no platform container maps devices",
             )
-        _expect(not _field(host_config, "VolumesFrom"), "VolumesFrom is refused")
-        _expect(not _field(host_config, "VolumeDriver"), "VolumeDriver is refused")
         for opt in _list(host_config, "SecurityOpt"):
             _expect(
                 not (isinstance(opt, str) and opt.lower() in _UNCONFINED_SECURITY_OPTS),
                 f"SecurityOpt {opt!r} is refused",
             )
+        self._check_storage(host_config, host)
+
+    def _check_storage(self, host_config: Mapping[str, JsonValue], host: HostView) -> None:
+        _expect(not _field(host_config, "VolumesFrom"), "VolumesFrom is refused")
+        _expect(not _field(host_config, "VolumeDriver"), "VolumeDriver is refused")
         for bind in _list(host_config, "Binds"):
             if not isinstance(bind, str):
                 _refuse("a Binds entry is not a string")
