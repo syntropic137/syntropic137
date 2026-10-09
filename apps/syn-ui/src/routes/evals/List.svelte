@@ -129,6 +129,9 @@
     {cells}
     bind:selected
   />
+  {#if board.verifiers.length > 3}
+    <p class="sky-evals__swipe">Swipe the board sideways for all {board.verifiers.length} verifiers.</p>
+  {/if}
 {/if}
 
 <section class="sky-evals__all" aria-labelledby="sky-evals-all">
@@ -250,6 +253,12 @@
     border-radius: var(--sky-radius-card-lg);
     border: var(--ds-border-width) solid var(--ds-color-border);
     background: var(--ds-color-surface);
+  }
+  .sky-evals__swipe {
+    margin: calc(var(--ds-space-3) * -1) 0 0;
+    font-size: var(--ds-text-xs);
+    color: var(--ds-color-text-muted);
+    text-align: right;
   }
   .sky-evals__wait {
     margin: 0;
@@ -410,6 +419,9 @@
     color: var(--ds-color-fg);
   }
   @media (min-width: 48rem) {
+    .sky-evals__swipe {
+      display: none;
+    }
     .sky-evals__row {
       gap: var(--ds-space-4);
       padding: var(--ds-space-4) var(--ds-space-3-5);

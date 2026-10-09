@@ -295,6 +295,13 @@
     flex: 999 1 40rem;
     min-width: 0;
     overflow-x: auto;
+    overscroll-behavior-x: contain;
+    /* Scroll shadows: an edge darkens only while more columns sit past it (covers scroll with the content). */
+    background:
+      linear-gradient(90deg, var(--ds-color-surface) 40%, transparent) left center / 2.5rem 100% no-repeat local,
+      linear-gradient(270deg, var(--ds-color-surface) 40%, transparent) right center / 2.5rem 100% no-repeat local,
+      radial-gradient(farthest-side at 0 50%, var(--sky-color-scrim), transparent) left center / 1rem 100% no-repeat scroll,
+      radial-gradient(farthest-side at 100% 50%, var(--sky-color-scrim), transparent) right center / 1rem 100% no-repeat scroll;
   }
   .sky-verdicts__grid {
     display: flex;
