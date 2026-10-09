@@ -29,8 +29,9 @@ the upstream was when it stopped. See `_phase_got_somewhere`.
 
 AND ONE DIFFERENT AGENT, ONCE (PC-83). A phase that declared a
 `fallback_agent` is re-run on it when its own provider could not serve it at
-all - capacity that outlived the retries above, or a spent quota, which is
-never retried - and only under the same rule: the failed attempt got nowhere.
+all - capacity that outlived the retries above, a spent quota, or a content
+filter that refused the request, neither of which is ever retried - and only
+under the same rule: the failed attempt got nowhere.
 The result names the agent that produced it, on the completion command, so the
 execution records the model that actually ran rather than the one declared.
 """

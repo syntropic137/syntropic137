@@ -4,6 +4,14 @@ $ARGUMENTS
 
 **Skills:** `testing`, `error-handling`, `architecture` and `software-complexity` are installed in this workspace as context, because codex has no Skill tool. Read and apply them when you judge the tests, the failure paths, the boundaries and the complexity of the change.
 
+**Say which agent you are.** This phase is declared on codex so that a
+different model family from the implementer reviews the change, with claude as
+its `fallback_agent` for when codex's provider refuses the request (a content
+filter, a spent quota, no capacity). Put the line `Verifier: <provider>/<model>`
+in your report, after whatever lines this file requires first, naming the
+agent you actually are, not the one this file assumes. If you are not codex, add one sentence saying this review
+ran on the fallback agent and was therefore NOT cross-family.
+
 The implementation report is at `artifacts/input/implement.md`. Your job is to
 find out whether that change is actually correct, not to confirm that it is.
 

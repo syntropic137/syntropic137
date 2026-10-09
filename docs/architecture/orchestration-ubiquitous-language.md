@@ -97,6 +97,21 @@ calendar date, so it is never retried, and the Phase fails with
 line only. **Unclear:** no real claude quota message exists in this repo or its
 submodules, so claude quota text is not yet recognised and reads as `unknown`.
 
+## Content Refusal
+
+An upstream failure of kind `refusal`: the provider's content or safety filter
+declined the request itself, before or while the model worked on it ("This
+content was flagged for possible cybersecurity risk", exec-898cd870650e). It is
+not the agent's answer and says nothing about the change: the same request is
+routinely served by another provider's model. Resending it to the same filter
+gets the same verdict, so it is never retried; it hands the Phase to its
+[Fallback Agent](#fallback-agent), under the same rule as a capacity or quota
+failure. Recognised from codex's own fault line only. **Unclear:** no real
+claude refusal output exists in this repo or its submodules, so a claude
+refusal is not yet recognised and reads as `unknown`. A codex refusal that
+arrives after codex already completed an item counts as work done and does
+not fall back.
+
 ## Provision Step Timeout
 
 A provisioning step that ran inside the workspace and did not finish before its
@@ -119,11 +134,14 @@ workspace instead. Each deadline is a Setting.
 
 The agent (provider and model) a Phase declares under `fallback_agent`, to be
 re-run on once when its own agent's upstream could not serve it: capacity that
-outlived every retry, or a Quota Exhaustion (PC-83). The Phase's tools, budget
+outlived every retry, a Quota Exhaustion (PC-83), or a
+[Content Refusal](#content-refusal). The Phase's tools, budget
 and sandbox bind the fallback too, so the provider rules that refuse an `agent`
 refuse a `fallback_agent` at install. Acted on at execution (#1663): one
 attempt, only when the primary's failed attempt got nowhere, drawn from the
-same phase deadline as every attempt before it.
+same phase deadline as every attempt before it. The SDLC workflows declare
+claude/opus as the fallback of their codex verifiers; a verifier that ran on
+it says so in its report, because the review was then not cross-family.
 
 ## Review Verdict
 

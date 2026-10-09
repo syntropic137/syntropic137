@@ -83,6 +83,19 @@ _CODEX_QUOTA_PHRASES: tuple[str, ...] = ("hit your usage limit", "purchase more 
 # stream channel carries it) and add it here with a reset reader.
 _CLAUDE_QUOTA_PHRASES: tuple[str, ...] = ()
 
+#: What codex says when its content filter declines the request, as a fragment
+#: of the one real line in this repo (exec-61dad6055e6f, kept as
+#: `tests/fixtures/codex/codex_turn_failed.jsonl`; exec-898cd870650e said the
+#: same): "This content was flagged for possible cybersecurity risk. If this
+#: seems wrong, try rephrasing your request. ..." A fragment so the trailing
+#: advice and URL may change without the match breaking; matched
+#: case-insensitively and only inside codex's own fault line.
+_CODEX_REFUSAL_PHRASES: tuple[str, ...] = ("flagged for possible cybersecurity risk",)
+
+#: Claude's content refusal has no entry: no real claude refusal output exists
+#: in this repo, agentic-workspace or any fixture, and a spelling invented here
+#: would match nothing claude writes. A claude refusal reads as UNKNOWN.
+
 #: Codex's reset time, when it names a date. The CLI prints no zone; the
 #: workspace container runs in UTC, so the time is read as UTC. A time with no
 #: date ("try again at 9:10 PM") cannot be placed and reads as unstated.
@@ -151,6 +164,25 @@ _QUOTA_SPELLINGS: tuple[_QuotaSpelling, ...] = (
         resets_at=_no_reset,
     ),
 )
+
+
+#: Each provider's fault line, with the words that mark a refusal inside it.
+#: The fault line is required for the reason `_QuotaSpelling` requires it: a
+#: refusal buys a run on the fallback agent, so agent prose quoting the
+#: sentence must not forge one.
+_REFUSAL_SPELLINGS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    (codex_fault_reason(""), _CODEX_REFUSAL_PHRASES),
+)
+
+
+def _is_refusal(reason: str) -> bool:
+    for fault_line, phrases in _REFUSAL_SPELLINGS:
+        if not reason.startswith(fault_line):
+            continue
+        folded = reason.removeprefix(fault_line).casefold()
+        if any(phrase.casefold() in folded for phrase in phrases):
+            return True
+    return False
 
 
 def _claude_spellings(
@@ -225,6 +257,8 @@ class StreamReasonUpstreamFailureReader:
             return kind
         if self.quota_of(reason) is not None:
             return UpstreamFailureKind.QUOTA
+        if _is_refusal(reason):
+            return UpstreamFailureKind.REFUSAL
         if reason.startswith(self._AUTH_PREFIXES):
             return UpstreamFailureKind.AUTH
         return UpstreamFailureKind.UNKNOWN

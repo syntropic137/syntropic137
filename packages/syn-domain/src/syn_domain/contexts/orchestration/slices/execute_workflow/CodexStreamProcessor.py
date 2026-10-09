@@ -877,26 +877,20 @@ class CodexStreamProcessor:
         makes an ordinary prompt rejection look like the same unexplained
         failure as a stream that stopped for reasons nobody has established.
 
-        This is #891 again for a different event type, so it takes the same
-        shape: keep the FIRST fault, because a later generic one must not
-        overwrite the specific one that ended the run.
+        This is #891 again, so it keeps the FIRST fault: a later generic one
+        must not overwrite the specific one that ended the run. Except that
+        `turn.failed` replaces any `error`: it is codex's verdict on the turn,
+        and an `error` before a different fault did not end it - holding that
+        hiccup hid a refusal and lost its fallback (verification of #1819).
 
-        AND IT IS A CANDIDATE, NOT A VERDICT. Setting `_error_reason` here
-        directly would be worse than the bug it fixes. `AgentExecutionHandler`
-        forces a non-zero phase exit whenever a codex stream carries ANY
-        `error_reason`, and it does not consult `saw_terminal_turn`. So an
-        `error` event the CLI then recovers from - `error` ... `turn.completed`
-        - would fail a phase that finished cleanly, and would report the
-        mid-turn hiccup as its cause. That does not mask a failure; it invents
-        one. This module's own comment already names that class as the worse
-        defect (an early #891 draft "would have failed SUCCESSFUL codex
-        phases"), and the sibling `_note_non_json_fault` holds its result as a
-        candidate for exactly this reason.
-
-        So the message is held and promoted at end-of-stream only when no
-        `turn.completed` arrived. A turn that genuinely failed emits no terminal
-        turn, so the reason still surfaces; a turn that recovered keeps its
-        success. Found by the cross-model review of #1117.
+        AND IT IS A CANDIDATE, NOT A VERDICT. `AgentExecutionHandler` forces a
+        non-zero exit whenever a codex stream carries ANY `error_reason`,
+        without consulting `saw_terminal_turn`, so setting it here would fail a
+        phase that recovered (`error` ... `turn.completed`) and blame the
+        hiccup - inventing a failure, the class an early #891 draft hit ("would
+        have failed SUCCESSFUL codex phases"); `_note_non_json_fault` holds its
+        result for the same reason. So the message is promoted at end-of-stream
+        only when no `turn.completed` arrived. Found by the review of #1117.
         """
         message = event.get("message")
         if not message:
@@ -908,7 +902,10 @@ class CodexStreamProcessor:
         logger.error("Codex turn failed: %s", message)
         # A CANDIDATE, not a verdict - promoted at end-of-stream only if no
         # terminal turn arrived. See the class comment above for why.
-        self._turn_fault_candidate = self._turn_fault_candidate or reason
+        if event.get("type") == CodexStreamType.TURN_FAILED:
+            self._turn_fault_candidate = reason
+        else:
+            self._turn_fault_candidate = self._turn_fault_candidate or reason
 
     async def _handle_item_started(self, event: _CodexEvent) -> None:
         """Handle ``item.started``: record the start codex announced, if any.
