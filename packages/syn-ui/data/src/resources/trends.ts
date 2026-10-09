@@ -8,12 +8,14 @@
  * reach this package's generated api-types.ts; then alias the schemas here.
  * This file is the only adapter between the API and the screens.
  */
-import { request, seg } from '../client'
+import { MAX_PAGE_SIZE, request, seg } from '../client'
 import type { EvalVerdict } from './evals'
 import { cached } from '../keys'
 
 /** Largest page the API serves (list_query.MAX_PAGE_SIZE). */
-export const TREND_PAGE_SIZE = 200
+// The trend endpoints page like every other list (`le=MAX_PAGE_SIZE`), so a chart
+// shows at most the latest MAX_PAGE_SIZE runs.
+export const TREND_PAGE_SIZE = MAX_PAGE_SIZE
 
 export type DefinitionChangeKind = 'created' | 'updated' | 'phase_updated'
 

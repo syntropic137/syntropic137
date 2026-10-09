@@ -5,9 +5,11 @@ import { defineConfig } from 'vitest/config'
 // the prefix stripped (SSE included, under /api/v1/sse/*).
 const API_TARGET = process.env.VITE_API_PROXY_TARGET ?? 'http://127.0.0.1:9137'
 // Optional Basic Auth for a remote gateway (e.g. the VPS over Tailscale). Set
-// VITE_API_PROXY_AUTH to "user:password"; it is sent only on proxied requests and
-// never reaches the browser bundle (server-side proxy config, not import.meta.env).
-const API_AUTH = process.env.VITE_API_PROXY_AUTH
+// SYN_UI_PROXY_AUTH to "user:password". Deliberately NOT a VITE_-prefixed name:
+// Vite exposes every VITE_* variable to the client bundle via import.meta.env, so
+// a credential under that prefix would ship to the browser. This one is read
+// server-side only and applied to proxied requests.
+const API_AUTH = process.env.SYN_UI_PROXY_AUTH
 const API_HEADERS = API_AUTH ? { authorization: `Basic ${Buffer.from(API_AUTH).toString('base64')}` } : undefined
 
 // The app is served at /next until it takes over / (spec, Migration plan).

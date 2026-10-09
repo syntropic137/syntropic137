@@ -150,3 +150,18 @@ describe('trend fixtures (Eval and Workflows boards, PR #1800 shape)', () => {
     expect((await getWorkflowTrend('code-review')).items).toEqual([])
   })
 })
+
+
+describe('paginate honours the API page-size limit', () => {
+  it('rejects page_size above MAX_PAGE_SIZE with the API\'s 422 shape', async () => {
+    const { paginate } = await import('./seed')
+    const { MAX_PAGE_SIZE } = await import('../client/listQuery')
+    const { ApiError } = await import('../client/errors')
+    const rows = Array.from({ length: 3 }, (_, i) => i)
+    expect(paginate(rows, new URLSearchParams(`page_size=${MAX_PAGE_SIZE}`)).page_size).toBe(MAX_PAGE_SIZE)
+    let caught: unknown
+    try { paginate(rows, new URLSearchParams(`page_size=${MAX_PAGE_SIZE + 1}`)) } catch (e) { caught = e }
+    expect(caught).toBeInstanceOf(ApiError)
+    expect((caught as InstanceType<typeof ApiError>).status).toBe(422)
+  })
+})

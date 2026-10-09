@@ -13,6 +13,14 @@
  * describes the query it wants; it never writes a parameter name.
  */
 
+/**
+ * The largest page the API will serve (`page_size` is `le=100` on every list
+ * route; 101 is a 422). openapi-typescript drops numeric constraints, so this
+ * is spelled here once and the fixtures enforce it too, so a route that asks
+ * for more fails in fixtures mode and e2e rather than only against a server.
+ */
+export const MAX_PAGE_SIZE = 100
+
 /** A page of a filtered collection, asked for. */
 export interface ListQuery {
   page: number

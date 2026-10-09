@@ -1,3 +1,5 @@
+import { ApiError } from '../client/errors'
+import { MAX_PAGE_SIZE } from '../client/listQuery'
 /**
  * Shared helpers for fixture data. Sample values come from the design canvas
  * boards (names, durations, token counts, costs) so screens rendered on
@@ -48,6 +50,11 @@ export interface Page<T> {
 export function paginate<T>(rows: readonly T[], query: URLSearchParams, defaultSize = 50): Page<T> {
   const page = Math.max(1, Number(query.get('page') ?? 1) || 1)
   const page_size = Math.max(1, Number(query.get('page_size') ?? defaultSize) || defaultSize)
+  if (page_size > MAX_PAGE_SIZE) {
+    // Same shape and status as the API's validation error, so a route that
+    // over-asks breaks in fixtures mode exactly as it does against a server.
+    throw new ApiError(422, [{ loc: ['query', 'page_size'], msg: `Input should be less than or equal to ${MAX_PAGE_SIZE}`, type: 'less_than_equal' }])
+  }
   const start = (page - 1) * page_size
   return { rows: rows.slice(start, start + page_size), total: rows.length, page, page_size }
 }

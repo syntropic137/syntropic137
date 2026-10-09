@@ -1,6 +1,6 @@
 <!-- Evals list. Boards: Evals · PhoneEvals. Verdict board over every eval, then the tag-filterable list. -->
 <script lang="ts">
-  import { listEvalRuns, listEvals, mapLimit } from '@syn137/syn-ui-data'
+  import { listEvalRuns, listEvals, mapLimit, MAX_PAGE_SIZE } from '@syn137/syn-ui-data'
   import type { EvalSummary, EvalVerdict } from '@syn137/syn-ui-data'
   import { Callout, EmptyState, Pagination, Skeleton } from '@syn137/skyline-svelte-v5'
   import { PageHeader, VerdictBlock, VerdictBoard, VerdictSparkline } from '@syn137/skyline-svelte-v5/patterns'
@@ -25,7 +25,7 @@
   })
 
   // Every eval feeds the board; the list below follows the tag filter and page.
-  const all = resource((signal) => listEvals({ page_size: 200 }, signal), { live: (t) => t.startsWith('eval') })
+  const all = resource((signal) => listEvals({ page_size: MAX_PAGE_SIZE }, signal), { live: (t) => t.startsWith('eval') })
   const list = resource(
     async (signal) => {
       const t = tag

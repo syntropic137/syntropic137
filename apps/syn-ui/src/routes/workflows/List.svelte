@@ -29,7 +29,7 @@
   } from '@syn137/skyline-core/screens/workflows'
   import { Button, Callout, EmptyState, Input, Pagination, Select, Skeleton, ToggleGroup } from '@syn137/skyline-svelte-v5'
   import { ObjectIcon, TrendSpark } from '@syn137/skyline-svelte-v5/patterns'
-  import { ApiError, getWorkflow, getWorkflowTrend, isAbortError, listWorkflows, mapLimit, type WorkflowSummary, type WorkflowTrendRow } from '@syn137/syn-ui-data'
+  import { ApiError, getWorkflow, getWorkflowTrend, isAbortError, listWorkflows, mapLimit, type WorkflowSummary, type WorkflowTrendRow, MAX_PAGE_SIZE } from '@syn137/syn-ui-data'
   import { untrack } from 'svelte'
   import { resource } from '../../lib/load.svelte'
   import { setPage } from '../../lib/page.svelte'
@@ -54,7 +54,7 @@
   })
 
   // Whole catalogue at once: filtering by skills and sorting by runs are client side.
-  const list = resource((signal) => listWorkflows({ page_size: 200 }, signal), { live: (t) => t.startsWith('workflow_') })
+  const list = resource((signal) => listWorkflows({ page_size: MAX_PAGE_SIZE }, signal), { live: (t) => t.startsWith('workflow_') })
 
   let skills = $state<Record<string, string[]>>({})
   $effect(() => {
