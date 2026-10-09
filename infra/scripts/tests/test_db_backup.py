@@ -295,6 +295,28 @@ class TestBackup:
         assert list(racer.iterdir()) == [], "left a link inside a directory it did not create"
         assert (out / "syn-20261008T030000Z-1.dump").is_file()
 
+    @pytest.mark.parametrize("kind", ["symlink-to-file", "dangling-symlink", "directory"])
+    def test_ledger_is_never_written_through_what_holds_its_name(self, tmp_path, fake_pg, kind):
+        out = tmp_path / "backups"
+        out.mkdir()
+        target = tmp_path / "operator.conf"
+        target.write_text("operator data\n")
+        ledger = out / _LEDGER
+        if kind == "symlink-to-file":
+            ledger.symlink_to(target)
+        elif kind == "dangling-symlink":
+            ledger.symlink_to(tmp_path / "nowhere")
+        else:
+            ledger.mkdir()
+
+        result = _run("backup", str(out), env=fake_pg(_LISTING_WITH_DATA))
+
+        assert result.returncode == 0, result.stderr
+        assert "will never be pruned" in result.stderr
+        assert target.read_text() == "operator data\n"
+        assert not (tmp_path / "nowhere").exists()
+        assert ledger.is_symlink() == (kind != "directory")
+
     def test_simultaneous_backups_each_keep_their_own_archive(self, tmp_path, fake_pg):
         out = tmp_path / "backups"
         out.mkdir()
@@ -331,8 +353,11 @@ class TestPrune:
         path.write_text("x")
         _age(path, age_seconds)
         if tracked:
+            # Temp files are recorded before their content exists; published
+            # files with the sha256 of their final content.
+            digest = "-" if name.startswith(".") else hashlib.sha256(b"x").hexdigest()
             with (directory / _LEDGER).open("a") as ledger:
-                ledger.write(f"{path.stat().st_ino} {name}\n")
+                ledger.write(f"{path.stat().st_ino} {digest} {name}\n")
         return path
 
     def test_deletes_only_backups_older_than_retention(self, tmp_path):
@@ -433,6 +458,51 @@ class TestPrune:
         assert _run("prune", str(tmp_path), "1").returncode == 0
         assert ours.read_text() == "operator data"
 
+    def test_never_deletes_a_file_put_in_place_of_a_temp_file_it_created(self, tmp_path):
+        """A temp file has no final content to check: its inode is the ownership."""
+        name = ".syn-20260901T030000Z.dump.partial.Ab12Cd"
+        ours = self._make(tmp_path, name, 365 * _DAY)
+        replacement = tmp_path / "operator-copy"
+        replacement.write_text("x")
+        replacement.replace(ours)
+        _age(ours, 365 * _DAY)
+
+        assert _run("prune", str(tmp_path), "1").returncode == 0
+        assert ours.exists()
+
+    def test_never_deletes_content_written_over_one_it_created(self, tmp_path):
+        """Same name, same inode (written in place, or a reused inode): other bytes."""
+        ours = self._make(tmp_path, "syn-20260901T030000Z.dump", 365 * _DAY)
+        ours.write_text("operator data")
+        _age(ours, 365 * _DAY)
+
+        assert _run("prune", str(tmp_path), "1").returncode == 0
+        assert ours.read_text() == "operator data"
+
+    def test_a_file_swapped_in_after_the_checks_is_put_back_not_deleted(self, tmp_path):
+        """The check-then-delete race: prune deletes only what it renamed and re-checked."""
+        ours = self._make(tmp_path, "syn-20260901T030000Z.dump", 365 * _DAY)
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        swap = tmp_path / "swap"
+        swap.write_text("operator data")
+        real_find = shutil.which("find")
+        # The age check is the last look before the rename: swap the file then.
+        _stub(
+            bin_dir,
+            "find",
+            f'[ "$1" = "{ours}" ] && [ -f "{swap}" ] && mv -f "{swap}" "{ours}"\n'
+            f'exec {real_find} "$@"',
+        )
+        env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"}
+        _age(swap, 365 * _DAY)
+
+        result = _run("prune", str(tmp_path), "1", env=env)
+
+        assert result.returncode == 0, result.stderr
+        assert ours.read_text() == "operator data"
+        assert not list(tmp_path.glob(".syn-prune.*")), "left the operator file under a temp name"
+
     def test_without_a_ledger_nothing_is_pruned(self, tmp_path):
         old = self._make(tmp_path, "syn-20260901T030000Z.dump", 365 * _DAY, tracked=False)
         result = _run("prune", str(tmp_path), "1")
@@ -450,8 +520,10 @@ class TestPrune:
         _age(link, 365 * _DAY)
         # A forged ledger line naming the link with its own inode, and one
         # with its target's: neither may delete the link or what it points at.
+        digest = hashlib.sha256(b"x").hexdigest()
         (backups / _LEDGER).write_text(
-            f"{os.lstat(link).st_ino} {link.name}\n{target.stat().st_ino} {link.name}\n"
+            f"{os.lstat(link).st_ino} {digest} {link.name}\n"
+            f"{target.stat().st_ino} {digest} {link.name}\n"
         )
 
         assert _run("prune", str(backups), "1").returncode == 0

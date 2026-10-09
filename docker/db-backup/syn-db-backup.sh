@@ -43,9 +43,11 @@ fi
 
 MANIFEST_HEADER="syn-db-backup manifest 1"
 # Append-only record of every file this script creates in a backup directory,
-# as `INODE NAME`. prune deletes a file only when its name has the generated
-# shape AND the ledger records that name with that file's inode: a file an
-# operator put there, whatever it is called, is never in it.
+# as `INODE SHA256 NAME` (SHA256 is `-` for a temp file, whose content is
+# still being written). prune deletes a file only when its name has the
+# generated shape AND the ledger records that name with that file's inode AND,
+# for a published file, its exact content. A file an operator put there,
+# whatever it is called and whatever inode it reuses, is never all three.
 LEDGER=".syn-db-backup.ledger"
 
 # The only names this script ever publishes or leaves behind. prune deletes
@@ -77,12 +79,19 @@ inode() {
     ls -di -- "$1" | awk '{ print $1 }'
 }
 
-# Record DIR/NAME, just created by this script, in DIR's ledger. A file that
-# cannot be recorded is only ever kept, never pruned: that is the safe side.
+# Record DIR/NAME, just created by this script, in DIR's ledger, with SUM (the
+# sha256 of its final content, or - for a temp file). A file that cannot be
+# recorded is only ever kept, never pruned: that is the safe side. The ledger
+# is appended to only as a regular file, never through a symlink.
 track() {
+    tr_ledger="$1/$LEDGER"
+    if [ -L "$tr_ledger" ] || { [ -e "$tr_ledger" ] && [ ! -f "$tr_ledger" ]; }; then
+        echo "syn-db-backup: $tr_ledger is not a regular file; not recording $2, which will never be pruned" >&2
+        return 0
+    fi
     tr_ino=$(inode "$1/$2") && [ -n "$tr_ino" ] &&
-        printf '%s %s\n' "$tr_ino" "$2" >>"$1/$LEDGER" ||
-        echo "syn-db-backup: could not record $2 in $1/$LEDGER; it will never be pruned" >&2
+        printf '%s %s %s\n' "$tr_ino" "${3:--}" "$2" >>"$tr_ledger" ||
+        echo "syn-db-backup: could not record $2 in $tr_ledger; it will never be pruned" >&2
 }
 
 # Hard-link SRC to exactly DEST, never replacing or entering anything there:
@@ -225,8 +234,8 @@ backup() {
         [ "$n" -le 99 ] || fail "no free name for a $stamp backup in $dir"
         name="syn-$stamp-$n.dump"
     done
-    track "$dir" "$name.manifest"
-    track "$dir" "$name"
+    track "$dir" "$name.manifest" "$(sha256 "$dir/$name.manifest")"
+    track "$dir" "$name" "$sum"
     rm -f "$partial" "$manifest_partial"
     trap - EXIT
     size=$(du -h "$dir/$name" | cut -f1)
@@ -234,10 +243,17 @@ backup() {
     echo "backup ok: $dir/$name ($size, $tables tables, $total rows)"
 }
 
+# 0 if PATH is still the file the ledger recorded: a regular file, not a
+# symlink, with inode INO and (unless SUM is -) content SUM.
+is_recorded() {
+    [ -f "$1" ] && [ ! -L "$1" ] && [ "$(inode "$1")" = "$2" ] &&
+        { [ "$3" = - ] || [ "$(sha256 "$1")" = "$3" ]; }
+}
+
 # Age-based retention over files this script created, and only those: each
-# must be named in the generated shape and recorded in DIR's ledger with its
-# current inode. Anything else in DIR, however old or however named, is never
-# touched. Without a ledger nothing is pruned.
+# must be named in the generated shape and still be exactly what DIR's ledger
+# recorded. Anything else in DIR, however old or however named, is never
+# deleted. Without a ledger nothing is pruned.
 prune() {
     dir=$1
     require_days "$2"
@@ -246,9 +262,11 @@ prune() {
     if [ ! -f "$ledger" ] || [ -L "$ledger" ]; then
         return 0
     fi
-    while read -r ino name; do
+    while read -r ino sum name; do
         if is_published_name "$name"; then
             minutes=$(($2 * 1440))
+            # A published file's content is final: it must still match.
+            case $sum in - | '') continue ;; esac
         elif is_partial_name "$name"; then
             # Abandoned temp files of a backup that died; a live one is minutes old.
             minutes=1440
@@ -256,16 +274,28 @@ prune() {
             continue
         fi
         path="$dir/$name"
-        # A regular file, never a symlink (which could point anywhere).
-        if [ ! -f "$path" ] || [ -L "$path" ]; then
-            continue
-        fi
-        # Still the file this script created, not one put in its place.
-        [ "$(inode "$path")" = "$ino" ] || continue
+        is_recorded "$path" "$ino" - || continue
         # -mmin, not -mtime: -mtime truncates to whole days, so +7 keeps 7.9 days.
         [ -n "$(find "$path" -prune -type f -mmin "+$minutes")" ] || continue
-        rm -f -- "$path"
-        case $name in .syn-*) ;; *) echo "pruned: $name" ;; esac
+        # Rename it to a name only this run knows, then check what was
+        # renamed: whatever is deleted is exactly what was checked, even if
+        # something else took the name in between.
+        hold=$(mktemp "$dir/.syn-prune.XXXXXX") || fail "cannot create a file in $dir"
+        if ! mv -f -- "$path" "$hold" 2>/dev/null; then
+            rm -f -- "$hold"
+            continue
+        fi
+        if is_recorded "$hold" "$ino" "$sum"; then
+            rm -f -- "$hold"
+            case $name in .syn-*) ;; *) echo "pruned: $name" ;; esac
+            continue
+        fi
+        # Not ours after all: back under its own name, untouched, unless
+        # something has taken that name since; then it stays where it is.
+        mv -n -- "$hold" "$path" 2>/dev/null || true
+        if [ -e "$hold" ] || [ -L "$hold" ]; then
+            echo "syn-db-backup: $name is not the file this backup created; its name is taken, so it was kept as $hold" >&2
+        fi
     done <"$ledger"
 }
 
