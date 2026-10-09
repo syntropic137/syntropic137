@@ -142,8 +142,8 @@ async def test_postgres_page_keys_answers_what_page_query_run_answers(
     pool = await asyncpg.create_pool(e2_database, min_size=1, max_size=2)
     try:
         store = PostgresProjectionStore(pool)
-        # Written oldest key first, so ``updated_at`` cannot hide a tie the
-        # timestamp sort leaves to it in the opposite direction.
+        # Written oldest key first, so a tie broken by ``updated_at`` (write
+        # time) instead of the key would come back in the opposite order.
         for key in reversed(DOCS):
             await store.save(PROJECTION, key, dict(DOCS[key]))
         stored = await store.get_all(PROJECTION)
@@ -151,6 +151,7 @@ async def test_postgres_page_keys_answers_what_page_query_run_answers(
             [(key, DOCS[key]) for key in _keys_in_read_order(stored)],
             document_of=lambda kv: kv[1],
             to_row=lambda kv: kv[0],
+            key_of=lambda kv: kv[0],
         )
 
         assert await store.page_keys(PROJECTION, query) == expected
@@ -159,7 +160,7 @@ async def test_postgres_page_keys_answers_what_page_query_run_answers(
 
 
 def _keys_in_read_order(stored: list[ProjectionRecord]) -> list[str]:
-    """``get_all``'s order, which is the order ``paginate``'s stable sort breaks ties by."""
+    """``get_all``'s order: what ``run`` reads, before it breaks ties by key."""
     names = {str(doc.get("name")): key for key, doc in DOCS.items()}
     return [names[str(doc.get("name"))] for doc in stored]
 
@@ -230,6 +231,7 @@ async def test_the_execution_window_is_answered_from_its_index(e2_database: str)
             [(key, docs[key]) for key in _keys_in_read_order(stored)],
             document_of=lambda kv: kv[1],
             to_row=lambda kv: kv[0],
+            key_of=lambda kv: kv[0],
         )
 
         assert f"idx_{projection}_window_started_at" in plan, plan

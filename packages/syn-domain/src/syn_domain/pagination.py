@@ -109,6 +109,7 @@ def paginate[R, T](
     to_row: Callable[[R], T],
     offset: int = 0,
     limit: int | None = None,
+    key_of: Callable[[R], str] | None = None,
 ) -> Page[T]:
     """Filter, tally, sort and slice in one pass over ``records``.
 
@@ -135,6 +136,10 @@ def paginate[R, T](
     sorting by another. It is compared as a string because every list surface
     stores an ISO 8601 timestamp, and newest-first is the only order any of
     them offers, so neither the key nor the direction is a knob.
+
+    Rows sharing a timestamp are ordered by ``key_of`` ascending when given:
+    an immutable key, so updating one row cannot move another across a page
+    boundary. Without it, ties keep ``records``' order.
 
     ``limit=None`` means no cap.
     """
@@ -163,6 +168,9 @@ def paginate[R, T](
             continue
         matched.append(record)
 
+    if key_of is not None:
+        matched.sort(key=key_of)
+    # Stable: equal timestamps keep the key order just established.
     matched.sort(key=lambda r: str(timestamp_of(r) or ""), reverse=True)
     window = matched[offset : offset + limit] if limit is not None else matched[offset:]
     return Page(

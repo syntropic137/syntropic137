@@ -92,6 +92,7 @@ class ExecutionListReads:
             before=started_before,
             offset=offset,
             limit=limit,
+            key_field="workflow_execution_id",
         )
         return await page_projection(
             self._store,
