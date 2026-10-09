@@ -114,6 +114,9 @@ def _has_cachedir_tag(path: Path) -> bool:
 
 _GIT_TIMEOUT_SECONDS = 120
 
+#: How deep git follows alternates of alternates; deeper is refused.
+_MAX_ALTERNATES_DEPTH = 5
+
 
 class HostGitError(RuntimeError):
     """Git could not give a definite answer about a repository."""
@@ -263,8 +266,16 @@ class SubprocessHostWorkspaceGit:
     """`HostWorkspaceGit` over the host's ``git`` binary."""
 
     async def repositories(self, host_dir: str) -> list[str]:
-        """Raises `UnsafeRepositoryError` for one that reads outside ``host_dir``."""
-        return await asyncio.to_thread(_find_repositories, host_dir)
+        """Raises `UnsafeRepositoryError` for one that reads outside ``host_dir``.
+
+        Or whose config is not allowlisted. Every repository is checked before
+        any is read: a superproject's diff runs git inside its submodules,
+        under their config, which its own check never saw.
+        """
+        repos = await asyncio.to_thread(_find_repositories, host_dir)
+        for repo in repos:
+            await self._refuse_unsafe_config(repo)
+        return repos
 
     async def unpushed_commits(self, repo: str) -> int:
         await self._refuse_unsafe_config(repo)
@@ -284,22 +295,16 @@ class SubprocessHostWorkspaceGit:
             if entry
         ):
             raise HostGitError(f"{repo} has index flags that can hide authored changes")
-        diff_args = ("--binary", "--no-ext-diff", "--no-textconv", "--no-color")
+        # Each submodule is read as its own repository; `dirty` keeps git
+        # from running inside it to ask.
+        no_drivers = ("--no-ext-diff", "--no-textconv", "--ignore-submodules=dirty")
+        diff_args = ("--binary", *no_drivers, "--no-color")
         # A HEAD-to-tree patch holds one state. When the index differs from
         # both HEAD and the tree, the staged state would be lost: keep it.
         staged = await _git(
-            repo,
-            "diff",
-            "--no-ext-diff",
-            "--no-textconv",
-            "--cached",
-            "--quiet",
-            ok_codes=(0, 1),
-            status=True,
+            repo, "diff", *no_drivers, "--cached", "--quiet", ok_codes=(0, 1), status=True
         )
-        unstaged = await _git(
-            repo, "diff", "--no-ext-diff", "--no-textconv", "--quiet", ok_codes=(0, 1), status=True
-        )
+        unstaged = await _git(repo, "diff", *no_drivers, "--quiet", ok_codes=(0, 1), status=True)
         if staged and unstaged:
             raise HostGitError(f"{repo} has staged changes the working tree no longer matches")
         patch = await _git(repo, "diff", *diff_args, "HEAD")
@@ -407,24 +412,37 @@ def _refuse_outside(repo: Path, git_dir: Path, root: Path) -> None:
     """Raise unless the git dir, and every path it hands on, is under ``root``.
 
     `commondir` (a linked worktree) and `objects/info/alternates` are read by
-    every command, so they are confined like the git dir itself.
+    every command, so they are confined like the git dir itself. Git follows
+    alternates of alternates, so they are confined at every depth.
     """
-    git_dir = git_dir.resolve()
-    reads = [git_dir]
+    git_dir = _confined(repo, git_dir.resolve(), root)
     common = git_dir
     if (git_dir / "commondir").is_file():
         common = (git_dir / (git_dir / "commondir").read_text().strip()).resolve()
-        reads.append(common)
-    alternates = common / "objects" / "info" / "alternates"
-    if alternates.is_file():
-        reads.extend(
-            (common / "objects" / line.strip()).resolve()
-            for line in alternates.read_text(errors="surrogateescape").splitlines()
-            if line.strip() and not line.startswith("#")
-        )
-    for path in reads:
-        if not path.is_relative_to(root):
-            raise UnsafeRepositoryError(f"{repo} reads {path}, outside the workspace; not read")
+        _confined(repo, common, root)
+    pending = [(common / "objects", 0)]
+    seen: set[Path] = set()
+    while pending:
+        objects, depth = pending.pop()
+        alternates = objects / "info" / "alternates"
+        if objects in seen or not alternates.is_file():
+            continue
+        seen.add(objects)
+        if depth >= _MAX_ALTERNATES_DEPTH:
+            raise UnsafeRepositoryError(f"{repo} chains alternates past {depth}; not read")
+        for line in alternates.read_text(errors="surrogateescape").splitlines():
+            if not line.strip() or line.startswith("#"):
+                continue
+            if line.startswith('"'):
+                raise UnsafeRepositoryError(f"{repo} has a quoted alternate; not read")
+            # Relative to the objects directory whose file names it.
+            pending.append((_confined(repo, (objects / line.strip()).resolve(), root), depth + 1))
+
+
+def _confined(repo: Path, path: Path, root: Path) -> Path:
+    if not path.is_relative_to(root):
+        raise UnsafeRepositoryError(f"{repo} reads {path}, outside the workspace; not read")
+    return path
 
 
 def _looks_bare(dirpath: str, dirnames: list[str], filenames: list[str]) -> bool:
