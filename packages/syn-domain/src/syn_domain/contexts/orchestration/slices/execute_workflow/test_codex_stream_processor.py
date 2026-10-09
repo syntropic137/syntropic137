@@ -704,3 +704,50 @@ async def test_a_codex_phase_is_stopped_at_its_cost_limit() -> None:
     assert result.line_count == 2, "stopped on the first turn that crossed the limit"
     assert result.cost_limit_reason is not None
     assert result.cost_limit_reason.startswith("cost limit USD 0.01 exceeded at USD ")
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_turn_failed_outranks_an_earlier_error_codex_went_past() -> None:
+    """`turn.failed` is codex's verdict on the turn; an earlier `error` is not.
+
+    Constructed, not recorded: the hiccup from `codex_error_then_recovered.jsonl`
+    followed by the refusal tail of `codex_turn_failed.jsonl`. Keeping the
+    first `error` reported the hiccup and hid the refusal, so a phase with a
+    declared fallback died `unknown` (verification of #1819).
+    """
+    hiccup = (_FIXTURES_DIR / "codex_error_then_recovered.jsonl").read_text().splitlines()[2]
+    refused = (_FIXTURES_DIR / "codex_turn_failed.jsonl").read_text().splitlines()
+
+    async def stream() -> AsyncIterator[str]:
+        for line in (*refused[:2], hiccup, *refused[3:]):
+            yield line
+
+    processor, _tokens = _make_processor(_RecordingCollector())
+
+    result = await processor.process_stream(stream(), _NoopWorkspace())
+
+    assert result.error_reason is not None
+    assert "flagged for possible cybersecurity risk" in result.error_reason
+    assert "transient upstream hiccup" not in result.error_reason
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_a_later_error_does_not_replace_the_first_when_no_turn_failed() -> None:
+    """First-wins still holds among `error` events: a later generic one keeps the specific."""
+    lines = (
+        json.dumps({"type": "error", "message": "specific: the prompt was rejected"}),
+        json.dumps({"type": "error", "message": "stream disconnected before completion"}),
+    )
+
+    async def stream() -> AsyncIterator[str]:
+        for line in lines:
+            yield line
+
+    processor, _tokens = _make_processor(_RecordingCollector())
+
+    result = await processor.process_stream(stream(), _NoopWorkspace())
+
+    assert result.error_reason is not None
+    assert "specific: the prompt was rejected" in result.error_reason

@@ -470,11 +470,15 @@ class CodexStreamProcessor:
         # so the candidate is only promoted at end-of-stream and only when no
         # terminal turn arrived.
         self._auth_fault_candidate: str | None = None
-        #: A fault codex reported on `error` / `turn.failed`, held until
+        #: A fault codex reported on an `error` event, held until
         #: end-of-stream so a recovered turn is not failed by it (#1117).
         self._turn_fault_candidate: str | None = None
+        #: The fault codex gave on `turn.failed`: its verdict on the turn,
+        #: where `error` is only something that happened during it. Held for
+        #: the same reason, and outranks every `error` (see `_note_stream_fault`).
+        self._turn_failed_candidate: str | None = None
         #: A `{`-leading line that would not parse, held until end-of-stream
-        #: for the same reason (#1146). LAST one wins, unlike the two above:
+        #: for the same reason (#1146). LAST one wins, unlike those above:
         #: these lines carry no specificity gradient to preserve, and when the
         #: candidate is informative at all it is because the stream was cut
         #: off - which is the last such line, not the first.
@@ -559,8 +563,9 @@ class CodexStreamProcessor:
             # and settled here, so a stream that recovers and reaches
             # `turn.completed` cannot be failed by something it recovered from.
             #
-            # Order is deliberate, most specific first: a fault codex itself
-            # reported beats an inferred auth fault, which beats an unparseable
+            # Order is deliberate, most specific first: the fault codex said
+            # ended the turn beats a fault it reported during it, which beats
+            # an inferred auth fault, which beats an unparseable
             # `{`-leading line, which beats the generic "it just stopped".
             #
             # The parse fault ranks LAST of the three because it is the weakest
@@ -570,7 +575,8 @@ class CodexStreamProcessor:
             # mid-event, quoting the truncated line names the cause and the
             # generic reason does not.
             self._error_reason = (
-                self._turn_fault_candidate
+                self._turn_failed_candidate
+                or self._turn_fault_candidate
                 or self._auth_fault_candidate
                 or self._parse_fault_candidate
                 or MISSING_TERMINAL_TURN_REASON
@@ -897,6 +903,15 @@ class CodexStreamProcessor:
         `turn.completed` arrived. A turn that genuinely failed emits no terminal
         turn, so the reason still surfaces; a turn that recovered keeps its
         success. Found by the cross-model review of #1117.
+
+        `turn.failed` IS THE VERDICT, `error` IS NOT. First-wins holds among
+        `error` events, but an `error` codex went on past - a hiccup, then a
+        different fault - did not end the turn, and `turn.failed` says what
+        did. Keeping the first `error` over it reported the hiccup and hid a
+        content refusal behind it, so the phase died `unknown` instead of
+        running its declared fallback (PC-83, verification of #1819). In every
+        recorded failure `turn.failed` repeats the specific `error` before it,
+        so this costs nothing there.
         """
         message = event.get("message")
         if not message:
@@ -908,7 +923,10 @@ class CodexStreamProcessor:
         logger.error("Codex turn failed: %s", message)
         # A CANDIDATE, not a verdict - promoted at end-of-stream only if no
         # terminal turn arrived. See the class comment above for why.
-        self._turn_fault_candidate = self._turn_fault_candidate or reason
+        if event.get("type") == CodexStreamType.TURN_FAILED:
+            self._turn_failed_candidate = self._turn_failed_candidate or reason
+        else:
+            self._turn_fault_candidate = self._turn_fault_candidate or reason
 
     async def _handle_item_started(self, event: _CodexEvent) -> None:
         """Handle ``item.started``: record the start codex announced, if any.

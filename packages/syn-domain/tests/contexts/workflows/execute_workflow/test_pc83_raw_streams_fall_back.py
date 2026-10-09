@@ -11,7 +11,8 @@ execution detail the API reads, and the message an operator sees.
 
 Mutation check: replacing the fallback dispatch in `run_phase_agent` with a
 return of the primary's result fails (a), (b) and (e) below; dropping the
-`work_done` guard from `fallback_attempt` fails (f).
+`work_done` guard from `fallback_attempt` fails (f); letting the first codex
+`error` outrank `turn.failed` again in `CodexStreamProcessor` fails (g).
 """
 
 from __future__ import annotations
@@ -50,6 +51,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProces
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.execution_journal import (
     ExecutionJournal,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
+    AgentExecutionHandler,
 )
 from syn_domain.contexts.orchestration.slices.get_execution_detail.projection import (
     WorkflowExecutionDetailProjection,
@@ -126,6 +130,23 @@ CODEX_REFUSED_AFTER_WORK: tuple[str, ...] = tuple(
 #: declined before the agent did anything.
 CODEX_REFUSED_BEFORE_WORK: tuple[str, ...] = tuple(
     line for line in CODEX_REFUSED_AFTER_WORK if '"item.completed"' not in line
+)
+#: The `error` codex recovered from in `codex_error_then_recovered.jsonl`.
+CODEX_HICCUP: str = next(
+    line
+    for line in (
+        Path(__file__).parents[3] / "fixtures" / "codex" / "codex_error_then_recovered.jsonl"
+    )
+    .read_text()
+    .splitlines()
+    if '"type":"error"' in line
+)
+#: A constructed stream, not a recording: that hiccup, then the refusal, with
+#: no item between them. The turn codex failed was failed by the refusal.
+CODEX_HICCUP_THEN_REFUSED: tuple[str, ...] = (
+    *CODEX_REFUSED_BEFORE_WORK[:2],
+    CODEX_HICCUP,
+    *CODEX_REFUSED_BEFORE_WORK[2:],
 )
 
 #: A failure that is neither busy nor quota, for the fallback itself to hit.
@@ -229,6 +250,72 @@ class _RawJsonlAgent:
 
 # pyright verifies the double still matches the real handler's contract.
 _: AgentHandlerProtocol = _RawJsonlAgent(attempts=())
+
+
+class _ReplayedTransport:
+    """A workspace whose agent subprocess printed `lines` and exited `exit_code`.
+
+    The ONLY substitution: `AgentExecutionHandler` launches against it as it
+    would a container, picks its parser, and judges the result itself.
+    """
+
+    def __init__(self, workspace: ManagedWorkspace, lines: tuple[str, ...], exit_code: int) -> None:
+        self._workspace = workspace
+        self._lines = lines
+        self.last_stream_exit_code = exit_code
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._workspace, name)
+
+    async def stream(self, *_args: object, **_kwargs: object) -> AsyncIterator[str]:
+        if CLAUDE_SUCCEEDS in self._lines:
+            await self._workspace.inject_files(list(A_DELIVERABLE))
+        for line in self._lines:
+            yield line
+
+
+@dataclass
+class _ProductionHandlerAgent(_RawJsonlAgent):
+    """The real `AgentExecutionHandler`, over a replayed subprocess per attempt."""
+
+    exit_codes: tuple[int, ...] = ()
+
+    async def handle(  # type: ignore[override]
+        self,
+        todo: TodoItem,
+        workspace: ManagedWorkspace,
+        agent_env: dict[str, str],
+        claude_cmd: list[str],
+        session_id: str,
+        agent_model: str | None,
+        timeout_seconds: int,
+        collector: ObservabilityCollector | None = None,
+        runner: Runner = AgentRunner.CLAUDE,
+        on_launch: AgentLaunchObserver | None = None,
+        cost_limit: PhaseCostLimit | None = None,
+        on_push: PushObserver | None = None,
+    ) -> AgentExecutionResult:
+        self.runners.append(runner)
+        attempt = len(self.runners) - 1
+        transport = _ReplayedTransport(
+            workspace,
+            self.attempts[attempt],
+            self.exit_codes[attempt] if attempt < len(self.exit_codes) else 0,
+        )
+        return await AgentExecutionHandler(controller=None).handle(
+            todo=todo,
+            workspace=transport,  # type: ignore[arg-type]
+            agent_env=agent_env,
+            claude_cmd=claude_cmd,
+            session_id=session_id,
+            agent_model=agent_model,
+            timeout_seconds=timeout_seconds,
+            collector=collector,
+            runner=runner,
+            on_launch=on_launch,
+            cost_limit=cost_limit,
+            on_push=on_push,
+        )
 
 
 class _RecordingRepository(FakeExecutionRepository):
@@ -375,3 +462,34 @@ class TestRawStreamsFallBack:
             "the fallback re-ran a phase whose primary had already done work"
         )
         assert "flagged for possible cybersecurity risk" in (result.error_message or "")
+
+    @pytest.mark.parametrize("exit_code", [0, 1])
+    async def test_g_a_refusal_after_a_hiccup_still_completes_on_the_fallback(
+        self, exit_code: int
+    ) -> None:
+        """(g) An `error` codex went past, then the refusal: the refusal ended the turn.
+
+        Found by verification of #1819: the parser kept the FIRST fault, so the
+        hiccup hid the refusal, the phase died `unknown`, and the declared
+        fallback never ran. Driven through the real `AgentExecutionHandler`,
+        under both exit statuses the CLI could report.
+        """
+        agent = _ProductionHandlerAgent(
+            attempts=(CODEX_HICCUP_THEN_REFUSED, (CLAUDE_SUCCEEDS,)), exit_codes=(exit_code, 0)
+        )
+        phase = _phase(AgentConfiguration(provider=AgentProvider.CODEX), CLAUDE_FALLBACK)
+
+        result, repository = await _run(agent, phase, "exec-refusal-raw-after-hiccup")
+
+        assert result.status == "completed", result.error_message
+        assert agent.runners == [AgentRunner.CODEX, AgentRunner.CLAUDE], (
+            "a hiccup before the refusal hid it, so the fallback never ran"
+        )
+        completed = _completed(repository)
+        assert completed.agent_provider == AgentProvider.CLAUDE
+        assert completed.agent_model == "claude-fallback-model"
+        (row,) = (await _detail(repository, "exec-refusal-raw-after-hiccup")).phases
+        assert (row.agent_provider, row.agent_model) == (
+            AgentProvider.CLAUDE,
+            "claude-fallback-model",
+        )
