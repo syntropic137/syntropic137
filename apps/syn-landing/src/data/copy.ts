@@ -19,8 +19,8 @@ export interface SiteLink {
 export const isExternal = (href: string): boolean => /^https?:\/\//.test(href);
 
 /**
- * Nav links, in the board's order. The in-page targets are today's sections
- * until P6 and P7 rebuild them; Evals points at the docs until P7 adds the
+ * Nav links, in the board's order. Workflows, Harnesses and Observability
+ * jump to the P6 pillars; Evals points at the docs until P7 adds the
  * "04 Compounding improvement" section (#evals).
  */
 export const NAV_LINKS: readonly SiteLink[] = [
@@ -74,3 +74,4 @@ export * from "./copy/hero";
 export * from "./copy/whatIs";
 export * from "./copy/workflows";
 export * from "./copy/anyHarness";
+export * from "./copy/observability";

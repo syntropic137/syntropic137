@@ -3,9 +3,8 @@ import Hero from "./sections/Hero";
 import WhatIs from "./sections/WhatIs";
 import Workflows from "./sections/Workflows";
 import Harnesses from "./sections/Harnesses";
+import Observability from "./sections/Observability";
 import WhySyntropic from "./components/WhySyntropic";
-import Observability from "./components/Observability";
-import Security from "./components/Security";
 import GetStarted from "./components/GetStarted";
 import Footer from "./components/Footer";
 
@@ -19,12 +18,9 @@ export default function App() {
         <WhatIs />
         <Workflows />
         <Harnesses />
-        <hr className="section-divider" />
-        <WhySyntropic />
-        <hr className="section-divider" />
         <Observability />
         <hr className="section-divider" />
-        <Security />
+        <WhySyntropic />
         <hr className="section-divider" />
         <GetStarted />
       </main>
