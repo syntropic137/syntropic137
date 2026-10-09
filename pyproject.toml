@@ -98,6 +98,8 @@ exclude = [
     "__pycache__/",
     # Separate nested git repo checked out inside this tree; not our code.
     "markdown-explorer/",
+    # Design canvas generators: reference geometry to port, never run or shipped.
+    "design/reference/",
 ]
 
 [tool.ruff.lint]
