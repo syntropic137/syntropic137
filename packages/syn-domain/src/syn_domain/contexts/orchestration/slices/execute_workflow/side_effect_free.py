@@ -22,8 +22,12 @@ from __future__ import annotations
 import re
 import shlex
 from pathlib import PurePosixPath
+from typing import TYPE_CHECKING
 
 from syn_shared.codex_stream import CodexItemType
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 #: Claude tools that only read. Anything not listed is treated as work.
 READ_ONLY_TOOLS: frozenset[str] = frozenset({"Read", "Grep", "Glob", "LS"})
@@ -170,17 +174,18 @@ def _segment_reads(segment: str) -> bool:
         return False
     if program in _READ_ONLY_PROGRAMS:
         return True
-    if program == "sed":
-        return _sed_prints(args)
-    if program == "find":
-        return not any(a.startswith(_FIND_ACTIONS) for a in args)
-    if program == "git":
-        return _git_reads(args)
-    if program == "rg":
-        return "--no-config" in args
-    if program == "gh":
-        return len(args) >= 2 and (args[0], args[1]) in _READ_ONLY_GH
-    return False
+    decides = _READS_BY_ARGUMENTS.get(program)
+    return decides is not None and decides(args)
+
+
+#: Programs that read or not depending on their arguments.
+_READS_BY_ARGUMENTS: dict[str, Callable[[list[str]], bool]] = {
+    "sed": lambda args: _sed_prints(args),
+    "find": lambda args: not any(a.startswith(_FIND_ACTIONS) for a in args),
+    "git": lambda args: _git_reads(args),
+    "rg": lambda args: "--no-config" in args,
+    "gh": lambda args: len(args) >= 2 and (args[0], args[1]) in _READ_ONLY_GH,
+}
 
 
 #: A sed script that only prints a line range, the one shape agents read with.
