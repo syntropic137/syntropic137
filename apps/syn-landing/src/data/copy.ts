@@ -24,7 +24,7 @@ export const isExternal = (href: string): boolean => /^https?:\/\//.test(href);
  * "04 Compounding improvement" section (#evals).
  */
 export const NAV_LINKS: readonly SiteLink[] = [
-  { label: "Workflows", href: "#how-it-works" },
+  { label: "Workflows", href: "#workflows" },
   { label: "Harnesses", href: "#orchestrator" },
   { label: "Observability", href: "#observability" },
   { label: "Evals", href: `${DOCS_URL}/docs/guide/evals` },
@@ -72,3 +72,4 @@ export const FOOTER_COLUMNS: readonly FooterColumn[] = [
 ];
 export * from "./copy/hero";
 export * from "./copy/whatIs";
+export * from "./copy/workflows";

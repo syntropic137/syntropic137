@@ -1,10 +1,9 @@
 import Nav from "./components/Nav";
 import Hero from "./sections/Hero";
 import WhatIs from "./sections/WhatIs";
+import Workflows from "./sections/Workflows";
 import WhySyntropic from "./components/WhySyntropic";
-import HowItWorks from "./components/HowItWorks";
 import AgentControlPlane from "./components/AgentControlPlane";
-import GitHubTriggers from "./components/GitHubTriggers";
 import Observability from "./components/Observability";
 import Security from "./components/Security";
 import GetStarted from "./components/GetStarted";
@@ -18,16 +17,13 @@ export default function App() {
       <main id="main-content">
         <Hero />
         <WhatIs />
+        <Workflows />
         <hr className="section-divider" />
         <WhySyntropic />
-        <hr className="section-divider" />
-        <HowItWorks />
         <hr className="section-divider" />
         <AgentControlPlane />
         <hr className="section-divider" />
         <Observability />
-        <hr className="section-divider" />
-        <GitHubTriggers />
         <hr className="section-divider" />
         <Security />
         <hr className="section-divider" />
