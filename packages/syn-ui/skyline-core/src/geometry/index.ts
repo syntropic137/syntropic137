@@ -1,6 +1,8 @@
 export { polygonPath, polygonPoints, round2 } from './path'
 export type { Point } from './path'
 export { extrudeColors, obliqueBox, obliqueFloor, isoBox } from './extrude'
+export { isoCube, isoCubePoints, isoCorners, prism, ISO_PIXEL, ISO_TRUE } from './isoCube'
+export type { IsoCube, IsoCubeFaces, IsoCubeInput, IsoCubePoints, PrismCorners } from './isoCube'
 export type { Face, FaceColors, FacePaths, ExtrudeColorOptions, ObliqueBox, IsoBox } from './extrude'
 export { scaleLinear, sqrtHeight } from './scale'
 export { layoutSkyline, skylineLeadPath, hitStyle, describeSkyline, yearRange, recentWeeksRange, weekStart, weekday, addDays, dayMs, dayFromMs, dayLabel, SKYLINE_YEAR, SKYLINE_WEEKS, WEEKDAYS, MONTHS } from './skyline'

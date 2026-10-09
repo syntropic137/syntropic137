@@ -1,13 +1,15 @@
 /**
  * 3D extrusion: the three visible faces of a box, in two projections, plus
- * the colour recipe for each face.
+ * the colour recipe for each face. Both projections are the shared cube of
+ * isoCube.ts (`prism()`); only the edge vectors differ.
  *
  * Colour: the front face is the base colour, the top face is mixed 58%
  * toward the foreground, the side face 50% toward the ground. Returned as
  * color-mix() strings over CSS custom properties, so the result recolours
  * with any theme and never contains a colour literal.
  */
-import { type Point, polygonPath } from './path'
+import { isoCorners, prism } from './isoCube'
+import { polygonPath } from './path'
 
 export type Face = 'front' | 'top' | 'side'
 
@@ -69,13 +71,11 @@ export interface ObliqueBox {
  */
 export function obliqueBox(b: ObliqueBox): FacePaths {
   const { x, y, width: w, height: h, dx, dy } = b
-  const front: Point[] = [[x, y], [x + w, y], [x + w, y - h], [x, y - h]]
-  const side: Point[] = [[x + w, y], [x + w + dx, y - dy], [x + w + dx, y - dy - h], [x + w, y - h]]
-  const top: Point[] = [[x, y - h], [x + w, y - h], [x + w + dx, y - h - dy], [x + dx, y - h - dy]]
+  const k = prism([x, y], [w, 0], [dx, -dy], h)
   return {
-    front: h > 0 ? polygonPath(front) : '',
-    side: h > 0 ? polygonPath(side) : '',
-    top: polygonPath(top),
+    front: h > 0 ? polygonPath([k.g0, k.gu, k.tu, k.t0]) : '',
+    side: h > 0 ? polygonPath([k.gu, k.guv, k.tuv, k.tu]) : '',
+    top: polygonPath([k.t0, k.tu, k.tuv, k.tv]),
   }
 }
 
@@ -102,15 +102,11 @@ export interface IsoBox {
  * The Execution icon is isoBox({ x: 32, y: 54, width: 20, depth: 20, height: 24 }).
  */
 export function isoBox(b: IsoBox): FacePaths {
-  const { x, y, width: w, depth: d, height: h } = b
-  const F: Point = [x, y]
-  const L: Point = [x - w, y - w / 2]
-  const R: Point = [x + d, y - d / 2]
-  const up = ([px, py]: Point): Point => [px, py - h]
-  const B: Point = [L[0] + R[0] - F[0], L[1] + R[1] - F[1]]
+  // The same corners as isoCube(); the top path starts at the front corner.
+  const k = isoCorners([b.x, b.y], b.width, b.depth, b.height)
   return {
-    top: polygonPath([up(F), up(R), up(B), up(L)]),
-    front: polygonPath([up(L), up(F), F, L]),
-    side: polygonPath([up(F), up(R), R, F]),
+    top: polygonPath([k.t0, k.tv, k.tuv, k.tu]),
+    front: polygonPath([k.tu, k.t0, k.g0, k.gu]),
+    side: polygonPath([k.t0, k.tv, k.gv, k.g0]),
   }
 }

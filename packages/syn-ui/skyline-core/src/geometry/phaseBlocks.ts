@@ -6,7 +6,8 @@
  * decimal before they are laid end to end, which reproduces the board's
  * coordinates. A phase with no recorded duration (pending, skipped) still
  * gets `minWidth` so it can be seen; heights are linear in tokens with a
- * floor of `minHeight`.
+ * floor of `minHeight`. Blocks are the brand cube's oblique projection
+ * (obliqueBox() on isoCube.ts's prism()), as drawn on the board.
  */
 import { type FacePaths, obliqueBox } from './extrude'
 import { round2 } from './path'

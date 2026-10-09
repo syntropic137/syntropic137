@@ -1,7 +1,8 @@
 /**
  * Verdict Block (Evals board, CompPatterns sheet): one run's verdict as an
  * isometric block. Height carries the verdict before colour does: tall pass,
- * short fail or scorer error, flat unscored.
+ * short fail or scorer error, flat unscored. The block is the brand cube
+ * (isoCube.ts) via isoBox(): isoCube({ x: 28, y: 34, size: 16, height }).
  */
 import { type FacePaths, isoBox } from './extrude'
 
