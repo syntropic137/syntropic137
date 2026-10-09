@@ -22,7 +22,7 @@ Run from the repo root.
 | Dev server with no backend (fixtures) | `just skyline-dev-fixtures`, or `pnpm --filter syn-ui run dev:fixtures` |
 | One package | `pnpm --filter @syn137/skyline-core test`, `pnpm --filter syn-ui check`, and so on |
 
-The dev server runs on port 5174, so it can run next to the React dashboard on 5173. `VITE_API_PROXY_TARGET` overrides the API address. `SYN_UI_BASE=/next/` builds the app for `/next` (see Routing).
+The dev server runs on port 5174, so it can run next to the React dashboard on 5173. `VITE_API_PROXY_TARGET` overrides the API address. `VITE_API_PROXY_AUTH=user:password` adds Basic Auth to proxied requests only (for a remote gateway such as the VPS over Tailscale: target `http://100.114.86.77:8137/api/v1`, user `admin`, password from the login Keychain item `syn137-api-password-vps`); it never reaches the browser bundle. `SYN_UI_BASE=/next/` builds the app for `/next` (see Routing).
 
 Before you hand work back, check, test and build must all pass with zero warnings. `svelte-check` runs with `--fail-on-warnings`, so accessibility warnings count as failures.
 
