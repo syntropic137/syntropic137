@@ -120,6 +120,17 @@ export async function pathFor(page: Page, route: RouteCase): Promise<string> {
   return route.path.replace(':id', encodeURIComponent(id))
 }
 
+/**
+ * Wait until the page that replaced `from` has rendered its own heading.
+ * The outgoing page stays on screen until the next page's chunk loads, so
+ * "a heading is visible" alone can still be the old page's.
+ */
+export async function arrived(page: Page, from: string | null): Promise<void> {
+  const h = mainHeading(page)
+  await expect(h).toBeVisible()
+  if (from) await expect(h).not.toHaveText(from)
+}
+
 /** Open a route and wait for its page heading. */
 export async function open(page: Page, path: string): Promise<void> {
   await page.goto(rel(path))

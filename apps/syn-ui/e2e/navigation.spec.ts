@@ -6,6 +6,7 @@
 import { isSkyline } from './support/env'
 import { ROUTES, SECTIONS } from './support/routes'
 import {
+  arrived,
   breadcrumbs,
   esc,
   expect,
@@ -43,9 +44,11 @@ test.describe('list to detail and back', () => {
       const id = await firstDetailId(page, kind)
       expect(id, `a link to a ${kind} on ${listPath}`).not.toBeNull()
       await markWindow(page)
+      const listHeading = (await mainHeading(page).textContent())?.trim() ?? null
       await page.locator(`a[href$="${listPath}/${encodeURIComponent(id!)}"]`).first().click()
       await expect(page).toHaveURL(urlFor(`${listPath}/${encodeURIComponent(id!)}`))
-      await expect(mainHeading(page)).toBeVisible()
+      // The detail's own heading: its breadcrumb trail is final from here on.
+      await arrived(page, listHeading)
       expect(await windowStillMarked(page), 'client-side navigation (no reload)').toBe(true)
 
       // Back to the list through the breadcrumb.
@@ -109,9 +112,11 @@ test.describe('Skyline only', () => {
     await open(page, '/executions')
     const id = await firstDetailId(page, 'execution')
     expect(id, 'a link to an execution').not.toBeNull()
+    const listHeading = (await mainHeading(page).textContent())?.trim() ?? null
     await page.locator(`a[href$="/executions/${encodeURIComponent(id!)}"]`).first().click()
     await expect(page).toHaveURL(urlFor(`/executions/${encodeURIComponent(id!)}`))
-    await expect(mainHeading(page)).toBeVisible()
+    // The detail itself, not the list still on screen while its chunk loads.
+    await arrived(page, listHeading)
     // Count every skeleton inserted from here on: a cache hit never mounts one.
     await page.evaluate(() => {
       const w = window as unknown as { skeletonsSeen: number }

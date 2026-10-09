@@ -4,7 +4,7 @@
  */
 import type { Page } from '@playwright/test'
 import { isFixtures, isSkyline } from './support/env'
-import { expect, mainHeading, markWindow, open, test, urlFor, windowStillMarked } from './support/test'
+import { arrived, expect, mainHeading, markWindow, open, test, urlFor, windowStillMarked } from './support/test'
 
 test.skip(!isSkyline, 'Skyline keyboard layer')
 
@@ -115,9 +115,10 @@ test.describe('list rows', () => {
     await openKeys(page, '/executions')
     await expect(page.locator('#sky-main [data-sky-row]').first()).toBeVisible()
     await page.keyboard.press('j')
+    const listHeading = (await mainHeading(page).textContent())?.trim() ?? null
     await page.keyboard.press('Enter')
     await expect(page).toHaveURL(/\/executions\/[^/?]+/)
-    await expect(page.getByRole('main').getByRole('heading', { level: 1 })).toBeVisible()
+    await arrived(page, listHeading)
     await page.keyboard.press('Backspace')
     await expect(page).toHaveURL(urlFor('/executions'))
   })
