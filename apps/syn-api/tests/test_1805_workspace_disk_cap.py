@@ -3,7 +3,7 @@
 Every test drives `WorkspaceDiskCapEnforcer.run_once` over real directories
 holding real git repositories with a real (bare) remote, measured by the real
 `scan_workspace_dirs` and read by the real host-git adapter. Only docker
-(the container list and `docker stop`) and MinIO are doubles.
+(the container list, `docker pause`/`unpause`/`kill`) and MinIO are doubles.
 """
 
 from __future__ import annotations
@@ -64,14 +64,28 @@ def _grow(ws: Path, size: int = 2 * _LIMIT) -> None:
 
 
 class _Docker:
-    """The container list and `docker stop`, recording into a shared log."""
+    """The container list, freeze, thaw and kill, recording into a shared log."""
 
-    def __init__(self, log: list[str], running: dict[str, str]) -> None:
+    def __init__(
+        self, log: list[str], running: dict[str, str], *, freeze_fails: bool = False
+    ) -> None:
         self.log = log
         self.running = running
+        self.frozen: set[str] = set()
+        self._freeze_fails = freeze_fails
 
     async def list_containers(self) -> list[WorkspaceContainer]:
         return [WorkspaceContainer(ws, ex, running=True) for ws, ex in self.running.items()]
+
+    async def freeze(self, workspace_id: str) -> None:
+        if self._freeze_fails:
+            raise RuntimeError("docker pause exited 1")
+        self.log.append(f"freeze {workspace_id}")
+        self.frozen.add(workspace_id)
+
+    async def thaw(self, workspace_id: str) -> None:
+        self.log.append(f"thaw {workspace_id}")
+        self.frozen.discard(workspace_id)
 
     async def stop(self, workspace_id: str) -> None:
         self.log.append(f"stop {workspace_id}")
@@ -110,6 +124,8 @@ def _enforcer(base: Path, docker: _Docker, archive: _Archive) -> WorkspaceDiskCa
         git=git,
         bundler=git,
         archive=archive,
+        freeze_container=docker.freeze,
+        thaw_container=docker.thaw,
         stop_container=docker.stop,
     )
 
@@ -150,8 +166,9 @@ async def test_below_cap_is_untouched_then_over_cap_is_saved_before_it_is_stoppe
     second = await enforcer.run_once()
 
     assert second.stopped == ("ws-big",)
+    assert log[0] == "freeze ws-big"
     assert log[-1] == "stop ws-big"
-    assert sorted(log[:-1]) == [
+    assert sorted(log[1:-1]) == [
         "save bundle ws-big exec-big",
         "save files ws-big exec-big",
         "save patch ws-big exec-big",
@@ -188,8 +205,77 @@ async def test_a_failed_save_is_reported_and_the_run_is_not_stopped(
     assert result.stopped == ()
     assert result.unpreserved == ("ws-big",)
     assert not any(entry.startswith("stop") for entry in log)
+    assert log[0] == "freeze ws-big" and log[-1] == "thaw ws-big"  # the run carries on
     assert (ws / "artifacts" / "output" / "deliverable.md").exists()
     assert "NOT stopped, its work could not be saved" in caplog.text
+
+
+class _AgentWritingDuringUpload(_Archive):
+    """The agent keeps working while each upload is in flight, unless frozen.
+
+    The freezer is the kernel's; this double models it by letting the "agent"
+    write only while its container is not frozen.
+    """
+
+    def __init__(self, log: list[str], docker: _Docker, ws: Path) -> None:
+        super().__init__(log)
+        self._docker = docker
+        self._ws = ws
+
+    def _agent_works(self) -> None:
+        if self._ws.name in self._docker.frozen:
+            return
+        app = self._ws / "repos" / "app"
+        (app / "late.py").write_text("late = True\n")
+        _git(app, "add", "late.py")
+        _git(app, "commit", "-m", "late commit")
+        (self._ws / "artifacts" / "output" / "deliverable.md").write_text("# NEW work\n")
+
+    async def save(self, stale: StaleWorkspaceDir, repo: str, patch: bytes) -> str:
+        result = await super().save(stale, repo, patch)
+        self._agent_works()
+        return result
+
+    async def save_files(self, stale: StaleWorkspaceDir, tarball: bytes) -> str:
+        result = await super().save_files(stale, tarball)
+        self._agent_works()
+        return result
+
+
+async def test_every_byte_present_at_the_kill_is_in_the_archive(base: Path, tmp_path: Path) -> None:
+    """#1805 reverify B1: no write lands between the snapshot and the kill."""
+    ws = _workspace(base, "ws-big", tmp_path)
+    _authored_work(ws)
+    _grow(ws)
+    log: list[str] = []
+    docker = _Docker(log, {"ws-big": "exec-big"})
+    archive = _AgentWritingDuringUpload(log, docker, ws)
+
+    result = await _enforcer(base, docker, archive).run_once()
+
+    assert result.stopped == ("ws-big",)
+    assert "ws-big" in docker.frozen  # killed while still frozen
+    app = ws / "repos" / "app"
+    live_head = _git(app, "rev-parse", "HEAD").strip()
+    bundle = next(v for k, v in archive.patches.items() if k.endswith(".bundle"))
+    (tmp_path / "b.bundle").write_bytes(bundle)
+    assert live_head in _git(tmp_path, "bundle", "list-heads", str(tmp_path / "b.bundle"))
+    with tarfile.open(fileobj=io.BytesIO(archive.files[0]), mode="r:gz") as tar:
+        member = tar.extractfile("artifacts/output/deliverable.md")
+        assert member is not None
+        archived = member.read()
+    assert archived == (ws / "artifacts" / "output" / "deliverable.md").read_bytes()
+
+
+async def test_a_workspace_that_cannot_be_frozen_is_not_touched(base: Path, tmp_path: Path) -> None:
+    ws = _workspace(base, "ws-big", tmp_path)
+    _authored_work(ws)
+    _grow(ws)
+    log: list[str] = []
+    docker = _Docker(log, {"ws-big": "exec-big"}, freeze_fails=True)
+    result = await _enforcer(base, docker, _Archive(log)).run_once()
+    assert result.unpreserved == ("ws-big",)
+    assert log == []
 
 
 async def test_an_unowned_workspace_is_not_stopped(base: Path, tmp_path: Path) -> None:

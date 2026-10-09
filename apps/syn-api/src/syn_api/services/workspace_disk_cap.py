@@ -9,17 +9,29 @@ this is the portable floor: measure on a clock, and stop what is over.
 
 A pass measures every workspace directory (`scan_workspace_dirs`, one walk
 each). One that is over ``SYN_WORKSPACE_DISK_LIMIT_MB`` AND mounted by a
-running container is stopped, but only after everything a teardown would
-lose is in durable storage, linked to its execution:
+running container is frozen (`docker pause`, the cgroup freezer), so nothing
+in it can write while it is read, and then killed, but only after everything a
+teardown would lose is in durable storage, linked to its execution:
 
 * unpushed commits, as a git bundle per repository;
 * each repository's uncommitted changes, as a patch;
 * every file no repository can reproduce (`artifacts/output` included).
 
-Stopping the container is what reaches the existing teardown, which deletes
+The archive is a snapshot of the frozen state, and the kill is SIGKILL to the
+still-frozen container (`docker kill` delivers it, then thaws the cgroup), so
+not one more instruction of the agent runs between the snapshot and its death:
+no commit or deliverable can be written after it was read (#1805 reverify B1).
+
+Killing the container is what reaches the existing teardown, which deletes
 the directory. So when any of that cannot be saved, the container is NOT
-stopped: the failure is logged and reported, and the run keeps its work and
-keeps the disk. A run is never killed with its work unsaved.
+killed: it is thawed, the failure is logged and reported, and the run keeps
+its work and keeps the disk. A run is never killed with its work unsaved. A
+container that cannot be frozen is not touched at all.
+
+The freeze and kill are docker CLI calls on the container agentic-workspace
+names, the same seam `docker stop` was; a provider-owned quiesce/snapshot
+operation (or a kernel-enforced sized volume) in agentic-workspace would
+replace both, and is described in #1805.
 
 Overshoot: a workspace can grow for one interval plus one pass past the cap
 before it is stopped. At ``_INTERVAL_SECONDS`` and the write rates seen on the
@@ -89,6 +101,8 @@ class WorkspaceDiskCapEnforcer:
     git: HostWorkspaceGit
     bundler: UnpushedBundler
     archive: PatchArchive
+    freeze_container: Callable[[str], Awaitable[None]]
+    thaw_container: Callable[[str], Awaitable[None]]
     stop_container: Callable[[str], Awaitable[None]]
     is_live: Callable[[], bool] = field(default=lambda: True)
 
@@ -117,7 +131,7 @@ class WorkspaceDiskCapEnforcer:
         return CapPass(stopped=tuple(stopped), unpreserved=tuple(unpreserved))
 
     async def _enforce(self, listing: WorkspaceDirListing, execution_id: str | None) -> bool:
-        """Save the workspace's work, then stop it. Whether it was stopped."""
+        """Freeze the workspace, save its work, then kill it. Whether it was killed."""
         from syn_domain.contexts.orchestration import StaleWorkspaceDir
 
         over = StaleWorkspaceDir(
@@ -127,11 +141,31 @@ class WorkspaceDiskCapEnforcer:
             size_bytes=listing.size_bytes,
             last_modified=listing.last_modified,
         )
+        if execution_id is None:
+            logger.error(
+                "WorkspaceOverDiskCap workspace_id=%s size_bytes=%d limit_bytes=%d: NOT "
+                "stopped, no execution owns it, so its work has nowhere to be filed",
+                listing.workspace_id,
+                listing.size_bytes,
+                self.limit_bytes,
+            )
+            return False
         try:
-            if execution_id is None:
-                raise RuntimeError("no execution owns it, so its work has nowhere to be filed")
+            await self.freeze_container(listing.workspace_id)
+        except Exception as exc:
+            logger.error(
+                "WorkspaceOverDiskCap workspace_id=%s execution_id=%s: NOT stopped, it "
+                "could not be frozen, so its work cannot be read consistently (%s: %s)",
+                listing.workspace_id,
+                execution_id,
+                type(exc).__name__,
+                exc,
+            )
+            return False
+        try:
             saved = await self._preserve(over)
         except Exception as exc:
+            await self._thaw(listing.workspace_id)
             logger.error(
                 "WorkspaceOverDiskCap workspace_id=%s execution_id=%s size_bytes=%d "
                 "limit_bytes=%d: NOT stopped, its work could not be saved (%s: %s)",
@@ -146,6 +180,7 @@ class WorkspaceDiskCapEnforcer:
         try:
             await self.stop_container(listing.workspace_id)
         except Exception as exc:
+            await self._thaw(listing.workspace_id)
             logger.error(
                 "WorkspaceOverDiskCap workspace_id=%s: work saved as %s but stop failed (%s)",
                 listing.workspace_id,
@@ -164,6 +199,20 @@ class WorkspaceDiskCapEnforcer:
         )
         return True
 
+    async def _thaw(self, workspace_id: str) -> None:
+        """Let a frozen run carry on. A failure is logged: the run stays frozen."""
+        try:
+            await self.thaw_container(workspace_id)
+        except Exception as exc:
+            logger.error(
+                "WorkspaceOverDiskCap workspace_id=%s: thaw failed, the run is still "
+                "frozen; `docker unpause agentic-%s` resumes it (%s: %s)",
+                workspace_id,
+                workspace_id,
+                type(exc).__name__,
+                exc,
+            )
+
     async def _preserve(self, over: StaleWorkspaceDir) -> list[str]:
         """Archive everything a teardown would lose. Raises on the first failure."""
         saved: list[str] = []
@@ -181,21 +230,33 @@ class WorkspaceDiskCapEnforcer:
         return saved
 
 
-async def _stop_workspace_container(workspace_id: str) -> None:
-    """`docker stop` the container mounting ``workspace_id``. Raises on failure."""
+async def _docker(verb: str, workspace_id: str) -> None:
+    """`docker <verb>` the container mounting ``workspace_id``. Raises on failure."""
     # agentic-workspace names a workspace's container "agentic-" + its id.
     proc = await asyncio.create_subprocess_exec(
         "docker",
-        "stop",
-        "-t",
-        "5",
+        verb,
         f"agentic-{workspace_id}",
         stdout=asyncio.subprocess.DEVNULL,
         stderr=asyncio.subprocess.PIPE,
     )
     _, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
     if proc.returncode != 0:
-        raise RuntimeError(f"docker stop exited {proc.returncode}: {stderr.decode()[:200]}")
+        raise RuntimeError(f"docker {verb} exited {proc.returncode}: {stderr.decode()[:200]}")
+
+
+async def _freeze_workspace_container(workspace_id: str) -> None:
+    await _docker("pause", workspace_id)
+
+
+async def _thaw_workspace_container(workspace_id: str) -> None:
+    await _docker("unpause", workspace_id)
+
+
+async def _kill_workspace_container(workspace_id: str) -> None:
+    # SIGKILL, not `docker stop`: a grace period would let the agent write
+    # after the snapshot. Docker delivers it to the paused container, then thaws.
+    await _docker("kill", workspace_id)
 
 
 def default_enforcer(limit_mb: int, is_live: Callable[[], bool]) -> WorkspaceDiskCapEnforcer:
@@ -217,7 +278,9 @@ def default_enforcer(limit_mb: int, is_live: Callable[[], bool]) -> WorkspaceDis
         git=git,
         bundler=git,
         archive=ArtifactStoragePatchArchive(),
-        stop_container=_stop_workspace_container,
+        freeze_container=_freeze_workspace_container,
+        thaw_container=_thaw_workspace_container,
+        stop_container=_kill_workspace_container,
         is_live=is_live,
     )
 

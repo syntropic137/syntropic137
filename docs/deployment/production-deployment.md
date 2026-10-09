@@ -86,8 +86,9 @@ SYN_WORKSPACE_MEMORY_LIMIT_MB=4096      # 4GB per workspace
 SYN_WORKSPACE_CPU_LIMIT=2.0             # 2 CPUs per workspace
 # Disk per workspace directory (0 = off). Measured once a minute, not enforced by
 # the kernel: a run can overshoot by what it writes in about a minute. Over the
-# cap, its unpushed commits, changes and files are saved to artifact storage and
-# then its container is stopped; if the save fails it keeps running (#1805).
+# cap, its container is frozen (docker pause), its unpushed commits, changes and
+# files are saved to artifact storage, and the frozen container is killed; if the
+# save fails it is unfrozen and keeps running (#1805).
 SYN_WORKSPACE_DISK_LIMIT_MB=20480
 
 # ---- Cloud provider ----
