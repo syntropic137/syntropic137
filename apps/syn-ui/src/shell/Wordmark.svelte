@@ -1,4 +1,5 @@
-<!-- Syntropic137 wordmark: the original "S" mark (public/logo_syntropic137.png) and Orbitron type, as in the React dashboard. -->
+<!-- Syntropic137 wordmark: the rebrand blue cube "S" (public/logo_syntropic137.png, the landing page mark cropped to the cube; its
+     background is baked in, so the tile is rounded with a radius token rather than shown as a square) and Orbitron type. -->
 <script lang="ts">
   let { href = '/', compact = false }: { href?: string; compact?: boolean } = $props()
   const logo = `${import.meta.env.BASE_URL}logo_syntropic137.png`
@@ -28,6 +29,8 @@
     flex-shrink: 0;
     width: 26px;
     height: 26px;
+    border-radius: var(--ds-radius-sm);
+    object-fit: cover;
   }
   .sky-wordmark__text {
     font-family: var(--sky-font-brand);
