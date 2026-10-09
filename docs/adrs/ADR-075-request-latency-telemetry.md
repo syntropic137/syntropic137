@@ -111,7 +111,10 @@ being cheap, add a daily rollup (a continuous aggregate of
 `percentile_agg` from timescaledb_toolkit, or a table written by a daily job)
 and serve windows longer than a day from it; this ADR is updated in place then.
 
-`syn insights latency [--window 7d] [--route /evals]` prints the same table.
+`syn observability latency [--window 7d] [--route /evals]` prints the same table.
+Request latency is **Observability**, not an Insight: see
+`docs/architecture/agent_sessions-ubiquitous-language.md` (Observability) and
+`docs/architecture/organization-ubiquitous-language.md` (Words we do NOT use).
 
 ### Why Lane 2
 
