@@ -49,13 +49,21 @@ if TYPE_CHECKING:
 
 
 class EventsNotRecordedError(RuntimeError):
-    """The event store refused the write, so the events are NOT durable.
+    """The event store did not acknowledge the write; `__cause__` says what it did.
+
+    Durability depends on the cause, which is always the repository's own
+    exception (ADR-072 D5 step 1). A `ConcurrencyConflictError` means another
+    writer advanced the stream and this append lost the version race: the
+    events are NOT durable. Any other cause, such as an RPC that failed after
+    the append was sent, is a lost acknowledgment, not an absent write: the
+    store may have committed. Reload before deciding anything.
 
     THE ONE THING A CALLER ON A TEARDOWN PATH HAS TO KNOW (#1319). `append` is
     two steps - the store, then this run's local to-do list - and they fail for
-    opposite reasons. A store that rejected the write means the events do not
-    exist and nothing downstream will ever see them; a projection that blew up
-    afterwards means they DO exist and only the read model is behind.
+    opposite reasons. A store that did not acknowledge the write means the
+    events may not exist and nothing downstream can rely on them; a projection
+    that blew up afterwards means they DO exist and only the read model is
+    behind.
 
     A failing phase must be reaped either way, because a container nobody
     removes is a leaked one - but only the first case has lost the account of
@@ -98,9 +106,11 @@ class ExecutionJournal:
         """Record whatever the aggregate has decided since it was last saved.
 
         Raises:
-            EventsNotRecordedError: the store rejected the write and the events
-                are not durable. ANY OTHER exception means they are - the
-                projection is the only thing that failed.
+            EventsNotRecordedError: the store did not acknowledge the write.
+                Not durable only when its `__cause__` is a
+                `ConcurrencyConflictError`; otherwise unknown, so reload. ANY
+                OTHER exception means the events are durable - the projection
+                is the only thing that failed.
 
         `open` deliberately does not wrap: its `StreamAlreadyExistsError` is a
         domain answer ("this run already started") that callers act on, not a
