@@ -452,18 +452,22 @@ cache derived wholly from durable events and rebuilt at every claim, so losing
 it loses nothing. It must not be `InMemoryProjectionStore`, which refuses
 production (ADR-060).
 
-*As built (#1310 item 1.4).* The in-memory fitness check
-(`test_in_memory_adapters_are_guarded.py`) never treats `RunTodoStore` as a
-candidate: neither its name nor its module (`run_todo_fold.py`) matches the
-check's patterns, and an exemption entry for a non-candidate fails as stale. So
-the by-name pin is a test beside the code instead
-(`test_run_todo_store_is_not_an_in_memory_adapter`), which fails if the class
-ever becomes an `InMemoryProjectionStore` or an `InMemoryAdapter`. The entry
-point is `RunScopedTodoFold.for_execution(execution_id, repository, events)`.
-`ExecutionRepository` cannot read a stream, so seeding reads through a port,
-`ExecutionEventStream`, satisfied in `syn-adapters` by
-`EventStoreExecutionEventStream`. Seeding and live saves share one dispatch,
-`execution_journal.project_events`.
+*As built (#1310 item 1.4).* `RunTodoStore` matches neither of the in-memory
+fitness check's patterns, so the check names it by exact key in
+`_NAMED_CANDIDATES` (`test_in_memory_adapters_are_guarded.py`), and
+`fitness_exceptions.toml` exempts that same key citing this decision. A guard
+added to the class would make it guarded, the exemption would go stale, and the
+gate would fail; `test_the_fold_constructs_and_folds_in_production` also builds
+and seeds a fold with `APP_ENVIRONMENT=production`. The record it holds is a
+frozen typed value; dicts exist only at the `ProjectionStore` boundary. The
+entry point is `RunScopedTodoFold.for_execution(execution_id, repository,
+events, projection_type)`: the projection class is passed in by the composition
+root, as the processor's projection already is, because a slice may not import
+the `execution_todo` slice (VSA031). `ExecutionRepository` cannot read a
+stream, so seeding reads through a port, `ExecutionEventStream`, satisfied in
+`syn-adapters` by `EventStoreExecutionEventStream`, which pages through the
+whole stream (one gRPC read returns at most 1,000 events). Seeding and live
+saves share one dispatch, `execution_journal.project_events`.
 
 ### D9. Event epoch
 
