@@ -186,3 +186,44 @@ async def test_v5_start_then_run_claimed_in_a_fresh_processor_matches_todays_run
     assert await world.event_types("exec-claimed") == golden
     assert result.status == "failed"
     world.workspace.create_workspace.assert_called()
+
+
+async def test_a_reservation_whose_stream_write_failed_is_not_a_duplicate() -> None:
+    """reserve -> failed open -> re-offer. The row exists but no start does:
+    calling that a duplicate would confirm a start that never happened, so
+    the re-offer must admit it for real."""
+    world = _World()
+    await world.install()
+    first = world.processor(queued=True)
+    first._journal.open = AsyncMock(side_effect=RuntimeError("event store down"))  # type: ignore[method-assign]
+    with pytest.raises(RuntimeError, match="event store down"):
+        await world.handle(first, "exec-reoffered")
+    assert await world.event_types("exec-reoffered") == []
+    assert (await world.queue.in_use()).opening == 1
+
+    status = await world.handle(world.processor(queued=True), "exec-reoffered")
+
+    assert status == "admitted"
+    assert await world.event_types("exec-reoffered") == ["WorkflowExecutionStarted"]
+    counts = await world.queue.in_use()
+    assert (counts.opening, counts.admitted) == (0, 1)
+
+
+async def test_a_duplicate_whose_start_died_before_mark_admitted_is_promoted() -> None:
+    """The stream exists but the row is still ``opening``: a duplicate, and
+    the re-offer finishes the promotion the first start never reached (D2)."""
+    world = _World()
+    await world.install()
+    first = world.processor(queued=True)
+    first._run_queue = MagicMock(wraps=world.queue)
+    first._run_queue.mark_admitted = AsyncMock(side_effect=RuntimeError("died"))
+    with pytest.raises(RuntimeError, match="died"):
+        await world.handle(first, "exec-half")
+    assert (await world.queue.in_use()).opening == 1
+
+    with pytest.raises(DuplicateExecutionError):
+        await world.handle(world.processor(queued=True), "exec-half")
+
+    assert await world.event_types("exec-half") == ["WorkflowExecutionStarted"]
+    counts = await world.queue.in_use()
+    assert (counts.opening, counts.admitted) == (0, 1)

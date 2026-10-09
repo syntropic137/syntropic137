@@ -431,8 +431,8 @@ class WorkflowExecutionProcessor:
         reading the stream (ADR-072 D2), never a stream no row will run.
 
         Raises:
-            StreamAlreadyExistsError: the execution already has a run row or a
-                stream - it was started before, by this or another process.
+            StreamAlreadyExistsError: the execution already has a stream - it
+                was started before, by this or another process.
         """
         execution_id = aggregate.id or ""
         await self._cancelled_work.settle()
@@ -443,7 +443,7 @@ class WorkflowExecutionProcessor:
         if self._run_queue is not None and not await self._run_queue.reserve(
             execution_id, ORCHESTRATION_EVENT_EPOCH, is_resume=origin is not None
         ):
-            raise StreamAlreadyExistsError(execution_id, 0)
+            await self._refuse_if_started(self._run_queue, execution_id)
         # #1387: durable, therefore visible. From the write the drain counts
         # this execution and a maintenance transition may proceed over it;
         # before it, it existed only as a queued task, and `set_mode(active=True)`
@@ -459,6 +459,25 @@ class WorkflowExecutionProcessor:
         if self._run_queue is not None:
             await self._run_queue.mark_admitted(execution_id)
         return phase_outputs
+
+    async def _refuse_if_started(self, queue: ExecutionRunQueue, execution_id: str) -> None:
+        """Decide what a refused ``reserve`` means, from the stream, not the row.
+
+        A row exists, but a row is a reservation, not a start: an ``opening``
+        or ``abandoned`` row whose stream write failed has no start at all,
+        and calling it a duplicate would confirm a start that never happened.
+        So only a stream that exists is a duplicate - promoted first, in case
+        the earlier start died between its write and ``mark_admitted`` (D2).
+        Absent, the start proceeds: ``journal.open``'s no-stream write is the
+        fence, so a concurrent opener still loses there, honestly.
+
+        Raises:
+            StreamAlreadyExistsError: the execution's stream exists.
+        """
+        if await self._journal.reload(execution_id) is None:
+            return
+        await queue.mark_admitted(execution_id)
+        raise StreamAlreadyExistsError(execution_id, 0)
 
     async def run_claimed(self, run: ClaimedRun) -> WorkflowExecutionResult:
         """Drain a run an Executor claimed, from its stream alone (#1310 1.3).
