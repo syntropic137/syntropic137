@@ -101,3 +101,79 @@ async def test_a_start_returns_with_its_row_admitted_and_its_start_event_durable
     assert state == "admitted"
     assert await executions.get_by_id("exec-pg-admitted") is not None
     workspace.create_workspace.assert_not_called()
+
+
+async def test_a_durable_start_reloads_through_a_fresh_event_store_client(
+    pool: asyncpg.Pool, test_infrastructure: TestInfrastructure
+) -> None:
+    """B2 slice: the start survives the process, read back by a client that never wrote it.
+
+    The test above holds the stream in memory, so it cannot show the start is
+    durable. This one writes through the production gRPC client and reloads
+    through a second one; the start pins - inputs and repositories, including
+    one whose SHA is unknown - are what `run_claimed` rebuilds the run from.
+    It does NOT drive the dispatch, resume or direct-route entrances.
+    """
+    from syn_adapters.storage.legacy_tolerant_client import LegacyShapeTolerantGrpcClient
+    from syn_domain.contexts._shared.repository_ref import RepositoryRef
+
+    address = f"{test_infrastructure.eventstore_host}:{test_infrastructure.eventstore_port}"
+    tenant = f"run-queue-{uuid4().hex}"
+
+    def _executions(client: LegacyShapeTolerantGrpcClient) -> RepositoryAdapter:
+        return RepositoryAdapter(
+            EventStoreRepository(
+                client,
+                WorkflowExecutionAggregate,  # type: ignore[arg-type]  # ESP SDK TEvent invariance
+                "WorkflowExecution",
+            )
+        )
+
+    writer = LegacyShapeTolerantGrpcClient(address=address, tenant_id=tenant)
+    reader = LegacyShapeTolerantGrpcClient(address=address, tenant_id=tenant)
+    await writer.connect()
+    await reader.connect()
+    execution_id = f"exec-durable-{uuid4().hex[:8]}"
+    try:
+        processor = WorkflowExecutionProcessor(
+            execution_repository=_executions(writer),
+            session_repository=AsyncMock(),
+            workspace_service=MagicMock(),
+            artifact_repository=AsyncMock(),
+            artifact_content_storage=None,
+            artifact_query=None,
+            conversation_storage=None,
+            observability_writer=None,
+            controller=None,
+            prompt_builder=AsyncMock(return_value="p"),
+            command_builder=MagicMock(return_value=["claude"]),
+            todo_projection=ExecutionTodoProjection(store=InMemoryProjectionStore()),
+            run_queue=PostgresExecutionRunQueue(pool),
+        )
+        result = await processor.run(
+            workflow_id="wf-1",
+            workflow_name="wf",
+            phases=[ExecutablePhase(phase_id="p1", name="P1", order=1, prompt_template="do")],
+            inputs={"task": "x"},
+            execution_id=execution_id,
+            repos=[
+                RepositoryRef.from_slug("acme/one"),
+                RepositoryRef.from_slug("acme/two"),
+            ],
+        )
+        assert result.status == "admitted"
+
+        reloaded = await _executions(reader).get_by_id(execution_id)
+        assert reloaded is not None
+        pins = reloaded.start_pins
+        assert pins.inputs["task"] == "x"
+        assert [c.repository for c in pins.source_commits] == ["acme/one", "acme/two"]
+        assert [p.phase_id for p in pins.pinned_phases] == ["p1"]
+        async with pool.acquire() as conn:
+            state = await conn.fetchval(
+                "SELECT state FROM execution_runs WHERE execution_id=$1", execution_id
+            )
+        assert state == "admitted"
+    finally:
+        await writer.disconnect()
+        await reader.disconnect()
