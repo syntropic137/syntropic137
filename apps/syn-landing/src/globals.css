@@ -7,6 +7,11 @@
  */
 :root {
   --landing-text-body: clamp(15px, 1.5vw, 16px);
+  /* Room the floating nav takes at the top (capsule plus a margin). */
+  --landing-nav-clearance: 88px;
+  /* Sections land 16px from the top on a nav jump, under the capsule: their
+     own top padding clears it. */
+  --landing-section-snap: calc(var(--ds-space-4) - var(--landing-nav-clearance));
 }
 
 /* ── Global Reset ── */
@@ -18,6 +23,8 @@
 
 html {
   scroll-behavior: smooth;
+  /* Keyboard focus scrolled into view never lands under the floating nav. */
+  scroll-padding-top: var(--landing-nav-clearance);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   overflow-x: hidden;
@@ -634,7 +641,7 @@ img, video {
   position: relative;
   border-top: var(--ds-border-width) solid var(--sky-color-section-rule);
   background: var(--sky-color-ground-deep);
-  scroll-margin-top: var(--ds-space-4);
+  scroll-margin-top: var(--landing-section-snap);
 }
 
 .page-section[data-ground="band"] {

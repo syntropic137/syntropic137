@@ -158,7 +158,7 @@
 .pillar {
   border-top: 1px solid var(--sky-color-section-rule);
   background: var(--sky-color-ground-deep);
-  scroll-margin-top: var(--ds-space-4);
+  scroll-margin-top: var(--landing-section-snap);
 }
 
 .pillar[data-tinted] {
