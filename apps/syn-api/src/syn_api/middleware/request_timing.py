@@ -207,7 +207,9 @@ class RequestTimingMiddleware:
                 message["headers"] = headers
                 # Offered at response START, so a stream that stays open for
                 # an hour is recorded when it answered, not when it closed.
-                self._offer(scope, arrived, started_status, (responded_at - start) * 1000, request_id)
+                self._offer(
+                    scope, arrived, started_status, (responded_at - start) * 1000, request_id
+                )
             await send(message)
 
         with tally_pool_wait() as pool_wait:
