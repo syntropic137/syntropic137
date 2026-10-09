@@ -165,7 +165,7 @@ img, video {
   inset: calc(var(--nav-pad-y) - var(--nav-cap-y)) calc(var(--sky-gutter) - var(--nav-cap-x));
   border: var(--ds-border-width) solid var(--sky-color-border-glass);
   border-radius: calc(var(--sky-radius-row) + var(--nav-cap-y));
-  background: color-mix(in oklab, var(--sky-color-ground-deep) 72%, transparent);
+  background: color-mix(in oklab, var(--sky-color-ground-deep) 86%, transparent);
   box-shadow:
     0 18px 40px -18px color-mix(in oklab, var(--sky-color-ground-deep) 90%, transparent),
     inset 0 1px 0 color-mix(in oklab, var(--sky-color-display-hi) 6%, transparent);
