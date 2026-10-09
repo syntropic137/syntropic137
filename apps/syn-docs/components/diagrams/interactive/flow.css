@@ -26,14 +26,19 @@
   background: rgba(244, 244, 245, 1) !important;
 }
 
+.dark .react-flow__controls {
+  border-color: var(--sky-color-border-strong) !important;
+  box-shadow: var(--sky-shadow-float) !important;
+}
+
 .dark .react-flow__controls-button {
-  background: rgba(24, 24, 27, 0.95) !important;
-  border-bottom: 1px solid rgba(161, 161, 170, 0.1) !important;
-  fill: #a1a1aa !important;
+  background: var(--sky-color-control) !important;
+  border-bottom: 1px solid var(--sky-color-divider) !important;
+  fill: var(--ds-color-text-muted) !important;
 }
 
 .dark .react-flow__controls-button:hover {
-  background: rgba(39, 39, 42, 1) !important;
+  background: var(--sky-color-control-hover) !important;
 }
 
 /* Handles — completely invisible */
