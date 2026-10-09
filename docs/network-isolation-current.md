@@ -135,7 +135,9 @@ async def test_network_isolation_config():
             assert result.exit_code == 0
             
             # Should NOT reach disallowed hosts (if allowlist enforced)
-            if settings.workspace_security.allowed_hosts:
+            # The egress allowlist lives in the Envoy proxy config;
+            # SYN_SECURITY_ALLOWED_HOSTS was never applied and was removed (#1805).
+            if ALLOWED_HOSTS:
                 result = await ws.execute(["curl", "-I", "https://evil.com"])
                 assert result.exit_code != 0  # Should fail
 ```

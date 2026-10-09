@@ -39,6 +39,11 @@ isolation similar to Firecracker, but with full OCI compatibility for Kubernetes
 
 ## Implementation Plan
 
+> **Note (#1805):** this plan predates the current provider surface. The
+> `WorkspaceSecuritySettings` type it passes around was deleted because nothing
+> consumed it; a Kata backend would take its hardening from agentic_isolation's
+> `SecurityConfig` and its limits from `SYN_WORKSPACE_*`, like the Docker one.
+
 ### Phase 1: KataWorkspace Class
 
 Create `packages/syn-adapters/src/syn_adapters/workspaces/kata.py`:
