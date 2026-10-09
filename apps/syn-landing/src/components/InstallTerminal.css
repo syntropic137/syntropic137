@@ -48,8 +48,7 @@
   background: var(--ds-color-accent);
 }
 
-/* Off screen: the typing and the caret wait (they run only while visible). */
-.install-box[data-paused] .sky-type,
+/* Off screen: the caret waits (it blinks only while visible). */
 .install-box[data-paused] .sky-blink {
   animation-play-state: paused;
 }

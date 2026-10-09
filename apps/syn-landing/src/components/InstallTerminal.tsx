@@ -6,8 +6,8 @@ import "./InstallTerminal.css";
 interface InstallTerminalProps {
   className?: string;
   style?: CSSProperties;
-  /** Type the command out once it is on screen (hero). The caret blinks only while visible, for about 20s. */
-  typing?: boolean;
+  /** Show a blinking caret after the command (hero, closing box). It blinks only while visible, for about 20s. */
+  caret?: boolean;
 }
 
 const onScreen = (el: Element) => {
@@ -15,11 +15,11 @@ const onScreen = (el: Element) => {
   return r.bottom > 0 && r.top < window.innerHeight;
 };
 
-/** started: the typing has begun (sticky); visible: the box is on screen now. */
-function useTyping(ref: RefObject<HTMLDivElement | null>, enabled: boolean) {
+/** started: the caret has started blinking (sticky); visible: the box is on screen now. */
+function useCaret(ref: RefObject<HTMLDivElement | null>, enabled: boolean) {
   const [state, setState] = useState({ started: false, visible: false });
 
-  // Start before first paint when already on screen, so the full command never flashes first.
+  // Start before first paint when already on screen.
   useLayoutEffect(() => {
     if (enabled && ref.current && onScreen(ref.current)) setState({ started: true, visible: true });
   }, [enabled, ref]);
@@ -76,43 +76,36 @@ function CopyIcon({ done }: { done: boolean }) {
   );
 }
 
-const CHARS = INSTALL_COMMAND.length;
-const TYPE_STYLE = { width: `${CHARS}ch`, animationTimingFunction: `steps(${CHARS})` } as CSSProperties;
-
-/** The command, revealed with motion.css sky-type and a blinking caret once `started`. */
-function Command({ typing, started }: { typing: boolean; started: boolean }) {
-  if (!typing) return <span className="install-box__cmd">{INSTALL_COMMAND}</span>;
-  const motion = started ? " sky-type" : "";
+/** The full command, with a caret that blinks (motion.css sky-blink) once `started`. */
+function Command({ caret, started }: { caret: boolean; started: boolean }) {
   return (
     <>
-      <span className={`install-box__cmd${motion}`} style={TYPE_STYLE}>
-        {INSTALL_COMMAND}
-      </span>
-      <span className={started ? "install-box__caret sky-blink" : "install-box__caret"} aria-hidden="true" />
+      <span className="install-box__cmd">{INSTALL_COMMAND}</span>
+      {caret && <span className={started ? "install-box__caret sky-blink" : "install-box__caret"} aria-hidden="true" />}
     </>
   );
 }
 
 /**
  * The install box of the v4 boards: prompt, `npx @syntropic137/setup init`
- * and a Copy button. The full command is always in the DOM (and is the
- * static end state); typing only reveals it. Used by the hero, the closing
+ * and a Copy button. The full command is always shown; the optional caret
+ * blinks after it while the box is on screen. Used by the hero, the closing
  * call to action and the links page. The button keeps its name ("Copy
  * install command"); the result is announced in a polite status message.
  */
-export default function InstallTerminal({ className, style, typing = false }: InstallTerminalProps) {
+export default function InstallTerminal({ className, style, caret = false }: InstallTerminalProps) {
   const ref = useRef<HTMLDivElement>(null);
-  const { started, visible } = useTyping(ref, typing);
+  const { started, visible } = useCaret(ref, caret);
   const { state, copy } = useCopy(INSTALL_COMMAND);
   const classes = className ? `install-box ${className}` : "install-box";
 
   return (
-    <div ref={ref} className={classes} style={style} data-state={state} data-paused={typing && !visible ? "" : undefined}>
+    <div ref={ref} className={classes} style={style} data-state={state} data-paused={caret && !visible ? "" : undefined}>
       <span className="install-box__prompt" aria-hidden="true">
         ❯
       </span>
       <code className="install-box__code">
-        <Command typing={typing} started={started} />
+        <Command caret={caret} started={started} />
       </code>
       <button type="button" className="install-box__copy" onClick={copy} aria-label={HERO.copyAria}>
         <CopyIcon done={state === "copied"} />

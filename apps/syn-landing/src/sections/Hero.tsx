@@ -155,7 +155,7 @@ export default function Hero() {
         <h1 className="hero__title glow-text">{HERO.title}</h1>
         <p className="hero__lede">{HERO.lede}</p>
         <div className="hero__install">
-          <InstallTerminal typing />
+          <InstallTerminal caret />
           <span className="hero__note">{HERO.installNote}</span>
         </div>
       </div>

@@ -16,7 +16,7 @@ export default function Start() {
         <div className="start__main">
           <SectionIntro titleId="start-title" title={c.title} lede={c.lede} size="closing" />
           <div className="start__install">
-            <InstallTerminal typing />
+            <InstallTerminal caret />
             <p className="start__note">{c.note}</p>
           </div>
         </div>
