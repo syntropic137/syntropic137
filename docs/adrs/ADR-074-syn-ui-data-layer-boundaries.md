@@ -39,9 +39,18 @@ Enforcement, as fitness functions in `ci/fitness/` (not lint):
 ## Consequences
 
 - A new screen is three files in three layers: a resource (or reuse), a view model with unit tests, a route that composes. No screen-specific fetching.
-- Swapping fixtures for the live API is one `configureClient({ fixtures })` call in `main.ts`; nothing in routes changes.
+- Swapping fixtures for the live API is one `configureClient({ fixtures })` call, made by `startClient()` in `apps/syn-ui/src/lib/client.ts`; nothing in routes changes.
 - The cache is ours to maintain. Kept deliberately small; the fallback is named.
 - The fitness checks are the guard. Breaking the layering fails preflight, not review.
+
+Measured when implemented (2026-10-08, feat/skyline-svelte):
+
+- Cache: `packages/syn-ui/data/src/client/queryCache.ts`, 199 lines (under the 200-line TanStack trigger), 1.2 KB gzipped minified on its own. The live invalidation map (`src/live/invalidate.ts`, 0.9 KB gz) loads as a lazy chunk. Against the build before the cache: first-load JS 28.9 KB to 29.0 KB gzipped (+0.1 KB); first visit to a data route +1.6 KB (cache, `cached()` wrappers and the binding, in the shared route chunk).
+- `resource()` reads through the cache. A fetcher that returns a resource call directly renders cached data on the first frame, so list -> detail -> back mounts no skeleton (e2e: `apps/syn-ui/e2e/navigation.spec.ts`, "back to a list renders cached data on the first frame").
+- Client setup moved from `main.ts` to `apps/syn-ui/src/lib/client.ts`, so only routes, the binding and the shell import the data package.
+- Unit tests: `packages/syn-ui/data/src/client/queryCache.test.ts` (keys, staleness, de-dupe, abort, invalidation, fixtures mode, copies) and `packages/syn-ui/data/src/live/invalidate.test.ts` (event-to-invalidation map, throttling).
+- Fitness functions in `ci/fitness/code_quality/`, zero exceptions: `test_syn_ui_no_fetch_outside_data.py`, `test_syn_ui_data_imports.py`, `test_syn_ui_data_is_framework_agnostic.py`, `test_syn_ui_every_resource_has_a_fixture.py` (shared scanning in `_syn_ui.py`). The fixture check found three resources with no fixture (session-inventory pages, node lookups, archived transcripts); they now 404 as the API does for a run with no snapshot.
+- Not yet done: the contract test of each resource's response type against the served OpenAPI spec (`check:api-drift` for the data package).
 
 ## Rejected
 

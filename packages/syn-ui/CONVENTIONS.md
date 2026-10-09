@@ -52,7 +52,7 @@ A component never fetches data. A pattern takes plain props, typed in `skyline-c
 - Files: Svelte components use `PascalCase.svelte`. TypeScript files use `camelCase.ts`. Runes modules end in `.svelte.ts`.
 - Components: one folder per component, `components/Button/Button.svelte`, with a `types.ts` that holds `ButtonProps`. Patterns follow the same layout under `patterns/RunRow/`.
 - CSS classes always carry the `sky-` prefix: `sky-button`, `sky-button__icon`. Variants and state are data attributes, not classes: `data-variant`, `data-size`, `data-tone`, `data-state`, plus `aria-*` where ARIA has the concept, such as `aria-pressed` and `aria-current`.
-- Exports are named and come from the package index. Deep imports into another package's `src/` are not allowed. Subpath entries are the exception: `@syn137/skyline-core/format`, `/geometry`, `/state`, `/patterns`, `/contracts`, and `@syn137/syn-ui-data/types`, `/live`, `/fixtures`.
+- Exports are named and come from the package index. Deep imports into another package's `src/` are not allowed. Subpath entries are the exception: `@syn137/skyline-core/format`, `/geometry`, `/state`, `/patterns`, `/contracts`, and `@syn137/syn-ui-data/types`, `/live`, `/invalidate`, `/fixtures`.
 - A `TODO` or `FIXME` must reference an issue, for example `TODO(#624): ...`. Issue #624 is the Skyline epic.
 
 ## CSS rules
@@ -132,7 +132,7 @@ import { subscribeActivity, subscribeExecution } from '@syn137/syn-ui-data/live'
 - Types: generated OpenAPI types live in `src/generated/api-types.ts` (regenerate with `pnpm --filter @syn137/syn-ui-data generate:types`). Hand-written types are ported in `src/types.ts`. Prefer aliasing the generated schema, `components['schemas']['X']`, to restating it.
 - Concurrent identical GETs are coalesced into one request. Each caller's abort only cancels that caller.
 - Every read goes through the query cache (`src/client/queryCache.ts`, ADR-074). Wrap a new read in `cached(name, params, (s) => request(path, { signal: s }), { signal, staleAfter })` from `src/keys.ts`, where `name` is the function's own name (add it to the `ResourceName` union) and `params` are its arguments minus the signal. `staleAfter` is `'list'` (15 s), `'detail'` (60 s, the default), `'metrics'` (5 s) or ms. Fresh data is served without a request, stale data is served and refreshed in the background, and fixtures mode never goes stale on its own.
-- A mutation wraps its request in `thenInvalidate(request(...), [{ name: 'getX', id }, { name: 'listX' }])`. Live events invalidate through the pure map in `src/live/invalidate.ts` (`invalidationsFor`); add a case there, with a test, when a new event should refresh a resource.
+- A mutation wraps its request in `thenInvalidate(request(...), [{ name: 'getX', id }, { name: 'listX' }])`. Live events invalidate through the pure map in `src/live/invalidate.ts` (`invalidationsFor`, subpath `/invalidate`, which the app loads lazily to keep it out of the first load); add a case there, with a test, when a new event should refresh a resource.
 - Callers get a copy of cached data, so editing a response never edits the cache.
 - Avoid N+1 fan-out. If you must fan out, use `mapLimit(items, 4, fn)` and record the API gap in your result.
 - Errors are `ApiError` with `status`, `code` and `detail`. Ignore `isAbortError(e)`.
