@@ -4214,6 +4214,76 @@
         }
       }
     },
+    "/observability/latency": {
+      "get": {
+        "tags": [
+          "observability"
+        ],
+        "summary": "Get Request Latency",
+        "description": "Exact p50/p95/p99, max and count per (method, route template) over the window.\n\nRead from ``api_request_latency`` (Lane 2, ADR-073). Every API process\nrecords its own requests; ``recorder`` describes THIS process's only.",
+        "operationId": "get_request_latency_observability_latency_get",
+        "parameters": [
+          {
+            "name": "route",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "One route TEMPLATE, e.g. /evals/{eval_id}. Every route when omitted.",
+              "title": "Route"
+            },
+            "description": "One route TEMPLATE, e.g. /evals/{eval_id}. Every route when omitted."
+          },
+          {
+            "name": "window",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "1h",
+                "24h",
+                "7d",
+                "30d"
+              ],
+              "type": "string",
+              "description": "How far back to look",
+              "default": "24h",
+              "title": "Window"
+            },
+            "description": "How far back to look"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestLatencyResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/costs/sessions": {
       "get": {
         "tags": [
@@ -14914,6 +14984,40 @@
         "title": "InvokedSkillInfo",
         "description": "One skill the agent invoked through the Skill tool, and how often (#1269)."
       },
+      "LatencyRecorderStatusResponse": {
+        "properties": {
+          "running": {
+            "type": "boolean",
+            "title": "Running"
+          },
+          "written": {
+            "type": "integer",
+            "title": "Written"
+          },
+          "dropped": {
+            "type": "integer",
+            "title": "Dropped"
+          },
+          "write_failures": {
+            "type": "integer",
+            "title": "Write Failures"
+          },
+          "buffered": {
+            "type": "integer",
+            "title": "Buffered"
+          }
+        },
+        "type": "object",
+        "required": [
+          "running",
+          "written",
+          "dropped",
+          "write_failures",
+          "buffered"
+        ],
+        "title": "LatencyRecorderStatusResponse",
+        "description": "What this API process's recorder did with its samples since it started."
+      },
       "LineageEdge": {
         "properties": {
           "parent": {
@@ -17881,6 +17985,48 @@
         "title": "ReportedFailureReason",
         "description": "What a phase says CAUSED the failure it is reporting (#1372).\n\nTHE QUESTION THIS ANSWERS, and why it had to be asked rather than worked\nout. A readable ``success=false`` says THAT a phase failed and nothing\nmore, so every reported failure was recorded as a correct refusal - the\nsystem working - including the one whose agent had just written \"GH_TOKEN\nis not set\", which is the system not working, and the one that said the\ntask was impossible, which is neither. Those three take opposite responses:\nretry, fix the platform, rewrite the brief. An operator re-dispatching off\na record that cannot tell them apart spends a whole run to find out.\n\nTHE SPELLINGS ARE classify.md's, which is the vocabulary analysts already\nsort failures into by hand and the one `FailureClassification` was built\nfrom. Three words, closed, written here and nowhere else - a closed set in\none place is what separates a contract from the habit of adding one more\nstring every time a run is lost, and it is the definition the negative\ntests are written against.\n\nIT IS THE AGENT'S OWN WORD, NEVER AN INFERENCE. Nothing reads ``comments``,\nan exception message or an exit status to reach a member of this; the only\nway into one is a phase that wrote it.\n\nAND BECAUSE IT IS THE AGENT'S OWN WORD, IT IS A REPORT AND NOT A\nMEASUREMENT (#1392). This is the whole of what the type means, and the\nreason it is spelled `reported_failure_reason` everywhere it is carried:\nthe platform's only corroboration of anything written here is that the\nprocess exited cleanly and its stream arrived intact, which is evidence\nabout the HARNESS and not about whether the task was possible. A run that\nnamed itself ``task`` established nothing about the request; it said\nsomething about it. So the word travels the whole way to the operator - who\nwants to know what the agent said - and `FailureClassification`, which is\nwhat failure NUMBERS are computed from, is never decided by it. The one\nthing a phase can do to that record is WITHDRAW a claim; see\n`_corroborated_classification`, which holds the whole rule.\n\nAND IT CANNOT CHANGE WHETHER A PHASE COMPLETES - the property to keep when\nediting anything here. This decides a LABEL on a failure already decided by\n``success``. A word nobody recognises, a sentence, a number, or no key at\nall all read as \"no reason given\" and leave the verdict exactly as it was.\nMaking a misspelling fatal would let a tally field refuse a finished run,\nwhich is #1324's defect bought back in exchange for nothing."
       },
+      "RequestLatencyResponse": {
+        "properties": {
+          "window": {
+            "type": "string",
+            "enum": [
+              "1h",
+              "24h",
+              "7d",
+              "30d"
+            ],
+            "title": "Window"
+          },
+          "since": {
+            "type": "string",
+            "title": "Since"
+          },
+          "available": {
+            "type": "boolean",
+            "title": "Available"
+          },
+          "routes": {
+            "items": {
+              "$ref": "#/components/schemas/RouteLatencyResponse"
+            },
+            "type": "array",
+            "title": "Routes"
+          },
+          "recorder": {
+            "$ref": "#/components/schemas/LatencyRecorderStatusResponse"
+          }
+        },
+        "type": "object",
+        "required": [
+          "window",
+          "since",
+          "available",
+          "routes",
+          "recorder"
+        ],
+        "title": "RequestLatencyResponse",
+        "description": "Per-route request latency, from ``api_request_latency``, slowest p99 first."
+      },
       "ResourceCoverageResponse": {
         "properties": {
           "phases": {
@@ -18174,6 +18320,55 @@
         ],
         "title": "RootResponse",
         "description": "Payload of ``GET /`` \u2014 what this API is, and which build is serving it.\n\nTHE VERSION HERE IS NULLABLE AND COMES WITH A STATUS, like /health's. It was\na flat ``dict[str, str]`` whose version slot held the literal ``\"unknown\"``\nwhen metadata could not be read: a string in a version field, indistinguish-\nable to a client from a release actually called that, and exactly the defect\n#1380 was filed to remove \u2014 just at the endpoint nobody re-read. A typed\nresponse makes the absence a declared state instead of a word.\n\n``openapi.json``'s ``info.version`` remains the one place a sentinel is\nunavoidable; see the comment at that call in ``main.py``."
+      },
+      "RouteLatencyResponse": {
+        "properties": {
+          "method": {
+            "type": "string",
+            "title": "Method"
+          },
+          "route": {
+            "type": "string",
+            "title": "Route"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "p50_ms": {
+            "type": "number",
+            "title": "P50 Ms"
+          },
+          "p95_ms": {
+            "type": "number",
+            "title": "P95 Ms"
+          },
+          "p99_ms": {
+            "type": "number",
+            "title": "P99 Ms"
+          },
+          "max_ms": {
+            "type": "number",
+            "title": "Max Ms"
+          },
+          "p99_display": {
+            "type": "string",
+            "title": "P99 Display"
+          }
+        },
+        "type": "object",
+        "required": [
+          "method",
+          "route",
+          "count",
+          "p50_ms",
+          "p95_ms",
+          "p99_ms",
+          "max_ms",
+          "p99_display"
+        ],
+        "title": "RouteLatencyResponse",
+        "description": "Exact latency percentiles of one (method, route template) over the window."
       },
       "RunIdentity": {
         "properties": {

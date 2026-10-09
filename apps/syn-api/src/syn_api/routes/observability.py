@@ -5,16 +5,22 @@ Provides tool timelines and token metrics for sessions.
 
 from __future__ import annotations
 
+import logging
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 
 from syn_api._wiring import ensure_connected, get_projection_mgr
 from syn_api.types import (
     Err,
+    LatencyRecorderStatusResponse,
+    LatencyWindow,
     ObservabilityError,
     Ok,
+    RequestLatencyResponse,
     Result,
+    RouteLatencyResponse,
     SessionTokenMetrics,
     ToolTimelineEntry,
     ToolTimelineResponse,
@@ -23,6 +29,7 @@ from syn_api.types import (
 if TYPE_CHECKING:
     from syn_adapters.projections.manager import ProjectionManager
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/observability", tags=["observability"])
 
 
@@ -214,4 +221,72 @@ async def get_token_metrics_endpoint(
         total_cost_usd=data.get("total_cost_usd", "0"),
         cache_creation_tokens=data.get("cache_creation_tokens", 0),
         cache_read_tokens=data.get("cache_read_tokens", 0),
+    )
+
+
+# =============================================================================
+# Request latency (ADR-073)
+# =============================================================================
+
+_WINDOWS: dict[LatencyWindow, timedelta] = {
+    "1h": timedelta(hours=1),
+    "24h": timedelta(hours=24),
+    "7d": timedelta(days=7),
+    "30d": timedelta(days=30),
+}
+
+
+def _ms_display(ms: float) -> str:
+    return f"{ms:.0f} ms" if ms < 1000 else f"{ms / 1000:.1f} s"
+
+
+@router.get("/latency", response_model=RequestLatencyResponse)
+async def get_request_latency(
+    route: str | None = Query(
+        None, description="One route TEMPLATE, e.g. /evals/{eval_id}. Every route when omitted."
+    ),
+    window: LatencyWindow = Query("24h", description="How far back to look"),
+) -> RequestLatencyResponse:
+    """Exact p50/p95/p99, max and count per (method, route template) over the window.
+
+    Read from ``api_request_latency`` (Lane 2, ADR-073). Every API process
+    records its own requests; ``recorder`` describes THIS process's only.
+    """
+    from syn_adapters.request_latency import latency_by_route, request_latency_recorder
+    from syn_api._wiring import get_event_store_instance
+
+    since = datetime.now(UTC) - _WINDOWS[window]
+    counters = request_latency_recorder.counters()
+    recorder = LatencyRecorderStatusResponse(
+        running=counters.running,
+        written=counters.written,
+        dropped=counters.dropped,
+        write_failures=counters.write_failures,
+        buffered=counters.buffered,
+    )
+    try:
+        pool = get_event_store_instance().pool
+        rows = [] if pool is None else await latency_by_route(pool, since=since, route=route)
+        available = pool is not None
+    except Exception:
+        logger.warning("request latency could not be read", exc_info=True)
+        rows, available = [], False
+    return RequestLatencyResponse(
+        window=window,
+        since=since.isoformat(),
+        available=available,
+        routes=[
+            RouteLatencyResponse(
+                method=r.method,
+                route=r.route,
+                count=r.count,
+                p50_ms=r.p50_ms,
+                p95_ms=r.p95_ms,
+                p99_ms=r.p99_ms,
+                max_ms=r.max_ms,
+                p99_display=_ms_display(r.p99_ms),
+            )
+            for r in rows
+        ],
+        recorder=recorder,
     )

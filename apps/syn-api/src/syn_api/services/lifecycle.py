@@ -49,6 +49,7 @@ from syn_api.services.reconciliation import (
     reconcile_orphaned_executions,
     reconcile_orphaned_sessions,
 )
+from syn_api.services.request_latency_lifecycle import start_request_latency, stop_request_latency
 from syn_api.services.seeding import seed_offline_data
 from syn_api.services.subscription_health import render_subscription_health
 from syn_api.services.workspace_dir_reclaim import (
@@ -324,6 +325,9 @@ async def shutdown() -> Result[None, LifecycleError]:
                 with contextlib.suppress(Exception):
                     await entry.shutdown_fn(_state)
 
+        # ADR-073: flush buffered request samples while the pool is still open.
+        await stop_request_latency()
+
         # ADR-060: Close shared DB pool
         with contextlib.suppress(Exception):
             from syn_api._wiring_db import close_shared_db_pool
@@ -498,6 +502,8 @@ async def _init_durable_stores() -> Result[None, LifecycleError]:
 
     if isinstance(ledger := await _init_import_ledger(), Err):
         return ledger
+    # ADR-073: best-effort, on the observability pool the event store opened.
+    await start_request_latency()
     return await inventory_lifecycle.initialize_session_inventory()
 
 

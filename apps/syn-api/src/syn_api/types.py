@@ -3964,3 +3964,49 @@ class PhaseProfilesResponse(BaseModel):
                 for r in profiles.resources
             ],
         )
+
+
+# =============================================================================
+# Request latency (ADR-073)
+# =============================================================================
+
+LatencyWindow = Literal["1h", "24h", "7d", "30d"]
+"""How far back ``GET /observability/latency`` looks. 30d is the retention."""
+
+
+class RouteLatencyResponse(BaseModel):
+    """Exact latency percentiles of one (method, route template) over the window."""
+
+    method: str
+    route: str
+    """The route TEMPLATE, e.g. ``/evals/{eval_id}``; ``<unmatched>`` for no route."""
+    count: int
+    p50_ms: float
+    p95_ms: float
+    p99_ms: float
+    max_ms: float
+    p99_display: str
+
+
+class LatencyRecorderStatusResponse(BaseModel):
+    """What this API process's recorder did with its samples since it started."""
+
+    running: bool
+    written: int
+    dropped: int
+    """Offered while the buffer was full or the recorder was not running."""
+    write_failures: int
+    """Samples lost because their batch could not be written."""
+    buffered: int
+
+
+class RequestLatencyResponse(BaseModel):
+    """Per-route request latency, from ``api_request_latency``, slowest p99 first."""
+
+    window: LatencyWindow
+    since: str
+    """ISO 8601 UTC start of the window."""
+    available: bool
+    """False when the observability store could not be read; ``routes`` is then empty."""
+    routes: list[RouteLatencyResponse]
+    recorder: LatencyRecorderStatusResponse

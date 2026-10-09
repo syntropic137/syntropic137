@@ -80,6 +80,11 @@ class AgentEventStore:
             skip_auto_create=os.environ.get("SYN_SKIP_AUTO_CREATE_TABLES", "").lower() == "true"
         )
 
+    @property
+    def skip_auto_create(self) -> bool:
+        """Whether this deployment's migrations own the observability DDL (one policy for every table)."""
+        return self._schema.skip_auto_create
+
     async def initialize(self) -> None:
         """Open the pool, ready the schema, and ready the tool-call tally.
 

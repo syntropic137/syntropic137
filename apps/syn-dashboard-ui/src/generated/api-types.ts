@@ -1264,6 +1264,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/observability/latency": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Request Latency
+         * @description Exact p50/p95/p99, max and count per (method, route template) over the window.
+         *
+         *     Read from ``api_request_latency`` (Lane 2, ADR-073). Every API process
+         *     records its own requests; ``recorder`` describes THIS process's only.
+         */
+        get: operations["get_request_latency_observability_latency_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/costs/sessions": {
         parameters: {
             query?: never;
@@ -5501,6 +5524,22 @@ export interface components {
             /** Count */
             count: number;
         };
+        /**
+         * LatencyRecorderStatusResponse
+         * @description What this API process's recorder did with its samples since it started.
+         */
+        LatencyRecorderStatusResponse: {
+            /** Running */
+            running: boolean;
+            /** Written */
+            written: number;
+            /** Dropped */
+            dropped: number;
+            /** Write Failures */
+            write_failures: number;
+            /** Buffered */
+            buffered: number;
+        };
         /** LineageEdge */
         LineageEdge: {
             parent: components["schemas"]["InventoryNodeRef"];
@@ -7035,6 +7074,24 @@ export interface components {
          */
         ReportedFailureReason: "task" | "platform" | "refused" | "unknown";
         /**
+         * RequestLatencyResponse
+         * @description Per-route request latency, from ``api_request_latency``, slowest p99 first.
+         */
+        RequestLatencyResponse: {
+            /**
+             * Window
+             * @enum {string}
+             */
+            window: "1h" | "24h" | "7d" | "30d";
+            /** Since */
+            since: string;
+            /** Available */
+            available: boolean;
+            /** Routes */
+            routes: components["schemas"]["RouteLatencyResponse"][];
+            recorder: components["schemas"]["LatencyRecorderStatusResponse"];
+        };
+        /**
          * ResourceCoverageResponse
          * @description What the resource percentiles stand on. Every count is over the whole window.
          */
@@ -7210,6 +7267,28 @@ export interface components {
              * @enum {string}
              */
             readonly version_status: "installed" | "unavailable";
+        };
+        /**
+         * RouteLatencyResponse
+         * @description Exact latency percentiles of one (method, route template) over the window.
+         */
+        RouteLatencyResponse: {
+            /** Method */
+            method: string;
+            /** Route */
+            route: string;
+            /** Count */
+            count: number;
+            /** P50 Ms */
+            p50_ms: number;
+            /** P95 Ms */
+            p95_ms: number;
+            /** P99 Ms */
+            p99_ms: number;
+            /** Max Ms */
+            max_ms: number;
+            /** P99 Display */
+            p99_display: string;
         };
         /** RunIdentity */
         RunIdentity: {
@@ -11852,6 +11931,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SessionTokenMetrics"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_request_latency_observability_latency_get: {
+        parameters: {
+            query?: {
+                /** @description One route TEMPLATE, e.g. /evals/{eval_id}. Every route when omitted. */
+                route?: string | null;
+                /** @description How far back to look */
+                window?: "1h" | "24h" | "7d" | "30d";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestLatencyResponse"];
                 };
             };
             /** @description Validation Error */

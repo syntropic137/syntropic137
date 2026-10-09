@@ -17,17 +17,30 @@ database connection? Only requests at or over
 everything else - and the line carries the method, the route TEMPLATE, the
 status and two durations, never the raw path, query string, headers or body:
 ids, tokens and credentials all pass through here.
+
+EVERY REQUEST IS ALSO RECORDED DURABLY (ADR-073): the same method, route
+template, status and time-to-response-start, with a request id, are offered to
+the request latency recorder, which batches them into the observability
+database off the request path. The id is returned as ``x-request-id`` and named
+on the slow-request line, so a slow line and its row can be joined.
 """
 
 from __future__ import annotations
 
 import logging
 import time
+import uuid
 from collections import deque
+from datetime import UTC, datetime
 from threading import Lock
 from typing import TYPE_CHECKING
 
 from syn_adapters.postgres_pool import tally_pool_wait
+from syn_adapters.request_latency import (
+    RequestLatencyRecorder,
+    RequestSample,
+    request_latency_recorder,
+)
 
 if TYPE_CHECKING:
     from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -137,9 +150,11 @@ class RequestTimingMiddleware:
         *,
         slow_request_ms: int,
         aggregator: RequestTimingAggregator | None = None,
+        recorder: RequestLatencyRecorder | None = None,
     ) -> None:
         self.app = app
         self._aggregator = aggregator if aggregator is not None else request_timing_aggregator
+        self._recorder = recorder if recorder is not None else request_latency_recorder
         self._slow_request_ms = slow_request_ms
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
@@ -148,6 +163,8 @@ class RequestTimingMiddleware:
             return
 
         start = time.perf_counter()
+        arrived = datetime.now(UTC)
+        request_id = uuid.uuid4().hex
         responded_at: float | None = None
         status: int | None = None
 
@@ -156,6 +173,9 @@ class RequestTimingMiddleware:
             if message["type"] == "http.response.start":
                 responded_at = time.perf_counter()
                 status = message["status"]
+                headers = list(message.get("headers", []))
+                headers.append((b"x-request-id", request_id.encode()))
+                message["headers"] = headers
             await send(message)
 
         with tally_pool_wait() as pool_wait:
@@ -174,12 +194,26 @@ class RequestTimingMiddleware:
                 # No response started means the handler raised or the client
                 # went away: the whole time was spent without an answer.
                 duration_ms = ((responded_at or end) - start) * 1000
+                route = _logged_route(scope)
+                self._recorder.offer(
+                    RequestSample(
+                        time=arrived,
+                        method=scope["method"],
+                        route=route,
+                        # No response started: the client got the 500 or nothing.
+                        status=status if status is not None else 500,
+                        duration_ms=duration_ms,
+                        request_id=request_id,
+                    )
+                )
                 if duration_ms >= self._slow_request_ms:
                     logger.warning(
-                        "slow request method=%s route=%s status=%s duration_ms=%d pool_wait_ms=%d",
+                        "slow request method=%s route=%s status=%s duration_ms=%d "
+                        "pool_wait_ms=%d request_id=%s",
                         scope["method"],
-                        _logged_route(scope),
+                        route,
                         status if status is not None else "-",
                         duration_ms,
                         pool_wait.wait_ms,
+                        request_id,
                     )
