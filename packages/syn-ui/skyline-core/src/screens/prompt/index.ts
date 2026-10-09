@@ -88,39 +88,43 @@ class PromptAccumulator {
   private code: string[] | null = null
 
   line(raw: string): void {
-    if (this.code) {
-      if (PROMPT_FENCE.test(raw)) this.closeCode()
-      else this.code.push(raw)
-      return
-    }
-    if (PROMPT_FENCE.test(raw)) {
-      this.flush()
-      this.code = []
-      return
-    }
-    const line = raw.trim()
-    if (!line) {
-      this.flushParagraph()
-      return
-    }
+    if (this.code) this.codeLine(raw)
+    else if (PROMPT_FENCE.test(raw)) this.openCode()
+    else if (!raw.trim()) this.flushParagraph()
+    else if (!this.listLine(raw)) this.textLine(raw)
+  }
+
+  /** Inside a fence: a closing fence ends it, anything else is kept verbatim. */
+  private codeLine(raw: string): void {
+    if (PROMPT_FENCE.test(raw)) this.closeCode()
+    else this.code!.push(raw)
+  }
+
+  private openCode(): void {
+    this.flush()
+    this.code = []
+  }
+
+  /** A list item, or an indented continuation of the open list's last item. False when neither. */
+  private listLine(raw: string): boolean {
     const li = PROMPT_LIST_ITEM.exec(raw)
     if (li) {
       this.listItem(li[1]!.length > 0, /\d/.test(li[2]!), li[3]!)
-      return
+      return true
     }
-    // An indented line under an open list continues its last item.
-    if (this.list && /^\s/.test(raw) && !this.para.length) {
-      this.continueItem(line)
-      return
-    }
+    if (!this.list || !/^\s/.test(raw) || this.para.length) return false
+    this.continueItem(raw.trim())
+    return true
+  }
+
+  /** An argument slot, a heading, or a paragraph line. */
+  private textLine(raw: string): void {
     this.flushList()
+    const line = raw.trim()
     const arg = PROMPT_ARGUMENT.exec(line)
-    if (arg) {
-      this.block({ kind: 'argument', name: arg[1]!.replace(/[{}\s]/g, '') })
-      return
-    }
-    const h = PROMPT_HEADING.exec(line)
-    if (h) this.block({ kind: 'heading', text: h[1]! })
+    const h = arg ? null : PROMPT_HEADING.exec(line)
+    if (arg) this.block({ kind: 'argument', name: arg[1]!.replace(/[{}\s]/g, '') })
+    else if (h) this.block({ kind: 'heading', text: h[1]! })
     else this.para.push(line)
   }
 
