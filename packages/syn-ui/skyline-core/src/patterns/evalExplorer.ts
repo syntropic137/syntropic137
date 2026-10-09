@@ -101,54 +101,62 @@ function path(points: [number, number][]): string {
   return points.map(([x, y], i) => `${i === 0 ? 'M' : 'L'}${x} ${y}`).join(' ')
 }
 
-/** Everything the explorer draws, from plain verifier series. */
-/** The x span in days (the last run day, else the longest series) and the cost axis top. */
-function explorerScales(p: EvalExplorerProps): { span: number; costMax: number } {
+const isNum = (v: number | null | undefined): v is number => typeof v === 'number' && Number.isFinite(v)
+const clamp = (v: number, max: number) => Math.min(max, Math.max(0, v))
+const runCount = (v: ExplorerVerifier) => Math.max(v.scores.length, v.costs.length)
+
+/** Days across the x axis: the given span, else the last run's day, else the longest series. */
+function axisSpan(p: EvalExplorerProps): number {
+  if (p.span !== undefined) return p.span
   const lastDay = Math.max(0, ...p.verifiers.flatMap((v) => v.days ?? []))
-  const longest = Math.max(0, ...p.verifiers.map((v) => Math.max(v.scores.length, v.costs.length) - 1))
-  const span = p.span ?? (lastDay > 0 ? lastDay : Math.max(1, longest))
-  const dearest = Math.max(0, ...p.verifiers.flatMap((v) => v.costs.filter((c) => Number.isFinite(c))))
-  const costMax = p.costMax ?? (dearest > 0 ? Math.ceil(dearest * 1.28 * 10) / 10 : 1)
-  return { span, costMax }
+  if (lastDay > 0) return lastDay
+  return Math.max(1, ...p.verifiers.map((v) => runCount(v) - 1))
 }
 
-/** The requested verifier when it is a valid index, else the best ranked, else the first. */
-function explorerSelected(selected: number | undefined, n: number, best: number | null): number {
-  const valid = typeof selected === 'number' && Number.isInteger(selected) && selected >= 0 && selected < n
-  return valid ? selected : (best ?? 0)
+/** Top of the cost axis: the given one, else 1.28 times the dearest run rounded up to 10 cents. */
+function axisCostMax(p: EvalExplorerProps): number {
+  if (p.costMax !== undefined) return p.costMax
+  const dearest = Math.max(0, ...p.verifiers.flatMap((v) => v.costs.filter(isNum)))
+  return dearest > 0 ? Math.ceil(dearest * 1.28 * 10) / 10 : 1
 }
 
+/** One series as a path: y is value / max of the box height, points without a value are skipped. */
+function seriesPath(days: readonly number[], values: readonly (number | null | undefined)[], span: number, max: number, height: number): string {
+  const points: [number, number][] = []
+  days.forEach((d, i) => {
+    const v = values[i]
+    if (isNum(v)) points.push([explorerX(d, span), r1(height - (clamp(v, max) / max) * height)])
+  })
+  return path(points)
+}
+
+/** The verifier index to show: the requested one when valid, else the best, else the first. */
+function pickIndex(requested: number | undefined, count: number, best: number | null): number {
+  const valid = typeof requested === 'number' && Number.isInteger(requested) && requested >= 0 && requested < count
+  return valid ? requested : (best ?? 0)
+}
+
+const rankInput = (v: ExplorerVerifier): RankVerifierInput => ({
+  name: v.name,
+  runs: Array.from({ length: runCount(v) }, (_, i) => ({ score: v.scores[i] ?? null, costUsd: v.costs[i] ?? 0 })),
+})
+
+const grid = (h: number) => [0, 0.25, 0.5, 0.75, 1].map((f) => h * f)
+
+/** Everything the explorer draws, from plain verifier series. */
 export function explorerModel(p: EvalExplorerProps): ExplorerModel {
   const { quality: QH, cost: CH } = EXPLORER_CHART
   const passAt = p.passAt ?? PASS_SCORE
-  const { span, costMax } = explorerScales(p)
+  const span = axisSpan(p)
+  const costMax = axisCostMax(p)
+  const lines = p.verifiers.map((v, index) => ({ index, token: explorerColour(v.colour, index), days: daysOf(v, span), v }))
+  const quality: ExplorerLine[] = lines.map((l) => ({ index: l.index, token: l.token, d: seriesPath(l.days, l.v.scores, span, 100, QH) }))
+  const cost: ExplorerLine[] = lines.map((l) => ({ index: l.index, token: l.token, d: seriesPath(l.days, l.v.costs, span, costMax, CH) }))
 
-  const quality: ExplorerLine[] = []
-  const cost: ExplorerLine[] = []
-  p.verifiers.forEach((v, index) => {
-    const token = explorerColour(v.colour, index)
-    const days = daysOf(v, span)
-    const q: [number, number][] = []
-    const c: [number, number][] = []
-    days.forEach((d, i) => {
-      const s = v.scores[i]
-      if (typeof s === 'number' && Number.isFinite(s)) q.push([explorerX(d, span), r1(QH - (Math.min(100, Math.max(0, s)) / 100) * QH)])
-      const k = v.costs[i]
-      if (typeof k === 'number' && Number.isFinite(k)) c.push([explorerX(d, span), r1(CH - (Math.min(costMax, Math.max(0, k)) / costMax) * CH)])
-    })
-    quality.push({ index, d: path(q), token })
-    cost.push({ index, d: path(c), token })
-  })
-
-  const inputs: RankVerifierInput[] = p.verifiers.map((v) => ({
-    name: v.name,
-    runs: Array.from({ length: Math.max(v.scores.length, v.costs.length) }, (_, i) => ({ score: v.scores[i] ?? null, costUsd: v.costs[i] ?? 0 })),
-  }))
-  const ranking = rankVerifiers(inputs)
-  const selected = explorerSelected(p.selected, p.verifiers.length, ranking.best)
+  const ranking = rankVerifiers(p.verifiers.map(rankInput))
+  const selected = pickIndex(p.selected, p.verifiers.length, ranking.best)
   const stats = ranking.stats[selected]
   const verdict = stats ? rankVerdict(stats) : null
-  const grid = (h: number) => [0, 0.25, 0.5, 0.75, 1].map((f) => h * f)
   const rows = ranking.rows.map((r): ExplorerRow => ({ ...r, token: explorerColour(p.verifiers[r.index]?.colour, r.index) }))
   return {
     quality,
