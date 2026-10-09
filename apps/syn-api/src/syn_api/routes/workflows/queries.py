@@ -33,6 +33,7 @@ from syn_domain.contexts.orchestration import (
 )
 from syn_shared.agents import DEFAULT_PHASE_SANDBOX, resolve_definition_model
 from syn_shared.display import format_phase_model_definition
+from syn_shared.platform_access import PlatformScope
 
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.read_models.workflow_detail import (
@@ -222,6 +223,7 @@ def _map_phase(p: PhaseDefinitionDetail) -> PhaseDefinitionResponse:
         ),
         clone_repos=p.clone_repos,
         delivers_repo_changes=p.delivers_repo_changes,
+        platform_access=p.platform_access,
         requires_verdict=p.requires_verdict,
         sandbox=p.sandbox,
         claude_plugins=[_ref_response(r) for r in p.claude_plugins],
@@ -633,16 +635,21 @@ def _yaml_phase_lines(phase: PhaseDefinitionResponse) -> list[str]:
 
 
 def _yaml_declaration_lines(phase: PhaseDefinitionResponse) -> list[str]:
-    """The phase's boolean declarations, each emitted only when it differs from its default.
+    """The phase's declarations, each emitted only when it differs from its default.
 
-    `clone_repos` and `delivers_repo_changes` default True and `requires_verdict`
-    (PC-116) defaults False, so "differs" is a different value for each.
+    `clone_repos` and `delivers_repo_changes` default True, `requires_verdict`
+    (PC-116) defaults False and `platform_access` (#1744) defaults `read`, so
+    "differs" is a different value for each.
     """
     lines: list[str] = []
     if not phase.clone_repos:
         lines.append("    clone_repos: false")
     if not phase.delivers_repo_changes:
         lines.append("    delivers_repo_changes: false")
+    # #1744. Dropped, a reinstalled eval phase silently loses the access its
+    # workflow was written to need.
+    if phase.platform_access is not PlatformScope.READ:
+        lines.append(f"    platform_access: {phase.platform_access.value}")
     if phase.requires_verdict:
         lines.append("    requires_verdict: true")
     return lines

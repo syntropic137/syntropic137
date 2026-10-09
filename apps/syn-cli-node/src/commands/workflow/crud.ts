@@ -249,11 +249,14 @@ function renderInputDeclarations(declarations: WorkflowResponse["input_declarati
 function phaseCapabilityNotes(phase: {
   clone_repos?: boolean;
   delivers_repo_changes?: boolean;
+  platform_access?: string;
   sandbox?: string;
 }): string[] {
   const notes: string[] = [];
   if (phase.clone_repos === false) notes.push(style("no repo checkout", DIM));
   if (phase.delivers_repo_changes === false) notes.push(style("no repo deliverable", DIM));
+  // Can start executions (ADR-072, #1744), so never buried with the defaults.
+  if (phase.platform_access === "eval") notes.push(style("platform access: eval", YELLOW));
   if (phase.sandbox && phase.sandbox !== "full-access") {
     notes.push(style(`sandbox: ${phase.sandbox}`, YELLOW));
   }

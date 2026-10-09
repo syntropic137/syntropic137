@@ -255,6 +255,9 @@ class PhaseWorkspace:
                 for repository, sha in checkout.commits.items()
             ],
             continued_branches=checkout.branches,
+            # Likewise the eval an `eval` phase's platform token is bound to
+            # (#1744): the execution's own membership, never a request's word.
+            eval_id=aggregate.eval_membership.eval_id,
         )
 
     async def keep_unfinished_output(

@@ -8,8 +8,13 @@ The security properties, each enforced in this module and nowhere else:
 
 - A token is random, shown once at issue, and stored only as its SHA-256.
 - A token carries exactly one scope. ``READ`` reaches GET/HEAD on the
-  read-only resources in ``_READ_RESOURCES``; there is no scope that can start
-  an execution, change a workflow, or read settings or secrets.
+  read-only resources in ``_READ_RESOURCES``. ``EVAL`` (#1744) reaches what
+  READ does plus exactly two writes: ``POST /workflows/{id}/execute`` whose
+  body names an ``eval_id`` explicitly, and
+  ``POST /evals/{id}/runs/{execution}/score``. Both must name the eval the
+  issuing execution belongs to (``PlatformTokenGrant.eval_id``); an EVAL grant
+  bound to no eval reaches neither. No scope can change a workflow, launch a
+  run outside its own eval, or read settings or secrets.
 - A token expires (store TTL AND an explicit ``expires_at`` check) and is
   revoked when its phase ends.
 - The token value is never logged; log lines carry the execution id only.
@@ -18,21 +23,22 @@ The security properties, each enforced in this module and nowhere else:
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import math
 import secrets
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from enum import StrEnum
 from typing import TYPE_CHECKING, Protocol
 from urllib.parse import urlsplit
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Awaitable, Callable
 
 from pydantic import BaseModel, ConfigDict
 
 from syn_adapters.in_memory import InMemoryAdapter
+from syn_shared.platform_access import PlatformScope
 
 if TYPE_CHECKING:
     from redis.asyncio import Redis as AsyncRedis
@@ -49,11 +55,9 @@ _REDIS_KEY_PREFIX = "syn:platform-token:"
 _READ_RESOURCES = frozenset({"executions", "sessions", "artifacts", "evals", "insights", "health"})
 _READ_METHODS = frozenset({"GET", "HEAD"})
 
-
-class PlatformScope(StrEnum):
-    """What a platform token may do. Only READ exists (see ADR-072, "Not granted")."""
-
-    READ = "read"
+# The largest execute body an EVAL token's request is read up to. A real one is
+# a few hundred bytes; anything past this is refused rather than buffered.
+MAX_EVAL_BODY_BYTES = 64 * 1024
 
 
 class PlatformTokenGrant(BaseModel):
@@ -64,6 +68,10 @@ class PlatformTokenGrant(BaseModel):
     execution_id: str
     scope: PlatformScope
     expires_at: datetime
+    # The eval the issuing execution belongs to: the only eval an EVAL token
+    # may launch into or score (#1744). None for READ, and for an EVAL phase
+    # whose execution is in no eval, which therefore can write nothing.
+    eval_id: str | None = None
 
 
 class PlatformTokenStore(Protocol):
@@ -125,15 +133,67 @@ def _hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
-def _scope_allows(scope: PlatformScope, method: str, path: str) -> bool:
-    if scope is not PlatformScope.READ or method.upper() not in _READ_METHODS:
-        return False
+async def _scope_allows(
+    grant: PlatformTokenGrant,
+    method: str,
+    path: str,
+    read_body: Callable[[], Awaitable[bytes]],
+) -> bool:
     # Envoy does not normalize paths by default, so a dot or empty segment
     # could name one resource here and route to another downstream.
     segments = path.removeprefix("/").removesuffix("/").split("/")
     if any(segment in ("", ".", "..") for segment in segments):
         return False
-    return segments[0] in _READ_RESOURCES
+    method = method.upper()
+    if method in _READ_METHODS:
+        return segments[0] in _READ_RESOURCES
+    own_eval = grant.eval_id
+    if grant.scope is not PlatformScope.EVAL or method != "POST" or not own_eval:
+        return False
+    match segments:
+        case ["evals", eval_id, "runs", _, "score"]:
+            # Which runs belong to `eval_id` is the scoring route's check.
+            return eval_id == own_eval
+        case ["workflows", _, "execute"]:
+            return _names_eval(await read_body(), own_eval)
+        case _:
+            return False
+
+
+def _names_eval(body: bytes, own_eval: str) -> bool:
+    """Whether an execute body launches into ``own_eval``, naming it itself.
+
+    Explicit, not merely "not opted out": with no ``eval_id`` the route falls
+    back to the workflow's ``default_eval_id``, and a workflow with none runs
+    as an ordinary execution - which an EVAL token must not be able to start.
+    Parsed the way the route parses it (``json.loads``, last duplicate key
+    wins), so this and the route cannot read two different requests.
+    """
+    if len(body) > MAX_EVAL_BODY_BYTES:
+        return False
+    try:
+        named = _EvalNamedInBody.model_validate(json.loads(body))
+    except ValueError:  # json.JSONDecodeError and pydantic.ValidationError both
+        return False
+    return named.eval_id == own_eval and not named.no_eval
+
+
+class _EvalNamedInBody(BaseModel):
+    """The two execute-body fields that decide an EVAL token's request.
+
+    Typed as ``ExecuteWorkflowRequest`` types them and validated in the same
+    lax mode, so ``"no_eval": "true"`` is an opt-out here exactly as it is
+    there. Every other field is the route's business.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    eval_id: str | None = None
+    no_eval: bool = False
+
+
+async def _no_body() -> bytes:
+    return b""
 
 
 @dataclass(frozen=True)
@@ -181,8 +241,17 @@ class PlatformTokenService:
         """
         return urlsplit(self._api_url).path.rstrip("/") + "/api/v1"
 
-    async def issue(self, execution_id: str, scope: PlatformScope = PlatformScope.READ) -> str:
-        """Mint a token for one execution's phase. Raises if access is disabled."""
+    async def issue(
+        self,
+        execution_id: str,
+        scope: PlatformScope = PlatformScope.READ,
+        eval_id: str | None = None,
+    ) -> str:
+        """Mint a token for one execution's phase. Raises if access is disabled.
+
+        ``eval_id`` is the eval ``execution_id`` belongs to, and the only one
+        an EVAL token may write to.
+        """
         if self._store is None:
             msg = "platform access is disabled (SYN_PLATFORM_ACCESS_ENABLED=false)"
             raise PermissionError(msg)
@@ -191,16 +260,28 @@ class PlatformTokenService:
             execution_id=execution_id,
             scope=scope,
             expires_at=self._now() + timedelta(seconds=self._max_ttl),
+            eval_id=eval_id,
         )
         await self._store.put(_hash(token), grant, self._max_ttl)
         logger.info("Issued %s platform token for execution %s", scope, execution_id)
         return token
 
-    async def grant_workspace(self, execution_id: str) -> WorkspacePlatformGrant | None:
-        """A read-only grant for one workspace, or ``None`` while access is OFF."""
+    async def grant_workspace(
+        self,
+        execution_id: str,
+        scope: PlatformScope = PlatformScope.READ,
+        eval_id: str | None = None,
+    ) -> WorkspacePlatformGrant | None:
+        """A grant of ``scope`` for one workspace, or ``None`` while access is OFF.
+
+        ``scope`` is what the phase declared (``platform_access``); a phase
+        that declared nothing is READ. ``eval_id`` is the eval the execution
+        belongs to, read from its aggregate.
+        """
         if self._store is None:
             return None
-        return WorkspacePlatformGrant(self._api_url, await self.issue(execution_id))
+        token = await self.issue(execution_id, scope, eval_id)
+        return WorkspacePlatformGrant(self._api_url, token)
 
     async def bound_to_deadline(self, token: str, deadline: datetime) -> None:
         """Make ``token`` expire no later than ``deadline``. Never extends it.
@@ -228,8 +309,19 @@ class PlatformTokenService:
         if self._store is not None:
             await self._store.delete(_hash(token))
 
-    async def authorize(self, authorization: str | None, method: str, path: str) -> Denial | None:
-        """``None`` if the request may proceed, otherwise why it may not."""
+    async def authorize(
+        self,
+        authorization: str | None,
+        method: str,
+        path: str,
+        read_body: Callable[[], Awaitable[bytes]] = _no_body,
+    ) -> Denial | None:
+        """``None`` if the request may proceed, otherwise why it may not.
+
+        ``read_body`` is called only when the answer depends on the body (an
+        EVAL token's execute request), and must return at most
+        ``MAX_EVAL_BODY_BYTES`` + 1 bytes; a longer body is refused.
+        """
         if self._store is None:
             return Denial(403, "workspace platform access is disabled")
         scheme, _, token = (authorization or "").partition(" ")
@@ -238,7 +330,7 @@ class PlatformTokenService:
         grant = await self._store.get(_hash(token))
         if grant is None or grant.expires_at <= self._now():
             return Denial(401, "platform token invalid, expired or revoked")
-        if not _scope_allows(grant.scope, method, path):
+        if not await _scope_allows(grant, method, path, read_body):
             return Denial(
                 403, f"platform token scope '{grant.scope}' does not allow {method} {path}"
             )
@@ -246,6 +338,7 @@ class PlatformTokenService:
 
 
 __all__ = [
+    "MAX_EVAL_BODY_BYTES",
     "TOKEN_PREFIX",
     "Denial",
     "InMemoryPlatformTokenStore",

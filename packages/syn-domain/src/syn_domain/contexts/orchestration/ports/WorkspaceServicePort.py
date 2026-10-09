@@ -7,6 +7,8 @@ workspaces. This port defines the contract for workspace creation and management
 from contextlib import AbstractAsyncContextManager
 from typing import TYPE_CHECKING, Protocol
 
+from syn_shared.platform_access import PlatformScope
+
 if TYPE_CHECKING:
     from syn_adapters.workspace_backends.service import ManagedWorkspace
 
@@ -34,6 +36,8 @@ class WorkspaceServicePort(Protocol):
         with_sidecar: bool = True,
         inject_tokens: bool = False,
         capture_session_id: str | None = None,
+        platform_access: PlatformScope = PlatformScope.READ,
+        eval_id: str | None = None,
     ) -> AbstractAsyncContextManager["ManagedWorkspace"]:
         """Create an isolated workspace for agent execution.
 
@@ -49,6 +53,10 @@ class WorkspaceServicePort(Protocol):
             phase_id: Optional phase ID for context.
             with_sidecar: Whether to start token vending sidecar (deprecated - use setup phase).
             inject_tokens: Whether to inject tokens (deprecated - use setup phase).
+            platform_access: The scope of the workspace's platform token, as
+                the phase declared it (ADR-072, #1744).
+            eval_id: The eval the execution belongs to. An EVAL token can
+                launch into or score that eval and no other (#1744).
 
         Returns:
             AsyncContextManager that yields ManagedWorkspace.
