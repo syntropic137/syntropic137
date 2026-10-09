@@ -4791,7 +4791,7 @@
           "github"
         ],
         "summary": "List Accessible Repos Endpoint",
-        "description": "List repositories accessible to the GitHub App.\n\nWith no installation_id, aggregates every installation. The last complete\nlisting is cached and served without waiting on GitHub: as ``complete``\nwhile under a minute old, as ``partial`` once older, with a background\nrefresh behind it. GitHub is asked live only when no listing is cached. The\nGitHub App's ``installation`` and ``installation_repositories`` webhooks\ninvalidate the cache at once. A single installation_id is always asked live.\n\n``lookup`` says whether a repo missing from ``repos`` is known to be out of\nthe App's reach (``complete``) or merely went unseen because GitHub failed.",
+        "description": "List repositories accessible to the GitHub App.\n\nWith no installation_id, aggregates every installation and never waits on\nGitHub. The last complete listing is cached and served as ``complete``\nwhile under a minute old, as ``partial`` once older, with a background\nrefresh behind it. With no listing cached the answer is ``unavailable``\nwhile a background refresh fetches one. The GitHub App's ``installation``\nand ``installation_repositories`` webhooks invalidate the cache at once. A\nsingle installation_id is always asked live.\n\n``lookup`` says whether a repo missing from ``repos`` is known to be out of\nthe App's reach (``complete``) or merely went unseen because GitHub failed.",
         "operationId": "list_accessible_repos_endpoint_github_repos_get",
         "parameters": [
           {
