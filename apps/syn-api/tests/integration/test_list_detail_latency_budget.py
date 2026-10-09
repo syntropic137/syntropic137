@@ -443,13 +443,11 @@ class SlowGitHub:
     the expired listing and every timed request meets the expired-cache path.
     """
 
-    async def list_installations(self) -> list[dict[str, object]]:
+    async def list_installations(self) -> list[dict]:
         await asyncio.sleep(GITHUB_ROUND_TRIP_S)
         raise RuntimeError("GitHub 502")
 
-    async def list_accessible_repos(
-        self, installation_id: str | None = None
-    ) -> list[dict[str, object]]:
+    async def list_accessible_repos(self, installation_id: str | None = None) -> list[dict]:
         await asyncio.sleep(GITHUB_ROUND_TRIP_S)
         return [
             {"id": n, "name": repo_name(n).split("/")[1], "full_name": repo_name(n)}
