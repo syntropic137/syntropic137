@@ -266,11 +266,11 @@ class _EntriesTaken:
 
     def of(self, directory: Path) -> int:
         """Entries taken from the listing of `directory`; KeyError if never listed."""
-        st = os.stat(directory, follow_symlinks=False)
+        st = directory.lstat()
         return self._by_inode[(st.st_dev, st.st_ino)]
 
     def was_listed(self, directory: Path) -> bool:
-        st = os.stat(directory, follow_symlinks=False)
+        st = directory.lstat()
         return (st.st_dev, st.st_ino) in self._by_inode
 
     @property
