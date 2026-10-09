@@ -146,9 +146,7 @@ async def _github_calls_on_request(repos: int, age: timedelta) -> tuple[int, Git
     with (
         patch("syn_adapters.github.client.get_github_client", return_value=github),
         # The background refresh is started, not awaited: it is not on the request.
-        patch.object(
-            github_routes, "_revalidate_in_background", new_callable=AsyncMock
-        ) as refresh,
+        patch.object(github_routes, "_revalidate_in_background", new_callable=AsyncMock) as refresh,
     ):
         result = await list_accessible_repos()
     assert isinstance(result, Ok)

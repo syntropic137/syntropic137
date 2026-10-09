@@ -27,7 +27,8 @@ waits on /repos, /systems and /github/repos together. The first two read the
 seeded organization projections. /github/repos answers from the App's cached
 listing, seeded here as EXPIRED, the state a page opened after a while away
 finds, while every GitHub call takes GITHUB_ROUND_TRIP_S: a request that waited
-on GitHub cannot fit its budget.
+on GitHub cannot fit its budget. A second test times /github/repos with no
+listing retained at all, the state first use or a webhook invalidation leaves.
 """
 
 from __future__ import annotations
@@ -570,3 +571,26 @@ async def test_list_and_detail_endpoints_stay_inside_their_p95_budget(
         print(f"  {name} p95 at 100 rows / at 50 rows: {ratio:.2f}x ({verdict} {MAX_100_OVER_50}x)")
     over = over_budget(measured)
     assert not over, f"p95 over budget for {over}:\n{table}"
+
+
+async def test_github_repos_on_a_cold_cache_stays_inside_its_budget(
+    e2_seeded_client: httpx.AsyncClient,
+) -> None:
+    """No listing retained (first use, or a webhook just invalidated it): still no GitHub wait.
+
+    SlowGitHub's installation list fails, so the refresh each miss starts never
+    fills the cache and every timed request meets the miss path.
+    """
+    from syn_api.services.github_repo_listing_cache import get_repo_listing_cache
+
+    client = e2_seeded_client
+    await get_repo_listing_cache().invalidate()
+    cold = (await client.get("/github/repos")).json()
+    assert (cold["total"], cold["lookup"]) == (0, "unavailable"), cold
+
+    measured = await p95_ms(client, "/github/repos", {})
+
+    print(
+        f"\n/github/repos on a cold cache: p95 {measured:.1f} ms, budget {REPOS_PAGE_BUDGET_MS:.0f}"
+    )
+    assert measured <= REPOS_PAGE_BUDGET_MS, measured
