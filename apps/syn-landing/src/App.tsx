@@ -1,5 +1,6 @@
 import Nav from "./components/Nav";
 import Hero from "./sections/Hero";
+import WhatIs from "./sections/WhatIs";
 import WhySyntropic from "./components/WhySyntropic";
 import HowItWorks from "./components/HowItWorks";
 import AgentControlPlane from "./components/AgentControlPlane";
@@ -16,6 +17,7 @@ export default function App() {
       <Nav />
       <main id="main-content">
         <Hero />
+        <WhatIs />
         <hr className="section-divider" />
         <WhySyntropic />
         <hr className="section-divider" />

@@ -71,3 +71,4 @@ export const FOOTER_COLUMNS: readonly FooterColumn[] = [
   },
 ];
 export * from "./copy/hero";
+export * from "./copy/whatIs";
