@@ -130,6 +130,13 @@ def get_default_isolation_backend() -> IsolationBackend:
 
 ### Security Configuration
 
+> **Superseded in implementation (#1805, 2026-10-09).** The
+> `WorkspaceSecuritySettings` class sketched below shipped as `SYN_SECURITY_*`
+> but nothing ever read it, and it was deleted. The hardening that actually
+> applies is agentic_isolation's `SecurityConfig.production()`, set in
+> `WorkspaceService.create`; live per-workspace limits are `SYN_WORKSPACE_*`.
+> The text below is kept as the original decision record.
+
 All workspaces enforce these security defaults:
 
 ```python

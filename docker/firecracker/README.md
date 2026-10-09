@@ -143,9 +143,11 @@ sudo ip link set br0 up
 # Enable IP forwarding
 echo 1 | sudo tee /proc/sys/net/ipv4/ip_forward
 
-# In .env:
-SYN_SECURITY_ALLOW_NETWORK=true
 ```
+
+Workspace egress is not an env switch: it goes through the Envoy proxy on
+`agent-net` (the former `SYN_SECURITY_ALLOW_NETWORK` was never applied and was
+removed in #1805).
 
 ## Comparison: Home Lab vs Cloud
 
@@ -218,7 +220,7 @@ Firecracker provides strong isolation but follow these practices:
 
 1. **Never run Firecracker as root in production** - Use jailer
 2. **Limit KVM access** - Only authorized users should access /dev/kvm
-3. **Network isolation** - Keep `SYN_SECURITY_ALLOW_NETWORK=false` unless required
+3. **Network isolation** - Keep workspace egress behind the proxy allowlist
 4. **Resource limits** - Always set memory and CPU limits
 5. **Jailer** - Use Firecracker's jailer for additional isolation
 

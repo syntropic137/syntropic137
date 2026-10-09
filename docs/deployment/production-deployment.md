@@ -89,16 +89,18 @@ SYN_WORKSPACE_CPU_LIMIT=2.0             # 2 CPUs per workspace
 SYN_WORKSPACE_CLOUD_PROVIDER=e2b
 SYN_WORKSPACE_CLOUD_API_KEY=your-e2b-api-key
 
-# ---- Security Settings ----
-SYN_SECURITY_ALLOW_NETWORK=false        # No network by default
-SYN_SECURITY_READ_ONLY_ROOT=true        # Read-only root filesystem
-SYN_SECURITY_MAX_PIDS=100               # Process limit
-SYN_SECURITY_MAX_EXECUTION_TIME=3600    # 1 hour timeout
+# ---- Security hardening ----
+# Not configurable, by design. Every workspace container gets agentic_isolation's
+# SecurityConfig.production(): all capabilities dropped, no-new-privileges,
+# read-only root with tmpfs for scratch, pids limit 256, and the seccomp/AppArmor
+# profiles. Egress goes through the Envoy proxy on agent-net. The former
+# SYN_SECURITY_* variables were never applied and were removed (#1805).
 
 # ---- Docker Settings ----
 SYN_WORKSPACE_DOCKER_IMAGE=syn-workspace:latest
-SYN_WORKSPACE_DOCKER_RUNTIME=runsc      # gVisor runtime
-SYN_WORKSPACE_DOCKER_NETWORK=none       # No network
+# SYN_WORKSPACE_DOCKER_RUNTIME and SYN_WORKSPACE_DOCKER_NETWORK are not yet
+# applied to the container (#1805); see [workspace_settings_consumed] in
+# ci/fitness/fitness_exceptions.toml for every setting in that state.
 
 # ---- Firecracker Settings (if using Firecracker) ----
 SYN_FIRECRACKER_KERNEL_PATH=/var/lib/syn/firecracker/vmlinux
