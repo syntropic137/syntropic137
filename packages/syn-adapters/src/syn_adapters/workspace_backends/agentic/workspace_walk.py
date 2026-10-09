@@ -2,10 +2,15 @@
 
 The workspace is written by the agent, so finding candidates must stay cheap
 however many entries the agent creates, and must never leave the workspace.
-A bounded walk does both: each directory is opened relative to its parent
-without following a symlink, listed one entry at a time, and abandoned once
-it has shown max_directory_entries; the whole walk stops after max_entries.
-Only directories some pattern can still match below are entered.
+A bounded walk does both: each directory is opened once, relative to the
+fd of its parent and without following a symlink, listed one entry at a time,
+and abandoned once it has shown max_directory_entries; the whole walk stops
+after max_entries, and goes no deeper than max_depth. Only directories some
+pattern can still match below are entered.
+
+Relative paths are built by joining the names already listed, never by
+turning an fd back into a path, so the walk needs only `os.scandir(fd)` and
+`os.open(..., dir_fd=...)`: both available on Linux and macOS.
 
 Patterns mean what `Path.glob` makes them mean, per path segment: `*`, `?`
 and `[...]` never cross a `/`, and a `**` segment matches zero or more
@@ -64,6 +69,7 @@ class WalkLimits:
     max_matches: int
     max_entries: int
     max_directory_entries: int
+    max_depth: int
 
 
 # A position in one pattern: (pattern index, index of the next segment to match).
@@ -115,36 +121,85 @@ class _Patterns:
         return frozenset(closed)
 
 
-def _list_directory(
-    root: Path, parts: tuple[str, ...], max_entries: int
-) -> Iterator[os.DirEntry[str]]:
-    """Yield up to max_entries entries of root/parts, streamed, never followed."""
-    relative = "/".join(parts) or "."
-    try:
-        dir_fd = open_directory(root, parts)
-    except (UnopenableDirectoryError, OSError) as e:
-        logger.warning("copy_from: Did not list %s: %s", relative, e)
-        return
-    try:
-        with os.scandir(dir_fd) as entries:
-            for listed, entry in enumerate(entries):
-                if listed == max_entries:
-                    logger.warning(
-                        "copy_from: Stopped listing %s after %d entries; the rest were not examined",
-                        relative,
-                        max_entries,
-                    )
-                    return
-                yield entry
-    finally:
-        os.close(dir_fd)
-
-
 def _is_real_directory(entry: os.DirEntry[str]) -> bool:
     try:
         return entry.is_dir(follow_symlinks=False)
     except OSError:
         return False
+
+
+class _EntryBudget:
+    """Entries examined so far across the whole walk."""
+
+    def __init__(self, max_entries: int) -> None:
+        self.max_entries = max_entries
+        self.examined = 0
+        self.spent = False
+
+    def take(self) -> bool:
+        """Count one entry; False once the walk must stop."""
+        self.examined += 1
+        if self.examined > self.max_entries:
+            if not self.spent:
+                logger.warning(
+                    "copy_from: Stopped after examining %d entries; the rest were not collected",
+                    self.max_entries,
+                )
+            self.spent = True
+        return not self.spent
+
+
+def _walk_directory(
+    dir_fd: int,
+    parts: tuple[str, ...],
+    states: frozenset[_State],
+    matcher: _Patterns,
+    limits: WalkLimits,
+    budget: _EntryBudget,
+) -> Iterator[tuple[tuple[str, ...], frozenset[_State], os.DirEntry[str]]]:
+    """Yield the non-directories below the open directory dir_fd (root/parts).
+
+    Each subdirectory is opened once, relative to dir_fd, with O_NOFOLLOW, and
+    held open only while it is being walked: at most max_depth directories
+    are open at a time, and no directory is reopened from the root.
+    """
+    relative = "/".join(parts) or "."
+    with os.scandir(dir_fd) as entries:
+        for listed, entry in enumerate(entries):
+            if listed == limits.max_directory_entries:
+                logger.warning(
+                    "copy_from: Stopped listing %s after %d entries; the rest were not examined",
+                    relative,
+                    limits.max_directory_entries,
+                )
+                return
+            if not budget.take():
+                return
+            if not _is_real_directory(entry):
+                yield parts, states, entry
+                continue
+            below = matcher.enter(states, entry.name)
+            if not below:
+                continue
+            child = (*parts, entry.name)
+            if len(child) > limits.max_depth:
+                logger.warning(
+                    "copy_from: Did not enter %s: deeper than %d directories",
+                    "/".join(child),
+                    limits.max_depth,
+                )
+                continue
+            try:
+                child_fd = os.open(entry.name, _DIR_OPEN_FLAGS, dir_fd=dir_fd)
+            except OSError as e:
+                logger.warning("copy_from: Did not list %s: %s", "/".join(child), e)
+                continue
+            try:
+                yield from _walk_directory(child_fd, child, below, matcher, limits, budget)
+            finally:
+                os.close(child_fd)
+            if budget.spent:
+                return
 
 
 def _reachable_files(
@@ -155,22 +210,17 @@ def _reachable_files(
     Enters only real directories that a pattern can still match below, and
     stops after limits.max_entries entries in all.
     """
-    pending: list[tuple[tuple[str, ...], frozenset[_State]]] = [((), matcher.start())]
-    examined = 0
-    while pending:
-        parts, states = pending.pop()
-        for entry in _list_directory(root, parts, limits.max_directory_entries):
-            examined += 1
-            if examined > limits.max_entries:
-                logger.warning(
-                    "copy_from: Stopped after examining %d entries; the rest were not collected",
-                    limits.max_entries,
-                )
-                return
-            if not _is_real_directory(entry):
-                yield parts, states, entry
-            elif below := matcher.enter(states, entry.name):
-                pending.append(((*parts, entry.name), below))
+    try:
+        root_fd = open_directory(root, ())
+    except OSError as e:
+        logger.warning("copy_from: Did not list .: %s", e)
+        return
+    try:
+        yield from _walk_directory(
+            root_fd, (), matcher.start(), matcher, limits, _EntryBudget(limits.max_entries)
+        )
+    finally:
+        os.close(root_fd)
 
 
 def iter_matching_paths(root: Path, patterns: list[str], limits: WalkLimits) -> Iterator[str]:

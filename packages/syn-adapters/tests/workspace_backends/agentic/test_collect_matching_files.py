@@ -376,8 +376,9 @@ def test_entries_examined_across_directories_are_bounded(
         )
 
     assert collected == []
-    # 6 entries lead down to the four d* directories, so the cap falls
-    # inside the second one listed and the last two are never opened.
+    # 3 entries lead down to the first d* directory (5 entries), 1 more to
+    # the second, so the cap falls inside the second one listed and the last
+    # two are never opened.
     assert entries_taken.total == 12 + 1
     assert sum(entries_taken.was_listed(out / f"d{d}") for d in range(4)) == 2
     assert "Stopped after examining 12 entries" in caplog.text
@@ -410,3 +411,55 @@ def test_walk_relies_only_on_posix_fd_primitives() -> None:
     assert os.open in os.supports_dir_fd
     source = Path(workspace_walk.__file__).read_text()
     assert "/proc" not in source
+
+
+def test_deep_directory_chain_opens_each_directory_once(
+    workspace: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Each directory is opened from its parent's fd, never re-walked from the root.
+
+    Reopening every ancestor would cost depth^2 opens for a chain the agent
+    can make as deep as it likes.
+    """
+    depth = 40
+    chain = workspace / "artifacts" / "output"
+    for i in range(depth):
+        chain /= f"c{i}"
+    chain.mkdir(parents=True)
+    (chain / "deep.md").write_bytes(b"deep")
+
+    opens = 0
+    real_open = os.open
+
+    def counting_open(*args: object, **kwargs: object) -> int:
+        nonlocal opens
+        opens += 1
+        return real_open(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(workspace_walk.os, "open", counting_open)
+    collected = collect_matching_files(workspace, ["**/*.md"], max_bytes=_LIMIT)
+
+    assert [path for path, _ in collected] == [
+        "/".join(("artifacts", "output", *(f"c{i}" for i in range(depth)), "deep.md"))
+    ]
+    directories = depth + 3  # root, artifacts, output, then the chain
+    # One open per directory for the walk, plus one walk from the root (a
+    # directory each, then the file) to read the single matched file.
+    assert opens <= 2 * directories + 1
+
+
+def test_walk_goes_no_deeper_than_the_depth_cap(
+    workspace: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    out = workspace / "artifacts" / "output"
+    (out / "shallow.md").write_bytes(b"s")
+    deep = out / "x" / "y"
+    deep.mkdir(parents=True)
+    (deep / "deep.md").write_bytes(b"d")
+
+    with caplog.at_level(logging.WARNING):
+        collected = collect_matching_files(workspace, ["**/*.md"], max_bytes=_LIMIT, max_depth=3)
+
+    # artifacts/output/x is 3 deep and entered; artifacts/output/x/y is 4.
+    assert collected == [("artifacts/output/shallow.md", b"s")]
+    assert "Did not enter artifacts/output/x/y: deeper than 3 directories" in caplog.text

@@ -80,6 +80,8 @@ MAX_COLLECTION_BYTES = 200 * 1024 * 1024
 MAX_COLLECTION_MATCHES = 10_000
 MAX_COLLECTION_ENTRIES = 100_000
 MAX_DIRECTORY_ENTRIES = 10_000
+# How many directories deep the walk goes; also how many it holds open at once.
+MAX_DIRECTORY_DEPTH = 64
 
 
 class _SkipFileError(Exception):
@@ -181,6 +183,7 @@ def collect_matching_files(
     max_matches: int = MAX_COLLECTION_MATCHES,
     max_entries: int = MAX_COLLECTION_ENTRIES,
     max_directory_entries: int = MAX_DIRECTORY_ENTRIES,
+    max_depth: int = MAX_DIRECTORY_DEPTH,
 ) -> list[tuple[str, bytes]]:
     """Match glob patterns against workspace and read matching regular files.
 
@@ -189,7 +192,8 @@ def collect_matching_files(
     than max_bytes is skipped. A file that would take the collection past
     max_total_bytes is skipped, and collection stops after max_matches
     matches. Finding them lists at most max_entries directory entries, and
-    at most max_directory_entries from any one directory.
+    at most max_directory_entries from any one directory, and enters no
+    directory more than max_depth levels below the workspace.
     """
     results: list[tuple[str, bytes]] = []
     root = workspace_path.resolve(strict=True)
@@ -197,6 +201,7 @@ def collect_matching_files(
         max_matches=max_matches,
         max_entries=max_entries,
         max_directory_entries=max_directory_entries,
+        max_depth=max_depth,
     )
     used = 0
     for relative_path in iter_matching_paths(
