@@ -47,7 +47,8 @@ ROOT = Path(__file__).resolve().parent.parent.parent  # scripts/workflows/ -> sc
 
 # Node packages versioned in lockstep with the product. Unlike the Python
 # members below there is no glob to derive this from: pnpm-workspace.yaml lists
-# packages/openclaw-plugin too, and that one is independently versioned (0.1.0).
+# packages/openclaw-plugin and apps/syn-landing too, and those are independently
+# versioned (0.1.0 and the marketing site's own 0.2.x).
 # `TestNodeManifestList` fails if this list and pnpm-workspace.yaml disagree.
 PACKAGE_JSON_RELPATHS = (
     "apps/syn-cli-node/package.json",
