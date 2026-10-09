@@ -4,8 +4,9 @@
  * and refreshed in the background (a failed background refresh keeps the old
  * data). Invalidated data is different: the next read waits for the refresh,
  * so a failure rejects that read and the binding shows it. Concurrent loads of
- * one key and generation share one request (Coalescer; each signal cancels only
- * its caller); a load publishes only if it was not abandoned, its generation is
+ * one key and generation share one load (Coalescer; each signal cancels only
+ * its caller), and loads of different keys share one HTTP request for the same
+ * URL within one invalidation epoch; a load publishes only if it was not abandoned, its generation is
  * still current and its entry is still the cached one. Fixtures mode never goes
  * stale by time. Bindings `track` a fetcher's keys, then `subscribe`.
  */
@@ -53,12 +54,17 @@ export interface QueryCacheOptions {
   maxEntries?: number // oldest unwatched entries go past this (default 300)
 }
 
+let cacheIds = 0
+
 export class QueryCache {
   private entries = new Map<string, Entry>()
   private flights = new Coalescer()
   private listeners = new Map<string, Set<() => void>>()
   private collector: Set<string> | null = null
   private gens = 0
+  // Bumped by every invalidate() and clear(): HTTP sharing never crosses one (see load).
+  private epoch = 0
+  private readonly id = ++cacheIds
   private served = new WeakMap<Promise<unknown>, SettledValue<unknown>>()
 
   constructor(private readonly options: QueryCacheOptions = {}) {}
@@ -109,12 +115,14 @@ export class QueryCache {
       count++
       this.emit(entry.key)
     }
+    if (count > 0) this.epoch++
     return count
   }
 
   /** Forget everything (tests, sign-out). Listeners stay registered. */
   clear(): void {
     this.entries.clear()
+    this.epoch++
   }
 
   /** Hear when any of `keys` is refreshed or invalidated. */
@@ -178,7 +186,9 @@ export class QueryCache {
     const gen = entry.gen
     const flight = `${entry.key}#${gen}`
     const start = (s: AbortSignal) => {
-      flightTags.set(s, flight)
+      // The transport joins identical URLs only within one epoch, across keys: a request
+      // started before any invalidation is never joined by a load started after it.
+      flightTags.set(s, `${this.id}:${this.epoch}`)
       return fetcher(s).then((data) => {
         if (s.aborted || gen !== entry.gen || this.entries.get(entry.key) !== entry) return data
         const refreshed = entry.dataGen >= 0

@@ -284,4 +284,36 @@ describe('QueryCache over the real transport', () => {
       configureClient({ fetch: (...a) => globalThis.fetch(...a) })
     }
   })
+
+  it('two keys reading one URL share one HTTP request within an epoch, and two across an invalidation', async () => {
+    const { configureClient } = await import('./config')
+    const { request } = await import('./http')
+    const pending: Array<(r: Response) => void> = []
+    const fetch = vi.fn(() => new Promise<Response>((resolve) => pending.push(resolve)))
+    configureClient({ fixtures: false, baseUrl: '/api/v1', fetch })
+    try {
+      const cache = new QueryCache({ fixtures: () => false })
+      const read = (s: AbortSignal) => request<{ v: number }>('/executions', { query: { page_size: 1 }, signal: s })
+      const list = cache.get('listExecutions', [{ page_size: 1 }], read)
+      const budget = cache.get('getExecutionBudget', [], read)
+      expect(fetch).toHaveBeenCalledTimes(1)
+      pending[0]!(new Response(JSON.stringify({ v: 0 })))
+      await expect(list).resolves.toEqual({ v: 0 })
+      await expect(budget).resolves.toEqual({ v: 0 })
+
+      // In flight for one key, then an invalidation of the other: the other must not join it.
+      cache.invalidate(queryKey('listExecutions', [{ page_size: 1 }]))
+      const refreshed = cache.get('listExecutions', [{ page_size: 1 }], read)
+      expect(fetch).toHaveBeenCalledTimes(2)
+      cache.invalidate(queryKey('getExecutionBudget', []))
+      const budgetAfter = cache.get('getExecutionBudget', [], read)
+      expect(fetch).toHaveBeenCalledTimes(3)
+      pending[1]!(new Response(JSON.stringify({ v: 1 })))
+      pending[2]!(new Response(JSON.stringify({ v: 2 })))
+      await expect(refreshed).resolves.toEqual({ v: 1 })
+      await expect(budgetAfter).resolves.toEqual({ v: 2 })
+    } finally {
+      configureClient({ fetch: (...a) => globalThis.fetch(...a) })
+    }
+  })
 })

@@ -12,7 +12,7 @@ export interface RequestOptions {
   body?: unknown
   signal?: AbortSignal
   cache?: RequestCache
-  /** GETs are coalesced by URL (plus the cache generation of a cache-managed signal) unless this is false. */
+  /** GETs are coalesced by URL (plus the cache epoch of a cache-managed signal) unless this is false. */
   coalesce?: boolean
 }
 

@@ -15,9 +15,11 @@ interface Flight<T> {
 }
 
 /**
- * Identity a cache-managed load stamps on the signal it hands its fetcher
- * (query key plus generation). The transport adds it to its own coalescing key,
- * so a request started before an invalidation is never joined by a read after it.
+ * Identity a cache-managed load stamps on the signal it hands its fetcher: the
+ * cache and its invalidation epoch (bumped by every invalidate and clear). The
+ * transport adds it to its own coalescing key, so two keys asking for one URL
+ * in one epoch share a request, and a request started before an invalidation is
+ * never joined by a read after it.
  */
 export const flightTags = new WeakMap<AbortSignal, string>()
 
