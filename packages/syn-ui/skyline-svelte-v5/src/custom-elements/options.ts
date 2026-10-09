@@ -94,4 +94,52 @@ export const CUSTOM_ELEMENT_OPTIONS: Record<string, CustomElementOptions> = {
       heading: { type: 'String' },
     },
   },
+  'SkySMark.svelte': {
+    tag: 'sky-s-mark',
+    props: { size: { type: 'String' }, animate: { type: 'Boolean' }, label: { type: 'String' } },
+  },
+  'SkyIsoCity.svelte': {
+    tag: 'sky-iso-city',
+    props: {
+      days: { type: 'Array' },
+      live: { type: 'Array' },
+      failed: { type: 'Array' },
+      errored: { type: 'Array' },
+      animate: { type: 'Boolean' },
+      drift: { type: 'Boolean' },
+      cols: { type: 'Number' },
+      rows: { type: 'Number' },
+      cell: { type: 'Number' },
+      maxSessions: { type: 'Number', attribute: 'max-sessions' },
+      label: { type: 'String' },
+    },
+  },
+  'SkyEvalExplorer.svelte': {
+    tag: 'sky-eval-explorer',
+    props: {
+      verifiers: { type: 'Array' },
+      passAt: { type: 'Number', attribute: 'pass-at' },
+      judge: { type: 'String' },
+      selected: { type: 'Number', reflect: true },
+      span: { type: 'Number' },
+      ticks: { type: 'Array' },
+      costMax: { type: 'Number', attribute: 'cost-max' },
+    },
+  },
+  'SkyHarnessChip.svelte': {
+    tag: 'sky-harness-chip',
+    props: { provider: { type: 'String' }, label: { type: 'String' } },
+  },
+  'SkyHarnessLanes.svelte': {
+    tag: 'sky-harness-lanes',
+    props: { phases: { type: 'Array' }, label: { type: 'String' } },
+  },
+  'SkyToolLog.svelte': {
+    tag: 'sky-tool-log',
+    props: { rows: { type: 'Array' }, speed: { type: 'Number' }, label: { type: 'String' } },
+  },
+  'SkyUsageBand.svelte': {
+    tag: 'sky-usage-band',
+    props: { tokens: { type: 'Object' }, rates: { type: 'Object' }, shape: { type: 'String' }, legend: { type: 'String' } },
+  },
 }

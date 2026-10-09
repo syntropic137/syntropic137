@@ -1,0 +1,170 @@
+<!doctype html>
+<!--
+  The landing <sky-*> elements in a plain HTML page (what apps/syn-landing
+  gets through React).
+
+  1. Build:   pnpm --filter @syn137/skyline-svelte-v5 run build:elements
+  2. Serve packages/syn-ui over HTTP (ES modules do not load from file://),
+     e.g. python3 -m http.server -d packages/syn-ui 8137
+  3. Open     http://localhost:8137/skyline-svelte-v5/examples/landing-elements.html
+              Add ?delay=3000 to see the static fallback before the elements upgrade.
+
+  Static first render: light-DOM children of an element are a fallback that
+  the browser shows until the element upgrades; the upgraded element renders
+  into its shadow root without a default slot, so the fallback disappears.
+  The S below falls back to the brand SVG. Only slot="overlay" children of
+  <sky-iso-city> stay visible after the upgrade.
+-->
+<html lang="en" data-theme="syn137">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Skyline landing elements</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="../../themes/src/all.css" />
+    <style>
+      body {
+        margin: 0;
+        padding: var(--ds-space-6) var(--ds-space-4);
+        background: var(--sky-color-ground-deep);
+        color: var(--ds-color-fg);
+        font-family: var(--ds-font-sans);
+      }
+      main {
+        max-width: 1100px;
+        margin: 0 auto;
+        display: grid;
+        gap: var(--ds-space-8);
+      }
+      h2 {
+        margin: 0 0 var(--ds-space-3);
+        font-family: var(--ds-font-mono);
+        font-size: var(--ds-text-sm);
+        color: var(--ds-color-text-muted);
+        font-weight: var(--ds-font-weight-medium);
+      }
+      .row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--ds-space-3);
+        align-items: center;
+      }
+      /* Reserve the shapes' space before the upgrade, so nothing shifts. */
+      sky-s-mark:not(:defined) {
+        display: inline-block;
+      }
+      sky-s-mark:not(:defined) img {
+        display: block;
+      }
+      sky-iso-city:not(:defined) {
+        display: block;
+        aspect-ratio: 726 / 535;
+      }
+      sky-iso-city sky-s-mark {
+        width: 15%;
+        margin-top: 2%;
+      }
+      sky-usage-band::part(band) {
+        height: 14px;
+      }
+      #log {
+        font-family: var(--ds-font-mono);
+        font-size: var(--ds-text-sm);
+        color: var(--ds-color-text-muted);
+        min-height: 1.5em;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section>
+        <h2>&lt;sky-s-mark&gt;</h2>
+        <div class="row">
+          <sky-s-mark size="26"><img src="../../../../design/brand/s-mark.svg" alt="Syntropic137" width="26" /></sky-s-mark>
+          <sky-s-mark size="64" animate><img src="../../../../design/brand/s-mark.svg" alt="Syntropic137" width="64" /></sky-s-mark>
+          <sky-s-mark size="22" label=""></sky-s-mark>
+        </div>
+      </section>
+
+      <section>
+        <h2>&lt;sky-iso-city&gt; with the S in slot="overlay"</h2>
+        <sky-iso-city id="city" animate drift live="[150,171,199,222]" failed="[88,260]" errored="[141]">
+          <sky-s-mark slot="overlay" animate label="The Syntropic137 S, built from cubes"></sky-s-mark>
+        </sky-iso-city>
+      </section>
+
+      <section>
+        <h2>&lt;sky-harness-chip&gt; &lt;sky-harness-lanes&gt;</h2>
+        <div class="row">
+          <sky-harness-chip provider="claude" label="implement · claude"></sky-harness-chip>
+          <sky-harness-chip provider="codex" label="review · codex"></sky-harness-chip>
+        </div>
+        <sky-harness-lanes
+          style="margin-top: var(--ds-space-4)"
+          phases='[{"name":"plan","provider":"claude","span":2},{"name":"implement","provider":"codex","span":3},{"name":"fix","provider":"claude","span":2},{"name":"review","provider":"codex","span":2}]'
+        ></sky-harness-lanes>
+      </section>
+
+      <section>
+        <h2>&lt;sky-usage-band&gt; &lt;sky-tool-log&gt;</h2>
+        <sky-usage-band shape="flat" legend="compact" tokens='{"cacheRead":582400,"cacheWrite":201600,"output":235200,"input":100800}'></sky-usage-band>
+        <sky-tool-log id="tools" style="margin-top: var(--ds-space-4)"></sky-tool-log>
+      </section>
+
+      <section>
+        <h2>&lt;sky-eval-explorer&gt;</h2>
+        <sky-eval-explorer id="explorer" pass-at="70" judge="claude-opus-5-5"></sky-eval-explorer>
+        <p id="log" aria-live="polite"></p>
+      </section>
+    </main>
+
+    <script type="module">
+      const delay = Number(new URLSearchParams(location.search).get('delay') ?? 0)
+      if (delay) await new Promise((r) => setTimeout(r, delay))
+      await import('../dist-elements/index.js')
+
+      // Sample city: the landing hero's activity ramp (sampleCityDays in skyline-core).
+      const days = []
+      for (let k = 0; k < 26 * 11; k++) {
+        const i = k % 26
+        const j = Math.floor(k / 26)
+        const ramp = (i + (11 - j) * 0.35) / (26 + 11 * 0.35)
+        let act = (0.12 + 0.88 * ramp) * (0.4 + 0.6 * (((k * 37) % 13) / 13))
+        if ((k * 17) % 9 === 0) act *= 0.2
+        days.push({ date: new Date(Date.UTC(2026, 0, 1 + k)).toISOString().slice(0, 10), sessions: Math.round(act * 1000) })
+      }
+      const city = document.getElementById('city')
+      city.maxSessions = 1000
+      city.days = days
+
+      document.getElementById('tools').rows = [
+        { time: '14:02:11', tool: 'Read', target: 'src/domain/aggregate.py', duration: '42ms' },
+        { time: '14:02:14', tool: 'Grep', target: '"apply_event" -n', duration: '118ms' },
+        { time: '14:02:19', tool: 'Bash', target: 'pytest -q tests/domain', duration: '8.4s' },
+        { time: '14:02:31', tool: 'Write', target: 'docs/event-sourcing.md', duration: '12ms' },
+        { time: '14:02:33', tool: 'Read', target: 'src/projections/list.py', duration: '31ms' },
+        { time: '14:02:40', tool: 'Edit', target: 'projection.py +12 −3', duration: '9ms' },
+        { time: '14:02:52', tool: 'Bash', target: 'ruff check .', duration: '1.2s' },
+        { time: '14:03:01', tool: 'Read', target: 'tests/test_replay.py', duration: '28ms' },
+      ]
+
+      const runs = [
+        [0, 0, 1.21, 82], [4, 0, 1.18, 85], [8, 0, 1.25, 61], [12, 0, 1.16, 84], [17, 0, 1.09, 88], [21, 0, 1.06, 90], [25, 0, 1.02, 91], [29, 0, 1.04, 92],
+        [1, 1, 0.49, 48], [5, 1, 0.51, 55], [9, 1, 0.5, 72], [13, 1, 0.53, 63], [16, 1, 0.52, 66], [19, 1, 0.5, 78], [22, 1, 0.52, 84], [26, 1, 0.51, 87], [28, 1, 0.52, 89],
+        [2, 2, 0.55, 80], [7, 2, 0.58, 78], [11, 2, 0.61, 64], [15, 2, 0.63, 76], [20, 2, 0.66, 62], [24, 2, 0.69, 73], [27, 2, 0.71, 58],
+        [23, 3, 0.62, 79], [25, 3, 0.6, 66], [27, 3, 0.59, 81], [29, 3, 0.61, null],
+      ]
+      const names = ['claude-opus-5-5', 'claude-sonnet-5-5', 'gpt-5.6-sol', 'gpt-5.6-terra']
+      const explorer = document.getElementById('explorer')
+      explorer.ticks = ['Sep 8', 'Sep 15', 'Sep 22', 'Sep 29', 'Oct 7']
+      explorer.span = 29
+      explorer.verifiers = names.map((name, si) => {
+        const rs = runs.filter((r) => r[1] === si)
+        return { name, colour: si + 1, days: rs.map((r) => r[0]), costs: rs.map((r) => r[2]), scores: rs.map((r) => r[3]) }
+      })
+      explorer.addEventListener('verifierchange', (e) => {
+        document.getElementById('log').textContent = `verifierchange: ${e.detail.index} ${e.detail.name}`
+      })
+    </script>
+  </body>
+</html>
