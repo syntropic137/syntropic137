@@ -28,8 +28,9 @@ import pytest
 
 from syn_adapters.projections.session_tools import GIT_EVENT_TYPES, SUBAGENT_TOOL_NAMES
 from syn_adapters.projections.session_tools_dispatch import to_operation
+from syn_api.routes.executions.models import ExecutionDetailResponse
 from syn_api.routes.executions.phase_mapping import _map_phase_detail, _map_phase_to_response
-from syn_api.types import PhaseStartConfig, PinnedSkillInfo
+from syn_api.types import ExecutionSkillUseSummary, PhaseStartConfig, PinnedSkillInfo
 from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_detail import (
     PhaseExecutionDetail,
 )
@@ -254,3 +255,86 @@ async def test_unreadable_timeline_is_unavailable_not_unused() -> None:
 
     assert mapped.skill_use.status == "unavailable"
     assert _map_phase_to_response(mapped).skill_use.declared_not_invoked == []
+
+
+# --- What a client RENDERS (feedback 01308bcf) ---------------------------------
+# The dashboard prints these strings verbatim, so they are asserted on the
+# response a client receives, after the real phase mapping and through JSON.
+
+
+@pytest.mark.asyncio
+async def test_codex_status_is_explained_and_never_reads_as_zero() -> None:
+    use = (await _as_client_sees_it([], "codex")).skill_use
+
+    assert use.status_display == "not observable: codex has no Skill tool"
+    assert use.summary_display == ("2 skills declared; use not observable: codex has no Skill tool")
+    assert "0" not in use.summary_display
+
+
+@pytest.mark.asyncio
+async def test_observed_summary_counts_declared_skills_invoked() -> None:
+    ops = await _timeline(_recorded_tool_use("toolu_b", "Skill", {"skill": "architecture"}))
+
+    use = (await _as_client_sees_it(ops, "claude")).skill_use
+
+    assert use.summary_display == "1 of 2 declared skills invoked"
+
+
+@pytest.mark.asyncio
+async def test_unreadable_pins_explain_unavailable() -> None:
+    phase = PhaseExecutionDetail(
+        workflow_phase_id=PHASE_ID, name="Implement", status="completed", session_id=SESSION_ID
+    )
+    mapped = await _map_phase_detail(
+        phase,
+        _Manager([]),  # pyright: ignore[reportArgumentType]
+        None,
+        start_configs={},
+    )
+    use = _map_phase_to_response(mapped).skill_use
+
+    assert use.status_display == "unavailable: no record for this run"
+    assert use.summary_display == "skill use unavailable: no record for this run"
+
+
+async def _execution_sees(*phases: PhaseExecutionInfo) -> ExecutionSkillUseSummary:
+    response = ExecutionDetailResponse.model_construct(phases=list(phases))
+    return ExecutionSkillUseSummary.model_validate(
+        json.loads(response.model_dump_json(include={"phases", "skill_use"}))["skill_use"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_execution_summary_never_calls_a_codex_declared_skill_unused() -> None:
+    # architecture: invoked on claude. principles-and-patterns: declared on
+    # both, not invoked on claude, but the codex phase may have used it.
+    ops = await _timeline(_recorded_tool_use("toolu_b", "Skill", {"skill": "architecture"}))
+    claude = await _as_client_sees_it(ops, "claude")
+    codex = await _as_client_sees_it([], "codex")
+
+    summary = await _execution_sees(claude, codex)
+
+    assert summary.declared == list(DECLARED)
+    assert [(s.name, s.count) for s in summary.invoked] == [("architecture", 1)]
+    assert summary.never_invoked == []
+    assert summary.not_known == ["principles-and-patterns"]
+    assert summary.summary_display == (
+        "2 skills declared · 1 invoked · 0 never invoked · 1 use unknown"
+    )
+
+
+@pytest.mark.asyncio
+async def test_execution_summary_names_a_skill_no_observed_phase_invoked() -> None:
+    claude = await _as_client_sees_it([], "claude")
+
+    summary = await _execution_sees(claude)
+
+    assert summary.never_invoked == list(DECLARED)
+    assert summary.summary_display == "2 skills declared · 0 invoked · 2 never invoked"
+
+
+@pytest.mark.asyncio
+async def test_execution_summary_of_codex_only_run_counts_nothing() -> None:
+    summary = await _execution_sees(await _as_client_sees_it([], "codex"))
+
+    assert summary.summary_display == "2 skills declared; use not observable on any phase"
