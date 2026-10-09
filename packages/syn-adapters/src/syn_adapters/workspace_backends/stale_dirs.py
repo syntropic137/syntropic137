@@ -4,14 +4,19 @@ Three things the domain guard (`guard_stale_workspace_dir`) cannot do itself:
 see which directories exist and which containers still mount them, read their
 repositories with git from the host, and archive a dirty tree to MinIO.
 
-RUNNING GIT ON A REPOSITORY AN AGENT WROTE. The repository's own config is
-the agent's to write, and git runs commands named there (filters, diff
-drivers, fsmonitor). This process is the API, on the host. So a repository
-whose config names a command is never read here - it is reported unreadable,
-which keeps the directory - and every call disables the remaining hooks.
-The config is listed under the same trust (`safe.directory=*`) as every later
-call: listed without it, git silently drops a different owner's repository
-config, the scan sees nothing, and the next call loads and runs it.
+RUNNING GIT ON A REPOSITORY AN AGENT WROTE. The repository's own config and
+layout are the agent's to write, and git runs commands named in the config
+(filters, diff drivers, fsmonitor) and follows paths named in the layout
+(a `.git` file, `commondir`, alternates, `core.worktree`). This process is
+the API, on the host. So a repository is read here only when everything git
+would read stays inside the workspace and its config sets nothing outside a
+short allowlist (`_ALLOWED_CONFIG`); any other repository is refused
+(`UnsafeRepositoryError`), which reports it and keeps the directory. Every
+call also disables hooks and fsmonitor, and stops git searching above the
+repository. The config is listed under the same trust (`safe.directory=*`)
+as every later call: listed without it, git silently drops a different
+owner's repository config, the scan sees nothing, and the next call loads
+and runs it.
 
 WHAT A REPOSITORY DOES NOT HOLD. A workspace keeps work outside its working
 trees too - `artifacts/output`, session spools, a bare clone, a stash, a file
@@ -40,24 +45,32 @@ if TYPE_CHECKING:
 #: tree that big is not "a few uncommitted edits", and an operator decides.
 MAX_PATCH_BYTES = 100 * 1024 * 1024
 
-#: Config keys whose value git may execute. A repository setting any of them
-#: is not read from the host at all.
-_COMMAND_KEY_SUFFIXES = (
-    ".clean",
-    ".smudge",
-    ".process",
-    ".command",
-    ".textconv",
-    "core.fsmonitor",
-    "core.pager",
-    "core.sshcommand",
-    "core.gitproxy",
-    "core.askpass",
-    "core.editor",
-    "core.hookspath",
-    "gpg.program",
-    "credential.helper",
-)
+#: The only repository config keys host git is run under, as (section,
+#: whether it has a subsection) -> names, or None for any name. They are what
+#: clone, init, checkout and submodule write; none of them names a command or
+#: a path git reads outside the workspace. `core.worktree` (written for
+#: submodules) is a path, so it is admitted only when it is the repository
+#: itself (`_refuse_unsafe_config`). Anything else - include.path, includeIf,
+#: filter.*, credential.*, core.sshCommand, extensions git may fetch for -
+#: refuses the repository, so an unknown key fails closed.
+_ALLOWED_CONFIG: dict[tuple[str, bool], frozenset[str] | None] = {
+    ("core", False): frozenset(
+        {
+            "repositoryformatversion",
+            "filemode",
+            "bare",
+            "logallrefupdates",
+            "ignorecase",
+            "precomposeunicode",
+            "worktree",
+        }
+    ),
+    ("remote", True): frozenset({"url", "fetch"}),
+    ("branch", True): frozenset({"remote", "merge"}),
+    ("submodule", True): frozenset({"url", "active"}),
+    ("extensions", False): frozenset({"objectformat"}),
+    ("user", False): None,
+}
 
 _GIT_GUARD_ARGS = (
     "-c",
@@ -101,9 +114,20 @@ def _has_cachedir_tag(path: Path) -> bool:
 
 _GIT_TIMEOUT_SECONDS = 120
 
+#: How deep git follows alternates of alternates; deeper is refused.
+_MAX_ALTERNATES_DEPTH = 5
+
 
 class HostGitError(RuntimeError):
     """Git could not give a definite answer about a repository."""
+
+
+class UnsafeRepositoryError(HostGitError):
+    """A repository host git would follow out of the workspace or run a command for.
+
+    It is not read at all, so nothing it names takes effect; like any
+    `HostGitError` it keeps its directory.
+    """
 
 
 @dataclass(frozen=True)
@@ -242,17 +266,26 @@ class SubprocessHostWorkspaceGit:
     """`HostWorkspaceGit` over the host's ``git`` binary."""
 
     async def repositories(self, host_dir: str) -> list[str]:
-        return await asyncio.to_thread(_find_repositories, host_dir)
+        """Raises `UnsafeRepositoryError` for one that reads outside ``host_dir``.
+
+        Or whose config is not allowlisted. Every repository is checked before
+        any is read: a superproject's diff runs git inside its submodules,
+        under their config, which its own check never saw.
+        """
+        repos = await asyncio.to_thread(_find_repositories, host_dir)
+        for repo in repos:
+            await self._refuse_unsafe_config(repo)
+        return repos
 
     async def unpushed_commits(self, repo: str) -> int:
-        await self._refuse_command_config(repo)
+        await self._refuse_unsafe_config(repo)
         # Every ref (branches, tags, stash) and HEAD: an agent on a detached
         # HEAD commits too, and a stash is work no branch reaches.
         out = await _git(repo, "rev-list", "--count", "--all", "HEAD", "--not", "--remotes")
         return int(out.strip() or b"0")
 
     async def uncommitted_patch(self, repo: str) -> bytes:
-        await self._refuse_command_config(repo)
+        await self._refuse_unsafe_config(repo)
         if _is_bare(repo):
             return b""
         index_entries = await _git(repo, "ls-files", "-v", "-z")
@@ -262,22 +295,16 @@ class SubprocessHostWorkspaceGit:
             if entry
         ):
             raise HostGitError(f"{repo} has index flags that can hide authored changes")
-        diff_args = ("--binary", "--no-ext-diff", "--no-textconv", "--no-color")
+        # Each submodule is read as its own repository; `dirty` keeps git
+        # from running inside it to ask.
+        no_drivers = ("--no-ext-diff", "--no-textconv", "--ignore-submodules=dirty")
+        diff_args = ("--binary", *no_drivers, "--no-color")
         # A HEAD-to-tree patch holds one state. When the index differs from
         # both HEAD and the tree, the staged state would be lost: keep it.
         staged = await _git(
-            repo,
-            "diff",
-            "--no-ext-diff",
-            "--no-textconv",
-            "--cached",
-            "--quiet",
-            ok_codes=(0, 1),
-            status=True,
+            repo, "diff", *no_drivers, "--cached", "--quiet", ok_codes=(0, 1), status=True
         )
-        unstaged = await _git(
-            repo, "diff", "--no-ext-diff", "--no-textconv", "--quiet", ok_codes=(0, 1), status=True
-        )
+        unstaged = await _git(repo, "diff", *no_drivers, "--quiet", ok_codes=(0, 1), status=True)
         if staged and unstaged:
             raise HostGitError(f"{repo} has staged changes the working tree no longer matches")
         patch = await _git(repo, "diff", *diff_args, "HEAD")
@@ -298,7 +325,7 @@ class SubprocessHostWorkspaceGit:
         for repo in repos:
             if _is_bare(repo):
                 continue
-            await self._refuse_command_config(repo)
+            await self._refuse_unsafe_config(repo)
             out = await _git(
                 repo, "ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "-z"
             )
@@ -309,31 +336,127 @@ class SubprocessHostWorkspaceGit:
             )
         return await asyncio.to_thread(_tar_unversioned, host_dir, repos, ignored)
 
-    async def _refuse_command_config(self, repo: str) -> None:
+    async def _refuse_unsafe_config(self, repo: str) -> None:
         # Under the trust later calls use, but without our command-disabling
-        # overrides, which `--list` would report back.
+        # overrides; `--show-scope` tells the one we do pass apart. Included
+        # files are listed as their includer's scope, and `include.path`
+        # itself is refused.
         config = await _git(
-            repo, "config", "--list", "--name-only", "-z", overrides=_GIT_TRUST_ARGS
+            repo, "config", "--list", "--name-only", "--show-scope", "-z", overrides=_GIT_TRUST_ARGS
         )
-        for key in filter(None, config.decode(errors="replace").lower().split("\0")):
-            if key.endswith(_COMMAND_KEY_SUFFIXES):
-                raise HostGitError(f"{repo} configures a command ({key}); not run from the host")
+        # With -z, scope and name are each NUL-terminated: alternate fields.
+        # A stray field raises, which keeps the directory.
+        fields = config.decode(errors="replace").split("\0")[:-1]
+        keys = [
+            key.lower()
+            for scope, key in zip(fields[0::2], fields[1::2], strict=True)
+            if scope != "command"
+        ]
+        for key in keys:
+            if not _is_allowed_config(key):
+                raise UnsafeRepositoryError(
+                    f"{repo} sets {key}, which is not on the host-git allowlist; not read"
+                )
+        if "core.worktree" in keys and (_is_bare(repo) or not await _is_own_worktree(repo)):
+            raise UnsafeRepositoryError(f"{repo} has a core.worktree other than itself; not read")
+
+
+async def _is_own_worktree(repo: str) -> bool:
+    top = await _git(repo, "rev-parse", "--show-toplevel")
+    return Path(top.decode(errors="surrogateescape").strip()).resolve() == Path(repo).resolve()
+
+
+def _is_allowed_config(key: str) -> bool:
+    section, _, rest = key.partition(".")
+    subsection, _, name = rest.rpartition(".")
+    if (section, bool(subsection)) not in _ALLOWED_CONFIG:
+        return False
+    names = _ALLOWED_CONFIG[(section, bool(subsection))]
+    return names is None or name in names
 
 
 def _find_repositories(host_dir: str) -> list[str]:
+    root = Path(host_dir).resolve()
     repos: list[str] = []
     for dirpath, dirnames, filenames in os.walk(host_dir):
         if _looks_bare(dirpath, dirnames, filenames):
             # A bare clone holds refs no working tree shows; guard it, and do
             # not walk into its object store.
+            _refuse_outside(Path(dirpath), Path(dirpath), root)
             repos.append(dirpath)
             dirnames.clear()
             continue
         if ".git" in dirnames or ".git" in filenames:
+            _refuse_outside(Path(dirpath), _git_dir(Path(dirpath)), root)
             repos.append(dirpath)
         if ".git" in dirnames:
             dirnames.remove(".git")
     return repos
+
+
+def _git_dir(repo: Path) -> Path:
+    """Where ``repo``'s ``.git`` leads: itself, or the target of a ``gitdir:`` file."""
+    dot_git = repo / ".git"
+    if not dot_git.is_file():
+        return dot_git
+    try:
+        pointer = dot_git.read_text(errors="surrogateescape")
+    except OSError as exc:
+        raise UnsafeRepositoryError(f"{dot_git} cannot be read") from exc
+    if not pointer.startswith("gitdir: "):
+        raise UnsafeRepositoryError(f"{dot_git} is not a gitdir pointer")
+    return repo / pointer.removeprefix("gitdir: ").strip()
+
+
+def _refuse_outside(repo: Path, git_dir: Path, root: Path) -> None:
+    """Raise unless the git dir, and every path it hands on, is under ``root``.
+
+    `commondir` (a linked worktree) and `objects/info/alternates` are read by
+    every command, so they are confined like the git dir itself. Git follows
+    alternates of alternates, so they are confined at every depth.
+    """
+    git_dir = _confined(repo, git_dir.resolve(), root)
+    common = git_dir
+    if (git_dir / "commondir").is_file():
+        common = (git_dir / (git_dir / "commondir").read_text().strip()).resolve()
+        _confined(repo, common, root)
+    _refuse_alternates_outside(repo, common / "objects", root)
+
+
+def _refuse_alternates_outside(repo: Path, start: Path, root: Path) -> None:
+    """Confine every alternate git would follow from ``start``, at every depth."""
+    pending = [(start, 0)]
+    seen: set[Path] = set()
+    while pending:
+        objects, depth = pending.pop()
+        alternates = objects / "info" / "alternates"
+        if objects in seen or not alternates.is_file():
+            continue
+        seen.add(objects)
+        if depth >= _MAX_ALTERNATES_DEPTH:
+            raise UnsafeRepositoryError(f"{repo} chains alternates past {depth}; not read")
+        # Each entry is relative to the objects directory whose file names it.
+        pending.extend(
+            (_confined(repo, (objects / entry).resolve(), root), depth + 1)
+            for entry in _alternate_entries(repo, alternates)
+        )
+
+
+def _alternate_entries(repo: Path, alternates: Path) -> list[str]:
+    entries: list[str] = []
+    for line in alternates.read_text(errors="surrogateescape").splitlines():
+        if not line.strip() or line.startswith("#"):
+            continue
+        if line.startswith('"'):
+            raise UnsafeRepositoryError(f"{repo} has a quoted alternate; not read")
+        entries.append(line.strip())
+    return entries
+
+
+def _confined(repo: Path, path: Path, root: Path) -> Path:
+    if not path.is_relative_to(root):
+        raise UnsafeRepositoryError(f"{repo} reads {path}, outside the workspace; not read")
+    return path
 
 
 def _looks_bare(dirpath: str, dirnames: list[str], filenames: list[str]) -> bool:
@@ -412,6 +535,9 @@ async def _git(
         "GIT_CONFIG_GLOBAL": "/dev/null",
         "GIT_TERMINAL_PROMPT": "0",
         "GIT_OPTIONAL_LOCKS": "0",
+        # `repo` was found as a repository; never let git search above it for
+        # another one, which may be outside the workspace.
+        "GIT_CEILING_DIRECTORIES": str(Path(repo).resolve().parent),
     }
     proc = await asyncio.create_subprocess_exec(
         "git",
