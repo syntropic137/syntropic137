@@ -102,10 +102,10 @@ test('Overview has no breadcrumbs and the home crumb leads there', async ({ page
 test.describe('Skyline only', () => {
   test.skip(!isSkyline, 'React keeps /insights and has no not-found page')
 
-  test('/insights redirects to Overview', async ({ page }) => {
+  test('/insights is gone: the not-found page, not a redirect', async ({ page }) => {
     await page.goto('insights/costs')
-    await expect(page).toHaveURL(urlFor('/'))
-    await expect(page).toHaveTitle(/Overview/)
+    await expect(page).toHaveURL(urlFor('/insights/costs'))
+    await expect(page).toHaveTitle(/Not found/)
   })
 
   test('back to a list renders cached data on the first frame (ADR-074 query cache)', async ({ page }) => {

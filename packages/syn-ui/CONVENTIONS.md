@@ -166,7 +166,7 @@ Fixtures mode (`VITE_SYN_FIXTURES=1`, or `configureClient({ fixtures: true })`) 
 
 ### Routing
 
-`src/lib/routes.ts` is the route table. Paths are identical to the React app. `/insights` and anything under it redirect to Overview. Each page is a lazily loaded chunk under `src/routes/<area>/`. `src/lib/router/` is a small history router written for this app:
+`src/lib/routes.ts` is the route table. Paths are identical to the React app, minus `/insights` (removed; it renders the not-found page). Each page is a lazily loaded chunk under `src/routes/<area>/`. `src/lib/router/` is a small history router written for this app:
 
 - Use plain `<a href={href('/executions/' + id)}>` links. `href()` adds the deploy base. Clicks are intercepted, and hover or focus preloads the target route's chunk. To force a full reload, add `data-sky-reload`.
 - `router.navigate(path)`, `router.path`, `router.query` (URLSearchParams) and `router.setQuery({ status: 'failed' })`. Filters live in the query string and replace history rather than push to it.

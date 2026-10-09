@@ -1,7 +1,7 @@
 /**
  * Every route the app serves. Paths match apps/syn-dashboard-ui/src/App.tsx
- * (minus /insights, which redirects to Overview), so swapping /next for /
- * is the only change a link needs.
+ * minus /insights (removed; it renders the not-found page), so a React-era
+ * link works unchanged at /.
  *
  * Each page is its own lazily loaded chunk. The `crumbs` here are the
  * defaults shown while a page loads; a page refines them with setPage()
@@ -108,9 +108,6 @@ export const routes: RouteDef[] = [
 
   // Pattern sheet for review (not in the nav).
   { path: '/dev/patterns', area: 'none', title: () => 'Patterns', crumbs: () => [{ label: 'Dev' }, { label: 'Patterns' }], load: () => import('../routes/dev/Patterns.svelte') },
-
-  // Insights left the nav (design review, Oct 8 2026). Old bookmarks land on Overview.
-  { path: '/insights/*', area: 'overview', title: () => 'Overview', crumbs: () => [], redirect: '/' },
 
   // Component gallery for review (components agent). Lazy chunk; not in the nav.
   { path: '/dev/components', area: 'none', title: () => 'Components', crumbs: () => [{ label: 'Components' }], load: () => import('../routes/dev/Components.svelte') },
