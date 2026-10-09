@@ -340,9 +340,12 @@ class SubprocessHostWorkspaceGit:
             repo, "config", "--list", "--name-only", "--show-scope", "-z", overrides=_GIT_TRUST_ARGS
         )
         # With -z, scope and name are each NUL-terminated: alternate fields.
-        fields = config.decode(errors="replace").split("\0")
+        # A stray field raises, which keeps the directory.
+        fields = config.decode(errors="replace").split("\0")[:-1]
         keys = [
-            key.lower() for scope, key in zip(fields[0::2], fields[1::2]) if scope != "command"
+            key.lower()
+            for scope, key in zip(fields[0::2], fields[1::2], strict=True)
+            if scope != "command"
         ]
         for key in keys:
             if not _is_allowed_config(key):

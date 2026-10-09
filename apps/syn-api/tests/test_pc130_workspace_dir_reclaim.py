@@ -817,9 +817,7 @@ async def test_an_included_config_never_takes_effect(
     assert ws.exists()
 
 
-async def test_a_repository_with_a_submodule_is_still_salvaged(
-    base: Path, tmp_path: Path
-) -> None:
+async def test_a_repository_with_a_submodule_is_still_salvaged(base: Path, tmp_path: Path) -> None:
     """A submodule's `.git` file and `core.worktree` both stay inside the workspace."""
     ws = _workspace(base, "ws-sub", tmp_path)
     app = ws / "repos" / "app"
