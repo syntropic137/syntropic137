@@ -10,6 +10,8 @@ import {
   listSummary,
   outcomeTotals,
   parseTimeWindow,
+  DEFAULT_LIST_WINDOW,
+  timeWindowParam,
   type PhaseLike,
   phaseKit,
   phaseMeta,
@@ -50,6 +52,17 @@ describe('list', () => {
     expect(parseTimeWindow('nope')).toBe('all')
     expect(timeWindowStart('all', NOW)).toBeUndefined()
     expect(timeWindowStart('1h', NOW)).toBe('2026-10-08T11:00:00.000Z')
+  })
+
+  it('defaults the lists to 24h; All stays selectable as ?window=all', () => {
+    expect(DEFAULT_LIST_WINDOW).toBe('24h')
+    expect(parseTimeWindow(null, DEFAULT_LIST_WINDOW)).toBe('24h')
+    expect(parseTimeWindow('all', DEFAULT_LIST_WINDOW)).toBe('all')
+    expect(parseTimeWindow('bogus', DEFAULT_LIST_WINDOW)).toBe('24h')
+    expect(timeWindowParam('24h', DEFAULT_LIST_WINDOW)).toBeNull()
+    expect(timeWindowParam('all', DEFAULT_LIST_WINDOW)).toBe('all')
+    expect(timeWindowParam('7d', DEFAULT_LIST_WINDOW)).toBe('7d')
+    expect(timeWindowParam('all')).toBeNull()
   })
 
   it('names age groups like the board', () => {

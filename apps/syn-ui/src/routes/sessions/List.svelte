@@ -8,7 +8,8 @@
 <script lang="ts">
   import { formatInteger, formatRelativeTime } from '@syn137/skyline-core/format'
   import { sessionRowSub, sessionsForAgent, windowRange } from '@syn137/skyline-core/screens/sessions'
-  import { listSessions } from '@syn137/syn-ui-data'
+  import { DEFAULT_LIST_WINDOW, TIME_WINDOWS, parseTimeWindow, timeWindowParam, timeWindowStart } from '@syn137/skyline-core/screens/executions'
+  import { MAX_PAGE_SIZE, listSessions } from '@syn137/syn-ui-data'
   import { Button, Callout, EmptyState, Input, Pagination, Skeleton, ToggleGroup } from '@syn137/skyline-svelte-v5'
   import { CopyButton, StatusBadge } from '@syn137/skyline-svelte-v5/patterns'
   import { isRunEvent, isSessionEvent } from '@syn137/syn-ui-data/live'
@@ -18,7 +19,8 @@
 
   let { params: _params }: PageProps = $props()
 
-  const PAGE_SIZE = 100
+  // Owner tweak (Oct 8 2026): the last 24h, 100 rows a page. All stays one click away.
+  const PAGE_SIZE = MAX_PAGE_SIZE
   const STATUSES = ['running', 'completed', 'failed', 'cancelled'] as const
   const LABEL: Record<string, string> = { running: 'Running', completed: 'Completed', failed: 'Failed', cancelled: 'Cancelled' }
 
@@ -26,11 +28,12 @@
   const status = $derived(router.query.get('status') ?? 'all')
   const page = $derived(Math.max(1, Number(router.query.get('page')) || 1))
   const workflowId = $derived(router.query.get('workflow_id') ?? undefined)
+  const timeWindow = $derived(parseTimeWindow(router.query.get('window'), DEFAULT_LIST_WINDOW))
 
   const list = resource(
     (signal) =>
       listSessions(
-        { page, page_size: PAGE_SIZE, q: q || undefined, statuses: status === 'all' ? undefined : [status], ...(workflowId ? { workflow_id: workflowId } : {}) },
+        { page, page_size: PAGE_SIZE, started_after: timeWindowStart(timeWindow, Date.now()), q: q || undefined, statuses: status === 'all' ? undefined : [status], ...(workflowId ? { workflow_id: workflowId } : {}) },
         signal,
       ),
     { live: (type) => isSessionEvent(type) || isRunEvent(type) },
@@ -90,8 +93,8 @@
     if (h > 0 && Math.abs(h - rowHeight) > 0.5) rowHeight = h
   }
 
-  const filtered = $derived(q !== '' || status !== 'all' || !!workflowId)
-  const clear = () => router.setQuery({ q: null, status: null, page: null, workflow_id: null })
+  const filtered = $derived(q !== '' || status !== 'all' || !!workflowId || timeWindow !== DEFAULT_LIST_WINDOW)
+  const clear = () => router.setQuery({ q: null, status: null, page: null, workflow_id: null, window: null })
 </script>
 
 <div class="sky-sessions">
@@ -108,6 +111,16 @@
   <div class="sky-sessions__filters">
     <Input type="search" aria-label="Search sessions" placeholder="Search workflow, phase or ID" bind:value={search} oninput={(e) => onSearch(e.currentTarget.value)} />
     <ToggleGroup type="single" variant="chips" aria-label="Filter by status" bind:value={chipValue} items={chips} />
+    <ToggleGroup
+      class="sky-sessions__window"
+      type="single"
+      variant="segmented"
+      mono
+      aria-label="Time window"
+      items={TIME_WINDOWS.map((w) => ({ value: w.value, label: w.label }))}
+      value={[timeWindow]}
+      onValueChange={(v) => router.setQuery({ window: timeWindowParam(v[0], DEFAULT_LIST_WINDOW), page: null })}
+    />
   </div>
 
   {#if list.error && !list.data}
@@ -122,11 +135,11 @@
     </div>
   {:else if rows.length === 0}
     <EmptyState
-      title={filtered ? 'No sessions match' : 'No sessions yet'}
-      description={filtered ? 'Try another search or status, or clear the filters.' : 'Sessions appear here when a workflow runs.'}
+      title={filtered ? 'No sessions match' : timeWindow !== 'all' ? 'No sessions in the last 24 hours' : 'No sessions yet'}
+      description={filtered ? 'Try another search, status or time window, or clear the filters.' : timeWindow !== 'all' ? 'Older sessions are under All.' : 'Sessions appear here when a workflow runs.'}
     >
       {#snippet action()}
-        {#if filtered}<Button onclick={clear}>Clear filters</Button>{:else}<Button href={href('/workflows')}>Run a workflow</Button>{/if}
+        {#if filtered}<Button onclick={clear}>Clear filters</Button>{:else if timeWindow !== 'all'}<Button onclick={() => router.setQuery({ window: 'all', page: null })}>Show all</Button>{:else}<Button href={href('/workflows')}>Run a workflow</Button>{/if}
       {/snippet}
     </EmptyState>
   {:else}
@@ -298,6 +311,9 @@
     }
     .sky-sessions__filters > :global(:first-child) {
       flex: 0 1 20rem;
+    }
+    .sky-sessions__filters > :global(.sky-sessions__window) {
+      margin-inline-start: auto;
     }
     .sky-sessions__row {
       grid-template-columns: auto minmax(0, 1fr) auto;

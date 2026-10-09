@@ -21,8 +21,18 @@ const WINDOW_MS: Record<Exclude<TimeWindow, 'all'>, number> = {
   '7d': 7 * 86_400_000,
 }
 
-export function parseTimeWindow(value: string | null | undefined): TimeWindow {
-  return value && (value in WINDOW_MS || value === 'all') ? (value as TimeWindow) : 'all'
+/** What the Executions and Sessions lists show with no `?window=` (owner tweak, Oct 8 2026). */
+export const DEFAULT_LIST_WINDOW: TimeWindow = '24h'
+
+/** `?window=` -> window; unknown or absent gives `fallback`. */
+export function parseTimeWindow(value: string | null | undefined, fallback: TimeWindow = 'all'): TimeWindow {
+  return value && (value in WINDOW_MS || value === 'all') ? (value as TimeWindow) : fallback
+}
+
+/** The `?window=` value for a chosen window: null (no param) when it is the default. */
+export function timeWindowParam(window: string | undefined, fallback: TimeWindow = 'all'): string | null {
+  const w = parseTimeWindow(window, fallback)
+  return w === fallback ? null : w
 }
 
 /** Inclusive lower bound for `started_after`, ISO 8601 with an offset (the API rejects naive bounds); undefined for "all". */

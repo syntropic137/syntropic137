@@ -24,6 +24,17 @@ export function after(iso: string, ms: number): string {
   return new Date(Date.parse(iso) + ms).toISOString()
 }
 
+/**
+ * A list query's `started_after`, moved from the real clock onto the fixture
+ * clock: "the last 24h" asked at any real time means the 24h before
+ * FIXTURE_NOW. The fixture world stays frozen (stable screenshots) and time
+ * windows stay meaningful whatever day the fixtures run. NaN when absent.
+ */
+export function fixtureWindowStart(query: URLSearchParams, now: number = Date.now()): number {
+  const bound = Date.parse(query.get('started_after') ?? '')
+  return Number.isNaN(bound) ? Number.NaN : FIXTURE_NOW - (now - bound)
+}
+
 export const REPO_SYN = 'https://github.com/syntropic137/syntropic137'
 export const REPO_SANDBOX = 'https://github.com/syntropic137/sandbox_syn-engineer-beta'
 

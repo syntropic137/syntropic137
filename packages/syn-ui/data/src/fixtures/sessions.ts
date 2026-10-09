@@ -2,7 +2,7 @@ import type { SessionListItem, SessionListResponse } from '../resources/sessions
 import type { OperationInfo, SessionResponse } from '../types'
 import { type CatalogPhaseRun, RUNS, phaseRuns, workflowOf } from './catalog'
 import { type FixtureRoute, notFound, route } from './define'
-import { after, costDisplay, countBy, durationDisplay, filterList, paginate, tokensDisplay } from './seed'
+import { after, costDisplay, countBy, durationDisplay, filterList, fixtureWindowStart, paginate, tokensDisplay } from './seed'
 
 export function allPhaseRuns(): CatalogPhaseRun[] {
   return RUNS.flatMap(phaseRuns).filter((p) => p.sessionId !== null)
@@ -164,9 +164,11 @@ export function sessionDetail(p: CatalogPhaseRun): SessionResponse {
 
 export const sessionRoutes: FixtureRoute[] = [
   route('GET', '/sessions', ({ query }): SessionListResponse => {
-    const items = allPhaseRuns().map(sessionListItem)
+    const items = allPhaseRuns().map(sessionListItem).sort((a, b) => (b.started_at ?? '').localeCompare(a.started_at ?? ''))
     const workflowId = query.get('workflow_id')
-    const scoped = workflowId ? items.filter((s) => s.workflow_id === workflowId) : items
+    const since = fixtureWindowStart(query)
+    const byWorkflow = workflowId ? items.filter((s) => s.workflow_id === workflowId) : items
+    const scoped = Number.isNaN(since) ? byWorkflow : byWorkflow.filter((s) => s.started_at && Date.parse(s.started_at) >= since)
     const textOf = (s: SessionListItem) => `${s.id} ${s.workflow_name ?? ''} ${s.phase_display ?? ''}`
     const rows = filterList(scoped, query, (s) => s.status, textOf)
     const page = paginate(rows, query, 50)

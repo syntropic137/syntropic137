@@ -2,7 +2,7 @@ import type { InventoryStatus } from '../resources/sessionInventory'
 import type { ExecutionDetailResponse, ExecutionListResponse, PhaseExecutionDetail } from '../types'
 import { type CatalogRun, RUNS, phaseRuns, runOf, workflowOf } from './catalog'
 import { type FixtureRoute, notFound, route } from './define'
-import { costDisplay, countBy, durationDisplay, fakeId, filterList, paginate, tokensDisplay } from './seed'
+import { costDisplay, countBy, durationDisplay, fakeId, filterList, fixtureWindowStart, paginate, tokensDisplay } from './seed'
 
 /**
  * Board-exact phases for the canonical Research run (Execution board,
@@ -215,9 +215,9 @@ function inventory(r: CatalogRun): InventoryStatus {
 
 export const executionRoutes: FixtureRoute[] = [
   route('GET', '/executions', ({ query }): ExecutionListResponse => {
-    const items = RUNS.map(executionListItem)
+    const items = [...RUNS].sort((a, b) => b.startedAt.localeCompare(a.startedAt)).map(executionListItem)
     const textOf = (e: ExecutionListItem) => `${e.workflow_name} ${e.workflow_execution_id} ${e.repos_display ?? ''}`
-    const after = Date.parse(query.get('started_after') ?? '')
+    const after = fixtureWindowStart(query)
     const inWindow = Number.isNaN(after) ? items : items.filter((e) => e.started_at && Date.parse(e.started_at) >= after)
     const unfiltered = filterList(inWindow, new URLSearchParams({ q: query.get('q') ?? '' }), (e) => e.status, textOf)
     const rows = filterList(inWindow, query, (e) => e.status, textOf)

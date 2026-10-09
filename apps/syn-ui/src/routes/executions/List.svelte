@@ -16,12 +16,14 @@
     isExecutionEvent,
     listSummary,
     outcomeTotals,
+    DEFAULT_LIST_WINDOW,
     parseTimeWindow,
+    timeWindowParam,
     timeWindowStart,
   } from '@syn137/skyline-core/screens/executions'
   import { Button, Callout, EmptyState, Input, Pagination, Skeleton, ToggleGroup } from '@syn137/skyline-svelte-v5'
   import { ObjectIcon, RunRow } from '@syn137/skyline-svelte-v5/patterns'
-  import { ApiError, listExecutions } from '@syn137/syn-ui-data'
+  import { ApiError, MAX_PAGE_SIZE, listExecutions } from '@syn137/syn-ui-data'
   import type { ExecutionListResponse } from '@syn137/syn-ui-data/types'
   import { resource } from '../../lib/load.svelte'
   import { setPage } from '../../lib/page.svelte'
@@ -33,9 +35,10 @@
   let { params: _params }: PageProps = $props()
   setPage({ title: 'Executions', crumbs: [{ label: 'Executions' }] })
 
-  const PAGE_SIZE = 50
+  // Owner tweak (Oct 8 2026): the last 24h, 100 rows a page. All stays one click away.
+  const PAGE_SIZE = MAX_PAGE_SIZE
   const status = $derived(router.query.get('status') ?? 'all')
-  const window = $derived(parseTimeWindow(router.query.get('window')))
+  const window = $derived(parseTimeWindow(router.query.get('window'), DEFAULT_LIST_WINDOW))
   const page = $derived(Math.max(1, Number(router.query.get('page')) || 1))
   const q = $derived(router.query.get('q') ?? '')
 
@@ -78,7 +81,7 @@
     })),
   )
 
-  const filtered = $derived(status !== 'all' || window !== 'all' || q !== '')
+  const filtered = $derived(status !== 'all' || window !== DEFAULT_LIST_WINDOW || q !== '')
 
   function rowSub(r: Row): string {
     const repo = r.repos_display ?? null
@@ -157,7 +160,7 @@
       aria-label="Time window"
       items={TIME_WINDOWS.map((w) => ({ value: w.value, label: w.label }))}
       value={[window]}
-      onValueChange={(v) => router.setQuery({ window: v[0] && v[0] !== 'all' ? v[0] : null, page: null })}
+      onValueChange={(v) => router.setQuery({ window: timeWindowParam(v[0], DEFAULT_LIST_WINDOW), page: null })}
     />
   </div>
 
@@ -175,12 +178,18 @@
     </section>
   {:else if rows.length === 0}
     <EmptyState
-      title={filtered ? 'No matching executions' : 'No executions yet'}
-      description={filtered ? 'Nothing matches these filters. Widen the time window or clear the filters.' : 'Executions appear here when a workflow runs. Start one from a workflow page.'}
+      title={filtered ? 'No matching executions' : window !== 'all' ? 'No executions in the last 24 hours' : 'No executions yet'}
+      description={filtered
+        ? 'Nothing matches these filters. Widen the time window or clear the filters.'
+        : window !== 'all'
+          ? 'Older runs are under All.'
+          : 'Executions appear here when a workflow runs. Start one from a workflow page.'}
     >
       {#snippet action()}
         {#if filtered}
           <Button onclick={clearFilters}>Clear filters</Button>
+        {:else if window !== 'all'}
+          <Button onclick={() => router.setQuery({ window: 'all', page: null })}>Show all</Button>
         {:else}
           <Button onclick={() => router.navigate(href('/workflows'))}>Go to workflows</Button>
         {/if}

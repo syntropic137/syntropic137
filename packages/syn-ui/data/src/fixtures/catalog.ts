@@ -104,6 +104,13 @@ export const RUNS: CatalogRun[] = [
   run('failed', 'subagent-observability-demo', 0, null, 0, 0, 1, 7 * WEEK),
   run('completed', 'codex-bridge-demo', 1, null, 162_200, 0.04, 56, 7 * WEEK),
   run('completed', 'multi-agent', 2, null, 229_000, 0.09, 86, 7 * WEEK),
+  // Appended (not inserted) so every id above keeps its seq: today's runs, so
+  // the 24h default on Executions and Sessions has a list to show. List
+  // routes sort by start time, newest first.
+  run('completed', 'pr-review', 3, REPO_SYN, 188_400, 0.23, 131, 3 * HOUR),
+  run('failed', 'research-workflow', 1, null, 84_200, 0.05, 44, 6 * HOUR),
+  run('completed', 'codex-delegates-to-claude', 1, null, 251_900, 0.31, 64, 11 * HOUR),
+  run('completed', 'skills-matrix', 4, null, 112_300, 0.11, 88, 17 * HOUR),
 ]
 
 export function workflowOf(id: string): CatalogWorkflow | undefined {
