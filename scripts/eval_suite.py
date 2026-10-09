@@ -877,9 +877,7 @@ def score_report(expected: Expected, verdict: Verdict | None, report: str) -> Sc
     )
 
 
-def score_case(
-    case: Case, verdict: Verdict | None, report: str, llm: Judge | None = None
-) -> Score:
+def score_case(case: Case, verdict: Verdict | None, report: str, llm: Judge | None = None) -> Score:
     """Score one run of `case`: a defect by `score_report`, a clean control by its verdict alone.
 
     A clean control has no defect to name, so its findings are counted but never matched.
@@ -890,9 +888,7 @@ def score_case(
         score = score_report(case.expected, verdict, report)
         if llm is None or verdict != "blocked":
             return score
-        return score.model_copy(
-            update={"llm": llm.judge(case.expected, blocking_findings(report))}
-        )
+        return score.model_copy(update={"llm": llm.judge(case.expected, blocking_findings(report))})
     return Score(
         polarity="clean",
         verdict=verdict,

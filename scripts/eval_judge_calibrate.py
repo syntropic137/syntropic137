@@ -26,7 +26,6 @@ import sys
 from pathlib import Path
 
 import httpx
-
 from eval_suite import (
     DEFAULT_SUITE,
     AnthropicMessages,
@@ -43,6 +42,7 @@ from eval_suite import (
     load_suite,
     read_launches,
 )
+
 from syn_shared.settings.dev_tooling import get_dev_api_url
 
 

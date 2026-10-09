@@ -38,8 +38,8 @@ from eval_suite import (
     Launch,
     LoadedSuite,
     Score,
-    blocking_findings,
     ScoredRun,
+    blocking_findings,
     check_commits,
     install_provenance,
     launch_suite,
@@ -2899,8 +2899,11 @@ def _reply(verdict: str, quote: str = "", reason: str = "r") -> str:
 
 # The seeded defect, said in words the keyword judge does not know.
 _PARAPHRASED = _report(
-    ("minio.py:212", "download() derives the object path without the execution prefix, "
-     "so every fetch misses the object written by upload().")
+    (
+        "minio.py:212",
+        "download() derives the object path without the execution prefix, "
+        "so every fetch misses the object written by upload().",
+    )
 )
 _PARAPHRASE_QUOTE = "derives the object path without the execution prefix"
 # A real but DIFFERENT bug in the same file: the calibration case for precision.
@@ -3042,3 +3045,16 @@ def test_anthropic_client_sends_the_pinned_model_at_temperature_zero() -> None:
     assert request.headers["x-api-key"] == "test-key"
     body = json.loads(request.content)
     assert (body["model"], body["temperature"]) == ("claude-sonnet-5-5", 0)
+
+
+@pytest.mark.unit
+def test_calibration_refuses_a_ledger_without_the_runs(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The checked-in ledger has no v6 lines: the script says so rather than printing an empty table."""
+    import eval_judge_calibrate
+
+    ledger = tmp_path / "launches.jsonl"
+    ledger.write_text(_LAUNCHED.model_dump_json() + "\n")
+    assert eval_judge_calibrate.main(["--launches", str(ledger), "--suite-tag", "nope:v6:"]) == 1
+    assert "no ledger line has a suite tag starting 'nope:v6:'" in capsys.readouterr().err
