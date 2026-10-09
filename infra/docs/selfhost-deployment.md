@@ -425,7 +425,7 @@ selfhost-up` starts. Three settings in `infra/.env` control it:
 | Setting | Default | Meaning |
 |---|---|---|
 | `BACKUP_SCHEDULE` | `0 3 * * *` | Five-field cron, evaluated in **UTC**. Numbers, `*`, lists, ranges and `/step` only; names such as `MON` and `@daily` are rejected at startup |
-| `BACKUP_RETENTION_DAYS` | `7` | After each successful backup, delete backups (and their manifests) older than this. Only files the backup itself created are ever deleted: each is recorded, with its inode and sha256, in `BACKUP_DIR/.syn-db-backup.ledger`, and is deleted only while it is still exactly that file. Any other file in `BACKUP_DIR`, whatever it is named, is left alone; so is a file copied or written over a backup's name. Delete the ledger and nothing is pruned. A failed backup deletes nothing |
+| `BACKUP_RETENTION_DAYS` | `7` | After each successful backup, delete backups (and their manifests) older than this. Only files the backup itself created are ever deleted: each is recorded, with its inode and sha256, in `BACKUP_DIR/.syn-db-backup.ledger`, and is deleted only while it is still exactly that file. Any other file in `BACKUP_DIR`, whatever it is named, is left alone; so is a file copied or written over a backup's name. Delete the ledger and nothing is pruned. A backup killed outright (SIGKILL, out of memory) can leave a `.syn-<UTC>.backup.XXXXXX` directory behind; prune never removes it, so delete it by hand. A failed backup deletes nothing |
 | `BACKUP_DIR` | `/var/backups/syn` | Host directory the archives are written to |
 
 Check it with `just selfhost-logs db-backup`. A failed run logs `scheduled
