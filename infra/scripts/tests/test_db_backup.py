@@ -470,6 +470,13 @@ class TestPrune:
         assert _run("prune", str(tmp_path), "1").returncode == 0
         assert ours.exists()
 
+    def test_a_published_name_recorded_without_its_checksum_is_kept(self, tmp_path):
+        ours = self._make(tmp_path, "syn-20260901T030000Z.dump", 365 * _DAY, tracked=False)
+        (tmp_path / _LEDGER).write_text(f"{ours.stat().st_ino} - {ours.name}\n")
+
+        assert _run("prune", str(tmp_path), "1").returncode == 0
+        assert ours.exists()
+
     def test_never_deletes_content_written_over_one_it_created(self, tmp_path):
         """Same name, same inode (written in place, or a reused inode): other bytes."""
         ours = self._make(tmp_path, "syn-20260901T030000Z.dump", 365 * _DAY)
