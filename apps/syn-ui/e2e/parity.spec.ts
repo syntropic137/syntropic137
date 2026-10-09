@@ -9,12 +9,12 @@ import { FIXTURE_IDS } from './support/routes'
 
 test.skip(!isSkyline || !isFixtures, 'pins fixture values on syn-ui')
 
-test('Overview Live commits lists commits from /events/recent, nested agent shape included', async ({ page }) => {
+// Feedback 627f4206: Live commits was noise; the Overview does not show it.
+test('Overview has no Live commits panel', async ({ page }) => {
   await page.goto('./')
-  const commits = page.getByRole('region', { name: 'Live commits' })
-  await expect(commits.getByText('922a6b2')).toBeVisible()
-  await expect(commits.getByText(/member-access specifier/)).toBeVisible()
-  await expect(commits.getByText(/No git events yet/)).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: 'Recent runs' })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Live commits' })).toHaveCount(0)
+  await expect(page.getByText('Live commits')).toHaveCount(0)
 })
 
 test('Workflow detail recent runs read the Executions list usage, failed phases included (#1843)', async ({ page }) => {

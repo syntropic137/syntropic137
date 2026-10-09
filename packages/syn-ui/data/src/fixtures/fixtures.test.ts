@@ -8,7 +8,6 @@ import {
   getLocalTranscript,
   getArtifact,
   getContributionHeatmap,
-  listRecentEvents,
   getEval,
   getExecution,
   getSession,
@@ -133,10 +132,6 @@ describe('every screen has data in fixtures mode', () => {
     expect((await lookUpAppAccess()).repos.map((r) => r.fullName)).toContain('syntropic137/homelab-infra')
     const heat = await getContributionHeatmap()
     expect(heat.days?.find((d) => d.date === '2026-08-28')?.count).toBe(43)
-    const commits = await listRecentEvents({ event_type: 'git_commit', limit: 30 })
-    expect(commits.count).toBe(4)
-    expect(commits.events.every((e) => e.event_type === 'git_commit')).toBe(true)
-    expect((commits.events[0]!.data.git as { sha: string }).sha).toMatch(/^922a6b2/)
     expect((await getMetrics()).total_workflows).toBeGreaterThan(0)
     // /metrics?workflow_id= counts every phase; /workflows/{id}/runs drops failed-phase usage, as the API does (#1843).
     const wm = await getMetrics('skills-matrix')

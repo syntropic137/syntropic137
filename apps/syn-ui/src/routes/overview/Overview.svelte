@@ -5,9 +5,8 @@
   Data: metrics (totals, outcome counts, token mix), the contribution heatmap
   (Skyline days), the newest executions (Recent runs, attention chips,
   running count), workflows (count, most-run) and triggers (count, repos).
-  Metrics and runs refetch on workflow and phase events; git events from the
-  activity stream feed Live commits, seeded from GET /events/recent
-  (event_type=git_commit) as the React Overview does.
+  Metrics and runs refetch on workflow and phase events. The board's Live
+  commits block is intentionally not shipped (owner, feedback 627f4206).
 -->
 <script lang="ts">
   import { formatCost, formatInteger, formatRelativeTime, formatTokens } from '@syn137/skyline-core/format'
@@ -16,21 +15,16 @@
   import {
     activeDayCount,
     attentionRuns,
-    combineCommits,
     distinctRepoCount,
     heatmapToSkylineDays,
-    mergeLiveCommits,
     outcomeCounts,
     outcomeLine,
     overviewHeadline,
-    recentCommits,
     runningCount,
     skylineYears,
-    toLiveCommit,
     tokenMix,
     topWorkflows,
     triggerLine,
-    type LiveCommit,
     OUTCOME_RANGES,
     OUTCOME_RANGE_STORAGE_KEY,
     outcomeRangeNoun,
@@ -41,14 +35,13 @@
   import { evalBadge } from '@syn137/skyline-core/screens/executions'
   import { Button, Callout, EmptyState, Skeleton, ToggleGroup } from '@syn137/skyline-svelte-v5'
   import { OutcomeRing, RunRow, Skyline, StatusBadge } from '@syn137/skyline-svelte-v5/patterns'
-  import { getContributionHeatmap, getMetrics, listExecutions, listRecentEvents, listTriggers, listWorkflows } from '@syn137/syn-ui-data'
-  import { isGitEvent, isRunEvent, isRunFinished, subscribeActivity } from '@syn137/syn-ui-data/live'
+  import { getContributionHeatmap, getMetrics, listExecutions, listTriggers, listWorkflows } from '@syn137/syn-ui-data'
+  import { isRunEvent, isRunFinished } from '@syn137/syn-ui-data/live'
   import { live } from '../../lib/live.svelte'
   import { resource } from '../../lib/load.svelte'
   import { setPage } from '../../lib/page.svelte'
   import type { PageProps } from '../../lib/routes'
   import { href } from '../../lib/router'
-  import LiveCommits from './parts/LiveCommits.svelte'
   import Pipeline from './parts/Pipeline.svelte'
   import TokenMix from './parts/TokenMix.svelte'
   import TopWorkflows from './parts/TopWorkflows.svelte'
@@ -128,27 +121,12 @@
   const isEmpty = $derived(!!metrics.data && !!runs.data && runs.data.total === 0 && metrics.data.total_sessions === 0)
   const firstLoad = $derived(!metrics.data && !metrics.error)
 
-  // ---- live commits: the latest from the API, then the activity stream ahead of them ----
-  const recent = resource((signal) => listRecentEvents({ event_type: 'git_commit', limit: 30 }, signal))
-  let liveCommits = $state<LiveCommit[]>([])
-  const commits = $derived(combineCommits(liveCommits, recentCommits(recent.data?.events)))
-  $effect(() =>
-    subscribeActivity({
-      filter: isGitEvent,
-      onFrames: (frames) => {
-        const incoming = frames.map(toLiveCommit).filter((c): c is LiveCommit => c !== null)
-        if (incoming.length) liveCommits = mergeLiveCommits(liveCommits, incoming)
-      },
-    }),
-  )
-
   function retry() {
     metrics.refresh()
     runs.refresh()
     heatmap.refresh()
     workflows.refresh()
     triggers.refresh()
-    recent.refresh()
   }
 
   const execHref = (id: string) => href(`/executions/${encodeURIComponent(id)}`)
@@ -271,7 +249,6 @@
           {/each}
         </div>
       {/if}
-      <LiveCommits {commits} state={live.state} loading={!recent.data && !recent.error} />
     </section>
 
     <div class="sky-ov-side">
