@@ -26,7 +26,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
     AgentConfiguration,
     ExecutablePhase,
 )
-from syn_shared.agents import CODEX_PROJECT_DOC_MAX_BYTES, CODEX_SANDBOX_FLAGS, PhaseSandbox
+from syn_shared.agents import CODEX_SANDBOX_FLAGS, PhaseSandbox
 
 # Without this the whole module collects ZERO under CI's `pytest -m unit`, and
 # the gate goes green having run none of it - including the argv pin that
@@ -36,8 +36,6 @@ pytestmark = pytest.mark.unit
 # Built from the typed mapping, never hand-written: the repository forbids a
 # literal sandbox-disabling invocation (test_no_codex_sandbox_bypass, #1398).
 FULL_ACCESS_FLAG = CODEX_SANDBOX_FLAGS[PhaseSandbox.FULL_ACCESS]
-# Codex keeps only project_doc_max_bytes of AGENTS.md; the inlined repo instructions need more (#1835).
-PROJECT_DOC_OVERRIDE = f"project_doc_max_bytes={CODEX_PROJECT_DOC_MAX_BYTES}"
 
 
 def _phase(
@@ -63,8 +61,6 @@ def test_codex_command_passes_actual_model_and_prompt_as_individual_args() -> No
         "--sandbox",
         FULL_ACCESS_FLAG,
         "--skip-git-repo-check",
-        "-c",
-        PROJECT_DOC_OVERRIDE,
         "--model",
         "gpt-5.6",
         "do the thing",
@@ -79,8 +75,6 @@ def test_codex_command_omits_model_option_when_model_is_not_provided() -> None:
         "--sandbox",
         FULL_ACCESS_FLAG,
         "--skip-git-repo-check",
-        "-c",
-        PROJECT_DOC_OVERRIDE,
         "do the thing",
     ]
 
@@ -129,8 +123,6 @@ def test_codex_command_via_domain_default_model_forces_gpt_6_1_sol() -> None:
         "--sandbox",
         FULL_ACCESS_FLAG,
         "--skip-git-repo-check",
-        "-c",
-        PROJECT_DOC_OVERRIDE,
         "--model",
         ModelId.GPT_6_1_SOL,
         "do the thing",

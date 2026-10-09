@@ -124,33 +124,15 @@ def _inlined_section(path: str, content: str | _Unread) -> str:
     )
 
 
-def _render_inlined(
-    files: Sequence[tuple[str, str | _Unread]], notice: str, max_bytes: int
-) -> tuple[str, list[str]]:
-    """Return the inlined document and the paths that lie wholly or partly past ``max_bytes``.
-
-    ``notice`` leads, so the one line about the phase deadline is the last
-    thing a byte limit could cut.
-    """
-    text = notice + "\n"
-    cut: list[str] = []
-    for path, content in files:
-        text += "\n" + _inlined_section(path, content)
-        if len(text.encode()) > max_bytes:
-            cut.append(path)
-    return text, cut
-
-
 async def inline_instruction_files(
-    workspace: ManagedWorkspace, paths: Sequence[str], *, notice: str, max_bytes: int
+    workspace: ManagedWorkspace, paths: Sequence[str], *, notice: str
 ) -> str:
     """Return ``notice`` followed by the content of each file in ``paths``, in order.
 
     For an agent that reads its instruction file verbatim. A file confirmed
-    absent is left out; one that cannot be read is named rather than left out. Content past ``max_bytes``, which the
-    reading agent will not see, is logged as a WARNING naming the files it cuts.
+    absent is left out; one that cannot be read is named rather than left out.
     """
-    files: list[tuple[str, str | _Unread]] = []
+    text = notice + "\n"
     for path in paths:
         try:
             content = await _read_instruction_file(workspace, path)
@@ -158,14 +140,5 @@ async def inline_instruction_files(
             logger.warning("could not read %s to inline it, naming it instead: %s", path, exc)
             content = _Unread.UNREADABLE
         if content is not _Unread.ABSENT:
-            files.append((path, content))
-    text, cut = _render_inlined(files, notice, max_bytes)
-    if cut:
-        logger.warning(
-            "inlined instructions are %d bytes, over the %d an agent reads: "
-            "it will not see all of %s",
-            len(text.encode()),
-            max_bytes,
-            ", ".join(cut),
-        )
+            text += "\n" + _inlined_section(path, content)
     return text

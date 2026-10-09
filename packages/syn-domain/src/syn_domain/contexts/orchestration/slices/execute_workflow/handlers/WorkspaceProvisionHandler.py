@@ -8,8 +8,8 @@ Reports ProvisionWorkspaceCompletedCommand to the aggregate.
 ADR-058: Repos are pre-cloned during setup phase. After setup, synthetic
 /workspace/AGENTS.md and /workspace/CLAUDE.md are injected with @-imports
 of each repo's distinct instruction files, so Claude starts fully hydrated.
-Where codex may run, AGENTS.md carries those files' content instead, because
-codex does not expand @-imports (#1835).
+Where codex may run, those files' content is also installed as codex's global
+instructions, because codex does not expand @-imports (#1835).
 """
 
 from __future__ import annotations
@@ -50,11 +50,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.phase_runtime imp
 from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
     PhaseOutputCache,
 )
-from syn_shared.agents import (
-    CODEX_PROJECT_DOC_MAX_BYTES,
-    AgentProvider,
-    require_executable_provider,
-)
+from syn_shared.agents import AgentProvider, require_executable_provider
 from syn_shared.env_constants import (
     ENV_ANTHROPIC_API_KEY,
     ENV_ANTHROPIC_BASE_URL,
@@ -231,6 +227,30 @@ def _check_no_conflicting_skill_versions(skills: tuple[ResolvedSkill, ...]) -> N
 _DEADLINE_NOTICE = (
     f"This phase is killed at ${ENV_SYN_PHASE_DEADLINE} (ISO 8601 UTC; read it with "
     f"`echo ${ENV_SYN_PHASE_DEADLINE}`). Only pushed work survives: commit and push before then."
+)
+
+#: Where the inlined instructions are staged before ``_INSTALL_CODEX_INSTRUCTIONS``
+#: moves them: ``inject_files`` can only write under /workspace.
+_CODEX_INSTRUCTIONS_STAGED = ".setup/codex-instructions.md"
+
+#: Append ``$1`` to codex's global instructions file and remove it. Codex reads
+#: ``$CODEX_HOME/AGENTS.md`` from any working directory, so a delegated codex
+#: started inside a clone gets it too, where it never sees /workspace/AGENTS.md;
+#: and ``project_doc_max_bytes`` (32768 by default in codex-cli 0.160.1) does
+#: not cap it, so no launch cuts its tail (#1835). Appended, not overwritten:
+#: the image ships its own global instructions there.
+_INSTALL_CODEX_INSTRUCTIONS = (
+    'h="${CODEX_HOME:-$HOME/.codex}"; mkdir -p "$h" && '
+    '{ if [ -s "$h/AGENTS.md" ]; then printf "\\n"; fi; cat -- "$1"; } >> "$h/AGENTS.md" && '
+    'rm -f -- "$1"'
+)
+
+#: /workspace/AGENTS.md when the instructions are codex's global instructions:
+#: codex at the workspace root reads both, so this must not repeat them.
+_CODEX_POINTER = (
+    "The target repositories' instructions, and this phase's deadline, are in "
+    "codex's global instructions file (~/.codex/AGENTS.md), which codex loads "
+    "in every directory.\n"
 )
 
 
@@ -527,8 +547,8 @@ class WorkspaceProvisionHandler:
     ) -> None:
         """Run the secret-injection setup and inject synthetic context files (ADR-058).
 
-        ``inline_instructions`` writes the repo instruction files' content into
-        AGENTS.md instead of @-importing them, for an agent that does not expand
+        ``inline_instructions`` installs the repo instruction files' content as
+        codex's global instructions, for an agent that does not expand
         @-imports (#1835). CLAUDE.md keeps the imports either way.
 
         ``phase_name`` is here for the failure message alone. The ADR-024 setup
@@ -593,9 +613,11 @@ class WorkspaceProvisionHandler:
         # distinct instruction files. Direct imports keep repo content at L2 (not
         # L3 via indirection), preserving maximum @import depth for repo-internal
         # context. AGENTS.md is the same file unless an agent that may run here
-        # reads it without expanding @-imports (codex, #1835); then it carries
-        # the files' content instead. Claude never reads AGENTS.md, so a
-        # fallback between the two finds its own file already right.
+        # reads it without expanding @-imports (codex, #1835); then the files'
+        # content goes to codex's global instructions instead, which every codex
+        # launch reads whatever its working directory and size, and AGENTS.md
+        # only points there. Claude never reads either, so a fallback or
+        # delegation between the two finds its own file already right.
         #
         # Only for repos that are actually ON DISK. Every line of this file is
         # `@/workspace/repos/<name>/...`, so emitting it for a phase that did
@@ -609,17 +631,19 @@ class WorkspaceProvisionHandler:
                 path for name in names for path in await repo_instruction_imports(workspace, name)
             ]
             context = self._generate_workspace_context(imports)
-            agents_md = context
+            files = [("AGENTS.md", context.encode()), ("CLAUDE.md", context.encode())]
             if inline_instructions:
-                agents_md = await inline_instruction_files(
-                    workspace,
-                    imports,
-                    notice=_DEADLINE_NOTICE,
-                    max_bytes=CODEX_PROJECT_DOC_MAX_BYTES,
+                inlined = await inline_instruction_files(
+                    workspace, imports, notice=_DEADLINE_NOTICE
                 )
-            await workspace.inject_files(
-                [("AGENTS.md", agents_md.encode()), ("CLAUDE.md", context.encode())]
-            )
+                files = [
+                    ("AGENTS.md", _CODEX_POINTER.encode()),
+                    ("CLAUDE.md", context.encode()),
+                    (_CODEX_INSTRUCTIONS_STAGED, inlined.encode()),
+                ]
+            await workspace.inject_files(files)
+            if inline_instructions:
+                await self._install_codex_instructions(workspace)
             logger.info(
                 "Injected /workspace/AGENTS.md + CLAUDE.md (%d repo(s), %d import(s))",
                 len(cloned_repos),
@@ -924,6 +948,29 @@ class WorkspaceProvisionHandler:
             agent_key,
             workspace.workspace_id,
         )
+
+    @staticmethod
+    async def _install_codex_instructions(workspace: ManagedWorkspace) -> None:
+        """Move the staged inlined instructions into codex's global instructions.
+
+        A failure is raised, not logged: codex would run with none of the
+        target repos' instructions, which is the defect this exists to close.
+        """
+        result = await workspace.execute(
+            [
+                "sh",
+                "-c",
+                _INSTALL_CODEX_INSTRUCTIONS,
+                "sh",
+                f"/workspace/{_CODEX_INSTRUCTIONS_STAGED}",
+            ],
+            timeout_seconds=30,
+        )
+        if result.exit_code != 0 or result.timed_out:
+            msg = (
+                f"could not install codex's instructions (exit {result.exit_code}): {result.stderr}"
+            )
+            raise RuntimeError(msg)
 
     @staticmethod
     def _generate_workspace_context(imports: Sequence[str]) -> str:

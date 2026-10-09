@@ -47,18 +47,6 @@ _EXPANDS_AT_IMPORTS: dict[AgentProvider, bool] = {
 """One entry per ``AgentProvider``: a new provider must say which it is."""
 
 
-CODEX_PROJECT_DOC_MAX_BYTES: int = 256 * 1024
-"""The AGENTS.md size every ``codex exec`` is told to read in full.
-
-Codex reads at most ``project_doc_max_bytes`` of its project doc and silently
-drops the rest; the default in codex-cli 0.160.1 is 32768. A codex phase's
-AGENTS.md carries every target repo's instructions inline (#1835), which
-syntropic137's own already exceeds, so the codex command raises the limit to
-this value with ``-c project_doc_max_bytes``. Provisioning warns, naming the
-files, when the inlined content is larger still.
-"""
-
-
 class PhaseSandbox(StrEnum):
     """How much authority a phase's agent process is granted.
 

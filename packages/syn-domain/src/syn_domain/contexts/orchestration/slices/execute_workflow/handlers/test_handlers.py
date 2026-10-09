@@ -6,6 +6,8 @@ correct commands back to the aggregate.
 
 from __future__ import annotations
 
+import os
+import shutil
 import subprocess
 from typing import TYPE_CHECKING
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
@@ -38,6 +40,10 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExe
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.ArtifactCollectionHandler import (
     ArtifactCollectionHandler,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
+    _CODEX_INSTRUCTIONS_STAGED,
+    _INSTALL_CODEX_INSTRUCTIONS,
+)
 from syn_shared.agents import AgentProvider
 from syn_shared.settings import get_settings
 
@@ -46,12 +52,17 @@ from syn_shared.settings import get_settings
 # =========================================================================
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
         AgentConfiguration,
     )
     from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
         ExecutionResult,
     )
+
+#: How ``_provisioned_files`` names what it installed as codex's global instructions.
+_CODEX_GLOBAL = "~/.codex/AGENTS.md"
 
 _HANDLER_MODULE = (
     "syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler"
@@ -889,6 +900,8 @@ async def _provisioned_files(
 ) -> dict[str, str]:
     """Run the real WorkspaceProvisionHandler.handle() and return the context files it injected.
 
+    Codex's global instructions, when installed, are returned as ``_CODEX_GLOBAL``.
+
     ``files`` is what the clone put on disk: reading a listed path succeeds
     with its content, reading anything else fails the way a missing file does
     (the read script's own exit status). ``read_results`` overrides the result
@@ -906,7 +919,13 @@ async def _provisioned_files(
         WorkspaceProvisionHandler,
     )
 
+    installed: list[str] = []
+
     async def execute(command: list[str], **_kwargs: object) -> ExecutionResult:
+        if command[:3] == ["sh", "-c", _INSTALL_CODEX_INSTRUCTIONS]:
+            # Never run for real: it appends to the test runner's own ~/.codex.
+            installed.append(command[-1])
+            return ExecutionResult(exit_code=0, success=True, duration_ms=1.0)
         if execute_error is not None:
             raise execute_error
         path = command[-1]
@@ -981,7 +1000,13 @@ async def _provisioned_files(
     ]
     assert len(injected) == 1, "the workspace context is injected exactly once"
     (files_injected,) = injected
-    return {name: content.decode() for name, content in files_injected.items()}
+    result = {name: content.decode() for name, content in files_injected.items()}
+    staged = result.pop(_CODEX_INSTRUCTIONS_STAGED, None)
+    # Staged exactly when it is installed: a staged file left behind reaches no agent.
+    assert installed == ([f"/workspace/{_CODEX_INSTRUCTIONS_STAGED}"] if staged else [])
+    if staged is not None:
+        result[_CODEX_GLOBAL] = staged
+    return result
 
 
 # =========================================================================
@@ -2194,11 +2219,14 @@ class TestInstructionsReachEveryAgent:
         injected = await _provisioned_files(
             {_REPO_CLAUDE: _CLAUDE_BODY}, agent=_agent(AgentProvider.CODEX)
         )
-        agents_md = injected["AGENTS.md"]
+        agents_md = injected[_CODEX_GLOBAL]
         assert agents_md.count("RULE_FROM_CLAUDE_MD_7f3a") == 1
         assert f"# Instructions from {_REPO_CLAUDE}" in agents_md
         assert _imports(agents_md) == [], "codex would read a bare @path literally"
         assert agents_md.count("This phase is killed at") == 1
+        # Codex at the workspace root reads both: the root file must not repeat them.
+        assert "RULE_FROM_CLAUDE_MD_7f3a" not in injected["AGENTS.md"]
+        assert "This phase is killed at" not in injected["AGENTS.md"]
         # CLAUDE.md is untouched: still the @-import form.
         assert _imports(injected["CLAUDE.md"]) == [_REPO_CLAUDE]
 
@@ -2215,7 +2243,7 @@ class TestInstructionsReachEveryAgent:
             repos=["https://github.com/org/repo-a", "https://github.com/org/repo-b"],
             agent=_agent(AgentProvider.CODEX),
         )
-        agents_md = injected["AGENTS.md"]
+        agents_md = injected[_CODEX_GLOBAL]
         order = [agents_md.index(m) for m in ("AGENTS_BODY_1", "CLAUDE_BODY_1", "REPO_B_BODY")]
         assert order == sorted(order)
         assert agents_md.count("REPO_B_BODY") == 1
@@ -2248,7 +2276,7 @@ class TestInstructionsReachEveryAgent:
         injected = await _provisioned_files(
             {_REPO_CLAUDE: _CLAUDE_BODY}, agent=_agent(primary), fallback=_agent(fallback)
         )
-        assert injected["AGENTS.md"].count("RULE_FROM_CLAUDE_MD_7f3a") == 1
+        assert injected[_CODEX_GLOBAL].count("RULE_FROM_CLAUDE_MD_7f3a") == 1
         assert _imports(injected["CLAUDE.md"]) == [_REPO_CLAUDE]
 
     @pytest.mark.anyio
@@ -2258,34 +2286,8 @@ class TestInstructionsReachEveryAgent:
         injected = await _provisioned_files(
             {_REPO_CLAUDE: _CLAUDE_BODY}, agent=_agent(primary, allow_delegation=True)
         )
-        assert injected["AGENTS.md"].count("RULE_FROM_CLAUDE_MD_7f3a") == 1
+        assert injected[_CODEX_GLOBAL].count("RULE_FROM_CLAUDE_MD_7f3a") == 1
         assert _imports(injected["CLAUDE.md"]) == [_REPO_CLAUDE]
-
-    @pytest.mark.anyio
-    async def test_content_past_the_codex_limit_is_kept_and_named_in_a_warning(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        big = "x" * 600 + "\nTAIL_MARKER\n"
-        with (
-            patch(f"{_HANDLER_MODULE}.CODEX_PROJECT_DOC_MAX_BYTES", 400),
-            caplog.at_level("WARNING"),
-        ):
-            injected = await _provisioned_files(
-                {_REPO_CLAUDE: big}, agent=_agent(AgentProvider.CODEX)
-            )
-        assert "TAIL_MARKER" in injected["AGENTS.md"], "never cut on our side"
-        warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
-        assert any(_REPO_CLAUDE in w and "400" in w for w in warnings), warnings
-
-    @pytest.mark.anyio
-    async def test_within_the_limit_nothing_is_warned(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        with caplog.at_level("WARNING"):
-            await _provisioned_files(
-                {_REPO_CLAUDE: _CLAUDE_BODY}, agent=_agent(AgentProvider.CODEX)
-            )
-        assert not [r for r in caplog.records if "inlined instructions" in r.getMessage()]
 
     @pytest.mark.anyio
     async def test_an_unreadable_file_is_named_not_dropped(self) -> None:
@@ -2299,8 +2301,8 @@ class TestInstructionsReachEveryAgent:
             read_results={_REPO_CLAUDE: failed},
             agent=_agent(AgentProvider.CODEX),
         )
-        assert f"# Instructions from {_REPO_CLAUDE}" in injected["AGENTS.md"]
-        assert "could not be read" in injected["AGENTS.md"]
+        assert f"# Instructions from {_REPO_CLAUDE}" in injected[_CODEX_GLOBAL]
+        assert "could not be read" in injected[_CODEX_GLOBAL]
 
 
 @pytest.mark.unit
@@ -2310,3 +2312,54 @@ def test_every_provider_declares_whether_it_expands_at_imports() -> None:
         AgentProvider.CLAUDE: True,
         AgentProvider.CODEX: False,
     }
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+@pytest.mark.skipif(shutil.which("codex") is None, reason="needs the pinned codex CLI")
+@pytest.mark.parametrize("breadcrumb", [False, True], ids=["claude-md-only", "breadcrumb"])
+async def test_codex_sees_the_repo_rules_once_from_any_directory_past_32_kib(
+    tmp_path: Path, breadcrumb: bool
+) -> None:
+    """The real codex CLI, offline, as a delegated launch sees it (#1835).
+
+    A delegated codex keeps its caller's working directory, often inside a
+    clone, and gets no ``-c`` overrides, so it reads the image's 32768-byte
+    ``project_doc_max_bytes`` default. The repo's instructions must reach the
+    model from the clone and from the workspace root alike, tail included.
+    """
+    body = "RULE_HEAD_5b1e\n" + "x" * 40_000 + "\nRULE_TAIL_5b1e\n"
+    injected = await _provisioned_files(
+        {_REPO_CLAUDE: body}, agent=_agent(AgentProvider.CLAUDE, allow_delegation=True)
+    )
+    home, workspace = tmp_path / "codex-home", tmp_path / "workspace"
+    clone = workspace / "repos" / "repo-a"
+    (clone / ".git").mkdir(parents=True)
+    home.mkdir()
+    (home / "AGENTS.md").write_text("IMAGE_GLOBAL_RULE\n")
+    (workspace / "AGENTS.md").write_text(injected["AGENTS.md"])
+    (clone / "CLAUDE.md").write_text(body)
+    if breadcrumb:
+        (clone / "AGENTS.md").write_text("@CLAUDE.md\n")
+    staged = workspace / _CODEX_INSTRUCTIONS_STAGED
+    staged.parent.mkdir()
+    staged.write_text(injected[_CODEX_GLOBAL])
+    env = {**os.environ, "CODEX_HOME": str(home)}
+    # The handler's real install script, against a stand-in codex home.
+    subprocess.run(
+        ["sh", "-c", _INSTALL_CODEX_INSTRUCTIONS, "sh", str(staged)], env=env, check=True
+    )
+    assert not staged.exists()
+
+    for cwd in (clone, workspace):
+        prompt = subprocess.run(
+            ["codex", "debug", "prompt-input", "probe"],
+            cwd=cwd,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        for rule in ("RULE_HEAD_5b1e", "RULE_TAIL_5b1e", "IMAGE_GLOBAL_RULE"):
+            assert prompt.count(rule) == 1, (cwd, rule)
+        assert prompt.count("This phase is killed at") == 1, cwd
