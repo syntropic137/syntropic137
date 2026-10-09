@@ -1,34 +1,46 @@
 <!--
-  Repos. No board yet (spec phase 4: card list, status badge), built in the
-  Triggers/Artifact language. Registered repos merged with what the GitHub
-  App reaches: owning system, App attachment and privacy. Read-only; repos
-  are registered from the CLI.
+  Repos (boards Repos, PhoneRepos). Registered repos merged with what the
+  GitHub App reaches: owning system, App attachment and privacy, plus the
+  trigger rules that listen on each. Header figures, With triggers / No
+  triggers chips. Read-only; repos are registered from the CLI. Per-repo
+  runs, pass rate, spend, last run and health need backend reads (see PR).
 -->
 <script lang="ts">
-  import { listRepos, listSystems, lookUpAppAccess } from '@syn137/syn-ui-data'
-  import type { AppAccess, SystemSummary } from '@syn137/syn-ui-data'
-  import { Button, Callout, EmptyState, Input, Skeleton } from '@syn137/skyline-svelte-v5'
+  import { listRepos, listSystems, listTriggers, lookUpAppAccess } from '@syn137/syn-ui-data'
+  import type { AppAccess, SystemSummary, TriggerSummary } from '@syn137/syn-ui-data'
+  import { Button, Callout, EmptyState, Input, Skeleton, Stat, ToggleGroup } from '@syn137/skyline-svelte-v5'
   import { ObjectIcon } from '@syn137/skyline-svelte-v5/patterns'
   import { formatDate } from '@syn137/skyline-core/format'
-  import { groupReposByOwner, repoCounts, repoRows, type RepoRow } from '@syn137/skyline-core/screens/repos'
+  import { filterReposByRules, groupReposByOwner, repoCounts, repoRows, rulesByRepo, type RepoFilter, type RepoRow } from '@syn137/skyline-core/screens/repos'
   import { resource } from '../../lib/load.svelte'
+  import { href, router } from '../../lib/router'
   import type { PageProps } from '../../lib/routes'
 
   let { params: _params }: PageProps = $props()
 
   const data = resource(async (signal) => {
-    const [repos, systems, access] = await Promise.all([
+    const [repos, systems, access, triggers] = await Promise.all([
       listRepos(signal),
       // Names only: rows are still worth showing without them.
       listSystems(signal).catch((): SystemSummary[] => []),
       lookUpAppAccess(signal).catch((): AppAccess => ({ repos: [], complete: false })),
+      // Rules only fill the Triggers column; the list stands without them.
+      listTriggers({}, signal)
+        .then((r) => r.triggers)
+        .catch((): TriggerSummary[] => []),
     ])
-    return { rows: repoRows(repos, systems, access), complete: access.complete }
+    return { rows: repoRows(repos, systems, access), complete: access.complete, rules: rulesByRepo(triggers) }
   })
 
   let search = $state('')
   const rows = $derived(data.data?.rows ?? [])
-  const shown = $derived(search.trim() ? rows.filter((r) => `${r.fullName} ${r.system ?? ''}`.toLowerCase().includes(search.trim().toLowerCase())) : rows)
+  const rules = $derived(data.data?.rules ?? new Map<string, string[]>())
+  const filter = $derived((['watched', 'quiet'] as const).find((f) => f === router.query.get('filter')) ?? ('all' satisfies RepoFilter))
+  const ruled = $derived(filterReposByRules(rows, rules, filter))
+  const shown = $derived(search.trim() ? ruled.filter((r) => `${r.fullName} ${r.system ?? ''}`.toLowerCase().includes(search.trim().toLowerCase())) : ruled)
+  const rulesOf = (r: RepoRow): string[] => rules.get(r.fullName.toLowerCase()) ?? []
+  const ruleCount = $derived([...rules.values()].reduce((n, evs) => n + evs.length, 0))
+  const watched = $derived(filterReposByRules(rows, rules, 'watched').length)
   const groups = $derived(groupReposByOwner(shown))
   const counts = $derived(repoCounts(rows))
   const errorText = $derived(data.error instanceof Error ? data.error.message : 'The server did not answer.')
@@ -43,15 +55,37 @@
       <div>
         <h1 id="sky-repos-title" class="sky-repos__title">Repos</h1>
         <p class="sky-repos__lead">
-          Repositories registered with the platform or reachable by the GitHub App.
-          {#if data.data && rows.length}<span class="sky-repos__count">{counts.total} connected, {counts.attached} with the App.</span>{/if}
+          <span class="sky-repos__what">GitHub repos registered with the platform or reachable by the Syntropic137 app. Triggers listen here and runs check the code out from here.</span>
+          {#if data.data && rows.length}<span class="sky-repos__count">{counts.total} connected, {counts.attached} through the GitHub app.</span>{/if}
         </p>
       </div>
     </div>
-    {#if rows.length > 4}
-      <div class="sky-repos__search"><Input type="search" aria-label="Search repos" placeholder="Repo or system" bind:value={search} /></div>
+    {#if data.data}
+      <div class="sky-repos__stats">
+        <Stat label="Connected" value={counts.total} />
+        <Stat label="With the app" value={counts.attached} />
+        <Stat label="Trigger rules" value={ruleCount} />
+      </div>
     {/if}
   </section>
+
+  {#if data.data && rows.length}
+    <div class="sky-repos__tools">
+      <ToggleGroup
+        type="single"
+        variant="chips"
+        aria-label="Triggers"
+        value={[filter]}
+        onValueChange={(v) => router.setQuery({ filter: v[0] && v[0] !== 'all' ? v[0] : null })}
+        items={[
+          { value: 'all', label: 'All', count: rows.length },
+          { value: 'watched', label: 'With triggers', count: watched },
+          { value: 'quiet', label: 'No triggers', count: rows.length - watched },
+        ]}
+      />
+      <div class="sky-repos__search"><Input type="search" aria-label="Search repos" placeholder="owner/repo or system" bind:value={search} /></div>
+    </div>
+  {/if}
 
   {#if data.error && !data.data}
     <Callout tone="danger" title="Couldn't load repositories." role="alert">
@@ -63,12 +97,13 @@
   {:else if rows.length === 0}
     <EmptyState title="No repositories attached" description="Register one with syn repo register --url owner/repo, then install the GitHub App on it so workflows can act on it." />
   {:else}
-    {#if !data.data.complete}
+    <!-- Only when it shows: live, an incomplete lookup with every repo attached claimed unknowns that weren't there. -->
+    {#if !data.data.complete && rows.some((r) => r.attachment === 'unknown')}
       <Callout tone="warning" title="GitHub didn't answer for every installation.">Some repos show attachment as unknown; they may still be reachable.</Callout>
     {/if}
     {#if shown.length === 0}
-      <EmptyState title="No repos match" description="Try another name or system.">
-        {#snippet action()}<Button size="sm" onclick={() => (search = '')}>Clear search</Button>{/snippet}
+      <EmptyState title="No repos match" description="Try another name, system or filter.">
+        {#snippet action()}<Button size="sm" onclick={() => { search = ''; router.setQuery({ filter: null }) }}>Clear filters</Button>{/snippet}
       </EmptyState>
     {/if}
     {#each groups as g (g.owner)}
@@ -80,7 +115,7 @@
         <ul class="sky-repos__rows">
           {#each g.repos as r (r.key)}
             <li class="sky-repos__row" data-sky-row>
-              <span class="sky-repos__glyph" aria-hidden="true">
+              <span class="sky-repos__glyph" data-watched={rulesOf(r).length > 0 || undefined} aria-hidden="true">
                 <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 2.75h8v10.5h-8a1.5 1.5 0 0 1-1.5-1.5v-7.5a1.5 1.5 0 0 1 1.5-1.5zM3 11.75a1.5 1.5 0 0 1 1.5-1.5h8"></path></svg>
               </span>
               <span class="sky-repos__main">
@@ -101,6 +136,18 @@
                   {#if r.defaultBranch}<span class="sky-repos__mono">{r.defaultBranch}</span>{/if}
                   {#if r.createdAt}<span>added {formatDate(r.createdAt)}</span>{/if}
                 </span>
+              </span>
+              <span class="sky-repos__rules">
+                {#if rulesOf(r).length}
+                  <a class="sky-repos__rules-link" href={href(`/triggers?q=${encodeURIComponent(r.fullName)}`)}>
+                    <span class="sky-repos__rules-n">{rulesOf(r).length} trigger {rulesOf(r).length === 1 ? 'rule' : 'rules'}</span>
+                    <span class="sky-repos__events">
+                      {#each rulesOf(r) as ev, i (i)}<span class="sky-repos__event">{ev}</span>{/each}
+                    </span>
+                  </a>
+                {:else}
+                  <span class="sky-repos__quiet">Nothing listens here yet.</span>
+                {/if}
               </span>
               <span class="sky-repos__attach" data-state={r.attachment}>
                 <span class="sky-repos__dot" aria-hidden="true"></span>{attachLabel[r.attachment]}
@@ -159,6 +206,65 @@
   }
   .sky-repos__count {
     color: var(--ds-color-text-subtle);
+  }
+  /* The phone board keeps only the count line under the title. */
+  .sky-repos__what {
+    display: none;
+  }
+  .sky-repos__stats {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--ds-space-4);
+  }
+  .sky-repos__tools {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ds-space-3);
+    min-width: 0;
+  }
+  .sky-repos__glyph[data-watched] {
+    background: var(--sky-color-accent-soft);
+    color: var(--sky-color-accent-soft-fg);
+  }
+  .sky-repos__rules {
+    grid-column: 2;
+    min-width: 0;
+  }
+  .sky-repos__rules-link {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ds-space-0-5);
+    min-width: 0;
+    border-radius: var(--ds-radius-md);
+    color: var(--ds-color-fg);
+    text-decoration: none;
+  }
+  .sky-repos__rules-link:hover .sky-repos__rules-n {
+    text-decoration: underline;
+  }
+  .sky-repos__rules-link:focus-visible {
+    outline: var(--sky-focus-ring-width) solid var(--sky-color-focus);
+    outline-offset: var(--sky-focus-ring-offset);
+  }
+  .sky-repos__rules-n {
+    font-size: var(--ds-text-sm);
+    font-weight: var(--ds-font-weight-semibold);
+  }
+  /* Phone: events on one line, truncated (PhoneRepos); wide: one pill each (Repos). */
+  .sky-repos__events {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--ds-font-mono);
+    font-size: var(--ds-text-xs);
+    color: var(--ds-color-text-subtle);
+  }
+  .sky-repos__event + .sky-repos__event::before {
+    content: ' · ';
+  }
+  .sky-repos__quiet {
+    font-size: var(--ds-text-sm);
+    color: var(--ds-color-text-muted);
   }
   .sky-repos__list {
     display: flex;
@@ -283,14 +389,55 @@
     .sky-repos__icon {
       width: 5.25rem;
     }
+    .sky-repos__what {
+      display: inline;
+    }
+    /* The header figures carry the counts from here. */
+    .sky-repos__count {
+      display: none;
+    }
+    .sky-repos__lead {
+      max-width: 36rem;
+    }
+    .sky-repos__stats {
+      display: flex;
+      flex-shrink: 0;
+      gap: var(--ds-space-9);
+    }
+    .sky-repos__tools {
+      flex-direction: row;
+      align-items: center;
+      justify-content: space-between;
+    }
     .sky-repos__search {
       flex: 0 1 22rem;
     }
+  }
+  @media (min-width: 64rem) {
     .sky-repos__row {
-      grid-template-columns: auto minmax(0, 1fr) auto;
+      grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr) auto;
+    }
+    .sky-repos__rules {
+      grid-column: 3;
     }
     .sky-repos__attach {
-      grid-column: 3;
+      grid-column: 4;
+    }
+    .sky-repos__events {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--ds-space-1-5);
+      margin-top: var(--ds-space-1);
+      white-space: normal;
+    }
+    .sky-repos__event {
+      padding: var(--ds-space-0-5) var(--ds-space-2);
+      border-radius: var(--ds-radius-full);
+      border: var(--ds-border-width) solid var(--ds-color-border);
+      color: var(--ds-color-text-muted);
+    }
+    .sky-repos__event + .sky-repos__event::before {
+      content: none;
     }
   }
 </style>

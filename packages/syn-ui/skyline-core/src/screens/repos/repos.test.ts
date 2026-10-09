@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { groupReposByOwner, repoCounts, repoRows } from './index'
+import { filterReposByRules, groupReposByOwner, repoCounts, repoRows, rulesByRepo, type RepoRow } from './index'
 
 describe('repoRows', () => {
   const repos = [
@@ -25,5 +25,28 @@ describe('repoRows', () => {
   })
   it('says not attached when the lookup was complete', () => {
     expect(repoRows([repos[2]!], [], { repos: [], complete: true })[0]!.attachment).toBe('not-attached')
+  })
+})
+
+describe('rulesByRepo and filterReposByRules', () => {
+  const rules = [
+    { repository: 'Org/A', event: 'check_run.completed', status: 'active' },
+    { repository: 'org/a', event: 'issue_comment.created', status: 'paused' },
+    { repository: 'org/b', event: 'push', status: 'deleted' },
+  ]
+  const row = (fullName: string): RepoRow => ({ key: fullName, fullName, owner: 'org', name: fullName.split('/')[1] ?? '', registered: true, system: null, attachment: 'attached', privacy: 'unknown', defaultBranch: null, createdAt: null })
+  const rows = [row('org/a'), row('org/b')]
+
+  it('groups live rule events by repo, case-insensitively, skipping deleted rules', () => {
+    const m = rulesByRepo(rules)
+    expect(m.get('org/a')).toEqual(['check_run.completed', 'issue_comment.created'])
+    expect(m.has('org/b')).toBe(false)
+  })
+
+  it('filters rows by whether any rule listens on them', () => {
+    const m = rulesByRepo(rules)
+    expect(filterReposByRules(rows, m, 'all').map((r) => r.fullName)).toEqual(['org/a', 'org/b'])
+    expect(filterReposByRules(rows, m, 'watched').map((r) => r.fullName)).toEqual(['org/a'])
+    expect(filterReposByRules(rows, m, 'quiet').map((r) => r.fullName)).toEqual(['org/b'])
   })
 })

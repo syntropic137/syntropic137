@@ -118,3 +118,29 @@ export function groupReposByOwner(rows: readonly RepoRow[]): { owner: string; re
   for (const r of rows) m.set(r.owner || '—', [...(m.get(r.owner || '—') ?? []), r])
   return [...m.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([owner, repos]) => ({ owner, repos }))
 }
+
+/** The part of a trigger rule the Repos screen reads. */
+export interface RepoRule {
+  repository: string
+  event: string
+  status: string
+}
+
+/** Events of the live (non-deleted) rules on each repo, keyed by lowercased full name (Repos board, Triggers column). */
+export function rulesByRepo(rules: readonly RepoRule[]): Map<string, string[]> {
+  const m = new Map<string, string[]>()
+  for (const r of rules) {
+    if (r.status === 'deleted') continue
+    const key = r.repository.toLowerCase()
+    m.set(key, [...(m.get(key) ?? []), r.event])
+  }
+  return m
+}
+
+export type RepoFilter = 'all' | 'watched' | 'quiet'
+
+/** Rows for the Repos board's chips: All, With triggers (watched), No triggers (quiet). */
+export function filterReposByRules(rows: readonly RepoRow[], rules: Map<string, string[]>, filter: RepoFilter): RepoRow[] {
+  if (filter === 'all') return [...rows]
+  return rows.filter((r) => (rules.get(r.fullName.toLowerCase())?.length ?? 0) > 0 === (filter === 'watched'))
+}
