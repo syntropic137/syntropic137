@@ -1708,6 +1708,66 @@ selfhost-seed:
       python /app/scripts/seed_triggers.py
     echo "✅ Seeding complete"
 
+# Back up the whole syn database into $BACKUP_DIR, verified before it reports ok
+selfhost-backup:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # Same command the scheduled db-backup service runs: docker/db-backup/.
+    source infra/scripts/selfhost-env.sh
+    # The database's identity comes from the running container, not from
+    # infra/.env, which can have changed since the container was created.
+    # Only these two values are read; nothing else from its env is printed.
+    db_user=$({{compose_selfhost}} exec -T timescaledb printenv POSTGRES_USER) \
+        || { echo "❌ timescaledb is not running"; exit 1; }
+    db_name=$({{compose_selfhost}} exec -T timescaledb printenv POSTGRES_DB)
+    db_identity=(-e "PGUSER=$db_user" -e "PGDATABASE=$db_name")
+    {{compose_selfhost}} run --rm --no-TTY "${db_identity[@]}" db-backup backup /backups \
+        | sed "s|/backups/|${BACKUP_DIR:-/var/backups/syn}/|"
+
+# Replace the syn database with a verified backup; the old one is kept aside (--force for a populated DB)
+[positional-arguments]
+selfhost-restore file *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # Stops the writers first - api, collector, event-store, gateway - the same
+    # set docs/deployment/timescaledb-2.29-upgrade.md stops before its backup,
+    # because they reconnect and write the moment Postgres is reachable. Starts
+    # them again afterwards, unless the restore itself failed. --force is also
+    # passed to the in-flight execution check: a restore discards running
+    # executions too. Arguments arrive as "$1" "$@", never as recipe text, so a
+    # file name is only ever data. The script restores into a staging database
+    # and swaps it in only once verified; the replaced database is renamed
+    # aside, never dropped, and with --force is backed up into BACKUP_DIR first.
+    source infra/scripts/selfhost-env.sh
+    [ -f "$1" ] || { echo "❌ No such backup: $1"; exit 1; }
+    file="$(cd "$(dirname -- "$1")" && pwd)/$(basename -- "$1")"
+    shift
+    uv run python infra/scripts/predeploy_check.py "$@"
+    force=()
+    for a in "$@"; do [ "$a" = --force ] && force=(--force); done
+    # The database's identity comes from the running container, not from
+    # infra/.env, which can have changed since the container was created.
+    # Only these two values are read; nothing else from its env is printed.
+    db_user=$({{compose_selfhost}} exec -T timescaledb printenv POSTGRES_USER) \
+        || { echo "❌ timescaledb is not running"; exit 1; }
+    db_name=$({{compose_selfhost}} exec -T timescaledb printenv POSTGRES_DB)
+    db_identity=(-e "PGUSER=$db_user" -e "PGDATABASE=$db_name")
+    writers="api collector event-store gateway"
+    echo "Stopping writers: $writers"
+    {{compose_selfhost}} stop $writers
+    rc=0
+    {{compose_selfhost}} run --rm --no-TTY "${db_identity[@]}" \
+        -v "$(dirname -- "$file"):/restore:ro" \
+        db-backup restore "/restore/$(basename -- "$file")" "${force[@]}" || rc=$?
+    if [ "$rc" -ne 0 ] && [ "$rc" -ne 3 ]; then
+        echo "❌ Restore failed (exit $rc); the database was not replaced. Writers left STOPPED:"
+        echo "   {{compose_selfhost}} start $writers"
+        exit "$rc"
+    fi
+    echo "Starting writers: $writers"
+    {{compose_selfhost}} start $writers
+    exit "$rc"
+
 # Pull latest code, rebuild, and restart self-host (auto-detects tunnel)
 selfhost-update *args:
     #!/usr/bin/env bash

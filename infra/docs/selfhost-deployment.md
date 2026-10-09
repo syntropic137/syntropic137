@@ -401,13 +401,90 @@ See `docs/development/1password-secrets.md` for full 1Password documentation.
 
 ### Database Backup
 
-```bash
-# Manual backup
-docker exec ${COMPOSE_PROJECT_NAME:-syntropic137}-timescaledb pg_dump -U ${POSTGRES_USER:-syn} ${POSTGRES_DB:-syn} > backup-$(date +%Y%m%d).sql
+The whole `syn` database (event store tables `events` / `aggregates` /
+`idempotency`, every projection and checkpoint, and the `agent_events`
+hypertable) is backed up with one command:
 
-# Restore
-cat backup-20250101.sql | docker exec -i ${COMPOSE_PROJECT_NAME:-syntropic137}-timescaledb psql -U ${POSTGRES_USER:-syn} ${POSTGRES_DB:-syn}
+```bash
+just selfhost-backup
+# backup ok: /var/backups/syn/syn-20261008T030000Z.dump (48M, 61 tables)
 ```
+
+It writes a compressed `pg_dump --format=custom` archive into `BACKUP_DIR`
+(default `/var/backups/syn`, mode `0600`) and, beside it, a
+`syn-<UTC>.dump.manifest` holding the archive's sha256 and the row count of
+every table. It reports `ok` only after every row of every table has been read
+back out of the archive. A dump that fails part way leaves no file behind.
+Keep each `.dump` with its `.manifest`: restore refuses an archive without one. The dump runs in the
+`db-backup` service, which uses the same TimescaleDB image as the database, so
+the client tools always match the server. No host PostgreSQL tools are needed.
+
+**Scheduled backups** run in the same `db-backup` service, which `just
+selfhost-up` starts. Three settings in `infra/.env` control it:
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `BACKUP_SCHEDULE` | `0 3 * * *` | Five-field cron, evaluated in **UTC**. Numbers, `*`, lists, ranges and `/step` only; names such as `MON` and `@daily` are rejected at startup |
+| `BACKUP_RETENTION_DAYS` | `7` | After each successful backup, delete backups (and their manifests) older than this. Only files the backup itself created are ever deleted: each is recorded, with its inode and sha256, in `BACKUP_DIR/.syn-db-backup.ledger`, and is deleted only while it is still exactly that file. Any other file in `BACKUP_DIR`, whatever it is named, is left alone; so is a file copied or written over a backup's name. Delete the ledger and nothing is pruned. A backup killed outright (SIGKILL, out of memory) can leave a `.syn-<UTC>.backup.XXXXXX` directory behind; prune never removes it, so delete it by hand. A failed backup deletes nothing |
+| `BACKUP_DIR` | `/var/backups/syn` | Host directory the archives are written to |
+
+Check it with `just selfhost-logs db-backup`. A failed run logs `scheduled
+backup FAILED` and keeps the previous backups. Copy `BACKUP_DIR` off the host
+as well: a backup on the same disk as the database does not survive the disk.
+
+### Restore
+
+```bash
+just selfhost-restore /var/backups/syn/syn-20261008T030000Z.dump
+```
+
+In order, it:
+
+1. Runs the in-flight execution check (`predeploy_check.py`), as `selfhost-update` does.
+2. **Stops the writers: `api`, `collector`, `event-store` and `gateway`.** This
+   is the same set the [TimescaleDB 2.29 upgrade](../../docs/deployment/timescaledb-2.29-upgrade.md)
+   stops: they reconnect and write the moment Postgres is reachable.
+   `timescaledb`, `redis` and `minio` keep running.
+3. Checks the archive against its manifest's sha256. A truncated or altered
+   file is refused before anything is touched.
+4. Refuses, changing nothing, if any table in the current database holds a
+   row. It lists those tables. Re-run with `--force` to replace it; `--force`
+   also overrides the in-flight execution check, and first takes a fresh
+   backup of the current database into `BACKUP_DIR`. If that backup fails,
+   nothing is restored.
+5. Restores into a new staging database, between `timescaledb_pre_restore()`
+   and `timescaledb_post_restore()` (without those calls the hypertables come
+   back broken), and checks every table's row count against the manifest. Only
+   then does it rename the current `syn` database aside, to
+   `syn_pre_restore_<UTC>_<pid>`, and the staging database to `syn`, in one
+   transaction. Any failure before that drops only the staging database:
+   the current one is untouched.
+6. Starts the writers again. If the restore failed, they are left stopped;
+   the command prints how to start them.
+
+The replaced database is never dropped. Once the restore is verified, reclaim
+its space yourself: the restore prints its name; then run
+`DROP DATABASE syn_pre_restore_...` in `psql`. Until then the database uses
+twice its usual disk.
+
+A stack that has just been seeded (`just selfhost-seed`) already holds rows,
+so restoring onto it needs `--force`.
+
+### When a backup is required before an upgrade
+
+The scheduled backup gives you a daily baseline. Take a fresh one with `just
+selfhost-backup` immediately before an upgrade that **changes stored data in a
+way a restart cannot undo**:
+
+| Required | Why |
+|---|---|
+| An event store or event-sourcing-platform version bump (`git diff HEAD..origin/main -- lib/event-sourcing-platform` is non-empty) | It can migrate the event store tables, and events are the only copy of domain state |
+| A PostgreSQL or TimescaleDB image change | The extension upgrade alters the catalog in place |
+| Running any script that writes events (backfills, data migrations, seed scripts) | Events are append-only: a wrong event cannot be deleted, only compensated |
+
+**Not needed** for a normal application upgrade (`just selfhost-update` that
+changes only `apps/` or `packages/`): the event store is append-only and the
+application never rewrites it, and projections are rebuilt from the events.
 
 ### Configuration Backup
 

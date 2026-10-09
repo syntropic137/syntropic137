@@ -310,15 +310,15 @@ class InfraSettings(BaseSettings):
 
     backup_schedule: str = Field(
         default="0 3 * * *",
-        description="Backup cron schedule.",
+        description="Five-field cron schedule, in UTC, for the selfhost db-backup service.",
     )
 
     backup_retention_days: int = Field(
         default=7,
-        description="Number of days to retain backups.",
+        description="Days to keep syn-*.dump backups; older ones are pruned after each successful backup.",
     )
 
     backup_dir: str = Field(
         default="/var/backups/syn",
-        description="Directory for database backups.",
+        description="Host directory the selfhost db-backup service writes backups to.",
     )

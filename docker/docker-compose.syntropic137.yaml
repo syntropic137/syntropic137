@@ -31,7 +31,9 @@ services:
     healthcheck:
       test:
       - CMD-SHELL
-      - pg_isready -U ${POSTGRES_USER:-syn} -d ${POSTGRES_DB:-syn}
+      - pg_isready -U ${POSTGRES_USER:-syn} -d ${POSTGRES_DB:-syn} || exit 1; printf "PGUSER=%s\nPGDATABASE=%s\n" "$$POSTGRES_USER"
+        "$$POSTGRES_DB" > /syn-db-identity/.identity.new && mv -f /syn-db-identity/.identity.new /syn-db-identity/identity;
+        exit 0
       interval: 5s
       timeout: 5s
       retries: 5
@@ -42,6 +44,7 @@ services:
     volumes:
     - db_data:/var/lib/postgresql/data
     - ./init-db:/docker-entrypoint-initdb.d:ro
+    - db_identity:/syn-db-identity
     restart: always
     read_only: true
     security_opt:
@@ -675,6 +678,8 @@ volumes:
   session_inventory_data: null
   db_data:
     name: syn137_db_data
+  db_identity:
+    name: syn137_db_identity
   api_logs:
     name: syn137_api_logs
   minio_data:

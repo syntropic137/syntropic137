@@ -456,12 +456,23 @@ curl -X POST http://grafana.internal/api/dashboards/db \
 
 ### Database Backup
 
-```bash
-# Automated backup with pg_dump
-pg_dump -h localhost -U syn -d syn | gzip > backup-$(date +%Y%m%d).sql.gz
+On a Docker Compose self-host stack use `just selfhost-backup` and
+`just selfhost-restore <file>`, with scheduled backups from the `db-backup`
+service: see [Backup & Recovery](../../infra/docs/selfhost-deployment.md#backup--recovery).
 
-# Restore
-gunzip -c backup-20250101.sql.gz | psql -h localhost -U syn -d syn
+Elsewhere, keep the same shape, because a plain-SQL dump replayed with `psql`
+does not restore TimescaleDB hypertables correctly:
+
+```bash
+# Backup: custom format, then prove it is readable
+pg_dump -h localhost -U syn -d syn --format=custom --file=syn.dump
+pg_restore --list syn.dump | grep -c ' TABLE DATA '   # must be > 0
+
+# Restore into an empty database, writers stopped
+psql -h localhost -U syn -d syn -c 'CREATE EXTENSION IF NOT EXISTS timescaledb' \
+    -c 'SELECT timescaledb_pre_restore()'
+pg_restore -h localhost -U syn -d syn --no-owner --no-acl syn.dump   # no -j
+psql -h localhost -U syn -d syn -c 'SELECT timescaledb_post_restore()'
 ```
 
 ### Disaster Recovery
