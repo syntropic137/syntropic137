@@ -157,9 +157,7 @@ def _segment_reads(segment: str) -> bool:
     if program == "find":
         return not any(a.startswith(_FIND_ACTIONS) for a in args)
     if program == "git":
-        return _git_subcommand(args) in _READ_ONLY_GIT and not any(
-            a.startswith(_GIT_EXECUTING_OPTIONS) for a in args
-        )
+        return _git_reads(args)
     if program == "gh":
         return len(args) >= 2 and (args[0], args[1]) in _READ_ONLY_GH
     return False
@@ -176,6 +174,13 @@ def _sed_prints(args: list[str]) -> bool:
         all(a in {"-n", "-E", "-r"} for a in args if a.startswith("-"))
         and bool(scripts)
         and _SED_PRINT.fullmatch(scripts[0]) is not None
+    )
+
+
+def _git_reads(args: list[str]) -> bool:
+    """A read-only git subcommand, with no option that runs another program."""
+    return _git_subcommand(args) in _READ_ONLY_GIT and not any(
+        a.startswith(_GIT_EXECUTING_OPTIONS) for a in args
     )
 
 
