@@ -142,6 +142,7 @@ async def test_a_later_deadline_never_extends_a_grant() -> None:
 
 
 _SCORE = "/evals/ev-1/runs/exec-other/score"
+_OTHER_EVAL_SCORE = "/evals/ev-2/runs/exec-other/score"
 
 
 async def _no_body() -> bytes:
@@ -162,15 +163,18 @@ async def test_a_workspace_declared_eval_is_launched_with_an_eval_token() -> Non
         assert isinstance(environment, dict)
         bearer = f"Bearer {environment['SYN_API_TOKEN']}"
         seen.append(await tokens.authorize(bearer, "POST", _SCORE, _no_body))
+        seen.append(await tokens.authorize(bearer, "POST", _OTHER_EVAL_SCORE, _no_body))
         yield "{}"
 
     service._event_stream.stream = checking_stream  # type: ignore[method-assign]
     async with service.create_workspace(
-        execution_id="exec-1744", platform_access=PlatformScope.EVAL
+        execution_id="exec-1744", platform_access=PlatformScope.EVAL, eval_id="ev-1"
     ) as workspace:
         async for _ in workspace.stream(["claude"], environment={}):
             pass
-    assert seen == [None]
+    # Bound to the execution's eval: its own is reachable, another is not.
+    assert seen[0] is None
+    assert seen[1] is not None and seen[1].status == 403
 
 
 @pytest.mark.asyncio
@@ -223,7 +227,7 @@ async def test_an_eval_grant_dies_at_the_phase_deadline_even_when_revocation_fai
 
     tokens.revoke = unreachable  # type: ignore[method-assign]
     async with service.create_workspace(
-        execution_id="exec-1744", platform_access=PlatformScope.EVAL
+        execution_id="exec-1744", platform_access=PlatformScope.EVAL, eval_id="ev-1"
     ) as workspace:
         async for _ in workspace.stream(["claude"], environment=dict(phase_env)):
             pass

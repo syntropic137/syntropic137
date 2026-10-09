@@ -64,7 +64,7 @@ async def client(
 
 
 async def _bearer(service: PlatformTokenService, scope: PlatformScope) -> dict[str, str]:
-    token = await service.issue("exec-1744", scope)
+    token = await service.issue("exec-1744", scope, "ev-1")
     return {**_INGRESS, "authorization": f"Bearer {token}", "content-type": "application/json"}
 
 
@@ -113,6 +113,7 @@ class TestEvalTokenReachesItsTwoWrites:
         b'{"eval_id": "ev-1", "no_eval": true}',
         b'{"eval_id": "ev-1", "no_eval": "true"}',  # the route reads this as true too
         b'{"no_eval": false, "eval_id": "ev-1", "eval_id": null}',  # last key wins, as in the route
+        b'{"eval_id": "ev-2"}',  # an eval other than the one the token is bound to
         b'["eval_id", "ev-1"]',
         b"eval_id=ev-1",
         b"",
@@ -147,6 +148,7 @@ async def test_an_oversized_execute_body_is_refused_unread(
         ("PUT", _EXECUTE),
         ("POST", "/evals"),
         ("POST", "/evals/ev-1/runs/exec-1/score/extra"),
+        ("POST", "/evals/ev-2/runs/exec-1/score"),
         ("PUT", _SCORE),
         ("DELETE", _SCORE),
         ("POST", "/evals/ev-1/runs/exec-1"),

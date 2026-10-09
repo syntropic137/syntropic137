@@ -463,6 +463,7 @@ class WorkspaceService:
         extra_environment: dict[str, str] | None = None,
         capture_session_id: str | None = None,
         platform_access: PlatformScope = PlatformScope.READ,
+        eval_id: str | None = None,
     ) -> AsyncIterator[ManagedWorkspace]:
         """Create a managed workspace with full lifecycle.
 
@@ -479,6 +480,8 @@ class WorkspaceService:
             extra_environment: Additional environment variables
             platform_access: Scope of the workspace's platform token, as the
                 phase declared it (ADR-072, #1744). READ unless declared.
+            eval_id: The eval the execution belongs to; the only eval an EVAL
+                token can launch into or score (#1744).
 
         Yields:
             ManagedWorkspace for command execution
@@ -524,7 +527,7 @@ class WorkspaceService:
 
             if self._platform_tokens is not None:
                 workspace.platform_grant = await self._platform_tokens.grant_workspace(
-                    execution_id, platform_access
+                    execution_id, platform_access, eval_id
                 )
 
             yield workspace

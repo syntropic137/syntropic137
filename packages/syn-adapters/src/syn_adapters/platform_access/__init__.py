@@ -11,8 +11,10 @@ The security properties, each enforced in this module and nowhere else:
   read-only resources in ``_READ_RESOURCES``. ``EVAL`` (#1744) reaches what
   READ does plus exactly two writes: ``POST /workflows/{id}/execute`` whose
   body names an ``eval_id`` explicitly, and
-  ``POST /evals/{id}/runs/{execution}/score``. No scope can change a workflow,
-  launch a run outside an eval, or read settings or secrets.
+  ``POST /evals/{id}/runs/{execution}/score``. Both must name the eval the
+  issuing execution belongs to (``PlatformTokenGrant.eval_id``); an EVAL grant
+  bound to no eval reaches neither. No scope can change a workflow, launch a
+  run outside its own eval, or read settings or secrets.
 - A token expires (store TTL AND an explicit ``expires_at`` check) and is
   revoked when its phase ends.
 - The token value is never logged; log lines carry the execution id only.
@@ -66,6 +68,10 @@ class PlatformTokenGrant(BaseModel):
     execution_id: str
     scope: PlatformScope
     expires_at: datetime
+    # The eval the issuing execution belongs to: the only eval an EVAL token
+    # may launch into or score (#1744). None for READ, and for an EVAL phase
+    # whose execution is in no eval, which therefore can write nothing.
+    eval_id: str | None = None
 
 
 class PlatformTokenStore(Protocol):
@@ -128,7 +134,10 @@ def _hash(token: str) -> str:
 
 
 async def _scope_allows(
-    scope: PlatformScope, method: str, path: str, read_body: Callable[[], Awaitable[bytes]]
+    grant: PlatformTokenGrant,
+    method: str,
+    path: str,
+    read_body: Callable[[], Awaitable[bytes]],
 ) -> bool:
     # Envoy does not normalize paths by default, so a dot or empty segment
     # could name one resource here and route to another downstream.
@@ -138,19 +147,21 @@ async def _scope_allows(
     method = method.upper()
     if method in _READ_METHODS:
         return segments[0] in _READ_RESOURCES
-    if scope is not PlatformScope.EVAL or method != "POST":
+    own_eval = grant.eval_id
+    if grant.scope is not PlatformScope.EVAL or method != "POST" or not own_eval:
         return False
     match segments:
-        case ["evals", _, "runs", _, "score"]:
-            return True
+        case ["evals", eval_id, "runs", _, "score"]:
+            # Which runs belong to `eval_id` is the scoring route's check.
+            return eval_id == own_eval
         case ["workflows", _, "execute"]:
-            return _names_an_eval(await read_body())
+            return _names_eval(await read_body(), own_eval)
         case _:
             return False
 
 
-def _names_an_eval(body: bytes) -> bool:
-    """Whether an execute body launches into an eval it names itself.
+def _names_eval(body: bytes, own_eval: str) -> bool:
+    """Whether an execute body launches into ``own_eval``, naming it itself.
 
     Explicit, not merely "not opted out": with no ``eval_id`` the route falls
     back to the workflow's ``default_eval_id``, and a workflow with none runs
@@ -164,7 +175,7 @@ def _names_an_eval(body: bytes) -> bool:
         named = _EvalNamedInBody.model_validate(json.loads(body))
     except ValueError:  # json.JSONDecodeError and pydantic.ValidationError both
         return False
-    return named.eval_id is not None and named.eval_id.strip() != "" and not named.no_eval
+    return named.eval_id == own_eval and not named.no_eval
 
 
 class _EvalNamedInBody(BaseModel):
@@ -230,8 +241,17 @@ class PlatformTokenService:
         """
         return urlsplit(self._api_url).path.rstrip("/") + "/api/v1"
 
-    async def issue(self, execution_id: str, scope: PlatformScope = PlatformScope.READ) -> str:
-        """Mint a token for one execution's phase. Raises if access is disabled."""
+    async def issue(
+        self,
+        execution_id: str,
+        scope: PlatformScope = PlatformScope.READ,
+        eval_id: str | None = None,
+    ) -> str:
+        """Mint a token for one execution's phase. Raises if access is disabled.
+
+        ``eval_id`` is the eval ``execution_id`` belongs to, and the only one
+        an EVAL token may write to.
+        """
         if self._store is None:
             msg = "platform access is disabled (SYN_PLATFORM_ACCESS_ENABLED=false)"
             raise PermissionError(msg)
@@ -240,22 +260,28 @@ class PlatformTokenService:
             execution_id=execution_id,
             scope=scope,
             expires_at=self._now() + timedelta(seconds=self._max_ttl),
+            eval_id=eval_id,
         )
         await self._store.put(_hash(token), grant, self._max_ttl)
         logger.info("Issued %s platform token for execution %s", scope, execution_id)
         return token
 
     async def grant_workspace(
-        self, execution_id: str, scope: PlatformScope = PlatformScope.READ
+        self,
+        execution_id: str,
+        scope: PlatformScope = PlatformScope.READ,
+        eval_id: str | None = None,
     ) -> WorkspacePlatformGrant | None:
         """A grant of ``scope`` for one workspace, or ``None`` while access is OFF.
 
         ``scope`` is what the phase declared (``platform_access``); a phase
-        that declared nothing is READ.
+        that declared nothing is READ. ``eval_id`` is the eval the execution
+        belongs to, read from its aggregate.
         """
         if self._store is None:
             return None
-        return WorkspacePlatformGrant(self._api_url, await self.issue(execution_id, scope))
+        token = await self.issue(execution_id, scope, eval_id)
+        return WorkspacePlatformGrant(self._api_url, token)
 
     async def bound_to_deadline(self, token: str, deadline: datetime) -> None:
         """Make ``token`` expire no later than ``deadline``. Never extends it.
@@ -304,7 +330,7 @@ class PlatformTokenService:
         grant = await self._store.get(_hash(token))
         if grant is None or grant.expires_at <= self._now():
             return Denial(401, "platform token invalid, expired or revoked")
-        if not await _scope_allows(grant.scope, method, path, read_body):
+        if not await _scope_allows(grant, method, path, read_body):
             return Denial(
                 403, f"platform token scope '{grant.scope}' does not allow {method} {path}"
             )

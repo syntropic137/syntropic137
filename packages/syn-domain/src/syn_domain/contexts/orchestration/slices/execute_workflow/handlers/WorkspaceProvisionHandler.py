@@ -405,6 +405,7 @@ class WorkspaceProvisionHandler:
         inputs: dict[str, object] | None = None,
         pinned_commits: Sequence[SourceCommit] = (),
         continued_branches: Mapping[str, str] | None = None,
+        eval_id: str | None = None,
     ) -> ProvisionResult:
         """Provision workspace for a phase.
 
@@ -426,6 +427,8 @@ class WorkspaceProvisionHandler:
             continued_branches: ``owner/name`` -> the branch to check a pinned
                 repository out ON, at its head, for a phase that continues it
                 (`StartPins.checkout_for`, #1513).
+            eval_id: The eval the execution belongs to, which bounds what an
+                ``eval`` phase's platform token can write (#1744).
         """
         assert todo.phase_id is not None
 
@@ -439,6 +442,7 @@ class WorkspaceProvisionHandler:
             inject_tokens=True,
             capture_session_id=session_id,
             platform_access=phase.platform_access,
+            eval_id=eval_id,
         )
 
         # Enter the async context manager; clean up on any exception (P0: container leak fix)
