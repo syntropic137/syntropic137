@@ -31,6 +31,12 @@
     outcomeRangeStart,
     parseOutcomeRange,
     type OutcomeRange,
+    SEEN_RUNS_STORAGE_KEY,
+    markSeen,
+    parseSeenRuns,
+    seenSignature,
+    seenToggleLabel,
+    splitSeenRuns,
   } from '@syn137/skyline-core/screens/overview'
   import { evalBadge } from '@syn137/skyline-core/screens/executions'
   import { Button, Callout, EmptyState, Skeleton, ToggleGroup } from '@syn137/skyline-svelte-v5'
@@ -73,8 +79,17 @@
   const yearDays = $derived(days.filter((d) => d.date.startsWith(String(year))))
 
   const rows = $derived(runs.data?.executions ?? [])
-  const attention = $derived(attentionRuns(rows))
-  const headline = $derived(overviewHeadline({ running: runningCount(rows), needsLook: attention.length }))
+  // Needs a look (feedback 443e9c0a): chips the viewer opened stay hidden until that run fails again.
+  const ATTENTION = 2
+  let seenRuns = $state<string[]>(parseSeenRuns(readViewer(SEEN_RUNS_STORAGE_KEY)))
+  let showSeen = $state(false)
+  const attentionSplit = $derived(splitSeenRuns(attentionRuns(rows, rows.length), seenRuns))
+  const attention = $derived([...attentionSplit.fresh.slice(0, ATTENTION), ...(showSeen ? attentionSplit.seen : [])])
+  const headline = $derived(overviewHeadline({ running: runningCount(rows), needsLook: Math.min(ATTENTION, attentionSplit.fresh.length) }))
+  function onLooked(r: { workflow_execution_id: string; started_at?: string | null; completed_at?: string | null }) {
+    seenRuns = markSeen(seenRuns, seenSignature(r))
+    writeViewer(SEEN_RUNS_STORAGE_KEY, JSON.stringify(seenRuns))
+  }
   const outcomes = $derived(outcomeCounts(metrics.data?.execution_status_counts))
   const executionsTotal = $derived(runs.data?.total ?? metrics.data?.total_workflows ?? 0)
   const mix = $derived(tokenMix(metrics.data))
@@ -160,7 +175,7 @@
           <ul class="sky-ov-chips" aria-label="Runs that need a look">
             {#each attention as r (r.workflow_execution_id)}
               <li>
-                <a class="sky-ov-chip" href={execHref(r.workflow_execution_id)}>
+                <a class="sky-ov-chip" data-seen={seenRuns.includes(seenSignature(r)) || undefined} href={execHref(r.workflow_execution_id)} onclick={() => onLooked(r)} onauxclick={() => onLooked(r)}>
                   <StatusBadge status={outcomeStatus(r.status, r.failure_classification)} shape="glyph" />
                   <span class="sky-ov-chip__name">{r.workflow_name}</span>
                   <span class="sky-ov-chip__meta">
@@ -170,6 +185,9 @@
               </li>
             {/each}
           </ul>
+        {/if}
+        {#if attentionSplit.seen.length}
+          <button type="button" class="sky-ov-seen" aria-pressed={showSeen} onclick={() => (showSeen = !showSeen)}>{seenToggleLabel(attentionSplit.seen.length, showSeen)}</button>
         {/if}
       </div>
 
@@ -349,6 +367,32 @@
   }
   h1 span {
     color: var(--ds-color-text-subtle);
+  }
+  .sky-ov-chip[data-seen] {
+    opacity: 0.6;
+  }
+  .sky-ov-seen {
+    align-self: flex-start;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--ds-color-text-subtle);
+    font: inherit;
+    font-family: var(--ds-font-mono);
+    font-size: var(--ds-text-xs);
+    cursor: pointer;
+  }
+  .sky-ov-seen:hover {
+    color: var(--ds-color-text-muted);
+  }
+  .sky-ov-seen:focus-visible {
+    outline: var(--sky-focus-ring-width) solid var(--sky-color-focus);
+    outline-offset: var(--sky-focus-ring-offset);
+  }
+  @media (pointer: coarse) {
+    .sky-ov-seen {
+      min-height: var(--sky-size-touch);
+    }
   }
   .sky-ov-chips {
     display: flex;

@@ -7,7 +7,7 @@
  * Screen agents: add rows here (or richer per-screen data in the resource
  * fixture file) rather than inventing disconnected records.
  */
-import { DAY, HOUR, REPO_SANDBOX, REPO_SYN, WEEK, ago, after, fakeId } from './seed'
+import { DAY, HOUR, MINUTE, REPO_SANDBOX, REPO_SYN, WEEK, ago, after, fakeId } from './seed'
 
 export interface CatalogPhase {
   id: string
@@ -111,6 +111,10 @@ export const RUNS: CatalogRun[] = [
   run('failed', 'research-workflow', 1, null, 84_200, 0.05, 44, 6 * HOUR),
   run('completed', 'codex-delegates-to-claude', 1, null, 251_900, 0.31, 64, 11 * HOUR),
   run('completed', 'skills-matrix', 4, null, 112_300, 0.11, 88, 17 * HOUR),
+  // Two fresh failures among the newest runs, so the Overview's "needs a look" chips show (feedback 443e9c0a).
+  // run() staggers each run by its seq; these cancel the stagger to start exactly 12 and 24 minutes ago.
+  run('failed', 'pr-review', 2, REPO_SYN, 96_400, 0.11, 73, 12 * MINUTE - (seq + 1) * 7 * MINUTE),
+  run('failed', 'starter-research', 1, null, 41_800, 0.03, 29, 24 * MINUTE - (seq + 1) * 7 * MINUTE),
 ]
 
 export function workflowOf(id: string): CatalogWorkflow | undefined {
