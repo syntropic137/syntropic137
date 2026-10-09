@@ -679,6 +679,39 @@ class TestGetSessionCosts:
         assert many["s-1"] == await projection.get_session_cost("s-1")
 
     @pytest.mark.asyncio
+    async def test_without_a_pool_it_is_one_keyed_lookup_not_a_read_per_id(
+        self, store: MockProjectionStore
+    ) -> None:
+        reads: list[list[str]] = []
+
+        class _KeyedStore(MockProjectionStore):
+            async def get_many(self, projection_name: str, keys: list[str]) -> dict[str, Any]:
+                reads.append(list(keys))
+                return {k: d for k in keys if (d := await self.get(projection_name, k))}
+
+            async def get(self, projection_name: str, key: str) -> dict[str, Any] | None:
+                return self._data.get(projection_name, {}).get(key)
+
+        keyed = _KeyedStore()
+        for sid in ("s-1", "s-2"):
+            await keyed.save("session_cost", sid, {"session_id": sid})
+        projection = SessionCostProjection(keyed)
+        per_id = 0
+
+        async def counting_get(session_id: str) -> object:
+            nonlocal per_id
+            per_id += 1
+            return None
+
+        projection.get_session_cost = counting_get  # type: ignore[method-assign]  # count per-id reads
+
+        many = await projection.get_session_costs(["s-1", "s-2", "s-none"])
+
+        assert set(many) == {"s-1", "s-2"}
+        assert reads == [["s-1", "s-2", "s-none"]]
+        assert per_id == 0
+
+    @pytest.mark.asyncio
     async def test_with_a_pool_it_is_one_calculate_many_keyed_by_the_given_id(
         self, store: MockProjectionStore, monkeypatch: pytest.MonkeyPatch
     ) -> None:

@@ -36,6 +36,7 @@ from syn_domain.contexts.agent_sessions.slices.session_cost.cost_calculator impo
 from syn_domain.contexts.agent_sessions.slices.session_cost.timescale_query import (
     TimescaleSessionCostQuery,
 )
+from syn_domain.projection_scan import read_by_keys
 from syn_shared.observed_model import RecordedModel, split_observation_model
 from syn_shared.pricing import parse_vendor_cost
 
@@ -433,16 +434,13 @@ class SessionCostProjection:
         What ``get_session_cost`` answers for each id, in one batch of queries
         rather than four round trips per session (#1811). ``calculate`` IS
         ``calculate_many`` of one id, so the two cannot disagree. Without a pool
-        (offline and tests) it asks ``get_session_cost`` per id.
+        (offline and tests) it reads the projection documents by key in one
+        lookup, which is what ``get_session_cost`` reads one at a time.
         """
         wanted = list(dict.fromkeys(session_ids))
         if self._pool is None:
-            found: dict[str, SessionCost] = {}
-            for session_id in wanted:
-                cost = await self.get_session_cost(session_id)
-                if cost is not None:
-                    found[session_id] = cost
-            return found
+            documents = await read_by_keys(self._store, self.PROJECTION_NAME, wanted)
+            return {sid: SessionCost.from_dict(dict(doc)) for sid, doc in documents.items() if doc}
         query = TimescaleSessionCostQuery(self._pool, self._cost_calculator)
         return await query.calculate_many_by_given_id(wanted)
 
