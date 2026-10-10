@@ -35,10 +35,10 @@ pytestmark = pytest.mark.unit
     ("alias", "target", "basis"),
     [
         ("gpt-sol", ModelId.GPT_6_1_SOL, AliasResolutionBasis.TRANSLATED),
-        ("opus", ModelId.CLAUDE_OPUS_5_5, AliasResolutionBasis.EXPECTED),
-        ("sonnet", ModelId.CLAUDE_SONNET_5_5, AliasResolutionBasis.EXPECTED),
-        ("haiku", ModelId.CLAUDE_HAIKU_4_5, AliasResolutionBasis.EXPECTED),
-        ("fable", ModelId.CLAUDE_FABLE_5, AliasResolutionBasis.EXPECTED),
+        ("opus", ModelId.CLAUDE_OPUS_5_5, AliasResolutionBasis.TRANSLATED),
+        ("sonnet", ModelId.CLAUDE_SONNET_5_5, AliasResolutionBasis.TRANSLATED),
+        ("haiku", ModelId.CLAUDE_HAIKU_4_5, AliasResolutionBasis.TRANSLATED),
+        ("fable", ModelId.CLAUDE_FABLE_5, AliasResolutionBasis.TRANSLATED),
     ],
 )
 def test_each_alias_resolves(alias: str, target: ModelId, basis: AliasResolutionBasis) -> None:
