@@ -25,6 +25,8 @@ from syn_domain.contexts.github.slices.evaluate_webhook.EvaluateWebhookHandler i
 )
 from syn_domain.contexts.github.slices.event_pipeline.pipeline import EventPipeline
 
+pytestmark = pytest.mark.unit
+
 
 class FakeClock:
     """Deterministic clock for testing time-dependent behavior."""

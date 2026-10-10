@@ -27,7 +27,6 @@ downloads/
 eggs/
 .eggs/
 lib64/
-parts/
 sdist/
 var/
 wheels/
@@ -141,15 +140,6 @@ id_ed25519.*
 *.temp
 *.log
 
-# Artifacts directory (if storing locally)
-artifacts/
-# But not the domain artifacts bounded context
-!packages/syn-domain/src/syn_domain/contexts/artifacts/
-# And not the adapters artifacts module
-!packages/syn-adapters/src/syn_adapters/artifacts/
-# And not that bounded context's tests
-!packages/syn-domain/tests/contexts/artifacts/
-
 _reference/
 archive/
 
@@ -231,3 +221,9 @@ infra/.environments.lock
 
 # Separate nested git repo, not part of this project
 markdown-explorer/
+
+# One-off eval duplicate migration journal (scripts/migrate_eval_suite_duplicates.py)
+evals/*/migration-journal.jsonl
+
+# Local artifact storage (SYN_STORAGE_LOCAL_PATH default)
+/.artifacts/

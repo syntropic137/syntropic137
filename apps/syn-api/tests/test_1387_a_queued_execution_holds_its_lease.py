@@ -14,9 +14,15 @@ of unspent tickets hits zero, ``PUT /maintenance`` persists and returns, the
 drain sees only terminal executions because B has no stream, and the swap
 cancels B. That is the whole loss this issue exists to prevent, one layer down.
 
-The invariant these tests pin: an admission stays OUTSTANDING until its start
-event is durably written, or it definitively aborts. Nothing in between - and
-certainly not spawning a task - may release it.
+The invariant these tests pin: an admission whose start HOLDS an execution
+slot stays OUTSTANDING until its start event is durably written, or it
+definitively aborts. Nothing in between - and certainly not spawning a task -
+may release it.
+
+#1617 narrowed where the lease begins. A start still QUEUED for a slot no
+longer holds the pause - with every slot busy that pause never returned. It
+re-checks the gate when its slot arrives and, if the pause won, does not start:
+it stays owed in its durable record and is re-offered after the re-open.
 
 Determinism comes from occupying the real semaphore and from ``asyncio.Event``,
 never from sleeps. Both entrances are exercised against their REAL machinery:
@@ -46,9 +52,12 @@ from syn_api.routes.executions import commands
 from syn_api.routes.maintenance import set_maintenance_mode
 from syn_api.types import SetMaintenanceModeRequest
 from syn_domain.contexts._shared import AdmissionGate, AdmissionTicket
-from syn_domain.contexts.orchestration import WorkflowTemplateAggregate
+from syn_domain.contexts.orchestration import TagSet, WorkflowTemplateAggregate
 from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEvent import (
     WorkflowExecutionStartedEvent,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
+    WorkflowExecutionResult,
 )
 from syn_domain.contexts.orchestration.slices.list_executions.projection import (
     WorkflowExecutionListProjection,
@@ -137,7 +146,9 @@ class _StreamOpeningHandler:
     async def validate_stored_declarations(self, _workflow_id: str) -> None:
         return None
 
-    async def handle(self, command: object, *, admitted: AdmissionTicket | None = None) -> None:
+    async def handle(
+        self, command: object, *, admitted: AdmissionTicket | None = None
+    ) -> WorkflowExecutionResult:
         self.reached.set()
         await self.may_open_the_stream.wait()
         execution_id = getattr(command, "execution_id", "") or ""
@@ -147,6 +158,13 @@ class _StreamOpeningHandler:
         self.appended.append(_a_start_event(execution_id))
         if admitted is not None:
             admitted.mark_visible()
+        # Both callers read the result they are given (#1547), as they must.
+        return WorkflowExecutionResult(
+            workflow_id="wf",
+            execution_id=execution_id,
+            status="completed",
+            started_at=datetime(2026, 10, 5, tzinfo=UTC),
+        )
 
 
 class TestATriggeredExecutionQueuedBehindTheSemaphore:
@@ -154,7 +172,11 @@ class TestATriggeredExecutionQueuedBehindTheSemaphore:
     queued behind it, with no stream of its own. The operator's transition must
     not return over B."""
 
-    async def test_the_transition_cannot_return_until_b_opens_its_stream(self) -> None:
+    async def test_the_transition_waits_for_a_and_holds_b_back(self) -> None:
+        """A holds the slot and has not opened its stream: the transition must
+        wait for A (#1387). B is only queued: it must not hold the transition
+        (#1617), and once its slot comes it must not start behind the pause -
+        it is handed back as held, so its record can offer it again."""
         gate = AdmissionGate(InMemoryMaintenanceAdapter())
         handler = _StreamOpeningHandler()
         dispatcher = BackgroundWorkflowDispatcher(
@@ -162,6 +184,10 @@ class TestATriggeredExecutionQueuedBehindTheSemaphore:
             max_concurrent=1,
             maintenance=gate,
         )
+        held: list[str] = []
+
+        async def _held(exc: Exception) -> None:
+            held.append(type(exc).__name__)
 
         # A takes the only permit and sits inside the handler, so anything
         # admitted after it is queued rather than running.
@@ -169,7 +195,7 @@ class TestATriggeredExecutionQueuedBehindTheSemaphore:
         async with asyncio.timeout(_PATIENCE):
             await handler.reached.wait()
 
-        await dispatcher.run_workflow("wf-b", {}, "exec-b")
+        await dispatcher.run_workflow("wf-b", {}, "exec-b", on_held=_held)
         await _let_the_loop_run()
         assert handler.opened == [], "B started; it was supposed to be queued"
 
@@ -177,9 +203,9 @@ class TestATriggeredExecutionQueuedBehindTheSemaphore:
         await _let_the_loop_run()
 
         assert not closing.done(), (
-            "PUT /maintenance returned while an admitted execution was still "
-            "queued behind the semaphore with no stream. The drain would see "
-            "only terminal executions and the swap would kill it (#1387)"
+            "PUT /maintenance returned while A held its slot with no stream. "
+            "The drain would see only terminal executions and the swap would "
+            "kill it (#1387)"
         )
 
         handler.may_open_the_stream.set()
@@ -187,17 +213,20 @@ class TestATriggeredExecutionQueuedBehindTheSemaphore:
             await closing
             await asyncio.gather(*list(dispatcher._tasks), return_exceptions=True)
 
-        assert "exec-b" in handler.opened, (
-            "the transition returned, but B never became durable - the wait "
-            "ended for a reason other than the execution existing"
+        assert handler.opened == ["exec-a"], (
+            "B started after the pause had returned; a queued start must stay "
+            "queued until admission re-opens (#1617)"
+        )
+        assert held == ["MaintenancePausedError"], (
+            "B was neither started nor handed back as held: its record would "
+            "say dispatched over a start that will never run"
         )
 
-        # The deploy's next step. The transition waited for B to be visible,
-        # so once the projection has caught up the drain counts B and the
-        # deploy holds instead of swapping the container out from under it.
+        # The deploy's next step. The transition waited for A to be visible,
+        # so once the projection has caught up the drain counts A.
         drain = _TheDrainsReadModel()
         await drain.catch_up(handler.appended)
-        assert "exec-b" in await drain.active_execution_ids(), (
+        assert "exec-a" in await drain.active_execution_ids(), (
             "the drain cannot see the execution the transition waited for; "
             "the wait protected nothing"
         )
@@ -322,6 +351,9 @@ class _Request:
         default_factory=lambda: ["https://github.com/syntropic137/syntropic137"]
     )
     task: str | None = None
+    tags: TagSet = field(default_factory=TagSet)
+    eval_id: None = None
+    no_eval: bool = False
     provider: str = "claude"
 
 
@@ -357,8 +389,10 @@ class _DelayedExecution:
         task: str | None,
         repos: list[object],
         admitted: AdmissionTicket | None = None,
+        tags: TagSet | None = None,
+        launch_eval: object = None,
     ) -> None:
-        del workflow_id, inputs, task, repos
+        del workflow_id, inputs, task, repos, tags, launch_eval
         self.reached.set()
         await self.may_open_the_stream.wait()
         self.opened.append(execution_id)
@@ -374,6 +408,9 @@ class TestAnHttpExecutionStillInsideItsBackgroundTask:
     async def test_the_transition_cannot_return_until_the_task_opens_its_stream(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """Starlette has run the task and it holds its slot, held before
+        ``journal.open()``. That is admitted and invisible, so it holds the
+        transition (#1387)."""
         import syn_api._wiring_admission as wiring
 
         gate = AdmissionGate(InMemoryMaintenanceAdapter())
@@ -391,23 +428,15 @@ class TestAnHttpExecutionStillInsideItsBackgroundTask:
         )
         assert response.status == "started"
 
+        running = asyncio.create_task(tasks())
+        async with asyncio.timeout(_PATIENCE):
+            await execution.reached.wait()
+
         closing = asyncio.create_task(
             set_maintenance_mode(
                 SetMaintenanceModeRequest(active=True, reason="pit stop", actor="deploy")
             )
         )
-        await _let_the_loop_run()
-
-        assert not closing.done(), (
-            "PUT /maintenance returned after the route had merely queued the "
-            "background task. The caller holds a 200 for an execution with no "
-            "stream, and the drain that follows would not count it (#1387)"
-        )
-
-        # Starlette runs the queued task, but it is held before journal.open().
-        running = asyncio.create_task(tasks())
-        async with asyncio.timeout(_PATIENCE):
-            await execution.reached.wait()
         await _let_the_loop_run()
 
         assert not closing.done(), (
@@ -421,6 +450,44 @@ class TestAnHttpExecutionStillInsideItsBackgroundTask:
             await closing
 
         assert execution.opened == [response.execution_id]
+
+    async def test_a_task_still_queued_does_not_hold_the_transition(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """#1617: queued after the 200 but not yet run, it holds no lease, so
+        the pause returns at once. When Starlette does run it, it is refused at
+        its slot and never starts: its durable request is still owed, and the
+        request ProcessManager offers it again once admission re-opens."""
+        import syn_api._wiring_admission as wiring
+
+        gate = AdmissionGate(InMemoryMaintenanceAdapter())
+        execution = _DelayedExecution()
+        execution.may_open_the_stream.set()
+        monkeypatch.setattr(wiring, "_admission_gate_singleton", gate, raising=False)
+        monkeypatch.setattr(commands, "ensure_connected", _nothing_to_connect)
+        monkeypatch.setattr(commands, "get_workflow_repo", _WorkflowRepo)
+        monkeypatch.setattr(commands, "execute", execution)
+
+        tasks = BackgroundTasks()
+        response = await commands.execute_workflow_endpoint(
+            "wf-ci-self-healing",
+            _Request(),  # type: ignore[arg-type]
+            tasks,
+        )
+
+        async with asyncio.timeout(_PATIENCE):
+            mode = await set_maintenance_mode(
+                SetMaintenanceModeRequest(active=True, reason="pit stop", actor="deploy")
+            )
+        assert mode.active is True
+
+        async with asyncio.timeout(_PATIENCE):
+            await tasks()
+        assert execution.opened == [], "the queued start ran behind the pause (#1617)"
+        assert wiring.get_execution_budget().position(response.execution_id) is None, (
+            "the refused start kept its budget place, so the request "
+            "ProcessManager would skip its owed record for ever"
+        )
 
     async def test_a_task_that_never_starts_an_execution_releases_the_deploy(
         self, monkeypatch: pytest.MonkeyPatch
@@ -447,17 +514,12 @@ class TestAnHttpExecutionStillInsideItsBackgroundTask:
             tasks,
         )
 
-        closing = asyncio.create_task(
-            set_maintenance_mode(
-                SetMaintenanceModeRequest(active=True, reason="pit stop", actor="deploy")
-            )
-        )
-        await _let_the_loop_run()
-        assert not closing.done()
-
+        # It takes its slot - so it leases (#1617) - and then fails.
         async with asyncio.timeout(_PATIENCE):
             await tasks()
-            mode = await closing
+            mode = await set_maintenance_mode(
+                SetMaintenanceModeRequest(active=True, reason="pit stop", actor="deploy")
+            )
 
         assert mode.active is True
         assert mode.since is not None
@@ -488,7 +550,7 @@ class TestAnHttpExecutionStillInsideItsBackgroundTask:
         monkeypatch.setattr(commands, "execute", execution)
 
         tasks = BackgroundTasks()
-        await commands.execute_workflow_endpoint(
+        response = await commands.execute_workflow_endpoint(
             "wf-ci-self-healing",
             _Request(),  # type: ignore[arg-type]
             tasks,
@@ -499,12 +561,9 @@ class TestAnHttpExecutionStillInsideItsBackgroundTask:
                 SetMaintenanceModeRequest(active=True, reason="pit stop", actor="deploy")
             )
         )
-        await _let_the_loop_run()
-        assert not closing.done(), (
-            "the transition returned while the queued task might still run and "
-            "open a stream; the lease was released at the hand-off (#1387)"
-        )
-
+        # #1617: a task that has not taken its slot holds no lease, so the
+        # transition does not wait for it. What must still end is its budget
+        # place, or the request ProcessManager skips the owed record for ever.
         # The response was never sent, so the queued task is discarded unrun.
         del tasks
         gc.collect()
@@ -517,4 +576,7 @@ class TestAnHttpExecutionStillInsideItsBackgroundTask:
         assert execution.opened == [], (
             "the background task ran after all, so this test no longer covers "
             "the case where Starlette never invokes it"
+        )
+        assert wiring.get_execution_budget().position(response.execution_id) is None, (
+            "the discarded task kept its budget place for the life of the process"
         )

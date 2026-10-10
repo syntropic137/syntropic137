@@ -40,11 +40,16 @@ if TYPE_CHECKING:
     from syn_adapters.dedup.memory_dedup import InMemoryDedupAdapter
     from syn_adapters.dedup.postgres_dedup import PostgresDedupAdapter
     from syn_adapters.dedup.redis_dedup import RedisDedupAdapter
+    from syn_adapters.disk_space import StatvfsDiskSpace
     from syn_adapters.events.store import AgentEventStore
+    from syn_adapters.execution_runs import PostgresExecutionRunQueue
+    from syn_adapters.execution_runs.memory import InMemoryExecutionRunQueue
     from syn_adapters.github.checks_api_client import GitHubChecksAPIClient
     from syn_adapters.github.events_api_client import GitHubEventsAPIClient
     from syn_adapters.github.pending_sha_store import InMemoryPendingSHAStore
     from syn_adapters.github.postgres_pending_sha_store import PostgresPendingSHAStore
+    from syn_adapters.github.remote_branch_reader import GitHubRemoteBranchReader
+    from syn_adapters.github.revision_resolver import GitHubRevisionResolver
     from syn_adapters.github.source_commit_resolver import GitHubSourceCommitResolver
     from syn_adapters.maintenance import (
         InMemoryMaintenanceAdapter,
@@ -66,6 +71,7 @@ if TYPE_CHECKING:
     from syn_adapters.session_inventory.history_source import PostgresHistoricalEvidenceSource
     from syn_adapters.session_inventory.local_archive import LocalSessionTranscriptArchive
     from syn_adapters.session_inventory.native_evidence import AgenticNativeSessionEvidence
+    from syn_adapters.session_inventory.phase_delegations import ChildJournalDelegations
     from syn_adapters.session_inventory.postgres_inventory import PostgresSessionInventory
     from syn_adapters.session_inventory.postgres_jobs import PostgresSessionInventoryJobs
     from syn_adapters.session_inventory.postgres_settlements import PostgresSettlementDeadlines
@@ -135,6 +141,7 @@ if TYPE_CHECKING:
     from syn_adapters.workspace_backends.tokens.token_vending_adapter import (
         TokenVendingServiceAdapter,
     )
+    from syn_domain.contexts._shared.disk_space import DiskSpacePort
     from syn_domain.contexts._shared.maintenance import MaintenancePort
     from syn_domain.contexts.agent_sessions.delegate_usage import SessionStorePort
     from syn_domain.contexts.agent_sessions.import_ledger import ImportLedgerPort
@@ -222,11 +229,21 @@ if TYPE_CHECKING:
         ClaudePluginStoragePort,
     )
     from syn_domain.contexts.orchestration.ports.CodexRolloutPort import CodexRolloutPort
+    from syn_domain.contexts.orchestration.ports.DelegationEvidencePort import (
+        DelegationEvidencePort,
+    )
+    from syn_domain.contexts.orchestration.ports.ExecutionRunQueuePort import (
+        ExecutionRunQueue,
+    )
     from syn_domain.contexts.orchestration.ports.GlobalClaudePluginRegistryRepositoryPort import (
         GlobalClaudePluginRegistryRepositoryPort,
     )
     from syn_domain.contexts.orchestration.ports.ObservabilityServicePort import (
         ObservabilityServicePort,
+    )
+    from syn_domain.contexts.orchestration.ports.RemoteBranchPort import RemoteBranchPort
+    from syn_domain.contexts.orchestration.ports.RevisionResolverPort import (
+        RevisionResolverPort,
     )
     from syn_domain.contexts.orchestration.ports.SessionRepositoryPort import (
         SessionRepositoryPort,
@@ -299,6 +316,7 @@ if TYPE_CHECKING:
         memory_injection: MemoryTokenInjectionAdapter,
         workspace: ManagedWorkspace,
         service: WorkspaceService,
+        delegations: ChildJournalDelegations,
     ) -> None:
         """The backends ``WorkspaceService`` composes, and the facade itself.
 
@@ -318,6 +336,7 @@ if TYPE_CHECKING:
         _direct_injection: TokenInjectionPort = direct_injection
         _memory_injection: TokenInjectionPort = memory_injection
         _rollout: CodexRolloutPort = workspace
+        _delegations: DelegationEvidencePort = delegations
         _service: WorkspaceServicePort = service
 
     def _observability(
@@ -353,6 +372,8 @@ if TYPE_CHECKING:
         postgres_pending: PostgresPendingSHAStore,
         memory_pending: InMemoryPendingSHAStore,
         source_commits: GitHubSourceCommitResolver,
+        remote_branches: GitHubRemoteBranchReader,
+        revisions: GitHubRevisionResolver,
     ) -> None:
         """GitHub ingestion and execution control.
 
@@ -363,6 +384,8 @@ if TYPE_CHECKING:
         _events: GitHubEventsAPIPort = events_client
         _checks: GitHubChecksAPIPort = checks_client
         _source_commits: SourceCommitResolverPort = source_commits
+        _remote_branches: RemoteBranchPort = remote_branches
+        _revisions: RevisionResolverPort = revisions
         _redis_dedup: DedupPort = redis_dedup
         _postgres_dedup: DedupPort = postgres_dedup
         _memory_dedup: DedupPort = memory_dedup
@@ -380,6 +403,10 @@ if TYPE_CHECKING:
         _postgres: MaintenancePort = postgres
         _redis: MaintenancePort = redis
         _memory: MaintenancePort = memory
+
+    def _disk_space(statvfs: StatvfsDiskSpace) -> None:
+        """The workspace-volume probe /health and admission both judge (#1560)."""
+        _statvfs: DiskSpacePort = statvfs
 
     def _session_inventory(
         evidence: PostgresSessionEvidence,
@@ -435,3 +462,11 @@ if TYPE_CHECKING:
         _history_receipts: BackfillReceiptPort = history_receipts
         _history_queue: HistoryBackfillQueuePort = history_queue
         _settlements: SessionSettlementPort = settlements
+
+    def _run_queue(
+        postgres: PostgresExecutionRunQueue,
+        memory: InMemoryExecutionRunQueue,
+    ) -> None:
+        """The Run Queue (ADR-072). The double must keep the port, not just Postgres."""
+        _postgres: ExecutionRunQueue = postgres
+        _memory: ExecutionRunQueue = memory

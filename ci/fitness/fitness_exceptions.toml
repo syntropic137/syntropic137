@@ -37,6 +37,9 @@
 allowed_prefixes = [
     "syn_domain.contexts",
     "syn_domain.pagination",
+    "syn_domain.projection_scan",
+    "syn_domain.projection_page",
+    "syn_domain.projection_newest",
     "syn_shared",
     "syn_adapters.projection_stores",
     "time",
@@ -50,6 +53,17 @@ allowed_prefixes = [
 "packages/syn-domain/src/syn_domain/contexts/github/slices/evaluate_webhook/EvaluateWebhookHandler.py" = { variable = "_fire_locks", description = "per-(trigger, pr) asyncio.Lock dict for concurrency guard" }
 "packages/syn-domain/src/syn_domain/contexts/github/slices/evaluate_webhook/debouncer.py" = { variable = "_pending", description = "pending debounce task dict" }
 "packages/syn-domain/src/syn_domain/contexts/github/slices/evaluate_webhook/safety_guards.py" = { variable = "_dispatch_timestamps", description = "dispatch rate limit timestamp list" }
+
+[in_memory_adapters_guarded]
+# Classes that match the in-memory adapter rule but are NOT guarded by
+# InMemoryAdapter / assert_test_only() (ADR-060). See
+# ci/fitness/code_quality/test_in_memory_adapters_are_guarded.py for the rule.
+# A stale entry fails the gate, so this table can only shrink.
+# "<path>::<ClassName>" = { reason = "...", issue = "#NNN" (for real violations) }
+"packages/syn-shared/src/syn_shared/in_memory.py::InMemoryAdapterError" = { reason = "The exception the guard raises, not an adapter. Holds no state." }
+"packages/syn-adapters/src/syn_adapters/workspace_backends/memory/memory_adapter.py::MemoryIsolationState" = { reason = "Per-workspace state record, constructed only inside the guarded MemoryIsolationAdapter. Not an adapter and implements no port." }
+"packages/syn-adapters/src/syn_adapters/workspace_backends/memory/memory_sidecar.py::MemorySidecarState" = { reason = "Per-sidecar state record, constructed only inside the guarded MemorySidecarAdapter. Not an adapter and implements no port." }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/run_todo_fold.py::RunTodoStore" = { reason = "ADR-072 D8: one run's to-do record, a cache derived wholly from the execution's durable events and rebuilt at every claim, so losing it loses nothing. Must construct in production; named in _NAMED_CANDIDATES so a guard added to it fails this entry as stale." }
 
 [aggregate_guards]
 # @command_handler methods exempt from the guard requirement.
@@ -373,11 +387,6 @@ allowed_prefixes = [
 # Pulled in when the gate stopped deciding scope by filename and started
 # reading the dispatch table's shape (#1281 review). Same debt, measured
 # correctly for the first time - never a relaxed ratchet.
-"apps/syn-api/src/syn_api/_wiring.py:_build_context_appendix.param:phase_outputs" = { annotation = "dict[str, str]", verdict = "string-keyed", issue = "#1268" }
-"apps/syn-api/src/syn_api/_wiring.py:_build_workspace_prompt.param:inputs" = { annotation = "dict[str, Any] | None", verdict = "string-keyed", issue = "#1268" }
-"apps/syn-api/src/syn_api/_wiring.py:_build_workspace_prompt.param:phase_outputs" = { annotation = "dict[str, str]", verdict = "string-keyed", issue = "#1268" }
-"apps/syn-api/src/syn_api/_wiring.py:_substitute_inputs.param:inputs" = { annotation = "dict[str, Any] | None", verdict = "string-keyed", issue = "#1268" }
-"apps/syn-api/src/syn_api/_wiring.py:_substitute_inputs.param:phase_outputs" = { annotation = "dict[str, str]", verdict = "string-keyed", issue = "#1268" }
 "apps/syn-api/src/syn_api/routes/capture.py:_counted_loss.param:payload" = { annotation = "Mapping[str, object]", verdict = "string-keyed", issue = "#1268" }
 "apps/syn-api/src/syn_api/routes/capture.py:_parsed_time.param:value" = { annotation = "object", verdict = "undeclared", issue = "#1268" }
 "apps/syn-api/src/syn_api/routes/capture.py:_state_of.param:payload" = { annotation = "Mapping[str, object]", verdict = "string-keyed", issue = "#1268" }
@@ -427,7 +436,6 @@ allowed_prefixes = [
 "packages/syn-domain/src/syn_domain/contexts/github/slices/event_pipeline/dedup_keys.py:_repo_name.param:payload" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
 "packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_workflow_template/WorkflowTemplateAggregate.py:_apply_phase_update.param:data" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
 "packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/SubagentTracker.py:SubagentTracker.on_task_started.param:input_data" = { annotation = "dict[str, Any]", verdict = "string-keyed", issue = "#1268" }
-"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/list_executions/projection.py:WorkflowExecutionListProjection.page.base.param:record" = { annotation = "Mapping[str, object]", verdict = "string-keyed", issue = "#1268" }
 
 [unknown_has_a_representation]
 # Branches that return a real-looking answer after catching an exception (#1341).
@@ -458,7 +466,6 @@ allowed_prefixes = [
 # tool count that reads 0 because agent_events was unreachable. Both render as
 # a real number on the executions page.
 "apps/syn-api/src/syn_api/routes/executions/queries.py:_load_execution_enrichment" = { issue = "#1341" }
-"apps/syn-api/src/syn_api/routes/executions/queries.py:_fetch_tool_counts" = { issue = "#1341" }
 "apps/syn-api/src/syn_api/routes/sessions.py:_load_session_costs" = { issue = "#1341" }
 # The same defect as _load_phase_operations above, duplicated: sessions.py has
 # its own copy of the tool-operations loader, so #1332 fixing one leaves this
@@ -466,9 +473,6 @@ allowed_prefixes = [
 "apps/syn-api/src/syn_api/routes/sessions.py:_load_tool_operations" = { issue = "#1341" }
 # An unreadable capture-observation query makes every phase report no agent
 # session, which the detail page renders as "no session was captured".
-# A GitHub API failure makes an installation report zero accessible repos,
-# which is also what an installation scoped to nothing looks like.
-"apps/syn-api/src/syn_api/routes/github.py:_repos_for_installation" = { issue = "#1341" }
 # The phase-metrics build failing makes a workflow report zero phases.
 "apps/syn-api/src/syn_api/routes/metrics.py:_build_phase_metrics" = { issue = "#1341" }
 # A collection failure makes an unfinished phase report zero artifacts kept,
@@ -490,3 +494,25 @@ allowed_prefixes = [
 # TODO(#1424): the API conversation log parses Claude message content and Codex
 # stream items (imports syn_shared.codex_stream). Predates #1398.
 "apps/syn-api/src/syn_api/routes/conversations.py" = { violations = 1, issue = "#1424" }
+
+[linux_only_constructs]
+# Modules declared Linux-only by design: each uses a /proc or /sys path or a
+# Linux-only syscall/flag on purpose (PC-145). Gate:
+# ci/fitness/code_quality/test_no_linux_only_constructs.py
+#
+# macOS is a supported dev and self-host platform and no CI job runs on it, so
+# this table is the only place a Linux-only construct is seen at all. An entry
+# says WHERE the code runs and why that makes it safe; "it works in CI" is not a
+# reason. Exact paths only. An entry with no reason, or naming a file with no
+# Linux-only construct left, fails the gate, so the table can only shrink.
+# "<path>" = { reason = "..." }
+"apps/syn-api/src/syn_api/services/cpu_throttling.py" = { reason = "Reads cgroup v2 cpu.stat for /health. A missing file is already the 'unknown' status (no cgroup v2, outside a container, or not Linux), so on macOS it reports unknown rather than failing." }
+"apps/syn-api/src/syn_api/services/execution_posture.py" = { reason = "Reads the cgroup v2/v1 memory limit of the API process. Absent files mean no stated limit, which is the macOS answer too: the API's real home is its Linux container." }
+"packages/syn-adapters/src/syn_adapters/diagnostics/signal_capture.py" = { reason = "Reads /proc/uptime to date kernel fault records from /dev/kmsg, both Linux kernel interfaces by nature. Any OSError resolves to None and the record is kept, so it degrades on macOS instead of raising." }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/skill_install.py" = { reason = "The /proc walk is a shell script sent INTO the Linux workspace container to reap a stuck `skills add`. It never runs on the host." }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/unpushed_work_guard.py" = { reason = "`cat /proc/self/mountinfo` is a command executed INSIDE the Linux workspace container to read its mount table. The host's /proc is never touched." }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/test_unpushed_work_guard.py" = { reason = "A fake workspace that matches the in-container `cat /proc/self/mountinfo` argv and answers with a canned table. Never opens /proc, so it runs on macOS." }
+"scripts/e2e_workspace_test.py" = { reason = "`ls /proc` and `cat /proc/self/status` are argv run INSIDE a Docker workspace container to check its process and capability isolation." }
+"scripts/validate_isolation.py" = { reason = "Every /proc and /sys path is a command run INSIDE a Docker workspace container to verify its isolation and cgroup limits; the script inspects the container, not the host." }
+"scripts/tests/test_eval_suite.py" = { reason = "Prose in an eval fixture describing a finding (a credential visible in /proc/<pid>/cmdline). No code opens it." }
+".claude/hooks/validators/security/file.py" = { reason = "A denylist of paths an agent may not read; /proc/ and /sys/ are entries to refuse, not paths this hook opens." }

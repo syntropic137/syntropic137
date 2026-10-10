@@ -45,6 +45,13 @@ export interface paths {
          *
          *     Archived templates are excluded from listing by default but remain
          *     accessible via `GET /workflows/{id}` and with `?include_archived=true`.
+         *
+         *     ``expected_package_name`` makes the archive conditional on the current
+         *     aggregate still attributing the workflow to that package (#1588). A prune
+         *     picks candidates from `GET /workflows/{id}`, a read model that can lag;
+         *     this check is made against the aggregate at the moment of archive, so a
+         *     workflow reinstalled by another package is refused with 409 however stale
+         *     that read was.
          */
         delete: operations["delete_workflow_endpoint_workflows__workflow_id__delete"];
         options?: never;
@@ -92,6 +99,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/workflows/{workflow_id}/trend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Workflow Trend Endpoint
+         * @description The workflow's executions as trend points, newest first, with its definition changes.
+         *
+         *     One row per execution: date, status, cost, duration, tokens and how long
+         *     each phase took. The workflow id may be a unique prefix.
+         */
+        get: operations["get_workflow_trend_endpoint_workflows__workflow_id__trend_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/workflows/{workflow_id}/history": {
         parameters: {
             query?: never;
@@ -104,6 +134,26 @@ export interface paths {
          * @description DEPRECATED: Use /workflows/{workflow_id}/runs instead.
          */
         get: operations["get_workflow_history_endpoint_workflows__workflow_id__history_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workflows/{workflow_id}/latest-outputs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Workflow Latest Outputs Endpoint
+         * @description Each phase's latest output: its newest primary deliverable across all runs.
+         */
+        get: operations["get_workflow_latest_outputs_endpoint_workflows__workflow_id__latest_outputs_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -180,6 +230,10 @@ export interface paths {
          *     refused with 409 unless ``force`` is set, and a matching version that
          *     resolves to a different digest is refused regardless of how it looks,
          *     because that is the signature of a republished version.
+         *
+         *     ``package_name`` records which package installed the definition (#1588).
+         *     It is read back on ``GET /workflows/{id}`` so ``syn workflow install
+         *     --prune`` archives only what the server attributes to that package.
          */
         post: operations["create_workflow_from_yaml_endpoint_workflows_from_yaml_post"];
         delete?: never;
@@ -301,7 +355,7 @@ export interface paths {
         put?: never;
         /**
          * Cancel Execution Endpoint
-         * @description Cancel a running execution.
+         * @description Cancel an execution, or withdraw a start still queued for one (#1650).
          */
         post: operations["cancel_execution_endpoint_executions__execution_id__cancel_post"];
         delete?: never;
@@ -559,6 +613,230 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/executions/{execution_id}/tags": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add Execution Tags Endpoint
+         * @description Add tags to an execution, retroactively. Its inherited tags are never changed.
+         */
+        post: operations["add_execution_tags_endpoint_executions__execution_id__tags_post"];
+        /**
+         * Remove Execution Tags Endpoint
+         * @description Remove tags from an execution. Removing an inherited tag leaves `inherited_tags` alone.
+         */
+        delete: operations["remove_execution_tags_endpoint_executions__execution_id__tags_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workflows/{workflow_id}/tags": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add Workflow Tags Endpoint
+         * @description Add tags to a workflow. Future runs inherit them; existing runs keep their own.
+         */
+        post: operations["add_workflow_tags_endpoint_workflows__workflow_id__tags_post"];
+        /**
+         * Remove Workflow Tags Endpoint
+         * @description Remove tags from a workflow. Existing runs keep the tags they launched with.
+         */
+        delete: operations["remove_workflow_tags_endpoint_workflows__workflow_id__tags_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/executions/{execution_id}/eval": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Attach Execution To Eval Endpoint
+         * @description Attach an execution to an eval, in any status. Never copies the eval's baseline.
+         */
+        post: operations["attach_execution_to_eval_endpoint_executions__execution_id__eval_post"];
+        /**
+         * Detach Execution From Eval Endpoint
+         * @description Detach an execution from its eval. The launch record (`launched_eval_id`) is kept.
+         */
+        delete: operations["detach_execution_from_eval_endpoint_executions__execution_id__eval_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workflows/{workflow_id}/default-eval": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Workflow Default Eval Endpoint
+         * @description Set or clear the eval a workflow's runs join when the launch names none.
+         */
+        put: operations["set_workflow_default_eval_endpoint_workflows__workflow_id__default_eval_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/evals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Evals Endpoint
+         * @description List evals, newest first, each with its run count and status tally.
+         */
+        get: operations["list_evals_endpoint_evals_get"];
+        put?: never;
+        /**
+         * Create Eval Endpoint
+         * @description Create an eval, pinning each baseline ref to a commit SHA. The id is minted here.
+         */
+        post: operations["create_eval_endpoint_evals_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/evals/{eval_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Eval Endpoint
+         * @description One eval with its Baseline and run tally. Its runs are `GET /evals/{eval_id}/runs`.
+         */
+        get: operations["get_eval_endpoint_evals__eval_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/evals/{eval_id}/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Eval Runs Endpoint
+         * @description The executions currently in an eval, newest first, each with what it ran and its score.
+         *
+         *     The eval id may be a unique prefix, as on `GET /evals/{eval_id}`; an id
+         *     matching no eval is a 404. An eval with no runs is an empty page.
+         */
+        get: operations["list_eval_runs_endpoint_evals__eval_id__runs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/evals/{eval_id}/trend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Eval Trend Endpoint
+         * @description The eval's current runs as trend points, newest first, with its definition changes.
+         *
+         *     One row per run: date, verifier and judge model, score (0 to 100), verdict,
+         *     cost, duration and tokens. The same runs as `GET /evals/{eval_id}/runs`.
+         */
+        get: operations["get_eval_trend_endpoint_evals__eval_id__trend_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/evals/{eval_id}/runs/{execution_id}/score": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Score Eval Run Endpoint
+         * @description Record a verdict on one run. Re-scoring replaces the run's current score.
+         *
+         *     Allowed on frozen and archived evals: judging a run is not editing the eval.
+         */
+        post: operations["score_eval_run_endpoint_evals__eval_id__runs__execution_id__score_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/evals/{eval_id}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Archive Eval Endpoint
+         * @description Archive an eval: it stays readable with its runs, and admits no new ones. Idempotent.
+         */
+        post: operations["archive_eval_endpoint_evals__eval_id__archive_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/sessions": {
         parameters: {
             query?: never;
@@ -675,6 +953,30 @@ export interface paths {
          * @description Get artifact content only (for large artifacts).
          */
         get: operations["get_artifact_content_endpoint_artifacts__artifact_id__content_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/artifacts/{artifact_id}/raw": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Artifact Raw Endpoint
+         * @description Get artifact content as stored, byte-for-byte, under its own content type.
+         *
+         *     The way to fetch a binary artifact - a screenshot, a PDF - which has no
+         *     text form for the JSON endpoints to carry (#990). Text artifacts are
+         *     served the same way, as their UTF-8 bytes.
+         */
+        get: operations["get_artifact_raw_endpoint_artifacts__artifact_id__raw_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -944,6 +1246,56 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/metrics/phase-profiles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Phase Profiles Endpoint
+         * @description Per phase type and model: p50/p90 tokens and cost; per phase type: p50/p95 resources.
+         *
+         *     Sizes the capacity model and the execution budget from what phases of
+         *     this workflow actually used (#1716). Every percentile is over every phase
+         *     in the window; below ten phases it reads ``insufficient``.
+         */
+        get: operations["get_phase_profiles_endpoint_metrics_phase_profiles_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/metrics/shipped": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Shipped Metrics Endpoint
+         * @description What agents shipped over the last ``days`` UTC days, against the ``days`` before.
+         *
+         *     Agent-attributed only, read from the shipped ledger's daily rollup: commits
+         *     runs made, PRs runs created (a successful ``gh pr create``), merges of
+         *     those PRs (``pull_request`` closed+merged events from the GitHub
+         *     pipeline), merge rate as the share of the window's opened PRs merged by
+         *     now, and the repos all of that touched.
+         */
+        get: operations["get_shipped_metrics_endpoint_metrics_shipped_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/capture/status": {
         parameters: {
             query?: never;
@@ -996,6 +1348,29 @@ export interface paths {
          * @description Get token usage metrics for a session.
          */
         get: operations["get_token_metrics_endpoint_observability_sessions__session_id__tokens_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/observability/latency": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Request Latency
+         * @description Exact p50/p95/p99, max and count of arrival-to-response-start latency per (method, route template).
+         *
+         *     Read from ``api_request_latency`` (Lane 2, ADR-075). Every API process
+         *     records its own requests; ``recorder`` describes THIS process's only.
+         */
+        get: operations["get_request_latency_observability_latency_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1215,11 +1590,16 @@ export interface paths {
          * List Accessible Repos Endpoint
          * @description List repositories accessible to the GitHub App.
          *
-         *     Queries all active installations and aggregates results when no
-         *     installation_id is provided. The installation list is cached locally with
-         *     a 1-hour TTL: if empty or stale, it bootstraps automatically from the
-         *     GitHub API without requiring a webhook URL. Stale data is kept as a
-         *     fallback if the GitHub API is unreachable during refresh.
+         *     With no installation_id, aggregates every installation and never waits on
+         *     GitHub. The last complete listing is cached and served as ``complete``
+         *     while under a minute old, as ``partial`` once older, with a background
+         *     refresh behind it. With no listing cached the answer is ``unavailable``
+         *     while a background refresh fetches one. The GitHub App's ``installation``
+         *     and ``installation_repositories`` webhooks invalidate the cache at once. A
+         *     single installation_id is always asked live.
+         *
+         *     ``lookup`` says whether a repo missing from ``repos`` is known to be out of
+         *     the App's reach (``complete``) or merely went unseen because GitHub failed.
          */
         get: operations["list_accessible_repos_endpoint_github_repos_get"];
         put?: never;
@@ -1962,6 +2342,11 @@ export interface paths {
          *     still asleep and nothing else will re-offer them, so reporting success here
          *     would close the deploy over work that never runs. Repeating the clear
          *     re-announces, which is why this is a retryable status and not a 500.
+         *
+         *     Pausing waits only for starts that already hold an execution slot and have
+         *     not written their start event, and only for a bound (#1617). Starts queued
+         *     for a slot stay queued and start after the clear. A pause that runs out of
+         *     that bound answers 503 with the flag NOT set: admission is still open.
          */
         put: operations["set_maintenance_mode_maintenance_put"];
         post?: never;
@@ -2143,6 +2528,12 @@ export interface paths {
         /**
          * Health
          * @description Health check endpoint with detailed subscription status.
+         *
+         *     This is the container's LIVENESS check (#1575): while the gate withholds
+         *     the API it answers 200 with the gate's phase - "starting", or "failed"
+         *     in the moment between a late startup failure and the process exiting -
+         *     without probing anything startup has not built. "healthy" is what
+         *     readiness waits for, so it is only ever said once the gate is ready.
          */
         get: operations["health_health_get"];
         put?: never;
@@ -2199,6 +2590,17 @@ export interface components {
             name: string;
             /** Version */
             version: string;
+        };
+        /**
+         * AddTagsRequest
+         * @description Tags to add to an execution or a workflow. Adds only: never replaces the set.
+         */
+        AddTagsRequest: {
+            /**
+             * Tags
+             * @description Tags to add. Normalised (trimmed, lowercased, deduped); an invalid tag is rejected with 422 and nothing is written. Tags already present are a no-op.
+             */
+            tags: string[];
         };
         /**
          * AliasResolutionBasis
@@ -2355,6 +2757,14 @@ export interface components {
             system_id: string;
         };
         /**
+         * AttachEvalRequest
+         * @description The eval to attach an execution to (#967).
+         */
+        AttachEvalRequest: {
+            /** @description The eval to attach to. It must exist and not be archived. Attaching to the eval the run already belongs to is a no-op; another eval needs a detach first. */
+            eval_id: components["schemas"]["EvalId"];
+        };
+        /**
          * BodyAvailability
          * @enum {string}
          */
@@ -2419,8 +2829,8 @@ export interface components {
          *     twenty releases behind the installed package.
          *
          *     The release and its status come from ``_NamesTheRunningRelease``. What this
-         *     model adds is the two build-time stamps, which only an image can supply and
-         *     only ``/health`` reports.
+         *     model adds is the two build-time stamps, which only an image can supply,
+         *     and when this process went live, which only the process can.
          */
         BuildInfo: {
             /**
@@ -2439,11 +2849,22 @@ export interface components {
              */
             commit?: string | null;
             /**
+             * Started At
+             * Format: date-time
+             * @description When this API process started (UTC, ISO 8601): the moment the running deployment went live. Captured once per process, so it changes only when the process is replaced, which is what a redeploy does.
+             */
+            started_at: string;
+            /**
              * Version Status
              * @description Whether the running release could be read at all. 'installed' means version names the distribution this process was installed from; 'unavailable' means the distribution's metadata could not be read, version is null, and nothing has been invented to fill it.
              * @enum {string}
              */
             readonly version_status: "installed" | "unavailable";
+            /**
+             * Started At Display
+             * @description started_at as an absolute UTC label, e.g. '2026-10-04 06:47 UTC'. Relative and local-time renderings are the client's to make from started_at.
+             */
+            readonly started_at_display: string;
         };
         /**
          * CancelRequest
@@ -2757,7 +3178,7 @@ export interface components {
             size_bytes?: number | null;
             /**
              * Model Display
-             * @description The model for humans: the reported id verbatim, or 'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9).
+             * @description The model for humans: the reported id verbatim, or '<alias> (requested)', or 'unknown' (ADR-067 D9).
              */
             readonly model_display: string;
         };
@@ -2803,10 +3224,46 @@ export interface components {
             executed_at: string;
         };
         /**
+         * CostSplitBasis
+         * @description How a cost-by-token-type breakdown was arrived at.
+         *
+         *     The two are not equally strong claims, so a client must be able to tell
+         *     them apart and label the second one.
+         * @enum {string}
+         */
+        CostSplitBasis: "rate_table" | "allocated";
+        /**
          * CoverageState
          * @enum {string}
          */
         CoverageState: "unknown" | "open" | "reconciled" | "missing" | "unsupported" | "conflicting";
+        /**
+         * CpuThrottling
+         * @description CPU throttling of the process answering /health, since its cgroup was created.
+         */
+        CpuThrottling: {
+            /**
+             * Status
+             * @description 'measured' when cgroup v2 cpu.stat reported throttling counters; 'unknown' on cgroup v1, outside a container, or with no CPU limit set. Unknown is not zero: the counters are null, not 0.
+             * @enum {string}
+             */
+            status: "measured" | "unknown";
+            /**
+             * Nr Periods
+             * @description Scheduling periods in which this cgroup was runnable.
+             */
+            nr_periods?: number | null;
+            /**
+             * Nr Throttled
+             * @description Periods in which the cgroup hit its CPU limit and was held back. nr_throttled / nr_periods is the share of time the control plane was starved.
+             */
+            nr_throttled?: number | null;
+            /**
+             * Throttled Usec
+             * @description Total time spent throttled, in microseconds.
+             */
+            throttled_usec?: number | null;
+        };
         /** CreateArtifactRequest */
         CreateArtifactRequest: {
             /** Workflow Id */
@@ -2837,6 +3294,28 @@ export interface components {
             artifact_type: string;
             /** Status */
             status: string;
+        };
+        /**
+         * CreateEvalRequest
+         * @description A new eval (#967). The server mints its id; see `EvalCreatedResponse`.
+         */
+        CreateEvalRequest: {
+            /** Name */
+            name: string;
+            /**
+             * Goal
+             * @description What the eval sets out to measure.
+             */
+            goal: string;
+            /**
+             * Starting Workflow Id
+             * @description The workflow a run uses when it names none.
+             */
+            starting_workflow_id?: string | null;
+            /** Baseline Repos */
+            baseline_repos?: components["schemas"]["EvalBaselineRepoRequest"][];
+            /** Tags */
+            tags?: string[];
         };
         /**
          * CreateOrganizationRequest
@@ -2959,19 +3438,600 @@ export interface components {
             warnings?: string[];
         };
         /**
+         * DbPoolHealth
+         * @description One Postgres connection pool in this API process, at the moment of asking (#1583).
+         *
+         *     ``waiting`` greater than zero, or ``in_use`` equal to ``max_size``, means
+         *     requests are queueing for a connection rather than for the database itself.
+         */
+        DbPoolHealth: {
+            /**
+             * Name
+             * @description What the pool serves, e.g. 'projections' or 'agent_events'.
+             */
+            name: string;
+            /**
+             * Size
+             * @description Connections currently open.
+             */
+            size: number;
+            /**
+             * Max Size
+             * @description Most connections the pool will open.
+             */
+            max_size: number;
+            /**
+             * In Use
+             * @description Connections checked out right now.
+             */
+            in_use: number;
+            /**
+             * Waiting
+             * @description Callers blocked waiting for a connection right now.
+             */
+            waiting: number;
+        };
+        /**
+         * DeclaredSkillResponse
+         * @description A skill a workflow declares, once, and where it declares it.
+         *
+         *     On the workflow LIST so a card can draw its skill chips without one detail
+         *     request per workflow. Same ref shape as a phase's ``skills`` entry, so a
+         *     client matches a chip to a phase by comparing the ref fields.
+         */
+        DeclaredSkillResponse: {
+            /** Source Url */
+            source_url?: string | null;
+            /** Name */
+            name?: string | null;
+            /** Version */
+            version?: string | null;
+            /**
+             * Name Overridden
+             * @default false
+             */
+            name_overridden: boolean;
+            /** Raw */
+            raw?: string | null;
+            /** Phase Ids */
+            phase_ids?: string[];
+            /**
+             * Workflow Scope
+             * @default false
+             */
+            workflow_scope: boolean;
+        };
+        /**
+         * DefinitionChangeKind
+         * @description What changed the definition.
+         * @enum {string}
+         */
+        DefinitionChangeKind: "created" | "updated" | "phase_updated";
+        /**
+         * DefinitionChangeResponse
+         * @description A change to an eval's or workflow's definition: a trend chart's annotation (#1788).
+         */
+        DefinitionChangeResponse: {
+            /** Definition Version */
+            definition_version: string | null;
+            /** Changed At */
+            changed_at: string;
+            kind: components["schemas"]["DefinitionChangeKind"];
+        };
+        /**
          * DegradedReason
          * @description Reasons the API may enter degraded mode.
          *
          *     StrEnum so values serialize directly to JSON in health responses.
          * @enum {string}
          */
-        DegradedReason: "artifact_storage" | "claude_plugin_storage" | "skill_storage" | "conversation_storage" | "ui_feedback" | "subscription_coordinator" | "projection_catchup" | "projection_stalled" | "event_poller" | "check_run_poller" | "anthropic_api_key" | "github_app";
+        DegradedReason: "artifact_storage" | "claude_plugin_storage" | "skill_storage" | "conversation_storage" | "ui_feedback" | "subscription_coordinator" | "projection_catchup" | "projection_stalled" | "projection_dropped_event" | "projection_held" | "subscription_halted" | "event_poller" | "check_run_poller" | "anthropic_api_key" | "github_app" | "disk_space";
+        /**
+         * DelegationAttempt
+         * @description One delegate the phase's agent launched, as the platform observed it.
+         */
+        DelegationAttempt: {
+            /** Delegate Id */
+            delegate_id: string;
+            /** Target Harness */
+            target_harness: string;
+            outcome: components["schemas"]["DelegationOutcome"] | null;
+            /** Exit Code */
+            exit_code?: number | null;
+            /** Reason */
+            reason?: string | null;
+        };
+        /**
+         * DelegationFailure
+         * @description The typed account of a failed required delegation.
+         */
+        DelegationFailure: {
+            reason: components["schemas"]["DelegationFailureReason"];
+            /** Required Delegate */
+            required_delegate?: string | null;
+            /**
+             * Attempts
+             * @default []
+             */
+            attempts: components["schemas"]["DelegationAttempt"][];
+            /** Detail */
+            detail?: string | null;
+        };
+        /**
+         * DelegationFailureReason
+         * @description Why a required delegation is counted as not having happened.
+         * @enum {string}
+         */
+        DelegationFailureReason: "not_attempted" | "failed" | "unverifiable";
+        /**
+         * DelegationOutcome
+         * @description How a delegated run ended, in provider-neutral terms.
+         *
+         *     WHY NOT A BARE EXIT CODE (raised in review of this event): an integer exit
+         *     status is shell-specific baggage. The native same-harness fan-out path
+         *     reports a boolean success and has no process to exit; cancellation and
+         *     timeout have no natural integer either. Since these events are v1 and this
+         *     repo has no upcaster framework, encoding a shell assumption now would need
+         *     a v2 to undo.
+         * @enum {string}
+         */
+        DelegationOutcome: "succeeded" | "failed" | "cancelled" | "timed_out";
         /** DeleteWorkflowResponse */
         DeleteWorkflowResponse: {
             /** Workflow Id */
             workflow_id: string;
             /** Status */
             status: string;
+        };
+        /**
+         * DiskSpaceHealth
+         * @description Free space on the workspace volume, as /health reports it (#1560).
+         */
+        DiskSpaceHealth: {
+            /**
+             * Path
+             * @description Directory whose filesystem was measured.
+             */
+            path: string;
+            /**
+             * State
+             * @description 'low' degrades /health; 'critical' also refuses new executions.
+             * @enum {string}
+             */
+            state: "ok" | "unmeasurable" | "low" | "critical";
+            /**
+             * Free Percent
+             * @description Percent free; null when unmeasurable.
+             */
+            free_percent: number | null;
+            /**
+             * Free Bytes
+             * @description Bytes available; null when unmeasurable.
+             */
+            free_bytes: number | null;
+            /**
+             * Degraded Below Percent
+             * @description SYN_DISK_DEGRADED_BELOW_PERCENT.
+             */
+            degraded_below_percent: number;
+            /**
+             * Refuse Admission Below Percent
+             * @description SYN_DISK_REFUSE_ADMISSION_BELOW_PERCENT.
+             */
+            refuse_admission_below_percent: number;
+        };
+        /**
+         * EvalArchivedResponse
+         * @description The receipt for an archive, read from the Eval aggregate (#967).
+         */
+        EvalArchivedResponse: {
+            /** Eval Id */
+            eval_id: string;
+            /** Archived */
+            archived: boolean;
+        };
+        /**
+         * EvalBaselineRepoRequest
+         * @description One repository of a new eval's Baseline, before its ref is pinned (#967).
+         */
+        EvalBaselineRepoRequest: {
+            /**
+             * Repository
+             * @description The repository, as an `owner/name` slug.
+             */
+            repository: string;
+            /**
+             * Requested Ref
+             * @description A branch, tag or commit. Resolved once, at create, to a full commit SHA; every run starts from that SHA even after the branch or tag moves.
+             */
+            requested_ref: string;
+        };
+        /**
+         * EvalBaselineRepoResponse
+         * @description One repository of an eval's Baseline: the ref asked for and the SHA it pinned to.
+         */
+        EvalBaselineRepoResponse: {
+            /** Repository */
+            repository: string;
+            /** Requested Ref */
+            requested_ref: string;
+            /** Commit Sha */
+            commit_sha: string;
+        };
+        /**
+         * EvalCreatedResponse
+         * @description The receipt for a create, read from the Eval aggregate, never a projection (#967).
+         *
+         *     The eval list and `GET /evals/{eval_id}` are read models and may not show
+         *     the eval for a moment after this returns. That is lag, not a failed create:
+         *     `eval_id` is authoritative from here on.
+         */
+        EvalCreatedResponse: {
+            /** Eval Id */
+            eval_id: string;
+            /** Name */
+            name: string;
+            /** Goal */
+            goal: string;
+            /** Starting Workflow Id */
+            starting_workflow_id: string | null;
+            /** Baseline Repos */
+            baseline_repos: components["schemas"]["EvalBaselineRepoResponse"][];
+            /** Tags */
+            tags: string[];
+        };
+        /**
+         * EvalDetailResponse
+         * @description One eval, as `GET /evals/{eval_id}` returns it.
+         *
+         *     The row model plus whether the evals read model is rebuilding, so a
+         *     missing or stale eval can say why. Kept off `EvalResponse` so every list
+         *     row does not repeat the list's own status.
+         */
+        EvalDetailResponse: {
+            /** Eval Id */
+            eval_id: string;
+            /** Name */
+            name: string;
+            /** Goal */
+            goal: string;
+            /** Starting Workflow Id */
+            starting_workflow_id: string | null;
+            /** Baseline Repos */
+            baseline_repos: components["schemas"]["EvalBaselineRepoResponse"][];
+            /** Tags */
+            tags: string[];
+            /** Frozen */
+            frozen: boolean;
+            /** Archived */
+            archived: boolean;
+            /** Created At */
+            created_at: string | null;
+            /** Updated At */
+            updated_at: string | null;
+            /** Run Count */
+            run_count: number;
+            /** Run Status Counts */
+            run_status_counts: {
+                [key: string]: number;
+            };
+            /**
+             * Scored Count
+             * @default 0
+             */
+            scored_count: number;
+            /** Pass Rate */
+            pass_rate?: number | null;
+            /**
+             * Pass Rate Display
+             * @default —
+             */
+            pass_rate_display: string;
+            /** Last Run At */
+            last_run_at?: string | null;
+            last_verdict?: components["schemas"]["Verdict"] | null;
+            /** Variants */
+            variants?: components["schemas"]["EvalVariantResponse"][];
+            stats: components["schemas"]["EvalRunStatsResponse"];
+            read_model_status?: components["schemas"]["ReadModelStatus"] | null;
+        };
+        /**
+         * EvalId
+         * @description The identity of one eval, and the id of its stream.
+         */
+        EvalId: string;
+        /**
+         * EvalListResponse
+         * @description One page of evals, newest first (#967).
+         */
+        EvalListResponse: {
+            /** Evals */
+            evals: components["schemas"]["EvalResponse"][];
+            /** Total */
+            total: number;
+            /** Page */
+            page: number;
+            /** Page Size */
+            page_size: number;
+            /** Status Counts */
+            status_counts: {
+                [key: string]: number;
+            };
+            read_model_status?: components["schemas"]["ReadModelStatus"] | null;
+        };
+        /**
+         * EvalResponse
+         * @description An eval as the eval read model holds it, with its run tally (#967).
+         */
+        EvalResponse: {
+            /** Eval Id */
+            eval_id: string;
+            /** Name */
+            name: string;
+            /** Goal */
+            goal: string;
+            /** Starting Workflow Id */
+            starting_workflow_id: string | null;
+            /** Baseline Repos */
+            baseline_repos: components["schemas"]["EvalBaselineRepoResponse"][];
+            /** Tags */
+            tags: string[];
+            /** Frozen */
+            frozen: boolean;
+            /** Archived */
+            archived: boolean;
+            /** Created At */
+            created_at: string | null;
+            /** Updated At */
+            updated_at: string | null;
+            /** Run Count */
+            run_count: number;
+            /** Run Status Counts */
+            run_status_counts: {
+                [key: string]: number;
+            };
+            /**
+             * Scored Count
+             * @default 0
+             */
+            scored_count: number;
+            /** Pass Rate */
+            pass_rate?: number | null;
+            /**
+             * Pass Rate Display
+             * @default —
+             */
+            pass_rate_display: string;
+            /** Last Run At */
+            last_run_at?: string | null;
+            last_verdict?: components["schemas"]["Verdict"] | null;
+            /** Variants */
+            variants?: components["schemas"]["EvalVariantResponse"][];
+            stats: components["schemas"]["EvalRunStatsResponse"];
+        };
+        /**
+         * EvalRunListResponse
+         * @description One page of an eval's current runs, newest first (Evals v2).
+         */
+        EvalRunListResponse: {
+            /** Items */
+            items: components["schemas"]["EvalRunResponse"][];
+            /** Total */
+            total: number;
+            /** Page */
+            page: number;
+            /** Page Size */
+            page_size: number;
+        };
+        /**
+         * EvalRunModelResponse
+         * @description The model one phase of a run ACTUALLY ran, as its harness reported it.
+         */
+        EvalRunModelResponse: {
+            /** Phase Id */
+            phase_id: string;
+            /** Model */
+            model: string;
+        };
+        /**
+         * EvalRunResponse
+         * @description One run of an eval: one data point of how the eval changes over time (Evals v2).
+         */
+        EvalRunResponse: {
+            /** Execution Id */
+            execution_id: string;
+            /** Started At */
+            started_at: string | null;
+            /** Completed At */
+            completed_at: string | null;
+            /** Status */
+            status: string;
+            /** Workflow Id */
+            workflow_id: string;
+            /** Workflow Version */
+            workflow_version?: string | null;
+            /** Models */
+            models: components["schemas"]["EvalRunModelResponse"][];
+            /** Total Cost Usd */
+            total_cost_usd: string | null;
+            /** Total Cost Display */
+            total_cost_display: string;
+            /** Duration Seconds */
+            duration_seconds: number | null;
+            /** Duration Display */
+            duration_display: string;
+            verdict: components["schemas"]["Verdict"] | null;
+            /** Score */
+            score: number | null;
+            /** Evidence Excerpt */
+            evidence_excerpt: string | null;
+            /** Scorer */
+            scorer: string | null;
+            /** Scorer Version */
+            scorer_version: string | null;
+            /** Scored At */
+            scored_at: string | null;
+            /** Judge Model */
+            judge_model?: string | null;
+        };
+        /**
+         * EvalRunScoreRequest
+         * @description A scorer's verdict on one run of an eval. Re-scoring replaces the current score.
+         */
+        EvalRunScoreRequest: {
+            verdict: components["schemas"]["Verdict"];
+            /** Score */
+            score?: number | null;
+            /**
+             * Evidence
+             * @default
+             */
+            evidence: string;
+            /** Scorer */
+            scorer: string;
+            /** Scorer Version */
+            scorer_version: string;
+            /** Judge Model */
+            judge_model?: string | null;
+        };
+        /**
+         * EvalRunScoreResponse
+         * @description The run's score as recorded (Evals v2).
+         */
+        EvalRunScoreResponse: {
+            /** Eval Id */
+            eval_id: string;
+            /** Execution Id */
+            execution_id: string;
+            verdict: components["schemas"]["Verdict"];
+            /** Score */
+            score: number | null;
+            /** Evidence */
+            evidence: string;
+            /** Scorer */
+            scorer: string;
+            /** Scorer Version */
+            scorer_version: string;
+            /** Scored At */
+            scored_at: string;
+            /** Judge Model */
+            judge_model?: string | null;
+        };
+        /**
+         * EvalRunStatsResponse
+         * @description How long a set of an eval's runs took and what it cost, over EVERY run in the set.
+         *
+         *     Medians, not means: one runaway run should not make a variant look slow.
+         */
+        EvalRunStatsResponse: {
+            /** Median Duration Seconds */
+            median_duration_seconds: number | null;
+            /** Median Duration Display */
+            median_duration_display: string;
+            /** Incomplete Duration Count */
+            incomplete_duration_count: number;
+            /** Median Cost Usd */
+            median_cost_usd: string | null;
+            /** Median Cost Display */
+            median_cost_display: string;
+            /** Incomplete Cost Count */
+            incomplete_cost_count: number;
+            /** Cost Per Pass Usd */
+            cost_per_pass_usd: string | null;
+            /** Cost Per Pass Display */
+            cost_per_pass_display: string;
+        };
+        /**
+         * EvalTrendPointResponse
+         * @description One run of an eval as one point on its trend charts (#1788).
+         */
+        EvalTrendPointResponse: {
+            /** Execution Id */
+            execution_id: string;
+            /** Date */
+            date: string | null;
+            /** Workflow Id */
+            workflow_id: string;
+            /** Workflow Version */
+            workflow_version: string | null;
+            /** Eval Definition Version */
+            eval_definition_version: string | null;
+            /** Verifier Model */
+            verifier_model: string | null;
+            /** Observed Models */
+            observed_models: string[];
+            /** Judge Model */
+            judge_model: string | null;
+            /** Score */
+            score: number | null;
+            verdict: components["schemas"]["Verdict"] | null;
+            /** Cost Usd */
+            cost_usd: string | null;
+            /** Cost Is Lower Bound */
+            cost_is_lower_bound: boolean;
+            /** Cost Display */
+            cost_display: string;
+            /** Duration Seconds */
+            duration_seconds: number | null;
+            /** Duration Is Lower Bound */
+            duration_is_lower_bound: boolean;
+            /** Duration Display */
+            duration_display: string;
+            /** Tokens */
+            tokens: number;
+        };
+        /**
+         * EvalTrendResponse
+         * @description One page of an eval's current runs as trend points, newest first (#1788).
+         */
+        EvalTrendResponse: {
+            /** Definition Version */
+            definition_version: string | null;
+            /** Definition Changed At */
+            definition_changed_at: string | null;
+            /** Definition Changes */
+            definition_changes: components["schemas"]["DefinitionChangeResponse"][];
+            /** Eval Id */
+            eval_id: string;
+            /** Items */
+            items: components["schemas"]["EvalTrendPointResponse"][];
+            /** Total */
+            total: number;
+            /** Page */
+            page: number;
+            /** Page Size */
+            page_size: number;
+        };
+        /**
+         * EvalVariantResponse
+         * @description Every run of an eval with the same workflow, workflow version and OBSERVED models.
+         *
+         *     (Evals v2.) Two versions of one workflow are two variants: an edit between
+         *     runs is a different treatment, and pooling them would hide its effect.
+         */
+        EvalVariantResponse: {
+            /** Workflow Id */
+            workflow_id: string;
+            /** Workflow Version */
+            workflow_version?: string | null;
+            /** Models */
+            models: string[];
+            /** Run Count */
+            run_count: number;
+            /** Pass Count */
+            pass_count: number;
+            /** Pass Rate */
+            pass_rate: number | null;
+            /** Pass Rate Display */
+            pass_rate_display: string;
+            /** Avg Cost Usd */
+            avg_cost_usd: string | null;
+            /** Avg Cost Display */
+            avg_cost_display: string;
+            /** Last Run At */
+            last_run_at: string | null;
+            last_verdict: components["schemas"]["Verdict"] | null;
+            stats: components["schemas"]["EvalRunStatsResponse"];
         };
         /**
          * EventListResponse
@@ -3051,7 +4111,7 @@ export interface components {
             };
             /**
              * Task
-             * @description Primary task description -- substituted for $ARGUMENTS in phase prompts.
+             * @description Primary task description -- substituted for $ARGUMENTS in phase prompts. Omit it to run without a task; an empty or whitespace-only task is rejected with 422 (PC-66).
              */
             task?: string | null;
             /**
@@ -3059,6 +4119,19 @@ export interface components {
              * @description GitHub URLs or 'owner/repo' slugs to pre-clone for workspace hydration (ADR-058, ADR-063). Typed channel for repository identity: one execution can touch 0, 1, or N repos. Passing 'repository' or 'repos' in the `inputs` dict is rejected with 422.
              */
             repos?: string[];
+            /**
+             * Tags
+             * @description Tags for this run, united with the workflow's own tags at launch (#967). Normalised (trimmed, lowercased, deduped); an invalid tag is rejected with 422.
+             */
+            tags?: string[];
+            /** @description The eval this run joins, overriding the workflow's default eval (#967). 404 if it does not exist, 409 if it is archived. */
+            eval_id?: components["schemas"]["EvalId"] | null;
+            /**
+             * No Eval
+             * @description Launch an ordinary run: join no eval, even if the workflow has a default eval (#967). Cannot be combined with `eval_id` (422).
+             * @default false
+             */
+            no_eval: boolean;
             /**
              * Provider
              * @deprecated
@@ -3092,6 +4165,29 @@ export interface components {
              * @default Workflow execution started
              */
             message: string;
+        };
+        /**
+         * ExecutionBudgetInfo
+         * @description How full the execution budget is right now, for the app bar (PC-124).
+         *
+         *     ``running`` and ``limit`` are this API process's budget. ``queued`` is
+         *     every start the list reports as ``queued``: waiting here for a slot, or
+         *     recorded durably and not yet picked up by any process.
+         */
+        ExecutionBudgetInfo: {
+            /** Running */
+            running: number;
+            /** Queued */
+            queued: number;
+            /** Limit */
+            limit: number;
+            /** Admission Paused */
+            admission_paused: boolean | null;
+            /**
+             * Display
+             * @description e.g. '2 running / 3 queued / cap 4'.
+             */
+            readonly display: string;
         };
         /**
          * ExecutionCostResponse
@@ -3221,6 +4317,9 @@ export interface components {
              * @default 0
              */
             completed_phases: number;
+            phase_progress: components["schemas"]["PhaseProgressInfo"];
+            /** Phase Plan */
+            phase_plan: components["schemas"]["PlannedPhaseInfo"][];
             /** Total Input Tokens */
             total_input_tokens: number;
             /** Total Output Tokens */
@@ -3258,22 +4357,70 @@ export interface components {
             error_message?: string | null;
             /** @default unclassified */
             failure_classification: components["schemas"]["FailureClassification"];
+            delegation_failure?: components["schemas"]["DelegationFailure"] | null;
             reported_failure_reason?: components["schemas"]["ReportedFailureReason"] | null;
+            /** Quarantined Refs */
+            quarantined_refs?: components["schemas"]["QuarantinedRef"][];
             /**
              * Deliverable Produced
              * @default false
              */
             deliverable_produced: boolean;
+            review_verdict?: components["schemas"]["ReviewVerdict"] | null;
             reported_side_effects?: components["schemas"]["SideEffectStatus"] | null;
             /** Repos */
             repos?: string[];
+            /** Tags */
+            tags?: string[];
             /** Task */
             task?: string | null;
             /** Inputs */
             inputs?: {
                 [key: string]: string;
             };
+            eval?: components["schemas"]["ExecutionEvalRunResponse"] | null;
             resume_start?: components["schemas"]["ResumeStartInfo"] | null;
+            start_queue?: components["schemas"]["ExecutionStartQueueInfo"] | null;
+            read_model_status?: components["schemas"]["ReadModelStatus"] | null;
+            /** @description Skill use across every phase that started: declared, invoked anywhere, never invoked, and not knowable (feedback 01308bcf). */
+            readonly skill_use: components["schemas"]["ExecutionSkillUseSummary"];
+        };
+        /**
+         * ExecutionEvalResponse
+         * @description An execution's eval membership after an edit, read from the aggregate (#967).
+         */
+        ExecutionEvalResponse: {
+            /** Execution Id */
+            execution_id: string;
+            /** Eval Id */
+            eval_id: string | null;
+            /** Association Kind */
+            association_kind: ("launched" | "attached") | null;
+            /** Launched Eval Id */
+            launched_eval_id: string | null;
+        };
+        /**
+         * ExecutionEvalRunResponse
+         * @description The eval an execution is a run of, and that run's current verdict (Evals v2).
+         *
+         *     Carried on ``GET /executions/{id}`` so an execution page can link to its eval
+         *     and show how the run was judged without a second request.
+         */
+        ExecutionEvalRunResponse: {
+            /** Eval Id */
+            eval_id: string;
+            /** Eval Name */
+            eval_name: string | null;
+            /**
+             * Association Kind
+             * @enum {string}
+             */
+            association_kind: "launched" | "attached";
+            verdict: components["schemas"]["Verdict"] | null;
+            /** Score */
+            score: number | null;
+            /** Scored At */
+            scored_at: string | null;
         };
         /** ExecutionHistoryResponse */
         ExecutionHistoryResponse: {
@@ -3312,10 +4459,12 @@ export interface components {
              * @default 0
              */
             excluded_undated: number;
+            budget?: components["schemas"]["ExecutionBudgetInfo"] | null;
             /** Status Counts */
             status_counts?: {
                 [key: string]: number;
             };
+            read_model_status?: components["schemas"]["ReadModelStatus"] | null;
         };
         /** ExecutionRunListResponse */
         ExecutionRunListResponse: {
@@ -3352,6 +4501,7 @@ export interface components {
              * @default 0
              */
             total_phases: number;
+            phase_progress: components["schemas"]["PhaseProgressInfo"];
             /**
              * Total Tokens
              * @default 0
@@ -3367,6 +4517,117 @@ export interface components {
             /** @default unclassified */
             failure_classification: components["schemas"]["FailureClassification"];
             reported_failure_reason?: components["schemas"]["ReportedFailureReason"] | null;
+        };
+        /**
+         * ExecutionSkillUseSummary
+         * @description Skill use across every phase of one execution (feedback 01308bcf).
+         *
+         *     A declared skill is only ``never_invoked`` when EVERY phase was observed.
+         *     A phase may invoke a skill it never declared, so one phase that ran where
+         *     use cannot be seen (codex), or could not be read, could have used any of
+         *     them: every declared skill no observed phase invoked is then ``not_known``
+         *     - the #1269 misreading this model exists to refuse, one level up.
+         */
+        ExecutionSkillUseSummary: {
+            /** Declared */
+            declared?: string[];
+            /** Invoked */
+            invoked?: components["schemas"]["InvokedSkillInfo"][];
+            /** Never Invoked */
+            never_invoked?: string[];
+            /** Not Known */
+            not_known?: string[];
+            /**
+             * Summary Display
+             * @default no phase has started
+             */
+            summary_display: string;
+        };
+        /**
+         * ExecutionStartQueueInfo
+         * @description Where a start stands in the execution budget, before its execution exists (#1557).
+         *
+         *     Every start path - direct, trigger and resume - claims one of
+         *     ``SYN_EXECUTION_MAX_CONCURRENT`` slots. A start that finds none free waits
+         *     here, first come first served, and has no execution record yet; this is
+         *     what it shows instead of a 404.
+         */
+        ExecutionStartQueueInfo: {
+            path: components["schemas"]["StartPath"];
+            /** Position */
+            position: number | null;
+            /**
+             * Held
+             * @default true
+             */
+            held: boolean;
+            /** Start Status */
+            start_status?: ("pending" | "paused" | "retryable" | "dispatched" | "started" | "failed" | "withdrawn") | null;
+            /** Status Reason */
+            status_reason?: string | null;
+            /** Running */
+            running: number;
+            /** Waiting */
+            waiting: number;
+            /** Limit */
+            limit: number;
+            /**
+             * Queued At
+             * Format: date-time
+             */
+            queued_at: string;
+            /**
+             * Position Display
+             * @description Human-readable position, e.g. 'queued 2 of 3 (4/4 running)'.
+             */
+            readonly position_display: string;
+            /**
+             * Reason Display
+             * @description Why it has not started: 'slots full 4/4', 'admission paused', 'starting' or 'awaiting pickup (<status>)' (PC-124).
+             */
+            readonly reason_display: string;
+        };
+        /**
+         * ExecutionStatusCounts
+         * @description How many executions are in each status, one field per status.
+         *
+         *     The fields are exactly the domain's ``ExecutionStatus`` values (a test pins
+         *     that), so every execution lands in exactly one field and the fields sum to
+         *     the number of executions. ``completed_workflows``/``failed_workflows``
+         *     alone left cancelled, interrupted and running runs invisible on the
+         *     dashboard. There is no ``paused``: that word was deleted from orchestration.
+         */
+        ExecutionStatusCounts: {
+            /**
+             * Not Started
+             * @default 0
+             */
+            not_started: number;
+            /**
+             * Running
+             * @default 0
+             */
+            running: number;
+            /**
+             * Completed
+             * @default 0
+             */
+            completed: number;
+            /**
+             * Failed
+             * @default 0
+             */
+            failed: number;
+            /**
+             * Cancelled
+             * @default 0
+             */
+            cancelled: number;
+            /**
+             * Interrupted
+             * @default 0
+             */
+            interrupted: number;
         };
         /**
          * ExecutionStatusResponse
@@ -3391,6 +4652,7 @@ export interface components {
              * @default 0
              */
             total_phases: number;
+            phase_progress: components["schemas"]["PhaseProgressInfo"];
             /** Started At */
             started_at?: string | null;
             /** Completed At */
@@ -3431,6 +4693,7 @@ export interface components {
              * @default 0
              */
             total_phases: number;
+            phase_progress: components["schemas"]["PhaseProgressInfo"];
             /** Total Tokens */
             total_tokens: number;
             /**
@@ -3480,8 +4743,24 @@ export interface components {
             reported_failure_reason?: components["schemas"]["ReportedFailureReason"] | null;
             /** Repos */
             repos?: string[];
+            /** Tags */
+            tags?: string[];
             /** Repos Display */
             repos_display?: string | null;
+            eval?: components["schemas"]["ExecutionEvalRunResponse"] | null;
+            start_queue?: components["schemas"]["ExecutionStartQueueInfo"] | null;
+        };
+        /**
+         * ExecutionTagsResponse
+         * @description An execution's tags after an edit, read from the aggregate, not a projection.
+         */
+        ExecutionTagsResponse: {
+            /** Execution Id */
+            execution_id: string;
+            /** Tags */
+            tags: string[];
+            /** Inherited Tags */
+            inherited_tags: string[];
         };
         /**
          * ExportManifestResponse
@@ -3595,6 +4874,16 @@ export interface components {
              * @default
              */
             last_seen: string;
+        };
+        /**
+         * FallbackAgentResponse
+         * @description The agent a phase is re-run on when its own provider cannot serve it (PC-83).
+         */
+        FallbackAgentResponse: {
+            /** Provider */
+            provider: string;
+            /** Model */
+            model?: string | null;
         };
         /**
          * FeatureDisabledDetail
@@ -4025,7 +5314,18 @@ export interface components {
             total: number;
             /** Installation Id */
             installation_id?: string | null;
+            lookup: components["schemas"]["GitHubRepoLookup"];
         };
+        /**
+         * GitHubRepoLookup
+         * @description How much of the GitHub App's access a repo listing actually covers.
+         *
+         *     Only ``complete`` makes a repo's absence mean the App cannot reach it. A
+         *     ``partial`` listing still proves access for every repo it contains; an
+         *     ``unavailable`` one proves nothing.
+         * @enum {string}
+         */
+        GitHubRepoLookup: "complete" | "partial" | "unavailable";
         /**
          * GitHubRepoResponse
          * @description A repository accessible to the GitHub App installation.
@@ -4201,7 +5501,7 @@ export interface components {
         HealthResponse: {
             /**
              * Status
-             * @description 'healthy' while the process is alive and accepting writes.
+             * @description 'healthy' while the process is alive and accepting writes; 'starting' while it is alive but startup (a long migration, say) has not finished, when every route but /health and /version answers 503; 'failed' when startup failed after serving began and the process is exiting; 'unhealthy' when the probe failed.
              */
             status: string;
             /**
@@ -4225,6 +5525,15 @@ export interface components {
              * @description Human-readable notes that need attention but do not degrade the instance. Omitted when there are none.
              */
             warnings?: string[] | null;
+            /** @description Free space on the workspace volume (#1560). Omitted only when the probe itself could not be built. */
+            disk?: components["schemas"]["DiskSpaceHealth"] | null;
+            /**
+             * Db Pools
+             * @description Every open Postgres pool in this process, by name. Omitted when none is open, e.g. in offline mode.
+             */
+            db_pools?: components["schemas"]["DbPoolHealth"][] | null;
+            /** @description How often the API container hit its CPU limit (#1600). Always present once the gate is ready, with status 'unknown' when the cgroup does not say; omitted only while the gate is withholding the API. */
+            cpu_throttling?: components["schemas"]["CpuThrottling"] | null;
         };
         /**
          * HeatmapDayBucketResponse
@@ -4242,6 +5551,36 @@ export interface components {
             breakdown?: {
                 [key: string]: number;
             };
+            /**
+             * Failed
+             * @default 0
+             */
+            failed: number;
+        };
+        /**
+         * HeldProjectionHealth
+         * @description A projection held below an event it failed to apply (ESP #391).
+         *
+         *     It is retried there with backoff and never checkpointed past it, so it is
+         *     behind and stays behind until the handler is fixed or the projection is
+         *     rebuilt. Every other projection keeps consuming.
+         */
+        HeldProjectionHealth: {
+            /**
+             * Projection
+             * @description Projection name, as in projection_checkpoints.
+             */
+            projection: string;
+            /**
+             * Event Type
+             * @description Type of the event it failed to apply.
+             */
+            event_type: string;
+            /**
+             * Global Nonce
+             * @description Global nonce of the event it is held at.
+             */
+            global_nonce: number;
         };
         /**
          * IdentityBinding
@@ -4422,6 +5761,36 @@ export interface components {
             evidence_watermark: number;
             coverage: components["schemas"]["InventoryCoverage"];
             counts: components["schemas"]["InventoryCounts"];
+        };
+        /**
+         * InvokedSkillInfo
+         * @description One skill the agent invoked through the Skill tool, and how often (#1269).
+         */
+        InvokedSkillInfo: {
+            /** Name */
+            name: string;
+            /** Count */
+            count: number;
+        };
+        /**
+         * LatencyRecorderStatusResponse
+         * @description What this API process's recorder did with its samples since it started.
+         */
+        LatencyRecorderStatusResponse: {
+            /** Running */
+            running: boolean;
+            /** Written */
+            written: number;
+            /** Dropped */
+            dropped: number;
+            /** Write Failures */
+            write_failures: number;
+            /** Discarded */
+            discarded: number;
+            /** Cleanup Failures */
+            cleanup_failures: number;
+            /** Buffered */
+            buffered: number;
         };
         /** LineageEdge */
         LineageEdge: {
@@ -4604,6 +5973,7 @@ export interface components {
              * @default 0
              */
             failed_workflows: number;
+            execution_status_counts?: components["schemas"]["ExecutionStatusCounts"];
             /**
              * Total Sessions
              * @default 0
@@ -4806,6 +6176,8 @@ export interface components {
             elapsed_seconds?: number | null;
             /** Timeout Seconds */
             timeout_seconds?: number | null;
+            /** Deadline */
+            deadline?: string | null;
         };
         /**
          * PhaseDefinitionResponse
@@ -4835,6 +6207,8 @@ export interface components {
              * @default 300
              */
             timeout_seconds: number;
+            /** Max Cost Usd */
+            max_cost_usd?: number | null;
             /** Allowed Tools */
             allowed_tools?: string[];
             /** Argument Hint */
@@ -4854,6 +6228,12 @@ export interface components {
              */
             allow_delegation: boolean;
             /**
+             * Require Delegation
+             * @default false
+             */
+            require_delegation: boolean;
+            fallback_agent?: components["schemas"]["FallbackAgentResponse"] | null;
+            /**
              * Clone Repos
              * @default true
              */
@@ -4863,6 +6243,11 @@ export interface components {
              * @default true
              */
             delivers_repo_changes: boolean;
+            /**
+             * Requires Verdict
+             * @default false
+             */
+            requires_verdict: boolean;
             /**
              * Sandbox
              * @default full-access
@@ -4883,6 +6268,18 @@ export interface components {
             input_artifact_types?: string[];
             /** Output Artifact Types */
             output_artifact_types?: string[];
+        };
+        /**
+         * PhaseDurationResponse
+         * @description How long one phase of a run took.
+         */
+        PhaseDurationResponse: {
+            /** Phase Id */
+            phase_id: string;
+            /** Phase Name */
+            phase_name: string;
+            /** Duration Seconds */
+            duration_seconds: number | null;
         };
         /** PhaseExecutionInfo */
         PhaseExecutionInfo: {
@@ -4930,10 +6327,14 @@ export interface components {
              */
             deliverable_recovered: boolean;
             reported_side_effects?: components["schemas"]["SideEffectStatus"] | null;
+            failure_classification?: components["schemas"]["FailureClassification"] | null;
+            reported_failure_reason?: components["schemas"]["ReportedFailureReason"] | null;
             /** Model */
             model?: string | null;
             /** Requested Model */
             requested_model: string | null;
+            /** Agent Provider */
+            agent_provider?: string | null;
             /** Cost By Model */
             cost_by_model?: {
                 [key: string]: string;
@@ -4944,14 +6345,33 @@ export interface components {
             exit_code?: number | null;
             /** Observed Branches */
             observed_branches?: components["schemas"]["BranchObservationInfo"][] | null;
+            pinned_at_start?: components["schemas"]["PhaseStartConfig"] | null;
+            /**
+             * Start Pins Status
+             * @default unavailable
+             * @enum {string}
+             */
+            start_pins_status: "recorded" | "not_recorded" | "unavailable";
+            skill_use?: components["schemas"]["PhaseSkillUseInfo"];
             /** Operations */
             operations?: components["schemas"]["PhaseOperationInfo"][];
             activity?: components["schemas"]["PhaseActivityInfo"];
             /**
              * Model Display
-             * @description The model for humans: the reported id verbatim, or 'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9).
+             * @description The model for humans: the reported id verbatim, or '<alias> (requested)', or 'unknown' (ADR-067 D9).
              */
             readonly model_display: string;
+        };
+        /**
+         * PhaseLatestOutputResponse
+         * @description One phase of a workflow and the output it last produced.
+         */
+        PhaseLatestOutputResponse: {
+            /** Phase Id */
+            phase_id: string;
+            /** Phase Name */
+            phase_name: string;
+            artifact?: components["schemas"]["ArtifactSummaryResponse"] | null;
         };
         /**
          * PhaseMetrics
@@ -5023,6 +6443,58 @@ export interface components {
             error_message?: string | null;
         };
         /**
+         * PhaseProfilesResponse
+         * @description Per-phase-type usage profiles for one workflow over a window (#1716).
+         *
+         *     Percentiles are over EVERY phase of the workflow with telemetry in
+         *     ``[since, until)`` - nothing is paged.
+         */
+        PhaseProfilesResponse: {
+            /** Workflow Id */
+            workflow_id: string;
+            /**
+             * Since
+             * Format: date-time
+             */
+            since: string;
+            /**
+             * Until
+             * Format: date-time
+             */
+            until: string;
+            /** Window Days */
+            window_days: number;
+            /** Executions */
+            executions: number;
+            /** Tokens */
+            tokens: components["schemas"]["PhaseTokenProfileResponse"][];
+            /** Resources */
+            resources: components["schemas"]["PhaseResourceProfileResponse"][];
+        };
+        /**
+         * PhaseProgressInfo
+         * @description How far through its phases an execution is, skipped phases accounted for.
+         *
+         *     ``total_phases`` is what the workflow defines, and a review that certifies
+         *     skips the repair rounds after it (PC-63), so ``completed/total`` read
+         *     "6/10" for a run that finished. Clients render ``display`` and draw
+         *     ``percent``; they never divide the raw counts themselves.
+         */
+        PhaseProgressInfo: {
+            /** Completed */
+            completed: number;
+            /** Skipped */
+            skipped: number;
+            /** Possible */
+            possible: number;
+            /** Remaining Possible */
+            remaining_possible: number;
+            /** Percent */
+            percent: number;
+            /** Display */
+            display: string;
+        };
+        /**
          * PhaseRefResponse
          * @description A plugin or skill reference. Structured, never a joined string.
          *
@@ -5043,6 +6515,125 @@ export interface components {
             name_overridden: boolean;
             /** Raw */
             raw?: string | null;
+        };
+        /**
+         * PhaseResourceProfileResponse
+         * @description One phase type's workspace resource use at teardown (cgroup counters).
+         */
+        PhaseResourceProfileResponse: {
+            /** Phase Id */
+            phase_id: string;
+            cpu_seconds_per_wall_second: components["schemas"]["ResourcePercentilesResponse"];
+            cpu_throttled_seconds: components["schemas"]["ResourcePercentilesResponse"];
+            memory_peak_bytes: components["schemas"]["ResourcePercentilesResponse"];
+            disk_bytes_at_teardown: components["schemas"]["ResourcePercentilesResponse"];
+            coverage: components["schemas"]["ResourceCoverageResponse"];
+        };
+        /**
+         * PhaseSkillUseInfo
+         * @description Which declared skills this phase actually used (#1269).
+         *
+         *     Declaring a skill installs it; only an invocation shows the agent reached
+         *     for it. This is the fact that tells the two apart, per phase.
+         */
+        PhaseSkillUseInfo: {
+            /**
+             * Status
+             * @default unavailable
+             * @enum {string}
+             */
+            status: "observed" | "not_observable" | "unavailable";
+            /** Declared */
+            declared?: string[];
+            /** Invoked */
+            invoked?: components["schemas"]["InvokedSkillInfo"][];
+            /** Provider */
+            provider?: string | null;
+            /**
+             * Declared Not Invoked
+             * @description Declared skills with no observed invocation. Empty unless status is 'observed': an unobservable use is not a non-use.
+             */
+            readonly declared_not_invoked: string[];
+            /**
+             * Status Display
+             * @description What `status` means for this phase, in plain words. Render verbatim.
+             */
+            readonly status_display: string;
+            /**
+             * Summary Display
+             * @description One line on this phase's skill use. Never a count of zero for a phase whose use could not be seen. Render verbatim.
+             */
+            readonly summary_display: string;
+        };
+        /**
+         * PhaseStartConfig
+         * @description What a phase was configured with when its execution STARTED.
+         *
+         *     Read from the execution's own start event (`StartPins`, #1454), never from
+         *     the workflow template, which may have been edited since. That is the whole
+         *     point: this answers "what did the agent have", not "what would it get now".
+         */
+        PhaseStartConfig: {
+            /** Provider */
+            provider: string;
+            /** Requested Model */
+            requested_model?: string | null;
+            /** Allowed Tools */
+            allowed_tools?: string[];
+            /** Skills */
+            skills?: components["schemas"]["PinnedSkillInfo"][];
+        };
+        /**
+         * PhaseTokenProfileResponse
+         * @description One (phase type, model). A sample is one execution's phase on that model.
+         *
+         *     A phase that fell back to another model mid-phase is a sample under BOTH
+         *     models, each holding only the tokens that model consumed.
+         */
+        PhaseTokenProfileResponse: {
+            /** Phase Id */
+            phase_id: string;
+            /** Model */
+            model: string;
+            input_tokens: components["schemas"]["TokenPercentilesResponse"];
+            output_tokens: components["schemas"]["TokenPercentilesResponse"];
+            cache_creation_tokens: components["schemas"]["TokenPercentilesResponse"];
+            cache_read_tokens: components["schemas"]["TokenPercentilesResponse"];
+            cost_usd: components["schemas"]["TokenPercentilesResponse"];
+            /** Unpriced Phases */
+            unpriced_phases: number;
+        };
+        /**
+         * PinnedSkillInfo
+         * @description One skill a phase was given at start, at the version it was resolved to (#1454).
+         */
+        PinnedSkillInfo: {
+            /** Name */
+            name: string;
+            /** Version */
+            version: string;
+            /** Resolved Sha */
+            resolved_sha: string;
+            /** Source Url */
+            source_url: string;
+        };
+        /**
+         * PlannedPhaseInfo
+         * @description One phase the run declared, and where it stands (feedback cee46909).
+         *
+         *     ``ExecutionDetail.phase_plan`` lists every declared phase, so a client
+         *     shows what is left as well as what ran. Clients render ``status_display``
+         *     and style by ``status``; they never work the status out themselves.
+         */
+        PlannedPhaseInfo: {
+            /** Phase Id */
+            phase_id: string;
+            /** Name */
+            name: string;
+            /** Status */
+            status: string;
+            /** Status Display */
+            status_display: string;
         };
         /**
          * Priority
@@ -5107,6 +6698,85 @@ export interface components {
              * @default false
              */
             stalled: boolean;
+        };
+        /**
+         * QuarantinedRef
+         * @description Where one repository's unpushed work was saved when its phase ended (#1547).
+         *
+         *     The structured half of what `describe_saved_work` writes as prose into
+         *     `error_message`: only work that LANDED, because a ref that does not exist
+         *     is nothing a reviewer can fetch. Travels on ``WorkflowFailedEvent`` so the
+         *     PR the run was working on can be told, by a ProcessManager rather than by
+         *     whoever happened to read the error.
+         */
+        QuarantinedRef: {
+            /** Repository */
+            repository: string;
+            /** Branch */
+            branch: string;
+            /** Ref */
+            ref: string;
+            /** Commit */
+            commit: string | null;
+            /** Commit Count */
+            commit_count: number;
+            /** Pull Request */
+            pull_request?: number | null;
+            /** Diffstat */
+            diffstat?: string | null;
+        };
+        /**
+         * ReadModelStatus
+         * @description Whether one read model is rebuilding, and how far it has got.
+         *
+         *     Carried on the list and detail responses a read model serves, so a page can
+         *     say "this list is incomplete because it is being rebuilt" instead of
+         *     looking broken, and listed on ``/health`` for every read model that is
+         *     rebuilding. Judged by ``services.read_model_status``; every number is
+         *     exact (checkpoint position against store head), never estimated.
+         */
+        ReadModelStatus: {
+            /**
+             * Rebuilding
+             * @description True while this read model is replaying history: it is more than the live-lag threshold (500 events) behind the head. A few events of ordinary live lag is NOT rebuilding, even while another read model replays.
+             */
+            rebuilding: boolean;
+            /**
+             * Projection
+             * @description Projection name, as in projection_checkpoints.
+             */
+            projection: string;
+            /**
+             * Label Display
+             * @description What the read model holds, for a sentence, e.g. 'execution history'.
+             */
+            label_display: string;
+            /**
+             * Progress Pct
+             * @description Checkpoint position as a whole percentage of the store head, 0-99 while rebuilding. Null when not rebuilding.
+             */
+            progress_pct?: number | null;
+            /**
+             * Progress Display
+             * @description progress_pct as '72%'.
+             */
+            progress_display?: string | null;
+            /**
+             * Events Behind
+             * @description Events between the checkpoint and the store head.
+             * @default 0
+             */
+            events_behind: number;
+            /**
+             * Events Behind Display
+             * @description events_behind as '29,476 events behind'.
+             */
+            events_behind_display?: string | null;
+            /**
+             * Summary Display
+             * @description One sentence for a banner, e.g. 'Rebuilding execution history - 72% (29,476 events behind).' Null when not rebuilding.
+             */
+            summary_display?: string | null;
         };
         /**
          * RegisterClaudePluginRequest
@@ -5691,6 +7361,62 @@ export interface components {
          */
         ReportedFailureReason: "task" | "platform" | "refused" | "unknown";
         /**
+         * RequestLatencyResponse
+         * @description Per-route arrival-to-response-start latency from ``api_request_latency``, slowest p99 first.
+         */
+        RequestLatencyResponse: {
+            /**
+             * Window
+             * @enum {string}
+             */
+            window: "1h" | "24h" | "7d" | "30d";
+            /** Since */
+            since: string;
+            /** Available */
+            available: boolean;
+            /** Routes */
+            routes: components["schemas"]["RouteLatencyResponse"][];
+            recorder: components["schemas"]["LatencyRecorderStatusResponse"];
+        };
+        /**
+         * ResourceCoverageResponse
+         * @description What the resource percentiles stand on. Every count is over the whole window.
+         */
+        ResourceCoverageResponse: {
+            /** Phases */
+            phases: number;
+            /** Phases Without Usage Row */
+            phases_without_usage_row: number;
+            /** Cpu Usage Seconds Missing */
+            cpu_usage_seconds_missing: number;
+            /** Cpu Throttled Seconds Missing */
+            cpu_throttled_seconds_missing: number;
+            /** Memory Peak Bytes Missing */
+            memory_peak_bytes_missing: number;
+            /** Disk Bytes At Teardown Missing */
+            disk_bytes_at_teardown_missing: number;
+            /** Wall Seconds Missing */
+            wall_seconds_missing: number;
+            /** Coverage Display */
+            coverage_display: string;
+        };
+        /**
+         * ResourcePercentilesResponse
+         * @description p50/p95 of one measure over ``n`` measured phases; null below ten.
+         */
+        ResourcePercentilesResponse: {
+            /** N */
+            n: number;
+            /** P50 */
+            p50: number | null;
+            /** P95 */
+            p95: number | null;
+            /** P50 Display */
+            p50_display: string;
+            /** P95 Display */
+            p95_display: string;
+        };
+        /**
          * ResumeRequest
          * @description What an operator must decide before a resume is admitted.
          *
@@ -5743,7 +7469,7 @@ export interface components {
              * Status
              * @enum {string}
              */
-            status: "pending" | "paused" | "retryable" | "dispatched" | "started" | "failed";
+            status: "pending" | "paused" | "retryable" | "dispatched" | "started" | "failed" | "withdrawn";
             /** Status Reason */
             status_reason?: string | null;
             /**
@@ -5760,7 +7486,33 @@ export interface components {
             recorded_at: string;
             /** Dispatched At */
             dispatched_at?: string | null;
+            start_queue?: components["schemas"]["ExecutionStartQueueInfo"] | null;
         };
+        /**
+         * ReviewVerdict
+         * @description What a reviewing phase concluded about the change in front of it (PC-63).
+         *
+         *     THE AGGREGATE DECIDES ON IT, THE AGENT ONLY REPORTS IT. A phase writes
+         *     ``review_verdict`` in its TASK_RESULT block; the aggregate reads it when
+         *     the phase's artifacts are collected and chooses the next phase from it
+         *     (see `WorkflowExecutionAggregate.artifacts_collected`):
+         *
+         *     * ``certified`` ends the repair loop. Every phase before the workflow's
+         *       final phase is skipped, so a run that certifies in round 1 does not pay
+         *       for the rounds after it.
+         *     * ``blocked`` - or no verdict at all - advances by order, which is the
+         *       next repair round, or the final phase once the rounds are spent.
+         *
+         *     The latest verdict a run reported is also how it ended: a run completed
+         *     on ``blocked`` completed with UNRESOLVED FINDINGS, and says so on
+         *     `WorkflowCompleted` rather than looking certified.
+         *
+         *     A missing or misspelled verdict is never read as ``certified``: skipping
+         *     review on a word the reader did not recognise is the one mistake here that
+         *     costs more than a repair round.
+         * @enum {string}
+         */
+        ReviewVerdict: "certified" | "blocked";
         /**
          * RootResponse
          * @description Payload of ``GET /`` — what this API is, and which build is serving it.
@@ -5802,6 +7554,31 @@ export interface components {
              * @enum {string}
              */
             readonly version_status: "installed" | "unavailable";
+        };
+        /**
+         * RouteLatencyResponse
+         * @description Exact latency percentiles of one (method, route template) over the window.
+         *
+         *     Latency here is ARRIVAL TO RESPONSE START (time to first byte), not to the
+         *     last byte, so a long-lived stream counts as fast if it answered promptly.
+         */
+        RouteLatencyResponse: {
+            /** Method */
+            method: string;
+            /** Route */
+            route: string;
+            /** Count */
+            count: number;
+            /** P50 Ms */
+            p50_ms: number;
+            /** P95 Ms */
+            p95_ms: number;
+            /** P99 Ms */
+            p99_ms: number;
+            /** Max Ms */
+            max_ms: number;
+            /** P99 Display */
+            p99_display: string;
         };
         /** RunIdentity */
         RunIdentity: {
@@ -6294,6 +8071,7 @@ export interface components {
             cost_by_model?: {
                 [key: string]: string;
             };
+            cost_by_token_type?: components["schemas"]["TokenTypeCostResponse"] | null;
             /** Cache Read Rate Display */
             cache_read_rate_display?: string | null;
             /** Cache Write Rate Display */
@@ -6319,7 +8097,7 @@ export interface components {
             };
             /**
              * Agent Model Display
-             * @description The model for humans: the reported id verbatim, or 'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9).
+             * @description The model for humans: the reported id verbatim, or '<alias> (requested)', or 'unknown' (ADR-067 D9).
              */
             readonly agent_model_display: string;
         };
@@ -6424,7 +8202,7 @@ export interface components {
             completed_at?: string | null;
             /**
              * Agent Model Display
-             * @description The model for humans: the reported id verbatim, or 'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9).
+             * @description The model for humans: the reported id verbatim, or '<alias> (requested)', or 'unknown' (ADR-067 D9).
              */
             readonly agent_model_display: string;
         };
@@ -6467,6 +8245,14 @@ export interface components {
             cache_read_tokens: number;
         };
         /**
+         * SetDefaultEvalRequest
+         * @description The eval a workflow's runs join when the launch names none (#967).
+         */
+        SetDefaultEvalRequest: {
+            /** @description The default eval, which must exist and not be archived. Null clears it. Runs already started keep the eval they launched into. */
+            eval_id: components["schemas"]["EvalId"] | null;
+        };
+        /**
          * SetMaintenanceModeRequest
          * @description Set or clear maintenance mode (#1387).
          *
@@ -6491,6 +8277,169 @@ export interface components {
              * @default
              */
             actor: string;
+        };
+        /**
+         * ShippedCountPointResponse
+         * @description One UTC day's count.
+         */
+        ShippedCountPointResponse: {
+            /**
+             * Date
+             * Format: date
+             */
+            date: string;
+            /** Value */
+            value: number;
+        };
+        /**
+         * ShippedCountTileResponse
+         * @description A count over the window against the window before it.
+         *
+         *     When ``reason`` is set the count cannot be answered from persisted data:
+         *     every number is null and ``series`` is empty. Never a zero standing in for
+         *     "unknown".
+         */
+        ShippedCountTileResponse: {
+            /** Total */
+            total: number | null;
+            /** Previous Total */
+            previous_total: number | null;
+            /** Delta */
+            delta: number | null;
+            /** Delta Percent */
+            delta_percent: number | null;
+            /** Delta Display */
+            delta_display: string | null;
+            delta_unit: components["schemas"]["ShippedDeltaUnit"];
+            /** Total Display */
+            total_display: string | null;
+            /** Series */
+            series: components["schemas"]["ShippedCountPointResponse"][];
+            /** Source */
+            source: string;
+            /** Reason */
+            reason: string | null;
+        };
+        /**
+         * ShippedDeltaUnit
+         * @description What a tile's ``delta_display`` is expressed in.
+         * @enum {string}
+         */
+        ShippedDeltaUnit: "percent" | "points" | "count";
+        /**
+         * ShippedMetricsResponse
+         * @description What agents shipped over the window, tile by tile (the Overview block).
+         */
+        ShippedMetricsResponse: {
+            window: components["schemas"]["ShippedWindowResponse"];
+            previous: components["schemas"]["ShippedPreviousWindowResponse"];
+            /** Workflow Id */
+            workflow_id: string | null;
+            commits: components["schemas"]["ShippedCountTileResponse"];
+            prs_opened: components["schemas"]["ShippedCountTileResponse"];
+            prs_merged: components["schemas"]["ShippedCountTileResponse"];
+            merge_rate: components["schemas"]["ShippedRateTileResponse"];
+            repos_touched: components["schemas"]["ShippedCountTileResponse"];
+            /** Repos */
+            repos: string[];
+            /** By Workflow */
+            by_workflow: components["schemas"]["ShippedWorkflowResponse"][];
+            /** Unavailable */
+            unavailable: string[];
+        };
+        /**
+         * ShippedPreviousWindowResponse
+         * @description The ``days`` UTC days immediately before the window, inclusive.
+         */
+        ShippedPreviousWindowResponse: {
+            /**
+             * From
+             * Format: date
+             */
+            from: string;
+            /**
+             * To
+             * Format: date
+             */
+            to: string;
+        };
+        /**
+         * ShippedRatePointResponse
+         * @description One UTC day's rate in percent; null on a day with no denominator.
+         */
+        ShippedRatePointResponse: {
+            /**
+             * Date
+             * Format: date
+             */
+            date: string;
+            /** Value */
+            value: number | null;
+        };
+        /**
+         * ShippedRateTileResponse
+         * @description Merge rate: of the run PRs OPENED in the window, the percent merged by now.
+         *
+         *     A cohort conversion, 0 to 100 by construction (the merged PRs are a subset
+         *     of the opened ones). ``previous_total`` asks the same of the previous
+         *     window's cohort, as of now. ``delta`` is in percentage points. A series
+         *     point is that day's opened PRs merged since, null on a day none opened.
+         *     Null totals: no PR was opened, which is not 0%.
+         */
+        ShippedRateTileResponse: {
+            /** Total */
+            total: number | null;
+            /** Previous Total */
+            previous_total: number | null;
+            /** Delta */
+            delta: number | null;
+            /** Delta Display */
+            delta_display: string | null;
+            delta_unit: components["schemas"]["ShippedDeltaUnit"];
+            /** Total Display */
+            total_display: string | null;
+            /** Series */
+            series: components["schemas"]["ShippedRatePointResponse"][];
+            /** Source */
+            source: string;
+            /** Reason */
+            reason: string | null;
+        };
+        /**
+         * ShippedWindowResponse
+         * @description ``days`` UTC calendar days, ``from`` and ``to`` inclusive; ``to`` is today.
+         */
+        ShippedWindowResponse: {
+            /** Days */
+            days: number;
+            /**
+             * From
+             * Format: date
+             */
+            from: string;
+            /**
+             * To
+             * Format: date
+             */
+            to: string;
+        };
+        /**
+         * ShippedWorkflowResponse
+         * @description One workflow's share of what was shipped in the window.
+         */
+        ShippedWorkflowResponse: {
+            /** Workflow Id */
+            workflow_id: string;
+            /** Name */
+            name: string;
+            /** Commits */
+            commits: number;
+            /** Prs Opened */
+            prs_opened: number;
+            /** Prs Merged */
+            prs_merged: number;
+            /** Repos Touched */
+            repos_touched: number;
         };
         /**
          * SideEffectStatus
@@ -6652,6 +8601,12 @@ export interface components {
             truncated: boolean;
         };
         /**
+         * StartPath
+         * @description Which entrance an execution start came through.
+         * @enum {string}
+         */
+        StartPath: "direct" | "trigger" | "resume";
+        /**
          * StateResponse
          * @description Response with execution state.
          */
@@ -6716,13 +8671,17 @@ export interface components {
          *     runbook already read. The fields from ``running`` down are
          *     ``CoordinatorSubscriptionService.get_status()``; the ones from
          *     ``is_catching_up`` down are ``ReadModelLag``, spread into the same object by
-         *     ``lifecycle._describe_subscription_health``.
+         *     ``lifecycle._describe_subscription_health`` (rendered by ``subscription_health``).
          *
          *     EVERY FIELD BUT ``status`` IS OPTIONAL, and each absence is a distinct fact
          *     rather than a default: ``lag is None`` means the coordinator is not up yet,
          *     so there is nothing whose progress could be measured — which is not the same
-         *     as "not behind", and must not serialize as ``lag: 0``. When the probe itself
-         *     fails, ``status`` is "unknown" and nothing else is known at all.
+         *     as "not behind", and must not serialize as ``lag: 0``. When the lag or
+         *     dropped-start probe fails, the lag fields are absent but what the
+         *     coordinator itself knows (``running``, ``held_projections``, ``halted_at``)
+         *     is still published, and still sets ``status``: a halt at an undecodable
+         *     head event is exactly when the lag probe fails too. ``status`` is "unknown"
+         *     only when none of those fires.
          *
          *     ``ReadModelLag``'s fields are restated here because the block is flat on the
          *     wire and a generated client has to be able to see them. That restatement is
@@ -6732,10 +8691,10 @@ export interface components {
         SubscriptionHealth: {
             /**
              * Status
-             * @description Verdict on the read path: 'healthy', 'catching_up' during a replay that ends by itself, 'stalled' for a projection that does not, 'degraded' for a coordinator that is not running, or 'unknown' when the probe failed.
+             * @description Verdict on the read path: 'healthy', 'catching_up' during a replay that ends by itself, 'stalled' for a projection that does not, 'degraded' for a coordinator that is not running, 'halted' when the subscription stopped at a stored event it cannot decode, 'dropped_events' when a read model passed an event without applying it, 'held' when a projection failed to apply an event and is retried below it, or 'unknown' when the probe failed.
              * @enum {string}
              */
-            status: "healthy" | "degraded" | "stalled" | "catching_up" | "unknown";
+            status: "healthy" | "degraded" | "halted" | "dropped_events" | "held" | "stalled" | "catching_up" | "unknown";
             /**
              * Running
              * @description Whether the subscription coordinator is running. Null when the probe failed and could not ask.
@@ -6751,6 +8710,16 @@ export interface components {
              * @description Whether a realtime (SSE) projection is attached.
              */
             realtime_enabled?: boolean | null;
+            /**
+             * Held Projections
+             * @description Projections held below an event they failed to apply (ESP #391). Non-empty sets status 'held'; the cause is in the API log as the handler's exception. Null when the probe failed.
+             */
+            held_projections?: components["schemas"]["HeldProjectionHealth"][] | null;
+            /**
+             * Halted At
+             * @description Global nonce of the undecodable stored event the subscription is halted at (ESP ADR-026); status is then 'halted'. Re-checked every minute; repair per the ESP ADR-026 recovery steps in the API log. Null when not halted.
+             */
+            halted_at?: number | null;
             /**
              * Is Catching Up
              * @description True while the coordinator is replaying history and some projection has not reached the head. Reads may 404 for recently written aggregates. Ends by itself. Null when the subscription is not up yet and lag is unmeasurable.
@@ -6781,6 +8750,16 @@ export interface components {
              * @description Every projection short of the head, furthest behind first. Empty when all are at the head; null when lag is unmeasurable.
              */
             lagging_projections?: components["schemas"]["ProjectionLag"][] | null;
+            /**
+             * Rebuilding Read Models
+             * @description Every read model that is rebuilding, furthest behind first, with display strings for a banner. Ordinary live lag is excluded. Null when lag is unmeasurable.
+             */
+            rebuilding_read_models?: components["schemas"]["ReadModelStatus"][] | null;
+            /**
+             * Unapplied Starts
+             * @description Executions whose WorkflowExecutionStarted an execution read model's checkpoint passed without applying (#1545). Lag cannot show these: the read model is at the head and wrong. Non-empty sets status 'dropped_events'; repair per docs/runbooks/repair-dropped-execution-start.md. Null when not measured.
+             */
+            unapplied_starts?: components["schemas"]["UnappliedStart"][] | null;
         };
         /**
          * SystemActionResponse
@@ -7062,6 +9041,41 @@ export interface components {
             duration_ms?: number | null;
             /** Success */
             success?: boolean | null;
+        };
+        /**
+         * TokenPercentilesResponse
+         * @description p50/p90 of one measure over ``n`` phases; null below ten phases.
+         */
+        TokenPercentilesResponse: {
+            /** N */
+            n: number;
+            /** P50 */
+            p50: number | null;
+            /** P90 */
+            p90: number | null;
+            /** P50 Display */
+            p50_display: string;
+            /** P90 Display */
+            p90_display: string;
+        };
+        /**
+         * TokenTypeCostResponse
+         * @description A session's priced cost split by the kind of token it was spent on.
+         *
+         *     The parts sum to ``total_cost_usd`` (to within the canonical quantum per
+         *     part when ``basis`` is ``allocated``). Unpriced work is in neither, exactly
+         *     as with ``cost_by_model``.
+         */
+        TokenTypeCostResponse: {
+            /** Input Usd */
+            input_usd: string;
+            /** Output Usd */
+            output_usd: string;
+            /** Cache Creation Usd */
+            cache_creation_usd: string;
+            /** Cache Read Usd */
+            cache_read_usd: string;
+            basis: components["schemas"]["CostSplitBasis"];
         };
         /**
          * ToolSummary
@@ -7574,6 +9588,27 @@ export interface components {
              */
             other: number;
         };
+        /**
+         * UnappliedStart
+         * @description One execution whose start a projection skipped past. Published on /health as is.
+         */
+        UnappliedStart: {
+            /**
+             * Projection
+             * @description Read model that skipped the start.
+             */
+            projection: string;
+            /**
+             * Execution Id
+             * @description Execution whose WorkflowExecutionStarted it skipped.
+             */
+            execution_id: string;
+            /**
+             * Global Nonce
+             * @description Store position of that start event.
+             */
+            global_nonce: number;
+        };
         /** UpdateArtifactRequest */
         UpdateArtifactRequest: {
             /** Title */
@@ -7709,6 +9744,39 @@ export interface components {
             /** Context */
             ctx?: Record<string, never>;
         };
+        /**
+         * Verdict
+         * @description What a scorer concluded about one run of an eval.
+         *
+         *     ``ERROR`` is the scorer's own failure to reach a conclusion (the run left
+         *     nothing to judge, or the scorer broke), never a judgement that the run
+         *     failed. It counts as scored, and not as passed.
+         * @enum {string}
+         */
+        Verdict: "PASS" | "FAIL" | "ERROR";
+        /**
+         * WorkflowDefaultEvalResponse
+         * @description A workflow's default eval after an edit, read from the aggregate (#967).
+         */
+        WorkflowDefaultEvalResponse: {
+            /** Workflow Id */
+            workflow_id: string;
+            /** Default Eval Id */
+            default_eval_id: string | null;
+        };
+        /**
+         * WorkflowLatestOutputsResponse
+         * @description Every phase of a workflow, in phase order, with its latest output.
+         *
+         *     One request for the whole workflow detail page instead of one artifact
+         *     query per phase.
+         */
+        WorkflowLatestOutputsResponse: {
+            /** Workflow Id */
+            workflow_id: string;
+            /** Phases */
+            phases: components["schemas"]["PhaseLatestOutputResponse"][];
+        };
         /** WorkflowListResponse */
         WorkflowListResponse: {
             /** Workflows */
@@ -7757,6 +9825,12 @@ export interface components {
             repos?: string[];
             /** Requires Repos */
             requires_repos: boolean;
+            /** Tags */
+            tags?: string[];
+            /** Default Eval Id */
+            default_eval_id?: string | null;
+            /** Package Name */
+            package_name?: string | null;
         };
         /** WorkflowSummaryResponse */
         WorkflowSummaryResponse: {
@@ -7782,6 +9856,72 @@ export interface components {
             is_archived: boolean;
             /** Requires Repos */
             requires_repos: boolean;
+            /** Tags */
+            tags?: string[];
+            /** Skills */
+            skills?: components["schemas"]["DeclaredSkillResponse"][];
+        };
+        /**
+         * WorkflowTagsResponse
+         * @description A workflow's tags after an edit, read from the aggregate, not a projection.
+         */
+        WorkflowTagsResponse: {
+            /** Workflow Id */
+            workflow_id: string;
+            /** Tags */
+            tags: string[];
+        };
+        /**
+         * WorkflowTrendPointResponse
+         * @description One execution of a workflow as one point on its trend charts (#1788).
+         */
+        WorkflowTrendPointResponse: {
+            /** Execution Id */
+            execution_id: string;
+            /** Date */
+            date: string | null;
+            /** Status */
+            status: string;
+            /** Workflow Version */
+            workflow_version: string | null;
+            /** Cost Usd */
+            cost_usd: string | null;
+            /** Cost Is Lower Bound */
+            cost_is_lower_bound: boolean;
+            /** Cost Display */
+            cost_display: string;
+            /** Duration Seconds */
+            duration_seconds: number | null;
+            /** Duration Is Lower Bound */
+            duration_is_lower_bound: boolean;
+            /** Duration Display */
+            duration_display: string;
+            /** Tokens */
+            tokens: number;
+            /** Phase Durations */
+            phase_durations: components["schemas"]["PhaseDurationResponse"][];
+        };
+        /**
+         * WorkflowTrendResponse
+         * @description One page of a workflow's executions as trend points, newest first (#1788).
+         */
+        WorkflowTrendResponse: {
+            /** Definition Version */
+            definition_version: string | null;
+            /** Definition Changed At */
+            definition_changed_at: string | null;
+            /** Definition Changes */
+            definition_changes: components["schemas"]["DefinitionChangeResponse"][];
+            /** Workflow Id */
+            workflow_id: string;
+            /** Items */
+            items: components["schemas"]["WorkflowTrendPointResponse"][];
+            /** Total */
+            total: number;
+            /** Page */
+            page: number;
+            /** Page Size */
+            page_size: number;
         };
         /**
          * CostSummaryResponse
@@ -7875,6 +10015,8 @@ export interface operations {
                 page_size?: number;
                 /** @description Sort field (- prefix = descending) */
                 order_by?: string | null;
+                /** @description Case-insensitive substring match on name or id, applied before paging */
+                search?: string | null;
             };
             header?: never;
             path?: never;
@@ -7968,7 +10110,9 @@ export interface operations {
     };
     delete_workflow_endpoint_workflows__workflow_id__delete: {
         parameters: {
-            query?: never;
+            query?: {
+                expected_package_name?: string | null;
+            };
             header?: never;
             path: {
                 workflow_id: string;
@@ -7993,7 +10137,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Conflict; workflow has active executions or is already archived */
+            /** @description Conflict; workflow has active executions, is already archived, or is not attributed to expected_package_name */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -8076,6 +10220,47 @@ export interface operations {
             };
         };
     };
+    get_workflow_trend_endpoint_workflows__workflow_id__trend_get: {
+        parameters: {
+            query?: {
+                page?: number;
+                page_size?: number;
+            };
+            header?: never;
+            path: {
+                workflow_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowTrendResponse"];
+                };
+            };
+            /** @description No workflow has this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_workflow_history_endpoint_workflows__workflow_id__history_get: {
         parameters: {
             query?: never;
@@ -8094,6 +10279,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ExecutionHistoryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_workflow_latest_outputs_endpoint_workflows__workflow_id__latest_outputs_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workflow_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowLatestOutputsResponse"];
                 };
             };
             /** @description Validation Error */
@@ -8183,6 +10399,7 @@ export interface operations {
                 workflow_id?: string | null;
                 version?: string | null;
                 source_digest?: string | null;
+                package_name?: string | null;
                 force?: boolean;
             };
             header?: never;
@@ -8224,6 +10441,12 @@ export interface operations {
                 started_before?: string | null;
                 /** @description Case-insensitive substring match against execution id, workflow id and workflow name */
                 q?: string | null;
+                /** @description Keep only executions carrying this tag. Repeat to require several (AND). Normalised like stored tags; an invalid tag is rejected with 422. */
+                tag?: string[] | null;
+                /** @description Keep only executions currently in this eval: an eval's runs (#967). Matched exactly, never as a prefix. */
+                eval_id?: string | null;
+                /** @description true keeps only executions that are currently a run of some eval; false keeps only executions in no eval. Omit for both. */
+                in_eval?: boolean | null;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -8881,6 +11104,601 @@ export interface operations {
             };
         };
     };
+    add_execution_tags_endpoint_executions__execution_id__tags_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                execution_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddTagsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExecutionTagsResponse"];
+                };
+            };
+            /** @description No execution or workflow has this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The id prefix matches more than one record */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A tag is invalid, none was given, or the limit would be exceeded */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    remove_execution_tags_endpoint_executions__execution_id__tags_delete: {
+        parameters: {
+            query: {
+                /** @description A tag to remove. Repeat to remove several. Normalised like stored tags; an invalid tag is rejected with 422. */
+                tag: string[];
+            };
+            header?: never;
+            path: {
+                execution_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExecutionTagsResponse"];
+                };
+            };
+            /** @description No execution or workflow has this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The id prefix matches more than one record */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A tag is invalid, none was given, or the limit would be exceeded */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    add_workflow_tags_endpoint_workflows__workflow_id__tags_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workflow_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddTagsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowTagsResponse"];
+                };
+            };
+            /** @description No execution or workflow has this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The id prefix matches more than one record */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A tag is invalid, none was given, or the limit would be exceeded */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    remove_workflow_tags_endpoint_workflows__workflow_id__tags_delete: {
+        parameters: {
+            query: {
+                /** @description A tag to remove. Repeat to remove several. Normalised like stored tags; an invalid tag is rejected with 422. */
+                tag: string[];
+            };
+            header?: never;
+            path: {
+                workflow_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowTagsResponse"];
+                };
+            };
+            /** @description No execution or workflow has this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The id prefix matches more than one record */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A tag is invalid, none was given, or the limit would be exceeded */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    attach_execution_to_eval_endpoint_executions__execution_id__eval_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                execution_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AttachEvalRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExecutionEvalResponse"];
+                };
+            };
+            /** @description No execution has this id, or no eval has the eval id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The eval is archived, the run belongs to a different eval, or the id prefix matches more than one execution */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The eval id is not a valid eval id */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    detach_execution_from_eval_endpoint_executions__execution_id__eval_delete: {
+        parameters: {
+            query: {
+                /** @description The eval to detach from. Must be the eval the run belongs to, or none. */
+                eval_id: string;
+            };
+            header?: never;
+            path: {
+                execution_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExecutionEvalResponse"];
+                };
+            };
+            /** @description No execution has this id, or no eval has the eval id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The eval is archived, the run belongs to a different eval, or the id prefix matches more than one execution */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The eval id is not a valid eval id */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    set_workflow_default_eval_endpoint_workflows__workflow_id__default_eval_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workflow_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetDefaultEvalRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowDefaultEvalResponse"];
+                };
+            };
+            /** @description No workflow has this id, or no eval has the eval id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The eval is archived, or the id prefix matches more than one workflow */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The eval id is not a valid eval id */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    list_evals_endpoint_evals_get: {
+        parameters: {
+            query?: {
+                /** @description Keep only active or only archived evals. Both when omitted. */
+                status?: ("active" | "archived") | null;
+                /** @description Case-insensitive match on id, name and goal */
+                q?: string | null;
+                /** @description Keep evals carrying this tag; repeat for AND */
+                tag?: string[] | null;
+                page?: number;
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvalListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_eval_endpoint_evals_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateEvalRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvalCreatedResponse"];
+                };
+            };
+            /** @description The request is invalid, or a baseline ref could not be resolved */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_eval_endpoint_evals__eval_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                eval_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvalDetailResponse"];
+                };
+            };
+            /** @description No eval has this id in the eval read model (it may still be catching up) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The eval id is not a valid eval id */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    list_eval_runs_endpoint_evals__eval_id__runs_get: {
+        parameters: {
+            query?: {
+                /** @description Comma-separated execution statuses (OR'd) */
+                statuses?: string | null;
+                page?: number;
+                page_size?: number;
+            };
+            header?: never;
+            path: {
+                eval_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvalRunListResponse"];
+                };
+            };
+            /** @description No eval has this id in the eval read model (it may still be catching up) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The eval id is not a valid eval id */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_eval_trend_endpoint_evals__eval_id__trend_get: {
+        parameters: {
+            query?: {
+                page?: number;
+                page_size?: number;
+            };
+            header?: never;
+            path: {
+                eval_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvalTrendResponse"];
+                };
+            };
+            /** @description No eval has this id in the eval read model (it may still be catching up) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The eval id is not a valid eval id */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    score_eval_run_endpoint_evals__eval_id__runs__execution_id__score_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                eval_id: string;
+                execution_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EvalRunScoreRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvalRunScoreResponse"];
+                };
+            };
+            /** @description No eval has this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The execution is not currently a run of this eval */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The eval id is not a valid eval id */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    archive_eval_endpoint_evals__eval_id__archive_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                eval_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvalArchivedResponse"];
+                };
+            };
+            /** @description No eval has this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The eval id is not a valid eval id */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     list_sessions_endpoint_sessions_get: {
         parameters: {
             query?: {
@@ -9171,6 +11989,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ArtifactContentResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_artifact_raw_endpoint_artifacts__artifact_id__raw_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                artifact_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": unknown;
                 };
             };
             /** @description Validation Error */
@@ -9612,6 +12461,74 @@ export interface operations {
             };
         };
     };
+    get_phase_profiles_endpoint_metrics_phase_profiles_get: {
+        parameters: {
+            query: {
+                /** @description Workflow whose phases to profile */
+                workflow_id: string;
+                /** @description Look-back window in days */
+                window_days?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PhaseProfilesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_shipped_metrics_endpoint_metrics_shipped_get: {
+        parameters: {
+            query?: {
+                /** @description Window length in UTC days: 7, 14 or 30 */
+                days?: 7 | 14 | 30;
+                /** @description Only commits of this workflow's executions */
+                workflow_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShippedMetricsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_capture_status_capture_status_get: {
         parameters: {
             query?: {
@@ -9699,6 +12616,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SessionTokenMetrics"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_request_latency_observability_latency_get: {
+        parameters: {
+            query?: {
+                /** @description One route TEMPLATE, e.g. /evals/{eval_id}. Every route when omitted. */
+                route?: string | null;
+                /** @description How far back to look */
+                window?: "1h" | "24h" | "7d" | "30d";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestLatencyResponse"];
                 };
             };
             /** @description Validation Error */

@@ -81,7 +81,7 @@ class TestEnvironmentEnforcement:
 
         with (
             patch(
-                "syn_adapters.in_memory.get_settings",
+                "syn_shared.in_memory.get_settings",
                 return_value=_mock_settings(AppEnvironment.DEVELOPMENT),
             ),
             pytest.raises(InMemoryAdapterError, match="test/offline only"),
@@ -97,7 +97,7 @@ class TestEnvironmentEnforcement:
 
         with (
             patch(
-                "syn_adapters.in_memory.get_settings",
+                "syn_shared.in_memory.get_settings",
                 return_value=_mock_settings(AppEnvironment.PRODUCTION),
             ),
             pytest.raises(InMemoryAdapterError),
@@ -113,7 +113,7 @@ class TestEnvironmentEnforcement:
 
         with (
             patch(
-                "syn_adapters.in_memory.get_settings",
+                "syn_shared.in_memory.get_settings",
                 return_value=_mock_settings(AppEnvironment.STAGING),
             ),
             pytest.raises(InMemoryAdapterError),
@@ -129,7 +129,7 @@ class TestEnvironmentEnforcement:
 
         with (
             patch(
-                "syn_adapters.in_memory.get_settings",
+                "syn_shared.in_memory.get_settings",
                 return_value=_mock_settings(AppEnvironment.DEVELOPMENT),
             ),
             pytest.raises(InMemoryAdapterError),
@@ -145,7 +145,7 @@ class TestEnvironmentEnforcement:
 
         with (
             patch(
-                "syn_adapters.in_memory.get_settings",
+                "syn_shared.in_memory.get_settings",
                 return_value=_mock_settings(AppEnvironment.DEVELOPMENT),
             ),
             pytest.raises(InMemoryAdapterError),
@@ -161,7 +161,7 @@ class TestEnvironmentEnforcement:
 
         with (
             patch(
-                "syn_adapters.in_memory.get_settings",
+                "syn_shared.in_memory.get_settings",
                 return_value=_mock_settings(AppEnvironment.DEVELOPMENT),
             ),
             pytest.raises(InMemoryAdapterError),
@@ -389,6 +389,7 @@ class TestMemorySidecarAdapter:
         """Create test sidecar config."""
         return SidecarConfig(
             workspace_id="ws-456",
+            execution_id="exec-456",
             listen_port=8080,
         )
 

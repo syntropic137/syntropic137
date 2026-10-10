@@ -30,6 +30,7 @@ from syn_domain.contexts.orchestration import (
     TokenAccumulator,
 )
 from syn_shared.agents import AgentRunner
+from syn_shared.in_memory import assert_test_only
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -41,6 +42,12 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.orchestration.slices.execute_workflow.ObservabilityCollector import (
         ObservabilityCollector,
+    )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.phase_cost_limit import (
+        PhaseCostLimit,
+    )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.phase_push import (
+        PushObserver,
     )
     from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
         AgentHandlerProtocol,
@@ -83,8 +90,17 @@ class FakeAgentExecutionHandler:
         stream_error: str | None = None,
         uses_tools: Sequence[str] = (),
         attempts: Sequence[FakeAgentExecutionHandler] = (),
+        cost_limit_reason: str | None = None,
     ) -> None:
+        assert_test_only()
         self._interrupt = interrupt
+        #: Set when the double models a run the platform stopped for spending
+        #: past its phase's ``max_cost_usd`` (#1376), as the real stream
+        #: processor reports it: interrupted, AND saying why.
+        self._cost_limit_reason = cost_limit_reason
+        #: The cost limit each call was handed, so a test can see the phase's
+        #: ``max_cost_usd`` actually reached the agent run.
+        self.cost_limits: list[PhaseCostLimit | None] = []
         self._exit_code = exit_code
         self._interrupt_reason = interrupt_reason
         self._launches = launches
@@ -145,6 +161,8 @@ class FakeAgentExecutionHandler:
         self._attempts = tuple(attempts)
         self.calls: list[TodoItem] = []
         self.runners: list[Runner] = []
+        #: What each attempt was told to report pushes to (PC-128).
+        self.push_observers: list[PushObserver | None] = []
 
     # ------------------------------------------------------------------
     # Protocol-required method
@@ -162,9 +180,13 @@ class FakeAgentExecutionHandler:
         collector: ObservabilityCollector | None = None,
         runner: Runner = AgentRunner.CLAUDE,
         on_launch: AgentLaunchObserver | None = None,
+        cost_limit: PhaseCostLimit | None = None,
+        on_push: PushObserver | None = None,
     ) -> AgentExecutionResult:
         self.calls.append(todo)
+        self.cost_limits.append(cost_limit)
         self.runners.append(runner)
+        self.push_observers.append(on_push)
         if self._attempts:
             # The script decides this attempt; the outer double stays the one
             # the test inspects, so `call_count` counts attempts across all of
@@ -181,6 +203,7 @@ class FakeAgentExecutionHandler:
                 collector,
                 runner,
                 on_launch,
+                cost_limit,
             )
         if self._produces:
             await workspace.inject_files(list(self._produces))
@@ -211,6 +234,7 @@ class FakeAgentExecutionHandler:
             verdict=AgentVerdict.from_agent_text(self._says),
             last_agent_message=self._says,
             error_reason=self._stream_error,
+            cost_limit_reason=self._cost_limit_reason,
         )
         command = AgentExecutionCompletedCommand(
             execution_id=todo.execution_id,
@@ -231,6 +255,7 @@ class FakeAgentExecutionHandler:
             # the real handler does, so processor tests see what production
             # records about the phase's write-backs.
             reported_side_effects=stream_result.verdict.reported_side_effects,
+            reported_review_verdict=stream_result.verdict.reported_review_verdict,
         )
         return AgentExecutionResult(
             stream_result=stream_result,
@@ -263,6 +288,11 @@ class FakeAgentExecutionHandler:
         it, which is why the default is overridable rather than fixed.
         """
         return cls(interrupt=True, interrupt_reason=reason)
+
+    @classmethod
+    def stopped_on_cost(cls, reason: str) -> FakeAgentExecutionHandler:
+        """Simulates the platform stopping a phase at its ``max_cost_usd`` (#1376)."""
+        return cls(interrupt=True, interrupt_reason=reason, cost_limit_reason=reason)
 
     @classmethod
     def success(

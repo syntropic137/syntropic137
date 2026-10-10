@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://syntropic137.dev/schemas/plugin/v0.33.1/workflow.schema.json",
+  "$id": "https://syntropic137.dev/schemas/plugin/v1.0.0/workflow.schema.json",
   "$defs": {
     "AgentYamlDefinition": {
       "additionalProperties": false,
@@ -54,6 +54,11 @@
         "allow_delegation": {
           "default": false,
           "title": "Allow Delegation",
+          "type": "boolean"
+        },
+        "require_delegation": {
+          "default": false,
+          "title": "Require Delegation",
           "type": "boolean"
         }
       },
@@ -111,6 +116,42 @@
       ],
       "description": "A workflow-declared reference to a Claude Code plugin.\n\nCompared and hashed by ``(source_url, version, name)`` to match the lock\nprojection key (issue #726). A workflow author who installs the same\nplugin under two different display names produces two distinct lock\nentries -- the materializer needs both to write the right files.",
       "title": "ClaudePluginRef"
+    },
+    "EvalId": {
+      "description": "The identity of one eval, and the id of its stream.",
+      "title": "EvalId",
+      "type": "string"
+    },
+    "FallbackAgentYamlDefinition": {
+      "additionalProperties": false,
+      "description": "Per-phase ``fallback_agent`` block as parsed from YAML (PC-83).\n\nThe agent the phase is re-run on, once, when its primary provider had no\ncapacity after every retry or its quota is spent. Provider and model only:\nthe phase's sandbox, tools and budget apply to the fallback unchanged, so\nthe provider rules that bind ``agent`` bind this too.",
+      "properties": {
+        "provider": {
+          "enum": [
+            "claude",
+            "codex"
+          ],
+          "title": "Provider",
+          "type": "string"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model"
+        }
+      },
+      "required": [
+        "provider"
+      ],
+      "title": "FallbackAgentYamlDefinition",
+      "type": "object"
     },
     "InputYamlDefinition": {
       "additionalProperties": false,
@@ -267,6 +308,19 @@
           "default": null,
           "title": "Timeout Seconds"
         },
+        "max_cost_usd": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Cost Usd"
+        },
         "allowed_tools": {
           "items": {
             "type": "string"
@@ -282,6 +336,11 @@
         "delivers_repo_changes": {
           "default": true,
           "title": "Delivers Repo Changes",
+          "type": "boolean"
+        },
+        "requires_verdict": {
+          "default": false,
+          "title": "Requires Verdict",
           "type": "boolean"
         },
         "argument_hint": {
@@ -312,6 +371,17 @@
           "anyOf": [
             {
               "$ref": "#/$defs/AgentYamlDefinition"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "fallback_agent": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FallbackAgentYamlDefinition"
             },
             {
               "type": "null"
@@ -541,6 +611,24 @@
       },
       "title": "Skills",
       "type": "array"
+    },
+    "tags": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Tags",
+      "type": "array"
+    },
+    "default_eval_id": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/EvalId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     }
   },
   "required": [

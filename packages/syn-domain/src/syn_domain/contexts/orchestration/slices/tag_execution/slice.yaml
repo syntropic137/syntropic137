@@ -1,0 +1,11 @@
+name: tag-execution
+type: command
+aggregate: WorkflowExecution
+emits:
+  - ExecutionTagsAddedEvent
+  - ExecutionTagsRemovedEvent
+projection: WorkflowExecutionListProjection
+subscribes_to:
+  - ExecutionTagsAddedEvent
+  - ExecutionTagsRemovedEvent
+returns: TagEditResult[ExecutionTags]

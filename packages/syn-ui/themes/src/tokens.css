@@ -1,0 +1,311 @@
+/*
+ * Skyline structural tokens: type, space, radius, size, motion, layout.
+ *
+ * No colour values live in this file. Colours are assigned per theme in
+ * skyline.css and syn137.css. The derived tokens at the bottom are built from
+ * colour tokens with color-mix(), so they recolour with any theme; they sit
+ * under [data-theme] so they resolve against the nearest theme root.
+ *
+ * Naming: --ds-* are the upstream @syntropic137/design-tokens roles (0.1.0,
+ * imported first by all.css); --sky-* belongs to Skyline.
+ *
+ * Intentional differences from upstream 0.1.0 (Skyline wins, being unlayered):
+ * - Values. Every --ds-* Skyline sets is overridden on purpose: the canvas
+ *   (Foundations board) is dark only, with its own palette per theme, rem
+ *   type and space sizes (upstream uses px), Instrument Sans / JetBrains
+ *   Mono, and the canvas radii. Upstream's light :root and dark values
+ *   never show: Skyline's theme roots are "skyline" and "syn137".
+ * - Extra names. Skyline also defines --ds-* names upstream 0.1.0 lacks:
+ *   font-weight-*, line-height-*, space-0, -px, -0-5, -1-5, -2-5, -3-5, -5,
+ *   -7, -9, -10, -12, -14, -16, radius-xs and border-width. check-themes.mjs
+ *   pins that list against the package's typed names, so a new one is a
+ *   deliberate change and an upstream addition is noticed.
+ * - Upstream-only names (brand-*, *-contrast, focus-ring, shadow-*,
+ *   duration-*, ease, z-*) keep upstream's values; Skyline does not use them
+ *   and has its own --sky-* equivalents.
+ *
+ * Breakpoints (custom properties cannot drive media queries, so they are
+ * written literally in min-width rem queries): 48rem dock -> capsule nav,
+ * 64rem detail pages gain a side column.
+ */
+
+:root {
+  /* ---- Fonts ---------------------------------------------------------- */
+  --ds-font-sans: 'Instrument Sans', 'Helvetica Neue', system-ui, sans-serif;
+  --ds-font-mono: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  --sky-font-brand: 'Orbitron', 'Eurostile', var(--ds-font-sans);
+  /* Landing display type: Instrument Sans at 600; the outlined SYNTROPIC137 wordmark */
+  --sky-font-display: var(--ds-font-sans);
+  --sky-font-weight-display: var(--ds-font-weight-semibold);
+  --sky-font-wordmark: var(--sky-font-brand);
+
+  /* ---- Type scale (rem against the 16px browser default) -------------- */
+  --sky-text-label: 0.65625rem; /* 10.5 mono labels, uppercase */
+  --ds-text-xs: 0.6875rem;      /* 11   mono captions */
+  --ds-text-sm: 0.8125rem;      /* 13   controls, secondary copy */
+  --sky-text-data: 0.78125rem;  /* 12.5 mono data */
+  --sky-text-control: 0.84375rem; /* 13.5 buttons, inputs, menu items */
+  --ds-text-md: 0.875rem;       /* 14   desktop body */
+  --sky-text-body: 0.9375rem;   /* 15   phone body, lead copy */
+  --ds-text-lg: 1.0625rem;      /* 17   card titles */
+  --ds-text-xl: 1.25rem;        /* 20   section titles */
+  --ds-text-2xl: 1.5rem;        /* 24 */
+  --sky-text-3xl: 1.875rem;     /* 30   figures, phone page title */
+  --sky-text-4xl: 2.75rem;      /* 44   page titles */
+  --sky-text-5xl: 3.25rem;      /* 52   Overview headline */
+
+  /* Fluid titles: phone size -> desktop size */
+  --sky-text-page: clamp(var(--sky-text-3xl), 1.2rem + 2.6vw, var(--sky-text-4xl));
+  --sky-text-hero: clamp(2.25rem, 1.4rem + 3vw, var(--sky-text-5xl));
+  --sky-text-figure: clamp(1.5rem, 1.2rem + 0.9vw, var(--sky-text-3xl));
+
+  --ds-font-weight-regular: 400;
+  --ds-font-weight-medium: 500;
+  --ds-font-weight-semibold: 600;
+  --ds-font-weight-bold: 700;
+
+  --ds-line-height-tight: 1.05;
+  --ds-line-height-snug: 1.3;
+  --ds-line-height-normal: 1.45;
+  --ds-line-height-code: 1.7;
+
+  --sky-tracking-display: -0.035em;
+  --sky-tracking-title: -0.015em;
+  --sky-tracking-label: 0.1em;
+  --sky-tracking-brand: 0.06em;
+
+  /* ---- Display type (landing boards) ----------------------------------
+   * px on purpose: the boards draw these at fixed sizes per viewport, and a
+   * page picks desktop or phone sizes with a min-width query. Desktop: hero,
+   * closing headline, section title, small display. Phone: hero, closing
+   * headline, section title. Hero and closing headline set
+   * -display-tight / -display; section titles (-m, -phone-m) set
+   * -display-section on both. */
+  --sky-font-display-xl: 104px;       /* hero h1 (board: 104; plan said 112) */
+  --sky-font-display-l: 84px;         /* closing headline */
+  --sky-font-display-m: 64px;         /* section titles */
+  --sky-font-display-s: 44px;         /* small display */
+  --sky-font-display-phone-xl: 50px;  /* phone hero h1 (board: 50; plan said 52) */
+  --sky-font-display-phone-l: 44px;   /* phone closing headline */
+  --sky-font-display-phone-m: 36px;   /* phone section titles */
+  --sky-tracking-display-tight: -0.045em;
+  --sky-line-height-display: 0.95;
+  --sky-tracking-display-section: -0.04em;
+  --sky-line-height-display-section: 1;
+
+  /* ---- Space (4px grid) ---------------------------------------------- */
+  --ds-space-0: 0;
+  --ds-space-px: 1px;
+  --ds-space-0-5: 0.125rem; /* 2 */
+  --ds-space-1: 0.25rem;    /* 4 */
+  --ds-space-1-5: 0.375rem; /* 6 */
+  --ds-space-2: 0.5rem;     /* 8 */
+  --ds-space-2-5: 0.625rem; /* 10 */
+  --ds-space-3: 0.75rem;    /* 12 */
+  --ds-space-3-5: 0.875rem; /* 14 */
+  --ds-space-4: 1rem;       /* 16 */
+  --ds-space-5: 1.25rem;    /* 20 */
+  --ds-space-6: 1.5rem;     /* 24 */
+  --ds-space-7: 1.75rem;    /* 28 */
+  --ds-space-8: 2rem;       /* 32 */
+  --ds-space-9: 2.25rem;    /* 36 */
+  --ds-space-10: 2.5rem;    /* 40 */
+  --ds-space-12: 3rem;      /* 48 */
+  --ds-space-14: 3.5rem;    /* 56 */
+  --ds-space-16: 4rem;      /* 64 */
+
+  /* ---- Radius ----------------------------------------------------------
+   * 24 hero panels, 18-20 cards, 14 rows, 10-12 controls, full for chips. */
+  --ds-radius-xs: 0.25rem;   /* 4  kbd hints */
+  --ds-radius-sm: 0.5625rem; /* 9  inner segments, breadcrumb pill */
+  --ds-radius-md: 0.625rem;  /* 10 nav items, small controls */
+  --ds-radius-lg: 0.6875rem; /* 11 buttons */
+  --sky-radius-control: 0.75rem; /* 12 inputs, groups */
+  --sky-radius-row: 0.875rem;    /* 14 rows, capsule */
+  --sky-radius-xl: 1.125rem;     /* 18 cards */
+  --sky-radius-card-lg: 1.25rem; /* 20 list panels */
+  --sky-radius-2xl: 1.5rem;      /* 24 header panels, dock */
+  --ds-radius-full: 999px;
+
+  /* ---- Sizes --------------------------------------------------------- */
+  --sky-size-control-sm: 2rem;    /* 32 */
+  --sky-size-control-md: 2.25rem; /* 36 */
+  --sky-size-control-lg: 2.75rem; /* 44, the touch size */
+  --sky-size-touch: 2.75rem;
+  --sky-size-nav-item: 2.125rem;  /* 34 capsule items */
+  --sky-size-dock-item: 3.25rem;  /* 52 dock items */
+  --sky-size-feedback-bubble: 2.5rem; /* 40 floating feedback bubble */
+  --sky-size-feedback-thumb-w: 7.5rem; /* 120 feedback screenshot thumbnail */
+  --sky-size-feedback-thumb-h: 4.5rem; /* 72 */
+  --sky-size-icon-sm: 0.875rem;   /* 14 */
+  --sky-size-icon-md: 0.9375rem;  /* 15 */
+  --sky-size-icon-lg: 1.125rem;   /* 18 */
+  --sky-size-object-icon-sm: 3rem;   /* 48 phone page header */
+  --sky-size-object-icon-lg: 5.25rem; /* 84 desktop page header */
+  --ds-border-width: 1px;
+  --sky-focus-ring-width: 2px;
+  --sky-focus-ring-offset: 2px;
+
+  /* ---- Layout -------------------------------------------------------- */
+  --sky-page-max: 87.5rem;      /* 1400 */
+  --sky-gutter: var(--ds-space-4); /* 16 phone, 40 from 48rem */
+  --sky-side-column: 21.25rem;  /* 340 detail side column */
+  --sky-dock-clearance: 6.5rem; /* space kept free under content for the dock */
+
+  /* ---- Motion -------------------------------------------------------- */
+  --sky-duration-fast: 120ms;
+  --sky-duration-base: 200ms;
+  --sky-duration-slow: 360ms;
+  --sky-ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --sky-ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  /* Landing motion (motion.css). --sky-ease-out above is the board's rise
+     curve; out-back is the S-mark drop with its small overshoot; draw is the
+     trend-line stroke. */
+  --sky-ease-out-back: cubic-bezier(0.2, 0.9, 0.25, 1.15);
+  --sky-ease-draw: cubic-bezier(0.4, 0, 0.2, 1);
+  --sky-dur-1: 250ms;  /* hover lift, tile border */
+  --sky-dur-2: 900ms;  /* S-mark cube drop */
+  --sky-dur-3: 1100ms; /* city block rise */
+  --sky-dur-4: 2600ms; /* line draw, live pulse period */
+  /* Hold every motion.css class at its first frame: set paused on an
+     ancestor until the page plays it (e.g. once it scrolls into view), then
+     back to running. Inherited, so it reaches into the elements' shadow roots. */
+  --sky-motion-play: running;
+
+  /* ---- Light and texture --------------------------------------------- */
+  --sky-blur-glass: 14px;
+  --sky-texture-dots-size: 28px;
+  /* Film grain: 160px fractal-noise tile at 6% opacity. A complete background
+     layer: background: var(--sky-texture-grain). */
+  --sky-texture-grain: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20width%3D%27160%27%20height%3D%27160%27%3E%3Cfilter%20id%3D%27n%27%3E%3CfeTurbulence%20type%3D%27fractalNoise%27%20baseFrequency%3D%270.9%27%20numOctaves%3D%272%27%20stitchTiles%3D%27stitch%27%2F%3E%3C%2Ffilter%3E%3Crect%20width%3D%27100%25%27%20height%3D%27100%25%27%20filter%3D%27url%28%23n%29%27%20opacity%3D%270.06%27%2F%3E%3C%2Fsvg%3E");
+
+  /* ---- Layers -------------------------------------------------------- */
+  --sky-z-sticky: 10;
+  --sky-z-nav: 20;
+  --sky-z-dock: 30;
+  --sky-z-overlay: 40;
+  --sky-z-toast: 50;
+}
+
+@media (min-width: 48rem) {
+  :root {
+    --sky-gutter: var(--ds-space-10);
+    --sky-dock-clearance: 0rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --sky-duration-fast: 0ms;
+    --sky-duration-base: 0ms;
+    --sky-duration-slow: 0ms;
+    --sky-dur-1: 0ms;
+    --sky-dur-2: 0ms;
+    --sky-dur-3: 0ms;
+    --sky-dur-4: 0ms;
+  }
+}
+
+/*
+ * Derived colour roles. Defined once, from the theme's colour tokens, so both
+ * themes (and any later one) get them for free.
+ */
+[data-theme] {
+  /* 3D faces: front is the accent, top 58% toward the foreground, side 50%
+     toward the ground. skyline-core's extrude() returns the same recipe for
+     any base colour. */
+  --sky-face-front: var(--ds-color-accent);
+  --sky-face-top: color-mix(in oklab, var(--ds-color-accent) 58%, var(--ds-color-fg));
+  --sky-face-side: color-mix(in oklab, var(--ds-color-accent) 50%, var(--ds-color-bg));
+
+  --sky-color-accent-soft: color-mix(in oklab, var(--ds-color-accent) 16%, transparent);
+  --sky-color-accent-ring: color-mix(in oklab, var(--ds-color-accent) 24%, transparent);
+  --sky-color-accent-soft-fg: color-mix(in oklab, var(--ds-color-accent) 40%, var(--ds-color-fg));
+  --sky-color-hero-glow: color-mix(in oklab, var(--ds-color-accent) 18%, transparent);
+  --sky-color-focus: var(--ds-color-accent);
+
+  --sky-color-running-block: color-mix(in oklab, var(--ds-color-accent) 45%, var(--sky-color-empty));
+
+  /* Run and session status: one colour per state (owner tweak after demo).
+     skyline-core's statusSemantics() names these; nothing else picks status colours. */
+  --sky-status-completed: var(--ds-color-success);
+  --sky-status-failed: var(--ds-color-danger);
+  --sky-status-refused: var(--ds-color-warning);
+  --sky-status-running: var(--ds-color-accent);
+  --sky-status-pending: var(--ds-color-text-subtle);
+  --sky-status-cancelled: var(--ds-color-text-muted);
+  --sky-status-interrupted: var(--ds-color-warning);
+  --sky-status-skipped: var(--ds-color-text-subtle);
+  --sky-status-unknown: var(--ds-color-text-subtle);
+
+  /* Feedback bubble (#1385): one colour per type and priority, after the
+     React widget's palette (bug red, feature violet, UI/UX blue, performance
+     amber, question/other grey; low grey to critical red). */
+  --sky-feedback-type-bug: var(--ds-color-danger);
+  --sky-feedback-type-feature: var(--sky-color-data-3);
+  --sky-feedback-type-ui-ux: var(--sky-color-data-1);
+  --sky-feedback-type-performance: var(--ds-color-warning);
+  --sky-feedback-type-question: var(--ds-color-text-muted);
+  --sky-feedback-type-other: var(--ds-color-text-subtle);
+  --sky-feedback-priority-low: var(--ds-color-text-subtle);
+  --sky-feedback-priority-medium: var(--ds-color-warning);
+  --sky-feedback-priority-high: var(--sky-color-data-2);
+  --sky-feedback-priority-critical: var(--ds-color-danger);
+  --sky-feedback-pick: var(--ds-color-accent);
+  --sky-feedback-pick-fill: color-mix(in oklab, var(--ds-color-accent) 12%, transparent);
+  --sky-feedback-scrim: color-mix(in oklab, var(--ds-color-bg) 55%, transparent);
+
+  /* Harnesses: the agent colours under the landing page's name, plus a
+     gradient for harness names set as text (background-clip: text). Claude
+     keeps the current site's clay-into-amber direction; Codex moves off the
+     old sky-to-indigo ramp, which read as the syn137 accent blue, onto the
+     board's slate. */
+  --sky-harness-claude: var(--sky-color-agent-claude);
+  --sky-harness-codex: var(--sky-color-agent-codex);
+  --sky-harness-claude-gradient: linear-gradient(120deg, var(--sky-harness-claude) 0%, color-mix(in oklab, var(--sky-harness-claude) 55%, var(--ds-color-warning)) 100%);
+  --sky-harness-codex-gradient: linear-gradient(120deg, var(--sky-harness-codex) 0%, color-mix(in oklab, var(--sky-harness-codex) 55%, var(--ds-color-fg)) 100%);
+
+  /* Landing light and depth (Landing board). */
+  --sky-glow-accent: 0 30px 80px -30px color-mix(in oklab, var(--ds-color-accent) 60%, transparent); /* box-shadow under the install box and hero panels */
+  --sky-glow-accent-strong: 0 60px 120px -40px color-mix(in oklab, var(--ds-color-accent) 45%, transparent); /* box-shadow under the explorer window */
+  --sky-glow-accent-wash: radial-gradient(60% 50% at 50% 0%, color-mix(in oklab, var(--ds-color-accent) 22%, transparent), transparent 70%); /* hero top light, a background layer */
+  --sky-glow-accent-wash-bottom: radial-gradient(50% 70% at 50% 100%, color-mix(in oklab, var(--ds-color-accent) 28%, transparent), transparent 70%); /* closing call to action, a background layer */
+  --sky-gradient-panel: linear-gradient(180deg, var(--sky-color-panel-top), var(--ds-color-bg)); /* cards, tiles, code windows */
+  --sky-gradient-window: linear-gradient(180deg, var(--sky-color-panel-top), var(--sky-color-window-bottom)); /* the explorer window inside --sky-border-gradient */
+  --sky-gradient-glass-raised: linear-gradient(180deg, color-mix(in oklab, var(--sky-color-glass-top) 85%, transparent), color-mix(in oklab, var(--ds-color-bg) 85%, transparent)); /* install box, with backdrop blur */
+  --sky-fade-to-ground: linear-gradient(180deg, transparent, var(--sky-color-ground-deep)); /* hero bottom fade into the page */
+  --sky-mask-fade-y: linear-gradient(180deg, transparent, var(--ds-color-fg) 18%, var(--ds-color-fg) 82%, transparent); /* mask-image: soft top and bottom edges (only alpha counts) */
+  --sky-cube-glass-left: color-mix(in oklab, var(--ds-color-fg) 32%, transparent); /* S mark glass cube faces; top is --sky-color-cube-glass-edge */
+  --sky-cube-glass-right: color-mix(in oklab, var(--ds-color-fg) 18%, transparent);
+  --sky-gradient-text: linear-gradient(180deg, var(--sky-color-display-hi) 0%, var(--sky-color-display-mid) 55%, color-mix(in oklab, var(--ds-color-accent) 70%, var(--sky-color-display-hi)) 100%); /* headlines, with background-clip: text */
+  --sky-surface-glass: color-mix(in oklab, var(--ds-color-surface) 66%, transparent); /* floating cards, with backdrop-filter: blur(var(--sky-blur-glass)) */
+  --sky-border-gradient: linear-gradient(140deg, color-mix(in oklab, var(--ds-color-accent) 70%, var(--sky-color-display-hi)), color-mix(in oklab, var(--sky-color-border-strong) 60%, transparent) 35%, color-mix(in oklab, var(--sky-color-border-strong) 30%, transparent) 70%, color-mix(in oklab, var(--ds-color-accent) 50%, transparent)); /* 1px frame: a padded wrapper with this background */
+  /* 28px dot grid, a complete background layer: background: var(--sky-texture-dots), var(--ds-color-bg). */
+  --sky-texture-dots: radial-gradient(circle at 1px 1px, color-mix(in oklab, var(--ds-color-text-muted) 14%, transparent) 1px, transparent 0) 0 0 / var(--sky-texture-dots-size) var(--sky-texture-dots-size);
+
+  /* IsoCity tone tiers (Main board): mid and hot mix the accent, fail the
+     danger colour, toward the ground (sides), the card (fronts) and the
+     selected surface or white (tops). Hot and fail tops get a light rim. */
+  --sky-iso-dim-rim: color-mix(in oklab, var(--ds-color-accent) 30%, var(--sky-iso-dim-rim-base));
+  --sky-iso-mid-side: color-mix(in oklab, var(--ds-color-accent) 22%, var(--ds-color-bg));
+  --sky-iso-mid-front: color-mix(in oklab, var(--ds-color-accent) 42%, var(--ds-color-surface));
+  --sky-iso-mid-top: color-mix(in oklab, var(--ds-color-accent) 62%, var(--ds-color-overlay));
+  --sky-iso-mid-rim: color-mix(in oklab, var(--ds-color-accent) 70%, var(--sky-color-display-hi));
+  --sky-iso-hot-side: color-mix(in oklab, var(--ds-color-accent) 52%, var(--sky-color-ground-deep));
+  --sky-iso-hot-front: color-mix(in oklab, var(--ds-color-accent) 88%, var(--ds-color-surface));
+  --sky-iso-hot-top: color-mix(in oklab, var(--ds-color-accent) 45%, var(--sky-color-display-hi));
+  --sky-iso-hot-rim: var(--sky-color-display-hi);
+  --sky-iso-fail-side: color-mix(in oklab, var(--ds-color-danger) 40%, var(--sky-color-ground-deep));
+  --sky-iso-fail-front: color-mix(in oklab, var(--ds-color-danger) 78%, var(--ds-color-surface));
+  --sky-iso-fail-top: color-mix(in oklab, var(--ds-color-danger) 55%, var(--sky-color-display-hi));
+  --sky-iso-today: color-mix(in oklab, var(--ds-color-accent) 30%, transparent);
+  --sky-iso-today-edge: color-mix(in oklab, var(--ds-color-accent) 60%, var(--sky-color-display-hi));
+  --sky-iso-beam: color-mix(in oklab, var(--ds-color-accent) 50%, var(--sky-color-display-hi));
+  --sky-iso-pool: color-mix(in oklab, var(--ds-color-accent) 22%, transparent);
+  --sky-iso-sel-side: color-mix(in oklab, var(--ds-color-accent) 60%, var(--ds-color-surface));
+  --sky-iso-sel-front: color-mix(in oklab, var(--ds-color-accent) 80%, var(--sky-color-display-hi));
+  --sky-iso-strip-lit: color-mix(in oklab, var(--ds-color-accent) 80%, var(--sky-color-display-hi));
+  --sky-iso-now: color-mix(in oklab, var(--ds-color-accent) 50%, var(--sky-color-display-hi));
+
+  color-scheme: dark;
+}

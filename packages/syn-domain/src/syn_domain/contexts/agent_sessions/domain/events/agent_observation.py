@@ -89,6 +89,11 @@ class ObservationType(StrEnum):
     # because the alternative is a phase whose pushes fail with nobody told.
     GIT_CREDENTIAL_LAPSED = "git_credential_lapsed"
 
+    # What one phase workspace consumed, measured as it was torn down: CPU,
+    # throttling, memory peak, OOM kills, disk, network, failed deletes. Lane 2:
+    # it sizes the platform (docs/north-star.md) and decides nothing.
+    WORKSPACE_RESOURCE_USAGE = "workspace_resource_usage"
+
 
 @event("AgentObservation", "v1")
 class AgentObservationEvent(DomainEvent):

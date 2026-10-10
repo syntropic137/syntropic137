@@ -6,12 +6,21 @@ Extracted from WorkflowExecutionEngine during M6 cleanup.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import TYPE_CHECKING, Final, NamedTuple
 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    DelegationAttempt,
+    DelegationFailure,
+    DelegationFailureReason,
     FailureClassification,
+    ReviewVerdict,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.upstream_failure import (
+    UpstreamFailureError,
 )
 from syn_shared.display import format_exit_code
+from syn_shared.upstream_failure import UpstreamFailureKind
 
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
@@ -96,6 +105,149 @@ class NonZeroExitError(RuntimeError):
     def __init__(self, message: str, *, exit_code: int) -> None:
         super().__init__(message)
         self.exit_code = exit_code
+
+
+class UpstreamExitError(NonZeroExitError, UpstreamFailureError):
+    """An agent run that exited non-zero on an upstream fault its harness named (#1592, #1593).
+
+    Both things at once, because both are true and both are read: the exit
+    status by `exit_code_of`, the kind by `failure_account`. Raised in place of
+    a plain `NonZeroExitError` - including after the phase's capacity retries
+    run out - so a busy provider is RECORDED as one on the WorkflowFailed event,
+    not only described in its message.
+    """
+
+    def __init__(self, message: str, *, exit_code: int, upstream_kind: UpstreamFailureKind) -> None:
+        # Not `super().__init__`: in this class's MRO, `NonZeroExitError`'s
+        # `super()` resolves to `UpstreamFailureError`, whose `upstream_kind` is
+        # keyword-only and would be missing, so construction raised TypeError.
+        RuntimeError.__init__(self, message)
+        self.exit_code = exit_code
+        self.upstream_kind = upstream_kind
+
+
+class ProvisionStep(StrEnum):
+    """A provisioning step that runs inside the workspace under a deadline (PC-126)."""
+
+    SECRET_INJECTION = "secret_injection"
+    """The ADR-024 setup script: credentials, token mint and repository clones."""
+
+    SKILL_INSTALL = "skill_install"
+    """`skills add` for one skill declared by the phase."""
+
+    CODEX_SANDBOX_PROBE = "codex_sandbox_probe"
+    """The live `codex sandbox` probe run before a sandboxed codex phase (#1434)."""
+
+    CHECKOUT_VERIFICATION = "checkout_verification"
+    """The read-only `git rev-parse` reads of each cloned repository's HEAD (#967)."""
+
+
+class ProvisionStepTimeoutError(UpstreamFailureError):
+    """A provisioning step ran out of time, every attempt it was allowed (PC-126).
+
+    A timeout is not an answer about the work. Under host load (10 concurrent
+    runs put load ~27 on 16 cores) a `skills add` or a setup script that would
+    finish is killed at its deadline, and the run used to fail as if the step
+    itself were broken. So it is recorded as what it is: the workspace did not
+    answer in time, `UNAVAILABLE`, transient, and a resume - which provisions
+    a fresh workspace - is the remedy. `failure_account` reads that kind off
+    this exception exactly as it does for GitHub; `step` says which step.
+    """
+
+    def __init__(
+        self,
+        step: ProvisionStep,
+        *,
+        subject: str,
+        timeout_seconds: int,
+        attempts: int,
+        detail: str = "",
+    ) -> None:
+        message = (
+            f"Provision step {step.value} ({subject}) timed out after {timeout_seconds}s "
+            f"on each of {attempts} attempt(s); the host is likely overloaded. "
+            "Raise the step's timeout setting if this recurs on an idle host."
+        )
+        super().__init__(
+            f"{message}\n{detail}" if detail else message,
+            upstream_kind=UpstreamFailureKind.UNAVAILABLE,
+        )
+        self.step = step
+        self.timeout_seconds = timeout_seconds
+        self.attempts = attempts
+
+
+class PinnedCommitUnreachableError(NonZeroExitError):
+    """A repository cannot be checked out at the commit its run pinned it to (#1458).
+
+    Every phase is provisioned at the commits its run recorded - a resume's
+    being its parent's - and when one of them is on no branch or tag of origin
+    any more - force-pushed away, its branch deleted - the phase is refused
+    rather than run on the default branch's head. Running it there would make
+    the run's record a lie: a resume's inherited phases saw one tree, and it
+    would work on another, with nothing on the record to say so.
+
+    The message names the repository and the commit, from the setup script's
+    own refusal. Classified as the platform's failure like every other
+    setup failure (`failure_account`): the request was sound, the code it
+    named is what went away.
+    """
+
+    def __init__(self, *, phase_name: str, detail: str, exit_code: int) -> None:
+        super().__init__(
+            f"Phase '{phase_name}' will not be run: a repository could not be checked "
+            f"out at the commit this run is pinned to, and it is not run on any "
+            f"other. {detail}",
+            exit_code=exit_code,
+        )
+        self.phase_name = phase_name
+
+
+@dataclass(frozen=True)
+class CheckoutMismatch:
+    """One repository whose working tree is not where it was asked to be (#967)."""
+
+    #: `owner/name`, as the run's pin names it.
+    repository: str
+    pinned_sha: str
+    actual_sha: str
+    #: The branch it continues (#1513), which it is held to instead of its pin.
+    branch: str | None = None
+
+    def describe(self) -> str:
+        """The disagreement, in the terms the repository was held to."""
+        if self.branch is None:
+            return f"{self.repository} is at {self.actual_sha}, pinned to {self.pinned_sha}"
+        return (
+            f"{self.repository} is at {self.actual_sha}, not on {self.branch} at the head of"
+            f" origin/{self.branch} containing its pin {self.pinned_sha}"
+        )
+
+
+class CheckoutMismatchError(RuntimeError):
+    """A provisioned workspace is not at the commits its run pinned (#967).
+
+    THE OTHER HALF OF `PinnedCommitUnreachableError`. That one is the setup
+    script refusing a pin it cannot reach; this one is the workspace, read back
+    after setup said it succeeded, standing somewhere else. Either way the
+    agent is never given the workspace: an eval's runs are comparable only if
+    each started from the baseline it froze, and a run that started anywhere
+    else would be scored as if it had not.
+
+    `mismatches` names every repository that disagreed, not only the first, so
+    one failure tells an operator the whole extent of it. Classified as the
+    platform's failure (`failure_account`): the pin was sound and the
+    provisioning did not honour it.
+    """
+
+    def __init__(self, *, phase_name: str, mismatches: tuple[CheckoutMismatch, ...]) -> None:
+        listed = "; ".join(m.describe() for m in mismatches)
+        super().__init__(
+            f"Phase '{phase_name}' will not be run: its workspace is not checked out "
+            f"at the commits this run is pinned to ({listed})."
+        )
+        self.phase_name = phase_name
+        self.mismatches = mismatches
 
 
 class ExitStatusUnavailableError(RuntimeError):
@@ -346,6 +498,77 @@ class FailureAccount(NamedTuple):
     """What the AGENT SAID caused it, `None` when it said nothing this reader
     knows. An operator reads it; nothing counts it."""
 
+    upstream: UpstreamFailureKind | None = None
+    """What kind of upstream fault this was, when an upstream service raised
+    it (#1593): whether resuming is enough or an operator must act. Read off
+    the exception's type, never its text. `None` for every other failure."""
+
+    delegation_failure: DelegationFailure | None = None
+    """Which required delegate did not happen, and why (#894); `None` for
+    every failure that is not a failed delegation."""
+
+
+class PhaseReportedNoVerdictError(RuntimeError):
+    """A phase that must report a review verdict reported none (PC-116).
+
+    THE FAILURE THIS EXISTS TO STOP. No verdict advances by order, on purpose,
+    so a verify phase that forgot ``review_verdict`` was read as "found
+    something" and the run spent a repair round on a fix nobody asked for -
+    or, on the last round, finished as though review had happened.
+
+    Classified `PLATFORM` by `failure_account`, like every failure that is
+    not the phase's own readable refusal: the agent claimed success and the
+    platform detected the gap. It fails the phase through the ordinary path,
+    so the execution is FAILED and resumable at this phase.
+    """
+
+    def __init__(self, *, phase_id: str) -> None:
+        super().__init__(
+            f"verify produced no verdict: phase {phase_id} declares requires_verdict, "
+            f"and its TASK_RESULT named no review_verdict this reader knows "
+            f"(exactly one of {', '.join(v.value for v in ReviewVerdict)}). "
+            f"Without one the review rounds cannot tell a certified change from a "
+            f"blocked one, so the phase fails rather than advancing by order."
+        )
+        self.phase_id = phase_id
+
+
+class DelegationFailedError(RuntimeError):
+    """A phase that required a delegate did not delegate successfully (#894)."""
+
+    def __init__(
+        self,
+        *,
+        phase_id: str,
+        required_delegate: str,
+        reason: DelegationFailureReason,
+        attempts: tuple[DelegationAttempt, ...] = (),
+        detail: str | None = None,
+    ) -> None:
+        self.phase_id = phase_id
+        #: The typed account every sink records (`failure_account`); the
+        #: message below is its rendering for `error`, never its source.
+        self.delegation_failure = DelegationFailure(
+            required_delegate=required_delegate, reason=reason, attempts=attempts, detail=detail
+        )
+        lines = [
+            f"Required delegation to {required_delegate} failed for phase {phase_id} "
+            f"({reason.value}): " + _summary(reason, required_delegate, detail)
+        ]
+        lines.extend(f"  - {attempt.describe()}" for attempt in attempts)
+        super().__init__("\n".join(lines))
+
+
+def _summary(reason: DelegationFailureReason, required_delegate: str, detail: str | None) -> str:
+    if reason is DelegationFailureReason.NOT_ATTEMPTED:
+        return (
+            f"the phase declared require_delegation but no delegate to "
+            f"{required_delegate} was launched."
+        )
+    if reason is DelegationFailureReason.FAILED:
+        return f"every delegate to {required_delegate} failed or never finished."
+    return "the delegation record could not be read" + (f": {detail}" if detail else ".")
+
 
 def failure_account(error: BaseException) -> FailureAccount:
     """What kind of failure `error` is, and what its phase said about it (#1357, #1372).
@@ -373,6 +596,16 @@ def failure_account(error: BaseException) -> FailureAccount:
     """
     if isinstance(error, PhaseReportedFailureError):
         return FailureAccount(error.failure_classification, error.reported_failure_reason)
+    # Still `PLATFORM` - the work was never judged - but now saying which
+    # platform failure: one a resume clears, or one only an operator can (#1593).
+    if isinstance(error, UpstreamFailureError):
+        return FailureAccount(FailureClassification.PLATFORM, None, upstream=error.upstream_kind)
+    if isinstance(error, DelegationFailedError):
+        # Still `PLATFORM`: the platform observed it, the agent claimed nothing.
+        # What it adds is the typed account of which delegate failed (#894).
+        return FailureAccount(
+            FailureClassification.PLATFORM, None, delegation_failure=error.delegation_failure
+        )
     return FailureAccount(FailureClassification.PLATFORM, None)
 
 
@@ -534,6 +767,14 @@ class QuarantinedWork:
     #: record AND an unrecoverable one, because the patch it carries is the
     #: only copy of those changes when the second push fails too.
     dropped: DroppedWorkflows | None = None
+    #: The commit ``pushed_ref`` was pushed at (#1547), so a reviewer can be
+    #: told exactly what to fetch. None when nothing landed; when the
+    #: workflow-safe rescue (#1437) landed, the rescue commit it pushed.
+    commit: str | None = None
+    #: What ``commit`` changes against the newest commit a remote had, as
+    #: ``git diff --stat`` prints it (#1547). None when nothing landed or it
+    #: could not be read inside its bound.
+    diffstat: str | None = None
 
     def __post_init__(self) -> None:
         if (self.pushed_ref is None) == (self.push_error is None):

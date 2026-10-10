@@ -18,6 +18,7 @@ syn execution list [options]
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--status`, `-s` | `text` | --- | Filter by status |
+| `--tag` | `text` | --- | Only executions carrying this tag (repeatable; all must match) |
 | `--page` | `text` | `1` | Page number |
 | `--page-size` | `text` | `50` | Items per page (max 100) |
 
@@ -108,6 +109,31 @@ syn execution show <execution-id>
 ```bash
 syn execution show <execution-id>       # phases, cost and a session inventory summary
 syn execution sessions <execution-id> --all   # every session of the run (the summary's Details line)
+```
+
+---
+
+## `syn execution tag`
+
+Add or remove an execution's tags. Idempotent; never replaces the set
+
+```bash
+syn execution tag <action> <execution-id> <tags>
+```
+
+**Arguments:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `action` | `text` | Yes | add or remove |
+| `execution-id` | `text` | Yes | The execution to edit |
+| `tags` | `text` | Yes | One or more tags |
+
+**Examples:**
+
+```bash
+syn execution tag add <execution-id> eval:baseline     # filter later with --tag eval:baseline
+syn execution tag remove <execution-id> nightly        # inherited_tags still records it
 ```
 
 ---

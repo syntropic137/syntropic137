@@ -25,9 +25,25 @@ import {
 import { useResetView } from './useResetView'
 
 /** Long enough that typing a word is one request, short enough to feel live. */
-const SEARCH_DEBOUNCE_MS = 300
+export const SEARCH_DEBOUNCE_MS = 300
 
 export const LIST_PAGE_SIZE = 50
+
+/**
+ * The sizes an operator can pick on Executions and Sessions (feedback
+ * 60d9f990). The API caps a page at 200.
+ */
+export const RUN_LIST_PAGE_SIZES: readonly number[] = [50, 100]
+
+/**
+ * Sessions open at 100, Executions at 50; either can switch to the other size.
+ * The owner's bound was "100 by default unless it costs over 1.5x of 50". On
+ * the VPS /sessions at 100 measured 0.85-1.22x of 50, inside it. /executions
+ * measured up to 2.04x at p95 - still within the 200 ms budget, but outside
+ * the ratio, so it keeps 50 and offers 100 (PR #1785 has the tables).
+ */
+export const SESSION_LIST_PAGE_SIZE = 100
+export const EXECUTION_LIST_PAGE_SIZE = LIST_PAGE_SIZE
 
 export interface ListQueryState {
   /**
@@ -51,7 +67,7 @@ export interface ListQueryState {
 }
 
 /** Settle on a value only once it has stopped changing for `delayMs`. */
-function useDebounced<T>(value: T, delayMs: number): T {
+export function useDebounced<T>(value: T, delayMs: number): T {
   const [settled, setSettled] = useState(value)
   useEffect(() => {
     const timer = setTimeout(() => setSettled(value), delayMs)
@@ -61,11 +77,44 @@ function useDebounced<T>(value: T, delayMs: number): T {
 }
 
 /**
+ * The page being viewed within one collection, identified by `collectionKey`.
+ *
+ * A page number means nothing except relative to its collection, so any change
+ * of collection IS page 1. Derived in render rather than reset in an effect,
+ * which would fetch the old page of the new collection first. And the held page
+ * is dropped the moment the collection changes, not merely hidden: keeping it
+ * would restore page 3 on returning to a collection seen before (page 3 ->
+ * search -> clear search), which is a change of collection like any other.
+ */
+export interface CollectionPage {
+  page: number
+  /** Move within the current collection. Clamped at page 1. */
+  setPage: (page: number) => void
+}
+
+export function useCollectionPage(collectionKey: string): CollectionPage {
+  const [pageState, setPageState] = useState({ collectionKey, page: 1 })
+  if (pageState.collectionKey !== collectionKey) {
+    // Adjusting state while rendering, as React documents for a changed input:
+    // this render already reads page 1, and the stale page is forgotten.
+    setPageState({ collectionKey, page: 1 })
+  }
+  const page = pageState.collectionKey === collectionKey ? pageState.page : 1
+  const setPage = useCallback(
+    (next: number) => setPageState({ collectionKey, page: Math.max(1, next) }),
+    [collectionKey],
+  )
+  return { page, setPage }
+}
+
+/**
  * @param scopeKey Identity of any narrowing the caller applies that this hook
  *   cannot see, such as Sessions' `workflow_id`. Changing it selects a
  *   different collection, exactly as a shared filter does.
+ * @param pageSize Rows per page. Changing it returns to page 1, since the
+ *   old page number addresses different rows at a different size.
  */
-export function useListQuery(scopeKey: string): ListQueryState {
+export function useListQuery(scopeKey: string, pageSize: number = LIST_PAGE_SIZE): ListQueryState {
   const { selectedStatuses, timeWindow, toggleStatus, setTimeWindow, clearStatuses } =
     useFilterUrlState()
   const resetView = useResetView()
@@ -87,26 +136,19 @@ export function useListQuery(scopeKey: string): ListQueryState {
   // out from under the page offsets while an operator is paging through it.
   const startedAfter = useMemo(() => timeWindowToStartedAfter(timeWindow), [timeWindow])
 
-  // Which collection is being paged. A page number means nothing except
-  // relative to this, so a change to it IS page 1 - derived rather than reset
-  // in an effect, which would fetch the old page first and then correct it.
-  const collectionKey = [scopeKey, statusesKey, startedAfter ?? '', search].join(' ')
-  const [pageState, setPageState] = useState({ collectionKey, page: 1 })
-  const page = pageState.collectionKey === collectionKey ? pageState.page : 1
-  const setPage = useCallback(
-    (next: number) => setPageState({ collectionKey, page: Math.max(1, next) }),
-    [collectionKey],
-  )
+  // Which collection is being paged. See useCollectionPage.
+  const collectionKey = [scopeKey, statusesKey, startedAfter ?? '', search, pageSize].join(' ')
+  const { page, setPage } = useCollectionPage(collectionKey)
 
   const query = useMemo<ListQuery>(
     () => ({
       page,
-      page_size: LIST_PAGE_SIZE,
+      page_size: pageSize,
       statuses,
       started_after: startedAfter,
       q: search || undefined,
     }),
-    [page, statuses, startedAfter, search],
+    [page, pageSize, statuses, startedAfter, search],
   )
 
   return {

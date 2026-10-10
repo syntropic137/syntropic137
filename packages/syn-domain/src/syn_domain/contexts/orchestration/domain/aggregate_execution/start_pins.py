@@ -27,6 +27,16 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
+from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continuation import (
+    AbandonedBranch,
+    ContinuedBranch,
+    LeftBranches,
+    PhaseCheckout,
+    PushedCommit,
+    branches_left_by,
+    read_abandoned_branches,
+    read_continued_branches,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.legacy_event_shapes import (
     LegacyEventShapeError,
     payload_of,
@@ -77,6 +87,60 @@ class StartPins(BaseModel):
     source_commits: list[SourceCommit] = Field(default_factory=list)
     #: Set on a resume only: the parent this run was resumed from.
     resumed_from: ResumeOrigin | None = None
+    #: Set on a resume only: the branches its resumed phase continues (#1513).
+    continued_branches: list[ContinuedBranch] = Field(default_factory=list)
+    #: Set on a resume only: branches it could have continued and did not, and why.
+    abandoned_branches: list[AbandonedBranch] = Field(default_factory=list)
+    #: Set on a resume only: phases its parent's certified review skipped (#1681).
+    inherited_skipped_phase_ids: list[str] = Field(default_factory=list)
+    #: The installed workflow version it launched from (Evals v2); a resume
+    #: carries its parent's, never the template's current one.
+    workflow_version: str | None = None
+
+    def inherited_owners(self) -> dict[str, str]:
+        """Who holds the artifacts of each phase a resume inherited, by phase id."""
+        return {} if self.resumed_from is None else self.resumed_from.owners()
+
+    def checkout_for(self, phase_id: str) -> PhaseCheckout:
+        """What ``phase_id``'s repositories are checked out at (#1458, #1513).
+
+        THE RULE, in one place. A phase that READS code gets the pinned start
+        commits (`checkout_commits`). The phase a resume resumes CONTINUES
+        each branch in `continued_branches` - the branches its own earlier
+        attempt pushed - so those repositories are checked out on that
+        branch, at its head, instead. No other phase continues anything.
+        """
+        commits = {c.repository: c.sha for c in self.checkout_commits() if c.sha is not None}
+        if self.resumed_from is None or phase_id != self.resumed_from.resume_phase_id:
+            return PhaseCheckout(commits=commits)
+        branches: dict[str, str] = {}
+        for continued in self.continued_branches:
+            commits[continued.repository] = continued.head_sha
+            branches[continued.repository] = continued.branch
+        return PhaseCheckout(commits=commits, branches=branches)
+
+    def checkout_commits(self) -> list[SourceCommit]:
+        """The commits this run's phases check their repositories out at (#1458).
+
+        Every run's, fresh or resumed: what `source_commits` records is what
+        the run is checked out at, so the record is a fact about the code the
+        run ran on rather than about the moment it started. A resume copies
+        its parent's record, so it runs the rest of its parent's work against
+        the code the parent actually ran, however far the default branch has
+        moved.
+
+        A fresh run is pinned too, because otherwise its record would not be
+        what it ran: the commit is read at start and each phase is cloned
+        later, at provisioning, so a push landing in between - or between two
+        of its phases - would have the run work on a commit nothing recorded,
+        and a resume of it check out a different one (verification of #1525).
+
+        A repository whose commit nobody could resolve (`sha` None) pins
+        nothing. There is no commit to hold it to, so it clones the default
+        branch's head as it always has, and refusing it would make every run
+        started without GitHub access impossible.
+        """
+        return [c for c in self.source_commits if c.sha is not None]
 
 
 class AdmittedResume(BaseModel):
@@ -93,6 +157,7 @@ class AdmittedResume(BaseModel):
     resume_execution_id: str | None = None
     inherited_phases: list[InheritedPhase] = Field(default_factory=list)
     resume_phase_id: str | None = None
+    inherited_skipped_phase_ids: list[str] = Field(default_factory=list)
 
 
 def phase_definitions_of(phases: Sequence[ExecutablePhase]) -> list[PhaseDefinition]:
@@ -106,7 +171,7 @@ def phase_definitions_of(phases: Sequence[ExecutablePhase]) -> list[PhaseDefinit
             phase_id=p.phase_id,
             name=p.name,
             order=p.order,
-            timeout_seconds=p.timeout_seconds or p.agent_config.timeout_seconds,
+            timeout_seconds=p.effective_timeout_seconds,
         )
         for p in phases
     ]
@@ -147,13 +212,13 @@ def read_pinned_phases(raw: object) -> list[ExecutablePhase]:
 
 
 def read_source_commits(raw: object) -> list[SourceCommit]:
-    """The recorded source commits, or empty when absent or unreadable."""
+    """Recorded commits - a start's, or a provisioning's checkout - or empty when unreadable."""
     if not raw:
         return []
     try:
         return _SOURCE_COMMITS.validate_python(raw)
     except ValidationError:
-        logger.warning("Unreadable source_commits on a replayed start event; treating as absent")
+        logger.warning("Unreadable commits on a replayed event; treating as absent")
         return []
 
 
@@ -176,6 +241,35 @@ def read_start_pins(event: DomainEvent) -> StartPins:
         resumed_from=read_resume_origin(
             evt(event, "resumed_from"), evt(event, INHERITED_PHASE_OWNERS)
         ),
+        continued_branches=read_continued_branches(evt(event, "continued_branches")),
+        abandoned_branches=read_abandoned_branches(evt(event, "abandoned_branches")),
+        inherited_skipped_phase_ids=read_phase_ids(evt(event, "inherited_skipped_phase_ids")),
+        workflow_version=evt(event, "workflow_version"),
+    )
+
+
+def read_left_branches(
+    pins: StartPins, event: DomainEvent, pushed: Sequence[PushedCommit] = ()
+) -> LeftBranches:
+    """The branches a replayed `WorkflowFailed`'s failing phase left on origin (#1513).
+
+    A run that was itself continuing branches in the phase that failed owns
+    them still, moved or not, so a resume of it continues them in turn. So
+    does every branch the failing phase's own workspace pushed to, from
+    ``pushed`` (PC-128): the only record a run orphaned by a restart has.
+    """
+    phase_id = evt(event, "failed_phase_id")
+    resuming_same_phase = (
+        pins.resumed_from is not None and pins.resumed_from.resume_phase_id == phase_id
+    )
+    return LeftBranches(
+        phase_id=phase_id,
+        branches=branches_left_by(
+            evt(event, "observed_branches"),
+            repositories=[c.repository for c in pins.source_commits],
+            continued=pins.continued_branches if resuming_same_phase else [],
+            pushed=[p for p in pushed if p.phase_id == phase_id],
+        ),
     )
 
 
@@ -187,7 +281,15 @@ def read_admitted_resume(event: DomainEvent) -> AdmittedResume:
             evt(event, "inherited_phases"), evt(event, INHERITED_PHASE_OWNERS)
         ),
         resume_phase_id=evt(event, "resume_phase_id"),
+        inherited_skipped_phase_ids=read_phase_ids(evt(event, "inherited_skipped_phase_ids")),
     )
+
+
+def read_phase_ids(value: object) -> list[str]:
+    """A stored list of phase ids; empty when absent, as on events before #1681."""
+    if not isinstance(value, list):
+        return []
+    return [str(v) for v in value]
 
 
 def _stored_str(value: object) -> str | None:

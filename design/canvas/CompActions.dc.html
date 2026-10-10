@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Skyline components: actions and inputs</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Orbitron:wght@500;600;700&display=swap">
+<style>
+:root{--ac:#4D80FF}
+body{margin:0;background:#0A0C14}
+a{color:#E8EEFB}
+button{font-family:inherit}
+input::placeholder,textarea::placeholder{color:#6F7FA3}
+</style>
+</helmet>
+<div style="--ac: {{accent}}; display: flex; flex-direction: column; gap: 24px; width: 1440px; height: 1260px; box-sizing: border-box; padding: 48px; background: #0A0C14; color: #E8EEFB; font-family: 'Instrument Sans', 'Helvetica Neue', system-ui, sans-serif; font-size: 14px; line-height: 1.45; -webkit-font-smoothing: antialiased">
+<div style="display: flex; flex-direction: column; gap: 6px">
+<h1 style="margin: 0; font-size: 32px; line-height: 1.1; font-weight: 600; letter-spacing: -0.03em">Actions and inputs</h1>
+<p style="margin: 0; font-size: 15px; color: #9AA8C7">Buttons, copy, toggles, switches, checkboxes and fields, with every state the screens use. Desktop sizes; phone sizes are noted.</p>
+</div>
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; align-items: start">
+<section aria-label="Button" style="display: flex; flex-direction: column; gap: 18px; padding: 22px 24px 24px; border-radius: 18px; border: 1px solid #1A2032; background: #0D101A; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04)">
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px">
+<h2 style="margin: 0; font-size: 17px; font-weight: 600; letter-spacing: -0.01em">Button</h2>
+<span style="height: 22px; padding: 0 9px; border-radius: 11px; border: 1px solid #283048; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; line-height: 20px; color: #9AA8C7">ButtonContract · required</span>
+<span style="font-size: 13px; color: #9AA8C7">Primary for the one action a screen is for; secondary and ghost for the rest.</span>
+</div>
+<div style="display: flex; flex-wrap: wrap; align-items: flex-end; gap: 22px 28px">
+<div style="display: flex; flex-direction: column; align-items: flex-start; gap: 10px; min-width: 0">
+<button type="button" style="display: flex; align-items: center; justify-content: center; gap: 8px; height: 36px; padding: 0 16px; border-radius: 12px; background: color-mix(in oklab, var(--ac) 80%, black); box-shadow: inset 0 1px 0 color-mix(in oklab, var(--ac) 60%, white), 0 10px 24px -10px var(--ac); color: #FFFFFF; border: 0; font-size: 13.5px; font-weight: 600; cursor: pointer"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 5.5h8v8h-8zM10.5 5.5V2.5h-8v8h3"></path></svg><span>Copy agent prompt</span></button>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3">primary</span>
+</div>
+<div style="display: flex; flex-direction: column; align-items: flex-start; gap: 10px; min-width: 0">
+<button type="button" style="display: flex; align-items: center; justify-content: center; gap: 8px; height: 36px; padding: 0 16px; border-radius: 12px; border: 1px solid #283048; background: #0F121C; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04); color: #E8EEFB; font-size: 13.5px; font-weight: 600; cursor: pointer"><span>View transcript</span></button>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3">secondary</span>
+</div>
+<div style="display: flex; flex-direction: column; align-items: flex-start; gap: 10px; min-width: 0">
+<button type="button" style="display: flex; align-items: center; justify-content: center; gap: 8px; height: 36px; padding: 0 16px; border-radius: 12px; border: 0; background: transparent; color: #9AA8C7; font-size: 13.5px; font-weight: 600; cursor: pointer"><span>Expand all</span></button>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3">ghost</span>
+</div>
+<div style="display: flex; flex-direction: column; align-items: flex-start; gap: 10px; min-width: 0">
+<button type="button" style="display: flex; align-items: center; justify-content: center; gap: 8px; height: 36px; padding: 0 16px; border-radius: 12px; border: 1px solid #4A211B; background: #2A1513; color: #FF8A7D; font-size: 13.5px; font-weight: 600; cursor: pointer"><span>Delete</span></button>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3">danger</span>
+</div>
+<div style="display: flex; flex-direction: column; align-items: flex-start; gap: 10px; min-width: 0">
+<button type="button" style="display: flex; align-items: center; justify-content: center; gap: 8px; width: 36px; height: 36px; padding: 0; border-radius: 12px; border: 1px solid #283048; background: #0F121C; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04); color: #E8EEFB; font-size: 13.5px; font-weight: 600; cursor: pointer"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 5.5h8v8h-8zM10.5 5.5V2.5h-8v8h3"></path></svg></button>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3">icon only</span>
+</div>
+</div>
+<div style="display: flex; flex-wrap: wrap; align-items: flex-end; gap: 22px 28px">
+<div style="display: flex; flex-direction: column; align-items: flex-start; gap: 10px; min-width: 0">
+<button type="button" style="display: flex; align-items: center; justify-content: center; gap: 8px; height: 36px; padding: 0 16px; border-radius: 12px; background: color-mix(in oklab, var(--ac) 80%, black); box-shadow: inset 0 1px 0 color-mix(in oklab, var(--ac) 60%, white), 0 10px 24px -10px var(--ac); color: #FFFFFF; border: 0; font-size: 13.5px; font-weight: 600; cursor: pointer; filter: brightness(1.12)"><span>Copy agent prompt</span></button>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3">hover</span>
+</div>
+<div style="display: flex; flex-direction: column; align-items: flex-start; gap: 10px; min-width: 0">
+<button type="button" style="display: flex; align-items: center; justify-content: center; gap: 8px; height: 36px; padding: 0 16px; border-radius: 12px; background: color-mix(in oklab, var(--ac) 80%, black); box-shadow: inset 0 1px 0 color-mix(in oklab, var(--ac) 60%, white), 0 10px 24px -10px var(--ac); color: #FFFFFF; border: 0; font-size: 13.5px; font-weight: 600; cursor: pointer; outline: 2px solid var(--ac); outline-offset: 2px"><span>Copy agent prompt</span></button>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3">focus</span>
+</div>
+<div style="display: flex; flex-direction: column; align-items: flex-start; gap: 10px; min-width: 0">
+<button type="button" style="display: flex; align-items: center; justify-content: center; gap: 8px; height: 36px; padding: 0 16px; border-radius: 12px; background: color-mix(in oklab, var(--ac) 80%, black); box-shadow: inset 0 1px 0 color-mix(in oklab, var(--ac) 60%, white), 0 10px 24px -10px var(--ac); color: #FFFFFF; border: 0; font-size: 13.5px; font-weight: 600; cursor: pointer; filter: brightness(0.88); box-shadow: inset 0 2px 4px rgba(0,0,0,0.35)"><span>Copy agent prompt</span></button>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3">pressed</span>
+</div>
+<div style="display: flex; flex-direction: column; align-items: flex-start; gap: 10px; min-width: 0">
+<button type="button" style="display: flex; align-items: center; justify-content: center; gap: 8px; height: 36px; padding: 0 16px; border-radius: 12px; background: color-mix(in oklab, var(--ac) 80%, black); box-shadow: inset 0 1px 0 color-mix(in oklab, var(--ac) 60%, white), 0 10px 24px -10px var(--ac); color: #FFFFFF; border: 0; font-size: 13.5px; font-weight: 600; cursor: pointer; opacity: 0.4; cursor: not-allowed"><span>Copy agent prompt</span></button>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3">disabled</span>
+</div>
+<div style="display: flex; flex-direction: column; align-items: flex-start; gap: 10px; min-width: 0">
+<button type="button" style="display: flex; align-items: center; justify-content: center; gap: 8px; height: 36px; padding: 0 16px; border-radius: 12px; background: color-mix(in oklab, var(--ac) 80%, black); box-shadow: inset 0 1px 0 color-mix(in oklab, var(--ac) 60%, white), 0 10px 24px -10px var(--ac); color: #FFFFFF; border: 0; font-size: 13.5px; font-weight: 600; cursor: pointer"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="6" stroke="rgba(255,255,255,0.3)" stroke-width="2"></circle><path d="M8 2a6 6 0 0 1 6 6" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round"></path></svg><span>Loading</span></button>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3">busy</span>
+</div>
+</div>
+<div style="display: flex; flex-wrap: wrap; align-items: flex-end; gap: 22px 28px">
+<div style="display: flex; flex-direction: column; align-items: flex-start; gap: 10px; min-width: 0">
+<button type="button" style="display: flex; align-items: center; justify-content: center; gap: 8px; height: 36px; padding: 0 16px; border-radius: 12px; background: color-mix(in oklab, var(--ac) 80%, black); box-shadow: inset 0 1px 0 color-mix(in oklab, var(--ac) 60%, white), 0 10px 24px -10px var(--ac); color: #FFFFFF; border: 0; font-size: 13.5px; font-weight: 600; cursor: pointer"><span>Run</span></button>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3">desktop · 36px</span>
+</div>
+<div style="display: flex; flex-direction: column; align-items: flex-start; gap: 10px; min-width: 0">
+<button type="button" style="display: flex; align-items: center; justify-content: center; gap: 8px; height: 44px; padding: 0 16px; border-radius: 14px; background: color-mix(in oklab, var(--ac) 80%, black); box-shadow: inset 0 1px 0 color-mix(in oklab, var(--ac) 60%, white), 0 10px 24px -10px var(--ac); color: #FFFFFF; border: 0; font-size: 15px; font-weight: 600; cursor: pointer"><span>Run</span></button>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3">phone · 44px</span>
+</div>
+<div style="display: flex; flex-direction: column; align-items: flex-start; gap: 10px; min-width: 0">
+<button type="button" style="display: flex; align-items: center; justify-content: center; gap: 8px; width: 300px; height: 50px; padding: 0 16px; border-radius: 16px; background: color-mix(in oklab, var(--ac) 80%, black); box-shadow: inset 0 1px 0 color-mix(in oklab, var(--ac) 60%, white), 0 10px 24px -10px var(--ac); color: #FFFFFF; border: 0; font-size: 16px; font-weight: 600; cursor: pointer"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 5.5h8v8h-8zM10.5 5.5V2.5h-8v8h3"></path></svg><span>Copy agent prompt</span></button>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3">phone, full width · 50px</span>
+</div>
+</div>
+</section>
+<section aria-label="Copy Button" style="display: flex; flex-direction: column; gap: 18px; padding: 22px 24px 24px; border-radius: 18px; border: 1px solid #1A2032; background: #0D101A; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04)">
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px">
+<h2 style="margin: 0; font-size: 17px; font-weight: 600; letter-spacing: -0.01em">Copy Button</h2>
+<span style="height: 22px; padding: 0 9px; border-radius: 11px; border: 1px solid #283048; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; line-height: 20px; color: #9AA8C7">pattern · Button</span>
+<span style="font-size: 13px; color: #9AA8C7">Copies one part or the whole list, then shows a check for two seconds.</span>
+</div>
+<div style="display: flex; flex-wrap: wrap; align-items: flex-end; gap: 22px 28px">
+<div style="display: flex; flex-direction: column; align-items: flex-start; gap: 10px; min-width: 0">
+<button type="button" aria-label="Copy" style="display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 9px; background: transparent; color: #9AA8C7; cursor: pointer"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="#9AA8C7" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 5.5h8v8h-8zM10.5 5.5V2.5h-8v8h3"></path></svg></button>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3">idle</span>
+</div>
+<div style="display: flex; flex-direction: column; align-items: flex-start; gap: 10px; min-width: 0">
+<button type="button" aria-label="Copy" style="display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 9px; background: #151A2A; color: var(--ac); cursor: pointer"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="var(--ac)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7"></path></svg></button>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3">copied</span>
+</div>
+<div style="display: flex; flex-direction: column; align-items: flex-start; gap: 10px; min-width: 0">
+<button type="button" style="display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px; border: 0; border-radius: 10px; background: transparent; color: #9AA8C7; font-size: 12.5px; cursor: pointer"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="#9AA8C7" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 5.5h8v8h-8zM10.5 5.5V2.5h-8v8h3"></path></svg><span>Copy all</span></button>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3">section, idle</span>
+</div>
+<div style="display: flex; flex-direction: column; align-items: flex-start; gap: 10px; min-width: 0">
+<button type="button" style="display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px; border: 0; border-radius: 10px; background: #151A2A; color: var(--ac); font-size: 12.5px; cursor: pointer"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="var(--ac)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7"></path></svg><span>Copied all</span></button>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3">section, copied</span>
+</div>
+<div style="display: flex; flex-direction: column; align-items: flex-start; gap: 10px; min-width: 0">
+<div style="position: relative; width: 300px"><pre style="margin: 0; padding: 10px 44px 10px 12px; border-radius: 12px; border: 1px solid #1A2032; background: #0A0C14; color: #9AA8C7; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; white-space: pre-wrap">/workspace/skills-lock.json</pre><span style="position: absolute; top: 4px; right: 4px"><button type="button" aria-label="Copy" style="display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 9px; background: transparent; color: #9AA8C7; cursor: pointer"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="#9AA8C7" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 5.5h8v8h-8zM10.5 5.5V2.5h-8v8h3"></path></svg></button></span></div>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3">on an output</span>
+</div>
+</div>
+</section>
+<section aria-label="Toggle and Toggle Group" style="display: flex; flex-direction: column; gap: 18px; padding: 22px 24px 24px; border-radius: 18px; border: 1px solid #1A2032; background: #0D101A; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04)">
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px">
+<h2 style="margin: 0; font-size: 17px; font-weight: 600; letter-spacing: -0.01em">Toggle and Toggle Group</h2>
+<span style="height: 22px; padding: 0 9px; border-radius: 11px; border: 1px solid #283048; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; line-height: 20px; color: #9AA8C7">ToggleContract · ToggleGroupContract</span>
+<span style="font-size: 13px; color: #9AA8C7">A lone pressed state, a segmented choice, or filter chips with counts.</span>
+</div>
+<div style="display: flex; flex-wrap: wrap; align-items: flex-end; gap: 22px 28px">
+<div style="display: flex; flex-direction: column; align-items: flex-start; gap: 10px; min-width: 0">
+<button type="button" aria-pressed="false" style="height: 34px; padding: 0 14px; border-radius: 11px; border: 1px solid #222A40; background: transparent; color: #9AA8C7; font-size: 13px; cursor: pointer">Expand all</button>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3">toggle off</span>
+</div>
+<div style="display: flex; flex-direction: column; align-items: flex-start; gap: 10px; min-width: 0">
+<button type="button" aria-pressed="true" style="height: 34px; padding: 0 14px; border-radius: 11px; border: 1px solid #34406A; background: #1A2134; color: #E8EEFB; font-size: 13px; cursor: pointer">Expand all</button>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3">toggle on</span>
+</div>
+<div style="display: flex; flex-direction: column; align-items: flex-start; gap: 10px; min-width: 0">
+<div role="group" style="display: flex; gap: 2px; padding: 3px; border-radius: 12px; border: 1px solid #222A40; background: #0A0C14"><button type="button" style="height: 30px; padding: 0 14px; border: 0; border-radius: 9px; background: #1A2134; color: #E8EEFB; font-size: 13px; cursor: pointer">Rendered</button><button type="button" style="height: 30px; padding: 0 14px; border: 0; border-radius: 9px; background: transparent; color: #9AA8C7; font-size: 13px; cursor: pointer">Raw</button></div>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3">segmented</span>
+</div>
+<div style="display: flex; flex-direction: column; align-items: flex-start; gap: 10px; min-width: 0">
+<div role="group" style="display: flex; gap: 2px; padding: 3px; border-radius: 12px; border: 1px solid #222A40; background: #0A0C14"><button type="button" style="height: 30px; padding: 0 14px; border: 0; border-radius: 9px; background: #1A2134; color: #E8EEFB; font-size: 13px; cursor: pointer">16w</button><button type="button" style="height: 30px; padding: 0 14px; border: 0; border-radius: 9px; background: transparent; color: #9AA8C7; font-size: 13px; cursor: pointer">Year</button></div>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3">segmented, mono</span>
+</div>
+</div>
+<div style="display: flex; flex-wrap: wrap; align-items: flex-end; gap: 22px 28px">
+<div style="display: flex; flex-direction: column; align-items: flex-start; gap: 10px; min-width: 0">
+<div style="display: flex; gap: 8px"><button type="button" style="display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 14px; border-radius: 17px; border: 1px solid #34406A; background: #1A2134; color: #E8EEFB; font-size: 13px; cursor: pointer"><span>All</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #9AA8C7">75</span></button><button type="button" style="display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 14px; border-radius: 17px; border: 1px solid #222A40; background: transparent; color: #9AA8C7; font-size: 13px; cursor: pointer"><span>Completed</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #9AA8C7">50</span></button><button type="button" style="display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 14px; border-radius: 17px; border: 1px solid #222A40; background: transparent; color: #9AA8C7; font-size: 13px; cursor: pointer"><span>Failed</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #9AA8C7">23</span></button></div>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3">filter chips</span>
+</div>
+<div style="display: flex; flex-direction: column; align-items: flex-start; gap: 10px; min-width: 0">
+<button type="button" style="display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px 0 12px; border: 1px solid #34406A; border-radius: 14px; background: #1A2134; color: #E8EEFB; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px">case:codex-cost-limit<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"></path></svg></button>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3">removable tag filter</span>
+</div>
+</div>
+</section>
+<section aria-label="Switch and Checkbox" style="display: flex; flex-direction: column; gap: 18px; padding: 22px 24px 24px; border-radius: 18px; border: 1px solid #1A2032; background: #0D101A; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04)">
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px">
+<h2 style="margin: 0; font-size: 17px; font-weight: 600; letter-spacing: -0.01em">Switch and Checkbox</h2>
+<span style="height: 22px; padding: 0 9px; border-radius: 11px; border: 1px solid #283048; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; line-height: 20px; color: #9AA8C7">SwitchRootContract · CheckboxRootContract</span>
+<span style="font-size: 13px; color: #9AA8C7">Switch for a live setting such as a trigger; checkbox for selecting rows.</span>
+</div>
+<div style="display: flex; flex-wrap: wrap; align-items: flex-end; gap: 22px 28px">
+<div style="display: flex; flex-direction: column; align-items: flex-start; gap: 10px; min-width: 0">
+<button type="button" role="switch" aria-checked="true" style="display: flex; align-items: center; justify-content: flex-end; width: 38px; height: 22px; padding: 2px; border: 0; border-radius: 11px; background: color-mix(in oklab, var(--ac) 80%, black); cursor: pointer"><span style="width: 18px; height: 18px; border-radius: 50%; background: #FFFFFF; box-shadow: 0 1px 3px rgba(0,0,0,0.4)"></span></button>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3">on</span>
+</div>
+<div style="display: flex; flex-direction: column; align-items: flex-start; gap: 10px; min-width: 0">
+<button type="button" role="switch" aria-checked="false" style="display: flex; align-items: center; justify-content: flex-start; width: 38px; height: 22px; padding: 2px; border: 0; border-radius: 11px; background: #222A40; cursor: pointer"><span style="width: 18px; height: 18px; border-radius: 50%; background: #9AA8C7; box-shadow: 0 1px 3px rgba(0,0,0,0.4)"></span></button>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3">off</span>
+</div>
+<div style="display: flex; flex-direction: column; align-items: flex-start; gap: 10px; min-width: 0">
+<button type="button" role="switch" aria-checked="true" style="display: flex; align-items: center; justify-content: flex-end; width: 38px; height: 22px; padding: 2px; border: 0; border-radius: 11px; background: color-mix(in oklab, var(--ac) 80%, black); outline: 2px solid var(--ac); outline-offset: 2px; cursor: pointer"><span style="width: 18px; height: 18px; border-radius: 50%; background: #FFFFFF; box-shadow: 0 1px 3px rgba(0,0,0,0.4)"></span></button>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3">focus</span>
+</div>
+<div style="display: flex; flex-direction: column; align-items: flex-start; gap: 10px; min-width: 0">
+<button type="button" role="switch" aria-checked="true" style="display: flex; align-items: center; justify-content: flex-end; width: 38px; height: 22px; padding: 2px; border: 0; border-radius: 11px; background: color-mix(in oklab, var(--ac) 80%, black); opacity: 0.4; cursor: pointer"><span style="width: 18px; height: 18px; border-radius: 50%; background: #FFFFFF; box-shadow: 0 1px 3px rgba(0,0,0,0.4)"></span></button>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3">disabled</span>
+</div>
+<div style="display: flex; flex-direction: column; align-items: flex-start; gap: 10px; min-width: 0">
+<span role="checkbox" aria-checked="false" style="display: flex; align-items: center; justify-content: center; width: 18px; height: 18px; box-sizing: border-box; border-radius: 5px; border: 1.5px solid #34406A; background: #0A0C14"></span>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3">unchecked</span>
+</div>
+<div style="display: flex; flex-direction: column; align-items: flex-start; gap: 10px; min-width: 0">
+<span role="checkbox" aria-checked="true" style="display: flex; align-items: center; justify-content: center; width: 18px; height: 18px; box-sizing: border-box; border-radius: 5px; border: 1.5px solid transparent; background: var(--ac)"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7"></path></svg></span>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3">checked</span>
+</div>
+<div style="display: flex; flex-direction: column; align-items: flex-start; gap: 10px; min-width: 0">
+<span role="checkbox" aria-checked="mixed" style="display: flex; align-items: center; justify-content: center; width: 18px; height: 18px; box-sizing: border-box; border-radius: 5px; border: 1.5px solid transparent; background: var(--ac)"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h8"></path></svg></span>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3">some rows</span>
+</div>
+<div style="display: flex; flex-direction: column; align-items: flex-start; gap: 10px; min-width: 0">
+<span role="checkbox" aria-checked="false" style="display: flex; align-items: center; justify-content: center; width: 18px; height: 18px; box-sizing: border-box; border-radius: 5px; border: 1.5px solid #34406A; background: #0A0C14; opacity: 0.4"></span>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3">disabled</span>
+</div>
+</div>
+</section>
+<section aria-label="Input, Select, Label" style="display: flex; flex-direction: column; gap: 18px; padding: 22px 24px 24px; border-radius: 18px; border: 1px solid #1A2032; background: #0D101A; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04)">
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px">
+<h2 style="margin: 0; font-size: 17px; font-weight: 600; letter-spacing: -0.01em">Input, Select, Label</h2>
+<span style="height: 22px; padding: 0 9px; border-radius: 11px; border: 1px solid #283048; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; line-height: 20px; color: #9AA8C7">InputContract · SelectRootContract · LabelContract</span>
+<span style="font-size: 13px; color: #9AA8C7">Fields sit on the ground colour; the label states what is required.</span>
+</div>
+<div style="display: flex; flex-wrap: wrap; align-items: flex-end; gap: 22px 28px">
+<div style="display: flex; flex-direction: column; align-items: flex-start; gap: 10px; min-width: 0">
+<label style="display: flex; align-items: center; gap: 8px; height: 38px; width: 260px; padding: 0 12px; box-sizing: border-box; border-radius: 12px; border: 1px solid #283048; background: #0A0C14; color: #E8EEFB; font: inherit; font-size: 13.5px; color: #6F7FA3"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="7" cy="7" r="4.25"></circle><path d="M10.25 10.25L13.5 13.5"></path></svg><input type="search" aria-label="Search" placeholder="Search by name or ID" style="flex-grow: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: #E8EEFB; font: inherit"></label>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3">search</span>
+</div>
+<div style="display: flex; flex-direction: column; align-items: flex-start; gap: 10px; min-width: 0">
+<label style="display: flex; align-items: center; gap: 8px; height: 38px; padding: 0 12px; box-sizing: border-box; border-radius: 12px; border: 1px solid #283048; background: #0A0C14; color: #E8EEFB; font: inherit; font-size: 13.5px; color: #6F7FA3"><span>Sort</span><select style="border: 0; outline: 0; background: transparent; color: #E8EEFB; font: inherit"><option>Most run</option><option>Name</option></select></label>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3">select</span>
+</div>
+<div style="display: flex; flex-direction: column; align-items: flex-start; gap: 10px; min-width: 0">
+<input type="text" aria-label="Topic" value="sorting" style="height: 38px; width: 200px; padding: 0 12px; box-sizing: border-box; border-radius: 12px; border: 1px solid #283048; background: #0A0C14; color: #E8EEFB; font: inherit; font-size: 13.5px; outline: 2px solid var(--ac); outline-offset: 2px">
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3">focus</span>
+</div>
+<div style="display: flex; flex-direction: column; align-items: flex-start; gap: 10px; min-width: 0">
+<div style="display: flex; flex-direction: column; gap: 6px; width: 240px"><input type="text" aria-label="Max attempts" value="0" style="height: 38px; padding: 0 12px; box-sizing: border-box; border-radius: 12px; border: 1px solid #283048; background: #0A0C14; color: #E8EEFB; font: inherit; font-size: 13.5px; border-color: #FF6F61"><span style="font-size: 12.5px; color: #FF8A7D">Must be at least 1.</span></div>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3">error</span>
+</div>
+</div>
+<div style="display: flex; flex-wrap: wrap; align-items: flex-end; gap: 22px 28px">
+<div style="display: flex; flex-direction: column; align-items: flex-start; gap: 10px; min-width: 0">
+<div style="display: flex; flex-direction: column; gap: 8px; width: 420px"><label style="display: flex; align-items: baseline; justify-content: space-between; font-size: 13px; font-weight: 600"><span>Task</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; font-weight: 400; color: #6F7FA3">required · $ARGUMENTS</span></label><textarea rows="3" aria-label="Task" placeholder="Describe what to work on…" style="padding: 12px 14px; box-sizing: border-box; border-radius: 12px; border: 1px solid #283048; background: #0A0C14; color: #E8EEFB; font: inherit; font-size: 13.5px; resize: vertical"></textarea><span style="display: flex; gap: 8px; font-size: 12.5px; color: #EBD9A8"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#E5B450" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2.25l6 10.75H2zM8 6.5v3M8 11.4v.1"></path></svg>A phase prompt uses the task. Left empty, it renders blank.</span></div>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3">label + textarea + hint</span>
+</div>
+</div>
+</section>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#4D80FF","options":["#4D80FF","#4CC9F0","#45E0A0","#A78BFA"]},"$preview":{"width":1440,"height":1260}}'>
+class Component extends DCLogic {
+renderVals() {
+return { accent: this.props.accent ?? '#4D80FF' };
+}
+}
+</script>
+</body>
+</html>

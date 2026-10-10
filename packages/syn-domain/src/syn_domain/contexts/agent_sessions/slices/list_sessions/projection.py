@@ -20,13 +20,8 @@ from syn_domain.contexts.agent_sessions._shared.value_objects import AgentLaunch
 from syn_domain.contexts.agent_sessions.domain.read_models.session_summary import (
     SessionSummary,
 )
-from syn_domain.pagination import (
-    Page,
-    ProjectionRecord,
-    matches_search,
-    paginate,
-    within_window,
-)
+from syn_domain.pagination import Page, within_window
+from syn_domain.projection_scan import ListShape, page_projection
 
 logger = logging.getLogger(__name__)
 
@@ -158,6 +153,16 @@ def _update_subagent_record(
             break
 
 
+#: What ``page`` windows, orders, tallies and searches by. A store that pages
+#: in SQL writes these as one statement; any other store evaluates the same
+#: shape in Python (``syn_domain.projection_scan.page_projection``, E2).
+_PAGE_SHAPE = ListShape(
+    timestamp_field="started_at",
+    facet_field="status",
+    search_fields=("id", "workflow_id"),
+)
+
+
 class SessionListProjection(AutoDispatchProjection):
     """Builds session list read model from events.
 
@@ -169,7 +174,7 @@ class SessionListProjection(AutoDispatchProjection):
     """
 
     PROJECTION_NAME = "session_summaries"
-    VERSION = 5  # Bumped: operations list dropped; the timeline is Lane 2 only (#1034)
+    VERSION = 6  # Bumped: requested_model kept from SessionStarted (#1785)
 
     def __init__(self, store: ProjectionStore):
         """Initialize with a projection store.
@@ -212,6 +217,11 @@ class SessionListProjection(AutoDispatchProjection):
             root_session_id=event_data.get("root_session_id"),
             repos=tuple(event_data.get("repos", ())),
             agent_launch=AgentLaunch.UNKNOWN,
+            # SessionStarted's agent_model is the model the workflow ASKED for
+            # (often an alias). It is the only model a running codex session
+            # has until its stream ends, so it is kept - as the request, never
+            # as what ran (#1785, ADR-067 D9).
+            requested_model=event_data.get("agent_model") or None,
         )
         await self._store.save(self.PROJECTION_NAME, session_id, summary.to_dict())
 
@@ -400,35 +410,33 @@ class SessionListProjection(AutoDispatchProjection):
         at any parameter setting. Paging needs a total counted over the same
         predicate as the rows, which is what this returns.
 
-        Only the equality filters the store can express are pushed down.
-        ``status`` deliberately is NOT, even though the store could: the facet
-        tally has to see every status the rest of the query matched, and a
-        store-side status filter would leave it able to report only the one
-        already selected.
+        ``status`` is deliberately NOT an equality filter: the facet tally
+        has to see every status the rest of the query matched, and a status
+        filter applied first would leave it able to report only the one
+        already selected. It is ``page_projection``'s facet dimension instead,
+        which on Postgres is still applied in the same SQL statement.
 
         ``search`` matches case-insensitively against the session id and the
         workflow id.
         """
         filters = _build_query_filters(workflow_id, None, None, parent_session_id, execution_id)
-
-        def base(record: ProjectionRecord) -> bool:
-            return matches_search(search, record.get("id"), record.get("workflow_id"))
-
-        return paginate(
-            await self._store.query(
+        return await page_projection(
+            self._store,
+            self.PROJECTION_NAME,
+            shape=_PAGE_SHAPE,
+            filters=filters or None,
+            search=search,
+            statuses=statuses,
+            after=started_after,
+            before=started_before,
+            full_read=lambda: self._store.query(
                 self.PROJECTION_NAME,
                 filters=filters if filters else None,
                 order_by="-started_at",
                 limit=None,
                 offset=0,
             ),
-            base_predicate=base,
-            status_of=lambda r: str(r.get("status") or ""),
-            statuses=statuses,
-            timestamp_of=lambda r: r.get("started_at"),
-            after=started_after,
-            before=started_before,
-            to_row=SessionSummary.from_dict,
+            to_row=lambda record: SessionSummary.from_dict(dict(record)),
             offset=offset,
             limit=limit,
         )

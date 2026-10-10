@@ -114,6 +114,20 @@ class _AgentEvents:
         row = await self.fetchrow(query, *args)
         return None if row is None else row.first()
 
+    async def execute(self, _query: str, *_args: object) -> str:
+        return ""
+
+    def transaction(self, *, isolation: str | None = None, readonly: bool = False) -> _Transaction:
+        return _Transaction()
+
+
+class _Transaction:
+    async def __aenter__(self) -> None:
+        return None
+
+    async def __aexit__(self, *_exc: object) -> bool:
+        return False
+
 
 class _Acquire:
     def __init__(self, conn: _AgentEvents) -> None:

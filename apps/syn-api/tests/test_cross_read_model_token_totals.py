@@ -26,6 +26,9 @@ import pytest
 from syn_api.types import Ok
 from syn_domain.contexts.agent_sessions.domain.read_models.session_cost import SessionCost
 from syn_domain.contexts.orchestration.domain.read_models.execution_cost import ExecutionCost
+from syn_domain.contexts.orchestration.slices.execution_cost.query_service import (
+    ExecutionCostsForIds,
+)
 
 # The live numbers from issue #873, so a regression reproduces the reported bug
 # rather than an invented one.
@@ -66,11 +69,11 @@ class _StubExecutionCostProjection:
     async def get_execution_cost(self, execution_id: str) -> ExecutionCost | None:
         return self.cost if execution_id == self.cost.execution_id else None
 
-    async def list_costs_for_ids(self, execution_ids: list[str]) -> dict[str, ExecutionCost]:
+    async def list_costs_for_ids(self, execution_ids: list[str]) -> ExecutionCostsForIds:
         """Batched counterpart of get_execution_cost (issue #1077)."""
         if self.cost.execution_id in execution_ids:
-            return {self.cost.execution_id: self.cost}
-        return {}
+            return ExecutionCostsForIds(costs=[self.cost], tool_calls={})
+        return ExecutionCostsForIds(costs=[], tool_calls={})
 
 
 @dataclass

@@ -2148,13 +2148,14 @@ evidence, in either direction.
 
 ### Concurrency
 
-- [ ] `SYN_POLLING_MAX_CONCURRENT_DISPATCHES` is **UNSET**
+- [ ] `SYN_POLLING_MAX_CONCURRENT_DISPATCHES` is **UNSET** (retired by #1557; set, it is ignored with a startup warning)
+- [ ] `SYN_EXECUTION_MAX_CONCURRENT` fits `API_MEMORY_LIMIT` by the unvalidated heuristic `(MiB - 128) / 96` (20 for the 2g default, 4 for 512m; the per-run figure is an upper bound pending #1717). The startup log warns when it does not.
+- [ ] Start more executions than the budget: the extras show `status: queued` with a position in `syn execution show <id>`, not a 404, and each starts once a slot frees.
 
-The code default is now 1 (#866), because one execution's cancel or failure
-tears down every other concurrently running execution's containers (#865, design
-in #869). Pinning the value in compose means remembering to remove it when #865
-is fixed and the default rises again. A deployment that raises it above 1 warns
-at startup, naming #865.
+One budget bounds every start path: `POST /execute`, trigger dispatch and
+resume (#1557). The hazard of a high value is API memory, not isolation: #1311
+closed the #865 isolation defect, and #1552 showed 8 concurrent runs OOM-kill a
+512m API (the former default; now 2g), taking every in-flight run with it.
 
 ---
 
@@ -3570,7 +3571,7 @@ Full pass/fail/skip for every command and feature tested.
 | ids resolve to store transcripts   |        |       |
 | store tags carry execution/phase   |        |       |
 | multi-session count stated         |        | even if 1 |
-| MAX_CONCURRENT_DISPATCHES unset    |        | #865/#866 |
+| EXECUTION_MAX_CONCURRENT fits mem  |        | #1557 |
 | **Executions**                     |        |       |
 | syn execution list/show            |        |       |
 | syn execution list --status        |        |       |

@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
+from syn_shared.settings.constants import TAURI_DESKTOP_ORIGINS
+
 
 @dataclass(frozen=True)
 class ApiConfig:
@@ -25,6 +27,8 @@ class ApiConfig:
             cors_origins=[
                 "http://localhost:5173",
                 "http://localhost:3000",
+                # The desktop app calls the API cross-origin (apps/syn-desktop).
+                *TAURI_DESKTOP_ORIGINS,
             ],
         )
 

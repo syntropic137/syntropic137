@@ -1,0 +1,6 @@
+name: freeze-eval
+type: command
+aggregate: Eval
+emits:
+  - EvalFrozenEvent
+returns: HandlerResult

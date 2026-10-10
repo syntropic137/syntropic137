@@ -41,8 +41,11 @@ if TYPE_CHECKING:
 #: CANCELLED is deliberately absent: a cancel IS that decision - it may have
 #: been issued because the run targeted the wrong repository or its task held
 #: a secret - so it is resumable only on `override_cancellation`, never merely
-#: because it is terminal. COMPLETED has nothing left to run; RUNNING is
-#: still live, and resuming it would put two runs on one piece of work; an
+#: because it is terminal. COMPLETED is resumable only when it ended with
+#: UNRESOLVED FINDINGS - its last review verdict `blocked` at the workflow's
+#: repair bound (PC-63) - and then at the last round's fix, not at the first
+#: unfinished phase (there is none); otherwise it has nothing left to run.
+#: RUNNING is still live, and resuming it would put two runs on one piece of work; an
 #: execution that never started has nothing to inherit.
 RESUMABLE_STATUSES: Final[frozenset[ExecutionStatus]] = frozenset(
     {ExecutionStatus.FAILED, ExecutionStatus.INTERRUPTED}
@@ -56,6 +59,7 @@ def completed_prefix(
     *,
     execution_id: str,
     phase_owners: Mapping[str, str],
+    skipped_phase_ids: frozenset[str] | set[str] = frozenset(),
 ) -> tuple[list[InheritedPhase], str | None]:
     """The phases a resume inherits, and the phase it resumes at.
 
@@ -79,9 +83,16 @@ def completed_prefix(
     ``execution_id`` for a phase this run ran, or its owner from
     ``phase_owners`` for one this run itself inherited. Without that a resume of a
     resume asks its parent for artifacts only the grandparent ever stored.
+
+    A phase in ``skipped_phase_ids`` is not a gap: a certified review decided it
+    would never run (PC-63), so the prefix passes over it without inheriting it
+    and a resume does not run a repair round the parent already made
+    unnecessary (#1681).
     """
     inherited: list[InheritedPhase] = []
     for phase in phase_definitions:
+        if phase.phase_id in skipped_phase_ids:
+            continue
         if phase.phase_id not in completed_phase_ids:
             return inherited, phase.phase_id
         inherited.append(
@@ -94,6 +105,25 @@ def completed_prefix(
     return inherited, None
 
 
+def skipped_before(
+    phase_definitions: Sequence[PhaseDefinition],
+    skipped_phase_ids: frozenset[str] | set[str],
+    resume_phase_id: str | None,
+) -> list[str]:
+    """The skipped phases that come before ``resume_phase_id``, in phase order.
+
+    What a resume inherits as skipped: a skip after the resume point belongs to
+    a decision the resume is about to make again.
+    """
+    skipped: list[str] = []
+    for phase in phase_definitions:
+        if phase.phase_id == resume_phase_id:
+            break
+        if phase.phase_id in skipped_phase_ids:
+            skipped.append(phase.phase_id)
+    return skipped
+
+
 def refuse_resume(
     *,
     execution_id: str | None,
@@ -102,8 +132,13 @@ def refuse_resume(
     resume_execution_id: str | None,
     requested_resume_id: str,
     override_cancellation: bool,
+    repair_point: str | None = None,
 ) -> str | None:
     """Why this execution may not be resumed, or None if it may.
+
+    ``repair_point`` is where a completed run with unresolved findings
+    continues (`ReviewRecord.repair_point`); a completed run without one is
+    refused.
 
     Returns the refusal MESSAGE rather than raising, so the whole admission
     decision is one expression the caller turns into a `ValueError`.
@@ -116,19 +151,35 @@ def refuse_resume(
     """
     if execution_id is None:
         return "Cannot resume an execution that has not been started"
-    if status is ExecutionStatus.CANCELLED:
-        if not override_cancellation:
-            return (
-                f"Cannot resume execution {execution_id}: it was cancelled, and "
-                "resuming a cancelled execution needs an explicit override"
-            )
-    elif status not in RESUMABLE_STATUSES:
-        return f"Cannot resume execution in status {status}"
+    refusal = _refuse_status(execution_id, status, override_cancellation, repair_point)
+    if refusal is not None:
+        return refusal
     if resumed:
         named = resume_execution_id or "an execution this stream does not name"
         return f"Execution {execution_id} has already been resumed as {named}"
     if not requested_resume_id or requested_resume_id == execution_id:
         return f"A resume needs an execution id of its own, got {requested_resume_id!r}"
+    return None
+
+
+def _refuse_status(
+    execution_id: str,
+    status: ExecutionStatus,
+    override_cancellation: bool,
+    repair_point: str | None,
+) -> str | None:
+    """Why a parent in ``status`` may not be resumed, or None if its status allows it."""
+    if status is ExecutionStatus.CANCELLED:
+        if override_cancellation:
+            return None
+        return (
+            f"Cannot resume execution {execution_id}: it was cancelled, and "
+            "resuming a cancelled execution needs an explicit override"
+        )
+    if status is ExecutionStatus.COMPLETED and repair_point is not None:
+        return None
+    if status not in RESUMABLE_STATUSES:
+        return f"Cannot resume execution in status {status}"
     return None
 
 
@@ -192,12 +243,22 @@ def decide_resume(
     phase_owners: Mapping[str, str],
     started_phase_ids: Mapping[str, int] | frozenset[str] | set[str],
     command: ResumeExecutionCommand,
+    repair_point: str | None = None,
+    skipped_phase_ids: frozenset[str] | set[str] = frozenset(),
 ) -> ResumeDecision:
     """Every rule above, applied in order.
 
     The ORDER matters: the prefix is only computed once the parent is resumable at
     all, and the resume point is judged only once there is a prefix to judge it
     against.
+
+    A completed run with unresolved findings inherits only the phases before
+    its ``repair_point``: the prefix stops there as if that phase had never
+    completed, so the resume re-runs the last round and what follows it.
+
+    Phases a certified review skipped before the resume point are passed over
+    and handed to the resume as skipped, so it neither runs them nor counts
+    them as work still to do (#1681).
     """
     from syn_domain.contexts.orchestration.domain.events.ExecutionResumedEvent import (
         ExecutionResumedEvent,
@@ -210,16 +271,21 @@ def decide_resume(
         resume_execution_id=resume_execution_id,
         requested_resume_id=command.resume_execution_id,
         override_cancellation=command.override_cancellation,
+        repair_point=repair_point,
     )
     if refusal is not None:
         return ResumeRefused(refusal)
 
+    if status is ExecutionStatus.COMPLETED and repair_point is not None:
+        ids = [p.phase_id for p in phase_definitions]
+        completed_phase_ids = set(ids[: ids.index(repair_point)]) & set(completed_phase_ids)
     inherited, resume_phase_id = completed_prefix(
         phase_definitions,
         completed_phase_ids,
         phase_artifact_ids,
         execution_id=execution_id or "",
         phase_owners=phase_owners,
+        skipped_phase_ids=skipped_phase_ids,
     )
     # Started means an agent may have acted. Nothing on this stream can show
     # that it did not: branch observations cover git refs only, and the evidence
@@ -242,6 +308,9 @@ def decide_resume(
             resume_execution_id=command.resume_execution_id,
             inherited_phases=inherited,
             resume_phase_id=resume_phase_id or "",
+            inherited_skipped_phase_ids=skipped_before(
+                phase_definitions, skipped_phase_ids, resume_phase_id
+            ),
             resumed_at=datetime.now(UTC),
             cancellation_overridden=status is ExecutionStatus.CANCELLED,
             external_effects_acknowledged=may_repeat_effects,

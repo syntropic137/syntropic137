@@ -6,7 +6,7 @@ import {
   type EdgeProps,
   getSmoothStepPath,
 } from '@xyflow/react';
-import { getEdgeColor, getEdgeLabelColor } from './theme';
+import { getEdgeColor, getEdgeLabelBackground, getEdgeLabelColor } from './theme';
 import { useThemeMode } from './useThemeMode';
 import type { AnimatedEdgeData } from './types';
 
@@ -45,18 +45,17 @@ function AnimatedEdgeComponent({
       <path
         d={edgePath}
         fill="none"
-        stroke={edgeColor}
         strokeWidth={1.5}
-        style={style}
+        style={{ stroke: edgeColor, ...style }}
       />
       {/* Animated dash overlay */}
       <path
         d={edgePath}
         fill="none"
-        stroke={edgeColor}
         strokeWidth={1.5}
         strokeDasharray="6 4"
         style={{
+          stroke: edgeColor,
           animation: `flowDash ${speedDurations[speed]} linear infinite`,
           ...style,
         }}
@@ -66,7 +65,7 @@ function AnimatedEdgeComponent({
         cx={targetX}
         cy={targetY}
         r={3}
-        fill={edgeColor}
+        style={{ fill: edgeColor }}
       />
       {/* Label */}
       {label && (
@@ -78,7 +77,7 @@ function AnimatedEdgeComponent({
               fontSize: '10px',
               fontWeight: 500,
               color: labelColor,
-              background: isDark ? 'rgba(39, 39, 42, 0.9)' : 'rgba(244, 244, 245, 0.9)',
+              background: getEdgeLabelBackground(isDark),
               padding: '2px 6px',
               borderRadius: 4,
               whiteSpace: 'nowrap',

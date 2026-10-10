@@ -11,10 +11,15 @@ building one.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import asdict
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
+from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continuation import (
+    continuation_candidates,
+    decide_continuation,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
     StartResumeCommand,
 )
@@ -24,6 +29,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins imp
 )
 
 if TYPE_CHECKING:
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continuation import (
+        LeftBranches,
+    )
     from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins import (
         AdmittedResume,
         StartPins,
@@ -31,6 +39,8 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEvent import (
         WorkflowExecutionStartedEvent,
     )
+
+logger = logging.getLogger(__name__)
 
 
 def refuse_resume_start(command: StartResumeCommand) -> str | None:
@@ -47,7 +57,9 @@ def refuse_resume_start(command: StartResumeCommand) -> str | None:
     * a resume phase absent from the snapshot;
     * inherited phases that are not exactly the snapshot's phases before the
       resume phase, in order - a gap would run nothing for a phase the resumed
-      one may read.
+      one may read. A phase the parent's certified review skipped is not a gap
+      (#1681): it was never going to run, so it is passed over here as the
+      parent's prefix passed over it.
     """
     resume_execution_id = command.aggregate_id
     pinned_phases = command.pinned_phases
@@ -72,7 +84,8 @@ def refuse_resume_start(command: StartResumeCommand) -> str | None:
             f"Cannot start resume {resume_execution_id}: resume phase {resume!r} is absent "
             "from the pinned phase config"
         )
-    before_resume = pinned_ids[: pinned_ids.index(resume)]
+    skipped = set(command.inherited_skipped_phase_ids)
+    before_resume = [p for p in pinned_ids[: pinned_ids.index(resume)] if p not in skipped]
     if inherited_ids != before_resume:
         return (
             f"Cannot start resume {resume_execution_id}: inherited phases {inherited_ids} are "
@@ -89,6 +102,7 @@ def resume_start_command(
     pins: StartPins,
     resumed: bool,
     admitted: AdmittedResume,
+    left: LeftBranches,
 ) -> StartResumeCommand:
     """The child's start, built from the parent's replayed stream alone.
 
@@ -98,6 +112,9 @@ def resume_start_command(
 
     Everything the child runs comes from here: the parent's inputs, its pinned
     phases and its commits. Nothing is read from the workflow template.
+
+    ``left`` is what the parent's failing phase left on origin; when the resume
+    resumes that phase, those branches are its continuation candidates (#1513).
     """
     if parent_execution_id is None or not resumed:
         msg = f"Execution {parent_execution_id} has not admitted a resume"
@@ -132,6 +149,9 @@ def resume_start_command(
             inherited_phases=inherited,
             resume_phase_id=resume_phase_id,
         ),
+        continuation_candidates=continuation_candidates(left, resume_phase_id),
+        inherited_skipped_phase_ids=list(admitted.inherited_skipped_phase_ids),
+        workflow_version=pins.workflow_version,
     )
 
 
@@ -141,11 +161,26 @@ def resume_started_event(command: StartResumeCommand) -> WorkflowExecutionStarte
     The same event a fresh run starts with, so every read model that knows how
     to show a run knows how to show this one. Its phase list is the pinned
     snapshot's, not the template's, and `resumed_from` is what marks it a resume.
+
+    It also records which branches the resumed phase continues and which it
+    abandoned, decided here from the candidates and what the forge said about
+    them (#1513). An abandoned branch is a warning, logged and on the event.
     """
     from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEvent import (
         WorkflowExecutionStartedEvent,
     )
 
+    continued, abandoned = decide_continuation(
+        command.continuation_candidates, command.remote_branches
+    )
+    for branch in abandoned:
+        logger.warning(
+            "Resume %s starts %s fresh instead of continuing %s: %s",
+            command.aggregate_id,
+            branch.repository,
+            branch.branch,
+            branch.reason,
+        )
     return WorkflowExecutionStartedEvent(
         workflow_id=command.workflow_id,
         execution_id=command.aggregate_id,
@@ -157,4 +192,8 @@ def resume_started_event(command: StartResumeCommand) -> WorkflowExecutionStarte
         pinned_phases=command.pinned_phases,
         source_commits=command.source_commits,
         resumed_from=command.resumed_from,
+        continued_branches=continued or None,
+        abandoned_branches=abandoned or None,
+        inherited_skipped_phase_ids=command.inherited_skipped_phase_ids or None,
+        workflow_version=command.workflow_version,
     )

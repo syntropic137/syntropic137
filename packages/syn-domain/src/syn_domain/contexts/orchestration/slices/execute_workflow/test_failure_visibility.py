@@ -62,11 +62,20 @@ class _NullCollector:
     async def record_tool_started(self, **kwargs: object) -> None:
         self.calls.append(("tool_started", kwargs))
 
-    def note_agent_activity(self) -> None:
+    def note_agent_activity(self, *, changed_nothing: bool = False) -> None:
         # Deliberately not recorded as a call: this is a bare fact the stream
         # processors set on anything the agent did, and every assertion in this
         # file is about what was RECOGNISED (#1303).
         return
+
+    async def note_command_ended(self, *_args: object) -> None:
+        return None
+
+    def note_command_started(self, *_args: object) -> None:
+        return None
+
+    async def note_command_finished(self, *_args: object) -> None:
+        return None
 
     async def record_tool_completed(self, **kwargs: object) -> None:
         self.calls.append(("tool_completed", kwargs))

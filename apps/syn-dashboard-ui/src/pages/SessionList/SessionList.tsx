@@ -21,6 +21,7 @@ import {
   ListPagination,
   ListToolbar,
   ResourceFilterBar,
+  StaleResults,
 } from '../../components'
 import { useIsMobile } from '../../hooks/useMediaQuery'
 import { useRowSelection } from '../../hooks/useRowSelection'
@@ -50,6 +51,9 @@ export function SessionList() {
   const {
     sessions,
     loading,
+    stale,
+    failed,
+    retry,
     searchQuery,
     setSearchQuery,
     selectedStatuses,
@@ -65,6 +69,8 @@ export function SessionList() {
     lastEventAt,
     page,
     pageSize,
+    pageSizeChoices,
+    setPageSize,
     total,
     excludedUndated,
     setPage,
@@ -113,22 +119,24 @@ export function SessionList() {
         isDefault={isDefaultView}
       />
 
-      {isMobile ? (
-        <SessionCardList
-          rows={sessions}
-          loading={loading}
-          selection={selection.tableProps}
-          emptyState={emptyState}
-        />
-      ) : (
-        <SessionTable
-          rows={sessions}
-          loading={loading}
-          selection={selection.tableProps}
-          emptyState={emptyState}
-          sort={{ state: sort, onToggle: toggleSort }}
-        />
-      )}
+      <StaleResults stale={stale} failed={failed} onRetry={retry}>
+        {isMobile ? (
+          <SessionCardList
+            rows={sessions}
+            loading={loading}
+            selection={selection.tableProps}
+            emptyState={emptyState}
+          />
+        ) : (
+          <SessionTable
+            rows={sessions}
+            loading={loading}
+            selection={selection.tableProps}
+            emptyState={emptyState}
+            sort={{ state: sort, onToggle: toggleSort }}
+          />
+        )}
+      </StaleResults>
 
       <ListPagination
         page={page}
@@ -136,6 +144,8 @@ export function SessionList() {
         total={total}
         excludedUndated={excludedUndated}
         onPageChange={setPage}
+        pageSizeChoices={pageSizeChoices}
+        onPageSizeChange={setPageSize}
         itemLabel="session"
       />
     </div>

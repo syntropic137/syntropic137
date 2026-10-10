@@ -27,7 +27,7 @@ function workflowLabel(e: ExecutionListItem): string {
 }
 
 function progressFraction(e: ExecutionListItem): number {
-  return e.total_phases > 0 ? e.completed_phases / e.total_phases : 0
+  return e.phase_progress.percent / 100
 }
 
 const COMPARATORS: Record<ExecutionSortKey, Cmp> = {

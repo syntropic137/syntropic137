@@ -1,0 +1,107 @@
+{
+  "$comment": "README banners, one per repo. Regenerate: pnpm --filter @syn137/skyline-core run repo-banner. See README.md for the fields.",
+  "repos": [
+    {
+      "name": "syntropic137",
+      "title": "Syntropic137",
+      "license": "MIT",
+      "label": "Agentic engineering platform",
+      "tagline": "Agent work that compounds.",
+      "command": "npx @syntropic137/setup init",
+      "edge": {
+        "text": "Agent work that compounds · Claude Code and Codex · Every step observed · Every run scored",
+        "seconds": 60
+      }
+    },
+    {
+      "name": "syntropic137-setup",
+      "title": "Setup",
+      "license": "MIT",
+      "label": "One-command self-host",
+      "tagline": "Deploy and run your own Syntropic137 stack.",
+      "command": "npx @syntropic137/setup init",
+      "edge": {
+        "text": "One-command self-host · Init, start, stop, update · Container health and logs · Credential rotation",
+        "seconds": 60
+      }
+    },
+    {
+      "name": "syntropic137-skills",
+      "title": "Skills",
+      "label": "Harness-agnostic agent skills",
+      "tagline": "Run, watch and steer Syntropic137 from any agent.",
+      "command": "npx skills add syntropic137/syntropic137-skills",
+      "edge": {
+        "text": "Run and control workflows · Observe sessions · Mine run logs · Claude Code, Codex and 70+ agents",
+        "seconds": 60
+      }
+    },
+    {
+      "name": "syntropic137-marketplace",
+      "title": "Marketplace",
+      "license": "MIT",
+      "label": "Workflow plugins",
+      "tagline": "Installable workflow packages with embedded triggers.",
+      "command": "syn marketplace add syntropic137/syntropic137-marketplace",
+      "edge": {
+        "text": "Official workflow plugins · Installable packages · Embedded triggers · Search, install, run",
+        "seconds": 60
+      }
+    },
+    {
+      "name": "event-sourcing-platform",
+      "title": "Event Sourcing",
+      "license": "MIT",
+      "label": "Event store and SDKs",
+      "tagline": "A modular event store with TypeScript, Python and Rust SDKs.",
+      "edge": {
+        "text": "Rust event store · gRPC server · Memory and Postgres backends · TypeScript, Python and Rust SDKs",
+        "seconds": 60
+      }
+    },
+    {
+      "name": "harness-app-template",
+      "title": "Harness Template",
+      "license": "MIT",
+      "label": "Polyglot monorepo template",
+      "tagline": "A forkable monorepo, agent-equipped from minute zero.",
+      "command": "gh repo create --template syntropic137/harness-app-template",
+      "edge": {
+        "text": "Tool-Belt Harness Standard · 11 named slots · Observability stack · Agent-native hooks · Conventional-commit gates",
+        "seconds": 60
+      }
+    },
+    {
+      "name": "software-leverage-points",
+      "title": "Leverage Points",
+      "license": "MIT",
+      "label": "Mixture-of-experts review",
+      "tagline": "Review plans and PRs across 17 software leverage points.",
+      "edge": {
+        "text": "17 software leverage points · Plan-time gate · PR-time gate · Codebase audit · One subagent per lens",
+        "seconds": 60
+      }
+    },
+    {
+      "name": "cross-framework-ui-design-system",
+      "title": "Design System",
+      "label": "Cross-framework UI",
+      "tagline": "Framework-neutral component contracts and shared design tokens.",
+      "command": "pnpm add -D @syntropic137/design-contracts @syntropic137/design-tokens",
+      "edge": {
+        "text": "Framework-neutral contracts · Shared design tokens · React and Svelte adapters · Runtime light and dark themes",
+        "seconds": 60
+      }
+    },
+    {
+      "name": "syntropic137-system-monorepo",
+      "title": "System Monorepo",
+      "label": "Development workspace",
+      "tagline": "Every Syntropic137 repo as a submodule, developed together.",
+      "edge": {
+        "text": "Every Syntropic137 repo · One workspace · Git submodules · Developed and tested together",
+        "seconds": 60
+      }
+    }
+  ]
+}

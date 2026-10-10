@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Syn137 executions</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Orbitron:wght@500;600;700&display=swap">
+<style>
+:root{--ac:#4D80FF}
+body{margin:0;background:#0A0C14}
+a{color:#E8EEFB}a:hover{color:#FFFFFF}
+.row:hover{background:#111626}
+.card:hover{border-color:#34406A}
+.ghost:hover{background:#151A2A}
+button{font-family:inherit}
+input::placeholder{color:#6F7FA3}
+input[type=checkbox]{accent-color:var(--ac)}
+:focus-visible{outline:2px solid var(--ac);outline-offset:2px}
+</style>
+</helmet>
+<div style="--ac: {{accent}}; display: flex; flex-direction: column; min-height: 100vh; background: #0A0C14; color: #E8EEFB; font-family: 'Instrument Sans', 'Helvetica Neue', system-ui, sans-serif; font-size: 14px; line-height: 1.45; -webkit-font-smoothing: antialiased">
+
+<dc-import name="TopNav" active="executions" hint-size="100%,78px"></dc-import>
+
+<nav aria-label="Breadcrumb" style="display: flex; flex-wrap: wrap; align-items: center; gap: 4px; box-sizing: border-box; width: 100%; max-width: 1400px; margin: 0 auto; padding: 0 40px 14px; font-size: 13px">
+<a href="Main.dc.html" aria-label="Overview" style="display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 10px; color: #9AA8C7"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M2.75 7.25L8 2.75l5.25 4.5V13a.5.5 0 0 1-.5.5H9.5V9.75h-3v3.75H3.25a.5.5 0 0 1-.5-.5z"></path></svg></a>
+<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="#6F7FA3" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink: 0; opacity: 0.7"><path d="M6 3.5L10.5 8 6 12.5"></path></svg>
+<span aria-current="page" style="display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 9px; border: 1px solid #1A2032; background: #0F121C; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04); font-weight: 600; color: #E8EEFB; white-space: nowrap">Executions</span>
+</nav>
+
+<main style="display: flex; flex-direction: column; gap: 24px; box-sizing: border-box; width: 100%; max-width: 1400px; margin: 0 auto; padding: 8px 40px 64px">
+
+<section aria-label="Executions" style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 28px 48px; padding: 32px 36px; border-radius: 24px; border: 1px solid #1A2032; background: radial-gradient(50% 130% at 100% 0%, color-mix(in oklab, var(--ac) 18%, transparent), transparent 70%), #0D101A; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05)">
+<div style="display: flex; align-items: center; gap: 24px; min-width: 0">
+<svg width="84" height="84" viewBox="0 0 64 64" aria-hidden="true" style="flex-shrink: 0">
+<ellipse cx="32" cy="59" rx="18" ry="3.5" style="fill: var(--ac); opacity: 0.22"></ellipse>
+<polygon points="32,10 52,20 32,30 12,20" style="fill: color-mix(in oklab, var(--ac) 58%, white)"></polygon>
+<polygon points="12,20 32,30 32,54 12,44" style="fill: var(--ac)"></polygon>
+<polygon points="32,30 52,20 52,44 32,54" style="fill: color-mix(in oklab, var(--ac) 50%, black)"></polygon>
+<polygon points="18,29 18,41 27,39.5" style="fill: #0A0C14; opacity: 0.8"></polygon>
+</svg>
+<div style="display: flex; flex-direction: column; gap: 8px; min-width: 0">
+<h1 style="margin: 0; font-size: 44px; line-height: 1.05; font-weight: 600; letter-spacing: -0.035em">Executions</h1>
+<p style="margin: 0; font-size: 15px; color: #9AA8C7">Every workflow run, newest first. 75 so far, none running.</p>
+</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 14px; width: 360px; max-width: 100%">
+<div style="display: flex; gap: 3px; height: 12px" role="img" aria-label="50 completed, 23 failed, 2 cancelled">
+<span style="flex: 50 1 0; border-radius: 4px; background: var(--ac); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25)"></span>
+<span style="flex: 23 1 0; border-radius: 4px; background: #FF6F61; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25)"></span>
+<span style="flex: 2 1 0; border-radius: 4px; background: #6F7FA3"></span>
+</div>
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px">
+<div style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 30px; line-height: 1.1; font-weight: 600; letter-spacing: -0.03em; font-variant-numeric: tabular-nums">50</span><span style="display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: #9AA8C7"><span style="width: 8px; height: 8px; border-radius: 2px; background: var(--ac)"></span>completed</span></div>
+<div style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 30px; line-height: 1.1; font-weight: 600; letter-spacing: -0.03em; font-variant-numeric: tabular-nums">23</span><span style="display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: #9AA8C7"><span style="width: 8px; height: 8px; border-radius: 2px; background: #FF6F61"></span>failed</span></div>
+<div style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 30px; line-height: 1.1; font-weight: 600; letter-spacing: -0.03em; font-variant-numeric: tabular-nums">2</span><span style="display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: #9AA8C7"><span style="width: 8px; height: 8px; border-radius: 2px; background: #6F7FA3"></span>cancelled</span></div>
+</div>
+</div>
+</section>
+
+<div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 16px">
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px">
+<button type="button" aria-pressed="{{chip.all.on}}" onClick="{{pickAll}}" style="display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 14px; border-radius: 17px; border: 1px solid {{chip.all.bd}}; background: {{chip.all.bg}}; color: {{chip.all.fg}}; font-size: 13px; cursor: pointer">
+<span>All</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #9AA8C7">75</span>
+</button>
+<button type="button" aria-pressed="false" style="display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 14px; border-radius: 17px; border: 1px solid #222A40; background: transparent; color: #9AA8C7; font-size: 13px; cursor: pointer">
+<span>Running</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #6F7FA3">0</span>
+</button>
+<button type="button" aria-pressed="false" style="display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 14px; border-radius: 17px; border: 1px solid #222A40; background: transparent; color: #9AA8C7; font-size: 13px; cursor: pointer">
+<span>Pending</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #6F7FA3">0</span>
+</button>
+<button type="button" aria-pressed="{{chip.completed.on}}" onClick="{{pickCompleted}}" style="display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 14px; border-radius: 17px; border: 1px solid {{chip.completed.bd}}; background: {{chip.completed.bg}}; color: {{chip.completed.fg}}; font-size: 13px; cursor: pointer">
+<span>Completed</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #9AA8C7">50</span>
+</button>
+<button type="button" aria-pressed="{{chip.failed.on}}" onClick="{{pickFailed}}" style="display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 14px; border-radius: 17px; border: 1px solid {{chip.failed.bd}}; background: {{chip.failed.bg}}; color: {{chip.failed.fg}}; font-size: 13px; cursor: pointer">
+<span>Failed</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #9AA8C7">23</span>
+</button>
+<button type="button" aria-pressed="{{chip.cancelled.on}}" onClick="{{pickCancelled}}" style="display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 14px; border-radius: 17px; border: 1px solid {{chip.cancelled.bd}}; background: {{chip.cancelled.bg}}; color: {{chip.cancelled.fg}}; font-size: 13px; cursor: pointer">
+<span>Cancelled</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #9AA8C7">2</span>
+</button>
+</div>
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px">
+<label style="display: flex; align-items: center; gap: 8px; height: 36px; width: 240px; max-width: 100%; box-sizing: border-box; padding: 0 12px; border-radius: 12px; border: 1px solid #222A40; background: #0D101A; color: #6F7FA3">
+<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="7" cy="7" r="4.25"></circle><path d="M10.25 10.25L13.5 13.5"></path></svg>
+<input type="search" aria-label="Search executions" placeholder="Workflow, repo or ID" style="flex-grow: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: #E8EEFB; font: inherit; font-size: 13px">
+</label>
+<div role="group" aria-label="Time window" style="display: flex; gap: 2px; padding: 3px; border-radius: 12px; border: 1px solid #222A40; background: #0D101A; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px">
+<button type="button" style="height: 28px; padding: 0 10px; border: 0; border-radius: 9px; background: transparent; color: #9AA8C7; cursor: pointer">15m</button>
+<button type="button" style="height: 28px; padding: 0 10px; border: 0; border-radius: 9px; background: transparent; color: #9AA8C7; cursor: pointer">1h</button>
+<button type="button" style="height: 28px; padding: 0 10px; border: 0; border-radius: 9px; background: transparent; color: #9AA8C7; cursor: pointer">24h</button>
+<button type="button" style="height: 28px; padding: 0 10px; border: 0; border-radius: 9px; background: transparent; color: #9AA8C7; cursor: pointer">7d</button>
+<button type="button" aria-pressed="true" style="height: 28px; padding: 0 10px; border: 0; border-radius: 9px; background: #1A2134; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07); color: #E8EEFB; cursor: pointer">All</button>
+</div>
+</div>
+</div>
+
+<section aria-label="Execution list" style="padding: 10px; border-radius: 20px; border: 1px solid #1A2032; background: #0D101A; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04)">
+<div style="overflow-x: auto">
+<div style="display: flex; flex-direction: column; gap: 2px; min-width: 900px">
+<div style="display: grid; grid-template-columns: 16px 32px minmax(210px, 1.1fr) minmax(240px, 1.5fr) 72px 60px 64px; column-gap: 16px; align-items: center; height: 36px; padding: 0 12px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: #6F7FA3">
+<input type="checkbox" aria-label="Select all executions" style="margin: 0; width: 14px; height: 14px">
+<span></span>
+<span>Workflow</span>
+<span>Phases over time</span>
+<span style="text-align: right">Tokens</span>
+<span style="text-align: right">Cost</span>
+<span style="text-align: right; color: #E8EEFB">Started ↓</span>
+</div>
+<sc-for list="{{groups}}" as="g" hint-placeholder-count="3">
+<div style="display: flex; align-items: center; gap: 10px; height: 30px; margin-top: 6px; padding: 0 12px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #9AA8C7">
+<span>{{g.title}}</span>
+<span style="color: #6F7FA3">{{g.count}}</span>
+<span style="flex-grow: 1; height: 1px; background: #1A2032"></span>
+</div>
+<sc-for list="{{g.rows}}" as="r" hint-placeholder-count="6">
+<div class="row" style="display: grid; grid-template-columns: 16px 32px minmax(210px, 1.1fr) minmax(240px, 1.5fr) 72px 60px 64px; column-gap: 16px; align-items: center; padding: 9px 12px; border-radius: 14px">
+<input type="checkbox" aria-label="{{r.selectLabel}}" style="margin: 0; width: 14px; height: 14px">
+<span style="display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 10px; background: {{r.badge}}; color: {{r.tone}}">
+<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{r.icon}}"></path></svg>
+</span>
+<a href="Execution.dc.html" style="display: flex; flex-direction: column; min-width: 0; text-decoration: none">
+<span style="font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{r.name}}</span>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{r.sub}}</span>
+</a>
+<span style="display: flex; align-items: center; gap: 12px">
+<span style="display: flex; flex-grow: 1; height: 10px; border-radius: 5px; background: #121727">
+<span style="display: flex; gap: 2px; width: {{r.pct}}; min-width: 14px">
+<sc-for list="{{r.segs}}" as="p" hint-placeholder-count="3">
+<span style="flex: 1 1 0; height: 10px; border-radius: 3px; background: {{p.c}}"></span>
+</sc-for>
+</span>
+</span>
+<span style="width: 52px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #9AA8C7">{{r.dur}}</span>
+</span>
+<span style="text-align: right; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px; color: #9AA8C7">{{r.tokens}}</span>
+<span style="text-align: right; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px">{{r.cost}}</span>
+<span style="text-align: right; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #6F7FA3">{{r.when}}</span>
+</div>
+</sc-for>
+</sc-for>
+</div>
+</div>
+</section>
+
+<div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; font-size: 13px; color: #9AA8C7">
+<span>{{summary}}</span>
+<div style="display: flex; align-items: center; gap: 8px">
+<button type="button" disabled="{{ true }}" style="height: 34px; padding: 0 14px; border-radius: 11px; border: 1px solid #1A2032; background: transparent; color: #6F7FA3; font-size: 13px">Previous</button>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px">1 / 4</span>
+<button class="ghost" type="button" style="height: 34px; padding: 0 14px; border-radius: 11px; border: 1px solid #283048; background: #0F121C; color: #E8EEFB; font-size: 13px; cursor: pointer">Next</button>
+</div>
+</div>
+
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#4D80FF","options":["#4D80FF","#4CC9F0","#45E0A0","#A78BFA"]},"$preview":{"width":1440,"height":1690}}'>
+class Component extends DCLogic {
+renderVals() {
+const filter = (this.state && this.state.filter) || 'all';
+const ST = {
+completed: { tone: 'var(--ac)', badge: 'color-mix(in oklab, var(--ac) 16%, transparent)', icon: 'M3.5 8.5l3 3 6-7' },
+failed: { tone: '#FF6F61', badge: '#2A1513', icon: 'M4.5 4.5l7 7M11.5 4.5l-7 7' },
+cancelled: { tone: '#9AA8C7', badge: '#171C2B', icon: 'M3.5 8h9' }
+};
+const SYN = 'syntropic137/syntropic137';
+const BOX = 'syntropic137/sandbox_syn-engineer-beta';
+const LONGEST = 241;
+const mk = (status, name, done, total, repo, tokens, cost, secs, dur, when) => {
+const s = ST[status];
+const segs = [];
+for (let i = 0; i < total; i++) {
+let c = '#2B3350';
+if (i < done) c = 'var(--ac)';
+else if (i === done && status === 'failed') c = '#FF6F61';
+else if (i === done && status === 'cancelled') c = '#6F7FA3';
+segs.push({ c });
+}
+return {
+status,
+tone: s.tone,
+badge: s.badge,
+icon: s.icon,
+name,
+sub: (repo || 'no repo') + ' · ' + done + ' of ' + total + (total === 1 ? ' phase' : ' phases'),
+segs,
+pct: Math.max(4, Math.round((secs / LONGEST) * 100)) + '%',
+dur,
+tokens,
+cost,
+when,
+selectLabel: 'Select ' + name + ', started ' + when
+};
+};
+const all = [
+{ title: 'Last week', rows: [
+mk('failed', 'Starter PR Review', 0, 2, SYN, '0', '$0.00', 5, '5s', '1w ago'),
+mk('failed', 'PR Review', 0, 3, SYN, '0', '$0.00', 8, '8s', '1w ago')
+] },
+{ title: '6 weeks ago', rows: [
+mk('completed', 'Codex delegates to Claude', 1, 1, '', '261.7k', '$0.33', 62, '1m 2s', '6w ago'),
+mk('completed', 'Codex delegates to Claude', 1, 1, '', '243.4k', '$0.29', 66, '1m 6s', '6w ago'),
+mk('failed', 'Codex delegates to Claude', 0, 1, '', '0', '$0.00', 3, '3s', '6w ago'),
+mk('completed', 'Codex delegates to Claude', 1, 1, '', '348.3k', '$0.22', 92, '1m 32s', '6w ago'),
+mk('completed', 'Research Workflow', 3, 3, '', '396.8k', '$0.21', 227, '3m 47s', '6w ago'),
+mk('completed', 'Research Workflow', 3, 3, '', '479.4k', '$0.22', 222, '3m 42s', '6w ago'),
+mk('completed', 'Research Workflow', 3, 3, '', '365.3k', '$0.16', 157, '2m 37s', '6w ago'),
+mk('cancelled', 'Research Workflow', 2, 3, '', '156.6k', '$0.17', 241, '4m 1s', '6w ago'),
+mk('cancelled', 'Research Workflow', 0, 3, '', '0', '$0.00', 56, '56s', '6w ago'),
+mk('completed', 'Claude delegates to Codex', 1, 1, '', '127.9k', '$0.06', 37, '37s', '6w ago'),
+mk('completed', 'Skills Matrix', 4, 4, '', '106.9k', '$0.10', 85, '1m 25s', '6w ago'),
+mk('failed', 'Skills Matrix', 3, 4, '', '92.5k', '$0.07', 52, '52s', '6w ago'),
+mk('completed', 'Skill Probe', 3, 3, BOX, '92.7k', '$0.07', 61, '1m 1s', '6w ago')
+] },
+{ title: '7 weeks ago', rows: [
+mk('completed', 'Starter Research', 2, 2, BOX, '162.3k', '$0.12', 77, '1m 17s', '7w ago'),
+mk('failed', 'Subagent Observability Demo', 0, 2, '', '0', '$0.00', 1, '1s', '7w ago'),
+mk('completed', 'Codex Bridge Demo', 1, 1, '', '162.2k', '$0.04', 56, '56s', '7w ago'),
+mk('completed', 'Multi-agent (claude plans, codex implements)', 2, 2, '', '229.0k', '$0.09', 86, '1m 26s', '7w ago')
+] }
+];
+const groups = all
+.map((g) => ({ title: g.title, rows: g.rows.filter((r) => filter === 'all' || r.status === filter) }))
+.filter((g) => g.rows.length > 0)
+.map((g) => ({ title: g.title, rows: g.rows, count: g.rows.length + (g.rows.length === 1 ? ' run' : ' runs') }));
+const shown = groups.reduce((n, g) => n + g.rows.length, 0);
+const totals = { all: 75, completed: 50, failed: 23, cancelled: 2 };
+const chipOf = (key) => {
+const on = filter === key;
+return { on: on ? 'true' : 'false', bg: on ? '#1A2134' : 'transparent', fg: on ? '#E8EEFB' : '#9AA8C7', bd: on ? '#34406A' : '#222A40' };
+};
+return {
+accent: this.props.accent ?? '#4D80FF',
+groups,
+summary: 'Showing 1–' + shown + ' of ' + totals[filter] + (filter === 'all' ? '' : ' ' + filter) + ' executions',
+chip: { all: chipOf('all'), completed: chipOf('completed'), failed: chipOf('failed'), cancelled: chipOf('cancelled') },
+pickAll: () => this.setState({ filter: 'all' }),
+pickCompleted: () => this.setState({ filter: 'completed' }),
+pickFailed: () => this.setState({ filter: 'failed' }),
+pickCancelled: () => this.setState({ filter: 'cancelled' })
+};
+}
+}
+</script>
+</body>
+</html>

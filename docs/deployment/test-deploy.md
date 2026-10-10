@@ -40,15 +40,95 @@ just pit-stop 0.29.1-beta.5 --stage-only   # bump, build, verify, ship, repoint:
 just pit-stop 0.29.1-beta.5 --swap-only    # wait for the drain, recreate api + gateway, verify
 just pit-stop 0.29.1-beta.5                # both, in one go
 just pit-stop 0.29.1-beta.5 --dry-run      # echo every mutating command; still run the read-only checks
+just pit-stop 0.29.1-beta.5 --service gateway   # the gateway alone: no gate, no drain, no probe
 ```
+
+**`--service gateway` swaps the gateway alone (#1310).** One image is built,
+shipped and repointed (`pit_stop_repoint.py --service gateway` leaves the
+`syn-api` pin as deployed), then `compose up -d --no-deps gateway`. There is no
+admission gate, no drain and no ungate: the gateway is on `syn-internal` only,
+never `agent-net`, so no execution depends on it and `--no-deps` leaves the API
+and everything it is running untouched. Verify checks the container runs the
+shipped image by id and that `GET /health` answers 200 through it; not
+`/version`, which reports the API's build. The post-swap probe, and its
+precheck, are skipped too: the probe proves an execution can start, which a
+gateway swap does not touch, and it waits minutes and spends tokens. It
+combines with `--stage-only` and `--swap-only` as the default does.
 
 **Stage early, swap late.** Everything except the swap is safe while executions
 run, so stage as soon as the content is merged; the swap is one `compose up`
 once the drain clears. The drain is the speed limit, because recreating the API
 destroys in-flight work (#1381). It needs `SYN_API_PASSWORD`; the host and API
 default to the selfhost VPS and can be overridden with `SYN_PIT_HOST` /
-`SYN_PIT_API`. It does not dispatch the final real-run check (section 5, step 5.3):
-do that yourself, and watch a PHASE reach `running`.
+`SYN_PIT_API`.
+
+**It proves a real execution starts before it says DONE (#1641).** beta.8 and
+beta.9 passed every other check here while no execution could start - every
+direct start was dropped as a duplicate - and beta.8 sat live and broken for
+~3h because this last check was manual. So once admission is reopened, the pit
+stop dispatches the probe workflow `telemetry-lag-probe-v1`
+(`workflows/probes/telemetry-lag`, one phase, no repo) and polls
+`GET /executions/{id}` until a phase in `.phases[].status` reports `running` or
+`completed`. Then it cancels the probe and reads the cancel back, because a
+probe still in flight is in-flight work to the next pit stop's drain.
+
+- **It is not free.** No token-free runner exists yet (the
+  `ScriptedAgentProfile` contract from #1609 has no driver), so the probe is a
+  real `sonnet` agent in a real workspace. It is cancelled the moment a phase
+  is running, so it costs workspace startup plus the first agent turns, not the
+  ~2 minute heartbeat it would otherwise run.
+- **The workflow must be installed on the host** (once:
+  `syn workflow install workflows/probes/telemetry-lag`). A dispatch that is
+  refused fails the pit stop and says so.
+- **On failure it exits non-zero and never prints DONE**: the probe was not
+  seen to start within `SYN_PIT_PROBE_TIMEOUT` (default 600s), or it ended
+  (`failed`, `cancelled`, `interrupted`, a `failed` phase) without a phase
+  running, or it could not be dispatched, or its cancel did not land within
+  `SYN_PIT_PROBE_CANCEL_TIMEOUT` (default 300s), or it FAILED or was
+  interrupted after a phase ran (a failure is not the clean stop asked for).
+  The message names the execution id and its last status, says whether the
+  probe was verified terminal, and prints the rollback command.
+- **Both bounds are wall-clock deadlines.** Every request is capped to the time
+  left, so slow answers cannot stretch a 600s probe into an hour and a half.
+- **The probe is left terminal, and that is VERIFIED, not assumed.** Whether
+  it ran or not, the pit stop cancels it and reads `GET /executions/{id}` back
+  until it shows `cancelled`, `completed`, `failed` or `interrupted`, within
+  `SYN_PIT_PROBE_CANCEL_TIMEOUT`. A probe still in flight is in-flight work to
+  the next pit stop's drain. A start still `queued` for capacity is
+  **withdrawn** by the same cancel (#1650): it never runs, and GET reports it
+  `cancelled` with no phases. A probe that was withdrawn is still a FAILED pit
+  stop: it never ran, so nothing proved the start path. The cancel is re-sent
+  on every read that is not terminal, because a withdrawal can lose the race
+  with its own start (#1650's known limit), and only a later cancel stops the
+  run that results. An accepted cancel (200) is not proof.
+- **If it cannot be seen terminal**, the pit stop exits non-zero, says
+  `PROBE <id> MAY STILL BE LIVE`, and prints the exact command that stops it:
+  `curl -fsS -u "admin:$SYN_API_PASSWORD" -X POST <api>/executions/<id>/cancel`
+  (or `syn control cancel <id>`). Run it, then check the execution shows
+  `cancelled` before the next pit stop. **Nothing is rolled
+  back automatically, and admission stays OPEN**: other users' work is not
+  blocked by a failed probe. Decide, then roll back by hand.
+- **`--skip-probe`** is for emergencies only. It is logged loudly, the DONE
+  line says `PROBE SKIPPED`, and the check is yours again: dispatch one real
+  workflow and watch a PHASE reach `running` (section 5, step 5.3).
+- `SYN_PIT_PROBE_WORKFLOW` names a different probe workflow.
+
+**`stage` takes the deployed pins in either form.** A host installed from a
+release pins `syn-api` and `syn-gateway` **by digest**
+(`ghcr.io/syntropic137/syn-api@sha256:<64 hex>`, each to its own); a host a
+pit stop has already staged pins them by **tag** (`syn-api:v0.33.1`), possibly
+a different tag per service after a hotfix. Both are supported. Each service's
+`image:` line is replaced whole with the exact ref `ship` loaded,
+`ghcr.io/syntropic137/<image>:<tag>`, never edited in place - the shipped
+images are unpushed and have no digest - by `scripts/pit_stop_repoint.py`. The
+old file is kept beside it as `docker-compose.syntropic137.yaml.bak-<pin>`,
+where `<pin>` is the old `syn-api` tag (`bak-v0.33.1`) or the first 12 hex of
+its digest (`bak-sha256-bf783882d031`). Anything else - a variable pin, no pin,
+two `syn-api` lines - aborts `stage` before the host is touched. The new file
+is written beside the deployed one and checked against the staged sha256
+before anything else happens. Only then is the backup taken and the new file
+renamed into place, so a transfer cut short leaves the deployed compose as it
+was.
 
 The sections below remain the reference for what each stage does and why.
 
@@ -356,6 +436,19 @@ being deployed (digests elided):
 [section 5, step 2](#step-2-repoint-the-tag-pins-to-the-new-version) needs it
 twice: to name the backup, and as the string it replaces.
 
+**A host installed from a release pins all six by digest, `syn-api` and
+`syn-gateway` included** - the release asset is written that way (v0.33.1,
+checked 2026-10-03):
+
+```
+    image: ghcr.io/syntropic137/syn-api@sha256:bf783882d031...
+    image: ghcr.io/syntropic137/syn-gateway@sha256:6b416d4a25dd...
+```
+
+`syn-api` and `syn-gateway` are still the two that move. Their pins are just
+two different digests rather than one shared tag, so step 2 rewrites each line
+on its own.
+
 A **digest**-pinned service does not move when you change `SYN_VERSION`, by
 definition - the reference names content, not a version. So only `syn-api` and
 `syn-gateway` need building and only those two lines need editing. Building the
@@ -406,7 +499,9 @@ the top.
 
 It carries hand-applied digest pins that exist nowhere else - not in this repo,
 not in the release assets. Name the backup after the tag it still contains, so
-whoever reaches for it later can tell what rolling back to it would get them:
+whoever reaches for it later can tell what rolling back to it would get them.
+For a digest pin, use `sha256-` and its first 12 hex (`.bak-sha256-bf783882d031`):
+`@` and `:` have no business in a file name.
 
 ```bash
 ssh root@<host> 'cd /root/.syntropic137 \
@@ -449,6 +544,21 @@ are the two lines that changed.
 
 Run them as separate commands: **`grep -c` exits non-zero when the count is
 `0`**, so chaining the first with `&&` aborts on exactly the answer you wanted.
+
+**If the pins are digests** ([section 4](#4-which-images-actually-need-to-move)),
+there is no shared old string to substitute: each service has its own digest.
+Replace each `image:` line whole with the tag you loaded - a locally built image
+has no registry digest, so a digest cannot name it:
+
+```bash
+ssh root@<host> 'cd /root/.syntropic137 \
+  && sed -i -E "s#^( *image: *)[^ ]*/syn-api@sha256:[0-9a-f]{64}#\1ghcr.io/syntropic137/syn-api:v0.28.0-beta.9#; \
+                s#^( *image: *)[^ ]*/syn-gateway@sha256:[0-9a-f]{64}#\1ghcr.io/syntropic137/syn-gateway:v0.28.0-beta.9#" \
+       docker-compose.syntropic137.yaml'
+```
+
+and verify the same way, with `syn-\(api\|gateway\)@sha256` as the old count
+(want `0`) and the new tag as the new count (want `2`).
 
 If the deployed file pins with `${SYN_VERSION}` rather than a literal tag - the
 form the repo template ships - there is nothing to `sed`. Set `SYN_VERSION` in

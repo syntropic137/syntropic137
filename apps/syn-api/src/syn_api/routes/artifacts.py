@@ -6,10 +6,11 @@ Provides listing, retrieving, creating, and uploading artifacts.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from fastapi import APIRouter, HTTPException, Query, UploadFile
+from fastapi import APIRouter, HTTPException, Query, Response, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
 
 from syn_api._wiring import (
@@ -35,6 +36,11 @@ from syn_api.types import (
     Result,
 )
 from syn_domain.pagination import Page
+
+if TYPE_CHECKING:
+    from syn_domain.contexts.artifacts.domain.read_models.artifact_summary import (
+        ArtifactSummary as DomainArtifactSummary,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -143,6 +149,55 @@ class ArtifactResponse(BaseModel):
 # =============================================================================
 
 
+def _summary_from_domain(a: DomainArtifactSummary) -> ArtifactSummary:
+    """One projected artifact row as the API's summary DTO.
+
+    One mapping for every read that returns summaries, so the list and the
+    per-phase latest output cannot disagree about a field.
+    """
+    return ArtifactSummary(
+        id=a.id,
+        workflow_id=a.workflow_id,
+        execution_id=a.execution_id,
+        phase_id=a.phase_id,
+        artifact_type=a.artifact_type,
+        title=a.name,
+        size_bytes=a.size_bytes,
+        created_at=datetime.fromisoformat(a.created_at)
+        if isinstance(a.created_at, str)
+        else a.created_at,
+        # Named here or the list answers null for an artifact whose detail
+        # answers correctly - see the comment on excluded_undated in
+        # list_artifacts, which is this same hop (#1284).
+        agent_provider=a.agent_provider,
+        agent_model=observed_model_of(a.agent_model, None).observed,
+    )
+
+
+async def latest_phase_outputs(
+    workflow_id: str, phase_ids: list[str]
+) -> Result[dict[str, ArtifactSummary | None], ArtifactError]:
+    """Each phase's newest primary deliverable for one workflow.
+
+    Keyed by phase id, every requested phase present: ``None`` is the answer
+    "this phase has produced no output yet", which a missing key could not
+    tell apart from a phase nobody asked about.
+
+    One store read for the whole workflow, not one (or several) per phase.
+    """
+    await ensure_connected()
+    try:
+        found = await get_projection_mgr().artifact_list.latest_deliverables(workflow_id, phase_ids)
+    except Exception as e:
+        return Err(ArtifactError.STORAGE_ERROR, message=str(e))
+    return Ok(
+        {
+            phase_id: _summary_from_domain(row) if (row := found.get(phase_id)) else None
+            for phase_id in phase_ids
+        }
+    )
+
+
 async def list_artifacts(
     workflow_id: str | None = None,
     execution_id: str | None = None,
@@ -208,26 +263,7 @@ async def list_artifacts(
         )
         return Ok(
             Page(
-                rows=[
-                    ArtifactSummary(
-                        id=a.id,
-                        workflow_id=a.workflow_id,
-                        execution_id=a.execution_id,
-                        phase_id=a.phase_id,
-                        artifact_type=a.artifact_type,
-                        title=a.name,
-                        size_bytes=a.size_bytes,
-                        created_at=datetime.fromisoformat(a.created_at)
-                        if isinstance(a.created_at, str)
-                        else a.created_at,
-                        # Named here or the list answers null for an artifact
-                        # whose detail answers correctly - see the comment on
-                        # excluded_undated below, which is this same hop (#1284).
-                        agent_provider=a.agent_provider,
-                        agent_model=observed_model_of(a.agent_model, None).observed,
-                    )
-                    for a in domain_page.rows
-                ],
+                rows=[_summary_from_domain(a) for a in domain_page.rows],
                 total=domain_page.total,
                 status_counts=domain_page.status_counts,
                 # Rebuilding the page here re-states every field, so a new one
@@ -240,27 +276,81 @@ async def list_artifacts(
         return Err(ArtifactError.STORAGE_ERROR, message=str(e))
 
 
-async def _load_artifact_content(
-    artifact_id: str, fallback_content: str | None
-) -> tuple[str | None, str | None]:
-    """Download artifact content from storage, falling back to projection content.
+@dataclass(frozen=True)
+class _ArtifactBody:
+    """An artifact's content exactly as stored, and the type it was stored as.
 
-    Returns:
-        (content, content_type) tuple.
+    Bytes, never a decoding of them (#990). ``text`` is the one place a body
+    becomes a ``str``, and it refuses rather than substitutes: a body that is
+    not valid UTF-8 has no text form, whatever type it was recorded under.
     """
+
+    data: bytes
+    content_type: str
+
+    @property
+    def text(self) -> str | None:
+        if _is_binary_type(self.content_type):
+            return None
+        try:
+            return self.data.decode("utf-8")
+        except UnicodeDecodeError:
+            return None
+
+
+def _is_binary_type(content_type: str | None) -> bool:
+    from syn_domain.contexts.artifacts import ContentType
+
+    try:
+        return ContentType(content_type or ContentType.TEXT_MARKDOWN).is_binary
+    except ValueError:
+        return False
+
+
+async def _load_artifact_content(
+    artifact_id: str,
+    fallback_content: str | None,
+    content_type: str | None,
+    storage_uri: str | None = None,
+) -> _ArtifactBody | None:
+    """The artifact's bytes from object storage, falling back to the read model.
+
+    ``content_type`` is the one the artifact was created with; a row projected
+    before the read model carried it was text, as every artifact then was.
+    Only text has a fallback: a binary artifact's bytes are in object storage
+    and nowhere else (#990).
+    """
+    resolved_type = content_type or "text/markdown"
     try:
         from syn_adapters.storage.artifact_storage import get_artifact_storage
 
         storage = await get_artifact_storage()
-        raw = await storage.download(artifact_id)
-        return raw.decode("utf-8", errors="replace"), "text/plain"
+        data = await storage.download(artifact_id, storage_uri=storage_uri)
+        return _ArtifactBody(data=data, content_type=resolved_type)
     except Exception:
         logger.exception("Failed to load artifact content for %s", artifact_id)
 
     # Fall back to projection content if storage download failed
-    if fallback_content is not None:
-        return fallback_content, "text/plain"
-    return None, None
+    if fallback_content and not _is_binary_type(resolved_type):
+        return _ArtifactBody(data=fallback_content.encode("utf-8"), content_type=resolved_type)
+    return None
+
+
+async def get_artifact_bytes(artifact_id: str) -> Result[_ArtifactBody, ArtifactError]:
+    """The artifact's content as stored, for serving as-is (#990)."""
+    await ensure_connected()
+    try:
+        artifact = await get_projection_mgr().artifact_list.get_by_id(artifact_id)
+        if artifact is None:
+            return Err(ArtifactError.NOT_FOUND, message=f"Artifact {artifact_id} not found")
+        body = await _load_artifact_content(
+            artifact_id, artifact.content, artifact.content_type, artifact.storage_uri
+        )
+        if body is None:
+            return Err(ArtifactError.NOT_FOUND, message=f"Artifact {artifact_id} has no content")
+        return Ok(body)
+    except Exception as e:
+        return Err(ArtifactError.STORAGE_ERROR, message=str(e))
 
 
 def _parse_artifact_created_at(created_at: str | datetime | None) -> datetime | None:
@@ -298,9 +388,15 @@ async def get_artifact(
             return Err(ArtifactError.NOT_FOUND, message=f"Artifact {artifact_id} not found")
 
         content = None
-        content_type = None
+        content_type = artifact.content_type or "text/markdown"
         if include_content:
-            content, content_type = await _load_artifact_content(artifact_id, artifact.content)
+            # A binary body has no text form, so `content` stays None and the
+            # bytes are served by GET /artifacts/{id}/raw (#990).
+            body = await _load_artifact_content(
+                artifact_id, artifact.content, artifact.content_type, artifact.storage_uri
+            )
+            if body is not None:
+                content = body.text
 
         return Ok(
             ArtifactDetail(
@@ -539,7 +635,7 @@ _MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 # =============================================================================
 
 
-def _to_artifact_summary_response(a: ArtifactSummary) -> ArtifactSummaryResponse:
+def to_artifact_summary_response(a: ArtifactSummary) -> ArtifactSummaryResponse:
     """Convert an ArtifactSummary to its API response model."""
     return ArtifactSummaryResponse(
         id=a.id,
@@ -617,7 +713,7 @@ async def list_artifacts_endpoint(
 
     artifact_page = result.value
     return ArtifactListResponse(
-        artifacts=[_to_artifact_summary_response(a) for a in artifact_page.rows],
+        artifacts=[to_artifact_summary_response(a) for a in artifact_page.rows],
         # The filtered COLLECTION, not this page. There was no count at all
         # before, so truncation was undetectable from the response (#1204).
         total=artifact_page.total,
@@ -645,7 +741,7 @@ async def get_artifact_endpoint(
 
     a = result.value
 
-    if include_content and not a.content:
+    if include_content and not a.content and not _is_binary_type(a.content_type):
         raise HTTPException(
             status_code=404,
             detail=f"Artifact {artifact_id} content not found in projection.",
@@ -691,7 +787,12 @@ async def get_artifact_content_endpoint(artifact_id: str) -> ArtifactContentResp
     # storage_uri ahead of its bytes (#700). What remains is read-model
     # catch-up - the row is there before the content that fills it.
     # Signal retry-later instead of a misleading 200-with-null body.
-    if a.content is None and a.size_bytes and a.size_bytes > 0:
+    if (
+        a.content is None
+        and a.size_bytes
+        and a.size_bytes > 0
+        and not _is_binary_type(a.content_type)
+    ):
         raise HTTPException(
             status_code=202,
             detail=f"Artifact {artifact_id} content not yet available; retry shortly",
@@ -704,6 +805,28 @@ async def get_artifact_content_endpoint(artifact_id: str) -> ArtifactContentResp
         content_type=a.content_type or "text/markdown",
         size_bytes=a.size_bytes,
     )
+
+
+@router.get(
+    "/{artifact_id}/raw",
+    response_class=Response,
+    responses={200: {"content": {"application/octet-stream": {}}}},
+)
+async def get_artifact_raw_endpoint(artifact_id: str) -> Response:
+    """Get artifact content as stored, byte-for-byte, under its own content type.
+
+    The way to fetch a binary artifact - a screenshot, a PDF - which has no
+    text form for the JSON endpoints to carry (#990). Text artifacts are
+    served the same way, as their UTF-8 bytes.
+    """
+    from syn_api.prefix_resolver import resolve_or_raise
+
+    mgr = get_projection_mgr()
+    artifact_id = await resolve_or_raise(mgr.store, "artifact_summaries", artifact_id, "Artifact")
+    result = await get_artifact_bytes(artifact_id)
+    if isinstance(result, Err):
+        raise HTTPException(status_code=404, detail=f"Artifact {artifact_id} content not found")
+    return Response(content=result.value.data, media_type=result.value.content_type)
 
 
 @router.post("", response_model=CreateArtifactResponse, status_code=201)

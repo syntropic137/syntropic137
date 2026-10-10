@@ -28,6 +28,13 @@ DEFAULT_DEV_API_URL = f"http://localhost:{DEV_API_HOST_PORT}"
 DEFAULT_SELFHOST_API_URL = f"http://localhost:{SELFHOST_GATEWAY_PORT}"
 """Default API URL for selfhost users (CLI, browser)."""
 
+ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages"
+"""Anthropic Messages API endpoint (the eval suite's LLM judge, scripts/eval_suite.py)."""
+
+TAURI_DESKTOP_ORIGINS: tuple[str, ...] = ("tauri://localhost", "http://tauri.localhost")
+"""Origins the packaged desktop app (apps/syn-desktop) sends requests from:
+``tauri://localhost`` on macOS and Linux, ``http://tauri.localhost`` on Windows."""
+
 # ---------------------------------------------------------------------------
 # Environment variable names
 # ---------------------------------------------------------------------------
@@ -46,6 +53,9 @@ ENV_SYN_GATEWAY_PORT = "SYN_GATEWAY_PORT"
 
 ENV_SYN_GATEWAY_BIND = "SYN_GATEWAY_BIND"
 """Env var for the host address the selfhost gateway binds to."""
+
+ENV_SYN_GATEWAY_UI = "SYN_GATEWAY_UI"
+"""Env var selecting the dashboard the gateway serves at / (next or legacy)."""
 
 ENV_ANTHROPIC_API_KEY = "ANTHROPIC_API_KEY"
 """Env var for the Anthropic API key."""

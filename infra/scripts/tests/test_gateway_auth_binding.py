@@ -53,7 +53,7 @@ _AUTH_OFF = "auth_basic off;"
 
 
 def _run_entrypoint(
-    workdir: Path, *, bind: str | None, password: str
+    workdir: Path, *, bind: str | None, password: str, extra_env: dict[str, str] | None = None
 ) -> subprocess.CompletedProcess[str]:
     """Run the gateway entrypoint with a stub ``htpasswd`` and its own AUTH_DIR.
 
@@ -76,6 +76,7 @@ def _run_entrypoint(
     }
     if bind is not None:
         env["SYN_GATEWAY_BIND"] = bind
+    env.update(extra_env or {})
 
     return subprocess.run(
         ["sh", str(_ENTRYPOINT)],
@@ -358,3 +359,28 @@ def test_the_gateway_is_told_the_address_it_is_published_on(compose_file: Path) 
         f"{compose_file.name} publishes port 80 on {host_ip!r} but does not pass that "
         f"same expression to the container as SYN_GATEWAY_BIND"
     )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("ui_mode", ["next", "legacy"])
+def test_hashed_assets_get_their_own_rate_limit_zone(tmp_path: Path, ui_mode: str) -> None:
+    """One syn-ui page load fetches 60+ hashed chunks at once, three times the
+    auth backstop's burst of 20, so v1.0.0-beta.1 answered the first paint
+    with 429. Every ``/assets/`` location must declare its own zone (nginx
+    does not apply a server-scope ``limit_req`` to a location that has one),
+    and the zone must exist at http scope."""
+    _run_entrypoint(
+        tmp_path, bind=_EXPOSED_ADDRESS, password=_PASSWORD, extra_env={"SYN_GATEWAY_UI": ui_mode}
+    )
+
+    locations = _generated(tmp_path)["locations.conf"]
+    blocks = re.findall(r"location (?:/next)?/assets/ \{(.*?)\n\}", locations, flags=re.S)
+    assert blocks, "no /assets/ location was generated"
+    if ui_mode == "legacy":
+        assert len(blocks) == 2, "legacy mode serves React at /assets/ and syn-ui at /next/assets/"
+    for block in blocks:
+        assert "limit_req zone=assets burst=" in block, block
+        assert "auth_basic off" not in block, "assets must stay behind Basic auth"
+
+    zones = (_GATEWAY_IMAGE / "rate-limit.conf").read_text()
+    assert re.search(r"^limit_req_zone \$binary_remote_addr zone=assets:", zones, flags=re.M)

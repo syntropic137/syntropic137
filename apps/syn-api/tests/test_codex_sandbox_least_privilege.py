@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import pytest
 
-from syn_api._wiring import _build_codex_command, _resolve_sandbox
+from syn_api._codex_command import _build_codex_command, _resolve_sandbox
 from syn_shared.agents import (
     CODEX_SANDBOX_FLAGS,
     DEFAULT_PHASE_SANDBOX,

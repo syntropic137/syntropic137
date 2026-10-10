@@ -88,6 +88,7 @@ class TestSettings:
         assert settings.codex_auth_json.get_secret_value() == auth_json
 
 
+@pytest.mark.unit
 class TestComputedProperties:
     """Test computed properties."""
 
@@ -135,6 +136,7 @@ class TestComputedProperties:
             assert settings.use_in_memory_storage is False
 
 
+@pytest.mark.unit
 class TestGetSettings:
     """Test get_settings function."""
 

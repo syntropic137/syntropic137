@@ -8,10 +8,14 @@ See ADR-012: Artifact Storage Architecture
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
-from syn_domain.contexts.artifacts._shared.value_objects import PhaseOutputFile
+from syn_domain.contexts.artifacts._shared.errors import ArtifactStorageError
+from syn_domain.contexts.artifacts._shared.value_objects import ContentType, PhaseOutputFile
+
+logger = logging.getLogger(__name__)
 
 _EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 
@@ -20,6 +24,9 @@ if TYPE_CHECKING:
 
     from syn_domain.contexts.artifacts.domain.read_models.artifact_summary import (
         ArtifactSummary,
+    )
+    from syn_domain.contexts.artifacts.ports.ArtifactContentStoragePort import (
+        ArtifactContentStoragePort,
     )
 
 
@@ -41,6 +48,23 @@ def _as_instant(created: datetime | str | None) -> datetime | None:
     if created.tzinfo is None:
         return created.replace(tzinfo=UTC)
     return created.astimezone(UTC)
+
+
+def _is_binary(artifact: ArtifactSummary) -> bool:
+    """Whether the row's bytes live in object storage only (#990).
+
+    A type this build does not know is treated as text, which is what every
+    row was before binary types existed.
+    """
+    try:
+        return ContentType(artifact.content_type or ContentType.TEXT_MARKDOWN).is_binary
+    except ValueError:
+        return False
+
+
+def _has_content(artifact: ArtifactSummary) -> bool:
+    """Whether the row stands for a file that can be handed forward."""
+    return bool(artifact.content) or _is_binary(artifact)
 
 
 def _injection_rank(artifact: ArtifactSummary) -> tuple[int, int, datetime, str]:
@@ -158,13 +182,53 @@ class ArtifactQueryService:
     Replaces in-memory phase_outputs dict with DB-backed queries.
     """
 
-    def __init__(self, projection: _ArtifactProjection) -> None:
+    def __init__(
+        self,
+        projection: _ArtifactProjection,
+        content_storage: ArtifactContentStoragePort | None = None,
+    ) -> None:
         """Initialize with an artifact projection.
 
         Args:
             projection: The artifact projection to query (duck-typed)
+            content_storage: Where a binary artifact's bytes are (#990). The
+                read model holds text only, so without it a binary file is
+                not handed forward on the restart path - and is logged.
         """
         self._projection = projection
+        self._content_storage = content_storage
+
+    async def _files(self, rows: list[ArtifactSummary]) -> list[PhaseOutputFile]:
+        """The rows as files to hand forward, in injection rank order.
+
+        Text comes from the read model as before. A binary row's content is
+        empty there by design (Lane 1 holds no bytes), so its bytes are read
+        from object storage, which is where the collector put them (#990).
+        """
+        files: list[PhaseOutputFile] = []
+        for row in sorted(rows, key=_injection_rank):
+            content = await self._content_of(row)
+            if content is not None:
+                files.append(PhaseOutputFile(source_path=row.source_path, content=content))
+        return files
+
+    async def _content_of(self, row: ArtifactSummary) -> str | bytes | None:
+        if not _is_binary(row):
+            return row.content
+        if self._content_storage is None:
+            logger.warning(
+                "Binary artifact %s (%s) not handed forward: no object storage wired",
+                row.id,
+                row.source_path,
+            )
+            return None
+        try:
+            return await self._content_storage.download(row.id, storage_uri=row.storage_uri)
+        except ArtifactStorageError as err:
+            logger.warning(
+                "Binary artifact %s (%s) not handed forward: %s", row.id, row.source_path, err
+            )
+            return None
 
     async def get_by_execution(
         self,
@@ -246,7 +310,11 @@ class ArtifactQueryService:
 
         for artifact in artifacts:
             phase_id = artifact.phase_id
-            if phase_id is None or phase_id not in completed_phase_ids or not artifact.content:
+            if (
+                phase_id is None
+                or phase_id not in completed_phase_ids
+                or not _has_content(artifact)
+            ):
                 continue
             by_phase.setdefault(phase_id, []).append(artifact)
 
@@ -256,14 +324,7 @@ class ArtifactQueryService:
         # content survives a duplicated `source_path`. Since #1149 it also
         # takes the HEAD of this list as `<phase-id>.md`, so the ranking here
         # is what makes the alias and the tree name the same artifact.
-        return {
-            phase_id: [
-                PhaseOutputFile(source_path=a.source_path, content=a.content)
-                for a in sorted(rows, key=_injection_rank)
-                if a.content is not None
-            ]
-            for phase_id, rows in by_phase.items()
-        }
+        return {phase_id: await self._files(rows) for phase_id, rows in by_phase.items()}
 
     async def get_files_for_artifacts(
         self,
@@ -285,14 +346,7 @@ class ArtifactQueryService:
         by_phase: dict[str, list[ArtifactSummary]] = {}
         for artifact in await self._projection.get_by_execution(execution_id):
             phase_id = phase_of.get(artifact.id)
-            if phase_id is None or not artifact.content:
+            if phase_id is None or not _has_content(artifact):
                 continue
             by_phase.setdefault(phase_id, []).append(artifact)
-        return {
-            phase_id: [
-                PhaseOutputFile(source_path=a.source_path, content=a.content)
-                for a in sorted(rows, key=_injection_rank)
-                if a.content is not None
-            ]
-            for phase_id, rows in by_phase.items()
-        }
+        return {phase_id: await self._files(rows) for phase_id, rows in by_phase.items()}

@@ -9,6 +9,8 @@ import pytest
 from syn_adapters.github.client import GitHubRateLimitError
 from syn_adapters.github.client_endpoints import list_accessible_repos
 
+pytestmark = pytest.mark.unit
+
 
 def _make_repo(idx: int) -> dict:
     """Create a minimal repo dict matching GitHub API shape."""

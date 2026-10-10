@@ -1,5 +1,3 @@
-'use client';
-
 import { cn } from '@/lib/cn';
 import { Lock, Plug, CheckCircle, Puzzle, Shield, Zap, GitBranch, Layers, Eye, Workflow, Terminal, Globe } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -10,25 +8,14 @@ interface FeatureCardProps {
   icon: IconName;
   title: string;
   description: string;
+  /**
+   * Kept so existing MDX keeps compiling. Every card now uses the one Skyline
+   * panel (accent icon tile, panel gradient), as on the landing page, so the
+   * old per-card gradients no longer change the look.
+   */
   gradient?: 'purple' | 'indigo' | 'pink' | 'cyan' | 'green';
   className?: string;
 }
-
-const gradients = {
-  purple: 'from-purple-500/10 to-pink-500/10 border-purple-500/20 hover:border-purple-500/40',
-  indigo: 'from-indigo-500/10 to-purple-500/10 border-indigo-500/20 hover:border-indigo-500/40',
-  pink: 'from-pink-500/10 to-rose-500/10 border-pink-500/20 hover:border-pink-500/40',
-  cyan: 'from-cyan-500/10 to-blue-500/10 border-cyan-500/20 hover:border-cyan-500/40',
-  green: 'from-emerald-500/10 to-teal-500/10 border-emerald-500/20 hover:border-emerald-500/40',
-};
-
-const iconGradients = {
-  purple: 'from-purple-400 to-pink-400',
-  indigo: 'from-indigo-400 to-purple-400',
-  pink: 'from-pink-400 to-rose-400',
-  cyan: 'from-cyan-400 to-blue-400',
-  green: 'from-emerald-400 to-teal-400',
-};
 
 const iconMap: Record<IconName, LucideIcon> = {
   lock: Lock,
@@ -45,28 +32,17 @@ const iconMap: Record<IconName, LucideIcon> = {
   globe: Globe,
 };
 
-export function FeatureCard({ icon, title, description, gradient = 'indigo', className }: FeatureCardProps) {
+export function FeatureCard({ icon, title, description, className }: FeatureCardProps) {
   const Icon = iconMap[icon];
 
   return (
-    <div
-      className={cn(
-        'group relative rounded-xl border bg-gradient-to-br p-5 transition-all duration-300',
-        gradients[gradient],
-        className
-      )}
-    >
-      <div className="flex items-start gap-4">
-        <div className={cn(
-          'flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br',
-          iconGradients[gradient]
-        )}>
-          <Icon className="w-6 h-6 text-white" />
-        </div>
-        <div className="space-y-1">
-          <h3 className="font-semibold text-fd-foreground">{title}</h3>
-          <p className="text-sm text-fd-muted-foreground">{description}</p>
-        </div>
+    <div className={cn('syn-feature-card', className)}>
+      <div className="syn-feature-card__icon" aria-hidden="true">
+        <Icon />
+      </div>
+      <div className="syn-feature-card__body">
+        <h3 className="syn-feature-card__title">{title}</h3>
+        <p className="syn-feature-card__text">{description}</p>
       </div>
     </div>
   );
@@ -77,9 +53,5 @@ interface FeatureGridProps {
 }
 
 export function FeatureGrid({ children }: FeatureGridProps) {
-  return (
-    <div className="grid gap-4 sm:grid-cols-2 my-6">
-      {children}
-    </div>
-  );
+  return <div className="syn-feature-grid not-prose">{children}</div>;
 }

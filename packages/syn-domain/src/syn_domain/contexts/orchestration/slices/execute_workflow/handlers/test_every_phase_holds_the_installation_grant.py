@@ -22,7 +22,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from syn_api._wiring import _build_agent_command, _build_workspace_prompt
+from syn_api._wiring_agent_command import _build_agent_command, _build_workspace_prompt
 from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoAction, TodoItem
 from syn_domain.contexts.orchestration._shared.workflow_definition import WorkflowDefinition
 from syn_domain.contexts.orchestration._shared.yaml_to_command import (
@@ -139,6 +139,9 @@ async def _executable_phases() -> dict[str, ExecutablePhase]:
             repos: list[RepositoryRef],
             admitted: AdmissionTicket | None = None,
             source_commits: list[SourceCommit] | None = None,
+            tags: object = None,
+            launch_eval: object = None,
+            workflow_version: str | None = None,
         ) -> WorkflowExecutionResult:
             del workflow_name, inputs, repos, admitted
             captured.extend(phases)
@@ -189,6 +192,8 @@ async def _provision(phase: ExecutablePhase) -> _Provisioned:
     workspace.proxy_url = "http://envoy:10000"
     workspace.workspace_id = "ws-1197"
     workspace.run_setup_phase = AsyncMock(return_value=MagicMock(exit_code=0))
+    # A real outcome, not a MagicMock whose truthy timed_out reads as a timeout.
+    workspace.execute = AsyncMock(return_value=MagicMock(exit_code=0, timed_out=False, stdout=""))
     workspace.inject_files = AsyncMock()
 
     workspace_cm = AsyncMock()

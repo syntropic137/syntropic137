@@ -1,0 +1,6 @@
+name: update-eval
+type: command
+aggregate: Eval
+emits:
+  - EvalUpdatedEvent
+returns: HandlerResult

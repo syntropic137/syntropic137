@@ -1,0 +1,30 @@
+id: prompt-deliverable-only-if-acted
+polarity: defect
+source_pr: 1237
+# Mined from the fix: the first fix commit's first parent, so the bug is
+# present and nothing of the fix is. Evidence at the pin:
+# the prompt's completion rules only describe a deliverable for work done
+# (`Write summary to artifacts/output/deliverable.md` for commits/PRs, line
+# 116); nothing covers a phase that found nothing to do (0 matches for
+# "nothing needed|not conditional|declined" at pin, 4 after).
+commit: 425e1d87af3af1219f2b1d345efcf65f2c01c53b
+fix_commit: 08218c6fdf200a9bd954511c896ee774aa7a4208
+first_fix_commit: ad83337576e43ed2c90b3ce095dae09753ffc3bb
+task: >
+  Review the workspace system prompt's instructions for completing a task and
+  writing the phase deliverable to artifacts/output/. A phase that declares
+  output artifacts and produces none is failed by the collector.
+expected:
+  # The root cause, for the LLM judge only; never part of `task`.
+  defect: >
+    The workspace prompt's completion rules describe writing
+    artifacts/output/deliverable.md only for work done (commits/PRs or
+    findings); nothing tells an agent that found nothing to do, or declined
+    to act, that it must still write a deliverable, so such a phase writes
+    none and the collector fails it.
+  files:
+    - packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/workspace_prompt.py
+  keywords:
+    - ["nothing to do", "already done", "nothing needed", "no work", "did nothing", "declined", "decline", "no change", "not needed", "already exist", "chose not", "no action"]
+    - ["deliverable", "artifact", "output", "fail"]
+split: holdout

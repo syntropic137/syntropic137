@@ -36,11 +36,33 @@ created before `ArtifactCreated` v5 do not have one; a missing path means
 Carries no artifact id of its own, which is why a caller cannot tell from the
 files alone which of several requested Artifacts resolved - see issue #1460.
 
+## Binary Content
+
+An Artifact whose `content_type` is a binary type (`image/png`,
+`application/pdf`, `application/octet-stream`, ...): content that is not valid
+UTF-8 text, decided from its bytes and only then from its file extension. Its
+bytes live in object storage and nowhere else - `ArtifactCreated` (v7) records
+an empty `content`, and `content_hash`/`size_bytes` of the bytes. A binary
+Artifact has no text form, so it is never a Primary Deliverable's text and is
+read through `GET /artifacts/{id}/raw`. Before issue #990 there was no such
+thing: every file was decoded as text, and a screenshot was stored as U+FFFD.
+
 ## Primary Deliverable
 
 The one Artifact of a Phase that represents its result, flagged
 `is_primary_deliverable`. Distinguishes the thing a downstream Phase is meant
 to read from the incidental files beside it.
+
+## Latest Output
+
+A Workflow Phase's newest Primary Deliverable across every Execution of that
+Workflow: what the Phase last produced. Asked of the Workflow, not of one
+Execution, which is why it is not the same query as Ownership by Execution.
+An Artifact with no creation time is never the Latest Output, because nothing
+says it is newer than anything. "Newest" is the latest instant, never the
+latest timestamp text, and equal instants go to the lowest Artifact id.
+`ArtifactListProjection.latest_deliverables`, one store read for every Phase;
+served on `GET /workflows/{id}/latest-outputs`.
 
 ## Ownership by Execution
 

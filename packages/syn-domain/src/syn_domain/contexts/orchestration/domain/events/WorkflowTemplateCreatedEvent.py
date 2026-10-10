@@ -71,6 +71,13 @@ class WorkflowTemplateCreatedEvent(DomainEvent):
     # field rehydrate cleanly.
     skills: list[SkillRef] = Field(default_factory=list)
 
+    # Ordinary labels (#967), already normalised by TagSet. Defaults to empty
+    # so events written before tags existed rehydrate cleanly (ADR-007).
+    tags: list[str] = Field(default_factory=list)
+
+    # The workflow's default eval (#967); absent on older events (ADR-007).
+    default_eval_id: str | None = None
+
     # Provenance (issue #822). Optional so events written before this field
     # existed rehydrate cleanly.
     version: str | None = None
@@ -78,3 +85,8 @@ class WorkflowTemplateCreatedEvent(DomainEvent):
 
     source_digest: str | None = None
     """Resolved source commit SHA this definition was built from."""
+
+    package_name: str | None = None
+    """Package that installed this definition (#1588). Absent on older events,
+    and on a workflow created outside `syn workflow install`; prune treats
+    absent as "not this package's", so it never archives one."""

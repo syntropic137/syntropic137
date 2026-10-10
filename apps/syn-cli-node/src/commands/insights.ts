@@ -1,5 +1,5 @@
 /**
- * Insights commands — overview, cost, heatmap.
+ * Insights commands: overview, cost, heatmap.
  * Port of apps/syn-cli/src/syn_cli/commands/insights.py
  */
 
@@ -123,4 +123,7 @@ const heatmapCommand: CommandDef = {
 };
 
 export const insightsGroup = new CommandGroup("insights", "Global system insights and cost analysis");
-insightsGroup.command(overviewCommand).command(costCommand).command(heatmapCommand);
+insightsGroup
+  .command(overviewCommand)
+  .command(costCommand)
+  .command(heatmapCommand);

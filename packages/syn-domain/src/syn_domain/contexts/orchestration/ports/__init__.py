@@ -44,11 +44,32 @@ from syn_domain.contexts.orchestration.ports.ClaudePluginStoragePort import (
 from syn_domain.contexts.orchestration.ports.CodexRolloutPort import (
     CodexRolloutPort,
 )
+from syn_domain.contexts.orchestration.ports.DelegationEvidencePort import (
+    DelegationAttempt,
+    DelegationEvidencePort,
+    DelegationEvidenceUnavailableError,
+    DelegationOutcome,
+)
+from syn_domain.contexts.orchestration.ports.ExecutionRunQueuePort import (
+    ClaimedRun,
+    ExecutionRunQueue,
+    ExecutionStreamProbe,
+    ExecutorHost,
+    FencedRun,
+    OpeningSweep,
+    RunCounts,
+    RunLeaseLost,
+    StreamPresence,
+)
 from syn_domain.contexts.orchestration.ports.GlobalClaudePluginRegistryRepositoryPort import (
     GlobalClaudePluginRegistryRepositoryPort,
 )
 from syn_domain.contexts.orchestration.ports.ObservabilityServicePort import (
     ObservabilityServicePort,
+)
+from syn_domain.contexts.orchestration.ports.RemoteBranchPort import (
+    RemoteBranchPort,
+    RemoteBranchReading,
 )
 from syn_domain.contexts.orchestration.ports.SessionRepositoryPort import (
     SessionRepositoryPort,
@@ -69,15 +90,30 @@ from syn_domain.contexts.orchestration.ports.WorkspaceServicePort import (
 __all__ = [
     "ArtifactQueryServicePort",
     "ArtifactRepositoryPort",
+    "ClaimedRun",
     "ClaudePluginFile",
     "ClaudePluginRegistrationRepositoryPort",
     "ClaudePluginStoragePort",
     "CodexRolloutPort",
+    "DelegationAttempt",
+    "DelegationEvidencePort",
+    "DelegationEvidenceUnavailableError",
+    "DelegationOutcome",
+    "ExecutionRunQueue",
+    "ExecutionStreamProbe",
+    "ExecutorHost",
+    "FencedRun",
     "GlobalClaudePluginRegistryRepositoryPort",
     "ObservabilityServicePort",
+    "OpeningSweep",
+    "RemoteBranchPort",
+    "RemoteBranchReading",
+    "RunCounts",
+    "RunLeaseLost",
     "SessionRepositoryPort",
     "SourceCommitResolverPort",
     "StoredClaudePluginTree",
+    "StreamPresence",
     "WorkflowExecutionRepositoryPort",
     # Repository Ports
     "WorkflowTemplateRepositoryPort",

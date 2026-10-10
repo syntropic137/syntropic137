@@ -133,9 +133,16 @@ class _Conn:
 
     async def fetchval(self, query: str, *_args: object) -> object:
         self._record(query)
-        # "do the tally's tables exist?" -> as configured.
-        if "to_regclass" in query:
+        # "do the tally's tables exist?" -> as configured. The tally binds the
+        # name; validate()'s rollup checks inline theirs, and the rollups are
+        # present here - their absence is test_schema_validation_requires_rollups.py's.
+        if "to_regclass($1)" in query:
             return self.tables_exist
+        if "to_regclass" in query:
+            return True
+        # ...and the usage rollup's backfill has completed.
+        if "agent_usage_rollup_state" in query:
+            return True
         # "what definition version were these rows recounted to?" -> none, the
         # state migration 004 leaves and the one a startup must not accept.
         # Asked before the tally's own name, which this table's contains.
@@ -282,7 +289,7 @@ async def test_a_tally_projection_with_no_database_refuses_instead_of_pretending
 
 async def _start_the_store(*, skip_auto_create: bool, conn: _Conn) -> None:
     """Run ``AgentEventStore.initialize`` against the double, nothing stubbed but the pool."""
-    import asyncpg
+    from syn_adapters import postgres_pool
 
     store = AgentEventStore(
         "postgresql://double/observability",
@@ -292,12 +299,12 @@ async def _start_the_store(*, skip_auto_create: bool, conn: _Conn) -> None:
     async def _create_pool(*_args: object, **_kwargs: object) -> _Pool:
         return _Pool(conn)
 
-    original = asyncpg.create_pool
-    asyncpg.create_pool = cast("Any", _create_pool)
+    original = postgres_pool.create_pool
+    postgres_pool.create_pool = cast("Any", _create_pool)
     try:
         await store.initialize()
     finally:
-        asyncpg.create_pool = cast("Any", original)
+        postgres_pool.create_pool = cast("Any", original)
 
 
 @pytest.mark.parametrize("skip_auto_create", [True, False])

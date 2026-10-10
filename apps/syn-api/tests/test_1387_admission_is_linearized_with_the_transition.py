@@ -14,9 +14,10 @@ the transition completes underneath it, and the question is what the CALLER is
 told once it resumes. Two directions, and both matter:
 
 * a stale read must not become an admission (``TestAnAdmissionHoldingAStaleRead``)
-* a ticket already taken out must not be abandoned - ``set_mode`` waits for it,
-  rather than returning while work is still on its way in
-  (``TestATransitionThatStartsMidAdmission``)
+* a ticket already taken out must not be abandoned - its start is held back
+  in its record and re-offered after the re-open, rather than lost
+  (``TestATransitionThatStartsMidAdmission``; #1617 moved the wait to starts
+  that hold a slot)
 
 Determinism comes from an ``asyncio.Event`` inside the port double, never from
 sleeps: the interleaving is constructed, not raced for.
@@ -46,7 +47,7 @@ from syn_domain.contexts.github.domain.events.TriggerFiredEvent import TriggerFi
 from syn_domain.contexts.github.slices.dispatch_triggered_workflow.projection import (
     WorkflowDispatchProjection,
 )
-from syn_domain.contexts.orchestration import WorkflowTemplateAggregate
+from syn_domain.contexts.orchestration import TagSet, WorkflowTemplateAggregate
 
 pytestmark = pytest.mark.unit
 
@@ -310,9 +311,13 @@ class TestATransitionThatStartsMidAdmission:
             await closing
         await fixture.drain_the_dispatcher()
 
-    async def test_the_admission_that_held_the_ticket_is_honoured(self, fixture: _Fixture) -> None:
-        """It was admitted before the set returned, so it runs - and the record
-        says so truthfully. This gates admission, not execution."""
+    async def test_the_admission_that_held_the_ticket_is_held_then_honoured(
+        self, fixture: _Fixture
+    ) -> None:
+        """It was admitted before the set returned, but its task had not taken
+        its slot yet, so the set does not wait for it (#1617). It must then not
+        start behind the pause - its record goes back to `paused` - and it must
+        start once admission re-opens. Held, never lost."""
         await fixture.a_trigger_fires("exec-midway2")
         pending = asyncio.create_task(fixture.projection.process_pending())
 
@@ -330,13 +335,21 @@ class TestATransitionThatStartsMidAdmission:
         await fixture.drain_the_dispatcher()
 
         record = await fixture.record("exec-midway2")
+        assert record.status == "paused", (
+            "the admitted trigger neither started nor was held: its record "
+            "says dispatched over a start that never ran"
+        )
+        assert fixture.handler.admitted == []
+
+        # The re-open re-offers it, and this time it runs - under the ticket
+        # the record was written from.
+        await fixture.gate.set_mode(active=False, reason="", actor="deploy")
+        await fixture.projection.process_pending()
+        await fixture.drain_the_dispatcher()
+
+        record = await fixture.record("exec-midway2")
         assert record.status == "dispatched"
         assert len(fixture.handler.admitted) == 1
-
-        # The record and the run came from one admission, not from two guesses
-        # that happened to agree. `dispatched_at` is the gate's own answer -
-        # the moment it granted the ticket the handler then ran under - so a
-        # record cannot exist without an admission that produced it.
         ticket = fixture.handler.tickets[0]
         assert ticket is not None
         assert record.dispatched_at == ticket.granted_at.isoformat()
@@ -387,6 +400,9 @@ class _Request:
         default_factory=lambda: ["https://github.com/syntropic137/syntropic137"]
     )
     task: str | None = None
+    tags: TagSet = field(default_factory=TagSet)
+    eval_id: None = None
+    no_eval: bool = False
     provider: str = "claude"
 
 
@@ -430,6 +446,8 @@ class _HttpFixture:
         task: str | None,
         repos: list[object],
         admitted: AdmissionTicket | None = None,
+        tags: TagSet | None = None,
+        launch_eval: object = None,
     ) -> None:
         """Stand in for the background task's run of the execution.
 
@@ -437,7 +455,7 @@ class _HttpFixture:
         at ``journal.open()`` (#1387). Nothing before this point may end it:
         the route only QUEUED this coroutine.
         """
-        del workflow_id, inputs, task, repos
+        del workflow_id, inputs, task, repos, tags, launch_eval
         self.started.append(execution_id)
         if admitted is not None:
             admitted.mark_visible()
@@ -488,7 +506,7 @@ class TestAnHttpTransitionThatStartsMidAdmission:
     transition lock - so the request is provably part-way through being
     admitted when the operator asks."""
 
-    async def test_the_set_waits_and_the_request_is_honoured(
+    async def test_the_set_waits_for_the_decision_and_the_request_stays_owed(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         fixture = _HttpFixture(suspend_read=2)
@@ -518,17 +536,16 @@ class TestAnHttpTransitionThatStartsMidAdmission:
 
         assert response.status == "started"
         assert len(tasks.tasks) == 1
-        assert not closing.done(), (
-            "PUT /maintenance returned as soon as the route had QUEUED the "
-            "execution. Starlette has not run the background task yet, so no "
-            "stream exists for the drain to count (#1387, finding A)"
-        )
 
+        # #1617: queued, not holding a slot, so the transition does not wait
+        # for it - and when Starlette runs it, it is held at its slot rather
+        # than started behind the pause. Its durable request (recorded before
+        # the 200) is still owed; the request ProcessManager re-offers it.
         async with asyncio.timeout(_PATIENCE):
-            await tasks()  # Starlette runs the queued task after the response
             await closing
+            await tasks()  # Starlette runs the queued task after the response
 
-        assert fixture.started == [response.execution_id]
+        assert fixture.started == []
 
     async def test_the_next_request_after_the_set_returns_is_refused(
         self, monkeypatch: pytest.MonkeyPatch

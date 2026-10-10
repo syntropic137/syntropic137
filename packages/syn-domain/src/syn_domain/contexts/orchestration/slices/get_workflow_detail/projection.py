@@ -15,11 +15,28 @@ if TYPE_CHECKING:
 
     from event_sourcing import ProjectionStore
 
-from event_sourcing import AutoDispatchProjection
-
+from syn_domain.contexts.orchestration._shared.recorded_time import RecordedTimeProjection
+from syn_domain.contexts.orchestration._shared.tags import TagSet, replay_tag_edit
+from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
+    stored_fallback_agent,
+)
 from syn_domain.contexts.orchestration.domain.constants import (
     PhaseDefaults,
     PhaseFields,
+)
+from syn_domain.contexts.orchestration.domain.events.WorkflowDefaultEvalSetEvent import (
+    WorkflowDefaultEvalSetEvent,
+)
+from syn_domain.contexts.orchestration.domain.events.WorkflowTagsAddedEvent import (
+    WorkflowTagsAddedEvent,
+)
+from syn_domain.contexts.orchestration.domain.events.WorkflowTagsRemovedEvent import (
+    WorkflowTagsRemovedEvent,
+)
+from syn_domain.contexts.orchestration.domain.read_models.workflow_definition_changes import (
+    DefinitionChangeKind,
+    WorkflowDefinitionChange,
+    WorkflowDefinitionHistory,
 )
 from syn_domain.contexts.orchestration.domain.read_models.workflow_detail import (
     InputDeclarationDetail,
@@ -68,7 +85,7 @@ def _apply_phase_fields(phase: dict[str, Any], event_data: dict[str, Any]) -> No
             phase[phase_key] = event_data[event_key]
 
 
-class WorkflowDetailProjection(AutoDispatchProjection):
+class WorkflowDetailProjection(RecordedTimeProjection):
     """Builds workflow TEMPLATE detail read model from events.
 
     Templates don't have execution status. They only track:
@@ -77,7 +94,7 @@ class WorkflowDetailProjection(AutoDispatchProjection):
 
     For execution status, see WorkflowExecutionDetailProjection.
 
-    Uses AutoDispatchProjection: define on_<snake_case_event> methods to
+    Uses AutoDispatchProjection (via RecordedTimeProjection): define on_<snake_case_event> methods to
     subscribe and handle events — no separate subscription set needed.
     """
 
@@ -106,7 +123,22 @@ class WorkflowDetailProjection(AutoDispatchProjection):
     # NOT bumped again when `can_open_pr` was retired (#1477): that is the first
     # case, a removal. A v9 row that still carries the key stays readable,
     # because `from_dict` no longer looks for it, and the key stops surfacing.
-    VERSION = 9  # v9: surface can_open_pr, clone_repos, delivers_repo_changes, sandbox (#1429)
+    #
+    # v10 is the v9 case again (#967): a row written before tags existed has no
+    # `tags` key, and `from_dict` would report "no tags" for a workflow that
+    # has them -- and the export would then drop them on the way out.
+    #
+    # v11 is the same case for `default_eval_id` (#967): a v10 row would report
+    # no default for a workflow that has one, and the export would drop it.
+    #
+    # v12 (#959): `created_at` was read from a payload that never carried it,
+    # so every row has None. It now comes from the envelope's recorded time,
+    # and only a replay can supply that for existing rows.
+    #
+    # v13 (#1788): definition changes in ``CHANGES``, dated by recorded time,
+    # which only a replay can supply for existing workflows.
+    VERSION = 13  # v13: definition change history (#1788)
+    CHANGES = "workflow_definition_changes"
 
     def __init__(self, store: ProjectionStore):
         """Initialize with a projection store."""
@@ -124,6 +156,43 @@ class WorkflowDetailProjection(AutoDispatchProjection):
         """Clear projection data for rebuild."""
         if hasattr(self._store, "delete_all"):
             await self._store.delete_all(self.PROJECTION_NAME)
+            await self._store.delete_all(self.CHANGES)
+
+    async def _record_change(
+        self, workflow_id: str, version: str | None, kind: DefinitionChangeKind
+    ) -> None:
+        """Append a definition change, dated by the envelope (#1788).
+
+        A phase edit carries no version, so it keeps the one current in the
+        stream before it. A create is recorded only as a workflow's FIRST change:
+        a reinstall rebuilds the detail through the create handler and records
+        itself as an update. Without an envelope (a handler called directly)
+        there is no date, so nothing is recorded.
+        """
+        recorded_at, sequence = self.recorded_at, self.recorded_sequence
+        if not workflow_id or recorded_at is None or sequence is None:
+            return
+        history = await self.definition_history(workflow_id)
+        if kind is DefinitionChangeKind.CREATED and history.changes:
+            return
+        if kind is DefinitionChangeKind.PHASE_UPDATED:
+            version = history.current_version
+        change = WorkflowDefinitionChange(
+            sequence=sequence,
+            definition_version=version,
+            changed_at=recorded_at.isoformat(),
+            kind=kind,
+        )
+        updated = history.with_change(change)
+        if updated is not history:
+            await self._store.save(self.CHANGES, workflow_id, updated.model_dump(mode="json"))
+
+    async def definition_history(self, workflow_id: str) -> WorkflowDefinitionHistory:
+        """Every definition change of the workflow, in stream order; empty if none recorded."""
+        document = await self._store.get(self.CHANGES, workflow_id)
+        if document is None:
+            return WorkflowDefinitionHistory(workflow_id=workflow_id)
+        return WorkflowDefinitionHistory.model_validate(document)
 
     async def on_workflow_template_created(self, event_data: dict) -> None:
         """Handle WorkflowTemplateCreated event - create template detail."""
@@ -142,6 +211,12 @@ class WorkflowDetailProjection(AutoDispatchProjection):
                 # Check both new and old field names for backwards compatibility
                 prompt_template=p.get(PhaseFields.PROMPT_TEMPLATE) or p.get("prompt_template_id"),
                 timeout_seconds=p.get(PhaseFields.TIMEOUT_SECONDS, PhaseDefaults.TIMEOUT_SECONDS),
+                # #1376. Same sibling-site rule as #1429 below: `from_dict` in
+                # read_models/workflow_detail.py reads it, and omitting it here
+                # made `GET /workflows/{id}` report no limit for a phase that
+                # runs under one. No VERSION bump: no event written before
+                # #1376 can carry the key, so no stored row is wrong.
+                max_cost_usd=p.get("max_cost_usd"),
                 allowed_tools=tuple(p.get(PhaseFields.ALLOWED_TOOLS, [])),
                 argument_hint=p.get("argument_hint"),
                 model=p.get("model"),
@@ -149,11 +224,16 @@ class WorkflowDetailProjection(AutoDispatchProjection):
                 # Stored by create since #1012 and invisible until #1013: a
                 # caller could not ask the API what it had installed.
                 allow_delegation=bool(p.get("allow_delegation", False)),
+                require_delegation=bool(p.get("require_delegation", False)),
+                # PC-83. The sibling site in read_models/workflow_detail.py
+                # reads it too, through the same function.
+                fallback_agent=stored_fallback_agent(p.get("fallback_agent")),
                 # #1429. The sibling site in read_models/workflow_detail.py
                 # reads these too; a reader reaches the API through either,
                 # so patching one is patching half.
                 clone_repos=bool(p.get("clone_repos", True)),
                 delivers_repo_changes=bool(p.get("delivers_repo_changes", True)),
+                requires_verdict=bool(p.get("requires_verdict", False)),
                 sandbox=str(p.get("sandbox", DEFAULT_PHASE_SANDBOX)),
                 claude_plugins=_refs(p.get("claude_plugins")),
                 skills=_refs(p.get("skills")),
@@ -185,13 +265,21 @@ class WorkflowDetailProjection(AutoDispatchProjection):
             description=event_data.get("description"),
             phases=phases,
             input_declarations=input_decls,
-            created_at=event_data.get("created_at"),
+            created_at=self.recorded_at,
             runs_count=0,
             repository_url=event_data.get("repository_url"),
             repos=tuple(event_data.get("repos", [])),
             requires_repos=event_data.get("requires_repos", True),
+            tags=TagSet.recorded(event_data.get("tags") or []).values,
+            default_eval_id=event_data.get("default_eval_id"),
+            package_name=event_data.get("package_name"),
         )
         await self._store.save(self.PROJECTION_NAME, workflow_id, detail.to_dict())
+        await self._record_change(
+            workflow_id,
+            event_data.get("version") or event_data.get("source_digest"),
+            DefinitionChangeKind.CREATED,
+        )
 
     async def on_workflow_template_updated(self, event_data: dict) -> None:
         """Handle WorkflowTemplateUpdated - rebuild the detail in place (issue #822).
@@ -206,6 +294,11 @@ class WorkflowDetailProjection(AutoDispatchProjection):
 
         existing = await self._store.get(self.PROJECTION_NAME, workflow_id)
         await self.on_workflow_template_created(event_data)
+        await self._record_change(
+            workflow_id,
+            event_data.get("version") or event_data.get("source_digest"),
+            DefinitionChangeKind.UPDATED,
+        )
 
         if not existing:
             return
@@ -229,6 +322,33 @@ class WorkflowDetailProjection(AutoDispatchProjection):
             existing["runs_count"] = existing.get("runs_count", 0) + 1
             await self._store.save(self.PROJECTION_NAME, workflow_id, existing)
 
+    async def on_workflow_default_eval_set(self, event_data: WorkflowDefaultEvalSetEvent) -> None:
+        """Handle WorkflowDefaultEvalSet (#967)."""
+        event = WorkflowDefaultEvalSetEvent.model_validate(event_data)
+        existing = await self._store.get(self.PROJECTION_NAME, event.workflow_id)
+        if existing:
+            existing["default_eval_id"] = event.eval_id
+            await self._store.save(self.PROJECTION_NAME, event.workflow_id, existing)
+
+    async def on_workflow_tags_added(self, event_data: WorkflowTagsAddedEvent) -> None:
+        """Handle WorkflowTagsAdded (#967)."""
+        event = WorkflowTagsAddedEvent.model_validate(event_data)
+        await self._edit_tags(event.workflow_id, event.tags, added=True)
+
+    async def on_workflow_tags_removed(self, event_data: WorkflowTagsRemovedEvent) -> None:
+        """Handle WorkflowTagsRemoved (#967)."""
+        event = WorkflowTagsRemovedEvent.model_validate(event_data)
+        await self._edit_tags(event.workflow_id, event.tags, added=False)
+
+    async def _edit_tags(self, workflow_id: str, tags: list[str], *, added: bool) -> None:
+        if not workflow_id:
+            return
+
+        existing = await self._store.get(self.PROJECTION_NAME, workflow_id)
+        if existing:
+            existing["tags"] = replay_tag_edit(existing.get("tags") or [], tags, added=added)
+            await self._store.save(self.PROJECTION_NAME, workflow_id, existing)
+
     async def on_workflow_phase_updated(self, event_data: dict) -> None:
         """Handle WorkflowPhaseUpdated event - update phase prompt and config."""
         workflow_id = event_data.get("workflow_id", "")
@@ -246,6 +366,7 @@ class WorkflowDetailProjection(AutoDispatchProjection):
             _apply_phase_fields(phase, event_data)
 
         await self._store.save(self.PROJECTION_NAME, workflow_id, existing)
+        await self._record_change(workflow_id, None, DefinitionChangeKind.PHASE_UPDATED)
 
     async def get_by_id(self, workflow_id: str) -> WorkflowDetail | None:
         """Get a workflow template by ID."""

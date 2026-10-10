@@ -31,8 +31,13 @@ class TestSchemaValidation:
 
     @pytest.fixture
     def mock_conn(self) -> AsyncMock:
-        """Create a mock connection."""
-        return AsyncMock()
+        """Create a mock connection whose rollup tables and triggers exist.
+
+        Their absence is test_schema_validation_requires_rollups.py's subject.
+        """
+        conn = AsyncMock()
+        conn.fetchval.return_value = True
+        return conn
 
     # ==================== POSITIVE TESTS ====================
 
@@ -201,6 +206,7 @@ class TestSchemaValidation:
         assert "jsonb" in str(exc_info.value)
 
 
+@pytest.mark.unit
 class TestExpectedColumnsConstant:
     """Tests for EXPECTED_COLUMNS constant."""
 

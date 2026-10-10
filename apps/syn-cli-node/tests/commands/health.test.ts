@@ -176,6 +176,45 @@ describe("health command", () => {
     expect(output).not.toContain("Rebuilding read models");
   });
 
+  // #1545: every checkpoint at the head, so the lag fields say nothing is
+  // wrong, yet a read model skipped a start and the execution 404s.
+  it("names the execution a read model skipped although nothing is behind", async () => {
+    mockFetch.mockResolvedValue(
+      jsonResponse({
+        build: BUILD,
+        status: "healthy",
+        mode: "degraded",
+        degraded_reasons: ["projection_dropped_event"],
+        subscription: {
+          status: "dropped_events",
+          running: true,
+          is_catching_up: false,
+          is_stalled: false,
+          lag: 0,
+          lag_unit: "events",
+          head_position: 41000,
+          lagging_projections: [],
+          unapplied_starts: [
+            {
+              projection: "workflow_executions",
+              execution_id: "exec-db527ea0d361",
+              global_nonce: 39502,
+            },
+          ],
+        },
+      }),
+    );
+
+    await healthCommand.handler(emptyArgs);
+
+    const output = (process.stdout.write as ReturnType<typeof vi.fn>).mock.calls
+      .map((c: unknown[]) => String(c[0]))
+      .join("");
+    expect(output).toContain("exec-db527ea0d361 in workflow_executions");
+    expect(output).toContain("repair-dropped-execution-start.md");
+    expect(output).not.toContain("Rebuilding read models");
+  });
+
   // The two flags are independent, and a rebuild that wedges sets both. The
   // operator needs both facts: it is replaying AND it has stopped.
   it("reports a wedged rebuild as both rebuilding and stalled", async () => {
@@ -230,6 +269,14 @@ describe("health command", () => {
     );
 
     await expect(healthCommand.handler(emptyArgs)).rejects.toThrow(CLIError);
+  });
+
+  it("says a starting API is starting, not unhealthy (#1575)", async () => {
+    mockFetch.mockResolvedValue(
+      jsonResponse({ build: BUILD, status: "starting", mode: "degraded" }),
+    );
+
+    await expect(healthCommand.handler(emptyArgs)).rejects.toThrow("API is still starting");
   });
 
   // `syn health` is the interface an operator or an agent uses to answer "is

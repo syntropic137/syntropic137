@@ -16,11 +16,14 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import asyncpg
-
+from syn_adapters import postgres_pool
 from syn_adapters.events.schema import EventStoreSchema, SchemaValidationError  # noqa: F401
+from syn_adapters.events.shipped_ledger import (
+    PostgresShippedLedger,
+    ensure_shipped_ledger_schema,
+)
 from syn_adapters.events.store_helpers import (
     RESERVED_OBSERVATION_KEYS,
 )
@@ -40,6 +43,9 @@ from syn_adapters.events.store_write import (
     insert_one as _insert_one,
 )
 from syn_domain import tool_call_counts
+
+if TYPE_CHECKING:
+    import asyncpg
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +83,17 @@ class AgentEventStore:
         self._schema = schema or EventStoreSchema(
             skip_auto_create=os.environ.get("SYN_SKIP_AUTO_CREATE_TABLES", "").lower() == "true"
         )
+        self._shipped_ledger = PostgresShippedLedger(lambda: self.pool)
+
+    @property
+    def shipped_ledger(self) -> PostgresShippedLedger:
+        """What runs shipped, kept beside the telemetry it comes from (ShippedLedgerProvider)."""
+        return self._shipped_ledger
+
+    @property
+    def skip_auto_create(self) -> bool:
+        """Whether this deployment's migrations own the observability DDL (one policy for every table)."""
+        return self._schema.skip_auto_create
 
     async def initialize(self) -> None:
         """Open the pool, ready the schema, and ready the tool-call tally.
@@ -103,8 +120,9 @@ class AgentEventStore:
         if self._initialized:
             return
 
-        self.pool = await asyncpg.create_pool(
+        self.pool = await postgres_pool.create_pool(
             self.conn_string,
+            name="agent_events",
             min_size=5,
             max_size=20,
         )
@@ -115,6 +133,8 @@ class AgentEventStore:
                 conn,  # type: ignore[arg-type]  # asyncpg satisfies the protocol
                 skip_auto_create=self._schema.skip_auto_create,
             )
+            if not self._schema.skip_auto_create:
+                await ensure_shipped_ledger_schema(conn)
 
         self._initialized = True
         logger.info("AgentEventStore initialized")

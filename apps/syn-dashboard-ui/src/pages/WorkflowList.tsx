@@ -44,7 +44,7 @@ function WorkflowRow({ workflow, idx }: { workflow: WorkflowSummary; idx: number
 }
 
 export function WorkflowList() {
-  const { filteredWorkflows, loading, searchQuery, setSearchQuery, typeFilter, setTypeFilter, page, setPage, total, pageSize } = useWorkflowList()
+  const { workflows, loading, searchQuery, setSearchQuery, typeFilter, setTypeFilter, page, setPage, total, pageSize } = useWorkflowList()
 
   return (
     <div className="space-y-6">
@@ -66,7 +66,7 @@ export function WorkflowList() {
         </div>
         <select
           value={typeFilter}
-          onChange={(e) => { setTypeFilter(e.target.value); setPage(1) }}
+          onChange={(e) => setTypeFilter(e.target.value)}
           className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text-primary)] focus:border-[var(--color-accent)] focus:outline-none focus:ring-1 focus:ring-[var(--color-accent)]"
         >
           <option value="">All types</option>
@@ -79,7 +79,7 @@ export function WorkflowList() {
 
       {loading ? (
         <PageLoader />
-      ) : filteredWorkflows.length === 0 ? (
+      ) : workflows.length === 0 ? (
         <Card>
           <EmptyState
             icon={GitBranch}
@@ -90,7 +90,7 @@ export function WorkflowList() {
       ) : (
         <>
           <div className="space-y-2">
-            {filteredWorkflows.map((workflow, idx) => (
+            {workflows.map((workflow, idx) => (
               <WorkflowRow key={workflow.id} workflow={workflow} idx={idx} />
             ))}
           </div>

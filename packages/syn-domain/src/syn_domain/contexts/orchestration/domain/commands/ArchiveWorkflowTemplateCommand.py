@@ -16,11 +16,16 @@ class ArchiveWorkflowTemplateCommand:
     Attributes:
         workflow_id: ID of the workflow template to archive.
         archived_by: User or agent archiving the template.
+        expected_package_name: When set, archive only if the template is still
+            attributed to this package (#1588). A prune nominates candidates
+            from a read model that can lag; the aggregate is the one place
+            the attribution is current, so the check is made there.
         command_id: Unique identifier for this command.
     """
 
     workflow_id: str
     archived_by: str = ""
+    expected_package_name: str | None = None
     command_id: str = field(default_factory=lambda: str(uuid4()))
 
     @property

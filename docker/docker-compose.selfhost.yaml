@@ -30,6 +30,9 @@ services:
   # ===========================================================================
   timescaledb:
     container_name: syn137-timescaledb
+    # Control-plane CPU weight: wins over agent workspaces (default 1024)
+    # under contention, so dispatched work cannot starve it (#1600).
+    cpu_shares: ${CONTROL_PLANE_CPU_SHARES:-4096}
     environment:
       # Clear POSTGRES_PASSWORD from base compose — _FILE variant is exclusive
       POSTGRES_PASSWORD: ""
@@ -59,7 +62,7 @@ services:
       resources:
         limits:
           memory: ${POSTGRES_MEMORY_LIMIT:-1g}
-          cpus: "${POSTGRES_CPU_LIMIT:-1.0}"
+          cpus: "${POSTGRES_CPU_LIMIT:-2.0}"
     logging:
       driver: "json-file"
       options:
@@ -73,6 +76,9 @@ services:
   # ===========================================================================
   event-store:
     container_name: syn137-event-store
+    # Control-plane CPU weight: wins over agent workspaces (default 1024)
+    # under contention, so dispatched work cannot starve it (#1600).
+    cpu_shares: ${CONTROL_PLANE_CPU_SHARES:-4096}
     volumes:
       - ./selfhost-entrypoint.sh:/selfhost-entrypoint.sh:ro
     entrypoint: ["/bin/sh", "/selfhost-entrypoint.sh"]
@@ -90,7 +96,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: ${EVENT_STORE_MEMORY_LIMIT:-512m}
+          memory: ${EVENT_STORE_MEMORY_LIMIT:-2g}
     logging:
       driver: "json-file"
       options:
@@ -192,6 +198,9 @@ services:
   # ===========================================================================
   api:
     container_name: syn137-api
+    # Control-plane CPU weight: wins over agent workspaces (default 1024)
+    # under contention, so dispatched work cannot starve it (#1600).
+    cpu_shares: ${CONTROL_PLANE_CPU_SHARES:-4096}
     build:
       args:
         INCLUDE_OP_CLI: "${INCLUDE_OP_CLI:-0}"
@@ -201,7 +210,7 @@ services:
       - api_logs:/app/logs
       - ../workspaces:/workspaces
     entrypoint: ["/bin/sh", "/selfhost-entrypoint.sh"]
-    command: ["sh", "-c", "uvicorn syn_api.main:app --host $$SYN_API_HOST --port $$SYN_API_PORT --root-path /api/v1"]
+    command: ["sh", "-c", "uvicorn syn_api.main:app --host $$SYN_API_HOST --port $$SYN_API_PORT --root-path /api/v1 --timeout-graceful-shutdown 30"]
     environment:
       - LOG_FORMAT=${LOG_FORMAT:-json}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
@@ -225,10 +234,6 @@ services:
       - OP_SERVICE_ACCOUNT_TOKEN_SYN137_BETA=${OP_SERVICE_ACCOUNT_TOKEN_SYN137_BETA:-}
       - OP_SERVICE_ACCOUNT_TOKEN_SYN137_STAGING=${OP_SERVICE_ACCOUNT_TOKEN_SYN137_STAGING:-}
       - OP_SERVICE_ACCOUNT_TOKEN_SYN137_PROD=${OP_SERVICE_ACCOUNT_TOKEN_SYN137_PROD:-}
-      # Central session store (opt-in). Normally resolved from the vault above;
-      # these allow a non-1Password deployment to set them directly.
-      - SYN_SESSION_STORE_URL=${SYN_SESSION_STORE_URL:-}
-      - SYN_SESSION_STORE_AUTH_TOKEN=${SYN_SESSION_STORE_AUTH_TOKEN:-}
       # MinIO (artifact storage) — password read from Docker secret in entrypoint
       - SYN_STORAGE_PROVIDER=minio
       - SYN_STORAGE_MINIO_ENDPOINT=minio:9000
@@ -272,8 +277,8 @@ services:
     deploy:
       resources:
         limits:
-          memory: ${API_MEMORY_LIMIT:-512m}
-          cpus: "${API_CPU_LIMIT:-0.5}"
+          memory: ${API_MEMORY_LIMIT:-2g}
+          cpus: "${API_CPU_LIMIT:-2.0}"
     logging:
       driver: "json-file"
       options:
@@ -291,6 +296,9 @@ services:
       context: ..
       dockerfile: infra/docker/images/gateway/Dockerfile
     container_name: syn137-gateway
+    # Control-plane CPU weight: wins over agent workspaces (default 1024)
+    # under contention, so dispatched work cannot starve it (#1600).
+    cpu_shares: ${CONTROL_PLANE_CPU_SHARES:-4096}
     ports:
       - "${SYN_GATEWAY_BIND:-127.0.0.1}:${SYN_GATEWAY_PORT:-8137}:80"
     environment:
@@ -303,6 +311,9 @@ services:
       # a container cannot see its own port mapping, so this is the only way
       # the entrypoint learns whether port 80 is reachable off this host.
       - SYN_GATEWAY_BIND=${SYN_GATEWAY_BIND:-127.0.0.1}
+      # Dashboard at /: next (syn-ui, default) or legacy (React at /, syn-ui at
+      # /next), a one-release opt-out. Any other value stops the gateway.
+      - SYN_GATEWAY_UI=${SYN_GATEWAY_UI:-next}
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:80/health"]
       interval: 10s

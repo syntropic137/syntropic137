@@ -1,0 +1,29 @@
+id: artifacts-execution-filter-dropped
+polarity: defect
+source_pr: 1312
+# Mined from the fix: the first fix commit's first parent, so the bug is
+# present and nothing of the fix is. Evidence at the pin:
+# the list route has no `execution_id` parameter and rows carry none (0
+# matches at pin, 3 after).
+commit: 4f78382926c7cc8b3283b118a4569e5b4a38875f
+fix_commit: a242761e467c6614095f3effdbe6434dd6f18710
+first_fix_commit: 9b59050046e6745d87252c78903fb5d4feb9aa85
+task: >
+  Review the artifact list endpoint (GET /api/v1/artifacts): the filters it
+  accepts and the fields of each row. Phases use it to find the deliverable a
+  specific run wrote.
+expected:
+  # The root cause, for the LLM judge only; never part of `task`.
+  defect: >
+    GET /api/v1/artifacts declares no execution_id query parameter, and
+    FastAPI silently drops unknown query parameters, so filtering by a run's
+    id returns the same unfiltered page as no filter; the rows also carry no
+    execution_id, so a client cannot filter or detect the ignored filter
+    itself. A phase asking for one run's deliverable gets whatever any run
+    wrote most recently.
+  files:
+    - apps/syn-api/src/syn_api/routes/artifacts.py
+  keywords:
+    - ["execution id", "execution filter", "filter"]
+    - ["ignored", "dropped", "silently", "unknown", "not declared", "not accepted", "missing", "unfiltered", "most recent", "any run", "every artifact", "all artifacts"]
+split: holdout

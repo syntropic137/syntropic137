@@ -338,6 +338,13 @@ jobs:
         working-directory: apps/syn-dashboard-ui
         run: pnpm run build
 
+      # The local mirror of this job (the dashboard-ci recipe) has always run the
+      # tests; CI did not, so dashboard regression tests never gated a merge
+      # (found by verify on #1664, 2026-10-06).
+      - name: Test
+        working-directory: apps/syn-dashboard-ui
+        run: NO_COLOR=1 pnpm run test
+
   #############################################################################
   # DOCS SITE - Fumadocs build check
   #############################################################################
@@ -535,14 +542,15 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
 
       - name: Run OSV Scanner
-        # v1.9.0 restructured the repo — root action.yml lost its `runs:` section.
-        # The actual action now lives in the osv-scanner-action/ subdirectory.
-        # SHA confirmed: gh api repos/google/osv-scanner-action/git/ref/tags/v1.9.0
-        uses: google/osv-scanner-action/osv-scanner-action@19ec1116569a47416e11a45848722b1af31a857b # v1.9.0
+        # v2.3.8, not v1.9.0: v1.9.0 cannot parse uv.lock ("could not determine
+        # extractor", exit 127) and the step still reported success, so no
+        # lockfile was scanned at all. SHA: gh api repos/google/osv-scanner-action/git/ref/tags/v2.3.8
+        uses: google/osv-scanner-action/osv-scanner-action@9a498708959aeaef5ef730655706c5a1df1edbc2 # v2.3.8
         with:
           scan-args: |-
             --lockfile=uv.lock
             --lockfile=pnpm-lock.yaml
+            --lockfile=lib/ui-feedback/backend/ui-feedback-api/uv.lock
 
   #############################################################################
   # PIP-AUDIT - Python dependency audit against PyPI advisory database
@@ -604,6 +612,12 @@ jobs:
       # Requires GitHub Advanced Security (free for public repos).
       - name: Dependency Review
         uses: actions/dependency-review-action@f5b971718edcbb31275a1db40004592335c0e031 # v4.9.0
+        with:
+          # #1793: apps/syn-desktop (Tauri 2) pins gtk 0.18 -> glib 0.18.5,
+          # GHSA-wrw7-89jp-8q8g (moderate). The fix (glib 0.20) is unreachable
+          # until Tauri moves. Allowed here only; the OSV scan still reports it.
+          # Remove this line when Tauri 2 releases on gtk 0.20.
+          allow-ghsas: GHSA-wrw7-89jp-8q8g
 
   #############################################################################
   # SUMMARY - Required status check for PRs

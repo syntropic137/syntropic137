@@ -11,6 +11,8 @@ here also keeps the domain module free of the telemetry schema.
 
 from __future__ import annotations
 
+import asyncio
+import dataclasses
 import logging
 from enum import StrEnum
 from typing import TYPE_CHECKING, Final
@@ -59,6 +61,7 @@ __all__ = [
     "DelegateUsageRecorder",
     "capture_and_import_phase",
     "close_phase_workspaces",
+    "record_workspace_usage",
     "remember_leader_native_id",
 ]
 
@@ -406,6 +409,76 @@ async def capture_and_import_phase(
         leader_native_ids.pop((execution_id, phase_id), None)
 
 
+WORKSPACE_LIFETIME_KEY: Final = "workspace_lifetime_seconds"
+"""The interval the usage counters cover, recorded beside them (#1716)."""
+
+
+def _workspace_lifetime_seconds(workspace: ManagedWorkspace) -> float | None:
+    """Creation to termination: the interval the cumulative counters span.
+
+    The counters run from container start to teardown, so a rate over any
+    other span - the phase's telemetry, a query window - divides a whole
+    lifetime's CPU by part of it. None when termination was not recorded.
+    """
+    aggregate = workspace.aggregate
+    if aggregate.terminated_at is None:
+        return None
+    return aggregate.lifetime_seconds
+
+
+async def record_workspace_usage(
+    writer: ObservabilityRecorder | None,
+    workspace: ManagedWorkspace | None,
+    *,
+    session_id: str,
+    phase_id: str,
+) -> None:
+    """Record what this phase's workspace consumed, once it has been torn down.
+
+    Call AFTER the workspace's ``__aexit__``: teardown is where the usage is
+    measured, and it lands on ``workspace.teardown_usage``. This is the one
+    frame that knows the execution, the phase, the workspace and the session
+    together, which is why the row is written here and not in teardown.
+
+    Lane 2 only, and best-effort: no domain event, the aggregate untouched,
+    and a failed write is logged and dropped - telemetry never fails a phase.
+    Nothing is written when the backend measured nothing; an absent row means
+    "not measured", which a row of Nones would only restate.
+    """
+    if writer is None or workspace is None:
+        return
+    usage = workspace.teardown_usage
+    if usage is None:
+        return
+    if not session_id:
+        logger.info(
+            "Workspace usage for phase %s not recorded: the phase has no session id",
+            phase_id,
+        )
+        return
+    try:
+        await writer.record_observation(
+            session_id=session_id,
+            observation_type=ObservationType.WORKSPACE_RESOURCE_USAGE,
+            data={
+                **dataclasses.asdict(usage),
+                WORKSPACE_LIFETIME_KEY: _workspace_lifetime_seconds(workspace),
+            },
+            execution_id=workspace.execution_id,
+            phase_id=phase_id,
+            workspace_id=workspace.workspace_id,
+        )
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.warning(
+            "Failed to record workspace usage for phase %s (workspace %s)",
+            phase_id,
+            workspace.workspace_id,
+            exc_info=True,
+        )
+
+
 async def close_phase_workspaces(
     context: str,
     *,
@@ -418,7 +491,7 @@ async def close_phase_workspaces(
     writer: ObservabilityRecorder | None,
     ledger: ImportLedgerPort | None = None,
 ) -> None:
-    """Probe, import, then tear down every still-open phase workspace.
+    """Probe, import, tear down, then record the usage of every still-open phase workspace.
 
     The cancel and failure path. A phase that never reached finalisation still
     ran an agent, and a failed run is the one whose transcript is most worth
@@ -440,6 +513,12 @@ async def close_phase_workspaces(
             await workspace_cm.__aexit__(None, None, None)
         except Exception:
             logger.exception("Error cleaning up workspace during %s", context)
+        await record_workspace_usage(
+            writer,
+            workspaces.get(phase_id),
+            session_id=session_ids.get(phase_id, ""),
+            phase_id=phase_id,
+        )
 
     workspace_cms.clear()
     session_ids.clear()

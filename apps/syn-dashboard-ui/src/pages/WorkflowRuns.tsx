@@ -22,11 +22,11 @@ function RunProgressBar({ exec }: { exec: WorkflowExecutionSummary }) {
             tone === 'running' && 'bg-blue-500',
             tone === 'pending' && 'bg-slate-500'
           )}
-          style={{ width: `${exec.total_phases > 0 ? (exec.completed_phases / exec.total_phases) * 100 : 0}%` }}
+          style={{ width: `${exec.phase_progress.percent}%` }}
         />
       </div>
       <span className="text-xs text-[var(--color-text-muted)]">
-        {exec.completed_phases}/{exec.total_phases}
+        {exec.phase_progress.display}
       </span>
     </div>
   )

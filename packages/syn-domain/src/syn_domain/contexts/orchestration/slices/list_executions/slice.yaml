@@ -1,0 +1,20 @@
+name: list-executions
+type: query
+projection: WorkflowExecutionListProjection
+returns: Page[WorkflowExecutionSummary]
+
+subscribes_to:
+  - WorkflowExecutionStartedEvent
+  - PhaseCompletedEvent
+  - WorkflowCompletedEvent
+  - WorkflowFailedEvent
+  - ExecutionCancelledEvent
+  - WorkflowInterruptedEvent
+  - ExecutionTagsAddedEvent
+  - ExecutionTagsRemovedEvent
+  - ExecutionAttachedToEvalEvent
+  - ExecutionDetachedFromEvalEvent
+
+description: >
+  Query slice for listing executions, filterable by status, time window,
+  search, tags and eval_id. Filtered by eval_id it is also the Eval's runs view.

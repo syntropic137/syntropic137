@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 import re
 import signal
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from syn_shared.agents import PhaseModelResolution, resolve_model_alias
@@ -105,6 +105,20 @@ def format_duration_seconds(seconds: float | int | None) -> str:
     return f"{hours}h {mins}m" if mins else f"{hours}h"
 
 
+def format_utc_timestamp(moment: datetime) -> str:
+    """An instant as an absolute UTC label: ``"2026-10-04 06:47 UTC"``.
+
+    Absolute and in UTC on purpose. A relative phrase ("2h ago") is wrong the
+    moment it is cached, and the reader's local zone is known only to the
+    client, so both of those stay client-side (see the package docstring). This
+    is the label for a client that renders the string as-is. A naive datetime
+    is taken to already be UTC, which is how this codebase records instants.
+    """
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=UTC)
+    return moment.astimezone(UTC).strftime("%Y-%m-%d %H:%M UTC")
+
+
 def _parse_timestamp(value: datetime | str | None) -> datetime | None:
     """Parse an ISO 8601 string or pass through an existing datetime.
 
@@ -190,6 +204,20 @@ def compute_duration_seconds(
 
 _IN_FLIGHT_STATUSES = frozenset({"running"})
 """Statuses that mean "still accruing wall-clock time, no completion recorded"."""
+
+
+def resolve_deadline(
+    started_at: datetime | str | None, timeout_seconds: int | None
+) -> datetime | None:
+    """When a run that started at ``started_at`` is out of ``timeout_seconds``.
+
+    ``None`` when either half is unknown: a deadline built from a missing start
+    or a missing budget is not an early or late deadline, it is not one at all.
+    """
+    start = _parse_timestamp(started_at)
+    if start is None or timeout_seconds is None:
+        return None
+    return start + timedelta(seconds=timeout_seconds)
 
 
 def resolve_duration_seconds(
@@ -392,7 +420,7 @@ an em dash)."""
 def format_model_definition(model: str | None) -> str | None:
     """Render a DEFINED model with what its alias resolves to.
 
-    ``"gpt-sol" -> "gpt-sol \u2192 gpt-6-sol"``, ``"opus" -> "opus \u2192
+    ``"gpt-sol" -> "gpt-sol \u2192 gpt-6.1-sol"``, ``"opus" -> "opus \u2192
     claude-opus-5-5"``. A concrete or unknown id round-trips unchanged and
     ``None`` stays ``None``. Definition surfaces only: a run-time surface shows
     the OBSERVED model, never an alias target (ADR-067 D9).
@@ -411,8 +439,8 @@ def format_phase_model_definition(resolution: PhaseModelResolution) -> str:
     """Render a phase definition's model as the chain execution follows.
 
     ``opus`` -> ``opus \u2192 claude-opus-5-5``; a stale ``opus`` on a codex
-    phase -> ``opus \u2192 gpt-sol \u2192 gpt-6-sol``; unset on codex ->
-    ``default \u2192 gpt-sol \u2192 gpt-6-sol``; a concrete id -> itself.
+    phase -> ``opus \u2192 gpt-sol \u2192 gpt-6.1-sol``; unset on codex ->
+    ``default \u2192 gpt-sol \u2192 gpt-6.1-sol``; a concrete id -> itself.
     """
     parts: list[str] = []
     if resolution.substituted:

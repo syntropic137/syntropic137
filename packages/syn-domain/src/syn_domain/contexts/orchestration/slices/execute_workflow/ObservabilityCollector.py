@@ -15,11 +15,12 @@ from syn_domain.contexts.agent_sessions import ObservationType, SessionSummaryDa
 from syn_domain.contexts.orchestration.slices.execute_workflow.announced_model import (
     announced_model_from,
 )
-from syn_shared.events import SESSION_SUMMARY
+from syn_shared.events import GIT_COMMIT, SESSION_SUMMARY
 from syn_shared.observed_model import OBSERVED_MODEL_KEY, REQUESTED_MODEL_KEY
 from syn_shared.pricing import cost_json_number
 
 if TYPE_CHECKING:
+    from syn_domain.contexts.orchestration._shared.shipped_recorder import ShippedRecorder
     from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
         ObservabilityRecorder,
     )
@@ -76,8 +77,12 @@ class ObservabilityCollector:
         phase_id: str,
         workspace_id: str | None,
         requested_model: str | None,
+        shipped: ShippedRecorder | None = None,
     ) -> None:
         self._writer = writer
+        #: What this phase shipped (commits, PRs it created), recorded once here
+        #: at ingestion into the shipped ledger. None: not recorded.
+        self._shipped = shipped
         self._session_id = session_id
         self._execution_id = execution_id
         self._phase_id = phase_id
@@ -90,6 +95,7 @@ class ObservabilityCollector:
         #: and for a harness that never says.
         self._observed_model: str | None = None
         self._saw_agent_activity = False
+        self._may_have_written = False
 
     @property
     def requested_model(self) -> str | None:
@@ -152,7 +158,7 @@ class ObservabilityCollector:
         """
         return self._saw_agent_activity
 
-    def note_agent_activity(self) -> None:
+    def note_agent_activity(self, *, changed_nothing: bool = False) -> None:
         """Record that the agent was seen doing something, whatever it was.
 
         For the stream processors, which see events this collector is never
@@ -163,9 +169,39 @@ class ObservabilityCollector:
         the model started, which is the whole of what `saw_agent_activity` is
         asked for.
 
+        ``changed_nothing`` is the strong claim the fallback rests on (#1825),
+        and a stream processor makes it only for what it recognises in full: an
+        assistant turn's words or thinking, a codex ``reasoning`` or
+        ``agent_message`` item, a tool call `side_effect_free` reads as
+        read-only. Left at its default, the activity may have written. See
+        `may_have_written`.
+
         Idempotent, and one-way: nothing un-sees activity.
         """
         self._saw_agent_activity = True
+        if not changed_nothing:
+            self._may_have_written = True
+
+    @property
+    def may_have_written(self) -> bool:
+        """Whether this phase's agent may have done WORK: changed anything (#1825).
+
+        Narrower than `saw_agent_activity`, and asked by a different decision.
+        A same-agent retry needs "did the attempt do NOTHING at all" (#1303).
+        A fallback to a different agent (PC-83) needs "would a fresh run in
+        this workspace redo or overwrite something". Reading files, searching,
+        viewing a diff and reasoning out loud leave the workspace as they found
+        it. A verify phase that only read before its provider refused it has
+        done no work, and running it again on another agent loses nothing.
+
+        Fails safe in the same direction as `saw_agent_activity`. False is the
+        strong claim, so every activity counts as a possible write unless the
+        processor that saw it said ``changed_nothing``: hook events, subagents,
+        file changes, any command not recognisably read-only, and an item type
+        nobody has taught the parser all count. Cumulative across the phase's
+        attempts, like the collector.
+        """
+        return self._may_have_written
 
     async def record_hook_event(self, enriched: dict[str, Any]) -> None:
         """Record an enriched hook event to observability.
@@ -177,6 +213,7 @@ class ObservabilityCollector:
         rerun would repeat (#1303).
         """
         self.note_agent_activity()
+        await self._note_shipped_commit(enriched.get("event_type"), enriched.get("context"))
         if self._writer is None:
             return
 
@@ -246,13 +283,22 @@ class ObservabilityCollector:
         tool_name: str,
         tool_use_id: str,
         input_preview: str,
+        skill_name: str | None = None,
+        *,
+        changes_nothing: bool = False,
     ) -> None:
-        """Record tool execution started."""
+        """Record tool execution started.
+
+        ``skill_name`` is the skill a `Skill` call invoked, whole (#1269); the
+        key is written only when there is one, so other tools' rows are unchanged.
+        ``changes_nothing`` is the caller's verdict from `side_effect_free`, made
+        on the whole input rather than this truncated preview (#1825).
+        """
         # Recorded when the tool is ANNOUNCED, not when it returns, so this can
         # only run ahead of the side effect and never behind it. Running ahead
         # costs a retry that would have been safe; running behind would repeat
         # work that was not.
-        self.note_agent_activity()
+        self.note_agent_activity(changed_nothing=changes_nothing)
         if self._writer is None:
             return
 
@@ -263,6 +309,7 @@ class ObservabilityCollector:
                 "tool_name": tool_name,
                 "tool_use_id": tool_use_id,
                 "input_preview": input_preview,
+                **({"skill_name": skill_name} if skill_name else {}),
             },
             execution_id=self._execution_id,
             phase_id=self._phase_id,
@@ -275,13 +322,15 @@ class ObservabilityCollector:
         tool_use_id: str,
         success: bool,
         output_preview: str | None,
+        *,
+        changes_nothing: bool = False,
     ) -> None:
-        """Record tool execution completed."""
+        """Record tool execution completed. ``changes_nothing``: see the start."""
         # A completion can arrive with no start before it: some codex versions
         # announce a `file_change` only once it has happened (#1064). That is a
         # workspace mutation, so it counts, and counting only starts would miss
         # exactly the tool op that already changed something.
-        self.note_agent_activity()
+        self.note_agent_activity(changed_nothing=changes_nothing)
         if self._writer is None:
             return
 
@@ -468,6 +517,7 @@ class ObservabilityCollector:
         a commit, a push - has already happened by the time one is seen.
         """
         self.note_agent_activity()
+        await self._note_shipped_commit(event_type, enriched.get("context"))
         if self._writer is None:
             return
 
@@ -479,3 +529,34 @@ class ObservabilityCollector:
             phase_id=self._phase_id,
             workspace_id=self._workspace_id,
         )
+
+    # --- What the phase shipped (the shipped ledger) ---------------------------
+
+    async def _note_shipped_commit(self, event_type: object, context: object) -> None:
+        """Hand a ``git_commit`` hook event's sha and repo to the shipped ledger."""
+        if self._shipped is None or event_type != GIT_COMMIT or not isinstance(context, dict):
+            return
+        git = context.get("git")
+        facts = git if isinstance(git, dict) else context
+        sha = facts.get("sha") or facts.get("commit_hash")
+        repo = facts.get("repo")
+        await self._shipped.commit_seen(str(sha) if sha else None, str(repo) if repo else None)
+
+    def note_command_started(self, tool_use_id: str, command: object) -> None:
+        """The FULL command of a shell tool call, for the shipped ledger's PR check."""
+        if self._shipped is not None:
+            self._shipped.command_started(tool_use_id, command)
+
+    async def note_command_finished(self, tool_use_id: str, success: bool, output: object) -> None:
+        """That call's success and FULL output: records the PR it created, if any."""
+        if self._shipped is not None:
+            await self._shipped.command_finished(
+                tool_use_id, success, str(output) if output else ""
+            )
+
+    async def note_command_ended(
+        self, tool_use_id: str, command: str, success: bool, output: str
+    ) -> None:
+        """A whole shell call at once, for harnesses that report it on completion."""
+        self.note_command_started(tool_use_id, command)
+        await self.note_command_finished(tool_use_id, success, output)

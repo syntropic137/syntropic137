@@ -47,12 +47,20 @@ ROOT = Path(__file__).resolve().parent.parent.parent  # scripts/workflows/ -> sc
 
 # Node packages versioned in lockstep with the product. Unlike the Python
 # members below there is no glob to derive this from: pnpm-workspace.yaml lists
-# packages/openclaw-plugin too, and that one is independently versioned (0.1.0).
+# packages/openclaw-plugin and apps/syn-landing too, and those are independently
+# versioned (0.1.0 and the marketing site's own 0.2.x).
 # `TestNodeManifestList` fails if this list and pnpm-workspace.yaml disagree.
 PACKAGE_JSON_RELPATHS = (
     "apps/syn-cli-node/package.json",
     "apps/syn-dashboard-ui/package.json",
     "apps/syn-docs/package.json",
+    # syn-ui joined the product version at the cutover release
+    # (docs/syn-ui-rollout.md), so the shell's UI version equals the API's.
+    "apps/syn-ui/package.json",
+    "packages/syn-ui/data/package.json",
+    "packages/syn-ui/skyline-core/package.json",
+    "packages/syn-ui/skyline-svelte-v5/package.json",
+    "packages/syn-ui/themes/package.json",
 )
 
 # The plugin schemas advertise the version in their `$id`. `--check` reporting

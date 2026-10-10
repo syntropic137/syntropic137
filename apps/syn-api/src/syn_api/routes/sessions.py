@@ -5,7 +5,6 @@ Provides listing, starting, completing, and retrieving agent sessions.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from dataclasses import dataclass, field
 from datetime import (
@@ -46,12 +45,14 @@ from syn_api.types import (
     SessionDetail,
     SessionError,
     SessionSummary,
+    TokenTypeCostResponse,
     ToolOperation,
 )
 from syn_domain.contexts.orchestration.slices.list_workflows.projection import (
     WorkflowListProjection,
 )
 from syn_domain.pagination import Page
+from syn_domain.projection_scan import read_by_keys
 from syn_shared.display import (
     EM_DASH,
     compute_duration_seconds,
@@ -143,7 +144,7 @@ class SessionSummaryResponse(BaseModel):
 
     @computed_field(
         description="The model for humans: the reported id verbatim, or "
-        "'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9)."
+        "'<alias> (requested)', or 'unknown' (ADR-067 D9)."
     )
     @property
     def agent_model_display(self) -> str:
@@ -267,6 +268,15 @@ class SessionResponse(BaseModel):
     than printing a dollar figure they cannot back up (issue #890).
     """
     cost_by_model: dict[CostModelKey, Decimal] = Field(default_factory=dict)
+    cost_by_token_type: TokenTypeCostResponse | None = None
+    """``total_cost_usd`` split into input, output, cache write and cache read.
+
+    Null when no split can be stated: the cost source gave none (a list-path
+    record), or part of the session was priced from a reported total for a
+    model with no rate, so there is nothing to apportion it by. Null, never
+    zeroes: a split that omitted part of the cost would not sum to the total.
+    ``basis`` says whether each part was priced or apportioned.
+    """
     cache_read_rate_display: str | None = None
     """How cache READS are billed relative to fresh input, e.g. ``"0.05x rate"``.
 
@@ -289,7 +299,7 @@ class SessionResponse(BaseModel):
 
     @computed_field(
         description="The model for humans: the reported id verbatim, or "
-        "'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9)."
+        "'<alias> (requested)', or 'unknown' (ADR-067 D9)."
     )
     @property
     def agent_model_display(self) -> str:
@@ -300,22 +310,6 @@ class SessionResponse(BaseModel):
 # =============================================================================
 # Service functions (importable by tests)
 # =============================================================================
-
-
-async def _fetch_one_workflow_name(
-    manager: ProjectionManager, wf_id: str
-) -> tuple[str, str] | None:
-    """Fetch a single workflow name; returns (id, name) or None on failure."""
-    try:
-        wf_data = await manager.store.get(WorkflowListProjection.PROJECTION_NAME, wf_id)
-        if isinstance(wf_data, dict) and wf_data.get("name"):
-            return wf_id, wf_data["name"]
-    except Exception:
-        logger.debug("Could not load workflow name for %s", wf_id, exc_info=True)
-    return None
-
-
-_WF_NAME_CONCURRENCY = 20
 
 
 @dataclass
@@ -384,19 +378,32 @@ async def _load_session_costs(session_ids: list[str]) -> dict[str, _SummaryEnric
     return {sid: _enrichment_from_cost(cost) for sid, cost in costs.items()}
 
 
-async def _build_workflow_name_map(workflow_ids: set[str]) -> dict[str, str]:
-    """Build a {workflow_id: workflow_name} lookup for the given IDs via concurrent store lookups."""
+async def _build_workflow_name_map(workflow_ids: set[str]) -> dict[str, str] | None:
+    """``{workflow_id: name}`` for the given ids, in ONE store read; None if unreadable.
+
+    It was one ``get`` per workflow on the page - up to fifty round trips per
+    /sessions request, most of the endpoint's time once the page itself came
+    from one statement (E2). ``read_by_keys`` is one ``id = ANY(...)`` query
+    on Postgres. A failed read is None, not ``{}``: "no workflow has a name"
+    and "the names could not be read" are different answers (#1341). The
+    page still renders, without names, as it did when each lookup failed.
+    """
     if not workflow_ids:
         return {}
     manager = get_projection_mgr()
-    semaphore = asyncio.Semaphore(_WF_NAME_CONCURRENCY)
-
-    async def _fetch_bounded(wf_id: str) -> tuple[str, str] | None:
-        async with semaphore:
-            return await _fetch_one_workflow_name(manager, wf_id)
-
-    results = await asyncio.gather(*(_fetch_bounded(wf_id) for wf_id in workflow_ids))
-    return dict(entry for entry in results if entry is not None)
+    try:
+        documents = await read_by_keys(
+            manager.store, WorkflowListProjection.PROJECTION_NAME, sorted(workflow_ids)
+        )
+    except Exception:
+        logger.warning("Could not load workflow names for the session page", exc_info=True)
+        return None
+    names: dict[str, str] = {}
+    for wf_id, document in documents.items():
+        name = document.get("name")
+        if isinstance(name, str) and name:
+            names[wf_id] = name
+    return names
 
 
 def _to_session_summary(s: DomainSessionSummary) -> SessionSummary:
@@ -423,6 +430,7 @@ def _to_session_summary(s: DomainSessionSummary) -> SessionSummary:
         total_cost_usd=Decimal("0"),
         started_at=s.started_at,
         completed_at=s.completed_at,
+        requested_model=s.requested_model,
     )
 
 
@@ -560,6 +568,7 @@ class _CostData:
     """REPORTED model, or None. Never an alias (ADR-067 D9)."""
     requested_model: str | None = None
     cost_by_model: dict[str, Decimal] = field(default_factory=dict)
+    cost_by_token_type: TokenTypeCostResponse | None = None
     duration_seconds: float | None = None
 
 
@@ -589,6 +598,11 @@ def _lane1_tokens(session: DomainSessionSummary) -> _CostData:
         cache_read_tokens=session.cache_read_tokens,
         total_tokens=session.total_tokens,
         total_cost_usd=Decimal("0"),
+        # Nothing has REPORTED a model yet, so agent_model stays None; the
+        # request SessionStarted recorded is still true and is served as one.
+        # Dropping it is what made every running codex session read
+        # "unknown" (#1785).
+        requested_model=session.requested_model,
     )
 
 
@@ -626,8 +640,13 @@ async def _load_cost_data(session: DomainSessionSummary) -> _CostData:
         # confident dollar figure for work nobody could price (#890).
         unpriced_observation_count=cost.unpriced_observation_count,
         agent_model=recorded.observed,
-        requested_model=recorded.requested,
+        requested_model=recorded.requested or session.requested_model,
         cost_by_model=cost_by_observed_model(cost.cost_by_model),
+        cost_by_token_type=(
+            TokenTypeCostResponse.from_split(cost.cost_by_token_type, cost.cost_by_token_type_basis)
+            if cost.cost_by_token_type is not None and cost.cost_by_token_type_basis is not None
+            else None
+        ),
         duration_seconds=(cost.duration_ms / 1000.0) if cost.duration_ms else None,
     )
 
@@ -701,6 +720,7 @@ async def get_session(
             agent_model=cd.agent_model,
             requested_model=cd.requested_model,
             cost_by_model=dict(cd.cost_by_model),
+            cost_by_token_type=cd.cost_by_token_type,
             operations=operations,
             started_at=session.started_at,
             completed_at=session.completed_at,
@@ -753,7 +773,10 @@ def _build_session_summary_response(
         status=s.status,
         agent_provider=s.agent_type,
         agent_model=info.agent_model,
-        requested_model=info.requested_model,
+        # Lane 2 names the request once it has a row; before that - a running
+        # codex phase, which reports usage only at the end - the request comes
+        # from SessionStarted, so the row never reads "unknown" (#1785).
+        requested_model=info.requested_model or s.requested_model,
         repos=list(s.repos),
         repos_display=format_repos(s.repos),
         input_tokens=input_tokens,
@@ -834,7 +857,7 @@ async def list_sessions_endpoint(
     responses = [
         _build_session_summary_response(
             s,
-            wf_names.get(s.workflow_id) if s.workflow_id else None,
+            wf_names.get(s.workflow_id) if wf_names is not None and s.workflow_id else None,
             enrichment.get(s.id, _SummaryEnrichment()),
         )
         for s in summaries
@@ -939,6 +962,7 @@ async def get_session_endpoint(session_id: str) -> SessionResponse:
         total_cost_display=format_cost(total_cost, detail.unpriced_observation_count),
         unpriced_observation_count=detail.unpriced_observation_count,
         cost_by_model=detail.cost_by_model,
+        cost_by_token_type=detail.cost_by_token_type,
         cache_read_rate_display=cache_rates.cache_read_rate_display,
         cache_write_rate_display=cache_rates.cache_write_rate_display,
         operations=operations,

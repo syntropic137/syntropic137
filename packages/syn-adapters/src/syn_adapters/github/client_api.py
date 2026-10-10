@@ -36,7 +36,7 @@ def check_response(response: httpx.Response) -> None:
 
     if response.status_code >= 400:
         msg = f"GitHub API error {response.status_code}: {response.text}"
-        raise GitHubAppError(msg)
+        raise GitHubAppError(msg, status_code=response.status_code)
 
 
 async def api_get(client: GitHubAppClient, path: str, installation_id: str | None = None) -> dict:
@@ -124,5 +124,26 @@ async def api_put(
         json=json,
     )
 
+    check_response(response)
+    return response.json()
+
+
+async def api_patch(
+    client: GitHubAppClient,
+    path: str,
+    json: dict[str, str],
+    installation_id: str | None = None,
+) -> object:
+    """Make an authenticated PATCH request to the GitHub API (#1547: edit a comment).
+
+    Raises:
+        GitHubAppError: On API errors.
+    """
+    token = await client.get_installation_token(installation_id)
+    response = await client._http.patch(
+        path,
+        headers={"Authorization": f"Bearer {token}"},
+        json=json,
+    )
     check_response(response)
     return response.json()

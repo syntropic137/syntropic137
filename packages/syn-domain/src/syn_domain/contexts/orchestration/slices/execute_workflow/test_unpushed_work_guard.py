@@ -47,6 +47,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow import (
     unpushed_work_guard,
     workspace_git,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.cancel_teardown import (
+    record_cancel_and_release,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     RESCUE_BUNDLE_NAME,
     RESCUE_PATCH_NAME,
@@ -58,8 +61,15 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     UnpushedWorkQuarantinedError,
     WorkspaceInspectionFailedError,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.moved_gitlinks import (
+    _unquote,
+    split_moved_gitlinks,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
     PhaseOutputCache,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.quarantine_notice import (
+    quarantined_refs,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_guard import (
     _SCRATCH_INDEX,
@@ -72,6 +82,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_gua
 from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor import (
     WorkflowExecutionProcessor,
     _DispatchContext,
+)
+from syn_domain.contexts.orchestration.slices.notify_quarantine.value_objects import (
+    QuarantineNotice,
 )
 from syn_shared.workspace_paths import WORKSPACE_REPOS_DIR
 
@@ -579,6 +592,35 @@ async def test_an_unpushed_merge_commit_fails_the_phase_and_survives(clone: _Clo
     assert "1 commit(s) on no remote" in message
     # And nothing anyone reviews moved.
     assert clone.origin_refs()[f"refs/heads/{_BRANCH}"] == branch_head_before
+
+
+async def test_a_merge_of_two_remote_branches_is_summarised_against_its_own_branch(
+    clone: _Clone,
+) -> None:
+    """The diffstat base is the branch the work tracks, not whichever remote tip came first.
+
+    A merge gives the unpushed history two remote ancestors, and `rev-list
+    --boundary` lists them in no order that says which one is the PR's. The
+    summary must include the merged-in work and leave out what the branch
+    already had on its remote.
+    """
+    clone.git("checkout", "-b", "other", "origin/main")
+    clone.commit("other.py", "on another remote branch\n")
+    clone.git("push", "origin", "other")
+    clone.git("checkout", _BRANCH)
+    clone.commit("already_pushed.py", "on the PR branch already\n")
+    clone.git("push", "origin", _BRANCH)
+    clone.git("merge", "--no-ff", "-m", "Merge origin/other", "origin/other")
+    clone.commit("work.py", "the phase wrote this\n")
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await clone.run_gate()
+
+    (landed,) = raised.value.quarantined
+    assert landed.diffstat is not None
+    assert "other.py" in landed.diffstat and "work.py" in landed.diffstat
+    assert "already_pushed.py" not in landed.diffstat
+    assert "2 files changed" in landed.diffstat
 
 
 async def test_a_plain_commit_that_was_never_pushed_is_saved_too(clone: _Clone) -> None:
@@ -1211,7 +1253,14 @@ class _PhaseRun:
     told and what teardown ran, never about the guard's return value.
     """
 
-    def __init__(self, workspace: object, *, also_as: str | None = None) -> None:
+    def __init__(
+        self,
+        workspace: object,
+        *,
+        also_as: str | None = None,
+        execution_repository: object | None = None,
+        owed_cancelled_work: object | None = None,
+    ) -> None:
         from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
         from syn_domain.contexts.orchestration.slices.execution_todo.projection import (
             ExecutionTodoProjection,
@@ -1225,7 +1274,7 @@ class _PhaseRun:
         self.phase_results: list[PhaseResult] = []
         self.session = AsyncMock()
         self.processor = WorkflowExecutionProcessor(
-            execution_repository=AsyncMock(),
+            execution_repository=execution_repository or AsyncMock(),  # type: ignore[arg-type]
             session_repository=AsyncMock(),
             workspace_service=MagicMock(),
             artifact_repository=AsyncMock(),
@@ -1237,6 +1286,7 @@ class _PhaseRun:
             prompt_builder=AsyncMock(return_value="prompt"),
             command_builder=MagicMock(return_value=["claude"]),
             todo_projection=ExecutionTodoProjection(store=InMemoryProjectionStore()),
+            owed_cancelled_work=owed_cancelled_work,  # type: ignore[arg-type]
         )
         # `also_as` puts the SAME workspace behind a second phase id, which is
         # what lets one dirty tree be completed twice under two declarations.
@@ -3153,6 +3203,21 @@ _STALE = ExecutionResult(
 )
 
 
+async def test_a_rescued_ref_is_reported_at_the_sha_it_actually_holds(clone: _Clone) -> None:
+    """#1547: the PR is told the SHA to fetch, and after a workflow-safe rescue
+    that is the rescue commit - read back from the origin, through the same
+    converter the failure event is built with, not assumed."""
+    _a_phase_that_edited_a_workflow(clone)
+    run = _PhaseRun(clone.workspace)
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await run.complete()
+
+    (ref,) = quarantined_refs(raised.value.quarantined, None, ["acme/" + clone.name])
+    assert ref.ref == _QUARANTINE_REF
+    assert ref.commit == clone.origin_refs()[_QUARANTINE_REF]
+
+
 class _RefusesTheSecondPush(_RenewsCredential):
     """The real workspace, except the workflow-safe push is refused as well."""
 
@@ -3392,8 +3457,12 @@ async def test_the_rescue_has_a_deadline_of_its_own_and_not_a_share_of_the_first
     push's bound with nothing wrong at all.
     """
     _a_phase_that_edited_a_workflow(clone)
-    monkeypatch.setattr(unpushed_work_guard, "_CANCELLED_PUSH_SECONDS", 1.0)
-    workspace = _PushesSlowly(clone.workspace, slow_push=2, seconds=1.5)
+    # The first push is a real `git push` that must land inside this bound, so
+    # the bound needs headroom: on a loaded runner it took 1.03s against a 1s
+    # bound and was abandoned before the rescue ran. The second push only has
+    # to outlast the bound, which it does by sleeping past it.
+    monkeypatch.setattr(unpushed_work_guard, "_CANCELLED_PUSH_SECONDS", 5.0)
+    workspace = _PushesSlowly(clone.workspace, slow_push=2, seconds=6.0)
 
     with pytest.raises(asyncio.CancelledError):
         await clone.run_gate(workspace=workspace)
@@ -3482,18 +3551,180 @@ async def test_a_cancelled_execution_keeps_its_workflow_changes_as_an_artifact(
     run.processor._artifact_repo = artifacts  # type: ignore[assignment]
     all_artifact_ids: list[str] = []
 
-    await run.processor._cancel_execution(
-        _EXECUTION_ID,
-        "wf-1",
-        run.phase_results,
-        all_artifact_ids,
-        datetime.now(UTC),
+    run.processor._journal.append = AsyncMock()  # type: ignore[method-assign]
+
+    await record_cancel_and_release(
+        aggregate=run.aggregate,
+        runtime=run.processor._runtimes.of(_EXECUTION_ID),
+        workspaces=run.processor._workspaces_for(_EXECUTION_ID, {}),
+        ledger=run.processor._cancelled_work,
+        execution_id=_EXECUTION_ID,
+        workflow_id="wf-1",
+        phase_results=run.phase_results,
+        all_artifact_ids=all_artifact_ids,
+        started_at=datetime.now(UTC),
         cancel_reason="stopped by the user",
         phase_id=_PHASE_ID,
     )
 
     artifact = _the_patch_artifact(artifacts)
     assert artifact.id in all_artifact_ids  # type: ignore[attr-defined]
+    # The landed ref is TOLD to the aggregate, not only written into prose:
+    # that command is what becomes the event the PR notice is posted from.
+    (call,) = run.aggregate.record_cancelled_work.call_args_list
+    (landed,) = call.args[0].quarantined
+    assert call.args[0].phase_id == _PHASE_ID
+    assert landed.ref == _QUARANTINE_REF
+    assert landed.ref in clone.origin_refs()
+    run.processor._journal.append.assert_awaited_with(run.aggregate)
+    # The diffstat is of what LANDED - the workflow-safe rescue commit, so the
+    # refused workflow files are absent - and it reaches the PR's comment.
+    assert landed.diffstat is not None
+    assert "feature.py" in landed.diffstat and "notes.md" in landed.diffstat
+    assert "4 files changed, 16 insertions(+)" in landed.diffstat
+    assert ".github/workflows" not in landed.diffstat
+    body = QuarantineNotice(
+        execution_id=_EXECUTION_ID,
+        phase_id=_PHASE_ID,
+        failed_at=datetime.now(UTC),
+        quarantined=landed,
+    ).body()
+    assert landed.diffstat in body
+
+
+@pytest.mark.parametrize("failure", ["none", "refused", "both_refused", "delete_fails"])
+async def test_a_cancel_through_the_processor_tells_its_pr_once_from_the_stored_event(
+    clone: _Clone, failure: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The whole cancel path, with nothing supplied that the processor should produce.
+
+    ``refused``: the store refuses every append of what landed, so the
+    processor owes it; it recovers, and the processor's NEXT run - another
+    execution entirely - is what appends it.
+
+    ``both_refused``: the owed store refuses too. The result names the refs
+    as unrecorded instead of reading as a handled cancel, and the next run
+    still appends them once the event store recovers.
+
+    ``delete_fails``: the owed row survives the append that settled it, so a
+    later run settles it again. That must add no second fact.
+
+    A real aggregate is started and cancelled on a real journal; the
+    processor's own save lands the ref on the clone's origin; the processor
+    appends what landed; the coordinator reads that stored event and tells the
+    PR. Remove the processor's append and no event reaches the store, so the
+    post never happens - the failure #1547's re-verification named.
+    """
+    from event_sourcing.stores.memory_checkpoint import MemoryCheckpointStore
+    from event_sourcing.subscriptions.coordinator import SubscriptionCoordinator
+
+    from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
+        CancelExecutionCommand,
+        StartExecutionCommand,
+    )
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+        PhaseDefinition,
+        SourceCommit,
+    )
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
+        WorkflowExecutionAggregate,
+    )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.cancelled_work_record import (
+        OWED_CANCELLED_WORK,
+    )
+    from syn_domain.contexts.orchestration.slices.notify_quarantine import (
+        QuarantineNoticeProcessManager,
+    )
+    from syn_domain.contexts.orchestration.slices.notify_quarantine.test_quarantine_notice import (
+        _Commenter,
+        _Forge,
+        _LiveStore,
+        _replay_posts_nothing,
+        _settled,
+        _Stream,
+    )
+
+    _a_phase_that_edited_a_workflow(clone)
+    store = _LiveStore()
+    stream = _Stream(store)
+    owed = InMemoryProjectionStore()
+    run = _PhaseRun(clone.workspace, execution_repository=stream, owed_cancelled_work=owed)
+    run.processor._artifact_repo = _SavesArtifacts()  # type: ignore[assignment]
+    commenter = _Commenter(repository=f"acme/{_REPO}")
+    manager = QuarantineNoticeProcessManager(
+        commenter=commenter, store=InMemoryProjectionStore(), branches=_Forge(open_pr=42)
+    )
+    checkpoints = MemoryCheckpointStore()
+    coordinator = SubscriptionCoordinator(
+        event_store=store, checkpoint_store=checkpoints, projections=[manager]
+    )
+    runner = asyncio.create_task(coordinator.start())
+    try:
+        await asyncio.wait_for(store.subscribed.wait(), 5)
+        aggregate = WorkflowExecutionAggregate()
+        aggregate.start_execution(
+            StartExecutionCommand(
+                execution_id=_EXECUTION_ID,
+                workflow_id="wf-1",
+                workflow_name="Cancelled with work",
+                total_phases=1,
+                inputs={},
+                phase_definitions=[PhaseDefinition(phase_id=_PHASE_ID, name="Make", order=1)],
+                source_commits=[SourceCommit(repository=f"acme/{_REPO}")],
+            )
+        )
+        await run.processor._journal.open(aggregate)
+        aggregate.cancel_execution(
+            CancelExecutionCommand(execution_id=_EXECUTION_ID, phase_id=_PHASE_ID, reason="stop")
+        )
+        await run.processor._journal.append(aggregate)
+        assert stream.recorded("CancelledWorkQuarantined") == 0
+        stream.rejections = 0 if failure == "none" else 99
+        if failure == "both_refused":
+            monkeypatch.setattr(owed, "save", AsyncMock(side_effect=RuntimeError("down")))
+        if failure == "delete_fails":
+            monkeypatch.setattr(owed, "delete", AsyncMock(side_effect=RuntimeError("down")))
+
+        result = await record_cancel_and_release(
+            aggregate=aggregate,
+            runtime=run.processor._runtimes.of(_EXECUTION_ID),
+            workspaces=run.processor._workspaces_for(_EXECUTION_ID, {}),
+            ledger=run.processor._cancelled_work,
+            execution_id=_EXECUTION_ID,
+            workflow_id="wf-1",
+            phase_results=run.phase_results,
+            all_artifact_ids=[],
+            started_at=datetime.now(UTC),
+            cancel_reason="stop",
+            phase_id=_PHASE_ID,
+        )
+
+        assert result.status == "cancelled"
+        assert _QUARANTINE_REF in clone.origin_refs()
+        unrecorded = [ref.ref for ref in result.unrecorded_work]
+        assert unrecorded == ([_QUARANTINE_REF] if failure == "both_refused" else [])
+        if failure != "none":
+            assert stream.recorded("CancelledWorkQuarantined") == 0
+            owed_rows = 0 if failure == "both_refused" else 1
+            assert len(await owed.get_all(OWED_CANCELLED_WORK)) == owed_rows
+            stream.rejections = 0
+            await run.processor.run("wf-2", "Next", [], {}, "exec-next")
+        if failure == "delete_fails":
+            assert len(await owed.get_all(OWED_CANCELLED_WORK)) == 1
+            monkeypatch.undo()
+            await run.processor.run("wf-3", "Later", [], {}, "exec-later")
+        assert await owed.get_all(OWED_CANCELLED_WORK) == []
+        assert stream.recorded("CancelledWorkQuarantined") == 1
+        await asyncio.wait_for(_settled(coordinator, checkpoints, len(stream.history)), 5)
+        assert commenter.posts == 1
+        (body,) = commenter.comments.values()
+        assert _QUARANTINE_REF in body and f"`{_PHASE_ID}`" in body
+    finally:
+        await coordinator.stop()
+        runner.cancel()
+        await asyncio.gather(runner, return_exceptions=True)
+    await _replay_posts_nothing(store, manager, commenter)
 
 
 def test_records_come_from_the_gate_error_or_the_save_and_never_both() -> None:
@@ -3784,3 +4015,568 @@ def test_a_record_may_drop_nothing_only_when_it_kept_the_history() -> None:
             has_bundle=True,
         ),
     )
+
+
+# --------------------------------------------------------------------------
+# A submodule git moved is not a submodule anybody wrote in (#1499).
+#
+# On exec-5a22616362bd a verify phase checked out the commit under review
+# without --recurse-submodules: the superproject's recorded gitlink moved, the
+# submodule stayed put, `status --porcelain` said ` M lib/...`, and a finished
+# review was failed and lost. That line is byte-identical to the one an agent
+# that edited or committed inside the submodule leaves, so every test below
+# stages it for real - a real submodule of a real local origin, moved by a
+# real checkout - and they differ only in what is inside the submodule.
+# --------------------------------------------------------------------------
+
+_SUBMODULE = "lib/plugin"
+
+
+class _WithSubmodule:
+    """``clone`` with a submodule whose recorded gitlink can be moved under it.
+
+    The superproject's branch holds two commits pinning the submodule at
+    ``old`` then ``new``, both already on the submodule's origin, and the
+    checkout starts clean at the second. `move_the_gitlink` then does exactly
+    what the verify phase did: a superproject checkout without
+    ``--recurse-submodules``.
+    """
+
+    def __init__(self, clone: _Clone, at: str = _SUBMODULE) -> None:
+        self.clone = clone
+        self.at = at
+        home = clone.root / "home"
+        origin = clone.root / "plugin.origin.git"
+        seed = clone.root / "plugin.seed"
+        origin.mkdir()
+        _git("init", "--bare", "--initial-branch=main", ".", cwd=origin, home=home)
+        seed.mkdir()
+        _git("init", "--initial-branch=main", ".", cwd=seed, home=home)
+        shas: list[str] = []
+        for content in ("old\n", "new\n"):
+            (seed / "plugin.txt").write_text(content)
+            _git("add", "plugin.txt", cwd=seed, home=home)
+            _git("commit", "-m", content.strip(), cwd=seed, home=home)
+            shas.append(_git("rev-parse", "HEAD", cwd=seed, home=home).stdout.strip())
+        _git("push", str(origin), "main", cwd=seed, home=home)
+        self.old, self.new = shas
+
+        # Local-path submodules need file transport, which git refuses by
+        # default since 2.38.1; allowed for this one command only.
+        clone.git("-c", "protocol.file.allow=always", "submodule", "add", str(origin), at)
+        self.path = clone.path / at
+        self.git("checkout", "--detach", self.old)
+        clone.git("add", ".gitmodules", at)
+        clone.git("commit", "-m", "pin the plugin at old")
+        self.git("checkout", "--detach", self.new)
+        clone.git("add", at)
+        clone.git("commit", "-m", "bump the plugin to new")
+        clone.git("push", "origin", _BRANCH)
+
+    def git(self, *args: str) -> str:
+        """git inside the submodule."""
+        return _git(*args, cwd=self.path, home=self.clone.root / "home").stdout
+
+    def move_the_gitlink(self) -> None:
+        """The incident: check out a commit that records ``old``, leave the submodule at ``new``.
+
+        Asserts the shape it produced, so a fixture that stopped staging the
+        bug would fail here rather than pass every test below vacuously.
+        """
+        self.clone.git("checkout", "--detach", "HEAD~1")
+        assert self.clone.git("status", "--porcelain") in (f"M {self.at}", f'M "{self.at}"'), (
+            "the moved gitlink should be the only change porcelain reports"
+        )
+        assert self.git("rev-parse", "HEAD").strip() == self.new
+
+    def v2_token(self) -> str:
+        """The `S<c><m><u>` field porcelain v2 reports for the submodule."""
+        (entry,) = self.clone.git("status", "--porcelain=v2").splitlines()
+        return entry.split(" ")[2]
+
+
+@pytest.fixture
+def superproject(clone: _Clone) -> _WithSubmodule:
+    return _WithSubmodule(clone)
+
+
+def _quarantined(clone: _Clone) -> list[str]:
+    return [ref for ref in clone.origin_refs() if ref.startswith("refs/syn/lost/")]
+
+
+async def test_a_gitlink_moved_by_a_checkout_does_not_fail_the_phase(
+    superproject: _WithSubmodule,
+) -> None:
+    """THE INCIDENT: nothing was written, so nothing may be called lost.
+
+    Through the consuming hop rather than the guard alone - the phase must be
+    REPORTED completed, which is what exec-5a22616362bd was denied.
+    """
+    superproject.move_the_gitlink()
+    assert superproject.v2_token() == "SC.."
+    run = _PhaseRun(superproject.clone.workspace)
+
+    await run.complete()
+
+    run.aggregate.complete_phase.assert_called_once()
+    assert run.completed_phase_ids == [_PHASE_ID]
+    assert not _quarantined(superproject.clone)
+
+
+async def test_an_edit_inside_a_moved_submodule_still_fails_the_phase(
+    superproject: _WithSubmodule,
+) -> None:
+    """The same porcelain line, with a tracked file changed inside the submodule."""
+    superproject.move_the_gitlink()
+    (superproject.path / "plugin.txt").write_text("an agent wrote this\n")
+    assert superproject.v2_token() == "SCM."
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await superproject.clone.run_gate()
+
+    assert _SUBMODULE in str(raised.value)
+    assert _quarantined(superproject.clone) == [_QUARANTINE_REF]
+
+
+async def test_a_new_file_inside_a_submodule_still_fails_the_phase(
+    superproject: _WithSubmodule,
+) -> None:
+    """Untracked content in the submodule is authored too: the ``u`` of the token."""
+    (superproject.path / "new.py").write_text("an agent wrote this\n")
+    assert superproject.v2_token() == "S..U"
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await superproject.clone.run_gate()
+
+    assert _SUBMODULE in str(raised.value)
+
+
+async def test_a_commit_inside_a_submodule_that_no_remote_has_still_fails_the_phase(
+    superproject: _WithSubmodule,
+) -> None:
+    """THE CASE THE TOKEN CANNOT SEE. A committed, unpushed submodule change
+    leaves a clean submodule worktree and a moved gitlink: ``SC..``, exactly
+    the incident's token. Only asking the submodule's own remotes tells them
+    apart, and a gate that stopped at the token would discard this commit.
+    """
+    (superproject.path / "plugin.txt").write_text("committed, never pushed\n")
+    superproject.git("commit", "-am", "work in the submodule")
+    assert superproject.v2_token() == "SC.."
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await superproject.clone.run_gate()
+
+    assert _SUBMODULE in str(raised.value)
+
+
+async def test_a_submodule_commit_on_a_branch_not_checked_out_still_fails_the_phase(
+    superproject: _WithSubmodule,
+) -> None:
+    """Unpushed work parked on a submodule branch, with HEAD back on a pushed commit.
+
+    The checked-out commit is on a remote, so a check of HEAD alone would wave
+    this through as a moved gitlink; the branch tip is on no remote.
+    """
+    superproject.git("checkout", "-b", "agent-work")
+    (superproject.path / "plugin.txt").write_text("committed, never pushed\n")
+    superproject.git("commit", "-am", "work in the submodule")
+    superproject.git("checkout", "--detach", superproject.new)
+    superproject.move_the_gitlink()
+    assert superproject.v2_token() == "SC.."
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await superproject.clone.run_gate()
+
+    assert _SUBMODULE in str(raised.value)
+
+
+async def test_a_moved_gitlink_beside_real_work_does_not_hide_the_work(
+    superproject: _WithSubmodule,
+) -> None:
+    """The exemption removes one line, not the repository from judgement."""
+    superproject.move_the_gitlink()
+    (superproject.clone.path / "README.md").write_text("edited but never committed\n")
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await superproject.clone.run_gate()
+
+    assert "README.md" in str(raised.value)
+
+
+async def test_a_submodule_commit_kept_only_by_a_tag_still_fails_the_phase(
+    superproject: _WithSubmodule,
+) -> None:
+    """Unpushed work a local TAG keeps alive, with HEAD back on a pushed commit.
+
+    No branch reaches it, so a reachability check over branches alone reads
+    the submodule as merely moved; the tag is still on no remote.
+    """
+    (superproject.path / "plugin.txt").write_text("committed, never pushed\n")
+    superproject.git("commit", "-am", "work in the submodule")
+    superproject.git("tag", "agent-work")
+    superproject.git("checkout", "--detach", superproject.new)
+    superproject.move_the_gitlink()
+    assert superproject.v2_token() == "SC.."
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await superproject.clone.run_gate()
+
+    assert _SUBMODULE in str(raised.value)
+
+
+async def test_a_submodule_change_kept_only_by_a_stash_still_fails_the_phase(
+    superproject: _WithSubmodule,
+) -> None:
+    """A stash leaves the submodule worktree clean and the work on no remote."""
+    superproject.move_the_gitlink()
+    (superproject.path / "plugin.txt").write_text("stashed, never pushed\n")
+    superproject.git("stash")
+    assert superproject.v2_token() == "SC.."
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await superproject.clone.run_gate()
+
+    assert _SUBMODULE in str(raised.value)
+
+
+def _publish_a_tag_no_origin_branch_contains(superproject: _WithSubmodule, *tag_args: str) -> str:
+    """#1815's shape: origin has a tag on a commit none of its branches reach, and the clone fetched it.
+
+    What a release tag cut from a since-rewritten branch looks like. Returns
+    the tagged commit, and asserts the fixture really staged the bug: before
+    #1815 that commit read as "missing from every remote".
+    """
+    seed = superproject.clone.root / "plugin.seed"
+    home = superproject.clone.root / "home"
+    _git("checkout", "-b", "since-deleted", cwd=seed, home=home)
+    (seed / "plugin.txt").write_text("released from a branch origin no longer has\n")
+    _git("commit", "-am", "release", cwd=seed, home=home)
+    tagged = _git("rev-parse", "HEAD", cwd=seed, home=home).stdout.strip()
+    _git("tag", *tag_args, "v1.0.0", cwd=seed, home=home)
+    _git("push", str(superproject.clone.root / "plugin.origin.git"), "v1.0.0", cwd=seed, home=home)
+    superproject.git("fetch", "--tags", "origin")
+    # Origin then moves on, as it does after every clone: it now advertises a
+    # tip this clone has never fetched, so the guard must ignore what it lacks.
+    (seed / "plugin.txt").write_text("pushed after the workspace cloned\n")
+    _git("commit", "-am", "later", cwd=seed, home=home)
+    _git(
+        "push",
+        str(superproject.clone.root / "plugin.origin.git"),
+        "HEAD:later",
+        cwd=seed,
+        home=home,
+    )
+    assert superproject.git("rev-list", "HEAD", "--all", "--not", "--remotes").split() == [tagged]
+    return tagged
+
+
+@pytest.mark.parametrize("tag_args", [(), ("-a", "-m", "release")], ids=["light", "annotated"])
+async def test_a_tag_origin_publishes_off_every_branch_does_not_fail_the_phase(
+    superproject: _WithSubmodule, tag_args: tuple[str, ...]
+) -> None:
+    """#1815: a clean submodule at an older pin, holding only what origin already has.
+
+    Remote-tracking refs do not include tags, so the release tag's commit
+    looked unpushed and every reverify of a pre-bump branch was quarantined.
+    """
+    _publish_a_tag_no_origin_branch_contains(superproject, *tag_args)
+    superproject.move_the_gitlink()
+    assert superproject.v2_token() == "SC.."
+    run = _PhaseRun(superproject.clone.workspace)
+
+    await run.complete()
+
+    run.aggregate.complete_phase.assert_called_once()
+    assert run.completed_phase_ids == [_PHASE_ID]
+    assert not _quarantined(superproject.clone)
+
+
+async def test_a_local_tag_named_like_a_published_one_still_fails_the_phase(
+    superproject: _WithSubmodule,
+) -> None:
+    """Origin's tags are subtracted by OBJECT, not by name: a reused name publishes nothing."""
+    _publish_a_tag_no_origin_branch_contains(superproject)
+    (superproject.path / "plugin.txt").write_text("committed, never pushed\n")
+    superproject.git("commit", "-am", "work in the submodule")
+    superproject.git("tag", "-f", "v1.0.0")
+    superproject.git("checkout", "--detach", superproject.new)
+    superproject.move_the_gitlink()
+    assert superproject.v2_token() == "SC.."
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await superproject.clone.run_gate()
+
+    assert _SUBMODULE in str(raised.value)
+
+
+async def test_a_published_tag_still_counts_when_origin_cannot_be_asked(
+    superproject: _WithSubmodule,
+) -> None:
+    """No answer from origin is no evidence: the tagged commit stays counted as work."""
+    _publish_a_tag_no_origin_branch_contains(superproject)
+    superproject.git("remote", "set-url", "origin", str(superproject.clone.root / "gone.git"))
+    superproject.move_the_gitlink()
+    assert superproject.v2_token() == "SC.."
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await superproject.clone.run_gate()
+
+    assert _SUBMODULE in str(raised.value)
+
+
+@pytest.mark.parametrize("kind", ["tracked", "untracked"])
+@pytest.mark.parametrize("source", ["git-config", "gitmodules", "diff-config"])
+async def test_ignore_settings_cannot_pass_a_dirty_moved_submodule_as_clean(
+    superproject: _WithSubmodule, kind: str, source: str
+) -> None:
+    """#1815 review: a repository's ignore setting makes git print ``SC..`` over real dirt.
+
+    Built on the published-tag shape, the one #1815 exempts, so the only
+    thing between the dirt and a completed phase is how cleanliness is read.
+    """
+    _publish_a_tag_no_origin_branch_contains(superproject)
+    superproject.move_the_gitlink()
+    if source == "git-config":
+        superproject.clone.git("config", f"submodule.{_SUBMODULE}.ignore", "dirty")
+    elif source == "diff-config":
+        superproject.clone.git("config", "diff.ignoreSubmodules", "dirty")
+    else:
+        superproject.clone.git(
+            "config", "-f", ".gitmodules", f"submodule.{_SUBMODULE}.ignore", "dirty"
+        )
+        superproject.clone.git("add", ".gitmodules")
+        superproject.clone.git("commit", "-m", "record a submodule status policy")
+        superproject.clone.git("push", "origin", "HEAD:refs/heads/with-policy")
+    (superproject.path / ("plugin.txt" if kind == "tracked" else "never-committed.txt")).write_text(
+        "an agent wrote this\n"
+    )
+    assert superproject.git("status", "--porcelain").strip()
+    assert superproject.v2_token() == "SC..", "the setting should hide the dirt from plain status"
+    run = _PhaseRun(superproject.clone.workspace)
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await run.complete()
+
+    assert _SUBMODULE in str(raised.value)
+    assert run.completed_phase_ids == []
+
+
+@pytest.mark.parametrize("where", ["superproject", "submodule"])
+async def test_hiding_untracked_files_cannot_pass_a_moved_submodule_as_clean(
+    superproject: _WithSubmodule, where: str
+) -> None:
+    """``status.showUntrackedFiles=no`` drops the ``u`` of the token, wherever it is set."""
+    _publish_a_tag_no_origin_branch_contains(superproject)
+    superproject.move_the_gitlink()
+    configure = superproject.clone.git if where == "superproject" else superproject.git
+    configure("config", "status.showUntrackedFiles", "no")
+    (superproject.path / "never-committed.txt").write_text("an agent wrote this\n")
+    assert superproject.v2_token() == "SC..", "the setting should hide the file from plain status"
+    run = _PhaseRun(superproject.clone.workspace)
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await run.complete()
+
+    assert _SUBMODULE in str(raised.value)
+    assert run.completed_phase_ids == []
+
+
+async def test_ignore_all_cannot_hide_a_dirty_submodule_whose_gitlink_never_moved(
+    superproject: _WithSubmodule,
+) -> None:
+    """``ignore=all`` drops the submodule's line from the guard's own listing altogether."""
+    superproject.clone.git("config", f"submodule.{_SUBMODULE}.ignore", "all")
+    (superproject.path / "plugin.txt").write_text("an agent wrote this\n")
+    assert superproject.clone.git("status", "--porcelain") == ""
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await superproject.clone.run_gate()
+
+    assert _SUBMODULE in str(raised.value)
+
+
+class _RecordsGitCommands:
+    """The real workspace, keeping every argv it ran."""
+
+    def __init__(self, inner: GitWorkspace) -> None:
+        self._inner = inner
+        self.commands: list[list[str]] = []
+
+    async def renew_git_credential(self) -> None:
+        await self._inner.renew_git_credential()
+
+    async def execute(self, command: list[str]) -> ExecutionResult:
+        self.commands.append(command)
+        return await self._inner.execute(command)
+
+
+async def test_every_git_command_judging_a_moved_gitlink_runs_hardened(
+    superproject: _WithSubmodule,
+) -> None:
+    """#1807's hardening on each command whose answer can exempt a line (#1815).
+
+    Driven down the path that runs all three - status, both rev-lists and the
+    ls-remote - against real git, and the argv read as it was executed.
+    Every one loses HOME, ``ls-remote`` included; the remote one gets the
+    provisioned credential store back by explicit ``-c``, from the home the
+    workspace reports, and nothing else of the global config.
+    """
+    _publish_a_tag_no_origin_branch_contains(superproject)
+    superproject.move_the_gitlink()
+    workspace = _RecordsGitCommands(superproject.clone.workspace)
+    repo = f"{WORKSPACE_REPOS_DIR}/{superproject.clone.name}"
+
+    split = await split_moved_gitlinks(workspace, repo, (f" M {_SUBMODULE}",))
+
+    assert split.moved == frozenset({_SUBMODULE})
+    judged = [c for c in workspace.commands if {"status", "rev-list", "ls-remote"} & set(c)]
+    assert [next(a for a in c if a in {"status", "rev-list", "ls-remote"}) for c in judged] == [
+        "status",
+        "rev-list",
+        "ls-remote",
+        "rev-list",
+    ]
+    for command in judged:
+        git_at = command.index("git")
+        env, config = command[:git_at], command[git_at:]
+        assert "GIT_CONFIG_NOSYSTEM=1" in env, command
+        for setting in ("core.hooksPath=/dev/null", "core.fsmonitor=false"):
+            assert setting in config, command
+        assert "HOME=/nonexistent" in env, command
+        helper = [a for a in config if a.startswith("credential.helper=")]
+        if "ls-remote" in command:
+            store = superproject.clone.root / "home" / ".git-credentials"
+            assert helper == [f"credential.helper=store --file={store}"], command
+        else:
+            assert helper == [], command
+
+
+def _authenticating_origin() -> tuple[http.server.HTTPServer, list[str | None]]:
+    """An HTTP origin that demands credentials and records what git offered.
+
+    401 until an Authorization header arrives, so git consults its credential
+    helpers - the only path on which the provisioned store matters.
+    """
+    seen: list[str | None] = []
+
+    class _Demands(http.server.BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            offered = self.headers.get("Authorization")
+            seen.append(offered)
+            self.send_response(404 if offered else 401)
+            if not offered:
+                self.send_header("WWW-Authenticate", 'Basic realm="origin"')
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def log_message(self, *args: object) -> None:
+            """Keep the suite's output the test's, not the server's."""
+
+    return http.server.HTTPServer(("127.0.0.1", 0), _Demands), seen
+
+
+def test_a_hardened_remote_command_authenticates_without_home(tmp_path: Path) -> None:
+    """#1815 review: HOME=/nonexistent on ``ls-remote``, and a private origin still answers.
+
+    Real git over real TCP, run from the argv `git_argv` builds and with a
+    host HOME whose global config is hostile: a helper that hands out the
+    wrong token and a rewrite that sends github.com elsewhere. Only the
+    provisioned store, named by ``-c``, may supply the credential; only the
+    provisioned rewrites may apply.
+    """
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".gitconfig").write_text(
+        '[credential]\n\thelper = "!f() { echo username=leaked; echo password=global; }; f"\n'
+        '[url "https://elsewhere.invalid/"]\n\tinsteadOf = git@github.com:\n'
+    )
+    repo = tmp_path / "repo"
+    _git("init", "-q", str(repo), cwd=tmp_path, home=home)
+    server, seen = _authenticating_origin()
+    url = f"http://127.0.0.1:{server.server_port}/org/repo.git"
+    (home / workspace_git.PROVISIONED_CREDENTIAL_FILE).write_text(
+        f"http://x-access-token:provisioned@127.0.0.1:{server.server_port}/org/repo.git\n"
+    )
+    env = {"PATH": os.environ.get("PATH", ""), "HOME": str(home)}
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        argv = workspace_git.git_argv(
+            str(repo), "ls-remote", url, hardened=True, credentials_home=str(home)
+        )
+        subprocess.run(argv, capture_output=True, text=True, check=False, env=env)
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+    rewrite = workspace_git.git_argv(
+        str(repo),
+        "ls-remote",
+        "--get-url",
+        "git@github.com:org/repo",
+        hardened=True,
+        credentials_home=str(home),
+    )
+    rewritten = subprocess.run(rewrite, capture_output=True, text=True, check=True, env=env)
+
+    assert "HOME=/nonexistent" in argv
+    assert seen[0] is None
+    assert seen[1:] == ["Basic eC1hY2Nlc3MtdG9rZW46cHJvdmlzaW9uZWQ="]  # x-access-token:provisioned
+    assert rewritten.stdout.strip() == "https://github.com/org/repo"
+
+
+_QUOTED_SUBMODULE = "lib/my plugin"
+
+
+@pytest.fixture
+def quoted_superproject(clone: _Clone) -> _WithSubmodule:
+    """A submodule whose path porcelain v1 quotes and porcelain v2 does not."""
+    return _WithSubmodule(clone, at=_QUOTED_SUBMODULE)
+
+
+async def test_a_moved_gitlink_at_a_quoted_path_does_not_fail_the_phase(
+    quoted_superproject: _WithSubmodule,
+) -> None:
+    """The incident again, at a path the two porcelain formats spell differently."""
+    quoted_superproject.move_the_gitlink()
+    assert quoted_superproject.clone.git("status", "--porcelain") == f'M "{_QUOTED_SUBMODULE}"'
+    assert quoted_superproject.v2_token() == "SC.."
+    run = _PhaseRun(quoted_superproject.clone.workspace)
+
+    await run.complete()
+
+    run.aggregate.complete_phase.assert_called_once()
+    assert not _quarantined(quoted_superproject.clone)
+
+
+@pytest.mark.parametrize("token", ["SCM.", "SC.U"])
+async def test_work_inside_a_moved_submodule_at_a_quoted_path_still_fails_the_phase(
+    quoted_superproject: _WithSubmodule, token: str
+) -> None:
+    """Decoding the path admits the clean case only: inner dirt is still work."""
+    quoted_superproject.move_the_gitlink()
+    name = "plugin.txt" if token == "SCM." else "new.py"
+    (quoted_superproject.path / name).write_text("an agent wrote this\n")
+    assert quoted_superproject.v2_token() == token
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await quoted_superproject.clone.run_gate()
+
+    assert _QUOTED_SUBMODULE in str(raised.value)
+
+
+@pytest.mark.parametrize(
+    ("porcelain", "path"),
+    [
+        ("lib/plugin", "lib/plugin"),
+        ('"lib/my plugin"', "lib/my plugin"),
+        ('"lib/tab\\there"', "lib/tab\there"),
+        ('"lib/quote\\"d\\\\"', 'lib/quote"d\\'),
+        ('"lib/caf\\303\\251"', "lib/caf\u00e9"),
+        ('"lib/bad\\9"', '"lib/bad\\9"'),
+        ('"lib/short\\12"', '"lib/short\\12"'),
+        ('"lib/trailing\\"', "lib/trailing\\"),
+    ],
+)
+def test_a_porcelain_path_is_decoded_as_git_quotes_it(porcelain: str, path: str) -> None:
+    assert _unquote(porcelain) == path

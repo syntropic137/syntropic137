@@ -56,6 +56,7 @@ from syn_domain.contexts.agent_sessions.domain.read_models.session_cost import (
     SessionCost,
 )
 from syn_domain.contexts.orchestration.domain.read_models.execution_cost import ExecutionCost
+from syn_shared.pricing import CostSplitBasis, TokenTypeCost
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -121,6 +122,13 @@ _SESSION = SessionCost(
     tokens_by_model={"claude-opus-5": 166500},
     tokens_by_requested_model={"opus": 166500},
     unpriced_observation_count=3,
+    cost_by_token_type=TokenTypeCost(
+        input_usd=Decimal("0.08"),
+        output_usd=Decimal("0.11"),
+        cache_creation_usd=Decimal("0.05"),
+        cache_read_usd=Decimal("0.894567"),
+    ),
+    cost_by_token_type_basis=CostSplitBasis.ALLOCATED,
     #: A PROPER SUBSET of the default (which is every member). A fixture using
     #: the full set would pass with the mapper line deleted, and the empty set
     #: is not reachable today - no producer measures all three.

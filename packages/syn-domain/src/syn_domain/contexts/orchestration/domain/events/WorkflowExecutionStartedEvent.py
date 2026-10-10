@@ -6,10 +6,13 @@ from datetime import datetime  # noqa: TC003 - needed at runtime for Pydantic
 from typing import Any
 
 from event_sourcing import DomainEvent, event
-from pydantic import SerializerFunctionWrapHandler, model_serializer, model_validator
+from pydantic import Field, SerializerFunctionWrapHandler, model_serializer, model_validator
 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     INHERITED_PHASE_OWNERS,
+    AbandonedBranch,
+    ContinuedBranch,
+    EvalBaselinePin,
     ExecutablePhase,
     ResumeOrigin,
     SourceCommit,
@@ -26,6 +29,20 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 #: reads it back out have to agree; a second literal spelled somewhere else is
 #: how they stop agreeing.
 TASK_INPUT_KEY = "task"
+
+
+#: Fields a release before #1513 does not know: omitted when None.
+_WRITTEN_ONLY_WHEN_SET = frozenset(
+    {
+        "continued_branches",
+        "abandoned_branches",
+        "inherited_skipped_phase_ids",
+        "eval_id",
+        "eval_selection",
+        "eval_baseline",
+        "workflow_version",
+    }
+)
 
 
 @event("WorkflowExecutionStarted", "v1")
@@ -65,9 +82,59 @@ class WorkflowExecutionStartedEvent(DomainEvent):
     #: A resume copies its parent's, so the two record the same code.
     source_commits: list[SourceCommit] | None = None
 
+    #: The tags this execution launched with (#967): its workflow's tags at
+    #: that moment united with the tags the request carried. A launch
+    #: snapshot, never rewritten: later edits to the workflow affect future
+    #: runs only, and later edits to this run are their own events. Empty on
+    #: events written before the field existed (ADR-007, no upcaster), and
+    #: not written at all when empty -- see the serializer below.
+    tags: list[str] = Field(default_factory=list)
+
+    #: The eval this run was launched into (evals plan, #967), decided at
+    #: dispatch: ``association_kind=launched``. A launch record, never
+    #: rewritten - a later detach is its own event. None for a run launched
+    #: into no eval, and on events written before the field existed.
+    eval_id: str | None = None
+
+    #: How the launch chose: ``explicit``, ``workflow_default`` or
+    #: ``ordinary`` (the default was suppressed). None when there was no
+    #: choice to make. Both fields are written only when set, like the
+    #: #1513 fields below, so an ordinary start reads as it always did.
+    eval_selection: str | None = None
+
+    #: The eval's frozen baseline as this run was admitted to it (#967): every
+    #: repository, the ref asked for and the commit it pinned. Empty for an
+    #: eval with no repositories; None for a run in no eval and on events
+    #: written before the field existed. Written only when set.
+    eval_baseline: list[EvalBaselinePin] | None = None
+
+    #: The installed version of the workflow this run launched from (Evals v2):
+    #: the template's package version, or its source digest when it has no
+    #: version. A launch snapshot - a later install changes future runs only.
+    #: A resume carries its parent's, from the parent's start pins. None for a
+    #: template with neither and before the field existed. Written only when set.
+    workflow_version: str | None = None
+
     #: Set only on a resume: the parent, what it inherited and where it resumes
     #: (ADR-014 s7). The child's own record of "what was this a resume of".
     resumed_from: ResumeOrigin | None = None
+
+    #: Set only on a resume (#1513): the branches its resumed phase continues -
+    #: pushed by the parent's failing attempt at that phase and confirmed still
+    #: where it left them - each with the PR open from it. Top-level rather than
+    #: inside `resumed_from`, whose model forbids extra keys, so a release that
+    #: predates the field still reads the event. None before the field existed.
+    continued_branches: list[ContinuedBranch] | None = None
+
+    #: Set only on a resume (#1513): branches it could have continued and
+    #: started fresh instead, each with why - the recorded warning.
+    abandoned_branches: list[AbandonedBranch] | None = None
+
+    #: Set only on a resume (#1681): the phases before `resumed_from`'s resume
+    #: phase that a certified review in the parent skipped, in phase order.
+    #: Top-level for the same reason as `continued_branches`. None on a fresh
+    #: run, on a resume with none, and before the field existed.
+    inherited_skipped_phase_ids: list[str] | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -83,8 +150,19 @@ class WorkflowExecutionStartedEvent(DomainEvent):
         without them, and could not replay it with them nested. Only phases the
         parent did not run itself are written, so neither a fresh start nor a
         first resume writes the key at all.
+
+        The #1513 branch fields are likewise written only when set, so a run
+        that continues nothing reads exactly as a pre-#1513 release wrote it.
+
+        `tags` is left out when empty for the same reason (#967): every model
+        before it forbids extra fields, so an untagged start stays exactly what
+        a rollback can read typed, and only a tagged one carries the new key.
         """
-        payload = handler(self)
+        payload = {
+            k: v
+            for k, v in handler(self).items()
+            if not (k in _WRITTEN_ONLY_WHEN_SET and v is None) and not (k == "tags" and not v)
+        }
         origin = self.resumed_from
         owners = (
             {}

@@ -20,6 +20,11 @@ interface MetricCardProps {
    * Mutually exclusive with `href`.
    */
   scrollToId?: string
+  /**
+   * Wrap a long value instead of truncating it. Use when the value carries a
+   * qualifier the reader must see without hovering (e.g. "excl. 1 incomplete").
+   */
+  wrap?: boolean
 }
 
 function scrollToElement(id: string): void {
@@ -63,7 +68,7 @@ interface CardBodyProps {
   title: string
   value: string | number
   displayValue: string | number
-  valueSize: string
+  valueClass: string
   subtitle?: string
   Icon?: LucideIcon
   iconColors: { icon: string; iconBg: string }
@@ -75,7 +80,7 @@ function CardBody({
   title,
   value,
   displayValue,
-  valueSize,
+  valueClass,
   subtitle,
   Icon,
   iconColors,
@@ -96,7 +101,7 @@ function CardBody({
             {title}
           </p>
           <p
-            className={clsx('mt-2 truncate font-bold text-[var(--color-text-primary)]', valueSize)}
+            className={clsx('mt-2 font-bold text-[var(--color-text-primary)]', valueClass)}
             title={String(value)}
           >
             {displayValue}
@@ -129,6 +134,7 @@ export function MetricCard({
   color = 'default',
   href,
   scrollToId,
+  wrap = false,
 }: MetricCardProps) {
   const isNumeric = typeof value === 'number'
   const body = (
@@ -136,7 +142,7 @@ export function MetricCard({
       title={title}
       value={value}
       displayValue={isNumeric ? value.toLocaleString() : value}
-      valueSize={isNumeric ? 'text-2xl' : 'text-base'}
+      valueClass={clsx(isNumeric ? 'text-2xl' : 'text-base', wrap ? 'break-words' : 'truncate')}
       subtitle={subtitle}
       Icon={Icon}
       iconColors={colorClasses[color]}

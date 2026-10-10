@@ -9,17 +9,46 @@ JSON endpoint); those are separate, larger pieces of work (see #1070).
 
 Lane 2 (observability) only, per the Two-Lane Architecture rule: this data
 never touches the event store or any aggregate, and is lost on restart.
+
+SLOW REQUESTS ARE ALSO LOGGED (#1583), one line each, so a stall can be
+attributed from the logs alone: was the API slow, and was it waiting for a
+database connection? Only requests at or over
+``slow_request_log_threshold_ms`` are logged - a line per request would bury
+everything else - and the line carries the method, the route TEMPLATE, the
+status and two durations, never the raw path, query string, headers or body:
+ids, tokens and credentials all pass through here.
+
+EVERY REQUEST IS ALSO RECORDED DURABLY (ADR-075): the same method, route
+template, status and time-to-response-start, with a request id, are offered to
+the request latency recorder, which batches them into the observability
+database off the request path. The id is returned as ``x-request-id`` and named
+on the slow-request line, so a slow line and its row can be joined.
 """
 
 from __future__ import annotations
 
+import contextlib
+import logging
 import time
+import uuid
 from collections import deque
+from datetime import UTC, datetime
 from threading import Lock
 from typing import TYPE_CHECKING
 
+from starlette.responses import PlainTextResponse
+
+from syn_adapters.postgres_pool import tally_pool_wait
+from syn_adapters.request_latency import (
+    RequestLatencyRecorder,
+    RequestSample,
+    request_latency_recorder,
+)
+
 if TYPE_CHECKING:
-    from starlette.types import ASGIApp, Receive, Scope, Send
+    from starlette.types import ASGIApp, Message, Receive, Scope, Send
+
+logger = logging.getLogger(__name__)
 
 _DEFAULT_WINDOW_SIZE = 500
 
@@ -97,12 +126,57 @@ def _route_template(scope: Scope) -> str:
     return path if isinstance(path, str) else str(scope.get("path", ""))
 
 
-class RequestTimingMiddleware:
-    """ASGI middleware that records wall-clock duration per route template."""
+#: What a slow-request line names when no route matched. The raw path is never
+#: logged, so an unmatched path carrying an id or a token cannot leak through.
+UNMATCHED_ROUTE = "<unmatched>"
 
-    def __init__(self, app: ASGIApp, aggregator: RequestTimingAggregator | None = None) -> None:
+_REQUEST_ID_HEADER = b"x-request-id"
+
+
+def _logged_route(scope: Scope) -> str:
+    route = scope.get("route")
+    path = route.path if route is not None else None
+    return path if isinstance(path, str) else UNMATCHED_ROUTE
+
+
+class RequestTimingMiddleware:
+    """ASGI middleware that times every request and logs the slow ones.
+
+    Every request's wall-clock duration is recorded per route template in the
+    aggregator. A request whose response STARTED at least
+    ``slow_request_ms`` after it arrived is also logged. Time to response start
+    rather than to the last byte, so a long-lived stream (SSE) that answered
+    promptly is not reported as slow when it eventually closes.
+    """
+
+    def __init__(
+        self,
+        app: ASGIApp,
+        *,
+        slow_request_ms: int,
+        aggregator: RequestTimingAggregator | None = None,
+        recorder: RequestLatencyRecorder | None = None,
+    ) -> None:
         self.app = app
         self._aggregator = aggregator if aggregator is not None else request_timing_aggregator
+        self._recorder = recorder if recorder is not None else request_latency_recorder
+        self._slow_request_ms = slow_request_ms
+
+    def _offer(self, scope: Scope, arrived: datetime, status: int, ms: float, rid: str) -> None:
+        """Hand one sample to the recorder. Telemetry never fails a request."""
+        try:
+            self._recorder.offer(
+                RequestSample(
+                    time=arrived,
+                    method=scope["method"],
+                    route=_logged_route(scope),
+                    status=status,
+                    duration_ms=ms,
+                    request_id=rid,
+                )
+            )
+        except Exception:
+            logger.debug("request latency sample not offered", exc_info=True)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -110,8 +184,66 @@ class RequestTimingMiddleware:
             return
 
         start = time.perf_counter()
-        try:
-            await self.app(scope, receive, send)
-        finally:
-            duration_ms = (time.perf_counter() - start) * 1000
-            self._aggregator.record(_route_template(scope), duration_ms)
+        arrived = datetime.now(UTC)
+        request_id = uuid.uuid4().hex
+        request_id_header = (_REQUEST_ID_HEADER, request_id.encode())
+        responded_at: float | None = None
+        status: int | None = None
+
+        async def send_noting_response_start(message: Message) -> None:
+            nonlocal responded_at, status
+            if message["type"] == "http.response.start":
+                responded_at = time.perf_counter()
+                started_status: int = message["status"]
+                status = started_status
+                # Ours replaces any the app set: one id per response, and the
+                # one the stored sample carries.
+                headers = [
+                    (name, value)
+                    for name, value in message.get("headers", [])
+                    if name.lower() != _REQUEST_ID_HEADER
+                ]
+                headers.append(request_id_header)
+                message["headers"] = headers
+                # Offered at response START, so a stream that stays open for
+                # an hour is recorded when it answered, not when it closed.
+                self._offer(
+                    scope, arrived, started_status, (responded_at - start) * 1000, request_id
+                )
+            await send(message)
+
+        with tally_pool_wait() as pool_wait:
+            try:
+                await self.app(scope, receive, send_noting_response_start)
+            except Exception:
+                # Unhandled: answer the 500 here, so it carries x-request-id
+                # and is recorded like any response, then re-raise so
+                # Starlette's ServerErrorMiddleware still logs it (it sends
+                # nothing once a response has started).
+                if status is None:
+                    with contextlib.suppress(Exception):
+                        await PlainTextResponse("Internal Server Error", status_code=500)(
+                            scope, receive, send_noting_response_start
+                        )
+                if status is None:
+                    status = 500
+                raise
+            finally:
+                end = time.perf_counter()
+                self._aggregator.record(_route_template(scope), (end - start) * 1000)
+                # No response started means the client went away (or the 500
+                # above could not be sent): the whole time was spent unanswered.
+                duration_ms = ((responded_at or end) - start) * 1000
+                if responded_at is None:
+                    self._offer(scope, arrived, status or 500, duration_ms, request_id)
+                if duration_ms >= self._slow_request_ms:
+                    logger.warning(
+                        "slow request method=%s route=%s status=%s duration_ms=%d "
+                        "pool_wait_ms=%d request_id=%s",
+                        scope["method"],
+                        _logged_route(scope),
+                        status if status is not None else "-",
+                        duration_ms,
+                        pool_wait.wait_ms,
+                        request_id,
+                    )

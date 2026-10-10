@@ -17,16 +17,28 @@ from event_sourcing import (
     event_sourcing_handler,
 )
 
+from syn_domain.contexts.orchestration._shared.tags import TagSet
+from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.required_inputs import (
+    required_input_declarations,
+)
+
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+    from datetime import datetime
+
     from syn_domain.contexts.orchestration._shared.claude_plugin_ref import (
         ClaudePluginRef,
     )
     from syn_domain.contexts.orchestration._shared.skill_ref import (
         SkillRef,
     )
+    from syn_domain.contexts.orchestration.domain.aggregate_eval.value_objects import EvalId
     from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
         InputDeclaration,
         PhaseDefinition,
+    )
+    from syn_domain.contexts.orchestration.domain.commands.AddWorkflowTagsCommand import (
+        AddWorkflowTagsCommand,
     )
     from syn_domain.contexts.orchestration.domain.commands.ArchiveWorkflowTemplateCommand import (
         ArchiveWorkflowTemplateCommand,
@@ -34,20 +46,38 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.commands.CreateWorkflowTemplateCommand import (
         CreateWorkflowTemplateCommand,
     )
+    from syn_domain.contexts.orchestration.domain.commands.RemoveWorkflowTagsCommand import (
+        RemoveWorkflowTagsCommand,
+    )
+    from syn_domain.contexts.orchestration.domain.commands.SetWorkflowDefaultEvalCommand import (
+        SetWorkflowDefaultEvalCommand,
+    )
     from syn_domain.contexts.orchestration.domain.commands.UpdatePhasePromptCommand import (
         UpdatePhasePromptCommand,
     )
     from syn_domain.contexts.orchestration.domain.commands.UpdateWorkflowTemplateCommand import (
         UpdateWorkflowTemplateCommand,
     )
+    from syn_domain.contexts.orchestration.domain.events.WorkflowDefaultEvalSetEvent import (
+        WorkflowDefaultEvalSetEvent,
+    )
     from syn_domain.contexts.orchestration.domain.events.WorkflowPhaseUpdatedEvent import (
         WorkflowPhaseUpdatedEvent,
+    )
+    from syn_domain.contexts.orchestration.domain.events.WorkflowTagsAddedEvent import (
+        WorkflowTagsAddedEvent,
+    )
+    from syn_domain.contexts.orchestration.domain.events.WorkflowTagsRemovedEvent import (
+        WorkflowTagsRemovedEvent,
     )
     from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateArchivedEvent import (
         WorkflowTemplateArchivedEvent,
     )
     from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateCreatedEvent import (
         WorkflowTemplateCreatedEvent,
+    )
+    from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateExecutionLaunchedEvent import (
+        WorkflowTemplateExecutionLaunchedEvent,
     )
     from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateUpdatedEvent import (
         WorkflowTemplateUpdatedEvent,
@@ -68,6 +98,7 @@ _EVENT_FIELDS = [
     "skills",
     "version",
     "source_digest",
+    "package_name",
 ]
 
 
@@ -85,6 +116,15 @@ def _normalize_event_data(event: DomainEvent) -> dict[str, Any]:
             [] if field in ("phases", "input_declarations", "claude_plugins", "skills") else None,
         )
     return data
+
+
+def _event_tags(event: DomainEvent) -> list[str]:
+    """The ``tags`` of a typed event or a GenericDomainEvent from the store."""
+    return [str(t) for t in (_normalize_event_data(event).get("tags") or [])]
+
+
+def _eval_id_str(eval_id: EvalId | None) -> str | None:
+    return None if eval_id is None else str(eval_id)
 
 
 def _parse_enum(value: str | StrEnum, enum_type: type[StrEnum]) -> StrEnum:
@@ -204,6 +244,15 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
         # version whose content changed underneath the same version string.
         self._package_version: str | None = None
         self._source_digest: str | None = None
+        self._package_name: str | None = None
+        # WHY (issue #967): copied onto each execution at launch. Part of the
+        # definition, so a reinstall replaces it like every other field.
+        self._tags: TagSet = TagSet()
+        # The eval a launch that names none joins (#967). Read at dispatch.
+        self._default_eval_id: str | None = None
+        # Every execution launched from this template, and when (#1588). The
+        # archive guard asks the execution aggregates about exactly these.
+        self._launches: dict[str, datetime] = {}
 
     def get_aggregate_type(self) -> str:
         """Return aggregate type name."""
@@ -235,6 +284,11 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
         return list(self._input_declarations)
 
     @property
+    def required_input_declarations(self) -> list[InputDeclaration]:
+        """The declarations admission enforces, ``task`` included where a prompt implies it."""
+        return required_input_declarations(self._input_declarations, self._phases)
+
+    @property
     def requires_repos(self) -> bool:
         """Whether this workflow requires repository access at execution time (ADR-058 #666)."""
         return self._requires_repos
@@ -263,6 +317,16 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
         return list(self._skills)
 
     @property
+    def tags(self) -> TagSet:
+        """Tags every execution launched from this workflow starts with."""
+        return self._tags
+
+    @property
+    def default_eval_id(self) -> str | None:
+        """The eval a launch that names none joins (#967), or None."""
+        return self._default_eval_id
+
+    @property
     def package_version(self) -> str | None:
         """Package version of the installed definition (issue #822).
 
@@ -277,6 +341,11 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
     def source_digest(self) -> str | None:
         """Resolved source commit SHA of the installed definition (issue #822)."""
         return self._source_digest
+
+    @property
+    def package_name(self) -> str | None:
+        """Package that installed this definition (#1588), or None."""
+        return self._package_name
 
     # =========================================================================
     # COMMAND HANDLERS - Validate business rules, emit events
@@ -325,8 +394,11 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
             requires_repos=command.requires_repos,
             claude_plugins=command.claude_plugins,
             skills=command.skills,
+            tags=list(command.tags),
+            default_eval_id=_eval_id_str(command.default_eval_id),
             version=command.version,
             source_digest=command.source_digest,
+            package_name=command.package_name,
         )
 
         self._apply(event)
@@ -381,8 +453,11 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
             self._repos,
             self._claude_plugins,
             self._skills,
+            self._tags,
+            self._default_eval_id,
             self._package_version,
             self._source_digest,
+            self._package_name,
         )
 
     @staticmethod
@@ -402,8 +477,11 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
             [str(r) for r in command.repos],
             list(command.claude_plugins),
             list(command.skills),
+            command.tags,
+            _eval_id_str(command.default_eval_id),
             command.version,
             command.source_digest,
+            command.package_name,
         )
 
     def is_identical_to(self, command: UpdateWorkflowTemplateCommand) -> bool:
@@ -429,7 +507,9 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
 
         A matching version whose source digest differs is refused with the
         stronger error: that is the signature of a republished version, which
-        a version check alone would not catch.
+        a version check alone would not catch. This holds for an archived
+        template too: archiving retires the template, not its provenance, so
+        a republish over an archived version is still a republish (#1705).
 
         A byte-identical reinstall never reaches here: the caller treats it as
         a no-op, because #822 is about install being idempotent and failing on
@@ -444,12 +524,9 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
             return
         if command.force:
             return
-        # An archived template is not "already installed". Reinstalling it is
-        # how a user restores one a failed update archived, so refusing here
-        # would strand them behind --force for an ordinary recovery.
-        if self._is_archived:
-            return
 
+        # Checked BEFORE the archived exemption below: archived or not, the
+        # same version under a different digest is a republish (#1705).
         digest_changed = (
             command.source_digest is not None
             and self._source_digest is not None
@@ -462,6 +539,13 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
                 installed_digest=str(self._source_digest),
                 incoming_digest=str(command.source_digest),
             )
+
+        # An archived template is not "already installed". Reinstalling it with
+        # the provenance it was archived under is how a user restores one a
+        # failed update archived, so refusing here would strand them behind
+        # --force for an ordinary recovery.
+        if self._is_archived:
+            return
 
         raise WorkflowTemplateVersionAlreadyInstalledError(
             workflow_id=str(self.id),
@@ -507,8 +591,11 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
             requires_repos=command.requires_repos,
             claude_plugins=command.claude_plugins,
             skills=command.skills,
+            tags=list(command.tags),
+            default_eval_id=_eval_id_str(command.default_eval_id),
             version=command.version,
             source_digest=command.source_digest,
+            package_name=command.package_name,
         )
 
         self._apply(event)
@@ -627,6 +714,12 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
         # so an install carrying a version is never mistaken for a reinstall.
         self._package_version = data.get("version")
         self._source_digest = data.get("source_digest")
+        self._package_name = data.get("package_name")
+
+        # WHY (issue #967): legacy events have no tags; recorded() because the
+        # event already holds validated tags and replay must not re-judge them.
+        self._tags = TagSet.recorded(data.get("tags") or [])
+        self._default_eval_id = data.get("default_eval_id")
 
         # A full definition event reactivates the template. Applying this in
         # the shared path rather than only on Updated keeps archive semantics
@@ -639,12 +732,21 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
     def archive_workflow(self, command: ArchiveWorkflowTemplateCommand) -> None:
         """Handle ArchiveWorkflowTemplateCommand.
 
-        Guards against double-archive. The active-execution guard is
-        handled by the application service (cross-aggregate concern).
+        Guards against double-archive, and against archiving a template that
+        the caller believes is a package's when it is no longer (#1588). The
+        active-execution guard needs the execution aggregates, so the
+        application service decides it from ``launches``; this stream's
+        version is what makes that decision race-free against a launch.
         """
         from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateArchivedEvent import (
             WorkflowTemplateArchivedEvent,
         )
+
+        expected = command.expected_package_name
+        if expected is not None and expected != self._package_name:
+            owner = f"package '{self._package_name}'" if self._package_name else "no package"
+            msg = f"Package mismatch: workflow is installed by {owner}, not package '{expected}'"
+            raise ValueError(msg)
 
         if self._is_archived:
             msg = "Workflow template already archived"
@@ -656,10 +758,109 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
         )
         self._apply(event)
 
+    @property
+    def launches(self) -> Mapping[str, datetime]:
+        """Execution id -> launch time, for every launch recorded on this stream."""
+        return self._launches
+
+    def record_execution_launch(self, execution_id: str, launched_at: datetime) -> None:
+        """Record that an execution of this template is being launched (#1588).
+
+        Refuses an archived template, so a launch that loses the race to an
+        archive is refused rather than started against it. Recording the same
+        execution again (a retried dispatch) renews its launch time: the retry
+        is about to start it, so it must claim the stream afresh rather than
+        ride a record an archive may already treat as expired.
+        """
+        from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateExecutionLaunchedEvent import (
+            WorkflowTemplateExecutionLaunchedEvent,
+        )
+
+        if self._is_archived:
+            msg = f"Workflow {self.id} is archived and cannot launch executions"
+            raise ValueError(msg)
+        self._apply(
+            WorkflowTemplateExecutionLaunchedEvent(
+                workflow_id=str(self.id), execution_id=execution_id, launched_at=launched_at
+            )
+        )
+
+    @event_sourcing_handler("WorkflowTemplateExecutionLaunched")
+    def on_execution_launched(self, event: WorkflowTemplateExecutionLaunchedEvent) -> None:
+        """Apply WorkflowTemplateExecutionLaunchedEvent."""
+        self._launches[event.execution_id] = event.launched_at
+
     @event_sourcing_handler("WorkflowTemplateArchived")
     def on_workflow_archived(self, _event: WorkflowTemplateArchivedEvent) -> None:
         """Apply WorkflowTemplateArchivedEvent to update aggregate state."""
         self._is_archived = True
+
+    @command_handler("AddWorkflowTagsCommand")
+    def add_tags(self, command: AddWorkflowTagsCommand) -> None:
+        """Add tags. Tags already present are not re-added; none new, no event."""
+        from syn_domain.contexts.orchestration.domain.events.WorkflowTagsAddedEvent import (
+            WorkflowTagsAddedEvent,
+        )
+
+        if self.id is None:
+            msg = "Workflow does not exist"
+            raise ValueError(msg)
+        if not command.tags:
+            msg = "At least one tag is required"
+            raise ValueError(msg)
+        # union() enforces MAX_TAGS, so an over-limit add fails before any event.
+        added = self._tags.union(command.tags).difference(self._tags)
+        if not added:
+            return
+        self._apply(WorkflowTagsAddedEvent(workflow_id=str(self.id), tags=list(added)))
+
+    @command_handler("RemoveWorkflowTagsCommand")
+    def remove_tags(self, command: RemoveWorkflowTagsCommand) -> None:
+        """Remove tags. Tags not present are ignored; none present, no event."""
+        from syn_domain.contexts.orchestration.domain.events.WorkflowTagsRemovedEvent import (
+            WorkflowTagsRemovedEvent,
+        )
+
+        if self.id is None:
+            msg = "Workflow does not exist"
+            raise ValueError(msg)
+        if not command.tags:
+            msg = "At least one tag is required"
+            raise ValueError(msg)
+        present = command.tags.intersection(self._tags)
+        if not present:
+            return
+        self._apply(WorkflowTagsRemovedEvent(workflow_id=str(self.id), tags=list(present)))
+
+    @command_handler("SetWorkflowDefaultEvalCommand")
+    def set_default_eval(self, command: SetWorkflowDefaultEvalCommand) -> None:
+        """Set or clear the default eval. Unchanged, no event."""
+        from syn_domain.contexts.orchestration.domain.events.WorkflowDefaultEvalSetEvent import (
+            WorkflowDefaultEvalSetEvent,
+        )
+
+        if self.id is None:
+            msg = "Workflow does not exist"
+            raise ValueError(msg)
+        eval_id = _eval_id_str(command.eval_id)
+        if eval_id != self._default_eval_id:
+            self._apply(WorkflowDefaultEvalSetEvent(workflow_id=str(self.id), eval_id=eval_id))
+
+    @event_sourcing_handler("WorkflowDefaultEvalSet")
+    def on_default_eval_set(self, event: WorkflowDefaultEvalSetEvent) -> None:
+        """Apply WorkflowDefaultEvalSetEvent."""
+        self._default_eval_id = _normalize_event_data(event).get("eval_id")
+
+    @event_sourcing_handler("WorkflowTagsAdded")
+    def on_tags_added(self, event: WorkflowTagsAddedEvent) -> None:
+        """Apply WorkflowTagsAddedEvent."""
+        self._tags = TagSet.recorded([*self._tags, *_event_tags(event)])
+
+    @event_sourcing_handler("WorkflowTagsRemoved")
+    def on_tags_removed(self, event: WorkflowTagsRemovedEvent) -> None:
+        """Apply WorkflowTagsRemovedEvent."""
+        removed = set(_event_tags(event))
+        self._tags = TagSet.recorded(t for t in self._tags if t not in removed)
 
     @event_sourcing_handler("WorkflowCreated")
     def on_workflow_created_legacy(self, event: WorkflowTemplateCreatedEvent) -> None:

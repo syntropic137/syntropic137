@@ -49,6 +49,19 @@ function readModelLines(subscription: Record<string, unknown>): string[] {
     );
   }
 
+  // #1545: a read model at the head that skipped a start. Lag cannot show it,
+  // and unlike a stall it is not stuck, it is wrong, so name the executions.
+  const unapplied = subscription["unapplied_starts"];
+  const dropped = Array.isArray(unapplied) ? (unapplied as Record<string, unknown>[]) : [];
+  if (dropped.length > 0) {
+    const named = dropped
+      .map((entry) => `${String(entry["execution_id"])} in ${projectionName(entry)}`)
+      .join(", ");
+    lines.push(
+      `  Read models skipped execution starts: ${named}. This will NOT clear on its own — see docs/runbooks/repair-dropped-execution-start.md.`,
+    );
+  }
+
   return lines;
 }
 
@@ -79,6 +92,11 @@ export const healthCommand: CommandDef = {
       for (const reason of reasonsOf(data["degraded_reasons"])) {
         print(style(`  • ${reason}`, YELLOW));
       }
+    } else if (status === "starting") {
+      // Alive but not ready (#1575): a long startup migration is running and
+      // every route but /health and /version answers 503 until it finishes.
+      print(style("Starting", BOLD, YELLOW) + " — startup still running; retry shortly");
+      throw new CLIError("API is still starting");
     } else {
       print(style("Unhealthy", BOLD, RED) + ` — status: ${status}`);
       throw new CLIError("API is unhealthy");

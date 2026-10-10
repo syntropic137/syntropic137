@@ -12,12 +12,12 @@ per-session loop this replaced.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 import pytest
 
-from syn_domain import tool_call_counts
+from syn_domain import agent_event_span, tool_call_counts
 from syn_domain.contexts.agent_sessions.slices.session_cost.timescale_query import (
     _MIN_TIME_BATCH_QUERY,
     _SESSION_SUMMARY_BATCH_QUERY,
@@ -38,6 +38,19 @@ _MODEL = "claude-sonnet-4-5-20250929"
 #: is read belong to ``tool_call_counts``, and a test that pins the text here
 #: would have to be edited every time that module changes its mind (#1322).
 _TALLY = "<tool call tally>"
+
+#: The E2 span lookup on ``agent_event_day_rollup`` (``agent_event_span``), keyed
+#: by purpose for the same reason as the tally: its text belongs to that module.
+_SPAN = "<event span lookup>"
+
+#: The ``SET LOCAL plan_cache_mode`` that ``agent_event_span.custom_plans``
+#: issues at the top of the page's transaction.
+_PLAN = "<custom plans>"
+
+#: The ``BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY`` that ``custom_plans``
+#: opens with, so the span and the reads it bounds share a snapshot. A round
+#: trip of its own, and the only statement the snapshot costs.
+_SNAPSHOT = "<one read-only snapshot>"
 
 
 def _summary_row(session_id: str, *, total_input: int | None = 1_000) -> _FakeRow:
@@ -89,15 +102,61 @@ class _CountingConnection:
         self.calls: list[str] = []
         #: The session-id array bound by each round-trip, in order.
         self.batches: list[list[str]] = []
+        #: The ``(lower, upper)`` time bound each ``agent_events`` read bound.
+        self.bounds: list[tuple[object, object]] = []
 
-    async def fetch(self, query: str, *args: object) -> list[_FakeRow]:
-        key = _TALLY if tool_call_counts.TABLE in query else query
+    def transaction(self, *, isolation: str, readonly: bool) -> _Transaction:
+        assert (isolation, readonly) == ("repeatable_read", True)
+        self.calls.append(_SNAPSHOT)
+        return _Transaction()
+
+    async def execute(self, query: str, *_args: object) -> str:
+        assert "plan_cache_mode" in query, query
+        self.calls.append(_PLAN)
+        return "SET"
+
+    def _span_row(self, ids: list[str]) -> list[dict[str, date | None]]:
+        """MIN/MAX UTC day over every timestamp the fixture holds for these ids.
+
+        What the rollup would answer: the days these sessions have rows on.
+        No timestamps at all is the rollup never having seen them.
+        """
+        days = [
+            cell.astimezone(UTC).date()
+            for rows in self._rows_by_query.values()
+            for row in rows
+            if row.get("session_id") in ids
+            for cell in row.values()
+            if isinstance(cell, datetime)
+        ]
+        return [{"first_day": min(days, default=None), "last_day": max(days, default=None)}]
+
+    async def fetch(
+        self, query: str, *args: object
+    ) -> list[_FakeRow] | list[dict[str, date | None]]:
+        if tool_call_counts.TABLE in query:
+            key = _TALLY
+        elif "agent_event_day_rollup" in query:
+            key = _SPAN
+        else:
+            key = query
+            self.bounds.append((args[-2], args[-1]))
         self.calls.append(key)
         ids = args[0] if args and isinstance(args[0], list) else None
         if ids is None:
             return self._rows_by_query.get(key, [])
         self.batches.append([str(sid) for sid in ids])
+        if key == _SPAN:
+            return self._span_row([str(sid) for sid in ids])
         return [row for row in self._rows_by_query.get(key, []) if row["session_id"] in ids]
+
+
+class _Transaction:
+    async def __aenter__(self) -> None:
+        return None
+
+    async def __aexit__(self, *_exc: object) -> bool:
+        return False
 
 
 class _Acquire:
@@ -129,7 +188,7 @@ def _query(rows_by_query: dict[str, list[_FakeRow]]) -> tuple[TimescaleSessionCo
 
 @pytest.mark.unit
 @pytest.mark.anyio
-async def test_cost_for_fifty_sessions_takes_four_round_trips() -> None:
+async def test_cost_for_fifty_sessions_takes_six_round_trips() -> None:
     """The whole point: work is bounded by queries, not by page size."""
     ids = [f"sess-{i}" for i in range(50)]
     q, pool = _query(
@@ -146,16 +205,27 @@ async def test_cost_for_fifty_sessions_takes_four_round_trips() -> None:
     results = await q.calculate_many(ids)
 
     assert len(results) == 50
-    # Three queries and one connection for fifty sessions - the fourth, the
-    # token_usage fallback, is skipped because every session had a usable
-    # summary. The per-session loop this replaced would show 150-200 calls and
-    # 50 acquisitions, which is what made a page cost seconds.
+    # Six round trips and one connection for fifty sessions. Three read the
+    # page; the token_usage fallback is skipped because every session had a
+    # usable summary. The other three are E2's time bound (agent_event_span):
+    # the BEGIN that opens the read-only snapshot, the plan setting, then ONE
+    # span lookup for the
+    # whole page, which bounds every read after it - still fixed, not per
+    # session. The per-session loop
+    # this replaced would show 150-200 calls and 50 acquisitions, which is
+    # what made a page cost seconds.
     assert pool.conn.calls == [
+        _SNAPSHOT,
+        _PLAN,
+        _SPAN,
         _SESSION_SUMMARY_BATCH_QUERY,
         _TALLY,
         _MIN_TIME_BATCH_QUERY,
     ]
     assert pool.acquisitions == 1
+    # The page's one day, from the span lookup, bound to both agent_events reads.
+    page_day = agent_event_span.EventSpan.of_days(date(2026, 9, 3), date(2026, 9, 3))
+    assert pool.conn.bounds == [(page_day.lower, page_day.upper)] * 2
     assert results["sess-7"].total_cost_usd == Decimal("0.25")
     assert results["sess-7"].tool_calls == 3
 
@@ -278,7 +348,7 @@ async def test_no_round_trip_binds_more_ids_than_the_cap(count: int) -> None:
 @pytest.mark.unit
 @pytest.mark.anyio
 async def test_a_full_page_is_still_one_batch() -> None:
-    """At the cap, behaviour is exactly what it was: four queries, one page.
+    """At the cap, behaviour is exactly what it was: one page, one id array per statement.
 
     The cap restates the HTTP page limit, so the path that motivated #1114 must
     not start paying extra round-trips for the page size it already used.
@@ -288,7 +358,9 @@ async def test_a_full_page_is_still_one_batch() -> None:
 
     await q.calculate_many(ids)
 
-    assert [len(batch) for batch in pool.conn.batches] == [MAX_SESSIONS_PER_QUERY] * 3
+    # Four id arrays: the span lookup plus the three reads (#1114's three, plus
+    # E2's lookup, which binds the same capped array).
+    assert [len(batch) for batch in pool.conn.batches] == [MAX_SESSIONS_PER_QUERY] * 4
     assert pool.acquisitions == 1
 
 
@@ -301,7 +373,8 @@ async def test_one_id_past_the_cap_becomes_a_second_batch() -> None:
 
     results = await q.calculate_many(ids)
 
-    assert [len(batch) for batch in pool.conn.batches] == [MAX_SESSIONS_PER_QUERY] * 3 + [1] * 3
+    # Per batch: the span lookup and the three reads, so four arrays each.
+    assert [len(batch) for batch in pool.conn.batches] == [MAX_SESSIONS_PER_QUERY] * 4 + [1] * 4
     assert pool.acquisitions == 2
     assert len(results) == MAX_SESSIONS_PER_QUERY + 1
     assert results[f"sess-{MAX_SESSIONS_PER_QUERY}"].total_cost_usd == Decimal("0.25")

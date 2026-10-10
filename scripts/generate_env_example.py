@@ -31,12 +31,15 @@ sys.path.insert(0, str(PROJECT_ROOT / "packages" / "syn-shared" / "src"))
 
 from syn_shared.settings.config import Settings  # noqa: E402
 from syn_shared.settings.dev_tooling import DevToolingSettings  # noqa: E402
+from syn_shared.settings.disk import DiskSettings  # noqa: E402
+from syn_shared.settings.execution import ExecutionSettings  # noqa: E402
 from syn_shared.settings.git_identity import OperatorSettings  # noqa: E402
 from syn_shared.settings.github import GitHubAppSettings  # noqa: E402
 from syn_shared.settings.image_verification import (  # noqa: E402
     ImageVerificationSettings,
 )
 from syn_shared.settings.infra import InfraSettings  # noqa: E402
+from syn_shared.settings.platform_access import PlatformAccessSettings  # noqa: E402
 from syn_shared.settings.session_inventory import SessionInventorySettings  # noqa: E402
 from syn_shared.settings.session_store import SessionStoreSettings  # noqa: E402
 from syn_shared.settings.storage import StorageSettings  # noqa: E402
@@ -166,7 +169,7 @@ def format_refusal(env_name: str) -> list[str]:
     Silence is what #1101 was: SYN_IMAGE_VERIFY_ALLOW_LOCAL_IMAGES was set, the
     API restarted, and the old behaviour continued without a word. The reasons
     live in scripts/settings_forwarding.py, which is the same table that
-    generates the compose forwarding block, so this line cannot describe a
+    generates the compose passthrough, so this line cannot describe a
     refusal the stack no longer makes.
     """
     reason = NOT_FORWARDED.get(env_name)
@@ -423,6 +426,18 @@ def generate_env_example() -> str:
         )
     )
 
+    # Execution concurrency budget (SYN_EXECUTION_* prefix, #1557). One limit
+    # for every start path - direct, trigger and resume - sized against the
+    # API's memory limit, so an operator raising API_MEMORY_LIMIT finds it.
+    lines.extend(
+        generate_settings_section(
+            ExecutionSettings,
+            "EXECUTION CONCURRENCY (#1557)",
+            prefix="SYN_EXECUTION_",
+            description="How many workflow executions run at once; the rest queue, visibly.",
+        )
+    )
+
     # Workspace image signature verification (SYN_IMAGE_VERIFY_* prefix).
     # ON by default and fails closed: a remote workspace image must carry a
     # valid cosign keyless signature from the agentic-workspace publishing
@@ -486,10 +501,32 @@ def generate_env_example() -> str:
 
     lines.extend(
         generate_settings_section(
+            DiskSettings,
+            "DISK SPACE (workspace volume)",
+            prefix="SYN_DISK_",
+            description="Free-space thresholds: /health degrades below the first, admission refuses below the second (#1560).",
+        )
+    )
+
+    lines.extend(
+        generate_settings_section(
             SessionInventorySettings,
             "LOCAL SESSION INVENTORY",
             prefix="SYN_SESSION_INVENTORY_",
             description="Local discovery and transcript archive work without SeshMagic. Empty archive path uses ~/.syntropic137/session-inventory; Docker uses its persistent inventory volume.",
+        )
+    )
+
+    lines.extend(
+        generate_settings_section(
+            PlatformAccessSettings,
+            "WORKSPACE ACCESS TO THE API - OPT-IN, DEFAULT OFF",
+            prefix="SYN_PLATFORM_ACCESS_",
+            description=(
+                "Give each workspace phase a read-only, expiring, revocable API "
+                "token (ADR-072). Off: no token is issued and the API refuses all "
+                "workspace traffic."
+            ),
         )
     )
 
@@ -705,6 +742,7 @@ def generate_infra_env_example() -> str:
             "postgres_memory_limit",
             "postgres_cpu_limit",
             "event_store_memory_limit",
+            "control_plane_cpu_shares",
             "collector_memory_limit",
             "collector_cpu_limit",
             "minio_memory_limit",
@@ -715,6 +753,7 @@ def generate_infra_env_example() -> str:
         "SELF-HOST-SPECIFIC (Optional)": [
             "syn_gateway_port",
             "syn_gateway_bind",
+            "syn_gateway_ui",
             "syn_api_password",
             "syn_api_user",
             "restart_policy",
@@ -726,6 +765,14 @@ def generate_infra_env_example() -> str:
             "backup_dir",
         ],
     }
+
+    # A field missing from section_map used to vanish from the file without a
+    # word, so a new infra setting shipped undocumented (#1600 nearly did).
+    unplaced = set(InfraSettings.model_fields) - {f for fs in section_map.values() for f in fs}
+    if unplaced:
+        raise SystemExit(
+            f"InfraSettings fields with no section in generate_infra_env_example: {sorted(unplaced)}"
+        )
 
     for section_name, field_names in section_map.items():
         lines.extend(

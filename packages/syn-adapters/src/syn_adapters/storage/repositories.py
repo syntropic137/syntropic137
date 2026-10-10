@@ -23,6 +23,7 @@ if TYPE_CHECKING:
         BaseAggregate,
         DomainEvent,
         EventEnvelope,
+        EventStoreClient,
         EventStoreRepository,
         RepositoryFactory,
     )
@@ -39,8 +40,14 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.aggregate_claude_plugin_registration.ClaudePluginRegistrationAggregate import (
         ClaudePluginRegistrationAggregate,
     )
+    from syn_domain.contexts.orchestration.domain.aggregate_eval.EvalAggregate import (
+        EvalAggregate,
+    )
     from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
         WorkflowExecutionAggregate,
+    )
+    from syn_domain.contexts.orchestration.domain.aggregate_execution_request.ExecutionRequestAggregate import (
+        ExecutionRequestAggregate,
     )
     from syn_domain.contexts.orchestration.domain.aggregate_global_claude_plugin_registry.GlobalClaudePluginRegistryAggregate import (
         GlobalClaudePluginRegistryAggregate,
@@ -128,6 +135,7 @@ class RepositoryAdapter[TAggregate: BaseAggregate[Any]]:
 # Cached repository instances (RepositoryAdapter wrapping SDK repos)
 _workflow_repository: RepositoryAdapter[WorkflowTemplateAggregate] | None = None
 _workflow_execution_repository: RepositoryAdapter[WorkflowExecutionAggregate] | None = None
+_execution_request_repository: RepositoryAdapter[ExecutionRequestAggregate] | None = None
 _session_repository: RepositoryAdapter[AgentSessionAggregate] | None = None
 _artifact_repository: RepositoryAdapter[ArtifactAggregate] | None = None
 _trigger_repository: RepositoryAdapter[TriggerRuleAggregate] | None = None
@@ -142,6 +150,7 @@ _global_claude_plugin_registry_repository: (
     RepositoryAdapter[GlobalClaudePluginRegistryAggregate] | None
 ) = None
 _skill_registration_repository: RepositoryAdapter[SkillRegistrationAggregate] | None = None
+_eval_repository: RepositoryAdapter[EvalAggregate] | None = None
 
 
 def _get_repository_factory() -> RepositoryFactory:
@@ -186,10 +195,90 @@ def get_workflow_execution_repository() -> RepositoryAdapter[WorkflowExecutionAg
     factory = _get_repository_factory()
     sdk_repo = factory.create_repository(
         WorkflowExecutionAggregate,  # type: ignore[arg-type]  # ESP SDK TEvent invariance
-        aggregate_type="WorkflowExecution",
+        aggregate_type=_WORKFLOW_EXECUTION,
     )
     _workflow_execution_repository = RepositoryAdapter(sdk_repo)
     return _workflow_execution_repository
+
+
+_WORKFLOW_EXECUTION = "WorkflowExecution"
+
+
+class EventStoreExecutionEventStream:
+    """One execution's stored domain events, for seeding a run's to-do fold (ADR-072 D8).
+
+    Satisfies `ExecutionEventStream`. Reads the same stream
+    `get_workflow_execution_repository` writes, by the same aggregate type.
+    """
+
+    def __init__(self, client: EventStoreClient) -> None:
+        self._client = client
+
+    async def read(self, execution_id: str) -> list[DomainEvent]:
+        """The whole stream, page by page.
+
+        One `read_events` call is one page: the gRPC client asks for at most
+        1,000 events, so a single call silently drops the rest of a long
+        stream. The clients also disagree on `from_version` (gRPC reads from
+        that nonce inclusive, the memory client after it), so each page asks
+        from the last nonce seen and keeps only nonces beyond it. A page
+        that adds nothing ends the read.
+        """
+        stream = f"{_WORKFLOW_EXECUTION}-{execution_id}"
+        events: list[DomainEvent] = []
+        last_nonce: int | None = None
+        while True:
+            page = await self._client.read_events(stream, last_nonce)
+            fresh = [
+                e for e in page if last_nonce is None or e.metadata.aggregate_nonce > last_nonce
+            ]
+            if not fresh:
+                return events
+            events.extend(envelope.event for envelope in fresh)
+            last_nonce = fresh[-1].metadata.aggregate_nonce
+
+
+def get_execution_event_stream() -> EventStoreExecutionEventStream:
+    """Get the reader for one execution's stored events."""
+    from syn_adapters.storage.event_store_client import get_event_store_client
+
+    return EventStoreExecutionEventStream(get_event_store_client())
+
+
+def get_execution_request_repository() -> RepositoryAdapter[ExecutionRequestAggregate]:
+    """Get an ExecutionRequestAggregate repository (#1557)."""
+    global _execution_request_repository
+    if _execution_request_repository is not None:
+        return _execution_request_repository
+
+    from syn_domain.contexts.orchestration import ExecutionRequestAggregate
+
+    factory = _get_repository_factory()
+    sdk_repo = factory.create_repository(
+        ExecutionRequestAggregate,  # type: ignore[arg-type]  # ESP SDK TEvent invariance
+        aggregate_type="ExecutionRequest",
+    )
+    _execution_request_repository = RepositoryAdapter(sdk_repo)
+    return _execution_request_repository
+
+
+def get_eval_repository() -> RepositoryAdapter[EvalAggregate]:
+    """Get an EvalAggregate repository (#967)."""
+    global _eval_repository
+    if _eval_repository is not None:
+        return _eval_repository
+
+    from syn_domain.contexts.orchestration.domain.aggregate_eval.EvalAggregate import (
+        EvalAggregate,
+    )
+
+    factory = _get_repository_factory()
+    sdk_repo = factory.create_repository(
+        EvalAggregate,  # type: ignore[arg-type]  # ESP SDK TEvent invariance
+        aggregate_type="Eval",
+    )
+    _eval_repository = RepositoryAdapter(sdk_repo)
+    return _eval_repository
 
 
 def get_session_repository() -> RepositoryAdapter[AgentSessionAggregate]:
@@ -396,6 +485,7 @@ def reset_repositories() -> None:
     global \
         _workflow_repository, \
         _workflow_execution_repository, \
+        _execution_request_repository, \
         _session_repository, \
         _artifact_repository, \
         _trigger_repository, \
@@ -405,9 +495,11 @@ def reset_repositories() -> None:
         _repo_claim_repository, \
         _claude_plugin_registration_repository, \
         _global_claude_plugin_registry_repository, \
-        _skill_registration_repository
+        _skill_registration_repository, \
+        _eval_repository
     _workflow_repository = None
     _workflow_execution_repository = None
+    _execution_request_repository = None
     _session_repository = None
     _artifact_repository = None
     _trigger_repository = None
@@ -418,3 +510,4 @@ def reset_repositories() -> None:
     _claude_plugin_registration_repository = None
     _global_claude_plugin_registry_repository = None
     _skill_registration_repository = None
+    _eval_repository = None

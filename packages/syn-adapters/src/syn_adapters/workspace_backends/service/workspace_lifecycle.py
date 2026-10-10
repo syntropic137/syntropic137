@@ -9,6 +9,7 @@ See ADR-021, ADR-023, ADR-024.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import logging
 from typing import TYPE_CHECKING
@@ -21,6 +22,7 @@ from syn_domain.contexts.orchestration import (
     SidecarConfig,
     TerminateWorkspaceCommand,
     WorkspaceAggregate,
+    WorkspaceUsage,
 )
 from syn_shared.diagnostics import name_exit_status
 
@@ -228,6 +230,7 @@ async def provision_workspace(
     if with_sidecar:
         sidecar_config = SidecarConfig(
             workspace_id=workspace_id,
+            execution_id=isolation_config.execution_id,
             listen_port=8080,
             allowed_hosts=service._config.allowed_hosts,
         )
@@ -259,12 +262,23 @@ async def _stop_sidecar(service: WorkspaceService, sidecar_handle: SidecarHandle
         logger.warning("Failed to stop sidecar: %s", e)
 
 
-async def _destroy_isolation(service: WorkspaceService, isolation_handle: IsolationHandle) -> None:
-    """Destroy isolation container, logging on failure."""
+async def _destroy_isolation(
+    service: WorkspaceService, isolation_handle: IsolationHandle
+) -> WorkspaceUsage | None:
+    """Destroy isolation container, logging on failure.
+
+    Returns what the backend measured at teardown; None when it measured
+    nothing or the destroy itself failed.
+    """
     try:
-        await service._isolation.destroy(isolation_handle)
+        usage: object = await service._isolation.destroy(isolation_handle)
     except Exception as e:
         logger.warning("Failed to destroy isolation: %s", e)
+        return None
+    # Checked, not trusted: this value is only telemetry, and it is read in a
+    # `finally`. A backend that returned something else must cost the record,
+    # never the teardown.
+    return usage if isinstance(usage, WorkspaceUsage) else None
 
 
 async def cleanup_workspace(
@@ -276,8 +290,13 @@ async def cleanup_workspace(
     isolation_handle: IsolationHandle | None,
     sidecar_handle: SidecarHandle | None,
     inject_tokens: bool,
-) -> None:
+    phase_id: str | None = None,
+) -> WorkspaceUsage | None:
     """Clean up workspace resources (tokens, sidecar, isolation).
+
+    Returns what the isolation consumed, for the caller to attribute (Lane 2).
+    It is also logged here, once: a provision failure tears down before any
+    phase runtime holds the workspace, and this line is its only record.
 
     Args:
         service: WorkspaceService instance
@@ -287,15 +306,24 @@ async def cleanup_workspace(
         isolation_handle: Handle to isolation container (if created)
         sidecar_handle: Handle to sidecar (if created)
         inject_tokens: Whether tokens were injected
+        phase_id: Phase ID, when the workspace belongs to one (for the usage log)
     """
     logger.info("Cleaning up workspace (id=%s)", workspace_id)
 
+    usage: WorkspaceUsage | None = None
     if inject_tokens:
         await _revoke_tokens(service, execution_id)
     if sidecar_handle:
         await _stop_sidecar(service, sidecar_handle)
     if isolation_handle:
-        await _destroy_isolation(service, isolation_handle)
+        usage = await _destroy_isolation(service, isolation_handle)
+        _log_usage(
+            usage,
+            execution_id=execution_id,
+            phase_id=phase_id,
+            workspace_id=workspace_id,
+            isolation_id=isolation_handle.isolation_id,
+        )
 
     # Emit termination event
     terminate_cmd = TerminateWorkspaceCommand(
@@ -305,3 +333,29 @@ async def cleanup_workspace(
     aggregate.terminate_workspace(terminate_cmd)
 
     logger.info("Workspace cleaned up (id=%s)", workspace_id)
+    return usage
+
+
+def _log_usage(
+    usage: WorkspaceUsage | None,
+    *,
+    execution_id: str,
+    phase_id: str | None,
+    workspace_id: str,
+    isolation_id: str,
+) -> None:
+    """One structured line per destroyed isolation, measured or not."""
+    logger.info(
+        "Workspace resource usage (execution=%s, phase=%s, workspace=%s, isolation=%s)",
+        execution_id,
+        phase_id,
+        workspace_id,
+        isolation_id,
+        extra={
+            "execution_id": execution_id,
+            "phase_id": phase_id,
+            "workspace_id": workspace_id,
+            "isolation_id": isolation_id,
+            "workspace_usage": dataclasses.asdict(usage) if usage is not None else None,
+        },
+    )

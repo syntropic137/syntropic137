@@ -1,0 +1,57 @@
+id: eval-verify-pinned-sonnet-v1
+name: "Eval: verify the pinned checkout, read-only, on Sonnet (v1)"
+description: >
+  eval-verify-pinned-v1 with a different verifier: the same single verify phase
+  and the same prompt over the commit the workspace was provisioned at, run on
+  the `sonnet` alias (Claude Sonnet 5.5). The verifier-seed eval suite
+  (evals/verifier-seed-v1) launches any of its workflows over the same cases,
+  so the verifiers' scores compare directly.
+type: custom
+classification: standard
+requires_repos: true
+
+inputs:
+  - name: task
+    description: "What the change under review claims to do, and where to look"
+    required: true
+
+# SAME CASES, DIFFERENT VERIFIER (#967 step 8). This file is
+# workflows/evals/verify-pinned/workflow.yaml with only the verify phase's
+# agent changed, so a score difference is the verifier and nothing else.
+# phases/verify.md is a byte-identical copy of that workflow's prompt, and
+# scripts/tests/test_eval_suite.py fails when the prompts or any field but
+# the agent block (and this file's id, name and description) diverge. Change
+# the prompt in both or in neither.
+#
+# `sonnet` is an alias the pinned claude CLI resolves, not a pinned id. On
+# claude-code 2.1.281 it is still Sonnet 5; only a CLI that knows
+# `claude-sonnet-5-5` (2.1.293 was the first seen) runs Sonnet 5.5. Check the
+# observed model the scorer prints before reading a score as Sonnet 5.5's.
+#
+# THE MODEL IS PART OF THE MEASUREMENT. evals/verifier-seed-v1/suite.yaml
+# records this workflow's id and each phase's model, and the test fails when
+# they disagree. Change the model here and bump the suite's version with it.
+
+phases:
+  - id: verify
+    name: Verify the pinned checkout independently
+    order: 1
+    execution_type: sequential
+    input_artifacts: []
+    output_artifacts:
+      - markdown
+    timeout_seconds: 3600
+    delivers_repo_changes: false
+    # A review: no review_verdict fails the phase instead of completing it, so
+    # the eval scores ERROR rather than a FAIL nobody judged (PC-116, #1780).
+    requires_verdict: true
+    allowed_tools:
+      - Read
+      - Grep
+      - Glob
+      - Bash
+      - Write
+    agent:
+      provider: claude
+      model: sonnet
+    prompt_file: phases/verify.md

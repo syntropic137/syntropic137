@@ -1,6 +1,6 @@
 [project]
 name = "syntropic137"
-version = "0.33.1"
+version = "1.0.0"
 description = "Event-sourced system for tracking AI agent work across workflows"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -39,6 +39,9 @@ dev = [
     "pyright>=1.1.408",
     # Keep feedback available to API codegen and tests; production installs opt in.
     "ui-feedback-api",
+    # The load-test contract and its tests (#1310). No image installs the root
+    # project, so this reaches developers and CI only.
+    "syn-perf",
 ]
 
 [build-system]
@@ -65,7 +68,7 @@ constraint-dependencies = [
 
 [tool.uv.workspace]
 members = ["apps/*", "packages/*"]
-exclude = ["apps/syn-cli-node", "apps/syn-dashboard-ui", "apps/syn-docs", "apps/syn-pulse-ui", "packages/openclaw-plugin"]
+exclude = ["apps/syn-cli-node", "apps/syn-dashboard-ui", "apps/syn-desktop", "apps/syn-docs", "apps/syn-landing", "apps/syn-pulse-ui", "apps/syn-ui", "packages/openclaw-plugin", "packages/syn-ui"]
 
 [tool.uv.sources]
 apss-session-capture = { path = "lib/agent-paradise-standards-system/standards/v1/APS-V1-0004-session-capture/python" }
@@ -95,6 +98,8 @@ exclude = [
     "__pycache__/",
     # Separate nested git repo checked out inside this tree; not our code.
     "markdown-explorer/",
+    # Design canvas generators: reference geometry to port, never run or shipped.
+    "design/reference/",
 ]
 
 [tool.ruff.lint]
@@ -155,6 +160,7 @@ testpaths = [
     "packages/syn-shared/tests",
     "packages/syn-shared/src",  # co-located tests, same convention
     "packages/syn-tokens/tests",
+    "packages/syn-perf/tests",
     "scripts/workflows",
     "scripts/tests",
     "infra/scripts/tests",

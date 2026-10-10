@@ -222,6 +222,7 @@ class SidecarConfig:
 
     # Identity
     workspace_id: str
+    execution_id: str
 
     # Proxy settings
     listen_port: int = 8080
@@ -268,6 +269,33 @@ class IsolationHandle:
     proxy_url: str | None = None  # Sidecar proxy URL if applicable
     workspace_path: str | None = None  # Path to workspace inside isolation
     host_workspace_path: str | None = None  # Path on host mounted into container
+
+
+@dataclass(frozen=True)
+class WorkspaceUsage:
+    """What one workspace consumed, read once as the isolation was destroyed.
+
+    Returned by IsolationBackendPort.destroy(). The provider measures it at
+    teardown - the container's own cgroup v2 counters before it stops, the
+    workspace dir's size before it is deleted, the paths the delete could not
+    remove - so the counters are cumulative and exact, with no sampler.
+
+    Every field may be None, independently: a read that failed is unknown, not
+    zero, and a failed read never fails teardown. Lane 2 telemetry only - this
+    never reaches an aggregate.
+    """
+
+    cpu_usage_seconds: float | None = None
+    cpu_throttled_seconds: float | None = None
+    nr_throttled: int | None = None
+    memory_peak_bytes: int | None = None
+    oom_kills: int | None = None
+    disk_bytes_at_teardown: int | None = None
+    #: Paths the workspace-dir delete could not remove. None when the delete
+    #: was not observed; () when it was, and removed everything.
+    delete_failures: tuple[str, ...] | None = None
+    net_rx_bytes: int | None = None
+    net_tx_bytes: int | None = None
 
 
 @dataclass(frozen=True)

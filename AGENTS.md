@@ -29,6 +29,10 @@ stub bridge leaves this file 3 levels of nested imports, a copy leaves 4.
 
 Syntropic137 - orchestrates AI agent execution in isolated Docker workspaces and captures every event for observability. Two capabilities: **orchestration** (workspace lifecycle, secure token handling, GitHub App integration) and **observability** (tool use, tokens, costs, errors - all streamed to a real-time dashboard).
 
+**North star:** 20 concurrent executions now, 100 as soon as possible, 1,000 for production. Judge every design against it: read [docs/north-star.md](docs/north-star.md).
+
+**Purpose:** scale quality development - reach the quality bar first, then make the same bar cheaper and faster. Orchestrating or dogfooding the platform: read [.claude/skills/orchestrating/SKILL.md](.claude/skills/orchestrating/SKILL.md).
+
 The end goal: a `gh`-style CLI (`syn`) that integrates with Claude Code and OpenClaw for agentic workflow automation.
 
 ## Architecture
@@ -47,6 +51,7 @@ syntropic137/
 │   ├── syn-cli-node/          # CLI tool ("syn") - Node.js, HTTP client for syn-api
 │   ├── syn-dashboard-ui/      # Dashboard frontend (Vite + React) - operational UI
 │   ├── syn-docs/              # Public-facing documentation site (Next.js + Fumadocs)
+│   ├── syn-landing/           # syntropic137.com marketing site (Vite + React, Vercel; see its AGENTS.md)
 ├── packages/
 │   ├── syn-domain/            # Domain events, aggregates, ports
 │   ├── syn-adapters/          # Orchestration + observability adapters
@@ -294,7 +299,7 @@ All TODO and FIXME comments MUST reference a GitHub issue:
 
 ### Scratch Documentation Policy
 
-Root-level `.md` files (except `README.md`, `AGENTS.md`, `CLAUDE.md`) are scratch - never commit them. Permanent docs go in `docs/` or `docs/adrs/`.
+Root-level `.md` files (except `README.md`, `AGENTS.md`, `CLAUDE.md`, `CHANGELOG.md`) are scratch - never commit them. Permanent docs go in `docs/` or `docs/adrs/`.
 
 ## Key Concepts
 
@@ -346,6 +351,8 @@ Goal: manual testing finds zero bugs - everything caught by automated tests.
 - **E2E**: Real API calls (expensive, few)
 
 Test fixtures auto-detect infrastructure: env vars > test-stack (port 15432) > testcontainers.
+
+**In-memory adapters and test doubles in production code:** they must refuse to construct outside test/offline, and a fitness test enforces it for the classes it can see. Mocks inside test files are out of scope. Read [ADR-060 s5](docs/adrs/ADR-060-restart-safe-trigger-deduplication.md#5-inmemoryadapter-base-class-production-guard) before adding one.
 
 ## Event Sourcing Architecture
 
@@ -550,6 +557,21 @@ Submodules (agentic-workspace, event-sourcing-platform) have independent version
 - [Security Practices](docs/security-practices.md) - supply chain hardening, Docker runtime security, credential management
 - [GitHub App Security Model](docs/deployment/github-app-security.md) - PEM handling, token lifecycle, network isolation, token injector architecture
 
+## Design
+
+UI work starts at [design/README.md](design/README.md): the boards, the spec and the design-to-code loop. Three rules:
+
+- **Boards are a spec, not code.** Read `design/canvas/*.dc.html` for layout, copy, tokens, data and behaviour; never ship them.
+- **Code is the source of truth after a screen ships.** Its board is frozen history; small tweaks go straight to code.
+- **No Storybook.** The component reference is `/dev/components` and `/dev/patterns` in apps/syn-ui, plus Playwright screenshot tests of both.
+
+## Brand
+
+The brand kit is [design/brand/BRAND.md](design/brand/BRAND.md) (v2.0): logo, colour, type, motion, voice, surfaces and every asset. Follow it for anything user-facing.
+
+- **Harness claims.** Say "Claude Code and Codex" or "multi-harness"; never "any harness" as a present-tense claim (more harnesses are the goal).
+- **No Claude-only install paths.** Claude Code plugins are deprecated org-wide in favour of multi-harness skills (`npx skills add syntropic137/syntropic137-skills`).
+
 ## Tooling
 
 - **uv** for Python package management (workspaces)
@@ -590,8 +612,12 @@ just preflight-agent # The subset of preflight that runs INSIDE an agent
                      # workspace container. Use this one only there: the image
                      # ships just, uv and node and nothing else, so vsa,
                      # cargo, pnpm, docker and registry credentials are all
-                     # absent and seven gates cannot run at all (#1109). On a
-                     # dev machine run the full `just preflight` instead.
+                     # absent and seven gates cannot run at all (#1109).
+                     # All of fitness runs: the APS thresholds via
+                     # scripts/agent-fitness.sh (#1498) AND the pytest
+                     # ci/fitness invariants. Docker-backed fitness tests
+                     # skip there as a listed `NOT RUN`; CI runs them.
+                     # On a dev machine run the full `just preflight` instead.
 ```
 
 `scripts/check_ci_parity.py` (inside `preflight`) discovers every workflow that
@@ -606,3 +632,25 @@ not CI-shaped: some of its targets are deliberately more lenient than CI's.
 **Git hooks:** `.githooks/pre-push` runs the fast checks automatically. Wire it up once with `just setup-hooks` after cloning.
 
 **For small fixes on already-merged PRs** (formatting nits, Copilot review comments): push directly to `main` with `git push origin <branch>:main` rather than opening a new PR. Keeps the release chain unblocked.
+
+## Verification gates
+
+The gates an agent workflow's verify and fix phases run on a change to this
+repository, inside an agent workspace. The SDLC workflows read this section
+instead of naming commands themselves, because they run on other repositories
+too ([workflows/sdlc/README.md](workflows/sdlc/README.md#verification-gates)).
+The first fenced block is the list: one command per line, run from the repo root.
+
+```
+just preflight-agent
+uv run pytest -m unit -q
+```
+
+- `preflight-agent`, not `qa-ci` or `preflight`: seven gates need binaries the
+  workspace image lacks (#1109), and CI runs those. Passing here does not
+  promise a green CI.
+- It runs all of fitness. The first run installs Rust and builds `aps` (~6
+  minutes). A `FITNESS NOT RUN:` line is not a pass; a test listed as `NOT RUN`
+  (docker-backed) is settled by CI on the same head SHA.
+- New Python test modules need the `unit` marker (`architecture` under
+  `ci/fitness/`), or the second gate collects zero tests and goes green.

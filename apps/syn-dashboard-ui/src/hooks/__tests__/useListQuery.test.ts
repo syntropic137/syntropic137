@@ -18,7 +18,7 @@ import { createElement, type ReactNode } from 'react'
 import { MemoryRouter } from 'react-router-dom'
 
 import type { ListQuery } from '../../api/listQuery'
-import { LIST_PAGE_SIZE, useListQuery } from '../useListQuery'
+import { LIST_PAGE_SIZE, RUN_LIST_PAGE_SIZES, useListQuery } from '../useListQuery'
 
 const SEARCH_DEBOUNCE_MS = 300
 
@@ -61,6 +61,17 @@ describe('useListQuery', () => {
     expect(result.current.query.page_size).toBe(50)
     expect(result.current.query.statuses).toBeUndefined()
     expect(result.current.query.q).toBeUndefined()
+  })
+
+  it('asks for the page size a surface names instead of the shared one', () => {
+    // The Executions/Sessions picker offers 100 (feedback 60d9f990); the
+    // chosen size must reach the query, not the shared default.
+    const { result } = renderHook(() => useListQuery('', 100), {
+      wrapper: wrapperAt('/'),
+    })
+
+    expect(RUN_LIST_PAGE_SIZES).toContain(100)
+    expect(result.current.query.page_size).toBe(100)
   })
 
   it('carries the default window as a bound the API will accept', () => {
@@ -150,6 +161,19 @@ describe('useListQuery', () => {
     // it arrives as a scope key and must reset the page just as a chip does.
     rerender({ scope: 'wf-2' })
 
+    expect(result.current.query.page).toBe(1)
+  })
+
+  it('returning to a collection seen before lands on its first page, not its old page', () => {
+    // Codex review on #1566: the held page was remembered against the
+    // collection it was set in, so going back to that collection restored it.
+    const { result } = renderHook(() => useListQuery(''), { wrapper: wrapperAt('/') })
+
+    act(() => result.current.setPage(3))
+    act(() => result.current.toggleStatus('failed'))
+    act(() => result.current.toggleStatus('failed'))
+
+    expect(result.current.query.statuses).toBeUndefined()
     expect(result.current.query.page).toBe(1)
   })
 

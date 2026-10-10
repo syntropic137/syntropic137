@@ -9,13 +9,29 @@ from pydantic import BaseModel, Field, computed_field
 
 # Runtime import: Pydantic resolves the field annotations below, and
 # `PhaseActivityInfo` is also called at runtime as a field default.
+from syn_api.execution_budget import StartPath  # noqa: TC001
 from syn_api.model_identity import CostModelKey, ObservedModelId  # noqa: TC001
-from syn_api.types import BranchObservationInfo, PhaseActivityInfo
+from syn_api.types import (
+    BranchObservationInfo,
+    ExecutionEvalRunResponse,
+    ExecutionSkillUseSummary,
+    PhaseActivityInfo,
+    PhaseProgressInfo,
+    PhaseSkillUseInfo,
+    PhaseStartConfig,
+    PlannedPhaseInfo,
+    ReadModelStatus,
+    StartPinsStatus,
+)
 from syn_domain.contexts.orchestration import (
+    DelegationFailure,
     FailureClassification,
+    QuarantinedRef,
     ReportedFailureReason,
     ResumeStartStatus,  # Pydantic resolves it at runtime
+    ReviewVerdict,
     SideEffectStatus,
+    StartStatus,
 )
 from syn_shared.display import EM_DASH
 from syn_shared.observed_model import format_observed_model
@@ -87,6 +103,13 @@ class PhaseExecutionInfo(BaseModel):
     """What this phase's agent said happened to its external writes, ``None``
     when it said nothing. A report, never a measurement, and it never decides
     whether the phase completed."""
+    failure_classification: FailureClassification | None = None
+    """Why this phase failed - ``platform``, ``task``, ``correct_refusal`` or
+    ``unclassified`` - and ``None`` exactly when it did not fail. The same fact
+    as the execution's ``failure_classification``, at the phase it failed in."""
+    reported_failure_reason: ReportedFailureReason | None = None
+    """What this phase's agent SAID caused its failure, ``None`` when it said
+    nothing. A report beside the classification, never a replacement for it."""
     model: ObservedModelId | None = None
     """The model the harness REPORTED for this phase, or null (ADR-067 D9).
 
@@ -95,6 +118,11 @@ class PhaseExecutionInfo(BaseModel):
     """
     requested_model: str | None
     """The model the phase REQUESTED (often an alias), or null if not recorded."""
+    agent_provider: str | None = None
+    """The provider of the agent that PRODUCED this phase's result, or null
+    (PC-83). Differs from the declared provider when the phase fell back to its
+    ``fallback_agent`` on capacity, quota or a content refusal; ``requested_model`` is then the
+    fallback's model. Null when nothing recorded it."""
     cost_by_model: dict[CostModelKey, str] = Field(default_factory=dict)
     agent_session_ids: list[str] | None = None
     """The agent-native session ids this phase's capture confirmed, in the order
@@ -145,6 +173,17 @@ class PhaseExecutionInfo(BaseModel):
     identical again. What no record claims is who moved a ref: git does not
     carry that, so this reports the two readings and stops.
     """
+    pinned_at_start: PhaseStartConfig | None = None
+    """The tools, skills and model this phase had when its execution started.
+
+    Null is never a guess from the workflow as it stands now; `start_pins_status`
+    says whether it is null because nothing was recorded or because the start
+    event could not be read.
+    """
+    start_pins_status: StartPinsStatus = "unavailable"
+    skill_use: PhaseSkillUseInfo = Field(default_factory=PhaseSkillUseInfo)
+    """Which declared skills this phase invoked, and whether that is knowable
+    at all: codex phases report ``not_observable``, never zero (#1269)."""
     operations: list[PhaseOperationInfo] = Field(default_factory=list)
     activity: PhaseActivityInfo = Field(default_factory=PhaseActivityInfo)
     """What this phase was doing when it ended, and against what budget (#1262).
@@ -161,12 +200,72 @@ class PhaseExecutionInfo(BaseModel):
 
     @computed_field(
         description="The model for humans: the reported id verbatim, or "
-        "'unknown (requested: <alias>)', or 'unknown' (ADR-067 D9)."
+        "'<alias> (requested)', or 'unknown' (ADR-067 D9)."
     )
     @property
     def model_display(self) -> str:
         """Derived, never passed in, so it cannot contradict ``model``."""
         return format_observed_model(self.model, self.requested_model)
+
+
+class ExecutionStartQueueInfo(BaseModel):
+    """Where a start stands in the execution budget, before its execution exists (#1557).
+
+    Every start path - direct, trigger and resume - claims one of
+    ``SYN_EXECUTION_MAX_CONCURRENT`` slots. A start that finds none free waits
+    here, first come first served, and has no execution record yet; this is
+    what it shows instead of a 404.
+    """
+
+    path: StartPath
+    """Which entrance the start came through: ``direct``, ``trigger`` or ``resume``."""
+    position: int | None
+    """1 is next to start. ``None`` once the start holds a slot and is opening
+    its execution, or when no process holds it (see ``held``)."""
+    held: bool = True
+    """Whether this API process holds the start in its budget. ``False`` for a
+    durable direct request no process has picked up yet - after a restart,
+    until the request ProcessManager offers it again."""
+    start_status: StartStatus | None = None
+    """The durable request record's status, for a direct start (#1557):
+    ``pending``, ``paused``, ``retryable`` and ``dispatched`` are still owed a
+    start; ``failed`` is settled, with ``status_reason``; ``withdrawn`` was
+    cancelled before it started (#1650) and never starts."""
+    status_reason: str | None = None
+    """Why the last attempt at a direct start did not start it, if one failed."""
+    running: int
+    """Starts holding a slot in this process."""
+    waiting: int
+    """Starts queued behind the limit in this process."""
+    limit: int
+    """``SYN_EXECUTION_MAX_CONCURRENT``."""
+    queued_at: datetime
+    """When the start was accepted and claimed its place."""
+
+    @computed_field(description="Human-readable position, e.g. 'queued 2 of 3 (4/4 running)'.")
+    @property
+    def position_display(self) -> str:
+        if not self.held:
+            return (
+                f"recorded, {self.start_status or 'pending'} ({self.running}/{self.limit} running)"
+            )
+        if self.position is None:
+            return f"starting ({self.running}/{self.limit} running)"
+        return f"queued {self.position} of {self.waiting} ({self.running}/{self.limit} running)"
+
+    @computed_field(
+        description="Why it has not started: 'slots full 4/4', 'admission paused', "
+        "'starting' or 'awaiting pickup (<status>)' (PC-124)."
+    )
+    @property
+    def reason_display(self) -> str:
+        if self.start_status == "paused":
+            return "admission paused"
+        if not self.held:
+            return f"awaiting pickup ({self.start_status or 'pending'})"
+        if self.position is None:
+            return "starting"
+        return f"slots full {self.running}/{self.limit}"
 
 
 class ResumeStartInfo(BaseModel):
@@ -194,6 +293,10 @@ class ResumeStartInfo(BaseModel):
 
     Set only while ``status`` is ``dispatched``; a failed attempt writes its
     outcome over the record it was dispatched from, which had none."""
+    start_queue: ExecutionStartQueueInfo | None = None
+    """Where the child's start stands in the execution budget, while it waits
+    for a slot or opens its execution in this process (#1557). A ``dispatched``
+    start with this set is queued, not lost, and is not re-offered."""
 
 
 class ExecutionDetailResponse(BaseModel):
@@ -214,6 +317,17 @@ class ExecutionDetailResponse(BaseModel):
     """
     completed_phases: int = 0
     """Phases that finished. Same field, same meaning, as on the list view."""
+    phase_progress: PhaseProgressInfo
+    """Progress with skipped repair rounds accounted for; what clients render."""
+    phase_plan: list[PlannedPhaseInfo]
+    """Every phase the run declared, in order, with where each stands: ran here,
+    ``pending``, ``skipped`` or ``inherited`` (feedback cee46909).
+
+    Read off the same start event as ``total_phases``, so a run with declared
+    phases lists exactly that many. Draw the timeline from this, not from
+    ``phases``, which holds only the phases that started.
+    """
+
     total_input_tokens: int
     total_output_tokens: int
     total_cache_creation_tokens: int
@@ -261,6 +375,13 @@ class ExecutionDetailResponse(BaseModel):
     route actually returns, so a value that stops short of here never reaches
     a client.
     """
+    delegation_failure: DelegationFailure | None = None
+    """Which required delegate did not happen, and why (#894); `None` for every
+    other failure. `reason` is `not_attempted`, `failed` or `unverifiable`, and
+    `attempts` names each delegate the platform observed - its id, target
+    harness, outcome, exit code and launch-failure reason - so a client never
+    parses `error_message` for them. Observed by the platform, never the
+    agent's word."""
     reported_failure_reason: ReportedFailureReason | None = None
     """The word the failing phase wrote for what caused it, if it wrote one (#1392).
 
@@ -271,6 +392,12 @@ class ExecutionDetailResponse(BaseModel):
     dashboard with nothing to quote falls back to showing the measurement
     alone, which is the state #1392 was opened about.
     """
+    quarantined_refs: list[QuarantinedRef] = Field(default_factory=list)
+    """Where the failed phase's unpushed work was saved, one per repository (#1547).
+
+    Each names the `refs/syn/lost/<execution>/<phase>` ref and the commit it
+    holds, so a client can recover the work without parsing `error_message`.
+    """
     deliverable_produced: bool = False
     """True when any phase stored an artifact, whatever `status` says.
 
@@ -280,6 +407,9 @@ class ExecutionDetailResponse(BaseModel):
     per-phase field here, to the phases this execution ran: a resumed run's
     inherited phases are on its parent.
     """
+    review_verdict: ReviewVerdict | None = None
+    """The last review verdict the run reported (PC-63). On a `completed` run,
+    `blocked` means it completed with unresolved findings, not certified."""
     reported_side_effects: SideEffectStatus | None = None
     """The most severe side-effect status any phase reported, ``None`` if none did.
 
@@ -288,6 +418,8 @@ class ExecutionDetailResponse(BaseModel):
     write-back was refused - grant the permission, do not re-run the work.
     """
     repos: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
+    """The execution's current tags, normalised and sorted (#967)."""
     task: str | None = None
     """What this run was asked to do -- the ``$ARGUMENTS`` it was dispatched
     with, or ``None`` if the workflow takes none (#1307)."""
@@ -298,6 +430,8 @@ class ExecutionDetailResponse(BaseModel):
     Enough to re-dispatch the run: a caller retrying one that died on the
     platform posts these back rather than reconstructing them from its own
     notes (#1307)."""
+    eval: ExecutionEvalRunResponse | None = None
+    """The eval this execution is a current run of, with its verdict. Null in no eval."""
     resume_start: ResumeStartInfo | None = None
     """The start of the child this execution admitted when it was resumed.
 
@@ -305,6 +439,22 @@ class ExecutionDetailResponse(BaseModel):
     because the record is keyed by the parent and a child that failed to start
     has no execution of its own to show it on (#1480).
     """
+    start_queue: ExecutionStartQueueInfo | None = None
+    """Set, with ``status`` ``queued`` or ``starting``, for an execution that has
+    been accepted but not yet opened, because it is waiting for a slot in the
+    execution budget (#1557). ``None`` for every execution that exists."""
+    read_model_status: ReadModelStatus | None = None
+    """Whether the execution detail read model is rebuilding, so a page missing
+    recent phases can say why instead of looking broken."""
+
+    @computed_field(
+        description="Skill use across every phase that started: declared, "
+        "invoked anywhere, never invoked, and not knowable (feedback 01308bcf)."
+    )
+    @property
+    def skill_use(self) -> ExecutionSkillUseSummary:
+        """Derived from `phases`, so it cannot disagree with the per-phase rows."""
+        return ExecutionSkillUseSummary.of([p.skill_use for p in self.phases])
 
 
 class ExecutionSummaryResponse(BaseModel):
@@ -325,6 +475,8 @@ class ExecutionSummaryResponse(BaseModel):
     completed_at: str | None = None
     completed_phases: int = 0
     total_phases: int = 0
+    phase_progress: PhaseProgressInfo
+    """Progress with skipped repair rounds accounted for; what clients render."""
     total_tokens: int
     total_tokens_display: str = "0"
     total_input_tokens: int
@@ -363,7 +515,42 @@ class ExecutionSummaryResponse(BaseModel):
     alone, which is the state #1392 was opened about.
     """
     repos: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
+    """The execution's current tags, normalised and sorted (#967)."""
     repos_display: str | None = None
+    eval: ExecutionEvalRunResponse | None = None
+    """The eval this execution is a current run of, with its verdict. Null in no eval.
+
+    The same shape ``GET /executions/{id}`` carries, so a list row and the
+    execution page cannot describe the run differently."""
+    start_queue: ExecutionStartQueueInfo | None = None
+    """Set exactly when ``status`` is ``queued``: an accepted start with no
+    execution yet, and where it stands (PC-124). Same block as on the detail."""
+
+
+class ExecutionBudgetInfo(BaseModel):
+    """How full the execution budget is right now, for the app bar (PC-124).
+
+    ``running`` and ``limit`` are this API process's budget. ``queued`` is
+    every start the list reports as ``queued``: waiting here for a slot, or
+    recorded durably and not yet picked up by any process.
+    """
+
+    running: int
+    queued: int
+    limit: int
+    """``SYN_EXECUTION_MAX_CONCURRENT``."""
+    admission_paused: bool | None
+    """Maintenance mode is on: new starts are accepted and held, not started.
+    ``None`` when the flag could not be read, which is not a statement either way."""
+
+    @computed_field(description="e.g. '2 running / 3 queued / cap 4'.")
+    @property
+    def display(self) -> str:
+        text = f"{self.running} running / {self.queued} queued / cap {self.limit}"
+        if self.admission_paused is None:
+            return f"{text} (admission state unknown)"
+        return f"{text} (admission paused)" if self.admission_paused else text
 
 
 class ExecutionListResponse(BaseModel):
@@ -383,6 +570,8 @@ class ExecutionListResponse(BaseModel):
     row and returns the undated ones. Non-zero means rows exist that this
     filter could not judge, NOT that they failed it.
     """
+    budget: ExecutionBudgetInfo | None = None
+    """The execution budget's occupancy (PC-124). Not filtered by the request."""
     status_counts: dict[str, int] = Field(default_factory=dict)
     """Matching executions tallied by status, ignoring the status filter itself.
 
@@ -391,3 +580,6 @@ class ExecutionListResponse(BaseModel):
     rows cannot answer that: it only ever knows about the status already
     selected, and only about one page of it.
     """
+    read_model_status: ReadModelStatus | None = None
+    """Whether the execution list read model is rebuilding. While it is, this
+    page is a partial view of history and the newest runs may be missing."""

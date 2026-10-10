@@ -25,7 +25,7 @@ same defect as the constant zero, wearing a plausible value.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -142,11 +142,42 @@ def _a_tool_call_that_took(
     ]
 
 
+class _Transaction:
+    async def __aenter__(self) -> None:
+        return None
+
+    async def __aexit__(self, *_exc: object) -> None:
+        return None
+
+
 class _Connection:
     def __init__(self, rows: Sequence[_Row]) -> None:
         self._rows = rows
 
-    async def fetch(self, *_args: object) -> Sequence[_Row]:
+    def transaction(self, *, isolation: str, readonly: bool) -> _Transaction:
+        """``agent_event_span.custom_plans`` wraps the bounded read in one read-only snapshot."""
+        assert (isolation, readonly) == ("repeatable_read", True)
+        return _Transaction()
+
+    async def execute(self, query: str, *_args: object) -> str:
+        # custom_plans: the plan setting, its one statement after the BEGIN.
+        assert "plan_cache_mode" in query, query
+        return "SET"
+
+    async def fetch(
+        self, query: str, *args: object
+    ) -> Sequence[_Row] | list[dict[str, date | None]]:
+        if "agent_event_day_rollup" in query:
+            # The E2 span lookup: the UTC days these rows fall on, as the day
+            # rollup would answer it.
+            days = [row.time.astimezone(UTC).date() for row in self._rows]
+            return [{"first_day": min(days, default=None), "last_day": max(days, default=None)}]
+        if "time >= $" in query:
+            # A bounded read: honour the span it bound, as Postgres would.
+            lower, upper = args[-2], args[-1]
+            assert isinstance(lower, datetime)
+            assert isinstance(upper, datetime)
+            return [row for row in self._rows if lower <= row.time < upper]
         return self._rows
 
 
@@ -372,7 +403,7 @@ class _CodexRows:
     def __init__(self) -> None:
         self.rows: list[_Row] = []
 
-    def note_agent_activity(self) -> None:
+    def note_agent_activity(self, *, changed_nothing: bool = False) -> None:
         # Part of the recorder protocol; it writes no row, so nothing in this
         # file - which is entirely about rows and their timestamps - reads it (#1303).
         return
@@ -383,15 +414,30 @@ class _CodexRows:
         return
 
     async def record_tool_started(
-        self, tool_name: str, tool_use_id: str, input_preview: str
+        self,
+        tool_name: str,
+        tool_use_id: str,
+        input_preview: str,
+        skill_name: str | None = None,
+        *,
+        changes_nothing: bool = False,
     ) -> None:
         self._append(
             TOOL_EXECUTION_STARTED,
             _Payload(tool_name=tool_name, tool_use_id=tool_use_id, input_preview=input_preview),
         )
 
+    async def note_command_ended(self, *_args: object) -> None:
+        return None
+
     async def record_tool_completed(
-        self, tool_name: str, tool_use_id: str, success: bool, output_preview: str | None
+        self,
+        tool_name: str,
+        tool_use_id: str,
+        success: bool,
+        output_preview: str | None,
+        *,
+        changes_nothing: bool = False,
     ) -> None:
         self._append(
             TOOL_EXECUTION_COMPLETED,

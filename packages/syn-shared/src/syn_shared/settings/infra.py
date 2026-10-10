@@ -17,8 +17,19 @@ Environment Variables:
 
 from __future__ import annotations
 
+from enum import StrEnum
+
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class GatewayUI(StrEnum):
+    """Which dashboard the gateway serves at ``/`` (docs/syn-ui-rollout.md)."""
+
+    NEXT = "next"
+    """syn-ui (apps/syn-ui) at /; /next redirects to /."""
+    LEGACY = "legacy"
+    """One-release opt-out: the React dashboard at /, syn-ui at /next."""
 
 
 class InfraSettings(BaseSettings):
@@ -180,16 +191,65 @@ class InfraSettings(BaseSettings):
     # RESOURCE LIMITS
     # =========================================================================
 
-    api_memory_limit: str = Field(default="512m", description="API memory limit.")
-    api_cpu_limit: str = Field(default="0.5", description="API CPU limit.")
+    api_memory_limit: str = Field(
+        default="2g",
+        description=(
+            "API memory limit. The API hosts every execution, so when the kernel"
+            " OOM-kills it every in-flight run dies with it (#1552: killed at"
+            " ~443MB anon RSS with 8 runs under the previous default). 2g is the"
+            " value flywheel was mitigated with, not one derived from a"
+            " measured per-run slope. Size SYN_EXECUTION_MAX_CONCURRENT to it."
+        ),
+    )
+    api_cpu_limit: str = Field(
+        default="2.0",
+        description=(
+            "API CPU limit, in cores. The API serves HTTP, runs every projection"
+            " and orchestrates every execution, so it must not be capped below"
+            " the work it dispatches (#1600: at 0.5 a /sessions read took 55 s"
+            " with 9 runs on 16 cores). A limit is a ceiling, not a"
+            " reservation: on a 16-core host API + Postgres at the defaults can"
+            " use 4 cores, and workspaces (2 each) contend for the rest. When"
+            " they oversubscribe the host, CONTROL_PLANE_CPU_SHARES decides who"
+            " wins. Hosts above 16 cores can raise this with the run count."
+        ),
+    )
 
     ui_memory_limit: str = Field(default="256m", description="UI (nginx) memory limit.")
     ui_cpu_limit: str = Field(default="0.25", description="UI (nginx) CPU limit.")
 
     postgres_memory_limit: str = Field(default="1g", description="PostgreSQL memory limit.")
-    postgres_cpu_limit: str = Field(default="1.0", description="PostgreSQL CPU limit.")
+    postgres_cpu_limit: str = Field(
+        default="2.0",
+        description=(
+            "PostgreSQL CPU limit, in cores. Every read and projection write goes"
+            " through it, so it is sized with the API, not with the sidecars."
+            " Raise both together on hosts with more than 16 cores."
+        ),
+    )
 
-    event_store_memory_limit: str = Field(default="512m", description="Event Store memory limit.")
+    event_store_memory_limit: str = Field(
+        default="2g",
+        description=(
+            "Event Store memory limit. A projection rebuild replays from nonce"
+            " 0 and the store's memory grows with stream length x subscribers"
+            " (#1553: OOM-killed in a loop at ~520MB under the previous default;"
+            " stable at 749MB under 2g for a 46k-event store). A stopgap until"
+            " the store streams catch-up reads with bounded buffers."
+        ),
+    )
+
+    control_plane_cpu_shares: int = Field(
+        default=4096,
+        description=(
+            "CPU weight (docker cpu_shares) of the control plane: api,"
+            " timescaledb, event-store and gateway. Agent workspaces run at"
+            " Docker's default of 1024, so under contention the control plane"
+            " gets 4x a workspace's share of the host. A limit caps a"
+            " container; this decides who wins when the limits together exceed"
+            " the host's cores, which they do once workspaces x 2 > cores."
+        ),
+    )
 
     collector_memory_limit: str = Field(default="256m", description="Collector memory limit.")
     collector_cpu_limit: str = Field(default="0.25", description="Collector CPU limit.")
@@ -221,6 +281,17 @@ class InfraSettings(BaseSettings):
             " address outside 127.0.0.0/8 and ::1 exposes the dashboard and API"
             " to that network, so the gateway requires SYN_API_PASSWORD and"
             " refuses to start without one."
+        ),
+    )
+
+    syn_gateway_ui: GatewayUI = Field(
+        default=GatewayUI.NEXT,
+        description=(
+            "Dashboard the gateway serves at /. 'next' (default) serves the"
+            " Svelte dashboard (apps/syn-ui); /next redirects to / for old"
+            " bookmarks. 'legacy' is a one-release opt-out that restores the"
+            " previous layout: the React dashboard at / and the Svelte one at"
+            " /next. Any other value stops the gateway from starting."
         ),
     )
 

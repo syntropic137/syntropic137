@@ -44,6 +44,7 @@ def build_command_from_definition(
     name_override: str | None = None,
     version: str | None = None,
     source_digest: str | None = None,
+    package_name: str | None = None,
     force: bool = False,
 ) -> CreateWorkflowTemplateCommand:
     """Build a CreateWorkflowTemplateCommand from a parsed WorkflowDefinition.
@@ -54,6 +55,7 @@ def build_command_from_definition(
         name_override: If set, overrides ``definition.name``.
         version: Package version being installed, recorded for provenance (#822).
         source_digest: Resolved source commit SHA, recorded for provenance (#822).
+        package_name: Package that installed this definition (#1588).
         force: Overwrite an already-installed matching version (#822).
 
     Returns:
@@ -66,6 +68,7 @@ def build_command_from_definition(
     return CreateWorkflowTemplateCommand(
         version=version,
         source_digest=source_digest,
+        package_name=package_name,
         force=force,
         aggregate_id=workflow_id_override or definition.id,
         name=name_override or definition.name,
@@ -87,4 +90,6 @@ def build_command_from_definition(
         # claude_plugins into the create command so the aggregate persists
         # them, mirroring the claude_plugins wiring above.
         skills=list(definition.skills),
+        tags=definition.tags,
+        default_eval_id=definition.default_eval_id,
     )

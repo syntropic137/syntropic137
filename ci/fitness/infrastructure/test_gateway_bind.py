@@ -8,7 +8,9 @@ as happily on the hand-edit that `setup update` overwrote.
 
 `preflight` already requires docker (check-default-workspace-image pulls and
 runs the pinned image), so these do not skip when it is absent: a check that
-skips is a check that cannot fail.
+skips is a check that cannot fail. The one exception is `preflight-agent`,
+whose image has no docker at all (#1109): there the `host_tool` marker turns
+them into a listed `NOT RUN` skip, and CI still runs them.
 
 Scope: this file is about docker's interpolation of the PUBLISHED file, and
 nothing else. Two neighbouring properties that it cannot see, and which would
@@ -31,7 +33,7 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.architecture
+pytestmark = [pytest.mark.architecture, pytest.mark.host_tool("docker")]
 
 _ROOT = Path(__file__).resolve().parents[3]
 _PUBLISHED = _ROOT / "docker" / "docker-compose.syntropic137.yaml"

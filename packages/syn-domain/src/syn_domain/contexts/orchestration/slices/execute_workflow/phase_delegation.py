@@ -1,0 +1,150 @@
+"""Whether a phase that required a delegate actually delegated (#894).
+
+THE FAILURE THIS EXISTS TO STOP. A phase that needed its work done by the
+other harness, whose delegate never ran, or ran and failed, completed green: the agent did the work
+itself, exited 0, wrote ``TASK_RESULT success=true``, and the only trace of
+the missing delegate was a clause in a free-text comment. Exit status and the
+agent's own report are the only two signals `agent_run_outcome` consults, and
+neither of them can see a delegate.
+
+WHERE THE EVIDENCE COMES FROM, AND WHERE IT DOES NOT. Not from shell text: a
+gate built on recognising ``codex exec`` in a command was removed in review of
+#896 as unsound (see ``syn_shared.delegation``). The delegate reports itself,
+through the platform's ``syn-delegate`` shim, into the workspace's child
+journal - a format agentic-workspace owns. This module reads it only through
+`DelegationEvidencePort` (in ``orchestration.ports``), already normalised to
+`DelegationAttempt`; nothing here knows what a claude or codex transcript looks like.
+
+THE RULE. Two declarations, and only one of them is gated. ``allow_delegation``
+is a PERMISSION - the agent may delegate, and a phase that does the work itself
+is a success. ``require_delegation`` is the obligation, and only it is asked
+here: at least one delegate to the harness the phase's provider delegates TO
+(`AgentConfiguration.required_delegate`) must have reported success. A
+delegate to any other harness - a claude phase's claude child - is not the
+delegation the phase declared and proves nothing about it. Evidence that cannot be read is not evidence of success - an
+unverifiable delegation fails the phase the same way a missing one does, under
+its own reason, because "we could not tell" reading as green is exactly the
+defect.
+
+Every failure here is a platform-detected fact, never the agent's word, so it
+is classified `PLATFORM` like any other (see `failure_account`), and carries
+its typed `DelegationFailure` - reason and attempts - which `failure_account`
+hands to every sink. It is deliberately NOT a `ReportedFailureReason`: that
+enum is "the agent's own word, never an inference".
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    DelegationFailureReason,
+)
+from syn_domain.contexts.orchestration.ports.DelegationEvidencePort import (
+    DelegationAttempt,
+    DelegationEvidencePort,
+    DelegationEvidenceUnavailableError,
+    DelegationOutcome,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.agent_run_outcome import (
+    phase_failure,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
+    DelegationFailedError,
+    PhaseReportedNoVerdictError,
+)
+
+if TYPE_CHECKING:
+    from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
+    from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
+        AgentExecutionResult,
+    )
+
+
+async def delegation_failure(
+    evidence: DelegationEvidencePort | None,
+    workspace: ManagedWorkspace | None,
+    *,
+    phase_id: str,
+    required_delegate: str | None,
+) -> DelegationFailedError | None:
+    """The exception that fails this phase for its required delegate, or None.
+
+    ``required_delegate`` is the harness the phase must have delegated to,
+    None when it declared no requirement.
+
+    Returned rather than raised for the reason `phase_failure` gives: the
+    caller owns unwinding through its own teardown.
+    """
+    if required_delegate is None:
+        return None
+
+    def failed(
+        reason: DelegationFailureReason,
+        attempts: tuple[DelegationAttempt, ...] = (),
+        detail: str | None = None,
+    ) -> DelegationFailedError:
+        return DelegationFailedError(
+            phase_id=phase_id,
+            required_delegate=required_delegate,
+            reason=reason,
+            attempts=attempts,
+            detail=detail,
+        )
+
+    if evidence is None or workspace is None:
+        return failed(
+            DelegationFailureReason.UNVERIFIABLE,
+            detail="no delegation evidence source is wired for this workspace",
+        )
+    try:
+        attempts = await evidence.attempts(workspace)
+    except DelegationEvidenceUnavailableError as error:
+        return failed(DelegationFailureReason.UNVERIFIABLE, detail=str(error))
+    to_required = [attempt for attempt in attempts if attempt.target_harness == required_delegate]
+    if any(attempt.outcome is DelegationOutcome.SUCCEEDED for attempt in to_required):
+        return None
+    # Every observed attempt is kept, the misdirected ones included: a delegate
+    # sent to the wrong harness is what an operator needs to see to explain
+    # why the required one is missing.
+    if not to_required:
+        return failed(DelegationFailureReason.NOT_ATTEMPTED, attempts)
+    return failed(DelegationFailureReason.FAILED, attempts)
+
+
+async def completion_failure(
+    result: AgentExecutionResult,
+    *,
+    phase_id: str,
+    evidence: DelegationEvidencePort | None,
+    workspace: ManagedWorkspace | None,
+    required_delegate: str | None,
+    requires_verdict: bool,
+) -> Exception | None:
+    """What ends this phase instead of completing it, or None.
+
+    The run's own outcome first (`phase_failure`); the phase's declared
+    obligations - a verdict, a delegate - are asked only once the run itself
+    may complete, so neither relabels a failure the run already had.
+    """
+    return (
+        phase_failure(result, phase_id=phase_id)
+        or verdict_failure(result, phase_id=phase_id, requires_verdict=requires_verdict)
+        or await delegation_failure(
+            evidence, workspace, phase_id=phase_id, required_delegate=required_delegate
+        )
+    )
+
+
+def verdict_failure(
+    result: AgentExecutionResult, *, phase_id: str, requires_verdict: bool
+) -> PhaseReportedNoVerdictError | None:
+    """The exception that fails a review phase for reporting no verdict, or None (PC-116).
+
+    Only a phase that DECLARED ``requires_verdict`` is asked. For every other
+    phase no verdict still advances by order, exactly as `ReviewVerdict`
+    documents; this narrows nothing for them.
+    """
+    if requires_verdict and result.stream_result.verdict.reported_review_verdict is None:
+        return PhaseReportedNoVerdictError(phase_id=phase_id)
+    return None

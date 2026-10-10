@@ -97,6 +97,12 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.slices.execute_workflow.ObservabilityCollector import (
         ObservabilityCollector,
     )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.phase_cost_limit import (
+        PhaseCostLimit,
+    )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.phase_push import (
+        PushObserver,
+    )
     from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import Runner
 
 pytestmark = pytest.mark.unit
@@ -269,6 +275,8 @@ class _ReadsItsInputs:
         collector: ObservabilityCollector | None = None,
         runner: Runner = AgentRunner.CLAUDE,
         on_launch: AgentLaunchObserver | None = None,
+        cost_limit: PhaseCostLimit | None = None,
+        on_push: PushObserver | None = None,
     ) -> AgentExecutionResult:
         self.inputs[todo.phase_id or ""] = dict(
             await workspace.collect_files(["artifacts/input/**"])

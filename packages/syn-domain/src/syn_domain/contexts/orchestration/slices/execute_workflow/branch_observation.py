@@ -416,7 +416,44 @@ async def _branch_state(start: PhaseStartingPoint, repo: str) -> list[BranchObse
         )
         for remote in sorted(now.keys() | before.keys()) or [None]
     ]
+    observed.extend(await _branches_created_here(start, repo, branch))
     return [record for record in observed if record.is_worth_recording]
+
+
+async def _branches_created_here(
+    start: PhaseStartingPoint, repo: str, checked_out: str
+) -> list[BranchObservation]:
+    """Branches this workspace created and pushed, other than the checked-out one (#1513).
+
+    A phase that pushes branch B and then checks out another branch before it
+    fails left B on origin all the same, and a resume must be able to find it.
+    Only LOCAL branches that no remote carried when the phase started are
+    asked about, which is what keeps `main` moving under someone else's merge
+    out of this report: the phase found `main` on origin, so it is never here.
+    """
+    workspace = start.workspace
+    listing = await git(workspace, repo, "for-each-ref", "--format=%(refname:short)", "refs/heads")
+    name = repo.rsplit("/", 1)[-1]
+    observed: list[BranchObservation] = []
+    for local in (line.strip() for line in listing.splitlines()):
+        if not local or local == checked_out or start.remote_refs_for(repo, local):
+            continue
+        now = await _remote_tips(workspace, repo, local)
+        unpushed = len(
+            (await git(workspace, repo, "rev-list", local, "--not", "--remotes")).split()
+        )
+        observed.extend(
+            BranchObservation(
+                repo=name,
+                branch=local,
+                remote=remote,
+                remote_commit=sha,
+                remote_commit_at_phase_start=None,
+                unpushed_commits=unpushed,
+            )
+            for remote, sha in sorted(now.items())
+        )
+    return observed
 
 
 def _displayed(branch: str) -> str:

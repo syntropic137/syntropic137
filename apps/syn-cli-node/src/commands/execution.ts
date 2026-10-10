@@ -12,24 +12,31 @@ import { style, BOLD, CYAN, DIM, GREEN, RED, YELLOW } from "../output/ansi.js";
 import { formatCostWithCoverage, formatStatus, formatTimestamp, formatTokens } from "../output/format.js";
 import { executionSessionsCommand } from "./execution-sessions.js";
 import { executionTranscriptCommand } from "./execution-transcript.js";
+import { executionTagCommand } from "./execution-tags.js";
 import { Table } from "../output/table.js";
 
 type ExecutionList = components["schemas"]["ExecutionListResponse"];
 type ExecutionDetail = components["schemas"]["ExecutionDetailResponse"];
 type InventorySummary = components["schemas"]["SessionInventorySummary"];
 type ResumeStart = components["schemas"]["ResumeStartInfo"];
+type StartQueue = components["schemas"]["ExecutionStartQueueInfo"];
 type SideEffectStatus = components["schemas"]["SideEffectStatus"];
+type FailureClassification = components["schemas"]["FailureClassification"];
+type ReportedFailureReason = components["schemas"]["ReportedFailureReason"];
 
 const listCommand: CommandDef = {
   name: "list",
   description: "List all workflow executions",
   options: {
     status: { type: "string", short: "s", description: "Filter by status" },
+    tag: { type: "string", description: "Only executions carrying this tag (repeatable; all must match)", multiple: true },
     page: { type: "string", description: "Page number", default: "1" },
     "page-size": { type: "string", description: "Items per page (max 100)", default: "50" },
   },
   handler: async (parsed: ParsedArgs) => {
     const status = parsed.values["status"] as string | undefined;
+    const tagValues = parsed.values["tag"];
+    const tags: string[] = Array.isArray(tagValues) ? tagValues as string[] : tagValues ? [tagValues as string] : [];
     const pageStr = (parsed.values["page"] as string | undefined) ?? "1";
     const pageSizeStr = (parsed.values["page-size"] as string | undefined) ?? "50";
 
@@ -37,6 +44,7 @@ const listCommand: CommandDef = {
       params: {
         query: {
           status: status ?? null,
+          ...(tags.length > 0 ? { tag: tags } : {}),
           page: parseInt(pageStr, 10),
           page_size: parseInt(pageSizeStr, 10),
         },
@@ -70,14 +78,18 @@ const listCommand: CommandDef = {
         ex.workflow_execution_id,
         ex.workflow_name,
         formatStatus(ex.status),
-        formatTimestamp(ex.started_at),
-        `${ex.completed_phases}/${ex.total_phases}`,
+        // A queued start has not started: where it waits, and why (PC-124).
+        ex.start_queue
+          ? `${ex.start_queue.position_display}: ${ex.start_queue.reason_display}`
+          : formatTimestamp(ex.started_at),
+        ex.phase_progress.display,
         formatTokens(ex.total_tokens),
         formatCostWithCoverage(ex.total_cost_usd, ex.unpriced_observation_count),
         reposCell,
       );
     }
     table.print();
+    if (data.budget) printDim(`Budget: ${data.budget.display}`);
     if (total > page * pageSize) printDim(`Showing page ${page}. Use --page ${page + 1} for more.`);
   },
 };
@@ -105,6 +117,10 @@ const showCommand: CommandDef = {
     print(`${style("Execution:", BOLD)} ${ex.workflow_execution_id}`);
     print(`  Workflow:     ${ex.workflow_name}`);
     print(`  Status:       ${formatStatus(ex.status)}`);
+    // Accepted but waiting for a slot in the execution budget (#1557): there is
+    // no execution record yet, so this is the only place its wait shows.
+    if (ex.start_queue) print(`  Queue:        ${formatStartQueue(ex.start_queue)}`);
+    if ((ex.tags ?? []).length > 0) print(`  Tags:         ${(ex.tags ?? []).join(", ")}`);
     print(`  Started:      ${formatTimestamp(ex.started_at)}`);
     if (ex.completed_at) print(`  Completed:    ${formatTimestamp(ex.completed_at)}`);
     print(`  Tokens:       ${formatTokens(ex.total_tokens)}`);
@@ -114,6 +130,9 @@ const showCommand: CommandDef = {
     // refused (#1501).
     print(`  Deliverable:  ${ex.deliverable_produced ? "yes" : "no"}`);
     print(`  Side effects: ${formatSideEffects(ex.reported_side_effects)}`);
+    if (ex.status === "failed") {
+      print(`  ${style("Failure:", RED)}      ${formatFailure(ex.failure_classification, ex.reported_failure_reason)}`);
+    }
     if (ex.error_message) print(`  ${style("Error:", RED)}        ${ex.error_message}`);
     if (ex.resume_start) printResumeStart(ex.resume_start);
 
@@ -149,7 +168,7 @@ const showCommand: CommandDef = {
           ph.deliverable_recovered
             ? `${formatStatus(ph.status)} ${style("(recovered)", YELLOW)}`
             : formatStatus(ph.status),
-          // What RAN, or "unknown (requested: X)" - never the alias (ADR-067 D9).
+          // What RAN, or "X (requested)" - never the alias (ADR-067 D9).
           ph.model_display,
           formatTimestamp(ph.started_at),
           formatTokens(ph.total_tokens),
@@ -158,10 +177,27 @@ const showCommand: CommandDef = {
         );
       }
       table.print();
+
+      // Below the table, not in it: an error is a sentence, and the phase a
+      // reader opens first must say why it failed, not only that it did.
+      for (const ph of phases.filter((p) => p.status === "failed")) {
+        print(`  ${style("✗", RED)} ${ph.name}: ${formatFailure(ph.failure_classification, ph.reported_failure_reason)}`);
+        print(`    ${ph.error_message || style("no error recorded", DIM)}`);
+      }
     }
     await printInventorySummary(ex.workflow_execution_id);
   },
 };
+
+/** Why a run or phase failed: the classification, then what its agent SAID
+ * caused it, kept apart because only the first is a measurement (#1392). */
+function formatFailure(
+  classification: FailureClassification | null | undefined,
+  reported: ReportedFailureReason | null | undefined,
+): string {
+  const measured = classification ?? "unclassified";
+  return reported ? `${measured} (agent reported: ${reported})` : measured;
+}
 
 /** What an agent SAID about its external writes. Null is its own answer, the
  * agent said nothing, and is never shown as "none", which is a claim. */
@@ -179,6 +215,12 @@ function printResumeStart(resume: ResumeStart): void {
   print(`${style("Resume start:", BOLD)} ${formatStatus(resume.status)}`);
   print(`  Attempts:   ${resume.attempts}/${resume.max_attempts}`);
   if (resume.status_reason) print(`  ${style("Reason:", RED)}    ${resume.status_reason}`);
+  if (resume.start_queue) print(`  Queue:      ${formatStartQueue(resume.start_queue)}`);
+}
+
+/** Where a start stands in the execution budget, e.g. "queued 2 of 3 (4/4 running) via resume". */
+function formatStartQueue(queue: StartQueue): string {
+  return `${queue.position_display} via ${queue.path}`;
 }
 
 /**
@@ -269,5 +311,6 @@ executionGroup
   .command(listCommand)
   .command(showCommand)
   .command(resumeCommand)
+  .command(executionTagCommand)
   .command(executionSessionsCommand)
   .command(executionTranscriptCommand);

@@ -25,6 +25,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from check_test_markers import (
+    UNMARKED_SELECTOR,
     Budget,
     collect_census,
     count_xfail_markers,
@@ -175,6 +176,29 @@ class TestBudgetSemantics:
 
 
 @pytest.mark.unit
+class TestUnmarkedIsZeroTolerance:
+    """#1428: every test reaches a CI job, so the unmarked budget is 0, not a ratchet.
+
+    A non-zero budget lets new unmarked modules land as long as they fit in the
+    slack, which is how 742 tests came to run nowhere. Pinning the committed
+    value here makes raising it a deliberate test edit, not a one-line TOML bump.
+    """
+
+    def test_committed_unmarked_budget_is_zero(self) -> None:
+        import tomllib
+
+        config = tomllib.loads(
+            (Path(__file__).resolve().parents[2] / "fitness-exceptions.toml").read_text()
+        )
+        assert config["test-markers"]["unmarked"]["value"] == 0
+
+    def test_one_unmarked_test_fails_the_gate(self) -> None:
+        budgets = evaluate({"unmarked": {"value": 0, "issue": "#1428"}}, unmarked=1, xfails=0)
+        assert budgets[0].exceeded
+        assert "FAIL" in budgets[0].render()
+
+
+@pytest.mark.unit
 class TestCollectionErrorsAreNotAnImprovement:
     """A census pytest could not finish measuring is not a census.
 
@@ -234,3 +258,16 @@ class TestCollectionErrorsAreNotAnImprovement:
         (tmp_path / "test_good.py").write_text(self.GOOD)
 
         assert collect_census(str(tmp_path), "-m", "unit") == 0
+
+    def test_an_e2e_only_test_is_counted_as_unmarked(self, tmp_path: Path) -> None:
+        """No CI job runs ``-m e2e``, so ``e2e`` alone reaches nothing (#1428).
+
+        The census once filtered ``e2e`` out as if it were selected, and 11
+        tests carrying only that marker ran in no job behind a zero count.
+        """
+        (tmp_path / "test_e2e_only.py").write_text(
+            "import pytest\n\n\n@pytest.mark.e2e\ndef test_a() -> None: ...\n\n\n"
+            "@pytest.mark.unit\n@pytest.mark.e2e\ndef test_b() -> None: ...\n"
+        )
+
+        assert collect_census(str(tmp_path), "-m", UNMARKED_SELECTOR) == 1

@@ -2,28 +2,17 @@
  * Mobile card content for a single session.
  *
  * Pure presentation: renders the inner header row + metric grid. The outer
- * card wrapper, selection checkbox, hover/focus state, and tap-to-detail
+ * card wrapper, selection checkbox, hover/focus state, and link-to-detail
  * navigation are owned by ResourceCardList.
  *
  * See: docs/adrs/ADR-064-observability-monitor-ui.md
  */
 
-import { AgentBadge, ObservedModel, StatusBadge } from '../../components'
+import { AgentBadge, CardMetric, ObservedModel, StatusBadge } from '../../components'
 import type { SessionSummary } from '../../types'
 import { formatRelativeTime, formatTimestampLocale } from '../../utils/formatters'
 
 const EM_DASH = '—'
-
-function MetricCell({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <div className="text-[10px] uppercase tracking-wide text-[var(--color-text-muted)]">
-        {label}
-      </div>
-      <div className="font-mono text-xs text-[var(--color-text-primary)]">{value}</div>
-    </div>
-  )
-}
 
 export function SessionCard({ session }: { session: SessionSummary }) {
   const workflowLabel = session.workflow_name ?? session.workflow_id ?? 'Unknown workflow'
@@ -56,10 +45,10 @@ export function SessionCard({ session }: { session: SessionSummary }) {
         </div>
       </div>
       <div className="grid grid-cols-2 gap-3">
-        <MetricCell label="Repos" value={session.repos_display ?? EM_DASH} />
-        <MetricCell label="Tokens" value={session.total_tokens_display} />
-        <MetricCell label="Cost" value={session.total_cost_display} />
-        <MetricCell label="Duration" value={session.duration_display} />
+        <CardMetric wide label="Repos" value={session.repos_display ?? EM_DASH} />
+        <CardMetric label="Tokens" value={session.total_tokens_display} />
+        <CardMetric label="Cost" value={session.total_cost_display} />
+        <CardMetric label="Duration" value={session.duration_display} />
       </div>
     </div>
   )

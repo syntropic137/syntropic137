@@ -48,10 +48,15 @@ export interface PhaseDefinition {
   resolved_model?: string | null
   /** "translated" (platform rewrites it, codex) or "expected" (the CLI picks, claude). */
   resolution_basis?: 'translated' | 'expected' | null
-  /** e.g. "gpt-sol → gpt-6-sol"; the bare model otherwise. Render verbatim. */
+  /** e.g. "gpt-sol → gpt-6.1-sol"; the bare model otherwise. Render verbatim. */
   model_display?: string | null
   provider: string | null
+  /** Skills the phase DECLARES, as written; a version may be a tag, not a SHA. */
+  skills?: PhaseRef[]
 }
+
+/** A declared skill or plugin reference, aliased to the generated schema rather than restated. */
+export type PhaseRef = components['schemas']['PhaseRefResponse']
 
 export interface WorkflowResponse {
   id: string
@@ -98,7 +103,7 @@ export interface SessionSummary {
   agent_provider: string | null
   // Observed model id (ADR-067 D9); requested_model is what the definition asked for.
   agent_model: string | null
-  /** Explicit model id, or "unknown (requested: X)" / "unknown". Render verbatim. */
+  /** Explicit model id, or "X (requested)" / "unknown". Render verbatim. */
   agent_model_display: string
   /** What the phase definition asked for (an alias such as "opus"). */
   requested_model: string | null
@@ -142,7 +147,7 @@ export interface SessionResponse {
   agent_model: string | null
   /** What the phase definition asked for (an alias such as "opus"). */
   requested_model: string | null
-  /** Explicit model id, or "unknown (requested: X)". Render verbatim. */
+  /** Explicit model id, or "X (requested)". Render verbatim. */
   agent_model_display: string
   status: string
   input_tokens: number
@@ -241,13 +246,27 @@ export interface PhaseMetrics {
   artifact_count: number
 }
 
+/** Executions by status: one field per domain status, summing to every execution. */
+export interface ExecutionStatusCounts {
+  not_started: number
+  running: number
+  completed: number
+  failed: number
+  cancelled: number
+  interrupted: number
+}
+
 export interface MetricsResponse {
   total_workflows: number
   completed_workflows: number
   failed_workflows: number
+  execution_status_counts: ExecutionStatusCounts
   total_sessions: number
   total_input_tokens: number
   total_output_tokens: number
+  total_cache_creation_tokens: number
+  total_cache_read_tokens: number
+  /** Input + output + cache creation + cache read. */
   total_tokens: number
   total_cost_usd: number
   total_artifacts: number
@@ -282,6 +301,13 @@ export interface ExecutionHistoryResponse {
 // WORKFLOW EXECUTION TYPES (NEW)
 // =============================================================================
 
+/**
+ * Phase progress with skipped repair rounds accounted for, computed by the
+ * API (PC-63). Render `display` and draw `percent`; never divide
+ * `completed_phases` by `total_phases`, which counts skipped rounds.
+ */
+export type PhaseProgressInfo = components['schemas']['PhaseProgressInfo']
+
 export interface WorkflowExecutionSummary {
   /** Explicit naming for OTel correlation (ADR-028) */
   workflow_execution_id: string
@@ -291,6 +317,7 @@ export interface WorkflowExecutionSummary {
   completed_at: string | null
   completed_phases: number
   total_phases: number
+  phase_progress: PhaseProgressInfo
   total_tokens: number
   total_cost_usd: number
   /**
@@ -341,6 +368,7 @@ export interface ExecutionListItem {
   completed_at: string | null
   completed_phases: number
   total_phases: number
+  phase_progress: PhaseProgressInfo
   total_tokens: number
   total_tokens_display: string
   total_cost_usd: number
@@ -361,6 +389,10 @@ export interface ExecutionListItem {
   /** Full GitHub URLs of repositories cloned for this execution (ADR-058) */
   repos: string[]
   repos_display: string | null
+  /** The eval this run is a current data point of, with its verdict; null in none. */
+  eval: components['schemas']['ExecutionEvalRunResponse'] | null
+  /** Set exactly when `status` is `queued`: where the start waits, and why (PC-124). */
+  start_queue: ExecutionStartQueueInfo | null
 }
 
 /**
@@ -378,10 +410,18 @@ export interface ExecutionListItem {
  * this alias a drop-in.
  */
 export type ExecutionListResponse = components['schemas']['ExecutionListResponse']
+/** Where an accepted start waits for a slot, and why (#1557, PC-124). */
+export type ExecutionStartQueueInfo = components['schemas']['ExecutionStartQueueInfo']
+/** How full the execution budget is: running, queued and the cap (PC-124). */
+export type ExecutionBudgetInfo = components['schemas']['ExecutionBudgetInfo']
 
 export interface PhaseExecutionDetail {
-  /** Explicit naming for OTel correlation (ADR-028) */
-  workflow_phase_id: string
+  /**
+   * The phase's id, under the name the wire uses (`PhaseExecutionInfo.phase_id`).
+   * This read `workflow_phase_id`, which the server never sent, so the timeline
+   * could not match a phase that ran to its place in `phase_plan`.
+   */
+  phase_id: string
   name: string
   status: string
   session_id: string | null
@@ -407,15 +447,53 @@ export interface PhaseExecutionDetail {
   model: string | null
   /** What the phase definition asked for (an alias such as "opus"). */
   requested_model: string | null
-  /** Explicit model id, or "unknown (requested: X)" / "unknown". Render verbatim. */
+  /** Explicit model id, or "X (requested)" / "unknown". Render verbatim. */
   model_display: string
   /** Keyed by observed model id, or UNATTRIBUTED_MODEL_KEY. */
   cost_by_model: Record<string, string>
+  /**
+   * The tools, skills and model this phase had when its execution STARTED,
+   * read from the run's own start event (#1454) - never the current template.
+   * Null says nothing by itself: `start_pins_status` says whether it was
+   * not recorded (a run from before #1454) or could not be read.
+   */
+  pinned_at_start?: PhaseStartConfig | null
+  /** Absent from a server that predates the field: treat as `unavailable`. */
+  start_pins_status?: StartPinsStatus
+  /**
+   * Which declared skills this phase invoked, and whether that is knowable
+   * (#1269). Absent from a server that predates the field: unavailable.
+   */
+  skill_use?: PhaseSkillUse
+  /** Why THIS phase failed, in the server's words; null unless it failed. */
+  error_message?: string | null
+  /**
+   * What the platform classified THIS phase's failure as (#1592). A phase
+   * carries its own, so a card never borrows the run's for a phase it was not
+   * about. Null on a phase that did not fail; absent from an older server.
+   */
+  failure_classification?: FailureClassification | null
+  /** What this phase SAID caused its failure - attribution only, never a colour. */
+  reported_failure_reason?: ReportedFailureReason | null
 }
+
+/** A phase's start config, aliased to the generated schema rather than restated. */
+export type PhaseStartConfig = components['schemas']['PhaseStartConfig']
+/** A phase's skill use (#1269), aliased to the generated schema rather than restated. */
+export type PhaseSkillUse = components['schemas']['PhaseSkillUseInfo']
+/** Skill use across a whole execution (feedback 01308bcf), aliased to the generated schema. */
+export type ExecutionSkillUse = components['schemas']['ExecutionSkillUseSummary']
+/** Why a phase's start pins are or are not shown; only `not_recorded` reads as "not recorded". */
+export type StartPinsStatus = components['schemas']['PhaseExecutionInfo']['start_pins_status']
+
+/** One declared phase and where it stands, aliased to the generated schema rather than restated. */
+export type PlannedPhaseInfo = components['schemas']['PlannedPhaseInfo']
 
 export interface ExecutionDetailResponse {
   /** Explicit naming for OTel correlation (ADR-028) */
   workflow_execution_id: string
+  /** Whether the execution detail read model is rebuilding, judged by the API. */
+  read_model_status?: components['schemas']['ReadModelStatus'] | null
   workflow_id: string
   workflow_name: string
   status: string
@@ -433,6 +511,15 @@ export interface ExecutionDetailResponse {
    */
   total_phases: number
   completed_phases: number
+  phase_progress: PhaseProgressInfo
+  /**
+   * Every phase the run declared, in order, each with its status (feedback
+   * cee46909): what ran, and what is pending, skipped or inherited. Render
+   * `status_display` and style by `status`; never work the status out here.
+   */
+  phase_plan: PlannedPhaseInfo[]
+  /** Skill use across every phase that started. Absent from an older server. */
+  skill_use?: ExecutionSkillUse
   total_input_tokens: number
   total_output_tokens: number
   total_cache_creation_tokens: number
@@ -478,6 +565,16 @@ export interface ExecutionDetailResponse {
   cache_write_rate_display?: string | null
   // Workspace info (ADR-021)
   workspace: WorkspaceInfo | null
+  /**
+   * What this run was asked to do, verbatim (#1307). Null when it was
+   * dispatched with no task; absent from a server that predates the field.
+   */
+  task?: string | null
+  /**
+   * The eval this execution is a current run of, with its current verdict
+   * (Evals v2). Null in no eval; absent from a server that predates the field.
+   */
+  eval?: components['schemas']['ExecutionEvalRunResponse'] | null
 }
 
 // =============================================================================

@@ -5,6 +5,7 @@ from syn_api.routes.capture import router as capture_router
 from syn_api.routes.claude_plugins import router as claude_plugins_router
 from syn_api.routes.conversations import router as conversations_router
 from syn_api.routes.costs import router as costs_router
+from syn_api.routes.evals import router as evals_router
 from syn_api.routes.events import router as events_router
 from syn_api.routes.executions import router as executions_router
 from syn_api.routes.features import router as features_router
@@ -19,6 +20,7 @@ from syn_api.routes.sessions import router as sessions_router
 from syn_api.routes.skills import router as skills_router
 from syn_api.routes.sse import router as sse_router
 from syn_api.routes.systems import router as systems_router
+from syn_api.routes.tags import router as tags_router
 from syn_api.routes.triggers import router as triggers_router
 from syn_api.routes.webhooks import router as webhooks_router
 from syn_api.routes.workflows import router as workflows_router
@@ -29,6 +31,7 @@ __all__ = [
     "claude_plugins_router",
     "conversations_router",
     "costs_router",
+    "evals_router",
     "events_router",
     "executions_router",
     "features_router",
@@ -43,6 +46,7 @@ __all__ = [
     "skills_router",
     "sse_router",
     "systems_router",
+    "tags_router",
     "triggers_router",
     "webhooks_router",
     "workflows_router",

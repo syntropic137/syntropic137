@@ -17,7 +17,7 @@ from syn_domain.contexts.agent_sessions.recorded_model_rows import (
     recorded_model_select,
 )
 from syn_domain.storable_text import pg_safe
-from syn_shared.pricing import parse_vendor_cost
+from syn_shared.pricing import CostSplitBasis, TokenTypeCost, parse_vendor_cost
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     import asyncpg
 
     from syn_shared.observed_model import RecordedModel
-from syn_domain import tool_call_counts
+from syn_domain import agent_event_span, tool_call_counts
 from syn_domain.contexts.agent_sessions.slices.session_cost.cost_calculator import CostCalculator
 from syn_shared.events import (
     SESSION_STARTED,
@@ -104,6 +104,7 @@ SELECT DISTINCT ON (session_id)
     phase_id
 FROM agent_events
 WHERE session_id = ANY($1::text[]) AND event_type = $2
+  AND time >= $3 AND time < $4
 ORDER BY session_id, time DESC
 """
 
@@ -138,6 +139,7 @@ SELECT
     phase_id
 FROM agent_events
 WHERE session_id = ANY($1::text[]) AND event_type = $2
+  AND time >= $3 AND time < $4
 GROUP BY session_id, execution_id, phase_id, {recorded_model_group_by()}
 """
 
@@ -145,6 +147,7 @@ _MIN_TIME_BATCH_QUERY = """
 SELECT session_id, MIN(time) as started_at
 FROM agent_events
 WHERE session_id = ANY($1::text[]) AND event_type = $2
+  AND time >= $3 AND time < $4
 GROUP BY session_id
 """
 
@@ -210,6 +213,10 @@ class PricedSessionTotals:
     """The requested model behind most of the work, or None if none was recorded."""
     tokens_by_model: dict[str, int]
     tokens_by_requested_model: dict[str, int]
+    cost_by_token_type: TokenTypeCost | None
+    """``total_cost`` split by token type; None when some priced group could
+    not be split (see ``_GroupPrice``)."""
+    cost_by_token_type_basis: CostSplitBasis | None
     started_at: datetime | None
     last_observation: datetime | None
     workspace_id: str | None
@@ -279,6 +286,10 @@ class _SessionAccumulator:
     tokens_by_model: dict[str, int] = field(default_factory=dict)
     tokens_by_requested_model: dict[str, int] = field(default_factory=dict)
     unpriced_observation_count: int = 0
+    #: The priced total split by token type. None once any priced group could
+    #: not be split: a breakdown missing a group would not sum to the total.
+    cost_by_token_type: TokenTypeCost | None = field(default_factory=TokenTypeCost)
+    split_allocated: bool = False
     started_at: datetime | None = None
     last_observation: datetime | None = None
     workspace_id: str | None = None
@@ -309,15 +320,28 @@ class _SessionAccumulator:
         self.rows_seen += 1
         return group
 
-    def add_cost(self, model: RecordedModel, cost: Decimal) -> None:
-        """Record a priced group's contribution to the total and the breakdown.
+    def add_cost(self, model: RecordedModel, price: _GroupPrice) -> None:
+        """Record a priced group's contribution to the total and the breakdowns.
 
         Keyed by what RAN (``cost_key``): a group whose model was never
         reported is filed under the unknown bucket, never under its alias.
         """
+        cost = price.cost
+        if cost is None:
+            return
         self.total_cost += cost
         key = model.cost_key
         self.cost_by_model[key] = self.cost_by_model.get(key, Decimal("0")) + cost
+        if self.cost_by_token_type is None or price.split is None:
+            self.cost_by_token_type = None
+            return
+        self.cost_by_token_type += price.split
+        self.split_allocated = self.split_allocated or price.allocated
+
+    def _split_basis(self) -> CostSplitBasis | None:
+        if self.cost_by_token_type is None:
+            return None
+        return CostSplitBasis.ALLOCATED if self.split_allocated else CostSplitBasis.RATE_TABLE
 
     def to_totals(self) -> PricedSessionTotals:
         return PricedSessionTotals(
@@ -332,6 +356,10 @@ class _SessionAccumulator:
             requested_model=pick_primary_model(self.tokens_by_requested_model),
             tokens_by_model=dict(self.tokens_by_model),
             tokens_by_requested_model=dict(self.tokens_by_requested_model),
+            cost_by_token_type=(
+                self.cost_by_token_type.canonical() if self.cost_by_token_type else None
+            ),
+            cost_by_token_type_basis=self._split_basis(),
             started_at=self.started_at,
             last_observation=self.last_observation,
             workspace_id=self.workspace_id,
@@ -340,21 +368,48 @@ class _SessionAccumulator:
         )
 
 
+@dataclass(frozen=True)
+class _GroupPrice:
+    """One model group's cost, and that cost split by token type.
+
+    ``cost`` None means the group is unpriced. ``split`` None means it is
+    priced but cannot be split: a harness-reported total for a model this
+    platform has no rate for, so there are no proportions to apportion by.
+    """
+
+    cost: Decimal | None
+    split: TokenTypeCost | None = None
+    allocated: bool = False
+    """The split apportions a reported total rather than pricing each type."""
+
+
 def _price_one_group(
     row: asyncpg.Record,
     group: _GroupTokens,
     model: str | None,
     cost_calculator: CostCalculator,
     session_id: str,
-) -> Decimal | None:
-    """Price one model group, or ``None`` when no rate could be found.
+) -> _GroupPrice:
+    """Price one model group, and split that price by token type.
 
     A harness-reported ``sdk_cost`` is authoritative and used verbatim,
-    matching ``_price_session_summary_row`` on the execution side.
+    matching ``_price_session_summary_row`` on the execution side. It carries
+    no breakdown, so its split is the rate table's proportions applied to it.
     """
+    rates = cost_calculator.resolve_pricing(model)
+    rated = (
+        rates.cost_by_token_type(
+            group.input_tokens, group.output_tokens, group.cache_creation, group.cache_read
+        )
+        if rates is not None
+        else None
+    )
     sdk_cost = _row_sdk_cost(row)
     if sdk_cost is not None:
-        return sdk_cost
+        split = rated.allocated_to(sdk_cost) if rated is not None else None
+        if split is None and sdk_cost.is_zero():
+            split = TokenTypeCost()
+        return _GroupPrice(cost=sdk_cost, split=split, allocated=split is not None)
     priced = cost_calculator.calculate_token_cost(
         input_tokens=group.input_tokens,
         output_tokens=group.output_tokens,
@@ -363,7 +418,12 @@ def _price_one_group(
         model=model,
         context=f"session_id={session_id}",
     )
-    return priced.cost
+    if priced.cost is None:
+        return _GroupPrice(cost=None)
+    # A priced zero for a group with no model (no tokens at all) has no rate
+    # but needs none: zero of every type.
+    split = rated if rated is not None else (TokenTypeCost() if priced.cost.is_zero() else None)
+    return _GroupPrice(cost=priced.cost, split=split)
 
 
 def price_session_rows(
@@ -393,11 +453,11 @@ def price_session_rows(
             continue
         model = recorded_model_from_row(row, model_column="agent_model")
         group = acc.add_tokens(row, model)
-        cost = _price_one_group(row, group, model.pricing_model, cost_calculator, session_id)
-        if cost is None:
+        price = _price_one_group(row, group, model.pricing_model, cost_calculator, session_id)
+        if price.cost is None:
             acc.unpriced_observation_count += _row_observation_count(row)
             continue
-        acc.add_cost(model, cost)
+        acc.add_cost(model, price)
 
     if acc.rows_seen == 0:
         return None
@@ -489,6 +549,8 @@ class TimescaleSessionCostQuery:
         sc.requested_model = totals.requested_model
         sc.tokens_by_model = dict(totals.tokens_by_model)
         sc.tokens_by_requested_model = dict(totals.tokens_by_requested_model)
+        sc.cost_by_token_type = totals.cost_by_token_type
+        sc.cost_by_token_type_basis = totals.cost_by_token_type_basis
         sc.started_at = started_at
         sc.execution_id = totals.execution_id
         sc.phase_id = totals.phase_id
@@ -550,10 +612,27 @@ class TimescaleSessionCostQuery:
                     results[sid] = cost
         return results
 
+    async def calculate_many_by_given_id(
+        self, session_ids: Sequence[str]
+    ) -> dict[str, SessionCost]:
+        """``calculate_many``, keyed by each id as the CALLER spelled it (#1811).
+
+        ``calculate_many`` keys by the stored (``pg_safe``) spelling; a caller
+        that holds the ids a read model named looks them up by those.
+        """
+        stored = await self.calculate_many(session_ids)
+        return {sid: cost for sid in session_ids if (cost := stored.get(pg_safe(sid))) is not None}
+
     async def _fetch_page(self, ids: list[str]) -> _PageRows:
         """The three ``agent_events`` queries, once, plus the tool-call tally."""
-        async with self._pool.acquire() as conn:
-            summary_rows = await conn.fetch(_SESSION_SUMMARY_BATCH_QUERY, ids, SESSION_SUMMARY)
+        async with self._pool.acquire() as conn, agent_event_span.custom_plans(conn):  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime
+            # Bounded to the days these sessions have telemetry on, so the
+            # planner opens those chunks and no others (E2). Same rows: see
+            # agent_event_span.
+            span = await agent_event_span.for_sessions(conn, ids)  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime
+            summary_rows = await conn.fetch(
+                _SESSION_SUMMARY_BATCH_QUERY, ids, SESSION_SUMMARY, span.lower, span.upper
+            )
             summaries = {row["session_id"]: row for row in summary_rows}
 
             # A summary row with a NULL total_input is not usable, so those
@@ -565,7 +644,11 @@ class TimescaleSessionCostQuery:
             fallback: dict[str, list[asyncpg.Record]] = {}
             if fallback_ids:
                 for row in await conn.fetch(
-                    _TOKEN_USAGE_FALLBACK_BATCH_QUERY, fallback_ids, TOKEN_USAGE
+                    _TOKEN_USAGE_FALLBACK_BATCH_QUERY,
+                    fallback_ids,
+                    TOKEN_USAGE,
+                    span.lower,
+                    span.upper,
                 ):
                     fallback.setdefault(row["session_id"], []).append(row)
 
@@ -577,7 +660,9 @@ class TimescaleSessionCostQuery:
             tool_counts = await tool_call_counts.by_session(conn, ids)  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime
             started = {
                 row["session_id"]: row["started_at"]
-                for row in await conn.fetch(_MIN_TIME_BATCH_QUERY, ids, SESSION_STARTED)
+                for row in await conn.fetch(
+                    _MIN_TIME_BATCH_QUERY, ids, SESSION_STARTED, span.lower, span.upper
+                )
             }
         return _PageRows(summaries, fallback, tool_counts, started)
 

@@ -9,8 +9,11 @@ See `docs/architecture/orchestration-ubiquitous-language.md`.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping
 from enum import StrEnum
+
+logger = logging.getLogger(__name__)
 
 #: Present only on the post-rename shape. ANY of them is enough, and all three
 #: are listed for a reason: under ADR-023 a stored event that fails typed
@@ -36,8 +39,17 @@ _FORKED_FIELD_RENAMES = {
 }
 
 
-class LegacyEventShapeError(RuntimeError):
-    """A stored payload cannot be read as the type its name now means."""
+class LegacyEventShapeError(ValueError):
+    """A stored payload cannot be read as the type its name now means.
+
+    A ``ValueError`` because it is raised inside event validators, and pydantic
+    reports only ``ValueError`` / ``AssertionError`` from a validator as a
+    ``ValidationError``, which ESP v0.17.0 turns into ``EventPayloadError``, and
+    that is the one error ``LegacyShapeTolerantGrpcClient`` may admit as a
+    ``GenericDomainEvent`` (see ``replays_generic``). Any other type escapes the
+    decoder: ESP v0.16 caught every exception, v0.17 does not, and a refused
+    legacy payload then fails the read instead of replaying generic.
+    """
 
 
 class ResumedEventShape(StrEnum):
@@ -115,6 +127,35 @@ def classify_resumed_payload(payload: object) -> None:
     raise LegacyEventShapeError(msg)
 
 
+def resumed_event_applies(event: object, execution_id: object) -> bool:
+    """Whether a stored `ExecutionResumed` is a resume the aggregate should apply.
+
+    THE SHAPE IS CHECKED HERE, not only in the event's validator. Under
+    ADR-023 the store catches a validation error and falls back to
+    `GenericDomainEvent` with the event type preserved, so a payload the
+    validator refused arrives at the aggregate anyway and routes on its name.
+    The validator is the early warning; this is the gate.
+
+    A pre-rename un-pause is not a resume at all: it recorded un-pausing a
+    paused execution, which no longer exists. Applying it would spend the
+    parent's one resume on a child nobody asked for and cannot be undone, so it
+    is ignored - loudly, because a stream holding one needs migrating. An
+    ambiguous payload raises (`classify_resumed_payload`).
+    """
+    payload = payload_of(event)
+    shape = shape_of_resumed_payload(payload)
+    if shape is ResumedEventShape.PRE_RENAME_UNPAUSE:
+        logger.warning(
+            "Ignoring a pre-rename ExecutionResumed (un-pause) on %s: it is not a resume",
+            execution_id,
+            extra={"execution_id": execution_id},
+        )
+        return False
+    if shape is ResumedEventShape.AMBIGUOUS:
+        classify_resumed_payload(payload)  # raises, with the reason
+    return True
+
+
 def upcast_forked_payload(payload: object) -> object:
     """A pre-rename `ExecutionForked` payload as an `ExecutionResumed` one.
 
@@ -132,3 +173,26 @@ def upcast_forked_payload(payload: object) -> object:
     if "cancellation_overridden" not in upcast:
         upcast["cancellation_overridden"] = False
     return upcast
+
+
+#: The stored type whose name changed meaning on 2026-09-29.
+_RESUMED_EVENT_TYPE = "ExecutionResumed"
+
+
+def replays_generic(event_type: str, payload: object) -> bool:
+    """Whether a stored payload its typed class refuses may replay generic.
+
+    The event store raises on a payload its registered class rejects (ESP
+    ADR-027), which halts every projection at that event. That is right for a
+    corrupt or unexpected payload: replayed generic, an event such as an
+    `ExecutionRequested` missing its `workflow_id` would be checkpointed past
+    without being applied. It is wrong for a KNOWN legacy shape this domain
+    reads deliberately from a generic event, and there is exactly one: the
+    pre-rename un-pause `ExecutionResumed`, which the aggregate and
+    `ResumeStartProcessManager` recognise and ignore. An AMBIGUOUS payload is
+    not a legacy shape and is not admitted.
+    """
+    return (
+        event_type == _RESUMED_EVENT_TYPE
+        and shape_of_resumed_payload(payload) is ResumedEventShape.PRE_RENAME_UNPAUSE
+    )

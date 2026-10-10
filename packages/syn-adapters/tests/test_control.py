@@ -37,8 +37,10 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
     WorkflowExecutionAggregate,
 )
 
+pytestmark = pytest.mark.unit
+
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Awaitable, Callable
 
     from event_sourcing import EventStoreClient
 
@@ -332,16 +334,19 @@ class TestExecutionController:
 
 
 class _FakeTimingOutRedis:
-    """Minimal async Redis double whose getdel always raises a timeout.
+    """Minimal async Redis double whose claim script always raises a timeout.
 
     Mirrors what a transient `Timeout reading from redis:6379` looks like to
     the adapter, without needing a real Redis server.
     """
 
-    async def getdel(self, key: str) -> str | None:
-        import redis.exceptions
+    def register_script(self, script: str) -> Callable[..., Awaitable[str | None]]:
+        async def run(**_kwargs: object) -> str | None:
+            import redis.exceptions
 
-        raise redis.exceptions.TimeoutError("Timeout reading from redis:6379")
+            raise redis.exceptions.TimeoutError("Timeout reading from redis:6379")
+
+        return run
 
 
 @pytest.mark.unit

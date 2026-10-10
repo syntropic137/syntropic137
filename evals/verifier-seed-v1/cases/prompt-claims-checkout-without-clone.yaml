@@ -1,0 +1,29 @@
+id: prompt-claims-checkout-without-clone
+polarity: defect
+source_pr: 1208
+# Mined from the fix: the first fix commit's first parent, so the bug is
+# present and nothing of the fix is. Evidence at the pin:
+# `SYN_WORKSPACE_PROMPT: Final[str]` is one constant saying repos are "Pre-
+# cloned" and to navigate into `/workspace/repos/{repo-name}` (lines 15, 29,
+# 50), with no `clone_repos` (0 matches at pin, 7 after).
+commit: cc172fee6d54df695ea53cb4bfa6029c32635b36
+fix_commit: e6c8aaa681592af5e3dae3a3e1e0e3357f2bcfc6
+first_fix_commit: d15308ee9cbbeb17fb4bcb8d74d5696ccb5234bc
+task: >
+  Review the workspace system prompt every phase's agent receives, which
+  describes the workspace layout and how to start work. A phase may declare
+  clone_repos: false when it needs credentials rather than a checkout.
+expected:
+  # The root cause, for the LLM judge only; never part of `task`.
+  defect: >
+    workspace_prompt.py's SYN_WORKSPACE_PROMPT is a single constant that
+    always says the repositories are pre-cloned and tells the agent to work
+    in /workspace/repos/{repo-name}, even for a phase that declares
+    clone_repos: false and has no checkout, so that phase is sent into a
+    directory that does not exist.
+  files:
+    - packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/workspace_prompt.py
+  keywords:
+    - ["clone repos", "clone_repos", "no checkout", "not cloned", "without a checkout", "no clone", "does not clone"]
+    - ["pre cloned", "precloned", "repos/", "does not exist", "doesn't exist", "unconditional", "always", "false", "claims", "tells", "navigate"]
+split: train

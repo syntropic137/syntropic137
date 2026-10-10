@@ -55,6 +55,22 @@ class ArtifactSummary:
     content_hash: str | None = None
     """Hash of the content for integrity verification."""
 
+    content_type: str | None = None
+    """MIME type the artifact was created with (#990).
+
+    A binary type means ``content`` is empty and the bytes are in object
+    storage only. None for rows projected before the read model carried it;
+    every artifact of that era was text.
+    """
+
+    storage_uri: str | None = None
+    """Where object storage holds the content, as ``upload`` reported it (#990).
+
+    The only way to read a binary artifact's bytes back: the MinIO key
+    includes the workflow and execution ids, so the artifact id alone does not
+    find it. None when the upload did not happen or failed.
+    """
+
     is_primary_deliverable: bool = True
     """Whether this is the phase's primary deliverable (#997).
 
@@ -103,6 +119,8 @@ class ArtifactSummary:
             size_bytes=data.get("size_bytes", 0),
             content=data.get("content"),
             content_hash=data.get("content_hash"),
+            content_type=data.get("content_type"),
+            storage_uri=data.get("storage_uri"),
             is_primary_deliverable=read_primary_flag(data.get("is_primary_deliverable")),
             source_path=data.get("source_path"),
             agent_provider=data.get("agent_provider"),
@@ -131,6 +149,8 @@ class ArtifactSummary:
             "size_bytes": self.size_bytes,
             "content": self.content,
             "content_hash": self.content_hash,
+            "content_type": self.content_type,
+            "storage_uri": self.storage_uri,
             "is_primary_deliverable": self.is_primary_deliverable,
             "source_path": self.source_path,
             "agent_provider": self.agent_provider,

@@ -1,0 +1,29 @@
+id: heatmap-test-reads-clock-repeatedly
+polarity: defect
+source_pr: 1240
+# Mined from the fix: the first fix commit's first parent, so the bug is
+# present and nothing of the fix is. Evidence at the pin:
+# `_utc_today()` re-reads `datetime.now(UTC)` at each call (line 114) - when
+# recording, for the query's start/end and for the bucket assertion (lines
+# 118-228); the fix pins one `utc_day` per test.
+commit: dcb5011a83b9631bb06fdb78ccfedae98f064537
+fix_commit: 6a9576d87a9640063af7edb347c02aa717184b46
+first_fix_commit: 79481f14d8599c569f2f4e94ab78aa36b6604f32
+task: >
+  Review the heatmap integration tests, which record a session's observations
+  and then assert on the contribution heatmap bucket for the day they were
+  recorded. The suite has been reported flaky.
+expected:
+  # The root cause, for the LLM judge only; never part of `task`.
+  defect: >
+    The heatmap integration tests call _utc_today() (a fresh
+    datetime.now(UTC)) separately when recording, when building the query
+    window and when asserting the bucket, so a run that crosses UTC midnight
+    records on one day and queries/asserts another, and the test fails
+    spuriously (the reported flake). One day should be read once per test.
+  files:
+    - packages/syn-domain/tests/integration/test_heatmap_canonical_usage_source.py
+  keywords:
+    - ["midnight", "clock", "now", "day boundary", "date changes", "rolls over", "roll over", "different day", "two dates", "separately", "each call", "re read", "reread"]
+    - ["flak", "fail", "mismatch", "disagree", "wrong bucket", "no bucket", "different"]
+split: train

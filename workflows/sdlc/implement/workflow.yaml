@@ -74,7 +74,7 @@ phases:
       - Write
     agent:
       provider: claude
-      model: sonnet
+      model: opus
     skills:
       - syntropic137/software-leverage-points/purpose-and-scope@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
       - syntropic137/software-leverage-points/architecture@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
@@ -127,7 +127,7 @@ phases:
     agent:
       provider: codex
       # `gpt-sol` is the platform's codex alias: stored as written, sent to
-      # codex as `--model gpt-6-sol`, and priced as gpt-6-sol (#892 no longer
+      # codex as `--model gpt-6.1-sol`, and priced as gpt-6.1-sol (#892 no longer
       # applies - the alias resolves to a rate). Timeouts and any timing or
       # cost figures in this file were measured under gpt-5.6-sol
       # (pre-2026-09-24); re-measure before tuning them against this model.
@@ -187,7 +187,7 @@ phases:
     agent:
       provider: codex
       # `gpt-sol` is the platform's codex alias: stored as written, sent to
-      # codex as `--model gpt-6-sol`, and priced as gpt-6-sol (#892 no longer
+      # codex as `--model gpt-6.1-sol`, and priced as gpt-6.1-sol (#892 no longer
       # applies - the alias resolves to a rate). Timeouts and any timing or
       # cost figures in this file were measured under gpt-5.6-sol
       # (pre-2026-09-24); re-measure before tuning them against this model.
@@ -243,7 +243,7 @@ phases:
       - Write
     agent:
       provider: claude
-      model: sonnet
+      model: opus
     skills:
       - syntropic137/software-leverage-points/documentation@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
       - syntropic137/software-leverage-points/purpose-and-scope@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454

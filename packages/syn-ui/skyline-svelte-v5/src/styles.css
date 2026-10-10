@@ -1,0 +1,45 @@
+/*
+ * Skyline component base layer. Import once in the host app, after the theme:
+ *
+ *   import '@syn137/skyline-themes/all.css'
+ *   import '@syn137/skyline-svelte-v5/styles.css'
+ *
+ * Component CSS lives in each component's <style> block. This file holds only
+ * shared, low-specificity rules every component relies on. Tokens only: no
+ * colour literals, no var() fallbacks.
+ */
+
+/* Screen-reader-only text. */
+.sky-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Shared focus ring; components add their own :focus-visible rule using these tokens. */
+.sky-focus-ring:focus-visible {
+  outline: var(--sky-focus-ring-width) solid var(--sky-color-focus);
+  outline-offset: var(--sky-focus-ring-offset);
+}
+
+/* Mono data text: "exec-66e14f23 · 261.7k · $0.33". */
+.sky-mono {
+  font-family: var(--ds-font-mono);
+  font-size: var(--sky-text-data);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Uppercase mono labels: "TOKENS · COST · DURATION". */
+.sky-label {
+  font-family: var(--ds-font-mono);
+  font-size: var(--sky-text-label);
+  letter-spacing: var(--sky-tracking-label);
+  text-transform: uppercase;
+  color: var(--ds-color-text-subtle);
+}

@@ -97,6 +97,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
     import asyncpg
+    from event_sourcing import DomainEvent
     from syn_tests.fixtures.infrastructure import TestInfrastructure
 
     from syn_domain.contexts.organization.domain.read_models.contribution_heatmap import (
@@ -363,6 +364,88 @@ def _events_reaching_the_rollup_by_trigger() -> list[SeedEvent]:
     return events
 
 
+# How each seeded execution ENDED. The heatmap's `failed` metric reads only
+# the `workflow_executions` read model, never agent_events, so without these
+# every scope totals zero failed and
+# `test_every_metric_agrees_under_a_scope[failed]` refuses itself (#1860).
+# They are written as DOMAIN EVENTS through the production
+# WorkflowExecutionListProjection, so the row the heatmap reads is the row
+# production writes (WorkflowFailed's `failed_at` becomes `completed_at`).
+# One failure lands in every scope the handler tests filter by: A1 is alpha's
+# (repo), system one's and the org's; G1 is gamma's, so it is the org's only.
+# B1 completed and A2 was cancelled: neither is a failure.
+_WORKFLOW_ID = "wf-heatmap-equivalence"
+
+
+def _execution_lifecycles() -> list[tuple[str, DomainEvent]]:
+    """(execution_id, event) in the order each execution's stream recorded them."""
+    from syn_domain.contexts.orchestration.domain.events.ExecutionCancelledEvent import (
+        ExecutionCancelledEvent,
+    )
+    from syn_domain.contexts.orchestration.domain.events.WorkflowCompletedEvent import (
+        WorkflowCompletedEvent,
+    )
+    from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEvent import (
+        WorkflowExecutionStartedEvent,
+    )
+    from syn_domain.contexts.orchestration.domain.events.WorkflowFailedEvent import (
+        WorkflowFailedEvent,
+    )
+
+    def started(execution_id: str, at: datetime) -> WorkflowExecutionStartedEvent:
+        return WorkflowExecutionStartedEvent(
+            workflow_id=_WORKFLOW_ID,
+            execution_id=execution_id,
+            workflow_name="heatmap equivalence",
+            started_at=at,
+            total_phases=1,
+            inputs={},
+        )
+
+    def failed(execution_id: str, at: datetime) -> WorkflowFailedEvent:
+        return WorkflowFailedEvent(
+            workflow_id=_WORKFLOW_ID,
+            execution_id=execution_id,
+            failed_at=at,
+            error_message="seeded failure",
+            completed_phases=0,
+            total_phases=1,
+        )
+
+    return [
+        (EXEC_A1, started(EXEC_A1, _at(1, 8))),
+        (EXEC_A1, failed(EXEC_A1, _at(1, 13))),
+        (EXEC_A2, started(EXEC_A2, _at(2, 23))),
+        (
+            EXEC_A2,
+            ExecutionCancelledEvent(
+                workflow_id=_WORKFLOW_ID,
+                execution_id=EXEC_A2,
+                phase_id="phase-1",
+                cancelled_at=_at(3, 1),
+            ),
+        ),
+        (EXEC_B1, started(EXEC_B1, _at(4, 14))),
+        (
+            EXEC_B1,
+            WorkflowCompletedEvent(
+                workflow_id=_WORKFLOW_ID,
+                execution_id=EXEC_B1,
+                completed_at=_at(7, 3),
+                total_phases=1,
+                completed_phases=1,
+                total_input_tokens=0,
+                total_output_tokens=0,
+                total_tokens=0,
+                total_duration_seconds=1.0,
+                artifact_ids=[],
+            ),
+        ),
+        (EXEC_G1, started(EXEC_G1, _at(8, 11))),
+        (EXEC_G1, failed(EXEC_G1, _at(8, 12))),
+    ]
+
+
 SEEDED_SESSIONS = 10
 """Ten sessions are written. `pre-edge` started before the window, so nine count."""
 
@@ -413,10 +496,23 @@ async def _forget_seeded_rows(conn: asyncpg.pool.PoolConnectionProxy) -> None:
         await conn.execute(
             "DELETE FROM agent_event_day_rollup WHERE session_id LIKE $1", f"{SESSION_PREFIX}%"
         )
+    # The usage rollup (E1) is filled by its own AFTER INSERT trigger, and the
+    # same session ids are re-seeded by the next test.
+    for table in ("agent_summary_usage", "agent_turn_usage_rollup"):
+        if await conn.fetchval("SELECT to_regclass($1) IS NOT NULL", table) is True:
+            await conn.execute(
+                f"DELETE FROM {table} WHERE session_id LIKE $1",
+                f"{SESSION_PREFIX}%",
+            )
 
 
 async def _seed_projections() -> tuple[FakeProjectionStore, RepoProjection]:
     """The org structure the scope filters resolve through, built from real events."""
+    from event_sourcing import EventEnvelope, EventMetadata, MemoryCheckpointStore, ProjectionResult
+
+    from syn_domain.contexts.orchestration.slices.list_executions.projection import (
+        WorkflowExecutionListProjection,
+    )
     from syn_domain.contexts.organization.domain.events.RepoAssignedToSystemEvent import (
         RepoAssignedToSystemEvent,
     )
@@ -451,6 +547,23 @@ async def _seed_projections() -> tuple[FakeProjectionStore, RepoProjection]:
             execution_id,
             {"execution_id": execution_id, "repo_full_name": repo},
         )
+    # Through `handle_event`, the dispatch production's coordinator calls,
+    # not the `on_*` methods: it is what turns an event into handler data.
+    executions = WorkflowExecutionListProjection(store)
+    checkpoints = MemoryCheckpointStore()
+    for nonce, (execution_id, domain_event) in enumerate(_execution_lifecycles(), start=1):
+        envelope: EventEnvelope[DomainEvent] = EventEnvelope(
+            event=domain_event,
+            metadata=EventMetadata(
+                event_type=domain_event.event_type,
+                aggregate_id=execution_id,
+                aggregate_type="WorkflowExecution",
+                aggregate_nonce=nonce,
+                global_nonce=nonce,
+            ),
+        )
+        result = await executions.handle_event(envelope, checkpoints)
+        assert result == ProjectionResult.SUCCESS, domain_event.event_type
     return store, repos
 
 
@@ -686,6 +799,49 @@ class TestScopeFiltersAgreeThroughTheHandler:
             ),
         )
         assert total == 5.0
+
+    @pytest.mark.parametrize(
+        ("query", "expected"),
+        [
+            (
+                GetContributionHeatmapQuery(
+                    organization_id=ORG_ID,
+                    start_date=WINDOW_START,
+                    end_date=WINDOW_END,
+                    metric="failed",
+                ),
+                2.0,
+            ),
+            (
+                GetContributionHeatmapQuery(
+                    system_id=SYSTEM_ONE,
+                    start_date=WINDOW_START,
+                    end_date=WINDOW_END,
+                    metric="failed",
+                ),
+                1.0,
+            ),
+            (
+                GetContributionHeatmapQuery(
+                    repo_id=REPO_ID_ALPHA,
+                    start_date=WINDOW_START,
+                    end_date=WINDOW_END,
+                    metric="failed",
+                ),
+                1.0,
+            ),
+        ],
+        ids=["organization", "system", "repo"],
+    )
+    async def test_every_scope_sees_its_seeded_failures(
+        self, seeded: SeededHeatmap, query: GetContributionHeatmapQuery, expected: float
+    ) -> None:
+        """The seed puts a failure in every scope, so `failed` is never vacuous.
+
+        Exact counts, not "> 0": the org sees A1 and G1, system one and the
+        alpha repo see A1 only, and the cancelled and completed runs see none.
+        """
+        assert await self._compare(seeded, query) == expected
 
     @pytest.mark.parametrize("metric", sorted(VALID_METRICS))
     async def test_every_metric_agrees_under_a_scope(

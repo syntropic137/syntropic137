@@ -6,11 +6,16 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from syn_api.routes.executions.commands import (
+from syn_api.routes.executions.commands import _resolve_target_repo
+from syn_api.routes.executions.repo_access import (
     _parse_repo_from_url,
-    _resolve_target_repo,
     _validate_repo_access,
 )
+from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.required_inputs import (
+    required_input_declarations,
+)
+
+pytestmark = pytest.mark.unit
 
 # -- _parse_repo_from_url tests -----------------------------------------------
 
@@ -216,6 +221,13 @@ class TestRequiresReposPreflightGating:
         wf._repository_url = repo_url
         wf.requires_repos = requires_repos
         wf.input_declarations = input_declarations or []
+        # Admission reads required_input_declarations, not input_declarations
+        # (PC-66). Derive it the way the aggregate does: on a bare MagicMock the
+        # attribute auto-vivifies, iterates as empty, and every missing-input
+        # check passes vacuously.
+        wf.required_input_declarations = required_input_declarations(
+            wf.input_declarations, phases=[]
+        )
         wf.repos = repos or []
         return wf
 
@@ -279,7 +291,7 @@ class TestRequiresReposPreflightGating:
     @pytest.mark.asyncio
     async def test_validate_all_repos_noop_on_empty_list(self) -> None:
         """_validate_all_repos_access with empty list should be a no-op."""
-        from syn_api.routes.executions.commands import _validate_all_repos_access
+        from syn_api.routes.executions.repo_access import _validate_all_repos_access
 
         # Should complete without error or any GitHub API calls
         await _validate_all_repos_access([])
@@ -308,6 +320,95 @@ class TestRequiresReposPreflightGating:
             _check_missing_declarations(wf, merged)
         assert exc_info.value.status_code == 422
         assert "task" in str(exc_info.value.detail)
+
+    @pytest.mark.asyncio
+    async def test_admission_rejects_missing_declaration_without_repos(self) -> None:
+        """The admission path, not just the helper, holds a requires_repos=False
+        workflow to its required declarations (PC-81)."""
+        from fastapi import HTTPException
+
+        from syn_api.routes.executions.commands import (
+            ExecuteWorkflowRequest,
+            _validate_execution_request,
+        )
+
+        decl = MagicMock()
+        decl.name = "task"
+        decl.required = True
+        decl.default = None
+        wf = self._make_workflow(requires_repos=False, input_declarations=[decl])
+        preflight = AsyncMock()
+
+        with (
+            patch(
+                "syn_api.routes.executions.commands.get_workflow_repo",
+                return_value=MagicMock(get_by_id=AsyncMock(return_value=wf)),
+            ),
+            patch(
+                "syn_api.routes.executions.commands.ensure_connected",
+                new=AsyncMock(),
+            ),
+            patch(
+                "syn_api.routes.executions.commands._preflight_repos_or_reject",
+                new=preflight,
+            ),
+        ):
+            with pytest.raises(HTTPException) as exc_info:
+                await _validate_execution_request("wf-1", ExecuteWorkflowRequest(inputs={}))
+            assert exc_info.value.status_code == 422
+            assert "task" in str(exc_info.value.detail)
+
+            # Control: the same workflow is admitted once the input is supplied,
+            # so the 422 above came from the missing declaration.
+            await _validate_execution_request(
+                "wf-1", ExecuteWorkflowRequest(inputs={"task": "do it"})
+            )
+
+        preflight.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_explicit_repos_are_access_checked_without_requires_repos(self) -> None:
+        """#955: explicit repos reach the workspace whatever requires_repos says,
+        so a repo the App cannot reach is refused at admission for these too."""
+        from fastapi import HTTPException
+
+        from syn_api.routes.executions.commands import (
+            ExecuteWorkflowRequest,
+            _validate_execution_request,
+        )
+
+        wf = self._make_workflow(requires_repos=False)
+        checked: list[str] = []
+
+        async def _no_access(repo_full_name: str) -> None:
+            checked.append(repo_full_name)
+            raise HTTPException(status_code=422, detail=f"not installed: {repo_full_name}")
+
+        with (
+            patch(
+                "syn_api.routes.executions.commands.get_workflow_repo",
+                return_value=MagicMock(get_by_id=AsyncMock(return_value=wf)),
+            ),
+            patch(
+                "syn_api.routes.executions.commands.ensure_connected",
+                new=AsyncMock(),
+            ),
+            patch(
+                "syn_api.routes.executions.repo_access._validate_repo_access",
+                new=_no_access,
+            ),
+        ):
+            # Control: no explicit repo, nothing to check, admitted.
+            await _validate_execution_request("wf-1", ExecuteWorkflowRequest())
+            assert checked == []
+
+            with pytest.raises(HTTPException) as exc_info:
+                await _validate_execution_request(
+                    "wf-1", ExecuteWorkflowRequest(repos=["acme/private"])
+                )
+
+        assert exc_info.value.status_code == 422
+        assert checked == ["acme/private"]
 
 
 # -- Reserved repo input-key rejection (ADR-063 boundary) ---------------------

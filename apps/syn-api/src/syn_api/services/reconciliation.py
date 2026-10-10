@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Final
 from syn_shared.display import format_exit_code
 
 if TYPE_CHECKING:
+    from syn_domain.contexts.orchestration import ReclaimableDir
     from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
         WorkflowExecutionAggregate,
     )
@@ -351,6 +352,9 @@ async def cleanup_orphaned_containers() -> CleanupResult:
     - Sidecar containers: label syn.component=sidecar
     - Workspace containers: name prefix agentic-ws-
     """
+    # BEFORE the reap (#1560): the guard runs INSIDE each orphan, so this is
+    # the last moment its unpushed work can still be quarantined.
+    reclaimable = await _guard_orphaned_workspaces()
     failures: list[str] = []
     for selector, label in (
         ("label=syn.component=sidecar", "sidecar"),
@@ -361,7 +365,70 @@ async def cleanup_orphaned_containers() -> CleanupResult:
             failures.append(failure)
     if failures:
         logger.warning("Startup container reap did not complete: %s", "; ".join(failures))
+        # A container that may still be running may still be writing to its
+        # directory; its files stay until a later startup can reap it.
+        reclaimable = None
+    if reclaimable is not None:
+        # Off the event loop: an rmtree of a 150k-entry workspace froze the API for
+        # up to 49s per directory at startup (2026-10-07), and every exec
+        # deadline with it.
+        await asyncio.to_thread(_remove_reclaimed_dirs, reclaimable)
     return CleanupResult(fully_reaped=not failures, failures=tuple(failures))
+
+
+async def _guard_orphaned_workspaces() -> list[ReclaimableDir] | None:
+    """Run the unpushed-work guard in every orphaned workspace container (#1560).
+
+    Returns the directories it cleared, or None when the orphans could not even
+    be listed - "found none" and "could not look" are different answers. Never
+    raises: either way nothing uncleared is deleted, which costs only disk.
+    """
+    from syn_adapters.workspace_backends.orphaned import find_orphaned_workspaces
+    from syn_domain.contexts.orchestration import guard_orphaned_workspace
+
+    try:
+        ids = await _docker_ps_ids("name=agentic-ws-")
+        orphans = await find_orphaned_workspaces(ids)
+    except Exception:
+        logger.warning(
+            "Could not list orphaned workspaces to guard; keeping their directories", exc_info=True
+        )
+        return None
+    cleared: list[ReclaimableDir] = []
+    for orphan in orphans:
+        reclaimable = await guard_orphaned_workspace(orphan)
+        if reclaimable is not None:
+            cleared.append(reclaimable)
+    return cleared
+
+
+def _remove_reclaimed_dirs(reclaimable: list[ReclaimableDir]) -> None:
+    from syn_adapters.workspace_backends.orphaned import ShutilWorkspaceDirRemover
+    from syn_domain.contexts.orchestration import remove_reclaimed_dir
+
+    remover = ShutilWorkspaceDirRemover()
+    for directory in reclaimable:
+        remove_reclaimed_dir(directory, remover)
+
+
+async def _docker_ps_ids(filter_arg: str) -> list[str]:
+    """IDs of running containers matching ``filter_arg``. Raises on timeout."""
+    proc = await asyncio.create_subprocess_exec(
+        "docker",
+        "ps",
+        "-q",
+        "--filter",
+        filter_arg,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    try:
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
+    except TimeoutError:
+        proc.kill()
+        await proc.wait()
+        raise
+    return stdout.decode().split() if stdout else []
 
 
 async def _docker_stop_bounded(ids: list[str], label: str) -> None:

@@ -53,7 +53,7 @@ dev = [
 
 [[package]]
 name = "agentic-isolation"
-version = "0.12.0"
+version = "0.12.1"
 source = { editable = "lib/agentic-workspace/lib/python/agentic_isolation" }
 dependencies = [
     { name = "pydantic" },
@@ -524,7 +524,7 @@ wheels = [
 
 [[package]]
 name = "event-sourcing-python"
-version = "0.15.1"
+version = "0.18.0"
 source = { editable = "lib/event-sourcing-platform/event-sourcing/python" }
 dependencies = [
     { name = "protobuf" },
@@ -1364,7 +1364,7 @@ wheels = [
 
 [[package]]
 name = "syn-adapters"
-version = "0.33.1"
+version = "1.0.0"
 source = { editable = "packages/syn-adapters" }
 dependencies = [
     { name = "agentic-events" },
@@ -1418,7 +1418,7 @@ provides-extras = ["postgres", "minio", "all"]
 
 [[package]]
 name = "syn-api"
-version = "0.33.1"
+version = "1.0.0"
 source = { editable = "apps/syn-api" }
 dependencies = [
     { name = "agentic-logging" },
@@ -1456,7 +1456,7 @@ provides-extras = ["feedback"]
 
 [[package]]
 name = "syn-collector"
-version = "0.33.1"
+version = "1.0.0"
 source = { editable = "packages/syn-collector" }
 dependencies = [
     { name = "click" },
@@ -1496,7 +1496,7 @@ provides-extras = ["dev"]
 
 [[package]]
 name = "syn-domain"
-version = "0.33.1"
+version = "1.0.0"
 source = { editable = "packages/syn-domain" }
 dependencies = [
     { name = "agentic-events" },
@@ -1517,11 +1517,13 @@ requires-dist = [
 
 [[package]]
 name = "syn-perf"
-version = "0.33.1"
+version = "1.0.0"
 source = { editable = "packages/syn-perf" }
 dependencies = [
+    { name = "pydantic" },
     { name = "rich" },
     { name = "syn-adapters" },
+    { name = "syn-domain" },
     { name = "syn-shared" },
     { name = "typer" },
 ]
@@ -1534,10 +1536,12 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "pydantic", specifier = ">=2.12.5" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23.0" },
     { name = "rich", specifier = ">=13.0.0" },
     { name = "syn-adapters", editable = "packages/syn-adapters" },
+    { name = "syn-domain", editable = "packages/syn-domain" },
     { name = "syn-shared", editable = "packages/syn-shared" },
     { name = "typer", specifier = ">=0.9.0" },
 ]
@@ -1545,7 +1549,7 @@ provides-extras = ["dev"]
 
 [[package]]
 name = "syn-shared"
-version = "0.33.1"
+version = "1.0.0"
 source = { editable = "packages/syn-shared" }
 dependencies = [
     { name = "pydantic" },
@@ -1564,7 +1568,7 @@ requires-dist = [
 
 [[package]]
 name = "syn-tokens"
-version = "0.33.1"
+version = "1.0.0"
 source = { editable = "packages/syn-tokens" }
 dependencies = [
     { name = "pydantic" },
@@ -1581,7 +1585,7 @@ requires-dist = [
 
 [[package]]
 name = "syntropic137"
-version = "0.33.1"
+version = "1.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "event-sourcing-python" },
@@ -1605,6 +1609,7 @@ dev = [
     { name = "pytest-cov" },
     { name = "pytest-xdist" },
     { name = "ruff" },
+    { name = "syn-perf" },
     { name = "testcontainers" },
     { name = "ui-feedback-api" },
 ]
@@ -1633,6 +1638,7 @@ dev = [
     { name = "pytest-cov", specifier = ">=7.0.0" },
     { name = "pytest-xdist", specifier = ">=3.6.1" },
     { name = "ruff", specifier = ">=0.14.7" },
+    { name = "syn-perf", editable = "packages/syn-perf" },
     { name = "testcontainers", specifier = ">=4.13.3" },
     { name = "ui-feedback-api", editable = "lib/ui-feedback/backend/ui-feedback-api" },
 ]

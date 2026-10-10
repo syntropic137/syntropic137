@@ -15,6 +15,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects 
     TokenType,
     WorkspaceStatus,
 )
+from syn_shared.env_constants import phase_deadline_of
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Awaitable, Callable
@@ -22,6 +23,7 @@ if TYPE_CHECKING:
     from datetime import datetime
     from pathlib import Path
 
+    from syn_adapters.platform_access import WorkspacePlatformGrant
     from syn_adapters.workspace_backends.service.credential_keeper import CredentialLapse
     from syn_adapters.workspace_backends.service.issued_tokens import IssuedToken
     from syn_adapters.workspace_backends.service.setup_phase_secrets import (
@@ -34,6 +36,7 @@ if TYPE_CHECKING:
         IsolationHandle,
         SidecarHandle,
         TokenInjectionResult,
+        WorkspaceUsage,
     )
     from syn_domain.contexts.orchestration.domain.aggregate_workspace.WorkspaceAggregate import (
         WorkspaceAggregate,
@@ -87,6 +90,14 @@ class ManagedWorkspace:
     #: the renewal task reads the installed credential's expiry from, and what
     #: teardown revokes. In-process only - see `issued_tokens`.
     _ledger: IssuanceLedger = field(default_factory=IssuanceLedger, repr=False)
+    #: What the isolation consumed, set by teardown (`create_workspace`'s
+    #: `finally`) and so only readable after `__aexit__`. None before teardown,
+    #: and when the backend measured nothing.
+    teardown_usage: WorkspaceUsage | None = None
+    #: This phase's read-only access to the Syntropic137 API (ADR-072), set by
+    #: `create_workspace` and revoked by its teardown. None while platform
+    #: access is OFF, which is the default.
+    platform_grant: WorkspacePlatformGrant | None = field(default=None, repr=False)
 
     @property
     def path(self) -> Path:
@@ -160,6 +171,11 @@ class ManagedWorkspace:
         Yields:
             Individual stdout lines
         """
+        # The agent's read-only API access (ADR-072) rides on every streamed
+        # launch, whatever the provider: callers do not need to know it exists.
+        if self.platform_grant is not None:
+            await self._bound_platform_grant_to_phase(phase_deadline_of(environment))
+            environment = {**(environment or {}), **self.platform_grant.env}
         stream = self._service._event_stream.stream(
             self.isolation_handle,
             command,
@@ -170,6 +186,13 @@ class ManagedWorkspace:
         )
         async for line in stream:  # type: ignore[attr-defined]
             yield line
+
+    async def _bound_platform_grant_to_phase(self, deadline: datetime | None) -> None:
+        """The API token expires with the phase, not only when teardown revokes it."""
+        tokens = self._service._platform_tokens
+        if deadline is None or tokens is None or self.platform_grant is None:
+            return
+        await tokens.bound_to_deadline(self.platform_grant.token, deadline)
 
     @property
     def last_stream_exit_code(self) -> int | None:

@@ -17,6 +17,8 @@ from syn_domain.contexts.orchestration.slices.execution_cost.projection import (
     _update_started_at,
 )
 
+pytestmark = pytest.mark.unit
+
 
 class MockProjectionStore:
     """Mock projection store for testing."""

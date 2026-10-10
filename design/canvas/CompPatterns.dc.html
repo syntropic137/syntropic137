@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Skyline patterns: domain and data</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Orbitron:wght@500;600;700&display=swap">
+<style>
+:root{--ac:#4D80FF}
+body{margin:0;background:#0A0C14}
+a{color:#E8EEFB}
+button{font-family:inherit}
+input::placeholder,textarea::placeholder{color:#6F7FA3}
+</style>
+</helmet>
+<div style="--ac: {{accent}}; display: flex; flex-direction: column; gap: 24px; width: 1440px; height: 1700px; box-sizing: border-box; padding: 48px; background: #0A0C14; color: #E8EEFB; font-family: 'Instrument Sans', 'Helvetica Neue', system-ui, sans-serif; font-size: 14px; line-height: 1.45; -webkit-font-smoothing: antialiased">
+<div style="display: flex; flex-direction: column; gap: 6px">
+<h1 style="margin: 0; font-size: 32px; line-height: 1.1; font-weight: 600; letter-spacing: -0.03em">Patterns</h1>
+<p style="margin: 0; font-size: 15px; color: #9AA8C7">Compositions that carry the product: object icons, verdicts, phase outputs, operations and the charts. Phase kit and Usage meter have their own sheets.</p>
+</div>
+<section aria-label="Object Icon" style="display: flex; flex-direction: column; gap: 18px; padding: 22px 24px 24px; border-radius: 18px; border: 1px solid #1A2032; background: #0D101A; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04)">
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px">
+<h2 style="margin: 0; font-size: 17px; font-weight: 600; letter-spacing: -0.01em">Object Icon</h2>
+<span style="height: 22px; padding: 0 9px; border-radius: 11px; border: 1px solid #283048; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; line-height: 20px; color: #9AA8C7">pattern · SVG</span>
+<span style="font-size: 13px; color: #9AA8C7">One three-face isometric object per section; front, top and side shades come from the accent.</span>
+</div>
+<div style="display: flex; flex-wrap: wrap; align-items: flex-end; gap: 22px 40px">
+<div style="display: flex; flex-direction: column; align-items: center; gap: 10px; min-width: 0">
+<svg width="72" height="72" viewBox="0 0 64 64" aria-hidden="true" style="flex-shrink: 0">
+<ellipse cx="32" cy="59" rx="18" ry="3.5" style="fill: var(--ac); opacity: 0.22"></ellipse>
+<polygon points="38,10 22,36 34,36 30,58 50,28 38,28" style="fill: color-mix(in oklab, var(--ac) 50%, black)"></polygon>
+<polygon points="34,8 18,34 30,34 26,56 46,26 34,26" style="fill: color-mix(in oklab, var(--ac) 58%, white)"></polygon>
+</svg>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3">trigger</span>
+</div>
+<div style="display: flex; flex-direction: column; align-items: center; gap: 10px; min-width: 0">
+<svg width="72" height="72" viewBox="0 0 64 64" aria-hidden="true" style="flex-shrink: 0">
+<ellipse cx="32" cy="59" rx="18" ry="3.5" style="fill: var(--ac); opacity: 0.22"></ellipse>
+<g opacity="0.45">
+<polygon points="32,30 52,40 32,50 12,40" style="fill: color-mix(in oklab, var(--ac) 58%, white)"></polygon>
+<polygon points="12,40 32,50 32,55 12,45" style="fill: var(--ac)"></polygon>
+<polygon points="32,50 52,40 52,45 32,55" style="fill: color-mix(in oklab, var(--ac) 50%, black)"></polygon>
+</g>
+<g opacity="0.72">
+<polygon points="32,19 52,29 32,39 12,29" style="fill: color-mix(in oklab, var(--ac) 58%, white)"></polygon>
+<polygon points="12,29 32,39 32,44 12,34" style="fill: var(--ac)"></polygon>
+<polygon points="32,39 52,29 52,34 32,44" style="fill: color-mix(in oklab, var(--ac) 50%, black)"></polygon>
+</g>
+<polygon points="32,8 52,18 32,28 12,18" style="fill: color-mix(in oklab, var(--ac) 58%, white)"></polygon>
+<polygon points="12,18 32,28 32,33 12,23" style="fill: var(--ac)"></polygon>
+<polygon points="32,28 52,18 52,23 32,33" style="fill: color-mix(in oklab, var(--ac) 50%, black)"></polygon>
+</svg>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3">workflow</span>
+</div>
+<div style="display: flex; flex-direction: column; align-items: center; gap: 10px; min-width: 0">
+<svg width="72" height="72" viewBox="0 0 64 64" aria-hidden="true" style="flex-shrink: 0">
+<ellipse cx="32" cy="59" rx="18" ry="3.5" style="fill: var(--ac); opacity: 0.22"></ellipse>
+<polygon points="32,10 52,20 32,30 12,20" style="fill: color-mix(in oklab, var(--ac) 58%, white)"></polygon>
+<polygon points="12,20 32,30 32,54 12,44" style="fill: var(--ac)"></polygon>
+<polygon points="32,30 52,20 52,44 32,54" style="fill: color-mix(in oklab, var(--ac) 50%, black)"></polygon>
+<polygon points="18,29 18,41 27,39.5" style="fill: #0A0C14; opacity: 0.8"></polygon>
+</svg>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3">execution</span>
+</div>
+<div style="display: flex; flex-direction: column; align-items: center; gap: 10px; min-width: 0">
+<svg width="72" height="72" viewBox="0 0 64 64" aria-hidden="true" style="flex-shrink: 0">
+<ellipse cx="32" cy="59" rx="18" ry="3.5" style="fill: var(--ac); opacity: 0.22"></ellipse>
+<polygon points="32,18 54,29 32,40 10,29" style="fill: color-mix(in oklab, var(--ac) 58%, white)"></polygon>
+<polygon points="10,29 32,40 32,50 10,39" style="fill: var(--ac)"></polygon>
+<polygon points="32,40 54,29 54,39 32,50" style="fill: color-mix(in oklab, var(--ac) 50%, black)"></polygon>
+<polyline points="34,23 34,28 24,28" fill="none" stroke="#0A0C14" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" opacity="0.8"></polyline>
+<line x1="32" y1="32" x2="39" y2="35.5" stroke="#0A0C14" stroke-width="2.2" stroke-linecap="round" opacity="0.8"></line>
+</svg>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3">session</span>
+</div>
+<div style="display: flex; flex-direction: column; align-items: center; gap: 10px; min-width: 0">
+<svg width="72" height="72" viewBox="0 0 64 64" aria-hidden="true" style="flex-shrink: 0">
+<ellipse cx="32" cy="59" rx="18" ry="3.5" style="fill: var(--ac); opacity: 0.22"></ellipse>
+<polygon points="26,10 46,20 46,48 26,38" style="fill: color-mix(in oklab, var(--ac) 50%, black)"></polygon>
+<polygon points="18,16 38,26 38,54 18,44" style="fill: color-mix(in oklab, var(--ac) 58%, white)"></polygon>
+<path d="M22,25L34,31M22,31L34,37M22,37L30,41" fill="none" stroke="#0A0C14" stroke-width="2" stroke-linecap="round" opacity="0.6"></path>
+</svg>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3">artifact</span>
+</div>
+<div style="display: flex; flex-direction: column; align-items: center; gap: 10px; min-width: 0">
+<svg width="72" height="72" viewBox="0 0 64 64" aria-hidden="true" style="flex-shrink: 0">
+<ellipse cx="32" cy="58" rx="19" ry="3.5" style="fill: var(--ac); opacity: 0.22"></ellipse>
+<polygon points="26,9 32,9 32,54 11,54 26,25" style="fill: color-mix(in oklab, var(--ac) 58%, white); opacity: 0.4"></polygon>
+<polygon points="32,9 38,9 38,25 53,54 32,54" style="fill: color-mix(in oklab, var(--ac) 50%, black); opacity: 0.55"></polygon>
+<polygon points="19.3,38 32,38 32,54 11,54" style="fill: var(--ac)"></polygon>
+<polygon points="32,38 44.7,38 53,54 32,54" style="fill: color-mix(in oklab, var(--ac) 50%, black)"></polygon>
+<polygon points="19.3,38 32,35 44.7,38 32,41" style="fill: color-mix(in oklab, var(--ac) 58%, white)"></polygon>
+<polygon points="23.5,6 40.5,6 40.5,10 23.5,10" style="fill: color-mix(in oklab, var(--ac) 58%, white)"></polygon>
+</svg>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3">eval</span>
+</div>
+</div>
+</section>
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; align-items: start">
+<section aria-label="Verdict Block" style="display: flex; flex-direction: column; gap: 18px; padding: 22px 24px 24px; border-radius: 18px; border: 1px solid #1A2032; background: #0D101A; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04)">
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px">
+<h2 style="margin: 0; font-size: 17px; font-weight: 600; letter-spacing: -0.01em">Verdict Block</h2>
+<span style="height: 22px; padding: 0 9px; border-radius: 11px; border: 1px solid #283048; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; line-height: 20px; color: #9AA8C7">pattern · SVG</span>
+<span style="font-size: 13px; color: #9AA8C7">Height carries the verdict before colour does: tall pass, short fail or error, flat unscored.</span>
+</div>
+<div style="display: flex; flex-wrap: wrap; align-items: flex-end; gap: 22px 36px">
+<div style="display: flex; flex-direction: column; align-items: center; gap: 10px; min-width: 0">
+<svg width="56" height="48" viewBox="0 0 56 48" aria-hidden="true"><ellipse cx="28" cy="43" rx="15" ry="3.2" style="fill: var(--ac); opacity: 0.2"></ellipse><polygon points="12,10 28,18 28,42 12,34" style="fill: var(--ac)"></polygon><polygon points="28,18 44,10 44,34 28,42" style="fill: color-mix(in oklab, var(--ac) 50%, black)"></polygon><polygon points="28,2 44,10 28,18 12,10" style="fill: color-mix(in oklab, var(--ac) 58%, white)"></polygon></svg>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3">pass</span>
+</div>
+<div style="display: flex; flex-direction: column; align-items: center; gap: 10px; min-width: 0">
+<svg width="56" height="48" viewBox="0 0 56 48" aria-hidden="true"><ellipse cx="28" cy="43" rx="15" ry="3.2" style="fill: #FF6F61; opacity: 0.2"></ellipse><polygon points="12,25 28,33 28,42 12,34" style="fill: #FF6F61"></polygon><polygon points="28,33 44,25 44,34 28,42" style="fill: color-mix(in oklab, #FF6F61 50%, black)"></polygon><polygon points="28,17 44,25 28,33 12,25" style="fill: color-mix(in oklab, #FF6F61 58%, white)"></polygon></svg>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3">fail</span>
+</div>
+<div style="display: flex; flex-direction: column; align-items: center; gap: 10px; min-width: 0">
+<svg width="56" height="48" viewBox="0 0 56 48" aria-hidden="true"><ellipse cx="28" cy="43" rx="15" ry="3.2" style="fill: #E5B450; opacity: 0.2"></ellipse><polygon points="12,25 28,33 28,42 12,34" style="fill: #E5B450"></polygon><polygon points="28,33 44,25 44,34 28,42" style="fill: color-mix(in oklab, #E5B450 50%, black)"></polygon><polygon points="28,17 44,25 28,33 12,25" style="fill: color-mix(in oklab, #E5B450 58%, white)"></polygon></svg>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3">scorer error</span>
+</div>
+<div style="display: flex; flex-direction: column; align-items: center; gap: 10px; min-width: 0">
+<svg width="56" height="48" viewBox="0 0 56 48" aria-hidden="true"><ellipse cx="28" cy="43" rx="15" ry="3.2" style="fill: #4A567A; opacity: 0.2"></ellipse><polygon points="12,31 28,39 28,42 12,34" style="fill: #4A567A"></polygon><polygon points="28,39 44,31 44,34 28,42" style="fill: #2B3350"></polygon><polygon points="28,23 44,31 28,39 12,31" style="fill: #6F7FA3"></polygon></svg>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3">unscored</span>
+</div>
+<div style="display: flex; flex-direction: column; align-items: center; gap: 10px; min-width: 0">
+<div style="display: flex; flex-direction: column; align-items: center; padding: 6px 10px 8px; border-radius: 14px; border: 1px solid color-mix(in oklab, var(--ac) 70%, #1A2032); background: #151A2A"><svg width="56" height="48" viewBox="0 0 56 48" aria-hidden="true"><ellipse cx="28" cy="43" rx="15" ry="3.2" style="fill: var(--ac); opacity: 0.2"></ellipse><polygon points="12,10 28,18 28,42 12,34" style="fill: var(--ac)"></polygon><polygon points="28,18 44,10 44,34 28,42" style="fill: color-mix(in oklab, var(--ac) 50%, black)"></polygon><polygon points="28,2 44,10 28,18 12,10" style="fill: color-mix(in oklab, var(--ac) 58%, white)"></polygon></svg><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px">$1.04</span></div>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3">selected cell</span>
+</div>
+</div>
+</section>
+<section aria-label="Day Readout" style="display: flex; flex-direction: column; gap: 18px; padding: 22px 24px 24px; border-radius: 18px; border: 1px solid #1A2032; background: #0D101A; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04)">
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px">
+<h2 style="margin: 0; font-size: 17px; font-weight: 600; letter-spacing: -0.01em">Day Readout</h2>
+<span style="height: 22px; padding: 0 9px; border-radius: 11px; border: 1px solid #283048; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; line-height: 20px; color: #9AA8C7">pattern</span>
+<span style="font-size: 13px; color: #9AA8C7">Fixed beside the skyline on desktop, under it on a phone; a leader line ties it to the bar.</span>
+</div>
+<div style="display: flex; flex-wrap: wrap; align-items: flex-end; gap: 22px 28px">
+<div style="display: flex; flex-direction: column; align-items: flex-start; gap: 10px; min-width: 0">
+<div style="display: flex; flex-direction: column; gap: 12px; width: 244px; box-sizing: border-box; padding: 14px 16px; border-radius: 16px; border: 1px solid #283048; background: #111626"><div style="display: flex; justify-content: space-between"><span style="font-size: 16px; font-weight: 600">Fri, Aug 28<span style="font-weight: 400; color: #6F7FA3">, 2026</span></span><span style="font-size: 12.5px; font-weight: 600; color: color-mix(in oklab, var(--ac) 40%, white)">Runs →</span></div><div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px"><div style="display: flex; flex-direction: column"><span style="font-size: 22px; font-weight: 600; color: color-mix(in oklab, var(--ac) 40%, white)">43</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3; font-size: 10px">Sessions</span></div><div style="display: flex; flex-direction: column"><span style="font-size: 22px; font-weight: 600; color: #E8EEFB">23</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3; font-size: 10px">Executions</span></div><div style="display: flex; flex-direction: column"><span style="font-size: 22px; font-weight: 600; color: #E8EEFB">0</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3; font-size: 10px">Commits</span></div></div><div style="display: flex; gap: 2px; height: 8px"><span style="flex: 4556030; border-radius: 2px; background: #4C8DEA"></span><span style="flex: 517201; border-radius: 2px; background: #E0703A"></span><span style="flex: 137651; border-radius: 2px; background: #9085E9"></span><span style="flex: 464027; border-radius: 2px; background: #C98500"></span></div><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #9AA8C7">5.67M tokens · $4.98</span></div>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3">day readout</span>
+</div>
+</div>
+</section>
+</div>
+<section aria-label="Run Tiles and Provenance Strip" style="display: flex; flex-direction: column; gap: 18px; padding: 22px 24px 24px; border-radius: 18px; border: 1px solid #1A2032; background: #0D101A; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04)">
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px">
+<h2 style="margin: 0; font-size: 17px; font-weight: 600; letter-spacing: -0.01em">Run Tiles and Provenance Strip</h2>
+<span style="height: 22px; padding: 0 9px; border-radius: 11px; border: 1px solid #283048; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; line-height: 20px; color: #9AA8C7">pattern</span>
+<span style="font-size: 13px; color: #9AA8C7">A phase carries the session it ran in and the artifact it produced; the provenance strip closes the list.</span>
+</div>
+<div style="display: flex; flex-wrap: wrap; align-items: flex-end; gap: 22px 28px">
+<div style="display: flex; flex-direction: column; align-items: flex-start; gap: 10px; min-width: 0">
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px"><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3">Ran in</span><span style="display: flex; align-items: center; gap: 9px; height: 34px; padding: 0 12px 0 10px; border-radius: 11px; border: 1px solid #283048; background: #0A0C14"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="var(--ac)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4.5L6.5 8 3 11.5M8.5 11.5H13"></path></svg><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px">10dfeb5d</span><span style="font-size: 12px; color: #9AA8C7">platform session · no local transcript</span></span><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#6F7FA3" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 8h10.5M9.5 4.5L13 8l-3.5 3.5"></path></svg><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3">Produced</span><span style="display: flex; align-items: center; gap: 9px; height: 34px; padding: 0 12px 0 10px; border-radius: 11px; border: 1px solid #283048; background: #0A0C14"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="var(--ac)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 1.75h5l3 3v9.5H4zM9 1.75v3h3"></path></svg><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px">deliverable.md</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #9AA8C7">2.9 KB</span></span></div>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3">run tiles</span>
+</div>
+</div>
+<div style="display: flex; flex-wrap: wrap; align-items: flex-end; gap: 22px 28px">
+<div style="display: flex; flex-direction: column; align-items: flex-start; gap: 10px; min-width: 0">
+<div style="display: flex; flex-direction: column; gap: 10px; width: 600px"><div style="display: flex; align-items: center; justify-content: space-between; gap: 12px"><span style="display: flex; align-items: baseline; gap: 12px"><span style="font-size: 14px; font-weight: 600">Provenance</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #9AA8C7">3 platform sessions · 0 native transcripts · 1 gap</span></span><button type="button" style="display: flex; align-items: center; justify-content: center; gap: 8px; height: 32px; padding: 0 16px; border-radius: 10px; border: 1px solid #283048; background: #0F121C; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04); color: #E8EEFB; font-size: 12.5px; font-weight: 600; cursor: pointer"><span>Load latest revision</span></button></div><span style="display: flex; gap: 10px; font-size: 13px; color: #EBD9A8"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="#E5B450" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2.25l6 10.75H2zM8 6.5v3M8 11.4v.1"></path></svg><span><strong style="font-weight: 600; color: #F5E7BD">Coverage can't be proven for this harness.</strong> The sessions above are real, but others may exist.</span></span></div>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3">provenance strip</span>
+</div>
+</div>
+</section>
+<section aria-label="Operation Timeline" style="display: flex; flex-direction: column; gap: 18px; padding: 22px 24px 24px; border-radius: 18px; border: 1px solid #1A2032; background: #0D101A; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04)">
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px">
+<h2 style="margin: 0; font-size: 17px; font-weight: 600; letter-spacing: -0.01em">Operation Timeline</h2>
+<span style="height: 22px; padding: 0 9px; border-radius: 11px; border: 1px solid #283048; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; line-height: 20px; color: #9AA8C7">pattern</span>
+<span style="font-size: 13px; color: #9AA8C7">One row per tool call; input and output each copy on their own. Shown failed, output just copied.</span>
+</div>
+<div style="display: flex; flex-wrap: wrap; align-items: flex-end; gap: 22px 28px">
+<div style="display: flex; flex-direction: column; align-items: flex-start; gap: 10px; min-width: 0">
+<div style="display: grid; grid-template-columns: 78px 30px minmax(0, 1fr); column-gap: 14px; width: 640px"><span style="padding-top: 7px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #6F7FA3">1:32:36 PM</span><span style="display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 10px; background: #2A1513; color: #FF6F61"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4.5L6.5 8 3 11.5M8.5 11.5H13"></path></svg></span><div style="display: flex; flex-direction: column; gap: 8px; min-width: 0"><div style="display: flex; align-items: center; gap: 10px; min-height: 30px"><span style="font-size: 14px; font-weight: 600">Bash</span><code style="flex-grow: 1; min-width: 0; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px; color: #C3CCE2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">python -m py_compile /workspace/palindrome.py</code><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #FF8A7D">failed · 0s</span><button type="button" aria-label="Copy" style="display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 9px; background: transparent; color: #9AA8C7; cursor: pointer"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="#9AA8C7" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 5.5h8v8h-8zM10.5 5.5V2.5h-8v8h3"></path></svg></button></div><div style="position: relative"><pre style="margin: 0; padding: 10px 44px 10px 14px; border-radius: 12px; border: 1px solid #4A211B; background: #22130F; color: #FFB3A8; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; white-space: pre-wrap">/bin/bash: line 1: python: command not found</pre><span style="position: absolute; top: 5px; right: 6px"><button type="button" aria-label="Copy" style="display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 9px; background: #151A2A; color: var(--ac); cursor: pointer"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="var(--ac)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7"></path></svg></button></span></div></div></div>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3">operation, failed</span>
+</div>
+</div>
+</section>
+<section aria-label="Run Row, Outcome Ring, Sparkline" style="display: flex; flex-direction: column; gap: 18px; padding: 22px 24px 24px; border-radius: 18px; border: 1px solid #1A2032; background: #0D101A; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04)">
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px">
+<h2 style="margin: 0; font-size: 17px; font-weight: 600; letter-spacing: -0.01em">Run Row, Outcome Ring, Sparkline</h2>
+<span style="height: 22px; padding: 0 9px; border-radius: 11px; border: 1px solid #283048; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; line-height: 20px; color: #9AA8C7">pattern</span>
+<span style="font-size: 13px; color: #9AA8C7">Bar length is duration and its blocks are phases; the ring shares outcomes; the sparkline reads by height.</span>
+</div>
+<div style="display: flex; flex-wrap: wrap; align-items: flex-end; gap: 22px 28px">
+<div style="display: flex; flex-direction: column; align-items: flex-start; gap: 10px; min-width: 0">
+<div style="display: grid; grid-template-columns: 32px 220px 260px 70px 60px; column-gap: 14px; align-items: center; width: 700px; padding: 9px 12px; border-radius: 14px; background: #111626"><span style="display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 10px; background: color-mix(in oklab, var(--ac) 18%, transparent); color: var(--ac)"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7"></path></svg></span><span style="display: flex; flex-direction: column"><span style="font-size: 14px; font-weight: 600">Research Workflow</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3">no repo · 3 of 3 phases</span></span><span style="display: flex; align-items: center; gap: 10px"><span style="display: flex; gap: 2px; width: 94%; height: 10px"><span style="flex: 1; border-radius: 3px; background: var(--ac)"></span><span style="flex: 1; border-radius: 3px; background: var(--ac)"></span><span style="flex: 1; border-radius: 3px; background: var(--ac)"></span></span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #9AA8C7">3m 47s</span></span><span style="text-align: right; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px; color: #9AA8C7">396.8k</span><span style="text-align: right; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px">$0.21</span></div>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3">run row</span>
+</div>
+</div>
+<div style="display: flex; flex-wrap: wrap; align-items: flex-end; gap: 22px 28px">
+<div style="display: flex; flex-direction: column; align-items: center; gap: 10px; min-width: 0">
+<svg width="110" height="110" viewBox="0 0 120 120" role="img" aria-label="67 percent completed"><circle cx="60" cy="60" r="46" fill="none" stroke="#151A2A" stroke-width="12"></circle><g transform="rotate(-90 60 60)" fill="none" stroke-width="12"><circle cx="60" cy="60" r="46" stroke-dasharray="189.7 289.03" stroke-dashoffset="0" style="stroke: var(--ac)"></circle><circle cx="60" cy="60" r="46" stroke-dasharray="85.6 289.03" stroke-dashoffset="-192.69" style="stroke: #FF6F61"></circle><circle cx="60" cy="60" r="46" stroke-dasharray="4.7 289.03" stroke-dashoffset="-281.33" style="stroke: #6F7FA3"></circle></g><text x="60" y="66" text-anchor="middle" style="font-size: 22px; font-weight: 600; fill: #E8EEFB">67%</text></svg>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3">outcome ring</span>
+</div>
+<div style="display: flex; flex-direction: column; align-items: flex-start; gap: 10px; min-width: 0">
+<span style="display: flex; align-items: flex-end; gap: 2px; height: 16px"><span style="width: 6px; height: 16px; border-radius: 1px; background: var(--ac)"></span><span style="width: 6px; height: 16px; border-radius: 1px; background: var(--ac)"></span><span style="width: 6px; height: 8px; border-radius: 1px; background: #FF6F61"></span><span style="width: 6px; height: 16px; border-radius: 1px; background: var(--ac)"></span><span style="width: 6px; height: 3px; border-radius: 1px; background: #6F7FA3"></span><span style="width: 6px; height: 16px; border-radius: 1px; background: var(--ac)"></span><span style="width: 6px; height: 8px; border-radius: 1px; background: #FF6F61"></span><span style="width: 6px; height: 16px; border-radius: 1px; background: var(--ac)"></span></span>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3">sparkline · pass, fail, unscored</span>
+</div>
+<div style="display: flex; flex-direction: column; align-items: flex-start; gap: 10px; min-width: 0">
+<div style="display: flex; align-items: center; gap: 8px"><span style="height: 30px; padding: 0 12px; border-radius: 15px; border: 1px solid #283048; background: #0A0C14; line-height: 28px; font-size: 12px"><span style="color: #6F7FA3">Workflow</span> <span style="font-family: 'JetBrains Mono', ui-monospace, monospace">research-workflow-v2</span></span><span style="color: #6F7FA3">→</span><span style="height: 30px; padding: 0 12px; border-radius: 15px; border: 1px solid #283048; background: #0A0C14; line-height: 28px; font-size: 12px"><span style="color: #6F7FA3">Execution</span> <span style="font-family: 'JetBrains Mono', ui-monospace, monospace">exec-66e14f23</span></span><span style="color: #6F7FA3">→</span><span style="height: 30px; padding: 0 12px; border-radius: 15px; border: 1px solid #283048; background: #0A0C14; line-height: 28px; font-size: 12px"><span style="color: #6F7FA3">Session</span> <span style="font-family: 'JetBrains Mono', ui-monospace, monospace">3ef71a70</span></span></div>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3">lineage trail</span>
+</div>
+</div>
+</section>
+<section aria-label="Rule Sentence" style="display: flex; flex-direction: column; gap: 18px; padding: 22px 24px 24px; border-radius: 18px; border: 1px solid #1A2032; background: #0D101A; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04)">
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px">
+<h2 style="margin: 0; font-size: 17px; font-weight: 600; letter-spacing: -0.01em">Rule Sentence</h2>
+<span style="height: 22px; padding: 0 9px; border-radius: 11px; border: 1px solid #283048; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; line-height: 20px; color: #9AA8C7">pattern</span>
+<span style="font-size: 13px; color: #9AA8C7">A trigger read as a sentence: When, If, Then, Cap, Log.</span>
+</div>
+<div style="display: flex; flex-wrap: wrap; align-items: flex-end; gap: 22px 28px">
+<div style="display: flex; flex-direction: column; align-items: flex-start; gap: 10px; min-width: 0">
+<div style="display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 10px 16px; width: 560px; font-size: 14px; line-height: 1.8"><span style="display: flex; align-items: center; justify-content: center; width: 44px; height: 26px; border-radius: 8px; background: #151A2A; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: #9AA8C7">When</span><span>GitHub sends <code style="padding: 2px 8px; border-radius: 7px; background: #151A2A; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px">check_run.completed</code></span><span style="display: flex; align-items: center; justify-content: center; width: 44px; height: 26px; border-radius: 8px; background: #151A2A; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: #9AA8C7">If</span><span><code style="padding: 2px 8px; border-radius: 7px; background: #151A2A; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px">check_run.conclusion</code> equals <code style="padding: 2px 8px; border-radius: 7px; background: #2A1513; color: #FFB3A8; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px">failure</code></span><span style="display: flex; align-items: center; justify-content: center; width: 44px; height: 26px; border-radius: 8px; background: color-mix(in oklab, var(--ac) 18%, transparent); font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: color-mix(in oklab, var(--ac) 40%, white)">Then</span><span>Run <u>Self-Heal PR</u> with 7 inputs</span></div>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3">rule sentence</span>
+</div>
+</div>
+</section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#4D80FF","options":["#4D80FF","#4CC9F0","#45E0A0","#A78BFA"]},"$preview":{"width":1440,"height":1700}}'>
+class Component extends DCLogic {
+renderVals() {
+return { accent: this.props.accent ?? '#4D80FF' };
+}
+}
+</script>
+</body>
+</html>

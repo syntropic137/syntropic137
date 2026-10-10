@@ -23,6 +23,7 @@ import type {
   FailureClassification,
   PhaseExecutionDetail,
 } from '../../../types'
+import { withPlanOfPhases } from '../../../test/phasePlanFixtures'
 
 vi.mock('../../../api/executions', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../api/executions')>()),
@@ -39,9 +40,12 @@ const { ExecutionDetail } = await import('../ExecutionDetail')
 const EXECUTION_ID = 'exec-1'
 const REFUSAL_MESSAGE = 'Phase review reported success=false: the deliverable is not acceptable'
 
-function failedPhase(): PhaseExecutionDetail {
+function failedPhase(failure_classification: FailureClassification): PhaseExecutionDetail {
+  // The phase carries its own classification, as the API sends it (#1592):
+  // the timeline colours each card from its phase, not from the run.
   return {
-    workflow_phase_id: 'phase-1',
+    failure_classification,
+    phase_id: 'phase-1',
     name: 'review',
     status: 'failed',
     session_id: null,
@@ -71,9 +75,10 @@ function failedExecution(
     status: 'failed',
     started_at: '2026-09-18T00:00:00Z',
     completed_at: '2026-09-18T00:05:00Z',
-    phases: [failedPhase()],
+    phases: [failedPhase(failure_classification)],
     total_phases: 1,
     completed_phases: 0,
+    phase_progress: { completed: 0, skipped: 0, possible: 0, remaining_possible: 0, percent: 100, display: '0 of 0' },
     total_input_tokens: 10,
     total_output_tokens: 20,
     total_cache_creation_tokens: 0,
@@ -94,7 +99,7 @@ beforeEach(() => {
 })
 
 async function renderPage(execution: ExecutionDetailResponse): Promise<HTMLElement> {
-  vi.mocked(getExecution).mockResolvedValue(execution)
+  vi.mocked(getExecution).mockResolvedValue(withPlanOfPhases(execution))
   const { container } = render(
     <MemoryRouter initialEntries={[`/executions/${EXECUTION_ID}`]}>
       <Routes>

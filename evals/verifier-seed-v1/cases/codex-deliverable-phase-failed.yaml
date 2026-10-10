@@ -1,0 +1,34 @@
+id: codex-deliverable-phase-failed
+polarity: defect
+source_pr: 1112
+# Mined from the fix: the first fix commit's first parent, so the bug is
+# present and nothing of the fix is. Evidence at the pin:
+# any codex `stream_result.error_reason` becomes a non-zero exit (line 231);
+# `_produced_deliverable` exists only after the fix.
+commit: 5eabcb962f34d797d51a985e32769c7d41024b53
+fix_commit: 7f729ade364c0967a45a6f16b3048a55c20a3080
+first_fix_commit: 7661855c14ff0eacb673271f2a43955c132aae49
+task: >
+  Review how the agent execution handler decides a codex phase's exit status
+  from the parsed stream result. A codex stream can end without a terminal
+  turn for several reasons, including an expired login.
+expected:
+  # The root cause, for the LLM judge only; never part of `task`.
+  defect: >
+    AgentExecutionHandler turns every codex stream error_reason into a
+    non-zero phase exit, including the bare "stream ended without a terminal
+    turn" reason when the phase has already written a non-empty deliverable
+    to artifacts/output/, so a codex phase that finished its work is
+    discarded as failed. The fix exempts only that combination: the
+    missing-terminal-turn reason AND a non-empty deliverable. Everything else
+    must still fail: an authentication fault (e.g. an expired login) or a
+    malformed stream line even when a deliverable exists, a non-zero CLI
+    exit, and an absent, empty or unreadable deliverable. A finding that
+    would let an auth or malformed-stream error pass because output exists
+    is not this defect's remedy.
+  files:
+    - packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/AgentExecutionHandler.py
+  keywords:
+    - ["deliverable", "artifact", "output", "finished", "completed its work", "did its work", "work done", "produced"]
+    - ["fail", "non zero", "nonzero", "exit", "error reason"]
+split: holdout

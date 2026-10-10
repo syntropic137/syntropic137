@@ -103,7 +103,7 @@ This provides protection against novel failure modes we haven't anticipated — 
 
 ### 5. InMemoryAdapter base class (production guard)
 
-All in-memory adapters that must NOT run in production inherit from a single base class: `InMemoryAdapter` in `packages/syn-adapters/src/syn_adapters/in_memory.py`.
+All in-memory adapters that must NOT run in production inherit from a single base class: `InMemoryAdapter` in `packages/syn-shared/src/syn_shared/in_memory.py`.
 
 **The problem:** Before this change, the environment check was copy-pasted 7 times across 7 files, with 3 different strategies:
 
@@ -131,7 +131,9 @@ class InMemoryAdapter:
 - `_create_dedup_adapter()` and `get_pending_sha_store()` raise `RuntimeError` instead of falling back to in-memory -- belt-and-suspenders with the base class guard
 - A standalone `assert_test_only()` function is exported for dataclasses (`InMemoryEventStore`, `InMemoryProjectionStore`) that use `__post_init__`
 
-**Location:** `packages/syn-adapters/src/syn_adapters/in_memory.py`
+**Location:** `packages/syn-shared/src/syn_shared/in_memory.py` (re-exported from `syn_adapters.in_memory`), so packages that cannot depend on syn-adapters can use it too.
+
+**Enforced, not remembered:** `ci/fitness/code_quality/test_in_memory_adapters_are_guarded.py` fails the build when a production class it identifies as an in-memory adapter or double can be constructed without running `assert_test_only()`. It identifies them by name (`InMemory*`, `Memory*`, `Fake*`, `Stub*`) or by naming a port as a base inside a `memory`/`fake` module. Limits: test files (`test_*.py`, `conftest.py`) are not scanned, a port implemented structurally without naming it as a base is invisible to it, and listed exceptions bypass it. Those cases still follow the rule by review.
 
 ### 6. Cold-Start Fence (HistoricalPoller)
 
@@ -173,17 +175,23 @@ This second layer protects against implementation mistakes where historical even
 
 **Location:** `packages/syn-domain/.../event_pipeline/normalized_event.py` and `pipeline.py`
 
-### 8. Configurable dispatch concurrency
+### 8. One execution concurrency budget (#1557)
 
-`BackgroundWorkflowDispatcher.MAX_CONCURRENT` was hardcoded at 10. On a Docker host with limited memory (e.g., 8GB), 10 simultaneous 4GB containers cause OOM kills.
+`BackgroundWorkflowDispatcher.MAX_CONCURRENT` was hardcoded at 10. On a Docker host with limited memory (e.g., 8GB), 10 simultaneous 4GB containers cause OOM kills. It then became `SYN_POLLING_MAX_CONCURRENT_DISPATCHES`, default 1 (#865, #866).
 
-Now configurable via `SYN_POLLING_MAX_CONCURRENT_DISPATCHES` (default 1). This is distinct from `WorkspaceSettings.max_concurrent` (workspace pool capacity) -- dispatch concurrency is a safety limit on how many workflows fire simultaneously from triggers.
+**Updated 2026-10-04 (#1557): one budget, every start path.** `SYN_EXECUTION_MAX_CONCURRENT` (`ExecutionSettings.max_concurrent`, default 4) is the one limit on how many executions an API process runs at once. `POST /workflows/{id}/execute`, trigger dispatch and resume starts all claim a slot from the same process-wide `ExecutionBudget` (`get_execution_budget()`). The old name is ignored, with a startup warning. Three defects drove the change:
 
-**The default is 1 TEMPORARILY, and for correctness rather than memory.** Concurrent executions are not isolated from each other (#865): the processor keeps per-execution state on an instance they share, so one execution can read another's inputs and finish successfully against the wrong target, and one execution's cancellation tears down the others' containers. Restore a higher default once #865 lands.
+1. **The name hid the scope.** The polling limit also serialised resume starts, and never bounded `POST /execute`. After an OOM, five resumes waited an hour each behind one running resumed child while direct runs went past unbounded.
+2. **A waiting start was invisible.** It showed only as `dispatched`, and `GET /executions/{child}` 404'd for the whole wait. Now a start without a slot reports `status: queued` with its `start_queue` position, on the execution and, for a resume, on the parent's `resume_start`.
+3. **Re-offers queued duplicates.** `ResumeStartProcessManager` re-offers `dispatched` records after `DISPATCH_GRACE`, which added a second start task behind the first. The processor now asks the starter (`ResumeStarter.holds_start`) and skips a start queued or running in this process; the dispatcher also refuses a second claim for the same execution, and `StartResumeHandler.handle` still returns early once the child stream exists, which covers a re-offer from a restarted process.
 
-**Scope is narrower than the name suggests.** It bounds the background TRIGGER dispatcher only. Manual executions started through the API build their own processor and do not pass through this semaphore, and the limit is per-process rather than per-cluster, so it is not a global cap across API replicas. Raising it above 1 logs a startup warning naming #865.
+**What is unsafe about high concurrency, and how the default answers it.** Isolation was the original hazard: concurrent executions shared per-run processor state (#865), so the default was 1. #1311 gave each execution its own `PhaseRuntime`, so isolation no longer limits concurrency. Capacity does. Each running execution holds a workspace container (`SYN_WORKSPACE_MEMORY_LIMIT_MB`, `SYN_WORKSPACE_CPU_LIMIT`) and about 96MiB of API memory for stream parsing and artifact collection, and the API hosts every execution: in #1552, 8 concurrent runs reached ~443MB against the 512m `API_MEMORY_LIMIT` default at the time, the kernel killed the API and all 8 runs died. The default of 4 is `(512 - 128) / 96`, sized against 512m, the historical API default when this was written. The current `API_MEMORY_LIMIT` default is 2g (raised in #1777 from the #1552 incident numbers: 443MB RSS at OOM with 8 executions is an upper bound, not a per-execution slope); the budget default of 4 is unchanged and #1717 will measure the slope. As an unvalidated heuristic (the 96MiB figure is an upper-bound estimate, pending #1717), size it as `(API_MEMORY_LIMIT_MiB - 128) / 96` (20 for 2g) and check host RAM covers that many workspaces. At startup the API reads its cgroup memory limit and warns if the budget exceeds what it fits.
 
-**Location:** `packages/syn-shared/src/syn_shared/settings/polling.py`, `apps/syn-api/src/syn_api/_wiring.py`
+**Every queued start is durable (codex review of #1574).** The budget is per process and in memory, so it must never be the only record of an accepted start. Each path has a durable intent written before the caller is told yes: trigger dispatch records (from `TriggerFired`), resume starts (from `ExecutionResumed` on the parent) and, new here, direct starts: `POST /execute` writes `ExecutionRequested` on an `ExecutionRequest` stream inside the admission gate, and only then answers 200. The admission lease still spans the wait for a slot, so a planned drain waits for queued direct starts as it does for trigger starts; the record covers the crash. `ExecutionRequestStartProcessManager` and `ResumeStartProcessManager` share one start to-do list (`orchestration/_shared/start_todo.py`): pending -> dispatched -> started, failures classified (paused, retryable, failed after 3), re-offer after `DISPATCH_GRACE`, and never for a start the process already holds. The route still queues its own task as the fast path; the ProcessManager starts anything no process holds, which after a restart is every request still owed. A request recovered after a crash is re-admitted through the gate like a resume or trigger start: during maintenance it is recorded `paused`, durably, and `AdmissionOpen` re-offers it. It is never started into a drain, and never lost. `GET /executions/{id}` reads that record too (and the request stream itself before the record is projected), so a queued start shows `queued` across a restart, and a start that failed shows `failed` with its reason instead of a 404.
+
+**Scope.** The budget is per process, not per cluster. Duplicate prevention by `holds_start` / `holds_execution` is per process; across processes, a second start of the same execution loses on the execution stream's NoStream write, so the cost of a cross-process re-offer is a wasted queued task, never a second run.
+
+**Location:** `packages/syn-shared/src/syn_shared/settings/execution.py`, `apps/syn-api/src/syn_api/execution_budget.py`, `apps/syn-api/src/syn_api/_wiring_admission.py`, `packages/syn-domain/.../orchestration/_shared/start_todo.py`, `.../slices/start_execution_request/`, `.../domain/aggregate_execution_request/`
 
 ## Consequences
 

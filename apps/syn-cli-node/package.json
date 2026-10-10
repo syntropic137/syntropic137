@@ -1,6 +1,6 @@
 {
   "name": "@syntropic137/cli",
-  "version": "0.33.1",
+  "version": "1.0.0",
   "description": "Syntropic137 CLI - Event-sourced workflow engine for AI agents",
   "type": "module",
   "bin": {
@@ -24,6 +24,7 @@
   },
   "dependencies": {
     "openapi-fetch": "^0.17.0",
+    "yaml": "2.8.3",
     "zod": "^3.24.0"
   },
   "devDependencies": {

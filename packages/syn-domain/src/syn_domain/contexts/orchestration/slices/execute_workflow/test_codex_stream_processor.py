@@ -32,6 +32,8 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.TokenAccumulator 
     TokenAccumulator,
 )
 
+pytestmark = pytest.mark.unit
+
 _FIXTURES_DIR = Path(__file__).resolve().parents[6] / "tests" / "fixtures" / "codex"
 
 
@@ -42,11 +44,14 @@ class _RecordingCollector:
     async def record_tool_started(self, **kwargs: object) -> None:
         self.calls.append(("tool_started", kwargs))
 
-    def note_agent_activity(self) -> None:
+    def note_agent_activity(self, *, changed_nothing: bool = False) -> None:
         # Deliberately not recorded as a call: this is a bare fact the stream
         # processors set on anything the agent did, and every assertion in this
         # file is about what was RECOGNISED (#1303).
         return
+
+    async def note_command_ended(self, *_args: object) -> None:
+        return None
 
     async def record_tool_completed(self, **kwargs: object) -> None:
         self.calls.append(("tool_completed", kwargs))
@@ -650,3 +655,102 @@ async def test_codex_own_failure_reason_outranks_an_echoed_line() -> None:
     result = await processor.process_stream(_lines(rec), _NoopWorkspace())
 
     assert result.error_reason == "codex reported: stream disconnected before completion"
+
+
+@pytest.mark.asyncio
+async def test_a_codex_phase_is_stopped_at_its_cost_limit() -> None:
+    """#1376: the limit holds on the codex path too, per codex turn.
+
+    Codex names no model on its stream, so the turn is priced as the requested
+    model - the same rule `_estimate_cost` applies to the run's totals.
+    """
+    from syn_domain.contexts.orchestration.slices.execute_workflow.phase_cost_limit import (
+        PhaseCostLimit,
+    )
+
+    class _SpyWorkspace:
+        last_stream_exit_code = 0
+
+        def __init__(self) -> None:
+            self.interrupted = False
+
+        async def interrupt(self) -> bool:
+            self.interrupted = True
+            return True
+
+    turn = json.dumps(
+        {"type": "turn.completed", "usage": {"input_tokens": 2_000_000, "output_tokens": 0}}
+    )
+
+    async def _turns() -> AsyncIterator[str]:
+        for _ in range(3):
+            yield '{"type":"turn.started"}'
+            yield turn
+
+    processor = CodexStreamProcessor(
+        tokens=TokenAccumulator(),
+        collector=_RecordingCollector(),
+        controller=None,
+        execution_id="exec-1",
+        phase_id="p1",
+        session_id="s1",
+        agent_model="gpt-5.6",
+        rollout=None,
+        cost_limit=PhaseCostLimit(0.01),
+    )
+    workspace = _SpyWorkspace()
+
+    result = await processor.process_stream(_turns(), workspace)
+
+    assert workspace.interrupted is True
+    assert result.interrupt_requested is True
+    assert result.line_count == 2, "stopped on the first turn that crossed the limit"
+    assert result.cost_limit_reason is not None
+    assert result.cost_limit_reason.startswith("cost limit USD 0.01 exceeded at USD ")
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_turn_failed_outranks_an_earlier_error_codex_went_past() -> None:
+    """`turn.failed` is codex's verdict on the turn; an earlier `error` is not.
+
+    Constructed, not recorded: the hiccup from `codex_error_then_recovered.jsonl`
+    followed by the refusal tail of `codex_turn_failed.jsonl`. Keeping the
+    first `error` reported the hiccup and hid the refusal, so a phase with a
+    declared fallback died `unknown` (verification of #1819).
+    """
+    hiccup = (_FIXTURES_DIR / "codex_error_then_recovered.jsonl").read_text().splitlines()[2]
+    refused = (_FIXTURES_DIR / "codex_turn_failed.jsonl").read_text().splitlines()
+
+    async def stream() -> AsyncIterator[str]:
+        for line in (*refused[:2], hiccup, *refused[3:]):
+            yield line
+
+    processor, _tokens = _make_processor(_RecordingCollector())
+
+    result = await processor.process_stream(stream(), _NoopWorkspace())
+
+    assert result.error_reason is not None
+    assert "flagged for possible cybersecurity risk" in result.error_reason
+    assert "transient upstream hiccup" not in result.error_reason
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_a_later_error_does_not_replace_the_first_when_no_turn_failed() -> None:
+    """First-wins still holds among `error` events: a later generic one keeps the specific."""
+    lines = (
+        json.dumps({"type": "error", "message": "specific: the prompt was rejected"}),
+        json.dumps({"type": "error", "message": "stream disconnected before completion"}),
+    )
+
+    async def stream() -> AsyncIterator[str]:
+        for line in lines:
+            yield line
+
+    processor, _tokens = _make_processor(_RecordingCollector())
+
+    result = await processor.process_stream(stream(), _NoopWorkspace())
+
+    assert result.error_reason is not None
+    assert "specific: the prompt was rejected" in result.error_reason

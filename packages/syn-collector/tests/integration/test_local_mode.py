@@ -17,6 +17,8 @@ from syn_collector.collector.store import InMemoryObservabilityStore
 from syn_collector.watcher.hooks import HookWatcher
 from syn_collector.watcher.transcript import TranscriptWatcher
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.mark.unit
 class TestLocalModeIntegration:

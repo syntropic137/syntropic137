@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <img src="./public/assets/syn137-banner.png" alt="Syntropic137 Banner" width="100%" />
+  <img src="./design/brand/banners/syntropic137.svg" alt="Syntropic137: agent work that compounds" width="100%" />
 </p>
 
 # Syntropic137
@@ -113,9 +113,9 @@ The system is organized into 5 bounded contexts following Vertical Slice Archite
 
 | Context | Aggregates | Purpose |
 |---------|------------|---------|
-| **`orchestration`** | Workspace, WorkflowTemplate, WorkflowExecution | Workflow execution and workspace management |
-| **`organization`** | Organization, System, Repo | Organization hierarchy, system and repo management |
-| **`agent_sessions`** | AgentSession | Agent sessions and observability metrics |
+| **`orchestration`** | ClaudePluginRegistration, Eval, ExecutionRequest, GlobalClaudePluginRegistry, SkillRegistration, WorkflowExecution, WorkflowTemplate, Workspace | Workflow execution and workspace management |
+| **`organization`** | Organization, Repo, RepoClaim, System | Organization hierarchy, system and repo management |
+| **`agent_sessions`** | AgentSession, InventoryClock, InventoryReconciliation | Agent sessions and observability metrics |
 | **`github`** | Installation, TriggerRule | GitHub App integration, webhook trigger rules |
 | **`artifacts`** | Artifact | Artifact storage and retrieval |
 
@@ -170,7 +170,7 @@ phases:
   - id: review
     agent:
       provider: codex           # a different model reviews the work
-      model: gpt-sol            # platform alias for gpt-6-sol, see note below
+      model: gpt-sol            # platform alias for gpt-6.1-sol, see note below
 ```
 
 Codex phases need `CODEX_AUTH_JSON` set in your `.env`. Without it, a phase
@@ -178,7 +178,7 @@ with `agent.provider: codex` fails to provision.
 
 A phase that names no model gets the platform default: `opus` on claude
 phases, `gpt-sol` on codex phases. `gpt-sol` is a platform alias that runs
-and prices as `gpt-6-sol`; codex has no aliases of its own, so the platform
+and prices as `gpt-6.1-sol`; codex has no aliases of its own, so the platform
 translates it before calling codex. Override the defaults with
 `SYN_DEFAULT_CLAUDE_MODEL` and `SYN_DEFAULT_CODEX_MODEL` in your `.env`. A
 default is recorded in the workflow when you install it, so changing the
@@ -253,6 +253,7 @@ syntropic137/
 │   ├── syn-cli-node/             # CLI tool ("syn") — Node.js
 │   ├── syn-dashboard-ui/        # Dashboard frontend (Vite + React)
 │   ├── syn-docs/                # Public documentation site (Next.js + Fumadocs)
+│   ├── syn-landing/             # syntropic137.com marketing site (Vite + React)
 ├── packages/
 │   ├── syn-domain/              # Domain events, aggregates, ports
 │   ├── syn-adapters/            # Orchestration + observability adapters

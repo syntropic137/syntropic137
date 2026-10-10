@@ -33,6 +33,8 @@ from syn_domain.contexts.orchestration._shared.workflow_definition import (
     is_phase_id,
 )
 from syn_domain.contexts.orchestration._shared.yaml_to_command import build_command_from_definition
+from syn_shared.agents import AgentProvider
+from syn_shared.tools import ToolName
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -342,6 +344,37 @@ def grant_violations(path: Path) -> list[str]:
     return violations
 
 
+def skill_grant_notices(path: Path) -> list[str]:
+    """Phases whose explicit grant the platform will widen with `Skill` (#1269).
+
+    Declaring a skill asks for it to be usable, so `_grant_skill_invocation`
+    appends `Skill` at execution to a claude phase that scopes its tools and
+    declares skills, workflow-scope or its own. Not a failure: the grant is
+    deliberate. But the YAML then lists fewer tools than the agent holds, and
+    the author reading it should be told rather than left to find out. Codex
+    has no Skill tool and refuses a tool list, so it never appears here: its
+    skills land as context only.
+    """
+    definition = WorkflowDefinition.from_file(path)
+    notices: list[str] = []
+    for phase in definition.phases:
+        provider = phase.agent.provider if phase.agent else None
+        if provider == AgentProvider.CODEX or not phase.allowed_tools:
+            continue
+        if ToolName.SKILL in phase.allowed_tools:
+            continue
+        declared = [*definition.skills, *phase.skills]
+        if not declared:
+            continue
+        notices.append(
+            f"phase '{phase.id}' declares {len(declared)} skill(s) and lists "
+            f"allowed_tools [{', '.join(phase.allowed_tools)}] without Skill: "
+            f"the platform adds Skill automatically at execution, so the agent "
+            f"can invoke them."
+        )
+    return notices
+
+
 #: What ends an `artifacts/input/...` reference written in prose.
 #:
 #: Prompts are markdown, so a reference is nearly always fenced in backticks
@@ -454,13 +487,95 @@ def stale_phase_references(path: Path, *, phase_library_dir: Path | None = None)
     return violations
 
 
+#: The heading a repository declares its verification gates under, in its
+#: `AGENTS.md`. The SDLC prompts name it; `declared_gates` parses it. Rename it
+#: in one place and the prompts point at nothing, so it is spelled once here.
+GATES_HEADING = "## Verification gates"
+
+#: Workflows written before PC-129 that still name this repository's gates.
+#: They run only against syntropic137 today; each is the same defect the
+#: implement-v3 and reverify-pr prompts had, and the list may only shrink.
+_GATES_STILL_NAMED = frozenset(
+    {
+        "workflows/custom/bake-haiku",
+        "workflows/custom/bake-opus",
+        "workflows/custom/bake-sonnet",
+        "workflows/sdlc/implement",
+        "workflows/sdlc/quickfix",
+    }
+)
+
+
+def declared_gates(agents_md: Path) -> tuple[str, ...]:
+    """The gate commands a repository declares, in order; empty when it declares none.
+
+    THE CONVENTION: under `GATES_HEADING`, the first fenced block lists the
+    gates, one command per line, run from the repository root. Everything else
+    in the section is prose for the agent and is not parsed.
+    """
+    if not agents_md.is_file():
+        return ()
+    lines = agents_md.read_text().splitlines()
+    try:
+        start = lines.index(GATES_HEADING) + 1
+    except ValueError:
+        return ()
+    gates: list[str] = []
+    fence: str | None = None
+    for line in lines[start:]:
+        if fence is None:
+            if line.startswith("## "):
+                break
+            opened = _FENCE.match(line)
+            if opened is not None:
+                fence = opened.group(2)
+            continue
+        if line.strip().startswith(fence):
+            break
+        command = " ".join(line.split())
+        if command and not command.startswith("#"):
+            gates.append(command)
+    return tuple(gates)
+
+
+def hardcoded_gates(path: Path, gates: tuple[str, ...]) -> list[str]:
+    """Phases in this file that name one of THIS repository's gates literally.
+
+    THE INVARIANT: a workflow prompt gets its gates from the repository it runs
+    against, never from the repository it happens to ship in. A workflow can be
+    dispatched on any repository, and a command that is the gate here does not
+    exist there: sdlc-implement-v3 named `just preflight-agent`, so a run on a
+    repository with no justfile could not certify anything (PC-129).
+
+    `gates` is what this repository declares under `GATES_HEADING`, so the list
+    of forbidden commands cannot drift from the commands themselves: add a gate
+    there and every prompt that hard-codes it fails here.
+    """
+    if not gates:
+        return []
+    definition = WorkflowDefinition.from_file(path)
+    violations: list[str] = []
+    for phase in definition.phases:
+        prompt = " ".join((phase.prompt_template or "").split())
+        violations.extend(
+            f"phase '{phase.id}' names the gate `{gate}` literally. That gate is "
+            f"this repository's, not the target's: tell the phase to read the "
+            f"target repository's AGENTS.md '{GATES_HEADING}' section instead."
+            for gate in gates
+            if gate in prompt
+        )
+    return violations
+
+
 def main() -> int:
     files = _workflow_files()
     if not files:
         print("No workflow YAML found - nothing to validate.")
         return 0
 
+    gates = declared_gates(_ROOT / "AGENTS.md")
     failures: list[tuple[Path, str]] = []
+    notices: list[tuple[Path, str]] = []
     checked = 0
     for path in files:
         try:
@@ -491,6 +606,12 @@ def main() -> int:
         # through `from_file`, which is what raised above.
         failures.extend((path, why) for why in grant_violations(path))
         failures.extend((path, why) for why in stale_phase_references(path))
+        if path.parent.relative_to(_ROOT).as_posix() not in _GATES_STILL_NAMED:
+            failures.extend((path, why) for why in hardcoded_gates(path, gates))
+        notices.extend((path, note) for note in skill_grant_notices(path))
+
+    for path, note in notices:
+        print(f"  NOTE {path.relative_to(_ROOT)}\n       {note}")
 
     for path, why in failures:
         print(f"  FAIL {path.relative_to(_ROOT)}\n       {why}")

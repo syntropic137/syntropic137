@@ -82,6 +82,7 @@ def _get_coordinator_projections() -> list[CheckpointedProjection]:
     from syn_domain.contexts.orchestration.slices.get_workflow_detail import (
         WorkflowDetailProjection,
     )
+    from syn_domain.contexts.orchestration.slices.list_evals import EvalListProjection
     from syn_domain.contexts.orchestration.slices.list_executions import (
         WorkflowExecutionListProjection,
     )
@@ -99,9 +100,15 @@ def _get_coordinator_projections() -> list[CheckpointedProjection]:
     from syn_domain.contexts.orchestration.slices.register_skill.projection import (
         SkillLockProjection,
     )
+    from syn_domain.contexts.orchestration.slices.start_execution_request import (
+        ExecutionRequestStartProcessManager,
+    )
     from syn_domain.contexts.orchestration.slices.start_resume import ResumeStartProcessManager
     from syn_domain.contexts.orchestration.slices.workflow_phase_metrics import (
         WorkflowPhaseMetricsProjection,
+    )
+    from syn_domain.contexts.orchestration.slices.workspace_ownership.projection import (
+        WorkspaceOwnershipProjection,
     )
     from syn_domain.contexts.organization._shared.organization_projection import (
         OrganizationProjection,
@@ -126,6 +133,7 @@ def _get_coordinator_projections() -> list[CheckpointedProjection]:
         WorkflowDetailProjection(dummy),
         WorkflowExecutionListProjection(dummy),
         WorkflowExecutionDetailProjection(dummy),
+        EvalListProjection(dummy),
         DashboardMetricsProjection(dummy),
         # Orchestration — phase metrics and execution todo
         WorkflowPhaseMetricsProjection(dummy),
@@ -142,6 +150,8 @@ def _get_coordinator_projections() -> list[CheckpointedProjection]:
         WorkflowDispatchProjection(execution_service=None, store=dummy),
         # Orchestration — starts the child of an admitted resume (ADR-014 s7)
         ResumeStartProcessManager(resume_starter=None, store=dummy),
+        # Orchestration — starts an admitted direct request (#1557)
+        ExecutionRequestStartProcessManager(starter=None, store=dummy),
         TriggerQueryProjection(dummy),
         # Organization — adapted namespace projections
         OrganizationListAdapter(OrganizationProjection(dummy)),
@@ -161,6 +171,7 @@ def _get_coordinator_projections() -> list[CheckpointedProjection]:
         GlobalClaudePluginsProjection(dummy),
         # Skill injection (issue #772) - mirrors coordinator_service registration
         SkillLockProjection(dummy),
+        WorkspaceOwnershipProjection(dummy),
         # Tool-call tally (issue #1322) - registered for the rebuild hook, not
         # for dispatch; see ToolCallCountsProjection.
         ToolCallCountsProjection(dummy),
@@ -170,7 +181,7 @@ def _get_coordinator_projections() -> list[CheckpointedProjection]:
 # Expected count — update when adding/removing projections from the coordinator.
 # If this fails, you added or removed a projection. Update _EXPECTED_COUNT
 # and the list in _get_coordinator_projections() above.
-_EXPECTED_COUNT = 28
+_EXPECTED_COUNT = 31  # +WorkspaceOwnershipProjection (PC-130)
 
 
 # ---------------------------------------------------------------------------

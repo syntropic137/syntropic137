@@ -16,6 +16,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 
+@pytest.mark.unit
 @pytest.mark.e2e
 class TestPhaseCompletedE2EFlow:
     """E2E tests for PhaseCompleted event flow through the system."""
@@ -300,6 +301,7 @@ class TestPhaseCompletedE2EFlow:
         assert saved_data["total_output_tokens"] == 3000
 
 
+@pytest.mark.unit
 class TestEventStoreIntegration:
     """Test event store integration for PhaseCompleted events.
 

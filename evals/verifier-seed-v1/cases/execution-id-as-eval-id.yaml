@@ -1,0 +1,42 @@
+id: execution-id-as-eval-id
+polarity: defect
+source_pr: 1649
+# The parent of the PR's final head bd302d76, which is the fix.
+commit: 7047b1c3daf1c4057d63eeb478cadd676d712bf5
+fix_commit: bd302d76430c74d8d31a8aa0a016d6c862926d69
+task: >
+  The change under review adds the eval API and CLI: create, list, show, list
+  runs and archive an eval, and attach or detach an execution. The server mints
+  each eval id, and every eval command loads the Eval aggregate by the id it is
+  given. Review the Eval aggregate and the admission and edit paths that load
+  it, and judge them against the production ESP event store.
+expected:
+  # The root cause, for the LLM judge only; never part of `task`.
+  defect: >
+    The ESP server keys a stream by aggregate id alone, so loading Eval-<id>
+    for an id that belongs to another aggregate (e.g. a workflow execution
+    id) rehydrates that aggregate's events into an EvalAggregate and accepts
+    it as an eval. The admission and edit paths do not reject a non-eval
+    stream, so archive/attach with an execution id appends eval events to
+    the execution's stream.
+  # Repo-relative. The report must name one of them; it is matched by file
+  # name, because a verifier writes `minio.py:212` as often as the full path.
+  files:
+    - packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_eval/EvalAggregate.py
+    - packages/syn-domain/src/syn_domain/contexts/orchestration/_shared/eval_admission.py
+    - packages/syn-domain/src/syn_domain/contexts/orchestration/_shared/eval_edit.py
+  # Matched within ONE blocking finding, case-insensitive, with `_`, `-` and
+  # space alike, as substrings: a stem (`collid`) covers its inflections.
+  # Every group must match; within a group, any one word. Each group is one
+  # concept of the defect, written as the ways a correct finding says it.
+  keywords:
+    # The id that is not an eval's.
+    - [execution, run id, run's id, workflow run, other aggregate, another aggregate,
+       foreign, unrelated]
+    # It is looked up by stream, not by type.
+    - [stream, event store, events, load, rehydrat, replay, aggregate type, type check]
+    # So a non-eval is accepted as one.
+    - [exist, present, evalcreated, eval created, not an eval, no eval, isn't an eval,
+       accepted, accept, treated as, mistak, satisf, passes, without, wrong type,
+       any aggregate, not checked, never checked, admit, attach]
+split: train

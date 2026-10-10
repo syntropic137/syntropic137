@@ -1,0 +1,8 @@
+# The #1431 host: api hotfixed on the host (no registry prefix), gateway not.
+services:
+  api:
+    container_name: syn137-api
+    image: syn-api:v0.30.0-beta.7-hotfix1046b
+  gateway:
+    container_name: syn137-gateway
+    image: "ghcr.io/syntropic137/syn-gateway:v0.30.0-beta.7"

@@ -18,6 +18,14 @@ Model aliases are NOT here - they are not env var names. They live in
 ``syn_shared.agents.ModelAlias`` (issue #793).
 """
 
+from __future__ import annotations
+
+from datetime import datetime
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
 # ---------------------------------------------------------------------------
 # Deployment identity
 # APP_ENVIRONMENT is read in more places than any other name here, and it does
@@ -27,6 +35,11 @@ Model aliases are NOT here - they are not env var names. They live in
 # ---------------------------------------------------------------------------
 
 ENV_APP_ENVIRONMENT = "APP_ENVIRONMENT"
+
+# Stamped into the API image by its build (`pit_stop.sh` passes the tag), never
+# chosen per deployment, so deliberately not a Settings field (see
+# syn_api.build_info). Empty in compose and dry-run builds.
+ENV_BUILD_IMAGE_TAG = "SYN_BUILD_IMAGE_TAG"
 
 # Per-dispatch identity, supplied only after durable invocation registration.
 ENV_AGENTIC_INVOCATION_ID = "AGENTIC_INVOCATION_ID"
@@ -73,6 +86,25 @@ ENV_OTEL_EXPORTER_OTLP_ENDPOINT = "OTEL_EXPORTER_OTLP_ENDPOINT"
 #: variable is that answer.
 ENV_GH_REPO = "GH_REPO"
 
+#: When this phase is killed, as ISO 8601 UTC, and the whole budget it was
+#: given in seconds (#1546). Read by the agent, not by anything here: it cannot
+#: see a clock, and phases died at exit 124 holding finished, unpushed work.
+#: Fixed once per phase, so every retry attempt is told the same deadline.
+ENV_SYN_PHASE_DEADLINE = "SYN_PHASE_DEADLINE"
+ENV_SYN_PHASE_TIMEOUT_SECONDS = "SYN_PHASE_TIMEOUT_SECONDS"
+
+
+def phase_deadline_of(environment: Mapping[str, str] | None) -> datetime | None:
+    """The phase deadline a launch environment carries, or None if it carries none.
+
+    The inverse of how the domain writes it (``isoformat``), kept beside the
+    variable's name so the two cannot drift. Read by the workspace adapter to
+    bound the phase's platform token (ADR-072).
+    """
+    raw = (environment or {}).get(ENV_SYN_PHASE_DEADLINE)
+    return None if raw is None else datetime.fromisoformat(raw)
+
+
 # ---------------------------------------------------------------------------
 # Workspace infrastructure env vars
 # Read by the workspace adapter at initialisation; not in pydantic Settings.
@@ -116,9 +148,15 @@ ENV_AGENTIC_SESSION_STORE_URL = "AGENTIC_SESSION_STORE_URL"
 ENV_AGENTIC_SESSION_STORE_AUTH = "AGENTIC_SESSION_STORE_AUTH"
 ENV_AGENTIC_SESSION_STORE_SPOOL = "AGENTIC_SESSION_STORE_SPOOL"
 
-#: How many workflow executions the background TRIGGER dispatcher runs at once.
-#: Bound to the settings field by `validation_alias`, so this name is what
-#: pydantic actually reads rather than a second spelling kept in step by hand.
+#: How many workflow executions one API process runs at once, across every start
+#: path (direct, trigger, resume; #1557). Bound to the settings field by
+#: `validation_alias`, so this name is what pydantic actually reads rather than
+#: a second spelling kept in step by hand.
+ENV_SYN_EXECUTION_MAX_CONCURRENT = "SYN_EXECUTION_MAX_CONCURRENT"
+
+#: RETIRED by #1557. It bounded the trigger dispatcher (and, unnamed, resumes)
+#: but never direct API starts. Read only to warn an operator who still sets it
+#: that it no longer does anything.
 ENV_SYN_POLLING_MAX_CONCURRENT_DISPATCHES = "SYN_POLLING_MAX_CONCURRENT_DISPATCHES"
 ENV_AGENTIC_SESSION_STORE_PARTITION = "AGENTIC_SESSION_STORE_PARTITION"
 ENV_AGENTIC_SESSION_STORE_TAGS = "AGENTIC_SESSION_STORE_TAGS"
@@ -173,6 +211,7 @@ __all__ = [
     "ENV_GIT_COMMITTER_NAME",
     "ENV_OTEL_EXPORTER_OTLP_ENDPOINT",
     "ENV_SYN_AGENT_NETWORK",
+    "ENV_SYN_EXECUTION_MAX_CONCURRENT",
     "ENV_SYN_IMAGE_VERIFY_ALLOW_LOCAL_IMAGES",
     "ENV_SYN_IMAGE_VERIFY_CERTIFICATE_IDENTITY_REGEXP",
     "ENV_SYN_IMAGE_VERIFY_COSIGN_PATH",

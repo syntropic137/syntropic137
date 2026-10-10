@@ -1,0 +1,29 @@
+id: github-token-first-installation
+polarity: defect
+source_pr: 1130
+# Mined from the fix: the first fix commit's first parent, so the bug is
+# present and nothing of the fix is. Evidence at the pin:
+# `_resolve_github_app_token` uses `installations[0]["id"]` (line 259)
+# regardless of the repos; the fix routes by `repos`.
+commit: 3fab74084427c08372f26ada6c27141c4017ef87
+fix_commit: ed665ccdebe13fde23e2360027f47faad2dd8c9b
+first_fix_commit: 48740243eef3bf56ddb70c1df0c5041617959536
+task: >
+  Review how workspace provisioning resolves the GITHUB_TOKEN it injects into
+  the agent's environment so the agent's gh CLI can read issues and PRs of the
+  repository it is working on. The platform's GitHub App may be installed on
+  more than one organisation.
+expected:
+  # The root cause, for the LLM judge only; never part of `task`.
+  defect: >
+    WorkspaceProvisionHandler._resolve_github_app_token mints the injected
+    GITHUB_TOKEN from installations[0] regardless of which repository the
+    phase works on, so when the GitHub App is installed on several
+    organisations the agent gets a token for the wrong installation and
+    cannot read the repo's issues/PRs.
+  files:
+    - packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/WorkspaceProvisionHandler.py
+  keywords:
+    - ["first", "installations[0]", "[0]", "arbitrary", "any installation", "wrong installation", "wrong org", "single org", "one installation"]
+    - ["repo", "organisation", "organization", "org", "owner", "installation"]
+split: holdout

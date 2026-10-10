@@ -1,0 +1,9 @@
+# Build-context ignore for the gateway image only (BuildKit reads
+# <Dockerfile>.dockerignore beside the Dockerfile). Keeps a developer's host
+# node_modules (pnpm symlinks into a store the image does not have) and stale
+# build output from being copied over what the build stages install and build.
+**/node_modules
+apps/syn-ui/dist
+apps/syn-ui/e2e/.results
+apps/syn-ui/e2e/.report
+apps/syn-dashboard-ui/dist

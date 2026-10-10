@@ -11,6 +11,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
     FailureClassification,
     ReportedFailureReason,
 )
+from syn_domain.contexts.orchestration.domain.read_models.phase_progress import PhaseProgress
 
 
 @dataclass(frozen=True)
@@ -47,6 +48,9 @@ class WorkflowExecutionSummary:
 
     total_tokens: int
     """Total tokens used across all phases."""
+
+    skipped_phase_ids: tuple[str, ...] = ()
+    """Phases a review verdict made unnecessary (PC-63): they will never run."""
 
     total_input_tokens: int = 0
     """Total input tokens across all phases."""
@@ -98,6 +102,32 @@ class WorkflowExecutionSummary:
     repos: tuple[str, ...] = field(default_factory=tuple)
     """Full GitHub URLs of repositories cloned for this execution (ADR-058)."""
 
+    tags: tuple[str, ...] = ()
+    """The execution's current tags (#967): its launch snapshot, as edited since."""
+
+    inherited_tags: tuple[str, ...] = ()
+    """The tags it launched with (#967), never edited: workflow tags united with
+    the request's at launch."""
+
+    eval_id: str | None = None
+    """The Eval this execution belongs to now (#967); None in none or once detached."""
+
+    association_kind: str | None = None
+    """How it joined ``eval_id``: ``launched`` or ``attached``; None in no Eval."""
+
+    workflow_version: str | None = None
+    """The workflow's installed version or source digest at launch (Evals v2)."""
+
+    @property
+    def phase_progress(self) -> PhaseProgress:
+        """How far through its phases the run is, skipped phases accounted for."""
+        return PhaseProgress(
+            status=self.status,
+            completed=self.completed_phases,
+            skipped=len(self.skipped_phase_ids),
+            defined=self.total_phases,
+        )
+
     @classmethod
     def from_dict(cls, data: dict) -> "WorkflowExecutionSummary":
         """Create from dictionary data.
@@ -116,6 +146,7 @@ class WorkflowExecutionSummary:
             completed_at=data.get("completed_at"),
             completed_phases=data.get("completed_phases", 0),
             total_phases=data.get("total_phases", 0),
+            skipped_phase_ids=tuple(data.get("skipped_phase_ids") or ()),
             total_tokens=data.get("total_tokens", 0),
             total_input_tokens=data.get("total_input_tokens", 0),
             total_output_tokens=data.get("total_output_tokens", 0),
@@ -136,6 +167,11 @@ class WorkflowExecutionSummary:
                 data.get("reported_failure_reason")
             ),
             repos=tuple(data.get("repos", [])),
+            tags=tuple(data.get("tags") or ()),
+            inherited_tags=tuple(data.get("inherited_tags") or ()),
+            eval_id=data.get("eval_id"),
+            association_kind=data.get("association_kind"),
+            workflow_version=data.get("workflow_version"),
         )
 
     @staticmethod
@@ -158,6 +194,7 @@ class WorkflowExecutionSummary:
             "completed_at": self._to_iso_string(self.completed_at),
             "completed_phases": self.completed_phases,
             "total_phases": self.total_phases,
+            "skipped_phase_ids": list(self.skipped_phase_ids),
             "total_tokens": self.total_tokens,
             "total_input_tokens": self.total_input_tokens,
             "total_output_tokens": self.total_output_tokens,
@@ -171,4 +208,9 @@ class WorkflowExecutionSummary:
                 None if self.reported_failure_reason is None else self.reported_failure_reason.value
             ),
             "repos": list(self.repos),
+            "tags": list(self.tags),
+            "inherited_tags": list(self.inherited_tags),
+            "eval_id": self.eval_id,
+            "association_kind": self.association_kind,
+            "workflow_version": self.workflow_version,
         }

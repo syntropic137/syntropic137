@@ -28,6 +28,17 @@ mkdir -p "$AUTH_DIR"
 
 GATEWAY_BIND="${SYN_GATEWAY_BIND:-127.0.0.1}"
 
+# Which dashboard owns / (docs/syn-ui-rollout.md). Anything else is a typo that
+# would otherwise serve an unexpected UI, so refuse to start.
+GATEWAY_UI="${SYN_GATEWAY_UI:-next}"
+case "$GATEWAY_UI" in
+    next|legacy) ;;
+    *)
+        echo "gateway: refusing to start: SYN_GATEWAY_UI=${GATEWAY_UI} (expected next or legacy)" >&2
+        exit 1
+        ;;
+esac
+
 # 127.0.0.0/8, ::1 (docker accepts it bracketed or bare), and the name that
 # resolves to them. Docker also treats an empty host IP as "every interface",
 # which is emphatically not loopback and falls through to the default branch.
@@ -138,7 +149,7 @@ location /api/v1/ {
     proxy_read_timeout 300s;
     proxy_connect_timeout 75s;
 
-    add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data: https://fastapi.tiangolo.com; connect-src 'self' wss: ws:; font-src 'self' https://cdn.jsdelivr.net; frame-ancestors 'self';" always;
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data: blob: https://fastapi.tiangolo.com; connect-src 'self' wss: ws:; font-src 'self' https://cdn.jsdelivr.net; frame-ancestors 'self';" always;
     add_header X-Frame-Options "SAMEORIGIN" always;
     add_header X-Content-Type-Options "nosniff" always;
     add_header Referrer-Policy "strict-origin-when-cross-origin" always;
@@ -203,23 +214,102 @@ location ~ ^/healthz?$ {
     include /etc/nginx/conf.d/security-headers.conf;
 }
 
-# Static assets (dashboard)
+LOCATIONS
+
+# --- Dashboard UI, selected by SYN_GATEWAY_UI ---
+#   next (default): syn-ui (apps/syn-ui, built with SYN_UI_BASE=/) owns /.
+#     /next and /next/* answer 301 to the same path under / for bookmarks
+#     from the release that served syn-ui at /next.
+#   legacy: the previous release's layout, kept for one release as an opt-out:
+#     the React dashboard at /, syn-ui (built for /next/) at /next.
+# The React app is not served in next mode: its router has no basename, so it
+# cannot be re-based under /legacy without source edits.
+# Auth and the brute-force backstop come from server scope in every mode.
+case "$GATEWAY_UI" in
+    next)   UI_ROOT=/usr/share/nginx/html ;;
+    legacy) UI_ROOT=/usr/share/nginx/legacy ;;
+esac
+printf 'root %s;\nindex index.html;\n' "$UI_ROOT" > "$AUTH_DIR/ui-root.conf"
+echo "nginx: dashboard UI ${GATEWAY_UI} (root ${UI_ROOT})"
+
+if [ "$GATEWAY_UI" = next ]; then
+cat >> "$AUTH_DIR/locations.conf" <<'LOCATIONS'
+
+# Bookmarks from the /next era. absolute_redirect off keeps Location relative.
+location = /next {
+    return 301 /;
+}
+location ^~ /next/ {
+    rewrite ^/next/(.*)$ /$1 permanent;
+}
+
+# Hashed syn-ui chunks: cache forever. A missing chunk is a real 404, never
+# index.html (the router's preload would otherwise parse HTML as JS).
 location /assets/ {
     expires 1y;
     add_header Cache-Control "public, immutable";
     include /etc/nginx/conf.d/security-headers.conf;
+    # Own zone: a syn-ui page load fetches 60+ chunks at once, three times the
+    # server-scope auth backstop's burst, which answered 429 on v1.0.0-beta.1.
+    # auth_basic is still inherited; see rate-limit.conf.
+    limit_req zone=assets burst=300 nodelay;
+    limit_req_status 429;
 }
 
+# syn-ui SPA routing. index.html names the current hashed chunks, so it is
+# revalidated on every load; add_header here drops the server-scope headers,
+# hence the include.
+location / {
+    try_files $uri $uri/ /index.html;
+    add_header Cache-Control "no-cache";
+    include /etc/nginx/conf.d/security-headers.conf;
+}
+LOCATIONS
+else
+cat >> "$AUTH_DIR/locations.conf" <<'LOCATIONS'
 
-# SPA routing (dashboard — root). The brute-force backstop is applied at server
-# scope for whichever listener is authenticated (8081 in nginx.conf, port 80 via
-# auth-host.conf when it is bound off loopback), so it covers this and every
-# other Basic-Auth path without throttling a loopback-only port 80. Nothing to
-# add here.
+# Static assets (React dashboard)
+location /assets/ {
+    expires 1y;
+    add_header Cache-Control "public, immutable";
+    include /etc/nginx/conf.d/security-headers.conf;
+    # Own zone: a syn-ui page load fetches 60+ chunks at once, three times the
+    # server-scope auth backstop's burst, which answered 429 on v1.0.0-beta.1.
+    # auth_basic is still inherited; see rate-limit.conf.
+    limit_req zone=assets burst=300 nodelay;
+    limit_req_status 429;
+}
+
+# syn-ui at /next, built with SYN_UI_BASE=/next/ into the legacy root's next/.
+location = /next {
+    return 301 /next/;
+}
+
+location /next/assets/ {
+    expires 1y;
+    add_header Cache-Control "public, immutable";
+    include /etc/nginx/conf.d/security-headers.conf;
+    # Same zone as /assets/: the legacy layout's syn-ui at /next loads the
+    # same 60+ chunks and would otherwise hit the auth backstop (release
+    # review of #1866).
+    limit_req zone=assets burst=300 nodelay;
+    limit_req_status 429;
+}
+
+location /next/ {
+    try_files $uri $uri/ /next/index.html;
+    add_header Cache-Control "no-cache";
+    include /etc/nginx/conf.d/security-headers.conf;
+}
+
+# SPA routing (React dashboard, root).
 location / {
     try_files $uri $uri/ /index.html;
 }
+LOCATIONS
+fi
 
+cat >> "$AUTH_DIR/locations.conf" <<'LOCATIONS'
 # Error pages
 error_page 500 502 503 504 /50x.html;
 location = /50x.html {

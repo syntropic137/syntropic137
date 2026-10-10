@@ -1,0 +1,6 @@
+name: archive-eval
+type: command
+aggregate: Eval
+emits:
+  - EvalArchivedEvent
+returns: HandlerResult

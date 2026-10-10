@@ -14,12 +14,12 @@ Architecture:
 from __future__ import annotations
 
 import asyncio
+import inspect
 import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Final, cast
+from typing import TYPE_CHECKING, Final, Protocol, cast
 
-import asyncpg
 from agentic_logging import get_logger
 from event_sourcing import (
     CheckpointedProjection,
@@ -27,6 +27,7 @@ from event_sourcing import (
     SubscriptionCoordinator,
 )
 
+from syn_adapters import postgres_pool
 from syn_adapters.subscriptions.read_model_lag import (
     CheckpointState,
     ReadModelLag,
@@ -35,13 +36,21 @@ from syn_adapters.subscriptions.read_model_lag import (
 from syn_adapters.subscriptions.realtime_adapter import (
     RealTimeProjectionAdapter as RealTimeProjectionAdapter,
 )
+from syn_adapters.subscriptions.unapplied_starts import (
+    AppliesExecutionStarts,
+    UnappliedStartDetector,
+    UnappliedStartsReport,
+    UnappliedStartWatch,
+)
 from syn_shared.settings import get_settings
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
+    import asyncpg
     from event_sourcing import DomainEvent, EventEnvelope, EventStoreClient
     from event_sourcing.core.checkpoint import ProjectionCheckpointStore
+    from event_sourcing.core.envelope import EventTypeFilter
 
     from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
     from syn_adapters.projections.realtime import RealTimeProjection
@@ -55,6 +64,14 @@ if TYPE_CHECKING:
     )
 
 logger = get_logger(__name__)
+
+#: How often a coordinator halted at an undecodable stored event (ESP ADR-026)
+#: checks whether an operator has repaired it. It stays halted inside start(),
+#: visible as ``halted_at`` on /health, and resumes by itself once the event
+#: decodes or the checkpoints have moved. Without it start() raises and the
+#: generic reconnect loop in ``coordinator_helpers`` would replay to the same
+#: event on every attempt, logging each as a transient error.
+UNDECODABLE_RECHECK_INTERVAL_S: Final = 60.0
 
 #: How long :meth:`CoordinatorSubscriptionService.start` waits for the
 #: coordinator to open its subscription before giving up and FAILING. Only
@@ -89,6 +106,14 @@ class SubscriptionNotLiveError(RuntimeError):
     """
 
 
+class _TypeFilteringSubscribe(Protocol):
+    """``subscribe`` of a store that filters before decoding (ESP ADR-027)."""
+
+    def __call__(
+        self, *, from_global_nonce: int, event_types: EventTypeFilter
+    ) -> AsyncIterator[EventEnvelope[DomainEvent]]: ...
+
+
 class _SignalsWhenSubscribed:
     """The store the coordinator reads, plus the one moment it does not report.
 
@@ -111,9 +136,22 @@ class _SignalsWhenSubscribed:
     def __init__(self, inner: EventStoreClient, subscribed: asyncio.Event) -> None:
         self._inner = inner
         self._subscribed = subscribed
+        #: Whether the wrapped store can leave unwanted types undecoded (ESP
+        #: ADR-027, v0.17.0). The coordinator decides to filter by reading THIS
+        #: wrapper's signature, so the wrapper must declare ``event_types`` and
+        #: pass it on, or every track silently decodes every event and one
+        #: un-upcast type no projection handles halts all of them.
+        self._inner_filters = "event_types" in inspect.signature(inner.subscribe).parameters
 
-    def subscribe(self, from_global_nonce: int = 0) -> AsyncIterator[EventEnvelope[DomainEvent]]:
+    def subscribe(
+        self, from_global_nonce: int = 0, event_types: EventTypeFilter | None = None
+    ) -> AsyncIterator[EventEnvelope[DomainEvent]]:
         self._subscribed.set()
+        if event_types is not None and self._inner_filters:
+            # The protocol predates the parameter; the signature check above is
+            # the guarantee that the concrete store accepts it.
+            subscribe = cast("_TypeFilteringSubscribe", self._inner.subscribe)
+            return subscribe(from_global_nonce=from_global_nonce, event_types=event_types)
         return self._inner.subscribe(from_global_nonce=from_global_nonce)
 
     async def read_all(
@@ -143,6 +181,27 @@ class SubscriptionServiceStatus:
     running: bool
     projection_count: int
     realtime_enabled: bool
+    #: Projections the coordinator holds below an event they failed to apply
+    #: (ESP #391, v0.17.0), by name. Empty when none is held.
+    held_projections: tuple[HeldProjection, ...] = ()
+    #: Global nonce of the undecodable stored event the subscription is halted
+    #: at (ESP ADR-026), or None when it is not halted.
+    halted_at: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class HeldProjection:
+    """One projection the coordinator will not move past an event it failed on.
+
+    Since ESP v0.17.0 (#391) a projection whose handler returns FAILURE or
+    raises is held at that event and fed it again with backoff, instead of
+    being checkpointed past it and losing it silently. The other projections
+    keep consuming, so nothing else on /health would show it.
+    """
+
+    projection_name: str
+    event_type: str
+    global_nonce: int
 
 
 class CoordinatorSubscriptionService:
@@ -186,6 +245,7 @@ class CoordinatorSubscriptionService:
         self._db_pool: asyncpg.Pool | None = None
         self._checkpoint_store: ProjectionCheckpointStore | None = None
         self._coordinator: SubscriptionCoordinator | None = None
+        self._unapplied_starts: UnappliedStartWatch | None = None
         self._coordinator_started_at: datetime | None = None
         self._subscription_task: asyncio.Task[None] | None = None
         self._running = False
@@ -197,12 +257,30 @@ class CoordinatorSubscriptionService:
         """Check if the subscription is running."""
         return self._running
 
+    @property
+    def is_live(self) -> bool:
+        """Running and past catch-up: the only state in which side effects may run."""
+        coordinator = self._coordinator
+        return self._running and coordinator is not None and not coordinator.is_catching_up
+
     def get_status(self) -> SubscriptionServiceStatus:
         """Get service status for health checks."""
+        coordinator = self._coordinator
+        held = coordinator.held_projections if coordinator is not None else {}
+        halt = coordinator.halted if coordinator is not None else None
         return SubscriptionServiceStatus(
             running=self._running,
             projection_count=len(self._projections),
             realtime_enabled=self._realtime_projection is not None,
+            held_projections=tuple(
+                HeldProjection(
+                    projection_name=name,
+                    event_type=failure.event_type,
+                    global_nonce=failure.global_nonce,
+                )
+                for name, failure in sorted(held.items())
+            ),
+            halted_at=halt.global_nonce if halt is not None else None,
         )
 
     async def describe_read_model_lag(self) -> ReadModelLag | None:
@@ -269,6 +347,51 @@ class CoordinatorSubscriptionService:
             now=datetime.now(UTC),
         )
 
+    async def projected_through_head(
+        self, projection_name: str, *, timeout: float = 5.0, interval: float = 0.1
+    ) -> bool:
+        """Whether ``projection_name`` has processed every event in the store NOW (#1588).
+
+        The head is read once, first, so the target is fixed: a projection that
+        reaches it has seen every event written before the call, however many
+        are written while it waits. False if the subscription is not up or the
+        projection does not reach that head within ``timeout`` - the caller
+        refuses and asks again rather than trusting a read model that may lag.
+        """
+        if self._coordinator is None or self._checkpoint_store is None:
+            return False
+        head_events, _is_end, _next = await self._event_store.read_all(
+            from_global_nonce=sys.maxsize, max_count=1, forward=False
+        )
+        head = head_events[0].metadata.global_nonce if head_events else None
+        if head is None:
+            return True
+        deadline = asyncio.get_running_loop().time() + timeout
+        while True:
+            checkpoint = await self._checkpoint_store.get_checkpoint(projection_name)
+            if checkpoint is not None and checkpoint.global_position >= head:
+                return True
+            if asyncio.get_running_loop().time() >= deadline:
+                return False
+            await asyncio.sleep(interval)
+
+    async def describe_unapplied_starts(self) -> UnappliedStartsReport | None:
+        """Executions whose start a read model's checkpoint passed without applying (#1545).
+
+        The latest background reconciliation; ``None`` before ``start()`` or
+        before the first check completes, i.e. not measured. Never scans on
+        the caller's path; see ``unapplied_starts`` for what counts and what
+        it costs.
+        """
+        if self._unapplied_starts is None:
+            return None
+        return self._unapplied_starts.latest
+
+    async def _read_path_settled(self) -> bool:
+        """Whether the read models are past replay, so a missing row means something (#1545)."""
+        lag = await self.describe_read_model_lag()
+        return lag is not None and not lag.is_catching_up
+
     async def start(self) -> None:
         """Start the coordinator subscription service."""
         if self._running:
@@ -296,8 +419,9 @@ class CoordinatorSubscriptionService:
                     "Set it in your .env file."
                 )
             database_url = str(settings.syn_observability_db_url)
-            self._db_pool = await asyncpg.create_pool(
+            self._db_pool = await postgres_pool.create_pool(
                 database_url,
+                name="subscription_checkpoints",
                 min_size=2,
                 max_size=10,
             )
@@ -321,6 +445,15 @@ class CoordinatorSubscriptionService:
             event_store=_SignalsWhenSubscribed(self._event_store, self._subscribed),
             checkpoint_store=self._checkpoint_store,
             projections=all_projections,
+            undecodable_recheck_interval=UNDECODABLE_RECHECK_INTERVAL_S,
+        )
+        self._unapplied_starts = UnappliedStartWatch(
+            UnappliedStartDetector(
+                self._event_store,
+                self._checkpoint_store,
+                [p for p in self._projections if isinstance(p, AppliesExecutionStarts)],
+                is_settled=self._read_path_settled,
+            )
         )
 
         # Start coordinator in background task
@@ -334,6 +467,7 @@ class CoordinatorSubscriptionService:
         except BaseException:
             await self._abandon_failed_start()
             raise
+        self._unapplied_starts.start()
 
         logger.info(
             "Coordinator subscription service started",
@@ -398,6 +532,17 @@ class CoordinatorSubscriptionService:
 
         await run_coordinator(self)
 
+    async def wait_for_process_managers(self) -> None:
+        """Wait until every ProcessManager drain is idle with no wake pending.
+
+        ProcessManagers drain on their own task, off the dispatch path (ESP
+        #334, #1528), so a projection checkpoint reaching an event does not
+        mean its processor side has run. Tests and tooling that observe those
+        side effects wait here. A service that never started has none.
+        """
+        if self._coordinator is not None:
+            await self._coordinator.wait_for_process_managers()
+
     async def stop(self) -> None:
         """Stop the coordinator subscription service gracefully."""
         from syn_adapters.subscriptions.coordinator_helpers import stop_coordinator_service
@@ -445,8 +590,12 @@ def create_coordinator_service(
     Returns:
         Configured CoordinatorSubscriptionService
     """
+    from syn_adapters.github.client import get_github_client
+    from syn_adapters.github.pull_request_commenter import GitHubPullRequestCommenter
+    from syn_adapters.github.remote_branch_reader import GitHubRemoteBranchReader
     from syn_adapters.projections.manager_registry import create_session_cost_projection
     from syn_adapters.projections.trigger_query_projection import TriggerQueryProjection
+    from syn_adapters.storage.repositories import get_workflow_execution_repository
     from syn_adapters.subscriptions.projection_adapters import (
         ExecutionCostAdapter,
         SessionCostAdapter,
@@ -477,6 +626,11 @@ def create_coordinator_service(
         TriggerHistoryProjection,
     )
     from syn_domain.contexts.orchestration import (
+        CancelledWorkLedger,
+        ExecutionJournal,
+        ExecutionRequestStarter,
+        ExecutionRequestStartProcessManager,
+        QuarantineNoticeProcessManager,
         ResumeStarter,
         ResumeStartProcessManager,
     )
@@ -495,6 +649,7 @@ def create_coordinator_service(
     from syn_domain.contexts.orchestration.slices.get_workflow_detail import (
         WorkflowDetailProjection,
     )
+    from syn_domain.contexts.orchestration.slices.list_evals import EvalListProjection
     from syn_domain.contexts.orchestration.slices.list_executions import (
         WorkflowExecutionListProjection,
     )
@@ -511,6 +666,9 @@ def create_coordinator_service(
     from syn_domain.contexts.orchestration.slices.workflow_phase_metrics import (
         WorkflowPhaseMetricsProjection,
     )
+    from syn_domain.contexts.orchestration.slices.workspace_ownership.projection import (
+        WorkspaceOwnershipProjection,
+    )
     from syn_domain.contexts.organization._shared.organization_projection import (
         OrganizationProjection,
     )
@@ -523,7 +681,7 @@ def create_coordinator_service(
     from syn_domain.contexts.organization.slices.repo_health import RepoHealthProjection
     from syn_domain.tool_call_counts import ToolCallCountsProjection
 
-    # Create all checkpointed projections (26 total - bumped for ADR-014 s7)
+    # Create all checkpointed projections (27 total - bumped for #1557)
     projections: list[CheckpointedProjection] = cast(
         "list[CheckpointedProjection]",
         [
@@ -532,6 +690,7 @@ def create_coordinator_service(
             WorkflowDetailProjection(projection_store),
             WorkflowExecutionListProjection(projection_store),
             WorkflowExecutionDetailProjection(projection_store),
+            EvalListProjection(projection_store),
             DashboardMetricsProjection(projection_store),
             WorkflowPhaseMetricsProjection(projection_store),
             ExecutionTodoProjection(store=projection_store),
@@ -546,6 +705,28 @@ def create_coordinator_service(
             ResumeStartProcessManager(
                 resume_starter=cast("ResumeStarter | None", execution_service),
                 store=projection_store,
+            ),
+            # #1557: starts every admitted direct request from its durable
+            # record - after a restart, or when the route's own task never ran.
+            ExecutionRequestStartProcessManager(
+                starter=cast("ExecutionRequestStarter | None", execution_service),
+                store=projection_store,
+            ),
+            # #1547: tells the PR a failed phase's work is on a quarantine
+            # ref. Host-side, with the App's credential, and only when live.
+            QuarantineNoticeProcessManager(
+                commenter=GitHubPullRequestCommenter(get_github_client),
+                store=projection_store,
+                branches=GitHubRemoteBranchReader(get_github_client),
+                # Settled on every live pass and clock tick, so a cancel's
+                # refused refs reach the stream with no later execution.
+                owed_work=CancelledWorkLedger(
+                    ExecutionJournal(
+                        get_workflow_execution_repository(),
+                        ExecutionTodoProjection(store=projection_store),
+                    ),
+                    projection_store,
+                ),
             ),
             TriggerQueryProjection(projection_store),
             # --- Agent sessions context ---
@@ -572,6 +753,7 @@ def create_coordinator_service(
             GlobalClaudePluginsProjection(projection_store),
             # --- Skill injection (issue #772) ---
             SkillLockProjection(projection_store),
+            WorkspaceOwnershipProjection(projection_store),
             # --- Tool-call tally (issue #1322) ---
             # Not fed by replay: each tool call is counted in the transaction
             # that stores the event, so this is here for the rebuild half of

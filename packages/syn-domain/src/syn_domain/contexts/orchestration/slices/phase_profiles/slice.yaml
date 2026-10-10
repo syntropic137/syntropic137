@@ -1,0 +1,15 @@
+name: phase_profiles
+description: >
+  Per-phase-type, per-model p50/p90 token and cost profiles and p50/p95
+  workspace resource profiles for one workflow over a time window (#1716).
+  No projection: reads Lane 2 observations directly (the usage rollup for
+  tokens, workspace_resource_usage observations for resources), so usage
+  never passes through an aggregate.
+context: orchestration
+type: query
+
+query:
+  name: GetPhaseProfilesQuery
+  returns: PhaseProfiles
+
+read_model: PhaseProfiles

@@ -10,7 +10,7 @@ from .execution_cost import ExecutionCost
 from .workflow_detail import WorkflowDetail
 from .workflow_execution_detail import PhaseExecutionDetail, WorkflowExecutionDetail
 from .workflow_execution_summary import WorkflowExecutionSummary
-from .workflow_summary import WorkflowSummary
+from .workflow_summary import WorkflowSkillSummary, WorkflowSummary
 from .workspace_metrics import WorkspaceMetrics, WorkspaceMetricsSummary
 
 __all__ = [
@@ -20,6 +20,7 @@ __all__ = [
     "WorkflowDetail",
     "WorkflowExecutionDetail",
     "WorkflowExecutionSummary",
+    "WorkflowSkillSummary",
     "WorkflowSummary",
     "WorkspaceMetrics",
     "WorkspaceMetricsSummary",

@@ -2,6 +2,7 @@
 	path = lib/event-sourcing-platform
 	url = https://github.com/NeuralEmpowerment/event-sourcing-platform.git
 	active = true
+	branch = release
 [submodule "lib/agent-paradise-standards-system"]
 	path = lib/agent-paradise-standards-system
 	url = https://github.com/AgentParadise/agent-paradise-standards-system.git
@@ -14,3 +15,8 @@
 	path = lib/agentic-workspace
 	url = https://github.com/AgentParadise/agentic-workspace.git
 	branch = release
+[submodule "lib/syntropic137-skills"]
+	path = lib/syntropic137-skills
+	url = https://github.com/syntropic137/syntropic137-skills.git
+	branch = main
+	active = true

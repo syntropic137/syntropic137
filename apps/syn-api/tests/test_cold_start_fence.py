@@ -26,6 +26,8 @@ from syn_domain.contexts.github.slices.event_pipeline.normalized_event import (
 )
 from syn_domain.contexts.github.slices.event_pipeline.pipeline import EventPipeline, PipelineResult
 
+pytestmark = pytest.mark.unit
+
 if TYPE_CHECKING:
     from event_sourcing.core.historical_poller import CursorData
 

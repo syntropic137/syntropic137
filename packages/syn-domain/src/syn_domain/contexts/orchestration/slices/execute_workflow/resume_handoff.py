@@ -6,12 +6,19 @@ named the artifacts each inherited phase kept; this turns those names into the
 per-run output cache the processor fills for every phase it DOES run, so the
 resumed phase is provisioned the way it would have been had the parent carried
 on.
+
+It also hands the resumed phase the branch and PR its parent's failed attempt
+pushed (#1513), through the same cache, as the entry `CONTINUATION_OUTPUT_ID`.
+That puts "this is the PR you are reworking, use its branch" in the phase's
+context, which is exactly what the v3 implement prompt's "If you are reworking
+an existing PR, use its branch" path keys on - so the prompt itself is unchanged.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from syn_domain.contexts.artifacts import primary_text
 from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
     PhaseOutputCache,
 )
@@ -21,9 +28,21 @@ if TYPE_CHECKING:
     from syn_domain.contexts.artifacts.domain.services.artifact_query_service import (
         ArtifactQueryServiceProtocol,
     )
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continuation import (
+        AbandonedBranch,
+        ContinuedBranch,
+    )
     from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins import (
         ResumeOrigin,
+        StartPins,
     )
+
+#: The output-cache key the continuation is handed over under. Not a phase id,
+#: so no phase's own output can ever overwrite it.
+CONTINUATION_OUTPUT_ID = "resume-continuation"
+#: The words a fix prompt's checkout gate keys on (PC-128): the branch head is
+#: this execution's own unverified push, so verify at it instead of refusing.
+OWN_UNVERIFIED_PUSH = "OWN UNVERIFIED COMMITS"
 
 
 class InheritanceUnavailableError(RuntimeError):
@@ -84,7 +103,7 @@ async def inherited_outputs(
     # resolved; #1460 tracks that. Refusing on a count here would be a false
     # invariant, not a safer one.
     for phase_id, phase_files in files.items():
-        cache.record(phase_id, phase_files[0].content if phase_files else None, phase_files)
+        cache.record(phase_id, primary_text(phase_files), phase_files)
     return cache
 
 
@@ -120,3 +139,51 @@ async def _files_by_owner(
 def inherited_phase_ids(origin: ResumeOrigin | None) -> list[str]:
     """The phases a run begins with already complete, in phase order."""
     return [] if origin is None else [p.phase_id for p in origin.inherited_phases]
+
+
+def record_continuation(cache: PhaseOutputCache, pins: StartPins) -> None:
+    """Hand the resumed phase the branches it continues and those it abandoned (#1513).
+
+    Nothing is recorded for a run that is not a resume or has neither.
+    """
+    origin = pins.resumed_from
+    if origin is None or not (pins.continued_branches or pins.abandoned_branches):
+        return
+    lines = [
+        f"This run resumes execution {origin.parent_execution_id}, whose "
+        f"`{origin.resume_phase_id}` phase pushed work before it failed.",
+        "",
+        *(_continued_line(c) for c in pins.continued_branches),
+        *(_abandoned_line(a) for a in pins.abandoned_branches),
+    ]
+    cache.record(CONTINUATION_OUTPUT_ID, "\n".join(lines), [])
+
+
+def _continued_line(branch: ContinuedBranch) -> str:
+    pr = (
+        f"PR #{branch.pull_request} is open from it: you are reworking an existing PR, so "
+        "use its branch and push to it so that PR updates. Do NOT open a second PR."
+        if branch.pull_request is not None
+        else "No PR is open from it yet: open the draft PR from this branch."
+    )
+    line = (
+        f"- `{branch.repository}`: CONTINUE branch `{branch.branch}`. Your workspace is "
+        f"already checked out on it, at its head ({branch.head_sha}). Do not start a new "
+        f"branch. {pr}"
+    )
+    if branch.is_own_unverified_push:
+        line += (
+            f" {OWN_UNVERIFIED_PUSH}: {branch.head_sha} was pushed by this execution's own "
+            "interrupted attempt at this phase and nothing has verified it. Treat it as the "
+            "head to verify, not as a moved branch: re-run verification at it before you "
+            "change anything. Any other head would be someone else's push, and the platform "
+            "would not have continued the branch."
+        )
+    return line
+
+
+def _abandoned_line(branch: AbandonedBranch) -> str:
+    return (
+        f"- `{branch.repository}`: branch `{branch.branch}` was NOT continued, because "
+        f"{branch.reason}. Start fresh on a new branch."
+    )

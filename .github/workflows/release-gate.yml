@@ -61,11 +61,12 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Run OSV Scanner
-        uses: google/osv-scanner-action/osv-scanner-action@19ec1116569a47416e11a45848722b1af31a857b # v1.9.0
+        uses: google/osv-scanner-action/osv-scanner-action@9a498708959aeaef5ef730655706c5a1df1edbc2 # v2.3.8
         with:
           scan-args: |-
             --lockfile=uv.lock
             --lockfile=pnpm-lock.yaml
+            --lockfile=lib/ui-feedback/backend/ui-feedback-api/uv.lock
 
   pip-audit:
     name: Python Dependency Audit
@@ -93,6 +94,11 @@ jobs:
 
       - name: Dependency Review
         uses: actions/dependency-review-action@f5b971718edcbb31275a1db40004592335c0e031 # v4.9.0
+        with:
+          # #1793: same allow-list as ci.yml. apps/syn-desktop (Tauri 2) pins
+          # gtk 0.18 -> glib 0.18.5 (GHSA-wrw7-89jp-8q8g, moderate); the fix
+          # is unreachable until Tauri moves. OSV scan still reports it.
+          allow-ghsas: GHSA-wrw7-89jp-8q8g
 
   # ---------------------------------------------------------------------------
   # Aggregator — required status check for branch protection

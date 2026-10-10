@@ -1,0 +1,17 @@
+id: clean-fitness-stale-waivers
+polarity: clean
+# A control, not a defect: PR #1104, merged 2026-09-03. Chosen by the v5 rule
+# (README.md): no later fix or revert names the PR, no issue or fix PR refers
+# to it (searched on GitHub), and `git log -L` finds no mainline commit touching
+# a line it changed in scripts/check_stale_exceptions.py or the justfile,
+# through clean_through.
+source_pr: 1104
+commit: 7f2e55b32dfaaf182e11d096f569c47384d095c9
+merge_commit: 654016dd43b34cd7631b29918524245ca942ced3
+clean_through: 23edd9c0b65e6c6841b2248bb1614144b9d3c160
+task: >
+  The change under review deletes three fitness waivers whose debt was
+  already paid and adds a check that fails when the fitness tool reports a
+  stale waiver, wired into the justfile. Review whether the check can pass
+  while a stale waiver remains, or fail when none does.
+split: train

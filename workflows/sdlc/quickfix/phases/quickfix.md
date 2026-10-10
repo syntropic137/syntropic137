@@ -136,13 +136,17 @@ Both are tracked (#1100, #1120, #1133). Do not "fix" either by editing the
 justfile or running the recipes by hand - that hides the condition the prefix
 compensates for.
 
-**`preflight-agent`, not `qa-ci`.** This workspace ships `just`, `uv` and
-`node` and nothing else, so seven gates in `just preflight` cannot run here at
-all: `vsa-validate` (no `vsa`), `fitness` (no `cargo`), `codegen-check` (no
-`pnpm`), `check-submodules`, `check-compose-overlays`,
-`check-default-workspace-image` and `check-pinned-image-channels`. CI runs
-those seven. Passing here does not promise a green CI; name them in the PR as
-not run.
+**`preflight-agent`, not `qa-ci`.** This workspace ships `just`, `uv`, `node`
+and `rustup` and nothing else, so seven gates in `just preflight` cannot run
+here at all: `vsa-validate` (no `vsa`), `codegen-check` (no `pnpm`),
+`check-submodules`, `check-compose-overlays`, `check-default-workspace-image`,
+`check-pinned-image-channels` and `check-compose-images-public`. CI runs those
+seven. Passing here does not promise a green CI; name them in the PR as not run.
+
+`preflight-agent` DOES run all of `fitness`: `fitness-check` (#1498) and the
+`pytest ci/fitness` invariants. The first run in a workspace builds `aps` (~6
+minutes). A `FITNESS NOT RUN:` line means it did not run: say so in the PR,
+never call it a pass.
 
 **If a gate fails, do not open a PR.** Report what failed, paste the output,
 and stop. This is the same refusal discipline the four-phase workflow applies,

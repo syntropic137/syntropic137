@@ -22,7 +22,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from syn_api.routes.workflows.queries import list_workflows_endpoint
-from syn_api.types import Ok
+from syn_api.types import DeclaredSkillResponse, Ok
 
 pytestmark = pytest.mark.unit
 
@@ -39,10 +39,12 @@ class _Summary:
     created_at: str | None = None
     runs_count: int = 0
     is_archived: bool = False
+    tags: tuple[str, ...] = ()
+    skills: tuple[DeclaredSkillResponse, ...] = ()
 
 
 async def _list(summaries: list[_Summary]):
-    async def fake_list_workflows(*, workflow_type, limit, offset, include_archived):
+    async def fake_list_workflows(*, workflow_type, limit, offset, include_archived, search):
         return Ok(summaries)
 
     mgr = MagicMock()
@@ -61,6 +63,7 @@ async def _list(summaries: list[_Summary]):
             page=1,
             page_size=20,
             order_by=None,
+            search=None,
         )
 
 
@@ -110,3 +113,99 @@ class TestTheFieldCannotBeOmittedAgain:
                 runs_count=0,
                 is_archived=False,
             )
+
+
+async def test_tags_are_reported_not_defaulted() -> None:
+    """The same omission would hide a workflow's tags behind the empty default (#967)."""
+    resp = await _list(
+        [_Summary(id="evals", name="evals", requires_repos=False, tags=("eval-a", "nightly"))]
+    )
+    assert resp.workflows[0].tags == ["eval-a", "nightly"]
+
+
+async def test_the_detail_endpoint_reports_tags_too() -> None:
+    """Detail copies field by field; a copy that skips `tags` empties them (#967)."""
+    from syn_api.routes.workflows.queries import get_workflow_endpoint
+    from syn_api.types import WorkflowDetail
+
+    detail = WorkflowDetail(
+        id="evals",
+        name="evals",
+        workflow_type="custom",
+        classification="standard",
+        tags=["eval-a", "nightly"],
+    )
+    with (
+        patch("syn_api.routes.workflows.queries.get_projection_mgr", return_value=MagicMock()),
+        patch("syn_api.prefix_resolver.resolve_or_raise", new=AsyncMock(return_value="evals")),
+        patch(
+            "syn_api.routes.workflows.queries.get_workflow",
+            new=AsyncMock(return_value=Ok(detail)),
+        ),
+    ):
+        resp = await get_workflow_endpoint("evals")
+
+    assert resp.tags == ["eval-a", "nightly"]
+
+
+async def test_declared_skills_are_reported_on_the_list() -> None:
+    """The list carries each workflow's skills, so cards need no detail fetch."""
+    skill = DeclaredSkillResponse(
+        source_url="https://github.com/acme/skills",
+        name="review",
+        version="v1",
+        phase_ids=["plan", "review"],
+    )
+    resp = await _list([_Summary(id="wf", name="wf", requires_repos=False, skills=(skill,))])
+    assert resp.workflows[0].skills == [skill]
+
+
+async def test_service_maps_domain_skills_field_by_field() -> None:
+    """The domain summary's skills reach the API summary with every ref field."""
+    from syn_api.routes.workflows.queries import list_workflows
+    from syn_domain.contexts.orchestration.domain.read_models.workflow_detail import (
+        PhaseRefDetail,
+    )
+    from syn_domain.contexts.orchestration.domain.read_models.workflow_summary import (
+        WorkflowSkillSummary,
+        WorkflowSummary,
+    )
+
+    domain = WorkflowSummary(
+        id="wf",
+        name="wf",
+        workflow_type="custom",
+        classification="simple",
+        phase_count=2,
+        description=None,
+        created_at=None,
+        skills=(
+            WorkflowSkillSummary(
+                ref=PhaseRefDetail(
+                    source_url="https://github.com/acme/skills",
+                    name="review",
+                    version="v1",
+                    name_overridden=True,
+                ),
+                phase_ids=("p1", "p2"),
+            ),
+        ),
+    )
+    mgr = MagicMock()
+    mgr.workflow_list.query = AsyncMock(return_value=[domain])
+    with (
+        patch("syn_api.routes.workflows.queries.ensure_connected", new=AsyncMock()),
+        patch("syn_api.routes.workflows.queries.get_projection_mgr", return_value=mgr),
+    ):
+        result = await list_workflows()
+
+    assert isinstance(result, Ok)
+    assert result.value[0].skills == [
+        DeclaredSkillResponse(
+            source_url="https://github.com/acme/skills",
+            name="review",
+            version="v1",
+            name_overridden=True,
+            phase_ids=["p1", "p2"],
+        )
+    ]

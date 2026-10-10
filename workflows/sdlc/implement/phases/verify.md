@@ -85,14 +85,23 @@ on #1120. Do not "fix" a Permission denied here by editing the justfile or
 running the recipes by hand: that hides the one condition this prefix exists to
 compensate for.
 
-**`preflight-agent`, not `qa-ci`.** This workspace ships `just`, `uv` and `node`
-and nothing else, so seven of the gates in `just preflight` cannot run here at
-all: `vsa-validate` (no `vsa`), `fitness` (no `cargo`), `codegen-check` (no
-`pnpm`), `check-submodules`, `check-compose-overlays`,
-`check-default-workspace-image` and `check-pinned-image-channels`. Attempting
+**`preflight-agent`, not `qa-ci`.** This workspace ships `just`, `uv`, `node`
+and `rustup` and nothing else, so seven of the gates in `just preflight` cannot
+run here at all: `vsa-validate` (no `vsa`), `codegen-check` (no `pnpm`),
+`check-submodules`, `check-compose-overlays`, `check-default-workspace-image`,
+`check-pinned-image-channels` and `check-compose-images-public`. Attempting
 `qa-ci` here fails on the missing binary, not on the change. CI runs those
 seven; passing here does not promise a green CI, and if CI fails on one of them
 that is a real failure to fix, not an exception to claim.
+
+`preflight-agent` DOES run all of `fitness`: `fitness-check`, CI's thresholds
+unchanged (#1498), and `fitness-invariants`, the `pytest ci/fitness` suite CI
+runs. The first run in a workspace installs stable Rust and builds `aps` (~6
+minutes); later runs reuse both. A `FITNESS NOT RUN:` line means the gate did
+not run, which is not a pass: report it, never certify around it. The pytest
+summary lists each test skipped as `NOT RUN` for a binary this image lacks
+(today, the docker-backed `test_gateway_bind.py`); CI still runs those, and
+how to read its result is the section after this one.
 
 **Run the whole gate, not the sub-commands you think it contains.** A change can
 pass every test, typecheck and build and still fail on something none of them
@@ -101,6 +110,91 @@ failed `codegen-check`, a real PR-gating job, while every direct test passed.
 
 Run `git status --porcelain` before and after. Verification commands in this
 repository have mutated tracked files; if the tree changed, report it.
+
+## A check this workspace cannot run is settled by CI on the same head SHA
+
+Some checks cannot run here at all: a gate that needs a binary this workspace
+lacks, or a test the gate itself reports as `NOT RUN` (in syntropic137,
+today, the docker-backed fitness tests). "Not run here" is not a pass, and
+on its own it is not a blocker either. It is a question CI answers for the same
+commit, so read CI's answer instead of holding the PR in draft. PRs #1562 and
+#1576 each sat BLOCKED on exactly this while CI's Architectural Fitness job had
+already run the test green on the same head, and each needed a human to
+override the verdict.
+
+**The SHA must match. A green CI run on an older head proves nothing about this
+one**, because the code it tested is not the code you are judging. So print both
+SHAs, in full, side by side, and compare them before reading any result:
+
+```
+git rev-parse HEAD
+gh pr list --head <branch> --state all --json number,headRefOid
+```
+
+Then find the job that runs the check (`Architectural Fitness` runs
+`ci/fitness`) and read its own record, not the PR's summary line:
+
+```
+gh pr checks <n> --json name,state,link,workflow
+gh run view <run-id> --json headSha,status,conclusion
+gh run view --job <job-id> --log | grep -F '<test-file>'
+uv run pytest --collect-only -q -m <the job's marker> <test-file>
+```
+
+The job's `link` ends in `/actions/runs/<run-id>/job/<job-id>`. Print the run's
+`headSha` next to your `git rev-parse HEAD`; both must be the same full SHA.
+
+Then show from that log that the test ran and passed. The repo's pytest config
+adds `-q`, so CI prints one progress line per file, not one line per test:
+`ci/fitness/infrastructure/test_gateway_bind.py ...   [ 93%]`, one character per
+test (a long file wraps onto following lines of bare characters). `.` is a pass;
+`s`, `F`, `E`, `x` or `X` is not. Do not look for `<test-file>::` or `PASSED`
+lines: that output does not print them. Collecting needs no docker, so count the
+file's tests here with the job's own `-m` marker (the log prints the job's pytest
+command); the number of dots must equal that count. The same grep also shows any
+`SKIPPED [n] <test-file>:...` line from the job's short summary, and there must
+be none. A job that is green because it deselected or skipped the test did not
+run it, and settles nothing: no progress line for the file, fewer dots than
+collected tests, any character other than `.`, or a `SKIPPED` line naming the
+file all mean the check was not run.
+
+Then decide, and report the SHA pair, the job link and the log lines whatever
+the outcome:
+
+- **Passed on this SHA** (conclusion `success`, one `.` per collected test on the file's progress line, no
+  `SKIPPED` line naming it):
+  the check is closed. It is not a blocker, and you do not need to run it here.
+- **Not finished yet:** wait on it, bounded, rather than blocking:
+  `timeout 25m gh pr checks <n> --watch --interval 60`, then read it again as
+  above. Do not write your own `sleep` loop. If `timeout` exits 124, CI did not
+  finish in time: report the check open and pending, not passed.
+- **Failed on this SHA:** it IS a blocker. Put it under BLOCKING with the failing
+  job's link and a log excerpt from
+  `gh run view --job <job-id> --log-failed | tail -n 80`.
+- **Skipped by design for this PR:** CI deliberately does not run the job for
+  this PR's base or event. Prove it from the job's `if:` condition in
+  `.github/workflows/` (read it, never edit it): for example
+  `Python Integration Tests` runs on `pull_request` only when
+  `github.base_ref == 'release'`, so a PR into `main` never gets it. Then
+  decide whether the job covers this PR: compare the test paths in the job's
+  command with `git diff --name-only origin/main...HEAD`. The job covers this
+  PR when a changed file is one of those tests or code they exercise.
+  - **It covers nothing this PR changes:** that check is NOT a blocker, since
+    no CI result is coming to wait for, and NOT a pass, since nothing ran it.
+    List it in the verdict under a heading `Unverified by design`, one line per
+    check: the job name, the check it would have run, and the skip reason
+    quoted from the `if:`. Carry the same lines into the PR body under the same
+    heading, so a reviewer sees what was never run.
+  - **It covers code or tests this PR changes:** the skip does not settle it,
+    because this PR changes the behaviour that job exists to check. Produce
+    independent evidence on this head SHA: run those tests here if this
+    workspace can, or cite another CI job that ran them on this SHA, read as
+    above. Without either, it IS a blocker: put it under BLOCKING with the job
+    name, the changed files it covers, and the run that would close it.
+- **No CI evidence for this SHA** (no PR yet, the PR head is a different SHA, or
+  no job ran the test although its `if:` admits this PR): nothing has answered
+  the question. Report the check as not run, name it, and never claim CI passed
+  it.
 
 ## Attack the tests
 
@@ -221,6 +315,85 @@ something, confirm the recording is durable rather than in-memory - an event
 constructed and never persisted has shipped here before, and every unit test
 passed.
 
+## A UI change is verified by looking at it
+
+If the diff touches `apps/syn-dashboard-ui/` or another UI app (today
+`apps/syn-docs/`), you verify it with screenshots, not by reading JSX. The
+owner's rule is that a UI PR does not come back to a human to be looked at; you
+are the one who looks. **A UI change verified without screenshots is
+BLOCKING**, however good the code reads.
+
+Build and serve the production build, then screenshot every route the diff
+affects - a changed page, and every page that renders a changed component -
+at both viewports:
+
+```
+REPO=/workspace/repos/syntropic137
+SHOT="$REPO/apps/syn-dashboard-ui/scripts/screenshot.mjs"
+
+# apps/syn-dashboard-ui
+cd "$REPO/apps/syn-dashboard-ui"
+pnpm install --frozen-lockfile && pnpm build
+pnpm preview --port 4173 --strictPort &
+URL=http://localhost:4173
+
+# apps/syn-docs instead (Next.js; `next start` exits if the port is taken)
+cd "$REPO/apps/syn-docs"
+pnpm install --frozen-lockfile && pnpm build
+pnpm start -p 4174 &
+URL=http://localhost:4174
+
+# then, for each affected <route>, from any directory:
+node "$SHOT" "$URL/<route>" \
+  /workspace/artifacts/output/<route>-1280x800.png --viewport 1280x800
+node "$SHOT" "$URL/<route>" \
+  /workspace/artifacts/output/<route>-390x844.png --viewport 390x844
+```
+
+There is one screenshot script and it lives in the dashboard app; `syn-docs`
+has none, so always call it by the absolute path above, never as a relative
+`scripts/screenshot.mjs`. `$SHOT` uses the Playwright and headless Chromium baked into
+this image, so nothing needs installing; `apps/syn-dashboard-ui/README.md` ("Screenshots for
+UI verification") says what it prints. It exits 1 on an HTTP error status, and
+that is a failed screenshot, not a picture of the page. Name each file
+`<route>-<viewport>.png`, with `root` for `/` and `-` for each further `/`
+(`executions-1280x800.png`, `executions-abc-390x844.png`). Write them to
+`/workspace/artifacts/output/`, the only place the platform collects; never
+commit them.
+
+**The PNG files reach the next phase byte-for-byte.** Artifact collection
+keeps binary files intact (#990, fixed in #1652), so a later phase finds them
+under `artifacts/input/<phase-id>/`, can check each starts with the PNG magic
+bytes `89 50 4e 47`, and can open it. The judgement is still made HERE, in this
+workspace, on the files you just wrote: the PR body is built from the
+`## Screenshots` table below, not from the files, which is why every row says
+in words what the image shows. Do not defer looking to a later phase.
+
+**Then open every PNG and look at it.** You can read image files. A screenshot
+nobody looked at is the same as no screenshot. For each one judge: is the
+layout broken, does anything overflow or force horizontal scroll at phone
+width, is an element the change was meant to add or move missing, is the page
+showing an error state where the change should render.
+
+**No API is reachable here, and the dashboard has no fixture or mock-data mode**
+(#1647), so pages render their shell - navigation, header, filters, page chrome
+- with the data area in its loading state. That is expected and is not a
+defect. Do not build a mock layer to get around it. Screenshot what renders and
+judge only what the PR changed: a change to layout, navigation, filters or
+anything else in the shell is fully checkable; a change that only shows with
+data (a table row, a chart, a cost figure) is not, so name it under
+`Unverified by design` with the reason, rather than certifying a loading
+spinner as proof of it.
+
+Put a `## Screenshots` section in your report with one row per image:
+
+| Path | Viewport | What it shows | Verdict |
+|---|---|---|---|
+
+with the screenshot script's output line for each. `open_pr` carries that
+section into the PR body, so a reviewer sees what was looked at without
+opening anything.
+
 ## Write to `artifacts/output/verify.md`
 
 **This phase declares a markdown output artifact, so a run that writes
@@ -326,7 +499,13 @@ This includes a normal code, test, or design defect; a failing gate; and an
 environment limitation that prevents only part of verification, such as an
 unavailable database. Put each such item under a `BLOCKING` heading with the
 file and line or affected command, the root cause, the exact action required,
-and what would prove it closed. `success=true` means the verification report
+and what would prove it closed. The one exception is a check whose CI job is
+skipped by design for this PR and covers nothing this PR changes, proven from
+the job's `if:` and the diff as the CI section above describes: it is never
+`BLOCKING`, even when this workspace also lacks what it needs, such as a
+database. List it under `Unverified by design` instead, and carry that heading
+into the PR body. A skipped job that covers code or tests this PR changes is
+not that exception: without independent evidence it is `BLOCKING`. `success=true` means the verification report
 was delivered so the `fix` phase can run; it does not mean the candidate was
 certified.
 

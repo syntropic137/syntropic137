@@ -1,0 +1,25 @@
+id: executions-total-is-page-length
+polarity: defect
+source_pr: 1139
+# Mined from the fix: the first fix commit's first parent, so the bug is
+# present and nothing of the fix is. Evidence at the pin:
+# `total=len(domain_summaries)` (1 match at pin, 0 after; fix counts the
+# projection).
+commit: 6c8e5fb6e734b715a0337bea709cca2b9cb95ed3
+fix_commit: 85c59be752ec7bd9ec187f89d3981d55515a6ba3
+task: >
+  Review the execution list endpoint (GET /executions) and the pagination
+  information it returns to clients.
+expected:
+  # The root cause, for the LLM judge only; never part of `task`.
+  defect: >
+    GET /executions reports total=len(page) - the number of rows on the
+    current page - instead of the size of the whole collection, so
+    page_size=5 reports total 5 and clients cannot paginate or know how many
+    executions exist.
+  files:
+    - apps/syn-api/src/syn_api/routes/executions/queries.py
+  keywords:
+    - ["total"]
+    - ["page", "len", "length", "returned rows", "page size", "count"]
+split: train
