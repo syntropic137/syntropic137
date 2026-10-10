@@ -9,8 +9,11 @@ Now the trigger commits first and the backfill runs afterwards in batches,
 under no lock an insert waits on. Two claims, both tested here against a
 real database with a writer inserting the whole time:
 
-  1. INGEST CARRIES ON. Inserts complete while the backfill is running, and
-     none of them waits anywhere near as long as the backfill takes.
+  1. INGEST CARRIES ON. Inserts complete while the backfill is running, at a
+     rate comparable to the writer's own rate before it started, and none of
+     them waits anywhere near as long as the backfill takes. Both bounds are
+     RATIOS (#1860): an absolute insert count measured how fast the runner
+     ran ``ensure_schema``, so a faster runner failed the test.
   2. EVERY EVENT IS COUNTED EXACTLY ONCE. After the dust settles, the rollup
      equals a fresh aggregation of agent_events: per turn key (every token
      column and the observation count) and per summary row (as a multiset).
@@ -42,9 +45,15 @@ if TYPE_CHECKING:
 
 pytestmark = pytest.mark.integration
 
-HISTORY_SESSIONS = 300
+# Sized so the backfill outlasts many writer cycles on any runner: the
+# window has to hold enough inserts for a rate measured inside it to mean
+# something. 300 sessions gave 17 inserts on a fast CI runner (#1860).
+HISTORY_SESSIONS = 1200
 TURNS_PER_SESSION = 200
 BATCH_SESSIONS = 5  # many short transactions, so the writer interleaves with them
+BASELINE_S = 0.5  # how long the writer runs free before the backfill starts
+MIN_WINDOW_CYCLES = 20  # the backfill must span this many free-running inserts
+MIN_RATE_FRACTION = 0.25  # of the free-running rate, sustained during the backfill
 _MODELS = ("claude-sonnet-5", "claude-haiku-4-5-20251001")
 _T0 = datetime(2026, 9, 1, tzinfo=UTC)
 
@@ -192,7 +201,7 @@ async def test_inserts_flow_during_the_backfill_and_each_is_counted_once(
 
             writer = Writer(dsn)
             writing = asyncio.create_task(writer.run())
-            await asyncio.sleep(0.2)  # the writer is live before the rollup exists
+            await asyncio.sleep(BASELINE_S)  # the writer is live before the rollup exists
 
             started = time.perf_counter()
             await EventStoreSchema().ensure_schema(conn)
@@ -204,6 +213,13 @@ async def test_inserts_flow_during_the_backfill_and_each_is_counted_once(
 
             backfill_s = ended - started
             during = [t for t in writer.finished_at if started < t < ended]
+            # The writer's free-running rate, from its first completed insert
+            # (connection setup excluded) to the moment the backfill began.
+            before = [t for t in writer.finished_at if t <= started]
+            assert len(before) >= 2, "the writer never ran free before the backfill"
+            baseline_rate = (len(before) - 1) / (before[-1] - before[0])
+            during_rate = len(during) / backfill_s
+            window_cycles = baseline_rate * backfill_s
             worst = max(
                 lat
                 for lat, t in zip(writer.latencies, writer.finished_at, strict=True)
@@ -211,14 +227,27 @@ async def test_inserts_flow_during_the_backfill_and_each_is_counted_once(
             )
             print(
                 f"\nbackfill {backfill_s * 1000:.0f} ms over {HISTORY_SESSIONS} sessions in "
-                f"batches of {BATCH_SESSIONS}; {len(during)} inserts completed during it; "
+                f"batches of {BATCH_SESSIONS}; {len(during)} inserts completed during it "
+                f"({during_rate:.0f}/s against {baseline_rate:.0f}/s free-running, "
+                f"{window_cycles:.0f} free-running cycles); "
                 f"worst insert latency {worst * 1000:.0f} ms"
+            )
+
+            # 0. The window is long enough to measure a rate in. Both sides of
+            # this scale with the runner, so it is a property of the seed, not
+            # of the machine: if it fails, raise HISTORY_SESSIONS.
+            assert window_cycles >= MIN_WINDOW_CYCLES, (
+                f"the backfill took {backfill_s * 1000:.0f} ms, only {window_cycles:.1f} "
+                f"free-running inserts long; the history is too small to measure against"
             )
 
             # 1. Ingest carried on. A backfill holding inserts off would let
             # none complete inside its window, and its last waiter would have
             # waited about as long as the backfill itself.
-            assert len(during) >= 20, f"only {len(during)} inserts completed during the backfill"
+            assert during_rate >= MIN_RATE_FRACTION * baseline_rate, (
+                f"{len(during)} inserts in {backfill_s * 1000:.0f} ms is {during_rate:.0f}/s, "
+                f"under {MIN_RATE_FRACTION:.0%} of the free-running {baseline_rate:.0f}/s"
+            )
             assert worst < backfill_s / 2, (
                 f"an insert waited {worst * 1000:.0f} ms of a {backfill_s * 1000:.0f} ms backfill"
             )

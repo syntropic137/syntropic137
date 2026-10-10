@@ -76,7 +76,10 @@ from uuid import uuid4
 
 import pytest
 
-from syn_domain.contexts.organization._shared.projection_names import REPO_CORRELATION
+from syn_domain.contexts.organization._shared.projection_names import (
+    REPO_CORRELATION,
+    WORKFLOW_EXECUTIONS,
+)
 from syn_domain.contexts.organization.domain.queries.get_contribution_heatmap import (
     VALID_METRICS,
     GetContributionHeatmapQuery,
@@ -363,6 +366,20 @@ def _events_reaching_the_rollup_by_trigger() -> list[SeedEvent]:
     return events
 
 
+# How each seeded execution ENDED, as the `workflow_executions` read model
+# records it: (status, completed_at). The heatmap's `failed` metric reads only
+# this projection, never agent_events, so without it every scope totals zero
+# failed and `test_every_metric_agrees_under_a_scope[failed]` refuses itself
+# (#1860). One failure lands in every scope the handler tests filter by:
+# A1 is alpha's (repo), system one's and the org's; G1 is gamma's, so it is
+# the org's only. B1 completed and A2 was cancelled: neither is a failure.
+_ENDINGS: dict[str, tuple[str, datetime]] = {
+    EXEC_A1: ("failed", _at(1, 13)),
+    EXEC_A2: ("cancelled", _at(3, 1)),
+    EXEC_B1: ("completed", _at(7, 3)),
+    EXEC_G1: ("failed", _at(8, 12)),
+}
+
 SEEDED_SESSIONS = 10
 """Ten sessions are written. `pre-edge` started before the window, so nine count."""
 
@@ -458,6 +475,18 @@ async def _seed_projections() -> tuple[FakeProjectionStore, RepoProjection]:
             REPO_CORRELATION,
             execution_id,
             {"execution_id": execution_id, "repo_full_name": repo},
+        )
+    for execution_id, (status, ended) in _ENDINGS.items():
+        await store.save(
+            WORKFLOW_EXECUTIONS,
+            execution_id,
+            {
+                "workflow_execution_id": execution_id,
+                "workflow_id": "wf-heatmap-equivalence",
+                "status": status,
+                "started_at": None,
+                "completed_at": ended.isoformat(),
+            },
         )
     return store, repos
 
@@ -694,6 +723,49 @@ class TestScopeFiltersAgreeThroughTheHandler:
             ),
         )
         assert total == 5.0
+
+    @pytest.mark.parametrize(
+        ("query", "expected"),
+        [
+            (
+                GetContributionHeatmapQuery(
+                    organization_id=ORG_ID,
+                    start_date=WINDOW_START,
+                    end_date=WINDOW_END,
+                    metric="failed",
+                ),
+                2.0,
+            ),
+            (
+                GetContributionHeatmapQuery(
+                    system_id=SYSTEM_ONE,
+                    start_date=WINDOW_START,
+                    end_date=WINDOW_END,
+                    metric="failed",
+                ),
+                1.0,
+            ),
+            (
+                GetContributionHeatmapQuery(
+                    repo_id=REPO_ID_ALPHA,
+                    start_date=WINDOW_START,
+                    end_date=WINDOW_END,
+                    metric="failed",
+                ),
+                1.0,
+            ),
+        ],
+        ids=["organization", "system", "repo"],
+    )
+    async def test_every_scope_sees_its_seeded_failures(
+        self, seeded: SeededHeatmap, query: GetContributionHeatmapQuery, expected: float
+    ) -> None:
+        """The seed puts a failure in every scope, so `failed` is never vacuous.
+
+        Exact counts, not "> 0": the org sees A1 and G1, system one and the
+        alpha repo see A1 only, and the cancelled and completed runs see none.
+        """
+        assert await self._compare(seeded, query) == expected
 
     @pytest.mark.parametrize("metric", sorted(VALID_METRICS))
     async def test_every_metric_agrees_under_a_scope(
