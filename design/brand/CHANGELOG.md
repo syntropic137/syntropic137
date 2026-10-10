@@ -2,6 +2,11 @@
 
 Versions follow semver: major for a new identity, minor for a new asset or surface, patch for a fix. The current kit is described in [BRAND.md](BRAND.md).
 
+## 2.1.0 (2026-10-10)
+
+- **Avatar.** `avatar-1024.png` and `avatar-512.png`: the Blender close-up of the S on navy with a blue glow, for the GitHub org, X, Discord and npm profile pictures. The official social icon; replaces `icon-512.png` as the recommended avatar. Transparent cuts `avatar-transparent-1024.png` / `-512.png`.
+- **X header.** `x-header-1500x500.png`, PNG cut of the Blender banner render.
+
 ## 2.0.0 (2026-10-09)
 
 "Design V2, October 2026". A new identity across the landing page, docs and dashboard.

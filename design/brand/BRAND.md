@@ -1,6 +1,6 @@
 # Syntropic137 brand kit
 
-**Version 2.0.0, "Design V2, October 2026". Released 2026-10-09.** Version in [`VERSION`](VERSION), history in [`CHANGELOG.md`](CHANGELOG.md).
+**Version 2.1.0, "Design V2, October 2026". Released 2026-10-09, avatar added 2026-10-10.** Version in [`VERSION`](VERSION), history in [`CHANGELOG.md`](CHANGELOG.md).
 
 <p align="center">
   <img src="renders/syn137-banner-dark-1500.webp" alt="The Syntropic137 S standing in the run city, rendered in Blender" width="100%">
@@ -187,10 +187,16 @@ Full usage and fields: [`banners/README.md`](banners/README.md).
 
 The Blender render: the clip plays once when the stage is 40% visible, then the still replaces it. `HERO_MEDIA` in `apps/syn-landing/src/data/heroMedia.ts` switches between `"render"` (shipped) and `"vector"` (`<sky-iso-city>` with `<sky-s-mark>`). Headline, terminal and cards stay live HTML on top.
 
+### Social icon (official avatar: GitHub org, X, Discord, npm, LinkedIn)
+
+[`avatar-1024.png`](avatar-1024.png) (1024 x 1024, 296 KB) and [`avatar-512.png`](avatar-512.png): the Blender close-up of the S on a lighter navy ground with a blue glow, so the dark lower cubes still read at 32 to 48 px in a circle crop. This is the official social icon: use it wherever a profile picture is shown. The vector icons stay for UI (tabs, app shell). Transparent cut, same framing, for slides, docs and light backgrounds: [`avatar-transparent-1024.png`](avatar-transparent-1024.png), [`avatar-transparent-512.png`](avatar-transparent-512.png). The GitHub org avatar has no API: upload `avatar-1024.png` at github.com/organizations/syntropic137/settings/profile.
+
+<p align="center"><img src="avatar-512.png" alt="Avatar: the 3D S on navy" width="160"></p>
+
 ### X (Twitter)
 
-- Header: [`renders/syn137-banner-dark-1500.webp`](renders/syn137-banner-dark-1500.webp) (1500 x 500, X's header size). Keep the left third clear of text; the avatar covers the lower left.
-- Avatar: [`icon-512.png`](icon-512.png) (vector S on the ground) or [`renders/syn137-s-closeup-dark-800.webp`](renders/syn137-s-closeup-dark-800.webp). Convert to PNG if an upload refuses WebP.
+- Header: [`x-header-1500x500.png`](x-header-1500x500.png) (1500 x 500 PNG, X's header size; X does not accept WebP). Keep the left third clear of text; the avatar covers the lower left.
+- Avatar: [`avatar-1024.png`](avatar-1024.png).
 
 ### GitHub social preview
 
@@ -198,7 +204,7 @@ Repo Settings, Social preview. GitHub asks for 1280 x 640. Until a 1280 x 640 cu
 
 ### Discord
 
-Server icon: [`icon-512.png`](icon-512.png). Server banner or invite splash: [`renders/syn137-banner-dark-1500.webp`](renders/syn137-banner-dark-1500.webp) or [`renders/syn137-hero-dark-1920.webp`](renders/syn137-hero-dark-1920.webp), converted to PNG if needed.
+Server icon: [`avatar-1024.png`](avatar-1024.png). Server banner or invite splash: [`renders/syn137-banner-dark-1500.webp`](renders/syn137-banner-dark-1500.webp) or [`renders/syn137-hero-dark-1920.webp`](renders/syn137-hero-dark-1920.webp), converted to PNG if needed.
 
 ## Asset index
 
@@ -216,6 +222,11 @@ Every current v2 asset. Raw URLs on `main` (for use outside GitHub) take the for
 | [`apple-touch-icon.png`](apple-touch-icon.png) | | [raw](https://raw.githubusercontent.com/syntropic137/syntropic137/main/design/brand/apple-touch-icon.png) |
 | [`icon-192.png`](icon-192.png) | | [raw](https://raw.githubusercontent.com/syntropic137/syntropic137/main/design/brand/icon-192.png) |
 | [`icon-512.png`](icon-512.png) | <img src="icon-512.png" alt="App icon" height="64"> | [raw](https://raw.githubusercontent.com/syntropic137/syntropic137/main/design/brand/icon-512.png) |
+| [`avatar-1024.png`](avatar-1024.png) | <img src="avatar-512.png" alt="Avatar" height="64"> | [raw](https://raw.githubusercontent.com/syntropic137/syntropic137/main/design/brand/avatar-1024.png) |
+| [`avatar-512.png`](avatar-512.png) | | [raw](https://raw.githubusercontent.com/syntropic137/syntropic137/main/design/brand/avatar-512.png) |
+| [`avatar-transparent-1024.png`](avatar-transparent-1024.png) | <img src="avatar-transparent-512.png" alt="Avatar, transparent" height="64"> | [raw](https://raw.githubusercontent.com/syntropic137/syntropic137/main/design/brand/avatar-transparent-1024.png) |
+| [`avatar-transparent-512.png`](avatar-transparent-512.png) | | [raw](https://raw.githubusercontent.com/syntropic137/syntropic137/main/design/brand/avatar-transparent-512.png) |
+| [`x-header-1500x500.png`](x-header-1500x500.png) | <img src="x-header-1500x500.png" alt="X header" height="48"> | [raw](https://raw.githubusercontent.com/syntropic137/syntropic137/main/design/brand/x-header-1500x500.png) |
 | [`og-image.svg`](og-image.svg) | | [raw](https://raw.githubusercontent.com/syntropic137/syntropic137/main/design/brand/og-image.svg) |
 | [`og-image.png`](og-image.png) | <img src="og-image.png" alt="Social image" height="96"> | [raw](https://raw.githubusercontent.com/syntropic137/syntropic137/main/design/brand/og-image.png) |
 
