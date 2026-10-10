@@ -317,6 +317,19 @@ MODEL_PRICING_TABLE: dict[ModelId, ModelPricing] = {
         cache_creation_per_million=Decimal("2.50"),
         cache_read_per_million=Decimal("0.10"),
     ),
+    # Haiku 5.5: $0.10 in / $0.50 out per MTok for prompts up to 100K tokens
+    # ($0.50 / $2.50 beyond; that tier is not modelled, so a long prompt is
+    # under-priced). Source: the claude-api skill bundled with claude-code
+    # 2.1.293, model table cached 2026-10-06. It states no cache rates; these
+    # are Haiku 4.5's ratios to input (1.25x write, 0.1x read), not a quote.
+    # The `haiku` target since 2026-10-10, when Haiku 4.5 was retired.
+    ModelId.CLAUDE_HAIKU_5_5: ModelPricing(
+        model_id=ModelId.CLAUDE_HAIKU_5_5,
+        input_per_million=Decimal("0.10"),
+        output_per_million=Decimal("0.50"),
+        cache_creation_per_million=Decimal("0.125"),
+        cache_read_per_million=Decimal("0.01"),
+    ),
     # GPT-6.1-Sol (codex slug `gpt-6.1-sol`, the `gpt-sol` target since
     # 2026-10-06): $2 in / $0.10 cached / $2.50 cache write / $10 out per
     # MTok, SHORT-CONTEXT (<=272K input) Standard tier. Source, retrieved

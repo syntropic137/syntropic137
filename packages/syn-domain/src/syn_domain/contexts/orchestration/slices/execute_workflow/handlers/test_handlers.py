@@ -778,6 +778,23 @@ class TestBuildAgentEnv:
         assert "CLAUDE_CODE_OAUTH_TOKEN" not in env
         assert "ANTHROPIC_API_KEY" not in env
 
+    async def test_pins_claude_models_for_subagents_and_delegates(self) -> None:
+        """Every claude process in the workspace inherits this env, including
+        `syn-delegate claude` sessions started without `--model` and subagents
+        that declare an alias, so none of them falls back to the CLI catalog."""
+        from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
+            _build_agent_env,
+        )
+
+        workspace = MagicMock()
+        workspace.proxy_url = "http://envoy:10000"
+        env = await _build_agent_env(workspace, "sess-1")
+        assert env["ANTHROPIC_MODEL"] == "claude-opus-5-5"
+        assert env["ANTHROPIC_DEFAULT_SONNET_MODEL"] == "claude-sonnet-5-5"
+        assert env["ANTHROPIC_DEFAULT_OPUS_MODEL"] == "claude-opus-5-5"
+        assert env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] == "claude-haiku-5-5"
+        assert env["ANTHROPIC_DEFAULT_FABLE_MODEL"] == "claude-fable-5"
+
     async def test_injects_oauth_token_when_configured(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
