@@ -41,7 +41,9 @@ export interface StaticFont {
 const FONTTOOLS = ['--from', 'fonttools', '--with', 'brotli']
 
 function uvx(args: string[]): string {
-  return execFileSync('uvx', [...FONTTOOLS, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 << 20 })
+  // SOURCE_DATE_EPOCH pins head.modified, so the same input gives byte-identical fonts.
+  const env = { ...process.env, SOURCE_DATE_EPOCH: '0' }
+  return execFileSync('uvx', [...FONTTOOLS, ...args], { encoding: 'utf8', env, stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 << 20 })
 }
 
 let workDir: string | undefined
