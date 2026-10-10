@@ -333,6 +333,14 @@
     text-transform: uppercase;
     color: var(--ds-color-text-subtle);
   }
+  /*
+   * The readout sits on surface-raised, where text-subtle is 4.49:1 (syn137)
+   * and 4.27:1 (skyline): under AA. text-muted is 7.5:1 and 7.3:1 there.
+   */
+  .sky-verdicts__label,
+  .sky-verdicts__stats dt {
+    color: var(--ds-color-text-muted);
+  }
   .sky-verdicts__corner {
     padding-left: var(--ds-space-1);
   }
@@ -569,7 +577,7 @@
   .sky-verdicts__pick-wf {
     font-family: var(--ds-font-mono);
     font-size: var(--ds-text-xs);
-    color: var(--ds-color-text-subtle);
+    color: var(--ds-color-text-muted);
     overflow-wrap: anywhere;
   }
   .sky-verdicts__evidence,
