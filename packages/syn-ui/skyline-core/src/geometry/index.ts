@@ -32,3 +32,5 @@ export { isoCityHistory, maxMonthOffset, mondayOf, monthsBack, monthsBetween, of
 export type { IsoCityHistory, IsoCityWindowRange } from './isoCityScroll'
 export { isoCityStrip, isoRangeLabel } from './isoCityStrip'
 export type { IsoCityStrip, IsoStripBar, IsoStripTick, IsoStripTone } from './isoCityStrip'
+export { isoCityWindow } from './isoCityWindow'
+export type { IsoCityWindowInput, IsoCityWindowLayout } from './isoCityWindow'

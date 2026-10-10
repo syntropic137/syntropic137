@@ -13,6 +13,7 @@
  */
 import { type IsoCube, isoCube } from './isoCube'
 import { addDays, type SkylineDay } from './skyline'
+import { type IsoCityWindowInput, type IsoCityWindowLayout, isoCityWindow } from './isoCityWindow'
 
 /** run: a normal day; live: running now (pulses); failed: only failed runs; errored: mixed or scorer errors (amber). */
 export type CityTone = 'run' | 'live' | 'failed' | 'errored'
@@ -105,7 +106,19 @@ function cells(days: readonly SkylineDay[], o: IsoCityOptions): Cell[] {
 }
 
 /** Lay out the city for `days` (oldest first; the last cols * rows are shown). */
-export function isoCity(days: readonly SkylineDay[], options: IsoCityOptions): IsoCityLayout {
+export function isoCity(days: readonly SkylineDay[], options: IsoCityOptions): IsoCityLayout
+/** The Overview's scrolling city: `isoCity({ weeks, window, offset })` (isoCityWindow). */
+export function isoCity(input: IsoCityWindowInput): IsoCityWindowLayout
+export function isoCity(daysOrInput: readonly SkylineDay[] | IsoCityWindowInput, maybeOptions?: IsoCityOptions): IsoCityLayout | IsoCityWindowLayout {
+  if (!isDayList(daysOrInput)) return isoCityWindow(daysOrInput)
+  return heroCity(daysOrInput, maybeOptions ?? { cols: 0, rows: 0, cell: 0 })
+}
+
+function isDayList(v: readonly SkylineDay[] | IsoCityWindowInput): v is readonly SkylineDay[] {
+  return Array.isArray(v)
+}
+
+function heroCity(days: readonly SkylineDay[], options: IsoCityOptions): IsoCityLayout {
   const { cols, rows, cell } = options
   const hw = cell / 2
   const hh = cell / 4

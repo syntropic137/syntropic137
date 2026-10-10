@@ -70,6 +70,11 @@ describe('run row', () => {
 })
 
 describe('dayReadout', () => {
+  it('shows failed runs only when known and non-zero', () => {
+    expect(dayReadout({ date: '2026-10-01', sessions: 3, failed: 2 }).failed).toBe('2 failed')
+    expect(dayReadout({ date: '2026-10-01', sessions: 3, failed: 0 }).failed).toBeNull()
+    expect(dayReadout({ date: '2026-10-01', sessions: 3 }).failed).toBeNull()
+  })
   it('formats the board day', () => {
     const r = dayReadout({
       date: '2026-08-28',
