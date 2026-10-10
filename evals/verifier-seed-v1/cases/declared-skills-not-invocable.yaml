@@ -13,6 +13,12 @@ task: >
   configuration: its allowed tools and the skills it resolves for the phase.
   Phases may restrict their tools.
 expected:
+  # The root cause, for the LLM judge only; never part of `task`.
+  defect: >
+    When ExecuteWorkflowHandler builds a phase's agent configuration, a
+    phase that declares skills and also restricts its allowed tools without
+    naming Skill gets its skills installed but is never granted the Skill
+    tool, so the declared skills cannot be invoked.
   files:
     - packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/ExecuteWorkflowHandler.py
   keywords:

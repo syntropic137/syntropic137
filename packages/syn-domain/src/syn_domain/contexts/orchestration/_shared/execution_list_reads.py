@@ -16,9 +16,10 @@ from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_sum
 )
 from syn_domain.projection_count import count_by
 from syn_domain.projection_page import PageQuery, StatusOf, page_projection
+from syn_domain.projection_scan import read_by_keys
 
 if TYPE_CHECKING:
-    from collections.abc import Collection
+    from collections.abc import Collection, Sequence
     from datetime import datetime
 
     from event_sourcing import ProjectionStore
@@ -107,6 +108,18 @@ class ExecutionListReads:
         if data:
             return WorkflowExecutionSummary.from_dict(data)
         return None
+
+    async def by_ids(self, execution_ids: Sequence[str]) -> dict[str, WorkflowExecutionSummary]:
+        """The rows of ``execution_ids`` the list has projected, in one keyed read.
+
+        A primary-key read (``read_by_keys``), never a JSON filter, so it costs
+        the ids asked for and not the size of the list.
+        """
+        documents = await read_by_keys(self._store, WORKFLOW_EXECUTIONS, execution_ids)
+        return {
+            key: WorkflowExecutionSummary.from_dict(dict(document))
+            for key, document in documents.items()
+        }
 
     async def members_of(
         self, eval_ids: Collection[str]

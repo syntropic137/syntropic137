@@ -11,6 +11,13 @@ task: >
   the read path behind the artifact content endpoint, and judge them against
   production MinIO.
 expected:
+  # The root cause, for the LLM judge only; never part of `task`.
+  defect: >
+    MinioArtifactStorage uploads a binary artifact under a key built from
+    the workflow and execution ids, but download(artifact_id) reads the
+    id-only key, so on real MinIO every binary artifact is not found (404 on
+    GET /artifacts/{id}/raw) and is dropped from the restart handoff; text
+    artifacts hide it by falling back to the read model.
   # Repo-relative. The report must name one of them; it is matched by file
   # name, because a verifier writes `minio.py:212` as often as the full path.
   files:

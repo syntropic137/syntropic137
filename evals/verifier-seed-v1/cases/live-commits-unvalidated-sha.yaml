@@ -15,6 +15,12 @@ task: >
   placeholder hash. It also lists every connected repository on /repos. Review
   whether the card can still render a hash that is not a commit's.
 expected:
+  # The root cause, for the LLM judge only; never part of `task`.
+  defect: >
+    useEventFeed's toGitCommit accepts any non-empty string as a commit sha
+    without validating it is hex, so a payload with sha '???????' or
+    whitespace still renders the placeholder or a blank hash on the Live
+    Commits card - the very thing the change claims to eliminate.
   files:
     - apps/syn-dashboard-ui/src/hooks/useEventFeed.ts
   keywords:

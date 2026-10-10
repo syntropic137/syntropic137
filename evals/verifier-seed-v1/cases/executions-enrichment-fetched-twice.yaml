@@ -14,6 +14,13 @@ task: >
   enriches each listed execution with cost data from the execution_cost
   projection. The endpoint has been reported slow.
 expected:
+  # The root cause, for the LLM judge only; never part of `task`.
+  defect: >
+    The execution list endpoint's _load_execution_enrichment loops over
+    execution ids and calls execution_cost.get_execution_cost(eid) per id
+    (several sequential database round trips each, an N+1), and
+    list_executions_endpoint calls the enrichment twice per request, making
+    the listing very slow; it should be one batched lookup, called once.
   files:
     - apps/syn-api/src/syn_api/routes/executions/queries.py
   keywords:

@@ -269,6 +269,7 @@ async def get_contribution_heatmap_endpoint(
                     date=d.get("date", ""),
                     count=d.get("count", 0.0),
                     breakdown=d.get("breakdown", {}),
+                    failed=d.get("failed", 0),
                 )
                 for d in days_raw
             ],

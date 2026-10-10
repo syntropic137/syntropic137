@@ -15,6 +15,14 @@ task: >
   remote sources. Review whether it can disagree with install/update about
   which sources are remote.
 expected:
+  # The root cause, for the LLM judge only; never part of `task`.
+  defect: >
+    `syn workflow packages` decides whether a source is remote with its own
+    predicate (contains '://' or starts with git@/ssh://) instead of
+    parseSource, which install/update use and which accepts only https://,
+    http://, git@ and ssh://. The two disagree for file://, ftp://, s3://,
+    git:// and local paths containing '://', so packages misclassifies such
+    sources (e.g. keeps listing a deleted local package as if remote).
   files:
     - apps/syn-cli-node/src/commands/workflow/install.ts
   keywords:
