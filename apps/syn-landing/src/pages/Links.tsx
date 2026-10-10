@@ -1,93 +1,109 @@
-import { MessageSquare, Lightbulb, BookOpen, Link as LinkIcon, Scale, Mail } from "lucide-react";
+import { useEffect, type ComponentType } from "react";
+import { ArrowRight, ArrowUpRight, BookOpen, Globe, Lightbulb, Mail, MessagesSquare } from "lucide-react";
+import GitHubIcon from "../components/GitHubIcon";
 import InstallTerminal from "../components/InstallTerminal";
+import SMark from "../components/SMark";
+import Wordmark from "../components/Wordmark";
+import { BIO_LINKS, LINKS_PAGE, type BioLink, type LinkId } from "../data/copy/links";
+import "./Links.css";
 
-const GitHubIcon = () => (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-    <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
-  </svg>
-);
+function XIcon({ size = 18 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false">
+      <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+    </svg>
+  );
+}
 
-const XIcon = () => (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-    <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
-  </svg>
-);
+const ICONS: Record<LinkId, ComponentType<{ size?: number }>> = {
+  website: Globe,
+  github: GitHubIcon,
+  docs: BookOpen,
+  canny: Lightbulb,
+  discussions: MessagesSquare,
+  x: XIcon,
+  email: Mail,
+};
 
-const links = [
-  {
-    icon: GitHubIcon,
-    title: "GitHub",
-    desc: "Source code & releases",
-    href: "https://github.com/syntropic137/syntropic137",
-  },
-  {
-    icon: BookOpen,
-    title: "Documentation",
-    desc: "docs.syntropic137.com",
-    href: "https://docs.syntropic137.com",
-  },
-  {
-    icon: Lightbulb,
-    title: "Request a Feature",
-    desc: "Vote & suggest on Canny",
-    href: "https://syntropic137.canny.io/",
-  },
-  {
-    icon: MessageSquare,
-    title: "GitHub Discussions",
-    desc: "Questions & community help",
-    href: "https://github.com/syntropic137/syntropic137/discussions",
-  },
-  {
-    icon: XIcon,
-    title: "@syntropic137",
-    desc: "Updates & announcements",
-    href: "https://x.com/syntropic137",
-  },
-  {
-    icon: LinkIcon,
-    title: "Syntropic137 Landing Page",
-    desc: "syntropic137.com",
-    href: "/",
-  },
-  {
-    icon: Mail,
-    title: "Email",
-    desc: "hello@syntropic137.com",
-    href: "mailto:hello@syntropic137.com",
-  },
-];
+/** mailto stays in place; every other link opens in a new tab and says so. */
+const opensTab = (href: string) => !href.startsWith("mailto:");
 
+function LinkRow({ link }: { link: BioLink }) {
+  const Icon = ICONS[link.id];
+  const tab = opensTab(link.href);
+  const Trail = tab ? ArrowUpRight : ArrowRight;
+  return (
+    <a
+      href={link.href}
+      className="bio-link"
+      data-tier={link.tier}
+      data-link-id={link.id}
+      {...(tab ? { target: "_blank", rel: "noopener noreferrer" } : {})}
+    >
+      <span className="bio-link__icon" aria-hidden="true">
+        <Icon size={link.tier === "secondary" ? 18 : 20} />
+      </span>
+      <span className="bio-link__text">
+        <span className="bio-link__title">{link.title}</span>{" "}
+        <span className="bio-link__desc">{link.desc}</span>
+        {tab && <span className="sr-only"> {LINKS_PAGE.newTab}</span>}
+      </span>
+      <Trail className="bio-link__trail" size={18} aria-hidden="true" />
+    </a>
+  );
+}
+
+/**
+ * /links, the link in bio (most visits come from X on a phone): the S and
+ * wordmark, the tagline, the install box, then the links by priority. The
+ * website is the featured card, GitHub and the docs full cards, the rest one
+ * grouped list. No motion of its own beyond hover and press feedback.
+ */
 export default function Links() {
+  useEffect(() => {
+    document.title = LINKS_PAGE.documentTitle;
+  }, []);
+
+  const cards = BIO_LINKS.filter((l) => l.tier !== "secondary");
+  const rest = BIO_LINKS.filter((l) => l.tier === "secondary");
+
   return (
     <div className="links-page">
-      <div className="links-container">
-        <div className="links-header">
-          <a href="/" className="links-brand">Syntropic137</a>
-          <div style={{ marginTop: '12px' }}>
-            <span className="hero-eyebrow">
-              <Scale size={12} /> MIT <span className="eyebrow-sep" aria-hidden="true" /> Agentic Engineering Platform
-            </span>
+      <div className="links-page__grain" aria-hidden="true" />
+      <div className="links-page__col">
+        <header className="links-head">
+          <SMark size={58} label="" />
+          <h1 className="links-head__title">
+            <Wordmark />
+          </h1>
+          <p className="links-head__tagline">{LINKS_PAGE.tagline}</p>
+        </header>
+
+        <main className="links-main">
+          <div className="links-install">
+            <InstallTerminal caret />
+            <p className="links-install__note">{LINKS_PAGE.installNote}</p>
           </div>
-        </div>
-        <InstallTerminal className="links-install" />
-        <div className="links-list">
-          {links.map((link) => (
-            <a
-              key={link.title}
-              href={link.href}
-              className="links-item glass"
-              target={link.href.startsWith("http") ? "_blank" : undefined}
-              rel={link.href.startsWith("http") ? "noopener noreferrer" : undefined}
-            >
-              <link.icon size={20} className="links-item-icon" />
-              <div className="links-item-text">
-                <span className="links-item-title">{link.title}</span>
-                <span className="links-item-desc">{link.desc}</span>
-              </div>
-            </a>
-          ))}
-        </div>
+
+          <nav aria-label={LINKS_PAGE.listLabel} className="links-nav">
+            <ul className="links-cards">
+              {cards.map((link) => (
+                <li key={link.id}>
+                  <LinkRow link={link} />
+                </li>
+              ))}
+            </ul>
+            <ul className="links-group">
+              {rest.map((link) => (
+                <li key={link.id}>
+                  <LinkRow link={link} />
+                </li>
+              ))}
+            </ul>
+          </nav>
+        </main>
+
+        <footer className="links-foot">{LINKS_PAGE.footer}</footer>
       </div>
     </div>
   );

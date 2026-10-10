@@ -94,30 +94,6 @@ img, video {
   }
 }
 
-/* ── Glass Panel ── */
-.glass {
-  background: color-mix(in oklab, var(--ds-color-bg) 85%, transparent);
-  border: 1px solid var(--ds-color-border);
-  border-radius: var(--sky-radius-control);
-  box-shadow:
-    0 1px 2px color-mix(in oklab, var(--sky-color-ground-deep) 10%, transparent),
-    0 4px 16px color-mix(in oklab, var(--sky-color-ground-deep) 8%, transparent),
-    inset 0 1px 0 color-mix(in oklab, var(--sky-color-display-hi) 3%, transparent);
-  transition:
-    border-color 0.25s ease-out,
-    box-shadow 0.25s ease-out,
-    transform 0.25s ease-out;
-}
-
-.glass:hover {
-  border-color: var(--sky-color-border-hover);
-  box-shadow:
-    0 2px 4px color-mix(in oklab, var(--sky-color-ground-deep) 12%, transparent),
-    0 8px 24px color-mix(in oklab, var(--sky-color-ground-deep) 12%, transparent),
-    0 0 40px color-mix(in oklab, var(--ds-color-accent) 6%, transparent),
-    inset 0 1px 0 color-mix(in oklab, var(--sky-color-display-hi) 5%, transparent);
-}
-
 /* ── Site header (Landing / PhoneLanding boards) ──
    Phone first: S, wordmark and the GitHub button; from 48rem the call to
    action and the GitHub label; from 64rem the capsule of section links.
@@ -385,31 +361,6 @@ img, video {
   }
 }
 
-/* Eyebrow badge */
-
-.hero-eyebrow {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  width: fit-content;
-  font-family: var(--ds-font-mono);
-  font-size: 12px;
-  font-weight: var(--ds-font-weight-medium);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--ds-color-accent);
-  background: color-mix(in oklab, var(--ds-color-accent) 8%, transparent);
-  border: 1px solid color-mix(in oklab, var(--ds-color-accent) 20%, transparent);
-  border-radius: 100px;
-  padding: 6px 16px;
-}
-
-.eyebrow-sep {
-  width: 1px;
-  height: 14px;
-  background: color-mix(in oklab, var(--ds-color-accent) 30%, transparent);
-}
-
 /* ── Site footer (Landing / PhoneLanding boards) ──
    Phone first: brand over a two-column link grid; from 48rem brand left,
    three columns right. */
@@ -516,85 +467,6 @@ img, video {
   }
 }
 
-/* ── Links Page ── */
-.links-page {
-  min-height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: var(--ds-space-8);
-}
-
-.links-container {
-  width: 100%;
-  max-width: 440px;
-}
-
-.links-header {
-  text-align: center;
-  margin-bottom: var(--ds-space-6);
-}
-
-.links-install {
-  margin-bottom: var(--ds-space-8);
-}
-
-.links-brand {
-  font-family: var(--sky-font-brand);
-  font-size: 32px;
-  font-weight: var(--ds-font-weight-bold);
-  color: var(--ds-color-fg);
-  letter-spacing: 0.05em;
-  text-decoration: none;
-}
-
-.links-brand:hover {
-  color: var(--ds-color-accent);
-}
-
-.links-list {
-  display: flex;
-  flex-direction: column;
-  gap: var(--ds-space-2);
-}
-
-.links-item {
-  display: flex;
-  align-items: center;
-  gap: var(--ds-space-4);
-  padding: var(--ds-space-4) var(--ds-space-6);
-  text-decoration: none;
-  color: var(--ds-color-fg);
-  border-radius: 12px;
-  transition: transform 0.2s ease, border-color 0.2s ease;
-}
-
-.links-item:hover {
-  transform: translateY(-2px);
-  border-color: color-mix(in oklab, var(--ds-color-accent) 40%, transparent);
-}
-
-.links-item-icon {
-  flex-shrink: 0;
-  color: var(--ds-color-accent);
-}
-
-.links-item-text {
-  display: flex;
-  flex-direction: column;
-}
-
-.links-item-title {
-  font-weight: var(--ds-font-weight-semibold);
-  font-size: var(--landing-text-body);
-}
-
-.links-item-desc {
-  font-size: 13px;
-  color: var(--ds-color-text-subtle);
-  margin-top: 2px;
-}
-
 /* ── Skip Link ── */
 .skip-link {
   position: absolute;
@@ -619,18 +491,6 @@ img, video {
   *, *::before, *::after {
     animation: none !important;
     transition: none !important;
-  }
-}
-
-@media (max-width: 768px) {
-  .hero-eyebrow {
-    font-size: 9px;
-    padding: 5px 10px;
-    gap: 5px;
-  }
-
-  .eyebrow-sep {
-    height: 12px;
   }
 }
 
