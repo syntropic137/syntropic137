@@ -15,12 +15,17 @@ task: >
 expected:
   # The root cause, for the LLM judge only; never part of `task`.
   defect: >
-    AgentExecutionHandler turns any codex stream error_reason (e.g. the
-    stream ended without a terminal turn) into a non-zero phase exit without
-    checking whether the phase already wrote its deliverable to
-    artifacts/output/, so a codex phase that finished its work is discarded
-    as failed; only the no-terminal-turn-and-no-deliverable case (expired
-    login) should fail.
+    AgentExecutionHandler turns every codex stream error_reason into a
+    non-zero phase exit, including the bare "stream ended without a terminal
+    turn" reason when the phase has already written a non-empty deliverable
+    to artifacts/output/, so a codex phase that finished its work is
+    discarded as failed. The fix exempts only that combination: the
+    missing-terminal-turn reason AND a non-empty deliverable. Everything else
+    must still fail: an authentication fault (e.g. an expired login) or a
+    malformed stream line even when a deliverable exists, a non-zero CLI
+    exit, and an absent, empty or unreadable deliverable. A finding that
+    would let an auth or malformed-stream error pass because output exists
+    is not this defect's remedy.
   files:
     - packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/AgentExecutionHandler.py
   keywords:

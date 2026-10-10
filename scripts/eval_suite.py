@@ -960,9 +960,11 @@ temperature with HTTP 400, so they cannot be this judge."""
 TEMPERATURE_ZERO_MODELS = frozenset({"claude-sonnet-4-6", "claude-opus-4-6", "claude-haiku-4-5"})
 """Models the Messages API accepts `temperature: 0` for. `AnthropicMessages` refuses
 any other model before sending, rather than letting the provider 400 mid-scoring."""
-JUDGE_PROMPT_VERSION = 2
+JUDGE_PROMPT_VERSION = 3
 """Bump on ANY change to `_JUDGE_SYSTEM`, `_judge_prompt` or what they are given: it is
-part of the scorer version. v2: the case's `expected.defect` is required, never inferred."""
+part of the scorer version. v2: the case's `expected.defect` is required, never inferred.
+v3: the codex-deliverable-phase-failed description no longer reads as waiving auth and
+malformed-stream faults when a deliverable exists."""
 
 _JUDGE_SYSTEM = """You grade a code reviewer. You are given ONE known defect and the \
 reviewer's blocking findings. Answer whether any single finding identifies THIS defect: \

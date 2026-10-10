@@ -2998,9 +2998,9 @@ def test_llm_judged_score_is_recorded_under_the_judges_identity(
     rows, _ = score_suite(loaded, server.client(), [_LAUNCHED], eval_suite.LlmJudge(model))
 
     [(_, body)] = server.scores
-    assert body["scorer_version"] == "6+llm:claude-sonnet-4-6@prompt-v2"
+    assert body["scorer_version"] == "6+llm:claude-sonnet-4-6@prompt-v3"
     assert body["verdict"] == "PASS"
-    assert "LLM judge (`llm:claude-sonnet-4-6@prompt-v2`): `match`" in str(body["evidence"])
+    assert "LLM judge (`llm:claude-sonnet-4-6@prompt-v3`): `match`" in str(body["evidence"])
     assert "keyword judge: no match" in str(body["evidence"])
     table = render(loaded, rows)
     assert "keyword OR LLM match, unclear not caught): 1/1" in table
