@@ -1,6 +1,6 @@
 <!-- Evals list. Boards: Evals · PhoneEvals. Verdict board over every eval, then the tag-filterable list. -->
 <script lang="ts">
-  import { listEvalExecutions, listEvalRuns, listEvals, MAX_PAGE_SIZE } from '@syn137/syn-ui-data'
+  import { listAllEvals, listEvalExecutions, listEvalRuns } from '@syn137/syn-ui-data'
   import type { EvalSummary } from '@syn137/syn-ui-data'
   import { Callout, EmptyState, Pagination, Skeleton } from '@syn137/skyline-svelte-v5'
   import { PageHeader, VerdictBlock, VerdictBoard, VerdictSparkline } from '@syn137/skyline-svelte-v5/patterns'
@@ -24,9 +24,9 @@
     return Number.isInteger(n) && n > 0 ? n : 1
   })
 
-  // One /evals load per visit (it takes ~20 s on a large deployment): the
-  // board, the tag filter, the list and its pages are all derived from it.
-  const all = resource((signal) => listEvals({ page_size: MAX_PAGE_SIZE }, signal), { live: isRunFinished })
+  // One /evals load per visit (every page, it takes ~20 s on a large deployment):
+  // the board, the tag filter, the list and its pages are all derived from it.
+  const all = resource((signal) => listAllEvals({}, signal), { live: isRunFinished })
   // Each cell's cost is its latest run's, matching the verdict it shows.
   const evalRuns = resource((signal) => listEvalExecutions(signal), { live: isRunFinished })
   const runCosts = $derived(latestRunCosts(evalRuns.data ?? []))
