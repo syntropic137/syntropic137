@@ -310,6 +310,17 @@ def _rate(numerator: int, denominator: int) -> float | None:
     return round(numerator / denominator * 100, 2)
 
 
+def _window_rates(
+    opened: ShippedCountTile, merged: ShippedCountTile
+) -> tuple[float | None, float | None] | None:
+    """(current, previous) rates, or None when either count is unmeasured."""
+    counts = (opened.total, opened.previous_total, merged.total, merged.previous_total)
+    if any(c is None for c in counts):
+        return None
+    o, po, m, pm = (c or 0 for c in counts)
+    return _rate(m, o), _rate(pm, po)
+
+
 def merge_rate_tile(opened: ShippedCountTile, merged: ShippedCountTile) -> ShippedRateTile:
     """merged / opened over the window, as a percent; delta in points.
 
@@ -317,26 +328,21 @@ def merge_rate_tile(opened: ShippedCountTile, merged: ShippedCountTile) -> Shipp
     a number nobody measured.
     """
     source = f"prs_merged / prs_opened ({opened.source})"
-    if (
-        opened.total is None
-        or opened.previous_total is None
-        or merged.total is None
-        or merged.previous_total is None
-    ):
+    rates = _window_rates(opened, merged)
+    if rates is None:
         return ShippedRateTile(
             source=source, reason=opened.reason or merged.reason or "PR counts unavailable"
         )
-    total = _rate(merged.total, opened.total)
-    previous = _rate(merged.previous_total, opened.previous_total)
-    delta = round(total - previous, 2) if total is not None and previous is not None else None
+    total, previous = rates
+    delta = None if total is None or previous is None else round(total - previous, 2)
     merged_by_day = {p.day: p.value for p in merged.series}
     return ShippedRateTile(
         source=source,
         total=total,
         previous_total=previous,
         delta=delta,
-        delta_display=format_points_delta(delta) if delta is not None else None,
-        total_display=format_percent(total) if total is not None else None,
+        delta_display=None if delta is None else format_points_delta(delta),
+        total_display=None if total is None else format_percent(total),
         series=tuple(
             RatePoint(p.day, _rate(merged_by_day.get(p.day, 0), p.value)) for p in opened.series
         ),

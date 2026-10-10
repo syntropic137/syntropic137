@@ -17,10 +17,10 @@ from pydantic import BaseModel, ConfigDict, Field
 from syn_api._wiring import (
     ensure_connected,
     get_canonical_usage_query,
+    get_event_store_instance,
     get_execution_cost_query,
     get_phase_profile_query,
     get_projection_mgr,
-    get_shipped_metrics_query,
 )
 from syn_api.types import (
     DashboardMetrics,
@@ -31,7 +31,12 @@ from syn_api.types import (
     Result,
     ShippedMetricsResponse,
 )
-from syn_domain.contexts.orchestration.slices.shipped_metrics import SHIPPED_WINDOW_DAYS
+from syn_domain.contexts.orchestration import ExecutionListReads
+from syn_domain.contexts.orchestration.slices.shipped_metrics import (
+    SHIPPED_WINDOW_DAYS,
+    ShippedMetricsQueryService,
+    TimescaleCommitSightings,
+)
 from syn_domain.pagination import Page
 from syn_shared.pricing import canonical_cost_usd
 
@@ -421,6 +426,21 @@ async def get_phase_profiles_endpoint(
             detail="phase profiles are unavailable: the observability store could not be read",
         ) from exc
     return PhaseProfilesResponse.from_profiles(profiles, window_days)
+
+
+def get_shipped_metrics_query() -> ShippedMetricsQueryService:
+    """The "Shipped by agents" query: agent_events commits + the execution list.
+
+    Raises:
+        RuntimeError: If the TimescaleDB pool is not yet initialized.
+    """
+    pool = get_event_store_instance().pool
+    if pool is None:
+        raise RuntimeError("TimescaleDB pool is not initialized")
+    return ShippedMetricsQueryService(
+        sightings=TimescaleCommitSightings(pool),
+        executions=ExecutionListReads(get_projection_mgr().store),
+    )
 
 
 @router.get("/shipped", response_model=ShippedMetricsResponse)

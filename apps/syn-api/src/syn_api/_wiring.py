@@ -820,24 +820,6 @@ def get_phase_profile_query():
     return PhaseProfileQueryService(pool=_timescale_pool(), cost_calculator=CostCalculator())
 
 
-def get_shipped_metrics_query():
-    """Return the "Shipped by agents" query: agent_events commits + execution list.
-
-    Raises:
-        RuntimeError: If the TimescaleDB pool is not yet initialized.
-    """
-    from syn_domain.contexts.orchestration import (
-        ExecutionListReads,
-        ShippedMetricsQueryService,
-        TimescaleCommitSightings,
-    )
-
-    return ShippedMetricsQueryService(
-        sightings=TimescaleCommitSightings(_timescale_pool()),
-        executions=ExecutionListReads(get_projection_mgr().store),
-    )
-
-
 async def get_conversation_store() -> MinioConversationStorage:
     """Return the conversation storage (MinIO-backed)."""
     return await get_conversation_storage()
