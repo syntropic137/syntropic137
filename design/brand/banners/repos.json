@@ -9,7 +9,7 @@
       "tagline": "Agent work that compounds.",
       "command": "npx @syntropic137/setup init",
       "edge": {
-        "text": "Agent work that compounds · Any harness · Every step observed · Every run scored",
+        "text": "Agent work that compounds · Claude Code and Codex · Every step observed · Every run scored",
         "seconds": 60
       }
     },

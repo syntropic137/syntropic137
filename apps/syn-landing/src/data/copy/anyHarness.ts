@@ -1,8 +1,8 @@
-/** "02 Any harness" copy (#harnesses), from the v4 boards. */
+/** "02 Multi-harness" copy (#harnesses), from the v4 boards. */
 
 export const ANY_HARNESS = {
   num: "02",
-  eyebrow: "Any harness",
+  eyebrow: "Multi-harness",
   title: "Claude Code or Codex. Per phase.",
   lede: "Pick the best agent for each step instead of one vendor for everything. Build with one, review with the other, and delegate subtasks between them.",
   points: [

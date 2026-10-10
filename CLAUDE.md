@@ -569,7 +569,8 @@ UI work starts at [design/README.md](design/README.md): the boards, the spec and
 
 The brand kit is [design/brand/BRAND.md](design/brand/BRAND.md) (v2.0): logo, colour, type, motion, voice, surfaces and every asset. Follow it for anything user-facing.
 
-- **Any harness.** No Claude-only install paths. Claude Code plugins are deprecated org-wide in favour of multi-harness skills (`npx skills add syntropic137/syntropic137-skills`).
+- **Harness claims.** Say "Claude Code and Codex" or "multi-harness"; never "any harness" as a present-tense claim (more harnesses are the goal).
+- **No Claude-only install paths.** Claude Code plugins are deprecated org-wide in favour of multi-harness skills (`npx skills add syntropic137/syntropic137-skills`).
 
 ## Tooling
 

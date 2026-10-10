@@ -34,12 +34,12 @@ Everything below is already the right size, in [`social/`](social/). Pick the ro
 
 One idea: **agent work that compounds.**
 
-> Syntropic137 turns your coding agents into repeatable workflows. Run them on any harness, see every step, and make every run better than the last.
+> Syntropic137 turns your coding agents into repeatable workflows. Run them on Claude Code or Codex, see every step, and make every run better than the last.
 
 The four pillars, always in this order:
 
 1. Repeatable workflows
-2. Any harness (Claude Code or Codex, per phase)
+2. Multi-harness (Claude Code and Codex today, mixed per phase; more harnesses are the goal)
 3. Fully observable
 4. Compounding improvement (evals)
 
@@ -162,7 +162,8 @@ Durations and curves: `--sky-dur-1` to `--sky-dur-4` (250, 900, 1100, 2600ms), `
 - Short sentences. Plain words.
 - Real commands only. Every command shown must run as written.
 - Never invent features, numbers or integrations. Sample data is marked as sample.
-- **Any harness.** No Claude-only install paths. Claude Code plugins are deprecated org-wide in favour of multi-harness skills installed with `npx skills add`. The reference is [syntropic137-skills](https://github.com/syntropic137/syntropic137-skills):
+- **Harness claims.** Say "Claude Code and Codex" or "multi-harness". Never "any harness" as a present-tense claim: more harnesses are the goal, not shipped. (Skills are different: `npx skills` installs into many agents, which is true.)
+- **No Claude-only install paths.** Claude Code plugins are deprecated org-wide in favour of multi-harness skills installed with `npx skills add`. The reference is [syntropic137-skills](https://github.com/syntropic137/syntropic137-skills):
 
   ```bash
   npx skills add syntropic137/syntropic137-skills

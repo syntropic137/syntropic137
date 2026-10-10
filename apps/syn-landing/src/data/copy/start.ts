@@ -3,7 +3,7 @@ import { INSTALL_COMMAND } from "./hero";
 
 export const START_COPY = {
   title: "Make your agent work compound.",
-  lede: "Repeatable workflows, any harness, every step on the record, better every run. Self-hosted and MIT licensed.",
+  lede: "Repeatable workflows on Claude Code and Codex, every step on the record, better every run. Self-hosted and MIT licensed.",
   note: "Open source, MIT. Node 18+ and Docker. Your dashboard is live at localhost:8137 in about five minutes.",
   stepsLabel: "Three steps",
   steps: [
