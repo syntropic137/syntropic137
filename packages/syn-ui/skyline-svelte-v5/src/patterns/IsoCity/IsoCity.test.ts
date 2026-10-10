@@ -290,8 +290,10 @@ describe('IsoCity, codex review 2 of #1856', () => {
     const sel = l.blocks.find((b) => b.date === selectedDay)!
     let occluded = 0
     let visible = 0
-    for (let x = sel.hit.x; x <= sel.hit.x + sel.hit.width; x += 1) {
-      for (let y = sel.hit.y; y <= sel.hit.y + sel.hit.height; y += 1) {
+    // A 2-unit grid: a quarter of the points, still dozens on each face. Every
+    // point took 5.1 s on the CI runner against vitest's 5 s limit.
+    for (let x = sel.hit.x; x <= sel.hit.x + sel.hit.width; x += 2) {
+      for (let y = sel.hit.y; y <= sel.hit.y + sel.hit.height; y += 2) {
         if (!sel.faces.some((f) => pointInPolygon(x, y, f))) continue
         const picked = pickIsoCityBlock(l.blocks, x, y)?.date ?? null
         const painted = paintedAt(container, x, y)
