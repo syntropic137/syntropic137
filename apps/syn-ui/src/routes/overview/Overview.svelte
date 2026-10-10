@@ -14,10 +14,12 @@
   import { dayFromMs, type SkylineDay } from '@syn137/skyline-core/geometry'
   import { outcomeStatus, runBarPercent, runSegments, runSlots, runSubline } from '@syn137/skyline-core/patterns'
   import {
-    activeDayCount,
+    activeDaysIn,
     attentionRuns,
     distinctRepoCount,
+    heatmapCoverage,
     heatmapPages,
+    heatmapPeriod,
     heatmapToSkylineDays,
     outcomeCounts,
     outcomeLine,
@@ -72,13 +74,21 @@
   const HISTORY_WEEKS = 52
   let oldestWeek = $state(HISTORY_WEEKS - 16)
   let cityOffset = $state(0)
+  // `from` travels with the days, so a failed older page leaves the last good data AND says how far it reaches.
+  const wantedFrom = $derived(heatmapPages(today, HISTORY_WEEKS, oldestWeek).at(-1)?.start_date ?? today)
   const heatmap = resource(
     (signal) => {
       const pages = heatmapPages(today, HISTORY_WEEKS, oldestWeek)
-      return Promise.all(pages.map((p) => getContributionHeatmap(p, signal))).then((r) => r.flatMap((h) => h.days ?? []))
+      const from = pages.at(-1)?.start_date ?? today
+      return Promise.all(pages.map((p) => getContributionHeatmap(p, signal))).then((r) => ({ from, days: r.flatMap((h) => h.days ?? []) }))
     },
     { live: isRunFinished, liveIntervalMs: 15_000 },
   )
+  // Unloaded, loading and failed weeks are not zero (codex review of #1856).
+  const coverage = $derived(heatmapCoverage({ loadedFrom: heatmap.data?.from ?? null, wantedFrom, loading: heatmap.loading, error: heatmap.error }))
+  // The headline counts a fixed period, one request, whatever the scroller has loaded (codex review of #1856).
+  const period = heatmapPeriod(today, HISTORY_WEEKS)
+  const periodHeatmap = resource((signal) => getContributionHeatmap(period, signal), { live: isRunFinished, liveIntervalMs: 15_000 })
   const workflows = resource((signal) => listWorkflows({ page_size: 100 }, signal))
   const triggers = resource((signal) => listTriggers({}, signal))
   const SHIPPED_DAYS = 14
@@ -89,7 +99,7 @@
   )
 
   // ---- derived view data ----
-  const days = $derived<SkylineDay[]>(heatmapToSkylineDays(heatmap.data))
+  const days = $derived<SkylineDay[]>(heatmapToSkylineDays(heatmap.data?.days))
   let selectedDay = $state<string | null>(null)
 
   const rows = $derived(runs.data?.executions ?? [])
@@ -129,7 +139,7 @@
 
   const stats = $derived([
     { label: 'Sessions', value: formatInteger(metrics.data?.total_sessions) },
-    { label: 'Active days', value: heatmap.data ? formatInteger(activeDayCount(days)) : '…' },
+    { label: 'Active days', value: periodHeatmap.data ? formatInteger(activeDaysIn(heatmapToSkylineDays(periodHeatmap.data.days), period)) : '…' },
     { label: 'Tokens', value: formatTokens(metrics.data?.total_tokens) },
     { label: 'Spend', value: formatCost(metrics.data?.total_cost_usd) },
   ])
@@ -154,6 +164,7 @@
     metrics.refresh()
     runs.refresh()
     heatmap.refresh()
+    periodHeatmap.refresh()
     workflows.refresh()
     triggers.refresh()
     shipped.refresh()
@@ -228,7 +239,7 @@
       {:else if days.length === 0}
         <EmptyState title="No activity yet" description="Each day an agent works becomes a bar here." level={3} bare />
       {:else}
-        <IsoCity {days} {today} history={HISTORY_WEEKS} bind:offset={cityOffset} bind:selected={selectedDay} onwindow={onCityWindow} runsHref={dayRunsHref} />
+        <IsoCity {days} {today} history={HISTORY_WEEKS} {coverage} onretry={() => heatmap.refresh()} bind:offset={cityOffset} bind:selected={selectedDay} onwindow={onCityWindow} runsHref={dayRunsHref} />
       {/if}
     </div>
   </section>

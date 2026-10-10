@@ -53,11 +53,18 @@ test('the week strip jumps to that week, and arrow keys scroll when the city is 
   await expect(scroll.getByText('Latest 14 weeks')).toBeVisible()
 })
 
+/** Move the mouse onto the middle of a block's top face: the pointer picks the visible surface, not a rectangle. */
+async function pointAtTop(page: Page, date: string) {
+  const box = await page.locator(`[data-date-block="${date}"] .sky-iso__top`).boundingBox()
+  if (!box) throw new Error(`no block for ${date}`)
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+}
+
 test('pointing at a block shows its day in the readout, failed count included', async ({ page }) => {
   await openCity(page)
   const readout = page.getByRole('status').filter({ hasText: 'Sessions' })
   const oct1 = page.getByRole('button', { name: 'Thu, Oct 1: 3 sessions, 2 failed' })
-  await oct1.hover()
+  await pointAtTop(page, '2026-10-01')
   await expect(oct1).toHaveAttribute('aria-pressed', 'true')
   await expect(readout).toContainText('Thu, Oct 1')
   await expect(readout).toContainText('2 failed')
@@ -67,6 +74,24 @@ test('pointing at a block shows its day in the readout, failed count included', 
   await page.getByRole('button', { name: aug28 }).focus()
   await expect(readout).toContainText('Fri, Aug 28')
   await expect(readout).not.toContainText('failed')
+})
+
+test('the Active days headline counts a fixed period, not the pages scrolled into view (codex review of #1856)', async ({ page }) => {
+  const scroll = await openCity(page)
+  const stat = page.locator('.sky-ov-stats > div').filter({ hasText: 'Active days' }).locator('dd')
+  await expect(stat).not.toContainText('…')
+  const before = await stat.textContent()
+  for (let i = 0; i < 8; i++) await scroll.getByRole('button', { name: 'One month back' }).click()
+  await expect(scroll.getByText('8 months back')).toBeVisible()
+  await expect(page.locator('.sky-iso__load')).toHaveCount(0)
+  expect(await stat.textContent()).toBe(before)
+})
+
+test('every week is a full column: today\'s week shows its future days as tiles (owner, Oct 10)', async ({ page }) => {
+  await openCity(page)
+  // Oct 9 is a Friday: Saturday and Sunday are future tiles, and Sunday is the front row.
+  await expect(page.locator('.sky-iso__future').first()).toHaveAttribute('d', /^M.*Z.*M.*Z$/)
+  await expect(page.locator('[data-date-block="2026-10-10"]')).toHaveCount(0)
 })
 
 test('stepping active days scrolls the window only when the day is out of view', async ({ page }) => {
