@@ -23,7 +23,7 @@
   {#each operations as op (op.id)}
     {@const fold = op.output ? foldOutput(op.output, previewLines) : null}
     {@const unfolded = expanded || open.has(op.id)}
-    <li class="sky-ops__op" data-status={op.status}>
+    <li class="sky-ops__op" data-status={op.status} data-op-id={op.id}>
       <span class="sky-ops__time">{op.time}</span>
       <span class="sky-ops__rail" aria-hidden="true">
         <span class="sky-ops__badge"><Glyph d={toolGlyph(op.tool)} size={14} weight={1.7} /></span>

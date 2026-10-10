@@ -5,7 +5,7 @@ import type { SSEEventFrame } from '../types'
 import realtimePy from '../../../../syn-adapters/src/syn_adapters/projections/realtime.py?raw'
 import pushEventsPy from '../../../../../apps/syn-api/src/syn_api/routes/webhooks/push_events.py?raw'
 import { ACTIVITY_EVENT_TYPES, EXECUTION_STREAM_EVENT_TYPES, LIVE_EVENT_TYPES } from './events'
-import { connectLiveInvalidation, invalidationsFor, mergeTargets } from './invalidate'
+import { connectExecutionInvalidation, connectLiveInvalidation, invalidationsFor, mergeTargets } from './invalidate'
 
 const frame = (event_type: string, data: Record<string, unknown> = {}, execution_id: string | null = null): SSEEventFrame => ({
   type: 'event',
@@ -140,5 +140,36 @@ describe('connectLiveInvalidation teardown', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+describe('connectExecutionInvalidation (feedback 18ec6964)', () => {
+  it('an OperationRecorded frame on the execution stream refreshes that session and its tool timeline', () => {
+    let push: (frames: SSEEventFrame[]) => void = () => {}
+    const applied: QueryTarget[][] = []
+    const stop = connectExecutionInvalidation('ex', {
+      minIntervalMs: 0,
+      subscribe: (onFrames) => {
+        push = onFrames
+        return () => {}
+      },
+      apply: (t) => applied.push(t),
+    })
+    push([frame('OperationRecorded', { session_id: 's-1', operation_id: 'op-9' }, 'ex')])
+    const got = names(applied.flat())
+    expect(got).toContain('getSession:s-1')
+    expect(got).toContain('getToolTimeline:s-1')
+    expect(got).not.toContain('getSession')
+    stop()
+  })
+
+  it('subscribes to that execution, not the activity stream, by default', async () => {
+    const stream = await import('./stream')
+    const spy = vi.spyOn(stream.liveHub, 'subscribe').mockReturnValue(() => {})
+    const stop = connectExecutionInvalidation('ex 1')
+    expect(spy).toHaveBeenCalledTimes(1)
+    expect(spy.mock.calls[0]![0]).toMatch(/\/sse\/executions\/ex%201$/)
+    stop()
+    spy.mockRestore()
   })
 })

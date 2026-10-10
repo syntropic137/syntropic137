@@ -11,7 +11,7 @@ import type { QueryTarget } from '../keys'
 import { invalidateTargets } from '../keys'
 import type { SSEEventFrame } from '../types'
 import { isArtifactEvent, isGitEvent, isRunEvent, isRunFinished, isSessionEvent } from './events'
-import { subscribeActivity } from './stream'
+import { subscribeActivity, subscribeExecution } from './stream'
 
 const str = (v: unknown): string | undefined => (typeof v === 'string' && v ? v : undefined)
 
@@ -139,4 +139,18 @@ export function connectLiveInvalidation(options: LiveInvalidationOptions = {}): 
     clearTimeout(timer)
     if (pending.length) flush()
   }
+}
+
+/**
+ * Keep the cache in step with one execution's own stream (`/sse/executions/{id}`),
+ * which carries what the activity stream does not: PhaseStarted/Completed,
+ * OperationRecorded, ArtifactCreated, Subagent*. A session page holds one
+ * while its session runs, so its operations refresh as frames arrive
+ * (feedback 18ec6964). Same map and throttle as the activity stream.
+ */
+export function connectExecutionInvalidation(executionId: string, options: LiveInvalidationOptions = {}): () => void {
+  return connectLiveInvalidation({
+    ...options,
+    subscribe: options.subscribe ?? ((onFrames) => subscribeExecution(executionId, { onFrames })),
+  })
 }

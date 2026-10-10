@@ -3,8 +3,13 @@
   and figures; the Usage Meter by model; then the Operation Timeline with
   filter chips, Expand all and Copy all. Long timelines render in chunks as
   the reader scrolls (revealCount), so a 600-operation session stays light.
+  Operations read newest first; while the session runs they refresh on the
+  execution's own stream (and a 3 s poll, since the API forwards no
+  per-operation frame yet). Rows that arrive while the reader is scrolled
+  down keep the viewport still and show as "N new" (feedback 18ec6964).
 -->
 <script lang="ts">
+  import { untrack } from 'svelte'
   import { formatDurationPrecise, formatInteger, formatTokens } from '@syn137/skyline-core/format'
   import {
     agentKind,
@@ -12,14 +17,19 @@
     costByModelRows,
     countToolCalls,
     filterOperations,
+    LIVE_OPS_INITIAL,
+    liveOps,
+    newestFirst,
     operationChips,
     operationsSummary,
     revealCount,
     sessionCost,
     sessionCrumbs,
     sessionOperations,
+    sessionPollMs,
     sessionTokens,
     transcriptAvailable,
+    unseenLabel,
   } from '@syn137/skyline-core/screens/sessions'
   import { operationsToText } from '@syn137/skyline-core/patterns'
   import { ApiError, getSession } from '@syn137/syn-ui-data'
@@ -39,7 +49,7 @@
   })
 
   const s = $derived(session.data)
-  const rows = $derived(s ? sessionOperations(s.operations) : [])
+  const rows = $derived(s ? newestFirst(sessionOperations(s.operations)) : [])
   const chips = $derived(operationChips(rows))
   let filter = $state<string[]>(['all'])
   const current = $derived(chips.some((c) => c.value === filter[0]) ? (filter[0] ?? 'all') : 'all')
@@ -68,6 +78,76 @@
     io.observe(el)
     return () => io.disconnect()
   })
+
+  // Live: the execution's stream invalidates this session's cached read on its frames; a running session also polls.
+  const execId = $derived(s?.execution_id ?? null)
+  const pollMs = $derived(sessionPollMs(s?.status))
+  $effect(() => {
+    const ex = execId
+    if (!ex || pollMs === null) return
+    let stop: (() => void) | null = null
+    let gone = false
+    void import('@syn137/syn-ui-data/invalidate').then((m) => {
+      if (!gone) stop = m.connectExecutionInvalidation(ex)
+    })
+    return () => {
+      gone = true
+      stop?.()
+    }
+  })
+  $effect(() => {
+    const ms = pollMs
+    if (ms === null) return
+    const timer = setInterval(() => {
+      if (document.visibilityState === 'visible') session.refresh()
+    }, ms)
+    return () => clearInterval(timer)
+  })
+
+  // New rows prepend. At the top they just appear; scrolled down, the row the reader is on stays put and "N new" counts them.
+  let listEl = $state<HTMLElement | null>(null)
+  let ops = $state(LIVE_OPS_INITIAL)
+  let anchor: { id: string; top: number } | null = null
+  const listAtTop = () => !listEl || listEl.getBoundingClientRect().top >= 0
+  function firstVisibleRow(): { id: string; top: number } | null {
+    for (const el of listEl?.querySelectorAll<HTMLElement>('[data-op-id]') ?? []) {
+      const r = el.getBoundingClientRect()
+      if (r.bottom > 0) return { id: el.dataset.opId ?? '', top: r.top }
+    }
+    return null
+  }
+  $effect.pre(() => {
+    if (!s) return
+    const ids = rows.map((r) => r.id)
+    untrack(() => {
+      const atTop = listAtTop()
+      const next = liveOps(ops, { type: 'rows', ids, atTop })
+      if (next.added > 0 && !atTop) {
+        anchor = firstVisibleRow()
+        limit += next.added
+      }
+      ops = next
+    })
+  })
+  $effect(() => {
+    void visible
+    const a = anchor
+    anchor = null
+    if (!a || !listEl) return
+    const el = listEl.querySelector<HTMLElement>(`[data-op-id="${CSS.escape(a.id)}"]`)
+    if (el) window.scrollBy(0, el.getBoundingClientRect().top - a.top)
+  })
+  $effect(() => {
+    const onScroll = () => {
+      if (ops.unseen > 0 && listAtTop()) ops = liveOps(ops, { type: 'seen' })
+    }
+    window.addEventListener('scroll', onScroll, { passive: true })
+    return () => window.removeEventListener('scroll', onScroll)
+  })
+  function showNew() {
+    ops = liveOps(ops, { type: 'seen' })
+    document.getElementById('operations-timeline')?.scrollIntoView({ block: 'start' })
+  }
 
   const cost = $derived(s ? sessionCost(s.total_cost_usd, s.unpriced_observation_count) : null)
   const figures = $derived(
@@ -186,7 +266,15 @@
           {#snippet action()}<Button size="sm" onclick={() => (filter = ['all'])}>Show all</Button>{/snippet}
         </EmptyState>
       {:else}
-        <OperationTimeline operations={visible} {expanded} aria-label="Operations, oldest first" />
+        {#if ops.unseen > 0}
+          <button type="button" class="sky-session__new" onclick={showNew}>
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5"></path></svg>
+            {unseenLabel(ops.unseen)}
+          </button>
+        {/if}
+        <div class="sky-session__list" bind:this={listEl}>
+          <OperationTimeline operations={visible} {expanded} aria-label="Operations, newest first" />
+        </div>
         {#if visible.length < shown.length}
           <div class="sky-session__more" bind:this={sentinel}>
             <Button variant="ghost" size="sm" onclick={() => (limit = revealCount(limit, shown.length, CHUNK))}>
@@ -293,6 +381,44 @@
   /* Phone board: View transcript spans the card under the figures. */
   .sky-session :global(.sky-page-header__actions > .sky-button) {
     width: 100%;
+  }
+  /* Scroll anchoring is ours (rows prepend above the reader); the browser's own would move it twice. */
+  .sky-session__ops {
+    overflow-anchor: none;
+  }
+  .sky-session__list {
+    min-width: 0;
+  }
+  .sky-session__new {
+    position: sticky;
+    top: var(--ds-space-3);
+    z-index: 2;
+    align-self: center;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ds-space-1-5);
+    min-height: var(--sky-size-control-sm);
+    padding: 0 var(--ds-space-3);
+    border: var(--ds-border-width) solid var(--sky-color-accent-ring);
+    border-radius: var(--ds-radius-full);
+    background: var(--ds-color-surface-raised);
+    box-shadow: var(--sky-shadow-overlay);
+    color: var(--sky-color-accent-soft-fg);
+    font: inherit;
+    font-size: var(--ds-text-sm);
+    cursor: pointer;
+  }
+  .sky-session__new:hover {
+    border-color: var(--sky-color-border-hover);
+  }
+  .sky-session__new:focus-visible {
+    outline: var(--sky-focus-ring-width) solid var(--sky-color-focus);
+    outline-offset: var(--sky-focus-ring-offset);
+  }
+  @media (pointer: coarse) {
+    .sky-session__new {
+      min-height: var(--sky-size-touch);
+    }
   }
   .sky-session__more {
     display: flex;

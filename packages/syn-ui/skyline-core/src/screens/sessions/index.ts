@@ -315,12 +315,12 @@ export function filterOperations(rows: readonly SessionOperation[], filter: Oper
   return rows.filter((r) => r.kind === filter)
 }
 
-/** "8 tool calls from 16 recorded events, oldest first" or "2 of 8 tool calls shown". */
+/** "8 tool calls from 16 recorded events, newest first" or "2 of 8 tool calls shown". */
 export function operationsSummary(rows: readonly SessionOperation[], shown: number, events: number, filter: OperationFilter): string {
   const tools = rows.filter((r) => r.isTool).length
   const noun = (n: number) => (n === 1 ? 'tool call' : 'tool calls')
   if (filter !== 'all') return `${shown} of ${rows.length} ${rows.length === 1 ? 'operation' : 'operations'} shown`
-  return `${tools} ${noun(tools)} from ${events} recorded ${events === 1 ? 'event' : 'events'}, oldest first`
+  return `${tools} ${noun(tools)} from ${events} recorded ${events === 1 ? 'event' : 'events'}, newest first`
 }
 
 export function countToolCalls(rows: readonly SessionOperation[]): number {
@@ -522,3 +522,5 @@ export function sessionListRow(s: SessionListRowInput): SessionListRow {
     model: observedModel(s.agent_model, s.agent_model_display) ?? MODEL_NOT_REPORTED,
   }
 }
+
+export * from './live'

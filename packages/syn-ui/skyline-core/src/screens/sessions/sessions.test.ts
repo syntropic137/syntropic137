@@ -85,7 +85,7 @@ describe('chips, filter and summary', () => {
     expect(filterOperations(rows, 'all')).toHaveLength(6)
   })
   it('summarises', () => {
-    expect(operationsSummary(rows, 6, 8, 'all')).toBe('4 tool calls from 8 recorded events, oldest first')
+    expect(operationsSummary(rows, 6, 8, 'all')).toBe('4 tool calls from 8 recorded events, newest first')
     expect(operationsSummary(rows, 1, 8, 'errors')).toBe('1 of 6 operations shown')
   })
 })
