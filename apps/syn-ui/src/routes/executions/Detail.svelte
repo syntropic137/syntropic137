@@ -11,6 +11,7 @@
   import {
     evalBadge,
     phaseProgressText,
+    phaseRowTarget,
     canCancel,
     costRowsByModel,
     costRowsByPhase,
@@ -26,6 +27,7 @@
     timelineCaption,
     usageNote,
   } from '@syn137/skyline-core/screens/executions'
+  import type { PhaseRowTarget } from '@syn137/skyline-core/screens/executions'
   import { splitTask } from '@syn137/skyline-core/screens/prompt'
   import { Button, Callout, EmptyState, Skeleton } from '@syn137/skyline-svelte-v5'
   import { CopyButton, PageHeader, PhaseBlocks, PhaseKitChips, PromptText, ProvenanceStrip, RunTiles, StatusBadge, UsageMeter } from '@syn137/skyline-svelte-v5/patterns'
@@ -138,6 +140,8 @@
       href: href(`/artifacts/${p.artifact_id}`),
     }
   }
+
+  const reasonOf = (t: PhaseRowTarget) => (t.kind === 'none' ? t.reason : undefined)
 
   function sessionTile(p: PhaseExecutionDetail) {
     if (!p.session_id) return null
@@ -285,10 +289,16 @@
           {#each phases as p, i (p.phase_id + i)}
             {@const kit = phaseKit(p)}
             {@const total = phaseTokens(p)}
-            <li class="sky-exec__phase">
+            {@const target = phaseRowTarget(p)}
+            <li class="sky-exec__phase" data-linked={target.kind === 'session' ? '' : undefined} title={reasonOf(target)}>
               <div class="sky-exec__phase-head">
                 <span class="sky-exec__num">{phaseNumber(i)}</span>
-                <span class="sky-exec__phase-name">{p.name}</span>
+                {#if target.kind === 'session'}
+                  <!-- Stretched link: its ::after covers the row, so a click anywhere on the row opens the session; inner links sit above it. -->
+                  <a class="sky-exec__phase-name sky-exec__phase-link" href={href(target.path)} aria-label={target.label}>{p.name}</a>
+                {:else}
+                  <span class="sky-exec__phase-name">{p.name}</span>
+                {/if}
                 {#if statusSemantics(p.status).kind !== 'completed'}<StatusBadge status={p.status} />{/if}
                 <PhaseKitChips model={phaseModelChip(p)} tools={kit.tools === 'not-recorded' ? 'default' : kit.tools} skills={kit.skills} />
                 <span class="sky-exec__grow"></span>
@@ -315,7 +325,7 @@
             </li>
           {/each}
           {#each notStarted as p, j (p.phase_id)}
-            <li class="sky-exec__phase" data-pending>
+            <li class="sky-exec__phase" data-pending title={reasonOf(phaseRowTarget(p, true))}>
               <div class="sky-exec__phase-head">
                 <span class="sky-exec__num">{phaseNumber(phases.length + j)}</span>
                 <span class="sky-exec__phase-name">{p.name}</span>
@@ -503,6 +513,33 @@
     border-radius: var(--sky-radius-control);
     font-size: var(--ds-text-sm);
     color: var(--ds-color-text-muted);
+  }
+  /* The whole row opens the phase's session (feedback 1f70d3ab): a stretched link, focus ring on the row. */
+  .sky-exec__phase[data-linked] {
+    position: relative;
+    cursor: pointer;
+  }
+  .sky-exec__phase-link {
+    color: inherit;
+    text-decoration: none;
+  }
+  .sky-exec__phase-link::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+  }
+  .sky-exec__phase-link:focus-visible {
+    outline: none;
+  }
+  .sky-exec__phase:has(.sky-exec__phase-link:focus-visible) {
+    outline: var(--sky-focus-ring-width) solid var(--sky-color-focus);
+    outline-offset: var(--sky-focus-ring-offset);
+  }
+  /* Inner actions (session and artifact tiles, copy, chips with tooltips) stay above the row link. */
+  .sky-exec__phase[data-linked] :global(:is(a, button, [title]):not(.sky-exec__phase-link)) {
+    position: relative;
+    z-index: 1;
   }
   .sky-exec__phase[data-pending] {
     opacity: 0.7;

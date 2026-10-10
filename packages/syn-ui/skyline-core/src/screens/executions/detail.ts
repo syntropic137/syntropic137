@@ -258,3 +258,18 @@ export function phaseProgressText(display: string | null | undefined, completed:
   if (!display) return `${completed} of ${total} ${total === 1 ? 'phase' : 'phases'}`
   return /\bphases?\b/i.test(display) ? display : `phases ${display}`
 }
+
+/**
+ * Where a phase row leads (feedback 1f70d3ab): the whole row opens the
+ * session the phase ran in. A phase with no session yet (planned, queued,
+ * or started before the session was recorded) is not a link and says why.
+ */
+export type PhaseRowTarget = { kind: 'session'; path: string; label: string } | { kind: 'none'; reason: string }
+
+export function phaseRowTarget(p: { name: string; status: string; session_id?: string | null }, planned = false): PhaseRowTarget {
+  if (p.session_id) return { kind: 'session', path: `/sessions/${encodeURIComponent(p.session_id)}`, label: `Open the session for ${p.name}` }
+  if (planned) return { kind: 'none', reason: 'This phase has not started yet, so it has no session to open.' }
+  return statusKind(p.status) === 'running'
+    ? { kind: 'none', reason: 'The session for this phase has not been recorded yet.' }
+    : { kind: 'none', reason: 'No session was recorded for this phase.' }
+}
