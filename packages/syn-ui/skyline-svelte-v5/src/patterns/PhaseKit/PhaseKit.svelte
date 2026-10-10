@@ -6,6 +6,7 @@
 -->
 <script lang="ts">
   import { ABSENCE_TEXT, type KitAbsence } from '@syn137/skyline-core/patterns'
+  import HarnessChip from '../HarnessChip/HarnessChip.svelte'
   import SkillRef from '../SkillRef/SkillRef.svelte'
   import type { PhaseKitProps } from './types'
 
@@ -29,7 +30,7 @@
           <span class="sky-kit__absent">{ABSENCE_TEXT['not-recorded']}</span>
         {:else}
           <span class="sky-kit__model">
-            <span class="sky-kit__agent"><span class="sky-kit__dot" data-agent={model.agentKind ?? 'other'}></span>{model.agent}</span>
+            <HarnessChip provider={model.agentKind && model.agentKind !== 'other' ? model.agentKind : model.agent} label={model.agent} />
             {#if model.resolution}<span class="sky-kit__resolution">{model.resolution}</span>{/if}
           </span>
         {/if}
@@ -143,23 +144,6 @@
     flex-wrap: wrap;
     align-items: center;
     gap: var(--ds-space-1-5) var(--ds-space-2);
-  }
-  .sky-kit__agent {
-    display: flex;
-    align-items: center;
-    gap: var(--ds-space-1-5);
-  }
-  .sky-kit__dot {
-    width: 0.5rem;
-    height: 0.5rem;
-    border-radius: 50%;
-    background: var(--ds-color-text-subtle);
-  }
-  .sky-kit__dot[data-agent='claude'] {
-    background: var(--sky-color-agent-claude);
-  }
-  .sky-kit__dot[data-agent='codex'] {
-    background: var(--sky-color-agent-codex);
   }
   .sky-kit__resolution {
     font-family: var(--ds-font-mono);

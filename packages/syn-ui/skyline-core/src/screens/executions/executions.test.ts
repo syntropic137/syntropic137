@@ -19,6 +19,7 @@ import {
   DEFAULT_LIST_WINDOW,
   timeWindowParam,
   type PhaseLike,
+  phaseHarness,
   phaseKit,
   phaseMeta,
   phaseModelChip,
@@ -140,6 +141,13 @@ describe('detail', () => {
     expect(phaseModelChip(phase({ model: 'claude-haiku-4-5' }))).toBe('claude-haiku-4-5')
     // Never a model that was not observed (feedback 58868cd8).
     expect(phaseModelChip(phase({ requested_model: null, model_display: 'unknown' }))).toBe('model not reported')
+  })
+
+  it('names the harness for the chip', () => {
+    expect(phaseHarness(phase({ model: 'claude-haiku-4-5' }))).toBe('claude')
+    expect(phaseHarness(phase({ model: null, requested_model: 'gpt-5.6-sol' }))).toBe('codex')
+    expect(phaseHarness(phase({ model: 'gpt-5', pinned_at_start: { provider: 'claude' } }))).toBe('claude')
+    expect(phaseHarness(phase({ model: null, requested_model: null }))).toBe('')
   })
 
   it('reads the kit from start pins', () => {
