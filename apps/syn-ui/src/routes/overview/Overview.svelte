@@ -3,7 +3,7 @@
   page, base styles are the phone layout.
 
   Data: metrics (totals, outcome counts, token mix), the contribution heatmap
-  (Skyline days), the newest executions (Recent runs, attention chips,
+  (IsoCity days, fetched in 13-week pages as the window scrolls back), the newest executions (Recent runs, attention chips,
   running count), workflows (count, most-run) and triggers (count, repos).
   Metrics and runs refetch on workflow and phase events. The board's Live
   commits block is intentionally not shipped (owner, feedback 627f4206);
@@ -14,9 +14,12 @@
   import { SKYLINE_WEEKS, dayFromMs, skylineAspectRatio, type SkylineDay } from '@syn137/skyline-core/geometry'
   import { outcomeStatus, runBarPercent, runSegments, runSlots, runSubline } from '@syn137/skyline-core/patterns'
   import {
-    activeDayCount,
+    activeDaysStat,
     attentionRuns,
     distinctRepoCount,
+    heatmapCoverage,
+    heatmapPages,
+    heatmapPeriod,
     heatmapToSkylineDays,
     outcomeCounts,
     outcomeLine,
@@ -24,7 +27,6 @@
     runningCount,
     shippedTiles,
     shippedUnavailableTiles,
-    skylineYears,
     tokenMix,
     topWorkflows,
     triggerLine,
@@ -43,7 +45,7 @@
   } from '@syn137/skyline-core/screens/overview'
   import { evalBadge } from '@syn137/skyline-core/screens/executions'
   import { Button, Callout, EmptyState, Skeleton, ToggleGroup } from '@syn137/skyline-svelte-v5'
-  import { OutcomeRing, RunRow, Skyline, StatusBadge } from '@syn137/skyline-svelte-v5/patterns'
+  import { IsoCity, OutcomeRing, RunRow, StatusBadge } from '@syn137/skyline-svelte-v5/patterns'
   import { ApiError, getContributionHeatmap, getMetrics, getShippedMetrics, listExecutions, listTriggers, listWorkflows } from '@syn137/syn-ui-data'
   import { isGitEvent, isRunEvent, isRunFinished } from '@syn137/syn-ui-data/live'
   import { live } from '../../lib/live.svelte'
@@ -63,15 +65,30 @@
   setPage({ title: 'Overview', crumbs: [] })
 
   const today = dayFromMs(Date.now())
-  const thisYear = Number(today.slice(0, 4))
   const RECENT = 6
 
   const metrics = resource((signal) => getMetrics(undefined, signal), { live: isRunEvent })
   const runs = resource((signal) => listExecutions({ page: 1, page_size: RECENT }, signal), { live: isRunEvent })
-  const heatmap = resource((signal) => getContributionHeatmap({ start_date: `${thisYear - 1}-01-01`, end_date: today }, signal), {
-    live: isRunFinished,
-    liveIntervalMs: 15_000,
-  })
+  // IsoCity history: a year of weeks, fetched lazily. Each 13-week page is its own
+  // cache entry, so scrolling back fetches only the page it newly needs.
+  const HISTORY_WEEKS = 52
+  let oldestWeek = $state(HISTORY_WEEKS - 16)
+  let cityOffset = $state(0)
+  // `from` travels with the days, so a failed older page leaves the last good data AND says how far it reaches.
+  const wantedFrom = $derived(heatmapPages(today, HISTORY_WEEKS, oldestWeek).at(-1)?.start_date ?? today)
+  const heatmap = resource(
+    (signal) => {
+      const pages = heatmapPages(today, HISTORY_WEEKS, oldestWeek)
+      const from = pages.at(-1)?.start_date ?? today
+      return Promise.all(pages.map((p) => getContributionHeatmap(p, signal))).then((r) => ({ from, days: r.flatMap((h) => h.days ?? []) }))
+    },
+    { live: isRunFinished, liveIntervalMs: 15_000 },
+  )
+  // Unloaded, loading and failed weeks are not zero (codex review of #1856).
+  const coverage = $derived(heatmapCoverage({ loadedFrom: heatmap.data?.from ?? null, wantedFrom, loading: heatmap.loading, error: heatmap.error }))
+  // The headline counts a fixed period, one request, whatever the scroller has loaded (codex review of #1856).
+  const period = heatmapPeriod(today, HISTORY_WEEKS)
+  const periodHeatmap = resource((signal) => getContributionHeatmap(period, signal), { live: isRunFinished, liveIntervalMs: 15_000 })
   const workflows = resource((signal) => listWorkflows({ page_size: 100 }, signal))
   const triggers = resource((signal) => listTriggers({}, signal))
   const SHIPPED_DAYS = 14
@@ -83,10 +100,7 @@
 
   // ---- derived view data ----
   const days = $derived<SkylineDay[]>(heatmapToSkylineDays(heatmap.data?.days))
-  const years = $derived(skylineYears(days, thisYear))
-  let year = $state(thisYear)
   let selectedDay = $state<string | null>(null)
-  const yearDays = $derived(days.filter((d) => d.date.startsWith(String(year))))
 
   const rows = $derived(runs.data?.executions ?? [])
   // Needs a look (feedback 443e9c0a): chips the viewer opened stay hidden until that run fails again.
@@ -123,9 +137,13 @@
   const longest = $derived(Math.max(0, ...rows.map((r) => (r.duration_seconds ?? 0) * 1000)))
   const slots = $derived(runSlots(rows.map((r) => r.phase_progress?.possible ?? r.total_phases)))
 
-  const stats = $derived([
+  // The headline's own request can fail: say so and offer Retry, never an endless ellipsis (codex review 2 of #1856).
+  const activeDays = $derived(
+    activeDaysStat({ days: periodHeatmap.data ? heatmapToSkylineDays(periodHeatmap.data.days) : null, period, error: periodHeatmap.error, loading: periodHeatmap.loading }),
+  )
+  const stats = $derived<{ label: string; value: string; retry?: () => void }[]>([
     { label: 'Sessions', value: formatInteger(metrics.data?.total_sessions) },
-    { label: 'Active days', value: heatmap.data ? formatInteger(activeDayCount(yearDays.length ? yearDays : days)) : '…' },
+    { label: 'Active days', value: activeDays.state === 'ready' ? formatInteger(Number(activeDays.value)) : activeDays.value, retry: activeDays.state === 'error' ? () => periodHeatmap.refresh() : undefined },
     { label: 'Tokens', value: formatTokens(metrics.data?.total_tokens) },
     { label: 'Spend', value: formatCost(metrics.data?.total_cost_usd) },
   ])
@@ -155,6 +173,7 @@
     metrics.refresh()
     runs.refresh()
     heatmap.refresh()
+    periodHeatmap.refresh()
     workflows.refresh()
     triggers.refresh()
     shipped.refresh()
@@ -163,9 +182,8 @@
   const execHref = (id: string) => href(`/executions/${encodeURIComponent(id)}`)
   const dayRunsHref = (d: SkylineDay) => href(`/executions?day=${d.date}`)
 
-  function onYear(y: number) {
-    year = y
-    selectedDay = null
+  function onCityWindow(w: { first: number }) {
+    if (w.first - 2 < oldestWeek) oldestWeek = Math.max(0, w.first - 2)
   }
 </script>
 
@@ -215,6 +233,7 @@
             <dt>{s.label}</dt>
             <dd>
               {#if firstLoad}<Skeleton variant="text" width="4ch" />{:else}{s.value}{/if}
+              {#if s.retry}<button class="sky-ov-stat-retry" type="button" aria-label="Retry {s.label.toLowerCase()}" onclick={s.retry}>Retry</button>{/if}
             </dd>
           </div>
         {/each}
@@ -224,7 +243,7 @@
     <div class="sky-ov-hero__chart">
       {#if heatmap.error && !heatmap.data}
         <Callout tone="warning" title="Activity did not load">
-          The Skyline needs the contribution heatmap.
+          The activity city needs the contribution heatmap.
           {#snippet action()}<Button variant="outline" size="sm" onclick={() => heatmap.refresh()}>Retry</Button>{/snippet}
         </Callout>
       {:else if !heatmap.data}
@@ -234,7 +253,7 @@
       {:else if days.length === 0}
         <EmptyState title="No activity yet" description="Each day an agent works becomes a bar here." level={3} bare />
       {:else}
-        <Skyline days={yearDays} {today} {year} {years} onyearchange={onYear} bind:selected={selectedDay} runsHref={dayRunsHref} />
+        <IsoCity {days} {today} history={HISTORY_WEEKS} {coverage} onretry={() => heatmap.refresh()} bind:offset={cityOffset} bind:selected={selectedDay} onwindow={onCityWindow} runsHref={dayRunsHref} />
       {/if}
     </div>
   </section>
@@ -716,6 +735,27 @@
     .sky-ov-side {
       flex: 0 0 var(--sky-side-column);
       gap: var(--ds-space-5);
+    }
+  }
+  .sky-ov-stat-retry {
+    margin-left: var(--ds-space-2);
+    padding: 0 var(--ds-space-2);
+    border: var(--ds-border-width) solid var(--sky-color-border-strong);
+    border-radius: var(--sky-radius-control);
+    background: transparent;
+    color: var(--ds-color-fg);
+    font: inherit;
+    font-size: var(--ds-text-xs);
+    vertical-align: middle;
+    cursor: pointer;
+  }
+  .sky-ov-stat-retry:focus-visible {
+    outline: var(--sky-focus-ring-width) solid var(--sky-color-focus);
+    outline-offset: var(--sky-focus-ring-offset);
+  }
+  @media (pointer: coarse) {
+    .sky-ov-stat-retry {
+      min-height: var(--sky-size-touch);
     }
   }
 </style>

@@ -22,6 +22,7 @@
     RunRow,
     RunTiles,
     SkillRef,
+    IsoCity,
     Skyline,
     StatusBadge,
     UsageMeter,
@@ -75,6 +76,15 @@
     tokens: { input, output, cacheWrite, cacheRead },
   }))
   // 2025 gets a quieter, made-up spread so the year toggle has something to show.
+  // Iso City story: the board days, plus two SAMPLE coral days (not real runs).
+  const cityDays = $derived<SkylineDay[]>([
+    ...days.map((d) => ({ ...d, failed: 0 })),
+    { date: '2026-08-12', sessions: 3, executions: 2, failed: 2 },
+    { date: '2026-09-01', sessions: 6, executions: 4, failed: 3 },
+  ])
+  let cityOffset = $state(0)
+  let cityPicked = $state<string | null>(null)
+
   const days2025: SkylineDay[] = Array.from({ length: 40 }, (_, i) => {
     const d = new Date(Date.UTC(2025, 0, 6 + i * 9))
     const s = 1 + ((i * 7) % 13)
@@ -248,6 +258,17 @@
     <h1>Patterns</h1>
     <p>Every Skyline pattern with sample data from the canvas boards. Resize to 390 and 320px to check the phone layouts.</p>
   </header>
+
+  <section class="dev-patterns__sheet" aria-labelledby="p-iso-city">
+    <h2 id="p-iso-city">Iso City</h2>
+    <p class="dev-patterns__note">Main and PhoneOverview boards: the Overview heatmap. The 11 real board days plus two sample coral days (most runs failed). Month buttons, the week strip, drag, a horizontal wheel or the arrow keys on the focused city scroll it. Offset <code>{cityOffset}</code>, picked <code>{cityPicked ?? 'latest'}</code>.</p>
+    <div class="dev-patterns__hero">
+      <IsoCity days={cityDays} today="2026-09-04" bind:offset={cityOffset} bind:selected={cityPicked} runsHref={(d) => href(`/executions?day=${d.date}`)} badge="Sample history" />
+    </div>
+    <div class="dev-patterns__row">
+      <div class="dev-patterns__phone"><IsoCity days={cityDays} today="2026-09-04" badge="Sample" /></div>
+    </div>
+  </section>
 
   <section class="dev-patterns__sheet" aria-labelledby="p-skyline">
     <h2 id="p-skyline">Skyline and Day Readout</h2>
@@ -600,6 +621,10 @@
     border: var(--ds-border-width) solid var(--ds-color-border);
     background: var(--ds-color-surface);
     box-shadow: var(--sky-shadow-raised);
+  }
+  .dev-patterns__phone {
+    width: 100%;
+    max-width: 24.375rem;
   }
   .dev-patterns__hero {
     border-radius: var(--sky-radius-2xl);

@@ -44,6 +44,8 @@ export interface SkylineDay {
   commits?: number
   /** Spend in USD; null when unknown. */
   costUsd?: number | null
+  /** Failed runs that day; absent when the API does not send it (the IsoCity never paints such a day coral). */
+  failed?: number | null
   tokens?: SkylineTokens | null
   /** Finished runs; when absent the top face uses the session-count ramp. */
   outcomes?: SkylineOutcomes | null
