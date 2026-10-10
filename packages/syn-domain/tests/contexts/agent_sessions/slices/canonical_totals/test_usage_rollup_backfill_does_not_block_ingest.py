@@ -28,6 +28,7 @@ weekly cron, not on PRs into main.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import time
 from dataclasses import dataclass, field
@@ -219,6 +220,11 @@ async def test_inserts_flow_during_the_backfill_and_each_is_counted_once(
                 writer.stop.set()
                 if writing in done:
                     writing.result()  # the writer died: raise its error
+                # A stuck writer must not outlive the test: give it a bounded
+                # chance to stop, then cancel it.
+                writing.cancel()
+                with contextlib.suppress(asyncio.CancelledError, asyncio.TimeoutError):
+                    await asyncio.wait_for(writing, timeout=5)
                 pytest.fail(
                     f"the writer completed {len(writer.finished_at)} of {BASELINE_INSERTS} "
                     f"baseline inserts in {BASELINE_TIMEOUT_S:.0f} s"
