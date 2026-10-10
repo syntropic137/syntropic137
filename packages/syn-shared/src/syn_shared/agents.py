@@ -354,6 +354,7 @@ class ModelId(StrEnum):
     # --- Current generation (verified 2026-09-24; gpt-6.1-sol 2026-10-06) ---
     CLAUDE_OPUS_5_5 = "claude-opus-5-5"
     CLAUDE_SONNET_5_5 = "claude-sonnet-5-5"  # verified 2026-10-07
+    CLAUDE_HAIKU_5_5 = "claude-haiku-5-5"  # in claude-code 2.1.293, 2026-10-10
     GPT_6_1_SOL = "gpt-6.1-sol"
     GPT_6_SOL = "gpt-6-sol"
     GPT_6_LUNA = "gpt-6-luna"  # verified 2026-10-07
@@ -410,7 +411,7 @@ CLAUDE_MODEL_ALIAS_TARGETS: dict[ModelAlias, ModelId] = {
     # first CLI carrying `claude-sonnet-5-5` seen was 2.1.293. Until that pin
     # lands this is ahead of the CLI, and the observed model wins (see below).
     ModelAlias.SONNET: ModelId.CLAUDE_SONNET_5_5,
-    ModelAlias.HAIKU: ModelId.CLAUDE_HAIKU_4_5,
+    ModelAlias.HAIKU: ModelId.CLAUDE_HAIKU_5_5,
     ModelAlias.FABLE: ModelId.CLAUDE_FABLE_5,
 }
 """What each claude alias runs as. One entry per ``ModelAlias``.
@@ -501,11 +502,6 @@ _RETIRED_CLAUDE_MODEL = re.compile(
 dated or undated, ``[1m]``-suffixed, or provider-prefixed
 (``us.anthropic.claude-sonnet-4-5-...``)."""
 
-_RETIREMENT_EXEMPT = re.compile(r"(?:^|[./])claude-haiku-4-5(?:[-.@\[]|$)")
-"""Haiku 4.5 is the newest Haiku this platform can price, and ``haiku``
-resolves to it, so it stays runnable until a 5-family Haiku is in ``ModelId``.
-An owner decision (2026-10-10), not an oversight: delete this to retire it."""
-
 
 def is_retired_claude_model(model: str) -> bool:
     """Whether ``model`` names a Claude model the platform refuses to run.
@@ -514,7 +510,7 @@ def is_retired_claude_model(model: str) -> bool:
     first (aliases themselves are never retired). Retired models keep their
     pricing rows: a past run's cost is still displayed at its own rate.
     """
-    return bool(_RETIRED_CLAUDE_MODEL.search(model)) and not _RETIREMENT_EXEMPT.search(model)
+    return bool(_RETIRED_CLAUDE_MODEL.search(model))
 
 
 def resolve_claude_model(model: str) -> str:
@@ -622,6 +618,7 @@ CLAUDE_MODEL_IDS: frozenset[ModelId] = frozenset(
     {
         ModelId.CLAUDE_OPUS_5_5,
         ModelId.CLAUDE_SONNET_5_5,
+        ModelId.CLAUDE_HAIKU_5_5,
         ModelId.CLAUDE_OPUS_5,
         ModelId.CLAUDE_SONNET_5,
         ModelId.CLAUDE_FABLE_5,

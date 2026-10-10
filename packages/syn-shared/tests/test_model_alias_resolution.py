@@ -16,6 +16,7 @@ from syn_shared.agents import (
     CodexModelAlias,
     ModelAlias,
     ModelId,
+    resolve_claude_model,
     resolve_codex_model_alias,
     resolve_definition_model,
     resolve_model_alias,
@@ -37,7 +38,7 @@ pytestmark = pytest.mark.unit
         ("gpt-sol", ModelId.GPT_6_1_SOL, AliasResolutionBasis.TRANSLATED),
         ("opus", ModelId.CLAUDE_OPUS_5_5, AliasResolutionBasis.TRANSLATED),
         ("sonnet", ModelId.CLAUDE_SONNET_5_5, AliasResolutionBasis.TRANSLATED),
-        ("haiku", ModelId.CLAUDE_HAIKU_4_5, AliasResolutionBasis.TRANSLATED),
+        ("haiku", ModelId.CLAUDE_HAIKU_5_5, AliasResolutionBasis.TRANSLATED),
         ("fable", ModelId.CLAUDE_FABLE_5, AliasResolutionBasis.TRANSLATED),
     ],
 )
@@ -55,7 +56,7 @@ def test_each_alias_resolves(alias: str, target: ModelId, basis: AliasResolution
         "gpt-6-sol",
         "claude-opus-5-5",
         "claude-sonnet-5",
-        "claude-haiku-4-5-20251001",
+        "claude-haiku-5-5",
         "not-a-model",
         "Opus",  # aliases are case-sensitive: the CLI would not accept this either
         "",
@@ -72,16 +73,25 @@ def test_every_alias_has_exactly_one_target() -> None:
 
 
 @pytest.mark.parametrize("alias", sorted({*ModelAlias, *CodexModelAlias}))
-def test_pricing_and_the_codex_command_agree_with_the_resolver(alias: str) -> None:
+def test_pricing_and_the_command_builders_agree_with_the_resolver(alias: str) -> None:
     resolution = resolve_model_alias(alias)
     assert resolution is not None
+    assert resolution.basis is AliasResolutionBasis.TRANSLATED
     assert MODEL_ALIASES[alias] == resolution.target
     assert canonical_model_id(alias) == resolution.target
-    if resolution.basis is AliasResolutionBasis.TRANSLATED:
-        assert resolve_codex_model_alias(alias) == resolution.target
-    else:
-        # A claude alias reaches the CLI verbatim; only codex is translated.
+    # Each provider's resolver translates its own aliases and leaves the
+    # other provider's alone: the two command builders never cross over.
+    if alias in set(ModelAlias):
+        assert resolve_claude_model(alias) == resolution.target
         assert resolve_codex_model_alias(alias) == alias
+    else:
+        assert resolve_codex_model_alias(alias) == resolution.target
+        assert resolve_claude_model(alias) == alias
+
+
+@pytest.mark.parametrize("slug", sorted(set(CODEX_MODEL_ALIAS_TARGETS.values())))
+def test_explicit_codex_slugs_pass_through_unchanged(slug: str) -> None:
+    assert resolve_codex_model_alias(slug) == slug
 
 
 class TestFormatModelDefinition:
@@ -91,7 +101,7 @@ class TestFormatModelDefinition:
             ("gpt-sol", "gpt-sol → gpt-6.1-sol"),
             ("opus", "opus → claude-opus-5-5"),
             ("sonnet", "sonnet → claude-sonnet-5-5"),
-            ("haiku", "haiku → claude-haiku-4-5-20251001"),
+            ("haiku", "haiku → claude-haiku-5-5"),
             ("fable", "fable → claude-fable-5"),
         ],
     )
@@ -136,8 +146,8 @@ class TestDefinitionModelFollowsExecution:
             (
                 "claude",
                 " haiku ",
-                "haiku \u2192 claude-haiku-4-5-20251001",
-                "claude-haiku-4-5-20251001",
+                "haiku \u2192 claude-haiku-5-5",
+                "claude-haiku-5-5",
             ),
         ],
     )

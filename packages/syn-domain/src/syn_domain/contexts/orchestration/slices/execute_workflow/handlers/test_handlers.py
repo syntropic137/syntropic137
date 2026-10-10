@@ -792,7 +792,7 @@ class TestBuildAgentEnv:
         assert env["ANTHROPIC_MODEL"] == "claude-opus-5-5"
         assert env["ANTHROPIC_DEFAULT_SONNET_MODEL"] == "claude-sonnet-5-5"
         assert env["ANTHROPIC_DEFAULT_OPUS_MODEL"] == "claude-opus-5-5"
-        assert env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] == "claude-haiku-4-5-20251001"
+        assert env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] == "claude-haiku-5-5"
         assert env["ANTHROPIC_DEFAULT_FABLE_MODEL"] == "claude-fable-5"
 
     async def test_injects_oauth_token_when_configured(

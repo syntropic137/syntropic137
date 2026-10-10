@@ -36,6 +36,8 @@ RETIRED = [
     ModelId.CLAUDE_HAIKU_3_5,
     ModelId.CLAUDE_OPUS_3,
     ModelId.CLAUDE_HAIKU_3,
+    ModelId.CLAUDE_HAIKU_4_5,
+    "claude-haiku-4-5",
     "claude-sonnet-4-5",
     "claude-sonnet-4-6",
     "claude-opus-4-1",
@@ -49,8 +51,7 @@ ALLOWED = [
     ModelId.CLAUDE_OPUS_5_5,
     ModelId.CLAUDE_SONNET_5,
     ModelId.CLAUDE_FABLE_5,
-    ModelId.CLAUDE_HAIKU_4_5,
-    "claude-haiku-4-5",
+    ModelId.CLAUDE_HAIKU_5_5,
     "claude-opus-5-5[1m]",
     "some-future-model",
 ]
@@ -74,7 +75,7 @@ def test_allowed(model: str) -> None:
     [
         ("sonnet", "claude-sonnet-5-5"),
         ("opus", "claude-opus-5-5"),
-        ("haiku", "claude-haiku-4-5-20251001"),
+        ("haiku", "claude-haiku-5-5"),
         ("fable", "claude-fable-5"),
     ],
 )
@@ -84,7 +85,10 @@ def test_alias_resolves_to_an_explicit_id(alias: str, target: str) -> None:
     assert type(resolved) is str
 
 
-@pytest.mark.parametrize("model", [ModelId.CLAUDE_SONNET_4_5, "claude-sonnet-4-5"])
+@pytest.mark.parametrize(
+    "model",
+    [ModelId.CLAUDE_SONNET_4_5, "claude-sonnet-4-5", ModelId.CLAUDE_HAIKU_4_5, "claude-haiku-4-5"],
+)
 @pytest.mark.parametrize("provider", [None, AgentProvider.CLAUDE])
 def test_install_and_edit_refuse_a_declared_retired_model(model: str, provider: str | None) -> None:
     with pytest.raises(RetiredModelError):
@@ -125,7 +129,7 @@ def test_pin_env_pins_every_alias_and_the_default_session_model() -> None:
         "ANTHROPIC_MODEL": "claude-opus-5-5",
         "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus-5-5",
         "ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-sonnet-5-5",
-        "ANTHROPIC_DEFAULT_HAIKU_MODEL": "claude-haiku-4-5-20251001",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL": "claude-haiku-5-5",
         "ANTHROPIC_DEFAULT_FABLE_MODEL": "claude-fable-5",
     }
     assert set(ModelAlias) == set(CLAUDE_MODEL_ALIAS_TARGETS)
