@@ -1,6 +1,6 @@
 {
   "name": "@syn137/skyline-svelte-v5",
-  "version": "0.33.1",
+  "version": "1.0.0",
   "private": true,
   "description": "Skyline Svelte 5 (runes) components and patterns. Plain CSS over --ds-*/--sky-* tokens; no colour literals.",
   "type": "module",

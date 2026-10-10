@@ -1,6 +1,6 @@
 {
   "name": "@syn137/skyline-themes",
-  "version": "0.33.1",
+  "version": "1.0.0",
   "private": true,
   "description": "Skyline design tokens and themes. CSS only; the only place colour values live.",
   "type": "module",

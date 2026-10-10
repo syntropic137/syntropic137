@@ -1,6 +1,6 @@
 {
   "name": "@syn137/skyline-core",
-  "version": "0.33.1",
+  "version": "1.0.0",
   "private": true,
   "description": "Skyline plain-TypeScript core: upstream contract re-exports, formatters, chart geometry, state machines, pattern prop types. No DOM, no Svelte.",
   "type": "module",
