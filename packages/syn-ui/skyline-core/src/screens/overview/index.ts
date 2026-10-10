@@ -53,5 +53,5 @@ export type {
   ShippedTileUnavailable,
   ShippedTone,
 } from './shipped'
-export { heatmapPages, HEATMAP_PAGE_WEEKS } from './heatmapPages'
-export type { HeatmapPage } from './heatmapPages'
+export { activeDaysIn, heatmapCoverage, heatmapPages, heatmapPeriod, HEATMAP_PAGE_WEEKS } from './heatmapPages'
+export type { HeatmapCoverageInput, HeatmapPage } from './heatmapPages'
