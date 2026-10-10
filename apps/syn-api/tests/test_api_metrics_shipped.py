@@ -121,16 +121,25 @@ async def test_a_store_failure_is_503_not_zero() -> None:
 
 
 def _pr_event(
-    action: str, merged: bool | None = None, merged_at: str | None = None
+    action: str,
+    merged: bool | None = None,
+    merged_at: str | None = None,
+    repository: str = "acme/api",
+    repository_id: int | None = None,
 ) -> NormalizedEvent:
+    payload = {
+        "number": 7,
+        "pull_request": {"merged": merged, "merged_at": merged_at},
+        "repository": {"id": repository_id, "full_name": repository},
+    }
     return NormalizedEvent(
         event_type="pull_request",
         action=action,
-        repository="acme/api",
+        repository=repository,
         installation_id="1",
         dedup_key="k",
         source=EventSource.WEBHOOK,
-        payload={"number": 7, "pull_request": {"merged": merged, "merged_at": merged_at}},
+        payload=payload,
         received_at=datetime(2026, 10, 9, 12, tzinfo=UTC),
     )
 
@@ -177,3 +186,31 @@ async def test_a_redelivered_merge_is_recorded_once() -> None:
         await service.record_pull_request_merge(_pr_event("opened"))
     rows = await ledger.daily(date(2026, 10, 1), date(2026, 10, 31))
     assert sum(r.prs_merged for r in rows) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_transferred_repositorys_pr_still_merges() -> None:
+    """Opened as acme/old#7; the repo moves to neworg/api (same id); merged there."""
+    from syn_api.services import shipped_ledger as service
+
+    ledger = InMemoryShippedLedger()
+    await ledger.record_pull_request_opened(
+        PullRequestOpened("acme/old", 7, "u", "e1", "wf", "Implement", NOW)
+    )
+
+    class _Store:
+        shipped_ledger = ledger
+
+        async def initialize(self) -> None:
+            return None
+
+    with patch("syn_api._wiring.get_event_store_instance", lambda: _Store()):
+        await service.record_pull_request_merge(
+            _pr_event("opened", repository="acme/old", repository_id=77)
+        )
+        await service.record_pull_request_merge(
+            _pr_event("closed", True, "2026-10-08T23:30:00Z", "neworg/api", 77)
+        )
+    rows = await ledger.daily(date(2026, 10, 1), date(2026, 10, 31))
+    assert sum(r.prs_merged for r in rows) == 1
+    assert sum(r.prs_opened_merged for r in rows) == 1

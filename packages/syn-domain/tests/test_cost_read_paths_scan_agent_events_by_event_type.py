@@ -695,18 +695,23 @@ _DECLARED: Mapping[ScanIdentity, Declaration] = {
             ),
         },
     ),
-    # The shipped ledger's one-time backfill (/metrics/shipped). Run once per
-    # ledger version in the background, never on a request path: the read path
-    # reads only the shipped_daily rollup. Pins session_id, BACKFILL_SESSION_BATCH
-    # sessions per round-trip, so a compressed chunk discards every other
-    # session's segment; within a selected session it reads every segment once.
+    # The shipped ledger's backfill (/metrics/shipped). Runs once per backfill
+    # version in the background, never on a request path: the read path reads
+    # only the shipped_daily rollup. Pins ONE session_id per statement, paged
+    # by row_page rows, so a compressed chunk discards every other session's
+    # segment; within the session it reads every segment once.
     **_declared(
-        f"{_ADAPTERS}/events/shipped_ledger.py",
+        f"{_ADAPTERS}/events/shipped_backfill.py",
         {
-            "_BACKFILL_ROWS": _segment_discard(
-                "git_commit and gh-pr-create-shaped tool rows of a batch of sessions, once per "
-                "ledger version, to rebuild the shipped ledger. Bounded per round-trip by the "
-                "batch; the whole backfill is one read of the sessions that ran executions."
+            "_SESSION_ROWS": Declaration(
+                bound=Bound.SEGMENT_DISCARD,
+                restricted_by=(_SEGMENT_KEY, "execution_id"),
+                why=(
+                    "One session's git_commit and gh-pr-create-shaped tool rows, a page at a "
+                    "time, to replay history into the shipped ledger. Bounded per round-trip by "
+                    "the page; the whole backfill is one read of the sessions that ran executions."
+                ),
+                statements=1,
             ),
         },
     ),

@@ -17,18 +17,23 @@ workflow: ``commits`` and ``prs_opened`` on the day of the fact,
 the merged PR was OPENED (the merge-rate cohort numerator). The read path
 reads only these rows.
 
+FACTS ARE KEPT, THE ROLLUP IS DERIVED. The three fact tables are the record
+and are never reset: merges have no other source, and history keeps only
+previews. ``shipped_daily`` is a pure function of the facts, recomputed for
+every key a write touches and rebuilt whole when its version changes.
+
 IDEMPOTENT BY IDENTITY, ORDER-INDEPENDENT. Recording a fact twice changes
-nothing; a merge recorded before the PR it merges is counted when the PR
-arrives, and the other way round. So replaying every input any number of
-times, in any order, yields the same rollup: the property the backfill and
-fail-open dedup both rely on. Every implementation of ``ShippedLedger`` must
-hold it, and ``test_shipped_ledger_contract`` checks each against the same
-cases.
+nothing; when two observations claim one identity, a fixed rule picks the
+owner (earliest time, then smaller execution id); a merge recorded before the
+PR it merges is counted when the PR arrives, and the other way round; a merge
+reported under a repository's new slug is matched through its stable id. So
+replaying every input any number of times, in any order, yields the same
+rollup. Every ``ShippedLedger`` must hold this, and
+``test_shipped_ledger_contract`` checks each against the same cases.
 
 NOT A PROJECTION OVER THE EVENT STORE: its inputs are Lane 2 telemetry, which
-the event store never sees. It is versioned by the adapter's schema version
-and rebuilt by replaying those Lane 2 sources (the backfill), the same shape
-as ``agent_event_day_rollup`` (#1253).
+the event store never sees, the same shape as ``agent_event_day_rollup``
+(#1253).
 """
 
 from __future__ import annotations
@@ -83,6 +88,9 @@ class ExecutionAttribution:
 
 @dataclass(frozen=True)
 class CommitShipped:
+    """A commit a run made. One sha, one owner: the earliest observation wins,
+    ties broken by the smaller execution id, whatever order they arrive in."""
+
     sha: str
     execution_id: str
     workflow_id: str
@@ -93,6 +101,9 @@ class CommitShipped:
 
 @dataclass(frozen=True)
 class PullRequestOpened:
+    """A PR a run created. Same rule as a commit: earliest ``created_at`` wins,
+    then the smaller execution id."""
+
     repository: str
     number: int
     url: str
@@ -105,8 +116,11 @@ class PullRequestOpened:
 @dataclass(frozen=True)
 class PullRequestMerged:
     repository: str
+    """The slug the forge names now; after a transfer, not the one the PR was opened in."""
     number: int
     merged_at: datetime
+    repository_id: int | None = None
+    """The forge's stable repository id, when the event carried one."""
 
 
 @dataclass(frozen=True)
@@ -134,6 +148,14 @@ class ShippedLedger(Protocol):
     async def record_pull_request_opened(self, pr: PullRequestOpened) -> None: ...
 
     async def record_pull_request_merged(self, merge: PullRequestMerged) -> None: ...
+
+    async def record_repository_alias(self, repository: str, repository_id: int) -> None:
+        """``repository`` is (or was) the slug of the forge's repository ``repository_id``.
+
+        How a PR opened under one slug is matched to its merge reported under
+        another after a rename or transfer.
+        """
+        ...
 
     async def daily(
         self, start: date, end: date, workflow_id: str | None = None

@@ -100,9 +100,11 @@ owner's own work:
 - a **commit** is a distinct sha from a `git_commit` hook event in an
   Execution's own stream, attributed to the repository the run cloned under
   that directory name.
-- a **PR opened** is a PR a run created: a successful `gh pr create` (run as
-  a command, not quoted text, not `--dry-run`) whose output ends in the new
-  PR's URL. Parsed once, at ingestion, from the full command and output.
+- a **PR opened** is a PR a run created: a successful `gh pr create` that is
+  the LAST command of the call (so the call's exit status is its own; not
+  quoted text, not `--dry-run`), whose output ends in the new PR's URL; a
+  trailing `&&` chain of creates records each. Parsed once, at ingestion, from
+  the full command and output.
 - a **PR merged** is a merge of one of those PRs, seen by the GitHub event
   pipeline (`pull_request`, action `closed`, merged; webhooks and Events API),
   counted on the UTC day of `merged_at`. A merge of a PR no run created is
@@ -111,13 +113,18 @@ owner's own work:
 ## Shipped Ledger
 
 Where shipped facts are kept, once each, by identity (sha; repository and PR
-number): three fact tables and the daily rollup `shipped_daily` (one row per
-UTC day x repository x workflow) that the read path reads. Lane 2, beside the
-telemetry it is derived from; idempotent and order-independent, so replaying
-its inputs any number of times in any order yields the same rollup. Rebuilt
-from Lane 2 history by a one-time backfill per ledger version. **Unclear:**
-merges before the merge recorder ran, and PRs a run opens without
-`gh pr create`, are not in it (#1852).
+number), with the repository aliases (slug and stable id) that let a PR opened
+under one slug match its merge reported under another after a rename or
+transfer. The facts are the record and are never reset: merges have no other
+source. The daily rollup `shipped_daily` (one row per UTC day x repository x
+workflow) is derived from them, recomputed for every key a write touches and
+rebuilt whole when its version changes; the read path reads only it. When two
+observations claim one fact, the earliest owns it, ties to the smaller
+execution id, whatever order they arrive in. Lane 2, beside the telemetry it
+comes from; filled from Lane 2 history by a paged, resumable backfill that
+keeps sessions it cannot attribute yet and retries them. **Unclear:** merges
+before the merge recorder ran, and PRs a run opens without `gh pr create`,
+are not in it (#1852).
 
 ## Merge Rate
 

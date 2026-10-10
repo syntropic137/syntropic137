@@ -10,11 +10,13 @@ Three things the API process does for ``GET /metrics/shipped``:
    a cold-start replay (ADR-060 s9). The write is idempotent by
    ``(repository, number)``, so a redelivery the fail-open dedup lets through
    changes nothing. Every merge is kept; only merges of PRs a run created are
-   counted.
-2. **Backfills once.** On start, the ledger is rebuilt from the Lane 2
-   history if this ledger version has not been (see
-   ``syn_adapters.events.shipped_ledger.backfill`` for what it reads and
-   costs). In the background: the API serves while it runs.
+   counted. Every ``pull_request`` event also records its repository's
+   (slug, id) alias, which is how merges survive renames and transfers.
+2. **Backfills once.** On start, Lane 2 history is replayed into the ledger
+   unless this backfill version already finished: paged, resumable, bounded
+   and retrying sessions it cannot attribute yet (see
+   ``syn_adapters.events.shipped_backfill``). In the background: the API
+   serves while it runs.
 3. **Serves the read.** One ``ShippedMetricsQueryService`` per process, so
    its cache and request coalescing are shared by every request.
 
@@ -49,6 +51,13 @@ _PULL_REQUEST = "pull_request"
 _CLOSED = "closed"
 
 
+def _repository_id(event: NormalizedEvent) -> int | None:
+    """The forge's stable id of the event's repository, when the payload has it."""
+    repo = event.payload.get("repository") or {}
+    found = repo.get("id") if isinstance(repo, dict) else None
+    return found if isinstance(found, int) and found > 0 else None
+
+
 @dataclass(frozen=True)
 class PullRequestMerge:
     """The merge one ``pull_request`` event reports."""
@@ -56,6 +65,7 @@ class PullRequestMerge:
     repository: str
     number: int
     merged_at: datetime
+    repository_id: int | None = None
 
     @classmethod
     def from_event(cls, event: NormalizedEvent) -> PullRequestMerge | None:
@@ -65,7 +75,12 @@ class PullRequestMerge:
         number = _merged_number(event)
         if number is None:
             return None
-        return cls(repository=event.repository, number=number, merged_at=_merged_at(event))
+        return cls(
+            repository=event.repository,
+            number=number,
+            merged_at=_merged_at(event),
+            repository_id=_repository_id(event),
+        )
 
 
 def _merged_number(event: NormalizedEvent) -> int | None:
@@ -89,19 +104,34 @@ def _merged_at(event: NormalizedEvent) -> datetime:
 
 
 async def record_pull_request_merge(event: NormalizedEvent) -> None:
-    """Pipeline observer: record the merge ``event`` reports, if it reports one."""
-    merge = PullRequestMerge.from_event(event)
-    if merge is None:
+    """Pipeline observer: note the repository's id and slug; record a merge if reported.
+
+    Every ``pull_request`` event names its repository by slug and stable id,
+    so each one teaches the ledger an alias. That is what lets a PR opened
+    under an old slug match its merge reported under a new one after a
+    rename or transfer.
+    """
+    if event.event_type != _PULL_REQUEST:
         return
     from syn_api._wiring import get_event_store_instance
 
     store = get_event_store_instance()
     await store.initialize()
+    repository_id = _repository_id(event)
+    if repository_id is not None and event.repository:
+        await store.shipped_ledger.record_repository_alias(event.repository, repository_id)
+    merge = PullRequestMerge.from_event(event)
+    if merge is None:
+        return
     await store.shipped_ledger.record_pull_request_merged(
         PullRequestMerged(
-            repository=merge.repository, number=merge.number, merged_at=merge.merged_at
+            repository=merge.repository,
+            number=merge.number,
+            merged_at=merge.merged_at,
+            repository_id=merge.repository_id,
         )
     )
+    shipped_metrics_service().invalidate()
     logger.info("Recorded PR merge %s#%d", merge.repository, merge.number)
 
 
@@ -139,7 +169,7 @@ def start_shipped_ledger() -> None:
 
 
 async def _run_backfill() -> None:
-    from syn_adapters.events.shipped_ledger import backfill
+    from syn_adapters.events.shipped_backfill import run_backfill
     from syn_api._wiring import get_event_store_instance, get_projection_mgr
 
     try:
@@ -161,7 +191,7 @@ async def _run_backfill() -> None:
                 for key, row in rows.items()
             }
 
-        await backfill(store.pool, store.shipped_ledger, attributions)
+        await run_backfill(store.pool, store.shipped_ledger, attributions)
     except Exception:
         logger.warning(
             "Shipped ledger backfill failed; it will be retried on the next start", exc_info=True

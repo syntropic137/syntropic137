@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import random
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import TYPE_CHECKING
 
@@ -31,7 +32,7 @@ if TYPE_CHECKING:
 T0 = datetime(2026, 10, 1, 12, tzinfo=UTC)
 START, END = date(2026, 9, 1), date(2026, 10, 31)
 
-type Fact = CommitShipped | PullRequestOpened | PullRequestMerged
+type Fact = CommitShipped | PullRequestOpened | PullRequestMerged | Alias
 
 
 def commit(sha: str, day: int = 0, repo: str = "acme/api", wf: str = "impl") -> CommitShipped:
@@ -45,8 +46,16 @@ def opened(
     return PullRequestOpened(repo, number, url, f"e-{wf}", wf, wf.upper(), T0 + timedelta(days=day))
 
 
-def merged(number: int, day: int = 0, repo: str = "acme/api") -> PullRequestMerged:
-    return PullRequestMerged(repo, number, T0 + timedelta(days=day))
+def merged(
+    number: int, day: int = 0, repo: str = "acme/api", repo_id: int | None = None
+) -> PullRequestMerged:
+    return PullRequestMerged(repo, number, T0 + timedelta(days=day), repo_id)
+
+
+@dataclass(frozen=True)
+class Alias:
+    repository: str
+    repository_id: int
 
 
 async def apply(ledger: ShippedLedger, facts: Sequence[Fact]) -> None:
@@ -55,6 +64,8 @@ async def apply(ledger: ShippedLedger, facts: Sequence[Fact]) -> None:
             await ledger.record_commit(fact)
         elif isinstance(fact, PullRequestOpened):
             await ledger.record_pull_request_opened(fact)
+        elif isinstance(fact, Alias):
+            await ledger.record_repository_alias(fact.repository, fact.repository_id)
         else:
             await ledger.record_pull_request_merged(fact)
 
@@ -79,20 +90,29 @@ FACTS: list[Fact] = [
     commit("a"),
     commit("b", 1),
     commit("c", 1, "acme/web", "docs"),
+    # The same sha claimed by two executions: the earlier observation owns it.
+    CommitShipped("d", "e-late", "late", "LATE", "acme/api", T0 + timedelta(days=2)),
+    CommitShipped("d", "e-impl", "impl", "IMPL", "acme/api", T0 + timedelta(days=1)),
     opened(1),
     opened(2, 1, "ACME/api"),
     opened(3, 2, "acme/web", "docs"),
     merged(1, 3),
     merged(2, 3, "acme/API"),  # forge spelling differs in case
     merged(99, 3),  # a PR no run created
+    # A PR opened in acme/old, merged after the repo moved to acme/new (id 77).
+    opened(5, 0, "acme/old"),
+    Alias("acme/old", 77),  # e.g. its own `opened` webhook, before the move
+    merged(5, 4, "acme/new", 77),
 ]
 
 EXPECTED = {
     (date(2026, 10, 1), "acme/api", "impl", 1, 1, 0, 1),
-    (date(2026, 10, 2), "acme/api", "impl", 1, 1, 0, 1),
+    (date(2026, 10, 2), "acme/api", "impl", 2, 1, 0, 1),
     (date(2026, 10, 2), "acme/web", "docs", 1, 0, 0, 0),
     (date(2026, 10, 3), "acme/web", "docs", 0, 1, 0, 0),
     (date(2026, 10, 4), "acme/api", "impl", 0, 0, 2, 0),
+    (date(2026, 10, 1), "acme/old", "impl", 0, 1, 0, 1),
+    (date(2026, 10, 5), "acme/old", "impl", 0, 0, 1, 0),
 }
 
 
@@ -108,7 +128,7 @@ async def _checks(make: Callable[[], Awaitable[ShippedLedger]]) -> None:
 
     # 3. Order-free and replayable: shuffled, duplicated, on a fresh ledger.
     rng = random.Random(1857)
-    for _ in range(5):
+    for _ in range(12):
         ledger = await make()
         replay = FACTS * 2
         rng.shuffle(replay)
@@ -144,7 +164,7 @@ async def postgres_ledgers(
         async with pool.acquire() as conn:
             await conn.execute(
                 "TRUNCATE shipped_daily, shipped_commits, shipped_pull_requests,"
-                " github_pull_request_merges"
+                " github_pull_request_merges, github_repository_aliases"
             )
         return store.shipped_ledger
 
@@ -179,3 +199,36 @@ async def test_a_pr_and_its_merge_racing_are_counted_exactly_once(
     assert sum(r.prs_opened for r in rows) == 20
     assert sum(r.prs_merged for r in rows) == 20
     assert sum(r.prs_opened_merged for r in rows) == 20
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_rollup_version_change_rebuilds_from_facts_and_keeps_them(
+    postgres_ledgers: Callable[[], Awaitable[ShippedLedger]],
+    test_infrastructure: TestInfrastructure,
+) -> None:
+    """Facts are the record (merges have no other source): never reset."""
+    import asyncpg
+
+    from syn_adapters.events.shipped_ledger import ensure_shipped_ledger_schema
+
+    ledger = await postgres_ledgers()
+    await apply(ledger, FACTS)
+    conn = await asyncpg.connect(test_infrastructure.timescaledb_url)
+    try:
+        facts_before = await conn.fetchval(
+            "SELECT (SELECT count(*) FROM shipped_commits) + (SELECT count(*) FROM"
+            " shipped_pull_requests) + (SELECT count(*) FROM github_pull_request_merges)"
+        )
+        await conn.execute("UPDATE shipped_daily SET commits = 999")  # a stale derivation
+        await conn.execute("UPDATE shipped_ledger_meta SET rollup_version = 0")
+        await ensure_shipped_ledger_schema(conn)
+        await ensure_shipped_ledger_schema(conn)  # re-running applies nothing twice
+        facts_after = await conn.fetchval(
+            "SELECT (SELECT count(*) FROM shipped_commits) + (SELECT count(*) FROM"
+            " shipped_pull_requests) + (SELECT count(*) FROM github_pull_request_merges)"
+        )
+    finally:
+        await conn.close()
+    assert facts_after == facts_before
+    assert counts(await ledger.daily(START, END)) == EXPECTED
