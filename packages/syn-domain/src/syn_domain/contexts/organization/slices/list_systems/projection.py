@@ -201,7 +201,11 @@ class SystemProjection:
         (RepoUnassignedFromSystemEvent); this read ``old_system_id`` and the
         count never went down (release rehearsal 2026-10-10).
         """
-        system_id = str(event.get("previous_system_id") or event.get("old_system_id") or event.get("system_id", ""))
+        system_id = str(
+            event.get("previous_system_id")
+            or event.get("old_system_id")
+            or event.get("system_id", "")
+        )
         if system_id:
             await self.increment_repo_count(system_id, delta=-1)
 
