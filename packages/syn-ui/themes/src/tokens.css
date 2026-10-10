@@ -211,5 +211,29 @@
   --sky-cube-glass-left: color-mix(in oklab, var(--ds-color-fg) 32%, transparent); /* S mark glass cube faces; top is --sky-color-cube-glass-edge */
   --sky-cube-glass-right: color-mix(in oklab, var(--ds-color-fg) 18%, transparent);
 
+  /* IsoCity tone tiers (Main board): mid and hot mix the accent, fail the
+     danger colour, toward the ground (sides), the card (fronts) and the
+     selected surface or white (tops). Hot and fail tops get a light rim. */
+  --sky-iso-dim-rim: color-mix(in oklab, var(--ds-color-accent) 30%, var(--sky-iso-dim-rim-base));
+  --sky-iso-mid-side: color-mix(in oklab, var(--ds-color-accent) 22%, var(--ds-color-bg));
+  --sky-iso-mid-front: color-mix(in oklab, var(--ds-color-accent) 42%, var(--ds-color-surface));
+  --sky-iso-mid-top: color-mix(in oklab, var(--ds-color-accent) 62%, var(--ds-color-overlay));
+  --sky-iso-mid-rim: color-mix(in oklab, var(--ds-color-accent) 70%, var(--sky-color-display-hi));
+  --sky-iso-hot-side: color-mix(in oklab, var(--ds-color-accent) 52%, var(--sky-color-ground-deep));
+  --sky-iso-hot-front: color-mix(in oklab, var(--ds-color-accent) 88%, var(--ds-color-surface));
+  --sky-iso-hot-top: color-mix(in oklab, var(--ds-color-accent) 45%, var(--sky-color-display-hi));
+  --sky-iso-hot-rim: var(--sky-color-display-hi);
+  --sky-iso-fail-side: color-mix(in oklab, var(--ds-color-danger) 40%, var(--sky-color-ground-deep));
+  --sky-iso-fail-front: color-mix(in oklab, var(--ds-color-danger) 78%, var(--ds-color-surface));
+  --sky-iso-fail-top: color-mix(in oklab, var(--ds-color-danger) 55%, var(--sky-color-display-hi));
+  --sky-iso-today: color-mix(in oklab, var(--ds-color-accent) 30%, transparent);
+  --sky-iso-today-edge: color-mix(in oklab, var(--ds-color-accent) 60%, var(--sky-color-display-hi));
+  --sky-iso-beam: color-mix(in oklab, var(--ds-color-accent) 50%, var(--sky-color-display-hi));
+  --sky-iso-pool: color-mix(in oklab, var(--ds-color-accent) 22%, transparent);
+  --sky-iso-sel-side: color-mix(in oklab, var(--ds-color-accent) 60%, var(--ds-color-surface));
+  --sky-iso-sel-front: color-mix(in oklab, var(--ds-color-accent) 80%, var(--sky-color-display-hi));
+  --sky-iso-strip-lit: color-mix(in oklab, var(--ds-color-accent) 80%, var(--sky-color-display-hi));
+  --sky-iso-now: color-mix(in oklab, var(--ds-color-accent) 50%, var(--sky-color-display-hi));
+
   color-scheme: dark;
 }

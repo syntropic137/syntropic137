@@ -33,6 +33,8 @@ export interface DayReadoutModel {
   cost: string
   parts: ReadoutPart[]
   hasTokens: boolean
+  /** "2 failed" when the day has failed runs; null when none or unknown (the readout omits it). */
+  failed: string | null
 }
 
 const count = (v: number | null | undefined) => (typeof v === 'number' && Number.isFinite(v) ? String(Math.round(v)) : '0')
@@ -60,5 +62,6 @@ export function dayReadout(day: SkylineDay): DayReadoutModel {
     cost: day.costUsd === null || day.costUsd === undefined ? '—' : formatCost(day.costUsd),
     parts,
     hasTokens: total > 0,
+    failed: day.failed ? `${Math.round(day.failed)} failed` : null,
   }
 }

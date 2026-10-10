@@ -4,6 +4,7 @@ export {
   countWord,
   distinctRepoCount,
   heatmapToSkylineDays,
+  HEATMAP_FAILED_KEY,
   outcomeCounts,
   outcomeLine,
   overviewHeadline,
@@ -53,3 +54,5 @@ export type {
   ShippedTileUnavailable,
   ShippedTone,
 } from './shipped'
+export { heatmapPages, HEATMAP_PAGE_WEEKS } from './heatmapPages'
+export type { HeatmapPage } from './heatmapPages'

@@ -21,6 +21,14 @@ const num = (v: unknown): number => {
   return n === null ? 0 : n
 }
 
+/** Failed runs, only when the API sends `failed_executions` (until then a day is never coral). */
+function failedOf(br: Record<string, number>): { failed?: number } {
+  return HEATMAP_FAILED_KEY in br ? { failed: num(br[HEATMAP_FAILED_KEY]) } : {}
+}
+
+/** Breakdown key of the per-day failed-runs count. */
+export const HEATMAP_FAILED_KEY = 'failed_executions'
+
 /**
  * Heatmap buckets to Skyline days. `count` is the fallback for sessions;
  * days with no tokens at all get `tokens: null` so the readout says
@@ -46,6 +54,7 @@ export function heatmapToSkylineDays(buckets: readonly HeatmapBucketInput[] | nu
         commits: num(br.commits),
         costUsd: cost === undefined || cost === null ? null : num(cost),
         tokens: anyTokens ? tokens : null,
+        ...failedOf(br),
       }
     })
     .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
