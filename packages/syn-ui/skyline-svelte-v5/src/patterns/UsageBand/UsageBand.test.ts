@@ -11,12 +11,12 @@ describe('Usage Band', () => {
     const { container } = render(UsageBand, { tokens })
     expect(container.querySelector('svg[part="band"]')).not.toBeNull()
     expect(screen.getByRole('img').getAttribute('aria-label')).toBe('Tokens by type: Cache read 52.0 percent, Cache write 18.0 percent, Output 21.0 percent, Input 9.0 percent')
-    expect(screen.getByText('582,400')).toBeTruthy()
+    expect(screen.getByText('582.4K')).toBeTruthy()
   })
   it('draws the landing flat bar with a compact legend', () => {
     const { container } = render(UsageBand, { tokens, shape: 'flat', legend: 'compact' })
     expect(container.querySelectorAll('.sky-usage-band__flat > span')).toHaveLength(4)
-    expect(screen.queryByText('582,400')).toBeNull()
+    expect(screen.queryByText('582.4K')).toBeNull()
     expect(screen.getByText('Cache write')).toBeTruthy()
   })
   it('says when nothing was recorded', () => {
