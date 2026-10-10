@@ -36,6 +36,32 @@ export interface PhaseLike {
     allowed_tools?: string[]
     skills?: { name: string; version: string; resolved_sha: string; source_url: string }[]
   } | null
+  /** Which declared skills this phase used (#1269); absent from a server that predates it. */
+  skill_use?: PhaseSkillUseLike | null
+}
+
+/** One skill invoked through the Skill tool, and how many calls. */
+export interface InvokedSkillLike {
+  name: string
+  count: number
+}
+
+/** A phase's skill use (API `PhaseSkillUseInfo`). */
+export interface PhaseSkillUseLike {
+  status: string
+  /** The API always sends the lists; the schema marks them optional (they have defaults). */
+  declared?: readonly string[]
+  invoked?: readonly InvokedSkillLike[]
+  summary_display: string
+}
+
+/** Skill use across the run (API `ExecutionSkillUseSummary`). */
+export interface ExecutionSkillUseLike {
+  declared?: readonly string[]
+  invoked?: readonly InvokedSkillLike[]
+  never_invoked?: readonly string[]
+  not_known?: readonly string[]
+  summary_display: string
 }
 
 const upper = (n: number) => formatTokens(n, { case: 'upper' })
@@ -180,16 +206,56 @@ export function shortRevision(rev: string): string {
   return rev.length > 24 ? `${rev.slice(0, 12)}…${rev.slice(-8)}` : rev
 }
 
+/** Said only when the server sent no skill use at all (it predates #1269). */
+export const SKILL_USE_NOT_REPORTED = 'Which skills an agent actually used is not reported by this server.'
+
+const skillCall = (s: InvokedSkillLike, declared: ReadonlySet<string>) =>
+  `${s.name}${s.count > 1 ? ` (${s.count} calls)` : ''}${declared.has(s.name) ? '' : ' (undeclared)'}`
+
+/**
+ * What the run's agents did with their skills, from the API's summary:
+ * "Skills: 9 skills declared · 6 invoked · 3 use unknown · 1 undeclared
+ * invoked. Invoked: architecture, claude-api (undeclared), ... Use unknown:
+ * testing, security." The summary is the API's own words; the names are its
+ * lists. Null when the server sent nothing.
+ */
+export function skillUseNote(use: ExecutionSkillUseLike | null | undefined): string | null {
+  if (!use) return null
+  const declared = new Set(use.declared ?? [])
+  const invoked = use.invoked ?? []
+  const notKnown = use.not_known ?? []
+  const never = use.never_invoked ?? []
+  const parts = [`Skills: ${use.summary_display}.`]
+  if (invoked.length) parts.push(`Invoked: ${invoked.map((s) => skillCall(s, declared)).join(', ')}.`)
+  if (notKnown.length) parts.push(`Use unknown: ${notKnown.join(', ')}.`)
+  if (never.length) parts.push(`Never invoked: ${never.join(', ')}.`)
+  return parts.join(' ')
+}
+
+/** A phase's skill-use line, the API's summary verbatim; null when it reported nothing to say. */
+export function phaseSkillUseText(p: Pick<PhaseLike, 'skill_use'>): string | null {
+  const use = p.skill_use
+  if (!use || (!use.declared?.length && !use.invoked?.length)) return null
+  return use.summary_display
+}
+
 /**
  * The Provenance strip. With no inventory (older server, or still loading),
  * the counts come from the phases themselves and coverage stays unproven.
+ * The note reports skill use from the API's `skill_use`, and says it is not
+ * reported only when the server sent none.
  */
-export function provenanceFor(phases: readonly PhaseLike[], inventory: InventoryLike | null | undefined): ProvenanceStripProps {
+export function provenanceFor(
+  phases: readonly PhaseLike[],
+  inventory: InventoryLike | null | undefined,
+  skillUse?: ExecutionSkillUseLike | null,
+): ProvenanceStripProps {
   const sessions = phases.filter((p) => statusKind(p.status) !== 'pending').length
   const pinsMissing = phases.some((p) => !p.pinned_at_start && p.start_pins_status !== 'recorded')
+  const use = skillUseNote(skillUse) ?? SKILL_USE_NOT_REPORTED
   const note = pinsMissing
-    ? 'This run started before start config was pinned, so the tools and skills each phase had were not recorded. Which skills an agent actually used is not reported yet either.'
-    : 'Which skills an agent actually used is not reported yet.'
+    ? `This run started before start config was pinned, so the tools and skills each phase had were not recorded. ${use}`
+    : use
   if (!inventory) {
     return {
       counts: { platformSessions: sessions },

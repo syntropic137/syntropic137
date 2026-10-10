@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
+import { UNKNOWN } from '../../format/shared'
 import {
   agentLabel,
+  sessionDurationText,
   commitUrl,
   costByModelRows,
   filterOperations,
@@ -189,5 +191,16 @@ describe('list rows', () => {
     expect(child.sub).toBe('35468ba1 · child of 2fd5ec12')
     expect(child.agent).toBe('Claude · model not reported')
     expect(child.model).toBe('model not reported')
+  })
+})
+
+describe('session duration (parity-2 #6: detail said "2m", API and list say "1m 59s")', () => {
+  it("renders the API's duration_display verbatim", () => {
+    expect(sessionDurationText({ duration_seconds: 119.799, duration_display: '1m 59s' })).toBe('1m 59s')
+  })
+  it('falls back to the precise format only when the server sent no display', () => {
+    expect(sessionDurationText({ duration_seconds: 24.3 })).toBe('24.3s')
+    expect(sessionDurationText({ duration_seconds: 7 })).toBe('7s')
+    expect(sessionDurationText({ duration_seconds: null })).toBe(UNKNOWN)
   })
 })

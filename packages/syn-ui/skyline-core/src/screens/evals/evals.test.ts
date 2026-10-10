@@ -2,8 +2,12 @@ import { describe, expect, it } from 'vitest'
 import {
   agentOfModel,
   averageEvalCost,
+  evalFigures,
+  variantStats,
   buildEvalBoard,
   latestRunCosts,
+  latestRuns,
+  evalRunKey,
   runsTimeline,
   sameCaseSiblings,
   sameCaseVerifiers,
@@ -24,6 +28,8 @@ import {
   verdictWord,
   type EvalLike,
 } from './index'
+import { cellKey, verifierFooter } from '../../patterns/verdict'
+import { UNKNOWN } from '../../format/shared'
 
 const ev = (id: string, caseId: string, wf: string, model: string, verdict: string | null, last: string, cost = '0.5'): EvalLike => ({
   eval_id: id,
@@ -333,5 +339,49 @@ describe('same case, other verifiers (parity 2026-10-09: luna tile showed the ev
   it('keeps one eval-level tile for an eval with no variants', () => {
     const legacy: EvalLike = { eval_id: 'old', name: 'x', tags: ['case:repo-name-collision-skipped-clone'], last_verdict: 'PASS', run_count: 0, starting_workflow_id: 'wf-old' }
     expect(sameCaseVerifiers(e, [e, legacy]).at(-1)).toMatchObject({ workflowId: 'wf-old', verdict: 'unscored', current: false })
+  })
+})
+
+describe('verdict board footer time per verifier (parity-2 #3: blank for 7 of 8 verifiers)', () => {
+  const e = stable('eval-two', 'two-verifiers', [
+    ['eval-verify-pinned-codex-v1', 'gpt-6.1-sol', 'PASS', '2026-10-08T15:09:12Z', 1],
+    ['eval-verify-pinned-v1', 'claude-opus-5-5', 'FAIL', '2026-10-08T15:10:00Z', 1],
+  ])
+  const rows = [
+    { workflow_id: 'eval-verify-pinned-codex-v1', started_at: '2026-10-08T15:09:12Z', total_cost_usd: '0.16', duration_seconds: 161, eval: { eval_id: 'eval-two' } },
+    { workflow_id: 'eval-verify-pinned-codex-v1', started_at: '2026-10-07T15:09:12Z', total_cost_usd: '0.30', duration_seconds: 999, eval: { eval_id: 'eval-two' } },
+    { workflow_id: 'eval-verify-pinned-v1', started_at: '2026-10-08T15:10:00Z', total_cost_usd: '0.70', duration_seconds: 187, eval: { eval_id: 'eval-two' } },
+  ]
+  it('gives every column an average time from its latest runs, without a selection', () => {
+    const latest = latestRuns(rows)
+    const board = buildEvalBoard([e], {
+      costOf: (id, wf) => latest.get(evalRunKey(id, wf))?.costUsd,
+      durationOf: (id, wf) => latest.get(evalRunKey(id, wf))?.durationMs,
+    })
+    const footers = board.verifiers.map((v) => verifierFooter(board.cases.map((c) => board.cells[cellKey(c.id, v.id)])))
+    expect(footers.map((f) => f.averages)).toEqual(['$0.16 · 2m 41s', '$0.70 · 3m 7s'])
+  })
+  it('keeps the board duration when the readout enriches a selected cell', () => {
+    expect(withLatestRun({ verdict: 'pass', durationMs: 161_000 }, { execution_id: 'e', verdict: 'PASS', duration_seconds: 158 })!.durationMs).toBe(161_000)
+  })
+})
+
+describe('eval detail medians (parity-2 #7: median duration, median cost and cost per pass were dropped)', () => {
+  // repo-name-collision on the VPS: stats median 131.76 s / $0.185 / cost per pass $0.3227.
+  const stats = { median_duration_display: '2m 11s', median_cost_display: '$0.19', cost_per_pass_display: '$0.32' }
+  it("shows the API's stats in the header, verbatim", () => {
+    expect(evalFigures({ run_count: 4, scored_count: 4, pass_rate_display: '75%', stats })).toEqual([
+      { label: 'Runs', value: '4' },
+      { label: 'Scored', value: '4' },
+      { label: 'Pass rate', value: '75%' },
+      { label: 'Median duration', value: '2m 11s' },
+      { label: 'Median cost', value: '$0.19' },
+      { label: 'Cost per pass', value: '$0.32' },
+    ])
+    expect(evalFigures({ run_count: 0 })).toHaveLength(3)
+  })
+  it('gives each variant row its median duration and cost', () => {
+    expect(variantStats({ stats: { ...stats, median_duration_display: '2m 14s (excl. 1 incomplete)' } })).toEqual({ duration: '2m 14s (excl. 1 incomplete)', cost: '$0.19' })
+    expect(variantStats({})).toEqual({ duration: UNKNOWN, cost: UNKNOWN })
   })
 })

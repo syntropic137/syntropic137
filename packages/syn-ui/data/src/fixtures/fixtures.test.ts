@@ -99,6 +99,18 @@ describe('every screen has data in fixtures mode', () => {
     expect(inv.summary.platform_sessions).toBe(3)
     expect(inv.summary.complete).toBe(false)
   })
+  it('execution detail reports skill use per phase and per run, as the API does (parity-2)', async () => {
+    for (const r of RUNS) {
+      const d = await getExecution(r.id)
+      expect(d.skill_use?.summary_display).toBeTruthy()
+      for (const p of d.phases) expect(p.skill_use?.summary_display).toBeTruthy()
+      const declared = new Set(d.phases.flatMap((p) => p.skill_use?.declared ?? []))
+      expect(new Set(d.skill_use?.declared)).toEqual(declared)
+    }
+    const used = await Promise.all(RUNS.map((r) => getExecution(r.id)))
+    expect(used.some((d) => (d.skill_use?.invoked ?? []).length > 0)).toBe(true)
+  })
+
   it('inventory pages, nodes and transcripts 404 like the API when there is no snapshot', async () => {
     const id = RUNS[2]!.id
     for (const call of [

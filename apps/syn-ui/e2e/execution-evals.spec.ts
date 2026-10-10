@@ -19,7 +19,8 @@ test('the Evals filter keeps only eval runs, each marked Eval', async ({ page })
   await expect.poll(() => rows.count()).toBeLessThan(all)
   const n = await rows.count()
   expect(n).toBeGreaterThan(0)
-  for (let i = 0; i < n; i++) await expect(rows.nth(i).getByText('Eval', { exact: true })).toBeVisible()
+  // The chip carries the run's verdict when it has one ("Eval · PASS"), else plain "Eval" (parity-2 #8).
+  for (let i = 0; i < n; i++) await expect(rows.nth(i).getByText(/^Eval( · (PASS|FAIL|ERROR))?$/)).toBeVisible()
 
   // The detail links to the eval.
   await rows.first().getByRole('link').first().click()

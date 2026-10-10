@@ -524,3 +524,14 @@ export function sessionListRow(s: SessionListRowInput): SessionListRow {
 }
 
 export * from './live'
+
+/**
+ * A session's duration as the header shows it: the API's `duration_display`
+ * verbatim ("1m 59s"), so the detail agrees with the list; only an older
+ * server without it gets `formatDurationPrecise` (parity-2: the detail
+ * rounded 119.8 s to "2m").
+ */
+export function sessionDurationText(s: { duration_seconds: number | null; duration_display?: string | null }): string {
+  if (s.duration_display) return s.duration_display
+  return s.duration_seconds === null ? UNKNOWN : formatDurationPrecise(s.duration_seconds * 1000).replace(/\.0s$/, 's')
+}

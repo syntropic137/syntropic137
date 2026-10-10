@@ -26,6 +26,27 @@ export function listEvals(params: { tag?: string; page?: number; page_size?: num
   return cached('listEvals', [query], (s) => request('/evals', { query, signal: s }), { signal, staleAfter: 'list' })
 }
 
+/**
+ * Every eval (GET /evals, all pages, MAX_PAGE_SIZE each): the Evals board
+ * and its client-side list need the whole set, and the API answers 422
+ * above MAX_PAGE_SIZE. `total` is the API's own; `page` and `page_size`
+ * describe the whole set as one page.
+ */
+export function listAllEvals(params: { tag?: string } = {}, signal?: AbortSignal): Promise<EvalListResponse> {
+  const tag = params.tag
+  return cached('listAllEvals', [{ tag }], async (s) => {
+    const evals: EvalSummary[] = []
+    let first: EvalListResponse | null = null
+    for (let page = 1; page <= 100; page++) {
+      const res = await request<EvalListResponse>('/evals', { query: { tag, page: page > 1 ? page : undefined, page_size: MAX_PAGE_SIZE }, signal: s })
+      first ??= res
+      evals.push(...res.evals)
+      if (res.evals.length < MAX_PAGE_SIZE || evals.length >= res.total) break
+    }
+    return { ...first!, evals, page: 1, page_size: evals.length }
+  }, { signal, staleAfter: 'list' })
+}
+
 export function getEval(evalId: string, signal?: AbortSignal): Promise<EvalSummary> {
   return cached('getEval', [evalId], (s) => request(`/evals/${seg(evalId)}`, { signal: s }), { signal })
 }

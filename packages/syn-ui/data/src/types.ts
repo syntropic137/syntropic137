@@ -172,6 +172,8 @@ export interface SessionResponse {
   started_at: string | null
   completed_at: string | null
   duration_seconds: number | null
+  /** The API's duration, worded server-side ("1m 59s"); render verbatim. Absent from a server that predates it. */
+  duration_display?: string
   error_message: string | null
   metadata: Record<string, unknown>
   // Subagent metrics (from agentic_isolation v0.3.0)
@@ -473,6 +475,8 @@ export interface PhaseExecutionDetail {
   failure_classification?: FailureClassification | null
   /** What this phase SAID caused its failure - attribution only, never a colour. */
   reported_failure_reason?: ReportedFailureReason | null
+  /** Which declared skills this phase used (#1269); absent from a server that predates it. */
+  skill_use?: components['schemas']['PhaseSkillUseInfo']
 }
 
 /** A phase's start config, aliased to the generated schema rather than restated. */
@@ -565,6 +569,8 @@ export interface ExecutionDetailResponse {
    * (Evals v2). Null in no eval; absent from a server that predates the field.
    */
   eval?: components['schemas']['ExecutionEvalRunResponse'] | null
+  /** Skill use across every phase (feedback 01308bcf); absent from a server that predates it. */
+  skill_use?: components['schemas']['ExecutionSkillUseSummary']
 }
 
 // =============================================================================

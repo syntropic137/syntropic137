@@ -20,6 +20,7 @@
     phaseMeta,
     phaseModelChip,
     phaseNumber,
+    phaseSkillUseText,
     phaseTokenSplit,
     phaseTokens,
     provenanceFor,
@@ -126,7 +127,7 @@
   ])
 
   const caption = $derived(timelineCaption(phases))
-  const provenance = $derived(provenanceFor(phases, inventory.data))
+  const provenance = $derived(provenanceFor(phases, inventory.data, d?.skill_use))
   const tokens = $derived(
     d ? { cacheRead: d.total_cache_read_tokens, cacheWrite: d.total_cache_creation_tokens, output: d.total_output_tokens, input: d.total_input_tokens } : null,
   )
@@ -293,6 +294,7 @@
             {@const kit = phaseKit(p)}
             {@const total = phaseTokens(p)}
             {@const target = phaseRowTarget(p)}
+            {@const skills = phaseSkillUseText(p)}
             <li class="sky-exec__phase" data-linked={target.kind === 'session' ? '' : undefined} title={reasonOf(target)}>
               <div class="sky-exec__phase-head">
                 <span class="sky-exec__num">{phaseNumber(i)}</span>
@@ -321,6 +323,9 @@
                 </span>
                 <span class="sky-exec__split">{total > 0 ? phaseTokenSplit(p) : 'no tokens yet'}</span>
               </div>
+              {#if skills}
+                <p class="sky-exec__phase-skills">Skills: {skills}</p>
+              {/if}
               {#if p.error_message}
                 <p class="sky-exec__phase-error">{p.error_message}</p>
               {/if}
@@ -598,8 +603,15 @@
   }
   .sky-exec__phase-tokens,
   .sky-exec__phase > :global(.sky-exec__tiles),
+  .sky-exec__phase-skills,
   .sky-exec__phase-error {
     padding-left: 0;
+  }
+  .sky-exec__phase-skills {
+    margin: 0;
+    font-family: var(--ds-font-mono);
+    font-size: var(--ds-text-xs);
+    color: var(--ds-color-text-muted);
   }
   .sky-exec__phase-tokens {
     display: flex;
@@ -661,6 +673,7 @@
     }
     .sky-exec__phase-tokens,
     .sky-exec__phase > :global(.sky-exec__tiles),
+    .sky-exec__phase-skills,
     .sky-exec__phase-error {
       padding-left: 40px;
     }
