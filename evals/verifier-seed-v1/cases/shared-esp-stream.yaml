@@ -15,6 +15,13 @@ task: >
   admission path that dispatches the execution, and judge them against the
   production ESP event store.
 expected:
+  # The root cause, for the LLM judge only; never part of `task`.
+  defect: >
+    ExecutionRequestAggregate is saved with aggregate id = execution_id, and
+    the ESP server keys a stream by aggregate id alone, so
+    ExecutionRequested becomes version 1 of the WorkflowExecution's stream;
+    the execution's NoStream start write then conflicts and the execution is
+    rejected as a duplicate. The request needs its own stream id.
   # Repo-relative. The report must name one of them; it is matched by file
   # name, because a verifier writes `minio.py:212` as often as the full path.
   files:

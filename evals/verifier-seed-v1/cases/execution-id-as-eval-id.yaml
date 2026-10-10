@@ -11,6 +11,14 @@ task: >
   given. Review the Eval aggregate and the admission and edit paths that load
   it, and judge them against the production ESP event store.
 expected:
+  # The root cause, for the LLM judge only; never part of `task`.
+  defect: >
+    The ESP server keys a stream by aggregate id alone, so loading Eval-<id>
+    for an id that belongs to another aggregate (e.g. a workflow execution
+    id) rehydrates that aggregate's events into an EvalAggregate and accepts
+    it as an eval. The admission and edit paths do not reject a non-eval
+    stream, so archive/attach with an execution id appends eval events to
+    the execution's stream.
   # Repo-relative. The report must name one of them; it is matched by file
   # name, because a verifier writes `minio.py:212` as often as the full path.
   files:

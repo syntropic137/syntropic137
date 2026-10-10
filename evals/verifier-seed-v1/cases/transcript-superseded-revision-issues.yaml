@@ -14,6 +14,13 @@ task: >
   every archived revision into a session's coverage. Review whether a fully
   accounted session can still be reported as incomplete.
 expected:
+  # The root cause, for the LLM judge only; never part of `task`.
+  defect: >
+    The session relationship resolver folds extractor issues from every
+    archived revision of a growing live transcript (filtering only by
+    active_evidence), so an issue such as unresolved_spawn reported by an
+    early revision persists after a later revision resolved it, and a fully
+    accounted session is reported incomplete/missing.
   files:
     - packages/syn-domain/src/syn_domain/contexts/agent_sessions/domain/services/session_relationship_resolver.py
   keywords:
