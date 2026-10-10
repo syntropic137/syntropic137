@@ -45,9 +45,10 @@ not merely how the running platform is behaving.
 ## Failed Day Count
 
 On the activity heatmap, a day's `failed`: the Executions whose status is
-`failed` and whose `completed_at` falls on that UTC day. Counted on the day the
-run ENDED, beside the day's sessions, executions and commits, which count
-activity. Cancelled and interrupted runs are not failures. Read from the
+`failed` and whose `completed_at` falls on that UTC day, selected and bucketed
+by `completed_at` alone, so a run that started long before, or whose start was
+never seen, still counts on the day it ended. Cancelled and interrupted runs
+are not failures. Read from the
 `workflow_executions` read model, never an aggregate.
 
 ## Repo

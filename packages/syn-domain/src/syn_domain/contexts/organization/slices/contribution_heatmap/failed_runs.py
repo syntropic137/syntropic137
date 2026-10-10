@@ -7,10 +7,10 @@ UTC day: the day the run ended, not the day it started. Read from the
 slice), never an aggregate, so it is as replay-safe as that projection and
 needs no projection of its own.
 
-Bounded in the store, not in Python: one page query over failed executions
-STARTED from ``RUN_SPAN_DAYS`` before the window, so it reads the window's
-failures and not all history. A run that started more than that before the
-window and failed inside it is not counted; no execution runs that long.
+Selected and bucketed by ``completed_at`` alone, in the store: one page
+query over failed executions that ENDED in the window, whenever they started.
+A failure recorded without a start (the orphaned-failure row the projection
+writes when it never saw the start, #598) counts like any other.
 Cancelled and interrupted runs are not failures.
 """
 
@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time
 from typing import TYPE_CHECKING
 
 from syn_domain.contexts.organization._shared.projection_names import WORKFLOW_EXECUTIONS
@@ -33,8 +33,6 @@ if TYPE_CHECKING:
     from syn_domain.pagination import ProjectionRecord
 
 FAILED = "failed"
-RUN_SPAN_DAYS = 7
-"""How long before the window a failed run may have started and still count."""
 
 
 @dataclass(frozen=True)
@@ -74,10 +72,10 @@ async def failed_runs_by_day(
     """Executions that ended failed on each UTC day of ``[start, end]``."""
     query = PageQuery(
         status=StatusOf.text("status"),
-        timestamp_field="started_at",
+        timestamp_field="completed_at",
         statuses=frozenset({FAILED}),
-        after=datetime.combine(start - timedelta(days=RUN_SPAN_DAYS), time.min, tzinfo=UTC),
-        before=datetime.combine(end + timedelta(days=1), time.min, tzinfo=UTC),
+        after=datetime.combine(start, time.min, tzinfo=UTC),
+        before=datetime.combine(end, time.max, tzinfo=UTC),
         key_field="workflow_execution_id",
     )
     page = await page_projection(store, WORKFLOW_EXECUTIONS, query, to_row=_ended_run)

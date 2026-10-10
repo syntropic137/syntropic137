@@ -41,10 +41,12 @@ class TestFailedRunsByDay:
     @pytest.mark.asyncio
     async def test_reads_only_failed_runs_from_the_execution_list(self) -> None:
         store = FakeProjectionStore()
-        rows = {
+        rows: dict[str, tuple[str, str | None, str]] = {
             "f1": ("failed", "2026-10-02T01:00:00Z", "2026-10-03T02:00:00Z"),
             "f2": ("failed", "2026-09-28T01:00:00Z", "2026-10-01T00:30:00Z"),  # started before
-            "f3": ("failed", "2026-08-01T01:00:00Z", "2026-10-01T00:30:00Z"),  # beyond run span
+            "f3": ("failed", "2026-08-01T01:00:00Z", "2026-10-01T00:30:00Z"),  # long before
+            "orphan": ("failed", None, "2026-10-07T23:59:00Z"),  # no start ever seen (#598)
+            "late": ("failed", "2026-10-07T01:00:00Z", "2026-10-08T00:00:01Z"),  # ends after
             "ok": ("completed", "2026-10-02T01:00:00Z", "2026-10-02T03:00:00Z"),
             "cx": ("cancelled", "2026-10-02T01:00:00Z", "2026-10-02T03:00:00Z"),
         }
@@ -62,5 +64,6 @@ class TestFailedRunsByDay:
             )
         assert await failed_runs_by_day(store, START, END, None) == {
             date(2026, 10, 3): 1,
-            date(2026, 10, 1): 1,
+            date(2026, 10, 1): 2,
+            date(2026, 10, 7): 1,
         }
