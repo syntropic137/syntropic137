@@ -27,9 +27,12 @@ Two judges answer one question: does a blocking finding identify THIS defect?
 
 - **Keyword judge** (always; deterministic, offline): one blocking finding
   names an expected file and has a word from every `expected.keywords` group.
-- **LLM judge** (`score --llm-judge`; needs `ANTHROPIC_API_KEY`): a pinned
-  model at temperature 0 is given the defect (`expected.defect` when present,
-  plus the expected files and keyword concepts) and the blocking findings, and
+- **LLM judge** (`score --llm-judge`; needs the platform's `ANTHROPIC_API_KEY`
+  setting, from the environment or `.env`): a pinned model at temperature 0
+  (`claude-sonnet-4-6`; the 4.7+/5.x models reject temperature 0) is given the
+  case's root cause (`expected.defect`, required: the judge refuses a case
+  without it), the expected files and keyword concepts, and the blocking
+  findings, and
   answers `match`, `no_match` or `unclear`, quoting the finding it matched. A
   `match` whose quote is not in any finding is turned into `unclear`.
 

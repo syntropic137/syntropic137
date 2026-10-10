@@ -13,6 +13,14 @@ task: >
   from the parsed stream result. A codex stream can end without a terminal
   turn for several reasons, including an expired login.
 expected:
+  # The root cause, for the LLM judge only; never part of `task`.
+  defect: >
+    AgentExecutionHandler turns any codex stream error_reason (e.g. the
+    stream ended without a terminal turn) into a non-zero phase exit without
+    checking whether the phase already wrote its deliverable to
+    artifacts/output/, so a codex phase that finished its work is discarded
+    as failed; only the no-terminal-turn-and-no-deliverable case (expired
+    login) should fail.
   files:
     - packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/AgentExecutionHandler.py
   keywords:

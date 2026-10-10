@@ -12,6 +12,12 @@ task: >
   Review `syn workflow run`, which starts a workflow execution with an
   optional task (-t) and inputs, and reports what it started.
 expected:
+  # The root cause, for the LLM judge only; never part of `task`.
+  defect: >
+    `syn workflow run -t` sends the task (task ?? null) without checking
+    that any phase prompt uses $ARGUMENTS or {{task}}, so a task given to a
+    workflow that never reads it is silently dropped instead of being
+    refused.
   files:
     - apps/syn-cli-node/src/commands/workflow/run.ts
   keywords:

@@ -8,12 +8,15 @@ does), and prints one markdown row per BLOCKED defect run: the keyword verdict,
 the LLM verdict, the finding the LLM quoted, and an empty column for a human's
 own reading. It records nothing on the eval: it only reads.
 
-    ANTHROPIC_API_KEY=... uv run python scripts/eval_judge_calibrate.py \\
+    uv run python scripts/eval_judge_calibrate.py \\
         [--suite DIR] [--launches FILE] [--suite-tag PREFIX] [--version N] [--api-url URL] [--sample N]
 
 All keyword-missed blocked runs are listed, and a deterministic sample of
 ``--sample`` keyword-matched ones (default 10), so the table can show whether
 the LLM judge credits vague findings (precision) as well as paraphrases (recall).
+
+The judge's key is the platform's ``ANTHROPIC_API_KEY`` setting (environment or
+``.env``). Every defect case must carry ``expected.defect``.
 
 The ledger must hold the runs: the checked-in ``launches.jsonl`` has no v6 lines
 unless they were committed from the workspace that launched them.
@@ -38,6 +41,7 @@ from eval_suite import (
     _get,
     _report_of,
     blocking_findings,
+    judge_problems,
     launches_path,
     load_suite,
     read_launches,
@@ -71,9 +75,13 @@ def main(argv: list[str] | None = None) -> int:
         print(f"❌ no ledger line has a suite tag starting {args.suite_tag!r}", file=sys.stderr)
         return 1
     # The case set of the version the runs were launched under, never another's.
-    cases = {c.id: c for c in load_suite(args.suite, version=args.version).cases}
+    loaded = load_suite(args.suite, version=args.version)
+    if problems := judge_problems(loaded):
+        print("❌ the LLM judge cannot score:\n  " + "\n  ".join(problems), file=sys.stderr)
+        return 1
+    cases = {c.id: c for c in loaded.cases}
     try:
-        llm = LlmJudge(AnthropicMessages.from_env())
+        llm = LlmJudge(AnthropicMessages.from_settings())
     except JudgeError as exc:
         print(f"❌ {exc}", file=sys.stderr)
         return 1

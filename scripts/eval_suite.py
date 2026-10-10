@@ -54,9 +54,9 @@ eval's current score and the history stays in its events.
 
 TWO JUDGES. A blocked defect run is credited by the keyword judge (one
 blocking finding names an expected file and every keyword group) and, with
-``score --llm-judge``, by an LLM judge too (a pinned model at temperature 0
-asked whether a finding identifies THIS defect: match / no_match / unclear,
-with the finding it quotes). The headline catch rate counts a run caught when
+``score --llm-judge``, by an LLM judge too (a pinned model at temperature 0,
+given the case's ``expected.defect`` root cause, asked whether a finding
+identifies THIS defect: match / no_match / unclear, with the finding it quotes). The headline catch rate counts a run caught when
 the keyword judge OR the LLM judge says ``match``; ``unclear`` is not caught.
 Both judges' rates are printed beside it. An LLM-judged score is recorded
 under scorer_version ``<suite version>+llm:<model>@prompt-v<n>``, so it never
@@ -105,12 +105,15 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    SecretStr,
     TypeAdapter,
     ValidationError,
     field_validator,
 )
 
 from syn_domain.contexts.orchestration._shared.workflow_definition import WorkflowDefinition
+from syn_shared.settings.config import Settings, get_settings
+from syn_shared.settings.constants import ANTHROPIC_MESSAGES_URL, ENV_ANTHROPIC_API_KEY
 from syn_shared.settings.dev_tooling import get_dev_api_url
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -195,8 +198,8 @@ class Expected(_Frozen):
     keywords: tuple[tuple[str, ...], ...] = Field(min_length=1)
     """Groups of alternatives. Every group must match; within a group, any one word."""
     defect: str | None = Field(default=None, min_length=1)
-    """The defect in prose, for the LLM judge only. Never put it in `task`. Optional:
-    without it the LLM judge is told the files and keyword groups and nothing more."""
+    """The seeded root cause in prose, for the LLM judge only. Never put it in `task`.
+    The LLM judge refuses a case without it: "same root cause" needs the root cause."""
 
     @field_validator("keywords")
     @classmethod
@@ -949,10 +952,17 @@ class JudgeError(RuntimeError):
     """The LLM judge could not answer: no credential, a failed call, or an unreadable reply."""
 
 
-JUDGE_MODEL = "claude-sonnet-5-5"
-"""Pinned explicit model id, never an alias: the judge is part of the eval's identity."""
-JUDGE_PROMPT_VERSION = 1
-"""Bump on ANY change to `_JUDGE_SYSTEM` or `_judge_prompt`: it is part of the scorer version."""
+JUDGE_MODEL = "claude-sonnet-4-6"
+"""Pinned explicit model id, never an alias: the judge is part of the eval's identity.
+
+It must be in `TEMPERATURE_ZERO_MODELS`: the 4.7+/5.x models reject a non-default
+temperature with HTTP 400, so they cannot be this judge."""
+TEMPERATURE_ZERO_MODELS = frozenset({"claude-sonnet-4-6", "claude-opus-4-6", "claude-haiku-4-5"})
+"""Models the Messages API accepts `temperature: 0` for. `AnthropicMessages` refuses
+any other model before sending, rather than letting the provider 400 mid-scoring."""
+JUDGE_PROMPT_VERSION = 2
+"""Bump on ANY change to `_JUDGE_SYSTEM`, `_judge_prompt` or what they are given: it is
+part of the scorer version. v2: the case's `expected.defect` is required, never inferred."""
 
 _JUDGE_SYSTEM = """You grade a code reviewer. You are given ONE known defect and the \
 reviewer's blocking findings. Answer whether any single finding identifies THIS defect: \
@@ -967,11 +977,13 @@ sentence, copied verbatim; empty unless match>", "reason": "<one line>"}"""
 
 
 def _judge_prompt(expected: Expected, findings: list[str]) -> str:
+    if expected.defect is None:
+        raise JudgeError("the LLM judge needs the case's expected.defect; it never infers it")
     keywords = "\n".join(f"- any of: {', '.join(g)}" for g in expected.keywords)
     blocks = "\n\n".join(f"<finding {i}>\n{f}\n</finding {i}>" for i, f in enumerate(findings, 1))
     return (
         "<defect>\n"
-        f"{expected.defect or '(no prose statement; infer it from the files and concepts below)'}\n"
+        f"{expected.defect}\n"
         f"Files the fix changed:\n" + "\n".join(f"- {f}" for f in expected.files) + "\n"
         f"Concepts a correct finding expresses, in some words:\n{keywords}\n"
         "</defect>\n\n"
@@ -1030,35 +1042,50 @@ class LlmJudge:
         )
 
 
-ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages"
+def judge_problems(loaded: LoadedSuite) -> list[str]:
+    """Defect cases the LLM judge cannot score: those with no `expected.defect`."""
+    return [
+        f"{c.id}: no expected.defect"
+        for c in loaded.cases
+        if isinstance(c, DefectCase) and c.expected.defect is None
+    ]
 
 
 class AnthropicMessages:
     """`ModelClient` over the Anthropic Messages API with httpx, already a dependency.
 
-    The key is read from ``ANTHROPIC_API_KEY`` in the operator's environment and
-    is never written anywhere. Temperature is 0.
+    The key is the platform's `Settings.anthropic_api_key` (``ANTHROPIC_API_KEY``
+    from the environment or ``.env``, ADR-004) and is never written anywhere.
+    Temperature is 0, so only `TEMPERATURE_ZERO_MODELS` are sent.
     """
 
-    def __init__(self, api_key: str, http: httpx.Client | None = None) -> None:
+    def __init__(self, api_key: SecretStr, http: httpx.Client | None = None) -> None:
         self._key = api_key
         self._http = http or httpx.Client(timeout=120)
 
     @classmethod
-    def from_env(cls) -> AnthropicMessages:
-        key = os.environ.get("ANTHROPIC_API_KEY")
-        if not key:
+    def from_settings(cls, settings: Settings | None = None) -> AnthropicMessages:
+        key = (settings or get_settings()).anthropic_api_key
+        if key is None or not key.get_secret_value():
             raise JudgeError(
-                "--llm-judge needs ANTHROPIC_API_KEY in the environment; "
+                f"--llm-judge needs {ENV_ANTHROPIC_API_KEY} (environment or .env); "
                 "omit --llm-judge to score by keywords alone (offline)"
             )
         return cls(key)
 
     def complete(self, *, model: str, system: str, prompt: str) -> str:
+        if model not in TEMPERATURE_ZERO_MODELS:
+            raise JudgeError(
+                f"{model} does not accept temperature 0; the judge needs one of "
+                f"{', '.join(sorted(TEMPERATURE_ZERO_MODELS))}"
+            )
         try:
             response = self._http.post(
                 ANTHROPIC_MESSAGES_URL,
-                headers={"x-api-key": self._key, "anthropic-version": "2023-06-01"},
+                headers={
+                    "x-api-key": self._key.get_secret_value(),
+                    "anthropic-version": "2023-06-01",
+                },
                 json={
                     "model": model,
                     "max_tokens": 1024,
@@ -1836,7 +1863,7 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help=(
             f"score: also ask the LLM judge ({JUDGE_MODEL}, prompt v{JUDGE_PROMPT_VERSION}); "
-            "needs ANTHROPIC_API_KEY. Recorded under a scorer_version naming the judge. "
+            f"needs {ENV_ANTHROPIC_API_KEY}. Recorded under a scorer_version naming the judge. "
             "Omit to score offline by keywords alone"
         ),
     )
@@ -1883,8 +1910,11 @@ def main(argv: list[str] | None = None) -> int:
 
     llm: Judge | None = None
     if args.llm_judge and args.command == "score":
+        if problems := [p for v in to_score for p in judge_problems(v)]:
+            print("❌ the LLM judge cannot score:\n  " + "\n  ".join(problems), file=sys.stderr)
+            return 1
         try:
-            llm = LlmJudge(AnthropicMessages.from_env())
+            llm = LlmJudge(AnthropicMessages.from_settings())
         except JudgeError as exc:
             print(f"❌ {exc}", file=sys.stderr)
             return 1

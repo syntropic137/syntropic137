@@ -23,6 +23,7 @@ from pathlib import Path
 
 import httpx
 import pytest
+from pydantic import SecretStr
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -72,6 +73,7 @@ from syn_shared.agents import (
     resolve_model_alias,
 )
 from syn_shared.pricing import resolve_model_pricing
+from syn_shared.settings.config import Settings
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -434,6 +436,7 @@ def test_check_refuses_a_file_absent_at_the_pin(
 _EXPECTED = Expected(
     files=("packages/syn-adapters/src/syn_adapters/storage/artifact_storage/minio.py",),
     keywords=(("key",), ("404", "not found")),
+    defect="upload() keys an object by execution id but download() reads the id-only key, so it 404s.",
 )
 
 
@@ -2995,9 +2998,9 @@ def test_llm_judged_score_is_recorded_under_the_judges_identity(
     rows, _ = score_suite(loaded, server.client(), [_LAUNCHED], eval_suite.LlmJudge(model))
 
     [(_, body)] = server.scores
-    assert body["scorer_version"] == "6+llm:claude-sonnet-5-5@prompt-v1"
+    assert body["scorer_version"] == "6+llm:claude-sonnet-4-6@prompt-v2"
     assert body["verdict"] == "PASS"
-    assert "LLM judge (`llm:claude-sonnet-5-5@prompt-v1`): `match`" in str(body["evidence"])
+    assert "LLM judge (`llm:claude-sonnet-4-6@prompt-v2`): `match`" in str(body["evidence"])
     assert "keyword judge: no match" in str(body["evidence"])
     table = render(loaded, rows)
     assert "keyword OR LLM match, unclear not caught): 1/1" in table
@@ -3025,8 +3028,31 @@ def test_llm_judge_flag_without_a_key_fails_before_any_call(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setattr(eval_suite, "get_settings", lambda: Settings(_env_file=None))
     assert eval_suite.main(["score", "--llm-judge", "--api-url", "http://unreachable.invalid"]) == 1
     assert "needs ANTHROPIC_API_KEY" in capsys.readouterr().err
+
+
+@pytest.mark.unit
+def test_the_judge_uses_the_key_configured_in_settings_dotenv(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """ADR-004: the credential comes from `Settings` (env or .env), not a parallel env read."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    dotenv = tmp_path / ".env"
+    dotenv.write_text("ANTHROPIC_API_KEY=fake-dotenv-key\n")
+    sent: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        sent.append(request)
+        return httpx.Response(200, json={"content": [{"type": "text", "text": "ok"}]})
+
+    client = eval_suite.AnthropicMessages.from_settings(Settings(_env_file=dotenv))
+    client._http = httpx.Client(transport=httpx.MockTransport(handle))
+    assert client.complete(model=eval_suite.JUDGE_MODEL, system="s", prompt="p") == "ok"
+    [request] = sent
+    assert request.headers["x-api-key"] == "fake-dotenv-key"
+    assert "fake-dotenv-key" not in repr(vars(client)) + capsys.readouterr().out
 
 
 @pytest.mark.unit
@@ -3038,13 +3064,63 @@ def test_anthropic_client_sends_the_pinned_model_at_temperature_zero() -> None:
         return httpx.Response(200, json={"content": [{"type": "text", "text": "ok"}]})
 
     client = eval_suite.AnthropicMessages(
-        "test-key", httpx.Client(transport=httpx.MockTransport(handle))
+        SecretStr("test-key"), httpx.Client(transport=httpx.MockTransport(handle))
     )
-    assert client.complete(model="claude-sonnet-5-5", system="s", prompt="p") == "ok"
+    assert client.complete(model=eval_suite.JUDGE_MODEL, system="s", prompt="p") == "ok"
     [request] = sent
     assert request.headers["x-api-key"] == "test-key"
     body = json.loads(request.content)
-    assert (body["model"], body["temperature"]) == ("claude-sonnet-5-5", 0)
+    assert (body["model"], body["temperature"]) == (eval_suite.JUDGE_MODEL, 0)
+
+
+@pytest.mark.unit
+def test_a_model_that_rejects_temperature_zero_is_refused_before_sending() -> None:
+    """The 4.7+/5.x models 400 on a non-default temperature: the pinned judge is not one of them.
+
+    The transport below plays the provider's contract, so a pinned model it rejects
+    fails here rather than mid-scoring against the real API.
+    """
+    sent: list[httpx.Request] = []
+
+    def provider(request: httpx.Request) -> httpx.Response:
+        sent.append(request)
+        body = json.loads(request.content)
+        if body["model"] not in eval_suite.TEMPERATURE_ZERO_MODELS and body["temperature"] != 1:
+            return httpx.Response(400, json={"error": {"message": "temperature not supported"}})
+        return httpx.Response(200, json={"content": [{"type": "text", "text": "ok"}]})
+
+    client = eval_suite.AnthropicMessages(
+        SecretStr("test-key"), httpx.Client(transport=httpx.MockTransport(provider))
+    )
+    assert client.complete(model=eval_suite.JUDGE_MODEL, system="s", prompt="p") == "ok"
+    for unsupported in ("claude-sonnet-5-5", "claude-opus-5-5", "claude-opus-4-7"):
+        with pytest.raises(eval_suite.JudgeError, match="does not accept temperature 0"):
+            client.complete(model=unsupported, system="s", prompt="p")
+    assert len(sent) == 1
+
+
+@pytest.mark.unit
+def test_every_defect_case_gives_the_judge_its_root_cause_and_hides_it_from_the_task() -> None:
+    """Producer through loader: the checked-in YAML, not a hand-built case."""
+    loaded = load_suite(DEFAULT_SUITE)
+    defects = [c for c in loaded.cases if isinstance(c, DefectCase)]
+    assert defects and eval_suite.judge_problems(loaded) == []
+    for case in defects:
+        assert case.expected.defect is not None
+        assert case.expected.defect not in case.task
+        model = _FakeModel(_reply("no_match"))
+        eval_suite.LlmJudge(model).judge(case.expected, ["some finding"])
+        [call] = model.calls
+        assert case.expected.defect in call["prompt"], case.id
+
+
+@pytest.mark.unit
+def test_the_llm_judge_refuses_a_case_without_a_root_cause() -> None:
+    model = _FakeModel(_reply("match", "some finding"))
+    bare = _EXPECTED.model_copy(update={"defect": None})
+    with pytest.raises(eval_suite.JudgeError, match=r"expected\.defect"):
+        eval_suite.LlmJudge(model).judge(bare, ["some finding"])
+    assert not model.calls
 
 
 @pytest.mark.unit
