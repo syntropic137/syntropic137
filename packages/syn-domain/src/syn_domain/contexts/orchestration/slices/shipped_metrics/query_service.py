@@ -34,12 +34,14 @@ an aggregate or reads the event store.
   PRs opened and merged. The commit row's own ``repo`` is a directory name,
   not a slug, so it cannot answer this.
 
-WHY NO PROJECTION. Every read is one statement bounded by the window
-(``idx_events_type (event_type, time DESC)``), and attribution is one keyed
-read of ``workflow_executions`` for the executions involved, so nothing is per
-execution. Commits and merges cost what they count. The PR-created read scans
-the window's completed tool rows (telemetry-sized, see ``_RUN_PRS_QUERY``):
-acceptable now, and the rollup to build if it becomes the slow read.
+WHY NO PROJECTION (YET). Nothing here is per execution: each read is one
+statement bounded by the window, and attribution is one keyed read of
+``workflow_executions`` for the executions involved. But ``event_type`` is
+not the hypertable's ``compress_segmentby``, so on compressed chunks every
+segment in range is decompressed: the cost is the telemetry in the range (up
+to 90 days for the PR-created read), not the rows returned. Declared as
+accepted debt in ``test_cost_read_paths_scan_agent_events_by_event_type.py``;
+the trigger-maintained rollup that removes it is #1855.
 
 THE DAY IS A UTC DAY: the window is ``days`` UTC calendar days ending today,
 inclusive, and an observation belongs to the UTC day its ``time`` falls in
@@ -701,7 +703,7 @@ ORDER BY sha, time
 # COST: this reads the tool_execution_completed rows in the range, which grow
 # with telemetry, not with PRs. Bounded by the range (2 windows plus the merge
 # lookback); a per-PR rollup is the follow-up if the north star's 1,000
-# concurrent runs make it the slow read (#1852).
+# concurrent runs make it the slow read (#1855).
 _PR_URL = r"https://github\.com/([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)/pull/([0-9]+)"
 _RUN_PRS_QUERY = f"""
 SELECT DISTINCT ON (lower(m[1]), m[2]::int)
