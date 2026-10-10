@@ -274,14 +274,16 @@ interface Paint {
   today: { tile: string; beam: IsoHitBox } | null
 }
 
+function todayMark(d: IsoCityDims, c: number, r: number): { tile: string; beam: IsoHitBox } {
+  const b = pt(d, c + d.f / 2, r + d.f / 2, 0)
+  return { tile: tile(d, c, r), beam: { x: n2(b[0] - 1.5), y: n2(b[1] - d.beam), width: 3, height: d.beam } }
+}
+
 function paintCell(ctx: Ctx, paint: Paint, week: IsoCityWeek, w: number, c: number, r: number): void {
   const d = ctx.dims
   const date = addDays(week.start, r)
   const inWindow = c >= 0 && c < ctx.window
-  if (date === ctx.today) {
-    const b = pt(d, c + d.f / 2, r + d.f / 2, 0)
-    paint.today = { tile: tile(d, c, r), beam: { x: n2(b[0] - 1.5), y: n2(b[1] - d.beam), width: 3, height: d.beam } }
-  }
+  if (date === ctx.today) paint.today = todayMark(d, c, r)
   const day = week.days[r]
   if (date > ctx.today) (inWindow ? paint.future : paint.futureEdge).push(tile(d, c, r))
   else if (!day || day.sessions <= 0) (inWindow ? paint.floor : paint.floorEdge).push(tile(d, c, r))
