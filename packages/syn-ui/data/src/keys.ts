@@ -22,6 +22,7 @@ export type ResourceName =
   | 'getContributionHeatmap'
   | 'getEvalTrend' | 'getWorkflowTrend'
   | 'getWorkflowLatestOutputs'
+  | 'getShippedMetrics'
 
 export interface QueryTarget {
   name: ResourceName

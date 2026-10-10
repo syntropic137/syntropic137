@@ -38,6 +38,7 @@ const RULES: ReadonlyArray<readonly [(t: string) => boolean, (ids: FrameIds) => 
       { name: 'getWorkflowTrend', id: workflowId },
       { name: 'listExecutionCosts' },
       { name: 'getCostSummary' },
+      { name: 'getShippedMetrics' },
       ...when(!!executionId, [{ name: 'getExecution', id: executionId }, { name: 'getExecutionCost', id: executionId }]),
     ],
   ],
@@ -64,7 +65,7 @@ const RULES: ReadonlyArray<readonly [(t: string) => boolean, (ids: FrameIds) => 
     ],
   ],
   [isArtifactEvent, ({ artifactId }) => [{ name: 'listArtifacts' }, { name: 'getArtifact', id: artifactId }]],
-  [isGitEvent, () => [{ name: 'getContributionHeatmap' }]],
+  [isGitEvent, () => [{ name: 'getContributionHeatmap' }, { name: 'getShippedMetrics' }]],
 ]
 
 /**

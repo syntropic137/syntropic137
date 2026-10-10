@@ -29,6 +29,7 @@ import {
   getEvalTrend,
   getWorkflowTrend,
   getWorkflowLatestOutputs,
+  getShippedMetrics,
 } from '../index'
 import { RUNS, matchFixture } from './index'
 import { EVALS } from './evals'
@@ -199,5 +200,36 @@ describe('workflow latest outputs (Workflow board, api-gaps shape)', () => {
     expect(RUNS.some((r) => r.id === report.execution_id)).toBe(true)
     expect((await getWorkflowLatestOutputs('code-review')).phases.every((p) => p.artifact === null)).toBe(true)
     await expect(getWorkflowLatestOutputs('missing')).rejects.toMatchObject({ status: 404 })
+  })
+})
+
+describe('shipped metrics (Main board "Shipped by agents")', () => {
+  afterEach(() => {
+    delete (globalThis as { synFixtureShippedUnavailable?: unknown }).synFixtureShippedUnavailable
+  })
+  it('serves the board sample for 14 days, series summing to the totals', async () => {
+    const res = await getShippedMetrics({ days: 14 })
+    expect(res.window.days).toBe(14)
+    expect(res.window.to.slice(0, 10)).toBe('2026-10-08')
+    expect([res.commits, res.prs_opened, res.prs_merged, res.merge_rate, res.repos_touched].map((m) => [m?.total, m?.delta_display])).toEqual([
+      [1204, '+38%'], [73, '+24%'], [61, '+27%'], [84, '+5 pts'], [9, '+3'],
+    ])
+    for (const m of [res.commits, res.prs_opened, res.prs_merged]) {
+      expect(m!.series).toHaveLength(14)
+      expect(m!.series.reduce((a, p) => a + p.value, 0)).toBe(m!.total)
+    }
+    expect(res.commits!.series[0]!.date).toBe('2026-09-25')
+    expect(res.by_workflow.reduce((a, w) => a + w.commits, 0)).toBe(1204)
+    expect(res.repos).toHaveLength(9)
+  })
+  it('scales to 7 and 30 days and filters by workflow', async () => {
+    expect((await getShippedMetrics({ days: 30 })).commits!.series).toHaveLength(30)
+    expect((await getShippedMetrics({ days: 7, workflow_id: 'pr-review' })).by_workflow.map((w) => w.workflow_id)).toEqual(['pr-review'])
+  })
+  it('the test hook nulls a tile with a reason', async () => {
+    ;(globalThis as { synFixtureShippedUnavailable?: unknown }).synFixtureShippedUnavailable = ['prs_opened']
+    const res = await getShippedMetrics({ days: 7 })
+    expect(res.prs_opened).toBeNull()
+    expect(res.reasons?.prs_opened).toMatch(/pull requests/)
   })
 })

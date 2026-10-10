@@ -6,7 +6,8 @@
   (Skyline days), the newest executions (Recent runs, attention chips,
   running count), workflows (count, most-run) and triggers (count, repos).
   Metrics and runs refetch on workflow and phase events. The board's Live
-  commits block is intentionally not shipped (owner, feedback 627f4206).
+  commits block is intentionally not shipped (owner, feedback 627f4206);
+  "Shipped by agents" (GET /metrics/shipped, 14 days) took its place.
 -->
 <script lang="ts">
   import { formatCost, formatInteger, formatRelativeTime, formatTokens } from '@syn137/skyline-core/format'
@@ -21,6 +22,8 @@
     outcomeLine,
     overviewHeadline,
     runningCount,
+    shippedTiles,
+    shippedUnavailableTiles,
     skylineYears,
     tokenMix,
     topWorkflows,
@@ -41,14 +44,15 @@
   import { evalBadge } from '@syn137/skyline-core/screens/executions'
   import { Button, Callout, EmptyState, Skeleton, ToggleGroup } from '@syn137/skyline-svelte-v5'
   import { OutcomeRing, RunRow, Skyline, StatusBadge } from '@syn137/skyline-svelte-v5/patterns'
-  import { getContributionHeatmap, getMetrics, listExecutions, listTriggers, listWorkflows } from '@syn137/syn-ui-data'
-  import { isRunEvent, isRunFinished } from '@syn137/syn-ui-data/live'
+  import { ApiError, getContributionHeatmap, getMetrics, getShippedMetrics, listExecutions, listTriggers, listWorkflows } from '@syn137/syn-ui-data'
+  import { isGitEvent, isRunEvent, isRunFinished } from '@syn137/syn-ui-data/live'
   import { live } from '../../lib/live.svelte'
   import { resource } from '../../lib/load.svelte'
   import { setPage } from '../../lib/page.svelte'
   import type { PageProps } from '../../lib/routes'
   import { href } from '../../lib/router'
   import Pipeline from './parts/Pipeline.svelte'
+  import Shipped from './parts/Shipped.svelte'
   import TokenMix from './parts/TokenMix.svelte'
   import TopWorkflows from './parts/TopWorkflows.svelte'
   import type { PipelineItem } from './parts/types'
@@ -70,6 +74,12 @@
   })
   const workflows = resource((signal) => listWorkflows({ page_size: 100 }, signal))
   const triggers = resource((signal) => listTriggers({}, signal))
+  const SHIPPED_DAYS = 14
+  const shipped = resource((signal) => getShippedMetrics({ days: SHIPPED_DAYS }, signal), { live: (t) => isRunEvent(t) || isGitEvent(t) })
+  // A server older than the endpoint answers 404: every tile says so, rather than a warning.
+  const shippedView = $derived(
+    shipped.data ? shippedTiles(shipped.data) : shipped.error instanceof ApiError && shipped.error.status === 404 ? shippedUnavailableTiles() : null,
+  )
 
   // ---- derived view data ----
   const days = $derived<SkylineDay[]>(heatmapToSkylineDays(heatmap.data?.days))
@@ -142,6 +152,7 @@
     heatmap.refresh()
     workflows.refresh()
     triggers.refresh()
+    shipped.refresh()
   }
 
   const execHref = (id: string) => href(`/executions/${encodeURIComponent(id)}`)
@@ -266,6 +277,15 @@
             />
           {/each}
         </div>
+      {/if}
+      {#if shippedView}
+        <Shipped tiles={shippedView} days={shipped.data?.window.days ?? SHIPPED_DAYS} />
+      {:else if shipped.error}
+        <Callout tone="warning" title="Shipped by agents did not load">
+          {#snippet action()}<Button variant="outline" size="sm" onclick={() => shipped.refresh()}>Retry</Button>{/snippet}
+        </Callout>
+      {:else}
+        <Skeleton variant="block" height="8.5rem" label="Loading shipped by agents" />
       {/if}
     </section>
 

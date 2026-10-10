@@ -28,6 +28,7 @@ describe('invalidationsFor (real API event names)', () => {
         'getWorkflowTrend:wf',
         'listExecutionCosts',
         'getCostSummary',
+        'getShippedMetrics',
         'getExecution:ex',
         'getExecutionCost:ex',
       ].sort(),
@@ -63,7 +64,7 @@ describe('invalidationsFor (real API event names)', () => {
   })
   it('artifact and git events refresh their resources', () => {
     expect(names(invalidationsFor(frame('ArtifactCreated', { artifact_id: 'a' })))).toEqual(['getArtifact:a', 'getMetrics', 'listArtifacts'])
-    expect(names(invalidationsFor(frame('git_commit')))).toEqual(['getContributionHeatmap', 'getMetrics'])
+    expect(names(invalidationsFor(frame('git_commit')))).toEqual(['getContributionHeatmap', 'getMetrics', 'getShippedMetrics'])
   })
   it('terminal frames map like events; nothing for handshakes', () => {
     expect(names(invalidationsFor({ ...frame('WorkflowCompleted', {}, 'ex'), type: 'terminal' }))).toContain('getExecution:ex')
@@ -109,7 +110,7 @@ describe('connectLiveInvalidation', () => {
     const apply = vi.fn()
     const stop = connectLiveInvalidation({ minIntervalMs: 1000, apply, subscribe: (fn) => ((deliver = fn), off) })
     deliver([frame('git_commit'), frame('git_commit')])
-    expect(apply).toHaveBeenCalledExactlyOnceWith([{ name: 'getMetrics' }, { name: 'getContributionHeatmap' }])
+    expect(apply).toHaveBeenCalledExactlyOnceWith([{ name: 'getMetrics' }, { name: 'getContributionHeatmap' }, { name: 'getShippedMetrics' }])
     deliver([frame('ArtifactCreated')])
     expect(apply).toHaveBeenCalledTimes(1)
     vi.advanceTimersByTime(1000)

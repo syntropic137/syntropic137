@@ -12,6 +12,7 @@ import { observabilityRoutes } from './observability'
 import { repoRoutes } from './repos'
 import type { FixtureRoute } from './define'
 import { sessionRoutes } from './sessions'
+import { shippedRoutes } from './shipped'
 import { trendRoutes } from './trends'
 import { triggerRoutes } from './triggers'
 import { workflowRoutes } from './workflows'
@@ -25,6 +26,7 @@ export const routes: FixtureRoute[] = [
   ...artifactRoutes,
   ...triggerRoutes,
   ...repoRoutes,
+  ...shippedRoutes,
   ...observabilityRoutes,
   ...insightRoutes,
   ...feedbackRoutes,
