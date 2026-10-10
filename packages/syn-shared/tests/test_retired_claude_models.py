@@ -98,7 +98,9 @@ def test_install_refuses_a_retired_operator_default() -> None:
 
 
 def test_codex_phase_is_not_judged_by_the_claude_deny_list() -> None:
-    model, defaulted = normalize_phase_model(AgentProvider.CODEX, "gpt-6-luna", PhaseModelDefaults())
+    model, defaulted = normalize_phase_model(
+        AgentProvider.CODEX, "gpt-6-luna", PhaseModelDefaults()
+    )
     assert (model, defaulted) == ("gpt-6-luna", False)
 
 

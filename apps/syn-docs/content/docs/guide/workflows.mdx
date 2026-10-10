@@ -293,19 +293,22 @@ laptop cannot revoke, use a ChatGPT Business or Enterprise access token. See
 ### Claude model aliases
 
 On claude phases, `model` may be an alias or a concrete Claude model id. The
-alias reaches `claude --model` unchanged and the pinned Claude Code CLI resolves
-it, so the table is what the platform **expects** it to resolve to. The model a
-run actually reports always wins, for display and for pricing.
+platform translates an alias to the explicit id below before it launches
+`claude --model`, and pins the same ids for subagents and `syn-delegate claude`
+sessions, so the Claude Code CLI never picks a model by itself. The model a run
+actually reports always wins, for display and for pricing.
 
-| Alias | Expected model |
+| Alias | Model it runs |
 | --- | --- |
 | `opus` | `claude-opus-5-5` |
-| `sonnet` | `claude-sonnet-5-5` (Sonnet 5.5; needs Claude Code CLI 2.1.293 or later, which the workspace images pin) |
+| `sonnet` | `claude-sonnet-5-5` |
 | `haiku` | `claude-haiku-4-5-20251001` |
 | `fable` | `claude-fable-5` |
 
-To pin a model regardless of what an alias means later, write the concrete id,
-for example `model: claude-sonnet-5-5`.
+Retired Claude models (every Sonnet and Opus below 5, every Claude 3 model) are
+refused: installing or editing a workflow that names one fails, and a stored
+phase that names one fails at launch. Haiku 4.5 stays allowed as the current
+Haiku.
 
 ### Codex model ids and cost
 
