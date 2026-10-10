@@ -1,0 +1,674 @@
+/*
+ * syntropic137.com page styles. Colours, fonts, space, radii and motion come
+ * from Skyline (@syn137/skyline-themes all.css + motion.css, imported in
+ * main.tsx; <html data-theme="syn137">). Only --ds-* and --sky-* tokens here:
+ * no colour literals (scripts/check-colours.sh). The --landing-* names below
+ * are this page's own layout values, with no Skyline equivalent.
+ */
+:root {
+  --landing-text-body: clamp(15px, 1.5vw, 16px);
+  /* Room the floating nav takes at the top (capsule plus a margin). */
+  --landing-nav-clearance: 88px;
+  /* Sections land 16px from the top on a nav jump, under the capsule: their
+     own top padding clears it. */
+  --landing-section-snap: calc(var(--ds-space-4) - var(--landing-nav-clearance));
+}
+
+/* ── Global Reset ── */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  scroll-behavior: smooth;
+  /* Keyboard focus scrolled into view never lands under the floating nav. */
+  scroll-padding-top: var(--landing-nav-clearance);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
+}
+
+:focus-visible {
+  outline: var(--sky-focus-ring-width) solid var(--sky-color-focus);
+  outline-offset: var(--sky-focus-ring-offset);
+}
+
+body {
+  font-family: var(--ds-font-sans);
+  font-size: var(--landing-text-body);
+  color: var(--ds-color-text-muted);
+  background-color: var(--sky-color-ground-deep);
+  line-height: 1.6;
+}
+
+h1, h2, h3 {
+  color: var(--ds-color-fg);
+  line-height: 1.2;
+}
+
+a {
+  color: var(--ds-color-accent);
+  text-decoration: none;
+}
+
+img, video {
+  max-width: 100%;
+  display: block;
+}
+
+/* Harness names carry their vendor's colour. src/data/harnesses.ts is the
+   single source: harnessStyle() sets --harness-color and --harness-gradient
+   from Skyline's --sky-harness-<id> tokens, so a new harness needs no CSS.
+
+   The gradient goes on `background-image`, never the `background` shorthand.
+   The shorthand resets `background-clip` to `border-box`, which would undo the
+   clip-to-text below and, with a transparent text fill, render the name
+   invisible. */
+.harness {
+  font-weight: var(--ds-font-weight-semibold);
+  /* Solid colour for anything that never reaches the gradient branch. */
+  color: var(--harness-color);
+}
+
+/* Gradient text only where the clip is actually supported. Outside this
+   block the names stay opaque and legible rather than transparent. */
+@supports (-webkit-background-clip: text) or (background-clip: text) {
+  .harness {
+    background-image: var(--harness-gradient);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    filter: drop-shadow(0 0 10px color-mix(in oklab, var(--harness-color) 40%, transparent));
+  }
+}
+
+/* Forced colours: drop the gradient entirely and let the OS palette win. */
+@media (forced-colors: active) {
+  .harness {
+    background-image: none;
+    -webkit-text-fill-color: currentColor;
+    color: CanvasText;
+    filter: none;
+  }
+}
+
+/* ── Glass Panel ── */
+.glass {
+  background: color-mix(in oklab, var(--ds-color-bg) 85%, transparent);
+  border: 1px solid var(--ds-color-border);
+  border-radius: var(--sky-radius-control);
+  box-shadow:
+    0 1px 2px color-mix(in oklab, var(--sky-color-ground-deep) 10%, transparent),
+    0 4px 16px color-mix(in oklab, var(--sky-color-ground-deep) 8%, transparent),
+    inset 0 1px 0 color-mix(in oklab, var(--sky-color-display-hi) 3%, transparent);
+  transition:
+    border-color 0.25s ease-out,
+    box-shadow 0.25s ease-out,
+    transform 0.25s ease-out;
+}
+
+.glass:hover {
+  border-color: var(--sky-color-border-hover);
+  box-shadow:
+    0 2px 4px color-mix(in oklab, var(--sky-color-ground-deep) 12%, transparent),
+    0 8px 24px color-mix(in oklab, var(--sky-color-ground-deep) 12%, transparent),
+    0 0 40px color-mix(in oklab, var(--ds-color-accent) 6%, transparent),
+    inset 0 1px 0 color-mix(in oklab, var(--sky-color-display-hi) 5%, transparent);
+}
+
+/* ── Site header (Landing / PhoneLanding boards) ──
+   Phone first: S, wordmark and the GitHub button; from 48rem the call to
+   action and the GitHub label; from 64rem the capsule of section links.
+
+   Floating (owner review): fixed from the start, so nothing shifts. At the
+   top of the page it sits over the hero exactly as on the board; once the
+   sentinel (the page's first 24px) leaves the viewport, Nav sets
+   data-scrolled and a glass capsule fades in behind the bar, which moves
+   to --nav-float-top. Only opacity and transform change. */
+.site-header__sentinel {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 24px;
+  pointer-events: none;
+}
+
+.site-header {
+  position: fixed;
+  inset: 0 0 auto;
+  z-index: var(--sky-z-nav);
+  /* The bar takes the clicks; the strip around the capsule does not. */
+  pointer-events: none;
+}
+
+.site-header__bar {
+  /* Bar padding at the top of the page, the capsule's padding around the
+     bar's content, and the capsule's distance from the top once scrolled. */
+  --nav-pad-y: var(--ds-space-3-5);
+  --nav-cap-x: var(--ds-space-2);
+  --nav-cap-y: 6px;
+  --nav-float-top: var(--ds-space-2);
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ds-space-4);
+  width: 100%;
+  max-width: 1320px;
+  margin: 0 auto;
+  padding: var(--nav-pad-y) var(--sky-gutter);
+  pointer-events: auto;
+  transition: transform var(--sky-duration-slow) var(--sky-ease-out);
+}
+
+.site-header__bar::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: calc(var(--nav-pad-y) - var(--nav-cap-y)) calc(var(--sky-gutter) - var(--nav-cap-x));
+  border: var(--ds-border-width) solid var(--sky-color-border-glass);
+  border-radius: calc(var(--sky-radius-row) + var(--nav-cap-y));
+  background: color-mix(in oklab, var(--sky-color-ground-deep) 86%, transparent);
+  box-shadow:
+    0 18px 40px -18px color-mix(in oklab, var(--sky-color-ground-deep) 90%, transparent),
+    inset 0 1px 0 color-mix(in oklab, var(--sky-color-display-hi) 6%, transparent);
+  opacity: 0;
+  transform: scale(0.98);
+  transition:
+    opacity var(--sky-duration-slow) var(--sky-ease-out),
+    transform var(--sky-duration-slow) var(--sky-ease-out);
+  pointer-events: none;
+}
+
+.site-header[data-scrolled] .site-header__bar {
+  transform: translateY(calc(var(--nav-float-top) + var(--nav-cap-y) - var(--nav-pad-y)));
+}
+
+.site-header[data-scrolled] .site-header__bar::before {
+  opacity: 1;
+  transform: none;
+  -webkit-backdrop-filter: blur(var(--sky-blur-glass)) saturate(1.4);
+  backdrop-filter: blur(var(--sky-blur-glass)) saturate(1.4);
+}
+
+@media (forced-colors: active) {
+  .site-header__bar::before {
+    background: Canvas;
+    border-color: CanvasText;
+  }
+}
+
+.site-header__brand {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-2-5);
+  color: var(--ds-color-fg);
+  text-decoration: none;
+  border-radius: var(--ds-radius-sm);
+}
+
+.site-header__brand:focus-visible,
+.site-nav__link:focus-visible,
+.site-header__github:focus-visible,
+.site-header__cta:focus-visible {
+  outline: var(--sky-focus-ring-width) solid var(--sky-color-focus);
+  outline-offset: var(--sky-focus-ring-offset);
+}
+
+.s-mark,
+.s-mark:not(:defined) {
+  display: block;
+  flex: none;
+}
+
+.s-mark__fallback {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+.s-mark__fallback g {
+  stroke-width: 1;
+  stroke-linejoin: round;
+}
+
+.wordmark {
+  font-family: var(--sky-font-wordmark);
+  font-size: 13px;
+  font-weight: var(--ds-font-weight-semibold);
+  letter-spacing: var(--sky-tracking-brand);
+  color: var(--ds-color-fg);
+}
+
+.wordmark__num {
+  color: var(--ds-color-accent);
+}
+
+.site-header__brand .s-mark {
+  width: 24px;
+}
+
+.site-nav {
+  display: none;
+  align-items: center;
+  gap: var(--ds-space-0-5);
+  padding: var(--ds-space-1);
+  border-radius: var(--sky-radius-row);
+  border: var(--ds-border-width) solid var(--sky-color-highlight-strong);
+  background: color-mix(in oklab, var(--ds-color-surface) 55%, transparent);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  transition: background-color var(--sky-duration-slow) ease, border-color var(--sky-duration-slow) ease;
+}
+
+.site-nav__link {
+  padding: var(--ds-space-2) var(--ds-space-3-5);
+  border-radius: var(--ds-radius-md);
+  font-size: var(--ds-text-md);
+  color: var(--sky-color-text-code);
+  text-decoration: none;
+  transition: background-color var(--sky-duration-base) ease, color var(--sky-duration-base) ease;
+}
+
+/* Inside the scrolled capsule the links need no capsule of their own. */
+.site-header[data-scrolled] .site-nav {
+  border-color: transparent;
+  background: transparent;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+.site-nav__link:hover {
+  background: var(--sky-color-control-hover);
+  color: var(--ds-color-fg);
+}
+
+.site-header__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+}
+
+.site-header__github,
+.site-header__cta {
+  display: flex;
+  align-items: center;
+  height: var(--sky-size-touch);
+  border-radius: var(--sky-radius-control);
+  font-size: var(--sky-text-control);
+  text-decoration: none;
+}
+
+.site-header__github {
+  gap: var(--ds-space-2);
+  padding: 0 var(--ds-space-3);
+  border: var(--ds-border-width) solid var(--sky-color-border-glass);
+  color: var(--ds-color-fg);
+  transition: background-color var(--sky-duration-base) ease;
+}
+
+.site-header__github:hover {
+  background: var(--sky-color-control-hover);
+  color: var(--ds-color-fg);
+}
+
+/* Phone: the label is read out but not shown (icon-only button). */
+.site-header__github-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.site-header__cta {
+  display: none;
+  padding: 0 var(--ds-space-4);
+  background: var(--sky-color-accent-solid);
+  color: var(--sky-color-accent-solid-contrast);
+  font-weight: var(--ds-font-weight-semibold);
+  box-shadow: var(--sky-shadow-glow);
+  transition: transform var(--sky-duration-base) ease, box-shadow var(--sky-duration-base) ease;
+}
+
+.site-header__cta:hover {
+  transform: translateY(-1px);
+  color: var(--sky-color-accent-solid-contrast);
+  box-shadow:
+    var(--sky-shadow-glow),
+    0 12px 30px -8px color-mix(in oklab, var(--ds-color-accent) 70%, transparent);
+}
+
+@media (min-width: 48rem) {
+  .site-header__bar {
+    --nav-pad-y: 22px;
+    --nav-cap-x: var(--ds-space-3-5);
+    --nav-cap-y: var(--ds-space-2);
+    --nav-float-top: var(--ds-space-3);
+  }
+
+  .site-header__brand .s-mark {
+    width: 26px;
+  }
+
+  .site-header__brand .wordmark {
+    font-size: 15px;
+  }
+
+  .site-header__github,
+  .site-header__cta {
+    height: var(--ds-space-10);
+  }
+
+  .site-header__github-label {
+    position: static;
+    width: auto;
+    height: auto;
+    overflow: visible;
+    clip-path: none;
+  }
+
+  .site-header__cta {
+    display: flex;
+  }
+}
+
+@media (min-width: 64rem) {
+  .site-nav {
+    display: flex;
+  }
+}
+
+/* Eyebrow badge */
+
+.hero-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  font-family: var(--ds-font-mono);
+  font-size: 12px;
+  font-weight: var(--ds-font-weight-medium);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ds-color-accent);
+  background: color-mix(in oklab, var(--ds-color-accent) 8%, transparent);
+  border: 1px solid color-mix(in oklab, var(--ds-color-accent) 20%, transparent);
+  border-radius: 100px;
+  padding: 6px 16px;
+}
+
+.eyebrow-sep {
+  width: 1px;
+  height: 14px;
+  background: color-mix(in oklab, var(--ds-color-accent) 30%, transparent);
+}
+
+/* ── Site footer (Landing / PhoneLanding boards) ──
+   Phone first: brand over a two-column link grid; from 48rem brand left,
+   three columns right. */
+.site-footer {
+  border-top: var(--ds-border-width) solid var(--sky-color-section-rule);
+}
+
+.site-footer__inner {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: var(--ds-space-8);
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: var(--ds-space-8) var(--sky-gutter) var(--ds-space-10);
+}
+
+.site-footer__brand {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-3);
+  max-width: 320px;
+}
+
+.site-footer__mark {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-2-5);
+}
+
+.site-footer__mark .s-mark {
+  width: 22px;
+}
+
+.site-footer__tagline {
+  font-size: var(--sky-text-control);
+  line-height: 1.5;
+  color: var(--ds-color-text-subtle);
+}
+
+.site-footer__columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--ds-space-6) var(--ds-space-4);
+}
+
+.site-footer__col {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--ds-space-2-5);
+}
+
+.site-footer__title {
+  font-family: var(--ds-font-mono);
+  font-size: var(--ds-text-xs);
+  font-weight: var(--ds-font-weight-regular);
+  line-height: var(--ds-line-height-normal);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ds-color-text-subtle);
+}
+
+.site-footer__link {
+  font-size: var(--ds-text-md);
+  line-height: var(--ds-line-height-normal);
+  color: var(--ds-color-text-muted);
+  text-decoration: none;
+  border-radius: var(--ds-radius-xs);
+  transition: color var(--sky-duration-base) ease;
+}
+
+.site-footer__link:hover {
+  color: var(--ds-color-fg);
+}
+
+.site-footer__link:focus-visible {
+  outline: var(--sky-focus-ring-width) solid var(--sky-color-focus);
+  outline-offset: var(--sky-focus-ring-offset);
+}
+
+@media (pointer: coarse) {
+  .site-footer__link {
+    display: inline-flex;
+    align-items: center;
+    min-height: var(--sky-size-touch);
+  }
+
+  .site-footer__col {
+    gap: 0;
+  }
+}
+
+@media (min-width: 48rem) {
+  .site-footer__inner {
+    flex-direction: row;
+    gap: var(--ds-space-8);
+    padding: var(--ds-space-12) var(--sky-gutter) var(--ds-space-14);
+  }
+
+  .site-footer__columns {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--ds-space-6) 72px;
+  }
+}
+
+/* ── Links Page ── */
+.links-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--ds-space-8);
+}
+
+.links-container {
+  width: 100%;
+  max-width: 440px;
+}
+
+.links-header {
+  text-align: center;
+  margin-bottom: var(--ds-space-6);
+}
+
+.links-install {
+  margin-bottom: var(--ds-space-8);
+}
+
+.links-brand {
+  font-family: var(--sky-font-brand);
+  font-size: 32px;
+  font-weight: var(--ds-font-weight-bold);
+  color: var(--ds-color-fg);
+  letter-spacing: 0.05em;
+  text-decoration: none;
+}
+
+.links-brand:hover {
+  color: var(--ds-color-accent);
+}
+
+.links-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+}
+
+.links-item {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-4);
+  padding: var(--ds-space-4) var(--ds-space-6);
+  text-decoration: none;
+  color: var(--ds-color-fg);
+  border-radius: 12px;
+  transition: transform 0.2s ease, border-color 0.2s ease;
+}
+
+.links-item:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in oklab, var(--ds-color-accent) 40%, transparent);
+}
+
+.links-item-icon {
+  flex-shrink: 0;
+  color: var(--ds-color-accent);
+}
+
+.links-item-text {
+  display: flex;
+  flex-direction: column;
+}
+
+.links-item-title {
+  font-weight: var(--ds-font-weight-semibold);
+  font-size: var(--landing-text-body);
+}
+
+.links-item-desc {
+  font-size: 13px;
+  color: var(--ds-color-text-subtle);
+  margin-top: 2px;
+}
+
+/* ── Skip Link ── */
+.skip-link {
+  position: absolute;
+  top: -100%;
+  left: var(--ds-space-4);
+  z-index: 200;
+  padding: var(--ds-space-2) var(--ds-space-4);
+  background: var(--ds-color-accent);
+  color: var(--sky-color-accent-solid-contrast);
+  font-weight: var(--ds-font-weight-semibold);
+  border-radius: 0 0 8px 8px;
+  transition: top 0.2s ease-out;
+}
+
+.skip-link:focus {
+  top: 0;
+  color: var(--sky-color-accent-solid-contrast);
+}
+
+/* ── Reduced motion ── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+@media (max-width: 768px) {
+  .hero-eyebrow {
+    font-size: 9px;
+    padding: 5px 10px;
+    gap: 5px;
+  }
+
+  .eyebrow-sep {
+    height: 12px;
+  }
+}
+
+/* ── Section frame (04 Evals, use cases, why, start) ──
+   Hairline on top and the board's 1320px column; data-ground="band" is the
+   dotted ground of the use-case and comparison bands. */
+.page-section {
+  position: relative;
+  border-top: var(--ds-border-width) solid var(--sky-color-section-rule);
+  background: var(--sky-color-ground-deep);
+  scroll-margin-top: var(--landing-section-snap);
+}
+
+.page-section[data-ground="band"] {
+  background: var(--sky-texture-dots), var(--sky-color-ground-band);
+}
+
+.page-section__inner {
+  max-width: 1320px;
+  margin: 0 auto;
+  padding: 56px var(--sky-gutter);
+}
+
+@media (min-width: 48rem) {
+  .page-section__inner {
+    padding-block: 120px;
+  }
+}
+
+/* Visually hidden, still read by screen readers. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}

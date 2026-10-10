@@ -125,6 +125,17 @@ jobs:
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
+      # The landing <sky-*> elements: one module per element plus one shared
+      # runtime chunk; scripts/elements-size.mjs fails above 45 KB gzip.
+      - name: Elements build (45 KB gzip)
+        run: |
+          {
+            echo '### Skyline elements budget'
+            echo '```'
+            pnpm --silent --filter @syn137/skyline-svelte-v5 run build:elements
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
   #############################################################################
   # E2E - the shared Playwright suite on fixtures data (just skyline-e2e)
   #############################################################################

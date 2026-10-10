@@ -641,3 +641,4 @@ export function withLatestRun(cell: VerdictCell | undefined, run: (EvalRunLike &
 }
 
 export * from './trend'
+export * from './ranking'

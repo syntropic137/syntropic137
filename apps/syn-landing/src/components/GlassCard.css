@@ -1,0 +1,14 @@
+/* GlassCard: floating frosted card (v4 boards, hero). */
+.glass-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: var(--ds-space-3) var(--ds-space-3-5);
+  border: 1px solid var(--sky-color-border-glass);
+  border-radius: 16px;
+  background: var(--sky-surface-glass);
+  -webkit-backdrop-filter: blur(var(--sky-blur-glass));
+  backdrop-filter: blur(var(--sky-blur-glass));
+  box-shadow: var(--sky-shadow-glass);
+  color: var(--ds-color-fg);
+}

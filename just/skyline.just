@@ -38,8 +38,12 @@ skyline-test:
 skyline-build:
     pnpm --filter syn-ui run build
 
+# Landing <sky-*> elements (skyline-svelte-v5 dist-elements/) with the 45 KB gzip budget
+skyline-elements:
+    pnpm --filter @syn137/skyline-svelte-v5 run build:elements
+
 # Everything CI should run for Skyline
-skyline-qa: skyline-check skyline-test skyline-build
+skyline-qa: skyline-check skyline-test skyline-build skyline-elements
 
 # Dev server against the API proxy (http://127.0.0.1:9137)
 skyline-dev:
