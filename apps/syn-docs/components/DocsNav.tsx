@@ -1,35 +1,32 @@
-'use client';
+/**
+ * The landing page's site nav (v4 Landing board), shown in the docs header.
+ * Same links and order as syntropic137.com; on the docs site, Docs is the
+ * selected item.
+ */
 
-import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+export const LANDING_URL = 'https://syntropic137.com';
 
-const tabs = [
-  { label: 'Documentation', href: '/docs/guide' },
-  { label: 'API Reference', href: '/docs/api' },
-  { label: 'CLI Reference', href: '/docs/cli' },
+export const SITE_LINKS: ReadonlyArray<{ text: string; url: string; current?: boolean }> = [
+  { text: 'Workflows', url: `${LANDING_URL}/#workflows` },
+  { text: 'Harnesses', url: `${LANDING_URL}/#harnesses` },
+  { text: 'Observability', url: `${LANDING_URL}/#observability` },
+  { text: 'Evals', url: `${LANDING_URL}/#evals` },
+  { text: 'Docs', url: '/docs/guide/getting-started', current: true },
 ];
 
 export function DocsNav() {
-  const pathname = usePathname();
-
   return (
-    <nav className="flex gap-6 border-b border-fd-border px-2 -mx-4 md:-mx-6 xl:-mx-8 md:px-6 xl:px-8 mb-6">
-      {tabs.map((tab) => {
-        const active = pathname.startsWith(tab.href);
-        return (
-          <Link
-            key={tab.href}
-            href={tab.href}
-            className={`pb-2 pt-3 text-sm font-medium border-b-2 transition-colors ${
-              active
-                ? 'border-fd-primary text-fd-primary'
-                : 'border-transparent text-fd-muted-foreground hover:text-fd-foreground'
-            }`}
-          >
-            {tab.label}
-          </Link>
-        );
-      })}
+    <nav aria-label="Site" className="syn-site-nav">
+      {SITE_LINKS.map((link) => (
+        <a
+          key={link.text}
+          href={link.url}
+          className="syn-site-nav__link"
+          aria-current={link.current ? 'page' : undefined}
+        >
+          {link.text}
+        </a>
+      ))}
     </nav>
   );
 }
