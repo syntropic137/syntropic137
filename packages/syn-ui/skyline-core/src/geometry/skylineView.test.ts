@@ -8,6 +8,7 @@ import {
   layoutSkyline,
   pickSkylineBar,
   projectSkylineDims,
+  skylineAspectRatio,
   recentWeeksRange,
   yearRange,
   type SkylineBar,
@@ -175,5 +176,20 @@ describe('skylineTone', () => {
     expect(layout.bars[0]).toMatchObject({ tone: 'mixed', fill: 'var(--sky-status-interrupted)' })
     expect(skylineLegend([{ outcomes: null }]).kind).toBe('ramp')
     expect(skylineLegend([{ outcomes: null }, { outcomes: { passed: 1, failed: 0 } }]).items.map((i) => i.tone)).toEqual(['pass', 'mixed', 'fail', 'none'])
+  })
+})
+
+describe('skylineAspectRatio', () => {
+  it('is the projected view box width over height', () => {
+    for (const dims of [SKYLINE_WEEKS, SKYLINE_YEAR]) {
+      const vb = projectSkylineDims(dims).viewBox
+      expect(skylineAspectRatio(dims)).toBeCloseTo(vb.width / vb.height, 10)
+    }
+  })
+
+  it('matches the view box the layout draws, so a placeholder reserves the real height', () => {
+    const layout = layoutSkyline({ days: [], range: recentWeeksRange(TODAY), today: TODAY, dims: SKYLINE_WEEKS })
+    const [, , w, h] = layout.viewBox.split(/\s+/).map(Number)
+    expect(skylineAspectRatio(SKYLINE_WEEKS)).toBeCloseTo(w! / h!, 6)
   })
 })

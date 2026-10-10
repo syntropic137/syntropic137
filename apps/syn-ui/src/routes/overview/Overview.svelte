@@ -11,7 +11,7 @@
 -->
 <script lang="ts">
   import { formatCost, formatInteger, formatRelativeTime, formatTokens } from '@syn137/skyline-core/format'
-  import { dayFromMs, type SkylineDay } from '@syn137/skyline-core/geometry'
+  import { SKYLINE_WEEKS, dayFromMs, skylineAspectRatio, type SkylineDay } from '@syn137/skyline-core/geometry'
   import { outcomeStatus, runBarPercent, runSegments, runSlots, runSubline } from '@syn137/skyline-core/patterns'
   import {
     activeDayCount,
@@ -143,8 +143,13 @@
     ]
   })
 
+  // Reserve the phone Skyline's drawn height while the heatmap loads (Lighthouse CLS).
+  const SKYLINE_PHONE_ASPECT = skylineAspectRatio(SKYLINE_WEEKS)
+
   const isEmpty = $derived(!!metrics.data && !!runs.data && runs.data.total === 0 && metrics.data.total_sessions === 0)
-  const firstLoad = $derived(!metrics.data && !metrics.error)
+  // The headline and its chips read the runs too: hold the placeholder until both
+  // answer, so the lead changes height once rather than twice (Lighthouse CLS).
+  const firstLoad = $derived((!metrics.data && !metrics.error) || (!runs.data && !runs.error))
 
   function retry() {
     metrics.refresh()
@@ -177,8 +182,10 @@
       <div class="sky-ov-hero__lead">
         <div class="sky-ov-eyebrow"><span class="sky-ov-eyebrow__dot" data-state={live.state}></span>Right now</div>
         {#if firstLoad}
-          <Skeleton variant="title" width="14ch" label="Loading overview" />
-          <Skeleton variant="text" width="20ch" />
+          <div class="sky-ov-lead-skel">
+            <Skeleton variant="title" width="14ch" label="Loading overview" />
+            <Skeleton variant="text" width="20ch" />
+          </div>
         {:else}
           <h1>{headline.lead}<br /><span>{headline.follow}</span></h1>
         {/if}
@@ -221,7 +228,9 @@
           {#snippet action()}<Button variant="outline" size="sm" onclick={() => heatmap.refresh()}>Retry</Button>{/snippet}
         </Callout>
       {:else if !heatmap.data}
-        <Skeleton variant="block" height="11rem" label="Loading activity" />
+        <div class="sky-ov-chart-skel" style:--ov-skyline-aspect={SKYLINE_PHONE_ASPECT}>
+          <Skeleton variant="block" height="100%" label="Loading activity" />
+        </div>
       {:else if days.length === 0}
         <EmptyState title="No activity yet" description="Each day an agent works becomes a bar here." level={3} bare />
       {:else}
@@ -479,6 +488,8 @@
     color: var(--ds-color-text-subtle);
   }
   .sky-ov-stats dd {
+    /* One line of the figure while its skeleton shows (Lighthouse CLS). */
+    min-height: 1lh;
     margin: 0;
     font-size: var(--sky-text-figure);
     line-height: var(--ds-line-height-tight);
@@ -491,6 +502,36 @@
     flex-direction: column;
     gap: var(--ds-space-3);
     min-width: 0;
+    container-type: inline-size;
+  }
+  /*
+   * Placeholders that hold the loaded height (Lighthouse CLS 0.34-0.49 on a phone).
+   * The headline is two lines of hero type. The Skyline on a phone is its
+   * controls (38px), the chart at the drawn view box's aspect ratio plus its
+   * legend (24px), and the day readout card (18rem), with 0.75rem gaps; from
+   * the Skyline's wide break (720px of its own width, Skyline wideFrom) it is
+   * the controls (28px) over the 256px docked stage.
+   */
+  .sky-ov-lead-skel {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: var(--ds-space-3);
+    min-height: 2lh;
+    font-size: var(--sky-text-hero);
+    line-height: var(--ds-line-height-tight);
+  }
+  .sky-ov-chart-skel {
+    display: flex;
+    height: calc(38px + 24px + 18rem + 2 * var(--ds-space-3) + 100cqw / var(--ov-skyline-aspect));
+  }
+  .sky-ov-chart-skel > :global(.sky-skeleton) {
+    flex: 1 1 auto;
+  }
+  @container (min-width: 720px) {
+    .sky-ov-chart-skel {
+      height: calc(28px + 256px + var(--ds-space-3));
+    }
   }
   .sky-ov-cmd {
     padding: var(--ds-space-1) var(--ds-space-2);

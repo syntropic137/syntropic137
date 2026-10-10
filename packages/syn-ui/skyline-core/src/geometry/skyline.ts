@@ -175,6 +175,16 @@ export function projectSkylineDims(dims: SkylineDims): SkylineDims {
   }
 }
 
+/**
+ * Width over height of the drawn chart for `dims` (the projected view box), so a
+ * loading placeholder can reserve the chart's final height with `aspect-ratio`
+ * before the heatmap arrives (Lighthouse CLS on the Overview).
+ */
+export function skylineAspectRatio(dims: SkylineDims): number {
+  const vb = projectSkylineDims(dims).viewBox
+  return vb.width / vb.height
+}
+
 /** "2026-08-28" -> UTC epoch ms at midnight; NaN when malformed. */
 export function dayMs(key: string): number {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(key)
