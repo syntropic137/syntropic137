@@ -15,11 +15,12 @@ from syn_domain.contexts.agent_sessions import ObservationType, SessionSummaryDa
 from syn_domain.contexts.orchestration.slices.execute_workflow.announced_model import (
     announced_model_from,
 )
-from syn_shared.events import SESSION_SUMMARY
+from syn_shared.events import GIT_COMMIT, SESSION_SUMMARY
 from syn_shared.observed_model import OBSERVED_MODEL_KEY, REQUESTED_MODEL_KEY
 from syn_shared.pricing import cost_json_number
 
 if TYPE_CHECKING:
+    from syn_domain.contexts.orchestration._shared.shipped_recorder import ShippedRecorder
     from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
         ObservabilityRecorder,
     )
@@ -76,8 +77,12 @@ class ObservabilityCollector:
         phase_id: str,
         workspace_id: str | None,
         requested_model: str | None,
+        shipped: ShippedRecorder | None = None,
     ) -> None:
         self._writer = writer
+        #: What this phase shipped (commits, PRs it created), recorded once here
+        #: at ingestion into the shipped ledger. None: not recorded.
+        self._shipped = shipped
         self._session_id = session_id
         self._execution_id = execution_id
         self._phase_id = phase_id
@@ -208,6 +213,7 @@ class ObservabilityCollector:
         rerun would repeat (#1303).
         """
         self.note_agent_activity()
+        await self._note_shipped_commit(enriched.get("event_type"), enriched.get("context"))
         if self._writer is None:
             return
 
@@ -511,6 +517,7 @@ class ObservabilityCollector:
         a commit, a push - has already happened by the time one is seen.
         """
         self.note_agent_activity()
+        await self._note_shipped_commit(event_type, enriched.get("context"))
         if self._writer is None:
             return
 
@@ -522,3 +529,34 @@ class ObservabilityCollector:
             phase_id=self._phase_id,
             workspace_id=self._workspace_id,
         )
+
+    # --- What the phase shipped (the shipped ledger) ---------------------------
+
+    async def _note_shipped_commit(self, event_type: object, context: object) -> None:
+        """Hand a ``git_commit`` hook event's sha and repo to the shipped ledger."""
+        if self._shipped is None or event_type != GIT_COMMIT or not isinstance(context, dict):
+            return
+        git = context.get("git")
+        facts = git if isinstance(git, dict) else context
+        sha = facts.get("sha") or facts.get("commit_hash")
+        repo = facts.get("repo")
+        await self._shipped.commit_seen(str(sha) if sha else None, str(repo) if repo else None)
+
+    def note_command_started(self, tool_use_id: str, command: object) -> None:
+        """The FULL command of a shell tool call, for the shipped ledger's PR check."""
+        if self._shipped is not None:
+            self._shipped.command_started(tool_use_id, command)
+
+    async def note_command_finished(self, tool_use_id: str, success: bool, output: object) -> None:
+        """That call's success and FULL output: records the PR it created, if any."""
+        if self._shipped is not None:
+            await self._shipped.command_finished(
+                tool_use_id, success, str(output) if output else ""
+            )
+
+    async def note_command_ended(
+        self, tool_use_id: str, command: str, success: bool, output: str
+    ) -> None:
+        """A whole shell call at once, for harnesses that report it on completion."""
+        self.note_command_started(tool_use_id, command)
+        await self.note_command_finished(tool_use_id, success, output)

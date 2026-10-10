@@ -3,7 +3,7 @@
  * headline numbers, as drawn on the v4 Landing and PhoneLanding boards
  * (design/reference/gen_landing3.py, hero()).
  */
-import { SAMPLE_SESSIONS, sampleCityDays } from "@syn137/skyline-core/geometry";
+import { HERO_CITY_SAMPLE_SESSIONS, sampleHeroCityDays } from "@syn137/skyline-core/geometry";
 
 export interface CityLayout {
   cols: number;
@@ -19,8 +19,8 @@ export const CITY_DESKTOP: CityLayout = { cols: 26, rows: 11, cell: 36, live: [1
 export const CITY_PHONE: CityLayout = { cols: 16, rows: 8, cell: 30, live: [90, 101, 118], failed: [52], errored: [77] };
 
 const END = "2026-10-08";
-export const cityDays = (c: CityLayout) => sampleCityDays(c.cols, c.rows, END);
-export const CITY_MAX_SESSIONS = SAMPLE_SESSIONS;
+export const cityDays = (c: CityLayout) => sampleHeroCityDays(c.cols, c.rows, END);
+export const CITY_MAX_SESSIONS = HERO_CITY_SAMPLE_SESSIONS;
 
 export const HERO_CARDS = {
   run: { meta: "self-heal-ci · run #142", title: "Fixed the failing check on PR #311", detail: "Triggered by GitHub · 4m 10s · $0.31" },

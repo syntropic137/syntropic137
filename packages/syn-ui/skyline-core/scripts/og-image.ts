@@ -1,6 +1,6 @@
 /**
  * Social image (Open Graph / Twitter card): the S over the run city, from
- * the same geometry the page uses (isoCity() with the hero's sample days,
+ * the same geometry the page uses (heroCity() with the hero's sample days,
  * sMark()). Writes design/brand/og-image.svg (1200 x 630) and renders
  * design/brand/og-image.png with rsvg-convert.
  *
@@ -13,21 +13,21 @@ import { execFileSync } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { isoCity, SAMPLE_SESSIONS, sampleCityDays, sMark } from '../src/geometry/index.ts'
+import { heroCity, HERO_CITY_SAMPLE_SESSIONS, sampleHeroCityDays, sMark } from '../src/geometry/index.ts'
 import { ACCENT, CITY_FACES, cube, GROUND, S_FACES } from './brand.ts'
 
 const W = 1200
 const H = 630
 
 // The hero city (desktop board), seen from a little further back.
-const city = isoCity(sampleCityDays(26, 11, '2026-10-08'), {
+const city = heroCity(sampleHeroCityDays(26, 11, '2026-10-08'), {
   cols: 26,
   rows: 11,
   cell: 36,
   live: [150, 171, 199, 222],
   failed: [88, 260],
   errored: [141],
-  maxSessions: SAMPLE_SESSIONS,
+  maxSessions: HERO_CITY_SAMPLE_SESSIONS,
 })
 const cityScale = 1.4
 const cityX = (W - city.width * cityScale) / 2

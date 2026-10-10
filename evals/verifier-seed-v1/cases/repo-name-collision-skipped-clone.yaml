@@ -14,6 +14,13 @@ task: >
   script is safe to re-run. Executions may list repositories from several
   organisations.
 expected:
+  # The root cause, for the LLM judge only; never part of `task`.
+  defect: >
+    The setup-phase script clones each repo to /workspace/repos/<bare repo
+    name> behind `[ -d dest ] || git clone`, with no collision check, so two
+    repositories with the same name from different organisations map to one
+    directory: the second clone is silently skipped and the phase works in
+    (and can push to) the wrong org's code.
   files:
     - packages/syn-adapters/src/syn_adapters/workspace_backends/service/setup_phase_secrets.py
   keywords:

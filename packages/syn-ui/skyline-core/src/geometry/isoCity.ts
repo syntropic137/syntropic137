@@ -9,12 +9,11 @@
  * left. Activity is sessions over the busiest day, height
  * 3 + activity * cell * 2.6, opacity 0.28 + 0.72 * min(1, activity * 1.3).
  * Blocks come back in draw order (back to front, by diagonal then column),
- * with `wave` (the diagonal) for a staggered entrance. cityBlockPaint()
- * colours a block: glass (the opacity above) or solid.
+ * with `wave` (the diagonal) for a staggered entrance.
  */
 import { type IsoCube, isoCube } from './isoCube'
 import { addDays, type SkylineDay } from './skyline'
-import { extrudeColors } from './extrude'
+import { type IsoCityWindowInput, type IsoCityWindowLayout, isoCityWindow } from './isoCityWindow'
 
 /** run: a normal day; live: running now (pulses); failed: only failed runs; errored: mixed or scorer errors (amber). */
 export type CityTone = 'run' | 'live' | 'failed' | 'errored'
@@ -107,7 +106,19 @@ function cells(days: readonly SkylineDay[], o: IsoCityOptions): Cell[] {
 }
 
 /** Lay out the city for `days` (oldest first; the last cols * rows are shown). */
-export function isoCity(days: readonly SkylineDay[], options: IsoCityOptions): IsoCityLayout {
+export function isoCity(days: readonly SkylineDay[], options: IsoCityOptions): IsoCityLayout
+/** The Overview's scrolling city: `isoCity({ weeks, window, offset })` (isoCityWindow). */
+export function isoCity(input: IsoCityWindowInput): IsoCityWindowLayout
+export function isoCity(daysOrInput: readonly SkylineDay[] | IsoCityWindowInput, maybeOptions?: IsoCityOptions): IsoCityLayout | IsoCityWindowLayout {
+  if (!isDayList(daysOrInput)) return isoCityWindow(daysOrInput)
+  return heroCity(daysOrInput, maybeOptions ?? { cols: 0, rows: 0, cell: 0 })
+}
+
+function isDayList(v: readonly SkylineDay[] | IsoCityWindowInput): v is readonly SkylineDay[] {
+  return Array.isArray(v)
+}
+
+function heroCity(days: readonly SkylineDay[], options: IsoCityOptions): IsoCityLayout {
   const { cols, rows, cell } = options
   const hw = cell / 2
   const hh = cell / 4
@@ -190,38 +201,4 @@ export function sampleCityDays(cols: number, rows: number, end: string): Skyline
     date: addDays(end, k - (acts.length - 1)),
     sessions: Math.round(a * SAMPLE_SESSIONS),
   }))
-}
-
-/** Entrance stagger of a city block (seconds), by its diagonal: 0.15s plus 0.035s per wave, as on the board. */
-export function cityDelay(wave: number): number {
-  return Math.round((0.15 + wave * 0.035) * 100) / 100
-}
-
-/** Board pulse and flash start this long after a block's rise begins (seconds). */
-export const CITY_SIGNAL_DELAY = 1.6
-
-/**
- * How a block shows how busy its day was. 'glass' (the board) fades the
- * whole cube with `opacity`, so the blocks behind and the floor show
- * through. 'solid' keeps every face opaque and mixes it toward the ground
- * colour by the same share instead: quiet days read as dark, finished
- * blocks, with the top, front and side shading intact.
- */
-export type CityFill = 'glass' | 'solid'
-
-/** Face colours of one block, and the opacity of its group (1 when solid). */
-export interface CityBlockPaint {
-  front: string
-  side: string
-  top: string
-  opacity: number
-}
-
-/** Paint for a block of `tone` at `opacity` (CityBlock.opacity), as token expressions. */
-export function cityBlockPaint(tone: CityTone, opacity: number, fill: CityFill = 'glass'): CityBlockPaint {
-  const faces = extrudeColors(CITY_TONE_FILL[tone])
-  if (fill === 'glass') return { ...faces, opacity }
-  const share = Math.round(Math.min(1, Math.max(0, opacity)) * 100)
-  const mix = (c: string) => (share === 100 ? c : `color-mix(in oklab, ${c} ${share}%, var(--sky-color-ground-deep))`)
-  return { front: mix(faces.front), side: mix(faces.side), top: mix(faces.top), opacity: 1 }
 }

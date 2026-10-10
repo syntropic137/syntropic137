@@ -302,3 +302,32 @@ async def test_sync_failure_returns_empty_gracefully() -> None:
     assert result.value.repos == []
     # Empty because GitHub failed, not because the App reaches nothing.
     assert result.value.lookup == GitHubRepoLookup.UNAVAILABLE
+
+
+async def test_no_github_app_is_a_clean_not_configured_error() -> None:
+    """A fresh install with no GitHub App returned 500 from GET /github/repos
+    (release rehearsal 2026-10-10). The factory's refusal must map to a
+    NOT_CONFIGURED result, which the endpoint turns into a 503."""
+    from fastapi import HTTPException
+
+    from syn_adapters.github.client import GitHubNotConfiguredError
+    from syn_api.routes.github import list_accessible_repos_endpoint
+
+    with (
+        patch.object(github_routes, "ensure_connected", AsyncMock()),
+        patch(
+            "syn_adapters.github.client.get_github_client",
+            side_effect=GitHubNotConfiguredError(
+                "GitHub App not configured. Set SYN_GITHUB_APP_ID"
+            ),
+        ),
+    ):
+        result = await list_accessible_repos(installation_id="12345")
+        assert isinstance(result, Err)
+        assert result.error == GitHubError.NOT_CONFIGURED
+        assert "not configured" in result.message
+
+        with pytest.raises(HTTPException) as exc:
+            await list_accessible_repos_endpoint(installation_id="12345")
+        assert exc.value.status_code == 503
+        assert "not configured" in str(exc.value.detail)

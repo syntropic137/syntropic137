@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
-import { S_MARK_FACES, cityBlockPaint, isoCity, sMark, type CityFill } from "@syn137/skyline-core/geometry";
+import { S_MARK_FACES, cityBlockPaint, heroCity, sMark, type CityFill } from "@syn137/skyline-core/geometry";
 import GlassCard from "../components/GlassCard";
 import HarnessChip from "../components/HarnessChip";
 import InstallTerminal from "../components/InstallTerminal";
@@ -42,7 +42,7 @@ function MarkArt() {
 /** The city as static SVG, same geometry as <sky-iso-city> (shown until the element is defined). */
 function CityArt({ layout }: { layout: CityLayout }) {
   const city = useMemo(
-    () => isoCity(cityDays(layout), { ...layout, maxSessions: CITY_MAX_SESSIONS }),
+    () => heroCity(cityDays(layout), { ...layout, maxSessions: CITY_MAX_SESSIONS }),
     [layout],
   );
   return (

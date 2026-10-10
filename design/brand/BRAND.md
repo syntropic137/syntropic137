@@ -200,7 +200,7 @@ Full usage and fields: [`banners/README.md`](banners/README.md).
 
 ### Social image (Open Graph, Twitter card)
 
-[`og-image.png`](og-image.png) (1200 x 630, from [`og-image.svg`](og-image.svg)): the S over the run city, generated from `isoCity()` and `sMark()` by `pnpm --filter @syn137/skyline-core run og-image`. No text.
+[`og-image.png`](og-image.png) (1200 x 630, from [`og-image.svg`](og-image.svg)): the S over the run city, generated from `heroCity()` and `sMark()` by `pnpm --filter @syn137/skyline-core run og-image`. No text.
 
 ### Favicon and app icons
 

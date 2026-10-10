@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { usageModel } from '../../patterns/usage'
 import {
+  runDurationMs,
+  runDurationText,
   ageGroupTitle,
   calendarDaysAgo,
   evalBadge,
+  evalRowTag,
+  runRowSub,
   parseEvalFilter,
   phaseProgressText,
   isExecutionEvent,
@@ -25,6 +29,9 @@ import {
   phaseModelChip,
   phaseTokenSplit,
   provenanceFor,
+  phaseSkillUseText,
+  skillUseNote,
+  SKILL_USE_NOT_REPORTED,
   runIdentityText,
   shortPhaseName,
   shortRevision,
@@ -252,5 +259,87 @@ describe('eval marker and progress text', () => {
     expect(phaseProgressText('3 of up to 10, failed', 3, 10)).toBe('phases 3 of up to 10, failed')
     expect(phaseProgressText(null, 1, 3)).toBe('1 of 3 phases')
     expect(phaseProgressText(undefined, 0, 1)).toBe('0 of 1 phase')
+  })
+})
+
+describe('runDurationMs / runDurationText (feedback 5ed77fc5: durations froze until a refresh)', () => {
+  const started = Date.parse('2026-10-10T00:00:00Z')
+  it('a running run is measured from its start to now, so a ticking now moves it', () => {
+    const r = { status: 'running', started_at: '2026-10-10T00:00:00Z', duration_seconds: 10, duration_display: '10s' }
+    expect(runDurationMs(r, started + 50_000)).toBe(50_000)
+    expect(runDurationMs(r, started + 51_000)).toBe(51_000)
+    expect(runDurationText(r, started + 50_000)).not.toBe('10s')
+    expect(runDurationText(r, started + 50_000)).toBe(runDurationText(r, started + 50_000))
+  })
+  it('a finished run keeps the server duration and its display text', () => {
+    const r = { status: 'completed', started_at: '2026-10-10T00:00:00Z', duration_seconds: 10, duration_display: '10s' }
+    expect(runDurationMs(r, started + 50_000)).toBe(10_000)
+    expect(runDurationText(r, started + 50_000)).toBe('10s')
+  })
+  it('a running run with no start falls back to the server duration, then to a dash', () => {
+    expect(runDurationMs({ status: 'running', started_at: null, duration_seconds: 7 }, started)).toBe(7_000)
+    expect(runDurationText({ status: 'running', started_at: null, duration_seconds: null }, started)).toBe('\u2014')
+  })
+  it('a start in the future is not a negative duration', () => {
+    expect(runDurationMs({ status: 'running', started_at: '2026-10-10T00:00:00Z', duration_seconds: null }, started - 1000)).toBeNull()
+  })
+})
+
+describe('skill use (parity-2: the API reports it, so the screen must)', () => {
+  // exec-64e1d7e33b6a on the VPS, 2026-10-10: skill_use as the API returned it.
+  const use = {
+    declared: ['principles-and-patterns', 'architecture', 'purpose-and-scope', 'types', 'error-handling', 'testing', 'software-complexity', 'security', 'documentation'],
+    invoked: [
+      { name: 'architecture', count: 1 },
+      { name: 'claude-api', count: 1 },
+      { name: 'documentation', count: 1 },
+      { name: 'error-handling', count: 1 },
+      { name: 'principles-and-patterns', count: 1 },
+      { name: 'purpose-and-scope', count: 2 },
+      { name: 'types', count: 1 },
+    ],
+    never_invoked: [],
+    not_known: ['testing', 'software-complexity', 'security'],
+    summary_display: '9 skills declared · 6 invoked · 3 use unknown · 1 undeclared invoked',
+  }
+  const pinned = phase({ start_pins_status: 'recorded', pinned_at_start: { provider: 'claude', skills: [] } })
+
+  it('renders the API summary and names instead of "not reported"', () => {
+    const p = provenanceFor([pinned], null, use)
+    expect(p.note).toBe(
+      'Skills: 9 skills declared · 6 invoked · 3 use unknown · 1 undeclared invoked. ' +
+        'Invoked: architecture, claude-api (undeclared), documentation, error-handling, principles-and-patterns, purpose-and-scope (2 calls), types. ' +
+        'Use unknown: testing, software-complexity, security.',
+    )
+    expect(p.note).not.toContain('not reported')
+    expect(skillUseNote({ ...use, invoked: [], not_known: [], never_invoked: ['testing'] })).toContain('Never invoked: testing.')
+  })
+
+  it('says it is not reported only when the server sent no skill use', () => {
+    expect(provenanceFor([pinned], null).note).toBe(SKILL_USE_NOT_REPORTED)
+    expect(provenanceFor([phase()], null, null).note).toContain(SKILL_USE_NOT_REPORTED)
+    expect(provenanceFor([phase()], null, use).note).toMatch(/^This run started before start config was pinned.*Skills: 9 skills declared/)
+  })
+
+  it("shows a phase's own summary verbatim, and nothing when it has no skills", () => {
+    expect(phaseSkillUseText(phase({ skill_use: { status: 'observed', declared: ['a', 'b', 'c'], invoked: [{ name: 'a', count: 1 }], summary_display: '1 of 3 declared skills invoked' } }))).toBe('1 of 3 declared skills invoked')
+    expect(phaseSkillUseText(phase({ skill_use: { status: 'unavailable', declared: [], invoked: [], summary_display: 'skill use unavailable: no record for this run' } }))).toBeNull()
+    expect(phaseSkillUseText(phase())).toBeNull()
+  })
+})
+
+describe('executions list rows on live data (parity-2 #8)', () => {
+  // exec rows from /executions on the VPS, 2026-10-10.
+  it('keeps the API\'s "up to" in the progress line', () => {
+    const progress = { completed: 3, skipped: 0, possible: 8, remaining_possible: 5, percent: 38, display: '3 of up to 8, failed' }
+    expect(runRowSub('syntropic137/syntropic137', progress, 3, 8)).toBe('syntropic137/syntropic137 · phases 3 of up to 8, failed')
+    expect(runRowSub(null, null, 1, 3)).toBe('no repo · 1 of 3 phases')
+  })
+  it('shows the eval verdict on the chip', () => {
+    const live = { eval_id: 'eval-f41a', eval_name: 'verifier-seed: workflow-run-task-undeliverable', association_kind: 'launched', verdict: 'FAIL', score: 0, scored_at: '2026-10-09T23:25:41Z' }
+    expect(evalRowTag(live)).toMatchObject({ label: 'Eval · FAIL', href: '/evals/eval-f41a' })
+    expect(evalRowTag({ ...live, verdict: 'PASS' })?.label).toBe('Eval · PASS')
+    expect(evalRowTag({ ...live, verdict: null })?.label).toBe('Eval')
+    expect(evalRowTag(null)).toBeNull()
   })
 })

@@ -13,14 +13,14 @@ import type {
   EvalExplorerProps,
   HarnessChipProps,
   HarnessLanesProps,
-  IsoCityProps,
+  HeroCityProps,
   SMarkProps,
   ToolLogProps,
   UsageBandProps,
 } from '@syn137/skyline-core/patterns'
 
 export type SkySMarkProperties = SMarkProps
-export type SkyIsoCityProperties = IsoCityProps
+export type SkyIsoCityProperties = HeroCityProps
 export type SkyEvalExplorerProperties = EvalExplorerProps
 export type SkyHarnessChipProperties = HarnessChipProps
 export type SkyHarnessLanesProperties = HarnessLanesProps

@@ -21,6 +21,7 @@
     phaseMeta,
     phaseModelChip,
     phaseNumber,
+    phaseSkillUseText,
     phaseTokenSplit,
     phaseTokens,
     provenanceFor,
@@ -35,6 +36,7 @@
   import { ApiError, cancelExecution, getArtifact, getExecution, getSessionInventory } from '@syn137/syn-ui-data'
   import type { ArtifactResponse, PhaseExecutionDetail } from '@syn137/syn-ui-data/types'
   import { subscribeExecution } from '@syn137/syn-ui-data/live'
+  import { clock } from '../../lib/clock.svelte'
   import { resource } from '../../lib/load.svelte'
   import { setPage } from '../../lib/page.svelte'
   import { href } from '../../lib/router'
@@ -59,6 +61,8 @@
   })
 
   const live = $derived(!!exec.data && !statusSemantics(exec.data.status).terminal)
+  // The duration counts up while the run is live (feedback 5ed77fc5).
+  $effect(() => (live ? clock.hold() : undefined))
 
   // A running execution also listens on its own stream (throttled refetch).
   $effect(() => {
@@ -100,7 +104,7 @@
 
   const durationText = $derived.by(() => {
     if (!d) return '—'
-    const ms = durationBetween(d.started_at, d.completed_at ?? (live ? new Date().toISOString() : null))
+    const ms = durationBetween(d.started_at, d.completed_at ?? null, clock.now)
     return formatDuration(ms)
   })
 
@@ -124,7 +128,7 @@
   ])
 
   const caption = $derived(timelineCaption(phases))
-  const provenance = $derived(provenanceFor(phases, inventory.data))
+  const provenance = $derived(provenanceFor(phases, inventory.data, d?.skill_use))
   const tokens = $derived(
     d ? { cacheRead: d.total_cache_read_tokens, cacheWrite: d.total_cache_creation_tokens, output: d.total_output_tokens, input: d.total_input_tokens } : null,
   )
@@ -291,6 +295,7 @@
             {@const kit = phaseKit(p)}
             {@const total = phaseTokens(p)}
             {@const target = phaseRowTarget(p)}
+            {@const skills = phaseSkillUseText(p)}
             <li class="sky-exec__phase" data-linked={target.kind === 'session' ? '' : undefined} title={reasonOf(target)}>
               <div class="sky-exec__phase-head">
                 <span class="sky-exec__num">{phaseNumber(i)}</span>
@@ -320,6 +325,9 @@
                 </span>
                 <span class="sky-exec__split">{total > 0 ? phaseTokenSplit(p) : 'no tokens yet'}</span>
               </div>
+              {#if skills}
+                <p class="sky-exec__phase-skills">Skills: {skills}</p>
+              {/if}
               {#if p.error_message}
                 <p class="sky-exec__phase-error">{p.error_message}</p>
               {/if}
@@ -597,8 +605,15 @@
   }
   .sky-exec__phase-tokens,
   .sky-exec__phase > :global(.sky-exec__tiles),
+  .sky-exec__phase-skills,
   .sky-exec__phase-error {
     padding-left: 0;
+  }
+  .sky-exec__phase-skills {
+    margin: 0;
+    font-family: var(--ds-font-mono);
+    font-size: var(--ds-text-xs);
+    color: var(--ds-color-text-muted);
   }
   .sky-exec__phase-tokens {
     display: flex;
@@ -660,6 +675,7 @@
     }
     .sky-exec__phase-tokens,
     .sky-exec__phase > :global(.sky-exec__tiles),
+    .sky-exec__phase-skills,
     .sky-exec__phase-error {
       padding-left: 40px;
     }

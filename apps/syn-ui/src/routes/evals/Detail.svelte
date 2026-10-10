@@ -5,7 +5,7 @@
   import { PageHeader, VerdictBlock } from '@syn137/skyline-svelte-v5/patterns'
   import { formatCost, formatDateTime, formatDuration, formatRelativeTime } from '@syn137/skyline-core/format'
   import { normalizeVerdict } from '@syn137/skyline-core/patterns'
-  import { agentOfModel, averageEvalCost, evidenceFallback, parseEvidence, runModels, runOutcome, sameCaseVerifiers, tagValue, variantPassed, verdictWord } from '@syn137/skyline-core/screens/evals'
+  import { agentOfModel, evalFigures, evidenceFallback, parseEvidence, runModels, runOutcome, sameCaseVerifiers, tagValue, variantPassed, variantStats, verdictWord } from '@syn137/skyline-core/screens/evals'
   import { isRunFinished } from '@syn137/syn-ui-data/live'
   import { resource } from '../../lib/load.svelte'
   import { setPage } from '../../lib/page.svelte'
@@ -48,16 +48,7 @@
 
   const e = $derived(ev.data)
   const siblings = $derived(e && siblingsRes.data ? sameCaseVerifiers(e, siblingsRes.data.evals) : [])
-  const figures = $derived(
-    e
-      ? [
-          { label: 'Runs', value: String(e.run_count) },
-          { label: 'Scored', value: String(e.scored_count) },
-          { label: 'Pass rate', value: e.pass_rate_display },
-          { label: 'Avg cost', value: averageEvalCost(e.variants) },
-        ]
-      : [],
-  )
+  const figures = $derived(e ? evalFigures(e) : [])
   const runsPageCount = $derived(runs.data ? Math.max(1, Math.ceil(runs.data.total / RUNS_PAGE)) : 1)
 
   const errText = (x: unknown) => (x instanceof Error ? x.message : String(x))
@@ -157,11 +148,12 @@
       <div class="sky-eval__scroll">
         <table class="sky-eval__table" data-min="compare">
           <thead>
-            <tr><th scope="col">Workflow · version · models</th><th scope="col" data-num="">Passed</th><th scope="col">Pass rate</th><th scope="col" data-num="">Avg cost</th><th scope="col" data-num="">Last run</th></tr>
+            <tr><th scope="col">Workflow · version · models</th><th scope="col" data-num="">Passed</th><th scope="col">Pass rate</th><th scope="col" data-num="">Median time</th><th scope="col" data-num="">Median cost</th><th scope="col" data-num="">Last run</th></tr>
           </thead>
           <tbody>
             {#each e.variants ?? [] as v (`${v.workflow_id}@${v.workflow_version}|${v.models.join(',')}`)}
               {@const p = variantPassed(v)}
+              {@const st = variantStats(v)}
               <tr>
                 <td>
                   <span class="sky-eval__mono-strong">{v.workflow_id}{v.workflow_version ? ` · ${v.workflow_version}` : ''}</span>
@@ -174,7 +166,8 @@
                     <span data-muted={p.fill === null ? '' : undefined}>{v.pass_rate_display}</span>
                   </span>
                 </td>
-                <td data-num="">{v.avg_cost_display}</td>
+                <td data-num="">{st.duration}</td>
+                <td data-num="">{st.cost}</td>
                 <td data-num="" class="sky-eval__muted" title={v.last_run_at ?? undefined}>{formatRelativeTime(v.last_run_at)}</td>
               </tr>
             {/each}
@@ -438,6 +431,9 @@
     min-width: 35rem;
     border-collapse: collapse;
     font-size: var(--ds-text-sm);
+  }
+  .sky-eval__table[data-min='compare'] {
+    min-width: 40rem;
   }
   .sky-eval__table th {
     padding: 0 var(--ds-space-2) var(--ds-space-2-5);

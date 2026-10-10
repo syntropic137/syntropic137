@@ -6,8 +6,8 @@
   stage; any other light-DOM child is a pre-upgrade fallback.
 -->
 <script lang="ts">
-  import type { IsoCityProps } from '@syn137/skyline-core/patterns'
-  import IsoCity from '../patterns/IsoCity/IsoCity.svelte'
+  import type { HeroCityProps } from '@syn137/skyline-core/patterns'
+  import HeroCity from '../patterns/HeroCity/HeroCity.svelte'
   import { SLOT, hostAttachment, watchSlots } from './host'
 
   let {
@@ -23,7 +23,7 @@
     cell,
     maxSessions,
     label,
-  }: Partial<IsoCityProps> = $props()
+  }: Partial<HeroCityProps> = $props()
 
   let filled = $state(new Set<string>())
   const connect = hostAttachment((host) => watchSlots(host, (s) => (filled = s)), { block: true, motion: true })
@@ -31,7 +31,7 @@
 
 {#snippet overlaySlot()}<svelte:element this={SLOT} name="overlay" />{/snippet}
 
-<IsoCity
+<HeroCity
   {days}
   {live}
   {failed}

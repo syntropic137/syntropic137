@@ -22,6 +22,7 @@
         <div class="sky-readout__when">
           <span class="sky-readout__date">{r.dateLabel}</span>
           {#if position}<span class="sky-readout__pos">{position}</span>{/if}
+          {#if r.failed}<span class="sky-readout__failed">{r.failed}</span>{/if}
         </div>
         <button class="sky-readout__step" type="button" aria-label="Next active day" onclick={onnext}><Glyph d={GLYPH.chevronRight} weight={1.75} /></button>
       </div>
@@ -30,6 +31,7 @@
         <span class="sky-readout__date">{r.dateLabel}<span class="sky-readout__year">, {r.year}</span></span>
         {#if runsHref}<a class="sky-readout__runs" href={runsHref}>Runs →</a>{/if}
       </div>
+      {#if r.failed}<span class="sky-readout__failed">{r.failed}</span>{/if}
     {/if}
     <dl class="sky-readout__stats">
       <div><dt>Sessions</dt><dd data-accent>{r.sessions}</dd></div>
@@ -143,6 +145,19 @@
     font-family: var(--ds-font-mono);
     font-size: var(--ds-text-xs);
     color: var(--ds-color-text-subtle);
+  }
+  .sky-readout__failed {
+    align-self: flex-start;
+    padding: 2px var(--ds-space-2);
+    border-radius: var(--ds-radius-full);
+    background: var(--sky-color-danger-soft);
+    color: var(--sky-color-danger-soft-fg);
+    font-family: var(--ds-font-mono);
+    font-size: var(--ds-text-xs);
+  }
+  .sky-readout__when .sky-readout__failed {
+    align-self: center;
+    margin-top: var(--ds-space-1);
   }
   .sky-readout__stats {
     display: grid;

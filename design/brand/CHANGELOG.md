@@ -15,7 +15,7 @@ Versions follow semver: major for a new identity, minor for a new asset or surfa
 - **Tokens.** One palette, type scale and motion set in `packages/syn-ui/themes/src/` (`syn137.css`, `tokens.css`, `motion.css`), shared by every app.
 - **Blender hero.** The run city and the S, rendered in Blender (`design/reference/blender/build_hero.py`); alpha clip and 4K stills on the landing page; web cuts in `renders/`.
 - **README banners.** One per org repo, generated from `banners/repos.json`, with the animated edge train.
-- **Social image.** `og-image.png`: the S over the run city, generated from `isoCity()` and `sMark()`.
+- **Social image.** `og-image.png`: the S over the run city, generated from `heroCity()` and `sMark()`.
 - **Favicons and app icons** from the S: `favicon.svg`, `favicon-32x32.png`, `apple-touch-icon.png`, `icon-192.png`, `icon-512.png`.
 - **Self-hosted fonts.** Instrument Sans, JetBrains Mono and Orbitron as woff2 in `apps/syn-landing/public/fonts/`.
 - **Adoption.** The landing page (`apps/syn-landing`), the docs (`apps/syn-docs`) and the dashboard (`apps/syn-ui`) use the S mark, the tokens and the fonts.

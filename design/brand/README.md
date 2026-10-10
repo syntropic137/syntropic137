@@ -23,7 +23,7 @@ rsvg-convert -w 180 -h 180 app-icon.svg -o apple-touch-icon.png
 for s in 192 512; do rsvg-convert -w $s -h $s app-icon.svg -o icon-$s.png; done
 ```
 
-The social image (the S over the run city) is generated from `skyline-core`'s `isoCity()` (the hero's sample days) and `sMark()`, so it uses the same geometry as the page. Regenerate both files (needs `rsvg-convert`) from the repo root:
+The social image (the S over the run city) is generated from `skyline-core`'s `heroCity()` (the hero's sample days) and `sMark()`, so it uses the same geometry as the page. Regenerate both files (needs `rsvg-convert`) from the repo root:
 
 ```bash
 pnpm --filter @syn137/skyline-core run og-image

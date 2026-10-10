@@ -6,31 +6,31 @@
 -->
 <script lang="ts">
   import '@syn137/skyline-themes/motion.css'
-  import { EvalExplorer, HarnessChip, HarnessLanes, IsoCity, SMark, ToolLogTicker, UsageBand } from '@syn137/skyline-svelte-v5/patterns'
+  import { EvalExplorer, HarnessChip, HarnessLanes, HeroCity, SMark, ToolLogTicker, UsageBand } from '@syn137/skyline-svelte-v5/patterns'
   import {
     EVAL_EXPLORER_EXAMPLE,
     HARNESS_CHIP_EXAMPLES,
     HARNESS_LANES_EXAMPLES,
-    ISO_CITY_EXAMPLES,
+    HERO_CITY_EXAMPLES,
     S_MARK_EXAMPLES,
     TOOL_LOG_EXAMPLE_ROWS,
     USAGE_BAND_EXAMPLES,
   } from '@syn137/skyline-svelte-v5/examples'
 
-  const [heroDesktop, heroPhone] = ISO_CITY_EXAMPLES
+  const [heroDesktop, heroPhone] = HERO_CITY_EXAMPLES
   const [lanes, lanesShort] = HARNESS_LANES_EXAMPLES
   const [meterBand, landingBand, emptyBand] = USAGE_BAND_EXAMPLES
   let pick = $state<number | undefined>(undefined)
 </script>
 
 <section class="dev-landing" aria-labelledby="p-landing">
-  <h2 id="p-landing">Landing: S Mark and Iso City</h2>
+  <h2 id="p-landing">Landing: S Mark and Hero City</h2>
   <p class="dev-landing__note">Hero: the run city with the S rising from the middle. Blocks rise, live days pulse and failed days flash a few times, then everything stops.</p>
   {#if heroDesktop}
     <div class="dev-landing__hero">
-      <IsoCity {...heroDesktop.props}>
+      <HeroCity {...heroDesktop.props}>
         {#snippet overlay()}<div class="dev-landing__s"><SMark animate label="The Syntropic137 S, built from cubes" /></div>{/snippet}
-      </IsoCity>
+      </HeroCity>
     </div>
   {/if}
   <div class="dev-landing__row">
@@ -38,7 +38,7 @@
       <figure class="dev-landing__figure"><SMark {...e.props} /><figcaption>{e.name}</figcaption></figure>
     {/each}
     {#if heroPhone}
-      <figure class="dev-landing__figure dev-landing__phone"><IsoCity {...heroPhone.props} /><figcaption>{heroPhone.name}</figcaption></figure>
+      <figure class="dev-landing__figure dev-landing__phone"><HeroCity {...heroPhone.props} /><figcaption>{heroPhone.name}</figcaption></figure>
     {/if}
   </div>
 </section>

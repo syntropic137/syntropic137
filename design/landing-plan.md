@@ -143,7 +143,7 @@ Skyline is built on the upstream design system, not beside it:
 |---|---|---|
 | `geometry/isoCube.ts` (new, shared primitive) | `isoCube({x, y, size, height, tone}) → {top, left, right}` polygon point strings | Refactor the verdict blocks, object icons, phase blocks and `extrude` onto it, so one cube shape serves the whole brand. |
 | `geometry/sMark.ts` (new) | `sMark(cubeSize) → cubes[]` with tone `blue`/`dark`/`glass` and a draw order | Grid `BBG / B.. / DDD / ..D / DDD`, cubes in one vertical plane running down-right. Port `s_mark()` from `design/reference/gen_landing3.py`. |
-| `geometry/isoCity.ts` (new) | `isoCity(days[], {cols, rows, cell}) → blocks[]`: height from activity, tone from status, draw order, viewBox | Port `city()` from `design/reference/gen_landing2.py`. Driven by the same per-day series as the Overview skyline. |
+| `geometry/heroCity.ts` (new) | `heroCity(days[], {cols, rows, cell}) → blocks[]`: height from activity, tone from status, draw order, viewBox | Port `city()` from `design/reference/gen_landing2.py`. Driven by the same per-day series as the Overview skyline. |
 | `screens/evals/ranking.ts` (new) | Ranks verifiers by quality per dollar and writes the one-line verdict ("Up 15 points… and $0.17 cheaper per run") | Port `EXPLORER_JS` from `design/reference/gen_landing3.py`. Reused by the app's Evals list. |
 | `format/` | Add `pointsPerDollar` and signed deltas ("+24 pts", "−$0.11") | Extend; don't duplicate. |
 
@@ -164,7 +164,7 @@ New shared patterns go in `src/patterns/`, and each is exported as a custom elem
 | Pattern | Element | Props (minimum) | Used by |
 |---|---|---|---|
 | `SMark` | `sky-s-mark` | `size`, `animate`, `label` | Landing nav, hero and footer; the app's top nav, phone top bar and empty states |
-| `IsoCity` | `sky-iso-city` | `days`, `live`, `failed`, `errored`, `animate`, `drift` | Landing hero; an optional Overview header in the app later |
+| `HeroCity` | `sky-iso-city` | `days`, `live`, `failed`, `errored`, `animate`, `drift` | Landing hero (the Overview has its own interactive `IsoCity`) |
 | `EvalExplorer` | `sky-eval-explorer` | `verifiers` (name, colour, score series, cost series), `passAt`, `judge`, `selected` | Landing pillar 04; a compact mode on the app's Evals list |
 | `HarnessChip` | `sky-harness-chip` | `provider`, `label` | Landing; the app's Execution, Workflow and Session pages |
 | `HarnessLanes` | `sky-harness-lanes` | `phases` (name, provider, span) | Landing pillar 02; the Workflow detail header in the app |
@@ -271,7 +271,7 @@ These are the landing page's existing gates, now run by `syn-landing.yml` in the
 ## 9. Answers (2026-10-09)
 
 1. UI text: Instrument Sans.
-2. Social image: the S over the run city, generated from `skyline-core`'s `sMark()` and `isoCity()` (lands with P2, not P0).
+2. Social image: the S over the run city, generated from `skyline-core`'s `sMark()` and `heroCity()` (lands with P2, not P0).
 3. docs.syntropic137.com home: redirect to `/docs/guide/getting-started`.
 4. Open: eval explorer reads `sample.ts` for now.
 

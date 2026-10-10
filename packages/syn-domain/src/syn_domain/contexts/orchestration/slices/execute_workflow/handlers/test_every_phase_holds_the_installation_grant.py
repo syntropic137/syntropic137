@@ -192,6 +192,8 @@ async def _provision(phase: ExecutablePhase) -> _Provisioned:
     workspace.proxy_url = "http://envoy:10000"
     workspace.workspace_id = "ws-1197"
     workspace.run_setup_phase = AsyncMock(return_value=MagicMock(exit_code=0))
+    # A real outcome, not a MagicMock whose truthy timed_out reads as a timeout.
+    workspace.execute = AsyncMock(return_value=MagicMock(exit_code=0, timed_out=False, stdout=""))
     workspace.inject_files = AsyncMock()
 
     workspace_cm = AsyncMock()

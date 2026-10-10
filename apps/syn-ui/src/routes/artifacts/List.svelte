@@ -8,8 +8,8 @@
   import { formatBytes, formatInteger, formatRelativeTime, shortId } from '@syn137/skyline-core/format'
   import { Button, Callout, EmptyState, Input, Pagination, Skeleton, ToggleGroup } from '@syn137/skyline-svelte-v5'
   import { PageHeader } from '@syn137/skyline-svelte-v5/patterns'
-  import { artifactGlyph, artifactName } from '@syn137/skyline-core/screens/artifacts'
-  import { ApiError, listArtifacts } from '@syn137/syn-ui-data'
+  import { artifactGlyph, artifactName, groupArtifactsByRun, groupFileCount } from '@syn137/skyline-core/screens/artifacts'
+  import { ApiError, countArtifactsByExecution, listArtifacts } from '@syn137/syn-ui-data'
   import type { ArtifactSummary } from '@syn137/syn-ui-data/types'
   import { isArtifactEvent, isRunEvent } from '@syn137/syn-ui-data/live'
   import { resource } from '../../lib/load.svelte'
@@ -72,27 +72,14 @@
     return 'execution_id' in a && typeof a.execution_id === 'string' ? a.execution_id : null
   }
 
-  interface Group {
-    key: string
-    workflow: string
-    exec: string | null
-    when: string | null
-    files: ArtifactSummary[]
-  }
+  const groups = $derived(groupArtifactsByRun(rows.map((a) => ({ ...a, execution_id: execOf(a) }))))
 
-  const groups = $derived.by((): Group[] => {
-    const out = new Map<string, Group>()
-    for (const a of rows) {
-      const exec = execOf(a)
-      const key = exec ?? a.workflow_id ?? 'unattributed'
-      let g = out.get(key)
-      if (!g) {
-        g = { key, workflow: a.workflow_id ?? 'No workflow', exec, when: a.created_at, files: [] }
-        out.set(key, g)
-      }
-      g.files.push(a)
-    }
-    return [...out.values()]
+  // Each run group counts the run (API total under the same filter), not its share of this page.
+  const runTotals = resource((signal) => {
+    const ids = groups.flatMap((g) => (g.exec ? [g.exec] : []))
+    const query = { q: q || undefined }
+    const scope = { artifact_type: type === 'all' ? undefined : type }
+    return ids.length ? countArtifactsByExecution(ids, query, scope, signal) : Promise.resolve({} as Record<string, number>)
   })
 
   const titleOf = (a: ArtifactSummary) => a.title || shortId(a.id)
@@ -219,7 +206,7 @@
               {:else}
                 <span class="sky-arts__group-name">{g.workflow}</span>
               {/if}
-              <span class="sky-arts__mono">{g.files.length} {g.files.length === 1 ? 'file' : 'files'}</span>
+              <span class="sky-arts__mono">{groupFileCount(g.files.length, g.exec ? runTotals.data?.[g.exec] : null)}</span>
               <span class="sky-arts__rule" aria-hidden="true"></span>
               {#if g.when}<span class="sky-arts__mono">{formatRelativeTime(g.when)}</span>{/if}
             </div>

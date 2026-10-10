@@ -1,3 +1,4 @@
+import './fonts.css'
 import '@syn137/skyline-themes/all.css'
 import '@syn137/skyline-svelte-v5/styles.css'
 import './app.css'

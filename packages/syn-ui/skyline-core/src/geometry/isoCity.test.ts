@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { SAMPLE_SESSIONS, cityActivitySample, cityBlockPaint, extrudeColors, isoCity, sampleCityDays, type SkylineDay } from './index'
+import { SAMPLE_SESSIONS, cityActivitySample, isoCity, sampleCityDays, type SkylineDay } from './index'
 
 /** Every coordinate of two point strings within `tol`. */
 function close(actual: string, expected: string, tol = 0.11) {
@@ -83,24 +83,5 @@ describe('isoCity from real days', () => {
   it('samples deterministically', () => {
     expect(cityActivitySample(3, 2)).toEqual(cityActivitySample(3, 2))
     expect(Math.max(...cityActivitySample(26, 11))).toBeLessThanOrEqual(1)
-  })
-})
-
-describe('cityBlockPaint', () => {
-  it('glass (the board) keeps the extruded faces and fades the block', () => {
-    expect(cityBlockPaint('run', 0.4)).toEqual({ ...extrudeColors('var(--ds-color-accent)'), opacity: 0.4 })
-  })
-
-  it('solid keeps the block opaque and mixes each face toward the ground by the same share', () => {
-    const p = cityBlockPaint('failed', 0.4, 'solid')
-    const faces = extrudeColors('var(--sky-status-failed)')
-    expect(p.opacity).toBe(1)
-    expect(p.front).toBe(`color-mix(in oklab, ${faces.front} 40%, var(--sky-color-ground-deep))`)
-    expect(p.top).toBe(`color-mix(in oklab, ${faces.top} 40%, var(--sky-color-ground-deep))`)
-    expect(p.side).toBe(`color-mix(in oklab, ${faces.side} 40%, var(--sky-color-ground-deep))`)
-  })
-
-  it('solid leaves a full-activity block as extruded', () => {
-    expect(cityBlockPaint('live', 1, 'solid')).toEqual({ ...extrudeColors('var(--ds-color-accent)'), opacity: 1 })
   })
 })

@@ -26,6 +26,8 @@ from typing import TYPE_CHECKING
 from syn_api.types import ReadModelStatus
 
 if TYPE_CHECKING:
+    from collections.abc import Collection
+
     from syn_adapters.subscriptions.read_model_lag import ProjectionLag, ReadModelLag
 
 logger = logging.getLogger(__name__)
@@ -118,3 +120,30 @@ async def read_model_status(projection: str) -> ReadModelStatus:
         )
         lag = None
     return judge_read_model_status(lag, projection)
+
+
+async def read_models_rebuilding(projections: Collection[str]) -> str | None:
+    """Why any of ``projections`` may be incomplete now, or None when none can be.
+
+    For a caller that DELETES on what a read model says, so it fails closed
+    where `read_model_status` fails open: no subscription, or a probe that
+    failed or hung, is a reason. And a projection with no checkpoint is
+    rebuilding at any distance, not only past ``LIVE_LAG_THRESHOLD``:
+    `rebuild_projection` deletes the checkpoint and clears the data while the
+    coordinator stays live, and on a small store that is fewer events behind.
+    """
+    from syn_api.services.lifecycle import _state
+
+    service = _state.subscription_service
+    if service is None:
+        return "no subscription service to ask whether read models are rebuilding"
+    try:
+        lag = await asyncio.wait_for(service.describe_read_model_lag(), timeout=_PROBE_TIMEOUT_S)
+    except Exception as exc:
+        return f"read model lag probe failed ({type(exc).__name__}: {exc})"
+    if lag is None:
+        return "read model lag is not known yet"
+    for entry in lag.lagging_projections:
+        if entry.projection in projections and (_is_rebuilding(entry) or entry.position == 0):
+            return f"{entry.projection} is rebuilding ({entry.lag} events behind)"
+    return None

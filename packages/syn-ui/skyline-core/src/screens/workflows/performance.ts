@@ -13,7 +13,7 @@ import { changeNotes, compactTokens, minutesSeconds, shortDay, type DefinitionCh
 
 /** Runs the Success line averages over. */
 export const SUCCESS_WINDOW = 5
-/** Completed runs averaged on each side of a summary card's comparison. */
+/** Completed runs on each side of a summary card's trend (latest N against first N). */
 export const KPI_WINDOW = 3
 /** Path height the chart lines are drawn for. */
 export const PERF_VIEW_HEIGHT = 200
@@ -234,8 +234,6 @@ const PERF: Record<PerfMetric, MetricDef> = {
   },
 }
 
-const avg = (xs: readonly number[]) => (xs.length ? xs.reduce((a, v) => a + v, 0) / xs.length : 0)
-
 export function median(xs: readonly number[]): number {
   if (!xs.length) return 0
   const s = [...xs].sort((a, b) => a - b)
@@ -258,7 +256,12 @@ function kpi(label: string, now: number, then: number, fmt: (v: number) => strin
   return { label, value: fmt(now), delta: zero ? 'no change' : `${signOf(diff)}${shown} ${since}`, ...(zero ? { word: 'Flat' as const, tone: 'neutral' as const } : judge(diff, better)) }
 }
 
-/** The four summary cards: latest window against the first one. */
+/**
+ * The four summary cards. Each value is the median over every completed run
+ * the trend gave (parity-2: it was the last three, labelled as the
+ * workflow's); the delta is the trend, the latest KPI_WINDOW completed runs
+ * against the first KPI_WINDOW, and says so.
+ */
 export function perfKpis(runs: readonly PerfRun[]): PerfKpi[] {
   const finished = runs.filter((r) => r.outcome !== 'other')
   const done = runs.filter((r) => r.counted)
@@ -267,11 +270,16 @@ export function perfKpis(runs: readonly PerfRun[]): PerfKpi[] {
   const fresh = done.length < KPI_WINDOW * 2
   const okNow = finished.at(-1)?.ok ?? 0
   const okThen = finished[Math.min(SUCCESS_WINDOW, finished.length) - 1]?.ok ?? okNow
+  const since = `(latest ${KPI_WINDOW} vs first ${KPI_WINDOW})`
+  const card = (label: string, of: (r: PerfRun) => number, fmt: (v: number) => string) => {
+    const k = kpi(label, median(last.map(of)), median(first.map(of)), fmt, 'down', since, fmt, fresh)
+    return { ...k, value: fmt(median(done.map(of))) }
+  }
   return [
     kpi(`Success, last ${SUCCESS_WINDOW}`, okNow, okThen, pct, 'up', `vs first ${SUCCESS_WINDOW} runs`, (v) => `${Math.round(v)} pts`, finished.length <= SUCCESS_WINDOW),
-    kpi('Median duration', median(last.map((r) => r.seconds)), median(first.map((r) => r.seconds)), minutesSeconds, 'down', 'vs first runs', minutesSeconds, fresh),
-    kpi('Cost per run', avg(last.map((r) => r.cost)), avg(first.map((r) => r.cost)), cost3, 'down', 'vs first runs', cost3, fresh),
-    kpi('Tokens per run', avg(last.map((r) => r.tokens)), avg(first.map((r) => r.tokens)), compactTokens, 'down', 'vs first runs', compactTokens, fresh),
+    card('Median duration', (r) => r.seconds, minutesSeconds),
+    card('Median cost', (r) => r.cost, cost3),
+    card('Median tokens', (r) => r.tokens, compactTokens),
   ]
 }
 

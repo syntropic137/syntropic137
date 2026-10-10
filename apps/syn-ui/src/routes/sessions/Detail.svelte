@@ -10,7 +10,7 @@
 -->
 <script lang="ts">
   import { untrack } from 'svelte'
-  import { formatDurationPrecise, formatInteger, formatTokens } from '@syn137/skyline-core/format'
+  import { formatInteger, formatTokens } from '@syn137/skyline-core/format'
   import {
     agentLabel,
     costByModelRows,
@@ -24,6 +24,7 @@
     revealCount,
     sessionCost,
     sessionCrumbs,
+    sessionDurationText,
     sessionOperations,
     sessionPollMs,
     sessionTokens,
@@ -152,7 +153,7 @@
   const figures = $derived(
     s
       ? [
-          { label: 'Duration', value: s.duration_seconds === null ? '—' : formatDurationPrecise(s.duration_seconds * 1000).replace(/\.0s$/, 's') },
+          { label: 'Duration', value: sessionDurationText(s) },
           { label: 'Cost', value: cost?.display ?? '—' },
           { label: 'Tool calls', value: formatInteger(countToolCalls(rows)) },
           { label: 'Tokens', value: formatTokens(s.total_tokens, { case: 'upper' }) },

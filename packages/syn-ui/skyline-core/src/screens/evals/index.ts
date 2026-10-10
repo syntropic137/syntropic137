@@ -7,6 +7,7 @@
  * API's EvalResponse and EvalRunResponse satisfy them.
  */
 import { formatCost } from '../../format/cost'
+import { UNKNOWN } from '../../format/shared'
 import { normalizeVerdict, type Verdict, type VerdictCase, type VerdictCell, type VerdictMatrix, type Verifier, cellKey } from '../../patterns/verdict'
 
 export interface EvalVariantLike {
@@ -98,6 +99,11 @@ export interface BoardOptions {
    * cost. Absent, cells fall back to the variant's median cost.
    */
   costOf?: (evalId: string, workflowId: string) => number | null | undefined
+  /**
+   * The cell's duration in ms: the latest run's (`latestRuns`), so every
+   * verifier column's footer has an average time, not only the selected one.
+   */
+  durationOf?: (evalId: string, workflowId: string) => number | null | undefined
 }
 
 /** An /executions row as the board reads it (structural: the API row satisfies it). */
@@ -105,6 +111,8 @@ export interface EvalExecutionLike {
   workflow_id: string
   started_at?: string | null
   total_cost_usd?: number | string | null
+  /** Wall clock, as the Executions list shows it. */
+  duration_seconds?: number | null
   eval?: { eval_id: string } | null
 }
 
@@ -113,17 +121,30 @@ export function evalRunKey(evalId: string, workflowId: string): string {
   return `${evalId}\u0000${workflowId}`
 }
 
-/** Each (eval, workflow)'s newest run cost, from the eval executions (any order). */
-export function latestRunCosts(rows: readonly EvalExecutionLike[]): Map<string, number | null> {
-  const newest = new Map<string, { at: number; cost: number | null }>()
+/** One (eval, workflow)'s newest run, as the board cell reads it. */
+export interface LatestRun {
+  costUsd: number | null
+  durationMs: number | null
+}
+
+/** Each (eval, workflow)'s newest run cost and duration, from the eval executions (any order). */
+export function latestRuns(rows: readonly EvalExecutionLike[]): Map<string, LatestRun> {
+  const newest = new Map<string, { at: number; run: LatestRun }>()
   for (const row of rows) {
     if (!row.eval) continue
     const key = evalRunKey(row.eval.eval_id, row.workflow_id)
     const at = time(row.started_at) ?? 0
     const prev = newest.get(key)
-    if (!prev || at > prev.at) newest.set(key, { at, cost: toNum(row.total_cost_usd ?? null) })
+    const secs = row.duration_seconds
+    if (!prev || at > prev.at)
+      newest.set(key, { at, run: { costUsd: toNum(row.total_cost_usd ?? null), durationMs: typeof secs === 'number' && Number.isFinite(secs) && secs >= 0 ? secs * 1000 : null } })
   }
-  return new Map([...newest].map(([k, v]) => [k, v.cost]))
+  return new Map([...newest].map(([k, v]) => [k, v.run]))
+}
+
+/** Each (eval, workflow)'s newest run cost, from the eval executions (any order). */
+export function latestRunCosts(rows: readonly EvalExecutionLike[]): Map<string, number | null> {
+  return new Map([...latestRuns(rows)].map(([k, v]) => [k, v.costUsd]))
 }
 
 /** One (case, workflow) result before it is placed on the board. */
@@ -295,7 +316,8 @@ function placeCell(board: EvalBoardModel, key: string, entry: BoardEntry, option
   board.evalIds[key] = entry.e.eval_id
   board.workflows[key] = entry.workflow
   const costUsd = options.costOf ? (options.costOf(entry.e.eval_id, entry.workflow) ?? null) : entry.costUsd
-  board.cells[key] = { verdict: entry.verdict, costUsd, runs: entry.runs, evalHref: options.evalHref?.(entry.e.eval_id) }
+  const durationMs = options.durationOf?.(entry.e.eval_id, entry.workflow) ?? undefined
+  board.cells[key] = { verdict: entry.verdict, costUsd, runs: entry.runs, evalHref: options.evalHref?.(entry.e.eval_id), ...(durationMs === undefined || durationMs === null ? {} : { durationMs }) }
 }
 
 /** "verifier-seed-v1 v2: shared-esp-stream" -> "verifier-seed-v1 · v2". */
@@ -598,6 +620,46 @@ export function averageEvalCost(variants: readonly { run_count: number; avg_cost
   return n === 0 ? formatCost(null) : formatCost(sum / n)
 }
 
+/** An eval's or variant's run stats (API `EvalRunStatsResponse`): the display strings, rendered verbatim. */
+export interface EvalRunStatsLike {
+  median_duration_display: string
+  median_cost_display: string
+  cost_per_pass_display: string
+}
+
+/** The fields the eval header reads (structural: the API's EvalResponse satisfies it). */
+export interface EvalFiguresInput {
+  run_count: number
+  scored_count?: number | null
+  pass_rate_display?: string | null
+  stats?: EvalRunStatsLike | null
+}
+
+/**
+ * The eval header's figures: runs, scored, pass rate, then the API's own
+ * median duration, median cost and cost per pass over every current run
+ * (parity-2: these were dropped for a client-side average cost).
+ */
+export function evalFigures(e: EvalFiguresInput): { label: string; value: string }[] {
+  const figures = [
+    { label: 'Runs', value: String(e.run_count) },
+    { label: 'Scored', value: String(e.scored_count ?? 0) },
+    { label: 'Pass rate', value: e.pass_rate_display || UNKNOWN },
+  ]
+  if (!e.stats) return figures
+  return [
+    ...figures,
+    { label: 'Median duration', value: e.stats.median_duration_display },
+    { label: 'Median cost', value: e.stats.median_cost_display },
+    { label: 'Cost per pass', value: e.stats.cost_per_pass_display },
+  ]
+}
+
+/** A variant row's median duration and cost, from the API's stats; a dash for a server without them. */
+export function variantStats(v: { stats?: EvalRunStatsLike | null }): { duration: string; cost: string } {
+  return { duration: v.stats?.median_duration_display ?? UNKNOWN, cost: v.stats?.median_cost_display ?? UNKNOWN }
+}
+
 /** Default scorer evidence when the run has none. */
 export function evidenceFallback(verdict: Verdict): string {
   switch (verdict) {
@@ -634,7 +696,8 @@ export function withLatestRun(cell: VerdictCell | undefined, run: (EvalRunLike &
     ...cell,
     verdict,
     costUsd: toNum(run.total_cost_usd) ?? cell.costUsd,
-    durationMs: typeof run.duration_seconds === 'number' ? run.duration_seconds * 1000 : cell.durationMs,
+    // The board's own duration wins, so the column footer does not move when a cell is selected.
+    durationMs: cell.durationMs ?? (typeof run.duration_seconds === 'number' ? run.duration_seconds * 1000 : undefined),
     evidence: evidenceSummary(run.evidence_excerpt) ?? evidenceFallback(verdict),
     ...extra,
   }

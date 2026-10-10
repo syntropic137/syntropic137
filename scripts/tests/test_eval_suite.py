@@ -17,12 +17,13 @@ import os
 import shutil
 import subprocess
 import sys
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass, field, replace
 from decimal import Decimal
 from pathlib import Path
 
 import httpx
 import pytest
+from pydantic import SecretStr
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -39,6 +40,7 @@ from eval_suite import (
     LoadedSuite,
     Score,
     ScoredRun,
+    blocking_findings,
     check_commits,
     install_provenance,
     launch_suite,
@@ -71,6 +73,7 @@ from syn_shared.agents import (
     resolve_model_alias,
 )
 from syn_shared.pricing import resolve_model_pricing
+from syn_shared.settings.config import Settings
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -433,6 +436,7 @@ def test_check_refuses_a_file_absent_at_the_pin(
 _EXPECTED = Expected(
     files=("packages/syn-adapters/src/syn_adapters/storage/artifact_storage/minio.py",),
     keywords=(("key",), ("404", "not found")),
+    defect="upload() keys an object by execution id but download() reads the id-only key, so it 404s.",
 )
 
 
@@ -2873,3 +2877,260 @@ def test_a_report_verdict_the_engine_did_not_record_is_only_a_warning() -> None:
     )
     # The score is the engine's, whatever the report says.
     assert run_verdict("completed", score_case(_case(_CASE), None, _FINDING)) == "ERROR"
+
+
+# ---------------------------------------------------------------------------
+# Judges: keyword (deterministic, unchanged) and LLM (fake model, no network)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _FakeModel:
+    """A `ModelClient` that answers with a canned reply and records what it was asked."""
+
+    reply: str
+    calls: list[dict[str, str]] = field(default_factory=list)
+
+    def complete(self, *, model: str, system: str, prompt: str) -> str:
+        self.calls.append({"model": model, "system": system, "prompt": prompt})
+        return self.reply
+
+
+def _reply(verdict: str, quote: str = "", reason: str = "r") -> str:
+    return json.dumps({"verdict": verdict, "quote": quote, "reason": reason})
+
+
+# The seeded defect, said in words the keyword judge does not know.
+_PARAPHRASED = _report(
+    (
+        "minio.py:212",
+        "download() derives the object path without the execution prefix, "
+        "so every fetch misses the object written by upload().",
+    )
+)
+_PARAPHRASE_QUOTE = "derives the object path without the execution prefix"
+# A real but DIFFERENT bug in the same file: the calibration case for precision.
+_OTHER_BUG = _report(("minio.py:88", "list_objects() is not paginated past 1000 entries."))
+
+
+@pytest.mark.unit
+def test_the_keyword_judge_is_unchanged_when_no_llm_judge_is_given() -> None:
+    case = _case(_CASE)
+    for report in (_FINDING, _PARAPHRASED, _OTHER_BUG):
+        assert score_case(case, "blocked", report) == score_report(case.expected, "blocked", report)
+    assert score_case(case, "blocked", _PARAPHRASED).llm is None
+    assert not score_case(case, "blocked", _PARAPHRASED).passed
+
+
+@pytest.mark.unit
+def test_keyword_judge_answers_as_score_report_does() -> None:
+    judge = eval_suite.KeywordJudge()
+    assert judge.judge(_EXPECTED, blocking_findings(_FINDING)).verdict == "match"
+    assert judge.judge(_EXPECTED, blocking_findings(_PARAPHRASED)).verdict == "no_match"
+
+
+@pytest.mark.unit
+def test_llm_judge_credits_a_paraphrase_the_keyword_judge_misses() -> None:
+    model = _FakeModel(_reply("match", _PARAPHRASE_QUOTE, "same root cause"))
+    score = score_case(_case(_CASE), "blocked", _PARAPHRASED, eval_suite.LlmJudge(model))
+
+    assert not score.matched
+    assert score.llm is not None and score.llm.verdict == "match"
+    assert score.llm.quote == _PARAPHRASE_QUOTE
+    assert score.passed and score.caught
+    [call] = model.calls
+    assert call["model"] == eval_suite.JUDGE_MODEL
+    assert "minio.py" in call["prompt"] and _PARAPHRASE_QUOTE in call["prompt"]
+
+
+@pytest.mark.unit
+def test_an_unclear_llm_answer_is_not_caught() -> None:
+    model = _FakeModel(_reply("unclear"))
+    score = score_case(_case(_CASE), "blocked", _PARAPHRASED, eval_suite.LlmJudge(model))
+    assert score.llm is not None and score.llm.verdict == "unclear"
+    assert not score.passed
+
+
+@pytest.mark.unit
+def test_a_match_quoting_text_no_finding_holds_is_unclear() -> None:
+    model = _FakeModel(_reply("match", "download keys by id only and 404s"))
+    judgement = eval_suite.LlmJudge(model).judge(_EXPECTED, blocking_findings(_OTHER_BUG))
+    assert judgement.verdict == "unclear"
+    assert judgement.quote == ""
+
+
+@pytest.mark.unit
+def test_calibration_a_different_bug_in_the_same_file_is_not_credited() -> None:
+    """Precision: the judge must answer the model's no_match, never credit by default.
+
+    Mutation check: make `LlmJudge.judge` return `match` unconditionally and this fails.
+    """
+    model = _FakeModel(_reply("no_match", reason="pagination, not the download key"))
+    score = score_case(_case(_CASE), "blocked", _OTHER_BUG, eval_suite.LlmJudge(model))
+    assert score.llm is not None and score.llm.verdict == "no_match"
+    assert not score.caught and not score.passed
+
+
+@pytest.mark.unit
+def test_llm_judge_is_not_asked_about_a_run_that_did_not_block() -> None:
+    model = _FakeModel(_reply("match", _PARAPHRASE_QUOTE))
+    score = score_case(_case(_CASE), "certified", _PARAPHRASED, eval_suite.LlmJudge(model))
+    assert score.llm is None and not model.calls
+
+
+@pytest.mark.unit
+def test_an_unreadable_llm_reply_raises_rather_than_scoring() -> None:
+    with pytest.raises(eval_suite.JudgeError, match="no readable verdict"):
+        eval_suite.LlmJudge(_FakeModel("I think it matches")).judge(
+            _EXPECTED, blocking_findings(_PARAPHRASED)
+        )
+
+
+@pytest.mark.unit
+def test_llm_judged_score_is_recorded_under_the_judges_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(globals(), "_FINDING", _PARAPHRASED)
+    loaded = load_suite(DEFAULT_SUITE)
+    server = _Server(loaded)
+    model = _FakeModel(_reply("match", _PARAPHRASE_QUOTE))
+
+    rows, _ = score_suite(loaded, server.client(), [_LAUNCHED], eval_suite.LlmJudge(model))
+
+    [(_, body)] = server.scores
+    assert body["scorer_version"] == "6+llm:claude-sonnet-4-6@prompt-v3"
+    assert body["verdict"] == "PASS"
+    assert "LLM judge (`llm:claude-sonnet-4-6@prompt-v3`): `match`" in str(body["evidence"])
+    assert "keyword judge: no match" in str(body["evidence"])
+    table = render(loaded, rows)
+    assert "keyword OR LLM match, unclear not caught): 1/1" in table
+    assert "keyword judge alone: 0/1" in table
+    assert "LLM judge alone: 1/1" in table
+
+
+@pytest.mark.unit
+def test_keyword_only_scoring_records_the_plain_suite_version(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(globals(), "_FINDING", _PARAPHRASED)
+    loaded = load_suite(DEFAULT_SUITE)
+    server = _Server(loaded)
+
+    score_suite(loaded, server.client(), [_LAUNCHED])
+
+    [(_, body)] = server.scores
+    assert (body["scorer_version"], body["verdict"]) == ("6", "FAIL")
+    assert "LLM judge" not in str(body["evidence"])
+
+
+@pytest.mark.unit
+def test_llm_judge_flag_without_a_key_fails_before_any_call(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setattr(eval_suite, "get_settings", lambda: Settings(_env_file=None))
+    assert eval_suite.main(["score", "--llm-judge", "--api-url", "http://unreachable.invalid"]) == 1
+    assert "needs ANTHROPIC_API_KEY" in capsys.readouterr().err
+
+
+@pytest.mark.unit
+def test_the_judge_uses_the_key_configured_in_settings_dotenv(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """ADR-004: the credential comes from `Settings` (env or .env), not a parallel env read."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    dotenv = tmp_path / ".env"
+    dotenv.write_text("ANTHROPIC_API_KEY=fake-dotenv-key\n")
+    sent: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        sent.append(request)
+        return httpx.Response(200, json={"content": [{"type": "text", "text": "ok"}]})
+
+    client = eval_suite.AnthropicMessages.from_settings(Settings(_env_file=dotenv))
+    client._http = httpx.Client(transport=httpx.MockTransport(handle))
+    assert client.complete(model=eval_suite.JUDGE_MODEL, system="s", prompt="p") == "ok"
+    [request] = sent
+    assert request.headers["x-api-key"] == "fake-dotenv-key"
+    assert "fake-dotenv-key" not in repr(vars(client)) + capsys.readouterr().out
+
+
+@pytest.mark.unit
+def test_anthropic_client_sends_the_pinned_model_at_temperature_zero() -> None:
+    sent: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        sent.append(request)
+        return httpx.Response(200, json={"content": [{"type": "text", "text": "ok"}]})
+
+    client = eval_suite.AnthropicMessages(
+        SecretStr("test-key"), httpx.Client(transport=httpx.MockTransport(handle))
+    )
+    assert client.complete(model=eval_suite.JUDGE_MODEL, system="s", prompt="p") == "ok"
+    [request] = sent
+    assert request.headers["x-api-key"] == "test-key"
+    body = json.loads(request.content)
+    assert (body["model"], body["temperature"]) == (eval_suite.JUDGE_MODEL, 0)
+
+
+@pytest.mark.unit
+def test_a_model_that_rejects_temperature_zero_is_refused_before_sending() -> None:
+    """The 4.7+/5.x models 400 on a non-default temperature: the pinned judge is not one of them.
+
+    The transport below plays the provider's contract, so a pinned model it rejects
+    fails here rather than mid-scoring against the real API.
+    """
+    sent: list[httpx.Request] = []
+
+    def provider(request: httpx.Request) -> httpx.Response:
+        sent.append(request)
+        body = json.loads(request.content)
+        if body["model"] not in eval_suite.TEMPERATURE_ZERO_MODELS and body["temperature"] != 1:
+            return httpx.Response(400, json={"error": {"message": "temperature not supported"}})
+        return httpx.Response(200, json={"content": [{"type": "text", "text": "ok"}]})
+
+    client = eval_suite.AnthropicMessages(
+        SecretStr("test-key"), httpx.Client(transport=httpx.MockTransport(provider))
+    )
+    assert client.complete(model=eval_suite.JUDGE_MODEL, system="s", prompt="p") == "ok"
+    for unsupported in ("claude-sonnet-5-5", "claude-opus-5-5", "claude-opus-4-7"):
+        with pytest.raises(eval_suite.JudgeError, match="does not accept temperature 0"):
+            client.complete(model=unsupported, system="s", prompt="p")
+    assert len(sent) == 1
+
+
+@pytest.mark.unit
+def test_every_defect_case_gives_the_judge_its_root_cause_and_hides_it_from_the_task() -> None:
+    """Producer through loader: the checked-in YAML, not a hand-built case."""
+    loaded = load_suite(DEFAULT_SUITE)
+    defects = [c for c in loaded.cases if isinstance(c, DefectCase)]
+    assert defects and eval_suite.judge_problems(loaded) == []
+    for case in defects:
+        assert case.expected.defect is not None
+        assert case.expected.defect not in case.task
+        model = _FakeModel(_reply("no_match"))
+        eval_suite.LlmJudge(model).judge(case.expected, ["some finding"])
+        [call] = model.calls
+        assert case.expected.defect in call["prompt"], case.id
+
+
+@pytest.mark.unit
+def test_the_llm_judge_refuses_a_case_without_a_root_cause() -> None:
+    model = _FakeModel(_reply("match", "some finding"))
+    bare = _EXPECTED.model_copy(update={"defect": None})
+    with pytest.raises(eval_suite.JudgeError, match=r"expected\.defect"):
+        eval_suite.LlmJudge(model).judge(bare, ["some finding"])
+    assert not model.calls
+
+
+@pytest.mark.unit
+def test_calibration_refuses_a_ledger_without_the_runs(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The checked-in ledger has no v6 lines: the script says so rather than printing an empty table."""
+    import eval_judge_calibrate
+
+    ledger = tmp_path / "launches.jsonl"
+    ledger.write_text(_LAUNCHED.model_dump_json() + "\n")
+    assert eval_judge_calibrate.main(["--launches", str(ledger), "--suite-tag", "nope:v6:"]) == 1
+    assert "no ledger line has a suite tag starting 'nope:v6:'" in capsys.readouterr().err

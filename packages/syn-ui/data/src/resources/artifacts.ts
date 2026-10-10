@@ -1,4 +1,4 @@
-import { type ListQuery, bucketTimeWindow, listQueryParams, request, seg } from '../client'
+import { type ListQuery, bucketTimeWindow, listQueryParams, mapLimit, request, seg } from '../client'
 import type { ArtifactListResponse, ArtifactResponse, ArtifactSummary } from '../types'
 import { cached } from '../keys'
 
@@ -26,6 +26,25 @@ function toArtifactSummary(row: ApiArtifactSummary): ArtifactSummary {
 export function listArtifacts(query: ListQuery, scope: ArtifactScope = {}, signal?: AbortSignal): Promise<ArtifactPage> {
   const q = bucketTimeWindow(query)
   return cached('listArtifacts', [q, scope], (s) => fetchArtifactPage(q, scope, s), { signal, staleAfter: 'list' })
+}
+
+/**
+ * Each run's artifact total under the same filter (`/artifacts?execution_id=`,
+ * one row a page, so only `total` is read). The list groups a page by run and
+ * a group must count the run, not its share of the page.
+ *
+ * API gap: `/artifacts` has no per-execution facet, so this fans out, at most
+ * four at a time, one cached request per run on the page.
+ */
+export async function countArtifactsByExecution(
+  executionIds: readonly string[],
+  query: Pick<ListQuery, 'q'> = {},
+  scope: Pick<ArtifactScope, 'artifact_type'> = {},
+  signal?: AbortSignal,
+): Promise<Record<string, number>> {
+  const ids = [...new Set(executionIds)]
+  const totals = await mapLimit(ids, 4, async (id) => (await listArtifacts({ page: 1, page_size: 1, q: query.q }, { ...scope, execution_id: id }, signal)).total)
+  return Object.fromEntries(ids.map((id, i) => [id, totals[i] ?? 0]))
 }
 
 async function fetchArtifactPage(query: ListQuery, scope: ArtifactScope, signal: AbortSignal): Promise<ArtifactPage> {

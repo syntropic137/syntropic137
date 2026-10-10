@@ -14,11 +14,18 @@ export interface HeatmapBucketInput {
   date: string
   count?: number
   breakdown?: Record<string, number> | null
+  /** Executions that ended failed that UTC day (HeatmapDayBucketResponse.failed); an API older than the field omits it. */
+  failed?: number | null
 }
 
 const num = (v: unknown): number => {
   const n = toNumber(v as number | string | null | undefined)
   return n === null ? 0 : n
+}
+
+/** Failed executions, from the bucket's `failed` field; absent on an older API (the day is then never coral). */
+function failedOf(b: HeatmapBucketInput): { failed?: number } {
+  return b.failed === undefined || b.failed === null ? {} : { failed: num(b.failed) }
 }
 
 /**
@@ -46,6 +53,7 @@ export function heatmapToSkylineDays(buckets: readonly HeatmapBucketInput[] | nu
         commits: num(br.commits),
         costUsd: cost === undefined || cost === null ? null : num(cost),
         tokens: anyTokens ? tokens : null,
+        ...failedOf(b),
       }
     })
     .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))

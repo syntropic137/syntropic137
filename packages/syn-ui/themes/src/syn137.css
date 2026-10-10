@@ -81,6 +81,22 @@
   --sky-color-cube-edge: rgba(120, 140, 190, 0.1);
   --sky-color-cube-glass-edge: rgba(255, 255, 255, 0.55);
 
+  /* IsoCity (Overview heatmap, Main board): floor tiles and edge, future
+     outline, painted month and weekday labels, the quiet (dim) block faces,
+     the hairline on block fronts and the rim of a failed block */
+  --sky-iso-floor: #111624;
+  --sky-iso-floor-edge: #1B2235;
+  --sky-iso-future-edge: #1E2638;
+  --sky-iso-label: #56658A;
+  --sky-iso-label-faint: #3E4A68;
+  --sky-iso-dim-side: #0C111C;
+  --sky-iso-dim-front: #151B2B;
+  --sky-iso-dim-top: #222B41;
+  --sky-iso-dim-rim-base: #2A3350;
+  --sky-iso-face-edge: rgba(255, 255, 255, 0.05);
+  --sky-iso-fail-rim: #FFD9D4;
+  --sky-iso-strip-dim: #2E3A5C;       /* Week strip bar outside the window */
+
   --sky-color-scrim: rgba(5, 7, 12, 0.6);
   --sky-color-highlight: rgba(255, 255, 255, 0.04);
   --sky-color-highlight-strong: rgba(255, 255, 255, 0.07);

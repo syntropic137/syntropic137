@@ -104,6 +104,7 @@ async def list_accessible_repos(
     from syn_adapters.github.client import (
         GitHubAppError,
         GitHubAuthError,
+        GitHubNotConfiguredError,
         GitHubRateLimitError,
         get_github_client,
     )
@@ -120,6 +121,9 @@ async def list_accessible_repos(
                 lookup=lookup,
             )
         )
+    except GitHubNotConfiguredError as e:
+        # A server with no GitHub App answers "not configured", never a traceback.
+        return Err(GitHubError.NOT_CONFIGURED, message=str(e))
     except GitHubAuthError as e:
         return Err(GitHubError.AUTH_REQUIRED, message=str(e))
     except GitHubRateLimitError as e:
@@ -365,6 +369,7 @@ async def list_accessible_repos_endpoint(
             GitHubError.NOT_FOUND: 404,
             GitHubError.AUTH_REQUIRED: 401,
             GitHubError.RATE_LIMITED: 429,
+            GitHubError.NOT_CONFIGURED: 503,
         }
         status = status_map.get(result.error, 502)
         raise HTTPException(status_code=status, detail=result.message)

@@ -44,6 +44,8 @@ export interface SkylineDay {
   commits?: number
   /** Spend in USD; null when unknown. */
   costUsd?: number | null
+  /** Failed runs that day; absent when the API does not send it (the IsoCity never paints such a day coral). */
+  failed?: number | null
   tokens?: SkylineTokens | null
   /** Finished runs; when absent the top face uses the session-count ramp. */
   outcomes?: SkylineOutcomes | null
@@ -173,6 +175,16 @@ export function projectSkylineDims(dims: SkylineDims): SkylineDims {
     leadY: dims.leadY + shift,
     viewBox: { ...vb, y: vb.y + shift, height: vb.height - shift },
   }
+}
+
+/**
+ * Width over height of the drawn chart for `dims` (the projected view box), so a
+ * loading placeholder can reserve the chart's final height with `aspect-ratio`
+ * before the heatmap arrives (Lighthouse CLS on the Overview).
+ */
+export function skylineAspectRatio(dims: SkylineDims): number {
+  const vb = projectSkylineDims(dims).viewBox
+  return vb.width / vb.height
 }
 
 /** "2026-08-28" -> UTC epoch ms at midnight; NaN when malformed. */

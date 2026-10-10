@@ -7,7 +7,7 @@
  * (S faces) and the syn137 theme (ground #0A0C14, accent #4D80FF, status
  * red and amber, text colours).
  */
-import type { CityTone, SMarkTone } from '../src/geometry/index.ts'
+import type { HeroCityTone, SMarkTone } from '../src/geometry/index.ts'
 
 export const GROUND = '#0A0C14'
 export const ACCENT = '#4D80FF'
@@ -28,7 +28,7 @@ export const S_FACES: Record<SMarkTone, Faces> = {
   glass: { left: 'rgba(232,238,251,0.32)', right: 'rgba(232,238,251,0.18)', top: 'rgba(255,255,255,0.55)', stroke: 'rgba(255,255,255,0.55)' },
 }
 
-export const CITY_FACES: Record<CityTone, Faces> = {
+export const CITY_FACES: Record<HeroCityTone, Faces> = {
   run: S_FACES.blue,
   live: S_FACES.blue,
   failed: { left: '#FF6F61', right: '#803831', top: '#FFACA3' },

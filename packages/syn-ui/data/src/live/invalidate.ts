@@ -43,7 +43,7 @@ const RULES: ReadonlyArray<readonly [(t: string) => boolean, (ids: FrameIds) => 
     ],
   ],
   [isRunEdge, ({ workflowId }) => [{ name: 'listWorkflows' }, { name: 'getWorkflow', id: workflowId }, { name: 'getContributionHeatmap' }]],
-  [isRunFinished, () => [{ name: 'listEvals' }, { name: 'getEval' }, { name: 'listEvalRuns' }, { name: 'getEvalTrend' }]],
+  [isRunFinished, () => [{ name: 'listEvals' }, { name: 'listAllEvals' }, { name: 'getEval' }, { name: 'listEvalRuns' }, { name: 'getEvalTrend' }]],
   [
     isSessionEvent,
     ({ sessionId }) => [
