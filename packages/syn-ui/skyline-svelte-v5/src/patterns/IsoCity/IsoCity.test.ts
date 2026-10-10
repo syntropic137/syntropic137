@@ -220,3 +220,46 @@ describe('IsoCity coverage (codex review of #1856: unloaded history is not zero)
     expect(screen.getAllByRole('button', { name: /: loading$/ }).length).toBe(26)
   })
 })
+
+describe('IsoCity board column (owner, Oct 10: the readout never covers today)', () => {
+  /** A ResizeObserver that reports the board column at `px`. */
+  function columnAt(px: number) {
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(private cb: ResizeObserverCallback) {}
+        observe(el: Element) {
+          this.cb([{ target: el, contentRect: { width: px } } as unknown as ResizeObserverEntry], this as unknown as ResizeObserver)
+        }
+        unobserve() {}
+        disconnect() {}
+      },
+    )
+  }
+  const xsOf = (d: string | null) => [...(d ?? '').matchAll(/(-?[\d.]+),(-?[\d.]+)/g)].map((m) => Number(m[1]))
+
+  // Board column widths at 1280 and 1920 viewports: page gutters and the 22rem readout column taken off.
+  it.each([
+    [1280, 1280 - 2 * 40 - 352 - 16 - 64],
+    [1920, 1920 - 2 * 40 - 352 - 16 - 64],
+  ])('at a %ipx viewport the newest column ends more than one cell inside the board column', async (_vp, column) => {
+    columnAt(column)
+    const { container } = render(IsoCity, { days: busy, today: TODAY })
+    await Promise.resolve()
+    const svg = container.querySelector<SVGSVGElement>('.sky-iso__svg')!
+    const vw = Number(svg.getAttribute('viewBox')!.split(' ')[2])
+    const scale = column / vw
+    const painted = [
+      ...[...container.querySelectorAll('.sky-iso__block:not([data-out]) path')].map((p) => p.getAttribute('d')),
+      container.querySelector('.sky-iso__future:not([data-edge])')!.getAttribute('d'),
+      container.querySelector('.sky-iso__floor:not([data-edge])')!.getAttribute('d'),
+      container.querySelector('.sky-iso__today')!.getAttribute('d'),
+    ].flatMap(xsOf)
+    const right = Math.max(...painted) * scale
+    const cell = 52 * scale
+    expect(vw).toBe(column)
+    expect(right).toBeLessThan(column - cell)
+    // Today's week, future tiles included, is the newest column painted.
+    expect(container.querySelector('.sky-iso__future:not([data-edge])')!.getAttribute('d')).toMatch(/^M/)
+  })
+})

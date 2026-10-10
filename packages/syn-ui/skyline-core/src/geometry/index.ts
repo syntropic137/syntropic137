@@ -29,7 +29,7 @@ export type { CityBlock, CityTone, IsoCityLayout, IsoCityOptions } from './isoCi
 export { layoutIsoCityFloor, isoCityWeeks, isoTone, isoHeight, isoDayLabel, isoDepth, isFailing, ISO_CITY_DESKTOP, ISO_CITY_PHONE, ISO_TONES, ISO_WEEKDAYS } from './isoCityFloor'
 export { blockCovers, pickIsoCityBlock, pointInPolygon, toViewBox } from './isoCityPick'
 export type { IsoHitBox, IsoCityBlock, IsoCityDims, IsoCityFloorInput, IsoCityFloorLayout, IsoCityLabel, IsoCityRow, IsoCellKind, IsoCityCell, IsoCityWeek, IsoTone, IsoWeekdayAxis } from './isoCityFloor'
-export { isoCityCentred, isoCityEdgeMask, isoCityExtent, isoCityFreeWidth } from './isoCityFrame'
+export { isoCityCentred, isoCityEdgeMask, isoCityExtent, isoCityFit, isoCityFreeWidth, ISO_FIT_WEEKS } from './isoCityFrame'
 export type { IsoEdgeMask } from './isoCityFrame'
 export { isoCityHistory, maxMonthOffset, mondayOf, monthsBack, monthsBetween, offsetForWeek, offsetLabel, offsetShowing, weekIndexOf, weekStartAt, windowRange } from './isoCityScroll'
 export type { IsoCityHistory, IsoCityWindowRange } from './isoCityScroll'

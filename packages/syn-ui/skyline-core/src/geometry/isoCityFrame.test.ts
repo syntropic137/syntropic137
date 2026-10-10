@@ -5,6 +5,8 @@ import {
   addDays,
   isoCityCentred,
   isoCityEdgeMask,
+  isoCityExtent,
+  isoCityFit,
   isoCityFreeWidth,
   isoCityHistory,
   isoCityWeeks,
@@ -76,5 +78,24 @@ describe('edge mask (owner, Oct 10: fluid scroll)', () => {
     expect(off(at(3, 0))).toBeCloseTo(off(at(3, 6)), 3)
     expect(off(at(0, 4))).toBeCloseTo(m.stops[1]!.offset, 2)
     expect(off(at(d.win - 1 + d.f, 2))).toBeCloseTo(m.stops[2]!.offset, 2)
+  })
+})
+
+describe('the board fits its own column (owner, Oct 10: the readout never covers today)', () => {
+  it.each([400, 824, 1100, 1464, 2400])('keeps the newest column a full cell inside a %ipx column', (px) => {
+    const d = isoCityFit(ISO_CITY_DESKTOP, px)
+    const [left, right] = isoCityExtent(d, d.win)
+    expect(d.vw).toBeGreaterThanOrEqual(px)
+    // One unit is one pixel when the column is at least the board's minimum width.
+    if (d.vw === px) expect(right).toBeLessThan(px - d.ax)
+    expect(right).toBeLessThanOrEqual(d.vw - d.ax)
+    expect(left).toBeGreaterThanOrEqual(d.ax - 1)
+    expect(d.leadX).toBe(d.vw)
+  })
+  it('gives a wider column more weeks, within bounds, and keeps the drawn board unmeasured', () => {
+    expect(isoCityFit(ISO_CITY_DESKTOP, 1464).win).toBeGreaterThan(isoCityFit(ISO_CITY_DESKTOP, 824).win)
+    expect(isoCityFit(ISO_CITY_DESKTOP, 5000).win).toBe(30)
+    expect(isoCityFit(ISO_CITY_DESKTOP, 0).win).toBe(ISO_CITY_DESKTOP.win)
+    expect(isoCityFit(ISO_CITY_DESKTOP, 824, 14).win).toBe(14)
   })
 })

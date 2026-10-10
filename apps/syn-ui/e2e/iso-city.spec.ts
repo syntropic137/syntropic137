@@ -20,23 +20,23 @@ async function openCity(page: Page) {
 test('month buttons step a calendar month, snapped to whole weeks; Now returns', async ({ page }) => {
   const scroll = await openCity(page)
   const now = scroll.getByRole('button', { name: 'Now' })
-  await expect(scroll.getByText('Latest 14 weeks')).toBeVisible()
-  await expect(page.getByText('Jul 6 – Oct 9, 2026')).toBeVisible()
+  await expect(scroll.getByText(/^Latest \d+ weeks$/)).toBeVisible()
+  await expect(page.getByText(/ – Oct 9, 2026$/)).toBeVisible()
   await expect(now).toHaveAttribute('aria-pressed', 'true')
 
   await scroll.getByRole('button', { name: 'One month back' }).click()
   await expect(scroll.getByText('1 month back')).toBeVisible()
   // Sep 9 is a Wednesday: the window ends on that week's Sunday.
-  await expect(page.getByText('Jun 8 – Sep 13, 2026')).toBeVisible()
+  await expect(page.getByText(/ – Sep 13, 2026$/)).toBeVisible()
   await expect(now).toHaveAttribute('aria-pressed', 'false')
 
   await scroll.getByRole('button', { name: 'One month back' }).click()
-  await expect(page.getByText('May 4 – Aug 9, 2026')).toBeVisible()
+  await expect(page.getByText(/ – Aug 9, 2026$/)).toBeVisible()
   await scroll.getByRole('button', { name: 'One month forward' }).click()
   await expect(scroll.getByText('1 month back')).toBeVisible()
 
   await now.click()
-  await expect(scroll.getByText('Latest 14 weeks')).toBeVisible()
+  await expect(scroll.getByText(/^Latest \d+ weeks$/)).toBeVisible()
   await expect(scroll.getByRole('button', { name: 'One month forward' })).toBeDisabled()
 })
 
@@ -44,13 +44,13 @@ test('the week strip jumps to that week, and arrow keys scroll when the city is 
   const scroll = await openCity(page)
   await page.getByRole('button', { name: /^Week of Mar 2:/ }).click()
   await expect(scroll.getByText('7 months back')).toBeVisible()
-  await expect(page.getByText('Dec 8, 2025 – Mar 15, 2026')).toBeVisible()
+  await expect(page.getByText(/ – Mar 15, 2026$/)).toBeVisible()
 
   await page.getByRole('group', { name: /^Activity city/ }).focus()
   await page.keyboard.press('ArrowRight')
   await expect(scroll.getByText('6 months back')).toBeVisible()
   await page.keyboard.press('End')
-  await expect(scroll.getByText('Latest 14 weeks')).toBeVisible()
+  await expect(scroll.getByText(/^Latest \d+ weeks$/)).toBeVisible()
 })
 
 /** Move the mouse onto the middle of a block's top face: the pointer picks the visible surface, not a rectangle. */
@@ -94,14 +94,34 @@ test('every week is a full column: today\'s week shows its future days as tiles 
   await expect(page.locator('[data-date-block="2026-10-10"]')).toHaveCount(0)
 })
 
+for (const width of [1280, 1920]) {
+  test.describe(`readout beside the board at ${width}px (owner, Oct 10)`, () => {
+    test.use({ viewport: { width, height: 900 } })
+    test('today, its block and the future tiles never sit under the readout', async ({ page }) => {
+      await openCity(page)
+      const dock = await page.locator('.sky-iso__dock').boundingBox()
+      expect(dock).not.toBeNull()
+      const overlaps = (a: { x: number; y: number; width: number; height: number }, b: typeof a) =>
+        a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height
+      // The board fits its column, so the week count varies with the viewport; today's tile and the future tiles are the newest column.
+      for (const sel of ['.sky-iso__today', '.sky-iso__future:not([data-edge])', '.sky-iso__block:not([data-out]) >> nth=-1']) {
+        const box = await page.locator(sel).boundingBox()
+        expect(box, sel).not.toBeNull()
+        expect(overlaps(box!, dock!), sel).toBe(false)
+        expect(box!.x + box!.width, sel).toBeLessThan(dock!.x)
+      }
+    })
+  })
+}
+
 test('stepping active days scrolls the window only when the day is out of view', async ({ page }) => {
   const scroll = await openCity(page)
   const prev = page.getByRole('group', { name: 'Active day' }).getByRole('button', { name: 'Previous active day' })
   await prev.click()
-  await expect(scroll.getByText('Latest 14 weeks')).toBeVisible()
+  await expect(scroll.getByText(/^Latest \d+ weeks$/)).toBeVisible()
   // Step back until the day leaves the window (Jul 6 is its oldest week).
   for (let i = 0; i < 40; i++) {
-    if ((await scroll.getByText('Latest 14 weeks').count()) === 0) break
+    if ((await scroll.getByText(/^Latest \d+ weeks$/).count()) === 0) break
     await prev.click()
   }
   await expect(scroll.getByText('1 month back')).toBeVisible()
@@ -111,7 +131,7 @@ test('reduced motion jumps instead of gliding', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' })
   const scroll = await openCity(page)
   await scroll.getByRole('button', { name: 'One month back' }).click()
-  await expect(page.getByText('Jun 8 – Sep 13, 2026')).toBeVisible()
+  await expect(page.getByText(/ – Sep 13, 2026$/)).toBeVisible()
   await expect(page.locator('[data-gliding]')).toHaveCount(0)
   await expect(page.locator('[data-moving]')).toHaveCount(0)
 })

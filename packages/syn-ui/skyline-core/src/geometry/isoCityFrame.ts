@@ -71,3 +71,25 @@ export function isoCityEdgeMask(dims: IsoCityDims, window = dims.win, fade = 1):
     ],
   }
 }
+
+/** Fewest and most weeks the desktop board shows when it fits its column. */
+export const ISO_FIT_WEEKS = { min: 8, max: 30 } as const
+
+/**
+ * The desktop board fitted to its own column (owner, Oct 10: the readout
+ * sits beside the board, never over it). One view box unit is one CSS pixel
+ * of column, so blocks keep their size and the board its height; the window
+ * gets as many weeks as fit with at least one cell (`ax`) of gutter either
+ * side, and is centred in the column. The leader line ends at the column's
+ * right edge, where the readout starts. `columnPx` 0 (not measured yet)
+ * keeps the board as drawn.
+ */
+export function isoCityFit(board: IsoCityDims, columnPx: number, window?: number): IsoCityDims {
+  if (!(columnPx > 0)) return isoCityCentred(board, window ?? board.win)
+  const depth = (6 + board.f) * board.bx
+  const fits = Math.floor((columnPx - 2 * board.ax - depth) / board.ax + 1 - board.f)
+  const win = window ?? Math.min(ISO_FIT_WEEKS.max, Math.max(ISO_FIT_WEEKS.min, fits))
+  const [left, right] = isoCityExtent(board, win)
+  const vw = Math.max(Math.round(columnPx), Math.ceil(right - left + 2 * board.ax))
+  return isoCityCentred({ ...board, win, vw, leadX: board.leadX > 0 ? vw : 0 }, win)
+}

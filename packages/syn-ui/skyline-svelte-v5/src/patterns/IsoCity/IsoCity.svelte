@@ -8,7 +8,10 @@
   today's week is future tiles, so every week is a full column. Older weeks
   sink into the fog on the left (SVG mask).
 
-  Only a window shows: 14 weeks wide, 8 narrow, centred. It scrolls by
+  Only a window shows: as many weeks as fit the board's own column on the
+  desktop board (measured with a ResizeObserver, a cell of gutter each
+  side), 8 narrow, centred. From 64rem the readout is a grid column beside
+  the board, never over it, so today is never hidden. It scrolls by
   months: the buttons ("One month back", "One month forward", "Now"), a
   horizontal wheel or trackpad swipe, a drag or touch swipe, and the arrow
   keys when the chart is focused. The week strip under it shows the whole
@@ -39,6 +42,7 @@
     dayFromMs,
     isoCityCentred,
     isoCityEdgeMask,
+    isoCityFit,
     isoCityHistory,
     isoCityKeyIntent,
     isoCityRovingDate,
@@ -91,9 +95,9 @@
 
   // Before the first measurement, assume desktop so a server or test render shows the board.
   const wide = $derived(width === 0 || width >= wideFrom)
-  const board = $derived(wide ? ISO_CITY_DESKTOP : ISO_CITY_PHONE)
-  const win = $derived(windowProp ?? board.win)
-  const dims = $derived(isoCityCentred(board, win))
+  // Desktop: the board is fitted to its own column (one unit per CSS pixel); phone: the board as drawn.
+  const dims = $derived(wide ? isoCityFit(ISO_CITY_DESKTOP, chartWidth, windowProp) : isoCityCentred(ISO_CITY_PHONE, windowProp ?? ISO_CITY_PHONE.win))
+  const win = $derived(dims.win)
   const edge = $derived(isoCityEdgeMask(dims, win))
   const hist = $derived(isoCityHistory(today, history))
   const weeks = $derived(isoCityWeeks(days, hist.start, hist.weeks))
@@ -143,14 +147,31 @@
     return typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
   }
 
+  // The board column's width, from a ResizeObserver on the column itself (not the window).
+  $effect(() => {
+    const el = chartBox
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width ?? 0
+      if (w > 0 && Math.abs(w - chartWidth) >= 1) chartWidth = w
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  })
+
   // The window moved: glide there (or retarget the glide in flight).
+  let lastWin = 0
   $effect.pre(() => {
     const first = range.first
+    const w = win
     untrack(() => {
-      const reduced = reducedMotion()
+      // A resize that changes the week count re-frames at once; only scrolling glides.
+      const resized = lastWin !== 0 && w !== lastWin
+      lastWin = w
+      const reduced = reducedMotion() || resized
       const was = glide.anchor
       send({ type: 'target', first, reduced })
-      if (reduced && was !== null && was !== first) fadeTick++
+      if (reduced && !resized && was !== null && was !== first) fadeTick++
     })
   })
 
@@ -294,7 +315,7 @@
     {/if}
   </div>
 
-  <div class="sky-iso__stage">
+  <div class="sky-iso__stage" data-wide={wide || undefined}>
     <!-- Drag, swipe, wheel and pointing are conveniences; the buttons, the week strip, the day buttons and the arrow keys carry the same moves. -->
     <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions, a11y_click_events_have_key_events -->
     <div
@@ -306,7 +327,6 @@
       data-dragging={glide.dragging || undefined}
       data-anchor={anchor}
       bind:this={chartBox}
-      bind:clientWidth={chartWidth}
       onpointerdown={ondown}
       onpointermove={onmove}
       onpointerup={onup}
@@ -461,6 +481,7 @@
 
 <style>
   .sky-iso {
+    container-type: inline-size;
     display: flex;
     flex-direction: column;
     gap: var(--ds-space-4);
@@ -592,6 +613,22 @@
 
   .sky-iso__stage {
     position: relative;
+    min-width: 0;
+  }
+  /* From 64rem the readout is a column beside the board, never over it (owner, Oct 10). */
+  @container (min-width: 64rem) {
+    .sky-iso__stage[data-wide] {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 22rem;
+      align-items: start;
+      gap: var(--ds-space-4);
+    }
+    .sky-iso__stage[data-wide] .sky-iso__dock {
+      margin-top: 0;
+    }
+  }
+  .sky-iso__chart {
+    min-width: 0;
   }
   .sky-iso__chart {
     position: relative;
@@ -809,14 +846,7 @@
   .sky-iso__dock {
     margin-top: var(--ds-space-3);
   }
-  .sky-iso[data-wide] .sky-iso__dock {
-    position: absolute;
-    top: 0;
-    right: var(--ds-space-2);
-    z-index: 20;
-    width: 15.25rem;
-    margin: 0;
-  }
+
 
   .sky-iso__strip {
     display: flex;
