@@ -26,6 +26,9 @@ import {
   phaseModelChip,
   phaseTokenSplit,
   provenanceFor,
+  phaseSkillUseText,
+  skillUseNote,
+  SKILL_USE_NOT_REPORTED,
   runIdentityText,
   shortPhaseName,
   shortRevision,
@@ -269,5 +272,48 @@ describe('runDurationMs / runDurationText (feedback 5ed77fc5: durations froze un
   })
   it('a start in the future is not a negative duration', () => {
     expect(runDurationMs({ status: 'running', started_at: '2026-10-10T00:00:00Z', duration_seconds: null }, started - 1000)).toBeNull()
+  })
+})
+
+describe('skill use (parity-2: the API reports it, so the screen must)', () => {
+  // exec-64e1d7e33b6a on the VPS, 2026-10-10: skill_use as the API returned it.
+  const use = {
+    declared: ['principles-and-patterns', 'architecture', 'purpose-and-scope', 'types', 'error-handling', 'testing', 'software-complexity', 'security', 'documentation'],
+    invoked: [
+      { name: 'architecture', count: 1 },
+      { name: 'claude-api', count: 1 },
+      { name: 'documentation', count: 1 },
+      { name: 'error-handling', count: 1 },
+      { name: 'principles-and-patterns', count: 1 },
+      { name: 'purpose-and-scope', count: 2 },
+      { name: 'types', count: 1 },
+    ],
+    never_invoked: [],
+    not_known: ['testing', 'software-complexity', 'security'],
+    summary_display: '9 skills declared · 6 invoked · 3 use unknown · 1 undeclared invoked',
+  }
+  const pinned = phase({ start_pins_status: 'recorded', pinned_at_start: { provider: 'claude', skills: [] } })
+
+  it('renders the API summary and names instead of "not reported"', () => {
+    const p = provenanceFor([pinned], null, use)
+    expect(p.note).toBe(
+      'Skills: 9 skills declared · 6 invoked · 3 use unknown · 1 undeclared invoked. ' +
+        'Invoked: architecture, claude-api (undeclared), documentation, error-handling, principles-and-patterns, purpose-and-scope (2 calls), types. ' +
+        'Use unknown: testing, software-complexity, security.',
+    )
+    expect(p.note).not.toContain('not reported')
+    expect(skillUseNote({ ...use, invoked: [], not_known: [], never_invoked: ['testing'] })).toContain('Never invoked: testing.')
+  })
+
+  it('says it is not reported only when the server sent no skill use', () => {
+    expect(provenanceFor([pinned], null).note).toBe(SKILL_USE_NOT_REPORTED)
+    expect(provenanceFor([phase()], null, null).note).toContain(SKILL_USE_NOT_REPORTED)
+    expect(provenanceFor([phase()], null, use).note).toMatch(/^This run started before start config was pinned.*Skills: 9 skills declared/)
+  })
+
+  it("shows a phase's own summary verbatim, and nothing when it has no skills", () => {
+    expect(phaseSkillUseText(phase({ skill_use: { status: 'observed', declared: ['a', 'b', 'c'], invoked: [{ name: 'a', count: 1 }], summary_display: '1 of 3 declared skills invoked' } }))).toBe('1 of 3 declared skills invoked')
+    expect(phaseSkillUseText(phase({ skill_use: { status: 'unavailable', declared: [], invoked: [], summary_display: 'skill use unavailable: no record for this run' } }))).toBeNull()
+    expect(phaseSkillUseText(phase())).toBeNull()
   })
 })
