@@ -1,6 +1,6 @@
 # Syntropic137 brand kit
 
-**Version 2.1.0, "Design V2, October 2026". Released 2026-10-09, avatar added 2026-10-10.** Version in [`VERSION`](VERSION), history in [`CHANGELOG.md`](CHANGELOG.md).
+**Version 2.2.0, "Design V2, October 2026". Released 2026-10-09, avatar added 2026-10-10, banner layout and S uplight locked 2026-10-10.** Version in [`VERSION`](VERSION), history in [`CHANGELOG.md`](CHANGELOG.md).
 
 <p align="center">
   <img src="renders/syn137-banner-dark-1500.webp" alt="The Syntropic137 S standing in the run city, rendered in Blender" width="100%">
@@ -70,6 +70,7 @@ Blue top row (the accent), one glass cube, dark lower cubes.
 - **Source of truth:** `sMark()` in `packages/syn-ui/skyline-core/src/geometry/sMark.ts`. `sMark(40)` reproduces [`s-mark.svg`](s-mark.svg) (viewBox 147 x 308). Face colours are the `--sky-color-cube-*` tokens.
 - **The small S is always vector:** landing nav and footer, docs, dashboard app shell, favicon, app icons. In React it is `SMark` (`<sky-s-mark>` with a static SVG fallback); in Svelte the `SMark` pattern.
 - **3D renders are for hero and marketing only:** the landing hero, social headers, slides. Never in UI chrome.
+- **Uplight:** in banners and on dark grounds the S is uplit: a soft accent glow centred under it, offset below by 12% of its height. The glow is centred horizontally on the S's drawn faces and fades out above, so it reads as light from below. In the banner generator it is `S_UPLIGHT_OFFSET`.
 
 ### Size and clear space
 
@@ -177,7 +178,12 @@ Durations and curves: `--sky-dur-1` to `--sky-dur-4` (250, 900, 1100, 2600ms), `
   <img src="banners/syntropic137.svg" alt="Syntropic137 README banner" width="760">
 </p>
 
-The S on the left; pill, Orbitron title (`137` in the accent) and the repo's command on the right; a train of key phrases runs slowly round the card edge (SMIL, no script). Generated from [`banners/repos.json`](banners/repos.json) by `packages/syn-ui/skyline-core/scripts/repo-banner.ts`:
+The S on the left; pill, Orbitron title (`137` in the accent) and the repo's command on the right; a train of key phrases runs slowly round the card edge (SMIL, no script).
+
+- **One centre line:** the S (by its drawn faces, glass cube included) and the title's cap box (descenders ignored) are both centred on the card's vertical middle. Banners without a command keep the title on that line.
+- **Symmetric spacing:** the pill sits 48px above the title's cap box and the command 48px below it.
+- **Horizontal balance:** the S plus the text column, to its longest line, is centred in the card.
+- **Uplight:** in banners and on dark grounds the S is uplit: a soft accent glow centred under it, offset below by 12% of its height. Same size and strength on every banner. Generated from [`banners/repos.json`](banners/repos.json) by `packages/syn-ui/skyline-core/scripts/repo-banner.ts`:
 
 ```bash
 pnpm --filter @syn137/skyline-core run repo-banner                      # all

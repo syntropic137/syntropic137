@@ -2,6 +2,12 @@
 
 Versions follow semver: major for a new identity, minor for a new asset or surface, patch for a fix. The current kit is described in [BRAND.md](BRAND.md).
 
+## 2.2.0 (2026-10-10)
+
+- **Banners: one centre line.** The S and the title's cap box share the card's vertical centre; the S plus the text column is centred horizontally.
+- **Banners: symmetric spacing.** Pill and command each 48px from the title's cap box.
+- **S uplight locked.** In banners and on dark grounds the S is uplit: a soft accent glow centred under it, offset below by 12% of its height (`S_UPLIGHT_OFFSET` in the banner generator). Identical on every banner.
+
 ## 2.1.0 (2026-10-10)
 
 - **Avatar.** `avatar-1024.png` and `avatar-512.png`: the Blender close-up of the S on navy with a blue glow, for the GitHub org, X, Discord and npm profile pictures. The official social icon; replaces `icon-512.png` as the recommended avatar. Transparent cuts `avatar-transparent-1024.png` / `-512.png`.

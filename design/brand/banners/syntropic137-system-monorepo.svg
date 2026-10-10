@@ -17,7 +17,7 @@
 <rect width="1200" height="400" fill="#0A0C14"/>
 <rect width="1200" height="400" fill="url(#dots)"/>
 <rect width="1200" height="400" fill="url(#wash)"/>
-<ellipse cx="191.4" cy="224" rx="200" ry="180" fill="url(#markglow)"/>
+<ellipse cx="191.4" cy="228.6" rx="200" ry="165" fill="url(#markglow)"/>
 <rect x="240" y="0" width="720" height="1" fill="url(#edge)"/>
 </g>
 <rect x="0.5" y="0.5" width="1199" height="399" rx="23.5" fill="none" stroke="#9AA8C7" stroke-opacity="0.16"/>
