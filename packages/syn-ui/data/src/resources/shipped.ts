@@ -16,7 +16,8 @@ export type ShippedDays = 7 | 14 | 30
 export interface ShippedPoint {
   /** ISO date (UTC day). */
   date: string
-  value: number
+  /** Null on a day the metric is undefined (merge rate when nothing was opened); the view model draws it as empty. */
+  value: number | null
 }
 
 /** One tile. `merge_rate` values are percentages, 0 to 100. */
