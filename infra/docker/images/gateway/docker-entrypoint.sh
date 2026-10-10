@@ -289,6 +289,11 @@ location /next/assets/ {
     expires 1y;
     add_header Cache-Control "public, immutable";
     include /etc/nginx/conf.d/security-headers.conf;
+    # Same zone as /assets/: the legacy layout's syn-ui at /next loads the
+    # same 60+ chunks and would otherwise hit the auth backstop (release
+    # review of #1866).
+    limit_req zone=assets burst=300 nodelay;
+    limit_req_status 429;
 }
 
 location /next/ {

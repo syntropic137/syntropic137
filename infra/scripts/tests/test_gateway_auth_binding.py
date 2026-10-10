@@ -374,8 +374,10 @@ def test_hashed_assets_get_their_own_rate_limit_zone(tmp_path: Path, ui_mode: st
     )
 
     locations = _generated(tmp_path)["locations.conf"]
-    blocks = re.findall(r"location /assets/ \{(.*?)\n\}", locations, flags=re.S)
+    blocks = re.findall(r"location (?:/next)?/assets/ \{(.*?)\n\}", locations, flags=re.S)
     assert blocks, "no /assets/ location was generated"
+    if ui_mode == "legacy":
+        assert len(blocks) == 2, "legacy mode serves React at /assets/ and syn-ui at /next/assets/"
     for block in blocks:
         assert "limit_req zone=assets burst=" in block, block
         assert "auth_basic off" not in block, "assets must stay behind Basic auth"
