@@ -298,6 +298,11 @@ from syn_domain.contexts.orchestration.slices.record_eval_run_score import (
 from syn_domain.contexts.orchestration.slices.set_workflow_default_eval import (
     SetWorkflowDefaultEvalHandler,
 )
+from syn_domain.contexts.orchestration.slices.shipped_metrics import (
+    ShippedMetrics,
+    ShippedMetricsQueryService,
+    TimescaleCommitSightings,
+)
 from syn_domain.contexts.orchestration.slices.show_claude_plugin import (
     ClaudePluginNotFoundError,
 )
@@ -461,6 +466,8 @@ __all__ = [
     "SecurityPolicy",
     "SetWorkflowDefaultEvalCommand",
     "SetWorkflowDefaultEvalHandler",
+    "ShippedMetrics",
+    "ShippedMetricsQueryService",
     "SideEffectStatus",
     "SidecarConfig",
     "SkillError",
@@ -475,6 +482,7 @@ __all__ = [
     "TagSet",
     "TemplateLaunches",
     "TerminateWorkspaceCommand",
+    "TimescaleCommitSightings",
     "TokenAccumulator",
     "UnsupportedExecutionTypeError",
     "UnsupportedToolPolicyForProviderError",

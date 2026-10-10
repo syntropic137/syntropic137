@@ -20,6 +20,7 @@ from syn_api._wiring import (
     get_execution_cost_query,
     get_phase_profile_query,
     get_projection_mgr,
+    get_shipped_metrics_query,
 )
 from syn_api.types import (
     DashboardMetrics,
@@ -28,7 +29,9 @@ from syn_api.types import (
     Ok,
     PhaseProfilesResponse,
     Result,
+    ShippedMetricsResponse,
 )
+from syn_domain.contexts.orchestration.slices.shipped_metrics import SHIPPED_WINDOW_DAYS
 from syn_domain.pagination import Page
 from syn_shared.pricing import canonical_cost_usd
 
@@ -418,3 +421,34 @@ async def get_phase_profiles_endpoint(
             detail="phase profiles are unavailable: the observability store could not be read",
         ) from exc
     return PhaseProfilesResponse.from_profiles(profiles, window_days)
+
+
+@router.get("/shipped", response_model=ShippedMetricsResponse)
+async def get_shipped_metrics_endpoint(
+    days: int = Query(
+        14,
+        description="Window length in UTC days: 7, 14 or 30",
+        json_schema_extra={"enum": sorted(SHIPPED_WINDOW_DAYS)},
+    ),
+    workflow_id: str | None = Query(None, description="Only commits of this workflow's executions"),
+) -> ShippedMetricsResponse:
+    """What agents shipped over the last ``days`` UTC days, against the ``days`` before.
+
+    Commits are distinct shas from agent ``git_commit`` observations attributed
+    to an execution; repos touched are the slugs those executions cloned. PRs
+    opened, PRs merged and merge rate are null with a ``reason``: no store
+    persists PR outcomes yet.
+    """
+    if days not in SHIPPED_WINDOW_DAYS:
+        allowed = ", ".join(str(d) for d in sorted(SHIPPED_WINDOW_DAYS))
+        raise HTTPException(status_code=422, detail=f"days must be one of {allowed}")
+    await ensure_connected()
+    try:
+        metrics = await get_shipped_metrics_query().shipped(days=days, workflow_id=workflow_id)
+    except Exception as exc:
+        logger.warning("Failed to read shipped metrics", exc_info=True)
+        raise HTTPException(
+            status_code=503,
+            detail="shipped metrics are unavailable: the observability store could not be read",
+        ) from exc
+    return ShippedMetricsResponse.from_metrics(metrics)

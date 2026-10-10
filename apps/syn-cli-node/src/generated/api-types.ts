@@ -1270,6 +1270,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/metrics/shipped": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Shipped Metrics Endpoint
+         * @description What agents shipped over the last ``days`` UTC days, against the ``days`` before.
+         *
+         *     Commits are distinct shas from agent ``git_commit`` observations attributed
+         *     to an execution; repos touched are the slugs those executions cloned. PRs
+         *     opened, PRs merged and merge rate are null with a ``reason``: no store
+         *     persists PR outcomes yet.
+         */
+        get: operations["get_shipped_metrics_endpoint_metrics_shipped_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/capture/status": {
         parameters: {
             query?: never;
@@ -8276,6 +8301,161 @@ export interface components {
             actor: string;
         };
         /**
+         * ShippedCountPointResponse
+         * @description One UTC day's count.
+         */
+        ShippedCountPointResponse: {
+            /**
+             * Date
+             * Format: date
+             */
+            date: string;
+            /** Value */
+            value: number;
+        };
+        /**
+         * ShippedCountTileResponse
+         * @description A count over the window against the window before it.
+         *
+         *     When ``reason`` is set the count cannot be answered from persisted data:
+         *     every number is null and ``series`` is empty. Never a zero standing in for
+         *     "unknown".
+         */
+        ShippedCountTileResponse: {
+            /** Total */
+            total: number | null;
+            /** Previous Total */
+            previous_total: number | null;
+            /** Delta */
+            delta: number | null;
+            /** Delta Percent */
+            delta_percent: number | null;
+            /** Delta Display */
+            delta_display: string | null;
+            delta_unit: components["schemas"]["ShippedDeltaUnit"];
+            /** Total Display */
+            total_display: string | null;
+            /** Series */
+            series: components["schemas"]["ShippedCountPointResponse"][];
+            /** Source */
+            source: string;
+            /** Reason */
+            reason: string | null;
+        };
+        /**
+         * ShippedDeltaUnit
+         * @description What a tile's ``delta_display`` is expressed in.
+         * @enum {string}
+         */
+        ShippedDeltaUnit: "percent" | "points" | "count";
+        /**
+         * ShippedMetricsResponse
+         * @description What agents shipped over the window, tile by tile (the Overview block).
+         */
+        ShippedMetricsResponse: {
+            window: components["schemas"]["ShippedWindowResponse"];
+            previous: components["schemas"]["ShippedPreviousWindowResponse"];
+            /** Workflow Id */
+            workflow_id: string | null;
+            commits: components["schemas"]["ShippedCountTileResponse"];
+            prs_opened: components["schemas"]["ShippedCountTileResponse"];
+            prs_merged: components["schemas"]["ShippedCountTileResponse"];
+            merge_rate: components["schemas"]["ShippedRateTileResponse"];
+            repos_touched: components["schemas"]["ShippedCountTileResponse"];
+            /** Repos */
+            repos: string[];
+            /** By Workflow */
+            by_workflow: components["schemas"]["ShippedWorkflowResponse"][] | null;
+            /** Commits Without Workflow */
+            commits_without_workflow: number;
+            /** Unavailable */
+            unavailable: string[];
+        };
+        /**
+         * ShippedPreviousWindowResponse
+         * @description The ``days`` UTC days immediately before the window, inclusive.
+         */
+        ShippedPreviousWindowResponse: {
+            /**
+             * From
+             * Format: date
+             */
+            from: string;
+            /**
+             * To
+             * Format: date
+             */
+            to: string;
+        };
+        /**
+         * ShippedRatePointResponse
+         * @description One UTC day's rate in percent; null on a day with no denominator.
+         */
+        ShippedRatePointResponse: {
+            /**
+             * Date
+             * Format: date
+             */
+            date: string;
+            /** Value */
+            value: number | null;
+        };
+        /**
+         * ShippedRateTileResponse
+         * @description A percentage over the window; ``delta`` is in percentage points.
+         */
+        ShippedRateTileResponse: {
+            /** Total */
+            total: number | null;
+            /** Previous Total */
+            previous_total: number | null;
+            /** Delta */
+            delta: number | null;
+            /** Delta Display */
+            delta_display: string | null;
+            delta_unit: components["schemas"]["ShippedDeltaUnit"];
+            /** Total Display */
+            total_display: string | null;
+            /** Series */
+            series: components["schemas"]["ShippedRatePointResponse"][];
+            /** Source */
+            source: string;
+            /** Reason */
+            reason: string | null;
+        };
+        /**
+         * ShippedWindowResponse
+         * @description ``days`` UTC calendar days, ``from`` and ``to`` inclusive; ``to`` is today.
+         */
+        ShippedWindowResponse: {
+            /** Days */
+            days: number;
+            /**
+             * From
+             * Format: date
+             */
+            from: string;
+            /**
+             * To
+             * Format: date
+             */
+            to: string;
+        };
+        /**
+         * ShippedWorkflowResponse
+         * @description One workflow's share of the window's commits.
+         */
+        ShippedWorkflowResponse: {
+            /** Workflow Id */
+            workflow_id: string;
+            /** Workflow Name */
+            workflow_name: string;
+            /** Commits */
+            commits: number;
+            /** Repos Touched */
+            repos_touched: number;
+        };
+        /**
          * SideEffectStatus
          * @description What a phase says happened to the external writes it attempted.
          *
@@ -12316,6 +12496,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PhaseProfilesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_shipped_metrics_endpoint_metrics_shipped_get: {
+        parameters: {
+            query?: {
+                /** @description Window length in UTC days: 7, 14 or 30 */
+                days?: 7 | 14 | 30;
+                /** @description Only commits of this workflow's executions */
+                workflow_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShippedMetricsResponse"];
                 };
             };
             /** @description Validation Error */

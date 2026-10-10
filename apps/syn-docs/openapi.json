@@ -4214,6 +4214,75 @@
         }
       }
     },
+    "/metrics/shipped": {
+      "get": {
+        "tags": [
+          "metrics"
+        ],
+        "summary": "Get Shipped Metrics Endpoint",
+        "description": "What agents shipped over the last ``days`` UTC days, against the ``days`` before.\n\nCommits are distinct shas from agent ``git_commit`` observations attributed\nto an execution; repos touched are the slugs those executions cloned. PRs\nopened, PRs merged and merge rate are null with a ``reason``: no store\npersists PR outcomes yet.",
+        "operationId": "get_shipped_metrics_endpoint_metrics_shipped_get",
+        "parameters": [
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "description": "Window length in UTC days: 7, 14 or 30",
+              "enum": [
+                7,
+                14,
+                30
+              ],
+              "default": 14,
+              "title": "Days"
+            },
+            "description": "Window length in UTC days: 7, 14 or 30"
+          },
+          {
+            "name": "workflow_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only commits of this workflow's executions",
+              "title": "Workflow Id"
+            },
+            "description": "Only commits of this workflow's executions"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShippedMetricsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/capture/status": {
       "get": {
         "tags": [
@@ -20673,6 +20742,440 @@
         ],
         "title": "SetMaintenanceModeRequest",
         "description": "Set or clear maintenance mode (#1387).\n\nThe response is not sent until the state is durably persisted, so a caller\nthat has seen a 200 knows no further execution can be admitted."
+      },
+      "ShippedCountPointResponse": {
+        "properties": {
+          "date": {
+            "type": "string",
+            "format": "date",
+            "title": "Date"
+          },
+          "value": {
+            "type": "integer",
+            "title": "Value"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "date",
+          "value"
+        ],
+        "title": "ShippedCountPointResponse",
+        "description": "One UTC day's count."
+      },
+      "ShippedCountTileResponse": {
+        "properties": {
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          },
+          "previous_total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous Total"
+          },
+          "delta": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delta"
+          },
+          "delta_percent": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delta Percent"
+          },
+          "delta_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delta Display"
+          },
+          "delta_unit": {
+            "$ref": "#/components/schemas/ShippedDeltaUnit"
+          },
+          "total_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Display"
+          },
+          "series": {
+            "items": {
+              "$ref": "#/components/schemas/ShippedCountPointResponse"
+            },
+            "type": "array",
+            "title": "Series"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "total",
+          "previous_total",
+          "delta",
+          "delta_percent",
+          "delta_display",
+          "delta_unit",
+          "total_display",
+          "series",
+          "source",
+          "reason"
+        ],
+        "title": "ShippedCountTileResponse",
+        "description": "A count over the window against the window before it.\n\nWhen ``reason`` is set the count cannot be answered from persisted data:\nevery number is null and ``series`` is empty. Never a zero standing in for\n\"unknown\"."
+      },
+      "ShippedDeltaUnit": {
+        "type": "string",
+        "enum": [
+          "percent",
+          "points",
+          "count"
+        ],
+        "title": "ShippedDeltaUnit",
+        "description": "What a tile's ``delta_display`` is expressed in."
+      },
+      "ShippedMetricsResponse": {
+        "properties": {
+          "window": {
+            "$ref": "#/components/schemas/ShippedWindowResponse"
+          },
+          "previous": {
+            "$ref": "#/components/schemas/ShippedPreviousWindowResponse"
+          },
+          "workflow_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workflow Id"
+          },
+          "commits": {
+            "$ref": "#/components/schemas/ShippedCountTileResponse"
+          },
+          "prs_opened": {
+            "$ref": "#/components/schemas/ShippedCountTileResponse"
+          },
+          "prs_merged": {
+            "$ref": "#/components/schemas/ShippedCountTileResponse"
+          },
+          "merge_rate": {
+            "$ref": "#/components/schemas/ShippedRateTileResponse"
+          },
+          "repos_touched": {
+            "$ref": "#/components/schemas/ShippedCountTileResponse"
+          },
+          "repos": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Repos"
+          },
+          "by_workflow": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ShippedWorkflowResponse"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "By Workflow"
+          },
+          "commits_without_workflow": {
+            "type": "integer",
+            "title": "Commits Without Workflow"
+          },
+          "unavailable": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Unavailable"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "window",
+          "previous",
+          "workflow_id",
+          "commits",
+          "prs_opened",
+          "prs_merged",
+          "merge_rate",
+          "repos_touched",
+          "repos",
+          "by_workflow",
+          "commits_without_workflow",
+          "unavailable"
+        ],
+        "title": "ShippedMetricsResponse",
+        "description": "What agents shipped over the window, tile by tile (the Overview block)."
+      },
+      "ShippedPreviousWindowResponse": {
+        "properties": {
+          "from": {
+            "type": "string",
+            "format": "date",
+            "title": "From"
+          },
+          "to": {
+            "type": "string",
+            "format": "date",
+            "title": "To"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "from",
+          "to"
+        ],
+        "title": "ShippedPreviousWindowResponse",
+        "description": "The ``days`` UTC days immediately before the window, inclusive."
+      },
+      "ShippedRatePointResponse": {
+        "properties": {
+          "date": {
+            "type": "string",
+            "format": "date",
+            "title": "Date"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "date",
+          "value"
+        ],
+        "title": "ShippedRatePointResponse",
+        "description": "One UTC day's rate in percent; null on a day with no denominator."
+      },
+      "ShippedRateTileResponse": {
+        "properties": {
+          "total": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          },
+          "previous_total": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous Total"
+          },
+          "delta": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delta"
+          },
+          "delta_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delta Display"
+          },
+          "delta_unit": {
+            "$ref": "#/components/schemas/ShippedDeltaUnit"
+          },
+          "total_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Display"
+          },
+          "series": {
+            "items": {
+              "$ref": "#/components/schemas/ShippedRatePointResponse"
+            },
+            "type": "array",
+            "title": "Series"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "total",
+          "previous_total",
+          "delta",
+          "delta_display",
+          "delta_unit",
+          "total_display",
+          "series",
+          "source",
+          "reason"
+        ],
+        "title": "ShippedRateTileResponse",
+        "description": "A percentage over the window; ``delta`` is in percentage points."
+      },
+      "ShippedWindowResponse": {
+        "properties": {
+          "days": {
+            "type": "integer",
+            "title": "Days"
+          },
+          "from": {
+            "type": "string",
+            "format": "date",
+            "title": "From"
+          },
+          "to": {
+            "type": "string",
+            "format": "date",
+            "title": "To"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "days",
+          "from",
+          "to"
+        ],
+        "title": "ShippedWindowResponse",
+        "description": "``days`` UTC calendar days, ``from`` and ``to`` inclusive; ``to`` is today."
+      },
+      "ShippedWorkflowResponse": {
+        "properties": {
+          "workflow_id": {
+            "type": "string",
+            "title": "Workflow Id"
+          },
+          "workflow_name": {
+            "type": "string",
+            "title": "Workflow Name"
+          },
+          "commits": {
+            "type": "integer",
+            "title": "Commits"
+          },
+          "repos_touched": {
+            "type": "integer",
+            "title": "Repos Touched"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "workflow_id",
+          "workflow_name",
+          "commits",
+          "repos_touched"
+        ],
+        "title": "ShippedWorkflowResponse",
+        "description": "One workflow's share of the window's commits."
       },
       "SideEffectStatus": {
         "type": "string",

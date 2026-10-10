@@ -87,6 +87,37 @@ read from observations, never from an aggregate. Below ten Phases a percentile
 reads `insufficient`. Sizes the capacity model and the
 [Execution Budget](#execution-budget); it is not itself a limit.
 
+## Shipped
+
+What agents put into repositories over a window of UTC days, counted only
+where an Execution is the author (`GET /metrics/shipped`, the Overview's
+"Shipped by agents" block). Five tiles, each a window total, the total of the
+window of equal length immediately before it, a delta and one value per day:
+commits, PRs opened, PRs merged, [Merge Rate](#merge-rate) and
+[Repos Touched](#repos-touched). A commit is a distinct sha from an agent's
+`git_commit` observation that carries an `execution_id`, counted once on the
+UTC day it was first seen; an amend or rebase makes a new sha and so a new
+commit. A push webhook's commit is not shipped: it has no Execution, so nothing
+says an agent wrote it. Lane 2 and the execution list read model only, never an
+aggregate. **Unclear:** PRs opened and merged are not persisted anywhere today,
+so those tiles and Merge Rate are null with a reason, never zero (#1852).
+
+## Merge Rate
+
+PRs merged divided by PRs opened over the same window, as a percent. Its delta
+is in percentage points ("+5 pts"), not a relative change: a rate moving from
+80% to 84% is +4 pts, not +5%. Null when no PR was opened: no data is not 0%.
+A daily point is that day's merged over that day's opened, null on a day with
+none opened.
+
+## Repos Touched
+
+Distinct `owner/name` repositories that the committing Executions cloned
+(their `repos`, ADR-058), over the window. A distinct count, never a sum of the
+daily series: one repo touched on ten days is one repo touched. Its delta is a
+plain count ("+3"). The commit observation's own `repo` is a directory name,
+not an `owner/name`, so it does not answer this.
+
 ## Quota Exhaustion
 
 An upstream failure of kind `quota` (PC-83): the provider's usage allowance for
