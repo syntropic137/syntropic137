@@ -215,7 +215,7 @@
                   <StatusBadge status={outcomeStatus(r.status, r.failure_classification)} shape="glyph" />
                   <span class="sky-ov-chip__name">{r.workflow_name}</span>
                   <span class="sky-ov-chip__meta">
-                    <span class="sky-ov-chip__verb">failed in </span>{r.duration_display || '—'} · {formatRelativeTime(r.started_at)}
+                    <span class="sky-ov-chip__verb">failed in&nbsp;</span>{r.duration_display || '—'} · {formatRelativeTime(r.started_at)}
                   </span>
                 </a>
               </li>
