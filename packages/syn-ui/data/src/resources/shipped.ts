@@ -1,5 +1,6 @@
 /**
- * What agents shipped in a window, against the window before:
+ * What agents shipped in a window (agent-attributed only: commits and PRs
+ * produced by runs), against the window before:
  * GET /metrics/shipped?days=14 (7 | 14 | 30; optional workflow_id). The
  * Overview's "Shipped by agents" block reads it.
  *
@@ -15,7 +16,8 @@ export type ShippedDays = 7 | 14 | 30
 export interface ShippedPoint {
   /** ISO date (UTC day). */
   date: string
-  value: number
+  /** Null on a day the metric is undefined (merge rate when nothing was opened); the view model draws it as empty. */
+  value: number | null
 }
 
 /** One tile. `merge_rate` values are percentages, 0 to 100. */

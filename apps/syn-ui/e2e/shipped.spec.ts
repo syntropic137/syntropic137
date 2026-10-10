@@ -16,7 +16,7 @@ test('five tiles render the board totals, deltas and 14-bar sparklines', async (
   await open(page, '/')
   const block = page.getByRole('region', { name: 'Shipped by agents, last 14 days' })
   await expect(block.getByText('Last 14 days, vs the 14 before')).toBeVisible()
-  await expect(block.getByRole('link', { name: 'by workflow →' })).toHaveAttribute('href', /\/workflows$/)
+  await expect(block.getByRole('link', { name: 'by workflow →' })).toHaveAttribute('href', /\/executions$/)
   const tiles = block.getByRole('listitem')
   await expect(tiles).toHaveCount(5)
   for (const [i, [label, total, delta]] of BOARD.entries()) {

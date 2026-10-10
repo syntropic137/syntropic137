@@ -1,5 +1,8 @@
 /**
- * GET /metrics/shipped: the Main board's "Shipped by agents" sample.
+ * SAMPLE DATA, not real numbers: the Main board's "Shipped by agents" values
+ * (canvas note "shipped-sample"). The real GET /metrics/shipped counts only
+ * agent-attributed work (commits and PRs produced by runs); the server enforces it.
+ *
  * 14 days: 1,204 commits (+38%), 73 PRs opened (+24%), 61 merged (+27%),
  * an 84% merge rate (+5 pts) and 9 repos (+3). Daily series follow the
  * board's bar heights, scaled so they sum to the totals (two quiet days at

@@ -20,6 +20,8 @@
     outcomeTotals,
     DEFAULT_LIST_WINDOW,
     parseTimeWindow,
+    runDurationMs,
+    runDurationText,
     timeWindowParam,
     timeWindowStart,
   } from '@syn137/skyline-core/screens/executions'
@@ -27,6 +29,7 @@
   import { ObjectIcon, RunRow } from '@syn137/skyline-svelte-v5/patterns'
   import { ApiError, MAX_PAGE_SIZE, listExecutions } from '@syn137/syn-ui-data'
   import type { ExecutionListResponse } from '@syn137/syn-ui-data/types'
+  import { clock } from '../../lib/clock.svelte'
   import { resource } from '../../lib/load.svelte'
   import { setPage } from '../../lib/page.svelte'
   import { href, router } from '../../lib/router'
@@ -69,10 +72,12 @@
     { live: isExecutionEvent },
   )
 
-  const now = $derived(list.data ? Date.now() : 0)
+  // Ticks while the page is open: running rows count up, "started 50m ago" stays true (feedback 5ed77fc5).
+  $effect(() => clock.hold())
+  const now = $derived(list.data ? clock.now : 0)
   const rows = $derived(list.data?.executions ?? [])
   const totals = $derived(outcomeTotals(list.data?.status_counts))
-  const longest = $derived(Math.max(0, ...rows.map((r) => (r.duration_seconds ?? 0) * 1000)))
+  const longest = $derived(Math.max(0, ...rows.map((r) => runDurationMs(r, now || Date.now()) ?? 0)))
   const slots = $derived(runSlots(rows.map((r) => r.phase_progress?.possible ?? r.total_phases)))
   const groups = $derived(groupByAge(rows, (r) => r.started_at, now || Date.now()))
   const pageCount = $derived(Math.max(1, Math.ceil((list.data?.total ?? 0) / PAGE_SIZE)))
@@ -236,9 +241,9 @@
                 tag={evalBadge(r.eval)}
                 sub={rowSub(r)}
                 segments={runSegments({ status: r.status, done: r.phase_progress?.completed ?? r.completed_phases, total: r.phase_progress?.possible ?? r.total_phases })}
-                barPercent={runBarPercent((r.duration_seconds ?? 0) * 1000, longest)}
+                barPercent={runBarPercent(runDurationMs(r, now || Date.now()) ?? 0, longest)}
                 {slots}
-                duration={r.duration_display ?? '—'}
+                duration={runDurationText(r, now || Date.now())}
                 tokens={r.total_tokens_display ?? formatTokens(r.total_tokens)}
                 cost={r.total_cost_display ?? formatCost(r.total_cost_usd)}
                 when={when(r)}

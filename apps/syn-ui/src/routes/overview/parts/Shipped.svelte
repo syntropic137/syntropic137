@@ -18,7 +18,7 @@
 <section class="sky-ov-shipped" aria-label="Shipped by agents, last {days} days">
   <div class="sky-ov-shipped__head">
     <h3><GitCommit size={15} aria-hidden="true" />Shipped by agents</h3>
-    <span class="sky-ov-shipped__window">{windowLine} · <a href={href('/workflows')}>by workflow →</a></span>
+    <span class="sky-ov-shipped__window">{windowLine} · <a href={href('/executions')}>by workflow →</a></span>
   </div>
   <ul class="sky-ov-shipped__tiles">
     {#each tiles as t (t.key)}

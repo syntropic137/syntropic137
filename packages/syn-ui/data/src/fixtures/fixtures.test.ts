@@ -216,7 +216,7 @@ describe('shipped metrics (Main board "Shipped by agents")', () => {
     ])
     for (const m of [res.commits, res.prs_opened, res.prs_merged]) {
       expect(m!.series).toHaveLength(14)
-      expect(m!.series.reduce((a, p) => a + p.value, 0)).toBe(m!.total)
+      expect(m!.series.reduce((a, p) => a + (p.value ?? 0), 0)).toBe(m!.total)
     }
     expect(res.commits!.series[0]!.date).toBe('2026-09-25')
     expect(res.by_workflow.reduce((a, w) => a + w.commits, 0)).toBe(1204)

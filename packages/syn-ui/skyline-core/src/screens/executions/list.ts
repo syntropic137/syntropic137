@@ -2,7 +2,9 @@
  * Executions list (Executions and PhoneExecutions boards): time windows,
  * age groups, the hero's lede and the pagination summary.
  */
+import { durationBetween, formatDuration } from '../../format/duration'
 import { toTime } from '../../format/shared'
+import { statusSemantics } from '../../patterns/status'
 
 export type TimeWindow = '15m' | '1h' | '24h' | '7d' | 'all'
 
@@ -178,4 +180,32 @@ export function evalBadge(e: ExecutionEvalLike | null | undefined): EvalBadge | 
 /** `?eval=1` <-> the list's in-eval filter. */
 export function parseEvalFilter(value: string | null | undefined): boolean {
   return value === '1' || value === 'true'
+}
+
+export interface RunDurationLike {
+  status: string | null | undefined
+  started_at?: string | number | null | undefined
+  duration_seconds?: number | null | undefined
+  duration_display?: string | null | undefined
+}
+
+/**
+ * How long a run has taken, in ms. A finished run reports the server's
+ * duration; a run still going is measured from its start to `now`, so a
+ * ticking `now` keeps it moving (feedback 5ed77fc5). Null when nothing is
+ * known.
+ */
+export function runDurationMs(r: RunDurationLike, now: number): number | null {
+  if (!statusSemantics(r.status).terminal) {
+    const live = durationBetween(r.started_at, null, now)
+    if (live !== null) return live
+  }
+  return typeof r.duration_seconds === 'number' ? r.duration_seconds * 1000 : null
+}
+
+/** The duration column: the server's text for a finished run, a live count for a running one. */
+export function runDurationText(r: RunDurationLike, now: number): string {
+  if (statusSemantics(r.status).terminal && r.duration_display) return r.duration_display
+  const ms = runDurationMs(r, now)
+  return ms === null ? '—' : formatDuration(ms)
 }

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { usageModel } from '../../patterns/usage'
 import {
+  runDurationMs,
+  runDurationText,
   ageGroupTitle,
   calendarDaysAgo,
   evalBadge,
@@ -244,5 +246,28 @@ describe('eval marker and progress text', () => {
     expect(phaseProgressText('3 of up to 10, failed', 3, 10)).toBe('phases 3 of up to 10, failed')
     expect(phaseProgressText(null, 1, 3)).toBe('1 of 3 phases')
     expect(phaseProgressText(undefined, 0, 1)).toBe('0 of 1 phase')
+  })
+})
+
+describe('runDurationMs / runDurationText (feedback 5ed77fc5: durations froze until a refresh)', () => {
+  const started = Date.parse('2026-10-10T00:00:00Z')
+  it('a running run is measured from its start to now, so a ticking now moves it', () => {
+    const r = { status: 'running', started_at: '2026-10-10T00:00:00Z', duration_seconds: 10, duration_display: '10s' }
+    expect(runDurationMs(r, started + 50_000)).toBe(50_000)
+    expect(runDurationMs(r, started + 51_000)).toBe(51_000)
+    expect(runDurationText(r, started + 50_000)).not.toBe('10s')
+    expect(runDurationText(r, started + 50_000)).toBe(runDurationText(r, started + 50_000))
+  })
+  it('a finished run keeps the server duration and its display text', () => {
+    const r = { status: 'completed', started_at: '2026-10-10T00:00:00Z', duration_seconds: 10, duration_display: '10s' }
+    expect(runDurationMs(r, started + 50_000)).toBe(10_000)
+    expect(runDurationText(r, started + 50_000)).toBe('10s')
+  })
+  it('a running run with no start falls back to the server duration, then to a dash', () => {
+    expect(runDurationMs({ status: 'running', started_at: null, duration_seconds: 7 }, started)).toBe(7_000)
+    expect(runDurationText({ status: 'running', started_at: null, duration_seconds: null }, started)).toBe('\u2014')
+  })
+  it('a start in the future is not a negative duration', () => {
+    expect(runDurationMs({ status: 'running', started_at: '2026-10-10T00:00:00Z', duration_seconds: null }, started - 1000)).toBeNull()
   })
 })
