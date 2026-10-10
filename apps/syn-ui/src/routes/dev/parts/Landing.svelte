@@ -113,6 +113,10 @@
     font-size: var(--ds-text-sm);
     color: var(--ds-color-text-muted);
   }
+  /* Token mono face, not the generic monospace (see .dev-patterns__note code). */
+  .dev-landing__note code {
+    font-family: var(--ds-font-mono);
+  }
   .dev-landing__hero {
     overflow: hidden;
     padding: var(--ds-space-6) 0 0;
