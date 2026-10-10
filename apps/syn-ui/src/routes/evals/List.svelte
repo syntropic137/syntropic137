@@ -6,7 +6,7 @@
   import { PageHeader, VerdictBlock, VerdictBoard, VerdictSparkline } from '@syn137/skyline-svelte-v5/patterns'
   import { formatDate, formatRelativeTime } from '@syn137/skyline-core/format'
   import { cellKey, normalizeVerdict } from '@syn137/skyline-core/patterns'
-  import { buildEvalBoard, evalRunKey, filterEvals, latestRunCosts, pageOf, recentVerdicts, sortEvalsByLastRun, tagValue, withLatestRun } from '@syn137/skyline-core/screens/evals'
+  import { buildEvalBoard, evalRunKey, filterEvals, latestRuns, pageOf, recentVerdicts, sortEvalsByLastRun, tagValue, withLatestRun } from '@syn137/skyline-core/screens/evals'
   import { isRunFinished } from '@syn137/syn-ui-data/live'
   import { resource } from '../../lib/load.svelte'
   import { href, router } from '../../lib/router'
@@ -27,9 +27,9 @@
   // One /evals load per visit (every page, it takes ~20 s on a large deployment):
   // the board, the tag filter, the list and its pages are all derived from it.
   const all = resource((signal) => listAllEvals({}, signal), { live: isRunFinished })
-  // Each cell's cost is its latest run's, matching the verdict it shows.
+  // Each cell's cost and time are its latest run's, matching the verdict it shows.
   const evalRuns = resource((signal) => listEvalExecutions(signal), { live: isRunFinished })
-  const runCosts = $derived(latestRunCosts(evalRuns.data ?? []))
+  const latest = $derived(latestRuns(evalRuns.data ?? []))
   const sorted = $derived(sortEvalsByLastRun(all.data?.evals ?? []))
   const filtered = $derived(filterEvals(sorted, tag))
   const paged = $derived(pageOf(filtered, page, PAGE_SIZE))
@@ -37,7 +37,8 @@
   const board = $derived(
     buildEvalBoard(all.data?.evals ?? [], {
       evalHref: (id) => href(`/evals/${encodeURIComponent(id)}`),
-      costOf: (id, wf) => runCosts.get(evalRunKey(id, wf)),
+      costOf: (id, wf) => latest.get(evalRunKey(id, wf))?.costUsd,
+      durationOf: (id, wf) => latest.get(evalRunKey(id, wf))?.durationMs,
       caseSub: (_id, evs) => {
         const repo = evs[0] && 'baseline_repos' in evs[0] ? (evs[0] as EvalSummary).baseline_repos[0] : undefined
         const pr = evs.map((e) => e.tags.find((t) => t.startsWith('pr:'))).find(Boolean)

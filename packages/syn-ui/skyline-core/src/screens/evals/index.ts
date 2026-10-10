@@ -98,6 +98,11 @@ export interface BoardOptions {
    * cost. Absent, cells fall back to the variant's median cost.
    */
   costOf?: (evalId: string, workflowId: string) => number | null | undefined
+  /**
+   * The cell's duration in ms: the latest run's (`latestRuns`), so every
+   * verifier column's footer has an average time, not only the selected one.
+   */
+  durationOf?: (evalId: string, workflowId: string) => number | null | undefined
 }
 
 /** An /executions row as the board reads it (structural: the API row satisfies it). */
@@ -105,6 +110,8 @@ export interface EvalExecutionLike {
   workflow_id: string
   started_at?: string | null
   total_cost_usd?: number | string | null
+  /** Wall clock, as the Executions list shows it. */
+  duration_seconds?: number | null
   eval?: { eval_id: string } | null
 }
 
@@ -113,17 +120,30 @@ export function evalRunKey(evalId: string, workflowId: string): string {
   return `${evalId}\u0000${workflowId}`
 }
 
-/** Each (eval, workflow)'s newest run cost, from the eval executions (any order). */
-export function latestRunCosts(rows: readonly EvalExecutionLike[]): Map<string, number | null> {
-  const newest = new Map<string, { at: number; cost: number | null }>()
+/** One (eval, workflow)'s newest run, as the board cell reads it. */
+export interface LatestRun {
+  costUsd: number | null
+  durationMs: number | null
+}
+
+/** Each (eval, workflow)'s newest run cost and duration, from the eval executions (any order). */
+export function latestRuns(rows: readonly EvalExecutionLike[]): Map<string, LatestRun> {
+  const newest = new Map<string, { at: number; run: LatestRun }>()
   for (const row of rows) {
     if (!row.eval) continue
     const key = evalRunKey(row.eval.eval_id, row.workflow_id)
     const at = time(row.started_at) ?? 0
     const prev = newest.get(key)
-    if (!prev || at > prev.at) newest.set(key, { at, cost: toNum(row.total_cost_usd ?? null) })
+    const secs = row.duration_seconds
+    if (!prev || at > prev.at)
+      newest.set(key, { at, run: { costUsd: toNum(row.total_cost_usd ?? null), durationMs: typeof secs === 'number' && Number.isFinite(secs) && secs >= 0 ? secs * 1000 : null } })
   }
-  return new Map([...newest].map(([k, v]) => [k, v.cost]))
+  return new Map([...newest].map(([k, v]) => [k, v.run]))
+}
+
+/** Each (eval, workflow)'s newest run cost, from the eval executions (any order). */
+export function latestRunCosts(rows: readonly EvalExecutionLike[]): Map<string, number | null> {
+  return new Map([...latestRuns(rows)].map(([k, v]) => [k, v.costUsd]))
 }
 
 /** One (case, workflow) result before it is placed on the board. */
@@ -295,7 +315,8 @@ function placeCell(board: EvalBoardModel, key: string, entry: BoardEntry, option
   board.evalIds[key] = entry.e.eval_id
   board.workflows[key] = entry.workflow
   const costUsd = options.costOf ? (options.costOf(entry.e.eval_id, entry.workflow) ?? null) : entry.costUsd
-  board.cells[key] = { verdict: entry.verdict, costUsd, runs: entry.runs, evalHref: options.evalHref?.(entry.e.eval_id) }
+  const durationMs = options.durationOf?.(entry.e.eval_id, entry.workflow) ?? undefined
+  board.cells[key] = { verdict: entry.verdict, costUsd, runs: entry.runs, evalHref: options.evalHref?.(entry.e.eval_id), ...(durationMs === undefined || durationMs === null ? {} : { durationMs }) }
 }
 
 /** "verifier-seed-v1 v2: shared-esp-stream" -> "verifier-seed-v1 · v2". */
@@ -634,7 +655,8 @@ export function withLatestRun(cell: VerdictCell | undefined, run: (EvalRunLike &
     ...cell,
     verdict,
     costUsd: toNum(run.total_cost_usd) ?? cell.costUsd,
-    durationMs: typeof run.duration_seconds === 'number' ? run.duration_seconds * 1000 : cell.durationMs,
+    // The board's own duration wins, so the column footer does not move when a cell is selected.
+    durationMs: cell.durationMs ?? (typeof run.duration_seconds === 'number' ? run.duration_seconds * 1000 : undefined),
     evidence: evidenceSummary(run.evidence_excerpt) ?? evidenceFallback(verdict),
     ...extra,
   }
