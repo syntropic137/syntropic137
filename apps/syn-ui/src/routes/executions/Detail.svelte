@@ -541,6 +541,16 @@
     position: relative;
     z-index: 1;
   }
+  /* One line of tiles per phase, so every row is the same height (feedback 6a5dd403): a long artifact name ellipsizes (full name on hover) instead of wrapping onto a second line. */
+  .sky-exec__phase :global(.sky-run-tiles__inner) {
+    flex-wrap: nowrap;
+  }
+  .sky-exec__phase :global(.sky-run-tiles__pair:first-child) {
+    flex-shrink: 0;
+  }
+  .sky-exec__phase :global(.sky-run-tiles__pair) {
+    min-width: 0;
+  }
   .sky-exec__phase[data-pending] {
     opacity: 0.7;
   }
