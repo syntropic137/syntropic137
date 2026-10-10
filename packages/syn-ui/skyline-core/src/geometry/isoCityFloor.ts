@@ -160,6 +160,20 @@ export interface IsoCityBlock {
   inWindow: boolean
 }
 
+/** What a day slot shows: a block, an empty floor tile, a future tile (after today) or unknown (not loaded). */
+export type IsoCellKind = 'block' | 'floor' | 'future' | 'unloaded'
+
+/** One day slot. Every laid-out week has all seven, so the board is a full rectangle. */
+export interface IsoCityCell {
+  date: string
+  week: number
+  column: number
+  row: number
+  depth: number
+  kind: IsoCellKind
+  inWindow: boolean
+}
+
 export interface IsoCityRow {
   row: number
   weekday: (typeof ISO_WEEKDAYS)[number]
@@ -190,6 +204,8 @@ export interface IsoCityFloorLayout {
   futureEdge: string
   /** Days before `loadedFrom`: not loaded yet, so unknown rather than empty. */
   unloaded: string
+  /** Every day slot laid out, seven per week (weeks after today's are never laid out). */
+  cells: IsoCityCell[]
   /** Today's tile and beam (null when today is not rendered). */
   today: { tile: string; beam: IsoHitBox } | null
   /** Tops of hot and failed blocks in the window, for the bloom. */
@@ -308,6 +324,7 @@ interface Paint {
   future: string[]
   futureEdge: string[]
   unloaded: string[]
+  cells: IsoCityCell[]
   rows: IsoCityBlock[][]
   today: { tile: string; beam: IsoHitBox } | null
 }
@@ -317,6 +334,12 @@ function todayMark(d: IsoCityDims, c: number, r: number): { tile: string; beam: 
   return { tile: tile(d, c, r), beam: { x: n2(b[0] - 1.5), y: n2(b[1] - d.beam), width: 3, height: d.beam } }
 }
 
+function cellKind(ctx: Ctx, date: string, day: SkylineDay | null | undefined): IsoCellKind {
+  if (date > ctx.today) return 'future'
+  if (ctx.loadedFrom !== null && date < ctx.loadedFrom) return 'unloaded'
+  return !day || day.sessions <= 0 ? 'floor' : 'block'
+}
+
 function paintCell(ctx: Ctx, paint: Paint, week: IsoCityWeek, w: number, c: number, wd: number): void {
   const d = ctx.dims
   const r = isoDepth(wd, ctx.axis)
@@ -324,11 +347,14 @@ function paintCell(ctx: Ctx, paint: Paint, week: IsoCityWeek, w: number, c: numb
   const inWindow = c >= 0 && c < ctx.window
   if (date === ctx.today) paint.today = todayMark(d, c, r)
   const day = week.days[wd]
-  if (date > ctx.today) (inWindow ? paint.future : paint.futureEdge).push(tile(d, c, r))
-  else if (ctx.loadedFrom !== null && date < ctx.loadedFrom) paint.unloaded.push(tile(d, c, r))
-  else if (!day || day.sessions <= 0) (inWindow ? paint.floor : paint.floorEdge).push(tile(d, c, r))
-  else paint.rows[wd]!.push(block(ctx, day, w, c, wd))
+  const kind = cellKind(ctx, date, day)
+  paint.cells.push({ date, week: w, column: c, row: wd, depth: r, kind, inWindow })
+  if (kind === 'block') paint.rows[wd]!.push(block(ctx, day!, w, c, wd))
+  else if (kind === 'unloaded') paint.unloaded.push(tile(d, c, r))
+  else paint[TILE_LAYER[kind][inWindow ? 0 : 1]].push(tile(d, c, r))
 }
+
+const TILE_LAYER = { future: ['future', 'futureEdge'], floor: ['floor', 'floorEdge'] } as const
 
 function monthLabels(ctx: Ctx, weeks: readonly IsoCityWeek[], from: number, to: number): IsoCityLabel[] {
   const out: IsoCityLabel[] = []
@@ -367,7 +393,7 @@ export function layoutIsoCityFloor(input: IsoCityFloorInput): IsoCityFloorLayout
   const dims = input.dims ?? ISO_CITY_DESKTOP
   const pad = Math.max(0, Math.floor(input.pad ?? 1))
   const ctx: Ctx = { dims, window: input.window ?? dims.win, first: input.first, today: input.today, max: input.maxSessions ?? busiest(input.weeks), selected: input.selected ?? null, axis: input.weekdayAxis ?? 'monday-back', loadedFrom: input.loadedFrom ?? null }
-  const paint: Paint = { floor: [], floorEdge: [], future: [], futureEdge: [], unloaded: [], rows: [[], [], [], [], [], [], []], today: null }
+  const paint: Paint = { floor: [], floorEdge: [], future: [], futureEdge: [], unloaded: [], cells: [], rows: [[], [], [], [], [], [], []], today: null }
   for (let c = -pad; c < ctx.window + pad; c++) {
     const week = input.weeks[ctx.first + c]
     if (!week) continue
@@ -389,6 +415,7 @@ export function layoutIsoCityFloor(input: IsoCityFloorInput): IsoCityFloorLayout
     future: paint.future.join(''),
     futureEdge: paint.futureEdge.join(''),
     unloaded: paint.unloaded.join(''),
+    cells: paint.cells,
     today: paint.today,
     glowHot: shown.filter((b) => b.tone === 'hot').map((b) => b.top).join(''),
     glowFail: shown.filter((b) => b.tone === 'fail').map((b) => b.top).join(''),
