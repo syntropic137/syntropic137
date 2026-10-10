@@ -42,10 +42,20 @@ describe('workflow performance (Workflow board sample)', () => {
     const m = workflowPerformance(ROWS, 'cost')
     expect(m.kpis.map((k) => [k.label, k.value, k.word, k.delta])).toEqual([
       ['Success, last 5', '100%', 'Improving', '+20 pts vs first 5 runs'],
-      ['Median duration', '4m 36s', 'Improving', '−2m 06s vs first runs'],
-      ['Cost per run', '$0.106', 'Improving', '−$0.047 vs first runs'],
-      ['Tokens per run', '213k', 'Improving', '−95k vs first runs'],
+      ['Median duration', '5m 26s', 'Improving', '−2m 06s (latest 3 vs first 3)'],
+      ['Median cost', '$0.121', 'Improving', '−$0.045 (latest 3 vs first 3)'],
+      ['Median tokens', '242k', 'Improving', '−90k (latest 3 vs first 3)'],
     ])
+  })
+
+  it('card values are the median of every completed run, not the latest three (parity-2 #5)', () => {
+    // 10 completed runs: durations 418 ... 266 s, median (333 + 318) / 2; the last three alone give 276 s (4m 36s).
+    const done = perfRuns(ROWS).filter((r) => r.counted)
+    expect(done).toHaveLength(10)
+    const m = workflowPerformance(ROWS, 'cost')
+    expect(m.kpis[1]!.value).toBe('5m 26s')
+    expect(m.kpis[1]!.value).not.toBe('4m 36s')
+    expect(m.kpis[2]!.value).toBe('$0.121')
   })
 
   it('draws completed runs on the line and the rest on the baseline', () => {
