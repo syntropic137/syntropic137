@@ -12,6 +12,7 @@ import random
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import TYPE_CHECKING
+from uuid import uuid4
 
 import pytest
 
@@ -27,6 +28,7 @@ from syn_domain.contexts.orchestration import (
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 
+    import asyncpg
     from syn_tests.fixtures.infrastructure import TestInfrastructure
 
 T0 = datetime(2026, 10, 1, 12, tzinfo=UTC)
@@ -201,13 +203,31 @@ async def test_a_pr_and_its_merge_racing_are_counted_exactly_once(
     assert sum(r.prs_opened_merged for r in rows) == 20
 
 
+_FACT_TABLES = {
+    "shipped_commits": "sha",
+    "shipped_pull_requests": "repository_key, number",
+    "github_pull_request_merges": "repository_key, number",
+    "github_repository_aliases": "repository_key",
+}
+
+
+async def _fact_snapshot(conn: asyncpg.Connection) -> dict[str, list[tuple[object, ...]]]:
+    """Every row of every fact table, in key order."""
+    return {
+        table: [
+            tuple(r.values()) for r in await conn.fetch(f"SELECT * FROM {table} ORDER BY {key}")
+        ]
+        for table, key in _FACT_TABLES.items()
+    }
+
+
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_a_rollup_version_change_rebuilds_from_facts_and_keeps_them(
     postgres_ledgers: Callable[[], Awaitable[ShippedLedger]],
     test_infrastructure: TestInfrastructure,
 ) -> None:
-    """Facts are the record (merges have no other source): never reset."""
+    """Facts are the record (merges have no other source): never reset, row for row."""
     import asyncpg
 
     from syn_adapters.events.shipped_ledger import ensure_shipped_ledger_schema
@@ -216,19 +236,46 @@ async def test_a_rollup_version_change_rebuilds_from_facts_and_keeps_them(
     await apply(ledger, FACTS)
     conn = await asyncpg.connect(test_infrastructure.timescaledb_url)
     try:
-        facts_before = await conn.fetchval(
-            "SELECT (SELECT count(*) FROM shipped_commits) + (SELECT count(*) FROM"
-            " shipped_pull_requests) + (SELECT count(*) FROM github_pull_request_merges)"
-        )
+        before = await _fact_snapshot(conn)
+        assert all(before.values())  # every fact table holds rows, aliases included
         await conn.execute("UPDATE shipped_daily SET commits = 999")  # a stale derivation
         await conn.execute("UPDATE shipped_ledger_meta SET rollup_version = 0")
         await ensure_shipped_ledger_schema(conn)
         await ensure_shipped_ledger_schema(conn)  # re-running applies nothing twice
-        facts_after = await conn.fetchval(
-            "SELECT (SELECT count(*) FROM shipped_commits) + (SELECT count(*) FROM"
-            " shipped_pull_requests) + (SELECT count(*) FROM github_pull_request_merges)"
-        )
+        after = await _fact_snapshot(conn)
     finally:
         await conn.close()
-    assert facts_after == facts_before
+    assert after == before
     assert counts(await ledger.daily(START, END)) == EXPECTED
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_pre_release_schema_is_refused_with_the_drop_instruction(
+    test_infrastructure: TestInfrastructure,
+) -> None:
+    """An earlier commit of #1857 created meta(version, ...): refused by name, not opaquely."""
+    import asyncpg
+
+    from syn_adapters.events.shipped_ledger import (
+        PRE_RELEASE_SCHEMA_MESSAGE,
+        PreReleaseShippedSchemaError,
+        ensure_shipped_ledger_schema,
+    )
+
+    schema = f"shipped_prerelease_{uuid4().hex[:8]}"
+    conn = await asyncpg.connect(test_infrastructure.timescaledb_url)
+    try:
+        await conn.execute(f"CREATE SCHEMA {schema}")
+        await conn.execute(f"SET search_path TO {schema}")
+        await conn.execute(
+            "CREATE TABLE shipped_ledger_meta (id INT PRIMARY KEY DEFAULT 1,"
+            " version INT NOT NULL, backfilled_at TIMESTAMPTZ)"
+        )
+        with pytest.raises(PreReleaseShippedSchemaError) as refused:
+            await ensure_shipped_ledger_schema(conn)
+        assert str(refused.value) == PRE_RELEASE_SCHEMA_MESSAGE
+        assert "DROP TABLE IF EXISTS shipped_ledger_meta" in str(refused.value)
+    finally:
+        await conn.execute(f"DROP SCHEMA {schema} CASCADE")
+        await conn.close()

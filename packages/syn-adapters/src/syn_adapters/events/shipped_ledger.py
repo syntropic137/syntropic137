@@ -152,6 +152,24 @@ SCHEMA_VERSION = MIGRATIONS[-1][0]
 ROLLUP_VERSION = 1
 """Bump when what ``shipped_daily`` derives changes: it is rebuilt from the facts."""
 
+PRE_RELEASE_SCHEMA_MESSAGE = (
+    "shipped ledger: this database holds the pre-release shipped-ledger schema from an "
+    "earlier commit of PR #1857 (never deployed; shipped_ledger_meta has a 'version' "
+    "column and no 'schema_version'). Drop it and restart: DROP TABLE IF EXISTS "
+    "shipped_ledger_meta, shipped_daily, shipped_commits, shipped_pull_requests, "
+    "github_pull_request_merges CASCADE;"
+)
+
+_META_COLUMNS = """
+SELECT column_name FROM information_schema.columns
+WHERE table_schema = current_schema() AND table_name = 'shipped_ledger_meta'
+"""
+
+
+class PreReleaseShippedSchemaError(RuntimeError):
+    """A dev database created by an earlier, never-deployed commit of #1857."""
+
+
 _SCHEMA_LOCK = "SELECT pg_advisory_xact_lock(hashtextextended('shipped_ledger:schema', 0))"
 _WRITE_LOCK = "SELECT pg_advisory_xact_lock(hashtextextended('shipped_ledger:write', 0))"
 
@@ -161,9 +179,17 @@ async def ensure_shipped_ledger_schema(conn: _Conn) -> None:
 
     Facts are only ever migrated forward, never reset. Safe to run on every
     start and from several processes at once (serialised by an advisory lock).
+
+    Refuses, with ``PRE_RELEASE_SCHEMA_MESSAGE``, a database created by an
+    earlier commit of #1857 (its meta table has ``version``, not
+    ``schema_version``). That schema was never deployed, so it is not
+    migrated: the message says exactly what to drop.
     """
     async with conn.transaction():
         await conn.execute(_SCHEMA_LOCK)
+        columns = {str(r["column_name"]) for r in await conn.fetch(_META_COLUMNS)}
+        if "version" in columns and "schema_version" not in columns:
+            raise PreReleaseShippedSchemaError(PRE_RELEASE_SCHEMA_MESSAGE)
         await conn.execute(_META)
         applied = int(await conn.fetchval("SELECT schema_version FROM shipped_ledger_meta") or 0)
         for version, ddl in MIGRATIONS:
