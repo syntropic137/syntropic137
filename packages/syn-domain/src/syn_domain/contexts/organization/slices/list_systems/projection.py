@@ -195,8 +195,13 @@ class SystemProjection:
     on_repo_assigned_to_system = on_repo_assigned_increment
 
     async def on_repo_unassigned_decrement(self, event: dict[str, Any]) -> None:
-        """Decrement repo_count when a repo is unassigned from this system."""
-        system_id = str(event.get("old_system_id") or event.get("system_id", ""))
+        """Decrement repo_count when a repo is unassigned from this system.
+
+        The event names the system it left ``previous_system_id``
+        (RepoUnassignedFromSystemEvent); this read ``old_system_id`` and the
+        count never went down (release rehearsal 2026-10-10).
+        """
+        system_id = str(event.get("previous_system_id") or event.get("old_system_id") or event.get("system_id", ""))
         if system_id:
             await self.increment_repo_count(system_id, delta=-1)
 
