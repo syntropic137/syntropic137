@@ -9,8 +9,17 @@ layers. `StrEnum` members compare equal to their string value, so a loose
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from enum import StrEnum
+
+from syn_shared.env_constants import (
+    ENV_ANTHROPIC_DEFAULT_FABLE_MODEL,
+    ENV_ANTHROPIC_DEFAULT_HAIKU_MODEL,
+    ENV_ANTHROPIC_DEFAULT_OPUS_MODEL,
+    ENV_ANTHROPIC_DEFAULT_SONNET_MODEL,
+    ENV_ANTHROPIC_MODEL,
+)
 
 
 class AgentProvider(StrEnum):
@@ -316,8 +325,9 @@ def runner_for_provider(provider: object, *, phase_id: str | None = None) -> Age
 class ModelAlias(StrEnum):
     """CLI-compatible Claude model aliases.
 
-    The ``claude`` CLI resolves these to the latest dated model in each
-    family, so the platform stores the alias rather than pinning a version.
+    The platform stores the alias, and translates it to the explicit id in
+    ``CLAUDE_MODEL_ALIAS_TARGETS`` right before launch (``resolve_claude_model``),
+    so a generation swap is one line there.
     Never write these as bare literals - issue #793.
     """
 
@@ -403,13 +413,19 @@ CLAUDE_MODEL_ALIAS_TARGETS: dict[ModelAlias, ModelId] = {
     ModelAlias.HAIKU: ModelId.CLAUDE_HAIKU_4_5,
     ModelAlias.FABLE: ModelId.CLAUDE_FABLE_5,
 }
-"""What the pinned ``claude`` CLI is EXPECTED to resolve each alias to.
+"""What each claude alias runs as. One entry per ``ModelAlias``.
 
-Unlike ``CODEX_MODEL_ALIAS_TARGETS`` the platform does not translate these:
-the alias itself reaches ``claude --model`` and the CLI picks. So this is an
-expectation that must track the pinned CLI (ADR-067 phase 0), and a run's
-observed model always wins over it. One entry per ``ModelAlias``; pricing's
-``MODEL_ALIASES`` is built from this map, never a second copy of it."""
+Like ``CODEX_MODEL_ALIAS_TARGETS`` the platform TRANSLATES these: the alias
+never reaches ``claude --model`` (``resolve_claude_model``), and the same map
+pins what the CLI's own alias lookups resolve to for subagents and delegate
+sessions (``claude_model_pin_env``). Leaving the choice to the CLI is how
+Sonnet 4.5 could run: claude-code 2.1.293's baked alias catalog sends
+``sonnet`` to ``claude-sonnet-4-5`` on Bedrock, Vertex, Foundry and Mantle.
+A run's observed model still wins wherever it is displayed. Pricing's
+``MODEL_ALIASES`` is built from this map, never a second copy of it.
+
+Every target must be allowed (``is_retired_claude_model``); a fitness test
+pins it."""
 
 
 class AliasResolutionBasis(StrEnum):
@@ -417,11 +433,13 @@ class AliasResolutionBasis(StrEnum):
 
     TRANSLATED = "translated"
     """The platform itself rewrites the alias before the CLI sees it (codex
-    ``--model gpt-6.1-sol``): the target IS what runs."""
+    ``--model gpt-6.1-sol``, claude ``--model claude-opus-5-5``): the target
+    IS what runs."""
 
     EXPECTED = "expected"
-    """The alias reaches the CLI verbatim and the CLI resolves it (claude):
-    the target is what the pinned CLI is expected to pick."""
+    """The alias reaches the CLI verbatim and the CLI resolves it: the target
+    is what the CLI is expected to pick. No provider uses this any more; kept
+    because it is part of the API response vocabulary."""
 
 
 @dataclass(frozen=True)
@@ -445,7 +463,7 @@ def resolve_model_alias(model: str | None) -> ModelAliasResolution | None:
         return None
     for claude_alias, claude_target in CLAUDE_MODEL_ALIAS_TARGETS.items():
         if model == claude_alias:
-            return ModelAliasResolution(model, claude_target, AliasResolutionBasis.EXPECTED)
+            return ModelAliasResolution(model, claude_target, AliasResolutionBasis.TRANSLATED)
     for codex_alias, codex_target in CODEX_MODEL_ALIAS_TARGETS.items():
         if model == codex_alias:
             return ModelAliasResolution(model, codex_target, AliasResolutionBasis.TRANSLATED)
@@ -458,6 +476,81 @@ def resolve_codex_model_alias(model: str) -> str:
         if model == alias:
             return target
     return model
+
+
+class RetiredModelError(ValueError):
+    """A phase would run a Claude model the owner has retired.
+
+    A ``ValueError`` so the template install and phase-edit routes report it
+    as a rejected request, like every other invalid phase definition.
+    """
+
+    def __init__(self, model: str) -> None:
+        self.model = model
+        super().__init__(
+            f"Claude model '{model}' is retired and will not be run. "
+            f"Declare an alias ({', '.join(ModelAlias)}) or a current model id "
+            f"such as '{ModelId.CLAUDE_SONNET_5_5}' instead."
+        )
+
+
+_RETIRED_CLAUDE_MODEL = re.compile(
+    r"(?:^|[./])claude-(?:[0-3][-.]|(?:opus|sonnet|haiku)-[0-4](?:[-.@\[]|$))"
+)
+"""Every Claude model below the 5 family, in any spelling the CLI accepts:
+dated or undated, ``[1m]``-suffixed, or provider-prefixed
+(``us.anthropic.claude-sonnet-4-5-...``)."""
+
+_RETIREMENT_EXEMPT = re.compile(r"(?:^|[./])claude-haiku-4-5(?:[-.@\[]|$)")
+"""Haiku 4.5 is the newest Haiku this platform can price, and ``haiku``
+resolves to it, so it stays runnable until a 5-family Haiku is in ``ModelId``.
+An owner decision (2026-10-10), not an oversight: delete this to retire it."""
+
+
+def is_retired_claude_model(model: str) -> bool:
+    """Whether ``model`` names a Claude model the platform refuses to run.
+
+    Judges the resolved id, so pass an alias through ``resolve_claude_model``
+    first (aliases themselves are never retired). Retired models keep their
+    pricing rows: a past run's cost is still displayed at its own rate.
+    """
+    return bool(_RETIRED_CLAUDE_MODEL.search(model)) and not _RETIREMENT_EXEMPT.search(model)
+
+
+def resolve_claude_model(model: str) -> str:
+    """The explicit model id ``claude --model`` receives for ``model``.
+
+    An alias becomes its ``CLAUDE_MODEL_ALIAS_TARGETS`` id; anything else
+    passes through. Raises ``RetiredModelError`` when the result is retired,
+    so this is also the last refusal before a phase launches.
+    """
+    for alias, target in CLAUDE_MODEL_ALIAS_TARGETS.items():
+        if model == alias:
+            model = str(target)
+            break
+    if is_retired_claude_model(model):
+        raise RetiredModelError(model)
+    return model
+
+
+def claude_model_pin_env() -> dict[str, str]:
+    """Env that stops every claude process in a workspace choosing its own model.
+
+    ``--model`` pins only the phase's own session. Subagents that declare an
+    alias or ``inherit``, and ``syn-delegate claude`` sessions started without
+    ``--model``, otherwise fall back to the CLI's catalog. These variables are
+    read by claude-code 2.1.293 (the pinned CLI; each name appears in its
+    binary): ``ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU,FABLE}_MODEL`` decide what
+    each alias means, and ``ANTHROPIC_MODEL`` is the model a session runs when
+    it is given none. Values come from the same map ``--model`` uses.
+    """
+    return {
+        ENV_ANTHROPIC_MODEL: resolve_claude_model(DEFAULT_CLAUDE_MODEL),
+        ENV_ANTHROPIC_DEFAULT_OPUS_MODEL: str(CLAUDE_MODEL_ALIAS_TARGETS[ModelAlias.OPUS]),
+        ENV_ANTHROPIC_DEFAULT_SONNET_MODEL: str(CLAUDE_MODEL_ALIAS_TARGETS[ModelAlias.SONNET]),
+        ENV_ANTHROPIC_DEFAULT_HAIKU_MODEL: str(CLAUDE_MODEL_ALIAS_TARGETS[ModelAlias.HAIKU]),
+        ENV_ANTHROPIC_DEFAULT_FABLE_MODEL: str(CLAUDE_MODEL_ALIAS_TARGETS[ModelAlias.FABLE]),
+    }
 
 
 _CLAUDE_ALIASES: frozenset[str] = frozenset(ModelAlias)
@@ -601,7 +694,22 @@ def normalize_phase_model(
 
     Unknown strings are kept (see ``model_is_for_provider``). ``provider=None``
     is the claude default path.
+
+    4. At the write boundaries only, a retired Claude model
+       (``is_retired_claude_model``), declared or defaulted, raises
+       ``RetiredModelError``: a template cannot be installed or edited into
+       running one. Execution does not refuse here (see
+       ``resolve_phase_model``).
     """
+    model, was_defaulted = _normalise(provider, model, defaults)
+    if not _is_codex_provider(provider):
+        resolve_claude_model(model)
+    return model, was_defaulted
+
+
+def _normalise(
+    provider: str | None, model: str | None, defaults: PhaseModelDefaults
+) -> tuple[str, bool]:
     normalised = model.strip() if model is not None else None
     if not normalised or model_is_for_provider(normalised, provider) is False:
         return defaults.for_provider(provider), True
@@ -620,8 +728,12 @@ def resolve_phase_model(provider: str | None, model: str | None) -> str:
     without a usable model (legacy ``None``, or a wrong-provider model from
     before the write boundaries normalised). ``dataclasses.replace`` re-enters
     the constructor, so a provider switch on a config is corrected too.
+
+    It does NOT refuse a retired model: configs are rebuilt from history, and
+    a past run that used one must still load. The refusal at execution is
+    ``resolve_claude_model`` in the claude command builder, right before launch.
     """
-    return normalize_phase_model(provider, model, _STATIC_DEFAULTS)[0]
+    return _normalise(provider, model, _STATIC_DEFAULTS)[0]
 
 
 @dataclass(frozen=True)
