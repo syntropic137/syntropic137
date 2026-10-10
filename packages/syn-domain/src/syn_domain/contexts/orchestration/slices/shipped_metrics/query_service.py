@@ -525,12 +525,26 @@ class _Shipped:
     """Each merge with the run PR it merged."""
 
 
+@dataclass(frozen=True)
+class _WorkflowFilter:
+    """Which executions a request keeps: all, or one workflow's."""
+
+    workflow_id: str | None
+    summaries: Mapping[str, WorkflowExecutionSummary]
+
+    def keeps(self, execution_id: str) -> bool:
+        if self.workflow_id is None:
+            return True
+        summary = self.summaries.get(execution_id)
+        return summary is not None and summary.workflow_id == self.workflow_id
+
+
 def _attribute(
     window: ShippedWindow,
     sightings: Iterable[CommitSighting],
     run_prs: Iterable[RunPullRequest],
     merges: Iterable[MergedPullRequest],
-    keep: Callable[[str], bool],
+    scope: _WorkflowFilter,
 ) -> _Shipped:
     def in_windows(day: date) -> bool:
         return window.is_current(day) or window.is_previous(day)
@@ -538,19 +552,21 @@ def _attribute(
     prs = _first_by_key(run_prs)
     return _Shipped(
         commits=[
-            s for s in _first_sightings(sightings) if in_windows(s.day) and keep(s.execution_id)
+            s
+            for s in _first_sightings(sightings)
+            if in_windows(s.day) and scope.keeps(s.execution_id)
         ],
-        opened=[p for p in prs.values() if in_windows(p.day) and keep(p.execution_id)],
+        opened=[p for p in prs.values() if in_windows(p.day) and scope.keeps(p.execution_id)],
         merged=[
             (m, prs[k])
             for k, m in _first_by_key(merges).items()
-            if k in prs and in_windows(m.day) and keep(prs[k].execution_id)
+            if k in prs and in_windows(m.day) and scope.keeps(prs[k].execution_id)
         ],
     )
 
 
 def _tally_workflows(
-    window: ShippedWindow, shipped: _Shipped, summaries: Mapping[str, WorkflowExecutionSummary]
+    window: ShippedWindow, work: _Shipped, summaries: Mapping[str, WorkflowExecutionSummary]
 ) -> dict[str, _WorkflowTally]:
     tallies: dict[str, _WorkflowTally] = {}
 
@@ -560,15 +576,15 @@ def _tally_workflows(
             return None
         return tallies.setdefault(summary.workflow_id, _WorkflowTally(summary.workflow_name))
 
-    for s in shipped.commits:
+    for s in work.commits:
         if (t := tally(s.day, s.execution_id)) is not None:
             t.commits += 1
             t.repos |= _repo_slugs(summaries.get(s.execution_id))
-    for p in shipped.opened:
+    for p in work.opened:
         if (t := tally(p.day, p.execution_id)) is not None:
             t.prs_opened += 1
             t.repos.add(p.repository)
-    for m, p in shipped.merged:
+    for m, p in work.merged:
         if (t := tally(m.day, p.execution_id)) is not None:
             t.prs_merged += 1
             t.repos.add(p.repository)
@@ -576,9 +592,9 @@ def _tally_workflows(
 
 
 def _by_workflow(
-    window: ShippedWindow, shipped: _Shipped, summaries: Mapping[str, WorkflowExecutionSummary]
+    window: ShippedWindow, work: _Shipped, summaries: Mapping[str, WorkflowExecutionSummary]
 ) -> tuple[ShippedWorkflow, ...]:
-    tallies = _tally_workflows(window, shipped, summaries)
+    tallies = _tally_workflows(window, work, summaries)
     ranked = sorted(tallies, key=lambda wf: (-tallies[wf].commits, -tallies[wf].prs_merged, wf))[
         :BY_WORKFLOW_LIMIT
     ]
@@ -610,30 +626,26 @@ def build_shipped_metrics(
     owner's, a contributor's) is not shipped by agents and is not counted.
     """
 
-    def keep(execution_id: str) -> bool:
-        if workflow_id is None:
-            return True
-        summary = summaries.get(execution_id)
-        return summary is not None and summary.workflow_id == workflow_id
-
-    shipped = _attribute(window, sightings, run_prs, merges, keep)
+    work = _attribute(
+        window, sightings, run_prs, merges, _WorkflowFilter(workflow_id, summaries)
+    )
     commits_per_day: dict[date, int] = defaultdict(int)
     opened_per_day: dict[date, int] = defaultdict(int)
     merged_per_day: dict[date, int] = defaultdict(int)
     repos_per_day: dict[date, set[str]] = defaultdict(set)
-    for s in shipped.commits:
+    for s in work.commits:
         commits_per_day[s.day] += 1
         repos_per_day[s.day] |= _repo_slugs(summaries.get(s.execution_id))
-    for p in shipped.opened:
+    for p in work.opened:
         opened_per_day[p.day] += 1
         repos_per_day[p.day].add(p.repository)
-    for m, p in shipped.merged:
+    for m, p in work.merged:
         merged_per_day[m.day] += 1
         repos_per_day[m.day].add(p.repository)
 
     prs_opened = count_tile(window, opened_per_day, DeltaUnit.PERCENT, PRS_OPENED_SOURCE)
     prs_merged = count_tile(window, merged_per_day, DeltaUnit.PERCENT, PRS_MERGED_SOURCE)
-    current_commits = [s for s in shipped.commits if window.is_current(s.day)]
+    current_commits = [s for s in work.commits if window.is_current(s.day)]
     return ShippedMetrics(
         window=window,
         workflow_id=workflow_id,
@@ -645,7 +657,7 @@ def build_shipped_metrics(
         repos=tuple(
             sorted(set().union(*(v for d, v in repos_per_day.items() if window.is_current(d))))
         ),
-        by_workflow=() if workflow_id is not None else _by_workflow(window, shipped, summaries),
+        by_workflow=() if workflow_id is not None else _by_workflow(window, work, summaries),
         commits_without_workflow=sum(1 for s in current_commits if s.execution_id not in summaries),
     )
 

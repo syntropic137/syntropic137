@@ -54,16 +54,17 @@ class PullRequestMerge:
         """The merge in ``event``, or None when it does not report one."""
         if event.event_type != _PULL_REQUEST or event.action != _CLOSED:
             return None
-        pr = event.payload.get("pull_request") or {}
         number = _merged_number(event)
         if number is None:
             return None
+        pr = event.payload.get("pull_request") or {}
+        head = pr.get("head")
         return cls(
             repository=event.repository,
             number=number,
-            merged_at=_parse_instant(pr.get("merged_at")) or event.received_at,
+            merged_at=_merged_at(event),
             html_url=str(pr.get("html_url") or ""),
-            head_ref=_head_ref(pr.get("head")),
+            head_ref=str(head.get("ref") or "") if isinstance(head, dict) else "",
         )
 
 
@@ -76,17 +77,15 @@ def _merged_number(event: NormalizedEvent) -> int | None:
     return number if isinstance(number, int) and number > 0 else None
 
 
-def _head_ref(head: object) -> str:
-    return str(head.get("ref") or "") if isinstance(head, dict) else ""
-
-
-def _parse_instant(value: object) -> datetime | None:
-    if not value:
-        return None
+def _merged_at(event: NormalizedEvent) -> datetime:
+    """``merged_at`` as an instant; when it is missing or unreadable, receipt."""
+    raw = (event.payload.get("pull_request") or {}).get("merged_at")
+    if not raw:
+        return event.received_at
     try:
-        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        return datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
     except ValueError:
-        return None
+        return event.received_at
 
 
 async def record_pull_request_merge(event: NormalizedEvent) -> None:
