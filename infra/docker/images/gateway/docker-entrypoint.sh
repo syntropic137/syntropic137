@@ -249,6 +249,11 @@ location /assets/ {
     expires 1y;
     add_header Cache-Control "public, immutable";
     include /etc/nginx/conf.d/security-headers.conf;
+    # Own zone: a syn-ui page load fetches 60+ chunks at once, three times the
+    # server-scope auth backstop's burst, which answered 429 on v1.0.0-beta.1.
+    # auth_basic is still inherited; see rate-limit.conf.
+    limit_req zone=assets burst=300 nodelay;
+    limit_req_status 429;
 }
 
 # syn-ui SPA routing. index.html names the current hashed chunks, so it is
@@ -268,6 +273,11 @@ location /assets/ {
     expires 1y;
     add_header Cache-Control "public, immutable";
     include /etc/nginx/conf.d/security-headers.conf;
+    # Own zone: a syn-ui page load fetches 60+ chunks at once, three times the
+    # server-scope auth backstop's burst, which answered 429 on v1.0.0-beta.1.
+    # auth_basic is still inherited; see rate-limit.conf.
+    limit_req zone=assets burst=300 nodelay;
+    limit_req_status 429;
 }
 
 # syn-ui at /next, built with SYN_UI_BASE=/next/ into the legacy root's next/.
