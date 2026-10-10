@@ -626,9 +626,7 @@ def build_shipped_metrics(
     owner's, a contributor's) is not shipped by agents and is not counted.
     """
 
-    work = _attribute(
-        window, sightings, run_prs, merges, _WorkflowFilter(workflow_id, summaries)
-    )
+    work = _attribute(window, sightings, run_prs, merges, _WorkflowFilter(workflow_id, summaries))
     commits_per_day: dict[date, int] = defaultdict(int)
     opened_per_day: dict[date, int] = defaultdict(int)
     merged_per_day: dict[date, int] = defaultdict(int)
