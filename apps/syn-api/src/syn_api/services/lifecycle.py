@@ -43,7 +43,6 @@ from syn_api.services.execution_posture import (
 )
 from syn_api.services.feedback_lifecycle import init_ui_feedback, shutdown_ui_feedback
 from syn_api.services.health_probes import describe_codex_auth_health, describe_disk_health
-from syn_api.services.pull_request_merges import register_pull_request_merge_recorder
 from syn_api.services.read_path_health import _judge_read_path
 from syn_api.services.reconciliation import (
     cleanup_orphaned_containers,
@@ -298,11 +297,6 @@ async def startup(
     result = await _init_durable_stores()
     if isinstance(result, Err):
         return result
-
-    try:
-        register_pull_request_merge_recorder()  # Lane 2: PR merges for /metrics/shipped
-    except Exception:
-        logger.warning("PR merge recorder not registered; merges will not be counted.")
 
     await _init_degradable_services(_state)
 

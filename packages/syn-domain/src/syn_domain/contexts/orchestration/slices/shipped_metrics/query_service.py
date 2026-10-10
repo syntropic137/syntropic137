@@ -549,29 +549,36 @@ def _attribute(
     )
 
 
-def _by_workflow(
+def _tally_workflows(
     window: ShippedWindow, shipped: _Shipped, summaries: Mapping[str, WorkflowExecutionSummary]
-) -> tuple[ShippedWorkflow, ...]:
+) -> dict[str, _WorkflowTally]:
     tallies: dict[str, _WorkflowTally] = {}
 
-    def tally(execution_id: str) -> _WorkflowTally | None:
+    def tally(day: date, execution_id: str) -> _WorkflowTally | None:
         summary = summaries.get(execution_id)
-        if summary is None:
+        if summary is None or not window.is_current(day):
             return None
         return tallies.setdefault(summary.workflow_id, _WorkflowTally(summary.workflow_name))
 
     for s in shipped.commits:
-        if window.is_current(s.day) and (t := tally(s.execution_id)) is not None:
+        if (t := tally(s.day, s.execution_id)) is not None:
             t.commits += 1
             t.repos |= _repo_slugs(summaries.get(s.execution_id))
     for p in shipped.opened:
-        if window.is_current(p.day) and (t := tally(p.execution_id)) is not None:
+        if (t := tally(p.day, p.execution_id)) is not None:
             t.prs_opened += 1
             t.repos.add(p.repository)
     for m, p in shipped.merged:
-        if window.is_current(m.day) and (t := tally(p.execution_id)) is not None:
+        if (t := tally(m.day, p.execution_id)) is not None:
             t.prs_merged += 1
             t.repos.add(p.repository)
+    return tallies
+
+
+def _by_workflow(
+    window: ShippedWindow, shipped: _Shipped, summaries: Mapping[str, WorkflowExecutionSummary]
+) -> tuple[ShippedWorkflow, ...]:
+    tallies = _tally_workflows(window, shipped, summaries)
     ranked = sorted(tallies, key=lambda wf: (-tallies[wf].commits, -tallies[wf].prs_merged, wf))[
         :BY_WORKFLOW_LIMIT
     ]

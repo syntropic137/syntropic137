@@ -55,28 +55,38 @@ class PullRequestMerge:
         if event.event_type != _PULL_REQUEST or event.action != _CLOSED:
             return None
         pr = event.payload.get("pull_request") or {}
-        merged_at_raw = pr.get("merged_at")
-        if not (pr.get("merged") is True or merged_at_raw):
+        number = _merged_number(event)
+        if number is None:
             return None
-        number = event.payload.get("number") or pr.get("number")
-        if not isinstance(number, int) or number <= 0 or not event.repository:
-            return None
-        try:
-            merged_at = (
-                datetime.fromisoformat(str(merged_at_raw).replace("Z", "+00:00"))
-                if merged_at_raw
-                else event.received_at
-            )
-        except ValueError:
-            merged_at = event.received_at
-        head = pr.get("head") or {}
         return cls(
             repository=event.repository,
             number=number,
-            merged_at=merged_at,
+            merged_at=_parse_instant(pr.get("merged_at")) or event.received_at,
             html_url=str(pr.get("html_url") or ""),
-            head_ref=str(head.get("ref") or "") if isinstance(head, dict) else "",
+            head_ref=_head_ref(pr.get("head")),
         )
+
+
+def _merged_number(event: NormalizedEvent) -> int | None:
+    """The PR number when the event's PR was merged in a named repo, else None."""
+    pr = event.payload.get("pull_request") or {}
+    if not (pr.get("merged") is True or pr.get("merged_at")) or not event.repository:
+        return None
+    number = event.payload.get("number") or pr.get("number")
+    return number if isinstance(number, int) and number > 0 else None
+
+
+def _head_ref(head: object) -> str:
+    return str(head.get("ref") or "") if isinstance(head, dict) else ""
+
+
+def _parse_instant(value: object) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
 
 
 async def record_pull_request_merge(event: NormalizedEvent) -> None:
@@ -110,10 +120,18 @@ _registered: set[int] = set()
 
 
 def register_pull_request_merge_recorder() -> None:
-    """Attach the recorder to the pipeline singleton, once per pipeline."""
+    """Attach the recorder to the pipeline singleton, once per pipeline.
+
+    Never raises: a pipeline that cannot be built here only means merges are
+    not counted, which must not stop the API from starting.
+    """
     from syn_api._wiring import get_event_pipeline
 
-    pipeline = get_event_pipeline()
+    try:
+        pipeline = get_event_pipeline()
+    except Exception:
+        logger.warning("PR merge recorder not registered; merges will not be counted.")
+        return
     if id(pipeline) in _registered:
         return
     pipeline.add_observer(record_pull_request_merge)
