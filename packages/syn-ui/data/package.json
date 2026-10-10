@@ -1,6 +1,6 @@
 {
   "name": "@syn137/syn-ui-data",
-  "version": "0.33.1",
+  "version": "1.0.0",
   "private": true,
   "description": "Plain-TypeScript API client for the Skyline UI: typed resources, live event stream, request coalescing, and a fixtures mode.",
   "type": "module",
