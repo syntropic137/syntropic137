@@ -112,3 +112,17 @@ class TestPullRequests:
         ledger = _Ledger()
         await _recorder(ledger).command_finished("never-started", True, URL)
         assert ledger.prs == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_one_call_creating_two_prs_records_both() -> None:
+    ledger = _Ledger()
+    recorder = _recorder(ledger)
+    recorder.command_started(
+        "t1", "gh pr create -R acme/api --fill && gh pr create -R acme/web --fill"
+    )
+    await recorder.command_finished(
+        "t1", True, "https://github.com/acme/api/pull/1\nhttps://github.com/acme/web/pull/2\n"
+    )
+    assert [(p.repository, p.number) for p in ledger.prs] == [("acme/api", 1), ("acme/web", 2)]

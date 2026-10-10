@@ -2,7 +2,7 @@
 
 from syn_domain.contexts.orchestration._shared.gh_pr_create import (
     CreatedPullRequest,
-    created_pull_request,
+    created_pull_requests,
     is_gh_pr_create,
 )
 from syn_domain.contexts.orchestration._shared.shipped_ledger import (
@@ -51,7 +51,7 @@ __all__ = [
     "ShippedWindow",
     "ShippedWorkflow",
     "build_shipped_metrics",
-    "created_pull_request",
+    "created_pull_requests",
     "format_count_delta",
     "format_percent_delta",
     "format_points_delta",

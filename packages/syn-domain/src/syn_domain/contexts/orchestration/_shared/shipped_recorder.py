@@ -7,7 +7,7 @@ phase's ``ObservabilityCollector``, which calls it:
 - ``command_started`` with the FULL command of each shell tool call;
 - ``command_finished`` with that call's success and FULL output.
 
-A PR is recorded only when ``gh_pr_create.created_pull_request`` accepts the
+A PR is recorded only when ``gh_pr_create.created_pull_requests`` accepts the
 command and its output. Never raises: recording what was shipped must not
 fail the phase that shipped it, so a ledger error is logged and dropped (the
 backfill can restore it).
@@ -21,7 +21,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from syn_domain.contexts.orchestration._shared.gh_pr_create import (
-    created_pull_request,
+    created_pull_requests,
     is_gh_pr_create,
 )
 from syn_domain.contexts.orchestration._shared.shipped_ledger import (
@@ -81,27 +81,25 @@ class ShippedRecorder:
             self._pr_commands[tool_use_id] = command
 
     async def command_finished(self, tool_use_id: str, success: bool, output: str) -> None:
-        """That call ended: record the PR it created, if it created one."""
+        """That call ended: record every PR it created, if it created any."""
         command = self._pr_commands.pop(tool_use_id, None)
         if command is None:
             return
-        created = created_pull_request(command, success, output)
-        if created is None:
-            return
         a = self.attribution
-        await self._safely(
-            self.ledger.record_pull_request_opened(
-                PullRequestOpened(
-                    repository=created.repository,
-                    number=created.number,
-                    url=created.url,
-                    execution_id=a.execution_id,
-                    workflow_id=a.workflow_id,
-                    workflow_name=a.workflow_name,
-                    created_at=self.clock(),
+        for created in created_pull_requests(command, success, output):
+            await self._safely(
+                self.ledger.record_pull_request_opened(
+                    PullRequestOpened(
+                        repository=created.repository,
+                        number=created.number,
+                        url=created.url,
+                        execution_id=a.execution_id,
+                        workflow_id=a.workflow_id,
+                        workflow_name=a.workflow_name,
+                        created_at=self.clock(),
+                    )
                 )
             )
-        )
 
     @staticmethod
     async def _safely(write: Awaitable[None]) -> None:

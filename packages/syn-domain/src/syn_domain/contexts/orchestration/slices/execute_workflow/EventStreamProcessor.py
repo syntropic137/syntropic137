@@ -933,7 +933,9 @@ class EventStreamProcessor:
         # Extract tool output content
         tool_content = item.get("content", "")
         if isinstance(tool_content, list):
-            tool_content = " ".join(
+            # Newlines, not spaces: a block boundary is a line boundary, and the
+            # shipped ledger reads the LAST line of a `gh pr create`.
+            tool_content = "\n".join(
                 str(c.get("text", c) if isinstance(c, dict) else c) for c in tool_content
             )
         output_preview = str(tool_content)[:500] if tool_content else None

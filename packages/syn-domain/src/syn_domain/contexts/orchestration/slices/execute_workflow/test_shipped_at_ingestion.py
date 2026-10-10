@@ -187,3 +187,40 @@ async def test_codex_stream_records_created_prs_on_exit_code_zero_only() -> None
         _Workspace(),
     )
     assert [(p.repository, p.number) for p in ledger.prs] == [("acme/api", 42)]
+
+
+@pytest.mark.asyncio
+async def test_claude_output_blocks_keep_their_line_boundaries() -> None:
+    """A warning block then a URL block: the URL is still the last line."""
+    ledger = _Ledger()
+    processor = EventStreamProcessor(
+        tokens=TokenAccumulator(),
+        subagents=SubagentTracker(),
+        observability=None,
+        controller=None,
+        execution_id="exec-1",
+        phase_id="p-1",
+        session_id="s-1",
+        workspace_id=None,
+        agent_model=None,
+        collector=_collector(ledger),
+    )
+    use, _ = _claude_tool("t1", "gh pr create --fill", "", False)
+    result = {
+        "type": "user",
+        "message": {
+            "content": [
+                {
+                    "type": "tool_result",
+                    "tool_use_id": "t1",
+                    "content": [
+                        {"type": "text", "text": "Warning: 1 uncommitted change"},
+                        {"type": "text", "text": URL},
+                    ],
+                    "is_error": False,
+                }
+            ]
+        },
+    }
+    await processor.process_stream(_lines(use, json.dumps(result)), _Workspace())
+    assert [(p.repository, p.number) for p in ledger.prs] == [("acme/api", 42)]
