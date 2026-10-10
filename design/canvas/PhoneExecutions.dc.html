@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Syn137 executions on a phone</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Orbitron:wght@500;600;700&display=swap">
+<style>
+:root{--ac:#4D80FF}
+body{margin:0;background:#0A0C14}
+a{color:#E8EEFB}a:hover{color:#FFFFFF}
+button{font-family:inherit}
+input::placeholder{color:#6F7FA3}
+:focus-visible{outline:2px solid var(--ac);outline-offset:2px}
+</style>
+</helmet>
+<div style="--ac: {{accent}}; display: flex; flex-direction: column; min-height: 100vh; background: #0A0C14; color: #E8EEFB; font-family: 'Instrument Sans', 'Helvetica Neue', system-ui, sans-serif; font-size: 15px; line-height: 1.45; -webkit-font-smoothing: antialiased">
+
+<dc-import name="PhoneTop" hint-size="100%,68px"></dc-import>
+
+<main style="display: flex; flex-direction: column; gap: 16px; flex-grow: 1; box-sizing: border-box; padding: 4px 16px 24px">
+
+<nav aria-label="Breadcrumb" style="display: flex; align-items: center; gap: 2px; min-height: 44px; margin: 0 -8px; font-size: 14px">
+<a href="PhoneOverview.dc.html" aria-label="Overview" style="display: flex; align-items: center; justify-content: center; flex-shrink: 0; width: 40px; height: 44px; color: #9AA8C7"><svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M2.75 7.25L8 2.75l5.25 4.5V13a.5.5 0 0 1-.5.5H9.5V9.75h-3v3.75H3.25a.5.5 0 0 1-.5-.5z"></path></svg></a>
+<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="#6F7FA3" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink: 0; opacity: 0.7"><path d="M6 3.5L10.5 8 6 12.5"></path></svg>
+<span aria-current="page" style="flex: 0 1 auto; min-width: 48px; padding: 0 6px; line-height: 44px; font-weight: 600; color: #E8EEFB; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">Executions</span>
+</nav>
+
+<section aria-label="Executions" style="display: flex; flex-direction: column; gap: 18px; padding: 20px; border-radius: 24px; border: 1px solid #1A2032; background: radial-gradient(70% 90% at 100% 0%, color-mix(in oklab, var(--ac) 20%, transparent), transparent 70%), #0D101A; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05)">
+<div style="display: flex; align-items: center; gap: 14px">
+<svg width="52" height="52" viewBox="0 0 64 64" aria-hidden="true" style="flex-shrink: 0">
+<polygon points="32,10 52,20 32,30 12,20" style="fill: color-mix(in oklab, var(--ac) 58%, white)"></polygon>
+<polygon points="12,20 32,30 32,54 12,44" style="fill: var(--ac)"></polygon>
+<polygon points="32,30 52,20 52,44 32,54" style="fill: color-mix(in oklab, var(--ac) 50%, black)"></polygon>
+<polygon points="18,29 18,41 27,39.5" style="fill: #0A0C14; opacity: 0.8"></polygon>
+</svg>
+<div style="display: flex; flex-direction: column; gap: 2px; min-width: 0">
+<h1 style="margin: 0; font-size: 30px; line-height: 1.1; font-weight: 600; letter-spacing: -0.03em">Executions</h1>
+<p style="margin: 0; font-size: 14px; color: #9AA8C7">75 runs, none running now</p>
+</div>
+</div>
+<div style="display: flex; gap: 3px; height: 12px" role="img" aria-label="50 completed, 23 failed, 2 cancelled">
+<span style="flex: 50 1 0; border-radius: 4px; background: var(--ac)"></span>
+<span style="flex: 23 1 0; border-radius: 4px; background: #FF6F61"></span>
+<span style="flex: 2 1 0; border-radius: 4px; background: #6F7FA3"></span>
+</div>
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px">
+<div style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 26px; line-height: 1.1; font-weight: 600; letter-spacing: -0.03em; font-variant-numeric: tabular-nums">50</span><span style="display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: #9AA8C7"><span style="width: 8px; height: 8px; border-radius: 2px; background: var(--ac)"></span>completed</span></div>
+<div style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 26px; line-height: 1.1; font-weight: 600; letter-spacing: -0.03em; font-variant-numeric: tabular-nums">23</span><span style="display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: #9AA8C7"><span style="width: 8px; height: 8px; border-radius: 2px; background: #FF6F61"></span>failed</span></div>
+<div style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 26px; line-height: 1.1; font-weight: 600; letter-spacing: -0.03em; font-variant-numeric: tabular-nums">2</span><span style="display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: #9AA8C7"><span style="width: 8px; height: 8px; border-radius: 2px; background: #6F7FA3"></span>cancelled</span></div>
+</div>
+</section>
+
+<label style="display: flex; align-items: center; gap: 10px; height: 46px; box-sizing: border-box; padding: 0 14px; border-radius: 14px; border: 1px solid #222A40; background: #0D101A; color: #6F7FA3">
+<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="7" cy="7" r="4.25"></circle><path d="M10.25 10.25L13.5 13.5"></path></svg>
+<input type="search" aria-label="Search executions" placeholder="Workflow, repo or ID" style="flex-grow: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: #E8EEFB; font: inherit; font-size: 15px">
+</label>
+
+<div style="display: flex; gap: 8px; margin: 0 -16px; padding: 0 16px; overflow-x: auto">
+<button type="button" aria-pressed="{{chip.all.on}}" onClick="{{pickAll}}" style="display: flex; align-items: center; gap: 8px; flex-shrink: 0; height: 44px; padding: 0 16px; border-radius: 22px; border: 1px solid {{chip.all.bd}}; background: {{chip.all.bg}}; color: {{chip.all.fg}}; font-size: 14px; cursor: pointer"><span>All</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #9AA8C7">75</span></button>
+<button type="button" aria-pressed="{{chip.completed.on}}" onClick="{{pickCompleted}}" style="display: flex; align-items: center; gap: 8px; flex-shrink: 0; height: 44px; padding: 0 16px; border-radius: 22px; border: 1px solid {{chip.completed.bd}}; background: {{chip.completed.bg}}; color: {{chip.completed.fg}}; font-size: 14px; cursor: pointer"><span>Completed</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #9AA8C7">50</span></button>
+<button type="button" aria-pressed="{{chip.failed.on}}" onClick="{{pickFailed}}" style="display: flex; align-items: center; gap: 8px; flex-shrink: 0; height: 44px; padding: 0 16px; border-radius: 22px; border: 1px solid {{chip.failed.bd}}; background: {{chip.failed.bg}}; color: {{chip.failed.fg}}; font-size: 14px; cursor: pointer"><span>Failed</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #9AA8C7">23</span></button>
+<button type="button" aria-pressed="{{chip.cancelled.on}}" onClick="{{pickCancelled}}" style="display: flex; align-items: center; gap: 8px; flex-shrink: 0; height: 44px; padding: 0 16px; border-radius: 22px; border: 1px solid {{chip.cancelled.bd}}; background: {{chip.cancelled.bg}}; color: {{chip.cancelled.fg}}; font-size: 14px; cursor: pointer"><span>Cancelled</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #9AA8C7">2</span></button>
+<button type="button" aria-pressed="false" style="display: flex; align-items: center; gap: 8px; flex-shrink: 0; height: 44px; padding: 0 16px; border-radius: 22px; border: 1px solid #222A40; background: transparent; color: #9AA8C7; font-size: 14px; cursor: pointer"><span>Running</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #6F7FA3">0</span></button>
+</div>
+
+<div role="group" aria-label="Time window" style="display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 2px; padding: 3px; border-radius: 14px; border: 1px solid #222A40; background: #0D101A; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px">
+<button type="button" style="height: 38px; border: 0; border-radius: 11px; background: transparent; color: #9AA8C7; cursor: pointer">15m</button>
+<button type="button" style="height: 38px; border: 0; border-radius: 11px; background: transparent; color: #9AA8C7; cursor: pointer">1h</button>
+<button type="button" style="height: 38px; border: 0; border-radius: 11px; background: transparent; color: #9AA8C7; cursor: pointer">24h</button>
+<button type="button" style="height: 38px; border: 0; border-radius: 11px; background: transparent; color: #9AA8C7; cursor: pointer">7d</button>
+<button type="button" aria-pressed="true" style="height: 38px; border: 0; border-radius: 11px; background: #1A2134; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07); color: #E8EEFB; cursor: pointer">All</button>
+</div>
+
+<section aria-label="Execution list" style="display: flex; flex-direction: column; gap: 8px">
+<sc-for list="{{groups}}" as="g" hint-placeholder-count="2">
+<div style="display: flex; align-items: center; gap: 10px; padding: 8px 4px 0; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #9AA8C7">
+<span>{{g.title}}</span>
+<span style="color: #6F7FA3">{{g.count}}</span>
+<span style="flex-grow: 1; height: 1px; background: #1A2032"></span>
+</div>
+<sc-for list="{{g.rows}}" as="r" hint-placeholder-count="4">
+<a href="PhoneExecution.dc.html" style="display: flex; flex-direction: column; gap: 10px; padding: 14px; border-radius: 16px; border: 1px solid #1A2032; background: #0D101A; text-decoration: none; color: #E8EEFB">
+<span style="display: flex; align-items: center; gap: 12px">
+<span style="display: flex; align-items: center; justify-content: center; flex-shrink: 0; width: 36px; height: 36px; border-radius: 11px; background: {{r.badge}}; color: {{r.tone}}">
+<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{r.icon}}"></path></svg>
+</span>
+<span style="display: flex; flex-direction: column; flex-grow: 1; min-width: 0">
+<span style="font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{r.name}}</span>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{r.sub}}</span>
+</span>
+<span style="display: flex; flex-direction: column; align-items: flex-end; flex-shrink: 0; font-family: 'JetBrains Mono', ui-monospace, monospace"><span style="font-size: 13px">{{r.cost}}</span><span style="font-size: 11px; color: #6F7FA3">{{r.tokens}}</span></span>
+</span>
+<span style="display: flex; align-items: center; gap: 10px">
+<span style="display: flex; flex-grow: 1; height: 10px; border-radius: 5px; background: #121727">
+<span style="display: flex; gap: 2px; width: {{r.pct}}; min-width: 14px">
+<sc-for list="{{r.segs}}" as="p" hint-placeholder-count="3">
+<span style="flex: 1 1 0; height: 10px; border-radius: 3px; background: {{p.c}}"></span>
+</sc-for>
+</span>
+</span>
+<span style="width: 48px; text-align: right; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #9AA8C7">{{r.dur}}</span>
+</span>
+</a>
+</sc-for>
+</sc-for>
+</section>
+
+<div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 13.5px; color: #9AA8C7">
+<span>{{summary}}</span>
+<button type="button" style="height: 44px; padding: 0 18px; border-radius: 14px; border: 1px solid #283048; background: #0F121C; color: #E8EEFB; font-size: 14px; font-weight: 600; cursor: pointer">Next</button>
+</div>
+
+</main>
+
+<div style="position: sticky; bottom: 0; padding: 8px 16px 16px; background: linear-gradient(to top, #0A0C14 55%, transparent)">
+<dc-import name="PhoneDock" active="executions" hint-size="100%,66px"></dc-import>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#4D80FF","options":["#4D80FF","#4CC9F0","#45E0A0","#A78BFA"]},"$preview":{"width":390,"height":1620}}'>
+class Component extends DCLogic {
+renderVals() {
+const filter = (this.state && this.state.filter) || 'all';
+const ST = {
+completed: { tone: 'var(--ac)', badge: 'color-mix(in oklab, var(--ac) 16%, transparent)', icon: 'M3.5 8.5l3 3 6-7' },
+failed: { tone: '#FF6F61', badge: '#2A1513', icon: 'M4.5 4.5l7 7M11.5 4.5l-7 7' },
+cancelled: { tone: '#9AA8C7', badge: '#171C2B', icon: 'M3.5 8h9' }
+};
+const LONGEST = 241;
+const mk = (status, name, done, total, repo, tokens, cost, secs, dur) => {
+const s = ST[status];
+const segs = [];
+for (let i = 0; i < total; i++) {
+let c = '#2B3350';
+if (i < done) c = 'var(--ac)';
+else if (i === done && status === 'failed') c = '#FF6F61';
+else if (i === done && status === 'cancelled') c = '#6F7FA3';
+segs.push({ c });
+}
+return { status, tone: s.tone, badge: s.badge, icon: s.icon, name, sub: (repo || 'no repo') + ' · ' + done + '/' + total + ' phases', segs, pct: Math.max(5, Math.round((secs / LONGEST) * 100)) + '%', dur, tokens: tokens + ' tok', cost };
+};
+const all = [
+{ title: 'Last week', rows: [
+mk('failed', 'Starter PR Review', 0, 2, 'syntropic137/syntropic137', '0', '$0.00', 5, '5s'),
+mk('failed', 'PR Review', 0, 3, 'syntropic137/syntropic137', '0', '$0.00', 8, '8s')
+] },
+{ title: '6 weeks ago', rows: [
+mk('completed', 'Codex delegates to Claude', 1, 1, '', '261.7k', '$0.33', 62, '1m 2s'),
+mk('failed', 'Codex delegates to Claude', 0, 1, '', '0', '$0.00', 3, '3s'),
+mk('completed', 'Research Workflow', 3, 3, '', '396.8k', '$0.21', 227, '3m 47s'),
+mk('cancelled', 'Research Workflow', 2, 3, '', '156.6k', '$0.17', 241, '4m 1s'),
+mk('completed', 'Skills Matrix', 4, 4, '', '106.9k', '$0.10', 85, '1m 25s'),
+mk('completed', 'Skill Probe', 3, 3, 'syntropic137/sandbox_syn-engineer-beta', '92.7k', '$0.07', 61, '1m 1s')
+] }
+];
+const groups = all
+.map((g) => ({ title: g.title, rows: g.rows.filter((r) => filter === 'all' || r.status === filter) }))
+.filter((g) => g.rows.length > 0)
+.map((g) => ({ title: g.title, rows: g.rows, count: g.rows.length + (g.rows.length === 1 ? ' run' : ' runs') }));
+const shown = groups.reduce((sum, g) => sum + g.rows.length, 0);
+const totals = { all: 75, completed: 50, failed: 23, cancelled: 2 };
+const chipOf = (key) => {
+const on = filter === key;
+return { on: on ? 'true' : 'false', bg: on ? '#1A2134' : 'transparent', fg: on ? '#E8EEFB' : '#9AA8C7', bd: on ? '#34406A' : '#222A40' };
+};
+return {
+accent: this.props.accent ?? '#4D80FF',
+groups,
+summary: '1–' + shown + ' of ' + totals[filter],
+chip: { all: chipOf('all'), completed: chipOf('completed'), failed: chipOf('failed'), cancelled: chipOf('cancelled') },
+pickAll: () => this.setState({ filter: 'all' }),
+pickCompleted: () => this.setState({ filter: 'completed' }),
+pickFailed: () => this.setState({ filter: 'failed' }),
+pickCancelled: () => this.setState({ filter: 'cancelled' })
+};
+}
+}
+</script>
+</body>
+</html>

@@ -6,6 +6,15 @@ packages:
   # Vendored in-tree (ADR-016), not a submodule - the dashboard consumes it
   # as a workspace package so the widget source and its host move together.
   - lib/ui-feedback/packages/ui-feedback-react
+  # syn-ui: the Svelte 5 app and its Skyline component library
+  # (packages/syn-ui/CONVENTIONS.md). Listed one by one, not as a glob, so
+  # scripts/workflows/bump_version.py can be checked against this file.
+  # Versioned in lockstep with the product since the cutover release (#1788).
+  - apps/syn-ui
+  - packages/syn-ui/data
+  - packages/syn-ui/skyline-core
+  - packages/syn-ui/skyline-svelte-v5
+  - packages/syn-ui/themes
 
 # Build scripts pnpm 11+ requires explicit approval for. Both are standard
 # native-binary installs: esbuild fetches its platform binary (vite/tsx), sharp
@@ -15,6 +24,13 @@ packages:
 allowBuilds:
   esbuild: true
   sharp: true
+
+# First-party design-system packages (syntropic137/cross-framework-ui-design-system),
+# published with provenance; exempt from the release-age cooldown so Skyline can
+# pin a release the day it ships.
+minimumReleaseAgeExclude:
+  - '@syntropic137/design-contracts@0.1.1'
+  - '@syntropic137/design-tokens@0.1.1'
 
 overrides:
   '@babel/core@<7.29.6': '>=7.29.6 <8'

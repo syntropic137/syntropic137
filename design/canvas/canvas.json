@@ -1,0 +1,412 @@
+{
+  "v": 3,
+  "attachments": {},
+  "boards": {
+    "Artifact.dc.html": {
+      "expand": "fill",
+      "h": 1350,
+      "is_interactive": true,
+      "page": "screens",
+      "title": "Artifact viewer",
+      "w": 1440,
+      "x": 3040,
+      "y": 2200
+    },
+    "Eval.dc.html": {
+      "expand": "fill",
+      "h": 1340,
+      "is_interactive": true,
+      "page": "screens",
+      "title": "Eval detail",
+      "w": 1440,
+      "x": 1520,
+      "y": 4400
+    },
+    "Evals.dc.html": {
+      "expand": "fill",
+      "h": 2400,
+      "is_interactive": true,
+      "page": "screens",
+      "title": "Evals",
+      "w": 1440,
+      "x": 0,
+      "y": 4400
+    },
+    "Execution.dc.html": {
+      "expand": "fill",
+      "h": 1320,
+      "is_interactive": true,
+      "page": "screens",
+      "title": "Execution detail",
+      "w": 1440,
+      "x": 3040,
+      "y": 0
+    },
+    "Executions.dc.html": {
+      "expand": "fill",
+      "h": 1690,
+      "is_interactive": true,
+      "page": "screens",
+      "title": "Executions",
+      "w": 1440,
+      "x": 1520,
+      "y": 0
+    },
+    "Foundations.dc.html": {
+      "h": 1400,
+      "page": "system",
+      "title": "Foundations",
+      "w": 1440,
+      "x": 0,
+      "y": 0
+    },
+    "Main.dc.html": {
+      "expand": "fill",
+      "h": 1760,
+      "is_interactive": true,
+      "page": "screens",
+      "title": "Overview",
+      "w": 1440,
+      "x": 0,
+      "y": 0
+    },
+    "PhaseKit.dc.html": {
+      "h": 980,
+      "page": "system",
+      "title": "Phase kit: model, tools, skills (component states)",
+      "w": 1440,
+      "x": 0,
+      "y": 1830
+    },
+    "PhoneArtifact.dc.html": {
+      "expand": "fill",
+      "h": 1760,
+      "is_interactive": true,
+      "page": "phone",
+      "title": "Artifact viewer",
+      "w": 390,
+      "x": 2820,
+      "y": 0
+    },
+    "PhoneDock.dc.html": {
+      "h": 66,
+      "page": "system",
+      "title": "Phone dock (shared component)",
+      "w": 358,
+      "x": 470,
+      "y": 1640
+    },
+    "PhoneEval.dc.html": {
+      "expand": "fill",
+      "h": 1860,
+      "is_interactive": true,
+      "page": "phone",
+      "title": "Eval detail",
+      "w": 390,
+      "x": 4230,
+      "y": 0
+    },
+    "PhoneEvals.dc.html": {
+      "expand": "fill",
+      "h": 2850,
+      "is_interactive": true,
+      "page": "phone",
+      "title": "Evals",
+      "w": 390,
+      "x": 3760,
+      "y": 0
+    },
+    "PhoneExecution.dc.html": {
+      "expand": "fill",
+      "h": 2220,
+      "is_interactive": true,
+      "page": "phone",
+      "title": "Execution detail",
+      "w": 390,
+      "x": 940,
+      "y": 0
+    },
+    "PhoneExecutions.dc.html": {
+      "expand": "fill",
+      "h": 1620,
+      "is_interactive": true,
+      "page": "phone",
+      "title": "Executions",
+      "w": 390,
+      "x": 470,
+      "y": 0
+    },
+    "PhoneOverview.dc.html": {
+      "expand": "fill",
+      "h": 2350,
+      "is_interactive": true,
+      "page": "phone",
+      "title": "Overview",
+      "w": 390,
+      "x": 0,
+      "y": 0
+    },
+    "PhoneSession.dc.html": {
+      "expand": "fill",
+      "h": 2320,
+      "is_interactive": true,
+      "page": "phone",
+      "title": "Session detail",
+      "w": 390,
+      "x": 1410,
+      "y": 0
+    },
+    "PhoneTop.dc.html": {
+      "h": 68,
+      "page": "system",
+      "title": "Phone top bar (shared component)",
+      "w": 390,
+      "x": 0,
+      "y": 1640
+    },
+    "PhoneTriggers.dc.html": {
+      "expand": "fill",
+      "h": 2040,
+      "is_interactive": true,
+      "page": "phone",
+      "title": "Triggers",
+      "w": 390,
+      "x": 3290,
+      "y": 0
+    },
+    "PhoneWorkflow.dc.html": {
+      "expand": "fill",
+      "h": 1920,
+      "is_interactive": true,
+      "page": "phone",
+      "title": "Workflow detail",
+      "w": 390,
+      "x": 2350,
+      "y": 0
+    },
+    "PhoneWorkflows.dc.html": {
+      "expand": "fill",
+      "h": 1740,
+      "is_interactive": true,
+      "page": "phone",
+      "title": "Workflows",
+      "w": 390,
+      "x": 1880,
+      "y": 0
+    },
+    "Session.dc.html": {
+      "expand": "fill",
+      "h": 1620,
+      "is_interactive": true,
+      "page": "screens",
+      "title": "Session detail",
+      "w": 1440,
+      "x": 4560,
+      "y": 0
+    },
+    "TopNav.dc.html": {
+      "h": 78,
+      "page": "system",
+      "title": "Top nav capsule (shared component)",
+      "w": 1440,
+      "x": 0,
+      "y": 1480
+    },
+    "Triggers.dc.html": {
+      "expand": "fill",
+      "h": 1230,
+      "is_interactive": true,
+      "page": "screens",
+      "title": "Triggers",
+      "w": 1440,
+      "x": 4560,
+      "y": 2200
+    },
+    "UsageMeter.dc.html": {
+      "h": 900,
+      "page": "system",
+      "title": "Usage meter: tokens and cost in one block (component)",
+      "w": 1440,
+      "x": 0,
+      "y": 2890
+    },
+    "Workflow.dc.html": {
+      "expand": "fill",
+      "h": 1780,
+      "is_interactive": true,
+      "page": "screens",
+      "title": "Workflow detail",
+      "w": 1440,
+      "x": 1520,
+      "y": 2200
+    },
+    "Workflows.dc.html": {
+      "expand": "fill",
+      "h": 1350,
+      "is_interactive": true,
+      "page": "screens",
+      "title": "Workflows",
+      "w": 1440,
+      "x": 0,
+      "y": 2200
+    },
+    "CompActions.dc.html": {
+      "x": 1520,
+      "y": 0,
+      "w": 1440,
+      "h": 1260,
+      "title": "Components · actions and inputs",
+      "page": "system"
+    },
+    "CompDisplay.dc.html": {
+      "x": 1520,
+      "y": 1340,
+      "w": 1440,
+      "h": 1360,
+      "title": "Components · display",
+      "page": "system"
+    },
+    "CompNav.dc.html": {
+      "x": 3040,
+      "y": 0,
+      "w": 1440,
+      "h": 1560,
+      "title": "Components · navigation and overlays",
+      "page": "system"
+    },
+    "CompPatterns.dc.html": {
+      "x": 3040,
+      "y": 1640,
+      "w": 1440,
+      "h": 1700,
+      "title": "Patterns · domain and data",
+      "page": "system"
+    }
+  },
+  "createdOnFiles": {
+    "at": "2026-10-07T18:40:00Z",
+    "v": 1
+  },
+  "designSystems": [],
+  "launch": {
+    "page": "screens",
+    "view": "canvas"
+  },
+  "notes": {
+    "evals-sample": {
+      "fill": "orange",
+      "page": "screens",
+      "text": "Evals boards: the cases, workflows, baseline, goal and the gpt-5.6-terra run of shared-esp-stream are real. Verdicts, most costs and durations are placeholders until the VPS data can be read.",
+      "w": 420,
+      "x": 3040,
+      "y": 4400
+    },
+    "evals-sample-phone": {
+      "fill": "orange",
+      "page": "phone",
+      "text": "Evals boards: the cases, workflows, baseline, goal and the gpt-5.6-terra run of shared-esp-stream are real. Verdicts, most costs and durations are placeholders until the VPS data can be read.",
+      "w": 420,
+      "x": 4700,
+      "y": 0
+    },
+    "row-build": {
+      "kind": "title1",
+      "maxW": 6000,
+      "page": "screens",
+      "text": "Build — workflows, artifacts, triggers",
+      "w": 240,
+      "x": 0,
+      "y": 1940
+    },
+    "row-measure": {
+      "kind": "title1",
+      "maxW": 2960,
+      "page": "screens",
+      "text": "Measure — evals",
+      "w": 240,
+      "x": 0,
+      "y": 4140
+    },
+    "row-observe": {
+      "kind": "title1",
+      "maxW": 6000,
+      "page": "screens",
+      "text": "Observe — overview, executions, sessions",
+      "w": 240,
+      "x": 0,
+      "y": -260
+    },
+    "row-phone": {
+      "kind": "title1",
+      "maxW": 4620,
+      "page": "phone",
+      "text": "Phone first — 390 wide, dock instead of the capsule",
+      "w": 240,
+      "x": 0,
+      "y": -260
+    },
+    "sys-foundations": {
+      "x": 0,
+      "y": -260,
+      "text": "Foundations and shared pieces",
+      "kind": "title1",
+      "maxW": 1440,
+      "page": "system"
+    },
+    "sys-components": {
+      "x": 1520,
+      "y": -260,
+      "text": "Components and patterns, every state",
+      "kind": "title1",
+      "maxW": 2960,
+      "page": "system"
+    }
+  },
+  "order": [
+    "Main.dc.html",
+    "Executions.dc.html",
+    "Execution.dc.html",
+    "Session.dc.html",
+    "Workflows.dc.html",
+    "Workflow.dc.html",
+    "Artifact.dc.html",
+    "Triggers.dc.html",
+    "Foundations.dc.html",
+    "TopNav.dc.html",
+    "PhoneOverview.dc.html",
+    "PhoneExecutions.dc.html",
+    "PhoneExecution.dc.html",
+    "PhoneSession.dc.html",
+    "PhoneWorkflows.dc.html",
+    "PhoneWorkflow.dc.html",
+    "PhoneArtifact.dc.html",
+    "PhoneTriggers.dc.html",
+    "PhoneTop.dc.html",
+    "PhoneDock.dc.html",
+    "PhaseKit.dc.html",
+    "Evals.dc.html",
+    "Eval.dc.html",
+    "PhoneEvals.dc.html",
+    "PhoneEval.dc.html",
+    "UsageMeter.dc.html",
+    "CompActions.dc.html",
+    "CompDisplay.dc.html",
+    "CompNav.dc.html",
+    "CompPatterns.dc.html"
+  ],
+  "pages": [
+    {
+      "id": "screens",
+      "name": "Desktop"
+    },
+    {
+      "id": "phone",
+      "name": "Phone"
+    },
+    {
+      "id": "system",
+      "name": "System"
+    }
+  ],
+  "title": "Syn137 — UI redesign"
+}

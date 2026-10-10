@@ -1,0 +1,170 @@
+/**
+ * Moving around: primary nav, list to detail and back by breadcrumb,
+ * browser history, redirects and the not-found page. All navigation must
+ * stay client-side (no full reload).
+ */
+import { isSkyline } from './support/env'
+import { ROUTES, SECTIONS } from './support/routes'
+import {
+  arrived,
+  breadcrumbs,
+  esc,
+  expect,
+  firstDetailId,
+  mainHeading,
+  markWindow,
+  open,
+  pathFor,
+  primaryNav,
+  test,
+  urlFor,
+  windowStillMarked,
+} from './support/test'
+
+test.describe('primary nav', () => {
+  for (const s of SECTIONS) {
+    test(`goes to ${s.path}`, async ({ page }) => {
+      // Start somewhere else so the click is a real navigation.
+      await open(page, s.path === '/repos' ? '/' : '/repos')
+      await markWindow(page)
+      await primaryNav(page).getByRole('link', { name: s.label }).click()
+      await expect(page).toHaveURL(urlFor(s.path))
+      await expect(mainHeading(page)).toHaveText(s.heading)
+      expect(await windowStillMarked(page), 'client-side navigation (no reload)').toBe(true)
+    })
+  }
+})
+
+test.describe('list to detail and back', () => {
+  for (const route of ROUTES.filter((r) => r.id && r.listPath && !r.path.endsWith('/runs'))) {
+    test(`${route.listPath} -> ${route.path}`, async ({ page }) => {
+      const listPath = route.listPath!
+      const kind = route.id!
+      await open(page, listPath)
+      const id = await firstDetailId(page, kind)
+      expect(id, `a link to a ${kind} on ${listPath}`).not.toBeNull()
+      await markWindow(page)
+      const listHeading = (await mainHeading(page).textContent())?.trim() ?? null
+      await page.locator(`a[href$="${listPath}/${encodeURIComponent(id!)}"]`).first().click()
+      await expect(page).toHaveURL(urlFor(`${listPath}/${encodeURIComponent(id!)}`))
+      // The detail's own heading: its breadcrumb trail is final from here on.
+      // A detail that keeps the list's heading has arrived once the trail names it.
+      if (route.sharesListHeading && isSkyline) await expect(breadcrumbs(page).locator('[aria-current="page"]').first()).not.toHaveText(listHeading ?? '')
+      else await arrived(page, listHeading)
+      expect(await windowStillMarked(page), 'client-side navigation (no reload)').toBe(true)
+
+      // Back to the list through the breadcrumb.
+      const parent = route.crumbs[0]
+      const back = breadcrumbs(page, parent.label).getByRole('link', { name: parent.label }).first()
+      const backHref = await back.getAttribute('href')
+      await back.click()
+      await expect(page).toHaveURL(new RegExp(`${esc(backHref ?? listPath)}/?$`))
+      await expect(mainHeading(page)).toBeVisible()
+
+      // And forward again with the browser.
+      await page.goBack()
+      await expect(page).toHaveURL(urlFor(`${listPath}/${encodeURIComponent(id!)}`))
+      await page.goBack()
+      await expect(page).toHaveURL(urlFor(listPath))
+      await expect(mainHeading(page)).toBeVisible()
+    })
+  }
+})
+
+test('workflow detail links to its runs', async ({ page }) => {
+  const detail = ROUTES.find((r) => r.name === 'workflow detail')!
+  const path = await pathFor(page, detail)
+  await open(page, path)
+  const runs = page.locator(`a[href$="${path}/runs"]`).first()
+  await expect(runs, 'link to the runs page').toBeVisible()
+  await runs.click()
+  await expect(page).toHaveURL(urlFor(`${path}/runs`))
+  await expect(mainHeading(page)).toBeVisible()
+})
+
+test('workflow runs breadcrumb returns to the workflow', async ({ page }) => {
+  const runs = ROUTES.find((r) => r.name === 'workflow runs')!
+  const path = await pathFor(page, runs)
+  await open(page, path)
+  const workflowPath = path.replace(/\/runs$/, '')
+  const link = breadcrumbs(page, /^Workflows$/).locator(`a[href$="${workflowPath}"]`)
+  await expect(link, 'breadcrumb link to the workflow').toBeVisible()
+  await link.click()
+  await expect(page).toHaveURL(urlFor(workflowPath))
+})
+
+test('Overview has no breadcrumbs and the home crumb leads there', async ({ page }) => {
+  await open(page, '/executions')
+  const home = isSkyline ? breadcrumbs(page).getByRole('link', { name: 'Overview' }) : page.locator('nav a[href="/"]').last()
+  await home.click()
+  await expect(page).toHaveURL(urlFor('/'))
+  if (isSkyline) await expect(page.getByRole('navigation', { name: 'Breadcrumb' })).toHaveCount(0)
+})
+
+test.describe('Skyline only', () => {
+  test.skip(!isSkyline, 'React keeps /insights and has no not-found page')
+
+  test('/insights is gone: the not-found page, not a redirect', async ({ page }) => {
+    await page.goto('insights/costs')
+    await expect(page).toHaveURL(urlFor('/insights/costs'))
+    await expect(page).toHaveTitle(/Not found/)
+  })
+
+  test('back to a list renders cached data on the first frame (ADR-074 query cache)', async ({ page }) => {
+    await open(page, '/executions')
+    const id = await firstDetailId(page, 'execution')
+    expect(id, 'a link to an execution').not.toBeNull()
+    const listHeading = (await mainHeading(page).textContent())?.trim() ?? null
+    await page.locator(`a[href$="/executions/${encodeURIComponent(id!)}"]`).first().click()
+    await expect(page).toHaveURL(urlFor(`/executions/${encodeURIComponent(id!)}`))
+    // The detail itself, not the list still on screen while its chunk loads.
+    await arrived(page, listHeading)
+    // Count every skeleton inserted from here on: a cache hit never mounts one.
+    await page.evaluate(() => {
+      const w = window as unknown as { skeletonsSeen: number }
+      w.skeletonsSeen = 0
+      new MutationObserver((records) => {
+        for (const r of records)
+          for (const n of r.addedNodes)
+            if (n instanceof Element && (n.matches('.sky-skeleton') || n.querySelector('.sky-skeleton'))) w.skeletonsSeen++
+      }).observe(document.body, { childList: true, subtree: true })
+    })
+    await page.goBack()
+    await expect(page).toHaveURL(urlFor('/executions'))
+    await expect(page.locator(`a[href$="/executions/${encodeURIComponent(id!)}"]`).first()).toBeVisible()
+    expect(await page.evaluate(() => (window as unknown as { skeletonsSeen: number }).skeletonsSeen), 'skeletons mounted on the way back').toBe(0)
+  })
+
+  test('unknown path shows not found', async ({ page }) => {
+    await page.goto('no-such-page')
+    await expect(mainHeading(page)).toBeVisible()
+    await expect(page).toHaveTitle(/not found/i)
+    await expect(page.getByRole('link', { name: new RegExp(esc('Overview')) }).first()).toBeVisible()
+  })
+})
+
+// Feedback 525d15c0: a task written as Markdown renders as body copy under a
+// section-scale title, never as a page-sized heading.
+test('a Markdown task renders as body copy', async ({ page }) => {
+  test.skip(!isSkyline, 'Skyline task body')
+  await open(page, '/workflows/multi-agent')
+  await page.locator('a[href*="/executions/"]').first().click()
+  const title = page.getByRole('heading', { level: 1, name: 'Plan and implement a palindrome checker with tests.' })
+  await expect(title).toBeVisible()
+  expect(parseFloat(await title.evaluate((el) => getComputedStyle(el).fontSize))).toBeLessThanOrEqual(20)
+  // The "## Steps" heading is a label in the body, not another heading.
+  await expect(page.getByRole('heading', { name: 'Steps' })).toHaveCount(0)
+  await expect(page.locator('ol li').filter({ hasText: 'is_palindrome(text)' })).toBeVisible()
+  await expect(page.locator('ol li ul li')).toHaveCount(2)
+  await expect(page.locator('ol li code').first()).toHaveText('is_palindrome(text)')
+})
+
+// Feedback 418d59db: token totals are condensed (k, M, B), never a raw count.
+test('execution token figure is condensed', async ({ page }) => {
+  test.skip(!isSkyline, 'Skyline figures')
+  await open(page, '/workflows/multi-agent')
+  await page.locator('a[href*="/executions/"]').first().click()
+  const header = page.locator('section[aria-label="Plan and implement a palindrome checker with tests."]')
+  await expect(header.getByText(/^\d+(\.\d+)?[kMB]$/).first()).toBeVisible()
+  await expect(header.getByText(/^\d{1,3}(,\d{3})+$/)).toHaveCount(0)
+})

@@ -235,6 +235,11 @@ _NODE_MANIFESTS = (
     "apps/syn-cli-node/package.json",
     "apps/syn-dashboard-ui/package.json",
     "apps/syn-docs/package.json",
+    "apps/syn-ui/package.json",
+    "packages/syn-ui/data/package.json",
+    "packages/syn-ui/skyline-core/package.json",
+    "packages/syn-ui/skyline-svelte-v5/package.json",
+    "packages/syn-ui/themes/package.json",
 )
 
 _SCHEMAS = (
@@ -271,7 +276,9 @@ def _make_repo(tmp_path: Path, version: str, extra_members: Iterable[str] = ()) 
                 "apps/syn-cli-node",
                 "apps/syn-dashboard-ui",
                 "apps/syn-docs",
+                "apps/syn-ui",
                 "packages/openclaw-plugin",
+                "packages/syn-ui",
             ]
         """),
     )

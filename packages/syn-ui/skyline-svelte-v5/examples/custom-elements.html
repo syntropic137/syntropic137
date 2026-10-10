@@ -1,0 +1,176 @@
+<!doctype html>
+<!--
+  Skyline custom elements in a plain HTML page (no Svelte in the host).
+
+  1. Build the bundle:   pnpm --filter @syn137/skyline-svelte-v5 run build:ce
+  2. Serve packages/syn-ui over HTTP (ES modules do not load from file://):
+                          python3 -m http.server -d packages/syn-ui 8137
+  3. Open               http://localhost:8137/skyline-svelte-v5/examples/custom-elements.html
+
+  The host page links the theme and sets data-theme on <html>; the tokens
+  inherit into each element's shadow root. Strings and booleans go in
+  attributes; arrays and objects (days, tokens, costRows) are set as JS
+  properties.
+-->
+<html lang="en" data-theme="syn137">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Skyline custom elements</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="../../themes/src/all.css" />
+    <script type="module" src="../dist-ce/skyline-elements.js"></script>
+    <style>
+      body {
+        margin: 0;
+        padding: var(--ds-space-6) var(--ds-space-4);
+        background: var(--ds-color-bg);
+        color: var(--ds-color-fg);
+        font-family: var(--ds-font-sans);
+      }
+      main {
+        max-width: 1100px;
+        margin: 0 auto;
+        display: grid;
+        gap: var(--ds-space-6);
+      }
+      h1 {
+        margin: 0;
+        font-size: var(--ds-text-xl);
+      }
+      h2 {
+        margin: 0 0 var(--ds-space-3);
+        font-family: var(--ds-font-mono);
+        font-size: var(--ds-text-sm);
+        color: var(--ds-color-text-muted);
+        font-weight: var(--ds-font-weight-medium);
+      }
+      .row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--ds-space-3);
+        align-items: center;
+      }
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        gap: var(--ds-space-4);
+      }
+      #log {
+        font-family: var(--ds-font-mono);
+        font-size: var(--ds-text-sm);
+        color: var(--ds-color-text-muted);
+        min-height: 1.5em;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="row">
+        <h1>Skyline custom elements</h1>
+        <sky-button id="theme" variant="ghost" size="sm">Switch theme</sky-button>
+      </div>
+
+      <section>
+        <h2>&lt;sky-button&gt;</h2>
+        <div class="row">
+          <sky-button variant="solid">Run workflow</sky-button>
+          <sky-button>Cancel</sky-button>
+          <sky-button variant="ghost">Details</sky-button>
+          <sky-button tone="danger">Delete</sky-button>
+          <sky-button loading>Saving</sky-button>
+          <sky-button disabled>Disabled</sky-button>
+        </div>
+      </section>
+
+      <section>
+        <h2>&lt;sky-badge&gt; &lt;sky-status-badge&gt; &lt;sky-tag&gt;</h2>
+        <div class="row">
+          <sky-badge variant="soft" tone="accent">Completed</sky-badge>
+          <sky-badge variant="soft" tone="danger">Failed</sky-badge>
+          <sky-badge variant="outline" tone="neutral">Cancelled</sky-badge>
+          <sky-badge variant="soft" tone="accent" dot>Running</sky-badge>
+          <sky-status-badge status="completed"></sky-status-badge>
+          <sky-status-badge status="failed"></sky-status-badge>
+          <sky-status-badge status="in_progress"></sky-status-badge>
+          <sky-status-badge status="completed" shape="square"></sky-status-badge>
+        </div>
+        <div class="row" style="margin-top: var(--ds-space-3)">
+          <sky-tag variant="outline">workflow</sky-tag>
+          <sky-tag variant="skill">code-review</sky-tag>
+          <sky-tag variant="agent" agent="claude">claude</sky-tag>
+          <sky-tag variant="agent" agent="codex">codex</sky-tag>
+          <sky-tag variant="dashed">not recorded</sky-tag>
+          <sky-tag variant="accent" removable id="filter">status: failed</sky-tag>
+        </div>
+      </section>
+
+      <section>
+        <h2>&lt;sky-card&gt; &lt;sky-stat&gt;</h2>
+        <sky-card variant="header" padding="lg">
+          <div class="stats">
+            <sky-stat label="Runs" value="128" size="hero"><span slot="meta">last 30 days</span></sky-stat>
+            <sky-stat label="Pass rate" value="94.5%"></sky-stat>
+            <sky-stat label="Spend" value="$41.20"><span slot="meta">of $60 budget</span></sky-stat>
+            <sky-stat label="Median duration"></sky-stat>
+          </div>
+        </sky-card>
+      </section>
+
+      <section>
+        <h2>&lt;sky-usage-meter&gt;</h2>
+        <sky-usage-meter id="usage" cost-by="model"></sky-usage-meter>
+      </section>
+
+      <section>
+        <h2>&lt;sky-skyline&gt;</h2>
+        <sky-card padding="md"><sky-skyline id="skyline" runs-href="#runs/{date}"></sky-skyline></sky-card>
+        <p id="log" aria-live="polite"></p>
+      </section>
+    </main>
+
+    <script type="module">
+      const log = document.getElementById('log')
+
+      document.getElementById('theme').addEventListener('click', () => {
+        const html = document.documentElement
+        html.dataset.theme = html.dataset.theme === 'syn137' ? 'skyline' : 'syn137'
+      })
+
+      document.getElementById('filter').addEventListener('remove', (e) => {
+        log.textContent = 'remove: ' + e.target.textContent
+        e.target.remove()
+      })
+
+      const usage = document.getElementById('usage')
+      usage.tokens = { input: 29912, output: 1936, cacheWrite: 0, cacheRead: 144128 }
+      usage.costRows = [
+        { label: 'claude-sonnet-4-5', value: 0.1578, tone: 'claude' },
+        { label: 'gpt-5-codex', value: 0.0584, tone: 'codex' },
+      ]
+      usage.rates = { cacheRead: '0.1× rate' }
+
+      // A deterministic year of activity ending today.
+      const today = new Date()
+      const days = []
+      for (let i = 364; i >= 0; i--) {
+        const d = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() - i))
+        const wave = Math.sin(i / 9) + Math.cos(i / 23)
+        const sessions = Math.max(0, Math.round(4 + 4 * wave + ((i * 7) % 5) - 2))
+        if (sessions === 0) continue
+        days.push({
+          date: d.toISOString().slice(0, 10),
+          sessions,
+          executions: Math.ceil(sessions / 2),
+          commits: (i * 3) % 7,
+          costUsd: Math.round(sessions * 37) / 100,
+        })
+      }
+      const skyline = document.getElementById('skyline')
+      skyline.days = days
+      skyline.addEventListener('select', (e) => {
+        log.textContent = `select: ${e.detail.date} (${e.detail.sessions} sessions)`
+      })
+    </script>
+  </body>
+</html>

@@ -1,0 +1,100 @@
+/*
+ * skyline: the neutral theme (first proposal; final palette is an open
+ * question in the spec). Same token names as syn137.css, grey accent.
+ *
+ * Apply with <html data-theme="skyline">.
+ */
+[data-theme='skyline'] {
+  /* ---- Upstream roles (--ds-*) --------------------------------------- */
+  --ds-color-bg: #0B0B0C;
+  --ds-color-surface: #111112;
+  --ds-color-surface-raised: #18181A;
+  --ds-color-overlay: #222225;
+  --ds-color-border: #1F1F22;
+  --ds-color-fg: #EDEDEE;
+  --ds-color-text-muted: #A6A6AB;
+  --ds-color-text-subtle: #7C7C82;
+  --ds-color-accent: #EDEDEE;
+  --ds-color-accent-hover: #FFFFFF;
+  --ds-color-accent-contrast: #0B0B0C;
+  --ds-color-danger: #FF6F61;
+  --ds-color-warning: #E5B450;
+  --ds-color-success: #3FAF82;
+
+  /* ---- Skyline roles (--sky-*) --------------------------------------- */
+  --sky-color-border-strong: #2C2C30;
+  --sky-color-border-hover: #3A3A40;
+  --sky-color-border-muted: #26262A;
+  --sky-color-divider: #18181B;
+  --sky-color-control: #121214;
+  --sky-color-control-hover: #1A1A1D;
+  --sky-color-track: #161618;
+  --sky-color-empty: #2E2E33;
+  --sky-color-neutral-soft: #1A1A1D;
+  --sky-color-text-faint: #5E5E64;      /* Tertiary text: version label, build meta. Recedes further than text-subtle */
+  --sky-color-danger-soft: #2A1513;
+  --sky-color-warning-soft: #1F1A0E;
+  --sky-color-warning-soft-fg: #EBD9A8;
+  --sky-color-danger-soft-fg: #FF8A7D;
+  --sky-color-unscored: #4A4A52;
+  --sky-color-text-code: #CACACE;
+
+  --sky-color-accent-solid: #EDEDEE;
+  --sky-color-accent-solid-contrast: #0B0B0C;
+  --sky-color-accent-solid-highlight: #FFFFFF;
+
+  --sky-color-data-1: #4C8DEA;
+  --sky-color-data-2: #E0703A;
+  --sky-color-data-3: #9085E9;
+  --sky-color-data-4: #C98500;
+
+  /* Trend charts: one colour per series (verifier), grid lines, good-change text and pill */
+  --sky-color-series-1: #4D80FF;
+  --sky-color-series-2: #199E70;
+  --sky-color-series-3: #9085E9;
+  --sky-color-series-4: #D55181;
+  --sky-color-grid: #161B2B;
+  --sky-color-success-soft: #0F241C;
+  --sky-color-success-soft-fg: #7FE3B8;
+
+  --sky-color-agent-claude: #D97757;
+  --sky-color-agent-codex: #8E9BBC;
+
+  --sky-color-display-hi: #FFFFFF;
+  --sky-color-ground-deep: #060607;
+  --sky-color-cube-dark-top: #2E2E33;
+  --sky-color-cube-dark-left: #1E1E22;
+  --sky-color-cube-dark-right: #111113;
+  --sky-color-cube-edge: rgba(160, 160, 170, 0.1);
+  --sky-color-cube-glass-edge: rgba(255, 255, 255, 0.55);
+
+  /* IsoCity (Overview heatmap, Main board): floor tiles and edge, future
+     outline, painted month and weekday labels, the quiet (dim) block faces,
+     the hairline on block fronts and the rim of a failed block */
+  --sky-iso-floor: #111624;
+  --sky-iso-floor-edge: #1B2235;
+  --sky-iso-future-edge: #1E2638;
+  --sky-iso-label: #56658A;
+  --sky-iso-label-faint: #3E4A68;
+  --sky-iso-dim-side: #0C111C;
+  --sky-iso-dim-front: #151B2B;
+  --sky-iso-dim-top: #222B41;
+  --sky-iso-dim-rim-base: #2A3350;
+  --sky-iso-face-edge: rgba(255, 255, 255, 0.05);
+  --sky-iso-fail-rim: #FFD9D4;
+  --sky-iso-strip-dim: #2E3A5C;       /* Week strip bar outside the window */
+
+  --sky-color-scrim: rgba(0, 0, 0, 0.6);
+  --sky-color-highlight: rgba(255, 255, 255, 0.04);
+  --sky-color-highlight-strong: rgba(255, 255, 255, 0.07);
+
+  /* ---- Elevation ----------------------------------------------------- */
+  --sky-shadow-raised: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  --sky-shadow-raised-strong: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  --sky-shadow-selected: inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  --sky-shadow-glow: inset 0 1px 0 var(--sky-color-accent-solid-highlight), 0 8px 20px -10px rgba(255, 255, 255, 0.35);
+  --sky-shadow-float: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 16px 32px -16px rgba(0, 0, 0, 0.7);
+  --sky-shadow-dock: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 16px 32px -12px rgba(0, 0, 0, 0.85);
+  --sky-shadow-overlay: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 30px 60px -20px rgba(0, 0, 0, 0.85);
+  --sky-shadow-knob: 0 1px 3px rgba(0, 0, 0, 0.4);
+}

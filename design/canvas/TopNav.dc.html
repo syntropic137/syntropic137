@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Top navigation capsule</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Orbitron:wght@500;600;700&display=swap">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<header style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px 20px; box-sizing: border-box; padding: 20px 40px; font-family: 'Instrument Sans', 'Helvetica Neue', system-ui, sans-serif; font-size: 13px; line-height: 1.3; color: #9AA8C7; background: #0A0C14">
+
+<a href="Main.dc.html" style="display: flex; align-items: center; gap: 10px; text-decoration: none">
+<svg width="26" height="26" viewBox="0 0 24 24" aria-hidden="true">
+<polygon points="12,3 21,7.5 12,12 3,7.5" style="fill: color-mix(in oklab, var(--ac, #4D80FF) 62%, white)"></polygon>
+<polygon points="3,7.5 12,12 12,21.5 3,17" style="fill: var(--ac, #4D80FF)"></polygon>
+<polygon points="12,12 21,7.5 21,17 12,21.5" style="fill: color-mix(in oklab, var(--ac, #4D80FF) 55%, black)"></polygon>
+</svg>
+<span style="font-family: 'Orbitron', 'Eurostile', sans-serif; font-size: 14px; font-weight: 600; letter-spacing: 0.06em; color: #E8EEFB">Syntropic<span style="color: var(--ac, #4D80FF)">137</span></span>
+</a>
+
+<nav aria-label="Primary" style="display: flex; flex-wrap: wrap; gap: 2px; padding: 4px; border-radius: 14px; border: 1px solid #1A2032; background: #0F121C; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 16px 32px -16px rgba(0, 0, 0, 0.7)">
+<a href="Main.dc.html" style="display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 12px; border-radius: 10px; text-decoration: none; background: {{overview.bg}}; color: {{overview.fg}}; font-weight: {{overview.w}}; box-shadow: {{overview.sh}}">
+<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true" style="color: {{overview.ic}}"><path d="M2.5 2.5H7V7H2.5zM9 2.5h4.5V7H9zM2.5 9H7v4.5H2.5zM9 9h4.5v4.5H9z"></path></svg>
+<span>Overview</span>
+</a>
+<a href="Workflows.dc.html" style="display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 12px; border-radius: 10px; text-decoration: none; background: {{workflows.bg}}; color: {{workflows.fg}}; font-weight: {{workflows.w}}; box-shadow: {{workflows.sh}}">
+<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true" style="color: {{workflows.ic}}"><circle cx="4" cy="3.25" r="1.5"></circle><circle cx="4" cy="12.75" r="1.5"></circle><circle cx="12" cy="5" r="1.5"></circle><path d="M4 4.75v6.5M12 6.5c0 2.25-2 2.75-4 2.75S4 9.75 4 11"></path></svg>
+<span>Workflows</span>
+</a>
+<a href="Executions.dc.html" style="display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 12px; border-radius: 10px; text-decoration: none; background: {{executions.bg}}; color: {{executions.fg}}; font-weight: {{executions.w}}; box-shadow: {{executions.sh}}">
+<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true" style="color: {{executions.ic}}"><circle cx="8" cy="8" r="5.75"></circle><path d="M6.75 5.75l3.5 2.25-3.5 2.25z"></path></svg>
+<span>Executions</span>
+</a>
+<a href="Evals.dc.html" style="display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 12px; border-radius: 10px; text-decoration: none; background: {{evals.bg}}; color: {{evals.fg}}; font-weight: {{evals.w}}; box-shadow: {{evals.sh}}">
+<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color: {{evals.ic}}"><path d="M6 1.75h4M6.75 1.75v4.1L3.1 12.4a1.25 1.25 0 0 0 1.1 1.85h7.6a1.25 1.25 0 0 0 1.1-1.85L9.25 5.85v-4.1M4.9 9.75h6.2"></path></svg>
+<span>Evals</span>
+</a>
+<a href="Session.dc.html" style="display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 12px; border-radius: 10px; text-decoration: none; background: {{sessions.bg}}; color: {{sessions.fg}}; font-weight: {{sessions.w}}; box-shadow: {{sessions.sh}}">
+<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color: {{sessions.ic}}"><path d="M1.75 8h2.5L6 3.5l3 9L10.75 8h3.5"></path></svg>
+<span>Sessions</span>
+</a>
+<a href="Artifact.dc.html" style="display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 12px; border-radius: 10px; text-decoration: none; background: {{artifacts.bg}}; color: {{artifacts.fg}}; font-weight: {{artifacts.w}}; box-shadow: {{artifacts.sh}}">
+<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true" style="color: {{artifacts.ic}}"><path d="M4 1.75h5l3 3v9.5H4zM9 1.75v3h3"></path></svg>
+<span>Artifacts</span>
+</a>
+<a href="Triggers.dc.html" style="display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 12px; border-radius: 10px; text-decoration: none; background: {{triggers.bg}}; color: {{triggers.fg}}; font-weight: {{triggers.w}}; box-shadow: {{triggers.sh}}">
+<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true" style="color: {{triggers.ic}}"><path d="M8.75 1.75L3.5 9h4l-.75 5.25L12.5 7h-4z"></path></svg>
+<span>Triggers</span>
+</a>
+<a href="#" style="display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 12px; border-radius: 10px; text-decoration: none; background: {{repos.bg}}; color: {{repos.fg}}; font-weight: {{repos.w}}; box-shadow: {{repos.sh}}">
+<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color: {{repos.ic}}"><path d="M3.5 12.25v-9a1.5 1.5 0 0 1 1.5-1.5h7.5v9H5a1.5 1.5 0 0 0 0 3h7.5v-3"></path></svg>
+<span>Repos</span>
+</a>
+</nav>
+
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px">
+<div style="display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 12px; border-radius: 10px; border: 1px solid #1A2032; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #9AA8C7">
+<span style="width: 7px; height: 7px; border-radius: 50%; background: var(--ac, #4D80FF); box-shadow: 0 0 0 3px color-mix(in oklab, var(--ac, #4D80FF) 24%, transparent)"></span>
+<span>Live</span>
+</div>
+<button type="button" aria-label="Search or jump to" style="display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 10px; border-radius: 10px; border: 1px solid #1A2032; background: #0F121C; color: #9AA8C7; font: inherit; cursor: pointer">
+<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="7" cy="7" r="4.25"></circle><path d="M10.25 10.25L13.5 13.5"></path></svg>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; padding: 1px 5px; border-radius: 4px; border: 1px solid #283048">⌘K</span>
+</button>
+<a href="Workflows.dc.html" style="display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 14px; border-radius: 10px; background: color-mix(in oklab, var(--ac, #4D80FF) 80%, black); box-shadow: inset 0 1px 0 color-mix(in oklab, var(--ac, #4D80FF) 60%, white), 0 8px 20px -8px var(--ac, #4D80FF); color: #FFFFFF; font-weight: 600; text-decoration: none">
+<svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M4.5 2.75v10.5L13 8z"></path></svg>
+<span>Run workflow</span>
+</a>
+</div>
+
+</header>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"active":{"editor":"enum","options":["overview","workflows","executions","evals","sessions","artifacts","triggers","repos"],"default":"overview"},"$preview":{"width":1440,"height":78}}'>
+class Component extends DCLogic {
+renderVals() {
+const active = this.props.active ?? 'overview';
+const mk = (key) => {
+const on = active === key;
+return {
+bg: on ? '#1A2134' : 'transparent',
+fg: on ? '#E8EEFB' : '#9AA8C7',
+ic: on ? 'var(--ac, #4D80FF)' : '#6F7FA3',
+w: on ? 600 : 500,
+sh: on ? 'inset 0 1px 0 rgba(255, 255, 255, 0.07)' : 'none'
+};
+};
+return {
+overview: mk('overview'),
+workflows: mk('workflows'),
+executions: mk('executions'),
+sessions: mk('sessions'),
+artifacts: mk('artifacts'),
+triggers: mk('triggers'),
+repos: mk('repos'),
+evals: mk('evals')
+};
+}
+}
+</script>
+</body>
+</html>

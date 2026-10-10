@@ -13,6 +13,12 @@ set dotenv-load := true
 # Image build/push/retag/release-asset recipes (owner-reviewed; see CODEOWNERS).
 import 'just/release.just'
 
+# Skyline Svelte UI recipes (skyline-check, skyline-test, skyline-build, skyline-qa, skyline-dev).
+import 'just/skyline.just'
+
+# Skyline serving (gateway / and the legacy /next), e2e and CI mirrors (skyline-ci, skyline-e2e, skyline-gateway-smoke, skyline-dev-next).
+import 'just/skyline-serve.just'
+
 # Docker Compose shorthand variables
 compose := "docker compose -f docker/docker-compose.yaml"
 compose_dev := compose + " -f docker/docker-compose.dev.yaml"
