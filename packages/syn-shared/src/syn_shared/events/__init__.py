@@ -83,6 +83,12 @@ GIT_CREDENTIAL_LAPSED = "git_credential_lapsed"
 # workspace consumed, measured at teardown.
 WORKSPACE_RESOURCE_USAGE = "workspace_resource_usage"
 
+# Forge telemetry, produced by Syn137 itself from the GitHub event pipeline: a
+# pull request was merged (a `pull_request` event, action `closed`, merged).
+# Recorded for every merge the pipeline sees; "was it a run's PR" is decided
+# at read time against the PRs runs created.
+GITHUB_PULL_REQUEST_MERGED = "github_pull_request_merged"
+
 # Type-safe literal union (like TypeScript)
 # MUST match the constants above and agentic_isolation.EventType
 EventType = Literal[
@@ -128,6 +134,8 @@ EventType = Literal[
     "git_credential_lapsed",
     # Capacity telemetry (#1310), produced by Syn137 for the same gating reason.
     "workspace_resource_usage",
+    # Forge telemetry, produced by Syn137 for the same gating reason.
+    "github_pull_request_merged",
 ]
 
 # Runtime validation set (auto-generated from Literal)
@@ -144,6 +152,7 @@ __all__ = [
     "CONTEXT_COMPACTED",
     "COST_RECORDED",
     "ERROR",
+    "GITHUB_PULL_REQUEST_MERGED",
     "GIT_BRANCH_CHANGED",
     "GIT_CHECKOUT",
     "GIT_COMMIT",

@@ -1281,10 +1281,12 @@ export interface paths {
          * Get Shipped Metrics Endpoint
          * @description What agents shipped over the last ``days`` UTC days, against the ``days`` before.
          *
-         *     Commits are distinct shas from agent ``git_commit`` observations attributed
-         *     to an execution; repos touched are the slugs those executions cloned. PRs
-         *     opened, PRs merged and merge rate are null with a ``reason``: no store
-         *     persists PR outcomes yet.
+         *     Agent-attributed only: commits are distinct shas from ``git_commit``
+         *     observations carrying an execution; PRs opened are PRs a run created with
+         *     ``gh pr create``; PRs merged are merges of those PRs, from the
+         *     ``pull_request`` (closed, merged) events the GitHub pipeline ingests;
+         *     merge rate is merged / opened in percent; repos touched are the repos of
+         *     all of the above.
          */
         get: operations["get_shipped_metrics_endpoint_metrics_shipped_get"];
         put?: never;
@@ -5550,6 +5552,11 @@ export interface components {
             breakdown?: {
                 [key: string]: number;
             };
+            /**
+             * Failed
+             * @default 0
+             */
+            failed: number;
         };
         /**
          * HeldProjectionHealth
@@ -8365,7 +8372,7 @@ export interface components {
             /** Repos */
             repos: string[];
             /** By Workflow */
-            by_workflow: components["schemas"]["ShippedWorkflowResponse"][] | null;
+            by_workflow: components["schemas"]["ShippedWorkflowResponse"][];
             /** Commits Without Workflow */
             commits_without_workflow: number;
             /** Unavailable */
@@ -8402,7 +8409,7 @@ export interface components {
         };
         /**
          * ShippedRateTileResponse
-         * @description A percentage over the window; ``delta`` is in percentage points.
+         * @description A percentage over the window, 0 to 100; ``delta`` is in percentage points.
          */
         ShippedRateTileResponse: {
             /** Total */
@@ -8443,15 +8450,19 @@ export interface components {
         };
         /**
          * ShippedWorkflowResponse
-         * @description One workflow's share of the window's commits.
+         * @description One workflow's share of what was shipped in the window.
          */
         ShippedWorkflowResponse: {
             /** Workflow Id */
             workflow_id: string;
-            /** Workflow Name */
-            workflow_name: string;
+            /** Name */
+            name: string;
             /** Commits */
             commits: number;
+            /** Prs Opened */
+            prs_opened: number;
+            /** Prs Merged */
+            prs_merged: number;
             /** Repos Touched */
             repos_touched: number;
         };

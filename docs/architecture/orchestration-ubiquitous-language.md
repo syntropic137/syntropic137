@@ -90,33 +90,46 @@ reads `insufficient`. Sizes the capacity model and the
 ## Shipped
 
 What agents put into repositories over a window of UTC days, counted only
-where an Execution is the author (`GET /metrics/shipped`, the Overview's
-"Shipped by agents" block). Five tiles, each a window total, the total of the
-window of equal length immediately before it, a delta and one value per day:
-commits, PRs opened, PRs merged, [Merge Rate](#merge-rate) and
-[Repos Touched](#repos-touched). A commit is a distinct sha from an agent's
-`git_commit` observation that carries an `execution_id`, counted once on the
-UTC day it was first seen; an amend or rebase makes a new sha and so a new
-commit. A push webhook's commit is not shipped: it has no Execution, so nothing
-says an agent wrote it. Lane 2 and the execution list read model only, never an
-aggregate. **Unclear:** PRs opened and merged are not persisted anywhere today,
-so those tiles and Merge Rate are null with a reason, never zero (#1852).
+where an Execution is the author (`GET /metrics/shipped`, `syn metrics
+shipped`, the Overview's "Shipped by agents" block). Five tiles, each a window
+total, the total of the window of equal length immediately before it, a delta
+and one value per day: commits, PRs opened, PRs merged,
+[Merge Rate](#merge-rate) and [Repos Touched](#repos-touched). Never the
+owner's own work:
+
+- a **commit** is a distinct sha from an agent's `git_commit` observation that
+  carries an `execution_id`, counted once on the UTC day it was first seen; an
+  amend or rebase makes a new sha and so a new commit. A push webhook's commit
+  has no Execution and is not shipped.
+- a **PR opened** is a PR a run created: a `gh pr create` tool call in an
+  Execution and the github.com PR URL it printed, counted once per PR.
+- a **PR merged** is a merge of one of those PRs, seen by the GitHub event
+  pipeline (`pull_request`, action `closed`, merged; webhooks and Events API)
+  and recorded as a `github_pull_request_merged` observation, counted on the
+  UTC day of `merged_at`. A merge of a PR no run created is not shipped.
+
+Lane 2 and the execution list read model only, never an aggregate.
+**Unclear:** PRs a run opens without `gh pr create`, and merges before the
+pipeline recorded them, are not seen (#1852).
 
 ## Merge Rate
 
-PRs merged divided by PRs opened over the same window, as a percent. Its delta
-is in percentage points ("+5 pts"), not a relative change: a rate moving from
-80% to 84% is +4 pts, not +5%. Null when no PR was opened: no data is not 0%.
-A daily point is that day's merged over that day's opened, null on a day with
-none opened.
+PRs merged divided by PRs opened over the same window, as a percent (0 to
+100, not a fraction). Its delta is in percentage points ("+5 pts"), not a
+relative change: 80% to 84% is +4 pts, not +5%. Null when no PR was opened: no
+data is not 0%. A merge counts in the window it happened even when its PR was
+opened earlier, so the rate can exceed 100% in a window that merged older
+work. A daily point is that day's merged over that day's opened, null on a day
+with none opened.
 
 ## Repos Touched
 
-Distinct `owner/name` repositories that the committing Executions cloned
-(their `repos`, ADR-058), over the window. A distinct count, never a sum of the
-daily series: one repo touched on ten days is one repo touched. Its delta is a
-plain count ("+3"). The commit observation's own `repo` is a directory name,
-not an `owner/name`, so it does not answer this.
+Distinct `owner/name` repositories shipped to over the window: those the
+committing Executions cloned (their `repos`, ADR-058) and those of the PRs
+opened and merged. A distinct count, never a sum of the daily series: one repo
+touched on ten days is one repo touched. Its delta is a plain count ("+3").
+The commit observation's own `repo` is a directory name, not an `owner/name`,
+so it does not answer this.
 
 ## Quota Exhaustion
 

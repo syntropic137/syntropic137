@@ -198,12 +198,16 @@ const shippedCommand: CommandDef = {
     for (const [label, tile] of tiles) {
       if (tile.reason) printDim(`${label}: ${tile.reason}`);
     }
-    if (d.by_workflow && d.by_workflow.length > 0) {
+    if (d.by_workflow.length > 0) {
       const wf = new Table({ title: "By workflow (commits)" });
       wf.addColumn("Workflow");
       wf.addColumn("Commits", { align: "right" });
+      wf.addColumn("PRs opened", { align: "right" });
+      wf.addColumn("PRs merged", { align: "right" });
       wf.addColumn("Repos", { align: "right" });
-      for (const b of d.by_workflow) wf.addRow(b.workflow_name || b.workflow_id, String(b.commits), String(b.repos_touched));
+      for (const b of d.by_workflow) {
+        wf.addRow(b.name || b.workflow_id, String(b.commits), String(b.prs_opened), String(b.prs_merged), String(b.repos_touched));
+      }
       wf.print();
     }
   },

@@ -114,13 +114,10 @@ from syn_shared.pricing import (  # noqa: TC001 - pydantic resolves at runtime
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from syn_domain.contexts.orchestration import ShippedCountTile, ShippedMetrics
     from syn_domain.contexts.orchestration.slices.phase_profiles import (
         Percentiles,
         PhaseProfiles,
-    )
-    from syn_domain.contexts.orchestration.slices.shipped_metrics import (
-        ShippedCountTile,
-        ShippedMetrics,
     )
 
 # ---------------------------------------------------------------------------
@@ -3540,6 +3537,10 @@ class HeatmapDayBucketResponse(BaseModel):
     date: str
     count: float = 0.0
     breakdown: dict[str, float] = Field(default_factory=dict)
+    failed: int = 0
+    """Executions that ended failed on this UTC day (status ``failed``, by
+    ``completed_at``), from the workflow_executions read model. Also in
+    ``breakdown["failed"]`` so ``metric=failed`` colours by it."""
 
 
 class ContributionHeatmapResponse(BaseModel):
@@ -4346,7 +4347,7 @@ class ShippedCountTileResponse(BaseModel):
 
 
 class ShippedRateTileResponse(BaseModel):
-    """A percentage over the window; ``delta`` is in percentage points."""
+    """A percentage over the window, 0 to 100; ``delta`` is in percentage points."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -4363,13 +4364,16 @@ class ShippedRateTileResponse(BaseModel):
 
 
 class ShippedWorkflowResponse(BaseModel):
-    """One workflow's share of the window's commits."""
+    """One workflow's share of what was shipped in the window."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     workflow_id: str
-    workflow_name: str
+    name: str
+    """The workflow's display name."""
     commits: int
+    prs_opened: int
+    prs_merged: int
     repos_touched: int
 
 
@@ -4389,8 +4393,8 @@ class ShippedMetricsResponse(BaseModel):
     repos_touched: ShippedCountTileResponse
     repos: list[str]
     """Distinct repos touched in the window, ``owner/name``, sorted."""
-    by_workflow: list[ShippedWorkflowResponse] | None
-    """Top workflows by commits in the window; null when filtered to one."""
+    by_workflow: list[ShippedWorkflowResponse]
+    """Top workflows by commits, then PRs merged; empty when filtered to one."""
     commits_without_workflow: int
     """Window commits whose execution has no workflow_executions row: counted in
     ``commits``, in no ``by_workflow`` entry."""
@@ -4422,13 +4426,13 @@ class ShippedMetricsResponse(BaseModel):
             ),
             repos_touched=_count_tile(m.repos_touched),
             repos=list(m.repos),
-            by_workflow=None
-            if m.by_workflow is None
-            else [
+            by_workflow=[
                 ShippedWorkflowResponse(
                     workflow_id=b.workflow_id,
-                    workflow_name=b.workflow_name,
+                    name=b.name,
                     commits=b.commits,
+                    prs_opened=b.prs_opened,
+                    prs_merged=b.prs_merged,
                     repos_touched=b.repos_touched,
                 )
                 for b in m.by_workflow

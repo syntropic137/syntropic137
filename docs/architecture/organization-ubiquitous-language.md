@@ -42,6 +42,14 @@ Owner's decision (2026-10-09): "insights" is reserved for this meaning. A
 number is an insight when it tells someone what to change in how work is done,
 not merely how the running platform is behaving.
 
+## Failed Day Count
+
+On the activity heatmap, a day's `failed`: the Executions whose status is
+`failed` and whose `completed_at` falls on that UTC day. Counted on the day the
+run ENDED, beside the day's sessions, executions and commits, which count
+activity. Cancelled and interrupted runs are not failures. Read from the
+`workflow_executions` read model, never an aggregate.
+
 ## Repo
 
 One repository the platform knows about, registered by `RepoRegistered` and

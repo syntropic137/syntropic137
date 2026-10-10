@@ -176,7 +176,7 @@ describe("metrics commands", () => {
       merge_rate: { ...count(null, null, "PR outcomes are not persisted"), delta_unit: "points" },
       repos_touched: { ...count(9, "+3"), delta_unit: "count" },
       repos: ["acme/api"],
-      by_workflow: [{ workflow_id: "wf", workflow_name: "Implement", commits: 1204, repos_touched: 9 }],
+      by_workflow: [{ workflow_id: "wf", name: "Implement", commits: 1204, prs_opened: 73, prs_merged: 61, repos_touched: 9 }],
       commits_without_workflow: 0,
       unavailable: ["prs_opened", "prs_merged", "merge_rate"],
     };

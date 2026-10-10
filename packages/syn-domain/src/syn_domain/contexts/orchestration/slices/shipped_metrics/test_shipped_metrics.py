@@ -11,9 +11,11 @@ from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_sum
     WorkflowExecutionSummary,
 )
 from syn_domain.contexts.orchestration.slices.shipped_metrics import (
-    PR_OUTCOMES_NOT_PERSISTED,
+    MERGE_LOOKBACK_DAYS,
     CommitSighting,
     DeltaUnit,
+    MergedPullRequest,
+    RunPullRequest,
     ShippedMetricsQueryService,
     ShippedWindow,
     build_shipped_metrics,
@@ -60,6 +62,22 @@ class _Sightings:
     async def sightings(self, since: datetime, until: datetime) -> list[CommitSighting]:
         self.asked = (since, until)
         return self.rows
+
+
+class _PullRequests:
+    def __init__(self, opened: list[RunPullRequest], merged: list[MergedPullRequest]) -> None:
+        self._opened = opened
+        self._merged = merged
+        self.asked_opened: tuple[datetime, datetime] | None = None
+        self.asked_merged: tuple[datetime, datetime] | None = None
+
+    async def opened(self, since: datetime, until: datetime) -> list[RunPullRequest]:
+        self.asked_opened = (since, until)
+        return self._opened
+
+    async def merged(self, since: datetime, until: datetime) -> list[MergedPullRequest]:
+        self.asked_merged = (since, until)
+        return self._merged
 
 
 class _Executions:
@@ -185,13 +203,33 @@ class TestBuild:
         assert m.repos_touched.total == 0 and m.repos == ()
         assert m.by_workflow == ()
 
-    def test_pr_tiles_are_null_with_a_reason_never_zero(self) -> None:
+    def test_empty_pr_tiles_are_zero_and_the_rate_is_none(self) -> None:
         m = build_shipped_metrics(ShippedWindow.ending(TODAY, 14), [], {})
-        for tile in (m.prs_opened, m.prs_merged):
-            assert tile.total is None and tile.series == () and tile.delta_display is None
-            assert tile.reason == PR_OUTCOMES_NOT_PERSISTED
-        assert m.merge_rate.total is None and m.merge_rate.reason == PR_OUTCOMES_NOT_PERSISTED
-        assert m.unavailable == ("prs_opened", "prs_merged", "merge_rate")
+        assert (m.prs_opened.total, m.prs_merged.total) == (0, 0)
+        assert m.prs_opened.reason is None
+        assert m.merge_rate.total is None and m.merge_rate.reason is None
+        assert m.unavailable == ()
+
+    def test_only_merges_of_prs_runs_created_count(self) -> None:
+        w = ShippedWindow.ending(TODAY, 7)
+        summaries = {"e1": _summary("e1", "impl", ["acme/api"])}
+        run_prs = [
+            RunPullRequest("acme/api", 1, "e1", TODAY),
+            RunPullRequest("acme/api", 1, "e1", TODAY),  # seen twice: one PR
+            RunPullRequest("acme/web", 2, "e1", w.previous_start - timedelta(days=5)),
+        ]
+        merges = [
+            MergedPullRequest("ACME/api", 1, TODAY),  # forge spelling differs in case
+            MergedPullRequest("acme/api", 1, TODAY),  # delivered twice: one merge
+            MergedPullRequest("acme/web", 2, w.start),  # opened before the windows: counted
+            MergedPullRequest("owner/manual", 9, TODAY),  # no run created it
+        ]
+        m = build_shipped_metrics(w, [], summaries, run_prs=run_prs, merges=merges)
+        assert (m.prs_opened.total, m.prs_opened.previous_total) == (1, 0)
+        assert m.prs_merged.total == 2
+        assert m.merge_rate.total == 200.0  # merged PRs opened earlier can exceed opened
+        assert m.repos == ("acme/api", "acme/web")
+        assert m.by_workflow[0].prs_opened == 1 and m.by_workflow[0].prs_merged == 2
 
     def test_a_sha_counts_once_on_its_first_day(self) -> None:
         w = ShippedWindow.ending(TODAY, 7)
@@ -241,20 +279,35 @@ class TestBuild:
         everything = build_shipped_metrics(w, rows, summaries)
         assert everything.commits.total == 4
         assert everything.commits_without_workflow == 1
-        assert everything.by_workflow is not None
-        assert [(b.workflow_id, b.commits, b.repos_touched) for b in everything.by_workflow] == [
-            ("impl", 2, 1),
-            ("docs", 1, 1),
-        ]
+        assert [
+            (b.workflow_id, b.name, b.commits, b.repos_touched) for b in everything.by_workflow
+        ] == [("impl", "IMPL", 2, 1), ("docs", "DOCS", 1, 1)]
 
         impl = build_shipped_metrics(w, rows, summaries, workflow_id="impl")
         assert impl.commits.total == 2 and impl.repos == ("acme/api",)
-        assert impl.by_workflow is None and impl.workflow_id == "impl"
+        assert impl.by_workflow == () and impl.workflow_id == "impl"
 
 
 @pytest.mark.unit
 class TestSeededScenario:
     """28 days shaped like the board's sample: 1,204 commits (+38%), 9 repos (+3)."""
+
+    @staticmethod
+    def _seed_prs() -> tuple[list[RunPullRequest], list[MergedPullRequest]]:
+        """73 run PRs opened and 61 merged now; 59 and 48 in the window before."""
+        w = ShippedWindow.ending(TODAY, 14)
+        opened: list[RunPullRequest] = []
+        merged: list[MergedPullRequest] = []
+        for n in range(73 + 59):
+            current = n < 73
+            i = n % 14
+            day = (w.start if current else w.previous_start) + timedelta(days=i)
+            execution = f"exec-{'cur' if current else 'prev'}-{i}"
+            repo = f"acme/repo-{i % 9 if current else i % 6}"
+            opened.append(RunPullRequest(repo, n + 1, execution, day))
+            if (current and n < 61) or (not current and n - 73 < 48):
+                merged.append(MergedPullRequest(repo, n + 1, day))
+        return opened, merged
 
     @staticmethod
     def _seed() -> tuple[list[CommitSighting], dict[str, WorkflowExecutionSummary]]:
@@ -283,12 +336,19 @@ class TestSeededScenario:
         rows, summaries = self._seed()
         sightings = _Sightings(rows)
         executions = _Executions(summaries)
-        service = ShippedMetricsQueryService(sightings, executions, today=lambda: TODAY)
+        opened, merged = self._seed_prs()
+        prs = _PullRequests(opened, merged)
+        service = ShippedMetricsQueryService(sightings, executions, prs, today=lambda: TODAY)
 
         m = await service.shipped(days=14)
 
         assert sightings.asked == (
             datetime(2026, 9, 12, tzinfo=UTC),
+            datetime(2026, 10, 10, tzinfo=UTC),
+        )
+        assert prs.asked_merged == sightings.asked
+        assert prs.asked_opened == (
+            datetime(2026, 9, 12, tzinfo=UTC) - timedelta(days=MERGE_LOOKBACK_DAYS),
             datetime(2026, 10, 10, tzinfo=UTC),
         )
         assert len(executions.asked) == 28  # one keyed read, not one per execution
@@ -298,14 +358,16 @@ class TestSeededScenario:
         assert (m.repos_touched.total, m.repos_touched.previous_total) == (9, 6)
         assert m.repos_touched.delta_display == "+3"
         assert m.repos == tuple(sorted(f"acme/repo-{i}" for i in range(9)))
-        assert m.by_workflow is not None
         assert sum(b.commits for b in m.by_workflow) == 1204
         assert m.by_workflow[0].workflow_id == "sdlc-implement"  # 5 days x 86
+        assert (m.prs_opened.total_display, m.prs_opened.delta_display) == ("73", "+24%")
+        assert (m.prs_merged.total_display, m.prs_merged.delta_display) == ("61", "+27%")
+        assert (m.merge_rate.total_display, m.merge_rate.delta_display) == ("84%", "+2 pts")
+        assert m.merge_rate.total == pytest.approx(83.56, abs=0.01)  # percent, not a fraction
+        assert sum(p.value for p in m.prs_opened.series) == 73
 
     def test_pr_tile_maths_on_the_board_numbers(self) -> None:
-        """When PR outcomes are persisted, the same maths yields the board's tiles.
-
-        The board's sample (73 opened +24%, 61 merged +27%) implies 59 and 48
+        """The board's sample (73 opened +24%, 61 merged +27%) implies 59 and 48
         before, which is a merge rate of 81% -> 84%: "+2 pts", not the "+5 pts"
         the mock shows. The mock's numbers are not mutually consistent.
         """

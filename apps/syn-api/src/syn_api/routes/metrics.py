@@ -31,11 +31,12 @@ from syn_api.types import (
     Result,
     ShippedMetricsResponse,
 )
-from syn_domain.contexts.orchestration import ExecutionListReads
-from syn_domain.contexts.orchestration.slices.shipped_metrics import (
+from syn_domain.contexts.orchestration import (
     SHIPPED_WINDOW_DAYS,
+    ExecutionListReads,
     ShippedMetricsQueryService,
     TimescaleCommitSightings,
+    TimescalePullRequestSightings,
 )
 from syn_domain.pagination import Page
 from syn_shared.pricing import canonical_cost_usd
@@ -440,6 +441,7 @@ def get_shipped_metrics_query() -> ShippedMetricsQueryService:
     return ShippedMetricsQueryService(
         sightings=TimescaleCommitSightings(pool),
         executions=ExecutionListReads(get_projection_mgr().store),
+        pull_requests=TimescalePullRequestSightings(pool),
     )
 
 
@@ -454,10 +456,12 @@ async def get_shipped_metrics_endpoint(
 ) -> ShippedMetricsResponse:
     """What agents shipped over the last ``days`` UTC days, against the ``days`` before.
 
-    Commits are distinct shas from agent ``git_commit`` observations attributed
-    to an execution; repos touched are the slugs those executions cloned. PRs
-    opened, PRs merged and merge rate are null with a ``reason``: no store
-    persists PR outcomes yet.
+    Agent-attributed only: commits are distinct shas from ``git_commit``
+    observations carrying an execution; PRs opened are PRs a run created with
+    ``gh pr create``; PRs merged are merges of those PRs, from the
+    ``pull_request`` (closed, merged) events the GitHub pipeline ingests;
+    merge rate is merged / opened in percent; repos touched are the repos of
+    all of the above.
     """
     if days not in SHIPPED_WINDOW_DAYS:
         allowed = ", ".join(str(d) for d in sorted(SHIPPED_WINDOW_DAYS))

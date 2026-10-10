@@ -1,12 +1,15 @@
 """What agents shipped over a rolling window, against the window before it."""
 
 from syn_domain.contexts.orchestration.slices.shipped_metrics.query_service import (
-    PR_OUTCOMES_NOT_PERSISTED,
+    MERGE_LOOKBACK_DAYS,
     SHIPPED_WINDOW_DAYS,
     CommitSighting,
     CommitSightingSource,
     DeltaUnit,
     ExecutionAttributionSource,
+    MergedPullRequest,
+    PullRequestSightingSource,
+    RunPullRequest,
     ShippedCountTile,
     ShippedMetrics,
     ShippedMetricsQueryService,
@@ -14,6 +17,7 @@ from syn_domain.contexts.orchestration.slices.shipped_metrics.query_service impo
     ShippedWindow,
     ShippedWorkflow,
     TimescaleCommitSightings,
+    TimescalePullRequestSightings,
     build_shipped_metrics,
     format_count_delta,
     format_percent_delta,
@@ -21,12 +25,15 @@ from syn_domain.contexts.orchestration.slices.shipped_metrics.query_service impo
 )
 
 __all__ = [
-    "PR_OUTCOMES_NOT_PERSISTED",
+    "MERGE_LOOKBACK_DAYS",
     "SHIPPED_WINDOW_DAYS",
     "CommitSighting",
     "CommitSightingSource",
     "DeltaUnit",
     "ExecutionAttributionSource",
+    "MergedPullRequest",
+    "PullRequestSightingSource",
+    "RunPullRequest",
     "ShippedCountTile",
     "ShippedMetrics",
     "ShippedMetricsQueryService",
@@ -34,6 +41,7 @@ __all__ = [
     "ShippedWindow",
     "ShippedWorkflow",
     "TimescaleCommitSightings",
+    "TimescalePullRequestSightings",
     "build_shipped_metrics",
     "format_count_delta",
     "format_percent_delta",

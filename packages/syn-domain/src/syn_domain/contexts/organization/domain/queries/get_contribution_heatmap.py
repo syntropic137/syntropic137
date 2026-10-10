@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from uuid import uuid4
 
-VALID_METRICS = frozenset({"sessions", "executions", "commits", "cost_usd", "tokens"})
+VALID_METRICS = frozenset({"sessions", "executions", "commits", "cost_usd", "tokens", "failed"})
 
 
 @dataclass(frozen=True)

@@ -2,12 +2,12 @@ name: shipped_metrics
 description: >
   What agents shipped over a rolling window of UTC days, against the window
   before it: commits, PRs opened, PRs merged, merge rate and repos touched,
-  each with a daily series. No projection: commits are read from the
-  git_commit observations in agent_events (Lane 2, indexed by event type and
-  time) and attributed through the workflow_executions read model in one
-  keyed read, so a request costs one statement per window regardless of how
-  many executions committed. PR tiles are reported unavailable, with a
-  reason, because no store persists PR outcomes today.
+  each with a daily series. Agent-attributed only. No projection: commits
+  (git_commit with an execution_id), run PRs (gh pr create tool calls and the
+  PR URL printed) and merges (github_pull_request_merged, recorded from the
+  GitHub event pipeline) are read from agent_events (Lane 2) with one
+  window-bounded statement each, and attributed through the
+  workflow_executions read model in one keyed read.
 context: orchestration
 type: query
 

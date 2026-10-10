@@ -299,9 +299,12 @@ from syn_domain.contexts.orchestration.slices.set_workflow_default_eval import (
     SetWorkflowDefaultEvalHandler,
 )
 from syn_domain.contexts.orchestration.slices.shipped_metrics import (
+    SHIPPED_WINDOW_DAYS,
+    ShippedCountTile,
     ShippedMetrics,
     ShippedMetricsQueryService,
     TimescaleCommitSightings,
+    TimescalePullRequestSightings,
 )
 from syn_domain.contexts.orchestration.slices.show_claude_plugin import (
     ClaudePluginNotFoundError,
@@ -340,6 +343,7 @@ __all__ = [
     "PHASE_ID_PATTERN",
     "RESERVED_INPUT_NAMES",
     "RETIRED_PHASE_FIELDS",
+    "SHIPPED_WINDOW_DAYS",
     "SKILL_TOOL_NAME",
     "TASK_PLACEHOLDER",
     # Tag edits after creation (#967)
@@ -466,6 +470,7 @@ __all__ = [
     "SecurityPolicy",
     "SetWorkflowDefaultEvalCommand",
     "SetWorkflowDefaultEvalHandler",
+    "ShippedCountTile",
     "ShippedMetrics",
     "ShippedMetricsQueryService",
     "SideEffectStatus",
@@ -483,6 +488,7 @@ __all__ = [
     "TemplateLaunches",
     "TerminateWorkspaceCommand",
     "TimescaleCommitSightings",
+    "TimescalePullRequestSightings",
     "TokenAccumulator",
     "UnsupportedExecutionTypeError",
     "UnsupportedToolPolicyForProviderError",
