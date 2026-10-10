@@ -73,6 +73,41 @@ export interface UsageModel {
   bandLabel: string
 }
 
+export interface UsageBandProps {
+  tokens: TokenBreakdown
+  /** Rate badges per series, e.g. { cacheRead: '0.1× rate' }. */
+  rates?: Partial<Record<keyof TokenBreakdown, string>>
+}
+
+export interface UsageBandModel {
+  total: number
+  /** Non-empty series in TOKEN_SERIES order, with counts and shares. */
+  series: UsageSeriesRow[]
+  /** "Tokens by type: Cache read 81.9 percent, Input 17.0 percent, Output 1.1 percent". */
+  bandLabel: string
+}
+
+/** The Usage Band (tokens by type), shared by the Usage Meter and the landing. */
+export function usageBand(p: UsageBandProps): UsageBandModel {
+  const t = p.tokens
+  const total = t.input + t.output + t.cacheWrite + t.cacheRead
+  const series = TOKEN_SERIES.filter((s) => t[s.key] > 0).map((s) => {
+    const ratio = total > 0 ? t[s.key] / total : 0
+    const row: UsageSeriesRow = { key: s.key, label: s.label, token: s.token, value: t[s.key], display: formatTokens(t[s.key], { case: 'upper' }), percent: formatPercent(ratio, 1) }
+    const rate = p.rates?.[s.key]
+    if (rate) row.rate = rate
+    return row
+  })
+  return {
+    total,
+    series,
+    bandLabel:
+      total > 0
+        ? `Tokens by type: ${series.map((s) => `${s.label} ${s.percent.replace('%', ' percent')}`).join(', ')}`
+        : 'No tokens recorded',
+  }
+}
+
 /** Cost rows with their share of the rows' total and a bar fill relative to the largest. */
 function costRowModels(rows: readonly CostRowInput[], fallbackTone: CostRowTone): { rows: UsageCostRow[]; sum: number } {
   const values = rows.map((r) => (typeof r.value === 'number' && r.value > 0 ? r.value : 0))
@@ -89,26 +124,15 @@ function costRowModels(rows: readonly CostRowInput[], fallbackTone: CostRowTone)
 }
 
 export function usageModel(p: Pick<UsageMeterProps, 'cost' | 'tokens' | 'costRows' | 'rates' | 'costBy' | 'modelRows'>): UsageModel {
-  const t = p.tokens
-  const total = t.input + t.output + t.cacheWrite + t.cacheRead
-  const series = TOKEN_SERIES.filter((s) => t[s.key] > 0).map((s) => {
-    const ratio = total > 0 ? t[s.key] / total : 0
-    const row: UsageSeriesRow = { key: s.key, label: s.label, token: s.token, value: t[s.key], display: formatTokens(t[s.key], { case: 'upper' }), percent: formatPercent(ratio, 1) }
-    const rate = p.rates?.[s.key]
-    if (rate) row.rate = rate
-    return row
-  })
+  const band = usageBand(p)
   const { rows: costRows, sum } = costRowModels(p.costRows, p.costBy === 'phase' ? 'accent' : 'neutral')
   return {
     cost: p.cost ?? formatCostPrecise(sum),
-    tokensTotal: total,
-    tokensLabel: `${formatTokens(total, { case: 'upper' })} tokens`,
-    series,
+    tokensTotal: band.total,
+    tokensLabel: `${formatTokens(band.total, { case: 'upper' })} tokens`,
+    series: band.series,
     costRows,
     modelRows: costRowModels(p.modelRows ?? [], 'neutral').rows,
-    bandLabel:
-      total > 0
-        ? `Tokens by type: ${series.map((s) => `${s.label} ${s.percent.replace('%', ' percent')}`).join(', ')}`
-        : 'No tokens recorded',
+    bandLabel: band.bandLabel,
   }
 }

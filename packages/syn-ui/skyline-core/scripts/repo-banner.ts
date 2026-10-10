@@ -1,0 +1,325 @@
+/**
+ * README banners for the org's repos: the cube S on the left; on the right a
+ * pill (license and a short label), the repo's display name in Orbitron and
+ * its key command, over the landing ground (accent glow wash, 28px dot
+ * grid), with a slow train of the repo's key phrases running round the card
+ * edge (edgeTrain.ts). One SVG per entry in
+ * design/brand/banners/repos.json, written to design/brand/banners/<name>.svg.
+ *
+ *   pnpm --filter @syn137/skyline-core run repo-banner [--config file] [--out dir] [name ...]
+ *
+ * GitHub shows README SVGs as <img>, which loads nothing external, so each
+ * banner embeds its fonts as subset woff2 data: URIs (fontSubset.ts; needs
+ * uv on PATH). The CSS font stacks still list fallbacks for renderers that
+ * ignore @font-face (rsvg-convert, some previewers).
+ */
+import { readFileSync, writeFileSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { sMark } from '../src/geometry/index.ts'
+import { ACCENT, cube, GROUND, S_FACES, TEXT } from './brand.ts'
+import { edgeTrain } from './edgeTrain.ts'
+import { type FontSpec, fontFace, measure, type StaticFont, staticFont } from './fontSubset.ts'
+
+export interface BannerSpec {
+  name: string
+  title: string
+  label: string
+  license?: string
+  tagline?: string
+  command?: string
+  alt?: string
+  /** Where the tagline is drawn: not at all (default; it still names the image), on its own line under the title, or beside the title on its baseline. */
+  taglineAt?: 'none' | 'below' | 'side'
+  /** Override the vertical gaps (px). */
+  gaps?: Partial<typeof GAP>
+  /** Text running round the card edge; `seconds` > 0 animates it counterclockwise. */
+  edge?: { text: string; seconds?: number }
+}
+
+const W = 1200
+const H = 400
+const RADIUS = 24
+const TEXT_X = 414
+const TEXT_MAX = W - TEXT_X - 88
+const MARK_CX = 236
+
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..')
+const fontDir = resolve(root, 'apps/syn-landing/public/fonts')
+const configDir = resolve(root, 'design/brand/banners')
+
+const FONTS: Record<'brand' | 'sans' | 'mono', FontSpec> = {
+  brand: { family: 'Orbitron', file: resolve(fontDir, 'orbitron-latin.woff2'), axes: { wght: 600 }, weight: 600 },
+  sans: { family: 'Instrument Sans', file: resolve(fontDir, 'instrument-sans-latin.woff2'), axes: { wght: 400 }, weight: 400 },
+  mono: { family: 'JetBrains Mono', file: resolve(fontDir, 'jetbrains-mono-latin.woff2'), axes: { wght: 500 }, weight: 500 },
+}
+const STACK = {
+  brand: "'Orbitron','Eurostile','Instrument Sans',system-ui,sans-serif",
+  sans: "'Instrument Sans',ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif",
+  mono: "'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace",
+}
+
+/** Type scale (px) and letter spacing (em). Tracking matches the landing (--sky-tracking-brand, pill caps). */
+const TYPE = {
+  title: { max: 92, tracking: 0.04 },
+  tagline: { size: 25, cap: 0.7 },
+  side: { size: 21, gap: 26 },
+  command: { max: 20 },
+  pill: { size: 13, tracking: 0.12, height: 34 },
+}
+const GAP = { pillTitle: 48, titleTagline: 36, taglineCommand: 26, titleCommand: 48 }
+
+const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+const n = (v: number) => Math.round(v * 10) / 10
+
+type Fonts = Record<keyof typeof FONTS, StaticFont>
+
+// ---------------------------------------------------------------- ground
+
+function defs(): string {
+  return `<clipPath id="card"><rect width="${W}" height="${H}" rx="${RADIUS}"/></clipPath>
+<radialGradient id="wash" cx="0.72" cy="0" r="0.75" gradientTransform="matrix(1 0 0 1.6 0 0)"><stop offset="0" stop-color="${ACCENT}" stop-opacity="0.26"/><stop offset="1" stop-color="${ACCENT}" stop-opacity="0"/></radialGradient>
+<radialGradient id="markglow"><stop offset="0" stop-color="${ACCENT}" stop-opacity="${UPLIGHT.opacity}"/><stop offset="1" stop-color="${ACCENT}" stop-opacity="0"/></radialGradient>
+<pattern id="dots" width="28" height="28" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="1" fill="${TEXT.muted}" fill-opacity="0.16"/></pattern>
+<linearGradient id="edge" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="${ACCENT}" stop-opacity="0"/><stop offset="0.5" stop-color="${ACCENT}" stop-opacity="0.7"/><stop offset="1" stop-color="${ACCENT}" stop-opacity="0"/></linearGradient>`
+}
+
+/**
+ * The S is uplit: a soft accent glow centred under it, its centre offset
+ * below the S's visual centre by S_UPLIGHT_OFFSET of the S's drawn height,
+ * so it reads as light from below with a falloff above (BRAND.md, Logo).
+ * Same size and strength on every banner; ry keeps it inside the card.
+ */
+const S_UPLIGHT_OFFSET = 0.12
+const UPLIGHT = { rx: 200, ry: 165, opacity: 0.34 }
+
+function uplight(dx: number): string {
+  const b = markBox()
+  const cy = H / 2 + (b.y1 - b.y0) * S_UPLIGHT_OFFSET
+  return `<ellipse cx="${n(MARK_CX + dx)}" cy="${n(cy)}" rx="${UPLIGHT.rx}" ry="${UPLIGHT.ry}" fill="url(#markglow)"/>`
+}
+
+function ground(dx = 0): string {
+  return `<g clip-path="url(#card)">
+<rect width="${W}" height="${H}" fill="${GROUND}"/>
+<rect width="${W}" height="${H}" fill="url(#dots)"/>
+<rect width="${W}" height="${H}" fill="url(#wash)"/>
+${uplight(dx)}
+<rect x="${W * 0.2}" y="0" width="${W * 0.6}" height="1" fill="url(#edge)"/>
+</g>
+<rect x="0.5" y="0.5" width="${W - 1}" height="${H - 1}" rx="${RADIUS - 0.5}" fill="none" stroke="${TEXT.muted}" stroke-opacity="0.16"/>`
+}
+
+const S_CUBE = 34
+
+/** Extents of the S's drawn faces (glass cube included), in its own units. */
+function markBox(): { x0: number; x1: number; y0: number; y1: number } {
+  const pts = sMark(S_CUBE).cubes.flatMap((c) => [c.left, c.right, c.top].flatMap((p) => p.trim().split(/\s+/)))
+  const xy = pts.map((p) => p.split(',').map(Number) as [number, number])
+  const xs = xy.map((p) => p[0])
+  const ys = xy.map((p) => p[1])
+  return { x0: Math.min(...xs), x1: Math.max(...xs), y0: Math.min(...ys), y1: Math.max(...ys) }
+}
+
+/** The S, its visual box centred on (MARK_CX, H / 2). */
+function mark(): string {
+  const m = sMark(S_CUBE)
+  const b = markBox()
+  const x = MARK_CX - (b.x0 + b.x1) / 2
+  const y = H / 2 - (b.y0 + b.y1) / 2
+  return `<g transform="translate(${n(x)} ${n(y)})">${m.cubes.map((c) => cube(S_FACES[c.tone], c)).join('')}</g>`
+}
+
+// ---------------------------------------------------------------- text
+
+/** The scales glyph for the license, drawn so it needs no font. */
+function scales(x: number, cy: number): string {
+  const s = `fill="none" stroke="${ACCENT}" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"`
+  return `<g transform="translate(${n(x)} ${n(cy - 7)})" ${s}><path d="M7 1v12M3.5 13h7M2 3.5h10"/><path d="M3 3.5 1 8.2h4zM11 3.5 9 8.2h4z"/></g>`
+}
+
+function pillTexts(spec: BannerSpec): string[] {
+  return [spec.license, spec.label].filter((t): t is string => Boolean(t)).map((t) => t.toUpperCase())
+}
+
+function pillWidth(spec: BannerSpec, mono: StaticFont): number {
+  const { size, tracking } = TYPE.pill
+  const texts = pillTexts(spec)
+  const textW = texts.reduce((w, t) => w + measure(mono, t, size, tracking), 0)
+  return 32 + (spec.license ? 23 : 0) + (texts.length - 1) * (21 - size * tracking) + textW - size * tracking
+}
+
+function pill(spec: BannerSpec, mono: StaticFont, top: number): string {
+  const { size, tracking, height } = TYPE.pill
+  const cy = top + height / 2
+  const base = n(cy + size * 0.36)
+  const parts: string[] = []
+  let x = TEXT_X + 16
+  if (spec.license) {
+    parts.push(scales(x, cy))
+    x += 14 + 9
+  }
+  pillTexts(spec).forEach((t, i) => {
+    if (i > 0) {
+      parts.push(`<rect x="${n(x - size * tracking + 10)}" y="${n(cy - 8)}" width="1" height="16" fill="${ACCENT}" fill-opacity="0.35"/>`)
+      x += 21 - size * tracking
+    }
+    parts.push(`<text x="${n(x)}" y="${base}" font-family="${STACK.mono}" font-size="${size}" font-weight="500" letter-spacing="${tracking}em" fill="${ACCENT}">${esc(t)}</text>`)
+    x += measure(mono, t, size, tracking)
+  })
+  const w = x - TEXT_X + 16 - size * tracking
+  const box = `<rect x="${TEXT_X + 0.5}" y="${top + 0.5}" width="${n(w)}" height="${height - 1}" rx="${(height - 1) / 2}" fill="${ACCENT}" fill-opacity="0.09" stroke="${ACCENT}" stroke-opacity="0.32"/>`
+  return box + parts.join('')
+}
+
+/** The title, any "137" in the accent (the wordmark convention). */
+function titleSpans(title: string): string {
+  return title
+    .split(/(137)/)
+    .filter(Boolean)
+    .map((p) => (p === '137' ? `<tspan fill="${ACCENT}">137</tspan>` : esc(p)))
+    .join('')
+}
+
+const fit = (font: StaticFont, text: string, max: number, tracking = 0): number => Math.min(max, TEXT_MAX / (measure(font, text, 1, tracking) - tracking))
+
+interface Row {
+  height: number
+  width: number
+  gapBefore: number
+  draw: (top: number) => string
+}
+
+function titleRow(spec: BannerSpec, fonts: Fonts, gap: number): Row {
+  const t = TYPE.title
+  const side = spec.taglineAt === 'side' && spec.tagline ? spec.tagline : ''
+  const sideSize = TYPE.side.size
+  const sideW = side ? TYPE.side.gap + measure(fonts.sans, side, sideSize) : 0
+  const titleW = measure(fonts.brand, spec.title, 1, t.tracking) - t.tracking
+  const size = Math.min(t.max, (TEXT_MAX - sideW) / titleW)
+  const cap = fonts.brand.cap
+  const draw = (top: number) => {
+    const base = n(top + size * cap)
+    const title = `<text x="${TEXT_X - size * 0.04}" y="${base}" font-family="${STACK.brand}" font-size="${n(size)}" font-weight="600" letter-spacing="${t.tracking}em" fill="${TEXT.fg}">${titleSpans(spec.title)}</text>`
+    if (!side) return title
+    const x = TEXT_X + size * titleW + TYPE.side.gap
+    return `${title}<text x="${n(x)}" y="${base}" font-family="${STACK.sans}" font-size="${sideSize}" fill="${TEXT.muted}" fill-opacity="0.85">${esc(side)}</text>`
+  }
+  return { height: size * cap, width: size * titleW + sideW, gapBefore: gap, draw }
+}
+
+function rows(spec: BannerSpec, fonts: Fonts): Row[] {
+  const gap = { ...GAP, ...spec.gaps }
+  const below = spec.taglineAt === 'below' && spec.tagline
+  const out: Row[] = [{ height: TYPE.pill.height, width: pillWidth(spec, fonts.mono), gapBefore: 0, draw: (top) => pill(spec, fonts.mono, top) }, titleRow(spec, fonts, gap.pillTitle)]
+  if (below) {
+    const s = TYPE.tagline.size
+    out.push({
+      height: s * TYPE.tagline.cap,
+      width: measure(fonts.sans, spec.tagline ?? '', s),
+      gapBefore: gap.titleTagline,
+      draw: (top) => `<text x="${TEXT_X}" y="${n(top + s * TYPE.tagline.cap)}" font-family="${STACK.sans}" font-size="${s}" fill="${TEXT.muted}">${esc(spec.tagline ?? '')}</text>`,
+    })
+  }
+  if (spec.command) out.push(commandRow(spec.command, fonts.mono, below ? gap.taglineCommand : gap.titleCommand))
+  return out
+}
+
+function commandRow(command: string, mono: StaticFont, gapBefore: number): Row {
+  const line = `$ ${command}`
+  const s = fit(mono, line, TYPE.command.max)
+  const cap = mono.cap
+  return {
+    height: s * cap,
+    width: measure(mono, line, s),
+    gapBefore,
+    draw: (top) =>
+      `<text x="${TEXT_X}" y="${n(top + s * cap)}" font-family="${STACK.mono}" font-size="${n(s)}" font-weight="500" fill="${TEXT.fg}" fill-opacity="0.86" xml:space="preserve"><tspan fill="${ACCENT}">$</tspan> ${esc(command)}</text>`,
+  }
+}
+
+/**
+ * Rows stacked down from the pill, placed so the title's cap box (rows[1])
+ * is centred on the card's middle line, the axis the S is centred on too.
+ * The pill and the command sit the same distance from that cap box.
+ */
+function textBlock(list: Row[]): string {
+  const [pillRow, title] = list
+  let top = H / 2 - (title?.height ?? 0) / 2 - (title?.gapBefore ?? 0) - (pillRow?.height ?? 0)
+  return list
+    .map((r) => {
+      top += r.gapBefore
+      const svg = r.draw(top)
+      top += r.height
+      return svg
+    })
+    .join('\n')
+}
+
+// ---------------------------------------------------------------- banner
+
+/** Shift that centres the S plus the text column (to its longest line) in the card. */
+function centreShift(list: Row[]): number {
+  const b = markBox()
+  const left = MARK_CX - (b.x1 - b.x0) / 2
+  const right = TEXT_X + Math.max(...list.map((r) => r.width))
+  return W / 2 - (left + right) / 2
+}
+
+function train(spec: BannerSpec, fonts: Fonts) {
+  if (!spec.edge) return undefined
+  return edgeTrain({ width: W, height: H, radius: RADIUS, text: spec.edge.text, seconds: spec.edge.seconds ?? 0, font: fonts.mono, family: STACK.mono, fill: TEXT.subtle, accent: ACCENT })
+}
+
+function styles(spec: BannerSpec, fonts: Fonts, edgeGlyphs: string): string {
+  const mono = [...pillTexts(spec), spec.command ? `$ ${spec.command}` : '', edgeGlyphs].join('')
+  return [fontFace(fonts.brand, spec.title), spec.tagline && spec.taglineAt && spec.taglineAt !== 'none' ? fontFace(fonts.sans, spec.tagline) : '', fontFace(fonts.mono, mono)].join('\n')
+}
+
+export function banner(spec: BannerSpec, fonts: Fonts): string {
+  const label = spec.alt ?? `${spec.title}: ${spec.tagline ?? spec.label}`
+  const edge = train(spec, fonts)
+  const list = rows(spec, fonts)
+  const dx = centreShift(list)
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(label)}">
+<title>${esc(label)}</title>
+<style>
+${styles(spec, fonts, edge?.glyphs ?? '')}
+</style>
+<defs>
+${defs()}${edge ? `\n${edge.defs}` : ''}
+</defs>
+${ground(dx)}${edge ? `\n${edge.body}` : ''}
+<g transform="translate(${n(dx)} 0)">
+${mark()}
+${textBlock(list)}
+</g>
+</svg>
+`
+}
+
+/** `[--config repos.json] [--out dir] [name ...]`; defaults to design/brand/banners for both. */
+function parseArgs(argv: string[]): { config: string; out: string; only: Set<string> } {
+  const opts = { config: resolve(configDir, 'repos.json'), out: configDir, only: new Set<string>() }
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i] ?? ''
+    if (a === '--config') opts.config = resolve(argv[++i] ?? '')
+    else if (a === '--out') opts.out = resolve(argv[++i] ?? '')
+    else opts.only.add(a)
+  }
+  return opts
+}
+
+function main(): void {
+  const { config: configPath, out, only } = parseArgs(process.argv.slice(2))
+  const config = JSON.parse(readFileSync(configPath, 'utf8')) as { repos: BannerSpec[] }
+  const fonts: Fonts = { brand: staticFont(FONTS.brand), sans: staticFont(FONTS.sans), mono: staticFont(FONTS.mono) }
+  for (const spec of config.repos.filter((r) => only.size === 0 || only.has(r.name))) {
+    const path = resolve(out, `${spec.name}.svg`)
+    const svg = banner(spec, fonts)
+    writeFileSync(path, svg)
+    console.log(`wrote ${path} (${(Buffer.byteLength(svg) / 1024).toFixed(1)} KB)`)
+  }
+}
+
+main()

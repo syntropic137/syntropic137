@@ -573,6 +573,9 @@
       ]}
     />
   </section>
+
+  <!-- Lazy: the landing patterns are a separate chunk, so this route stays inside the first-visit budget. -->
+  {#await import('./parts/Landing.svelte') then landing}<landing.default />{/await}
 </div>
 
 <style>

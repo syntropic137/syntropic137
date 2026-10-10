@@ -4,7 +4,8 @@
  *
  * Shapes name a face, not a colour. The renderer maps `top`, `front`, `side`
  * to the --sky-face-* tokens (or extrudeColors() of any base) and `ink` to
- * the page ground, so the icons recolour with the theme.
+ * the page ground, so the icons recolour with the theme. The box-shaped
+ * icons (workflow slabs, execution, session) are the brand cube (isoCube.ts).
  */
 import type { ObjectKind } from '../patterns/types'
 import { isoBox } from './extrude'

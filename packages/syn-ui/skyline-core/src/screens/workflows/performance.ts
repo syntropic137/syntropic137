@@ -5,6 +5,7 @@
  * duration graph per phase, all from the rows of GET /workflows/{id}/trend.
  * Pure: the page passes rows in and renders what comes out.
  */
+import { signOf } from '../../format/signed'
 import { MONTHS } from '../../geometry/skyline'
 import { axisTicks, linePath, niceCeil, sparkPath, timeX, valueY } from '../../geometry/trend'
 import type { TrendDot, TrendEnd, TrendLine, TrendNote, TrendTick } from '../../patterns/trendChart'
@@ -252,7 +253,7 @@ function kpi(label: string, now: number, then: number, fmt: (v: number) => strin
   const shown = dfmt(Math.abs(diff))
   // A change that rounds to nothing is no change.
   const zero = diff === 0 || shown === dfmt(0)
-  return { label, value: fmt(now), delta: zero ? 'no change' : `${diff > 0 ? '+' : '−'}${shown} ${since}`, ...(zero ? { word: 'Flat' as const, tone: 'neutral' as const } : judge(diff, better)) }
+  return { label, value: fmt(now), delta: zero ? 'no change' : `${signOf(diff)}${shown} ${since}`, ...(zero ? { word: 'Flat' as const, tone: 'neutral' as const } : judge(diff, better)) }
 }
 
 /**

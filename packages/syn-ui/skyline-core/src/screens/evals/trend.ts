@@ -4,6 +4,7 @@
  * verifier cards, verdict lanes and the run readout. Pure: the page passes
  * rows in and renders what comes out.
  */
+import { signOf } from '../../format/signed'
 import { MONTHS } from '../../geometry/skyline'
 import { axisTicks, linePath, niceCeil, spreadEndLabels, timeX, valueY, type TrendPoint } from '../../geometry/trend'
 import type { TrendDot, TrendEnd, TrendLine, TrendNote, TrendTick } from '../../patterns/trendChart'
@@ -303,7 +304,7 @@ function qualityUpVerdict(e: TrendDirection): { text: string; tone: TrendTone } 
   return { text: 'Getting better', tone: 'good' }
 }
 
-const signed = (n: number, fmt: (v: number) => string) => `${n > 0 ? '+' : n < 0 ? '−' : '±'}${fmt(n)}`
+const signed = (n: number, fmt: (v: number) => string) => `${signOf(n)}${fmt(n)}`
 
 interface Windows {
   now: TrendRun[]

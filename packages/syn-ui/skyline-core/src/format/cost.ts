@@ -41,3 +41,19 @@ export function formatCostWithCoverage(
   if (n === 0) return 'unpriced'
   return `≥${format(n)} (partial)`
 }
+
+/**
+ * Quality per dollar for ranking verifiers: score 87 at $0.52 a run ->
+ * "168 pts/$". Unknown, zero or negative cost -> em dash.
+ */
+export function pointsPerDollar(score: number | string | null | undefined, costUsd: number | string | null | undefined): string {
+  const per = pointsPerDollarValue(score, costUsd)
+  return per === null ? UNKNOWN : `${Math.round(per)} pts/$`
+}
+
+/** The number behind pointsPerDollar(), for sorting; null when it can't be computed. */
+export function pointsPerDollarValue(score: number | string | null | undefined, costUsd: number | string | null | undefined): number | null {
+  const s = toNumber(score)
+  const c = toNumber(costUsd)
+  return s === null || c === null || c <= 0 ? null : s / c
+}

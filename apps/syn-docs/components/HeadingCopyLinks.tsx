@@ -12,8 +12,9 @@ const CHECK_ICON = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="1
 function showTooltip(text: string, anchorEl: HTMLElement | null, x?: number, y?: number) {
   const tooltip = document.createElement('span');
   tooltip.textContent = text;
-  tooltip.style.cssText =
-    'position:fixed;z-index:9999;padding:4px 12px;border-radius:6px;font-size:12px;font-weight:500;color:#4d80ff;background:#0f0f1a;border:1px solid rgba(77,128,255,0.25);box-shadow:0 4px 12px rgba(0,0,0,0.4);white-space:nowrap;pointer-events:none;transition:opacity 0.15s;';
+  // Colours come from the .syn-copy-tooltip rule (app/components.css).
+  tooltip.className = 'syn-copy-tooltip';
+  tooltip.setAttribute('role', 'status');
   document.body.appendChild(tooltip);
 
   if (anchorEl) {

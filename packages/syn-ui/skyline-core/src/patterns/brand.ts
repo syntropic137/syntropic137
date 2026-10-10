@@ -1,7 +1,8 @@
 /**
  * Brand visuals of the landing hero, shared with the app: the S mark and
- * the run city. Geometry lives in geometry/sMark.ts and geometry/isoCity.ts.
+ * the run city. Geometry lives in geometry/sMark.ts and geometry/heroCity.ts.
  */
+import type { CityFill } from '../geometry/heroCity'
 import type { SkylineDay } from '../geometry/skyline'
 
 export interface SMarkProps {
@@ -13,7 +14,7 @@ export interface SMarkProps {
   label?: string
 }
 
-export interface IsoCityProps {
+export interface HeroCityProps {
   /** Per-day activity, oldest first (the Overview skyline's series); the last cols * rows are shown. */
   days: readonly SkylineDay[]
   /** Block indexes to show as running now (they pulse a few times). */
@@ -26,6 +27,8 @@ export interface IsoCityProps {
   animate?: boolean
   /** The whole city drifts and zooms once (30s). */
   drift?: boolean
+  /** Quiet days: 'glass' fades the whole block (default, the board), 'solid' keeps it opaque and darkens its faces. */
+  fill?: CityFill
   /** Grid size and cell width in viewBox units (default 26 x 11, 36: the desktop hero). */
   cols?: number
   rows?: number

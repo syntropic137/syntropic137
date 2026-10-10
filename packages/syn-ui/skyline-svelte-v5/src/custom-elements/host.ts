@@ -7,13 +7,17 @@
  * once on <html data-theme="..."> with @syn137/skyline-themes/all.css and the
  * elements follow it. The shared base layer (styles.css: visually hidden
  * text, focus ring) does not cross the shadow boundary, so each element
- * adopts it here.
+ * adopts it here. Elements that animate (the landing elements) also adopt
+ * @syn137/skyline-themes/motion.css: a page's own stylesheet never reaches
+ * into a shadow root, and every keyframe there stays inside the
+ * prefers-reduced-motion guard, so the static end state is the default.
  *
  * Wrappers reach their host element through an attachment on the wrapped
  * component rather than `$host()`, because svelte-check runs without the
  * customElement compile option and does not know `$host` (see options.ts).
  */
 import type { Attachment } from 'svelte/attachments'
+import motionCss from '@syn137/skyline-themes/motion.css?inline'
 import baseCss from '../styles.css?inline'
 
 const sheets = new Map<string, CSSStyleSheet>()
@@ -47,17 +51,19 @@ const HOST_BLOCK = ':host { display: block; }'
 /**
  * Attachment for the wrapped component's root element: finds the custom
  * element that hosts it, adopts the base layer and hands the host to
- * `onhost`. `block` makes the host display: block. Does nothing outside a shadow root (e.g. in a Svelte app).
+ * `onhost`. `block` makes the host display: block; `motion` adopts the
+ * motion.css classes. Does nothing outside a shadow root (e.g. in a Svelte app).
  */
 export function hostAttachment(
   onhost?: (host: HTMLElement) => void | (() => void),
-  opts: { block?: boolean } = {},
+  opts: { block?: boolean; motion?: boolean } = {},
 ): Attachment<Element> {
   return (el) => {
     const root = el.getRootNode()
     if (!(root instanceof ShadowRoot) || !(root.host instanceof HTMLElement)) return
     adopt(root, baseCss)
     if (opts.block) adopt(root, HOST_BLOCK)
+    if (opts.motion) adopt(root, motionCss)
     return onhost?.(root.host)
   }
 }

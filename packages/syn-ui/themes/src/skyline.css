@@ -61,7 +61,14 @@
   --sky-color-agent-codex: #8E9BBC;
 
   --sky-color-display-hi: #FFFFFF;
+  --sky-color-display-mid: #D4D4D8;
+  --sky-color-border-glass: rgba(255, 255, 255, 0.09);
   --sky-color-ground-deep: #060607;
+  --sky-color-ground-band: #09090A;
+  --sky-color-section-rule: #151517;
+  --sky-color-panel-top: #141416;
+  --sky-color-window-bottom: #0A0A0B;
+  --sky-color-glass-top: #18181A;
   --sky-color-cube-dark-top: #2E2E33;
   --sky-color-cube-dark-left: #1E1E22;
   --sky-color-cube-dark-right: #111113;
@@ -97,4 +104,5 @@
   --sky-shadow-dock: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 16px 32px -12px rgba(0, 0, 0, 0.85);
   --sky-shadow-overlay: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 30px 60px -20px rgba(0, 0, 0, 0.85);
   --sky-shadow-knob: 0 1px 3px rgba(0, 0, 0, 0.4);
+  --sky-shadow-glass: 0 24px 60px -20px rgba(0, 0, 0, 0.6); /* floating glass cards */
 }

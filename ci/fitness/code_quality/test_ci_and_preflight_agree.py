@@ -39,6 +39,14 @@ _ALLOWED_OUTSIDE: dict[str, str] = {
     "skyline-e2e": "needs a Playwright browser, which a pre-push hook cannot assume",
     "skyline-screenshots": "Linux Chromium baselines only; macOS fonts differ, so only CI compares",
     "skyline-gateway-smoke": "builds the gateway image, too heavy for a pre-push hook",
+    # syntropic137.com (apps/syn-landing): syn-landing.yml is path-filtered like
+    # syn-ui.yml, and check_ci_parity.py RUNNABLE_BUT_EXCLUDED records the split.
+    "landing-copy-lint": "path-filtered landing copy lint (em dashes); run by hand",
+    "landing-colour-lint": "path-filtered landing colour-literal and token-usage lint; run by hand",
+    "landing-typecheck": "path-filtered landing tsc --noEmit; run by hand",
+    "landing-build": "path-filtered landing vite build; run by hand",
+    "landing-lighthouse": "needs Chrome and fetches @lhci/cli, which a pre-push hook cannot assume",
+    "landing-energy": "needs a Playwright browser and ~2 minutes of idle measurement",
 }
 
 _NOT_A_GATE: dict[str, str] = {

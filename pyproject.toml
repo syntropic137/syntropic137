@@ -68,7 +68,7 @@ constraint-dependencies = [
 
 [tool.uv.workspace]
 members = ["apps/*", "packages/*"]
-exclude = ["apps/syn-cli-node", "apps/syn-dashboard-ui", "apps/syn-desktop", "apps/syn-docs", "apps/syn-pulse-ui", "apps/syn-ui", "packages/openclaw-plugin", "packages/syn-ui"]
+exclude = ["apps/syn-cli-node", "apps/syn-dashboard-ui", "apps/syn-desktop", "apps/syn-docs", "apps/syn-landing", "apps/syn-pulse-ui", "apps/syn-ui", "packages/openclaw-plugin", "packages/syn-ui"]
 
 [tool.uv.sources]
 apss-session-capture = { path = "lib/agent-paradise-standards-system/standards/v1/APS-V1-0004-session-capture/python" }
@@ -98,6 +98,8 @@ exclude = [
     "__pycache__/",
     # Separate nested git repo checked out inside this tree; not our code.
     "markdown-explorer/",
+    # Design canvas generators: reference geometry to port, never run or shipped.
+    "design/reference/",
 ]
 
 [tool.ruff.lint]

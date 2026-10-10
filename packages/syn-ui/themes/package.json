@@ -9,13 +9,14 @@
     "./tokens.css": "./src/tokens.css",
     "./skyline.css": "./src/skyline.css",
     "./syn137.css": "./src/syn137.css",
-    "./all.css": "./src/all.css"
+    "./all.css": "./src/all.css",
+    "./motion.css": "./src/motion.css"
   },
   "files": ["src"],
   "scripts": {
-    "check": "node ../scripts/check-themes.mjs && node ../scripts/check-token-usage.mjs",
-    "build": "node ../scripts/check-themes.mjs",
-    "test": "node ../scripts/check-themes.mjs && node ../scripts/check-token-usage.mjs"
+    "check": "node ../scripts/check-themes.mjs && node ../scripts/check-motion.mjs && node ../scripts/check-token-usage.mjs",
+    "build": "node ../scripts/check-themes.mjs && node ../scripts/check-motion.mjs",
+    "test": "node ../scripts/check-themes.mjs && node ../scripts/check-motion.mjs && node ../scripts/check-token-usage.mjs"
   },
   "dependencies": {
     "@syntropic137/design-tokens": "0.1.1"

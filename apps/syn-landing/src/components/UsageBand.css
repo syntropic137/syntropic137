@@ -1,0 +1,63 @@
+/* UsageBand: <sky-usage-band shape="flat"> and its static fallback, same shape. */
+.usage-band {
+  min-width: 0;
+}
+
+.usage-band sky-usage-band {
+  display: block;
+}
+
+.usage-band[data-size="sm"] sky-usage-band::part(band) {
+  height: 14px;
+}
+
+.usage-band__fallback {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-3);
+}
+
+.usage-band__bar {
+  display: flex;
+  gap: 2px;
+  height: 22px;
+}
+
+.usage-band[data-size="sm"] .usage-band__bar {
+  height: 14px;
+}
+
+.usage-band__bar > span {
+  flex: 1 1 0;
+  min-width: 4px;
+}
+
+.usage-band__bar > span:first-child {
+  border-start-start-radius: 6px;
+  border-end-start-radius: 6px;
+}
+
+.usage-band__bar > span:last-child {
+  border-start-end-radius: 6px;
+  border-end-end-radius: 6px;
+}
+
+.usage-band__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px var(--ds-space-4);
+  font-size: 12px;
+  color: var(--ds-color-text-muted);
+}
+
+.usage-band__legend > span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.usage-band__swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}

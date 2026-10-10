@@ -15,6 +15,7 @@ the agent's checklist for it.
 
 ## Rules
 
+- Brand (logo, colour, type, motion, voice): follow [design/brand/BRAND.md](../../../design/brand/BRAND.md).
 - Boards are a spec, not code. Never copy board markup or its JS class into the app.
 - Build only from boards for screens NOT in the Shipped table of `design/README.md`.
   A shipped screen changes in code; a redesign starts from a screenshot of the live app.

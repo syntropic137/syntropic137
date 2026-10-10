@@ -34,6 +34,10 @@
   --ds-font-sans: 'Instrument Sans', 'Helvetica Neue', system-ui, sans-serif;
   --ds-font-mono: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
   --sky-font-brand: 'Orbitron', 'Eurostile', var(--ds-font-sans);
+  /* Landing display type: Instrument Sans at 600; the outlined SYNTROPIC137 wordmark */
+  --sky-font-display: var(--ds-font-sans);
+  --sky-font-weight-display: var(--ds-font-weight-semibold);
+  --sky-font-wordmark: var(--sky-font-brand);
 
   /* ---- Type scale (rem against the 16px browser default) -------------- */
   --sky-text-label: 0.65625rem; /* 10.5 mono labels, uppercase */
@@ -69,6 +73,25 @@
   --sky-tracking-title: -0.015em;
   --sky-tracking-label: 0.1em;
   --sky-tracking-brand: 0.06em;
+
+  /* ---- Display type (landing boards) ----------------------------------
+   * px on purpose: the boards draw these at fixed sizes per viewport, and a
+   * page picks desktop or phone sizes with a min-width query. Desktop: hero,
+   * closing headline, section title, small display. Phone: hero, closing
+   * headline, section title. Hero and closing headline set
+   * -display-tight / -display; section titles (-m, -phone-m) set
+   * -display-section on both. */
+  --sky-font-display-xl: 104px;       /* hero h1 (board: 104; plan said 112) */
+  --sky-font-display-l: 84px;         /* closing headline */
+  --sky-font-display-m: 64px;         /* section titles */
+  --sky-font-display-s: 44px;         /* small display */
+  --sky-font-display-phone-xl: 50px;  /* phone hero h1 (board: 50; plan said 52) */
+  --sky-font-display-phone-l: 44px;   /* phone closing headline */
+  --sky-font-display-phone-m: 36px;   /* phone section titles */
+  --sky-tracking-display-tight: -0.045em;
+  --sky-line-height-display: 0.95;
+  --sky-tracking-display-section: -0.04em;
+  --sky-line-height-display-section: 1;
 
   /* ---- Space (4px grid) ---------------------------------------------- */
   --ds-space-0: 0;
@@ -135,6 +158,26 @@
   --sky-duration-slow: 360ms;
   --sky-ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
   --sky-ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  /* Landing motion (motion.css). --sky-ease-out above is the board's rise
+     curve; out-back is the S-mark drop with its small overshoot; draw is the
+     trend-line stroke. */
+  --sky-ease-out-back: cubic-bezier(0.2, 0.9, 0.25, 1.15);
+  --sky-ease-draw: cubic-bezier(0.4, 0, 0.2, 1);
+  --sky-dur-1: 250ms;  /* hover lift, tile border */
+  --sky-dur-2: 900ms;  /* S-mark cube drop */
+  --sky-dur-3: 1100ms; /* city block rise */
+  --sky-dur-4: 2600ms; /* line draw, live pulse period */
+  /* Hold every motion.css class at its first frame: set paused on an
+     ancestor until the page plays it (e.g. once it scrolls into view), then
+     back to running. Inherited, so it reaches into the elements' shadow roots. */
+  --sky-motion-play: running;
+
+  /* ---- Light and texture --------------------------------------------- */
+  --sky-blur-glass: 14px;
+  --sky-texture-dots-size: 28px;
+  /* Film grain: 160px fractal-noise tile at 6% opacity. A complete background
+     layer: background: var(--sky-texture-grain). */
+  --sky-texture-grain: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20width%3D%27160%27%20height%3D%27160%27%3E%3Cfilter%20id%3D%27n%27%3E%3CfeTurbulence%20type%3D%27fractalNoise%27%20baseFrequency%3D%270.9%27%20numOctaves%3D%272%27%20stitchTiles%3D%27stitch%27%2F%3E%3C%2Ffilter%3E%3Crect%20width%3D%27100%25%27%20height%3D%27100%25%27%20filter%3D%27url%28%23n%29%27%20opacity%3D%270.06%27%2F%3E%3C%2Fsvg%3E");
 
   /* ---- Layers -------------------------------------------------------- */
   --sky-z-sticky: 10;
@@ -156,6 +199,10 @@
     --sky-duration-fast: 0ms;
     --sky-duration-base: 0ms;
     --sky-duration-slow: 0ms;
+    --sky-dur-1: 0ms;
+    --sky-dur-2: 0ms;
+    --sky-dur-3: 0ms;
+    --sky-dur-4: 0ms;
   }
 }
 
@@ -208,8 +255,33 @@
   --sky-feedback-pick-fill: color-mix(in oklab, var(--ds-color-accent) 12%, transparent);
   --sky-feedback-scrim: color-mix(in oklab, var(--ds-color-bg) 55%, transparent);
 
+  /* Harnesses: the agent colours under the landing page's name, plus a
+     gradient for harness names set as text (background-clip: text). Claude
+     keeps the current site's clay-into-amber direction; Codex moves off the
+     old sky-to-indigo ramp, which read as the syn137 accent blue, onto the
+     board's slate. */
+  --sky-harness-claude: var(--sky-color-agent-claude);
+  --sky-harness-codex: var(--sky-color-agent-codex);
+  --sky-harness-claude-gradient: linear-gradient(120deg, var(--sky-harness-claude) 0%, color-mix(in oklab, var(--sky-harness-claude) 55%, var(--ds-color-warning)) 100%);
+  --sky-harness-codex-gradient: linear-gradient(120deg, var(--sky-harness-codex) 0%, color-mix(in oklab, var(--sky-harness-codex) 55%, var(--ds-color-fg)) 100%);
+
+  /* Landing light and depth (Landing board). */
+  --sky-glow-accent: 0 30px 80px -30px color-mix(in oklab, var(--ds-color-accent) 60%, transparent); /* box-shadow under the install box and hero panels */
+  --sky-glow-accent-strong: 0 60px 120px -40px color-mix(in oklab, var(--ds-color-accent) 45%, transparent); /* box-shadow under the explorer window */
+  --sky-glow-accent-wash: radial-gradient(60% 50% at 50% 0%, color-mix(in oklab, var(--ds-color-accent) 22%, transparent), transparent 70%); /* hero top light, a background layer */
+  --sky-glow-accent-wash-bottom: radial-gradient(50% 70% at 50% 100%, color-mix(in oklab, var(--ds-color-accent) 28%, transparent), transparent 70%); /* closing call to action, a background layer */
+  --sky-gradient-panel: linear-gradient(180deg, var(--sky-color-panel-top), var(--ds-color-bg)); /* cards, tiles, code windows */
+  --sky-gradient-window: linear-gradient(180deg, var(--sky-color-panel-top), var(--sky-color-window-bottom)); /* the explorer window inside --sky-border-gradient */
+  --sky-gradient-glass-raised: linear-gradient(180deg, color-mix(in oklab, var(--sky-color-glass-top) 85%, transparent), color-mix(in oklab, var(--ds-color-bg) 85%, transparent)); /* install box, with backdrop blur */
+  --sky-fade-to-ground: linear-gradient(180deg, transparent, var(--sky-color-ground-deep)); /* hero bottom fade into the page */
+  --sky-mask-fade-y: linear-gradient(180deg, transparent, var(--ds-color-fg) 18%, var(--ds-color-fg) 82%, transparent); /* mask-image: soft top and bottom edges (only alpha counts) */
   --sky-cube-glass-left: color-mix(in oklab, var(--ds-color-fg) 32%, transparent); /* S mark glass cube faces; top is --sky-color-cube-glass-edge */
   --sky-cube-glass-right: color-mix(in oklab, var(--ds-color-fg) 18%, transparent);
+  --sky-gradient-text: linear-gradient(180deg, var(--sky-color-display-hi) 0%, var(--sky-color-display-mid) 55%, color-mix(in oklab, var(--ds-color-accent) 70%, var(--sky-color-display-hi)) 100%); /* headlines, with background-clip: text */
+  --sky-surface-glass: color-mix(in oklab, var(--ds-color-surface) 66%, transparent); /* floating cards, with backdrop-filter: blur(var(--sky-blur-glass)) */
+  --sky-border-gradient: linear-gradient(140deg, color-mix(in oklab, var(--ds-color-accent) 70%, var(--sky-color-display-hi)), color-mix(in oklab, var(--sky-color-border-strong) 60%, transparent) 35%, color-mix(in oklab, var(--sky-color-border-strong) 30%, transparent) 70%, color-mix(in oklab, var(--ds-color-accent) 50%, transparent)); /* 1px frame: a padded wrapper with this background */
+  /* 28px dot grid, a complete background layer: background: var(--sky-texture-dots), var(--ds-color-bg). */
+  --sky-texture-dots: radial-gradient(circle at 1px 1px, color-mix(in oklab, var(--ds-color-text-muted) 14%, transparent) 1px, transparent 0) 0 0 / var(--sky-texture-dots-size) var(--sky-texture-dots-size);
 
   /* IsoCity tone tiers (Main board): mid and hot mix the accent, fail the
      danger colour, toward the ground (sides), the card (fronts) and the

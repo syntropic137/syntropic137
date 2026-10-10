@@ -12,7 +12,6 @@
   import { untrack } from 'svelte'
   import { formatInteger, formatTokens } from '@syn137/skyline-core/format'
   import {
-    agentKind,
     agentLabel,
     costByModelRows,
     countToolCalls,
@@ -34,8 +33,8 @@
   } from '@syn137/skyline-core/screens/sessions'
   import { operationsToText } from '@syn137/skyline-core/patterns'
   import { ApiError, getSession } from '@syn137/syn-ui-data'
-  import { Button, Callout, Card, EmptyState, Skeleton, Tag, ToggleGroup } from '@syn137/skyline-svelte-v5'
-  import { CopyButton, OperationTimeline, PageHeader, UsageMeter } from '@syn137/skyline-svelte-v5/patterns'
+  import { Button, Callout, Card, EmptyState, Skeleton, ToggleGroup } from '@syn137/skyline-svelte-v5'
+  import { CopyButton, HarnessChip, OperationTimeline, PageHeader, UsageMeter } from '@syn137/skyline-svelte-v5/patterns'
   import { isRunEvent, isSessionEvent } from '@syn137/syn-ui-data/live'
   import { resource } from '../../lib/load.svelte'
   import { setPage } from '../../lib/page.svelte'
@@ -197,7 +196,7 @@
   {:else}
     <PageHeader kind="session" title={s.workflow_name ?? `Session ${s.id.slice(0, 8)}`} eyebrow={s.phase_display ?? s.phase_id ?? undefined} status={s.status} {figures}>
       {#snippet badges()}
-        <Tag variant="agent" agent={agentKind(s.agent_provider)} title={s.requested_model ? `Requested: ${s.requested_model}` : undefined}>{agentLabel(s.agent_provider, s.agent_model_display, s.agent_model)}</Tag>
+        <HarnessChip provider={s.agent_provider ?? ''} label={agentLabel(s.agent_provider, s.agent_model_display, s.agent_model)} title={s.requested_model ? `Requested: ${s.requested_model}` : undefined} />
       {/snippet}
       {#snippet actions()}
         <Button

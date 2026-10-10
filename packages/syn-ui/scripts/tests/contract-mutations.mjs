@@ -75,6 +75,38 @@ const CASES = [
     apply: (s) => s.replace(/^.*--sky-color-control:.*\n/m, ''),
     cmd: 'pnpm --filter @syn137/skyline-themes run check',
   },
+  {
+    id: 'motion-unguarded-keyframes',
+    gap: 5,
+    what: 'add a @keyframes to motion.css outside the reduced-motion guard',
+    file: () => r('packages/syn-ui/themes/src/motion.css'),
+    apply: (s) => `${s}\n@keyframes sky-unguarded { from { opacity: 0; } }\n`,
+    cmd: 'pnpm --filter @syn137/skyline-themes run check',
+  },
+  {
+    id: 'motion-unguarded-animation',
+    gap: 5,
+    what: 'play an animation from motion.css outside the reduced-motion guard',
+    file: () => r('packages/syn-ui/themes/src/motion.css'),
+    apply: (s) => s.replace('  vertical-align: bottom;\n}', '  vertical-align: bottom;\n  animation: sky-type 1.8s both;\n}'),
+    cmd: 'pnpm --filter @syn137/skyline-themes run check',
+  },
+  {
+    id: 'motion-infinite',
+    gap: 5,
+    what: 'make the caret blink forever',
+    file: () => r('packages/syn-ui/themes/src/motion.css'),
+    apply: (s) => s.replace('sky-blink 1s steps(1) 20;', 'sky-blink 1s steps(1) infinite;'),
+    cmd: 'pnpm --filter @syn137/skyline-themes run check',
+  },
+  {
+    id: 'motion-colour-literal',
+    gap: 5,
+    what: 'hard-code the flash colour in motion.css',
+    file: () => r('packages/syn-ui/themes/src/motion.css'),
+    apply: (s) => s.replace('drop-shadow(0 0 10px var(--ds-color-danger))', 'drop-shadow(0 0 10px #FF6F61)'),
+    cmd: 'pnpm --filter @syn137/skyline-themes run check',
+  },
 ]
 
 const only = process.argv.slice(2)
@@ -94,7 +126,7 @@ for (const c of CASES.filter((c) => only.length === 0 || only.includes(c.id))) {
     const out = `${res.stdout}\n${res.stderr}`.replace(/\x1b\[[0-9;]*m/g, '')
     const lines = out.split('\n')
     const first =
-      [/not defined in|matches no defined/, / ERROR "|error TS\d+/, /✗/, /Error: /, /FAIL/]
+      [/not defined in|matches no defined|outside @media|infinite animation|colour literal/, / ERROR "|error TS\d+/, /✗/, /Error: /, /FAIL/]
         .map((re) => lines.find((l) => re.test(l) && !/ERR_PNPM|ELIFECYCLE|\$ /.test(l)))
         .find(Boolean)
         ?.trim()
