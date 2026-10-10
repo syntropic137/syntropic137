@@ -223,6 +223,8 @@ class GitHubError(StrEnum):
     INVALID_PAYLOAD = "invalid_payload"
     PROCESSING_FAILED = "processing_failed"
     NOT_IMPLEMENTED = "not_implemented"
+    NOT_CONFIGURED = "not_configured"
+    """No GitHub App on this server (SYN_GITHUB_APP_ID unset): a 503, never a 500."""
 
 
 # ---------------------------------------------------------------------------

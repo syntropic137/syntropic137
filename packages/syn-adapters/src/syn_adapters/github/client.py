@@ -80,6 +80,15 @@ class GitHubAppError(Exception):
         self.status_code = status_code
 
 
+class GitHubNotConfiguredError(GitHubAppError, ValueError):
+    """No GitHub App on this server (SYN_GITHUB_APP_ID unset).
+
+    A ``ValueError`` as before for callers that already catch that; a
+    ``GitHubAppError`` so route code can map it to a clean 503 instead of
+    letting it escape as a 500 (release rehearsal 2026-10-10).
+    """
+
+
 class GitHubAuthError(GitHubAppError, UpstreamFailureError):
     """Authentication failed: an operator must fix the App's access (#1593)."""
 
@@ -375,7 +384,7 @@ def get_github_client() -> GitHubAppClient:
         Configured GitHubAppClient instance.
 
     Raises:
-        ValueError: If GitHub App is not configured.
+        GitHubNotConfiguredError: If GitHub App is not configured (a ValueError subclass).
     """
     global _github_client
 
@@ -388,7 +397,7 @@ def get_github_client() -> GitHubAppClient:
 
     if not settings.github.is_configured:
         msg = "GitHub App not configured. Set SYN_GITHUB_APP_ID and either SYN_GITHUB_APP_PRIVATE_KEY_FILE or SYN_GITHUB_PRIVATE_KEY."
-        raise ValueError(msg)
+        raise GitHubNotConfiguredError(msg)
 
     _github_client = GitHubAppClient(settings.github)
     logger.info(
