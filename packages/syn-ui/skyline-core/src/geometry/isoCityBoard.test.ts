@@ -6,8 +6,8 @@
  * the floor, future outlines, today's tile and beam, month and weekday
  * labels, the bloom and the leader line. Board data stays in the test.
  */
-import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
+import mainBoard from '../../../../../design/canvas/Main.dc.html?raw'
+import phoneBoard from '../../../../../design/canvas/PhoneOverview.dc.html?raw'
 import { describe, expect, it } from 'vitest'
 import { ISO_CITY_DESKTOP, ISO_CITY_PHONE, ISO_TONES, isoCity, isoCityWeeks, type IsoCityDims, type SkylineDay } from './index'
 
@@ -27,9 +27,7 @@ interface BoardSky {
 }
 interface BoardCell { key: string; rec: (number | string | boolean)[] | null }
 
-function runBoard(file: string): { sky: BoardSky; days: SkylineDay[] } {
-  const url = new URL(`../../../../../design/canvas/${file}.dc.html`, import.meta.url)
-  const html = readFileSync(fileURLToPath(url), 'utf8')
+function runBoard(html: string): { sky: BoardSky; days: SkylineDay[] } {
   const src = html.slice(html.indexOf('class Component'), html.lastIndexOf('</script>'))
   const hooked = src.replace('const cells = [];', 'const cells = __cells;')
   const cells: BoardCell[] = []
@@ -45,10 +43,10 @@ const parts = (s: string) => (s === 'M0,0' ? '' : s).split('Z').filter(Boolean).
 const orEmpty = (s: string) => s || 'M0,0'
 
 describe.each([
-  ['Main', ISO_CITY_DESKTOP],
-  ['PhoneOverview', ISO_CITY_PHONE],
-] as [string, IsoCityDims][])('isoCity matches the %s board', (file, dims) => {
-  const { sky, days } = runBoard(file)
+  ['Main', mainBoard, ISO_CITY_DESKTOP],
+  ['PhoneOverview', phoneBoard, ISO_CITY_PHONE],
+] as [string, string, IsoCityDims][])('isoCity matches the %s board', (_file, html, dims) => {
+  const { sky, days } = runBoard(html)
   const weeks = isoCityWeeks(days, '2025-10-13', 52)
   const city = isoCity({ weeks, offset: 0, today: '2026-10-09', dims, pad: 0, selected: days.at(-1)!.date })
 
@@ -57,7 +55,8 @@ describe.each([
     for (const row of city.rows) {
       for (const tone of ISO_TONES) {
         const blocks = row.blocks.filter((b) => b.tone === tone)
-        const want = sky[`r${row.row}`][tone]!
+        const want = sky[`r${row.row}`]?.[tone]
+        if (!want) throw new Error(`board has no r${row.row}.${tone}`)
         expect(orEmpty(blocks.map((b) => b.side).join(''))).toBe(want.side)
         expect(orEmpty(blocks.map((b) => b.front).join(''))).toBe(want.front)
         expect(orEmpty(blocks.map((b) => b.top).join(''))).toBe(want.top)
