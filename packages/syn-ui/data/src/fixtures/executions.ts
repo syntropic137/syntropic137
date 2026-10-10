@@ -155,11 +155,8 @@ function phaseDetail(r: CatalogRun): PhaseExecutionDetail[] {
         allowed_tools: p.phase.provider === 'claude' ? ['Read', 'Glob', 'Grep', 'Bash', 'WebSearch'] : [],
         skills: p.phase.id === 'research' ? [{ name: 'doc-coauthoring', version: 'main', resolved_sha: 'db8ee61a0c3f2b7e', source_url: 'anthropics/skills' }] : [],
       }
-      base.skill_use = phaseSkillUse(p.phase.provider, p.phase.id === 'research' ? ['doc-coauthoring'] : [], p.phase.id === 'research' && p.status === 'completed')
-    } else {
-      base.start_pins_status = 'not_recorded'
-      base.skill_use = phaseSkillUse(null, [], false)
-    }
+    } else base.start_pins_status = 'not_recorded'
+    base.skill_use = skillUseOf(p, base.start_pins_status === 'recorded')
     if (!o) return base
     return {
       ...base,
@@ -208,53 +205,78 @@ type PhaseSkillUse = NonNullable<PhaseExecutionDetail['skill_use']>
 type ExecutionSkillUse = NonNullable<ExecutionDetailResponse['skill_use']>
 const plural = (n: number, noun: string) => `${n} ${noun}${n === 1 ? '' : 's'}`
 
+/** A phase's skill use, from its pins: research declares doc-coauthoring and a completed research phase invoked it. */
+function skillUseOf(p: ReturnType<typeof phaseRuns>[number], recorded: boolean): PhaseSkillUse {
+  if (!recorded) return phaseSkillUse(null, [], false)
+  const research = p.phase.id === 'research'
+  return phaseSkillUse(p.phase.provider, research ? ['doc-coauthoring'] : [], research && p.status === 'completed')
+}
+
+type SkillUseStatus = PhaseSkillUse['status']
+
+function skillStatusOf(provider: string | null): SkillUseStatus {
+  if (provider === null) return 'unavailable'
+  return provider === 'claude' ? 'observed' : 'not_observable'
+}
+
+/** types.py PhaseSkillUseInfo.status_display. */
+function skillStatusDisplay(status: SkillUseStatus, provider: string | null): string {
+  if (status === 'observed') return "observed: read from this phase's Skill tool calls"
+  if (status === 'not_observable') return `not observable: ${provider ?? 'this harness'} has no Skill tool`
+  return 'unavailable: no record for this run'
+}
+
+/** types.py PhaseSkillUseInfo.summary_display (no undeclared invocations in the fixtures). */
+function phaseSkillSummary(status: SkillUseStatus, statusDisplay: string, declared: readonly string[], notInvoked: readonly string[]): string {
+  if (status !== 'observed') return declared.length ? `${plural(declared.length, 'skill')} declared; use ${statusDisplay}` : `skill use ${statusDisplay}`
+  if (!declared.length) return 'no skills declared'
+  return `${declared.length - notInvoked.length} of ${plural(declared.length, 'declared skill')} invoked`
+}
+
 /** A phase's skill use as the API words it (types.py PhaseSkillUseInfo): claude is observed, codex is not, a legacy run has no record. */
 function phaseSkillUse(provider: string | null, declared: string[], usedFirst: boolean): PhaseSkillUse {
-  const status = provider === null ? 'unavailable' : provider === 'claude' ? 'observed' : 'not_observable'
+  const status = skillStatusOf(provider)
   const invoked = status === 'observed' && usedFirst && declared[0] ? [{ name: declared[0], count: 1 }] : []
-  const used = new Set(invoked.map((s) => s.name))
-  const notInvoked = status === 'observed' ? declared.filter((d) => !used.has(d)) : []
-  const statusDisplay =
-    status === 'observed' ? "observed: read from this phase's Skill tool calls" : status === 'not_observable' ? `not observable: ${provider} has no Skill tool` : 'unavailable: no record for this run'
-  const summary =
-    status !== 'observed'
-      ? declared.length
-        ? `${plural(declared.length, 'skill')} declared; use ${statusDisplay}`
-        : `skill use ${statusDisplay}`
-      : declared.length
-        ? `${declared.length - notInvoked.length} of ${plural(declared.length, 'declared skill')} invoked`
-        : 'no skills declared'
-  return { status, declared, invoked, provider, declared_not_invoked: notInvoked, status_display: statusDisplay, summary_display: summary }
+  const notInvoked = status === 'observed' ? declared.filter((d) => !invoked.some((s) => s.name === d)) : []
+  const statusDisplay = skillStatusDisplay(status, provider)
+  return { status, declared, invoked, provider, declared_not_invoked: notInvoked, status_display: statusDisplay, summary_display: phaseSkillSummary(status, statusDisplay, declared, notInvoked) }
+}
+
+/** Invocation counts summed over the observed phases. */
+function invokedCounts(uses: readonly PhaseSkillUse[]): Map<string, number> {
+  const counts = new Map<string, number>()
+  for (const s of uses.filter((u) => u.status === 'observed').flatMap((u) => u.invoked ?? [])) counts.set(s.name, (counts.get(s.name) ?? 0) + s.count)
+  return counts
+}
+
+/** types.py _execution_summary. */
+function executionSkillSummary(uses: readonly PhaseSkillUse[], declared: readonly string[], counts: ReadonlyMap<string, number>, never: readonly string[], notKnown: readonly string[]): string {
+  if (!uses.length) return 'no phase has started'
+  if (uses.every((u) => u.status === 'unavailable')) return 'unavailable: no record for this run'
+  if (!uses.some((u) => u.status === 'observed')) return `${declared.length ? plural(declared.length, 'skill') : 'no skills'} declared; use not observable on any phase`
+  const parts = [`${plural(declared.length, 'skill')} declared`, `${declared.filter((d) => counts.has(d)).length} invoked`]
+  if (never.length || !notKnown.length) parts.push(`${never.length} never invoked`)
+  if (notKnown.length) parts.push(`${notKnown.length} use unknown`)
+  const undeclared = [...counts.keys()].filter((n) => !declared.includes(n)).length
+  if (undeclared) parts.push(`${undeclared} undeclared invoked`)
+  return parts.join(' · ')
 }
 
 /** The run's skill use (types.py ExecutionSkillUseSummary.of), folded from its phases. */
 function executionSkillUse(phases: readonly PhaseExecutionDetail[]): ExecutionSkillUse {
   const uses = phases.flatMap((p) => (p.skill_use ? [p.skill_use] : []))
   const declared = [...new Set(uses.flatMap((u) => u.declared ?? []))]
-  const counts = new Map<string, number>()
-  for (const u of uses) if (u.status === 'observed') for (const s of u.invoked ?? []) counts.set(s.name, (counts.get(s.name) ?? 0) + s.count)
+  const counts = invokedCounts(uses)
   const blind = uses.some((u) => u.status !== 'observed')
   const unused = declared.filter((d) => !counts.has(d))
   const never = blind ? [] : unused
   const notKnown = blind ? unused : []
-  let summary: string
-  if (!uses.length) summary = 'no phase has started'
-  else if (uses.every((u) => u.status === 'unavailable')) summary = 'unavailable: no record for this run'
-  else if (!uses.some((u) => u.status === 'observed')) summary = declared.length ? `${plural(declared.length, 'skill')} declared; use not observable on any phase` : 'no skills declared; use not observable on any phase'
-  else {
-    const parts = [`${plural(declared.length, 'skill')} declared`, `${declared.filter((d) => counts.has(d)).length} invoked`]
-    if (never.length || !notKnown.length) parts.push(`${never.length} never invoked`)
-    if (notKnown.length) parts.push(`${notKnown.length} use unknown`)
-    const undeclared = [...counts.keys()].filter((n) => !declared.includes(n)).length
-    if (undeclared) parts.push(`${undeclared} undeclared invoked`)
-    summary = parts.join(' · ')
-  }
   return {
     declared,
     invoked: [...counts].sort((a, b) => a[0].localeCompare(b[0])).map(([name, count]) => ({ name, count })),
     never_invoked: never,
     not_known: notKnown,
-    summary_display: summary,
+    summary_display: executionSkillSummary(uses, declared, counts, never, notKnown),
   }
 }
 
