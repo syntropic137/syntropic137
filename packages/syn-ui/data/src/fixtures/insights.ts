@@ -116,8 +116,6 @@ function day(r: Row): HeatmapDay {
   return {
     date,
     count: sessions,
-    // Failed executions that day (spec field; the board sample has none).
-    failed: 0,
     breakdown: {
       sessions,
       executions,
