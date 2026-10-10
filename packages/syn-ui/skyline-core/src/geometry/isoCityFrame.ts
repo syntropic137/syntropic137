@@ -14,13 +14,19 @@
  * its depth. Opaque over the window, fading to nothing over the buffer
  * weeks either side: blocks gliding in and out fade instead of popping.
  */
-import type { IsoCityDims } from './isoCityFloor'
+import { ISO_WEEKDAY_LABEL_WIDTH, type IsoCityDims } from './isoCityFloor'
 
-/** The window's horizontal extent in view box units: [left, right]. */
+/**
+ * The window's horizontal extent in view box units: [left, right]. The right
+ * edge is the newest column or the weekday labels painted past it, whichever
+ * reaches further, so the labels never overflow the page.
+ */
 export function isoCityExtent(dims: IsoCityDims, window = dims.win): [number, number] {
   const left = dims.ox + Math.min(0, (6 + dims.f) * dims.bx)
-  const right = dims.ox + (window - 1 + dims.f) * dims.ax + Math.max(0, (6 + dims.f) * dims.bx)
-  return [left, right]
+  const blocks = dims.ox + (window - 1 + dims.f) * dims.ax + Math.max(0, (6 + dims.f) * dims.bx)
+  // Weekday labels (layoutIsoCityFloor's weekdayLabels): column window - 1 + f + 0.3, any depth 0..6 (+0.12).
+  const labels = dims.ox + (window - 1 + dims.f + 0.3) * dims.ax + Math.max(0.12 * dims.bx, 6.12 * dims.bx) + ISO_WEEKDAY_LABEL_WIDTH
+  return [left, Math.max(blocks, labels)]
 }
 
 /** The width the window is centred in: left of the dock when there is one. */
@@ -72,6 +78,20 @@ export function isoCityEdgeMask(dims: IsoCityDims, window = dims.win, fade = 1):
   }
 }
 
+/** Room under the month labels (text height plus a little air), in view box units. */
+const LABEL_ROOM = 14
+
+/** The lowest point the floor reaches for `window` weeks: the newest week's front edge or its month label. */
+export function isoCityBottom(dims: IsoCityDims, window: number): number {
+  return dims.oy + (window - 1 + dims.f) * Math.max(0, dims.ay) + Math.max(0, -0.6 * dims.by) + LABEL_ROOM
+}
+
+/** Most weeks whose floor still ends inside the view box height. */
+export function isoCityMaxWeeksByHeight(dims: IsoCityDims): number {
+  if (dims.ay <= 0) return ISO_FIT_WEEKS.max
+  return Math.floor((dims.vh - dims.oy - Math.max(0, -0.6 * dims.by) - LABEL_ROOM) / dims.ay + 1 - dims.f)
+}
+
 /** Fewest and most weeks the desktop board shows when it fits its column. */
 export const ISO_FIT_WEEKS = { min: 8, max: 30 } as const
 
@@ -83,12 +103,16 @@ export const ISO_FIT_WEEKS = { min: 8, max: 30 } as const
  * side, and is centred in the column. The leader line ends at the column's
  * right edge, where the readout starts. `columnPx` 0 (not measured yet)
  * keeps the board as drawn.
+ *
+ * Weeks run downhill (`ay` per week), so the count is capped by height too
+ * (codex review 2 of #1856): the newest week's front tiles and the month
+ * labels in front of them stay inside the view box, never below the mask.
  */
 export function isoCityFit(board: IsoCityDims, columnPx: number, window?: number): IsoCityDims {
   if (!(columnPx > 0)) return isoCityCentred(board, window ?? board.win)
   const depth = (6 + board.f) * board.bx
-  const fits = Math.floor((columnPx - 2 * board.ax - depth) / board.ax + 1 - board.f)
-  const win = window ?? Math.min(ISO_FIT_WEEKS.max, Math.max(ISO_FIT_WEEKS.min, fits))
+  const byWidth = Math.floor((columnPx - 2 * board.ax - depth) / board.ax + 1 - board.f)
+  const win = window ?? Math.min(ISO_FIT_WEEKS.max, isoCityMaxWeeksByHeight(board), Math.max(ISO_FIT_WEEKS.min, byWidth))
   const [left, right] = isoCityExtent(board, win)
   const vw = Math.max(Math.round(columnPx), Math.ceil(right - left + 2 * board.ax))
   return isoCityCentred({ ...board, win, vw, leadX: board.leadX > 0 ? vw : 0 }, win)

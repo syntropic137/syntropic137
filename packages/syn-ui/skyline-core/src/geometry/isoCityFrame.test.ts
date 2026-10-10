@@ -8,6 +8,7 @@ import {
   isoCityExtent,
   isoCityFit,
   isoCityFreeWidth,
+  ISO_WEEKDAY_LABEL_WIDTH,
   isoCityHistory,
   isoCityWeeks,
   layoutIsoCityFloor,
@@ -55,11 +56,14 @@ describe.each([
 
   it('centres the window: first and last columns have equal margins within one cell (left of the dock on desktop)', () => {
     const pts = l.blocks.filter((b) => b.inWindow).flatMap((b) => [b.side, b.front, b.top].flatMap(xs)).concat(xs(l.future), xs(l.floor))
+    const labels = l.weekdays.map((w) => Number(/matrix\(([-\d. ]+)\)/.exec(w.transform)![1]!.trim().split(' ')[4]) + ISO_WEEKDAY_LABEL_WIDTH)
     const left = Math.min(...pts.map((p) => p[0]))
-    const right = Math.max(...pts.map((p) => p[0]))
+    const right = Math.max(...pts.map((p) => p[0]), ...labels)
     const free = isoCityFreeWidth(dims)
-    expect(Math.abs(left - (free - right))).toBeLessThanOrEqual(1)
-    expect(right).toBeLessThanOrEqual(free + 1)
+    // Within a quarter cell (the drawn desktop board is 23 units off).
+    expect(Math.abs(left - (free - right))).toBeLessThanOrEqual(dims.ax / 4)
+    // The blocks themselves stay inside the free width; only a label may reach past it.
+    expect(Math.max(...pts.map((p) => p[0]))).toBeLessThanOrEqual(free + 1)
   })
 })
 
@@ -93,9 +97,43 @@ describe('the board fits its own column (owner, Oct 10: the readout never covers
     expect(d.leadX).toBe(d.vw)
   })
   it('gives a wider column more weeks, within bounds, and keeps the drawn board unmeasured', () => {
-    expect(isoCityFit(ISO_CITY_DESKTOP, 1464).win).toBeGreaterThan(isoCityFit(ISO_CITY_DESKTOP, 824).win)
-    expect(isoCityFit(ISO_CITY_DESKTOP, 5000).win).toBe(30)
+    expect(isoCityFit(ISO_CITY_DESKTOP, 1100).win).toBeGreaterThan(isoCityFit(ISO_CITY_DESKTOP, 824).win)
     expect(isoCityFit(ISO_CITY_DESKTOP, 0).win).toBe(ISO_CITY_DESKTOP.win)
     expect(isoCityFit(ISO_CITY_DESKTOP, 824, 14).win).toBe(14)
+  })
+})
+
+describe('the board fits its column vertically too (codex review 2 of #1856)', () => {
+  // Today a Saturday, so the newest week has a future Sunday in the front row.
+  const today = '2026-10-10'
+  it.each([824, 1100, 1408, 1464, 2400, 5000])('keeps the newest week\'s front tiles and month labels inside the view box at %ipx', (px) => {
+    const d = isoCityFit(ISO_CITY_DESKTOP, px)
+    const l = layoutIsoCityFloor({ weeks, first: hist.weeks - d.win, today, dims: d, pad: 0 })
+    const ys = [l.future, l.floor, ...l.blocks.map((b) => b.side + b.front)].flatMap((p) => xs(p).map((q) => q[1]))
+    expect(Math.max(...ys)).toBeLessThan(d.vh)
+    // Month labels sit in front of the floor: their anchor (the matrix translation) is inside too, with room for the text.
+    for (const m of l.months.filter((x) => x.inWindow)) {
+      const ty = Number(/matrix\(([-\d. ]+)\)/.exec(m.transform)![1]!.trim().split(' ')[5])
+      expect(ty).toBeLessThanOrEqual(d.vh - 10)
+    }
+  })
+  it('the 1408px column codex measured now gets fewer weeks than width alone allows', () => {
+    const d = isoCityFit(ISO_CITY_DESKTOP, 1408)
+    expect(d.win).toBeLessThan(23)
+    expect(d.win).toBeGreaterThanOrEqual(14)
+  })
+})
+
+describe('weekday labels stay inside the view box (no horizontal page scroll)', () => {
+  it.each([
+    ['phone', isoCityCentred(ISO_CITY_PHONE)],
+    ['desktop 824', isoCityFit(ISO_CITY_DESKTOP, 824)],
+    ['desktop 1464', isoCityFit(ISO_CITY_DESKTOP, 1464)],
+  ] as [string, IsoCityDims][])('%s', (_n, d) => {
+    const l = layoutIsoCityFloor({ weeks, first: hist.weeks - d.win, today: '2026-10-10', dims: d, pad: 0 })
+    for (const w of l.weekdays) {
+      const tx = Number(/matrix\(([-\d. ]+)\)/.exec(w.transform)![1]!.trim().split(' ')[4])
+      expect(tx + ISO_WEEKDAY_LABEL_WIDTH, w.text).toBeLessThanOrEqual(d.vw)
+    }
   })
 })

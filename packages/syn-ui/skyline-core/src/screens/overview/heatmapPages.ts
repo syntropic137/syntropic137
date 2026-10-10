@@ -67,3 +67,24 @@ export function heatmapCoverage({ loadedFrom, wantedFrom, loading, error }: Heat
   if (error !== undefined && error !== null && !loading) return { from: loadedFrom, state: 'error' }
   return { from: loadedFrom, state: 'loading' }
 }
+
+export interface ActiveDaysStatInput {
+  /** The period's days, once its request answered. */
+  days: readonly SkylineDay[] | null | undefined
+  period: HeatmapPage
+  error: unknown
+  loading: boolean
+}
+
+/** The Active days headline: a count, still loading, or failed with a Retry (codex review 2 of #1856). */
+export interface ActiveDaysStat {
+  state: 'ready' | 'loading' | 'error'
+  /** "128", "…" while loading, "Unavailable" when the request failed. */
+  value: string
+}
+
+export function activeDaysStat({ days, period, error, loading }: ActiveDaysStatInput): ActiveDaysStat {
+  if (days) return { state: 'ready', value: String(activeDaysIn(days, period)) }
+  if (error !== undefined && error !== null && !loading) return { state: 'error', value: 'Unavailable' }
+  return { state: 'loading', value: '…' }
+}

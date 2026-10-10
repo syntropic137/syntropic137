@@ -312,7 +312,8 @@ function block(ctx: Ctx, day: SkylineDay, week: number, c: number, wd: number): 
   }
 }
 
-function busiest(weeks: readonly IsoCityWeek[]): number {
+/** The busiest day's sessions across `weeks`: the default height and tone scale. */
+export function isoBusiest(weeks: readonly IsoCityWeek[]): number {
   let max = 0
   for (const w of weeks) for (const d of w.days) if (d && d.sessions > max) max = d.sessions
   return max
@@ -373,10 +374,18 @@ function monthLabels(ctx: Ctx, weeks: readonly IsoCityWeek[], from: number, to: 
   return out
 }
 
+/** Room for a weekday label ("MON", 9px mono with letter spacing), in view box units. */
+export const ISO_WEEKDAY_LABEL_WIDTH = 24
+
+/** Keep a label's text inside the view box: on a narrow board it slides left over the empty edge. */
+function labelAt(d: IsoCityDims, at: Point): Point {
+  return [Math.min(at[0], d.vw - ISO_WEEKDAY_LABEL_WIDTH), at[1]]
+}
+
 function weekdayLabels(ctx: Ctx): IsoCityLabel[] {
   const d = ctx.dims
   return [0, 2, 4].map((wd) => ({
-    transform: floorMatrix(d, pt(d, ctx.window - 1 + d.f + 0.3, isoDepth(wd, ctx.axis) + 0.12, 0)),
+    transform: floorMatrix(d, labelAt(d, pt(d, ctx.window - 1 + d.f + 0.3, isoDepth(wd, ctx.axis) + 0.12, 0))),
     text: ISO_WEEKDAYS[wd]!,
     key: ISO_WEEKDAYS[wd]!,
     inWindow: true,
@@ -392,7 +401,7 @@ function leadPath(d: IsoCityDims, b: IsoCityBlock | null): string | null {
 export function layoutIsoCityFloor(input: IsoCityFloorInput): IsoCityFloorLayout {
   const dims = input.dims ?? ISO_CITY_DESKTOP
   const pad = Math.max(0, Math.floor(input.pad ?? 1))
-  const ctx: Ctx = { dims, window: input.window ?? dims.win, first: input.first, today: input.today, max: input.maxSessions ?? busiest(input.weeks), selected: input.selected ?? null, axis: input.weekdayAxis ?? 'monday-back', loadedFrom: input.loadedFrom ?? null }
+  const ctx: Ctx = { dims, window: input.window ?? dims.win, first: input.first, today: input.today, max: input.maxSessions ?? isoBusiest(input.weeks), selected: input.selected ?? null, axis: input.weekdayAxis ?? 'monday-back', loadedFrom: input.loadedFrom ?? null }
   const paint: Paint = { floor: [], floorEdge: [], future: [], futureEdge: [], unloaded: [], cells: [], rows: [[], [], [], [], [], [], []], today: null }
   for (let c = -pad; c < ctx.window + pad; c++) {
     const week = input.weeks[ctx.first + c]

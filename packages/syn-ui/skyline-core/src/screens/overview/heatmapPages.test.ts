@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { activeDaysIn, heatmapCoverage, heatmapPages, heatmapPeriod, heatmapToSkylineDays } from './index'
+import { activeDaysIn, activeDaysStat, heatmapCoverage, heatmapPages, heatmapPeriod, heatmapToSkylineDays } from './index'
 
 describe('heatmap pages', () => {
   it('pages 13 weeks at a time, newest first, only as far back as needed', () => {
@@ -67,5 +67,19 @@ describe('heatmap coverage: loaded, loading and failed kept apart from zero (cod
     expect(heatmapCoverage({ loadedFrom: '2026-07-13', wantedFrom: '2026-04-13', loading: false, error: new Error('503') })).toEqual({ from: '2026-07-13', state: 'error' })
     // A retry in flight reads as loading again.
     expect(heatmapCoverage({ loadedFrom: '2026-07-13', wantedFrom: '2026-04-13', loading: true, error: new Error('503') }).state).toBe('loading')
+  })
+})
+
+describe('activeDaysStat: the headline request can fail (codex review 2 of #1856)', () => {
+  const period = heatmapPeriod('2026-10-09', 52)
+  it('counts when the period answered, even while a refresh is in flight', () => {
+    expect(activeDaysStat({ days: [{ date: '2026-10-05', sessions: 2 }], period, error: undefined, loading: true })).toEqual({ state: 'ready', value: '1' })
+  })
+  it('is loading until the first answer', () => {
+    expect(activeDaysStat({ days: undefined, period, error: undefined, loading: true })).toEqual({ state: 'loading', value: '…' })
+  })
+  it('is an error, not an endless ellipsis, when the request failed', () => {
+    expect(activeDaysStat({ days: undefined, period, error: new Error('503'), loading: false })).toEqual({ state: 'error', value: 'Unavailable' })
+    expect(activeDaysStat({ days: undefined, period, error: new Error('503'), loading: true }).state).toBe('loading')
   })
 })
