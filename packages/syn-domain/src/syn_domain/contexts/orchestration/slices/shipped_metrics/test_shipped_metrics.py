@@ -324,6 +324,43 @@ class TestCacheAndCoalescing:
 
 
 @pytest.mark.unit
+class TestTheCacheIsBounded:
+    @pytest.mark.asyncio
+    async def test_it_holds_at_most_its_entry_limit(self) -> None:
+        ledger = _Ledger([])
+        service = ShippedMetricsQueryService(
+            ledger, today=lambda: TODAY, clock=lambda: 0.0, cache_entries=4
+        )
+        for i in range(50):
+            await service.shipped(workflow_id=f"wf-{i}")
+        assert len(service._cache) == 4
+        await service.shipped(workflow_id="wf-49")  # most recent: still cached
+        assert len(ledger.reads) == 50
+
+    @pytest.mark.asyncio
+    async def test_expired_entries_are_dropped_not_kept_until_midnight(self) -> None:
+        now = [0.0]
+        ledger = _Ledger([])
+        service = ShippedMetricsQueryService(
+            ledger, today=lambda: TODAY, clock=lambda: now[0], cache_seconds=30
+        )
+        for i in range(100):
+            await service.shipped(workflow_id=f"wf-{i}")
+        now[0] = 31.0
+        await service.shipped(workflow_id="fresh")
+        assert list(service._cache) == [(TODAY, 14, "fresh")]
+
+    @pytest.mark.asyncio
+    async def test_invalidate_forgets_answers_a_write_changed(self) -> None:
+        ledger = _Ledger([])
+        service = ShippedMetricsQueryService(ledger, today=lambda: TODAY, clock=lambda: 0.0)
+        await service.shipped()
+        service.invalidate()
+        await service.shipped()
+        assert len(ledger.reads) == 2
+
+
+@pytest.mark.unit
 def test_now_is_utc() -> None:
     # The service's default "today" is the UTC date, whatever the host zone.
     from syn_domain.contexts.orchestration.slices.shipped_metrics.query_service import utc_today

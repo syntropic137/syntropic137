@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import asyncio
 import time as monotonic_clock
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import ROUND_HALF_UP, Decimal
@@ -54,6 +54,9 @@ BY_WORKFLOW_LIMIT = 10
 
 CACHE_SECONDS = 30.0
 """How long one answer is served before the rollup is read again."""
+
+CACHE_ENTRIES = 256
+"""Most answers held at once: the least recently used goes first."""
 
 COMMITS_SOURCE = "shipped_daily.commits: distinct shas from runs' git_commit hook events"
 PRS_OPENED_SOURCE = "shipped_daily.prs_opened: PRs created by a run's successful `gh pr create`"
@@ -475,8 +478,10 @@ class ShippedMetricsQueryService:
 
     One instance per process: the cache and the in-flight map live on it.
     Concurrent requests for the same key share one rollup read (coalescing);
-    an answer is reused for ``cache_seconds``, and never across a UTC day.
-    A failed read is not cached.
+    an answer is reused for ``cache_seconds``, never across a UTC day, and at
+    most ``cache_entries`` are held (least recently used evicted, expired ones
+    dropped on every insert). A failed read is not cached. ``invalidate``
+    forgets everything, for writers in the same process.
     """
 
     def __init__(
@@ -485,12 +490,14 @@ class ShippedMetricsQueryService:
         today: Callable[[], date] = utc_today,
         clock: Callable[[], float] = monotonic_clock.monotonic,
         cache_seconds: float = CACHE_SECONDS,
+        cache_entries: int = CACHE_ENTRIES,
     ) -> None:
         self._ledger = ledger
         self._today = today
         self._clock = clock
         self._cache_seconds = cache_seconds
-        self._cache: dict[_CacheKey, _Cached] = {}
+        self._cache_entries = cache_entries
+        self._cache: OrderedDict[_CacheKey, _Cached] = OrderedDict()
         self._in_flight: dict[_CacheKey, asyncio.Future[ShippedMetrics]] = {}
 
     async def shipped(self, days: int = 14, workflow_id: str | None = None) -> ShippedMetrics:
@@ -498,6 +505,7 @@ class ShippedMetricsQueryService:
         key: _CacheKey = (window.end, days, workflow_id)
         cached = self._cache.get(key)
         if cached is not None and cached.expires_at > self._clock():
+            self._cache.move_to_end(key)
             return cached.metrics
         pending = self._in_flight.get(key)
         if pending is not None:
@@ -513,7 +521,20 @@ class ShippedMetricsQueryService:
             raise
         finally:
             self._in_flight.pop(key, None)
-        self._cache = {k: v for k, v in self._cache.items() if k[0] == window.end}
-        self._cache[key] = _Cached(self._clock() + self._cache_seconds, metrics)
+        self._remember(key, metrics)
         future.set_result(metrics)
         return metrics
+
+    def _remember(self, key: _CacheKey, metrics: ShippedMetrics) -> None:
+        """Keep ``metrics``; drop what has expired, then the least recently used."""
+        now = self._clock()
+        for stale in [k for k, v in self._cache.items() if v.expires_at <= now or k[0] != key[0]]:
+            del self._cache[stale]
+        self._cache[key] = _Cached(now + self._cache_seconds, metrics)
+        self._cache.move_to_end(key)
+        while len(self._cache) > self._cache_entries:
+            self._cache.popitem(last=False)
+
+    def invalidate(self) -> None:
+        """Forget every answer: a write just changed what they would say."""
+        self._cache.clear()
