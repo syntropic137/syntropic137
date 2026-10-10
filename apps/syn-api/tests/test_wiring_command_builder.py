@@ -140,6 +140,9 @@ def test_agent_command_dispatches_on_provider_string() -> None:
 def test_claude_command_argv_is_pinned() -> None:
     """Pins the argv, INCLUDING the #964 change from --allowedTools to --tools.
 
+    It also pins that a claude alias reaches the CLI as its explicit id: the
+    pinned CLI's own catalog sends `sonnet` to Sonnet 4.5 on some providers.
+
     This guard caught that change, which is what it is for. The change is
     deliberate: --allowedTools governs auto-approval and, beside
     --dangerously-skip-permissions on the same line, restricted nothing.
@@ -148,7 +151,7 @@ def test_claude_command_argv_is_pinned() -> None:
     expected = [
         "claude",
         "--model",
-        "sonnet",
+        "claude-sonnet-5-5",  # the alias is translated, never left to the CLI
         "--verbose",
         "--output-format",
         "stream-json",
