@@ -79,9 +79,24 @@ type Fonts = Record<keyof typeof FONTS, StaticFont>
 function defs(): string {
   return `<clipPath id="card"><rect width="${W}" height="${H}" rx="${RADIUS}"/></clipPath>
 <radialGradient id="wash" cx="0.72" cy="0" r="0.75" gradientTransform="matrix(1 0 0 1.6 0 0)"><stop offset="0" stop-color="${ACCENT}" stop-opacity="0.26"/><stop offset="1" stop-color="${ACCENT}" stop-opacity="0"/></radialGradient>
-<radialGradient id="markglow"><stop offset="0" stop-color="${ACCENT}" stop-opacity="0.34"/><stop offset="1" stop-color="${ACCENT}" stop-opacity="0"/></radialGradient>
+<radialGradient id="markglow"><stop offset="0" stop-color="${ACCENT}" stop-opacity="${UPLIGHT.opacity}"/><stop offset="1" stop-color="${ACCENT}" stop-opacity="0"/></radialGradient>
 <pattern id="dots" width="28" height="28" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="1" fill="${TEXT.muted}" fill-opacity="0.16"/></pattern>
 <linearGradient id="edge" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="${ACCENT}" stop-opacity="0"/><stop offset="0.5" stop-color="${ACCENT}" stop-opacity="0.7"/><stop offset="1" stop-color="${ACCENT}" stop-opacity="0"/></linearGradient>`
+}
+
+/**
+ * The S is uplit: a soft accent glow centred under it, its centre offset
+ * below the S's visual centre by S_UPLIGHT_OFFSET of the S's drawn height,
+ * so it reads as light from below with a falloff above (BRAND.md, Logo).
+ * Same size and strength on every banner; ry keeps it inside the card.
+ */
+const S_UPLIGHT_OFFSET = 0.12
+const UPLIGHT = { rx: 200, ry: 165, opacity: 0.34 }
+
+function uplight(dx: number): string {
+  const b = markBox()
+  const cy = H / 2 + (b.y1 - b.y0) * S_UPLIGHT_OFFSET
+  return `<ellipse cx="${n(MARK_CX + dx)}" cy="${n(cy)}" rx="${UPLIGHT.rx}" ry="${UPLIGHT.ry}" fill="url(#markglow)"/>`
 }
 
 function ground(dx = 0): string {
@@ -89,7 +104,7 @@ function ground(dx = 0): string {
 <rect width="${W}" height="${H}" fill="${GROUND}"/>
 <rect width="${W}" height="${H}" fill="url(#dots)"/>
 <rect width="${W}" height="${H}" fill="url(#wash)"/>
-<ellipse cx="${n(MARK_CX + dx)}" cy="${H / 2 + 24}" rx="200" ry="180" fill="url(#markglow)"/>
+${uplight(dx)}
 <rect x="${W * 0.2}" y="0" width="${W * 0.6}" height="1" fill="url(#edge)"/>
 </g>
 <rect x="0.5" y="0.5" width="${W - 1}" height="${H - 1}" rx="${RADIUS - 0.5}" fill="none" stroke="${TEXT.muted}" stroke-opacity="0.16"/>`
