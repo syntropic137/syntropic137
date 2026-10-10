@@ -172,6 +172,8 @@ export interface SessionResponse {
   started_at: string | null
   completed_at: string | null
   duration_seconds: number | null
+  /** The API's duration, worded server-side ("1m 59s"); render verbatim. Absent from a server that predates it. */
+  duration_display?: string
   error_message: string | null
   metadata: Record<string, unknown>
   // Subagent metrics (from agentic_isolation v0.3.0)

@@ -157,6 +157,7 @@ export function sessionDetail(p: CatalogPhaseRun): SessionResponse {
     started_at: p.startedAt,
     completed_at: p.completedAt,
     duration_seconds: p.seconds,
+    duration_display: durationDisplay(p.seconds),
     error_message: p.status === 'failed' ? 'Phase exited with a non-zero status' : null,
     metadata: {},
   }
