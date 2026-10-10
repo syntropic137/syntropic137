@@ -1,0 +1,57 @@
+{
+  "$comment": "README banners, one per repo. Regenerate: pnpm --filter @syn137/skyline-core run repo-banner. Fields: name (repo, also the output file), title (big Orbitron line; any 137 is drawn in the accent), license and label (the pill), tagline (Instrument Sans), command (mono, shown after a $), alt (img alt text).",
+  "repos": [
+    {
+      "name": "syntropic137",
+      "title": "Syntropic137",
+      "license": "MIT",
+      "label": "Agentic engineering platform",
+      "tagline": "Agent work that compounds.",
+      "command": "npx @syntropic137/setup init"
+    },
+    {
+      "name": "syntropic137-setup",
+      "title": "Setup",
+      "license": "MIT",
+      "label": "One-command self-host",
+      "tagline": "Deploy and run your own Syntropic137 stack.",
+      "command": "npx @syntropic137/setup init"
+    },
+    {
+      "name": "syntropic137-skills",
+      "title": "Skills",
+      "label": "Harness-agnostic agent skills",
+      "tagline": "Run, watch and steer Syntropic137 from any agent.",
+      "command": "npx skills add syntropic137/syntropic137-skills"
+    },
+    {
+      "name": "syntropic137-marketplace",
+      "title": "Marketplace",
+      "license": "MIT",
+      "label": "Workflow plugins",
+      "tagline": "Installable workflow packages with embedded triggers.",
+      "command": "syn marketplace add syntropic137/syntropic137-marketplace"
+    },
+    {
+      "name": "event-sourcing-platform",
+      "title": "Event Sourcing",
+      "license": "MIT",
+      "label": "Event store and SDKs",
+      "tagline": "A modular event store with TypeScript, Python and Rust SDKs."
+    },
+    {
+      "name": "harness-app-template",
+      "title": "Harness Template",
+      "license": "MIT",
+      "label": "Polyglot monorepo template",
+      "tagline": "A forkable monorepo, agent-equipped from minute zero.",
+      "command": "gh repo create --template syntropic137/harness-app-template"
+    },
+    {
+      "name": "syntropic137-system-monorepo",
+      "title": "System Monorepo",
+      "label": "Development workspace",
+      "tagline": "Every Syntropic137 repo as a submodule, developed together."
+    }
+  ]
+}

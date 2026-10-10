@@ -6,47 +6,18 @@
  *
  *   pnpm --filter @syn137/skyline-core run og-image
  *
- * Colour literals are allowed here only because the output is a static
- * asset that can't read CSS variables. They mirror design/brand/s-mark.svg
- * (accent faces) and the theme (ground --ds-color-bg #0A0C14, status red
- * and amber).
+ * Brand colours and the cube drawer live in brand.ts (shared with
+ * repo-banner.ts).
  */
 import { execFileSync } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { type CityTone, isoCity, SAMPLE_SESSIONS, sampleCityDays, sMark, type SMarkTone } from '../src/geometry/index.ts'
+import { isoCity, SAMPLE_SESSIONS, sampleCityDays, sMark } from '../src/geometry/index.ts'
+import { ACCENT, CITY_FACES, cube, GROUND, S_FACES } from './brand.ts'
 
 const W = 1200
 const H = 630
-const GROUND = '#0A0C14'
-const ACCENT = '#4D80FF'
-
-interface Faces {
-  left: string
-  right: string
-  top: string
-  stroke?: string
-}
-
-/** Face fills as in s-mark.svg: left is the base, right shaded, top lit. */
-const S_FACES: Record<SMarkTone, Faces> = {
-  blue: { left: ACCENT, right: '#22396F', top: '#A9C1FF' },
-  dark: { left: '#1C2236', right: '#10141F', top: '#2B3350', stroke: 'rgba(120,140,190,0.10)' },
-  glass: { left: 'rgba(232,238,251,0.32)', right: 'rgba(232,238,251,0.18)', top: 'rgba(255,255,255,0.55)', stroke: 'rgba(255,255,255,0.55)' },
-}
-
-const CITY_FACES: Record<CityTone, Faces> = {
-  run: S_FACES.blue,
-  live: S_FACES.blue,
-  failed: { left: '#FF6F61', right: '#803831', top: '#FFACA3' },
-  errored: { left: '#E5B450', right: '#735A28', top: '#F0D399' },
-}
-
-function cube(f: Faces, p: { left: string; right: string; top: string }, attrs = ''): string {
-  const st = f.stroke ? ` stroke="${f.stroke}" stroke-width="1"` : ''
-  return `<g${attrs}><polygon points="${p.left}" fill="${f.left}"${st}/><polygon points="${p.right}" fill="${f.right}"${st}/><polygon points="${p.top}" fill="${f.top}"${st}/></g>`
-}
 
 // The hero city (desktop board), seen from a little further back.
 const city = isoCity(sampleCityDays(26, 11, '2026-10-08'), {

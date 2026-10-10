@@ -23,7 +23,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "og-image": "tsx scripts/og-image.ts"
+    "og-image": "tsx scripts/og-image.ts",
+    "repo-banner": "tsx scripts/repo-banner.ts"
   },
   "devDependencies": {
     "tsx": "4.21.0",

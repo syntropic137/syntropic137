@@ -11,6 +11,7 @@ The S mark: eleven isometric cubes in one vertical plane, grid `BBG / B.. / DDD 
 | `app-icon.svg` | Mark on the ground colour (`--ds-color-bg`, `#0A0C14`), source for the raster icons below |
 | `apple-touch-icon.png` (180), `icon-192.png`, `icon-512.png` | iOS home screen and PWA manifest icons |
 | `og-image.svg`, `og-image.png` (1200 x 630) | Social image (Open Graph, Twitter card): the S over the run city. Generated, don't edit by hand. |
+| `banners/<repo>.svg` (1200 x 400) | README banner per org repo, fonts embedded. Generated from `banners/repos.json`; see `banners/README.md`. |
 
 Regenerate the PNGs with `rsvg-convert`:
 
