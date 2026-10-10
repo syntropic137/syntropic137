@@ -49,51 +49,92 @@ button{font-family:inherit}
 <div style="display: flex; flex-direction: column; gap: 2px"><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3">Tokens</span><span style="font-size: 28px; line-height: 1.1; font-weight: 600; letter-spacing: -0.03em; font-variant-numeric: tabular-nums">10.26M</span></div>
 <div style="display: flex; flex-direction: column; gap: 2px"><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3">Spend</span><span style="font-size: 28px; line-height: 1.1; font-weight: 600; letter-spacing: -0.03em; font-variant-numeric: tabular-nums">$6.92</span></div>
 </div>
-<div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 20px 0">
-<span style="font-size: 13px; color: #9AA8C7">Agent activity · last 16 weeks</span>
-<div role="group" aria-label="Range" style="display: flex; gap: 2px; padding: 3px; border-radius: 12px; border: 1px solid #1A2032; background: #0A0C14; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px">
-<button type="button" aria-pressed="true" style="height: 30px; padding: 0 10px; border: 0; border-radius: 9px; background: #1A2134; color: #E8EEFB; cursor: pointer">16w</button>
-<button type="button" style="height: 30px; padding: 0 10px; border: 0; border-radius: 9px; background: transparent; color: #9AA8C7; cursor: pointer">Year</button>
-</div>
+<div style="display: flex; flex-direction: column; gap: 4px; padding: 6px 20px 0">
+<span style="display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; font-size: 13px; color: #9AA8C7">Agent activity · <span style="color: #E8EEFB">{{sky.range}}</span><span style="padding: 1px 7px; border-radius: 999px; border: 1px solid #283048; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; color: #6F7FA3">Sample</span></span>
+<span style="font-size: 12px; color: #6F7FA3">Swipe the city sideways to go back in time.</span>
 </div>
 <div style="position: relative; margin: 0 8px">
-<svg viewBox="0 0 350 146" role="img" aria-label="Activity skyline for the last 16 weeks. Eleven active days run from July 25 to August 28, and August 28 is by far the tallest with 43 sessions." style="display: block; width: 100%; height: auto">
+<svg viewBox="0 0 350 186" role="img" aria-label="Isometric activity city for {{sky.range}}. Each block is a day; older weeks fade to the left." style="display: block; width: 100%; height: auto">
+<defs>
+<linearGradient id="skyfadeP-g" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#FFFFFF" stop-opacity="0"></stop><stop offset="0.07" stop-color="#FFFFFF" stop-opacity="0.08"></stop><stop offset="0.36" stop-color="#FFFFFF" stop-opacity="1"></stop></linearGradient>
+<mask id="skyfadeP" maskUnits="userSpaceOnUse" x="0" y="0" width="350" height="186"><rect x="0" y="0" width="350" height="186" fill="url(#skyfadeP-g)"></rect></mask>
+</defs>
+<g mask="url(#skyfadeP)">
 <path d="{{sky.floor}}" style="fill: #171C2C"></path>
-<path d="{{sky.future}}" style="fill: #10141F"></path>
-<path d="{{sky.r6.side}}" style="fill: color-mix(in oklab, var(--ac) 50%, black)"></path>
-<path d="{{sky.r6.front}}" style="fill: var(--ac)"></path>
-<path d="{{sky.r6.top}}" style="fill: color-mix(in oklab, var(--ac) 58%, white)"></path>
-<path d="{{sky.r5.side}}" style="fill: color-mix(in oklab, var(--ac) 50%, black)"></path>
-<path d="{{sky.r5.front}}" style="fill: var(--ac)"></path>
-<path d="{{sky.r5.top}}" style="fill: color-mix(in oklab, var(--ac) 58%, white)"></path>
-<path d="{{sky.r4.side}}" style="fill: color-mix(in oklab, var(--ac) 50%, black)"></path>
-<path d="{{sky.r4.front}}" style="fill: var(--ac)"></path>
-<path d="{{sky.r4.top}}" style="fill: color-mix(in oklab, var(--ac) 58%, white)"></path>
-<path d="{{sky.r3.side}}" style="fill: color-mix(in oklab, var(--ac) 50%, black)"></path>
-<path d="{{sky.r3.front}}" style="fill: var(--ac)"></path>
-<path d="{{sky.r3.top}}" style="fill: color-mix(in oklab, var(--ac) 58%, white)"></path>
-<path d="{{sky.r2.side}}" style="fill: color-mix(in oklab, var(--ac) 50%, black)"></path>
-<path d="{{sky.r2.front}}" style="fill: var(--ac)"></path>
-<path d="{{sky.r2.top}}" style="fill: color-mix(in oklab, var(--ac) 58%, white)"></path>
-<path d="{{sky.r1.side}}" style="fill: color-mix(in oklab, var(--ac) 50%, black)"></path>
-<path d="{{sky.r1.front}}" style="fill: var(--ac)"></path>
-<path d="{{sky.r1.top}}" style="fill: color-mix(in oklab, var(--ac) 58%, white)"></path>
-<path d="{{sky.r0.side}}" style="fill: color-mix(in oklab, var(--ac) 50%, black)"></path>
-<path d="{{sky.r0.front}}" style="fill: var(--ac)"></path>
-<path d="{{sky.r0.top}}" style="fill: color-mix(in oklab, var(--ac) 58%, white)"></path>
-<path d="{{sky.sel.side}}" style="fill: var(--ac); stroke: #FFFFFF; stroke-width: 1; stroke-linejoin: round"></path>
-<path d="{{sky.sel.front}}" style="fill: color-mix(in oklab, var(--ac) 62%, white); stroke: #FFFFFF; stroke-width: 1; stroke-linejoin: round"></path>
-<path d="{{sky.sel.top}}" style="fill: #FFFFFF; stroke: #FFFFFF; stroke-width: 1; stroke-linejoin: round"></path>
+<path d="{{sky.future}}" style="fill: #0F131D; stroke: #1A2032; stroke-width: 0.75; stroke-dasharray: 2 2"></path>
+<path d="{{sky.today}}" style="fill: none; stroke: var(--ac); stroke-width: 1.5; stroke-linejoin: round"></path>
+<path d="{{sky.r6.run.side}}" style="fill: color-mix(in oklab, var(--ac) 46%, black)"></path>
+<path d="{{sky.r6.run.front}}" style="fill: var(--ac)"></path>
+<path d="{{sky.r6.run.top}}" style="fill: color-mix(in oklab, var(--ac) 58%, white)"></path>
+<path d="{{sky.r6.fail.side}}" style="fill: color-mix(in oklab, #FF6F61 46%, black)"></path>
+<path d="{{sky.r6.fail.front}}" style="fill: #FF6F61"></path>
+<path d="{{sky.r6.fail.top}}" style="fill: color-mix(in oklab, #FF6F61 55%, white)"></path>
+<path d="{{sky.r5.run.side}}" style="fill: color-mix(in oklab, var(--ac) 46%, black)"></path>
+<path d="{{sky.r5.run.front}}" style="fill: var(--ac)"></path>
+<path d="{{sky.r5.run.top}}" style="fill: color-mix(in oklab, var(--ac) 58%, white)"></path>
+<path d="{{sky.r5.fail.side}}" style="fill: color-mix(in oklab, #FF6F61 46%, black)"></path>
+<path d="{{sky.r5.fail.front}}" style="fill: #FF6F61"></path>
+<path d="{{sky.r5.fail.top}}" style="fill: color-mix(in oklab, #FF6F61 55%, white)"></path>
+<path d="{{sky.r4.run.side}}" style="fill: color-mix(in oklab, var(--ac) 46%, black)"></path>
+<path d="{{sky.r4.run.front}}" style="fill: var(--ac)"></path>
+<path d="{{sky.r4.run.top}}" style="fill: color-mix(in oklab, var(--ac) 58%, white)"></path>
+<path d="{{sky.r4.fail.side}}" style="fill: color-mix(in oklab, #FF6F61 46%, black)"></path>
+<path d="{{sky.r4.fail.front}}" style="fill: #FF6F61"></path>
+<path d="{{sky.r4.fail.top}}" style="fill: color-mix(in oklab, #FF6F61 55%, white)"></path>
+<path d="{{sky.r3.run.side}}" style="fill: color-mix(in oklab, var(--ac) 46%, black)"></path>
+<path d="{{sky.r3.run.front}}" style="fill: var(--ac)"></path>
+<path d="{{sky.r3.run.top}}" style="fill: color-mix(in oklab, var(--ac) 58%, white)"></path>
+<path d="{{sky.r3.fail.side}}" style="fill: color-mix(in oklab, #FF6F61 46%, black)"></path>
+<path d="{{sky.r3.fail.front}}" style="fill: #FF6F61"></path>
+<path d="{{sky.r3.fail.top}}" style="fill: color-mix(in oklab, #FF6F61 55%, white)"></path>
+<path d="{{sky.r2.run.side}}" style="fill: color-mix(in oklab, var(--ac) 46%, black)"></path>
+<path d="{{sky.r2.run.front}}" style="fill: var(--ac)"></path>
+<path d="{{sky.r2.run.top}}" style="fill: color-mix(in oklab, var(--ac) 58%, white)"></path>
+<path d="{{sky.r2.fail.side}}" style="fill: color-mix(in oklab, #FF6F61 46%, black)"></path>
+<path d="{{sky.r2.fail.front}}" style="fill: #FF6F61"></path>
+<path d="{{sky.r2.fail.top}}" style="fill: color-mix(in oklab, #FF6F61 55%, white)"></path>
+<path d="{{sky.r1.run.side}}" style="fill: color-mix(in oklab, var(--ac) 46%, black)"></path>
+<path d="{{sky.r1.run.front}}" style="fill: var(--ac)"></path>
+<path d="{{sky.r1.run.top}}" style="fill: color-mix(in oklab, var(--ac) 58%, white)"></path>
+<path d="{{sky.r1.fail.side}}" style="fill: color-mix(in oklab, #FF6F61 46%, black)"></path>
+<path d="{{sky.r1.fail.front}}" style="fill: #FF6F61"></path>
+<path d="{{sky.r1.fail.top}}" style="fill: color-mix(in oklab, #FF6F61 55%, white)"></path>
+<path d="{{sky.r0.run.side}}" style="fill: color-mix(in oklab, var(--ac) 46%, black)"></path>
+<path d="{{sky.r0.run.front}}" style="fill: var(--ac)"></path>
+<path d="{{sky.r0.run.top}}" style="fill: color-mix(in oklab, var(--ac) 58%, white)"></path>
+<path d="{{sky.r0.fail.side}}" style="fill: color-mix(in oklab, #FF6F61 46%, black)"></path>
+<path d="{{sky.r0.fail.front}}" style="fill: #FF6F61"></path>
+<path d="{{sky.r0.fail.top}}" style="fill: color-mix(in oklab, #FF6F61 55%, white)"></path>
 <g style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; fill: #6F7FA3">
-<text x="25" y="140">Jul</text>
-<text x="102" y="140">Aug</text>
-<text x="199" y="140">Sep</text>
-<text x="276" y="140">Oct</text>
+<text x="{{sky.mo.m0.x}}" y="{{sky.mo.m0.y}}">{{sky.mo.m0.t}}</text>
+<text x="{{sky.mo.m1.x}}" y="{{sky.mo.m1.y}}">{{sky.mo.m1.t}}</text>
+<text x="{{sky.mo.m2.x}}" y="{{sky.mo.m2.y}}">{{sky.mo.m2.t}}</text>
+<text x="{{sky.mo.m3.x}}" y="{{sky.mo.m3.y}}">{{sky.mo.m3.t}}</text>
+<text x="{{sky.mo.m4.x}}" y="{{sky.mo.m4.y}}">{{sky.mo.m4.t}}</text>
 </g>
+</g>
+<path d="{{sky.sel.side}}" style="fill: color-mix(in oklab, var(--ac) 70%, white); stroke: #FFFFFF; stroke-width: 1; stroke-linejoin: round"></path>
+<path d="{{sky.sel.front}}" style="fill: color-mix(in oklab, var(--ac) 40%, white); stroke: #FFFFFF; stroke-width: 1; stroke-linejoin: round"></path>
+<path d="{{sky.sel.top}}" style="fill: #FFFFFF; stroke: #FFFFFF; stroke-width: 1; stroke-linejoin: round"></path>
 </svg>
-<sc-for list="{{sky.hits}}" as="d" hint-placeholder-count="11">
+<sc-for list="{{sky.hits}}" as="d" hint-placeholder-count="38">
 <button type="button" aria-label="{{d.label}}" aria-pressed="{{d.on}}" onMouseEnter="{{d.pick}}" onFocus="{{d.pick}}" onClick="{{d.pick}}" style="position: absolute; left: {{d.l}}; top: {{d.t}}; width: {{d.w}}; height: {{d.h}}; z-index: {{d.z}}; padding: 0; border: 0; border-radius: 4px; background: transparent; cursor: pointer"></button>
 </sc-for>
+</div>
+<div role="group" aria-label="Scroll through time" style="display: flex; align-items: center; gap: 8px; padding: 0 12px">
+<button type="button" aria-label="One week back" onClick="{{sky.older}}" style="display: flex; align-items: center; justify-content: center; flex-shrink: 0; width: 44px; height: 44px; padding: 0; border-radius: 14px; border: 1px solid #283048; background: #0F121C; color: #E8EEFB; cursor: pointer"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 3.5L5.5 8l4.5 4.5"></path></svg></button>
+<span aria-live="polite" style="flex-grow: 1; text-align: center; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #9AA8C7">{{sky.weeksBack}}</span>
+<button type="button" aria-label="One week forward" onClick="{{sky.newer}}" style="display: flex; align-items: center; justify-content: center; flex-shrink: 0; width: 44px; height: 44px; padding: 0; border-radius: 14px; border: 1px solid #283048; background: #0F121C; color: #E8EEFB; cursor: pointer"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3.5L10.5 8 6 12.5"></path></svg></button>
+<button type="button" onClick="{{sky.now}}" aria-pressed="{{sky.atNow}}" style="height: 44px; padding: 0 14px; border-radius: 14px; border: 1px solid #283048; background: #0F121C; color: #E8EEFB; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; cursor: pointer">Now</button>
+</div>
+<div style="display: flex; flex-direction: column; gap: 6px; padding: 4px 20px 2px">
+<div role="group" aria-label="Whole history, one bar per week. The outlined box is the part shown above." style="position: relative; display: flex; align-items: flex-end; height: 30px">
+<sc-for list="{{sky.mini}}" as="m" hint-placeholder-count="52">
+<span style="display: flex; align-items: flex-end; flex: 1 1 0; min-width: 0; height: 100%; padding: 0 1px"><span style="display: block; width: 100%; height: {{m.h}}; border-radius: 1.5px; background: {{m.c}}"></span></span>
+</sc-for>
+<span aria-hidden="true" style="position: absolute; left: {{sky.winL}}; width: {{sky.winW}}; top: -5px; bottom: -5px; box-sizing: border-box; border: 1px solid color-mix(in oklab, var(--ac) 55%, white); border-radius: 7px; background: color-mix(in oklab, var(--ac) 10%, transparent); pointer-events: none"></span>
+</div>
+<div style="display: flex; justify-content: space-between; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; color: #6F7FA3"><span>Oct 2025</span><span>Today</span></div>
 </div>
 <div role="status" style="display: flex; flex-direction: column; gap: 12px; margin: 0 12px 12px; padding: 12px 14px 14px; border-radius: 16px; border: 1px solid #283048; background: #111626; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06)">
 <div style="display: flex; align-items: center; gap: 10px">
@@ -101,6 +142,7 @@ button{font-family:inherit}
 <div style="display: flex; flex-direction: column; align-items: center; flex-grow: 1; min-width: 0">
 <span style="font-size: 16px; font-weight: 600; letter-spacing: -0.01em">{{day.date}}</span>
 <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3">{{day.pos}}</span>
+<sc-if value="{{day.hasFailed}}" hint-placeholder-val="{{ false }}"><span style="margin-top: 4px; padding: 2px 8px; border-radius: 999px; background: #2A1513; color: #FF8A7E; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px">{{day.failed}}</span></sc-if>
 </div>
 <button type="button" aria-label="Next active day" onClick="{{day.next}}" style="display: flex; align-items: center; justify-content: center; flex-shrink: 0; width: 44px; height: 44px; padding: 0; border-radius: 14px; border: 1px solid #283048; background: #0F121C; color: #E8EEFB; cursor: pointer"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3.5L10.5 8 6 12.5"></path></svg></button>
 </div>
@@ -225,6 +267,33 @@ button{font-family:inherit}
 </span>
 </a>
 </sc-for>
+<div aria-label="Shipped by agents, last 14 days" style="display: flex; flex-direction: column; gap: 10px; margin-top: 8px; padding: 14px; border-radius: 16px; border: 1px solid #1A2032; background: #0D101A">
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 16px">
+<span style="display: flex; align-items: center; gap: 8px"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true" style="color: var(--ac)"><circle cx="4" cy="8" r="1.75"></circle><circle cx="12" cy="8" r="1.75"></circle><path d="M5.75 8h4.5M1 8h1.25M13.75 8H15"></path></svg><span style="font-size: 15px; font-weight: 600">Shipped by agents</span></span>
+<span style="font-size: 12.5px; color: #9AA8C7">Last 14 days, vs the 14 before · <a href="Executions.dc.html" style="color: #C3CCE2">by workflow →</a></span>
+</div>
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px"><div style="display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 12px; border-radius: 14px; border: 1px solid #1A2032; background: #0A0C14">
+<span style="font-size: 12px; color: #9AA8C7">Commits</span>
+<span style="display: flex; align-items: baseline; gap: 8px"><span style="font-size: 20px; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums">1,204</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #7FE3B8">+38%</span></span>
+<span aria-hidden="true" style="display: flex; align-items: flex-end; gap: 2px; height: 26px"><span style="flex: 1 1 0; height: 26%; border-radius: 2px; background: color-mix(in oklab, var(--ac) 45%, #151A2A)"></span><span style="flex: 1 1 0; height: 35%; border-radius: 2px; background: color-mix(in oklab, var(--ac) 45%, #151A2A)"></span><span style="flex: 1 1 0; height: 28%; border-radius: 2px; background: color-mix(in oklab, var(--ac) 45%, #151A2A)"></span><span style="flex: 1 1 0; height: 4%; border-radius: 2px; background: #1A2032"></span><span style="flex: 1 1 0; height: 8%; border-radius: 2px; background: color-mix(in oklab, var(--ac) 45%, #151A2A)"></span><span style="flex: 1 1 0; height: 45%; border-radius: 2px; background: color-mix(in oklab, var(--ac) 45%, #151A2A)"></span><span style="flex: 1 1 0; height: 50%; border-radius: 2px; background: color-mix(in oklab, var(--ac) 45%, #151A2A)"></span><span style="flex: 1 1 0; height: 39%; border-radius: 2px; background: color-mix(in oklab, var(--ac) 45%, #151A2A)"></span><span style="flex: 1 1 0; height: 62%; border-radius: 2px; background: color-mix(in oklab, var(--ac) 45%, #151A2A)"></span><span style="flex: 1 1 0; height: 4%; border-radius: 2px; background: #1A2032"></span><span style="flex: 1 1 0; height: 16%; border-radius: 2px; background: color-mix(in oklab, var(--ac) 45%, #151A2A)"></span><span style="flex: 1 1 0; height: 71%; border-radius: 2px; background: color-mix(in oklab, var(--ac) 45%, #151A2A)"></span><span style="flex: 1 1 0; height: 89%; border-radius: 2px; background: color-mix(in oklab, var(--ac) 45%, #151A2A)"></span><span style="flex: 1 1 0; height: 100%; border-radius: 2px; background: var(--ac)"></span></span>
+</div><div style="display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 12px; border-radius: 14px; border: 1px solid #1A2032; background: #0A0C14">
+<span style="font-size: 12px; color: #9AA8C7">PRs opened</span>
+<span style="display: flex; align-items: baseline; gap: 8px"><span style="font-size: 20px; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums">73</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #7FE3B8">+24%</span></span>
+<span aria-hidden="true" style="display: flex; align-items: flex-end; gap: 2px; height: 26px"><span style="flex: 1 1 0; height: 25%; border-radius: 2px; background: color-mix(in oklab, var(--ac) 45%, #151A2A)"></span><span style="flex: 1 1 0; height: 42%; border-radius: 2px; background: color-mix(in oklab, var(--ac) 45%, #151A2A)"></span><span style="flex: 1 1 0; height: 33%; border-radius: 2px; background: color-mix(in oklab, var(--ac) 45%, #151A2A)"></span><span style="flex: 1 1 0; height: 4%; border-radius: 2px; background: #1A2032"></span><span style="flex: 1 1 0; height: 8%; border-radius: 2px; background: color-mix(in oklab, var(--ac) 45%, #151A2A)"></span><span style="flex: 1 1 0; height: 50%; border-radius: 2px; background: color-mix(in oklab, var(--ac) 45%, #151A2A)"></span><span style="flex: 1 1 0; height: 58%; border-radius: 2px; background: color-mix(in oklab, var(--ac) 45%, #151A2A)"></span><span style="flex: 1 1 0; height: 42%; border-radius: 2px; background: color-mix(in oklab, var(--ac) 45%, #151A2A)"></span><span style="flex: 1 1 0; height: 67%; border-radius: 2px; background: color-mix(in oklab, var(--ac) 45%, #151A2A)"></span><span style="flex: 1 1 0; height: 4%; border-radius: 2px; background: #1A2032"></span><span style="flex: 1 1 0; height: 17%; border-radius: 2px; background: color-mix(in oklab, var(--ac) 45%, #151A2A)"></span><span style="flex: 1 1 0; height: 75%; border-radius: 2px; background: color-mix(in oklab, var(--ac) 45%, #151A2A)"></span><span style="flex: 1 1 0; height: 92%; border-radius: 2px; background: color-mix(in oklab, var(--ac) 45%, #151A2A)"></span><span style="flex: 1 1 0; height: 100%; border-radius: 2px; background: var(--ac)"></span></span>
+</div><div style="display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 12px; border-radius: 14px; border: 1px solid #1A2032; background: #0A0C14">
+<span style="font-size: 12px; color: #9AA8C7">PRs merged</span>
+<span style="display: flex; align-items: baseline; gap: 8px"><span style="font-size: 20px; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums">61</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #7FE3B8">+27%</span></span>
+<span aria-hidden="true" style="display: flex; align-items: flex-end; gap: 2px; height: 26px"><span style="flex: 1 1 0; height: 20%; border-radius: 2px; background: color-mix(in oklab, var(--ac) 45%, #151A2A)"></span><span style="flex: 1 1 0; height: 40%; border-radius: 2px; background: color-mix(in oklab, var(--ac) 45%, #151A2A)"></span><span style="flex: 1 1 0; height: 30%; border-radius: 2px; background: color-mix(in oklab, var(--ac) 45%, #151A2A)"></span><span style="flex: 1 1 0; height: 4%; border-radius: 2px; background: #1A2032"></span><span style="flex: 1 1 0; height: 10%; border-radius: 2px; background: color-mix(in oklab, var(--ac) 45%, #151A2A)"></span><span style="flex: 1 1 0; height: 50%; border-radius: 2px; background: color-mix(in oklab, var(--ac) 45%, #151A2A)"></span><span style="flex: 1 1 0; height: 60%; border-radius: 2px; background: color-mix(in oklab, var(--ac) 45%, #151A2A)"></span><span style="flex: 1 1 0; height: 40%; border-radius: 2px; background: color-mix(in oklab, var(--ac) 45%, #151A2A)"></span><span style="flex: 1 1 0; height: 70%; border-radius: 2px; background: color-mix(in oklab, var(--ac) 45%, #151A2A)"></span><span style="flex: 1 1 0; height: 4%; border-radius: 2px; background: #1A2032"></span><span style="flex: 1 1 0; height: 20%; border-radius: 2px; background: color-mix(in oklab, var(--ac) 45%, #151A2A)"></span><span style="flex: 1 1 0; height: 80%; border-radius: 2px; background: color-mix(in oklab, var(--ac) 45%, #151A2A)"></span><span style="flex: 1 1 0; height: 90%; border-radius: 2px; background: color-mix(in oklab, var(--ac) 45%, #151A2A)"></span><span style="flex: 1 1 0; height: 100%; border-radius: 2px; background: var(--ac)"></span></span>
+</div><div style="display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 12px; border-radius: 14px; border: 1px solid #1A2032; background: #0A0C14">
+<span style="font-size: 12px; color: #9AA8C7">Merge rate</span>
+<span style="display: flex; align-items: baseline; gap: 8px"><span style="font-size: 20px; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums">84%</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #7FE3B8">+5 pts</span></span>
+<span aria-hidden="true" style="display: flex; align-items: flex-end; gap: 2px; height: 26px"><span style="flex: 1 1 0; height: 67%; border-radius: 2px; background: color-mix(in oklab, var(--ac) 45%, #151A2A)"></span><span style="flex: 1 1 0; height: 80%; border-radius: 2px; background: color-mix(in oklab, var(--ac) 45%, #151A2A)"></span><span style="flex: 1 1 0; height: 75%; border-radius: 2px; background: color-mix(in oklab, var(--ac) 45%, #151A2A)"></span><span style="flex: 1 1 0; height: 4%; border-radius: 2px; background: #1A2032"></span><span style="flex: 1 1 0; height: 100%; border-radius: 2px; background: color-mix(in oklab, var(--ac) 45%, #151A2A)"></span><span style="flex: 1 1 0; height: 83%; border-radius: 2px; background: color-mix(in oklab, var(--ac) 45%, #151A2A)"></span><span style="flex: 1 1 0; height: 86%; border-radius: 2px; background: color-mix(in oklab, var(--ac) 45%, #151A2A)"></span><span style="flex: 1 1 0; height: 80%; border-radius: 2px; background: color-mix(in oklab, var(--ac) 45%, #151A2A)"></span><span style="flex: 1 1 0; height: 88%; border-radius: 2px; background: color-mix(in oklab, var(--ac) 45%, #151A2A)"></span><span style="flex: 1 1 0; height: 4%; border-radius: 2px; background: #1A2032"></span><span style="flex: 1 1 0; height: 100%; border-radius: 2px; background: color-mix(in oklab, var(--ac) 45%, #151A2A)"></span><span style="flex: 1 1 0; height: 89%; border-radius: 2px; background: color-mix(in oklab, var(--ac) 45%, #151A2A)"></span><span style="flex: 1 1 0; height: 82%; border-radius: 2px; background: color-mix(in oklab, var(--ac) 45%, #151A2A)"></span><span style="flex: 1 1 0; height: 83%; border-radius: 2px; background: var(--ac)"></span></span>
+</div><div style="display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 12px; border-radius: 14px; border: 1px solid #1A2032; background: #0A0C14">
+<span style="font-size: 12px; color: #9AA8C7">Repos touched</span>
+<span style="display: flex; align-items: baseline; gap: 8px"><span style="font-size: 20px; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums">9</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #7FE3B8">+3</span></span>
+<span aria-hidden="true" style="display: flex; align-items: flex-end; gap: 2px; height: 26px"><span style="flex: 1 1 0; height: 33%; border-radius: 2px; background: color-mix(in oklab, var(--ac) 45%, #151A2A)"></span><span style="flex: 1 1 0; height: 50%; border-radius: 2px; background: color-mix(in oklab, var(--ac) 45%, #151A2A)"></span><span style="flex: 1 1 0; height: 33%; border-radius: 2px; background: color-mix(in oklab, var(--ac) 45%, #151A2A)"></span><span style="flex: 1 1 0; height: 4%; border-radius: 2px; background: #1A2032"></span><span style="flex: 1 1 0; height: 17%; border-radius: 2px; background: color-mix(in oklab, var(--ac) 45%, #151A2A)"></span><span style="flex: 1 1 0; height: 50%; border-radius: 2px; background: color-mix(in oklab, var(--ac) 45%, #151A2A)"></span><span style="flex: 1 1 0; height: 67%; border-radius: 2px; background: color-mix(in oklab, var(--ac) 45%, #151A2A)"></span><span style="flex: 1 1 0; height: 50%; border-radius: 2px; background: color-mix(in oklab, var(--ac) 45%, #151A2A)"></span><span style="flex: 1 1 0; height: 67%; border-radius: 2px; background: color-mix(in oklab, var(--ac) 45%, #151A2A)"></span><span style="flex: 1 1 0; height: 4%; border-radius: 2px; background: #1A2032"></span><span style="flex: 1 1 0; height: 17%; border-radius: 2px; background: color-mix(in oklab, var(--ac) 45%, #151A2A)"></span><span style="flex: 1 1 0; height: 83%; border-radius: 2px; background: color-mix(in oklab, var(--ac) 45%, #151A2A)"></span><span style="flex: 1 1 0; height: 83%; border-radius: 2px; background: color-mix(in oklab, var(--ac) 45%, #151A2A)"></span><span style="flex: 1 1 0; height: 100%; border-radius: 2px; background: var(--ac)"></span></span>
+</div></div>
+</div>
 </section>
 
 <section aria-label="Outcomes" style="display: flex; align-items: center; gap: 20px; padding: 20px; border-radius: 20px; border: 1px solid #1A2032; background: #0D101A; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04)">
@@ -270,97 +339,164 @@ button{font-family:inherit}
 </div>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#4D80FF","options":["#4D80FF","#4CC9F0","#45E0A0","#A78BFA"]},"$preview":{"width":390,"height":2350}}'>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#4D80FF","options":["#4D80FF","#4CC9F0","#45E0A0","#A78BFA"]},"$preview":{"width":390,"height":2840}}'>
 class Component extends DCLogic {
 renderVals() {
-const A = 19.3, W = 13.5, DX = 6, DY = 5, EX = 4.2, EY = 3.5, OX = 6, Y0 = 118, HITMIN = 30;
-const DAYS = [
-['2026-07-25', 8, 6, 0, 0.2769, 73903, 8458, 60299, 828266],
-['2026-07-28', 4, 3, 0, 0.1737, 41859, 7150, 30391, 568180],
-['2026-08-06', 1, 1, 0, 0, 0, 0, 0, 0],
-['2026-08-08', 5, 4, 0, 0.043, 17, 279, 29892, 29688],
-['2026-08-10', 5, 5, 0, 0.1793, 78954, 7729, 0, 617216],
-['2026-08-17', 3, 2, 0, 0.1258, 29972, 4808, 30385, 326031],
-['2026-08-21', 10, 6, 0, 0.1324, 62, 4626, 69736, 139626],
-['2026-08-22', 5, 2, 0, 0.2159, 950, 5038, 70631, 204525],
-['2026-08-26', 5, 2, 0, 0.1266, 50, 5760, 66436, 82410],
-['2026-08-27', 19, 11, 0, 0.661, 37111, 21117, 154563, 953286],
-['2026-08-28', 43, 23, 0, 4.9849, 464027, 137651, 517201, 4556030]
+const G = { win: 8, ax: 34, ay: 5, bx: 10, by: -7, f: 0.72, ox: 10, oy: 118, hmax: 64, hmin: 4, vw: 350, vh: 186, leadY: 0, leadX: 0, labelDy: 18, hitmin: 30 };
+const REAL = [
+['2026-07-25', 8, 6, 0, 0.2769, 73903, 8458, 60299, 828266, 0],
+['2026-07-28', 4, 3, 0, 0.1737, 41859, 7150, 30391, 568180, 0],
+['2026-08-06', 1, 1, 0, 0, 0, 0, 0, 0, 0],
+['2026-08-08', 5, 4, 0, 0.043, 17, 279, 29892, 29688, 0],
+['2026-08-10', 5, 5, 0, 0.1793, 78954, 7729, 0, 617216, 0],
+['2026-08-17', 3, 2, 0, 0.1258, 29972, 4808, 30385, 326031, 0],
+['2026-08-21', 10, 6, 0, 0.1324, 62, 4626, 69736, 139626, 0],
+['2026-08-22', 5, 2, 0, 0.2159, 950, 5038, 70631, 204525, 0],
+['2026-08-26', 5, 2, 0, 0.1266, 50, 5760, 66436, 82410, 0],
+['2026-08-27', 19, 11, 0, 0.661, 37111, 21117, 154563, 953286, 0],
+['2026-08-28', 43, 23, 0, 4.9849, 464027, 137651, 517201, 4556030, 0]
 ];
-const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const WD = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const MO = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-const BASE = Date.UTC(2025, 11, 28);
-const MAXS = 43;
-const picked = this.state && typeof this.state.day === 'number' ? this.state.day : DAYS.length - 1;
+const DAY = 86400000;
+const START = Date.UTC(2025, 9, 13);
+const TODAY = Date.UTC(2026, 9, 9);
+const TOTALW = 52;
+const WIN = G.win;
 const n = (v) => Math.round(v * 100) / 100;
 const pc = (v, of) => n((v / of) * 100) + '%';
 const tok = (v) => (v >= 1e6 ? (v / 1e6).toFixed(2) + 'M' : v >= 1e3 ? (v / 1e3).toFixed(1) + 'K' : String(v));
 const poly = (pts) => 'M' + pts.map((p) => n(p[0]) + ',' + n(p[1])).join('L') + 'Z';
-const byCell = {};
-DAYS.forEach((d, i) => {
-const p = d[0].split('-').map(Number);
-const idx = Math.round((Date.UTC(p[0], p[1] - 1, p[2]) - BASE) / 86400000);
-byCell[Math.floor(idx / 7) + '-' + (idx % 7)] = { i, d, dow: idx % 7, mon: p[1] - 1, dom: p[2] };
-});
+const iso = (t) => new Date(t).toISOString().slice(0, 10);
+// Sample history around the 11 real days (seeded, so the board is stable)
+const real = {};
+REAL.forEach((r) => { real[r[0]] = r; });
+let seed = 137;
+const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
+const cells = [];
+for (let i = 0; i < TOTALW * 7; i++) {
+const t = START + i * DAY;
+const key = iso(t);
+const r1 = rnd(), r2 = rnd(), r3 = rnd();
+let rec = real[key] ? real[key].concat([false]) : null;
+const realSpan = t >= Date.UTC(2026, 6, 25) && t <= Date.UTC(2026, 7, 28);
+if (!rec && !realSpan && t <= TODAY) {
+const p = t < Date.UTC(2026, 3, 1) ? 0.14 : t < Date.UTC(2026, 6, 25) ? 0.32 : 0.55;
+if (r1 < p) {
+const s = 1 + Math.floor(r2 * r2 * (t > Date.UTC(2026, 7, 28) ? 26 : 12));
+const ex = Math.max(1, Math.round(s * 0.6));
+const fails = r3 < 0.16 ? Math.max(1, Math.round(ex * 0.6)) : 0;
+const k = s * 95000;
+rec = [key, s, ex, Math.floor(ex * r3), n(s * 0.11), Math.round(k * 0.08), Math.round(k * 0.03), Math.round(k * 0.12), Math.round(k * 0.77), fails, true];
+}
+}
+if (key === '2026-10-01') rec = [key, 3, 2, 0, 0, 0, 0, 0, 0, 2, true];
+cells.push({ i, t, key, w: Math.floor(i / 7), dow: i % 7, rec, future: t > TODAY });
+}
+const ACTIVE = cells.filter((c) => c.rec);
+const MAXS = Math.max.apply(null, ACTIVE.map((c) => c.rec[1]));
+const st = this.state || {};
+const pickedKey = typeof st.day === 'string' ? st.day : ACTIVE[ACTIVE.length - 1].key;
+const pi = Math.max(0, ACTIVE.findIndex((c) => c.key === pickedKey));
+const pickedCell = ACTIVE[pi];
+const maxOff = TOTALW - WIN;
+const off = Math.min(maxOff, Math.max(0, typeof st.off === 'number' ? st.off : 0));
+const first = maxOff - off;
+const offFor = (w) => {
+let f = first;
+if (w < f) f = w; else if (w > f + WIN - 1) f = w - WIN + 1;
+return Math.min(maxOff, Math.max(0, maxOff - f));
+};
+const go = (key, w) => this.setState({ day: key, off: offFor(w) });
+// Projection: weeks run toward the viewer (right, down), weekdays recede (Mon front, Sun back)
+const P = (c, r, z) => [G.ox + c * G.ax + r * G.bx, G.oy + c * G.ay + r * G.by - z];
+const F = G.f;
 const rows = [];
-for (let j = 0; j < 7; j++) rows.push({ side: '', front: '', top: '' });
-let floor = '';
-let future = '';
-const hits = [];
+for (let j = 0; j < 7; j++) rows.push({ run: { side: '', front: '', top: '' }, fail: { side: '', front: '', top: '' } });
+let floor = '', future = '', today = 'M0,0';
 let sel = { side: 'M0,0', front: 'M0,0', top: 'M0,0' };
-let lead = 'M0,0';
-let dot = { x: -10, y: -10 };
-for (let w = 25; w < 41; w++) {
-for (let d = 0; d < 7; d++) {
-const idx = w * 7 + d;
-if (idx < 4 || idx > 368) continue;
-const j = 6 - d;
-const X = OX + (w - 25) * A + j * DX;
-const Y = Y0 - j * DY;
-const cell = byCell[w + '-' + d];
-if (idx > 283) {
-future += poly([[X, Y], [X + W, Y], [X + W + EX, Y - EY], [X + EX, Y - EY]]);
-} else if (!cell) {
-floor += poly([[X, Y], [X + W, Y], [X + W + EX, Y - EY], [X + EX, Y - EY]]);
-} else {
-const h = Math.max(11, Math.round(72 * Math.sqrt(cell.d[1] / MAXS)));
-const front = poly([[X, Y], [X + W, Y], [X + W, Y - h], [X, Y - h]]);
-const side = poly([[X + W, Y], [X + W + EX, Y - EY], [X + W + EX, Y - EY - h], [X + W, Y - h]]);
-const top = poly([[X, Y - h], [X + W, Y - h], [X + W + EX, Y - h - EY], [X + EX, Y - h - EY]]);
-rows[j].front += front;
-rows[j].side += side;
-rows[j].top += top;
-const on = cell.i === picked;
+let lead = 'M0,0', dot = { x: -10, y: -10 };
+const hits = [];
+for (let c = 0; c < WIN; c++) {
+for (let r = 0; r < 7; r++) {
+const cell = cells[(first + c) * 7 + r];
+const base = poly([P(c, r, 0), P(c + F, r, 0), P(c + F, r + F, 0), P(c, r + F, 0)]);
+if (cell.t === TODAY) today = base;
+if (cell.future) { future += base; continue; }
+if (!cell.rec) { floor += base; continue; }
+const h = Math.max(G.hmin, Math.round(G.hmax * Math.sqrt(cell.rec[1] / MAXS)));
+const front = poly([P(c, r, 0), P(c + F, r, 0), P(c + F, r, h), P(c, r, h)]);
+const side = poly([P(c + F, r, 0), P(c + F, r + F, 0), P(c + F, r + F, h), P(c + F, r, h)]);
+const top = poly([P(c, r, h), P(c + F, r, h), P(c + F, r + F, h), P(c, r + F, h)]);
+const tone = cell.rec[9] * 2 >= cell.rec[2] && cell.rec[9] > 0 ? 'fail' : 'run';
+const b = rows[r][tone];
+b.front += front; b.side += side; b.top += top;
+const on = cell.key === pickedCell.key;
+const tc = P(c + F / 2, r + F / 2, h);
 if (on) {
 sel = { side, front, top };
-const cx = X + (W + EX) / 2;
-const ty = Y - h - EY / 2;
-dot = { x: n(cx), y: n(ty) };
-lead = 'M' + n(cx) + ',' + n(ty) + 'V0H0';
+dot = { x: n(tc[0]), y: n(tc[1]) };
+lead = 'M' + n(tc[0]) + ',' + n(tc[1]) + 'V' + G.leadY + 'H' + G.leadX;
 }
-const pad = 3;
-let y0 = Y - h - EY - pad;
-const y1 = Y + pad;
-if (y1 - y0 < HITMIN) y0 = y1 - HITMIN;
-const i = cell.i;
+const x0 = P(c, r, 0)[0] - 2, x1 = P(c + F, r + F, 0)[0] + 2;
+let y0 = P(c, r + F, h)[1] - 3;
+const y1 = P(c + F, r, 0)[1] + 3;
+if (y1 - y0 < G.hitmin) y0 = y1 - G.hitmin;
+const d = new Date(cell.t);
 hits.push({
-label: WD[cell.dow] + ', ' + MO[cell.mon] + ' ' + cell.dom + ': ' + cell.d[1] + (cell.d[1] === 1 ? ' session' : ' sessions'),
+label: WD[cell.dow] + ', ' + MO[d.getUTCMonth()] + ' ' + d.getUTCDate() + ': ' + cell.rec[1] + (cell.rec[1] === 1 ? ' session' : ' sessions') + (cell.rec[9] ? ', ' + cell.rec[9] + ' failed' : ''),
 on: on ? 'true' : 'false',
-l: pc(X - pad, 350),
-t: pc(y0, 146),
-w: pc(W + EX + pad * 2, 350),
-h: pc(y1 - y0, 146),
-z: 10 - j,
-pick: () => this.setState({ day: i })
+l: pc(x0, G.vw), t: pc(y0, G.vh), w: pc(x1 - x0, G.vw), h: pc(y1 - y0, G.vh),
+z: 10 + (6 - r) + c,
+pick: () => this.setState({ day: cell.key, off })
 });
 }
 }
+// Month labels along the front edge (5 slots, unused ones park off-canvas)
+const months = [];
+let lastM = -1;
+for (let c = 0; c < WIN; c++) {
+const d = new Date(cells[(first + c) * 7].t);
+const m = d.getUTCMonth();
+if (m !== lastM && months.length < 5) {
+const p = P(c, 0, 0);
+months.push({ x: n(p[0]), y: n(p[1] + G.labelDy), t: MO[m] + (m === 0 ? ' ' + d.getUTCFullYear() : '') });
 }
-const safe = (r) => ({ side: r.side || 'M0,0', front: r.front || 'M0,0', top: r.top || 'M0,0' });
-const sky = { floor, future: future || 'M0,0', r0: safe(rows[0]), r1: safe(rows[1]), r2: safe(rows[2]), r3: safe(rows[3]), r4: safe(rows[4]), r5: safe(rows[5]), r6: safe(rows[6]), sel, lead, dot, hits };
-const cur = DAYS[picked];
-const cp = cur[0].split('-').map(Number);
-const cdow = Math.round((Date.UTC(cp[0], cp[1] - 1, cp[2]) - BASE) / 86400000) % 7;
+lastM = m;
+}
+while (months.length < 5) months.push({ x: -100, y: -100, t: '' });
+const safe = (b) => ({ side: b.side || 'M0,0', front: b.front || 'M0,0', top: b.top || 'M0,0' });
+const R = rows.map((x) => ({ run: safe(x.run), fail: safe(x.fail) }));
+// Minimap: one bar per week across the whole history; the lit box is the window
+let wmax = 1;
+const wsum = [];
+for (let w = 0; w < TOTALW; w++) {
+let s = 0, f = 0;
+for (let r = 0; r < 7; r++) { const rec = cells[w * 7 + r].rec; if (rec) { s += rec[1]; f += rec[9]; } }
+wsum.push({ s, f });
+if (s > wmax) wmax = s;
+}
+const mini = wsum.map((x, w) => ({
+h: x.s ? Math.max(12, Math.round((x.s / wmax) * 100)) + '%' : '2px',
+c: x.f && x.f * 3 >= x.s ? '#FF6F61' : w >= first && w < first + WIN ? 'var(--ac)' : '#34406A',
+label: 'Week of ' + (() => { const d = new Date(cells[w * 7].t); return MO[d.getUTCMonth()] + ' ' + d.getUTCDate(); })() + ': ' + x.s + ' sessions',
+jump: () => this.setState({ off: Math.min(maxOff, Math.max(0, maxOff - (w - Math.floor(WIN / 2)))) })
+}));
+const fd = new Date(cells[first * 7].t), ld = new Date(Math.min(TODAY, cells[(first + WIN) * 7 - 1].t));
+const range = MO[fd.getUTCMonth()] + ' ' + fd.getUTCDate() + (fd.getUTCFullYear() !== ld.getUTCFullYear() ? ', ' + fd.getUTCFullYear() : '') + ' – ' + MO[ld.getUTCMonth()] + ' ' + ld.getUTCDate() + ', ' + ld.getUTCFullYear();
+const sky = {
+floor: floor || 'M0,0', future: future || 'M0,0', today, r0: R[0], r1: R[1], r2: R[2], r3: R[3], r4: R[4], r5: R[5], r6: R[6], sel, lead, dot, hits, mo: { m0: months[0], m1: months[1], m2: months[2], m3: months[3], m4: months[4] },
+mini, winL: pc(first, TOTALW), winW: pc(WIN, TOTALW), range,
+weeksBack: off === 0 ? 'Latest ' + WIN + ' weeks' : off + (off === 1 ? ' week back' : ' weeks back'),
+atNow: off === 0, atStart: off === maxOff,
+older: () => this.setState({ off: Math.min(maxOff, off + 1) }),
+olderPage: () => this.setState({ off: Math.min(maxOff, off + Math.floor(WIN / 2)) }),
+newer: () => this.setState({ off: Math.max(0, off - 1) }),
+newerPage: () => this.setState({ off: Math.max(0, off - Math.floor(WIN / 2)) }),
+now: () => this.setState({ off: 0 })
+};
+const cur = pickedCell.rec;
+const cd = new Date(pickedCell.t);
 const total = cur[5] + cur[6] + cur[7] + cur[8];
 const parts = [
 { label: 'Cache read', v: cur[8], c: '#4C8DEA' },
@@ -369,19 +505,22 @@ const parts = [
 { label: 'Input', v: cur[5], c: '#C98500' }
 ].map((p) => ({ label: p.label, c: p.c, v: tok(p.v), flex: Math.max(p.v, total * 0.008) }));
 const day = {
-date: WD[cdow] + ', ' + MO[cp[1] - 1] + ' ' + cp[2],
-year: String(cp[0]),
-pos: picked + 1 + ' of ' + DAYS.length + ' active days',
+date: WD[pickedCell.dow] + ', ' + MO[cd.getUTCMonth()] + ' ' + cd.getUTCDate(),
+year: String(cd.getUTCFullYear()),
+pos: pi + 1 + ' of ' + ACTIVE.length + ' active days',
 sessions: String(cur[1]),
 executions: String(cur[2]),
 commits: String(cur[3]),
+failed: cur[9] ? cur[9] + ' failed' : '',
+hasFailed: cur[9] > 0,
+sample: cur[10] === true,
 tokens: tok(total),
 cost: '$' + cur[4].toFixed(2),
 parts,
 hasTokens: total > 0,
 noTokens: total === 0,
-prev: () => this.setState({ day: (picked + DAYS.length - 1) % DAYS.length }),
-next: () => this.setState({ day: (picked + 1) % DAYS.length })
+prev: () => { const c = ACTIVE[(pi + ACTIVE.length - 1) % ACTIVE.length]; go(c.key, c.w); },
+next: () => { const c = ACTIVE[(pi + 1) % ACTIVE.length]; go(c.key, c.w); }
 };
 const ST = {
 completed: { tone: 'var(--ac)', badge: 'color-mix(in oklab, var(--ac) 16%, transparent)', icon: 'M3.5 8.5l3 3 6-7' },
