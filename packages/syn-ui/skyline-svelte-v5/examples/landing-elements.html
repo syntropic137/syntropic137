@@ -123,7 +123,7 @@
       if (delay) await new Promise((r) => setTimeout(r, delay))
       await import('../dist-elements/index.js')
 
-      // Sample city: the landing hero's activity ramp (sampleCityDays in skyline-core).
+      // Sample city: the landing hero's activity ramp (sampleHeroCityDays in skyline-core).
       const days = []
       for (let k = 0; k < 26 * 11; k++) {
         const i = k % 26
