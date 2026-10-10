@@ -263,3 +263,107 @@ describe('IsoCity board column (owner, Oct 10: the readout never covers today)',
     expect(container.querySelector('.sky-iso__future:not([data-edge])')!.getAttribute('d')).toMatch(/^M/)
   })
 })
+
+describe('IsoCity, codex review 2 of #1856', () => {
+  // jsdom lacks pointer capture; give it a no-op so the drag path runs as in a browser.
+  if (!('setPointerCapture' in HTMLElement.prototype)) Object.assign(HTMLElement.prototype, { setPointerCapture() {}, releasePointerCapture() {} })
+  const polysOf = (g: Element) =>
+    [...g.querySelectorAll('path')].map((p) => [...(p.getAttribute('d') ?? '').matchAll(/(-?[\d.]+),(-?[\d.]+)/g)].map((m) => [Number(m[1]), Number(m[2])] as [number, number]))
+  /** The day whose surface is painted on top at (x, y): the last block group in document order covering it (any overlay included). */
+  function paintedAt(c: HTMLElement, x: number, y: number): string | null {
+    let top: string | null = null
+    for (const g of c.querySelectorAll<SVGGElement>('.sky-iso__block:not([data-out]), .sky-iso__sel')) {
+      if (polysOf(g).some((p) => pointInPolygon(x, y, p))) top = g.dataset.dateBlock ?? 'selected-overlay'
+    }
+    return top
+  }
+  const pointer = (type: string, x: number, extra: Record<string, unknown> = {}) => {
+    const ev = new MouseEvent(type, { clientX: x, clientY: 100, bubbles: true, button: 0 })
+    Object.defineProperties(ev, { pointerType: { value: 'touch' }, pointerId: { value: 7 }, ...Object.fromEntries(Object.entries(extra).map(([k, v]) => [k, { value: v }])) })
+    return ev
+  }
+
+  it('paints the selection in painter order, so what is painted on top is what a pointer picks', () => {
+    const selectedDay = '2026-07-14'
+    const { container } = render(IsoCity, { days: busy, today: TODAY, selected: selectedDay })
+    const l = layoutIsoCityFloor({ weeks: isoCityWeeks(busy, hist.start, hist.weeks), first: FIRST, today: TODAY, dims, pad: 2, selected: selectedDay })
+    const sel = l.blocks.find((b) => b.date === selectedDay)!
+    let occluded = 0
+    let visible = 0
+    for (let x = sel.hit.x; x <= sel.hit.x + sel.hit.width; x += 1) {
+      for (let y = sel.hit.y; y <= sel.hit.y + sel.hit.height; y += 1) {
+        if (!sel.faces.some((f) => pointInPolygon(x, y, f))) continue
+        const picked = pickIsoCityBlock(l.blocks, x, y)?.date ?? null
+        const painted = paintedAt(container, x, y)
+        expect(painted, `${x},${y}`).toBe(picked)
+        if (picked === selectedDay) visible++
+        else occluded++
+      }
+    }
+    // The probe covers both cases: the selected day's own visible surface, and points a nearer block covers.
+    expect(visible).toBeGreaterThan(0)
+    expect(occluded).toBeGreaterThan(0)
+    expect(container.querySelector(`[data-date-block="${selectedDay}"]`)?.hasAttribute('data-selected')).toBe(true)
+  })
+
+  it('freezes the painted paths and the height scale while the floor moves, and swaps both on landing', async () => {
+    const recent = busy.filter((d) => d.date >= addDays(hist.start, FIRST * 7))
+    const { container, rerender } = render(IsoCity, { days: recent, today: TODAY })
+    const top = () => container.querySelector('[data-date-block="2026-09-04"] .sky-iso__top')!.getAttribute('d')
+    const before = top()
+    await back()
+    expect(chart(container).dataset.moving).toBeDefined()
+    // An older page arrives mid-glide with a far busier day: the height scale would drop every block.
+    const older: SkylineDay = { date: addDays(hist.start, (FIRST - 3) * 7 + 2), sessions: 10_000 }
+    await rerender({ days: [...busy, older], today: TODAY })
+    expect(chart(container).dataset.moving).toBeDefined()
+    expect(top()).toBe(before)
+    expect(container.querySelector(`[data-date-block="${older.date}"]`)).toBeNull()
+    await fireEvent.transitionEnd(floorGroup(container), { propertyName: 'transform' })
+    expect(top()).not.toBe(before)
+  })
+
+  it('hands focus to the chart when the focused day scrolls out (never to body)', async () => {
+    const { container } = render(IsoCity, { days: busy, today: TODAY, selected: '2026-10-05' })
+    const day = container.querySelector<HTMLButtonElement>('[data-date="2026-10-05"]')!
+    day.focus()
+    expect(document.activeElement).toBe(day)
+    await fireEvent.keyDown(day, { key: 'PageUp' })
+    expect(container.querySelector('[data-date="2026-10-05"]')).toBeNull()
+    expect(document.activeElement).toBe(chart(container))
+  })
+
+  it('a drag that starts mid-glide begins from the displayed transform and keeps the anchor', async () => {
+    const { container } = render(IsoCity, { days: busy, today: TODAY })
+    await back()
+    const glidingTo = shiftX(container)
+    expect(glidingTo).toBeGreaterThan(0)
+    // Mid-transition the floor is drawn 60% of the way there; jsdom has no transitions, so report it.
+    const shown = Math.round(glidingTo * 0.6)
+    const real = window.getComputedStyle
+    vi.spyOn(window, 'getComputedStyle').mockImplementation((el, p) => {
+      const s = real(el, p)
+      if (el !== floorGroup(container)) return s
+      return { ...s, transform: `matrix(1, 0, 0, 1, ${shown}, ${shown * (7 / 52)})` } as CSSStyleDeclaration
+    })
+    const el = chart(container)
+    await fireEvent(el, pointer('pointerdown', 500))
+    await fireEvent(el, pointer('pointermove', 510))
+    expect(anchorOf(container)).toBe(FIRST)
+    expect(shiftX(container)).toBeCloseTo(shown + 10, 0)
+    expect(floorGroup(container).dataset.gliding).toBeUndefined()
+  })
+
+  it('reduced motion: a drag release lands at once, with no glide back', async () => {
+    vi.stubGlobal('matchMedia', (q: string) => ({ matches: q.includes('reduce'), media: q, addEventListener() {}, removeEventListener() {} }))
+    const { container } = render(IsoCity, { days: busy, today: TODAY })
+    const el = chart(container)
+    await fireEvent(el, pointer('pointerdown', 500))
+    await fireEvent(el, pointer('pointermove', 520))
+    expect(shiftX(container)).toBeCloseTo(20, 0)
+    await fireEvent(el, pointer('pointerup', 520))
+    expect(floorGroup(container).dataset.gliding).toBeUndefined()
+    expect(floorGroup(container).style.transform).toBe('translate(0px, 0px)')
+    expect(anchorOf(container)).toBe(FIRST)
+  })
+})

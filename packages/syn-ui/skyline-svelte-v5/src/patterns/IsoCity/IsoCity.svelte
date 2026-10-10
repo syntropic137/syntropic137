@@ -42,6 +42,7 @@
     dayFromMs,
     isoCityCentred,
     isoCityEdgeMask,
+    isoBusiest,
     isoCityFit,
     isoCityHistory,
     isoCityKeyIntent,
@@ -60,10 +61,11 @@
     weekStartAt,
     windowRange,
     type IsoCityBlock,
+    type IsoCityWeek,
     type SkylineDay,
   } from '@syn137/skyline-core/geometry'
   import { GLYPH } from '@syn137/skyline-core/patterns'
-  import { glideFocusFirst, initialIsoGlide, isoGlide, stepperPosition, type IsoGlideEvent } from '@syn137/skyline-core/state'
+  import { dragWeeks, glideFocusFirst, initialIsoGlide, isoGlide, stepperPosition, type IsoGlideEvent } from '@syn137/skyline-core/state'
   import DayReadout from '../DayReadout/DayReadout.svelte'
   import Glyph from '../Glyph/Glyph.svelte'
   import type { IsoCityProps } from './types'
@@ -92,6 +94,7 @@
   let width = $state(0)
   let chartWidth = $state(0)
   let chartBox: HTMLDivElement | undefined = $state()
+  let floorGroup: SVGGElement | undefined = $state()
 
   // Before the first measurement, assume desktop so a server or test render shows the board.
   const wide = $derived(width === 0 || width >= wideFrom)
@@ -108,7 +111,15 @@
   // ---- motion: the floor is laid out around glide.anchor and translated by glide.shift weeks ----
   let glide = $state(initialIsoGlide)
   let fadeTick = $state(0)
-  const send = (e: IsoGlideEvent) => (glide = isoGlide(glide, e))
+  // While the floor moves, what it paints is frozen: the weeks, the height scale and the loaded range
+  // (codex review 2 of #1856). Data that arrives mid-glide is painted when it lands.
+  let frozen = $state.raw<{ weeks: IsoCityWeek[]; max: number; loadedFrom: string | null } | null>(null)
+  function send(e: IsoGlideEvent) {
+    glide = isoGlide(glide, e)
+    const isMoving = glide.gliding || glide.dragging
+    if (isMoving && !frozen) frozen = { weeks, max: isoBusiest(weeks), loadedFrom }
+    else if (!isMoving && frozen) frozen = null
+  }
   const anchor = $derived(glide.anchor ?? range.first)
   const focusFirst = $derived(glideFocusFirst(glide, range.first))
   const moving = $derived(glide.gliding || glide.dragging)
@@ -125,7 +136,19 @@
     return i >= 0 ? i : active.length - 1
   })
   const current = $derived(currentIndex === null ? null : (active[currentIndex] ?? null))
-  const layout = $derived(layoutIsoCityFloor({ weeks, first: anchor, window: win, today, dims, pad: glide.pad, selected: current?.date ?? null, loadedFrom }))
+  const layout = $derived(
+    layoutIsoCityFloor({
+      weeks: frozen?.weeks ?? weeks,
+      maxSessions: frozen?.max,
+      loadedFrom: frozen ? frozen.loadedFrom : loadedFrom,
+      first: anchor,
+      window: win,
+      today,
+      dims,
+      pad: glide.pad,
+      selected: current?.date ?? null,
+    }),
+  )
   const position = $derived(stepperPosition({ index: currentIndex, count: active.length }))
   const translate = $derived(`translate(${round(glide.shift * dims.ax)}px, ${round(glide.shift * dims.ay)}px)`)
   // The hit layer is HTML over the SVG: the same translation in CSS pixels.
@@ -243,9 +266,21 @@
       return
     }
     if (!glide.dragging && Math.abs(e.clientX - dragX) < 6) return
-    if (!glide.dragging) (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+    const starting = !glide.dragging
+    if (starting) (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId)
     dragged = true
-    send({ type: 'drag', weeks: (e.clientX - dragX) / weekPx, first: range.first })
+    // A drag that starts mid-glide picks the floor up where it is on screen (codex review 2 of #1856).
+    send({ type: 'drag', weeks: (e.clientX - dragX) / weekPx, first: range.first, from: starting ? displayedShift() : undefined })
+  }
+  /** The floor's translation on screen right now, in weeks (mid-transition included). */
+  function displayedShift(): number | undefined {
+    if (!floorGroup || typeof getComputedStyle !== 'function') return undefined
+    const t = getComputedStyle(floorGroup).transform
+    const m = /matrix\(([^)]+)\)/.exec(t) ?? /translate\(\s*(-?[\d.]+)px/.exec(t)
+    if (!m) return t === 'none' ? 0 : undefined
+    const parts = m[1]!.split(',').map(Number)
+    const x = parts.length === 6 ? parts[4]! : parts[0]!
+    return Number.isFinite(x) ? x / dims.ax : undefined
   }
   function hover(e: PointerEvent) {
     const b = blockAt(e)
@@ -256,10 +291,10 @@
     dragX = null
     dragId = null
     if (!glide.dragging) return
-    const moved = glide.shift
+    const moved = dragWeeks(glide)
     // About 4.35 weeks to a month; a quarter of a month's drag is enough to step.
     const months = Math.round((moved / 4.35) * 1.6)
-    send({ type: 'release' })
+    send({ type: 'release', first: range.first, reduced: reducedMotion() })
     setOffset(off + Math.sign(months) * Math.min(Math.abs(months), 12))
   }
   function onchartclick(e: MouseEvent) {
@@ -286,8 +321,10 @@
     const intent = isoCityKeyIntent(e.key, { onDay: (e.target as HTMLElement).dataset.date !== undefined, offset: off, maxOffset })
     if (!intent) return
     e.preventDefault()
-    if (intent.kind === 'step') void step(intent.dir, true)
-    else setOffset(intent.offset)
+    if (intent.kind === 'step') return void step(intent.dir, true)
+    // The focused day may scroll out and be removed: hand focus to the chart first, never to <body>.
+    if (e.target !== chartBox) chartBox?.focus()
+    setOffset(intent.offset)
   }
 
   const pct = (v: number, of: number) => `${round((v / of) * 100)}%`
@@ -364,7 +401,7 @@
         <rect x="0" y="0" width={dims.vw} height={dims.vh} fill="url(#{uid}-pool)" />
         <g mask="url(#{uid}-edge)">
           <g mask="url(#{uid}-fog)">
-            <g class="sky-iso__floor-group" data-gliding={glide.gliding || undefined} style:transform={translate} ontransitionend={onglideend}>
+            <g class="sky-iso__floor-group" data-gliding={glide.gliding || undefined} style:transform={translate} ontransitionend={onglideend} bind:this={floorGroup}>
               <path class="sky-iso__floor" d={layout.floor} />
               <path class="sky-iso__floor" data-edge d={layout.floorEdge} />
               <path class="sky-iso__unloaded" d={layout.unloaded} />
@@ -378,7 +415,7 @@
               </g>
               {#each layout.rows as row (row.row)}
                 {#each row.blocks as b (b.date)}
-                  <g class="sky-iso__block" data-tone={b.tone} data-out={!inFocus(b) || undefined} data-date-block={b.date}>
+                  <g class="sky-iso__block" data-tone={b.tone} data-out={!inFocus(b) || undefined} data-selected={(!moving && b.date === layout.selected?.date) || undefined} data-date-block={b.date}>
                     <path class="sky-iso__side" d={b.side} />
                     <path class="sky-iso__front" d={b.front} />
                     <path class="sky-iso__top" d={b.top} />
@@ -392,13 +429,6 @@
           <g style:transform={translate} class="sky-iso__floor-group" data-gliding={glide.gliding || undefined}>
             {#if layout.today}
               <rect x={layout.today.beam.x} y={layout.today.beam.y} width={layout.today.beam.width} height={layout.today.beam.height} rx="1.5" fill="url(#{uid}-beam)" />
-            {/if}
-            {#if layout.selected && !moving}
-              <g class="sky-iso__sel">
-                <path class="sky-iso__sel-side" d={layout.selected.side} />
-                <path class="sky-iso__sel-front" d={layout.selected.front} />
-                <path class="sky-iso__sel-top" d={layout.selected.top} />
-              </g>
             {/if}
           </g>
         </g>
@@ -627,8 +657,11 @@
       margin-top: 0;
     }
   }
+  /* The hit layer translates with a glide; clip it so it never widens the page (room left for focus rings). */
   .sky-iso__chart {
     min-width: 0;
+    overflow: clip;
+    overflow-clip-margin: 4px;
   }
   .sky-iso__chart {
     position: relative;
@@ -643,11 +676,12 @@
     outline: var(--sky-focus-ring-width) solid var(--sky-color-focus);
     outline-offset: var(--sky-focus-ring-offset);
   }
+  /* Clip to the view box: buffer weeks laid out for a glide are masked anyway, and must not widen the page. */
   .sky-iso__svg {
     display: block;
     width: 100%;
     height: auto;
-    overflow: visible;
+    overflow: hidden;
   }
   .sky-iso__fog-stop {
     stop-color: var(--sky-color-display-hi);
@@ -792,18 +826,20 @@
     fill: var(--ds-color-danger);
     opacity: 0.5;
   }
-  .sky-iso__sel path {
+  /* The selected day is lit in its own place in painter order, so nearer blocks still cover it and picking agrees with what is painted. */
+  .sky-iso__block[data-selected] path {
     stroke: var(--sky-color-display-hi);
     stroke-width: 1;
     stroke-linejoin: round;
+    stroke-opacity: 1;
   }
-  .sky-iso__sel-side {
+  .sky-iso__block[data-selected] .sky-iso__side {
     fill: var(--sky-iso-sel-side);
   }
-  .sky-iso__sel-front {
+  .sky-iso__block[data-selected] .sky-iso__front {
     fill: var(--sky-iso-sel-front);
   }
-  .sky-iso__sel-top {
+  .sky-iso__block[data-selected] .sky-iso__top {
     fill: var(--sky-color-display-hi);
   }
   .sky-iso__lead {
@@ -953,6 +989,10 @@
   }
   /* Reduced motion: no translation, one short crossfade per move (two names so each move restarts it). */
   @media (prefers-reduced-motion: reduce) {
+    .sky-iso__floor-group[data-gliding],
+    .sky-iso__hits[data-gliding] {
+      transition: none;
+    }
     .sky-iso__svg[data-fade='a'] {
       animation: sky-iso-fade-a 180ms ease-out;
     }
