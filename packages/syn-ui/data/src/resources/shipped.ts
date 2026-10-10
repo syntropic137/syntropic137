@@ -1,5 +1,6 @@
 /**
- * What agents shipped in a window, against the window before:
+ * What agents shipped in a window (agent-attributed only: commits and PRs
+ * produced by runs), against the window before:
  * GET /metrics/shipped?days=14 (7 | 14 | 30; optional workflow_id). The
  * Overview's "Shipped by agents" block reads it.
  *
