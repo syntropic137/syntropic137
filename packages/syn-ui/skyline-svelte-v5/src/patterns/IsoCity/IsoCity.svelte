@@ -1,33 +1,47 @@
 <!--
   Iso City (Overview "Right now" heatmap; Main and PhoneOverview boards):
-  an isometric floor of days. Weeks come toward the viewer, weekdays recede
-  (Mon in front). Height is sessions (sqrt), the tone tier says how busy
-  (dim, mid, hot with a rim and bloom) or that most runs failed (coral).
-  Today's tile is lit with a thin beam. Older weeks sink into the fog on the
-  left (SVG mask).
+  an isometric floor of days. Weeks come toward the viewer, and so do the
+  days of a week: Monday at the back, Sunday in front (owner, Oct 10), so
+  today is never hidden behind a later day. Height is sessions (sqrt), the
+  tone tier says how busy (dim, mid, hot with a rim and bloom) or that most
+  runs failed (coral). Today's tile is lit with a thin beam; the rest of
+  today's week is future tiles, so every week is a full column. Older weeks
+  sink into the fog on the left (SVG mask).
 
-  Only a window shows: 14 weeks wide, 8 narrow. It scrolls by months: the
-  buttons ("One month back", "One month forward", "Now"), a horizontal
-  wheel or trackpad swipe, a drag or touch swipe, and the arrow keys when
-  the chart is focused. The week strip under it shows the whole history
-  with the window lit; a click jumps to that week's month. Pointing at,
-  focusing or tapping a block shows its day in the readout; stepping active
-  days scrolls only when the day is out of view.
+  Only a window shows: 14 weeks wide, 8 narrow, centred. It scrolls by
+  months: the buttons ("One month back", "One month forward", "Now"), a
+  horizontal wheel or trackpad swipe, a drag or touch swipe, and the arrow
+  keys when the chart is focused. The week strip under it shows the whole
+  history with the window lit; a click jumps to that week's month. Pointing
+  at a block picks the day whose painted surface is on top (visible-surface
+  picking); focusing or tapping a day shows it in the readout. One visible
+  day is always the Tab stop (roving focus), apart from the selection.
 
-  Geometry and month maths live in skyline-core (layoutIsoCityFloor,
-  windowRange, offsetShowing, isoCityStrip). Weeks outside the window are
-  laid out one either side (more during a glide) and stay hidden at rest.
-  The glide is a CSS transition on the floor group; with reduced motion
-  the duration token is 0 and the window jumps. Nothing loops.
+  Motion (owner, Oct 10): a scroll is one continuous glide. The floor stays
+  laid out around the window it last landed on and translates by the whole
+  delta in one CSS transition; the window moves to the target only when the
+  glide lands, so nothing re-paints mid-glide. Wheel steps and button
+  presses mid-glide retarget the same transition. Blocks leaving the target
+  window fade and drop, blocks entering fade and rise, and an edge mask
+  along the week axis fades whole columns at both edges. Reduced motion:
+  one crossfade, no translation. The only timer is the landing backstop,
+  cleared on every retarget and on unmount.
+
+  Geometry, picking, keys and the glide live in skyline-core
+  (layoutIsoCityFloor, pickIsoCityBlock, isoCityKeyIntent, isoGlide).
 -->
 <script lang="ts">
-  import { tick } from 'svelte'
+  import { tick, untrack } from 'svelte'
   import {
     ISO_CITY_DESKTOP,
     ISO_CITY_PHONE,
     addDays,
     dayFromMs,
+    isoCityCentred,
+    isoCityEdgeMask,
     isoCityHistory,
+    isoCityKeyIntent,
+    isoCityRovingDate,
     isoCityStrip,
     isoCityWeeks,
     isoRangeLabel,
@@ -36,13 +50,16 @@
     offsetForWeek,
     offsetLabel,
     offsetShowing,
+    pickIsoCityBlock,
+    toViewBox,
     weekIndexOf,
     weekStartAt,
     windowRange,
+    type IsoCityBlock,
     type SkylineDay,
   } from '@syn137/skyline-core/geometry'
   import { GLYPH } from '@syn137/skyline-core/patterns'
-  import { stepperPosition } from '@syn137/skyline-core/state'
+  import { glideFocusFirst, initialIsoGlide, isoGlide, stepperPosition, type IsoGlideEvent } from '@syn137/skyline-core/state'
   import DayReadout from '../DayReadout/DayReadout.svelte'
   import Glyph from '../Glyph/Glyph.svelte'
   import type { IsoCityProps } from './types'
@@ -59,8 +76,13 @@
     runsHref,
     wideFrom = 720,
     badge,
+    coverage = null,
+    onretry,
     ...rest
   }: IsoCityProps = $props()
+
+  /** Landing backstop: the glide's CSS duration (--sky-duration-slow, 360ms) plus slack, in case transitionend never comes. */
+  const LAND_BACKSTOP_MS = 520
 
   const uid = $props.id()
   let width = $state(0)
@@ -69,23 +91,28 @@
 
   // Before the first measurement, assume desktop so a server or test render shows the board.
   const wide = $derived(width === 0 || width >= wideFrom)
-  const dims = $derived(wide ? ISO_CITY_DESKTOP : ISO_CITY_PHONE)
-  const win = $derived(windowProp ?? dims.win)
+  const board = $derived(wide ? ISO_CITY_DESKTOP : ISO_CITY_PHONE)
+  const win = $derived(windowProp ?? board.win)
+  const dims = $derived(isoCityCentred(board, win))
+  const edge = $derived(isoCityEdgeMask(dims, win))
   const hist = $derived(isoCityHistory(today, history))
   const weeks = $derived(isoCityWeeks(days, hist.start, hist.weeks))
   const maxOffset = $derived(maxMonthOffset(hist, win))
   const off = $derived(Math.min(maxOffset, Math.max(0, Math.floor(offset))))
   const range = $derived(windowRange(hist, win, off))
 
-  // ---- motion: `shift` weeks of translation still to glide away; `pad` weeks laid out each side ----
-  let shift = $state(0)
-  let pad = $state(1)
-  let gliding = $state(false)
-  let dragging = $state(false)
-  let shownFirst = $state<number | null>(null)
+  // ---- motion: the floor is laid out around glide.anchor and translated by glide.shift weeks ----
+  let glide = $state(initialIsoGlide)
+  let fadeTick = $state(0)
+  const send = (e: IsoGlideEvent) => (glide = isoGlide(glide, e))
+  const anchor = $derived(glide.anchor ?? range.first)
+  const focusFirst = $derived(glideFocusFirst(glide, range.first))
+  const moving = $derived(glide.gliding || glide.dragging)
 
-  const strip = $derived(isoCityStrip(weeks, range.first, win, dims.tickEvery))
+  const strip = $derived(isoCityStrip(weeks, range.first, win, dims.tickEvery, coverage))
   const rangeLabel = $derived(isoRangeLabel(weekStartAt(hist, range.first), minDay(addDays(weekStartAt(hist, range.last), 6), today)))
+  // Nothing loaded yet: every past day is unknown.
+  const loadedFrom = $derived(coverage ? (coverage.from ?? addDays(today, 1)) : null)
 
   const active = $derived(days.filter((d) => d.sessions > 0 && d.date <= today && d.date >= hist.start).sort((a, b) => (a.date < b.date ? -1 : 1)))
   const currentIndex = $derived.by(() => {
@@ -94,10 +121,17 @@
     return i >= 0 ? i : active.length - 1
   })
   const current = $derived(currentIndex === null ? null : (active[currentIndex] ?? null))
-  const layout = $derived(layoutIsoCityFloor({ weeks, first: range.first, window: win, today, dims, pad, selected: current?.date ?? null }))
+  const layout = $derived(layoutIsoCityFloor({ weeks, first: anchor, window: win, today, dims, pad: glide.pad, selected: current?.date ?? null, loadedFrom }))
   const position = $derived(stepperPosition({ index: currentIndex, count: active.length }))
-  const moving = $derived(gliding || dragging)
-  const translate = $derived(`translate(${round(shift * dims.ax)}px, ${round(shift * dims.ay)}px)`)
+  const translate = $derived(`translate(${round(glide.shift * dims.ax)}px, ${round(glide.shift * dims.ay)}px)`)
+  // The hit layer is HTML over the SVG: the same translation in CSS pixels.
+  const scale = $derived(chartWidth > 0 ? chartWidth / dims.vw : 1)
+  const hitTranslate = $derived(`translate(${round(glide.shift * dims.ax * scale)}px, ${round(glide.shift * dims.ay * scale)}px)`)
+
+  const inFocus = (b: IsoCityBlock) => b.week >= focusFirst && b.week < focusFirst + win
+  /** Day buttons: the days of the window the glide is heading for. Buffer weeks are never focusable. */
+  const dayButtons = $derived(layout.blocks.filter(inFocus))
+  const roving = $derived(isoCityRovingDate(dayButtons.map((b) => b.date), current?.date))
 
   function minDay(a: string, b: string): string {
     return a < b ? a : b
@@ -109,41 +143,37 @@
     return typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
   }
 
-  // Glide from wherever the floor was to the new window whenever the window moves.
+  // The window moved: glide there (or retarget the glide in flight).
   $effect.pre(() => {
     const first = range.first
-    const prev = shownFirst
-    shownFirst = first
-    if (prev === null || prev === first) return
-    glideFrom(first - prev)
+    untrack(() => {
+      const reduced = reducedMotion()
+      const was = glide.anchor
+      send({ type: 'target', first, reduced })
+      if (reduced && was !== null && was !== first) fadeTick++
+    })
+  })
+
+  // Landing backstop, re-armed by every retarget and cleared on unmount.
+  $effect(() => {
+    if (!glide.gliding) return
+    void glide.shift
+    const id = setTimeout(land, LAND_BACKSTOP_MS)
+    return () => clearTimeout(id)
   })
 
   $effect(() => {
     onwindow?.({ start: weekStartAt(hist, Math.max(0, range.first - 1)), end: addDays(weekStartAt(hist, range.last), 6), first: range.first })
   })
 
-  function glideFrom(delta: number) {
-    const from = shift + delta
-    if (reducedMotion() || from === 0) {
-      shift = 0
-      gliding = false
-      pad = 1
-      return
-    }
-    pad = Math.ceil(Math.abs(from)) + 1
-    gliding = false
-    shift = from
-    requestAnimationFrame(() =>
-      requestAnimationFrame(() => {
-        gliding = true
-        shift = 0
-      }),
-    )
+  function land() {
+    if (glide.gliding) send({ type: 'land', first: range.first })
   }
 
-  function onglideend() {
-    gliding = false
-    pad = 1
+  function onglideend(e: TransitionEvent) {
+    if (e.target !== e.currentTarget) return
+    if (e.propertyName && e.propertyName !== 'transform') return
+    land()
   }
 
   function setOffset(n: number) {
@@ -167,38 +197,55 @@
     chartBox?.querySelector<HTMLButtonElement>(`[data-date="${d.date}"]`)?.focus()
   }
 
+  // ---- pointing: the block painted on top under the pointer ----
+  function blockAt(e: MouseEvent): IsoCityBlock | null {
+    if (!chartBox || moving) return null
+    const p = toViewBox(e.clientX, e.clientY, chartBox.getBoundingClientRect(), dims.vw, dims.vh)
+    return p ? pickIsoCityBlock(dayButtons, p[0], p[1]) : null
+  }
+
   // ---- real input: drag or swipe, wheel or trackpad, keys ----
   let dragX: number | null = null
   let dragId: number | null = null
+  let dragged = false
   const weekPx = $derived(chartWidth > 0 ? (dims.ax * chartWidth) / dims.vw : dims.ax)
 
   function ondown(e: PointerEvent) {
     if (e.button !== 0) return
     dragX = e.clientX
     dragId = e.pointerId
+    dragged = false
   }
   function onmove(e: PointerEvent) {
-    if (dragX === null || e.pointerId !== dragId) return
-    const weeksMoved = (e.clientX - dragX) / weekPx
-    if (!dragging && Math.abs(e.clientX - dragX) < 6) return
-    if (!dragging) (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
-    dragging = true
-    gliding = false
-    shift = weeksMoved
-    pad = Math.ceil(Math.abs(weeksMoved)) + 1
+    if (dragX === null || e.pointerId !== dragId) {
+      if (e.pointerType === 'mouse') hover(e)
+      return
+    }
+    if (!glide.dragging && Math.abs(e.clientX - dragX) < 6) return
+    if (!glide.dragging) (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+    dragged = true
+    send({ type: 'drag', weeks: (e.clientX - dragX) / weekPx, first: range.first })
+  }
+  function hover(e: PointerEvent) {
+    const b = blockAt(e)
+    if (b) pick(b.day)
   }
   function onup(e: PointerEvent) {
     if (e.pointerId !== dragId) return
-    const moved = shift
     dragX = null
     dragId = null
-    if (!dragging) return
-    dragging = false
+    if (!glide.dragging) return
+    const moved = glide.shift
     // About 4.35 weeks to a month; a quarter of a month's drag is enough to step.
     const months = Math.round((moved / 4.35) * 1.6)
-    const next = Math.min(maxOffset, Math.max(0, off + Math.sign(months) * Math.min(Math.abs(months), 12)))
-    if (next === off) glideFrom(0)
-    else setOffset(next)
+    send({ type: 'release' })
+    setOffset(off + Math.sign(months) * Math.min(Math.abs(months), 12))
+  }
+  function onchartclick(e: MouseEvent) {
+    // detail 0 is a keyboard activation of a day button: that button already picked its day.
+    if (e.detail === 0 || dragged) return
+    const b = blockAt(e)
+    if (b) pick(b.day)
   }
 
   let wheelAcc = 0
@@ -206,7 +253,8 @@
     const dx = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.shiftKey ? e.deltaY : 0
     if (dx === 0) return
     e.preventDefault()
-    if (moving) return
+    if (glide.dragging) return
+    // Steps accumulate into the glide in flight (it retargets) rather than waiting for it.
     wheelAcc += dx
     if (Math.abs(wheelAcc) < 80) return
     setOffset(off + (wheelAcc > 0 ? -1 : 1))
@@ -214,24 +262,11 @@
   }
 
   function onchartkey(e: KeyboardEvent) {
-    const onBlock = (e.target as HTMLElement).dataset.date !== undefined
-    const key = e.key
-    if (onBlock && (key === 'ArrowLeft' || key === 'ArrowRight')) {
-      e.preventDefault()
-      void step(key === 'ArrowLeft' ? -1 : 1, true)
-      return
-    }
-    const months = key === 'ArrowLeft' || key === 'PageUp' ? 1 : key === 'ArrowRight' || key === 'PageDown' ? -1 : 0
-    if (months !== 0) {
-      e.preventDefault()
-      setOffset(off + months)
-    } else if (key === 'End') {
-      e.preventDefault()
-      setOffset(0)
-    } else if (key === 'Home') {
-      e.preventDefault()
-      setOffset(maxOffset)
-    }
+    const intent = isoCityKeyIntent(e.key, { onDay: (e.target as HTMLElement).dataset.date !== undefined, offset: off, maxOffset })
+    if (!intent) return
+    e.preventDefault()
+    if (intent.kind === 'step') void step(intent.dir, true)
+    else setOffset(intent.offset)
   }
 
   const pct = (v: number, of: number) => `${round((v / of) * 100)}%`
@@ -260,25 +295,27 @@
   </div>
 
   <div class="sky-iso__stage">
-    <!-- Drag, swipe and wheel are conveniences; the buttons, the week strip and the arrow keys carry the same moves. -->
-    <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
+    <!-- Drag, swipe, wheel and pointing are conveniences; the buttons, the week strip, the day buttons and the arrow keys carry the same moves. -->
+    <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions, a11y_click_events_have_key_events -->
     <div
       class="sky-iso__chart"
       role="group"
       tabindex="0"
       aria-label="Activity city, {offsetLabel(off, win)}. Left and right arrows scroll a month; on a day, they step active days."
       data-moving={moving || undefined}
-      data-dragging={dragging || undefined}
+      data-dragging={glide.dragging || undefined}
+      data-anchor={anchor}
       bind:this={chartBox}
       bind:clientWidth={chartWidth}
       onpointerdown={ondown}
       onpointermove={onmove}
       onpointerup={onup}
       onpointercancel={onup}
+      onclick={onchartclick}
       onwheel={onwheel}
       onkeydown={onchartkey}
     >
-      <svg class="sky-iso__svg" viewBox={layout.viewBox} role="img" aria-label="Isometric activity city for {rangeLabel}. Each block is a day; older weeks fade to the left. Use the arrows or the week strip below to scroll back in time.">
+      <svg class="sky-iso__svg" viewBox={layout.viewBox} role="img" data-fade={fadeTick === 0 ? undefined : fadeTick % 2 ? 'a' : 'b'} aria-label="Isometric activity city for {rangeLabel}. Each block is a day; older weeks fade to the left. Use the arrows or the week strip below to scroll back in time.">
         <defs>
           <linearGradient id="{uid}-fog-g" x1="0" y1="0" x2="1" y2="0">
             <stop class="sky-iso__fog-stop" offset="0" stop-opacity="0" />
@@ -287,6 +324,12 @@
           </linearGradient>
           <mask id="{uid}-fog" maskUnits="userSpaceOnUse" x="0" y="0" width={dims.vw} height={dims.vh}>
             <rect x="0" y="0" width={dims.vw} height={dims.vh} fill="url(#{uid}-fog-g)" />
+          </mask>
+          <linearGradient id="{uid}-edge-g" gradientUnits="userSpaceOnUse" x1={edge.x1} y1={edge.y1} x2={edge.x2} y2={edge.y2}>
+            {#each edge.stops as s, i (i)}<stop class="sky-iso__fog-stop" offset={s.offset} stop-opacity={s.opacity} />{/each}
+          </linearGradient>
+          <mask id="{uid}-edge" maskUnits="userSpaceOnUse" x="0" y="0" width={dims.vw} height={dims.vh}>
+            <rect x="0" y="0" width={dims.vw} height={dims.vh} fill="url(#{uid}-edge-g)" />
           </mask>
           <radialGradient id="{uid}-pool" cx="0.62" cy="0.78" r="0.55">
             <stop class="sky-iso__pool-in" offset="0" />
@@ -299,73 +342,73 @@
           <filter id="{uid}-bloom" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="6" /></filter>
         </defs>
         <rect x="0" y="0" width={dims.vw} height={dims.vh} fill="url(#{uid}-pool)" />
-        <g mask="url(#{uid}-fog)">
-          <g class="sky-iso__floor-group" data-gliding={gliding || undefined} style:transform={translate} ontransitionend={onglideend}>
-            <path class="sky-iso__floor" d={layout.floor} />
-            <path class="sky-iso__floor" data-edge d={layout.floorEdge} />
-            <path class="sky-iso__future" d={layout.future} />
-            <path class="sky-iso__future" data-edge d={layout.futureEdge} />
-            {#if layout.today}<path class="sky-iso__today" d={layout.today.tile} />{/if}
-            <g class="sky-iso__months" aria-hidden="true">
-              {#each layout.months as m (m.key)}
-                <text transform={m.transform} data-edge={!m.inWindow || undefined}>{m.text}</text>
+        <g mask="url(#{uid}-edge)">
+          <g mask="url(#{uid}-fog)">
+            <g class="sky-iso__floor-group" data-gliding={glide.gliding || undefined} style:transform={translate} ontransitionend={onglideend}>
+              <path class="sky-iso__floor" d={layout.floor} />
+              <path class="sky-iso__floor" data-edge d={layout.floorEdge} />
+              <path class="sky-iso__unloaded" d={layout.unloaded} />
+              <path class="sky-iso__future" d={layout.future} />
+              <path class="sky-iso__future" data-edge d={layout.futureEdge} />
+              {#if layout.today}<path class="sky-iso__today" d={layout.today.tile} />{/if}
+              <g class="sky-iso__months" aria-hidden="true">
+                {#each layout.months as m (m.key)}
+                  <text transform={m.transform} data-edge={!m.inWindow || undefined}>{m.text}</text>
+                {/each}
+              </g>
+              {#each layout.rows as row (row.row)}
+                {#each row.blocks as b (b.date)}
+                  <g class="sky-iso__block" data-tone={b.tone} data-out={!inFocus(b) || undefined} data-date-block={b.date}>
+                    <path class="sky-iso__side" d={b.side} />
+                    <path class="sky-iso__front" d={b.front} />
+                    <path class="sky-iso__top" d={b.top} />
+                  </g>
+                {/each}
               {/each}
+              <path class="sky-iso__glow" data-tone="hot" d={layout.glowHot} filter="url(#{uid}-bloom)" />
+              <path class="sky-iso__glow" data-tone="fail" d={layout.glowFail} filter="url(#{uid}-bloom)" />
             </g>
-            {#each layout.rows as row (row.row)}
-              {#each row.blocks as b (b.date)}
-                <g class="sky-iso__block" data-tone={b.tone} data-edge={!b.inWindow || undefined}>
-                  <path class="sky-iso__side" d={b.side} />
-                  <path class="sky-iso__front" d={b.front} />
-                  <path class="sky-iso__top" d={b.top} />
-                </g>
-              {/each}
-            {/each}
-            <path class="sky-iso__glow" data-tone="hot" d={layout.glowHot} filter="url(#{uid}-bloom)" />
-            <path class="sky-iso__glow" data-tone="fail" d={layout.glowFail} filter="url(#{uid}-bloom)" />
           </g>
-          <g class="sky-iso__weekdays" aria-hidden="true">
-            {#each layout.weekdays as w (w.key)}
-              <text transform={w.transform}>{w.text}</text>
-            {/each}
+          <g style:transform={translate} class="sky-iso__floor-group" data-gliding={glide.gliding || undefined}>
+            {#if layout.today}
+              <rect x={layout.today.beam.x} y={layout.today.beam.y} width={layout.today.beam.width} height={layout.today.beam.height} rx="1.5" fill="url(#{uid}-beam)" />
+            {/if}
+            {#if layout.selected && !moving}
+              <g class="sky-iso__sel">
+                <path class="sky-iso__sel-side" d={layout.selected.side} />
+                <path class="sky-iso__sel-front" d={layout.selected.front} />
+                <path class="sky-iso__sel-top" d={layout.selected.top} />
+              </g>
+            {/if}
           </g>
         </g>
-        <g style:transform={translate} class="sky-iso__floor-group" data-gliding={gliding || undefined}>
-          {#if layout.today}
-            <rect x={layout.today.beam.x} y={layout.today.beam.y} width={layout.today.beam.width} height={layout.today.beam.height} rx="1.5" fill="url(#{uid}-beam)" />
-          {/if}
-          {#if layout.selected && !moving}
-            <g class="sky-iso__sel">
-              <path class="sky-iso__sel-side" d={layout.selected.side} />
-              <path class="sky-iso__sel-front" d={layout.selected.front} />
-              <path class="sky-iso__sel-top" d={layout.selected.top} />
-            </g>
-            {#if wide && layout.lead}
-              <path class="sky-iso__lead" d={layout.lead} />
-              <circle class="sky-iso__dot" cx={layout.selected.anchor[0]} cy={layout.selected.anchor[1]} r="2.5" />
-            {/if}
-          {/if}
+        {#if layout.selected && !moving && wide && layout.lead}
+          <path class="sky-iso__lead" d={layout.lead} />
+          <circle class="sky-iso__dot" cx={layout.selected.anchor[0]} cy={layout.selected.anchor[1]} r="2.5" />
+        {/if}
+        <g class="sky-iso__weekdays" aria-hidden="true">
+          {#each layout.weekdays as w (w.key)}
+            <text transform={w.transform}>{w.text}</text>
+          {/each}
         </g>
       </svg>
-      <div class="sky-iso__hits" role="group" aria-label="Active days in view">
-        {#each layout.blocks as b (b.date)}
-          {#if b.inWindow}
-            <button
-              class="sky-iso__hit"
-              type="button"
-              data-date={b.date}
-              aria-label={b.label}
-              aria-pressed={b.date === current?.date}
-              tabindex={b.date === current?.date ? 0 : -1}
-              style:left={pct(b.hit.x, dims.vw)}
-              style:top={pct(b.hit.y, dims.vh)}
-              style:width={pct(b.hit.width, dims.vw)}
-              style:height={pct(b.hit.height, dims.vh)}
-              style:z-index={b.z}
-              onpointerenter={(e) => e.pointerType === 'mouse' && pick(b.day)}
-              onfocus={() => pick(b.day)}
-              onclick={() => pick(b.day)}
-            ></button>
-          {/if}
+      <div class="sky-iso__hits" role="group" aria-label="Active days in view" data-gliding={glide.gliding || undefined} style:transform={hitTranslate}>
+        {#each dayButtons as b (b.date)}
+          <button
+            class="sky-iso__hit"
+            type="button"
+            data-date={b.date}
+            aria-label={b.label}
+            aria-pressed={b.date === current?.date}
+            tabindex={b.date === roving ? 0 : -1}
+            style:left={pct(b.hit.x, dims.vw)}
+            style:top={pct(b.hit.y, dims.vh)}
+            style:width={pct(b.hit.width, dims.vw)}
+            style:height={pct(b.hit.height, dims.vh)}
+            style:z-index={b.z}
+            onfocus={() => pick(b.day)}
+            onclick={() => pick(b.day)}
+          ></button>
         {/each}
       </div>
     </div>
@@ -381,7 +424,7 @@
   <div class="sky-iso__strip">
     <div class="sky-iso__bars" role="group" aria-label="Whole history, one bar per week. The lit window is the part shown above.">
       {#each strip.bars as m (m.start)}
-        <button class="sky-iso__bar" type="button" aria-label={m.label} data-week={m.week} onclick={() => setOffset(offsetForWeek(hist, win, m.week))}>
+        <button class="sky-iso__bar" type="button" aria-label={m.label} data-week={m.week} data-status={m.status} onclick={() => setOffset(offsetForWeek(hist, win, m.week))}>
           <span data-tone={m.tone} style:height={m.height ? `${m.height}%` : '2px'}></span>
         </button>
       {/each}
@@ -391,6 +434,14 @@
       {#each strip.ticks as k (k.left)}<span style:left="{k.left}%">{k.text}</span>{/each}
       <span class="sky-iso__now">Now</span>
     </div>
+    {#if coverage?.state === 'error'}
+      <div class="sky-iso__load" data-state="error" role="alert">
+        <span>Older weeks did not load; they are not zero, just unknown.</span>
+        {#if onretry}<button class="sky-iso__retry" type="button" onclick={onretry}>Retry</button>{/if}
+      </div>
+    {:else if coverage?.state === 'loading'}
+      <div class="sky-iso__load" data-state="loading" role="status">Loading older weeks…</div>
+    {/if}
   </div>
 
   {#if !wide}
@@ -586,11 +637,21 @@
     stroke: var(--sky-iso-floor-edge);
     stroke-width: 0.6;
   }
+  /* Days after today: a floor tile like a quiet day, marked future by a dashed rim (owner, Oct 10: every week is a full column). */
   .sky-iso__future {
-    fill: none;
-    stroke: var(--sky-iso-future-edge);
+    fill: var(--sky-iso-floor);
+    fill-opacity: 0.55;
+    stroke: var(--sky-iso-label-faint);
     stroke-width: 0.6;
     stroke-dasharray: 2 2;
+  }
+  /* Not loaded yet: unknown, not zero. */
+  .sky-iso__unloaded {
+    fill: none;
+    stroke: var(--sky-iso-label-faint);
+    stroke-width: 0.5;
+    stroke-dasharray: 0.5 2.5;
+    stroke-linecap: round;
   }
   .sky-iso__today {
     fill: var(--sky-iso-today);
@@ -614,9 +675,20 @@
   }
   .sky-iso [data-edge] {
     opacity: 0;
+    transition: opacity var(--sky-duration-slow) var(--sky-ease-out);
   }
   .sky-iso__chart[data-moving] [data-edge] {
     opacity: 1;
+  }
+  /* Blocks outside the window the glide is heading for fade and drop; entering ones fade in and rise. */
+  .sky-iso__block {
+    transition:
+      opacity var(--sky-duration-slow) var(--sky-ease-out),
+      transform var(--sky-duration-slow) var(--sky-ease-out);
+  }
+  .sky-iso__block[data-out] {
+    opacity: 0;
+    transform: translateY(6px);
   }
   .sky-iso__front {
     stroke: var(--sky-iso-face-edge);
@@ -714,7 +786,12 @@
   .sky-iso__chart[data-moving] .sky-iso__hits {
     pointer-events: none;
   }
+  .sky-iso__hits[data-gliding] {
+    transition: transform var(--sky-duration-slow) var(--sky-ease-out);
+  }
+  /* Pointers pick the visible surface (pickIsoCityBlock); the buttons carry focus and keys. */
   .sky-iso__hit {
+    pointer-events: none;
     position: absolute;
     padding: 0;
     border: 0;
@@ -780,6 +857,43 @@
   .sky-iso__bar span[data-tone='fail'] {
     background: var(--ds-color-danger);
   }
+  .sky-iso__bar span[data-tone='unknown'] {
+    background: transparent;
+    border-bottom: 2px dotted var(--sky-iso-label-faint);
+  }
+  .sky-iso__load {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ds-space-2);
+    font-size: var(--sky-text-data);
+    color: var(--ds-color-text-subtle);
+  }
+  .sky-iso__load[data-state='error'] {
+    color: var(--sky-color-danger-soft-fg);
+  }
+  .sky-iso__retry {
+    height: var(--sky-size-control-sm);
+    padding: 0 var(--ds-space-3);
+    border: var(--ds-border-width) solid var(--sky-color-border-strong);
+    border-radius: var(--sky-radius-control);
+    background: transparent;
+    color: var(--ds-color-fg);
+    font: inherit;
+    cursor: pointer;
+  }
+  .sky-iso__retry:hover {
+    border-color: var(--sky-color-border-hover);
+  }
+  .sky-iso__retry:focus-visible {
+    outline: var(--sky-focus-ring-width) solid var(--sky-color-focus);
+    outline-offset: var(--sky-focus-ring-offset);
+  }
+  @media (pointer: coarse) {
+    .sky-iso__retry {
+      height: var(--sky-size-touch);
+    }
+  }
   .sky-iso__window {
     position: absolute;
     top: -6px;
@@ -806,6 +920,25 @@
   .sky-iso__ticks .sky-iso__now {
     right: 0;
     color: var(--sky-iso-now);
+  }
+  /* Reduced motion: no translation, one short crossfade per move (two names so each move restarts it). */
+  @media (prefers-reduced-motion: reduce) {
+    .sky-iso__svg[data-fade='a'] {
+      animation: sky-iso-fade-a 180ms ease-out;
+    }
+    .sky-iso__svg[data-fade='b'] {
+      animation: sky-iso-fade-b 180ms ease-out;
+    }
+  }
+  @keyframes sky-iso-fade-a {
+    from {
+      opacity: 0.35;
+    }
+  }
+  @keyframes sky-iso-fade-b {
+    from {
+      opacity: 0.35;
+    }
   }
   @media (prefers-reduced-motion: no-preference) {
     .sky-iso__window {

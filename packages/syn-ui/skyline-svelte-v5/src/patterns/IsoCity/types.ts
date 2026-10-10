@@ -1,4 +1,4 @@
-import type { SkylineDay } from '@syn137/skyline-core/geometry'
+import type { IsoCityCoverage, SkylineDay } from '@syn137/skyline-core/geometry'
 import type { HTMLAttributes } from 'svelte/elements'
 
 /** The weeks the window shows, as Mondays and the Sunday of the last week. */
@@ -31,4 +31,11 @@ export interface IsoCityProps extends Omit<HTMLAttributes<HTMLDivElement>, 'chil
   wideFrom?: number
   /** Optional chip after the range ("Sample history" in fixtures and stories). */
   badge?: string
+  /**
+   * How much of the history `days` covers. Weeks before `coverage.from` are
+   * unknown, not zero (strip and floor say so); `state` 'error' shows a
+   * Retry that calls `onretry`. Null or absent: `days` is the whole history.
+   */
+  coverage?: IsoCityCoverage | null
+  onretry?: () => void
 }
