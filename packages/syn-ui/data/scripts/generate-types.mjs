@@ -7,7 +7,9 @@ import { fileURLToPath } from 'node:url'
 import openapiTS, { astToString } from 'openapi-typescript'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
-const input = path.resolve(here, '../../../../apps/syn-docs/openapi.json')
+// An explicit spec path (first argument) regenerates from another committed spec,
+// e.g. main's while this branch's API lags it.
+const input = process.argv[2] ? path.resolve(process.argv[2]) : path.resolve(here, '../../../../apps/syn-docs/openapi.json')
 const output = path.resolve(here, '../src/generated/api-types.ts')
 
 if (!fs.existsSync(input)) {

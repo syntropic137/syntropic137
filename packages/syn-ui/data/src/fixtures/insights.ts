@@ -126,8 +126,9 @@ function day(r: Row): HeatmapDay {
       output_tokens: output,
       cache_creation_tokens: cacheWrite,
       cache_read_tokens: cacheRead,
-      failed_executions: failed,
+      failed,
     },
+    failed,
   }
 }
 

@@ -4,7 +4,6 @@ export {
   countWord,
   distinctRepoCount,
   heatmapToSkylineDays,
-  HEATMAP_FAILED_KEY,
   outcomeCounts,
   outcomeLine,
   overviewHeadline,

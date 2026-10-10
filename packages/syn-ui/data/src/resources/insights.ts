@@ -8,7 +8,8 @@ export type HeatmapDay = components['schemas']['HeatmapDayBucketResponse']
 /**
  * Per-day breakdown keys the API sends in `HeatmapDay.breakdown`
  * (sessions, executions, commits, cost_usd, tokens, the four token buckets
- * and, once the API sends it, failed_executions).
+ * and failed). The failed count is also a top-level field, `HeatmapDay.failed`:
+ * executions that ended failed on that UTC day.
  */
 export type HeatmapBreakdownKey =
   | 'sessions'
@@ -20,8 +21,8 @@ export type HeatmapBreakdownKey =
   | 'output_tokens'
   | 'cache_creation_tokens'
   | 'cache_read_tokens'
-  /** Failed runs that day (IsoCity coral tone); older APIs omit it. */
-  | 'failed_executions'
+  /** Executions that ended failed that day; the same value as `HeatmapDay.failed`. */
+  | 'failed'
 
 export interface HeatmapParams {
   organization_id?: string

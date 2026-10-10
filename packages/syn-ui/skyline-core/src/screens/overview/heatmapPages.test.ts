@@ -18,13 +18,21 @@ describe('heatmap pages', () => {
   })
 })
 
-describe('failed runs per day', () => {
-  it('reads failed_executions only when the API sends it', () => {
-    const [a, b] = heatmapToSkylineDays([
-      { date: '2026-10-01', count: 3, breakdown: { sessions: 3, executions: 2, failed_executions: 2 } },
-      { date: '2026-10-02', count: 1, breakdown: { sessions: 1 } },
+describe('failed runs per day (HeatmapDayBucketResponse.failed)', () => {
+  it('reads the top-level failed field the API ships', () => {
+    const [a, b, c] = heatmapToSkylineDays([
+      { date: '2026-10-01', count: 3, breakdown: { sessions: 3, executions: 2, failed: 2 }, failed: 2 },
+      { date: '2026-10-02', count: 1, breakdown: { sessions: 1, executions: 1, failed: 0 }, failed: 0 },
+      { date: '2026-10-03', count: 1, breakdown: { sessions: 1 } },
     ])
     expect(a?.failed).toBe(2)
-    expect(b && 'failed' in b).toBe(false)
+    expect(b?.failed).toBe(0)
+    // An API older than the field: unknown, never zero, never coral.
+    expect(c && 'failed' in c).toBe(false)
+  })
+
+  it('ignores the invented failed_executions and failed_count names', () => {
+    const [a] = heatmapToSkylineDays([{ date: '2026-10-01', count: 3, breakdown: { sessions: 3, executions: 2, failed_executions: 2, failed_count: 2 } }])
+    expect(a && 'failed' in a).toBe(false)
   })
 })
