@@ -144,6 +144,9 @@ test.describe('phone', () => {
     const back = scroll.getByRole('button', { name: 'One month back' })
     expect((await back.boundingBox())?.height).toBeGreaterThanOrEqual(44)
     await back.click()
+    // Mid-glide too: the buffer weeks laid out for the glide must not widen the page.
+    const midGlide = await page.evaluate(() => document.documentElement.scrollWidth)
+    expect(midGlide).toBeLessThanOrEqual(390)
     await expect(scroll.getByText('1 month back')).toBeVisible()
     await expect(page.getByRole('button', { name: 'Previous active day' })).toBeVisible()
     const width = await page.evaluate(() => document.documentElement.scrollWidth)

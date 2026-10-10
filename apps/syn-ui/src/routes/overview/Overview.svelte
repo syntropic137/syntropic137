@@ -14,7 +14,7 @@
   import { dayFromMs, type SkylineDay } from '@syn137/skyline-core/geometry'
   import { outcomeStatus, runBarPercent, runSegments, runSlots, runSubline } from '@syn137/skyline-core/patterns'
   import {
-    activeDaysIn,
+    activeDaysStat,
     attentionRuns,
     distinctRepoCount,
     heatmapCoverage,
@@ -137,9 +137,13 @@
   const longest = $derived(Math.max(0, ...rows.map((r) => (r.duration_seconds ?? 0) * 1000)))
   const slots = $derived(runSlots(rows.map((r) => r.phase_progress?.possible ?? r.total_phases)))
 
-  const stats = $derived([
+  // The headline's own request can fail: say so and offer Retry, never an endless ellipsis (codex review 2 of #1856).
+  const activeDays = $derived(
+    activeDaysStat({ days: periodHeatmap.data ? heatmapToSkylineDays(periodHeatmap.data.days) : null, period, error: periodHeatmap.error, loading: periodHeatmap.loading }),
+  )
+  const stats = $derived<{ label: string; value: string; retry?: () => void }[]>([
     { label: 'Sessions', value: formatInteger(metrics.data?.total_sessions) },
-    { label: 'Active days', value: periodHeatmap.data ? formatInteger(activeDaysIn(heatmapToSkylineDays(periodHeatmap.data.days), period)) : '…' },
+    { label: 'Active days', value: activeDays.state === 'ready' ? formatInteger(Number(activeDays.value)) : activeDays.value, retry: activeDays.state === 'error' ? () => periodHeatmap.refresh() : undefined },
     { label: 'Tokens', value: formatTokens(metrics.data?.total_tokens) },
     { label: 'Spend', value: formatCost(metrics.data?.total_cost_usd) },
   ])
@@ -222,6 +226,7 @@
             <dt>{s.label}</dt>
             <dd>
               {#if firstLoad}<Skeleton variant="text" width="4ch" />{:else}{s.value}{/if}
+              {#if s.retry}<button class="sky-ov-stat-retry" type="button" aria-label="Retry {s.label.toLowerCase()}" onclick={s.retry}>Retry</button>{/if}
             </dd>
           </div>
         {/each}
@@ -689,6 +694,27 @@
     .sky-ov-side {
       flex: 0 0 var(--sky-side-column);
       gap: var(--ds-space-5);
+    }
+  }
+  .sky-ov-stat-retry {
+    margin-left: var(--ds-space-2);
+    padding: 0 var(--ds-space-2);
+    border: var(--ds-border-width) solid var(--sky-color-border-strong);
+    border-radius: var(--sky-radius-control);
+    background: transparent;
+    color: var(--ds-color-fg);
+    font: inherit;
+    font-size: var(--ds-text-xs);
+    vertical-align: middle;
+    cursor: pointer;
+  }
+  .sky-ov-stat-retry:focus-visible {
+    outline: var(--sky-focus-ring-width) solid var(--sky-color-focus);
+    outline-offset: var(--sky-focus-ring-offset);
+  }
+  @media (pointer: coarse) {
+    .sky-ov-stat-retry {
+      min-height: var(--sky-size-touch);
     }
   }
 </style>
