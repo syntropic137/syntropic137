@@ -10,49 +10,17 @@
       "title": "Artifact viewer",
       "w": 1440,
       "x": 3040,
-      "y": 2400
-    },
-    "CompActions.dc.html": {
-      "h": 1260,
-      "page": "system",
-      "title": "Components \u00b7 actions and inputs",
-      "w": 1440,
-      "x": 1520,
-      "y": 0
-    },
-    "CompDisplay.dc.html": {
-      "h": 1360,
-      "page": "system",
-      "title": "Components \u00b7 display",
-      "w": 1440,
-      "x": 1520,
-      "y": 1340
-    },
-    "CompNav.dc.html": {
-      "h": 1560,
-      "page": "system",
-      "title": "Components \u00b7 navigation and overlays",
-      "w": 1440,
-      "x": 3040,
-      "y": 0
-    },
-    "CompPatterns.dc.html": {
-      "h": 1700,
-      "page": "system",
-      "title": "Patterns \u00b7 domain and data",
-      "w": 1440,
-      "x": 3040,
-      "y": 1640
+      "y": 2200
     },
     "Eval.dc.html": {
       "expand": "fill",
-      "h": 2240,
+      "h": 1340,
       "is_interactive": true,
       "page": "screens",
       "title": "Eval detail",
       "w": 1440,
       "x": 1520,
-      "y": 5200
+      "y": 4400
     },
     "Evals.dc.html": {
       "expand": "fill",
@@ -62,7 +30,7 @@
       "title": "Evals",
       "w": 1440,
       "x": 0,
-      "y": 5200
+      "y": 4400
     },
     "Execution.dc.html": {
       "expand": "fill",
@@ -94,7 +62,7 @@
     },
     "Main.dc.html": {
       "expand": "fill",
-      "h": 2120,
+      "h": 1760,
       "is_interactive": true,
       "page": "screens",
       "title": "Overview",
@@ -130,7 +98,7 @@
     },
     "PhoneEval.dc.html": {
       "expand": "fill",
-      "h": 3560,
+      "h": 1860,
       "is_interactive": true,
       "page": "phone",
       "title": "Eval detail",
@@ -170,7 +138,7 @@
     },
     "PhoneOverview.dc.html": {
       "expand": "fill",
-      "h": 2840,
+      "h": 2350,
       "is_interactive": true,
       "page": "phone",
       "title": "Overview",
@@ -208,7 +176,7 @@
     },
     "PhoneWorkflow.dc.html": {
       "expand": "fill",
-      "h": 2980,
+      "h": 1920,
       "is_interactive": true,
       "page": "phone",
       "title": "Workflow detail",
@@ -252,7 +220,7 @@
       "title": "Triggers",
       "w": 1440,
       "x": 4560,
-      "y": 2400
+      "y": 2200
     },
     "UsageMeter.dc.html": {
       "h": 900,
@@ -264,13 +232,13 @@
     },
     "Workflow.dc.html": {
       "expand": "fill",
-      "h": 2380,
+      "h": 1780,
       "is_interactive": true,
       "page": "screens",
       "title": "Workflow detail",
       "w": 1440,
       "x": 1520,
-      "y": 2400
+      "y": 2200
     },
     "Workflows.dc.html": {
       "expand": "fill",
@@ -280,47 +248,39 @@
       "title": "Workflows",
       "w": 1440,
       "x": 0,
-      "y": 2400
+      "y": 2200
     },
-    "Landing.dc.html": {
-      "expand": "fill",
-      "h": 8600,
-      "is_interactive": true,
-      "page": "landing",
-      "title": "syntropic137.com v4 \u00b7 agent work that compounds",
-      "w": 1440,
-      "x": 0,
-      "y": 0
-    },
-    "PhoneLanding.dc.html": {
-      "expand": "fill",
-      "h": 9400,
-      "is_interactive": true,
-      "page": "landing",
-      "title": "syntropic137.com v4 \u00b7 phone",
-      "w": 390,
+    "CompActions.dc.html": {
       "x": 1520,
-      "y": 0
-    },
-    "LandingV3.dc.html": {
-      "expand": "fill",
-      "h": 6300,
-      "is_interactive": true,
-      "page": "landing",
-      "title": "v3 (evals-first, for comparison)",
+      "y": 0,
       "w": 1440,
-      "x": 2600,
-      "y": 0
+      "h": 1260,
+      "title": "Components · actions and inputs",
+      "page": "system"
     },
-    "PhoneLandingV3.dc.html": {
-      "expand": "fill",
-      "h": 6900,
-      "is_interactive": true,
-      "page": "landing",
-      "title": "v3 phone",
-      "w": 390,
-      "x": 4120,
-      "y": 0
+    "CompDisplay.dc.html": {
+      "x": 1520,
+      "y": 1340,
+      "w": 1440,
+      "h": 1360,
+      "title": "Components · display",
+      "page": "system"
+    },
+    "CompNav.dc.html": {
+      "x": 3040,
+      "y": 0,
+      "w": 1440,
+      "h": 1560,
+      "title": "Components · navigation and overlays",
+      "page": "system"
+    },
+    "CompPatterns.dc.html": {
+      "x": 3040,
+      "y": 1640,
+      "w": 1440,
+      "h": 1700,
+      "title": "Patterns · domain and data",
+      "page": "system"
     }
   },
   "createdOnFiles": {
@@ -339,7 +299,7 @@
       "text": "Evals boards: the cases, workflows, baseline, goal and the gpt-5.6-terra run of shared-esp-stream are real. Verdicts, most costs and durations are placeholders until the VPS data can be read.",
       "w": 420,
       "x": 3040,
-      "y": 5200
+      "y": 4400
     },
     "evals-sample-phone": {
       "fill": "orange",
@@ -353,25 +313,25 @@
       "kind": "title1",
       "maxW": 6000,
       "page": "screens",
-      "text": "Build \u2014 workflows, artifacts, triggers",
+      "text": "Build — workflows, artifacts, triggers",
       "w": 240,
       "x": 0,
-      "y": 2140
+      "y": 1940
     },
     "row-measure": {
       "kind": "title1",
       "maxW": 2960,
       "page": "screens",
-      "text": "Measure \u2014 evals",
+      "text": "Measure — evals",
       "w": 240,
       "x": 0,
-      "y": 4940
+      "y": 4140
     },
     "row-observe": {
       "kind": "title1",
       "maxW": 6000,
       "page": "screens",
-      "text": "Observe \u2014 overview, executions, sessions",
+      "text": "Observe — overview, executions, sessions",
       "w": 240,
       "x": 0,
       "y": -260
@@ -380,93 +340,26 @@
       "kind": "title1",
       "maxW": 4620,
       "page": "phone",
-      "text": "Phone first \u2014 390 wide, dock instead of the capsule",
+      "text": "Phone first — 390 wide, dock instead of the capsule",
       "w": 240,
       "x": 0,
-      "y": -260
-    },
-    "sys-components": {
-      "kind": "title1",
-      "maxW": 2960,
-      "page": "system",
-      "text": "Components and patterns, every state",
-      "w": 240,
-      "x": 1520,
       "y": -260
     },
     "sys-foundations": {
+      "x": 0,
+      "y": -260,
+      "text": "Foundations and shared pieces",
       "kind": "title1",
       "maxW": 1440,
-      "page": "system",
-      "text": "Foundations and shared pieces",
-      "w": 240,
-      "x": 0,
-      "y": -260
+      "page": "system"
     },
-    "trends-sample": {
-      "fill": "orange",
-      "page": "screens",
-      "text": "Trend charts (Eval detail, Workflow detail, Workflows cards) use sample run history to show the design. Eval runs need a 0-100 judge score and the judge model stored per run; cost, duration and tokens already exist. Agents read the same data with `syn eval trend <id> --json`.",
-      "w": 420,
-      "x": 3040,
-      "y": 5460
-    },
-    "trends-sample-phone": {
-      "fill": "orange",
-      "page": "phone",
-      "text": "Trend charts on Eval and Workflow detail use sample run history to show the design.",
-      "w": 420,
-      "x": 4700,
-      "y": 260
-    },
-    "landing-title": {
+    "sys-components": {
+      "x": 1520,
+      "y": -260,
+      "text": "Components and patterns, every state",
       "kind": "title1",
-      "maxW": 4600,
-      "page": "landing",
-      "text": "syntropic137.com \u2014 v4: agent work that compounds (v3 on the right)",
-      "w": 240,
-      "x": 0,
-      "y": -260
-    },
-    "landing-note": {
-      "fill": "orange",
-      "page": "landing",
-      "text": "Positioning: Syntropic137 turns your coding agents into repeatable workflows. Run them on any harness, see every step, and make every run better than the last. Page order: hero (the S rising from the run city) \u2192 What is it (write once, run anywhere, every run compounds) \u2192 01 Repeatable workflows \u2192 02 Any harness \u2192 03 Fully observable \u2192 04 Compounding improvement (the eval explorer) \u2192 use cases \u2192 why a platform \u2192 get started. Product numbers are sample data.",
-      "w": 420,
-      "x": 1990,
-      "y": 0
-    },
-    "landing-hero-blender": {
-      "fill": "orange",
-      "page": "landing",
-      "text": "Hero art is now the Blender render (build_hero.py in the handoff folder's blender/). This is a preview-quality cloud render: grainy, no denoiser. The final comes from the Mac mini at 2560px with the denoiser, plus a 5-second clip that plays once. v3 on the right keeps the vector city hero for comparison.",
-      "w": 420,
-      "x": 1990,
-      "y": 360
-    },
-    "shipped-sample": {
-      "fill": "orange",
-      "page": "screens",
-      "text": "\"Shipped by agents\" replaces the Live commits feed: commits, PRs opened, PRs merged, merge rate and repos touched over 14 days, each with a daily bar trend. The numbers are samples (this instance has no git events yet). The data comes from the GitHub events the triggers already receive, plus PRs created by runs.",
-      "w": 420,
-      "x": -480,
-      "y": 0
-    },
-    "overview-iso": {
-      "fill": "orange",
-      "page": "screens",
-      "w": 420,
-      "x": -480,
-      "y": 420,
-      "text": "Overview heatmap is now an isometric city of days that scrolls back in time, like the Blender render: weeks come toward you, weekdays recede, older weeks sink into the fog on the left. Use the arrows, Now, or click a week in the strip below. In the build: trackpad and wheel scroll, drag, arrow keys and swipe on phone; render only visible weeks plus one each side; lazy-load older weeks; reduced motion jumps a week at a time. History outside Jul 25 to Aug 28 is sample data."
-    },
-    "overview-iso-phone": {
-      "fill": "orange",
-      "page": "phone",
-      "w": 420,
-      "x": 4700,
-      "y": 420,
-      "text": "Phone Overview: same scrolling city, 8 weeks visible. Swipe sideways in the build; the arrows and Now are the board stand-ins. The week strip shows the whole year with the visible window outlined. History outside Jul 25 to Aug 28 is sample data."
+      "maxW": 2960,
+      "page": "system"
     }
   },
   "order": [
@@ -499,11 +392,7 @@
     "CompActions.dc.html",
     "CompDisplay.dc.html",
     "CompNav.dc.html",
-    "CompPatterns.dc.html",
-    "Landing.dc.html",
-    "PhoneLanding.dc.html",
-    "LandingV3.dc.html",
-    "PhoneLandingV3.dc.html"
+    "CompPatterns.dc.html"
   ],
   "pages": [
     {
@@ -517,11 +406,7 @@
     {
       "id": "system",
       "name": "System"
-    },
-    {
-      "id": "landing",
-      "name": "Landing"
     }
   ],
-  "title": "Syn137 \u2014 UI redesign"
+  "title": "Syn137 — UI redesign"
 }
