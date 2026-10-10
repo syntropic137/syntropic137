@@ -71,6 +71,12 @@ class _NullCollector:
     async def note_command_ended(self, *_args: object) -> None:
         return None
 
+    def note_command_started(self, *_args: object) -> None:
+        return None
+
+    async def note_command_finished(self, *_args: object) -> None:
+        return None
+
     async def record_tool_completed(self, **kwargs: object) -> None:
         self.calls.append(("tool_completed", kwargs))
 
