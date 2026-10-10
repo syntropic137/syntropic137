@@ -23,9 +23,11 @@
   <ul class="sky-ov-shipped__tiles">
     {#each tiles as t (t.key)}
       <li class="sky-ov-shipped__tile" data-available={t.available}>
-        <span class="sky-ov-shipped__label">{t.label}</span>
         {#if t.available}
-          <span class="sky-ov-shipped__figure" aria-label={t.summary}>
+          <!-- aria-label is prohibited on a plain span (Lighthouse aria-prohibited-attr): the summary is real text. -->
+          <span class="sky-visually-hidden">{t.summary}</span>
+          <span class="sky-ov-shipped__label" aria-hidden="true">{t.label}</span>
+          <span class="sky-ov-shipped__figure">
             <span class="sky-ov-shipped__total" aria-hidden="true">{t.total}</span>
             <span class="sky-ov-shipped__delta" data-tone={t.tone} aria-hidden="true">{t.delta}</span>
           </span>
@@ -35,6 +37,7 @@
             {/each}
           </svg>
         {:else}
+          <span class="sky-ov-shipped__label">{t.label}</span>
           <span class="sky-ov-shipped__na" title={t.reason ?? undefined}>Not available on this server</span>
         {/if}
       </li>
