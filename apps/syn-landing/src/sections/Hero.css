@@ -117,6 +117,41 @@
   display: block;
 }
 
+/* The Blender hero (HERO_MEDIA "render"): transparent, so the page shows through. */
+.hero__render {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.hero__render[hidden] {
+  display: none;
+}
+
+/* The render fades into the page under the stats instead of ending on a hard edge
+   (a mask only reads alpha, so the token is just an opaque stop). */
+.hero__stage--render .hero__render {
+  mask-image: linear-gradient(to bottom, var(--ds-color-bg) 68%, transparent 94%);
+}
+
+/* The cards sit on the rendered city (stage percentages = render frame percentages):
+   the run on the left blocks, the phases on the right arm, the trend in front of the S. */
+.hero__stage--render .hero__card--run {
+  left: 8%;
+  top: 40%;
+}
+
+.hero__stage--render .hero__card--phases {
+  right: 8%;
+  top: 56%;
+}
+
+.hero__stage--render .hero__card--trend {
+  left: 24%;
+  right: auto;
+  top: 66%;
+}
+
 .hero__city-art {
   display: block;
   width: 100%;
@@ -180,7 +215,8 @@
   }
   .hero__stage[data-hold] .hero__city-art g,
   .hero__stage[data-hold] .hero__overlay,
-  .hero__stage[data-hold] sky-s-mark:not(:defined) {
+  .hero__stage[data-hold] sky-s-mark:not(:defined),
+  .hero__stage[data-hold] .hero__render {
     opacity: 0;
   }
 }
