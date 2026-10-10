@@ -311,6 +311,11 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         return self._workflow_id
 
     @property
+    def workflow_name(self) -> str | None:
+        """The workflow's display name as the run started it."""
+        return self._workflow_name
+
+    @property
     def running_phase_id(self) -> str | None:
         """The phase that started and has not completed, or None.
 

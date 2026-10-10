@@ -79,7 +79,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         - Disconnect from event store
     """
     import syn_api.services.lifecycle as lifecycle
-    from syn_api.services import pull_request_merges
+    from syn_api.services import shipped_ledger
 
     logger.info("Starting Syntropic137 API...")
 
@@ -89,8 +89,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             logger.error("Startup failed: %s — refusing to serve traffic", result.message)
             raise RuntimeError(f"Startup aborted: {result.message}")
         logger.info("Startup complete (mode=%s)", result.value.get("mode", "full"))
-        # Lane 2: PR merges the GitHub pipeline sees, for /metrics/shipped.
-        pull_request_merges.register_pull_request_merge_recorder()
+        # Lane 2: the shipped ledger's merge recorder and one-time backfill.
+        shipped_ledger.start_shipped_ledger()
 
     gate: StartupGate = app.state.startup_gate
     await gate.open(start)

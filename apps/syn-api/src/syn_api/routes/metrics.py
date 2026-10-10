@@ -17,11 +17,11 @@ from pydantic import BaseModel, ConfigDict, Field
 from syn_api._wiring import (
     ensure_connected,
     get_canonical_usage_query,
-    get_event_store_instance,
     get_execution_cost_query,
     get_phase_profile_query,
     get_projection_mgr,
 )
+from syn_api.services.shipped_ledger import shipped_metrics_service
 from syn_api.types import (
     DashboardMetrics,
     Err,
@@ -31,13 +31,7 @@ from syn_api.types import (
     Result,
     ShippedMetricsResponse,
 )
-from syn_domain.contexts.orchestration import (
-    SHIPPED_WINDOW_DAYS,
-    ExecutionListReads,
-    ShippedMetricsQueryService,
-    TimescaleCommitSightings,
-    TimescalePullRequestSightings,
-)
+from syn_domain.contexts.orchestration import SHIPPED_WINDOW_DAYS, ShippedMetricsQueryService
 from syn_domain.pagination import Page
 from syn_shared.pricing import canonical_cost_usd
 
@@ -430,19 +424,8 @@ async def get_phase_profiles_endpoint(
 
 
 def get_shipped_metrics_query() -> ShippedMetricsQueryService:
-    """The "Shipped by agents" query: agent_events commits + the execution list.
-
-    Raises:
-        RuntimeError: If the TimescaleDB pool is not yet initialized.
-    """
-    pool = get_event_store_instance().pool
-    if pool is None:
-        raise RuntimeError("TimescaleDB pool is not initialized")
-    return ShippedMetricsQueryService(
-        sightings=TimescaleCommitSightings(pool),
-        executions=ExecutionListReads(get_projection_mgr().store),
-        pull_requests=TimescalePullRequestSightings(pool),
-    )
+    """The process-wide shipped read service (rollup rows behind a cache)."""
+    return shipped_metrics_service()
 
 
 @router.get("/shipped", response_model=ShippedMetricsResponse)
@@ -456,12 +439,11 @@ async def get_shipped_metrics_endpoint(
 ) -> ShippedMetricsResponse:
     """What agents shipped over the last ``days`` UTC days, against the ``days`` before.
 
-    Agent-attributed only: commits are distinct shas from ``git_commit``
-    observations carrying an execution; PRs opened are PRs a run created with
-    ``gh pr create``; PRs merged are merges of those PRs, from the
-    ``pull_request`` (closed, merged) events the GitHub pipeline ingests;
-    merge rate is merged / opened in percent; repos touched are the repos of
-    all of the above.
+    Agent-attributed only, read from the shipped ledger's daily rollup: commits
+    runs made, PRs runs created (a successful ``gh pr create``), merges of
+    those PRs (``pull_request`` closed+merged events from the GitHub
+    pipeline), merge rate as the share of the window's opened PRs merged by
+    now, and the repos all of that touched.
     """
     if days not in SHIPPED_WINDOW_DAYS:
         allowed = ", ".join(str(d) for d in sorted(SHIPPED_WINDOW_DAYS))

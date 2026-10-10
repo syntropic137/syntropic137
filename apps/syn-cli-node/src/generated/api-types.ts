@@ -1281,12 +1281,11 @@ export interface paths {
          * Get Shipped Metrics Endpoint
          * @description What agents shipped over the last ``days`` UTC days, against the ``days`` before.
          *
-         *     Agent-attributed only: commits are distinct shas from ``git_commit``
-         *     observations carrying an execution; PRs opened are PRs a run created with
-         *     ``gh pr create``; PRs merged are merges of those PRs, from the
-         *     ``pull_request`` (closed, merged) events the GitHub pipeline ingests;
-         *     merge rate is merged / opened in percent; repos touched are the repos of
-         *     all of the above.
+         *     Agent-attributed only, read from the shipped ledger's daily rollup: commits
+         *     runs made, PRs runs created (a successful ``gh pr create``), merges of
+         *     those PRs (``pull_request`` closed+merged events from the GitHub
+         *     pipeline), merge rate as the share of the window's opened PRs merged by
+         *     now, and the repos all of that touched.
          */
         get: operations["get_shipped_metrics_endpoint_metrics_shipped_get"];
         put?: never;
@@ -8373,8 +8372,6 @@ export interface components {
             repos: string[];
             /** By Workflow */
             by_workflow: components["schemas"]["ShippedWorkflowResponse"][];
-            /** Commits Without Workflow */
-            commits_without_workflow: number;
             /** Unavailable */
             unavailable: string[];
         };
@@ -8409,7 +8406,13 @@ export interface components {
         };
         /**
          * ShippedRateTileResponse
-         * @description A percentage over the window, 0 to 100; ``delta`` is in percentage points.
+         * @description Merge rate: of the run PRs OPENED in the window, the percent merged by now.
+         *
+         *     A cohort conversion, 0 to 100 by construction (the merged PRs are a subset
+         *     of the opened ones). ``previous_total`` asks the same of the previous
+         *     window's cohort, as of now. ``delta`` is in percentage points. A series
+         *     point is that day's opened PRs merged since, null on a day none opened.
+         *     Null totals: no PR was opened, which is not 0%.
          */
         ShippedRateTileResponse: {
             /** Total */

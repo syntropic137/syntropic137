@@ -4334,7 +4334,8 @@ class ShippedCountTileResponse(BaseModel):
     delta: int | None
     """``total - previous_total``."""
     delta_percent: float | None
-    """Relative change in percent; null when the previous window was zero."""
+    """Relative change in percent; null whenever ``previous_total`` is 0 (0 to 0
+    included; ``delta_display`` then reads "0%", and "new" for 0 to N)."""
     delta_display: str | None
     """Server-formatted delta in ``delta_unit``: "+38%" or "+3"."""
     delta_unit: ShippedDeltaUnit
@@ -4347,7 +4348,14 @@ class ShippedCountTileResponse(BaseModel):
 
 
 class ShippedRateTileResponse(BaseModel):
-    """A percentage over the window, 0 to 100; ``delta`` is in percentage points."""
+    """Merge rate: of the run PRs OPENED in the window, the percent merged by now.
+
+    A cohort conversion, 0 to 100 by construction (the merged PRs are a subset
+    of the opened ones). ``previous_total`` asks the same of the previous
+    window's cohort, as of now. ``delta`` is in percentage points. A series
+    point is that day's opened PRs merged since, null on a day none opened.
+    Null totals: no PR was opened, which is not 0%.
+    """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -4395,9 +4403,6 @@ class ShippedMetricsResponse(BaseModel):
     """Distinct repos touched in the window, ``owner/name``, sorted."""
     by_workflow: list[ShippedWorkflowResponse]
     """Top workflows by commits, then PRs merged; empty when filtered to one."""
-    commits_without_workflow: int
-    """Window commits whose execution has no workflow_executions row: counted in
-    ``commits``, in no ``by_workflow`` entry."""
     unavailable: list[str]
     """Names of the tiles that could not be measured (their ``reason`` says why)."""
 
@@ -4437,7 +4442,6 @@ class ShippedMetricsResponse(BaseModel):
                 )
                 for b in m.by_workflow
             ],
-            commits_without_workflow=m.commits_without_workflow,
             unavailable=list(m.unavailable),
         )
 

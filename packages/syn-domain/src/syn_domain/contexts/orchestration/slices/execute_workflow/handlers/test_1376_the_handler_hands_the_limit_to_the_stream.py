@@ -89,6 +89,9 @@ class _Collector:
     async def record_tool_started(self, **_kwargs: object) -> None:
         return
 
+    async def note_command_ended(self, *_args: object) -> None:
+        return None
+
     async def record_tool_completed(self, **_kwargs: object) -> None:
         return
 

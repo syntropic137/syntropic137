@@ -43,19 +43,17 @@ _openapi:
           ``days`` before.
 
 
-          Agent-attributed only: commits are distinct shas from ``git_commit``
+          Agent-attributed only, read from the shipped ledger's daily rollup:
+          commits
 
-          observations carrying an execution; PRs opened are PRs a run created
-          with
+          runs made, PRs runs created (a successful ``gh pr create``), merges of
 
-          ``gh pr create``; PRs merged are merges of those PRs, from the
+          those PRs (``pull_request`` closed+merged events from the GitHub
 
-          ``pull_request`` (closed, merged) events the GitHub pipeline ingests;
+          pipeline), merge rate as the share of the window's opened PRs merged
+          by
 
-          merge rate is merged / opened in percent; repos touched are the repos
-          of
-
-          all of the above.
+          now, and the repos all of that touched.
         heading: get-shipped-metrics-endpoint
 ---
 

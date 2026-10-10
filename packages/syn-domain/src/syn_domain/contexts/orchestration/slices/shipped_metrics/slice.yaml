@@ -1,13 +1,13 @@
 name: shipped_metrics
 description: >
   What agents shipped over a rolling window of UTC days, against the window
-  before it: commits, PRs opened, PRs merged, merge rate and repos touched,
-  each with a daily series. Agent-attributed only. No projection: commits
-  (git_commit with an execution_id), run PRs (gh pr create tool calls and the
-  PR URL printed) and merges (github_pull_request_merged, recorded from the
-  GitHub event pipeline) are read from agent_events (Lane 2) with one
-  window-bounded statement each, and attributed through the
-  workflow_executions read model in one keyed read.
+  before it: commits, PRs opened, PRs merged, merge rate (cohort) and repos
+  touched, each with a daily series. Agent-attributed only. Reads only the
+  shipped ledger's daily rollup (shipped_daily: one row per UTC day x
+  repository x workflow), maintained idempotently at ingestion from Lane 2
+  facts (commit hook events, successful gh pr create calls, pull_request
+  merge events) and rebuilt by a one-time backfill per ledger version. A
+  short in-process cache with request coalescing sits in front.
 context: orchestration
 type: query
 

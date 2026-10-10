@@ -3,97 +3,65 @@
 Feeds the Overview's "Shipped by agents" block: five tiles, each a window
 total, the total of the window before it, a delta and one value per UTC day.
 
-WHERE EACH NUMBER COMES FROM. Lane 2 and read models only; nothing here loads
-an aggregate or reads the event store.
+READS ONLY THE ROLLUP. Every number comes from ``shipped_daily`` rows (one per
+UTC day x repository x workflow, see ``ledger``): at most ``2 x days`` days of
+them, so a request costs what it returns and nothing grows with telemetry.
+The facts behind the rows are recorded once, at ingestion, and only for work
+an execution produced:
 
-- **Commits**: distinct commit shas in the ``git_commit`` observations of
-  ``agent_events`` that carry an ``execution_id``. Those rows are written by
-  the workspace's post-commit hook through the engine, so each one is a commit
-  an agent made inside an execution. Rows from the push webhook
-  (``session_id = github_delivery:*``) carry no execution and are not
-  counted: a push to a watched repo is not proof an agent wrote it. A sha is
-  counted once, on the UTC day it was first seen; an amend or rebase writes a
-  new sha and is a new commit. A row with no sha in any spelling is skipped.
-- **PRs opened**: PRs a run created. A ``tool_execution_completed`` row with
-  an ``execution_id`` whose output names a ``https://github.com/<owner>/<repo>/pull/<n>``
-  URL, and whose start (same session and ``tool_use_id``) ran ``gh pr create``.
-  Counted once per PR on the UTC day of its first sighting. A PR opened any
-  other way (the API, a GitHub MCP tool, the platform host-side) is not seen.
-- **PRs merged**: merges of THOSE PRs only. Read from the
-  ``github_pull_request_merged`` observations that
-  ``syn_api.services.pull_request_merges`` records from the GitHub event
-  pipeline: ``pull_request`` events with action ``closed`` and the PR merged,
-  from webhooks and the Events API poller, for every repo the App receives
-  events for. Counted on the UTC day of ``merged_at``. A merge of a PR no run
-  created is never counted. Recorded only from the moment the observer runs:
-  merges before it was deployed are not backfilled (#1852).
-- **Merge rate**: PRs merged / PRs opened over the window, in percent (0-100);
-  the delta is in percentage points.
-- **Repos touched**: distinct ``owner/name`` repositories: those the committing
-  executions cloned (``workflow_executions.repos``, ADR-058) plus those of the
-  PRs opened and merged. The commit row's own ``repo`` is a directory name,
-  not a slug, so it cannot answer this.
+- **Commits**: distinct shas from the run's ``git_commit`` hook events.
+- **PRs opened**: PRs a run created with a successful ``gh pr create``
+  (``gh_pr_create``), counted on the day they were created.
+- **PRs merged**: merges of those PRs, from ``pull_request`` (closed, merged)
+  events the GitHub pipeline ingests, counted on the day they merged. A merge
+  of a PR no run created never counts.
+- **Merge rate**: a cohort conversion: of the run PRs OPENED in the window,
+  the share merged by now. Bounded 0-100 by construction.
+- **Repos touched**: distinct repositories with any of the above in the
+  window, never a sum over days.
 
-WHY NO PROJECTION (YET). Nothing here is per execution: each read is one
-statement bounded by the window, and attribution is one keyed read of
-``workflow_executions`` for the executions involved. But ``event_type`` is
-not the hypertable's ``compress_segmentby``, so on compressed chunks every
-segment in range is decompressed: the cost is the telemetry in the range (up
-to 90 days for the PR-created read), not the rows returned. Declared as
-accepted debt in ``test_cost_read_paths_scan_agent_events_by_event_type.py``;
-the trigger-maintained rollup that removes it is #1855.
+A short in-process cache keyed by (UTC day, days, workflow) with request
+coalescing sits in front: concurrent Overview loads share one rollup read.
 
 THE DAY IS A UTC DAY: the window is ``days`` UTC calendar days ending today,
-inclusive, and an observation belongs to the UTC day its ``time`` falls in
-(the same contract as the contribution heatmap, #1371).
+inclusive (the same contract as the contribution heatmap, #1371).
 """
 
 from __future__ import annotations
 
+import asyncio
+import time as monotonic_clock
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from enum import StrEnum
-from typing import TYPE_CHECKING, Protocol
-
-from syn_domain.contexts._shared.repository_ref import RepositoryRef
-from syn_shared.events import (
-    GIT_COMMIT,
-    GITHUB_PULL_REQUEST_MERGED,
-    TOOL_EXECUTION_COMPLETED,
-    TOOL_EXECUTION_STARTED,
-)
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Mapping, Sequence
+    from collections.abc import Callable, Iterable, Mapping
 
-    import asyncpg
-
-    from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_summary import (
-        WorkflowExecutionSummary,
+    from syn_domain.contexts.orchestration._shared.shipped_ledger import (
+        ShippedDayRow,
+        ShippedLedger,
     )
 
 SHIPPED_WINDOW_DAYS: frozenset[int] = frozenset({7, 14, 30})
 """The window lengths the block offers."""
 
 BY_WORKFLOW_LIMIT = 10
-"""How many workflows ``by_workflow`` lists, most commits first."""
+"""How many workflows ``by_workflow`` lists."""
 
-MERGE_LOOKBACK_DAYS = 30
-"""How far before the previous window a run's PR may have been opened and
-still have its merge counted: a PR opened 40 days earlier and merged today is
-not looked for."""
+CACHE_SECONDS = 30.0
+"""How long one answer is served before the rollup is read again."""
 
-COMMITS_SOURCE = "agent_events: git_commit observations with an execution_id, distinct sha"
-REPOS_SOURCE = "workflow_executions.repos of the committing executions, plus the repos of run PRs"
-PRS_OPENED_SOURCE = (
-    "agent_events: a run's `gh pr create` tool call and the github.com PR URL it printed"
-)
+COMMITS_SOURCE = "shipped_daily.commits: distinct shas from runs' git_commit hook events"
+PRS_OPENED_SOURCE = "shipped_daily.prs_opened: PRs created by a run's successful `gh pr create`"
 PRS_MERGED_SOURCE = (
-    "agent_events: github_pull_request_merged (pipeline pull_request closed+merged, "
-    "webhooks and Events API) for PRs runs created"
+    "shipped_daily.prs_merged: merges of run PRs, from pull_request closed+merged events"
 )
+MERGE_RATE_SOURCE = "shipped_daily: prs_opened_merged / prs_opened (cohort of PRs opened)"
+REPOS_SOURCE = "shipped_daily: distinct repositories with a commit or run PR"
 
 
 class DeltaUnit(StrEnum):
@@ -175,11 +143,12 @@ def _signed(value: int, suffix: str) -> str:
 def format_percent_delta(total: int, previous_total: int) -> tuple[float | None, str]:
     """Relative change and its display: ``(37.99, "+38%")``.
 
-    A previous window of zero has no relative change: nothing to something is
-    ``"new"`` and nothing to nothing is ``"0%"``, never a division by zero.
+    A previous window of zero has no relative change, so the percent is None
+    whenever ``previous_total`` is 0 (including 0 to 0); only the display
+    differs: nothing to something is ``"new"``, nothing to nothing ``"0%"``.
     """
     if previous_total == 0:
-        return (None, "new") if total > 0 else (0.0, "0%")
+        return (None, "new") if total > 0 else (None, "0%")
     percent = (total - previous_total) / previous_total * 100
     return round(percent, 2), _signed(_round_half_up(percent), "%")
 
@@ -231,7 +200,7 @@ class ShippedCountTile:
     delta: int | None = None
     """``total - previous_total``."""
     delta_percent: float | None = None
-    """Relative change, None when the previous window was zero."""
+    """Relative change; None whenever the previous window was zero, 0 to 0 included."""
     delta_display: str | None = None
     total_display: str | None = None
     series: tuple[CountPoint, ...] = ()
@@ -329,106 +298,45 @@ def _rate(numerator: int, denominator: int) -> float | None:
     return round(numerator / denominator * 100, 2)
 
 
-def _window_rates(
-    opened: ShippedCountTile, merged: ShippedCountTile
-) -> tuple[float | None, float | None] | None:
-    """(current, previous) rates, or None when either count is unmeasured."""
-    counts = (opened.total, opened.previous_total, merged.total, merged.previous_total)
-    if any(c is None for c in counts):
-        return None
-    o, po, m, pm = (c or 0 for c in counts)
-    return _rate(m, o), _rate(pm, po)
+@dataclass(frozen=True)
+class _Cohort:
+    """Run PRs opened per day, and how many of them have merged since."""
 
+    opened: Mapping[date, int]
+    merged: Mapping[date, int]
 
-def merge_rate_tile(opened: ShippedCountTile, merged: ShippedCountTile) -> ShippedRateTile:
-    """merged / opened over the window, as a percent; delta in points.
+    def total(self, window: ShippedWindow, previous: bool) -> tuple[int, int]:
+        def keep(d: date) -> bool:
+            return window.is_previous(d) if previous else window.is_current(d)
 
-    Unavailable whenever either side is: a rate over a missing count would be
-    a number nobody measured.
-    """
-    source = f"prs_merged / prs_opened ({opened.source})"
-    rates = _window_rates(opened, merged)
-    if rates is None:
-        return ShippedRateTile(
-            source=source, reason=opened.reason or merged.reason or "PR counts unavailable"
+        return (
+            sum(v for d, v in self.merged.items() if keep(d)),
+            sum(v for d, v in self.opened.items() if keep(d)),
         )
-    total, previous = rates
+
+
+def merge_rate_tile(window: ShippedWindow, cohort: _Cohort) -> ShippedRateTile:
+    """Of the run PRs opened in the window, the share merged by now (percent).
+
+    A cohort conversion, so it can never exceed 100: the numerator is a subset
+    of the denominator. The previous window's rate is the same question asked
+    of ITS cohort, as of now. Null when no PR was opened: no data is not 0%.
+    """
+    total = _rate(*cohort.total(window, previous=False))
+    previous = _rate(*cohort.total(window, previous=True))
     delta = None if total is None or previous is None else round(total - previous, 2)
-    merged_by_day = {p.day: p.value for p in merged.series}
     return ShippedRateTile(
-        source=source,
+        source=MERGE_RATE_SOURCE,
         total=total,
         previous_total=previous,
         delta=delta,
         delta_display=None if delta is None else format_points_delta(delta),
         total_display=None if total is None else format_percent(total),
         series=tuple(
-            RatePoint(p.day, _rate(merged_by_day.get(p.day, 0), p.value)) for p in opened.series
+            RatePoint(d, _rate(cohort.merged.get(d, 0), cohort.opened.get(d, 0)))
+            for d in window.current_days()
         ),
     )
-
-
-# =============================================================================
-# Inputs
-# =============================================================================
-
-
-@dataclass(frozen=True)
-class CommitSighting:
-    """One commit an agent made: its sha, the execution, its first UTC day."""
-
-    sha: str
-    execution_id: str
-    day: date
-
-
-class CommitSightingSource(Protocol):
-    """Commits agents made in ``[since, until)``, one per sha, first sighting."""
-
-    async def sightings(self, since: datetime, until: datetime) -> list[CommitSighting]: ...
-
-
-class ExecutionAttributionSource(Protocol):
-    """The ``workflow_executions`` rows of the given executions, keyed by id."""
-
-    async def by_ids(
-        self, execution_ids: Sequence[str]
-    ) -> Mapping[str, WorkflowExecutionSummary]: ...
-
-
-@dataclass(frozen=True)
-class RunPullRequest:
-    """A PR a run created: ``gh pr create`` in an execution, and the URL it printed."""
-
-    repository: str
-    number: int
-    execution_id: str
-    day: date
-
-    @property
-    def key(self) -> tuple[str, int]:
-        return (self.repository.lower(), self.number)
-
-
-@dataclass(frozen=True)
-class MergedPullRequest:
-    """A merge the GitHub event pipeline saw, on the UTC day it happened."""
-
-    repository: str
-    number: int
-    day: date
-
-    @property
-    def key(self) -> tuple[str, int]:
-        return (self.repository.lower(), self.number)
-
-
-class PullRequestSightingSource(Protocol):
-    """PRs runs created, and merges the pipeline saw, in ``[since, until)``."""
-
-    async def opened(self, since: datetime, until: datetime) -> list[RunPullRequest]: ...
-
-    async def merged(self, since: datetime, until: datetime) -> list[MergedPullRequest]: ...
 
 
 # =============================================================================
@@ -450,7 +358,7 @@ class ShippedWorkflow:
 
 @dataclass(frozen=True)
 class ShippedMetrics:
-    """The five tiles over one window, with what they were measured from."""
+    """The five tiles over one window."""
 
     window: ShippedWindow
     workflow_id: str | None
@@ -463,54 +371,13 @@ class ShippedMetrics:
     """The distinct repos touched in the current window, ``owner/name``, sorted."""
     by_workflow: tuple[ShippedWorkflow, ...]
     """Top workflows by commits, then PRs merged; empty when filtered to one."""
-    commits_without_workflow: int = 0
-    """Current-window commits whose execution the read model has no row for.
-
-    Counted in ``commits`` (an execution made them) but in no workflow, so the
-    ``by_workflow`` rows can sum to less than the tile.
-    """
     unavailable: tuple[str, ...] = field(default=())
     """Names of the tiles that could not be measured."""
 
 
-def _first_sightings(sightings: Iterable[CommitSighting]) -> list[CommitSighting]:
-    """One sighting per sha, the earliest day. The store already does this;
-    repeating it here keeps the count honest for any source."""
-    first: dict[str, CommitSighting] = {}
-    for s in sightings:
-        seen = first.get(s.sha)
-        if seen is None or s.day < seen.day:
-            first[s.sha] = s
-    return list(first.values())
-
-
-def _first_by_key[T: (RunPullRequest, MergedPullRequest)](
-    rows: Iterable[T],
-) -> dict[tuple[str, int], T]:
-    """One row per PR, the earliest day."""
-    first: dict[tuple[str, int], T] = {}
-    for row in rows:
-        seen = first.get(row.key)
-        if seen is None or row.day < seen.day:
-            first[row.key] = row
-    return first
-
-
-def _repo_slugs(summary: WorkflowExecutionSummary | None) -> set[str]:
-    if summary is None:
-        return set()
-    slugs: set[str] = set()
-    for value in summary.repos:
-        try:
-            slugs.add(RepositoryRef.parse(value).slug)
-        except ValueError:
-            continue
-    return slugs
-
-
 @dataclass
-class _WorkflowTally:
-    name: str
+class _Totals:
+    name: str = ""
     commits: int = 0
     prs_opened: int = 0
     prs_merged: int = 0
@@ -518,306 +385,135 @@ class _WorkflowTally:
 
 
 @dataclass
-class _Shipped:
-    """What the window's runs shipped, after attribution and filtering."""
+class _Days:
+    """The rollup rows folded per day (and, for the current window, per workflow)."""
 
-    commits: list[CommitSighting]
-    opened: list[RunPullRequest]
-    merged: list[tuple[MergedPullRequest, RunPullRequest]]
-    """Each merge with the run PR it merged."""
+    commits: dict[date, int] = field(default_factory=lambda: defaultdict(int))
+    opened: dict[date, int] = field(default_factory=lambda: defaultdict(int))
+    merged: dict[date, int] = field(default_factory=lambda: defaultdict(int))
+    opened_merged: dict[date, int] = field(default_factory=lambda: defaultdict(int))
+    repos: dict[date, set[str]] = field(default_factory=lambda: defaultdict(set))
+    workflows: dict[str, _Totals] = field(default_factory=dict)
 
+    def add(self, window: ShippedWindow, row: ShippedDayRow) -> None:
+        self.commits[row.day] += row.commits
+        self.opened[row.day] += row.prs_opened
+        self.merged[row.day] += row.prs_merged
+        self.opened_merged[row.day] += row.prs_opened_merged
+        if row.commits or row.prs_opened or row.prs_merged:
+            self.repos[row.day].add(row.repository)
+        if window.is_current(row.day):
+            self._add_workflow(row)
 
-@dataclass(frozen=True)
-class _WorkflowFilter:
-    """Which executions a request keeps: all, or one workflow's."""
+    def _add_workflow(self, row: ShippedDayRow) -> None:
+        totals = self.workflows.setdefault(row.workflow_id, _Totals())
+        totals.name = row.workflow_name or totals.name
+        totals.commits += row.commits
+        totals.prs_opened += row.prs_opened
+        totals.prs_merged += row.prs_merged
+        if row.commits or row.prs_opened or row.prs_merged:
+            totals.repos.add(row.repository)
 
-    workflow_id: str | None
-    summaries: Mapping[str, WorkflowExecutionSummary]
-
-    def keeps(self, execution_id: str) -> bool:
-        if self.workflow_id is None:
-            return True
-        summary = self.summaries.get(execution_id)
-        return summary is not None and summary.workflow_id == self.workflow_id
-
-
-def _attribute(
-    window: ShippedWindow,
-    sightings: Iterable[CommitSighting],
-    run_prs: Iterable[RunPullRequest],
-    merges: Iterable[MergedPullRequest],
-    scope: _WorkflowFilter,
-) -> _Shipped:
-    def in_windows(day: date) -> bool:
-        return window.is_current(day) or window.is_previous(day)
-
-    prs = _first_by_key(run_prs)
-    return _Shipped(
-        commits=[
-            s
-            for s in _first_sightings(sightings)
-            if in_windows(s.day) and scope.keeps(s.execution_id)
-        ],
-        opened=[p for p in prs.values() if in_windows(p.day) and scope.keeps(p.execution_id)],
-        merged=[
-            (m, prs[k])
-            for k, m in _first_by_key(merges).items()
-            if k in prs and in_windows(m.day) and scope.keeps(prs[k].execution_id)
-        ],
-    )
-
-
-def _tally_workflows(
-    window: ShippedWindow, work: _Shipped, summaries: Mapping[str, WorkflowExecutionSummary]
-) -> dict[str, _WorkflowTally]:
-    tallies: dict[str, _WorkflowTally] = {}
-
-    def tally(day: date, execution_id: str) -> _WorkflowTally | None:
-        summary = summaries.get(execution_id)
-        if summary is None or not window.is_current(day):
-            return None
-        return tallies.setdefault(summary.workflow_id, _WorkflowTally(summary.workflow_name))
-
-    for s in work.commits:
-        if (t := tally(s.day, s.execution_id)) is not None:
-            t.commits += 1
-            t.repos |= _repo_slugs(summaries.get(s.execution_id))
-    for p in work.opened:
-        if (t := tally(p.day, p.execution_id)) is not None:
-            t.prs_opened += 1
-            t.repos.add(p.repository)
-    for m, p in work.merged:
-        if (t := tally(m.day, p.execution_id)) is not None:
-            t.prs_merged += 1
-            t.repos.add(p.repository)
-    return tallies
-
-
-def _by_workflow(
-    window: ShippedWindow, work: _Shipped, summaries: Mapping[str, WorkflowExecutionSummary]
-) -> tuple[ShippedWorkflow, ...]:
-    tallies = _tally_workflows(window, work, summaries)
-    ranked = sorted(tallies, key=lambda wf: (-tallies[wf].commits, -tallies[wf].prs_merged, wf))[
-        :BY_WORKFLOW_LIMIT
-    ]
-    return tuple(
-        ShippedWorkflow(
-            workflow_id=wf,
-            name=tallies[wf].name,
-            commits=tallies[wf].commits,
-            prs_opened=tallies[wf].prs_opened,
-            prs_merged=tallies[wf].prs_merged,
-            repos_touched=len(tallies[wf].repos),
+    def by_workflow(self) -> tuple[ShippedWorkflow, ...]:
+        w = self.workflows
+        ranked = sorted(w, key=lambda k: (-w[k].commits, -w[k].prs_merged, k))
+        return tuple(
+            ShippedWorkflow(
+                workflow_id=k,
+                name=w[k].name,
+                commits=w[k].commits,
+                prs_opened=w[k].prs_opened,
+                prs_merged=w[k].prs_merged,
+                repos_touched=len(w[k].repos),
+            )
+            for k in ranked[:BY_WORKFLOW_LIMIT]
         )
-        for wf in ranked
-    )
 
 
 def build_shipped_metrics(
-    window: ShippedWindow,
-    sightings: Iterable[CommitSighting],
-    summaries: Mapping[str, WorkflowExecutionSummary],
-    workflow_id: str | None = None,
-    run_prs: Iterable[RunPullRequest] = (),
-    merges: Iterable[MergedPullRequest] = (),
+    window: ShippedWindow, rows: Iterable[ShippedDayRow], workflow_id: str | None = None
 ) -> ShippedMetrics:
-    """Every tile of the block from what runs shipped in both windows.
-
-    Only work an execution produced counts: commits with an ``execution_id``,
-    PRs a run created, and merges OF those PRs. A merge of any other PR (the
-    owner's, a contributor's) is not shipped by agents and is not counted.
-    """
-
-    work = _attribute(window, sightings, run_prs, merges, _WorkflowFilter(workflow_id, summaries))
-    commits_per_day: dict[date, int] = defaultdict(int)
-    opened_per_day: dict[date, int] = defaultdict(int)
-    merged_per_day: dict[date, int] = defaultdict(int)
-    repos_per_day: dict[date, set[str]] = defaultdict(set)
-    for s in work.commits:
-        commits_per_day[s.day] += 1
-        repos_per_day[s.day] |= _repo_slugs(summaries.get(s.execution_id))
-    for p in work.opened:
-        opened_per_day[p.day] += 1
-        repos_per_day[p.day].add(p.repository)
-    for m, p in work.merged:
-        merged_per_day[m.day] += 1
-        repos_per_day[m.day].add(p.repository)
-
-    prs_opened = count_tile(window, opened_per_day, DeltaUnit.PERCENT, PRS_OPENED_SOURCE)
-    prs_merged = count_tile(window, merged_per_day, DeltaUnit.PERCENT, PRS_MERGED_SOURCE)
-    current_commits = [s for s in work.commits if window.is_current(s.day)]
+    """Every tile of the block from the rollup rows of both windows."""
+    days = _Days()
+    for row in rows:
+        if window.is_current(row.day) or window.is_previous(row.day):
+            days.add(window, row)
+    current_repos = set().union(*(v for d, v in days.repos.items() if window.is_current(d)))
     return ShippedMetrics(
         window=window,
         workflow_id=workflow_id,
-        commits=count_tile(window, commits_per_day, DeltaUnit.PERCENT, COMMITS_SOURCE),
-        prs_opened=prs_opened,
-        prs_merged=prs_merged,
-        merge_rate=merge_rate_tile(prs_opened, prs_merged),
-        repos_touched=distinct_tile(window, repos_per_day, DeltaUnit.COUNT, REPOS_SOURCE),
-        repos=tuple(
-            sorted(set().union(*(v for d, v in repos_per_day.items() if window.is_current(d))))
-        ),
-        by_workflow=() if workflow_id is not None else _by_workflow(window, work, summaries),
-        commits_without_workflow=sum(1 for s in current_commits if s.execution_id not in summaries),
+        commits=count_tile(window, days.commits, DeltaUnit.PERCENT, COMMITS_SOURCE),
+        prs_opened=count_tile(window, days.opened, DeltaUnit.PERCENT, PRS_OPENED_SOURCE),
+        prs_merged=count_tile(window, days.merged, DeltaUnit.PERCENT, PRS_MERGED_SOURCE),
+        merge_rate=merge_rate_tile(window, _Cohort(days.opened, days.opened_merged)),
+        repos_touched=distinct_tile(window, days.repos, DeltaUnit.COUNT, REPOS_SOURCE),
+        repos=tuple(sorted(current_repos)),
+        by_workflow=() if workflow_id is not None else days.by_workflow(),
     )
 
 
 # =============================================================================
-# Stores
+# Service: rollup read behind a short, coalescing cache
 # =============================================================================
-
-# One row per sha: the first git_commit observation of it in the range. The sha
-# is read in every spelling the timeline converter reads (GitFacts in
-# syn_adapters.projections.session_tools_converters): v2 events nest it under
-# ``git``, legacy ones spread it over the top level and ``context``, and the
-# push webhook writes ``commit_hash`` (excluded anyway: it has no execution).
-# The day is the UTC day of ``time``, spelled as the heatmap spells it (#1371).
-_SIGHTINGS_QUERY = """
-SELECT DISTINCT ON (sha) sha, execution_id, (time AT TIME ZONE 'UTC')::date AS day
-FROM (
-    SELECT time, execution_id,
-        COALESCE(
-            NULLIF(data->'git'->>'sha', ''),
-            NULLIF(data->>'sha', ''),
-            NULLIF(data->'context'->>'sha', ''),
-            NULLIF(data->>'commit_hash', '')
-        ) AS sha
-    FROM agent_events
-    WHERE event_type = $1
-      AND execution_id IS NOT NULL
-      AND execution_id <> ''
-      AND time >= $2
-      AND time < $3
-) commits
-WHERE sha IS NOT NULL
-ORDER BY sha, time
-"""
-
-# A PR a run created: a completed tool call in an execution whose output names
-# a github.com PR URL, and whose own start (same session, same tool_use_id)
-# ran `gh pr create`. Both halves are needed: `gh pr view` prints the same URL,
-# and a create whose output was lost names no PR. One row per PR, its first
-# sighting. The cheap LIKE runs before the regex; the start is an index probe
-# on idx_events_session.
-#
-# COST: this reads the tool_execution_completed rows in the range, which grow
-# with telemetry, not with PRs. Bounded by the range (2 windows plus the merge
-# lookback); a per-PR rollup is the follow-up if the north star's 1,000
-# concurrent runs make it the slow read (#1855).
-_PR_URL = r"https://github\.com/([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)/pull/([0-9]+)"
-_RUN_PRS_QUERY = f"""
-SELECT DISTINCT ON (lower(m[1]), m[2]::int)
-    m[1] AS repository, m[2]::int AS number, c.execution_id,
-    (c.time AT TIME ZONE 'UTC')::date AS day
-FROM agent_events c
-CROSS JOIN LATERAL regexp_match(c.data->>'output_preview', '{_PR_URL}') AS m
-WHERE c.event_type = $1
-  AND c.execution_id IS NOT NULL
-  AND c.execution_id <> ''
-  AND c.time >= $3
-  AND c.time < $4
-  AND c.data->>'output_preview' LIKE '%github.com/%/pull/%'
-  AND m IS NOT NULL
-  AND EXISTS (
-      SELECT 1 FROM agent_events s
-      WHERE s.session_id = c.session_id
-        AND s.event_type = $2
-        AND s.data->>'tool_use_id' = c.data->>'tool_use_id'
-        AND s.time <= c.time
-        AND s.time >= c.time - INTERVAL '1 day'
-        AND COALESCE(s.data->>'input_preview', s.data->>'tool_input', '') ~ 'gh\\s+pr\\s+create'
-  )
-ORDER BY lower(m[1]), m[2]::int, c.time
-"""
-
-# Merges the pipeline recorded (syn_api.services.pull_request_merges), one per PR.
-_MERGES_QUERY = """
-SELECT DISTINCT ON (lower(data->>'repository'), (data->>'number')::int)
-    data->>'repository' AS repository, (data->>'number')::int AS number,
-    (time AT TIME ZONE 'UTC')::date AS day
-FROM agent_events
-WHERE event_type = $1
-  AND time >= $2
-  AND time < $3
-  AND data->>'number' ~ '^[0-9]+$'
-  AND COALESCE(data->>'repository', '') <> ''
-ORDER BY lower(data->>'repository'), (data->>'number')::int, time
-"""
-
-
-class TimescaleCommitSightings:
-    """``CommitSightingSource`` over ``agent_events`` (Lane 2)."""
-
-    def __init__(self, pool: asyncpg.Pool) -> None:
-        self._pool = pool
-
-    async def sightings(self, since: datetime, until: datetime) -> list[CommitSighting]:
-        async with self._pool.acquire() as conn:
-            rows = await conn.fetch(_SIGHTINGS_QUERY, GIT_COMMIT, since, until)
-        return [
-            CommitSighting(sha=str(r["sha"]), execution_id=str(r["execution_id"]), day=r["day"])
-            for r in rows
-        ]
-
-
-class TimescalePullRequestSightings:
-    """``PullRequestSightingSource`` over ``agent_events`` (Lane 2)."""
-
-    def __init__(self, pool: asyncpg.Pool) -> None:
-        self._pool = pool
-
-    async def opened(self, since: datetime, until: datetime) -> list[RunPullRequest]:
-        async with self._pool.acquire() as conn:
-            rows = await conn.fetch(
-                _RUN_PRS_QUERY, TOOL_EXECUTION_COMPLETED, TOOL_EXECUTION_STARTED, since, until
-            )
-        return [
-            RunPullRequest(
-                repository=str(r["repository"]),
-                number=int(r["number"]),
-                execution_id=str(r["execution_id"]),
-                day=r["day"],
-            )
-            for r in rows
-        ]
-
-    async def merged(self, since: datetime, until: datetime) -> list[MergedPullRequest]:
-        async with self._pool.acquire() as conn:
-            rows = await conn.fetch(_MERGES_QUERY, GITHUB_PULL_REQUEST_MERGED, since, until)
-        return [
-            MergedPullRequest(
-                repository=str(r["repository"]), number=int(r["number"]), day=r["day"]
-            )
-            for r in rows
-        ]
 
 
 def utc_today() -> date:
     return datetime.now(UTC).date()
 
 
+type _CacheKey = tuple[date, int, str | None]
+
+
+@dataclass(frozen=True)
+class _Cached:
+    expires_at: float
+    metrics: ShippedMetrics
+
+
 class ShippedMetricsQueryService:
-    """Answers the "Shipped by agents" block from Lane 2 and read models."""
+    """Answers the "Shipped by agents" block from the shipped rollup only.
+
+    One instance per process: the cache and the in-flight map live on it.
+    Concurrent requests for the same key share one rollup read (coalescing);
+    an answer is reused for ``cache_seconds``, and never across a UTC day.
+    A failed read is not cached.
+    """
 
     def __init__(
         self,
-        sightings: CommitSightingSource,
-        executions: ExecutionAttributionSource,
-        pull_requests: PullRequestSightingSource,
+        ledger: ShippedLedger,
         today: Callable[[], date] = utc_today,
+        clock: Callable[[], float] = monotonic_clock.monotonic,
+        cache_seconds: float = CACHE_SECONDS,
     ) -> None:
-        self._sightings = sightings
-        self._executions = executions
-        self._pull_requests = pull_requests
+        self._ledger = ledger
         self._today = today
+        self._clock = clock
+        self._cache_seconds = cache_seconds
+        self._cache: dict[_CacheKey, _Cached] = {}
+        self._in_flight: dict[_CacheKey, asyncio.Future[ShippedMetrics]] = {}
 
     async def shipped(self, days: int = 14, workflow_id: str | None = None) -> ShippedMetrics:
         window = ShippedWindow.ending(self._today(), days)
-        sightings = await self._sightings.sightings(window.since, window.until)
-        run_prs = await self._pull_requests.opened(
-            window.since - timedelta(days=MERGE_LOOKBACK_DAYS), window.until
-        )
-        merges = await self._pull_requests.merged(window.since, window.until)
-        execution_ids = {s.execution_id for s in sightings} | {p.execution_id for p in run_prs}
-        summaries = await self._executions.by_ids(sorted(execution_ids))
-        return build_shipped_metrics(window, sightings, summaries, workflow_id, run_prs, merges)
+        key: _CacheKey = (window.end, days, workflow_id)
+        cached = self._cache.get(key)
+        if cached is not None and cached.expires_at > self._clock():
+            return cached.metrics
+        pending = self._in_flight.get(key)
+        if pending is not None:
+            return await asyncio.shield(pending)
+        future: asyncio.Future[ShippedMetrics] = asyncio.get_running_loop().create_future()
+        self._in_flight[key] = future
+        try:
+            rows = await self._ledger.daily(window.previous_start, window.end, workflow_id)
+            metrics = build_shipped_metrics(window, rows, workflow_id)
+        except BaseException as exc:
+            future.set_exception(exc)
+            future.exception()  # retrieved here, so an unawaited future does not warn
+            raise
+        finally:
+            self._in_flight.pop(key, None)
+        self._cache = {k: v for k, v in self._cache.items() if k[0] == window.end}
+        self._cache[key] = _Cached(self._clock() + self._cache_seconds, metrics)
+        future.set_result(metrics)
+        return metrics

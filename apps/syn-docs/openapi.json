@@ -4220,7 +4220,7 @@
           "metrics"
         ],
         "summary": "Get Shipped Metrics Endpoint",
-        "description": "What agents shipped over the last ``days`` UTC days, against the ``days`` before.\n\nAgent-attributed only: commits are distinct shas from ``git_commit``\nobservations carrying an execution; PRs opened are PRs a run created with\n``gh pr create``; PRs merged are merges of those PRs, from the\n``pull_request`` (closed, merged) events the GitHub pipeline ingests;\nmerge rate is merged / opened in percent; repos touched are the repos of\nall of the above.",
+        "description": "What agents shipped over the last ``days`` UTC days, against the ``days`` before.\n\nAgent-attributed only, read from the shipped ledger's daily rollup: commits\nruns made, PRs runs created (a successful ``gh pr create``), merges of\nthose PRs (``pull_request`` closed+merged events from the GitHub\npipeline), merge rate as the share of the window's opened PRs merged by\nnow, and the repos all of that touched.",
         "operationId": "get_shipped_metrics_endpoint_metrics_shipped_get",
         "parameters": [
           {
@@ -20938,10 +20938,6 @@
             "type": "array",
             "title": "By Workflow"
           },
-          "commits_without_workflow": {
-            "type": "integer",
-            "title": "Commits Without Workflow"
-          },
           "unavailable": {
             "items": {
               "type": "string"
@@ -20963,7 +20959,6 @@
           "repos_touched",
           "repos",
           "by_workflow",
-          "commits_without_workflow",
           "unavailable"
         ],
         "title": "ShippedMetricsResponse",
@@ -21116,7 +21111,7 @@
           "reason"
         ],
         "title": "ShippedRateTileResponse",
-        "description": "A percentage over the window, 0 to 100; ``delta`` is in percentage points."
+        "description": "Merge rate: of the run PRs OPENED in the window, the percent merged by now.\n\nA cohort conversion, 0 to 100 by construction (the merged PRs are a subset\nof the opened ones). ``previous_total`` asks the same of the previous\nwindow's cohort, as of now. ``delta`` is in percentage points. A series\npoint is that day's opened PRs merged since, null on a day none opened.\nNull totals: no PR was opened, which is not 0%."
       },
       "ShippedWindowResponse": {
         "properties": {

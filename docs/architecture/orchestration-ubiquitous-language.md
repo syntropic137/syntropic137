@@ -97,39 +97,41 @@ and one value per day: commits, PRs opened, PRs merged,
 [Merge Rate](#merge-rate) and [Repos Touched](#repos-touched). Never the
 owner's own work:
 
-- a **commit** is a distinct sha from an agent's `git_commit` observation that
-  carries an `execution_id`, counted once on the UTC day it was first seen; an
-  amend or rebase makes a new sha and so a new commit. A push webhook's commit
-  has no Execution and is not shipped.
-- a **PR opened** is a PR a run created: a `gh pr create` tool call in an
-  Execution and the github.com PR URL it printed, counted once per PR.
+- a **commit** is a distinct sha from a `git_commit` hook event in an
+  Execution's own stream, attributed to the repository the run cloned under
+  that directory name.
+- a **PR opened** is a PR a run created: a successful `gh pr create` (run as
+  a command, not quoted text, not `--dry-run`) whose output ends in the new
+  PR's URL. Parsed once, at ingestion, from the full command and output.
 - a **PR merged** is a merge of one of those PRs, seen by the GitHub event
-  pipeline (`pull_request`, action `closed`, merged; webhooks and Events API)
-  and recorded as a `github_pull_request_merged` observation, counted on the
-  UTC day of `merged_at`. A merge of a PR no run created is not shipped.
+  pipeline (`pull_request`, action `closed`, merged; webhooks and Events API),
+  counted on the UTC day of `merged_at`. A merge of a PR no run created is
+  not shipped.
 
-Lane 2 and the execution list read model only, never an aggregate.
-**Unclear:** PRs a run opens without `gh pr create`, and merges before the
-pipeline recorded them, are not seen (#1852).
+## Shipped Ledger
+
+Where shipped facts are kept, once each, by identity (sha; repository and PR
+number): three fact tables and the daily rollup `shipped_daily` (one row per
+UTC day x repository x workflow) that the read path reads. Lane 2, beside the
+telemetry it is derived from; idempotent and order-independent, so replaying
+its inputs any number of times in any order yields the same rollup. Rebuilt
+from Lane 2 history by a one-time backfill per ledger version. **Unclear:**
+merges before the merge recorder ran, and PRs a run opens without
+`gh pr create`, are not in it (#1852).
 
 ## Merge Rate
 
-PRs merged divided by PRs opened over the same window, as a percent (0 to
-100, not a fraction). Its delta is in percentage points ("+5 pts"), not a
-relative change: 80% to 84% is +4 pts, not +5%. Null when no PR was opened: no
-data is not 0%. A merge counts in the window it happened even when its PR was
-opened earlier, so the rate can exceed 100% in a window that merged older
-work. A daily point is that day's merged over that day's opened, null on a day
-with none opened.
+A cohort conversion: of the run PRs OPENED in the window, the share merged by
+now, as a percent from 0 to 100 (never a throughput ratio, which exceeds 100
+when older PRs merge). The previous window's rate asks the same of its own
+cohort, as of now. Its delta is in percentage points ("+5 pts"), not a relative
+change. Null when no PR was opened: no data is not 0%.
 
 ## Repos Touched
 
-Distinct `owner/name` repositories shipped to over the window: those the
-committing Executions cloned (their `repos`, ADR-058) and those of the PRs
-opened and merged. A distinct count, never a sum of the daily series: one repo
-touched on ten days is one repo touched. Its delta is a plain count ("+3").
-The commit observation's own `repo` is a directory name, not an `owner/name`,
-so it does not answer this.
+Distinct `owner/name` repositories with a commit, PR opened or PR merged in the
+window. A distinct count, never a sum of the daily series: one repo touched on
+ten days is one repo touched. Its delta is a plain count ("+3").
 
 ## Quota Exhaustion
 

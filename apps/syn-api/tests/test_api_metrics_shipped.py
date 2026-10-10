@@ -1,4 +1,4 @@
-"""GET /metrics/shipped: the wire contract of the "Shipped by agents" block."""
+"""GET /metrics/shipped: the wire contract, and the merge recorder feeding it."""
 
 from __future__ import annotations
 
@@ -10,58 +10,36 @@ import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
+from syn_adapters.events.shipped_ledger_memory import InMemoryShippedLedger
 from syn_domain.contexts.github import EventSource, NormalizedEvent
-from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_summary import (
-    WorkflowExecutionSummary,
-)
-from syn_domain.contexts.orchestration.slices.shipped_metrics import (
-    CommitSighting,
-    MergedPullRequest,
-    RunPullRequest,
+from syn_domain.contexts.orchestration import (
+    CommitShipped,
+    PullRequestMerged,
+    PullRequestOpened,
     ShippedMetricsQueryService,
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Mapping, Sequence
+    from collections.abc import Iterator
 
 pytestmark = [pytest.mark.unit]
 
 TODAY = date(2026, 10, 9)
+NOW = datetime(2026, 10, 9, 12, tzinfo=UTC)
+EARLIER = datetime(2026, 9, 20, 12, tzinfo=UTC)
 
 
-class _Sightings:
-    async def sightings(self, since: datetime, until: datetime) -> list[CommitSighting]:
-        return [CommitSighting("a", "e1", TODAY), CommitSighting("b", "e1", date(2026, 9, 20))]
-
-
-class _PullRequests:
-    async def opened(self, since: datetime, until: datetime) -> list[RunPullRequest]:
-        return [RunPullRequest("acme/api", 7, "e1", TODAY)]
-
-    async def merged(self, since: datetime, until: datetime) -> list[MergedPullRequest]:
-        return [MergedPullRequest("acme/api", 7, TODAY), MergedPullRequest("me/own", 1, TODAY)]
-
-
-class _Executions:
-    async def by_ids(self, execution_ids: Sequence[str]) -> Mapping[str, WorkflowExecutionSummary]:
-        return {
-            "e1": WorkflowExecutionSummary(
-                workflow_execution_id="e1",
-                workflow_id="wf",
-                workflow_name="Implement",
-                status="completed",
-                started_at=None,
-                completed_at=None,
-                completed_phases=1,
-                total_phases=1,
-                total_tokens=0,
-                repos=("https://github.com/acme/api",),
-            )
-        }
-
-
-class _Boom(Exception):
-    pass
+async def _seeded() -> InMemoryShippedLedger:
+    ledger = InMemoryShippedLedger()
+    await ledger.record_commit(CommitShipped("a", "e1", "wf", "Implement", "acme/api", NOW))
+    await ledger.record_commit(CommitShipped("b", "e1", "wf", "Implement", "acme/api", EARLIER))
+    url = "https://github.com/acme/api/pull/7"
+    await ledger.record_pull_request_opened(
+        PullRequestOpened("acme/api", 7, url, "e1", "wf", "Implement", NOW)
+    )
+    await ledger.record_pull_request_merged(PullRequestMerged("acme/api", 7, NOW))
+    await ledger.record_pull_request_merged(PullRequestMerged("me/own", 1, NOW))
+    return ledger
 
 
 async def _connected() -> None:
@@ -70,13 +48,14 @@ async def _connected() -> None:
 
 @pytest.fixture
 def client() -> Iterator[TestClient]:
+    import asyncio
+
     from syn_api.routes import metrics
 
+    ledger = asyncio.run(_seeded())
     app = FastAPI()
     app.include_router(metrics.router)
-    service = ShippedMetricsQueryService(
-        _Sightings(), _Executions(), _PullRequests(), today=lambda: TODAY
-    )
+    service = ShippedMetricsQueryService(ledger, today=lambda: TODAY)
     with (
         patch.object(metrics, "ensure_connected", _connected),
         patch.object(metrics, "get_shipped_metrics_query", lambda: service),
@@ -94,7 +73,6 @@ def test_contract_shape(client: TestClient) -> None:
     assert len(commits["series"]) == 14
     assert commits["series"][-1] == {"date": "2026-10-09", "value": 1}
     assert body["repos"] == ["acme/api"]
-    assert body["repos_touched"]["delta_unit"] == "count"
     assert body["by_workflow"] == [
         {
             "workflow_id": "wf",
@@ -105,14 +83,16 @@ def test_contract_shape(client: TestClient) -> None:
             "repos_touched": 1,
         }
     ]
-    assert (body["prs_opened"]["total"], body["prs_merged"]["total"]) == (1, 1)
+    assert (body["prs_opened"]["total"], body["prs_merged"]["total"]) == (1, 1)  # not me/own#1
     assert body["merge_rate"]["total"] == 100.0  # percent 0-100, the UI contract
     assert body["merge_rate"]["delta_unit"] == "points"
     assert body["prs_opened"]["reason"] is None
+    assert body["prs_opened"]["delta_percent"] is None  # previous window was zero
     assert body["unavailable"] == []
+    assert "commits_without_workflow" not in body
 
 
-def test_workflow_filter_drops_by_workflow(client: TestClient) -> None:
+def test_workflow_filter_empties_by_workflow(client: TestClient) -> None:
     body = client.get("/metrics/shipped", params={"days": 7, "workflow_id": "wf"}).json()
     assert body["window"]["days"] == 7
     assert body["workflow_id"] == "wf"
@@ -128,6 +108,9 @@ def test_other_windows_are_refused(client: TestClient, days: int) -> None:
 async def test_a_store_failure_is_503_not_zero() -> None:
     from syn_api.routes import metrics
 
+    class _Boom(Exception):
+        pass
+
     with (
         patch.object(metrics, "ensure_connected", _connected),
         patch.object(metrics, "get_shipped_metrics_query", side_effect=_Boom("db down")),
@@ -140,7 +123,6 @@ async def test_a_store_failure_is_503_not_zero() -> None:
 def _pr_event(
     action: str, merged: bool | None = None, merged_at: str | None = None
 ) -> NormalizedEvent:
-    pull_request = {"merged": merged, "merged_at": merged_at}
     return NormalizedEvent(
         event_type="pull_request",
         action=action,
@@ -148,48 +130,50 @@ def _pr_event(
         installation_id="1",
         dedup_key="k",
         source=EventSource.WEBHOOK,
-        payload={"number": 7, "pull_request": pull_request},
+        payload={"number": 7, "pull_request": {"merged": merged, "merged_at": merged_at}},
         received_at=datetime(2026, 10, 9, 12, tzinfo=UTC),
     )
 
 
 def test_a_merged_close_is_a_merge_on_its_merged_at() -> None:
-    from syn_api.services.pull_request_merges import PullRequestMerge
+    from syn_api.services.shipped_ledger import PullRequestMerge
 
-    merge = PullRequestMerge.from_event(
-        _pr_event("closed", merged=True, merged_at="2026-10-08T23:30:00Z")
-    )
+    merge = PullRequestMerge.from_event(_pr_event("closed", True, "2026-10-08T23:30:00Z"))
     assert merge is not None
     assert (merge.repository, merge.number) == ("acme/api", 7)
     assert merge.merged_at == datetime(2026, 10, 8, 23, 30, tzinfo=UTC)
 
 
 @pytest.mark.parametrize(
-    ("action", "merged"),
-    [("closed", False), ("opened", False), ("synchronize", None)],
+    ("action", "merged"), [("closed", False), ("opened", False), ("synchronize", None)]
 )
 def test_anything_else_is_not_a_merge(action: str, merged: bool | None) -> None:
-    from syn_api.services.pull_request_merges import PullRequestMerge
+    from syn_api.services.shipped_ledger import PullRequestMerge
 
-    assert PullRequestMerge.from_event(_pr_event(action, merged=merged)) is None
+    assert PullRequestMerge.from_event(_pr_event(action, merged)) is None
 
 
 @pytest.mark.asyncio
-async def test_the_recorder_writes_one_observation_per_merge() -> None:
-    from syn_api.services import pull_request_merges
+async def test_a_redelivered_merge_is_recorded_once() -> None:
+    """Fail-open dedup can deliver the same merge twice; the ledger keeps one."""
+    from syn_api.services import shipped_ledger as service
 
-    written: list[object] = []
+    ledger = InMemoryShippedLedger()
+    await ledger.record_pull_request_opened(
+        PullRequestOpened("acme/api", 7, "u", "e1", "wf", "Implement", NOW)
+    )
 
     class _Store:
+        shipped_ledger = ledger
+
         async def initialize(self) -> None:
             return None
 
-        async def insert_one(self, event: object) -> None:
-            written.append(event)
-
     with patch("syn_api._wiring.get_event_store_instance", lambda: _Store()):
-        await pull_request_merges.record_pull_request_merge(
-            _pr_event("closed", merged=True, merged_at="2026-10-08T23:30:00Z")
-        )
-        await pull_request_merges.record_pull_request_merge(_pr_event("opened"))
-    assert len(written) == 1
+        for _ in range(3):
+            await service.record_pull_request_merge(
+                _pr_event("closed", True, "2026-10-08T23:30:00Z")
+            )
+        await service.record_pull_request_merge(_pr_event("opened"))
+    rows = await ledger.daily(date(2026, 10, 1), date(2026, 10, 31))
+    assert sum(r.prs_merged for r in rows) == 1

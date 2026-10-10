@@ -695,28 +695,18 @@ _DECLARED: Mapping[ScanIdentity, Declaration] = {
             ),
         },
     ),
-    # "Shipped by agents" (/metrics/shipped). Window-bounded by `time` only:
-    # chunks outside the range are pruned (time is the partition key), every
-    # segment of every chunk inside it is decompressed. Three windows' worth of
-    # telemetry, not all history - and accepted debt, not a bound: the
-    # per-PR / per-commit rollup that removes it is #1855.
+    # The shipped ledger's one-time backfill (/metrics/shipped). Run once per
+    # ledger version in the background, never on a request path: the read path
+    # reads only the shipped_daily rollup. Pins session_id, BACKFILL_SESSION_BATCH
+    # sessions per round-trip, so a compressed chunk discards every other
+    # session's segment; within a selected session it reads every segment once.
     **_declared(
-        f"{_DOMAIN}/orchestration/slices/shipped_metrics/query_service.py",
+        f"{_ADAPTERS}/events/shipped_ledger.py",
         {
-            "_SIGHTINGS_QUERY": _full_scan(
-                "git_commit rows with an execution_id over two windows (at most 60 UTC "
-                "days). Returns one row per sha; reads every segment in range."
-            ),
-            "_RUN_PRS_QUERY": _full_scan(
-                "Completed tool calls over two windows plus a 30-day merge lookback (at "
-                "most 90 days) whose output names a PR URL, each probed for its own "
-                "`gh pr create` start. The probe pins session_id; the outer scan pins "
-                "nothing and is the most expensive read here.",
-                statements=2,
-            ),
-            "_MERGES_QUERY": _full_scan(
-                "github_pull_request_merged rows over two windows. Rare rows, but event_type "
-                "discards no segment, so it costs what the range holds."
+            "_BACKFILL_ROWS": _segment_discard(
+                "git_commit and gh-pr-create-shaped tool rows of a batch of sessions, once per "
+                "ledger version, to rebuild the shipped ledger. Bounded per round-trip by the "
+                "batch; the whole backfill is one read of the sessions that ran executions."
             ),
         },
     ),
@@ -823,7 +813,7 @@ def test_the_number_of_unpinned_statements_is_the_number_we_have_accepted() -> N
     the conversation.
     """
     unpinned = [scan for scan in _production_scans() if not scan.discards_segments]
-    assert len(unpinned) == 26, "\n" + "\n".join(
+    assert len(unpinned) == 22, "\n" + "\n".join(
         f"{scan.identity}: {scan.predicate}" for scan in unpinned
     )
 
