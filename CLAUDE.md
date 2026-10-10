@@ -565,6 +565,12 @@ UI work starts at [design/README.md](design/README.md): the boards, the spec and
 - **Code is the source of truth after a screen ships.** Its board is frozen history; small tweaks go straight to code.
 - **No Storybook.** The component reference is `/dev/components` and `/dev/patterns` in apps/syn-ui, plus Playwright screenshot tests of both.
 
+## Brand
+
+The brand kit is [design/brand/BRAND.md](design/brand/BRAND.md) (v2.0): logo, colour, type, motion, voice, surfaces and every asset. Follow it for anything user-facing.
+
+- **Any harness.** No Claude-only install paths. Claude Code plugins are deprecated org-wide in favour of multi-harness skills (`npx skills add syntropic137/syntropic137-skills`).
+
 ## Tooling
 
 - **uv** for Python package management (workspaces)

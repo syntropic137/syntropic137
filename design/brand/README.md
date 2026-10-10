@@ -1,5 +1,7 @@
 # Brand
 
+Brand kit v2.0: see [BRAND.md](BRAND.md) (version in `VERSION`, history in `CHANGELOG.md`).
+
 The S mark: eleven isometric cubes in one vertical plane, grid `BBG / B.. / DDD / ..D / DDD`
 (blue top row, one glass cube, dark lower cubes). Traced from the original raster logo.
 

@@ -6,7 +6,7 @@ How a design on the canvas becomes code in Skyline (`apps/syn-ui` and `packages/
 - `canvas/canvas.json`: the canvas layout (board positions, pages, titles)
 - `canvas/Landing.dc.html`, `canvas/PhoneLanding.dc.html`: the syntropic137.com landing page (v4); `LandingV1` to `LandingV3` are history only
 - `reference/*.py`: the canvas generators. Exact geometry for the S mark, the isometric city, the eval explorer and the trend lines. Port the maths to `skyline-core`; never run them or ship them.
-- `brand/`: the S mark and the icons made from it (see `brand/README.md`)
+- `brand/`: the brand kit, v2.0 ([`brand/BRAND.md`](brand/BRAND.md)): the S mark, icons, banners, renders and the rules for using them
 - `skyline-spec.md`: architecture, tokens, components, patterns, responsive rules, screen map, build order
 - Live canvas, for viewing and comments only: https://claude.ai/artifact/M1bgLdL1fgrkwnPQZj32H9
 
