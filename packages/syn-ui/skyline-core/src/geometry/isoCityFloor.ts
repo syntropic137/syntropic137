@@ -1,15 +1,19 @@
 /**
  * The Overview IsoCity (Main and PhoneOverview boards, plan 4a and 4d): an
  * isometric floor of days. Weeks come toward the viewer (right and down),
- * weekdays recede (Monday in front, Sunday at the back). A day with
+ * and so do the days of a week: Monday at the back, Sunday in front (the
+ * owner's Oct 10 request), so today is never hidden behind a taller,
+ * later day. The boards predate it and draw Monday in front; pass
+ * `weekdayAxis: 'monday-front'` to reproduce them. A day with
  * sessions is a block, sqrt-scaled to the busiest day; an empty day is a
  * floor tile and a future day a dashed outline.
  *
- * Projection, from the board script: column c (week), row r (weekday) and
- * height z map to (ox + c*ax + r*bx, oy + c*ay + r*by - z). A block covers
+ * Projection, from the board script: column c (week), depth r and height
+ * z map to (ox + c*ax + r*bx, oy + c*ay + r*by - z). Depth 0 is the front
+ * row; a weekday's depth is 6 - weekday (Monday back) by default. A block covers
  * f of its cell in both directions, so a week step (ax) is wider than a
  * block's footprint (f * (ax + bx)) and blocks in one row never overlap.
- * Rows come back far to near (Sunday first) and each row left to right,
+ * Rows come back far to near (Monday first) and each row left to right,
  * which is the painter's order.
  *
  * Tone tiers: `fail` when failed runs are known, at least one, and at
@@ -65,6 +69,20 @@ export const ISO_CITY_PHONE: IsoCityDims = { win: 8, ax: 34, ay: 5, bx: 10, by: 
 export type IsoTone = 'dim' | 'mid' | 'hot' | 'fail'
 export const ISO_TONES: readonly IsoTone[] = ['dim', 'mid', 'hot', 'fail']
 
+/** Which weekday sits at the back: Monday (default, days come forward) or Sunday (the boards). */
+export type IsoWeekdayAxis = 'monday-back' | 'monday-front'
+
+/** Depth of weekday `r` (0 = front row). */
+export function isoDepth(r: number, axis: IsoWeekdayAxis = 'monday-back'): number {
+  return axis === 'monday-back' ? 6 - r : r
+}
+
+/** True when failed executions are known, at least one, and at least half the executions: the coral rule for a day and a week alike. */
+export function isFailing(failed: number | null | undefined, executions: number | null | undefined): boolean {
+  const f = failed ?? 0
+  return f > 0 && f * 2 >= (executions ?? 0)
+}
+
 /** One week of the history, Monday first; `days[i]` is null for a day with no data. */
 export interface IsoCityWeek {
   /** Monday, "2026-08-24". */
@@ -72,7 +90,7 @@ export interface IsoCityWeek {
   days: (SkylineDay | null)[]
 }
 
-/** Weekday names, Monday first (row 0 is the front row). */
+/** Weekday names, Monday first (index = weekday row; its depth comes from the weekday axis). */
 export const ISO_WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const
 
 /** Group days into `count` whole weeks starting on the Monday `start`. */
@@ -86,8 +104,7 @@ export function isoCityWeeks(days: readonly SkylineDay[], start: string, count: 
 
 /** The tone tier of a day with sessions. */
 export function isoTone(day: SkylineDay, maxSessions: number): IsoTone {
-  const failed = day.failed ?? 0
-  if (failed > 0 && failed * 2 >= (day.executions ?? 0)) return 'fail'
+  if (isFailing(day.failed, day.executions)) return 'fail'
   const ratio = maxSessions > 0 ? day.sessions / maxSessions : 0
   if (ratio >= 0.3) return 'hot'
   return ratio >= 0.1 ? 'mid' : 'dim'
@@ -122,16 +139,20 @@ export interface IsoCityBlock {
   week: number
   /** Column relative to the window's first week. */
   column: number
-  /** 0 = Monday (front) .. 6 = Sunday (back). */
+  /** Weekday, 0 = Monday .. 6 = Sunday. */
   row: number
+  /** Depth on screen, 0 = front row (isoDepth). */
+  depth: number
   tone: IsoTone
   height: number
   side: string
   front: string
   top: string
-  /** Hit box in view box units; stacking order `z` (nearer and newer on top). */
+  /** Bounding box in view box units (focus ring); stacking order `z` (nearer and newer on top). */
   hit: IsoHitBox
   z: number
+  /** The painted faces as polygons (side, front, top), for visible-surface picking. */
+  faces: readonly (readonly Point[])[]
   /** Top centre, where the leader line starts. */
   anchor: Point
   label: string
@@ -157,7 +178,7 @@ export interface IsoCityLabel {
 export interface IsoCityFloorLayout {
   dims: IsoCityDims
   viewBox: string
-  /** Rows far (Sunday) to near (Monday): draw in this order. */
+  /** Rows far to near (Monday first by default): draw in this order. */
   rows: IsoCityRow[]
   /** Every block in draw order. */
   blocks: IsoCityBlock[]
@@ -167,6 +188,8 @@ export interface IsoCityFloorLayout {
   /** Future day outlines. */
   future: string
   futureEdge: string
+  /** Days before `loadedFrom`: not loaded yet, so unknown rather than empty. */
+  unloaded: string
   /** Today's tile and beam (null when today is not rendered). */
   today: { tile: string; beam: IsoHitBox } | null
   /** Tops of hot and failed blocks in the window, for the bloom. */
@@ -194,6 +217,10 @@ export interface IsoCityFloorInput {
   selected?: string | null
   /** Busiest day for the height and tone scale (default: the busiest in `weeks`). */
   maxSessions?: number
+  /** Default 'monday-back'. */
+  weekdayAxis?: IsoWeekdayAxis
+  /** First day whose data is loaded; earlier days paint as unloaded, not empty. Default: everything is loaded. */
+  loadedFrom?: string | null
 }
 
 interface Ctx {
@@ -203,6 +230,8 @@ interface Ctx {
   today: string
   max: number
   selected: string | null
+  axis: IsoWeekdayAxis
+  loadedFrom: string | null
 }
 
 const n2 = round2
@@ -235,24 +264,32 @@ function hitBox(d: IsoCityDims, c: number, r: number, h: number): IsoHitBox {
   return { x: n2(x0), y: n2(y0), width: n2(x1 - x0), height: n2(y1 - y0) }
 }
 
-function block(ctx: Ctx, day: SkylineDay, week: number, c: number, r: number): IsoCityBlock {
+const rounded = (pts: readonly Point[]): Point[] => pts.map(([x, y]) => [n2(x), n2(y)])
+
+function block(ctx: Ctx, day: SkylineDay, week: number, c: number, wd: number): IsoCityBlock {
   const d = ctx.dims
   const F = d.f
+  const r = isoDepth(wd, ctx.axis)
   const h = isoHeight(day.sessions, ctx.max, d)
   const top = pt(d, c + F / 2, r + F / 2, h)
+  const sideQ = rounded([pt(d, c + F, r, 0), pt(d, c + F, r + F, 0), pt(d, c + F, r + F, h), pt(d, c + F, r, h)])
+  const frontQ = rounded([pt(d, c, r, 0), pt(d, c + F, r, 0), pt(d, c + F, r, h), pt(d, c, r, h)])
+  const topQ = rounded([pt(d, c, r, h), pt(d, c + F, r, h), pt(d, c + F, r + F, h), pt(d, c, r + F, h)])
   return {
     day,
     date: day.date,
     week,
     column: c,
-    row: r,
+    row: wd,
+    depth: r,
     tone: isoTone(day, ctx.max),
     height: h,
-    front: path([pt(d, c, r, 0), pt(d, c + F, r, 0), pt(d, c + F, r, h), pt(d, c, r, h)]),
-    side: path([pt(d, c + F, r, 0), pt(d, c + F, r + F, 0), pt(d, c + F, r + F, h), pt(d, c + F, r, h)]),
-    top: path([pt(d, c, r, h), pt(d, c + F, r, h), pt(d, c + F, r + F, h), pt(d, c, r + F, h)]),
+    front: path(frontQ),
+    side: path(sideQ),
+    top: path(topQ),
     hit: hitBox(d, c, r, h),
     z: 10 + (6 - r) + c,
+    faces: [sideQ, frontQ, topQ],
     anchor: [n2(top[0]), n2(top[1])],
     label: isoDayLabel(day),
     inWindow: c >= 0 && c < ctx.window,
@@ -270,6 +307,7 @@ interface Paint {
   floorEdge: string[]
   future: string[]
   futureEdge: string[]
+  unloaded: string[]
   rows: IsoCityBlock[][]
   today: { tile: string; beam: IsoHitBox } | null
 }
@@ -279,15 +317,17 @@ function todayMark(d: IsoCityDims, c: number, r: number): { tile: string; beam: 
   return { tile: tile(d, c, r), beam: { x: n2(b[0] - 1.5), y: n2(b[1] - d.beam), width: 3, height: d.beam } }
 }
 
-function paintCell(ctx: Ctx, paint: Paint, week: IsoCityWeek, w: number, c: number, r: number): void {
+function paintCell(ctx: Ctx, paint: Paint, week: IsoCityWeek, w: number, c: number, wd: number): void {
   const d = ctx.dims
-  const date = addDays(week.start, r)
+  const r = isoDepth(wd, ctx.axis)
+  const date = addDays(week.start, wd)
   const inWindow = c >= 0 && c < ctx.window
   if (date === ctx.today) paint.today = todayMark(d, c, r)
-  const day = week.days[r]
+  const day = week.days[wd]
   if (date > ctx.today) (inWindow ? paint.future : paint.futureEdge).push(tile(d, c, r))
+  else if (ctx.loadedFrom !== null && date < ctx.loadedFrom) paint.unloaded.push(tile(d, c, r))
   else if (!day || day.sessions <= 0) (inWindow ? paint.floor : paint.floorEdge).push(tile(d, c, r))
-  else paint.rows[r]!.push(block(ctx, day, w, c, r))
+  else paint.rows[wd]!.push(block(ctx, day, w, c, wd))
 }
 
 function monthLabels(ctx: Ctx, weeks: readonly IsoCityWeek[], from: number, to: number): IsoCityLabel[] {
@@ -309,10 +349,10 @@ function monthLabels(ctx: Ctx, weeks: readonly IsoCityWeek[], from: number, to: 
 
 function weekdayLabels(ctx: Ctx): IsoCityLabel[] {
   const d = ctx.dims
-  return [0, 2, 4].map((r) => ({
-    transform: floorMatrix(d, pt(d, ctx.window - 1 + d.f + 0.3, r + 0.12, 0)),
-    text: ISO_WEEKDAYS[r]!,
-    key: ISO_WEEKDAYS[r]!,
+  return [0, 2, 4].map((wd) => ({
+    transform: floorMatrix(d, pt(d, ctx.window - 1 + d.f + 0.3, isoDepth(wd, ctx.axis) + 0.12, 0)),
+    text: ISO_WEEKDAYS[wd]!,
+    key: ISO_WEEKDAYS[wd]!,
     inWindow: true,
   }))
 }
@@ -326,14 +366,16 @@ function leadPath(d: IsoCityDims, b: IsoCityBlock | null): string | null {
 export function layoutIsoCityFloor(input: IsoCityFloorInput): IsoCityFloorLayout {
   const dims = input.dims ?? ISO_CITY_DESKTOP
   const pad = Math.max(0, Math.floor(input.pad ?? 1))
-  const ctx: Ctx = { dims, window: input.window ?? dims.win, first: input.first, today: input.today, max: input.maxSessions ?? busiest(input.weeks), selected: input.selected ?? null }
-  const paint: Paint = { floor: [], floorEdge: [], future: [], futureEdge: [], rows: [[], [], [], [], [], [], []], today: null }
+  const ctx: Ctx = { dims, window: input.window ?? dims.win, first: input.first, today: input.today, max: input.maxSessions ?? busiest(input.weeks), selected: input.selected ?? null, axis: input.weekdayAxis ?? 'monday-back', loadedFrom: input.loadedFrom ?? null }
+  const paint: Paint = { floor: [], floorEdge: [], future: [], futureEdge: [], unloaded: [], rows: [[], [], [], [], [], [], []], today: null }
   for (let c = -pad; c < ctx.window + pad; c++) {
     const week = input.weeks[ctx.first + c]
     if (!week) continue
     for (let r = 0; r < 7; r++) paintCell(ctx, paint, week, ctx.first + c, c, r)
   }
-  const rows = [6, 5, 4, 3, 2, 1, 0].map((r): IsoCityRow => ({ row: r, weekday: ISO_WEEKDAYS[r]!, blocks: paint.rows[r]! }))
+  // Far to near: the weekday at depth 6 first.
+  const order = [0, 1, 2, 3, 4, 5, 6].sort((a, b) => isoDepth(b, ctx.axis) - isoDepth(a, ctx.axis))
+  const rows = order.map((r): IsoCityRow => ({ row: r, weekday: ISO_WEEKDAYS[r]!, blocks: paint.rows[r]! }))
   const blocks = rows.flatMap((r) => r.blocks)
   const shown = blocks.filter((b) => b.inWindow)
   const selected = shown.find((b) => b.date === ctx.selected) ?? null
@@ -346,6 +388,7 @@ export function layoutIsoCityFloor(input: IsoCityFloorInput): IsoCityFloorLayout
     floorEdge: paint.floorEdge.join(''),
     future: paint.future.join(''),
     futureEdge: paint.futureEdge.join(''),
+    unloaded: paint.unloaded.join(''),
     today: paint.today,
     glowHot: shown.filter((b) => b.tone === 'hot').map((b) => b.top).join(''),
     glowFail: shown.filter((b) => b.tone === 'fail').map((b) => b.top).join(''),

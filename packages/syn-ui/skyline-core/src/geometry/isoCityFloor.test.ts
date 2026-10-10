@@ -65,9 +65,10 @@ describe.each([
 
   it('draws rows far to near and each row left to right (painter order)', () => {
     for (const l of layouts) {
-      expect(l.rows.map((r) => r.row)).toEqual([6, 5, 4, 3, 2, 1, 0])
+      // Monday at the back, so it paints first (owner, Oct 10).
+      expect(l.rows.map((r) => r.row)).toEqual([0, 1, 2, 3, 4, 5, 6])
       for (const r of l.rows) expect(r.blocks.map((b) => b.column)).toEqual([...r.blocks.map((b) => b.column)].sort((a, b) => a - b))
-      expect(l.blocks.map((b) => b.row)).toEqual([...l.blocks.map((b) => b.row)].sort((a, b) => b - a))
+      expect(l.blocks.map((b) => b.depth)).toEqual([...l.blocks.map((b) => b.depth)].sort((a, b) => b - a))
     }
   })
 
@@ -75,10 +76,10 @@ describe.each([
     const l = layouts[0]!
     for (const b of l.blocks) {
       expect(b.hit.height).toBeGreaterThanOrEqual(dims.hitmin - 0.01)
-      expect(b.z).toBe(10 + (6 - b.row) + b.column)
+      expect(b.z).toBe(10 + (6 - b.depth) + b.column)
     }
-    const front = l.blocks.find((b) => b.row === 0 && b.column === 3)!
-    const back = l.blocks.find((b) => b.row === 6 && b.column === 3)!
+    const front = l.blocks.find((b) => b.depth === 0 && b.column === 3)!
+    const back = l.blocks.find((b) => b.depth === 6 && b.column === 3)!
     expect(front.z).toBeGreaterThan(back.z)
   })
 

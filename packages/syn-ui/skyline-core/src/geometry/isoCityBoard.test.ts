@@ -48,7 +48,8 @@ describe.each([
 ] as [string, string, IsoCityDims][])('isoCity matches the %s board', (_file, html, dims) => {
   const { sky, days } = runBoard(html)
   const weeks = isoCityWeeks(days, '2025-10-13', 52)
-  const city = isoCity({ weeks, offset: 0, today: '2026-10-09', dims, pad: 0, selected: days.at(-1)!.date })
+  // The boards draw Monday in front; the shipped default puts it at the back (owner, Oct 10).
+  const city = isoCity({ weeks, offset: 0, today: '2026-10-09', dims, pad: 0, selected: days.at(-1)!.date, weekdayAxis: 'monday-front' })
 
   it('draws every row and tone exactly, far rows first', () => {
     expect(city.rows.map((r) => r.row)).toEqual([6, 5, 4, 3, 2, 1, 0])
