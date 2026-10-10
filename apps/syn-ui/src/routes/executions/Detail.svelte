@@ -34,6 +34,7 @@
   import { ApiError, cancelExecution, getArtifact, getExecution, getSessionInventory } from '@syn137/syn-ui-data'
   import type { ArtifactResponse, PhaseExecutionDetail } from '@syn137/syn-ui-data/types'
   import { subscribeExecution } from '@syn137/syn-ui-data/live'
+  import { clock } from '../../lib/clock.svelte'
   import { resource } from '../../lib/load.svelte'
   import { setPage } from '../../lib/page.svelte'
   import { href } from '../../lib/router'
@@ -58,6 +59,8 @@
   })
 
   const live = $derived(!!exec.data && !statusSemantics(exec.data.status).terminal)
+  // The duration counts up while the run is live (feedback 5ed77fc5).
+  $effect(() => (live ? clock.hold() : undefined))
 
   // A running execution also listens on its own stream (throttled refetch).
   $effect(() => {
@@ -99,7 +102,7 @@
 
   const durationText = $derived.by(() => {
     if (!d) return '—'
-    const ms = durationBetween(d.started_at, d.completed_at ?? (live ? new Date().toISOString() : null))
+    const ms = durationBetween(d.started_at, d.completed_at ?? null, clock.now)
     return formatDuration(ms)
   })
 
