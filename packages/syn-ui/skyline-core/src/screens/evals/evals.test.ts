@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import {
   agentOfModel,
   averageEvalCost,
+  evalFigures,
+  variantStats,
   buildEvalBoard,
   latestRunCosts,
   latestRuns,
@@ -360,5 +362,25 @@ describe('verdict board footer time per verifier (parity-2 #3: blank for 7 of 8 
   })
   it('keeps the board duration when the readout enriches a selected cell', () => {
     expect(withLatestRun({ verdict: 'pass', durationMs: 161_000 }, { execution_id: 'e', verdict: 'PASS', duration_seconds: 158 })!.durationMs).toBe(161_000)
+  })
+})
+
+describe('eval detail medians (parity-2 #7: median duration, median cost and cost per pass were dropped)', () => {
+  // repo-name-collision on the VPS: stats median 131.76 s / $0.185 / cost per pass $0.3227.
+  const stats = { median_duration_display: '2m 11s', median_cost_display: '$0.19', cost_per_pass_display: '$0.32' }
+  it("shows the API's stats in the header, verbatim", () => {
+    expect(evalFigures({ run_count: 4, scored_count: 4, pass_rate_display: '75%', stats })).toEqual([
+      { label: 'Runs', value: '4' },
+      { label: 'Scored', value: '4' },
+      { label: 'Pass rate', value: '75%' },
+      { label: 'Median duration', value: '2m 11s' },
+      { label: 'Median cost', value: '$0.19' },
+      { label: 'Cost per pass', value: '$0.32' },
+    ])
+    expect(evalFigures({ run_count: 0 })).toHaveLength(3)
+  })
+  it('gives each variant row its median duration and cost', () => {
+    expect(variantStats({ stats: { ...stats, median_duration_display: '2m 14s (excl. 1 incomplete)' } })).toEqual({ duration: '2m 14s (excl. 1 incomplete)', cost: '$0.19' })
+    expect(variantStats({})).toEqual({ duration: '—', cost: '—' })
   })
 })

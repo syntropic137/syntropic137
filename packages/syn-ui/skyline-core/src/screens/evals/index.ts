@@ -619,6 +619,46 @@ export function averageEvalCost(variants: readonly { run_count: number; avg_cost
   return n === 0 ? formatCost(null) : formatCost(sum / n)
 }
 
+/** An eval's or variant's run stats (API `EvalRunStatsResponse`): the display strings, rendered verbatim. */
+export interface EvalRunStatsLike {
+  median_duration_display: string
+  median_cost_display: string
+  cost_per_pass_display: string
+}
+
+/** The fields the eval header reads (structural: the API's EvalResponse satisfies it). */
+export interface EvalFiguresInput {
+  run_count: number
+  scored_count?: number | null
+  pass_rate_display?: string | null
+  stats?: EvalRunStatsLike | null
+}
+
+/**
+ * The eval header's figures: runs, scored, pass rate, then the API's own
+ * median duration, median cost and cost per pass over every current run
+ * (parity-2: these were dropped for a client-side average cost).
+ */
+export function evalFigures(e: EvalFiguresInput): { label: string; value: string }[] {
+  const figures = [
+    { label: 'Runs', value: String(e.run_count) },
+    { label: 'Scored', value: String(e.scored_count ?? 0) },
+    { label: 'Pass rate', value: e.pass_rate_display || '—' },
+  ]
+  if (!e.stats) return figures
+  return [
+    ...figures,
+    { label: 'Median duration', value: e.stats.median_duration_display },
+    { label: 'Median cost', value: e.stats.median_cost_display },
+    { label: 'Cost per pass', value: e.stats.cost_per_pass_display },
+  ]
+}
+
+/** A variant row's median duration and cost, from the API's stats; a dash for a server without them. */
+export function variantStats(v: { stats?: EvalRunStatsLike | null }): { duration: string; cost: string } {
+  return { duration: v.stats?.median_duration_display ?? '—', cost: v.stats?.median_cost_display ?? '—' }
+}
+
 /** Default scorer evidence when the run has none. */
 export function evidenceFallback(verdict: Verdict): string {
   switch (verdict) {
