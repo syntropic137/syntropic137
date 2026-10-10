@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { S_MARK_FACES, cityBlockPaint, isoCity, sMark, type CityFill } from "@syn137/skyline-core/geometry";
 import GlassCard from "../components/GlassCard";
 import HarnessChip from "../components/HarnessChip";
@@ -7,6 +7,7 @@ import { loadElement, useElement } from "../components/useElement";
 import { useInViewOnce } from "../components/useInView";
 import { useMedia } from "../components/useMedia";
 import { HERO } from "../data/copy";
+import { HERO_MEDIA, HERO_RENDER } from "../data/heroMedia";
 import { CITY_DESKTOP, CITY_MAX_SESSIONS, CITY_PHONE, HERO_CARDS, HERO_STATS, cityDays, type CityLayout } from "../data/sample/hero";
 import "../components/PillarHeader.css";
 import "./Hero.css";
@@ -133,13 +134,85 @@ function useCityEntrance(stage: RefObject<HTMLDivElement | null>) {
   return { ready, animate, hold: animate && !(inView && ready) };
 }
 
+/** The vector stage: <sky-iso-city> with <sky-s-mark>, or their static fallback. */
+interface StageProps {
+  wide: boolean;
+  children: ReactNode;
+}
+
+function VectorStage({ wide, children }: StageProps) {
+  const stage = useRef<HTMLDivElement>(null);
+  const city = useCityEntrance(stage);
+  return (
+    <div ref={stage} className="hero__stage" data-hold={city.hold ? "" : undefined}>
+      <City layout={wide ? CITY_DESKTOP : CITY_PHONE} ready={city.ready} animate={city.animate} />
+      {children}
+    </div>
+  );
+}
+
+/**
+ * The rendered stage: the Blender clip plays once when the stage is 40% on
+ * screen, then the 4K still (its last frame) replaces it; no loop, for the
+ * idle-CPU gate. Until it plays, data-hold hides it, so the finished scene
+ * never flashes before the build. Reduced motion, or a refused autoplay,
+ * shows only the still.
+ */
+function RenderStage({ children }: StageProps) {
+  const stage = useRef<HTMLDivElement>(null);
+  const video = useRef<HTMLVideoElement>(null);
+  const motion = useMedia("(prefers-reduced-motion: no-preference)");
+  const inView = useInViewOnce(stage, 0.4);
+  const [ended, setEnded] = useState(false);
+
+  useEffect(() => {
+    if (motion && inView) void video.current?.play().catch(() => setEnded(true));
+  }, [motion, inView]);
+
+  const { stillWidths, still, sizes, phone, clip, width, height } = HERO_RENDER;
+  const playing = motion && !ended;
+  return (
+    <div ref={stage} className="hero__stage hero__stage--render" data-hold={motion && !inView ? "" : undefined}>
+      <img
+        className="hero__render"
+        src={still(stillWidths[1])}
+        srcSet={stillWidths.map((w) => `${still(w)} ${w}w`).join(", ")}
+        sizes={sizes}
+        fetchPriority={playing ? "low" : "high"}
+        width={width}
+        height={height}
+        alt={HERO.cityLabel}
+        hidden={playing}
+      />
+      {playing && (
+        <video
+          ref={video}
+          className="hero__render"
+          width={width}
+          height={height}
+          muted
+          playsInline
+          preload="auto"
+          aria-hidden="true"
+          onEnded={() => setEnded(true)}
+        >
+          <source media={phone} src={clip("hero-sm", "mov")} type={'video/mp4; codecs="hvc1"'} />
+          <source media={phone} src={clip("hero-sm", "webm")} type="video/webm" />
+          <source src={clip("hero", "mov")} type={'video/mp4; codecs="hvc1"'} />
+          <source src={clip("hero", "webm")} type="video/webm" />
+        </video>
+      )}
+      {children}
+    </div>
+  );
+}
+
 /** Section 1, "Agent work that compounds." (v4 Landing and PhoneLanding boards). */
 export default function Hero() {
   const wide = useMedia("(min-width: 48rem)");
   const cards = useMedia("(min-width: 64rem)");
-  const stage = useRef<HTMLDivElement>(null);
-  const city = useCityEntrance(stage);
   const { run, phases, trend } = HERO_CARDS;
+  const Stage = HERO_MEDIA === "render" ? RenderStage : VectorStage;
 
   return (
     <section className="hero" aria-label="Hero">
@@ -160,8 +233,7 @@ export default function Hero() {
         </div>
       </div>
 
-      <div ref={stage} className="hero__stage" data-hold={city.hold ? "" : undefined}>
-        <City layout={wide ? CITY_DESKTOP : CITY_PHONE} ready={city.ready} animate={city.animate} />
+      <Stage wide={wide}>
         {cards && (
           <>
             <GlassCard className="hero__card hero__card--run" float="bob">
@@ -204,7 +276,7 @@ export default function Hero() {
             </GlassCard>
           </>
         )}
-      </div>
+      </Stage>
 
       <ul className="hero__stats">
         {HERO_STATS.map((s) => (
