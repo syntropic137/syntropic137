@@ -353,7 +353,7 @@ async def _replay(
 ) -> int:
     replay = _Replay(ledger, attributions)
     for r in rows:
-        await replay.row(r)
+        await replay.replay_row(r)
     return replay.replayed
 
 
@@ -368,7 +368,7 @@ class _Replay:
         self._commands: dict[tuple[str, str], str] = {}
         self.replayed = 0
 
-    async def row(self, r: asyncpg.Record) -> None:
+    async def replay_row(self, r: asyncpg.Record) -> None:
         attribution = self._attributions.get(str(r["execution_id"]))
         if attribution is None:
             return
