@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { artifactGlyph, artifactName, baseName } from './index'
+import { artifactGlyph, artifactName, baseName, groupArtifactsByRun, groupFileCount } from './index'
 
 describe('artifactName', () => {
   it('splits a phase label from a path in the title', () => {
@@ -37,5 +37,24 @@ describe('baseName and artifactGlyph', () => {
     expect(artifactGlyph('markdown', 'x/palindrome.py')).toBe('code')
     expect(artifactGlyph('json')).toBe('data')
     expect(artifactGlyph('research_summary')).toBe('doc')
+  })
+})
+
+describe('run groups count the run, not the page (parity-2 #4: "43 files" vs API total 75)', () => {
+  const rows = [
+    { id: 'a', workflow_id: 'sdlc', execution_id: 'exec-64e1d7e33b6a', created_at: '2026-10-09T23:00:00Z' },
+    { id: 'b', workflow_id: 'sdlc', execution_id: 'exec-64e1d7e33b6a', created_at: '2026-10-09T22:00:00Z' },
+    { id: 'c', workflow_id: 'research', execution_id: null, created_at: null },
+  ]
+  it('groups by run in page order', () => {
+    const groups = groupArtifactsByRun(rows)
+    expect(groups.map((g) => [g.key, g.files.length])).toEqual([['exec-64e1d7e33b6a', 2], ['research', 1]])
+    expect(groups[1]!.exec).toBeNull()
+  })
+  it("uses the API's total for the run", () => {
+    expect(groupFileCount(43, 75)).toBe('75 files · 43 on this page')
+    expect(groupFileCount(8, 8)).toBe('8 files')
+    expect(groupFileCount(1, 1)).toBe('1 file')
+    expect(groupFileCount(43, undefined)).toBe('43 on this page')
   })
 })
