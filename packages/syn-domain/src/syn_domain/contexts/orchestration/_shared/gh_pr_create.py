@@ -2,26 +2,27 @@
 
 A PR counts as created by a run only when all of these hold:
 
-1. **``gh pr create`` is what ran, last.** The script (unwrapped from
-   ``bash -lc '...'``) is tokenised like a shell does, split on operators
-   outside quotes (``&&``, ``||``, ``;``, ``|``, ``&``, newlines, parens). The
-   LAST simple command must be ``gh pr create`` (after ``VAR=value``/``env``
-   prefixes), so the tool's exit status IS that invocation's: ``gh pr create
-   || echo URL`` and ``false && gh pr create; echo URL`` end in ``echo`` and
-   create nothing. ``echo 'gh pr create'`` has argv ``echo ...``. A trailing
-   ``&`` (backgrounded) is rejected. Several creates count only as a trailing
-   chain joined by ``&&``, where exit 0 proves every one of them succeeded.
+1. **``gh pr create`` is what ran, last, unconditionally.** The script
+   (unwrapped from ``bash -lc '...'``) is tokenised like a shell does, split
+   on operators outside quotes. The LAST simple command must be ``gh pr
+   create`` (after ``VAR=value``/``env`` prefixes), nothing may follow it (not
+   even ``;``), and every operator in the call must be ``&&``, ``;`` or a
+   newline: no ``||`` anywhere, no pipe, no ``&``, no subshell. Then exit 0
+   is the create's own success. ``echo 'gh pr create'`` has argv ``echo ...``.
+   Several creates count only as a trailing chain joined by ``&&``.
 2. **None is a dry run**: ``--dry-run`` in a create's argv rejects it.
 3. **It succeeded**: the harness reported success (exit code 0).
 4. **The URLs are what gh printed last**: each ``gh pr create`` prints its
-   PR's URL as its final line, so the last non-empty line of the FULL output
-   must be exactly ``https://github.com/<owner>/<repo>/pull/<n>``, and a chain
-   of k creates takes the last k such lines. A URL from a body, a warning or an
-   earlier command is never the created PR.
+   PR's URL as its final line, so a chain of N creates must end the FULL
+   output with exactly N lines that are each exactly
+   ``https://github.com/<owner>/<repo>/pull/<n>``, matched in order. One more
+   URL line before them (an earlier command's) refuses the whole call.
 
-Anything that fails a check creates nothing; nothing is guessed. Known limit:
-a create inside ``if``/``for`` is not last (``fi``/``done`` is) and is not
-counted: an undercount, never an invention.
+Anything that fails a check creates nothing; nothing is guessed. Known false
+negatives, accepted: ``cmd || true && gh pr create``, a piped body
+(``printf x | gh pr create -F -``), a create in ``if``/``for`` or a subshell,
+and gh warnings interleaved between the URLs of a chain. Each is an
+undercount, never an invented PR.
 """
 
 from __future__ import annotations
@@ -32,7 +33,6 @@ from dataclasses import dataclass
 
 _SEPARATORS = "();&|\n"
 _AND = "&&"
-_BACKGROUND = "&"
 _ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 _PR_URL = re.compile(
     r"^https://github\.com/(?P<repo>[A-Za-z0-9._-]+/[A-Za-z0-9._-]+)/pull/(?P<number>[0-9]+)/?$"
@@ -121,10 +121,24 @@ def is_gh_pr_create(command: str) -> bool:
     return any(c.creates for c in _commands(_unwrap_shell(command)))
 
 
+_SEQUENCE = frozenset({_AND, ";", "\n"})
+"""The only operators a counted call may contain: each runs the next only in order."""
+
+
 def _trailing_creates(command: str) -> int:
-    """How many ``gh pr create`` end the script, chained by ``&&``; 0 if not last."""
-    commands = _commands(_unwrap_shell(command))
-    if not commands or not commands[-1].creates or commands[-1].then == _BACKGROUND:
+    """How many ``gh pr create`` end the call, chained by ``&&``; 0 unless the call is strict.
+
+    Strict means every operator in the whole call is ``&&``, ``;`` or a
+    newline, and nothing (not even ``;``) follows the last command. So no
+    ``||`` anywhere (a create after one may not have run, one before it is not
+    last), no pipe, no background, no subshell. The cost is known false
+    negatives such as ``cmd || true && gh pr create``: an undercount, never an
+    invented PR.
+    """
+    commands = _commands(_unwrap_shell(command.strip()))
+    if not commands or not commands[-1].creates or commands[-1].then is not None:
+        return 0
+    if any(c.then not in _SEQUENCE for c in commands[:-1]):
         return 0
     count = 1
     for previous in reversed(commands[:-1]):
@@ -138,9 +152,16 @@ def created_pull_requests(command: str, success: bool, output: str) -> list[Crea
     """Every PR ``command`` created, oldest first; empty unless every check holds."""
     count = _trailing_creates(command) if success else 0
     lines = [line.strip() for line in output.splitlines() if line.strip()]
-    if count == 0 or not lines or _PR_URL.match(lines[-1]) is None:
+    trailing = 0
+    for line in reversed(lines):
+        if _PR_URL.match(line) is None:
+            break
+        trailing += 1
+    # Exactly one URL line per create, at the very end, in order: a URL any
+    # earlier command printed would make the run longer and is refused.
+    if count == 0 or trailing != count:
         return []
-    urls = [line for line in lines if _PR_URL.match(line)][-count:]
+    urls = lines[-count:]
     created: list[CreatedPullRequest] = []
     for url in urls:
         match = _PR_URL.match(url)

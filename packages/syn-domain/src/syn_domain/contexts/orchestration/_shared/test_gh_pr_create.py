@@ -66,6 +66,14 @@ class TestTheCreateMustBeWhatProducedTheUrl:
             "gh pr create --fill &",
             "if true; then gh pr create --fill; fi",
             "gh pr create --fill && echo done",
+            # Codex probes: a short-circuit before the create means it may not have run.
+            f"echo {URL}; true || gh pr create --fill",
+            f"echo {URL}; true || gh pr create --fill && gh pr create --fill",
+            # Known false negative, accepted: strictness refuses any `||`.
+            "cmd || true && gh pr create --fill",
+            "printf body | gh pr create --body-file -",
+            "(gh pr create --fill)",
+            "gh pr create --fill;",
         ],
     )
     def test_a_create_that_is_not_last_creates_nothing(self, command: str) -> None:
@@ -76,9 +84,8 @@ class TestTheCreateMustBeWhatProducedTheUrl:
         [
             "git push -u origin feat && gh pr create --fill",
             "git push; gh pr create --fill",
-            "printf body | gh pr create --body-file -",
-            "(gh pr create --fill)",
-            "gh pr create --fill;",
+            "git push\ngh pr create --fill\n",
+            "/bin/bash -lc 'git push && gh pr create --fill'",
         ],
     )
     def test_a_create_that_is_last_owns_the_exit_status(self, command: str) -> None:
@@ -86,9 +93,7 @@ class TestTheCreateMustBeWhatProducedTheUrl:
 
     def test_a_chain_of_creates_records_every_pr(self) -> None:
         command = "gh pr create -R acme/api --fill && gh pr create -R acme/web --fill"
-        output = (
-            "https://github.com/acme/api/pull/41\nwarning: x\nhttps://github.com/acme/web/pull/9"
-        )
+        output = "Creating\nhttps://github.com/acme/api/pull/41\nhttps://github.com/acme/web/pull/9"
         assert [(p.repository, p.number) for p in created_pull_requests(command, True, output)] == [
             ("acme/api", 41),
             ("acme/web", 9),
@@ -125,6 +130,12 @@ class TestTheOutputMustEndInTheCreatedPrsUrl:
     def test_the_url_must_be_exactly_the_last_line(self, output: str) -> None:
         assert created_pull_requests("gh pr create --fill", True, output) == []
 
-    def test_only_the_last_of_several_urls_is_the_created_pr(self) -> None:
+    def test_an_earlier_url_line_refuses_the_call(self) -> None:
+        """Exactly one URL line per create: one more means another command printed it."""
         output = "https://github.com/acme/api/pull/7\nhttps://github.com/acme/api/pull/42"
-        assert created_pull_requests("gh pr create --fill", True, output) == [PR]
+        assert created_pull_requests("gh pr create --fill", True, output) == []
+
+    def test_a_chain_needs_exactly_one_url_per_create(self) -> None:
+        command = "gh pr create -R acme/api --fill && gh pr create -R acme/web --fill"
+        output = "https://github.com/acme/api/pull/41\nwarning\nhttps://github.com/acme/web/pull/9"
+        assert created_pull_requests(command, True, output) == []
