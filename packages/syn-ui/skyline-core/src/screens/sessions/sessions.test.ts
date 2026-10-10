@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { UNKNOWN } from '../../format/shared'
 import {
   agentLabel,
   sessionDurationText,
@@ -200,6 +201,6 @@ describe('session duration (parity-2 #6: detail said "2m", API and list say "1m 
   it('falls back to the precise format only when the server sent no display', () => {
     expect(sessionDurationText({ duration_seconds: 24.3 })).toBe('24.3s')
     expect(sessionDurationText({ duration_seconds: 7 })).toBe('7s')
-    expect(sessionDurationText({ duration_seconds: null })).toBe('—')
+    expect(sessionDurationText({ duration_seconds: null })).toBe(UNKNOWN)
   })
 })

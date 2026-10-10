@@ -533,5 +533,5 @@ export * from './live'
  */
 export function sessionDurationText(s: { duration_seconds: number | null; duration_display?: string | null }): string {
   if (s.duration_display) return s.duration_display
-  return s.duration_seconds === null ? '—' : formatDurationPrecise(s.duration_seconds * 1000).replace(/\.0s$/, 's')
+  return s.duration_seconds === null ? UNKNOWN : formatDurationPrecise(s.duration_seconds * 1000).replace(/\.0s$/, 's')
 }

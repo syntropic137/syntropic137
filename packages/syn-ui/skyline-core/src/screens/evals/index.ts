@@ -7,6 +7,7 @@
  * API's EvalResponse and EvalRunResponse satisfy them.
  */
 import { formatCost } from '../../format/cost'
+import { UNKNOWN } from '../../format/shared'
 import { normalizeVerdict, type Verdict, type VerdictCase, type VerdictCell, type VerdictMatrix, type Verifier, cellKey } from '../../patterns/verdict'
 
 export interface EvalVariantLike {
@@ -643,7 +644,7 @@ export function evalFigures(e: EvalFiguresInput): { label: string; value: string
   const figures = [
     { label: 'Runs', value: String(e.run_count) },
     { label: 'Scored', value: String(e.scored_count ?? 0) },
-    { label: 'Pass rate', value: e.pass_rate_display || '—' },
+    { label: 'Pass rate', value: e.pass_rate_display || UNKNOWN },
   ]
   if (!e.stats) return figures
   return [
@@ -656,7 +657,7 @@ export function evalFigures(e: EvalFiguresInput): { label: string; value: string
 
 /** A variant row's median duration and cost, from the API's stats; a dash for a server without them. */
 export function variantStats(v: { stats?: EvalRunStatsLike | null }): { duration: string; cost: string } {
-  return { duration: v.stats?.median_duration_display ?? '—', cost: v.stats?.median_cost_display ?? '—' }
+  return { duration: v.stats?.median_duration_display ?? UNKNOWN, cost: v.stats?.median_cost_display ?? UNKNOWN }
 }
 
 /** Default scorer evidence when the run has none. */

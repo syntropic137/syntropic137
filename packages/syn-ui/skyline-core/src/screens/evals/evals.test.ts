@@ -29,6 +29,7 @@ import {
   type EvalLike,
 } from './index'
 import { cellKey, verifierFooter } from '../../patterns/verdict'
+import { UNKNOWN } from '../../format/shared'
 
 const ev = (id: string, caseId: string, wf: string, model: string, verdict: string | null, last: string, cost = '0.5'): EvalLike => ({
   eval_id: id,
@@ -381,6 +382,6 @@ describe('eval detail medians (parity-2 #7: median duration, median cost and cos
   })
   it('gives each variant row its median duration and cost', () => {
     expect(variantStats({ stats: { ...stats, median_duration_display: '2m 14s (excl. 1 incomplete)' } })).toEqual({ duration: '2m 14s (excl. 1 incomplete)', cost: '$0.19' })
-    expect(variantStats({})).toEqual({ duration: '—', cost: '—' })
+    expect(variantStats({})).toEqual({ duration: UNKNOWN, cost: UNKNOWN })
   })
 })
