@@ -8,6 +8,28 @@
 
 This is the one place that says what the brand is and where every asset lives. The S mark files and their regenerate commands are in [`README.md`](README.md); the README banners in [`banners/README.md`](banners/README.md).
 
+## Where does it go? (upload-ready files)
+
+Everything below is already the right size, in [`social/`](social/). Pick the row, upload the file.
+
+| Place | Upload this | Size |
+|---|---|---|
+| GitHub org avatar ([settings](https://github.com/organizations/syntropic137/settings/profile)) | [`social/avatar-official-1024.png`](social/avatar-official-1024.png) | 1024 x 1024 |
+| X profile photo | [`social/avatar-official-1024.png`](social/avatar-official-1024.png) | 1024 x 1024 |
+| X header | [`social/x-header-1500x500.png`](social/x-header-1500x500.png) | 1500 x 500 |
+| Discord server icon | [`social/avatar-official-1024.png`](social/avatar-official-1024.png) | 1024 x 1024 |
+| Discord server banner / invite splash | [`social/discord-banner-960x540.png`](social/discord-banner-960x540.png) | 960 x 540 |
+| LinkedIn page logo | [`social/avatar-official-1024.png`](social/avatar-official-1024.png) | 1024 x 1024 |
+| LinkedIn page cover | [`social/linkedin-cover-1128x191.png`](social/linkedin-cover-1128x191.png) | 1128 x 191 |
+| YouTube profile picture | [`social/avatar-official-1024.png`](social/avatar-official-1024.png) | 1024 x 1024 |
+| YouTube banner (art kept inside the 1546 x 423 safe area) | [`social/youtube-banner-2560x1440.jpg`](social/youtube-banner-2560x1440.jpg) | 2560 x 1440 |
+| npm org avatar | [`social/avatar-official-1024.png`](social/avatar-official-1024.png) | 1024 x 1024 |
+| GitHub repo social preview (repo Settings, Social preview) | [`social/github-social-preview-1280x640.png`](social/github-social-preview-1280x640.png) | 1280 x 640 |
+| README banner (top of each repo) | [`banners/<repo>.svg`](banners/) copied to the repo as `assets/banner.svg` | 1200 x 400 |
+| Website link previews (Open Graph, X card) | [`og-image.png`](og-image.png) (already wired in the landing page) | 1200 x 630 |
+| Slides, docs, light backgrounds | [`social/avatar-transparent-1024.png`](social/avatar-transparent-1024.png) | 1024 x 1024, transparent |
+| Browser tab / app icon | [`favicon.svg`](favicon.svg), [`icon-512.png`](icon-512.png) (already wired in every app) | vector, 512 |
+
 ## What the brand says
 
 One idea: **agent work that compounds.**
@@ -195,16 +217,16 @@ The Blender render: the clip plays once when the stage is 40% visible, then the 
 
 ### X (Twitter)
 
-- Header: [`x-header-1500x500.png`](x-header-1500x500.png) (1500 x 500 PNG, X's header size; X does not accept WebP). Keep the left third clear of text; the avatar covers the lower left.
+- Header: [`social/x-header-1500x500.png`](social/x-header-1500x500.png) (1500 x 500 PNG; X does not accept WebP). Keep the left third clear of text; the avatar covers the lower left.
 - Avatar: [`avatar-1024.png`](avatar-1024.png).
 
 ### GitHub social preview
 
-Repo Settings, Social preview. GitHub asks for 1280 x 640. Until a 1280 x 640 cut exists, upload [`og-image.png`](og-image.png) (1200 x 630).
+Repo Settings, Social preview. GitHub asks for 1280 x 640. Upload [`social/github-social-preview-1280x640.png`](social/github-social-preview-1280x640.png).
 
 ### Discord
 
-Server icon: [`avatar-1024.png`](avatar-1024.png). Server banner or invite splash: [`renders/syn137-banner-dark-1500.webp`](renders/syn137-banner-dark-1500.webp) or [`renders/syn137-hero-dark-1920.webp`](renders/syn137-hero-dark-1920.webp), converted to PNG if needed.
+Server icon: [`avatar-1024.png`](avatar-1024.png). Server banner or invite splash: [`social/discord-banner-960x540.png`](social/discord-banner-960x540.png).
 
 ## Asset index
 
@@ -226,7 +248,7 @@ Every current v2 asset. Raw URLs on `main` (for use outside GitHub) take the for
 | [`avatar-512.png`](avatar-512.png) | | [raw](https://raw.githubusercontent.com/syntropic137/syntropic137/main/design/brand/avatar-512.png) |
 | [`avatar-transparent-1024.png`](avatar-transparent-1024.png) | <img src="avatar-transparent-512.png" alt="Avatar, transparent" height="64"> | [raw](https://raw.githubusercontent.com/syntropic137/syntropic137/main/design/brand/avatar-transparent-1024.png) |
 | [`avatar-transparent-512.png`](avatar-transparent-512.png) | | [raw](https://raw.githubusercontent.com/syntropic137/syntropic137/main/design/brand/avatar-transparent-512.png) |
-| [`x-header-1500x500.png`](x-header-1500x500.png) | <img src="x-header-1500x500.png" alt="X header" height="48"> | [raw](https://raw.githubusercontent.com/syntropic137/syntropic137/main/design/brand/x-header-1500x500.png) |
+| [`social/`](social/) | Upload-ready files per place (see the table at the top) | |
 | [`og-image.svg`](og-image.svg) | | [raw](https://raw.githubusercontent.com/syntropic137/syntropic137/main/design/brand/og-image.svg) |
 | [`og-image.png`](og-image.png) | <img src="og-image.png" alt="Social image" height="96"> | [raw](https://raw.githubusercontent.com/syntropic137/syntropic137/main/design/brand/og-image.png) |
 

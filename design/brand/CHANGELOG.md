@@ -5,7 +5,7 @@ Versions follow semver: major for a new identity, minor for a new asset or surfa
 ## 2.1.0 (2026-10-10)
 
 - **Avatar.** `avatar-1024.png` and `avatar-512.png`: the Blender close-up of the S on navy with a blue glow, for the GitHub org, X, Discord and npm profile pictures. The official social icon; replaces `icon-512.png` as the recommended avatar. Transparent cuts `avatar-transparent-1024.png` / `-512.png`.
-- **X header.** `x-header-1500x500.png`, PNG cut of the Blender banner render.
+- **Upload-ready social files** in `social/`, one per place: official avatar, X header, Discord banner, LinkedIn cover, YouTube banner, GitHub social preview, transparent avatar. Composed from the full Blender hero so the S is never cropped. "Where does it go?" table at the top of BRAND.md.
 
 ## 2.0.0 (2026-10-09)
 
