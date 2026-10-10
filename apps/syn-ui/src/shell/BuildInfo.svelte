@@ -46,7 +46,7 @@
         onkeydown={(e) => {
           if (e.key === 'Escape') dismissed = true
         }}
-      >{view.label}{#if view.mismatch}<span class="sky-build-mark__warn" aria-hidden="true"> · ui v{view.ui}</span>{/if}</button>
+      >{view.label}</button>
       <div class="sky-build-tip" role="tooltip" id={tipId}>
         <dl class="sky-build-tip__rows">
           {#each view.details as d (d.term)}<div><dt>{d.term}</dt><dd>{d.value}</dd></div>{/each}
@@ -82,7 +82,10 @@
   .sky-build-mark:focus-visible {
     color: var(--ds-color-text-subtle);
   }
-  .sky-build-mark[data-state='mismatch'],
+  .sky-build-mark[data-state='mismatch'] {
+    text-decoration: underline dotted;
+    text-underline-offset: 0.2em;
+  }
   .sky-build-block__warn {
     color: var(--sky-color-warning-soft-fg);
   }
