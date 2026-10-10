@@ -76,10 +76,7 @@ from uuid import uuid4
 
 import pytest
 
-from syn_domain.contexts.organization._shared.projection_names import (
-    REPO_CORRELATION,
-    WORKFLOW_EXECUTIONS,
-)
+from syn_domain.contexts.organization._shared.projection_names import REPO_CORRELATION
 from syn_domain.contexts.organization.domain.queries.get_contribution_heatmap import (
     VALID_METRICS,
     GetContributionHeatmapQuery,
@@ -100,6 +97,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
     import asyncpg
+    from event_sourcing import DomainEvent
     from syn_tests.fixtures.infrastructure import TestInfrastructure
 
     from syn_domain.contexts.organization.domain.read_models.contribution_heatmap import (
@@ -366,19 +364,87 @@ def _events_reaching_the_rollup_by_trigger() -> list[SeedEvent]:
     return events
 
 
-# How each seeded execution ENDED, as the `workflow_executions` read model
-# records it: (status, completed_at). The heatmap's `failed` metric reads only
-# this projection, never agent_events, so without it every scope totals zero
-# failed and `test_every_metric_agrees_under_a_scope[failed]` refuses itself
-# (#1860). One failure lands in every scope the handler tests filter by:
-# A1 is alpha's (repo), system one's and the org's; G1 is gamma's, so it is
-# the org's only. B1 completed and A2 was cancelled: neither is a failure.
-_ENDINGS: dict[str, tuple[str, datetime]] = {
-    EXEC_A1: ("failed", _at(1, 13)),
-    EXEC_A2: ("cancelled", _at(3, 1)),
-    EXEC_B1: ("completed", _at(7, 3)),
-    EXEC_G1: ("failed", _at(8, 12)),
-}
+# How each seeded execution ENDED. The heatmap's `failed` metric reads only
+# the `workflow_executions` read model, never agent_events, so without these
+# every scope totals zero failed and
+# `test_every_metric_agrees_under_a_scope[failed]` refuses itself (#1860).
+# They are written as DOMAIN EVENTS through the production
+# WorkflowExecutionListProjection, so the row the heatmap reads is the row
+# production writes (WorkflowFailed's `failed_at` becomes `completed_at`).
+# One failure lands in every scope the handler tests filter by: A1 is alpha's
+# (repo), system one's and the org's; G1 is gamma's, so it is the org's only.
+# B1 completed and A2 was cancelled: neither is a failure.
+_WORKFLOW_ID = "wf-heatmap-equivalence"
+
+
+def _execution_lifecycles() -> list[tuple[str, DomainEvent]]:
+    """(execution_id, event) in the order each execution's stream recorded them."""
+    from syn_domain.contexts.orchestration.domain.events.ExecutionCancelledEvent import (
+        ExecutionCancelledEvent,
+    )
+    from syn_domain.contexts.orchestration.domain.events.WorkflowCompletedEvent import (
+        WorkflowCompletedEvent,
+    )
+    from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEvent import (
+        WorkflowExecutionStartedEvent,
+    )
+    from syn_domain.contexts.orchestration.domain.events.WorkflowFailedEvent import (
+        WorkflowFailedEvent,
+    )
+
+    def started(execution_id: str, at: datetime) -> WorkflowExecutionStartedEvent:
+        return WorkflowExecutionStartedEvent(
+            workflow_id=_WORKFLOW_ID,
+            execution_id=execution_id,
+            workflow_name="heatmap equivalence",
+            started_at=at,
+            total_phases=1,
+            inputs={},
+        )
+
+    def failed(execution_id: str, at: datetime) -> WorkflowFailedEvent:
+        return WorkflowFailedEvent(
+            workflow_id=_WORKFLOW_ID,
+            execution_id=execution_id,
+            failed_at=at,
+            error_message="seeded failure",
+            completed_phases=0,
+            total_phases=1,
+        )
+
+    return [
+        (EXEC_A1, started(EXEC_A1, _at(1, 8))),
+        (EXEC_A1, failed(EXEC_A1, _at(1, 13))),
+        (EXEC_A2, started(EXEC_A2, _at(2, 23))),
+        (
+            EXEC_A2,
+            ExecutionCancelledEvent(
+                workflow_id=_WORKFLOW_ID,
+                execution_id=EXEC_A2,
+                phase_id="phase-1",
+                cancelled_at=_at(3, 1),
+            ),
+        ),
+        (EXEC_B1, started(EXEC_B1, _at(4, 14))),
+        (
+            EXEC_B1,
+            WorkflowCompletedEvent(
+                workflow_id=_WORKFLOW_ID,
+                execution_id=EXEC_B1,
+                completed_at=_at(7, 3),
+                total_phases=1,
+                completed_phases=1,
+                total_input_tokens=0,
+                total_output_tokens=0,
+                total_tokens=0,
+                total_duration_seconds=1.0,
+                artifact_ids=[],
+            ),
+        ),
+        (EXEC_G1, started(EXEC_G1, _at(8, 11))),
+        (EXEC_G1, failed(EXEC_G1, _at(8, 12))),
+    ]
+
 
 SEEDED_SESSIONS = 10
 """Ten sessions are written. `pre-edge` started before the window, so nine count."""
@@ -442,6 +508,11 @@ async def _forget_seeded_rows(conn: asyncpg.pool.PoolConnectionProxy) -> None:
 
 async def _seed_projections() -> tuple[FakeProjectionStore, RepoProjection]:
     """The org structure the scope filters resolve through, built from real events."""
+    from event_sourcing import EventEnvelope, EventMetadata, MemoryCheckpointStore, ProjectionResult
+
+    from syn_domain.contexts.orchestration.slices.list_executions.projection import (
+        WorkflowExecutionListProjection,
+    )
     from syn_domain.contexts.organization.domain.events.RepoAssignedToSystemEvent import (
         RepoAssignedToSystemEvent,
     )
@@ -476,18 +547,23 @@ async def _seed_projections() -> tuple[FakeProjectionStore, RepoProjection]:
             execution_id,
             {"execution_id": execution_id, "repo_full_name": repo},
         )
-    for execution_id, (status, ended) in _ENDINGS.items():
-        await store.save(
-            WORKFLOW_EXECUTIONS,
-            execution_id,
-            {
-                "workflow_execution_id": execution_id,
-                "workflow_id": "wf-heatmap-equivalence",
-                "status": status,
-                "started_at": None,
-                "completed_at": ended.isoformat(),
-            },
+    # Through `handle_event`, the dispatch production's coordinator calls,
+    # not the `on_*` methods: it is what turns an event into handler data.
+    executions = WorkflowExecutionListProjection(store)
+    checkpoints = MemoryCheckpointStore()
+    for nonce, (execution_id, domain_event) in enumerate(_execution_lifecycles(), start=1):
+        envelope: EventEnvelope[DomainEvent] = EventEnvelope(
+            event=domain_event,
+            metadata=EventMetadata(
+                event_type=domain_event.event_type,
+                aggregate_id=execution_id,
+                aggregate_type="WorkflowExecution",
+                aggregate_nonce=nonce,
+                global_nonce=nonce,
+            ),
         )
+        result = await executions.handle_event(envelope, checkpoints)
+        assert result == ProjectionResult.SUCCESS, domain_event.event_type
     return store, repos
 
 

@@ -51,7 +51,8 @@ pytestmark = pytest.mark.integration
 HISTORY_SESSIONS = 1200
 TURNS_PER_SESSION = 200
 BATCH_SESSIONS = 5  # many short transactions, so the writer interleaves with them
-BASELINE_S = 0.5  # how long the writer runs free before the backfill starts
+BASELINE_INSERTS = 20  # free-running inserts the writer completes before the backfill
+BASELINE_TIMEOUT_S = 30.0  # generous: connection setup on a slow runner is not the test
 MIN_WINDOW_CYCLES = 20  # the backfill must span this many free-running inserts
 MIN_RATE_FRACTION = 0.25  # of the free-running rate, sustained during the backfill
 _MODELS = ("claude-sonnet-5", "claude-haiku-4-5-20251001")
@@ -97,6 +98,7 @@ class Writer:
 
     dsn: str
     stop: asyncio.Event = field(default_factory=asyncio.Event)
+    baseline_ready: asyncio.Event = field(default_factory=asyncio.Event)
     finished_at: list[float] = field(default_factory=list)
     latencies: list[float] = field(default_factory=list)
 
@@ -125,6 +127,8 @@ class Writer:
                 now = time.perf_counter()
                 self.latencies.append(now - started)
                 self.finished_at.append(now)
+                if len(self.finished_at) >= BASELINE_INSERTS:
+                    self.baseline_ready.set()
                 i += 1
                 await asyncio.sleep(0.002)
         finally:
@@ -201,7 +205,24 @@ async def test_inserts_flow_during_the_backfill_and_each_is_counted_once(
 
             writer = Writer(dsn)
             writing = asyncio.create_task(writer.run())
-            await asyncio.sleep(BASELINE_S)  # the writer is live before the rollup exists
+            # The writer is live, and has a measured free-running rate, before
+            # the rollup exists. Waiting on completions rather than a fixed
+            # sleep keeps connection setup on a slow runner out of the test.
+            ready = asyncio.create_task(writer.baseline_ready.wait())
+            done, _ = await asyncio.wait(
+                {ready, writing},
+                timeout=BASELINE_TIMEOUT_S,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if ready not in done:
+                ready.cancel()
+                writer.stop.set()
+                if writing in done:
+                    writing.result()  # the writer died: raise its error
+                pytest.fail(
+                    f"the writer completed {len(writer.finished_at)} of {BASELINE_INSERTS} "
+                    f"baseline inserts in {BASELINE_TIMEOUT_S:.0f} s"
+                )
 
             started = time.perf_counter()
             await EventStoreSchema().ensure_schema(conn)
@@ -216,7 +237,7 @@ async def test_inserts_flow_during_the_backfill_and_each_is_counted_once(
             # The writer's free-running rate, from its first completed insert
             # (connection setup excluded) to the moment the backfill began.
             before = [t for t in writer.finished_at if t <= started]
-            assert len(before) >= 2, "the writer never ran free before the backfill"
+            assert len(before) >= BASELINE_INSERTS
             baseline_rate = (len(before) - 1) / (before[-1] - before[0])
             during_rate = len(during) / backfill_s
             window_cycles = baseline_rate * backfill_s
