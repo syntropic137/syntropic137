@@ -61,10 +61,10 @@ const STACK = {
 
 /** Type scale (px) and letter spacing (em). Tracking matches the landing (--sky-tracking-brand, pill caps). */
 const TYPE = {
-  title: { max: 92, tracking: 0.04, cap: 0.72 },
+  title: { max: 92, tracking: 0.04 },
   tagline: { size: 25, cap: 0.7 },
   side: { size: 21, gap: 26 },
-  command: { max: 20, cap: 0.73 },
+  command: { max: 20 },
   pill: { size: 13, tracking: 0.12, height: 34 },
 }
 const GAP = { pillTitle: 48, titleTagline: 36, taglineCommand: 26, titleCommand: 48 }
@@ -84,21 +84,34 @@ function defs(): string {
 <linearGradient id="edge" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="${ACCENT}" stop-opacity="0"/><stop offset="0.5" stop-color="${ACCENT}" stop-opacity="0.7"/><stop offset="1" stop-color="${ACCENT}" stop-opacity="0"/></linearGradient>`
 }
 
-function ground(): string {
+function ground(dx = 0): string {
   return `<g clip-path="url(#card)">
 <rect width="${W}" height="${H}" fill="${GROUND}"/>
 <rect width="${W}" height="${H}" fill="url(#dots)"/>
 <rect width="${W}" height="${H}" fill="url(#wash)"/>
-<ellipse cx="${MARK_CX}" cy="${H / 2 + 24}" rx="200" ry="180" fill="url(#markglow)"/>
+<ellipse cx="${n(MARK_CX + dx)}" cy="${H / 2 + 24}" rx="200" ry="180" fill="url(#markglow)"/>
 <rect x="${W * 0.2}" y="0" width="${W * 0.6}" height="1" fill="url(#edge)"/>
 </g>
 <rect x="0.5" y="0.5" width="${W - 1}" height="${H - 1}" rx="${RADIUS - 0.5}" fill="none" stroke="${TEXT.muted}" stroke-opacity="0.16"/>`
 }
 
+const S_CUBE = 34
+
+/** Extents of the S's drawn faces (glass cube included), in its own units. */
+function markBox(): { x0: number; x1: number; y0: number; y1: number } {
+  const pts = sMark(S_CUBE).cubes.flatMap((c) => [c.left, c.right, c.top].flatMap((p) => p.trim().split(/\s+/)))
+  const xy = pts.map((p) => p.split(',').map(Number) as [number, number])
+  const xs = xy.map((p) => p[0])
+  const ys = xy.map((p) => p[1])
+  return { x0: Math.min(...xs), x1: Math.max(...xs), y0: Math.min(...ys), y1: Math.max(...ys) }
+}
+
+/** The S, its visual box centred on (MARK_CX, H / 2). */
 function mark(): string {
-  const m = sMark(34)
-  const x = MARK_CX - m.width / 2
-  const y = (H - m.height) / 2
+  const m = sMark(S_CUBE)
+  const b = markBox()
+  const x = MARK_CX - (b.x0 + b.x1) / 2
+  const y = H / 2 - (b.y0 + b.y1) / 2
   return `<g transform="translate(${n(x)} ${n(y)})">${m.cubes.map((c) => cube(S_FACES[c.tone], c)).join('')}</g>`
 }
 
@@ -112,6 +125,13 @@ function scales(x: number, cy: number): string {
 
 function pillTexts(spec: BannerSpec): string[] {
   return [spec.license, spec.label].filter((t): t is string => Boolean(t)).map((t) => t.toUpperCase())
+}
+
+function pillWidth(spec: BannerSpec, mono: StaticFont): number {
+  const { size, tracking } = TYPE.pill
+  const texts = pillTexts(spec)
+  const textW = texts.reduce((w, t) => w + measure(mono, t, size, tracking), 0)
+  return 32 + (spec.license ? 23 : 0) + (texts.length - 1) * (21 - size * tracking) + textW - size * tracking
 }
 
 function pill(spec: BannerSpec, mono: StaticFont, top: number): string {
@@ -150,6 +170,7 @@ const fit = (font: StaticFont, text: string, max: number, tracking = 0): number 
 
 interface Row {
   height: number
+  width: number
   gapBefore: number
   draw: (top: number) => string
 }
@@ -161,24 +182,26 @@ function titleRow(spec: BannerSpec, fonts: Fonts, gap: number): Row {
   const sideW = side ? TYPE.side.gap + measure(fonts.sans, side, sideSize) : 0
   const titleW = measure(fonts.brand, spec.title, 1, t.tracking) - t.tracking
   const size = Math.min(t.max, (TEXT_MAX - sideW) / titleW)
+  const cap = fonts.brand.cap
   const draw = (top: number) => {
-    const base = n(top + size * t.cap)
+    const base = n(top + size * cap)
     const title = `<text x="${TEXT_X - size * 0.04}" y="${base}" font-family="${STACK.brand}" font-size="${n(size)}" font-weight="600" letter-spacing="${t.tracking}em" fill="${TEXT.fg}">${titleSpans(spec.title)}</text>`
     if (!side) return title
     const x = TEXT_X + size * titleW + TYPE.side.gap
     return `${title}<text x="${n(x)}" y="${base}" font-family="${STACK.sans}" font-size="${sideSize}" fill="${TEXT.muted}" fill-opacity="0.85">${esc(side)}</text>`
   }
-  return { height: size * t.cap, gapBefore: gap, draw }
+  return { height: size * cap, width: size * titleW + sideW, gapBefore: gap, draw }
 }
 
 function rows(spec: BannerSpec, fonts: Fonts): Row[] {
   const gap = { ...GAP, ...spec.gaps }
   const below = spec.taglineAt === 'below' && spec.tagline
-  const out: Row[] = [{ height: TYPE.pill.height, gapBefore: 0, draw: (top) => pill(spec, fonts.mono, top) }, titleRow(spec, fonts, gap.pillTitle)]
+  const out: Row[] = [{ height: TYPE.pill.height, width: pillWidth(spec, fonts.mono), gapBefore: 0, draw: (top) => pill(spec, fonts.mono, top) }, titleRow(spec, fonts, gap.pillTitle)]
   if (below) {
     const s = TYPE.tagline.size
     out.push({
       height: s * TYPE.tagline.cap,
+      width: measure(fonts.sans, spec.tagline ?? '', s),
       gapBefore: gap.titleTagline,
       draw: (top) => `<text x="${TEXT_X}" y="${n(top + s * TYPE.tagline.cap)}" font-family="${STACK.sans}" font-size="${s}" fill="${TEXT.muted}">${esc(spec.tagline ?? '')}</text>`,
     })
@@ -190,19 +213,24 @@ function rows(spec: BannerSpec, fonts: Fonts): Row[] {
 function commandRow(command: string, mono: StaticFont, gapBefore: number): Row {
   const line = `$ ${command}`
   const s = fit(mono, line, TYPE.command.max)
-  const cap = TYPE.command.cap
+  const cap = mono.cap
   return {
     height: s * cap,
+    width: measure(mono, line, s),
     gapBefore,
     draw: (top) =>
       `<text x="${TEXT_X}" y="${n(top + s * cap)}" font-family="${STACK.mono}" font-size="${n(s)}" font-weight="500" fill="${TEXT.fg}" fill-opacity="0.86" xml:space="preserve"><tspan fill="${ACCENT}">$</tspan> ${esc(command)}</text>`,
   }
 }
 
-function textBlock(spec: BannerSpec, fonts: Fonts): string {
-  const list = rows(spec, fonts)
-  const total = list.reduce((sum, r) => sum + r.gapBefore + r.height, 0)
-  let top = (H - total) / 2
+/**
+ * Rows stacked down from the pill, placed so the title's cap box (rows[1])
+ * is centred on the card's middle line, the axis the S is centred on too.
+ * The pill and the command sit the same distance from that cap box.
+ */
+function textBlock(list: Row[]): string {
+  const [pillRow, title] = list
+  let top = H / 2 - (title?.height ?? 0) / 2 - (title?.gapBefore ?? 0) - (pillRow?.height ?? 0)
   return list
     .map((r) => {
       top += r.gapBefore
@@ -214,6 +242,14 @@ function textBlock(spec: BannerSpec, fonts: Fonts): string {
 }
 
 // ---------------------------------------------------------------- banner
+
+/** Shift that centres the S plus the text column (to its longest line) in the card. */
+function centreShift(list: Row[]): number {
+  const b = markBox()
+  const left = MARK_CX - (b.x1 - b.x0) / 2
+  const right = TEXT_X + Math.max(...list.map((r) => r.width))
+  return W / 2 - (left + right) / 2
+}
 
 function train(spec: BannerSpec, fonts: Fonts) {
   if (!spec.edge) return undefined
@@ -228,6 +264,8 @@ function styles(spec: BannerSpec, fonts: Fonts, edgeGlyphs: string): string {
 export function banner(spec: BannerSpec, fonts: Fonts): string {
   const label = spec.alt ?? `${spec.title}: ${spec.tagline ?? spec.label}`
   const edge = train(spec, fonts)
+  const list = rows(spec, fonts)
+  const dx = centreShift(list)
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(label)}">
 <title>${esc(label)}</title>
 <style>
@@ -236,9 +274,11 @@ ${styles(spec, fonts, edge?.glyphs ?? '')}
 <defs>
 ${defs()}${edge ? `\n${edge.defs}` : ''}
 </defs>
-${ground()}${edge ? `\n${edge.body}` : ''}
+${ground(dx)}${edge ? `\n${edge.body}` : ''}
+<g transform="translate(${n(dx)} 0)">
 ${mark()}
-${textBlock(spec, fonts)}
+${textBlock(list)}
+</g>
 </svg>
 `
 }

@@ -34,6 +34,8 @@ export interface StaticFont {
   spec: FontSpec
   ttf: string
   unitsPerEm: number
+  /** Cap height (OS/2 sCapHeight) as a fraction of the em. */
+  cap: number
   /** Advance width per character, in font units. */
   advances: Map<string, number>
 }
@@ -53,9 +55,10 @@ function work(): string {
 }
 
 /** Advance widths by character, read from a ttx dump of cmap and hmtx. */
-function readMetrics(ttf: string): { unitsPerEm: number; advances: Map<string, number> } {
-  const xml = uvx(['fonttools', 'ttx', '-q', '-t', 'head', '-t', 'cmap', '-t', 'hmtx', '-o', '-', ttf])
+function readMetrics(ttf: string): { unitsPerEm: number; cap: number; advances: Map<string, number> } {
+  const xml = uvx(['fonttools', 'ttx', '-q', '-t', 'head', '-t', 'OS/2', '-t', 'cmap', '-t', 'hmtx', '-o', '-', ttf])
   const unitsPerEm = Number(/<unitsPerEm value="(\d+)"/.exec(xml)?.[1] ?? 1000)
+  const cap = Number(/<sCapHeight value="(\d+)"/.exec(xml)?.[1] ?? unitsPerEm * 0.7) / unitsPerEm
   const widths = new Map<string, number>()
   for (const m of xml.matchAll(/<mtx name="([^"]+)" width="(\d+)"/g)) widths.set(m[1] ?? '', Number(m[2]))
   const advances = new Map<string, number>()
@@ -63,7 +66,7 @@ function readMetrics(ttf: string): { unitsPerEm: number; advances: Map<string, n
     const w = widths.get(m[2] ?? '')
     if (w !== undefined) advances.set(String.fromCodePoint(Number(m[1])), w)
   }
-  return { unitsPerEm, advances }
+  return { unitsPerEm, cap, advances }
 }
 
 /** Pin a variable font to one static instance and read its metrics. */
