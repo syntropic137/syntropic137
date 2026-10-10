@@ -6,6 +6,8 @@ import {
   ageGroupTitle,
   calendarDaysAgo,
   evalBadge,
+  evalRowTag,
+  runRowSub,
   parseEvalFilter,
   phaseProgressText,
   isExecutionEvent,
@@ -315,5 +317,21 @@ describe('skill use (parity-2: the API reports it, so the screen must)', () => {
     expect(phaseSkillUseText(phase({ skill_use: { status: 'observed', declared: ['a', 'b', 'c'], invoked: [{ name: 'a', count: 1 }], summary_display: '1 of 3 declared skills invoked' } }))).toBe('1 of 3 declared skills invoked')
     expect(phaseSkillUseText(phase({ skill_use: { status: 'unavailable', declared: [], invoked: [], summary_display: 'skill use unavailable: no record for this run' } }))).toBeNull()
     expect(phaseSkillUseText(phase())).toBeNull()
+  })
+})
+
+describe('executions list rows on live data (parity-2 #8)', () => {
+  // exec rows from /executions on the VPS, 2026-10-10.
+  it('keeps the API\'s "up to" in the progress line', () => {
+    const progress = { completed: 3, skipped: 0, possible: 8, remaining_possible: 5, percent: 38, display: '3 of up to 8, failed' }
+    expect(runRowSub('syntropic137/syntropic137', progress, 3, 8)).toBe('syntropic137/syntropic137 · phases 3 of up to 8, failed')
+    expect(runRowSub(null, null, 1, 3)).toBe('no repo · 1 of 3 phases')
+  })
+  it('shows the eval verdict on the chip', () => {
+    const live = { eval_id: 'eval-f41a', eval_name: 'verifier-seed: workflow-run-task-undeliverable', association_kind: 'launched', verdict: 'FAIL', score: 0, scored_at: '2026-10-09T23:25:41Z' }
+    expect(evalRowTag(live)).toMatchObject({ label: 'Eval · FAIL', href: '/evals/eval-f41a' })
+    expect(evalRowTag({ ...live, verdict: 'PASS' })?.label).toBe('Eval · PASS')
+    expect(evalRowTag({ ...live, verdict: null })?.label).toBe('Eval')
+    expect(evalRowTag(null)).toBeNull()
   })
 })

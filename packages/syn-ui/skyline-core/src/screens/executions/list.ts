@@ -4,7 +4,9 @@
  */
 import { durationBetween, formatDuration } from '../../format/duration'
 import { toTime } from '../../format/shared'
+import { runSubline } from '../../patterns/runRow'
 import { statusSemantics } from '../../patterns/status'
+import { phaseProgressText } from './detail'
 
 export type TimeWindow = '15m' | '1h' | '24h' | '7d' | 'all'
 
@@ -175,6 +177,36 @@ export function evalBadge(e: ExecutionEvalLike | null | undefined): EvalBadge | 
   const kind = e.association_kind ? ` (${e.association_kind})` : ''
   const verdict = e.verdict ? ` · verdict ${e.verdict}` : ' · not scored yet'
   return { label: 'Eval', title: `Eval run of ${e.eval_name || e.eval_id}${kind}${verdict}`, href: `/evals/${encodeURIComponent(e.eval_id)}` }
+}
+
+/**
+ * The run row's eval chip (parity-2: the list showed only "Eval"): the
+ * verdict the API reports, "Eval · PASS" / "Eval · FAIL", and plain "Eval"
+ * while the run is not scored. Same title and link as `evalBadge`.
+ */
+export function evalRowTag(e: ExecutionEvalLike | null | undefined): EvalBadge | null {
+  const badge = evalBadge(e)
+  if (!badge) return null
+  return e?.verdict ? { ...badge, label: `Eval · ${e.verdict}` } : badge
+}
+
+/** A list row's phase progress as the API words it (`phase_progress`); the counts are the fallback for a server without it. */
+export interface PhaseProgressLike {
+  completed: number
+  possible: number
+  display?: string | null
+}
+
+/**
+ * The run row's sub line: "owner/repo · phases 3 of up to 8, failed" from
+ * the API's `phase_progress.display` (parity-2: the list said "3 of 8
+ * phases", losing "up to"), else "owner/repo · 3 of 8 phases".
+ */
+export function runRowSub(repo: string | null | undefined, progress: PhaseProgressLike | null | undefined, completed: number, total: number): string {
+  const done = progress?.completed ?? completed
+  const possible = progress?.possible ?? total
+  if (!progress?.display) return runSubline(repo, done, possible)
+  return `${repo || 'no repo'} · ${phaseProgressText(progress.display, done, possible)}`
 }
 
 /** `?eval=1` <-> the list's in-eval filter. */

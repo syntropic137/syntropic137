@@ -6,10 +6,11 @@
 -->
 <script lang="ts">
   import { formatCost, formatRelativeTime, formatTokens } from '@syn137/skyline-core/format'
-  import { outcomeStatus, runBarPercent, runSegments, runSlots, runSubline, statusSemantics } from '@syn137/skyline-core/patterns'
+  import { outcomeStatus, runBarPercent, runSegments, runSlots, statusSemantics } from '@syn137/skyline-core/patterns'
   import {
     EXECUTION_FILTERS,
-    evalBadge,
+    evalRowTag,
+    runRowSub,
     parseEvalFilter,
     TIME_WINDOWS,
     executionsLede,
@@ -95,7 +96,7 @@
 
   function rowSub(r: Row): string {
     const repo = r.repos_display ?? null
-    return runSubline(repo, r.phase_progress?.completed ?? r.completed_phases, r.phase_progress?.possible ?? r.total_phases)
+    return runRowSub(repo, r.phase_progress, r.completed_phases, r.total_phases)
   }
 
   function when(r: Row): string {
@@ -238,7 +239,7 @@
                 href={href(`/executions/${r.workflow_execution_id}`)}
                 status={outcomeStatus(r.status, r.failure_classification)}
                 name={r.workflow_name || r.workflow_id}
-                tag={evalBadge(r.eval)}
+                tag={evalRowTag(r.eval)}
                 sub={rowSub(r)}
                 segments={runSegments({ status: r.status, done: r.phase_progress?.completed ?? r.completed_phases, total: r.phase_progress?.possible ?? r.total_phases })}
                 barPercent={runBarPercent(runDurationMs(r, now || Date.now()) ?? 0, longest)}
