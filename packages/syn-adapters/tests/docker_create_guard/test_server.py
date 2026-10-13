@@ -121,8 +121,12 @@ class TestGuardHostResolvesThroughTheMount:
         assert host.real_path("/srv/ws/ws-1") is None
 
 
-def _inspect(labels: JsonObject) -> JsonObject:
-    return {"Config": {"Image": workspace_body()["Image"], "Labels": labels}, "Mounts": []}
+def _inspect(labels: JsonObject, container_id: str = "a" * 64) -> JsonObject:
+    return {
+        "Id": container_id,
+        "Config": {"Image": workspace_body()["Image"], "Labels": labels},
+        "Mounts": [],
+    }
 
 
 class TestExec:
@@ -131,7 +135,9 @@ class TestExec:
         daemon.containers["ws-1"] = _inspect({"syn.workspace_id": "ws-1"})
         status, _ = _post(port, "/v1.47/containers/ws-1/exec", {"Cmd": ["true"]})
         assert status == 201
-        assert [path for path, _ in daemon.creates] == ["/v1.47/containers/ws-1/exec"]
+        # Forwarded by the inspected container's ID, not the name: a name can be
+        # moved onto the guard or the proxy between the inspect and the create.
+        assert [path for path, _ in daemon.creates] == [f"/v1.47/containers/{'a' * 64}/exec"]
 
     @pytest.mark.parametrize("name", ["syn-docker-create-guard", "missing"])
     def test_exec_into_the_guard_or_an_unknown_container_never_reaches_the_daemon(

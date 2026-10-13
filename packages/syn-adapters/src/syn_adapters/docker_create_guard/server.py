@@ -142,10 +142,11 @@ class CreateGuardHandler(BaseHTTPRequestHandler):
         body = self._read_body()
         if body is None:
             return
+        forward_path = self.path
         if exec_target is None:
             refusal = self.policy.check(body, self.host)
         else:
-            refusal = self._check_exec(body, exec_target.group(2))
+            refusal, forward_path = self._check_exec(body, exec_target)
             if refusal is _UNREACHABLE:
                 return
         if refusal is not None:
@@ -154,7 +155,7 @@ class CreateGuardHandler(BaseHTTPRequestHandler):
                 403, f"refused by the Syntropic137 container-create guard: {refusal.reason}"
             )
             return
-        self._forward(body)
+        self._forward(forward_path, body)
 
     def _read_body(self) -> bytes | None:
         length = self.headers.get("Content-Length")
@@ -163,21 +164,34 @@ class CreateGuardHandler(BaseHTTPRequestHandler):
             return None
         return self.rfile.read(int(length))
 
-    def _check_exec(self, body: bytes, target_name: str) -> Refusal | None:
-        """The exec refusal, or ``_UNREACHABLE`` once a 502 has been sent."""
+    def _check_exec(self, body: bytes, path: re.Match[str]) -> tuple[Refusal | None, str]:
+        """The exec refusal (``_UNREACHABLE`` once a 502 is sent) and the path to forward.
+
+        The forwarded path names the inspected container by its immutable ID,
+        never by the name the request gave: a name can be moved to another
+        container between this inspect and the daemon's exec create.
+        """
         try:
-            target = self.host.docker.container(target_name)
+            target = self.host.docker.container(path.group(2))
         except (OSError, ValueError) as exc:
             logger.error("exec target could not be inspected: %s", exc)
             self._reply(502, f"the create guard could not inspect the exec target: {exc}")
-            return _UNREACHABLE
-        return self.policy.check_exec(body, target, self.host)
+            return _UNREACHABLE, self.path
+        refusal = self.policy.check_exec(body, target, self.host)
+        target_id = target.get("Id") if target is not None else None
+        if refusal is None and not isinstance(target_id, str):
+            refusal = Refusal("the exec target has no container ID")
+        if refusal is not None or not isinstance(target_id, str):
+            return refusal, self.path
+        query = urlsplit(self.path).query
+        forward = f"{path.group(1) or ''}/containers/{quote(target_id, safe='')}/exec"
+        return None, forward + (f"?{query}" if query else "")
 
-    def _forward(self, body: bytes) -> None:
+    def _forward(self, path: str, body: bytes) -> None:
         headers = {"Content-Type": self.headers.get("Content-Type", "application/json")}
         try:
             status, response_headers, response_body = self.host.docker.request(
-                "POST", self.path, body, headers
+                "POST", path, body, headers
             )
         except OSError as exc:
             logger.error("container create could not reach the Docker socket: %s", exc)

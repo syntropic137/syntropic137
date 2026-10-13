@@ -185,9 +185,15 @@ services:
     - |
       set -eu
       template=/usr/local/etc/haproxy/haproxy.cfg.template
-      [ "$$(grep -c '^[[:space:]]*http-request deny$$' "$$template")" = 1 ]
-      [ "$$(grep -c '^[[:space:]]*default_backend dockerbackend$$' "$$template")" = 1 ]
-      [ "$$(grep -c '^frontend dockerfrontend$$' "$$template")" = 1 ]
+      # Transform the image's pristine template, kept aside on first start:
+      # a restart keeps this filesystem, and transforming the output again
+      # would duplicate the resolvers and backend sections, which haproxy
+      # refuses to load.
+      pristine="$$template.pristine"
+      [ -f "$$pristine" ] || cp "$$template" "$$pristine"
+      [ "$$(grep -c '^[[:space:]]*http-request deny$$' "$$pristine")" = 1 ]
+      [ "$$(grep -c '^[[:space:]]*default_backend dockerbackend$$' "$$pristine")" = 1 ]
+      [ "$$(grep -c '^frontend dockerfrontend$$' "$$pristine")" = 1 ]
       awk '
       /^[[:space:]]*http-request deny$$/ {
           print "    http-request allow if { method GET DELETE } { path -m reg ^(/v[0-9.]+)?/volumes/syn-capture-[a-f0-9]{64}$$ }"
@@ -211,7 +217,7 @@ services:
           print "backend docker-create-guard"
           print "    server guard docker-create-guard:2375 resolvers docker init-addr last,libc,none"
       }
-      ' "$$template" > /tmp/capture-haproxy.template
+      ' "$$pristine" > /tmp/capture-haproxy.template
       cat /tmp/capture-haproxy.template > "$$template"
       exec /docker-entrypoint.sh "$$@"
     - capture-policy

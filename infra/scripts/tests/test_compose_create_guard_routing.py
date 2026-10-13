@@ -39,11 +39,12 @@ _ROUTE = re.compile(
 )
 
 
-def _patched(compose: Path, tmp_path: Path) -> str:
+def _patched(compose: Path, tmp_path: Path, *, fresh: bool = True) -> str:
     service = yaml.safe_load(compose.read_text())["services"]["docker-socket-proxy"]
     shell, flags, script = service["entrypoint"][:3]
     template = tmp_path / "haproxy.cfg.template"
-    template.write_text(_TEMPLATE)
+    if fresh:
+        template.write_text(_TEMPLATE)
     script = script.replace("$$", "$").replace(
         "/usr/local/etc/haproxy/haproxy.cfg.template", str(template)
     )
@@ -51,6 +52,18 @@ def _patched(compose: Path, tmp_path: Path) -> str:
     script = script.replace('exec /docker-entrypoint.sh "$@"', "true")
     subprocess.run([shell, flags, script], check=True)
     return template.read_text()
+
+
+def test_a_restart_transforms_the_pristine_template_again(tmp_path: Path) -> None:
+    """A restarted proxy keeps its filesystem; a second pass must not stack sections."""
+    for compose in _COMPOSE:
+        work = tmp_path / compose.stem
+        work.mkdir()
+        first = _patched(compose, work)
+        second = _patched(compose, work, fresh=False)
+        assert second == first
+        assert second.count("\nresolvers docker\n") == 1
+        assert second.count("backend docker-create-guard\n") == 1
 
 
 def _routed(config: str, method: str, path: str) -> bool:
