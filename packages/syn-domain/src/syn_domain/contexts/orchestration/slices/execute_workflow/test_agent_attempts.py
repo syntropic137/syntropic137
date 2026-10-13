@@ -1274,3 +1274,48 @@ class TestTelemetryCannotSpendAGrantedBudget:
         ), f"dispatched at {started} with {granted}: an attempt outlived the {deadline}s deadline"
         assert len(started) == 2, f"{started}: a successor ran on a budget the recorder spent"
         assert result.stream_result.error_reason == AT_CAPACITY
+
+
+class TestTheBoundIsReadFromTheDurableRecord:
+    """Rebuilding the runner for the same phase does not replenish its attempts.
+
+    `PhaseAttempts` used to count from 1 on every `run_phase_agent`, so a
+    runner reconstructed for the same session launched another
+    `max_attempts` (#1882, verify finding 2). The count now starts from the
+    session's durable invocation registrations.
+    """
+
+    async def test_a_rebuilt_runner_gets_no_retries_the_phase_already_spent(self) -> None:
+        manager = await started_session_manager()
+        launch = replace(_launch(), session_manager=manager)
+        launches: list[int] = []
+        for _ in range(2):
+            handler = _RecordingHandler(
+                scripted=FakeAgentExecutionHandler(
+                    attempts=[FakeAgentExecutionHandler.failed(stream_error=AT_CAPACITY)] * 3
+                )
+            )
+            result = await _run(handler, launch=launch)
+            launches.append(len(handler.attempts))
+            assert result.stream_result.error_reason == AT_CAPACITY
+
+        max_attempts = NO_WAITING.max_attempts
+        assert launches == [max_attempts, 1], (
+            f"{launches}: the rebuilt runner retried attempts the phase had already spent"
+        )
+        assert manager.session is not None
+        assert len(manager.session.invocations) == max_attempts + 1
+
+    async def test_the_first_runner_still_gets_its_full_bound(self) -> None:
+        """The control: a fresh session is not starved by the durable count."""
+        handler = _RecordingHandler(
+            scripted=FakeAgentExecutionHandler(
+                attempts=[FakeAgentExecutionHandler.failed(stream_error=AT_CAPACITY)] * 3
+            )
+        )
+
+        await _run(
+            handler, launch=replace(_launch(), session_manager=await started_session_manager())
+        )
+
+        assert len(handler.attempts) == NO_WAITING.max_attempts

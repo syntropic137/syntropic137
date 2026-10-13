@@ -120,8 +120,6 @@ def test_the_response_models_are_frozen_and_forbid_extra_fields(model: str) -> N
         provider="codex", requested_model=None, upstream_kind="capacity", retries=1
     )
     with pytest.raises(ValidationError):
-        types.UpstreamRetryCountResponse.model_validate(
-            {**count.model_dump(), "unexpected": True}
-        )
+        types.UpstreamRetryCountResponse.model_validate({**count.model_dump(), "unexpected": True})
     with pytest.raises(ValidationError):
         count.retries = 2

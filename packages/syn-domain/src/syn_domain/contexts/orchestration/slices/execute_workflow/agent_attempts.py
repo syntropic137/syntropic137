@@ -94,6 +94,9 @@ if TYPE_CHECKING:
         AgentHandlerProtocol,
         Runner,
     )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.SessionLifecycleManager import (
+        SessionLifecycleManager,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -197,7 +200,10 @@ async def run_phase_agent(
     # so what a phase is configured to cost in time is what it can cost: a
     # per-attempt timeout made three attempts at a 3600-second phase into
     # three hours and three phases' money.
-    attempts = retry_policy.begin(timeout_seconds=phase.effective_timeout_seconds)
+    attempts = retry_policy.begin(
+        timeout_seconds=phase.effective_timeout_seconds,
+        already_launched=_launched_before(launch.session_manager),
+    )
     # ONE cost limit for the phase, for the same reason as the deadline above:
     # every attempt spends from it, so neither a retry nor the fallback can
     # reset what was spent (#1376). None when the phase declared no
@@ -249,6 +255,17 @@ async def run_phase_agent(
     if not _attempt_is_settled(second.result) or second.result.exit_code != 0:
         second.result.primary_failure = _why_the_primary_failed(phase.agent_config, primary.result)
     return second.result
+
+
+def _launched_before(session_manager: SessionLifecycleManager | None) -> int:
+    """Attempts this phase's session has already registered, read from its events.
+
+    Every launch registers durable intent first (#1398), so the session's
+    invocations ARE the attempts made: deriving the retry bound from them
+    means rebuilding the runner for the same phase cannot replenish it.
+    """
+    session = session_manager.session if session_manager is not None else None
+    return len(session.invocations) if session is not None else 0
 
 
 def _why_the_primary_failed(agent: AgentConfiguration, result: AgentExecutionResult) -> str:

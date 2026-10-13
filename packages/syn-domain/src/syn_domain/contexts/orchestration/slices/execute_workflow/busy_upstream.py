@@ -149,14 +149,23 @@ class PhaseAttempts:
     """
 
     def __init__(
-        self, *, policy: UpstreamRetryPolicy, timeout_seconds: float, clock: AttemptClock
+        self,
+        *,
+        policy: UpstreamRetryPolicy,
+        timeout_seconds: float,
+        clock: AttemptClock,
+        already_launched: int = 0,
     ) -> None:
         self._policy = policy
         self._clock = clock
         self._deadline = clock.monotonic() + timeout_seconds
         self._wall_deadline = clock.wall() + timedelta(seconds=timeout_seconds)
         self._timeout_seconds = timeout_seconds
-        self._attempt = 1
+        # Counted from the attempts this phase has ALREADY launched, as its
+        # session's durable invocation registrations record them, and not
+        # from 1: a runner rebuilt for the same phase used to start a fresh
+        # bound and launch another `max_attempts` (#1882, verify finding 2).
+        self._attempt = 1 + already_launched
 
     @property
     def deadline(self) -> datetime:
@@ -348,10 +357,19 @@ class UpstreamRetryPolicy:
         ceiling = self.base_delay_seconds * 2 ** (attempt - 1)
         return ceiling / 2 + ceiling / 2 * self.jitter()
 
-    def begin(self, *, timeout_seconds: float) -> PhaseAttempts:
+    def begin(self, *, timeout_seconds: float, already_launched: int = 0) -> PhaseAttempts:
         """Start this phase's clock. Call once, before the first attempt.
 
         ``timeout_seconds`` is the phase's whole budget, and every attempt and
-        backoff that follows comes out of it.
+        backoff that follows comes out of it. ``already_launched`` is how many
+        attempts the phase's durable record says were launched before this
+        call; they are spent from ``max_attempts``. The attempt about to run is
+        still never refused (see `first_attempt`) - what a spent bound refuses
+        is a retry after it.
         """
-        return PhaseAttempts(policy=self, timeout_seconds=timeout_seconds, clock=self.clock)
+        return PhaseAttempts(
+            policy=self,
+            timeout_seconds=timeout_seconds,
+            clock=self.clock,
+            already_launched=already_launched,
+        )
