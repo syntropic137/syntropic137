@@ -325,12 +325,14 @@ async def test_driver_counts_active_phases_from_the_server(
                     "phases": phases,
                 },
             )
-        # Every session says running; only exec-0's first phase is running too.
+        # Every session says running and launched; only exec-0's first phase
+        # is running too.
         return httpx.Response(
             200,
             json={
                 "agent_model": SCRIPTED_AGENT_MODEL,
                 "status": "running",
+                "agent_launch": "launched",
                 "operations": _converted(tools),
             },
         )
@@ -431,10 +433,25 @@ async def test_driver_stops_at_the_first_real_model(
     assert {"refused", "scripted"} <= _failed(report)
 
 
-async def test_a_running_phase_without_a_running_agent_is_not_active(
-    profile: ScriptedAgentProfile, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    ("session", "active"),
+    [
+        # SessionStarted is saved before provisioning: running, not launched.
+        ({"status": "running", "agent_launch": "unknown"}, 0),
+        # A server that predates agent_launch says nothing: not counted.
+        ({"status": "running"}, 0),
+        # The agent ran and its session ended; the phase is collecting.
+        ({"status": "completed", "agent_launch": "launched"}, 0),
+        ({"status": "running", "agent_launch": "launched"}, 1),
+    ],
+)
+async def test_only_a_launched_running_agent_is_active(
+    profile: ScriptedAgentProfile,
+    monkeypatch: pytest.MonkeyPatch,
+    session: dict[str, str],
+    active: int,
 ) -> None:
-    """``running`` from PhaseStarted covers provisioning; the agent session decides."""
+    """``running`` phase and session both cover provisioning; ``agent_launch`` decides (B0)."""
 
     def handler(request: httpx.Request) -> httpx.Response:
         path = request.url.path
@@ -446,7 +463,8 @@ async def test_a_running_phase_without_a_running_agent_is_not_active(
             phase = {"phase_id": "premise", "status": "running", "session_id": "s-0"}
             body = {"workflow_execution_id": "exec-0", "status": "running", "phases": [phase]}
             return httpx.Response(200, json=body)
-        return httpx.Response(200, json={"status": "pending", "operations": []})
+        body = {**session, "agent_model": SCRIPTED_AGENT_MODEL, "operations": []}
+        return httpx.Response(200, json=body)
 
     _stand_in(monkeypatch, handler)
     report = await run_load_test(
@@ -455,8 +473,7 @@ async def test_a_running_phase_without_a_running_agent_is_not_active(
         PassBar(n=1, sustain_seconds=0.0, read_p95_seconds=2.0),
         Pacing(admit_seconds=0.0, sample_seconds=0.1, drain_timeout_seconds=0.0),
     )
-    assert report.peak_active_phases == 0
-    assert report.lost == ["exec-0"]
+    assert report.peak_active_phases == active
 
 
 async def test_a_start_passes_the_api_repository_guard(monkeypatch: pytest.MonkeyPatch) -> None:

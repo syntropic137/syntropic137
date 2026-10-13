@@ -112,8 +112,9 @@ every detail read. All four container roles must be sampled, or
 
 It requires a stack whose workspace image is the stub agent
 (AgentParadise/agentic-workspace#44). Concurrency is the count of phases the
-server reports `running` whose session is `running` too, never the executions
-submitted. Event counts hold every planned phase to its scripted tool-use
+server reports `running` whose session is `running` with `agent_launch:
+launched` (the server's `AgentLaunched` fact), never the executions submitted
+and never a phase still provisioning. Event counts hold every planned phase to its scripted tool-use
 count in starts AND completions, counting Agent/Task uses the timeline
 relabels as subagent operations. Exit 0: pass bar held; 1: a check failed
 (named in the report); 2: refused. A session reporting a model other than

@@ -67,7 +67,8 @@ class Sample:
     """Seconds since the first admission."""
     active_phases: int
     """Phases of this run's executions that are ``running`` with their agent
-    session ``running`` too; a phase still provisioning does not count."""
+    session ``running`` and ``agent_launch`` ``launched``; a phase still
+    queued or provisioning does not count."""
     budget_running: int | None
     budget_queued: int | None
     list_latency_seconds: float

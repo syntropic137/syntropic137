@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING, Final
 import httpx
 from pydantic import BaseModel, ConfigDict
 
+from syn_domain.contexts.agent_sessions import AgentLaunch
 from syn_perf.loadtest.pass_bar import (
     TERMINAL_STATUSES,
     TOOL_END_OPERATIONS,
@@ -131,8 +132,21 @@ class _Operation(_Read):
 
 class _Session(_Read):
     status: str = ""
+    agent_launch: AgentLaunch = AgentLaunch.UNKNOWN
+    """Absent on a server that predates the field: unknown, so never active."""
     agent_model: str | None = None
     operations: list[_Operation]
+
+    @property
+    def agent_working(self) -> bool:
+        """An agent process has started for this session and it has not ended.
+
+        ``status`` alone is ``running`` from ``SessionStarted``, which the
+        server saves before the workspace is provisioned; ``agent_launch`` is
+        the server's ``AgentLaunched`` fact (#1065). Only both together are an
+        agent actively working (docs/north-star.md).
+        """
+        return self.status == "running" and self.agent_launch is AgentLaunch.LAUNCHED
 
 
 async def run_load_test(
@@ -285,10 +299,12 @@ async def _sample(
 ) -> tuple[Sample, list[_Detail | None]]:
     """One tick: the list read, every detail read, and the session of every running phase.
 
-    A phase is ``running`` from ``PhaseStarted``, before its workspace is
-    provisioned, so it counts as active only when its agent session is
-    ``running`` too. The same session read proves the model is the scripted
-    one, so a real harness stops the run on the tick it is first seen.
+    A phase is ``running`` from ``PhaseStarted`` and its session from
+    ``SessionStarted``, both before the workspace is provisioned, so a phase
+    counts as active only when its session reports the agent launched
+    (``_Session.agent_working``). The same session read proves the model is
+    the scripted one, so a real harness stops the run on the tick it is first
+    seen.
     """
     list_latency, listed = await _timed_get(client, LIST_READ_QUERY)
     listed.raise_for_status()
@@ -318,7 +334,7 @@ async def _sample(
             if s is not None
         ]
     )
-    active = sum(s is not None and s.status == "running" for s in sessions)
+    active = sum(s is not None and s.agent_working for s in sessions)
     return (
         Sample(
             at_seconds=at,
