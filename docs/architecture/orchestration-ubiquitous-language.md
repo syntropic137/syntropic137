@@ -1066,7 +1066,19 @@ contract lives in `syn_perf.loadtest.scripted_agent_profile`:
   Phase: the stream it replays, the workload it burns, the side effect it
   performs and the artifact it writes.
 - **Scripted Stream** (`ScriptedStream`) - the recorded session a Scripted
-  Phase replays, its harness and CLI version, and the pacing.
+  Phase replays, its harness and CLI version, its tool-use count, and the
+  pacing.
+- **Scripted Agent Model** (`SCRIPTED_AGENT_MODEL`) - the model id every
+  replayed stream reports. A session with any other observed model means a
+  real harness ran, and the load test stops.
+- **Active Phase** - a Phase whose status the server reports as `running`.
+  The load test's concurrency is the count of Active Phases read from
+  execution detail, never the executions it dispatched; a queued start or an
+  idle slot is not concurrency (docs/north-star.md).
+- **Pass Bar** (`PassBar`, `syn_perf.loadtest.pass_bar`) - what one load-test
+  run is held to: N Active Phases sustained, p95 dashboard reads, nothing lost,
+  orphaned or dropped at start (#1550), and stored tool operations equal to
+  each Scripted Stream's count.
 
 The workspace image that carries a Scripted Agent is still called the stub
 image in agentic-workspace; that names the image, not these models.

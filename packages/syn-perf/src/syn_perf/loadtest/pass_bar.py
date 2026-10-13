@@ -176,9 +176,7 @@ def judge(
     list_p95 = p95([s.list_latency_seconds for s in samples])
     detail_p95 = p95([d for s in samples for d in s.detail_latency_seconds])
     lost = sorted(r.execution_id for r in runs if not r.found)
-    orphaned = sorted(
-        r.execution_id for r in runs if r.found and r.status not in TERMINAL_STATUSES
-    )
+    orphaned = sorted(r.execution_id for r in runs if r.found and r.status not in TERMINAL_STATUSES)
     dropped = sorted(
         r.execution_id
         for r in runs
@@ -262,9 +260,7 @@ def _latency_check(name: str, value: float | None, limit: float) -> Check:
     return Check(name=name, passed=value < limit, detail=f"p95 {value:.3f}s, limit {limit:.3f}s")
 
 
-def _event_count_mismatches(
-    profile: ScriptedAgentProfile, runs: Sequence[RunOutcome]
-) -> list[str]:
+def _event_count_mismatches(profile: ScriptedAgentProfile, runs: Sequence[RunOutcome]) -> list[str]:
     """Completed phases whose stored tool operations differ from the recording's count."""
     off: list[str] = []
     for run in runs:
