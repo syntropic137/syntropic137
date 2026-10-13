@@ -29,6 +29,8 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.SessionLifecycleM
 )
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
     from syn_domain.contexts.agent_sessions.domain.read_models.session_cost import SessionCost
 
 os.environ.setdefault("APP_ENVIRONMENT", "test")
@@ -142,7 +144,6 @@ async def test_a_streaming_agent_is_active_only_while_it_works(
     ``unknown`` here and counted a working agent as idle.
     """
     import asyncio
-    from collections.abc import AsyncIterator
     from unittest.mock import MagicMock, patch
 
     from fastapi import FastAPI
