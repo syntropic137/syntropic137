@@ -48,6 +48,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import enum
 import fcntl
 import hashlib
 import logging
@@ -315,30 +316,45 @@ class DependencySeedStore:
         for snapshot_mtime, path, size in seeds:
             if remaining <= self._max_bytes:
                 break
+            recent = snapshot_mtime > cutoff
             # mtimes only move forward, so nothing after this is past the grace.
-            if snapshot_mtime > cutoff and remaining <= ceiling:
+            if recent and remaining <= ceiling:
                 break
-            if snapshot_mtime > cutoff and path.name.startswith(".staging-"):
+            if recent and path.name.startswith(".staging-"):
                 continue  # a publish in flight
-            try:
-                with _seed_lease(path, exclusive=True, blocking=False):
-                    # Re-read under the lease: a copy may have touched the
-                    # seed since the snapshot this loop is sorted by.
-                    try:
-                        mtime = path.stat().st_mtime
-                    except FileNotFoundError:
-                        remaining -= size  # another prune got there first
-                        continue
-                    if mtime > cutoff and remaining <= ceiling:
-                        continue
-                    _remove(path)
-                    _sidecar(path, ".size").unlink(missing_ok=True)
-            except BlockingIOError:
-                continue  # being copied right now, so not least recently used
+            verdict = _prune_one(path, cutoff=cutoff, keep_recent=remaining <= ceiling)
+            if verdict is _Pruned.KEPT:
+                continue
             remaining -= size
-            freed += size
-            logger.info("Pruned dependency seed %s (%d bytes)", path, size)
+            if verdict is _Pruned.DELETED:
+                freed += size
+                logger.info("Pruned dependency seed %s (%d bytes)", path, size)
         return freed
+
+
+class _Pruned(enum.Enum):
+    DELETED = "deleted"
+    KEPT = "kept"
+    ALREADY_GONE = "already_gone"
+
+
+def _prune_one(path: Path, *, cutoff: float, keep_recent: bool) -> _Pruned:
+    """Delete one seed under an exclusive lease, unless it is in use or recent."""
+    try:
+        with _seed_lease(path, exclusive=True, blocking=False):
+            # Re-read under the lease: a copy may have touched the seed since
+            # the snapshot prune sorted by.
+            try:
+                mtime = path.stat().st_mtime
+            except FileNotFoundError:
+                return _Pruned.ALREADY_GONE  # another prune got there first
+            if keep_recent and mtime > cutoff:
+                return _Pruned.KEPT
+            _remove(path)
+            _sidecar(path, ".size").unlink(missing_ok=True)
+            return _Pruned.DELETED
+    except BlockingIOError:
+        return _Pruned.KEPT  # being copied right now, so not least recently used
 
 
 @contextlib.contextmanager
