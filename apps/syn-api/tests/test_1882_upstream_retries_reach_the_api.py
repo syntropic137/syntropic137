@@ -102,3 +102,26 @@ def test_the_count_groups_by_the_keys_the_writer_writes() -> None:
     for key in ("provider", "requested_model", "upstream_kind"):
         assert key in written
         assert f"data->>'{key}' AS {key}" in UPSTREAM_RETRY_COUNTS_SQL
+
+
+@pytest.mark.parametrize(
+    "model", ["UpstreamRetryCountResponse", "UpstreamRetriesResponse"], ids=lambda m: m
+)
+def test_the_response_models_are_frozen_and_forbid_extra_fields(model: str) -> None:
+    from pydantic import BaseModel, ValidationError
+
+    from syn_api import types
+
+    cls: type[BaseModel] = getattr(types, model)
+    config = cls.model_config
+    assert config.get("frozen") is True
+    assert config.get("extra") == "forbid"
+    count = types.UpstreamRetryCountResponse(
+        provider="codex", requested_model=None, upstream_kind="capacity", retries=1
+    )
+    with pytest.raises(ValidationError):
+        types.UpstreamRetryCountResponse.model_validate(
+            {**count.model_dump(), "unexpected": True}
+        )
+    with pytest.raises(ValidationError):
+        count.retries = 2

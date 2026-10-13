@@ -4509,6 +4509,8 @@ class LatencyRecorderStatusResponse(BaseModel):
 class UpstreamRetryCountResponse(BaseModel):
     """In-phase retries one provider, model and upstream kind took in the window (#1882)."""
 
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
     provider: str | None
     """The agent provider retried, e.g. ``codex``. None if the row did not say."""
     requested_model: str | None
@@ -4525,6 +4527,8 @@ class UpstreamRetriesResponse(BaseModel):
     succeeded counts 2 here. Quota, auth and anything unrecognised are never
     retried, so they never appear.
     """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     window: LatencyWindow
     since: str

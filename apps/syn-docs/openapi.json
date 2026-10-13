@@ -23508,6 +23508,7 @@
             "title": "Counts"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "window",
@@ -23558,6 +23559,7 @@
             "title": "Retries"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "provider",
