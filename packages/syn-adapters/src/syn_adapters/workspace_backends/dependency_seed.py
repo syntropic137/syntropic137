@@ -531,30 +531,8 @@ async def seed_dependency_caches(
     store = configured_store()
     if store is None:
         return
-    warmed: list[SeedKey] = []
     try:
-        # Every missing seed is warmed FIRST, while the workspace's caches
-        # hold nothing copied from another seed, each into an empty cache.
-        keys = [
-            (key, clone_dir)
-            for repository, clone_dir in clones
-            for key in seed_keys(repository, clone_dir)
-        ]
-        hits = [key for key, _ in keys if store.has(key)]
-        for key in hits:
-            await asyncio.to_thread(store.touch, key)
-        # A warm that fails may leave its command running in the container
-        # (a timeout kills only the client), still writing to the tool's
-        # cache path, so no later warm of that tool in this workspace runs.
-        failed_tools: set[str] = set()
-        for key, clone_dir in keys:
-            if key in hits or key.tool in failed_tools:
-                continue
-            result = await _warm(store, workspace, key, clone_dir)
-            if result is _Warm.PUBLISHED:
-                warmed.append(key)
-            elif result is _Warm.COMMAND_FAILED:
-                failed_tools.add(key.tool)
+        warmed = await _warm_missing(store, workspace, clones)
         # Then every seed, warmed just now or long ago, is copied the same way.
         outcome = await asyncio.to_thread(store.seed, workspace.path, clones)
     except Exception:
@@ -567,6 +545,39 @@ async def seed_dependency_caches(
         [_label(key) for key in warmed],
         [_label(key) for key, _ in outcome.missing],
     )
+
+
+async def _warm_missing(
+    store: DependencySeedStore, workspace: SeedableWorkspace, clones: list[tuple[str, Path]]
+) -> list[SeedKey]:
+    """Warm every seed the store lacks, FIRST, each into an empty cache. Returns those published.
+
+    Runs while the workspace's caches hold nothing copied from another seed.
+    The hits are touched before any warm, so a warm's publish (which prunes)
+    cannot evict a seed this workspace is about to copy.
+    """
+    keys = [
+        (key, clone_dir)
+        for repository, clone_dir in clones
+        for key in seed_keys(repository, clone_dir)
+    ]
+    hits = [key for key, _ in keys if store.has(key)]
+    for key in hits:
+        await asyncio.to_thread(store.touch, key)
+    warmed: list[SeedKey] = []
+    # A warm that fails may leave its command running in the container (a
+    # timeout kills only the client), still writing to the tool's cache path,
+    # so no later warm of that tool in this workspace runs.
+    failed_tools: set[str] = set()
+    for key, clone_dir in keys:
+        if key in hits or key.tool in failed_tools:
+            continue
+        result = await _warm(store, workspace, key, clone_dir)
+        if result is _Warm.PUBLISHED:
+            warmed.append(key)
+        elif result is _Warm.COMMAND_FAILED:
+            failed_tools.add(key.tool)
+    return warmed
 
 
 class _Warm(enum.Enum):
