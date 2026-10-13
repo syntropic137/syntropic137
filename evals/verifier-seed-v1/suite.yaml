@@ -18,9 +18,9 @@
 # verifiers were already shaped against them. The holdout is, within each
 # batch of added cases, the ~30% whose sha256(id) sorts lowest (7 of the first
 # 18 mined, 2 of the next 6, 2 of the 6 clean controls, none of v6's 2
-# controls), fixed once, recorded in each file, and never moved to train. That
-# was 11 of 36 in v4; after v5's retirements and additions it is 10 of 33, and
-# 10 of 35 in v6.
+# controls, none of v7's 1 defect), fixed once, recorded in each file, and
+# never moved to train. That was 11 of 36 in v4; after v5's retirements and
+# additions it is 10 of 33, 10 of 35 in v6 and 10 of 36 in v7.
 #
 # What it measures: given a workflow, a prompt and a model, does verification
 # find the defect, and certify the change that has none? `score` prints both
@@ -69,6 +69,13 @@
 #     the declared-skills-not-invocable defect). The #1774 target of 8 or more
 #     clean controls is NOT met: 4 exist. No CLI or dashboard change met the
 #     rule. 31 defects, 4 controls, 35 in all.
+# v7: one defect case from the 2026-10-13 retro
+#     (docs/retrospectives/2026-10-13-provider-contract-day.md): #1808, which
+#     sdlc-reverify-pr-v1 on codex certified and a second verifier blocked.
+#     start-clock-read-before-settle, pinned at the first parent of its fix.
+#     The day's other escapes are in agentic-workspace, a different
+#     repository, so they are their own suite: evals/verifier-seed-aw-v1.
+#     32 defects, 4 controls, 36 in all.
 #
 # EVERY VERSION KEEPS ITS SCORE. `history` records each earlier version whose
 # runs launches.jsonl still holds: the tag exactly as those runs carry it, the
@@ -79,7 +86,7 @@ id: verifier-seed-v1
 # version and verifier runs into those same evals; the run carries
 # `suite-version:<n>` and `verifier:<workflow id>`.
 eval_suite: verifier-seed
-version: 6
+version: 7
 goal: >
   Does the verifier block a change that carries a known escaped bug, naming
   the defect and the file it lives in, and certify a merged change that has
@@ -406,6 +413,243 @@ history:
       - binary-artifact-minio-key
       - clean-api-shape-silent-absence
       - clean-delegation-edge-events
+      - cli-packages-own-remote-check
+      - codex-brace-line-protocol-fault
+      - codex-cost-limit
+      - codex-deliverable-phase-failed
+      - codex-turn-failed-reason-dropped
+      - declared-skills-not-invocable
+      - execution-id-as-eval-id
+      - executions-enrichment-fetched-twice
+      - executions-total-is-page-length
+      - github-shorthand-any-slash
+      - github-token-first-installation
+      - guard-moved-gitlink-unsaved-work
+      - heatmap-test-reads-clock-repeatedly
+      - input-alias-independent-resolution
+      - live-commits-unvalidated-sha
+      - pit-stop-password-on-argv
+      - prompt-claims-checkout-without-clone
+      - prompt-deliverable-only-if-acted
+      - redis-retry-non-idempotent
+      - redis-url-password-logged
+      - repo-name-collision-skipped-clone
+      - repo-privacy-ignores-app
+      - sessions-execution-filter-dropped
+      - shared-body-expired-by-oldest-capture
+      - shared-esp-stream
+      - token-injector-get-post-only
+      - transcript-superseded-revision-issues
+      - workflow-run-inputs-go-nowhere
+      - workflow-run-task-undeliverable
+  # v6 is the thirty-five live cases of #1774. The API was not reachable when v7
+  # was cut, so which verifiers ran v6 could not be read: every listed one is
+  # recorded, so no v6 run loses its score. One that never ran scores empty.
+  - version: 6
+    tag: verifier-seed-v1:v6:eval-verify-pinned-v1
+    workflow: eval-verify-pinned-v1
+    cases:
+      - artifacts-execution-filter-dropped
+      - binary-artifact-minio-key
+      - clean-api-shape-silent-absence
+      - clean-delegation-edge-events
+      - clean-fitness-stale-waivers
+      - clean-list-endpoints-model-defaults
+      - cli-packages-own-remote-check
+      - codex-brace-line-protocol-fault
+      - codex-cost-limit
+      - codex-deliverable-phase-failed
+      - codex-turn-failed-reason-dropped
+      - declared-skills-not-invocable
+      - execution-id-as-eval-id
+      - executions-enrichment-fetched-twice
+      - executions-total-is-page-length
+      - github-shorthand-any-slash
+      - github-token-first-installation
+      - guard-moved-gitlink-unsaved-work
+      - heatmap-test-reads-clock-repeatedly
+      - input-alias-independent-resolution
+      - live-commits-unvalidated-sha
+      - pit-stop-password-on-argv
+      - prompt-claims-checkout-without-clone
+      - prompt-deliverable-only-if-acted
+      - redis-retry-non-idempotent
+      - redis-url-password-logged
+      - repo-name-collision-skipped-clone
+      - repo-privacy-ignores-app
+      - sessions-execution-filter-dropped
+      - shared-body-expired-by-oldest-capture
+      - shared-esp-stream
+      - token-injector-get-post-only
+      - transcript-superseded-revision-issues
+      - workflow-run-inputs-go-nowhere
+      - workflow-run-task-undeliverable
+  - version: 6
+    tag: verifier-seed-v1:v6:eval-verify-pinned-codex-v1
+    workflow: eval-verify-pinned-codex-v1
+    cases:
+      - artifacts-execution-filter-dropped
+      - binary-artifact-minio-key
+      - clean-api-shape-silent-absence
+      - clean-delegation-edge-events
+      - clean-fitness-stale-waivers
+      - clean-list-endpoints-model-defaults
+      - cli-packages-own-remote-check
+      - codex-brace-line-protocol-fault
+      - codex-cost-limit
+      - codex-deliverable-phase-failed
+      - codex-turn-failed-reason-dropped
+      - declared-skills-not-invocable
+      - execution-id-as-eval-id
+      - executions-enrichment-fetched-twice
+      - executions-total-is-page-length
+      - github-shorthand-any-slash
+      - github-token-first-installation
+      - guard-moved-gitlink-unsaved-work
+      - heatmap-test-reads-clock-repeatedly
+      - input-alias-independent-resolution
+      - live-commits-unvalidated-sha
+      - pit-stop-password-on-argv
+      - prompt-claims-checkout-without-clone
+      - prompt-deliverable-only-if-acted
+      - redis-retry-non-idempotent
+      - redis-url-password-logged
+      - repo-name-collision-skipped-clone
+      - repo-privacy-ignores-app
+      - sessions-execution-filter-dropped
+      - shared-body-expired-by-oldest-capture
+      - shared-esp-stream
+      - token-injector-get-post-only
+      - transcript-superseded-revision-issues
+      - workflow-run-inputs-go-nowhere
+      - workflow-run-task-undeliverable
+  - version: 6
+    tag: verifier-seed-v1:v6:eval-verify-pinned-sonnet-v1
+    workflow: eval-verify-pinned-sonnet-v1
+    cases:
+      - artifacts-execution-filter-dropped
+      - binary-artifact-minio-key
+      - clean-api-shape-silent-absence
+      - clean-delegation-edge-events
+      - clean-fitness-stale-waivers
+      - clean-list-endpoints-model-defaults
+      - cli-packages-own-remote-check
+      - codex-brace-line-protocol-fault
+      - codex-cost-limit
+      - codex-deliverable-phase-failed
+      - codex-turn-failed-reason-dropped
+      - declared-skills-not-invocable
+      - execution-id-as-eval-id
+      - executions-enrichment-fetched-twice
+      - executions-total-is-page-length
+      - github-shorthand-any-slash
+      - github-token-first-installation
+      - guard-moved-gitlink-unsaved-work
+      - heatmap-test-reads-clock-repeatedly
+      - input-alias-independent-resolution
+      - live-commits-unvalidated-sha
+      - pit-stop-password-on-argv
+      - prompt-claims-checkout-without-clone
+      - prompt-deliverable-only-if-acted
+      - redis-retry-non-idempotent
+      - redis-url-password-logged
+      - repo-name-collision-skipped-clone
+      - repo-privacy-ignores-app
+      - sessions-execution-filter-dropped
+      - shared-body-expired-by-oldest-capture
+      - shared-esp-stream
+      - token-injector-get-post-only
+      - transcript-superseded-revision-issues
+      - workflow-run-inputs-go-nowhere
+      - workflow-run-task-undeliverable
+  - version: 6
+    tag: verifier-seed-v1:v6:eval-verify-pinned-codex-gpt-6-luna-v1
+    workflow: eval-verify-pinned-codex-gpt-6-luna-v1
+    cases:
+      - artifacts-execution-filter-dropped
+      - binary-artifact-minio-key
+      - clean-api-shape-silent-absence
+      - clean-delegation-edge-events
+      - clean-fitness-stale-waivers
+      - clean-list-endpoints-model-defaults
+      - cli-packages-own-remote-check
+      - codex-brace-line-protocol-fault
+      - codex-cost-limit
+      - codex-deliverable-phase-failed
+      - codex-turn-failed-reason-dropped
+      - declared-skills-not-invocable
+      - execution-id-as-eval-id
+      - executions-enrichment-fetched-twice
+      - executions-total-is-page-length
+      - github-shorthand-any-slash
+      - github-token-first-installation
+      - guard-moved-gitlink-unsaved-work
+      - heatmap-test-reads-clock-repeatedly
+      - input-alias-independent-resolution
+      - live-commits-unvalidated-sha
+      - pit-stop-password-on-argv
+      - prompt-claims-checkout-without-clone
+      - prompt-deliverable-only-if-acted
+      - redis-retry-non-idempotent
+      - redis-url-password-logged
+      - repo-name-collision-skipped-clone
+      - repo-privacy-ignores-app
+      - sessions-execution-filter-dropped
+      - shared-body-expired-by-oldest-capture
+      - shared-esp-stream
+      - token-injector-get-post-only
+      - transcript-superseded-revision-issues
+      - workflow-run-inputs-go-nowhere
+      - workflow-run-task-undeliverable
+  - version: 6
+    tag: verifier-seed-v1:v6:eval-verify-pinned-codex-gpt-5-6-luna-v1
+    workflow: eval-verify-pinned-codex-gpt-5-6-luna-v1
+    cases:
+      - artifacts-execution-filter-dropped
+      - binary-artifact-minio-key
+      - clean-api-shape-silent-absence
+      - clean-delegation-edge-events
+      - clean-fitness-stale-waivers
+      - clean-list-endpoints-model-defaults
+      - cli-packages-own-remote-check
+      - codex-brace-line-protocol-fault
+      - codex-cost-limit
+      - codex-deliverable-phase-failed
+      - codex-turn-failed-reason-dropped
+      - declared-skills-not-invocable
+      - execution-id-as-eval-id
+      - executions-enrichment-fetched-twice
+      - executions-total-is-page-length
+      - github-shorthand-any-slash
+      - github-token-first-installation
+      - guard-moved-gitlink-unsaved-work
+      - heatmap-test-reads-clock-repeatedly
+      - input-alias-independent-resolution
+      - live-commits-unvalidated-sha
+      - pit-stop-password-on-argv
+      - prompt-claims-checkout-without-clone
+      - prompt-deliverable-only-if-acted
+      - redis-retry-non-idempotent
+      - redis-url-password-logged
+      - repo-name-collision-skipped-clone
+      - repo-privacy-ignores-app
+      - sessions-execution-filter-dropped
+      - shared-body-expired-by-oldest-capture
+      - shared-esp-stream
+      - token-injector-get-post-only
+      - transcript-superseded-revision-issues
+      - workflow-run-inputs-go-nowhere
+      - workflow-run-task-undeliverable
+  - version: 6
+    tag: verifier-seed-v1:v6:eval-verify-pinned-codex-gpt-5-6-terra-v1
+    workflow: eval-verify-pinned-codex-gpt-5-6-terra-v1
+    cases:
+      - artifacts-execution-filter-dropped
+      - binary-artifact-minio-key
+      - clean-api-shape-silent-absence
+      - clean-delegation-edge-events
+      - clean-fitness-stale-waivers
+      - clean-list-endpoints-model-defaults
       - cli-packages-own-remote-check
       - codex-brace-line-protocol-fault
       - codex-cost-limit
