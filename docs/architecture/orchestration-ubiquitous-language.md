@@ -147,8 +147,21 @@ our account is spent until a reset it names ("try again at Oct 9th, 2026 9:10
 PM"). Distinct from capacity, which returns in seconds: a quota returns on a
 calendar date, so it is never retried, and the Phase fails with
 `<provider> quota exhausted until <time>`. Recognised from codex's own fault
-line only. **Unclear:** no real claude quota message exists in this repo or its
-submodules, so claude quota text is not yet recognised and reads as `unknown`.
+line, and from claude's "You've hit your weekly limit · resets Oct 15, 8am
+(UTC)" (PC-151) when that sentence opens the reason. **Unclear:** claude's
+reset names no year, so its time reads as unstated, and claude's other
+allowances ("limit", "Opus limit") have no captured line yet (#1669).
+
+## Upstream Retry
+
+A same-agent re-run of a Phase attempt that failed on a transient upstream
+kind (`capacity`, `rate_limited`) before it showed any activity, inside the same
+Phase and Execution (#1303). Bounded at three attempts, separated by a jittered
+backoff (30-60s, then 60-120s), all drawn from the one
+[Phase Deadline](#phase-deadline) (#1882). Each is recorded as an
+`upstream_retry` observation: Lane 2 telemetry, counted per provider and model
+at `GET /observability/upstream-retries`, never read back to decide anything.
+Not a [Resume](#resume): no new Execution, and no lineage to follow.
 
 ## Content Refusal
 
