@@ -757,6 +757,14 @@ class TestCronMatch:
             ("0 0 1 * 0", "0 0 4 10 0", True),
             ("0 0 1 * 0", "0 0 1 10 3", True),
             ("0 0 1 * 0", "0 0 2 10 3", False),
+            # A day field starting with '*' is unrestricted for that rule, even
+            # with a step (cronie DOM_STAR/DOW_STAR): both must then match.
+            ("0 3 */2 * 1", "0 3 3 10 2", False),
+            ("0 3 */2 * 1", "0 3 4 10 1", False),
+            ("0 3 */2 * 1", "0 3 3 10 1", True),
+            ("0 0 1 * */2", "0 0 2 10 4", False),
+            ("0 0 1 * */2", "0 0 1 10 3", False),
+            ("0 0 1 * */2", "0 0 1 10 2", True),
         ],
     )
     def test_standard_five_field_semantics(self, expr, now, matches):
@@ -1028,3 +1036,21 @@ class TestScheduledIdentity:
         assert "no database identity" in result.stderr
         assert "scheduled backup FAILED" in result.stderr
         assert not list(out.glob("syn-*.dump")), "dumped as the env file's identity"
+
+
+class TestAdmissionHold:
+    """The restore pauses admission with the API's own maintenance_mode table."""
+
+    @staticmethod
+    def _normalised(sql: str) -> str:
+        return " ".join(sql.split())
+
+    def test_script_table_matches_the_postgres_maintenance_adapter(self):
+        from syn_adapters.maintenance.postgres_maintenance import CREATE_TABLE_SQL
+
+        text = _SCRIPT.read_text()
+        match = re.search(r"^MAINTENANCE_TABLE_SQL='(.*?)^'$", text, re.S | re.M)
+        assert match, "MAINTENANCE_TABLE_SQL not found in syn-db-backup.sh"
+        # Inside the shell single quotes, '"''"' spells SQL's ''.
+        script_sql = match.group(1).replace("'\"''\"'", "''")
+        assert self._normalised(script_sql) == self._normalised(CREATE_TABLE_SQL)

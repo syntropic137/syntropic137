@@ -310,7 +310,8 @@ prune() {
 
 # Standard five-field cron: numbers, '*', lists, ranges and '/step'. Day of
 # month and day of week match on either when both are restricted, and 7 is
-# Sunday. Names (MON, JAN) and @aliases are rejected rather than ignored, so a
+# Sunday. As in cronie and vixie cron, a day field that begins with '*' (so
+# '*/2' too) counts as unrestricted for that rule. Names (MON, JAN) and @aliases are rejected rather than ignored, so a
 # schedule that could never fire fails at startup instead of silently.
 cron_match() {
     printf '%s\n' "$2" | awk -v expr="$1" '
@@ -350,7 +351,7 @@ cron_match() {
         mon = field_ok(f[4], $4 + 0, 1, 12)
         dow = field_ok(f[5], $5 + 0, 0, 7)
         if ($5 + 0 == 0 && field_ok(f[5], 7, 0, 7)) dow = 1
-        if (f[3] != "*" && f[5] != "*") day = dom || dow
+        if (substr(f[3], 1, 1) != "*" && substr(f[5], 1, 1) != "*") day = dom || dow
         else day = dom && dow
         matched = min && hour && mon && day
     }
@@ -469,6 +470,43 @@ SQL
     }
 }
 
+# Renaming a database stops its TimescaleDB background workers (compression
+# and retention policies), and terminating its backends stops its scheduler;
+# neither comes back by itself. Started again, by name, after every swap.
+restart_workers() {  # $1 database
+    psql -X -q -At -v ON_ERROR_STOP=1 -d "$1" \
+        -c "select _timescaledb_functions.start_background_workers()" >/dev/null
+}
+
+#: Same table as packages/syn-adapters/src/syn_adapters/maintenance/postgres_maintenance.py
+#: (CREATE_TABLE_SQL); a unit test holds the two equal.
+MAINTENANCE_TABLE_SQL='
+    CREATE TABLE IF NOT EXISTS maintenance_mode (
+        singleton  BOOLEAN     PRIMARY KEY DEFAULT TRUE CHECK (singleton),
+        active     BOOLEAN     NOT NULL,
+        reason     TEXT        NOT NULL DEFAULT '"''"',
+        since      TIMESTAMPTZ,
+        actor      TEXT        NOT NULL DEFAULT '"''"',
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+'
+
+# A restored database holds the queue as it was at backup time: dispatches
+# still pending or paused and executions still queued, some of which may have
+# run since. The API re-offers that work the moment it starts with admission
+# open (#1387), so every restore pauses admission inside the restored data
+# itself. Nothing new starts until the operator has looked and cleared it.
+hold_admission() {  # $1 database, $2 backup file name
+    printf '%s\n%s\n' "$MAINTENANCE_TABLE_SQL" \
+        "insert into maintenance_mode (singleton, active, reason, since, actor, updated_at)
+         values (true, true, :'reason', now(), 'syn-db-backup restore', now())
+         on conflict (singleton) do update set active = excluded.active,
+             reason = excluded.reason, since = excluded.since,
+             actor = excluded.actor, updated_at = now();" |
+        psql -X -q -v ON_ERROR_STOP=1 -d "$1" \
+            -v reason="restored from $2; review queued work, then clear maintenance mode" >/dev/null
+}
+
 restore() {
     file=$1 force=${2:-}
     case $force in '' | --force) ;; *) fail "usage: restore FILE [--force]" ;; esac
@@ -523,6 +561,8 @@ restore() {
     [ "$rc" -eq 0 ] || fail "pg_restore failed (exit $rc); '$db' was not changed"
     verify_restored "$staging" "$manifest" ||
         fail "restored data does not match the manifest; '$db' was not changed"
+    hold_admission "$staging" "$(basename "$file")" ||
+        fail "could not pause admission in the restored data; '$db' was not changed"
 
     # One transaction: both renames happen or neither does.
     if [ "$exists" = 1 ]; then
@@ -534,7 +574,10 @@ alter database :"live" rename to :"aside";
 alter database :"staging" rename to :"live";
 commit;
 SQL
+        {
+            restart_workers "$db" || true
             fail "could not swap '$staging' into place; '$db' was not changed"
+        }
     else
         echo 'alter database :"staging" rename to :"live";' |
             psql -X -q -v ON_ERROR_STOP=1 -d postgres -v live="$db" -v staging="$staging" ||
@@ -542,7 +585,11 @@ SQL
     fi
     swapped=1
     trap - EXIT
+    restart_workers "$db" ||
+        echo "syn-db-backup: WARNING: TimescaleDB background workers for '$db' did not restart; compression and retention are off until you run: select _timescaledb_functions.start_background_workers();" >&2
     echo "restore ok: '$db' from $(basename "$file")"
+    echo "execution admission is PAUSED in the restored data: queued and paused work will not start."
+    echo "review it, then resume: PUT /api/v1/maintenance {\"active\": false, \"reason\": \"\", \"actor\": \"<you>\"}"
     if [ "$exists" = 1 ]; then
         echo "previous '$db' kept as database '$aside'; drop it yourself once the restore is verified"
     fi

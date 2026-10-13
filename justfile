@@ -1775,6 +1775,12 @@ selfhost-restore file *args:
     fi
     echo "Starting writers: $writers"
     {{compose_selfhost}} start $writers
+    if [ "$rc" -eq 0 ]; then
+        # The restore paused admission inside the restored data, so the API
+        # comes up refusing new starts and re-offers no queued work (#1387).
+        echo "⏸️  Execution admission is PAUSED: queued and paused work from the backup will not start."
+        echo "   Review it, then resume with PUT /api/v1/maintenance {\"active\": false, \"reason\": \"\", \"actor\": \"<you>\"}"
+    fi
     exit "$rc"
 
 # Pull latest code, rebuild, and restart self-host (auto-detects tunnel)

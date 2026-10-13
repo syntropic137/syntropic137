@@ -463,16 +463,32 @@ service: see [Backup & Recovery](../../infra/docs/selfhost-deployment.md#backup-
 Elsewhere, keep the same shape, because a plain-SQL dump replayed with `psql`
 does not restore TimescaleDB hypertables correctly:
 
-```bash
-# Backup: custom format, then prove it is readable
-pg_dump -h localhost -U syn -d syn --format=custom --file=syn.dump
-pg_restore --list syn.dump | grep -c ' TABLE DATA '   # must be > 0
+Listing an archive (`pg_restore --list`) proves only that its table of
+contents survived: a truncated dump still lists. Prefer running the same
+script the self-host service uses, `docker/db-backup/syn-db-backup.sh`
+(`backup DIR` writes a manifest with a sha256 and every table's row count;
+`restore FILE` verifies both in a staging database before swapping it in).
+If you must do it by hand, stop on the first error and check row counts:
 
-# Restore into an empty database, writers stopped
-psql -h localhost -U syn -d syn -c 'CREATE EXTENSION IF NOT EXISTS timescaledb' \
-    -c 'SELECT timescaledb_pre_restore()'
-pg_restore -h localhost -U syn -d syn --no-owner --no-acl syn.dump   # no -j
-psql -h localhost -U syn -d syn -c 'SELECT timescaledb_post_restore()'
+```bash
+set -euo pipefail
+# Backup: custom format; record its checksum and per-table row counts
+pg_dump -h localhost -U syn -d syn --format=custom --file=syn.dump
+sha256sum syn.dump > syn.dump.sha256
+
+# Restore into an EMPTY staging database, writers stopped
+sha256sum -c syn.dump.sha256
+createdb -h localhost -U syn syn_staging
+psql -X -v ON_ERROR_STOP=1 -h localhost -U syn -d syn_staging \
+    -c 'CREATE EXTENSION IF NOT EXISTS timescaledb' -c 'SELECT timescaledb_pre_restore()'
+pg_restore --exit-on-error -h localhost -U syn -d syn_staging --no-owner --no-acl syn.dump   # no -j
+psql -X -v ON_ERROR_STOP=1 -h localhost -U syn -d syn_staging -c 'SELECT timescaledb_post_restore()'
+# Compare every table's count(*) in syn_staging with the source before
+# renaming it into place. After the rename, run
+#   SELECT _timescaledb_functions.start_background_workers();
+# in the renamed database (a rename stops them), and pause admission
+# (PUT /api/v1/maintenance {"active": true}) before starting the API, so the
+# backup's queued work does not start on its own.
 ```
 
 ### Disaster Recovery

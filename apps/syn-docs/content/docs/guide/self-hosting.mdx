@@ -238,7 +238,10 @@ service also takes one on a schedule and prunes old ones:
 `selfhost-restore` stops `api`, `collector`, `event-store` and `gateway`,
 checks the archive against its manifest, restores it into a staging database
 with TimescaleDB's restore mode around `pg_restore`, verifies every table's row
-count, and only then swaps it in and starts the writers again. The replaced
+count, and only then swaps it in and starts the writers again. Execution
+admission comes back **paused**: the backup's queued and pending work could
+have run since it was taken, so nothing starts until you review it and resume
+with `PUT /api/v1/maintenance` (`{"active": false}`). The replaced
 database is kept as `syn_pre_restore_<timestamp>`, never dropped; drop it
 yourself once satisfied. It refuses to replace a database that already holds
 rows unless you pass `--force`, which first takes a fresh backup of it and

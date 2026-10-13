@@ -458,9 +458,16 @@ In order, it:
    then does it rename the current `syn` database aside, to
    `syn_pre_restore_<UTC>_<pid>`, and the staging database to `syn`, in one
    transaction. Any failure before that drops only the staging database:
-   the current one is untouched.
+   the current one is untouched. Before the swap it also **pauses execution
+   admission inside the restored data** (`maintenance_mode`), and after it
+   restarts TimescaleDB's background workers, which a database rename stops.
 6. Starts the writers again. If the restore failed, they are left stopped;
    the command prints how to start them.
+7. Leaves admission paused. The backup holds the queue as it was when it was
+   taken: dispatches still pending and executions still queued, some of which
+   may have run since. With admission paused the API starts none of them.
+   Review them, then resume with
+   `PUT /api/v1/maintenance {"active": false, "reason": "", "actor": "<you>"}`.
 
 The replaced database is never dropped. Once the restore is verified, reclaim
 its space yourself: the restore prints its name; then run

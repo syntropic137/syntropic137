@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -159,10 +160,33 @@ def _sql(container, sql: str, database: str = "syn") -> str:
     return out.strip()
 
 
+#: Written by the restore itself after verification (the admission hold), so
+#: it is checked on its own rather than compared with the source.
+_HOLD_TABLE = "public.maintenance_mode"
+
+
 def _counts(container, database: str) -> dict[str, int]:
-    """Row count of every user table in DATABASE, keyed by qualified name."""
-    tables = _sql(container, _USER_TABLES, database).splitlines()
+    """Row count of every user table in DATABASE but the hold, keyed by qualified name."""
+    tables = [t for t in _sql(container, _USER_TABLES, database).splitlines() if t != _HOLD_TABLE]
     return {t: int(_sql(container, f"select count(*) from {t}", database)) for t in tables}
+
+
+def _hold(container, database: str) -> str:
+    return _sql(container, "select active, actor from maintenance_mode", database)
+
+
+def _scheduler_running(container, database: str) -> bool:
+    """Whether TimescaleDB's background-worker scheduler serves DATABASE."""
+    query = (
+        f"select count(*) from pg_stat_activity where datname = '{database}'"
+        " and backend_type = 'TimescaleDB Background Worker Scheduler'"
+    )
+    deadline = time.monotonic() + 20
+    while time.monotonic() < deadline:
+        if _sql(container, query, "postgres") != "0":
+            return True
+        time.sleep(0.5)
+    return False
 
 
 def _compressed_chunks(container, database: str) -> int:
@@ -230,6 +254,16 @@ class TestRoundTrip:
         assert all(source[t] > 0 for t in _SEEDED_TABLES), source
         assert _counts(timescaledb, "syn_restored") == source
 
+    def test_restore_pauses_admission_in_the_restored_data(self, timescaledb, backup_file):
+        """The backup's queued work must not start on its own (#1387)."""
+        db = "syn_held"
+        out = _restore(timescaledb, backup_file, db)
+
+        assert _hold(timescaledb, db) == "t|syn-db-backup restore"
+        assert "admission is PAUSED" in out, out
+        reason = _sql(timescaledb, "select reason from maintenance_mode", db)
+        assert backup_file.rsplit("/", 1)[-1] in reason
+
     def test_restored_hypertable_still_routes_and_queries_by_time(self, timescaledb, backup_file):
         db = "syn_hypertable"
         _restore(timescaledb, backup_file, db)
@@ -292,6 +326,10 @@ class TestRoundTrip:
 
         assert _sql(timescaledb, _MARKER, db) == "0"
         assert _counts(timescaledb, db) == _counts(timescaledb, "syn")
+        # The hold overwrites whatever admission state the replaced data had.
+        assert _hold(timescaledb, db) == "t|syn-db-backup restore"
+        # A database rename stops TimescaleDB's workers; the restore restarts them.
+        assert _scheduler_running(timescaledb, db), "background workers not restarted"
         # The replaced database is renamed aside, whole, not dropped.
         aside = re.search(r"kept as database '(syn_pre_restore_\w+)'", out)
         assert aside, out
