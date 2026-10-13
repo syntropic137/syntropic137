@@ -483,12 +483,28 @@ psql -X -v ON_ERROR_STOP=1 -h localhost -U syn -d syn_staging \
     -c 'CREATE EXTENSION IF NOT EXISTS timescaledb' -c 'SELECT timescaledb_pre_restore()'
 pg_restore --exit-on-error -h localhost -U syn -d syn_staging --no-owner --no-acl syn.dump   # no -j
 psql -X -v ON_ERROR_STOP=1 -h localhost -U syn -d syn_staging -c 'SELECT timescaledb_post_restore()'
-# Compare every table's count(*) in syn_staging with the source before
-# renaming it into place. After the rename, run
+# Compare every table's count(*) in syn_staging with the source.
+# Pause admission IN THE RESTORED DATA, before the API can start, so the
+# backup's queued work does not start on its own (the table is the API's own,
+# see packages/syn-adapters/src/syn_adapters/maintenance/postgres_maintenance.py):
+psql -X -v ON_ERROR_STOP=1 -h localhost -U syn -d syn_staging <<'SQL'
+CREATE TABLE IF NOT EXISTS maintenance_mode (
+    singleton  BOOLEAN     PRIMARY KEY DEFAULT TRUE CHECK (singleton),
+    active     BOOLEAN     NOT NULL,
+    reason     TEXT        NOT NULL DEFAULT '',
+    since      TIMESTAMPTZ,
+    actor      TEXT        NOT NULL DEFAULT '',
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+INSERT INTO maintenance_mode (singleton, active, reason, since, actor, updated_at)
+VALUES (TRUE, TRUE, 'restored from backup', now(), 'manual restore', now())
+ON CONFLICT (singleton) DO UPDATE SET active = TRUE, reason = EXCLUDED.reason,
+    since = EXCLUDED.since, actor = EXCLUDED.actor, updated_at = now();
+SQL
+# Then rename syn_staging into place and, in the renamed database, run
 #   SELECT _timescaledb_functions.start_background_workers();
-# in the renamed database (a rename stops them), and pause admission
-# (PUT /api/v1/maintenance {"active": true}) before starting the API, so the
-# backup's queued work does not start on its own.
+# (a rename stops them). Start the API; once the queue is reviewed, resume
+# with PUT /api/v1/maintenance {"active": false}.
 ```
 
 ### Disaster Recovery
