@@ -104,7 +104,7 @@ hand-rolled list missed gates CI then failed on.
 | `docs-lint.yml` | every PR; push to `main`/`release` | docs content lint |
 | `syn-ui.yml`, `syn-landing.yml` | PRs and `main` pushes touching Skyline / landing paths | UI build, tests, size budget, gateway serving |
 | `smoke-test.yml` | push to `main`/`release` only (PR trigger disabled) | full selfhost compose stack comes up healthy; a red smoke on `main` is found after merge |
-| `e2e-container.yml` | `main` pushes touching workspace code, the AW gitlink or image pins | a real agent runs in the pinned workspace image |
+| `e2e-container.yml` | PRs and `main` pushes touching workspace code, the AW gitlink or image pins; `workflow_dispatch` | automatic runs build and probe the workspace image from source; a real agent run (live API calls) happens only on manual dispatch with `run_full_e2e=true` |
 | `docs-drift.yml` | push to `main`/`release` | generated docs match source |
 | `release-gate.yml` | PRs into `release` | `_check-version`, `_check-changelog` (PR body >= 20 chars, read from the frozen event payload), `_check-codegen-sync`, `_check-docker-dry-run`, OSV, pip-audit, dependency review |
 | `release-create.yml` | push to `release` | `create-release` (waits on `release-publish` approval) -> tag + Release -> codegen re-check -> `release-containers.yaml` + `release-cli.yaml` |

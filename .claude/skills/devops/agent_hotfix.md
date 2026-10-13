@@ -9,7 +9,7 @@ release (that is a patch bump through `agent_release.md`).
 
 ## Workflow
 
-1. Qualify the change. In: formatting, lint, comments, doc typos, a late review nit with no behavior change. Out (use `agent_pr.md`): anything that changes runtime behavior, a schema, an event, a public API, a migration, or a CODEOWNERS path (`.github/CODEOWNERS`). If `main` is red and this fixes it, it is in, and it goes first.
+1. Qualify the change. In: formatting, lint, comments, doc typos, a late review nit with no behavior change. Out (use `agent_pr.md`): anything that changes runtime behavior, a schema, an event, a public API, a migration, or a CODEOWNERS path (`.github/CODEOWNERS`). A fix for a red `main` qualifies only if it also meets every condition above; otherwise it goes through `agent_pr.md` like any other change. A qualifying red-`main` fix goes first.
 2. Worktree from `origin/main` on a short branch; never the main checkout.
    ```
    git fetch origin main

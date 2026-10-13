@@ -15,7 +15,7 @@ release pipeline.
    ```
 2. Read the workflow YAML for that job before guessing. Map:
    - `ci.yml`: `python-qa`, `architectural-fitness`, `python-unit-tests`, `python-integration-tests`, `dashboard-ui`, `docs-site`, `cli-node`, `submodule-check`, `default-workspace-image`, `osv-scan`, `pip-audit`, `dependency-review`, `ci-success`.
-   - `docs-lint.yml`, `syn-ui.yml`, `syn-landing.yml` on PRs; `smoke-test.yml`, `docs-drift.yml`, `e2e-container.yml` on `main` pushes only.
+   - `docs-lint.yml`, `syn-ui.yml`, `syn-landing.yml` on PRs; `smoke-test.yml`, `docs-drift.yml` on `main` pushes only; `e2e-container.yml` on PRs and `main` pushes touching workspace paths (image build probe), with the real agent run only on manual dispatch (`run_full_e2e=true`).
    - `release-gate.yml` (+ `_check-*.yml`) on PRs into `release`; `release-create.yml` -> `release-containers.yaml`, `release-cli.yaml` after merge; `release-beta.yaml` on prereleases.
 3. Reproduce locally with the mirror target. `scripts/check_ci_parity.py` maps each PR-gating job to a `just` target; `just qa-ci` runs them all. Not local: osv-scan, pip-audit, dependency-review, e2e-container, release-only gates.
 4. Known flake classes, rerun once: apt or DNS failures in image builds, corepack/pnpm fetch, `UND_ERR_SOCKET`, registry 5xx. `gh run rerun <run-id> --failed`. Twice on the same step is a defect.

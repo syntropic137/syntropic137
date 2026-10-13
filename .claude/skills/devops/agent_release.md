@@ -33,7 +33,7 @@ so it never exercises signing. When to deploy a beta is `orchestrating`'s call.
    - If the `lib/event-sourcing-platform` gitlink moved since the last release, ESP has released that version and `just check-event-store-pin` passes. ESP releases before syn137, always.
    - Projection `VERSION` bumps in the range are listed; they open a read-path rebuild window that goes in Upgrade Notes.
    - Rehearsal done: a fresh install from the to-be-published compose AND an in-place upgrade from the last release, with images built from `main`, isolated from the live stack (prefer a disposable VM). Until `just rehearse-release` exists (#1865), this is manual.
-   - Base-image bumps built locally once (`docker build -f <Dockerfile> .`) to catch upstream rot.
+   - Base-image bumps built locally once to catch upstream rot, with the same Dockerfile and build context `just/release.just` uses for that image (`token-injector` and `sidecar-proxy` build from their own directory, the rest from the repo root): `docker build -f <Dockerfile> <context>`.
 3. Bump on a branch, through a normal PR into `main` (`agent_pr.md`):
    ```
    just bump-version X.Y.Z     # every version file, uv.lock, codegen, CHANGELOG.md section
@@ -55,7 +55,8 @@ so it never exercises signing. When to deploy a beta is `orchestrating`'s call.
    gh release download vX.Y.Z --pattern 'docker-compose.syntropic137.yaml' --pattern 'SHA256SUMS'
    sha256sum -c SHA256SUMS --ignore-missing
    # each pinned image ref in the compose:
-   docker buildx imagetools inspect <ref> --raw | jq -r .mediaType   # must be an index, with amd64 and arm64
+   # must be an index (OCI or Docker manifest list) carrying BOTH linux/amd64 and linux/arm64; exits non-zero otherwise
+   docker buildx imagetools inspect <ref> --raw | jq -e '(.mediaType == "application/vnd.oci.image.index.v1+json" or .mediaType == "application/vnd.docker.distribution.manifest.list.v2+json") and ([.manifests[].platform | select(. != null) | "\(.os)/\(.architecture)"] | (index("linux/amd64") != null and index("linux/arm64") != null))'
    npm view @syntropic137/cli version
    ```
    SHA256SUMS attests the bytes, not that the digests resolve. v0.33.0 pinned an arm64 child manifest and broke every amd64 self-host.
