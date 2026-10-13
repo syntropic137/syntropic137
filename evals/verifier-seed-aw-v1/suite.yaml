@@ -9,7 +9,8 @@
 #
 # TRAIN AND HOLDOUT. Within each batch of added cases, the ~30% whose
 # sha256(id) sorts lowest are holdout, fixed once and never moved to train:
-# 1 of v1's 4 defects and none of its 1 control, 1 of 5 in all.
+# 1 of v1's 4 defects and none of its 2 controls (as with verifier-seed-v1's
+# v6 pair), 1 of 6 in all.
 #
 # `check` reads the pins from an agentic-workspace checkout, not this one:
 #   git submodule update --init lib/agentic-workspace
@@ -20,12 +21,27 @@
 # v1: the four agentic-workspace escapes of 2026-10-13
 #     (docs/retrospectives/2026-10-13-provider-contract-day.md): AW#47 and
 #     AW#49 were certified by the platform verify (sdlc-implement-v3 /
-#     sdlc-reverify-pr-v1 on codex) and blocked by a second verifier. One
-#     clean control from agentic-workspace's imported mainline, chosen by
-#     verifier-seed-v1's rule. A second candidate, agentic-primitives #355
-#     (the provider logs capability), was dropped: `check` finds #358
-#     rewriting two of its functions within 30 days. The brief's 2-3
-#     controls are NOT met. 4 defects, 1 control, 5 in all.
+#     sdlc-reverify-pr-v1 on codex) and blocked by a second verifier. Two
+#     clean controls from agentic-workspace's imported mainline, chosen by
+#     verifier-seed-v1's rule: agentic-primitives #358 (staged teardown) and
+#     #395 (security-hardening runtime exposure, docs). Every other mainline
+#     merge at least 30 days before clean_through (2026-09-13 or earlier)
+#     back to #345 was read and fails a rule:
+#       #355 provider logs: `check` finds #358 rewriting two of its functions
+#       #399 RTK, #387 just, #356 and #347 exporter: later commits change
+#         the same omni-agent Dockerfile within 30 days (3df7804 and e46bb72
+#         for #399; #399, 3df7804, e46bb72 for #387; #363, #369 for the
+#         two exporter PRs)
+#       #376 delegation skills: #375 and 119f465 edit the same SKILL.md
+#         files within 30 days; #375: 119f465 and fbb5cbb do
+#       #362 session-store rename: #363, #369, #382 and #387 change the
+#         omni-agent Dockerfile it touched within 30 days
+#       #359, #348, #346, #345 session-store and entrypoint: superseded
+#         within 30 days by #362 (renames the scripts they changed) and
+#         cc89e13 (entrypoint.sh)
+#       the rest are version-pin and release-bookkeeping bumps, which change
+#         no behaviour a verifier could judge.
+#     4 defects, 2 controls, 6 in all.
 #
 # EVERY VERSION KEEPS ITS SCORE: when the version goes up, record the old one
 # under `history`, as verifier-seed-v1 does.
