@@ -16,6 +16,7 @@ No real Docker runs here; a real local rehearsal is for the orchestrator.
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -87,7 +88,9 @@ exit 0
 
 CURL_STUB = r"""#!/usr/bin/env bash
 case "${@: -1}" in
-    */health|*/api/v1/health) echo '{"subscription":{"status":"live","lag":0,"lagging_projections":[],"held_projections":[],"halted_at":null}}' ;;
+    */health|*/api/v1/health)
+        if [ -n "${STUB_HEALTH:-}" ]; then printf '%s\n' "$STUB_HEALTH"
+        else echo '{"subscription":{"status":"healthy","lag":0,"lagging_projections":[],"held_projections":[],"halted_at":null}}'; fi ;;
     *"/executions?"*) echo '{"total":0,"executions":[],"status_counts":{}}' ;;
     */sessions*) echo '{"total":1}' ;;
     */evals*) echo '{"total":0}' ;;
@@ -469,7 +472,10 @@ def test_failed_build_removes_the_worktree_and_its_registration(rig: Rig) -> Non
 # --- the row-count invariant, through --verify-only ---------------------------
 
 
-def _verify_only(rig: Rig, before: str, after: str) -> Result:
+HEALTHY = '{"subscription":{"status":"healthy","lagging_projections":[],"held_projections":[],"halted_at":null}}'
+
+
+def _verify_only(rig: Rig, before: str, after: str, health: str = HEALTHY) -> Result:
     out = rig.root / "saved" / "out"
     for label, text in (("from", before), ("to", after)):
         d = out / label
@@ -480,7 +486,7 @@ def _verify_only(rig: Rig, before: str, after: str) -> Result:
         (d / "executions.tsv").write_text("")
         (d / "sessions.json").write_text('{"total":1}')
         (d / "evals.json").write_text('{"total":0}')
-        (d / "health.json").write_text('{"subscription":{"held_projections":[],"halted_at":null}}')
+        (d / "health.json").write_text(health)
     (out / "touched-after-baseline.txt").write_text("")
     (out / "spot-ids.txt").write_text("")
     for f in ("from-catchup-seconds", "to-catchup-seconds", "to-api-ready-seconds"):
@@ -813,3 +819,54 @@ def test_breaking_cleanup_fails_its_test(rig: Rig, name: str) -> None:
     assert rig.script.read_text() != SCRIPT.read_text(), "mutation not applied"
     with pytest.raises(AssertionError):
         test(rig)
+
+
+# --- catch-up is measured, never assumed ---------------------------------------
+
+
+@pytest.mark.parametrize(
+    "health",
+    [
+        # The probe failed: no verdict and no lag. Must not read as caught up.
+        '{"subscription":{"status":"unknown"}}',
+        # Coordinator not up: lag unmeasurable.
+        '{"subscription":{"status":"degraded","running":false,"held_projections":[],"halted_at":null}}',
+    ],
+)
+def test_unmeasured_catch_up_times_out_instead_of_passing(rig: Rig, health: str) -> None:
+    res = rig.run(env={"STUB_HEALTH": health})
+    assert res.rc == 1, res.output
+    assert "catch-up timed out" in res.output
+    assert "RESULT: PASS" not in res.output
+
+
+@pytest.mark.parametrize("status", ["dropped_events", "halted", "stalled"])
+def test_unhealthy_read_path_fails_catch_up(rig: Rig, status: str) -> None:
+    health = json.dumps(
+        {
+            "subscription": {
+                "status": status,
+                "lag": 0,
+                "lagging_projections": [],
+                "held_projections": [],
+                "halted_at": None,
+            }
+        }
+    )
+    res = rig.run(env={"STUB_HEALTH": health})
+    assert res.rc == 1, res.output
+    assert f"subscription {status}" in res.output
+
+
+@pytest.mark.parametrize(
+    "health",
+    [
+        '{"subscription":{"status":"unknown"}}',
+        '{"subscription":{"status":"dropped_events","lagging_projections":[],"held_projections":[],"halted_at":null}}',
+        '{"subscription":{"status":"healthy","lagging_projections":null,"held_projections":[],"halted_at":null}}',
+    ],
+)
+def test_verify_fails_when_final_read_path_is_not_measured_healthy(rig: Rig, health: str) -> None:
+    res = _verify_only(rig, TABLES, TABLES, health)
+    assert res.rc == 1, res.output
+    assert "read path not healthy after upgrade" in res.output

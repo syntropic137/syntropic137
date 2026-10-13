@@ -88,6 +88,10 @@ if [ "$VERIFY_ONLY" = 1 ]; then
 else
 [ -f "$DUMP" ] || { echo "--dump file not found: $DUMP" >&2; usage; }
 for bin in docker gh jq curl git openssl; do command -v "$bin" >/dev/null || { echo "missing $bin" >&2; exit 2; }; done
+# GNU timeout bounds the daemon probe. Stock macOS has neither name; coreutils
+# (brew install coreutils) provides gtimeout.
+TIMEOUT_BIN="$(command -v timeout || command -v gtimeout || true)"
+[ -n "$TIMEOUT_BIN" ] || { echo "missing timeout (GNU coreutils; on macOS: brew install coreutils for gtimeout)" >&2; exit 2; }
 DUMP="$(cd "$(dirname "$DUMP")" && pwd)/$(basename "$DUMP")"
 
 # --- guard: local Docker daemon only ------------------------------------------
@@ -98,7 +102,7 @@ case "$CONTEXT_ENDPOINT" in unix://*) ;; *) refuse "the selected docker context'
 DOCKER_ENDPOINT="${DOCKER_HOST:-$CONTEXT_ENDPOINT}"
 # Every docker call: pinned local endpoint, and no other host variable.
 dk() { env -i PATH="$PATH" HOME="$HOME" DOCKER_HOST="$DOCKER_ENDPOINT" docker "$@"; }
-timeout 20 env -i PATH="$PATH" HOME="$HOME" DOCKER_HOST="$DOCKER_ENDPOINT" docker info >/dev/null || { echo "docker daemon not reachable" >&2; exit 2; }
+"$TIMEOUT_BIN" 20 env -i PATH="$PATH" HOME="$HOME" DOCKER_HOST="$DOCKER_ENDPOINT" docker info >/dev/null || { echo "docker daemon not reachable" >&2; exit 2; }
 
 # --- guard: a project that cannot be anyone else's ----------------------------
 PREFIX="syn137rehearse-"
@@ -368,9 +372,12 @@ use_version() {  # $1 from|to
 health() { curl -sf --max-time 10 "$API/health" || curl -sf --max-time 10 "$API/api/v1/health"; }
 api_get() { curl -sf --max-time 30 "$API$1"; }
 
-# Wait until the read path reaches the store head. Done = no projection
-# lagging except ones that are held (a held projection never catches up, so
-# waiting on it is pointless; it is reported instead). Prints seconds taken.
+# Wait until the read path reaches the store head. Done = lag was MEASURED
+# (lagging_projections present, not null) and no projection lags except ones
+# that are held (a held projection never catches up, so waiting on it is
+# pointless; it is reported instead), with status healthy or held. An
+# unmeasured probe ("unknown", or "degraded" while the coordinator starts) is
+# retried, never read as caught up. halted, dropped_events and stalled fail.
 wait_caught_up() {  # $1 label
     local start now st lag behind held halted
     start=$(date +%s)
@@ -383,10 +390,12 @@ wait_caught_up() {  # $1 label
             lag=$(jq -r '.subscription.lag // "?"' <<<"$h")
             held=$(jq -c '[.subscription.held_projections // [] | .[].projection]' <<<"$h")
             halted=$(jq -r '.subscription.halted_at // empty' <<<"$h")
-            behind=$(jq --argjson held "$held" '[.subscription.lagging_projections // [] | .[] | select(.projection as $p | $held | index($p) | not)] | length' <<<"$h")
+            behind=$(jq -r --argjson held "$held" 'if (.subscription.lagging_projections | type) == "array" then [.subscription.lagging_projections[] | select(.projection as $p | $held | index($p) | not)] | length else "?" end' <<<"$h")
             printf '   %s +%ss status=%s lag=%s behind=%s held=%s halted=%s\n' "$1" $(( now - start )) "$st" "$lag" "$behind" "$held" "${halted:-none}" | tee -a "$OUT/$1-poll.log"
-            if [ "$behind" = 0 ] && [ "$st" != catching_up ] && [ "$st" != "?" ]; then break; fi
-            [ "$st" = stalled ] && { fail "$1: subscription stalled"; break; }
+            case "$st" in
+                stalled|halted|dropped_events) fail "$1: subscription $st"; break ;;
+                healthy|held) [ "$behind" = 0 ] && break ;;
+            esac
         fi
         sleep 10
     done
@@ -530,8 +539,9 @@ S_FROM=$(jq '.total // 0' "$OUT/from/sessions.json"); S_TO=$(jq '.total // 0' "$
 [ "$S_TO" -ge "$S_FROM" ] && [ "$S_TO" -gt 0 ] || fail "sessions: $S_FROM -> $S_TO"
 E_TO=$(jq '.total // "unavailable"' "$OUT/to/evals.json")
 [ "$E_TO" != unavailable ] || fail "evals endpoint unavailable after upgrade"
-jq -e '(.subscription.held_projections // []) == [] and (.subscription.halted_at == null)' "$OUT/to/health.json" >/dev/null \
-    || fail "held/halted after upgrade: $(jq -c '{held: .subscription.held_projections, halted_at: .subscription.halted_at}' "$OUT/to/health.json")"
+jq -e '(.subscription.held_projections // []) == [] and (.subscription.halted_at == null)
+        and .subscription.status == "healthy" and ((.subscription.lagging_projections | type) == "array")' "$OUT/to/health.json" >/dev/null \
+    || fail "read path not healthy after upgrade: $(jq -c '{status: .subscription.status, held: .subscription.held_projections, halted_at: .subscription.halted_at, lagging: .subscription.lagging_projections}' "$OUT/to/health.json")"
 
 : > "$OUT/spot-check.txt"
 for id in $(cat "$OUT/spot-ids.txt"); do
