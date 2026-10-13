@@ -55,13 +55,13 @@ from syn_domain.testing.fake_agent_handler import FakeAgentExecutionHandler
 from syn_domain.testing.fake_clock import FakeClock
 from syn_domain.testing.fake_session_repository import FakeSessionRepository
 from syn_shared.agents import AgentProvider, AgentRunner
-from syn_shared.events import UPSTREAM_RETRY
 from syn_shared.env_constants import (
     ENV_AGENTIC_ATTEMPT_ID,
     ENV_AGENTIC_INVOCATION_ID,
     ENV_SYN_PHASE_DEADLINE,
     ENV_SYN_PHASE_TIMEOUT_SECONDS,
 )
+from syn_shared.events import UPSTREAM_RETRY
 
 if TYPE_CHECKING:
     from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace

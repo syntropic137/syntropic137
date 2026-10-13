@@ -1379,6 +1379,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/observability/upstream-retries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Upstream Retries
+         * @description How often a busy upstream made a phase retry in place, per provider and model (#1882).
+         *
+         *     Read from the ``upstream_retry`` observations (Lane 2). A store that cannot
+         *     be read is a 503, never an empty list: zero retries would tell an operator
+         *     there is no quota pressure when nobody looked.
+         */
+        get: operations["get_upstream_retries_observability_upstream_retries_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/costs/sessions": {
         parameters: {
             query?: never;
@@ -9735,6 +9759,41 @@ export interface components {
             /** Status */
             status: string;
         };
+        /**
+         * UpstreamRetriesResponse
+         * @description In-phase upstream retries per provider and model, most first (Lane 2, #1882).
+         *
+         *     Counts retries, not failures: a phase that retried twice and then
+         *     succeeded counts 2 here. Quota, auth and anything unrecognised are never
+         *     retried, so they never appear.
+         */
+        UpstreamRetriesResponse: {
+            /**
+             * Window
+             * @enum {string}
+             */
+            window: "1h" | "24h" | "7d" | "30d";
+            /** Since */
+            since: string;
+            /** Total */
+            total: number;
+            /** Counts */
+            counts: components["schemas"]["UpstreamRetryCountResponse"][];
+        };
+        /**
+         * UpstreamRetryCountResponse
+         * @description In-phase retries one provider, model and upstream kind took in the window (#1882).
+         */
+        UpstreamRetryCountResponse: {
+            /** Provider */
+            provider: string | null;
+            /** Model */
+            model: string | null;
+            /** Upstream Kind */
+            upstream_kind: string | null;
+            /** Retries */
+            retries: number;
+        };
         /** ValidateYamlRequest */
         ValidateYamlRequest: {
             /**
@@ -12697,6 +12756,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RequestLatencyResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_upstream_retries_observability_upstream_retries_get: {
+        parameters: {
+            query?: {
+                /** @description How far back to look */
+                window?: "1h" | "24h" | "7d" | "30d";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpstreamRetriesResponse"];
                 };
             };
             /** @description Validation Error */

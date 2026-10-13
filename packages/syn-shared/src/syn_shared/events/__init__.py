@@ -177,10 +177,10 @@ __all__ = [
     "TOOL_EXECUTION_COMPLETED",
     "TOOL_EXECUTION_FAILED",
     "TOOL_EXECUTION_STARTED",
+    "UPSTREAM_RETRY",
     "USER_PROMPT_SUBMITTED",
     "VALID_EVENT_TYPES",
     "WORKSPACE_RESOURCE_USAGE",
-    "UPSTREAM_RETRY",
     "EventType",
     "is_valid_event_type",
 ]
