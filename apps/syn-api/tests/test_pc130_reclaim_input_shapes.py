@@ -109,6 +109,7 @@ async def test_production_reclaimer_reads_the_registered_ownership_store(
     reclaimer.clock = infrastructure.clock
     reclaimer.list_containers = infrastructure.list_containers
     reclaimer.running_execution_ids = infrastructure.running_execution_ids
+    reclaimer.read_models_rebuilding = infrastructure.read_models_rebuilding
     archive = _Archive()
     reclaimer.archive = archive
     result = await reclaimer.run_once()

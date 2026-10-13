@@ -17,11 +17,13 @@ class HeatmapDayBucket:
         date: ISO date string (YYYY-MM-DD).
         count: Value of the selected metric for this day.
         breakdown: Full breakdown of all metrics for this day.
+        failed: Executions that ended failed on this UTC day.
     """
 
     date: str
     count: float = 0.0
     breakdown: dict[str, float] = field(default_factory=dict)
+    failed: int = 0
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> HeatmapDayBucket:
@@ -30,6 +32,7 @@ class HeatmapDayBucket:
             date=data.get("date", ""),
             count=data.get("count", 0.0),
             breakdown=dict(data.get("breakdown", {})),
+            failed=int(data.get("failed", 0)),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -38,6 +41,7 @@ class HeatmapDayBucket:
             "date": self.date,
             "count": self.count,
             "breakdown": dict(self.breakdown),
+            "failed": self.failed,
         }
 
 

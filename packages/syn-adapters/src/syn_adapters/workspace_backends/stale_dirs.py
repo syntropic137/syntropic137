@@ -171,13 +171,20 @@ def claim_workspace_dir(host_dir: str) -> str:
     return str(claimed)
 
 
-def release_workspace_dir(claimed: str, host_dir: str) -> None:
-    """Put a claimed directory back. Raises ``OSError`` when its path was retaken."""
-    if claimed == host_dir:
+def release_workspace_dir(claimed: str) -> None:
+    """Put a claimed directory back at its workspace path; a no-op if it is not claimed.
+
+    Whoever claimed it - this pass, or one that died - a kept directory is
+    returned, or it would stay claimed forever. Raises ``OSError`` when the
+    workspace path was retaken, and the directory then stays claimed.
+    """
+    path = Path(claimed)
+    if not path.name.startswith(CLAIM_PREFIX):
         return
-    if Path(host_dir).exists():
+    host_dir = path.with_name(path.name.removeprefix(CLAIM_PREFIX))
+    if os.path.lexists(host_dir):
         raise FileExistsError(f"{host_dir} was recreated while it was claimed")
-    Path(claimed).rename(host_dir)
+    path.rename(host_dir)
 
 
 def scan_workspace_dirs(base: str) -> list[WorkspaceDirListing]:

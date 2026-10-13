@@ -7,7 +7,7 @@ plus Pydantic response models used across all v1 modules.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime  # noqa: TC003 — needed at runtime for Pydantic
+from datetime import date, datetime  # noqa: TC003 — needed at runtime for Pydantic
 from decimal import Decimal
 from enum import StrEnum
 from typing import TYPE_CHECKING, Generic, Literal, TypeVar
@@ -84,6 +84,7 @@ from syn_api.model_identity import CostModelKey, ObservedModelId, ResolvedModelI
 from syn_api.services.cpu_throttling import CpuThrottling  # noqa: TC001
 from syn_api.services.degraded_reasons import DegradedReason  # noqa: TC001
 from syn_domain.contexts.orchestration import (
+    DefinitionChangeKind,
     DelegationFailure,
     EvalId,
     FailureClassification,
@@ -106,10 +107,15 @@ from syn_shared.display import format_utc_timestamp
 from syn_shared.display.formatters import EM_DASH, format_cost, format_tokens
 from syn_shared.observed_model import format_observed_model
 from syn_shared.platform_access import PlatformScope
+from syn_shared.pricing import (  # noqa: TC001 - pydantic resolves at runtime
+    CostSplitBasis,
+    TokenTypeCost,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from syn_domain.contexts.orchestration import ShippedCountTile, ShippedMetrics
     from syn_domain.contexts.orchestration.slices.phase_profiles import (
         Percentiles,
         PhaseProfiles,
@@ -218,6 +224,8 @@ class GitHubError(StrEnum):
     INVALID_PAYLOAD = "invalid_payload"
     PROCESSING_FAILED = "processing_failed"
     NOT_IMPLEMENTED = "not_implemented"
+    NOT_CONFIGURED = "not_configured"
+    """No GitHub App on this server (SYN_GITHUB_APP_ID unset): a 503, never a 500."""
 
 
 # ---------------------------------------------------------------------------
@@ -503,6 +511,8 @@ class WorkflowSummary(BaseModel):
     tags: list[str] = Field(default_factory=list)
     """The workflow's tags, normalised and sorted (#967). Future runs inherit them."""
     """Whether this workflow requires repository access at execution time (ADR-058 #666)."""
+    skills: list[DeclaredSkillResponse] = Field(default_factory=list)
+    """Every distinct skill the workflow's phases declare, first-declared first."""
 
 
 class InputDeclarationResponse(BaseModel):
@@ -526,6 +536,21 @@ class PhaseRefResponse(BaseModel):
     name_overridden: bool = False
     raw: str | None = None
     """The shorthand spelling when the stored row held a bare string."""
+
+
+class DeclaredSkillResponse(PhaseRefResponse):
+    """A skill a workflow declares, once, and where it declares it.
+
+    On the workflow LIST so a card can draw its skill chips without one detail
+    request per workflow. Same ref shape as a phase's ``skills`` entry, so a
+    client matches a chip to a phase by comparing the ref fields."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    phase_ids: list[str] = Field(default_factory=list)
+    """Phases that declare this skill themselves, in phase order."""
+    workflow_scope: bool = False
+    """Declared at workflow scope, so every phase gets it; not listed per phase."""
 
 
 class FallbackAgentResponse(BaseModel):
@@ -1215,6 +1240,8 @@ class EvalRunResponse(BaseModel):
     scorer: str | None
     scorer_version: str | None
     scored_at: str | None
+    judge_model: ObservedModelId | None = None
+    """The model that judged the run; null for a deterministic scorer or an older score."""
 
 
 class EvalRunListResponse(BaseModel):
@@ -1238,6 +1265,8 @@ class EvalRunScoreRequest(BaseModel):
     """Markdown."""
     scorer: str = Field(min_length=1)
     scorer_version: str = Field(min_length=1)
+    judge_model: ObservedModelId | None = Field(default=None, min_length=1)
+    """The model that judged the run, when a model did. Omit for a deterministic scorer."""
 
 
 class EvalRunScoreResponse(BaseModel):
@@ -1251,6 +1280,120 @@ class EvalRunScoreResponse(BaseModel):
     scorer: str
     scorer_version: str
     scored_at: str
+    judge_model: ObservedModelId | None = None
+
+
+class DefinitionChangeResponse(BaseModel):
+    """A change to an eval's or workflow's definition: a trend chart's annotation (#1788)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    definition_version: str | None
+    """Eval: "1" at creation, one more per goal or baseline change. Workflow: the
+    package version, else the source digest, as its runs record it; null if neither."""
+    changed_at: str
+    """ISO 8601 UTC."""
+    kind: DefinitionChangeKind
+
+
+class TrendDefinition(BaseModel):
+    """The current definition version, when it last changed, and every change."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    definition_version: str | None
+    definition_changed_at: str | None
+    """ISO 8601 UTC; null when no change was recorded."""
+    definition_changes: list[DefinitionChangeResponse]
+    """Oldest first."""
+
+
+class EvalTrendPointResponse(BaseModel):
+    """One run of an eval as one point on its trend charts (#1788)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    execution_id: str
+    date: str | None
+    """When the run started, ISO 8601 UTC; null if it never recorded a start."""
+    workflow_id: str
+    workflow_version: str | None
+    """The workflow version the run launched from, as on `GET /evals/{id}/runs`."""
+    eval_definition_version: str | None
+    """The eval's definition version current when the run started."""
+    verifier_model: ObservedModelId | None
+    """The model the run's last reporting phase ran, as its harness reported it."""
+    observed_models: list[ObservedModelId]
+    """Every distinct model the run was observed running, delegates included, sorted."""
+    judge_model: ObservedModelId | None
+    score: int | None
+    """0 to 100; the recorded fraction x 100, rounded. Null when unscored or scored without one."""
+    verdict: Verdict | None
+    cost_usd: Decimal | None
+    cost_is_lower_bound: bool
+    """True when some of the run's work had no price, so `cost_usd` is a floor."""
+    cost_display: str
+    duration_seconds: float | None
+    duration_is_lower_bound: bool
+    """True when some phase has no known duration, so `duration_seconds` is a floor."""
+    duration_display: str
+    tokens: int
+    """Total tokens, the same figure as `total_tokens` on `GET /executions`."""
+
+
+class EvalTrendResponse(TrendDefinition):
+    """One page of an eval's current runs as trend points, newest first (#1788)."""
+
+    eval_id: str
+    items: list[EvalTrendPointResponse]
+    total: int
+    """Every current run of the eval, whatever the page size."""
+    page: int
+    page_size: int
+
+
+class PhaseDurationResponse(BaseModel):
+    """How long one phase of a run took."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    phase_id: str
+    phase_name: str
+    duration_seconds: float | None
+    """Null when the phase has no known duration."""
+
+
+class WorkflowTrendPointResponse(BaseModel):
+    """One execution of a workflow as one point on its trend charts (#1788)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    execution_id: str
+    date: str | None
+    """When the execution started, ISO 8601 UTC."""
+    status: str
+    workflow_version: str | None
+    """The version the execution launched from; compare with `definition_changes`."""
+    cost_usd: Decimal | None
+    cost_is_lower_bound: bool
+    cost_display: str
+    duration_seconds: float | None
+    duration_is_lower_bound: bool
+    duration_display: str
+    tokens: int
+    phase_durations: list[PhaseDurationResponse]
+    """In the order the phases ran."""
+
+
+class WorkflowTrendResponse(TrendDefinition):
+    """One page of a workflow's executions as trend points, newest first (#1788)."""
+
+    workflow_id: str
+    items: list[WorkflowTrendPointResponse]
+    total: int
+    """Every execution of the workflow, whatever the page size."""
+    page: int
+    page_size: int
 
 
 class ExecutionEvalRunResponse(BaseModel):
@@ -2243,6 +2386,37 @@ class ControlResult(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class TokenTypeCostResponse(BaseModel):
+    """A session's priced cost split by the kind of token it was spent on.
+
+    The parts sum to ``total_cost_usd`` (to within the canonical quantum per
+    part when ``basis`` is ``allocated``). Unpriced work is in neither, exactly
+    as with ``cost_by_model``.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    input_usd: Decimal
+    output_usd: Decimal
+    cache_creation_usd: Decimal
+    """Cache WRITES."""
+    cache_read_usd: Decimal
+    basis: CostSplitBasis
+    """``rate_table``: each part is tokens x that type's rate. ``allocated``: a
+    harness-reported total, which states no split, apportioned in the rate
+    table's proportions. Label the second as an estimate."""
+
+    @classmethod
+    def from_split(cls, split: TokenTypeCost, basis: CostSplitBasis) -> TokenTypeCostResponse:
+        return cls(
+            input_usd=split.input_usd,
+            output_usd=split.output_usd,
+            cache_creation_usd=split.cache_creation_usd,
+            cache_read_usd=split.cache_read_usd,
+            basis=basis,
+        )
+
+
 class SessionDetail(BaseModel):
     """Detailed session with tool operations and cost data."""
 
@@ -2278,6 +2452,8 @@ class SessionDetail(BaseModel):
     requested_model: str | None = None
     """The model the session REQUESTED (often an alias), or None (ADR-067 D9)."""
     cost_by_model: dict[CostModelKey, Decimal] = Field(default_factory=dict)
+    cost_by_token_type: TokenTypeCostResponse | None = None
+    """Cost split by token type; None when it could not be split, never zeroes."""
     operations: list[ToolOperation] = Field(default_factory=list)
     started_at: datetime | None = None
     completed_at: datetime | None = None
@@ -3367,6 +3543,10 @@ class HeatmapDayBucketResponse(BaseModel):
     date: str
     count: float = 0.0
     breakdown: dict[str, float] = Field(default_factory=dict)
+    failed: int = 0
+    """Executions that ended failed on this UTC day (status ``failed``, by
+    ``completed_at``), from the workflow_executions read model. Also in
+    ``breakdown["failed"]`` so ``metric=failed`` colours by it."""
 
 
 class ContributionHeatmapResponse(BaseModel):
@@ -4093,6 +4273,198 @@ class PhaseProfilesResponse(BaseModel):
 
 LatencyWindow = Literal["1h", "24h", "7d", "30d"]
 """How far back ``GET /observability/latency`` looks. 30d is the retention."""
+
+
+# ---------------------------------------------------------------------------
+# Shipped by agents (GET /metrics/shipped)
+# ---------------------------------------------------------------------------
+
+
+class ShippedDeltaUnit(StrEnum):
+    """What a tile's ``delta_display`` is expressed in."""
+
+    PERCENT = "percent"
+    POINTS = "points"
+    COUNT = "count"
+
+
+class ShippedWindowResponse(BaseModel):
+    """``days`` UTC calendar days, ``from`` and ``to`` inclusive; ``to`` is today."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    days: int
+    from_: date = Field(serialization_alias="from")
+    to: date
+
+
+class ShippedPreviousWindowResponse(BaseModel):
+    """The ``days`` UTC days immediately before the window, inclusive."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    from_: date = Field(serialization_alias="from")
+    to: date
+
+
+class ShippedCountPointResponse(BaseModel):
+    """One UTC day's count."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    date: date
+    value: int
+
+
+class ShippedRatePointResponse(BaseModel):
+    """One UTC day's rate in percent; null on a day with no denominator."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    date: date
+    value: float | None
+
+
+class ShippedCountTileResponse(BaseModel):
+    """A count over the window against the window before it.
+
+    When ``reason`` is set the count cannot be answered from persisted data:
+    every number is null and ``series`` is empty. Never a zero standing in for
+    "unknown".
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    total: int | None
+    previous_total: int | None
+    delta: int | None
+    """``total - previous_total``."""
+    delta_percent: float | None
+    """Relative change in percent; null whenever ``previous_total`` is 0 (0 to 0
+    included; ``delta_display`` then reads "0%", and "new" for 0 to N)."""
+    delta_display: str | None
+    """Server-formatted delta in ``delta_unit``: "+38%" or "+3"."""
+    delta_unit: ShippedDeltaUnit
+    total_display: str | None
+    series: list[ShippedCountPointResponse]
+    """One point per day of the window, oldest first, zero-filled."""
+    source: str
+    """The store this number is read from."""
+    reason: str | None
+
+
+class ShippedRateTileResponse(BaseModel):
+    """Merge rate: of the run PRs OPENED in the window, the percent merged by now.
+
+    A cohort conversion, 0 to 100 by construction (the merged PRs are a subset
+    of the opened ones). ``previous_total`` asks the same of the previous
+    window's cohort, as of now. ``delta`` is in percentage points. A series
+    point is that day's opened PRs merged since, null on a day none opened.
+    Null totals: no PR was opened, which is not 0%.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    total: float | None
+    previous_total: float | None
+    delta: float | None
+    delta_display: str | None
+    """Server-formatted points delta: "+5 pts"."""
+    delta_unit: ShippedDeltaUnit
+    total_display: str | None
+    series: list[ShippedRatePointResponse]
+    source: str
+    reason: str | None
+
+
+class ShippedWorkflowResponse(BaseModel):
+    """One workflow's share of what was shipped in the window."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    workflow_id: str
+    name: str
+    """The workflow's display name."""
+    commits: int
+    prs_opened: int
+    prs_merged: int
+    repos_touched: int
+
+
+class ShippedMetricsResponse(BaseModel):
+    """What agents shipped over the window, tile by tile (the Overview block)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    window: ShippedWindowResponse
+    previous: ShippedPreviousWindowResponse
+    workflow_id: str | None
+    """The workflow the tiles are filtered to, or null for all."""
+    commits: ShippedCountTileResponse
+    prs_opened: ShippedCountTileResponse
+    prs_merged: ShippedCountTileResponse
+    merge_rate: ShippedRateTileResponse
+    repos_touched: ShippedCountTileResponse
+    repos: list[str]
+    """Distinct repos touched in the window, ``owner/name``, sorted."""
+    by_workflow: list[ShippedWorkflowResponse]
+    """Top workflows by commits, then PRs merged; empty when filtered to one."""
+    unavailable: list[str]
+    """Names of the tiles that could not be measured (their ``reason`` says why)."""
+
+    @classmethod
+    def from_metrics(cls, m: ShippedMetrics) -> ShippedMetricsResponse:
+        w = m.window
+        return cls(
+            window=ShippedWindowResponse(days=w.days, from_=w.start, to=w.end),
+            previous=ShippedPreviousWindowResponse(from_=w.previous_start, to=w.previous_end),
+            workflow_id=m.workflow_id,
+            commits=_count_tile(m.commits),
+            prs_opened=_count_tile(m.prs_opened),
+            prs_merged=_count_tile(m.prs_merged),
+            merge_rate=ShippedRateTileResponse(
+                total=m.merge_rate.total,
+                previous_total=m.merge_rate.previous_total,
+                delta=m.merge_rate.delta,
+                delta_display=m.merge_rate.delta_display,
+                delta_unit=ShippedDeltaUnit(m.merge_rate.delta_unit.value),
+                total_display=m.merge_rate.total_display,
+                series=[
+                    ShippedRatePointResponse(date=p.day, value=p.value) for p in m.merge_rate.series
+                ],
+                source=m.merge_rate.source,
+                reason=m.merge_rate.reason,
+            ),
+            repos_touched=_count_tile(m.repos_touched),
+            repos=list(m.repos),
+            by_workflow=[
+                ShippedWorkflowResponse(
+                    workflow_id=b.workflow_id,
+                    name=b.name,
+                    commits=b.commits,
+                    prs_opened=b.prs_opened,
+                    prs_merged=b.prs_merged,
+                    repos_touched=b.repos_touched,
+                )
+                for b in m.by_workflow
+            ],
+            unavailable=list(m.unavailable),
+        )
+
+
+def _count_tile(t: ShippedCountTile) -> ShippedCountTileResponse:
+    return ShippedCountTileResponse(
+        total=t.total,
+        previous_total=t.previous_total,
+        delta=t.delta,
+        delta_percent=t.delta_percent,
+        delta_display=t.delta_display,
+        delta_unit=ShippedDeltaUnit(t.delta_unit.value),
+        total_display=t.total_display,
+        series=[ShippedCountPointResponse(date=p.day, value=p.value) for p in t.series],
+        source=t.source,
+        reason=t.reason,
+    )
 
 
 class RouteLatencyResponse(BaseModel):

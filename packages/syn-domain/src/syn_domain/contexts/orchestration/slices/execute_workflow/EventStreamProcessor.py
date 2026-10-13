@@ -879,6 +879,7 @@ class EventStreamProcessor:
         self._subagents.register_tool_use(tool_use_id, tool_name)
 
         self._note_delegation_attempt(tool_use_id, tool_input.get("command"))
+        self._collector.note_command_started(tool_use_id, tool_input.get("command"))
 
         skill = tool_input.get(_SKILL_INPUT_FIELD) if tool_name == SKILL_TOOL_NAME else None
         changes_nothing = tool_call_changes_nothing(tool_name, tool_input.get("command"))
@@ -932,7 +933,9 @@ class EventStreamProcessor:
         # Extract tool output content
         tool_content = item.get("content", "")
         if isinstance(tool_content, list):
-            tool_content = " ".join(
+            # Newlines, not spaces: a block boundary is a line boundary, and the
+            # shipped ledger reads the LAST line of a `gh pr create`.
+            tool_content = "\n".join(
                 str(c.get("text", c) if isinstance(c, dict) else c) for c in tool_content
             )
         output_preview = str(tool_content)[:500] if tool_content else None
@@ -950,6 +953,7 @@ class EventStreamProcessor:
             self._delegation_completed_ids.add(tool_use_id)
             self._delegation_successes += 1
 
+        await self._collector.note_command_finished(tool_use_id, not is_error, tool_content)
         # Record tool completion
         await self._collector.record_tool_completed(
             tool_name=tool_name,

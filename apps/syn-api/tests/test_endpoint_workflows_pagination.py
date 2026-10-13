@@ -19,7 +19,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from syn_api.routes.workflows.queries import list_workflows_endpoint
-from syn_api.types import Ok
+from syn_api.types import DeclaredSkillResponse, Ok
 
 pytestmark = pytest.mark.unit
 
@@ -39,6 +39,7 @@ class _Summary:
     runs_count: int = 0
     is_archived: bool = False
     tags: tuple[str, ...] = ()
+    skills: tuple[DeclaredSkillResponse, ...] = ()
     requires_repos: bool = False
 
 

@@ -752,7 +752,7 @@ async def _init_subscriptions(state: LifecycleState) -> None:
     # #1560: freeing disk space is not an event either, so a clock asks.
     start_disk_recovery_watch()
     # PC-130: and a directory whose container is gone is reclaimed on a clock too.
-    start_workspace_reclaim(lambda: coordinator.is_live)
+    start_workspace_reclaim(lambda: state.subscription_service)
     # PC-130: and a low disk pages someone rather than waiting to be looked at.
     start_disk_pager()
 

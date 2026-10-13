@@ -12,6 +12,13 @@ task: >
   Review the token injector, the ext_authz service the egress proxy consults
   to inject GitHub credentials into an agent's outbound requests to GitHub.
 expected:
+  # The root cause, for the LLM judge only; never part of `task`.
+  defect: >
+    The token injector's ext_authz handler defines only do_GET and do_POST,
+    so any other method Envoy forwards on the check (e.g. the Claude CLI's
+    HEAD preflight, PUT, PATCH, DELETE) gets a 501 from http.server, which
+    Envoy (failure_mode_allow: false) turns into a bodyless 403: requests
+    with those methods are denied.
   files:
     - docker/token-injector/token_injector.py
   keywords:

@@ -427,6 +427,9 @@ class _CodexRows:
             _Payload(tool_name=tool_name, tool_use_id=tool_use_id, input_preview=input_preview),
         )
 
+    async def note_command_ended(self, *_args: object) -> None:
+        return None
+
     async def record_tool_completed(
         self,
         tool_name: str,
