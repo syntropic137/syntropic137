@@ -21,6 +21,7 @@ from syn_api.types import (
     PhaseStartConfig,
     PlannedPhaseInfo,
     ReadModelStatus,
+    ResumedFromInfo,
     StartPinsStatus,
 )
 from syn_domain.contexts.orchestration import (
@@ -432,6 +433,19 @@ class ExecutionDetailResponse(BaseModel):
     notes (#1307)."""
     eval: ExecutionEvalRunResponse | None = None
     """The eval this execution is a current run of, with its verdict. Null in no eval."""
+    resumed_from: ResumedFromInfo | None = None
+    """The execution this run resumed, and the phase it picked up at. None for a
+    fresh run (#1881)."""
+    resumed_as: str | None = None
+    """The execution that resumed this one. A run is resumed at most once, so
+    this is one id or None (#1881)."""
+    latest_resumed_as: str | None = None
+    """The newest run in the chain this one was resumed into: ``resumed_as``
+    followed to its end. Equal to ``resumed_as`` for a single resume (#1881)."""
+    resumed_from_display: str | None = None
+    """``Resumed from <parent> at phase <phase>``, or None for a fresh run."""
+    resumed_as_display: str | None = None
+    """``Resumed as <child>``, naming the latest run too when the chain is longer."""
     resume_start: ResumeStartInfo | None = None
     """The start of the child this execution admitted when it was resumed.
 
@@ -517,6 +531,12 @@ class ExecutionSummaryResponse(BaseModel):
     repos: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
     """The execution's current tags, normalised and sorted (#967)."""
+    resumed_from: ResumedFromInfo | None = None
+    """The execution this run resumed, and the phase it picked up at. None for a
+    fresh run (#1881)."""
+    resumed_as: str | None = None
+    """The execution that resumed this one. A run is resumed at most once, so
+    this is one id or None (#1881)."""
     repos_display: str | None = None
     eval: ExecutionEvalRunResponse | None = None
     """The eval this execution is a current run of, with its verdict. Null in no eval.

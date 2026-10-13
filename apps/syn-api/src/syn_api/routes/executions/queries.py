@@ -66,6 +66,7 @@ from .phase_mapping import (
     load_configured_models,
 )
 from .queued_start import QueuedStart, not_yet_started, queued_starts, start_queue_info
+from .resume_lineage import ResumeLineage, resumed_from_info
 from .start_config import load_start_configs
 
 if TYPE_CHECKING:
@@ -227,6 +228,8 @@ def _build_execution_summary_response(
         repos=list(e.repos),
         tags=list(e.tags),
         repos_display=format_repos(e.repos),
+        resumed_from=e.resumed_from,
+        resumed_as=e.resumed_as,
         eval=eval_run,
     )
 
@@ -382,6 +385,8 @@ def _to_execution_summary(
         error_message=s.error_message,
         repos=list(s.repos),
         tags=list(s.tags),
+        resumed_from=resumed_from_info(s.resumed_from),
+        resumed_as=s.resumed_as,
     )
 
 
@@ -582,6 +587,8 @@ async def get_detail(
             unknown_duration_phase_count=duration.unknown_phase_count,
             task=detail.task,
             inputs=dict(detail.inputs),
+            resumed_from=resumed_from_info(detail.resumed_from),
+            resumed_as=detail.resumed_as,
         )
     )
 
@@ -911,6 +918,9 @@ async def get_execution_endpoint(execution_id: str) -> ExecutionDetailResponse:
     total_cache_read = sum(p.cache_read_tokens for p in phases)
     artifact_ids = [p.artifact_id for p in phases if p.artifact_id]
     cache_rates = cache_rate_display(_models_run(phases))
+    lineage = await ResumeLineage.of(
+        detail.resumed_from, detail.resumed_as, mgr.workflow_execution_detail.get_by_id
+    )
     return ExecutionDetailResponse(
         read_model_status=await read_model_status(
             WorkflowExecutionDetailProjection.PROJECTION_NAME
@@ -954,5 +964,10 @@ async def get_execution_endpoint(execution_id: str) -> ExecutionDetailResponse:
         task=detail.task,
         inputs=dict(detail.inputs),
         resume_start=await _resume_start_of(mgr.store, execution_id),
+        resumed_from=lineage.resumed_from,
+        resumed_as=lineage.resumed_as,
+        latest_resumed_as=lineage.latest_resumed_as,
+        resumed_from_display=lineage.resumed_from_display,
+        resumed_as_display=lineage.resumed_as_display,
         eval=await execution_eval_run(mgr.store, execution_id),
     )
