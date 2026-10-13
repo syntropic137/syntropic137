@@ -87,7 +87,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.resume_handoff im
     inherited_phase_ids,
     record_continuation,
 )
-from syn_domain.contexts.orchestration.slices.execute_workflow.run_reservation import reserve_run
+from syn_domain.contexts.orchestration.slices.execute_workflow.run_reservation import open_start
 from syn_domain.contexts.orchestration.slices.execute_workflow.shutdown_interruption import (
     preserve_interrupted_run,
 )
@@ -404,6 +404,7 @@ class WorkflowExecutionProcessor:
         origin: ResumeOrigin | None = None,
     ) -> WorkflowExecutionResult:
         """Record the start, then drain here - or, with a run queue, admit and return."""
+        await self._cancelled_work.settle()
         started_at = datetime.now(UTC)
         phase_outputs = await self._start(aggregate, admitted, origin)
         if self._run_queue is not None:
@@ -432,38 +433,17 @@ class WorkflowExecutionProcessor:
     ) -> PhaseOutputCache:
         """Make the start durable; with a run queue, bracket it as ``opening -> admitted``.
 
-        The row is reserved BEFORE the stream opens and promoted after it, so
-        a crash between the two leaves an ``opening`` row the sweep settles by
-        reading the stream (ADR-072 D2), never a stream no row will run.
-
         Raises:
             StreamAlreadyExistsError: the execution already has a stream - it
                 was started before, by this or another process.
         """
-        execution_id = aggregate.id or ""
-        await self._cancelled_work.settle()
         # Before the stream opens: a resume whose inheritance cannot be read
         # must not leave a child that exists and can never run its first phase.
         phase_outputs = await inherited_outputs(self._artifact_query, origin)
         record_continuation(phase_outputs, aggregate.start_pins)
-        if self._run_queue is not None:
-            await reserve_run(
-                self._run_queue, self._journal, execution_id, is_resume=origin is not None
-            )
-        # #1387: durable, therefore visible. From the write the drain counts
-        # this execution and a maintenance transition may proceed over it;
-        # before it, it existed only as a queued task, and `set_mode(active=True)`
-        # was waiting on this line. #1707: the write is also where whoever
-        # queued it learns it started - not later, where an exception would
-        # read as a start that never happened. If `open()` raised before the
-        # write - a duplicate stream, a store that is down - the lease is
-        # ended by the worker instead, which is the other honest answer:
-        # nothing started.
-        await self._journal.open(
-            aggregate, written=admitted.mark_durable if admitted is not None else None
+        await open_start(
+            self._run_queue, self._journal, aggregate, admitted, is_resume=origin is not None
         )
-        if self._run_queue is not None:
-            await self._run_queue.mark_admitted(execution_id)
         return phase_outputs
 
     async def run_claimed(self, claimed: ClaimedRun) -> WorkflowExecutionResult:
