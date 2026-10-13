@@ -1,0 +1,313 @@
+/* /links, the link in bio. Phone first (390px is the main case: visits come
+   from X); from 48rem the column only gains air. Tokens only. */
+.links-page {
+  position: relative;
+  min-height: 100vh;
+  min-height: 100dvh;
+  overflow: hidden;
+  background: var(--sky-glow-accent-wash), var(--sky-texture-dots), var(--sky-color-ground-deep);
+  color: var(--ds-color-text-muted);
+}
+
+.links-page__grain {
+  position: absolute;
+  inset: 0;
+  background: var(--sky-texture-grain);
+  pointer-events: none;
+}
+
+.links-page__col {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 480px;
+  margin: 0 auto;
+  padding: var(--ds-space-10) var(--sky-gutter) var(--ds-space-6);
+}
+
+/* ── Brand: S, wordmark, tagline ── */
+.links-head {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.links-head .s-mark {
+  filter: drop-shadow(0 18px 30px color-mix(in oklab, var(--ds-color-accent) 28%, transparent));
+}
+
+.links-head__title {
+  margin-top: var(--ds-space-5);
+  line-height: 1;
+}
+
+.links-head__title .wordmark {
+  font-size: 26px;
+}
+
+.links-head__tagline {
+  margin-top: var(--ds-space-3);
+  font-family: var(--sky-font-display);
+  font-size: 19px;
+  font-weight: var(--ds-font-weight-medium);
+  line-height: 1.3;
+  letter-spacing: -0.015em;
+  color: var(--ds-color-text-muted);
+}
+
+/* ── Install ── */
+.links-install {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2-5);
+  margin-top: var(--ds-space-8);
+}
+
+.links-install__note {
+  font-size: 12.5px;
+  line-height: 1.45;
+  text-align: center;
+  color: var(--ds-color-text-subtle);
+}
+
+/* ── Links ── */
+.links-nav {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-3);
+  margin-top: var(--ds-space-8);
+}
+
+.links-cards,
+.links-group {
+  list-style: none;
+}
+
+.links-cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2-5);
+}
+
+.bio-link {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--ds-space-3-5);
+  min-height: 68px;
+  padding: var(--ds-space-3) var(--ds-space-4) var(--ds-space-3) var(--ds-space-3);
+  border: 1px solid var(--sky-color-border-glass);
+  border-radius: var(--sky-radius-xl);
+  background: var(--sky-surface-glass);
+  -webkit-backdrop-filter: blur(var(--sky-blur-glass));
+  backdrop-filter: blur(var(--sky-blur-glass));
+  box-shadow: var(--sky-shadow-selected);
+  color: var(--ds-color-fg);
+  text-decoration: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.bio-link__icon {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border: 1px solid color-mix(in oklab, var(--ds-color-accent) 22%, transparent);
+  border-radius: var(--sky-radius-control);
+  background: color-mix(in oklab, var(--ds-color-accent) 12%, transparent);
+  color: var(--ds-color-accent-hover);
+}
+
+.bio-link__text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.bio-link__title {
+  font-size: 16px;
+  font-weight: var(--ds-font-weight-semibold);
+  line-height: 1.3;
+  color: var(--ds-color-fg);
+}
+
+.bio-link__desc {
+  overflow: hidden;
+  font-size: 13.5px;
+  line-height: 1.4;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--ds-color-text-subtle);
+}
+
+.bio-link__trail {
+  flex: none;
+  color: var(--ds-color-text-subtle);
+}
+
+/* Featured: the website, first and largest, lit with the accent. */
+.bio-link[data-tier="featured"] {
+  min-height: 84px;
+  padding: var(--ds-space-4) var(--ds-space-4) var(--ds-space-4) var(--ds-space-3-5);
+  border-color: color-mix(in oklab, var(--ds-color-accent) 45%, transparent);
+  background:
+    radial-gradient(120% 140% at 0% 0%, color-mix(in oklab, var(--ds-color-accent) 22%, transparent), transparent 60%),
+    var(--sky-gradient-glass-raised);
+  box-shadow: var(--sky-shadow-selected), var(--sky-glow-accent);
+}
+
+.bio-link[data-tier="featured"] .bio-link__icon {
+  width: 50px;
+  height: 50px;
+  border: 0;
+  border-radius: 14px;
+  background: var(--sky-color-accent-solid);
+  box-shadow: var(--sky-shadow-glow);
+  color: var(--sky-color-accent-solid-contrast);
+}
+
+.bio-link[data-tier="featured"] .bio-link__title {
+  font-size: 18px;
+}
+
+.bio-link[data-tier="featured"] .bio-link__desc {
+  color: var(--ds-color-text-muted);
+}
+
+.bio-link[data-tier="featured"] .bio-link__trail {
+  box-sizing: content-box;
+  padding: 7px;
+  border-radius: 50%;
+  background: color-mix(in oklab, var(--ds-color-accent) 18%, transparent);
+  color: var(--ds-color-accent-hover);
+}
+
+/* Secondary: one glass panel, rows split by hairlines. */
+.links-group {
+  overflow: hidden;
+  border: 1px solid var(--sky-color-border-glass);
+  border-radius: var(--sky-radius-xl);
+  background: var(--sky-surface-glass);
+  -webkit-backdrop-filter: blur(var(--sky-blur-glass));
+  backdrop-filter: blur(var(--sky-blur-glass));
+  box-shadow: var(--sky-shadow-selected);
+}
+
+.links-group li + li {
+  border-top: 1px solid var(--sky-color-border-glass);
+}
+
+.bio-link[data-tier="secondary"] {
+  min-height: 60px;
+  padding-block: var(--ds-space-2-5);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: none;
+}
+
+.bio-link[data-tier="secondary"] .bio-link__icon {
+  width: 36px;
+  height: 36px;
+  border-color: var(--sky-color-border-glass);
+  background: color-mix(in oklab, var(--ds-color-overlay) 70%, transparent);
+  color: var(--ds-color-text-muted);
+}
+
+.bio-link[data-tier="secondary"] .bio-link__title {
+  font-size: 15px;
+}
+
+/* Focus: the ring sits inside the grouped panel so overflow never clips it. */
+.bio-link:focus-visible {
+  outline: var(--sky-focus-ring-width) solid var(--sky-color-focus);
+  outline-offset: var(--sky-focus-ring-offset);
+}
+
+.bio-link[data-tier="secondary"]:focus-visible {
+  outline-offset: calc(-1 * var(--sky-focus-ring-width) - 2px);
+  border-radius: var(--sky-radius-xl);
+}
+
+/* Hover (fine pointers only, so taps never stick) and press. */
+@media (hover: hover) {
+  .bio-link:hover {
+    border-color: var(--sky-color-border-hover);
+    background-color: color-mix(in oklab, var(--ds-color-surface-raised) 70%, transparent);
+  }
+
+  .bio-link[data-tier="featured"]:hover {
+    border-color: color-mix(in oklab, var(--ds-color-accent) 70%, transparent);
+  }
+
+  .bio-link[data-tier="secondary"]:hover {
+    background: color-mix(in oklab, var(--ds-color-overlay) 45%, transparent);
+  }
+
+  .bio-link:hover .bio-link__trail {
+    color: var(--ds-color-accent-hover);
+  }
+
+  .bio-link[data-tier="secondary"]:hover .bio-link__icon {
+    color: var(--ds-color-accent-hover);
+  }
+}
+
+.bio-link:active {
+  background-color: color-mix(in oklab, var(--ds-color-overlay) 60%, transparent);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .bio-link {
+    transition:
+      border-color var(--sky-duration-base) ease,
+      background-color var(--sky-duration-base) ease,
+      transform var(--sky-duration-fast) var(--sky-ease-out);
+  }
+
+  .bio-link__trail,
+  .bio-link__icon {
+    transition: transform var(--sky-duration-base) var(--sky-ease-out), color var(--sky-duration-base) ease;
+  }
+
+  .bio-link:active {
+    transform: scale(0.985);
+  }
+
+  @media (hover: hover) {
+    .bio-link:hover .bio-link__trail {
+      transform: translate(2px, -2px);
+    }
+  }
+}
+
+/* ── Footer ── */
+.links-foot {
+  margin-top: var(--ds-space-10);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  text-align: center;
+  color: var(--ds-color-text-subtle);
+}
+
+@media (min-width: 48rem) {
+  .links-page__col {
+    max-width: 520px;
+    padding-top: var(--ds-space-14);
+    padding-bottom: var(--ds-space-8);
+  }
+
+  .links-head__title .wordmark {
+    font-size: 30px;
+  }
+
+  .links-head__tagline {
+    font-size: 21px;
+  }
+}

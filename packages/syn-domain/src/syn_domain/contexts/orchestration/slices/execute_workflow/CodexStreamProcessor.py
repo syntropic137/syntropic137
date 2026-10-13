@@ -233,6 +233,12 @@ class CodexObservabilityRecorder(Protocol):
         """See ``ObservabilityCollector.note_observed_model`` (ADR-067)."""
         ...
 
+    async def note_command_ended(
+        self, tool_use_id: str, command: str, success: bool, output: str
+    ) -> None:
+        """See ``ObservabilityCollector.note_command_ended`` (shipped ledger)."""
+        ...
+
     async def record_tool_started(
         self,
         tool_name: str,
@@ -928,6 +934,9 @@ class CodexStreamProcessor:
                 tool_use_id,
                 exit_code,
             )
+        await self._collector.note_command_ended(
+            tool_use_id, str(item.get("command", "")), success, output
+        )
         await self._collector.record_tool_completed(
             tool_name=CODEX_TOOL_NAME_COMMAND,
             tool_use_id=tool_use_id,

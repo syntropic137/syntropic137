@@ -1,0 +1,73 @@
+/* Section 5, "03 Fully observable" (v4 boards). The fallback mirrors <sky-tool-log>. */
+.observability__cost {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 20px;
+}
+
+.observability__cost-value {
+  font-size: 34px;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  line-height: 1.2;
+}
+
+.observability__cost-detail {
+  font-family: var(--ds-font-mono);
+  font-size: 13px;
+  color: var(--ds-color-text-muted);
+}
+
+.tool-log sky-tool-log {
+  display: block;
+}
+
+.tool-log__fallback {
+  height: 11rem;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  list-style: none;
+  border: var(--ds-border-width) solid var(--ds-color-border);
+  border-radius: var(--sky-radius-row);
+  background: var(--sky-color-ground-band);
+  -webkit-mask-image: var(--sky-mask-fade-y);
+  mask-image: var(--sky-mask-fade-y);
+}
+
+.tool-log__fallback li {
+  display: grid;
+  grid-template-columns: 4rem 2.875rem minmax(0, 1fr) 3.25rem;
+  gap: 10px;
+  padding: 6px 10px;
+  font-family: var(--ds-font-mono);
+  font-size: var(--sky-text-data);
+  line-height: var(--ds-line-height-normal);
+  color: var(--ds-color-fg);
+}
+
+.tool-log__time {
+  color: var(--ds-color-text-subtle);
+}
+
+.tool-log__tool {
+  color: color-mix(in oklab, var(--ds-color-accent) 50%, var(--sky-color-display-hi));
+}
+
+.tool-log__target {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.tool-log__duration {
+  text-align: right;
+  color: var(--ds-color-text-muted);
+}
+
+@media (min-width: 64rem) {
+  .observability__cost-value {
+    font-size: 44px;
+  }
+}

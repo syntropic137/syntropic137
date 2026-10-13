@@ -158,4 +158,53 @@ describe("metrics commands", () => {
       }
     });
   });
+
+  describe("shipped", () => {
+    const handler = metricsGroup.getCommand("shipped")!.handler;
+    const count = (total: number | null, delta: string | null, reason: string | null = null) => ({
+      total, previous_total: null, delta: null, delta_percent: null,
+      delta_display: delta, delta_unit: "percent", total_display: total === null ? null : total.toLocaleString("en-US"),
+      series: [], source: "s", reason,
+    });
+    const body = {
+      window: { days: 14, from: "2026-09-26", to: "2026-10-09" },
+      previous: { from: "2026-09-12", to: "2026-09-25" },
+      workflow_id: null,
+      commits: count(1204, "+38%"),
+      prs_opened: count(null, null, "PR outcomes are not persisted"),
+      prs_merged: count(null, null, "PR outcomes are not persisted"),
+      merge_rate: { ...count(null, null, "PR outcomes are not persisted"), delta_unit: "points" },
+      repos_touched: { ...count(9, "+3"), delta_unit: "count" },
+      repos: ["acme/api"],
+      by_workflow: [{ workflow_id: "wf", name: "Implement", commits: 1204, prs_opened: 73, prs_merged: 61, repos_touched: 9 }],
+      unavailable: ["prs_opened", "prs_merged", "merge_rate"],
+    };
+
+    it("asks for the window and renders tiles, reasons and workflows", async () => {
+      mockFetch.mockResolvedValue(jsonResponse(body));
+      await handler({ positionals: [], values: { days: "14" } });
+      const url = String((mockFetch.mock.calls[0]![0] as Request).url ?? mockFetch.mock.calls[0]![0]);
+      expect(url).toContain("/metrics/shipped");
+      expect(url).toContain("days=14");
+      const out = stdout();
+      expect(out).toContain("1,204");
+      expect(out).toContain("+38%");
+      expect(out).toContain("+3");
+      expect(out).toContain("PR outcomes are not persisted");
+      expect(out).toContain("Implement");
+    });
+
+    it("prints raw JSON with --json", async () => {
+      mockFetch.mockResolvedValue(jsonResponse(body));
+      await handler({ positionals: [], values: { days: "14", json: true } });
+      expect(JSON.parse(stdout())).toEqual(body);
+    });
+
+    it("refuses a window the API does not offer", async () => {
+      await handler({ positionals: [], values: { days: "10" } });
+      expect(mockFetch).not.toHaveBeenCalled();
+      expect(process.exitCode).toBe(1);
+      process.exitCode = 0;
+    });
+  });
 });

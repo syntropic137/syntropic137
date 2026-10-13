@@ -1,0 +1,144 @@
+/* 04 Compounding improvement (#evals). Phone first; 48rem up is the desktop board. */
+.evals {
+  overflow: hidden;
+  background:
+    radial-gradient(45% 50% at 70% 30%, color-mix(in oklab, var(--ds-color-accent) 14%, transparent), transparent 70%),
+    var(--sky-color-ground-deep);
+}
+.evals__inner {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-6);
+}
+.evals__head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-6);
+}
+/* Number, rule and eyebrow as on pillars 01 to 03 (PillarHeader), so the four read as one set. */
+.evals__intro {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+.evals__guide {
+  align-self: flex-start;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+  height: 46px;
+  padding: 0 18px;
+  border-radius: var(--sky-radius-row);
+  border: var(--ds-border-width) solid var(--sky-color-border-strong);
+  color: var(--ds-color-fg);
+  font-size: var(--ds-text-md);
+  font-weight: var(--ds-font-weight-semibold);
+  text-decoration: none;
+  transition:
+    transform var(--sky-duration-fast) var(--sky-ease-out),
+    border-color var(--sky-duration-fast) var(--sky-ease-out);
+}
+.evals__guide:hover {
+  border-color: var(--sky-color-border-hover);
+  transform: translateY(-1px);
+}
+.evals__guide:focus-visible {
+  outline: var(--sky-focus-ring-width) solid var(--sky-color-focus);
+  outline-offset: var(--sky-focus-ring-offset);
+}
+
+/* The board's 1px gradient frame around the shared CodeWindow. */
+.evals__frame {
+  border-radius: 26px;
+  padding: 1px;
+  background: var(--sky-border-gradient);
+  box-shadow: 0 60px 120px -40px color-mix(in oklab, var(--ds-color-accent) 45%, transparent);
+}
+.evals__window {
+  border: 0;
+  border-radius: 25px;
+  background: var(--sky-gradient-window);
+  box-shadow: none;
+}
+.evals__explorer {
+  display: block;
+}
+/* Holds the explorer's height (phone: about 760px, desktop: about 470px) until the element loads. */
+.evals__placeholder {
+  min-height: 760px;
+}
+
+/* Capture / Replay / Judge / Decide */
+.evals__loop {
+  list-style: none;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 20px;
+  padding-top: var(--ds-space-2);
+}
+.evals__step {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+  min-width: 0;
+}
+.evals__step-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.evals__step-num {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 9px;
+  border: var(--ds-border-width) solid color-mix(in oklab, var(--ds-color-accent) 45%, var(--ds-color-border));
+  font-family: var(--ds-font-mono);
+  font-size: 0.75rem;
+  color: color-mix(in oklab, var(--ds-color-accent) 50%, var(--sky-color-display-hi));
+}
+.evals__step-title {
+  font-size: 17px;
+  font-weight: var(--ds-font-weight-semibold);
+  color: var(--ds-color-fg);
+}
+.evals__step-body {
+  font-size: var(--ds-text-md);
+  line-height: 1.55;
+  color: var(--ds-color-text-muted);
+}
+
+@media (min-width: 48rem) {
+  .evals__inner {
+    gap: 44px;
+  }
+  .evals__inner.page-section__inner {
+    padding-block: 130px 120px;
+  }
+  .evals__head {
+    flex-direction: row;
+    align-items: flex-end;
+    justify-content: space-between;
+  }
+  .evals__guide {
+    align-self: flex-end;
+  }
+  .evals__placeholder {
+    min-height: 470px;
+  }
+  .evals__loop {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 28px;
+  }
+  .evals__step {
+    padding: 0 4px;
+  }
+}
+@media (min-width: 64rem) {
+  .evals__loop {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}

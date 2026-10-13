@@ -7,7 +7,7 @@ plus Pydantic response models used across all v1 modules.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime  # noqa: TC003 — needed at runtime for Pydantic
+from datetime import date, datetime  # noqa: TC003 — needed at runtime for Pydantic
 from decimal import Decimal
 from enum import StrEnum
 from typing import TYPE_CHECKING, Generic, Literal, TypeVar
@@ -114,6 +114,7 @@ from syn_shared.pricing import (  # noqa: TC001 - pydantic resolves at runtime
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from syn_domain.contexts.orchestration import ShippedCountTile, ShippedMetrics
     from syn_domain.contexts.orchestration.slices.phase_profiles import (
         Percentiles,
         PhaseProfiles,
@@ -222,6 +223,8 @@ class GitHubError(StrEnum):
     INVALID_PAYLOAD = "invalid_payload"
     PROCESSING_FAILED = "processing_failed"
     NOT_IMPLEMENTED = "not_implemented"
+    NOT_CONFIGURED = "not_configured"
+    """No GitHub App on this server (SYN_GITHUB_APP_ID unset): a 503, never a 500."""
 
 
 # ---------------------------------------------------------------------------
@@ -3536,6 +3539,10 @@ class HeatmapDayBucketResponse(BaseModel):
     date: str
     count: float = 0.0
     breakdown: dict[str, float] = Field(default_factory=dict)
+    failed: int = 0
+    """Executions that ended failed on this UTC day (status ``failed``, by
+    ``completed_at``), from the workflow_executions read model. Also in
+    ``breakdown["failed"]`` so ``metric=failed`` colours by it."""
 
 
 class ContributionHeatmapResponse(BaseModel):
@@ -4262,6 +4269,198 @@ class PhaseProfilesResponse(BaseModel):
 
 LatencyWindow = Literal["1h", "24h", "7d", "30d"]
 """How far back ``GET /observability/latency`` looks. 30d is the retention."""
+
+
+# ---------------------------------------------------------------------------
+# Shipped by agents (GET /metrics/shipped)
+# ---------------------------------------------------------------------------
+
+
+class ShippedDeltaUnit(StrEnum):
+    """What a tile's ``delta_display`` is expressed in."""
+
+    PERCENT = "percent"
+    POINTS = "points"
+    COUNT = "count"
+
+
+class ShippedWindowResponse(BaseModel):
+    """``days`` UTC calendar days, ``from`` and ``to`` inclusive; ``to`` is today."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    days: int
+    from_: date = Field(serialization_alias="from")
+    to: date
+
+
+class ShippedPreviousWindowResponse(BaseModel):
+    """The ``days`` UTC days immediately before the window, inclusive."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    from_: date = Field(serialization_alias="from")
+    to: date
+
+
+class ShippedCountPointResponse(BaseModel):
+    """One UTC day's count."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    date: date
+    value: int
+
+
+class ShippedRatePointResponse(BaseModel):
+    """One UTC day's rate in percent; null on a day with no denominator."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    date: date
+    value: float | None
+
+
+class ShippedCountTileResponse(BaseModel):
+    """A count over the window against the window before it.
+
+    When ``reason`` is set the count cannot be answered from persisted data:
+    every number is null and ``series`` is empty. Never a zero standing in for
+    "unknown".
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    total: int | None
+    previous_total: int | None
+    delta: int | None
+    """``total - previous_total``."""
+    delta_percent: float | None
+    """Relative change in percent; null whenever ``previous_total`` is 0 (0 to 0
+    included; ``delta_display`` then reads "0%", and "new" for 0 to N)."""
+    delta_display: str | None
+    """Server-formatted delta in ``delta_unit``: "+38%" or "+3"."""
+    delta_unit: ShippedDeltaUnit
+    total_display: str | None
+    series: list[ShippedCountPointResponse]
+    """One point per day of the window, oldest first, zero-filled."""
+    source: str
+    """The store this number is read from."""
+    reason: str | None
+
+
+class ShippedRateTileResponse(BaseModel):
+    """Merge rate: of the run PRs OPENED in the window, the percent merged by now.
+
+    A cohort conversion, 0 to 100 by construction (the merged PRs are a subset
+    of the opened ones). ``previous_total`` asks the same of the previous
+    window's cohort, as of now. ``delta`` is in percentage points. A series
+    point is that day's opened PRs merged since, null on a day none opened.
+    Null totals: no PR was opened, which is not 0%.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    total: float | None
+    previous_total: float | None
+    delta: float | None
+    delta_display: str | None
+    """Server-formatted points delta: "+5 pts"."""
+    delta_unit: ShippedDeltaUnit
+    total_display: str | None
+    series: list[ShippedRatePointResponse]
+    source: str
+    reason: str | None
+
+
+class ShippedWorkflowResponse(BaseModel):
+    """One workflow's share of what was shipped in the window."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    workflow_id: str
+    name: str
+    """The workflow's display name."""
+    commits: int
+    prs_opened: int
+    prs_merged: int
+    repos_touched: int
+
+
+class ShippedMetricsResponse(BaseModel):
+    """What agents shipped over the window, tile by tile (the Overview block)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    window: ShippedWindowResponse
+    previous: ShippedPreviousWindowResponse
+    workflow_id: str | None
+    """The workflow the tiles are filtered to, or null for all."""
+    commits: ShippedCountTileResponse
+    prs_opened: ShippedCountTileResponse
+    prs_merged: ShippedCountTileResponse
+    merge_rate: ShippedRateTileResponse
+    repos_touched: ShippedCountTileResponse
+    repos: list[str]
+    """Distinct repos touched in the window, ``owner/name``, sorted."""
+    by_workflow: list[ShippedWorkflowResponse]
+    """Top workflows by commits, then PRs merged; empty when filtered to one."""
+    unavailable: list[str]
+    """Names of the tiles that could not be measured (their ``reason`` says why)."""
+
+    @classmethod
+    def from_metrics(cls, m: ShippedMetrics) -> ShippedMetricsResponse:
+        w = m.window
+        return cls(
+            window=ShippedWindowResponse(days=w.days, from_=w.start, to=w.end),
+            previous=ShippedPreviousWindowResponse(from_=w.previous_start, to=w.previous_end),
+            workflow_id=m.workflow_id,
+            commits=_count_tile(m.commits),
+            prs_opened=_count_tile(m.prs_opened),
+            prs_merged=_count_tile(m.prs_merged),
+            merge_rate=ShippedRateTileResponse(
+                total=m.merge_rate.total,
+                previous_total=m.merge_rate.previous_total,
+                delta=m.merge_rate.delta,
+                delta_display=m.merge_rate.delta_display,
+                delta_unit=ShippedDeltaUnit(m.merge_rate.delta_unit.value),
+                total_display=m.merge_rate.total_display,
+                series=[
+                    ShippedRatePointResponse(date=p.day, value=p.value) for p in m.merge_rate.series
+                ],
+                source=m.merge_rate.source,
+                reason=m.merge_rate.reason,
+            ),
+            repos_touched=_count_tile(m.repos_touched),
+            repos=list(m.repos),
+            by_workflow=[
+                ShippedWorkflowResponse(
+                    workflow_id=b.workflow_id,
+                    name=b.name,
+                    commits=b.commits,
+                    prs_opened=b.prs_opened,
+                    prs_merged=b.prs_merged,
+                    repos_touched=b.repos_touched,
+                )
+                for b in m.by_workflow
+            ],
+            unavailable=list(m.unavailable),
+        )
+
+
+def _count_tile(t: ShippedCountTile) -> ShippedCountTileResponse:
+    return ShippedCountTileResponse(
+        total=t.total,
+        previous_total=t.previous_total,
+        delta=t.delta,
+        delta_percent=t.delta_percent,
+        delta_display=t.delta_display,
+        delta_unit=ShippedDeltaUnit(t.delta_unit.value),
+        total_display=t.total_display,
+        series=[ShippedCountPointResponse(date=p.day, value=p.value) for p in t.series],
+        source=t.source,
+        reason=t.reason,
+    )
 
 
 class RouteLatencyResponse(BaseModel):

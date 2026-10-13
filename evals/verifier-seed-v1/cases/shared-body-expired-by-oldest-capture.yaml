@@ -13,6 +13,14 @@ task: >
   deletion of archived transcript bodies. Bodies are content-addressed, so
   several captures can reference the same stored object.
 expected:
+  # The root cause, for the LLM judge only; never part of `task`.
+  defect: >
+    body_retention's age expiry judges each content-addressed transcript
+    body by individual captures (every catalog row older than the age), so
+    expiring an old capture deletes a shared object that a recent capture
+    still references; an object should expire only when its newest
+    referencing capture is past the age (and quota eviction should order by
+    newest reference).
   files:
     - packages/syn-adapters/src/syn_adapters/session_inventory/body_retention.py
   keywords:

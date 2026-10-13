@@ -64,6 +64,7 @@ from syn_shared.env_constants import ENV_SYN_PHASE_DEADLINE, ENV_SYN_PHASE_TIMEO
 from .invocation_attempt import invocation_environment, registered_attempt
 
 if TYPE_CHECKING:
+    from syn_domain.contexts.orchestration._shared.shipped_recorder import ShippedRecorder
     from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoItem
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
         AgentConfiguration,
@@ -174,6 +175,7 @@ async def run_phase_agent(
     observability: ObservabilityRecorder | None,
     retry_policy: UpstreamRetryPolicy,
     on_push: PushObserver | None = None,
+    shipped: ShippedRecorder | None = None,
 ) -> AgentExecutionResult:
     """Run this phase's agent and return the result it ends on.
 
@@ -207,6 +209,7 @@ async def run_phase_agent(
         attempts=attempts,
         cost_limit=cost_limit,
         on_push=on_push,
+        shipped=shipped,
     )
     primary = await run.until_final(
         phase.agent_config,
@@ -282,8 +285,10 @@ class _AgentRun:
         attempts: PhaseAttempts,
         cost_limit: PhaseCostLimit | None,
         on_push: PushObserver | None = None,
+        shipped: ShippedRecorder | None = None,
     ) -> None:
         self._handler = handler
+        self._shipped = shipped
         self._todo = todo
         self._launch = launch
         self._session_id = session_id
@@ -356,6 +361,7 @@ class _AgentRun:
             phase_id=self._todo.phase_id,
             workspace_id=getattr(self._launch.workspace, "workspace_id", None),
             requested_model=agent.model,
+            shipped=self._shipped,
         )
         return runner, collector
 
