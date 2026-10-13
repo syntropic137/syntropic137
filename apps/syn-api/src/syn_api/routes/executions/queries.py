@@ -31,11 +31,8 @@ from syn_api.types import (
     Result,
 )
 from syn_domain.contexts.orchestration import (
-    MAX_START_ATTEMPTS,
     InvalidTagsError,
-    ResumeStartProcessManager,
     TagSet,
-    read_record,
 )
 from syn_domain.contexts.orchestration.slices.get_execution_detail.projection import (
     WorkflowExecutionDetailProjection,
@@ -57,7 +54,6 @@ from .models import (
     ExecutionDetailResponse,
     ExecutionListResponse,
     ExecutionSummaryResponse,
-    ResumeStartInfo,
 )
 from .phase_mapping import (
     _load_agent_session_ids,
@@ -65,15 +61,15 @@ from .phase_mapping import (
     _map_phase_to_response,
     load_configured_models,
 )
-from .queued_start import QueuedStart, not_yet_started, queued_starts, start_queue_info
+from .queued_start import QueuedStart, not_yet_started, queued_starts
 from .resume_lineage import ResumeLineage, resumed_from_info
+from .resume_start_info import resume_start_of
 from .start_config import load_start_configs
 
 if TYPE_CHECKING:
     from collections.abc import Collection, Iterable
     from datetime import datetime
 
-    from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
     from syn_adapters.projections.manager import ProjectionManager
     from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_detail import (
         PhaseExecutionDetail,
@@ -877,29 +873,6 @@ async def _detail_or_queued(
     return queued
 
 
-async def _resume_start_of(
-    store: ProjectionStoreProtocol, execution_id: str
-) -> ResumeStartInfo | None:
-    """The start of the child this execution's resume admitted, if it was resumed.
-
-    Read straight from the `resume_start` to-do list, the record the process
-    manager itself decides on, so what an operator sees is what will be retried.
-    """
-    row = await store.get(ResumeStartProcessManager.PROJECTION_NAME, execution_id)
-    record = read_record(row) if row is not None else None
-    if record is None:
-        return None
-    return ResumeStartInfo(
-        status=record.status,
-        status_reason=record.status_reason,
-        attempts=record.attempts,
-        max_attempts=MAX_START_ATTEMPTS,
-        recorded_at=record.recorded_at,
-        dispatched_at=record.dispatched_at,
-        start_queue=start_queue_info(get_execution_budget().resume_of(execution_id)),
-    )
-
-
 @router.get("/executions/{execution_id}", response_model=ExecutionDetailResponse)
 async def get_execution_endpoint(execution_id: str) -> ExecutionDetailResponse:
     """Get detailed information about a workflow execution run (supports partial ID prefix matching)."""
@@ -966,7 +939,7 @@ async def get_execution_endpoint(execution_id: str) -> ExecutionDetailResponse:
         unknown_duration_phase_count=detail.unknown_duration_phase_count,
         task=detail.task,
         inputs=dict(detail.inputs),
-        resume_start=await _resume_start_of(mgr.store, execution_id),
+        resume_start=await resume_start_of(mgr.store, execution_id),
         resumed_from=lineage.resumed_from,
         resumed_as=lineage.resumed_as,
         latest_resumed_as=lineage.latest_resumed_as,
