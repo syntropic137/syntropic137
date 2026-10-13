@@ -919,7 +919,10 @@ async def get_execution_endpoint(execution_id: str) -> ExecutionDetailResponse:
     artifact_ids = [p.artifact_id for p in phases if p.artifact_id]
     cache_rates = cache_rate_display(_models_run(phases))
     lineage = await ResumeLineage.of(
-        detail.resumed_from, detail.resumed_as, mgr.workflow_execution_detail.get_by_id
+        detail.resumed_from,
+        detail.resumed_as,
+        # Looked up only when there is a chain to walk.
+        lambda child: mgr.workflow_execution_detail.get_by_id(child),
     )
     return ExecutionDetailResponse(
         read_model_status=await read_model_status(
