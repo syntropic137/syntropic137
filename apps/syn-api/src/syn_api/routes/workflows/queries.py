@@ -11,7 +11,9 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
 from syn_api._wiring import ensure_connected, get_projection_mgr
+from syn_api.list_query import MAX_PAGE_SIZE
 from syn_api.types import (
+    DeclaredSkillResponse,
     Err,
     FallbackAgentResponse,
     InputDeclarationResponse,
@@ -23,6 +25,7 @@ from syn_api.types import (
     WorkflowDetail,
     WorkflowError,
     WorkflowSummary,
+    WorkflowTrendResponse,
 )
 
 # Imported from the context's public surface, not its internals (ADR-062).
@@ -39,6 +42,9 @@ if TYPE_CHECKING:
         InputDeclarationDetail,
         PhaseDefinitionDetail,
         PhaseRefDetail,
+    )
+    from syn_domain.contexts.orchestration.domain.read_models.workflow_summary import (
+        WorkflowSkillSummary,
     )
 
 router = APIRouter(prefix="/workflows", tags=["workflows"])
@@ -61,6 +67,10 @@ class WorkflowSummaryResponse(BaseModel):
     requires_repos: bool
     tags: list[str] = Field(default_factory=list)
     """The workflow's tags, normalised and sorted (#967). Future runs inherit them."""
+    skills: list[DeclaredSkillResponse] = Field(default_factory=list)
+    """Every distinct skill the workflow's phases declare, first-declared first.
+
+    Here so a list of workflow cards needs one request, not one per workflow."""
 
 
 class InputDeclarationModel(BaseModel):
@@ -233,6 +243,19 @@ def _map_phase(p: PhaseDefinitionDetail) -> PhaseDefinitionResponse:
     )
 
 
+def _skill_response(skill: WorkflowSkillSummary) -> DeclaredSkillResponse:
+    """Field by field for the reason `_ref_response` gives."""
+    return DeclaredSkillResponse(
+        source_url=skill.ref.source_url,
+        name=skill.ref.name,
+        version=skill.ref.version,
+        name_overridden=skill.ref.name_overridden,
+        raw=skill.ref.raw,
+        phase_ids=list(skill.phase_ids),
+        workflow_scope=skill.workflow_scope,
+    )
+
+
 def _map_input_declarations(
     raw_decls: list[InputDeclarationDetail] | None,
 ) -> list[InputDeclarationResponse]:
@@ -281,6 +304,7 @@ async def list_workflows(
                 is_archived=s.is_archived,
                 requires_repos=s.requires_repos,
                 tags=list(s.tags),
+                skills=[_skill_response(skill) for skill in s.skills],
             )
             for s in domain_summaries
         ]
@@ -803,6 +827,7 @@ async def list_workflows_endpoint(
             # -R is then told repos are supported when they are not.
             requires_repos=s.requires_repos,
             tags=list(s.tags),
+            skills=list(s.skills),
         )
         for s in result.value
     ]
@@ -944,6 +969,32 @@ async def list_workflow_runs_endpoint(workflow_id: str) -> ExecutionRunListRespo
         workflow_id=workflow_id,
         workflow_name=workflow_name,
     )
+
+
+@router.get(
+    "/{workflow_id}/trend",
+    response_model=WorkflowTrendResponse,
+    responses={404: {"description": "No workflow has this id"}},
+)
+async def get_workflow_trend_endpoint(
+    workflow_id: str,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=MAX_PAGE_SIZE),
+) -> WorkflowTrendResponse:
+    """The workflow's executions as trend points, newest first, with its definition changes.
+
+    One row per execution: date, status, cost, duration, tokens and how long
+    each phase took. The workflow id may be a unique prefix.
+    """
+    from syn_api.prefix_resolver import resolve_or_raise
+    from syn_api.routes.trends import workflow_trend
+
+    await ensure_connected()
+    mgr = get_projection_mgr()
+    workflow_id = await resolve_or_raise(mgr.store, "workflow_details", workflow_id, "Workflow")
+    if await mgr.workflow_detail.get_by_id(workflow_id) is None:
+        raise HTTPException(status_code=404, detail=f"Workflow {workflow_id} not found")
+    return await workflow_trend(mgr, workflow_id, page=page, page_size=page_size)
 
 
 @router.get("/{workflow_id}/history", response_model=ExecutionHistoryResponse)

@@ -51,6 +51,7 @@ from syn_api.routes.eval_runs import (
     stats_response,
     variant_responses,
 )
+from syn_api.routes.trends import eval_trend
 from syn_api.services.read_model_status import read_model_status
 from syn_api.types import (
     AttachEvalRequest,
@@ -64,6 +65,7 @@ from syn_api.types import (
     EvalRunListResponse,
     EvalRunScoreRequest,
     EvalRunScoreResponse,
+    EvalTrendResponse,
     ExecutionEvalResponse,
     SetDefaultEvalRequest,
     WorkflowDefaultEvalResponse,
@@ -414,6 +416,28 @@ async def list_eval_runs_endpoint(
     return await eval_run_page(manager, eval_id, page=page, page_size=page_size, statuses=wanted)
 
 
+@router.get("/evals/{eval_id}/trend", response_model=EvalTrendResponse, responses=_EVAL_RESPONSES)
+async def get_eval_trend_endpoint(
+    eval_id: str,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=MAX_PAGE_SIZE),
+) -> EvalTrendResponse:
+    """The eval's current runs as trend points, newest first, with its definition changes.
+
+    One row per run: date, verifier and judge model, score (0 to 100), verdict,
+    cost, duration and tokens. The same runs as `GET /evals/{eval_id}/runs`.
+    """
+    from syn_api.prefix_resolver import resolve_or_raise
+
+    await ensure_connected()
+    manager = get_projection_mgr()
+    eval_id = await resolve_or_raise(manager.store, "evals", eval_id, "Eval")
+    record = await manager.eval_list.record(eval_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail=f"Eval not found: {eval_id}")
+    return await eval_trend(manager, record, page=page, page_size=page_size)
+
+
 @router.post(
     "/evals/{eval_id}/runs/{execution_id}/score",
     response_model=EvalRunScoreResponse,
@@ -438,6 +462,7 @@ async def score_eval_run_endpoint(
         evidence=body.evidence,
         scorer=body.scorer,
         scorer_version=body.scorer_version,
+        judge_model=body.judge_model,
     )
     await ensure_connected()
     repository = get_eval_repo()
@@ -469,6 +494,7 @@ async def score_eval_run_endpoint(
         scorer=recorded.scorer,
         scorer_version=recorded.scorer_version,
         scored_at=recorded.scored_at.isoformat(),
+        judge_model=recorded.judge_model,
     )
 
 

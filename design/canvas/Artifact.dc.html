@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Syn137 artifact viewer</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Orbitron:wght@500;600;700&display=swap">
+<style>
+:root{--ac:#4D80FF}
+body{margin:0;background:#0A0C14}
+a{color:#E8EEFB}a:hover{color:#FFFFFF}
+.row:hover{background:#111626}
+.card:hover{border-color:#34406A}
+.ghost:hover{background:#151A2A}
+button{font-family:inherit}
+:focus-visible{outline:2px solid var(--ac);outline-offset:2px}
+</style>
+</helmet>
+<div style="--ac: {{accent}}; display: flex; flex-direction: column; min-height: 100vh; background: #0A0C14; color: #E8EEFB; font-family: 'Instrument Sans', 'Helvetica Neue', system-ui, sans-serif; font-size: 14px; line-height: 1.45; -webkit-font-smoothing: antialiased">
+
+<dc-import name="TopNav" active="artifacts" hint-size="100%,78px"></dc-import>
+
+<nav aria-label="Breadcrumb" style="display: flex; flex-wrap: wrap; align-items: center; gap: 4px; box-sizing: border-box; width: 100%; max-width: 1400px; margin: 0 auto; padding: 0 40px 14px; font-size: 13px">
+<a href="Main.dc.html" aria-label="Overview" style="display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 10px; color: #9AA8C7"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M2.75 7.25L8 2.75l5.25 4.5V13a.5.5 0 0 1-.5.5H9.5V9.75h-3v3.75H3.25a.5.5 0 0 1-.5-.5z"></path></svg></a>
+<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="#6F7FA3" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink: 0; opacity: 0.7"><path d="M6 3.5L10.5 8 6 12.5"></path></svg>
+<a href="Workflows.dc.html" style="display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 8px; border-radius: 9px; color: #9AA8C7; text-decoration: none; white-space: nowrap">Workflows</a>
+<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="#6F7FA3" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink: 0; opacity: 0.7"><path d="M6 3.5L10.5 8 6 12.5"></path></svg>
+<a href="Workflow.dc.html" style="display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 8px; border-radius: 9px; color: #9AA8C7; text-decoration: none; white-space: nowrap">Research Workflow</a>
+<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="#6F7FA3" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink: 0; opacity: 0.7"><path d="M6 3.5L10.5 8 6 12.5"></path></svg>
+<a href="Execution.dc.html" style="display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 8px; border-radius: 9px; color: #9AA8C7; text-decoration: none; white-space: nowrap">Execution <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px">66e14f23</span></a>
+<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="#6F7FA3" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink: 0; opacity: 0.7"><path d="M6 3.5L10.5 8 6 12.5"></path></svg>
+<a href="Session.dc.html" style="display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 8px; border-radius: 9px; color: #9AA8C7; text-decoration: none; white-space: nowrap">synthesis</a>
+<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="#6F7FA3" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink: 0; opacity: 0.7"><path d="M6 3.5L10.5 8 6 12.5"></path></svg>
+<span aria-current="page" style="display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 9px; border: 1px solid #1A2032; background: #0F121C; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04); font-weight: 600; color: #E8EEFB; white-space: nowrap">deliverable.md</span>
+</nav>
+
+<main style="display: flex; flex-direction: column; gap: 28px; box-sizing: border-box; width: 100%; max-width: 1400px; margin: 0 auto; padding: 8px 40px 64px">
+
+<section aria-label="Artifact" style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 28px 56px; padding: 32px 36px; border-radius: 24px; border: 1px solid #1A2032; background: radial-gradient(50% 130% at 100% 0%, color-mix(in oklab, var(--ac) 18%, transparent), transparent 70%), #0D101A; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05)">
+<div style="display: flex; align-items: center; gap: 24px; min-width: 0">
+<svg width="84" height="84" viewBox="0 0 64 64" aria-hidden="true" style="flex-shrink: 0">
+<ellipse cx="32" cy="59" rx="18" ry="3.5" style="fill: var(--ac); opacity: 0.22"></ellipse>
+<polygon points="26,10 46,20 46,48 26,38" style="fill: color-mix(in oklab, var(--ac) 50%, black)"></polygon>
+<polygon points="18,16 38,26 38,54 18,44" style="fill: color-mix(in oklab, var(--ac) 58%, white)"></polygon>
+<path d="M22,25L34,31M22,31L34,37M22,37L30,41" fill="none" stroke="#0A0C14" stroke-width="2" stroke-linecap="round" opacity="0.6"></path>
+</svg>
+<div style="display: flex; flex-direction: column; gap: 10px; min-width: 0">
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #6F7FA3">
+<span>artifacts/output/deliverable.md</span>
+<span style="height: 20px; padding: 0 8px; border-radius: 10px; border: 1px solid #283048; line-height: 18px; color: #9AA8C7">research_summary</span>
+<span>text/markdown · 19.8 KB</span>
+</div>
+<h1 style="margin: 0; font-size: 44px; line-height: 1.05; font-weight: 600; letter-spacing: -0.035em">Synthesis &amp; Documentation</h1>
+<nav aria-label="Lineage" style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px">
+<a class="card" href="Workflow.dc.html" style="display: flex; align-items: baseline; gap: 8px; height: 30px; padding: 0 12px; border-radius: 15px; border: 1px solid #283048; background: #0A0C14; line-height: 28px; text-decoration: none"><span style="font-size: 12px; color: #6F7FA3">Workflow</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px">research-workflow-v2</span></a>
+<span aria-hidden="true" style="color: #6F7FA3">→</span>
+<a class="card" href="Execution.dc.html" style="display: flex; align-items: baseline; gap: 8px; height: 30px; padding: 0 12px; border-radius: 15px; border: 1px solid #283048; background: #0A0C14; line-height: 28px; text-decoration: none"><span style="font-size: 12px; color: #6F7FA3">Execution</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px">exec-66e14f23</span></a>
+<span aria-hidden="true" style="color: #6F7FA3">→</span>
+<span style="display: flex; align-items: baseline; gap: 8px; height: 30px; padding: 0 12px; border-radius: 15px; border: 1px solid #1A2032; line-height: 28px"><span style="font-size: 12px; color: #6F7FA3">Phase</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px">synthesis</span></span>
+<span aria-hidden="true" style="color: #6F7FA3">→</span>
+<a class="card" href="Session.dc.html" style="display: flex; align-items: baseline; gap: 8px; height: 30px; padding: 0 12px; border-radius: 15px; border: 1px solid #283048; background: #0A0C14; line-height: 28px; text-decoration: none"><span style="font-size: 12px; color: #6F7FA3">Session</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px">3ef71a70</span></a>
+</nav>
+</div>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 10px">
+<button class="ghost" type="button" style="display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 14px; border-radius: 11px; border: 1px solid #283048; background: #0F121C; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04); color: #E8EEFB; font-size: 13px; font-weight: 600; cursor: pointer">
+<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"></rect><path d="M10.5 5.5v-2a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2"></path></svg>
+<span>Copy</span>
+</button>
+<button type="button" style="display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 16px; border: 0; border-radius: 11px; background: color-mix(in oklab, var(--ac) 80%, black); box-shadow: inset 0 1px 0 color-mix(in oklab, var(--ac) 60%, white), 0 8px 20px -8px var(--ac); color: #FFFFFF; font-size: 13px; font-weight: 600; cursor: pointer">
+<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2.5v8M4.75 7.5L8 10.75l3.25-3.25M2.75 13.25h10.5"></path></svg>
+<span>Download</span>
+</button>
+</div>
+</section>
+
+<div style="display: flex; flex-wrap: wrap; gap: 28px 32px">
+
+<section aria-label="Content" style="flex: 999 1 640px; min-width: 0; display: flex; flex-direction: column; border: 1px solid #1A2032; border-radius: 20px; background: #0D101A; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04)">
+<div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px 12px 24px; border-bottom: 1px solid #1A2032">
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #9AA8C7">deliverable.md</span>
+<div role="group" aria-label="View mode" style="display: flex; gap: 2px; padding: 3px; border-radius: 12px; border: 1px solid #222A40; background: #0A0C14; font-size: 12.5px">
+<button type="button" aria-pressed="{{rendered.on}}" onClick="{{showRendered}}" style="height: 28px; padding: 0 14px; border: 0; border-radius: 9px; background: {{rendered.bg}}; color: {{rendered.fg}}; cursor: pointer">Rendered</button>
+<button type="button" aria-pressed="{{raw.on}}" onClick="{{showRaw}}" style="height: 28px; padding: 0 14px; border: 0; border-radius: 9px; background: {{raw.bg}}; color: {{raw.fg}}; cursor: pointer">Raw</button>
+</div>
+</div>
+<sc-if value="{{isRendered}}" hint-placeholder-val="{{ true }}">
+<article style="display: flex; flex-direction: column; gap: 16px; box-sizing: border-box; max-width: 780px; padding: 40px 44px 52px; font-size: 16px; line-height: 1.65; color: #D3DAEC; text-wrap: pretty">
+<h2 style="margin: 0; font-size: 30px; line-height: 1.2; font-weight: 600; letter-spacing: -0.02em; color: #E8EEFB">Sorting: Research Synthesis &amp; Recommendations</h2>
+<h3 style="margin: 18px 0 0; font-size: 19px; font-weight: 600; color: #E8EEFB">Executive Summary</h3>
+<p style="margin: 0">Sorting is a foundational computational primitive with profound implications across algorithm design, systems engineering, and user experience. This synthesis consolidates two phases of research (discovery and deep-dive analysis) into actionable insights for decision-makers, engineers, and architects.</p>
+<p style="margin: 0"><strong style="font-weight: 600; color: #E8EEFB">Key Insight</strong>: Optimal sorting strategies are <strong style="font-weight: 600; color: #E8EEFB">context-dependent</strong>. There is no universally superior approach—success requires matching algorithm selection, implementation strategy, and correctness guarantees to specific workload characteristics.</p>
+<p style="margin: 0"><strong style="font-weight: 600; color: #E8EEFB">Bottom Line</strong>: 95% of applications should use language standard library sorting. Custom implementations are justified only when specific input characteristics guarantee substantial speedup or when extreme performance requirements demand specialized algorithms.</p>
+<h3 style="margin: 18px 0 0; font-size: 19px; font-weight: 600; color: #E8EEFB">Research Scope &amp; Methodology</h3>
+<p style="margin: 0">This research investigated sorting across three interconnected domains:</p>
+<ol style="display: flex; flex-direction: column; gap: 6px; margin: 0; padding-left: 22px">
+<li><strong style="font-weight: 600; color: #E8EEFB">Computational Algorithms</strong> — Algorithmic approaches (Quicksort, Mergesort, Timsort, etc.)</li>
+<li><strong style="font-weight: 600; color: #E8EEFB">Systems Implementation</strong> — Sorting in data structures, databases, and distributed systems</li>
+<li><strong style="font-weight: 600; color: #E8EEFB">User Experience &amp; Data Presentation</strong> — Sorting as a user-facing feature in applications</li>
+</ol>
+<p style="margin: 0">The analysis addressed five research questions:</p>
+<ul style="display: flex; flex-direction: column; gap: 6px; margin: 0; padding-left: 22px">
+<li><strong style="font-weight: 600; color: #E8EEFB">RQ1</strong>: What is the scope of "sorting"?</li>
+<li><strong style="font-weight: 600; color: #E8EEFB">RQ2</strong>: What are the performance constraints?</li>
+<li><strong style="font-weight: 600; color: #E8EEFB">RQ3</strong>: What sorting patterns already exist in codebases?</li>
+</ul>
+</article>
+</sc-if>
+<sc-if value="{{isRaw}}" hint-placeholder-val="{{ false }}">
+<pre style="margin: 0; padding: 32px 36px 44px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; line-height: 1.7; color: #C3CCE2; white-space: pre-wrap; overflow-wrap: anywhere">{{source}}</pre>
+</sc-if>
+</section>
+
+<div style="flex: 1 1 320px; min-width: 0; display: flex; flex-direction: column; gap: 20px">
+
+<section aria-label="Outline" style="display: flex; flex-direction: column; gap: 10px; padding: 22px 14px 14px; border-radius: 18px; border: 1px solid #1A2032; background: #0D101A; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04)">
+<h2 style="margin: 0; padding: 0 8px 4px; font-size: 15px; font-weight: 600">Outline</h2>
+<a href="#" aria-current="true" style="display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 12px; background: #151A2A; font-size: 13.5px; font-weight: 600; text-decoration: none"><span style="width: 6px; height: 6px; border-radius: 50%; background: var(--ac)"></span>Executive Summary</a>
+<a class="row" href="#" style="display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 12px; font-size: 13.5px; color: #9AA8C7; text-decoration: none"><span style="width: 6px; height: 6px; border-radius: 50%; background: #2B3350"></span>Research Scope &amp; Methodology</a>
+</section>
+
+<section aria-label="From the same execution" style="display: flex; flex-direction: column; gap: 6px; padding: 22px 14px 14px; border-radius: 18px; border: 1px solid #1A2032; background: #0D101A; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04)">
+<h2 style="margin: 0; padding: 0 8px 6px; font-size: 15px; font-weight: 600">From the same execution</h2>
+<a class="row" href="#" style="display: flex; align-items: center; gap: 12px; padding: 10px 8px; border-radius: 12px; text-decoration: none; color: #E8EEFB">
+<span style="display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 9px; background: #151A2A; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #9AA8C7">01</span>
+<span style="flex-grow: 1; font-size: 13.5px">Discovery Phase</span>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #9AA8C7">2.9 KB</span>
+</a>
+<a class="row" href="#" style="display: flex; align-items: center; gap: 12px; padding: 10px 8px; border-radius: 12px; text-decoration: none; color: #E8EEFB">
+<span style="display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 9px; background: #151A2A; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #9AA8C7">02</span>
+<span style="flex-grow: 1; font-size: 13.5px">Deep Dive Analysis</span>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #9AA8C7">29.4 KB</span>
+</a>
+<div aria-current="true" style="display: flex; align-items: center; gap: 12px; padding: 10px 8px; border-radius: 12px; background: #151A2A">
+<span style="display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 9px; background: color-mix(in oklab, var(--ac) 20%, transparent); font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; font-weight: 600; color: var(--ac)">03</span>
+<span style="flex-grow: 1; font-size: 13.5px; font-weight: 600">Synthesis &amp; Documentation</span>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #9AA8C7">19.8 KB</span>
+</div>
+</section>
+
+<section aria-label="Details" style="display: flex; flex-direction: column; gap: 14px; padding: 22px; border-radius: 18px; border: 1px solid #1A2032; background: #0D101A; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04)">
+<h2 style="margin: 0; font-size: 15px; font-weight: 600">Details</h2>
+<dl style="display: grid; grid-template-columns: 80px minmax(0, 1fr); gap: 10px 16px; margin: 0; font-size: 13px">
+<dt style="color: #6F7FA3">Path</dt>
+<dd style="margin: 0; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; overflow-wrap: anywhere">artifacts/output/deliverable.md</dd>
+<dt style="color: #6F7FA3">Type</dt>
+<dd style="margin: 0; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px">research_summary</dd>
+<dt style="color: #6F7FA3">Format</dt>
+<dd style="margin: 0; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px">text/markdown</dd>
+<dt style="color: #6F7FA3">Size</dt>
+<dd style="margin: 0; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px">19.8 KB</dd>
+<dt style="color: #6F7FA3">ID</dt>
+<dd style="margin: 0; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; overflow-wrap: anywhere">3dd16bd8-a261-41fd-9f3e-cb0f39eccfb8</dd>
+</dl>
+</section>
+
+</div>
+</div>
+
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#4D80FF","options":["#4D80FF","#4CC9F0","#45E0A0","#A78BFA"]},"$preview":{"width":1440,"height":1350}}'>
+class Component extends DCLogic {
+renderVals() {
+const view = (this.state && this.state.view) || 'rendered';
+const seg = (key) => {
+const on = view === key;
+return { on: on ? 'true' : 'false', bg: on ? '#1A2134' : 'transparent', fg: on ? '#E8EEFB' : '#9AA8C7' };
+};
+const source = [
+'# Sorting: Research Synthesis & Recommendations',
+'',
+'## Executive Summary',
+'',
+'Sorting is a foundational computational primitive with profound implications across algorithm design, systems engineering, and user experience. This synthesis consolidates two phases of research (discovery and deep-dive analysis) into actionable insights for decision-makers, engineers, and architects.',
+'',
+'**Key Insight**: Optimal sorting strategies are **context-dependent**. There is no universally superior approach—success requires matching algorithm selection, implementation strategy, and correctness guarantees to specific workload characteristics.',
+'',
+'**Bottom Line**: 95% of applications should use language standard library sorting. Custom implementations are justified only when specific input characteristics guarantee substantial speedup or when extreme performance requirements demand specialized algorithms.',
+'',
+'## Research Scope & Methodology',
+'',
+'This research investigated sorting across three interconnected domains:',
+'',
+'1. **Computational Algorithms** — Algorithmic approaches (Quicksort, Mergesort, Timsort, etc.)',
+'2. **Systems Implementation** — Sorting in data structures, databases, and distributed systems',
+'3. **User Experience & Data Presentation** — Sorting as a user-facing feature in applications'
+].join('\n');
+return {
+accent: this.props.accent ?? '#4D80FF',
+rendered: seg('rendered'),
+raw: seg('raw'),
+isRendered: view === 'rendered',
+isRaw: view === 'raw',
+source,
+showRendered: () => this.setState({ view: 'rendered' }),
+showRaw: () => this.setState({ view: 'raw' })
+};
+}
+}
+</script>
+</body>
+</html>

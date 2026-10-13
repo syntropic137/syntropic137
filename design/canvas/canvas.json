@@ -1,0 +1,495 @@
+{
+  "v": 3,
+  "attachments": {},
+  "boards": {
+    "Artifact.dc.html": {
+      "expand": "fill",
+      "h": 1350,
+      "is_interactive": true,
+      "page": "screens",
+      "title": "Artifact viewer",
+      "w": 1440,
+      "x": 3040,
+      "y": 2200
+    },
+    "CompActions.dc.html": {
+      "h": 1260,
+      "page": "system",
+      "title": "Components \u00b7 actions and inputs",
+      "w": 1440,
+      "x": 1520,
+      "y": 0
+    },
+    "CompDisplay.dc.html": {
+      "h": 1360,
+      "page": "system",
+      "title": "Components \u00b7 display",
+      "w": 1440,
+      "x": 1520,
+      "y": 1340
+    },
+    "CompNav.dc.html": {
+      "h": 1560,
+      "page": "system",
+      "title": "Components \u00b7 navigation and overlays",
+      "w": 1440,
+      "x": 3040,
+      "y": 0
+    },
+    "CompPatterns.dc.html": {
+      "h": 1700,
+      "page": "system",
+      "title": "Patterns \u00b7 domain and data",
+      "w": 1440,
+      "x": 3040,
+      "y": 1640
+    },
+    "Eval.dc.html": {
+      "expand": "fill",
+      "h": 2240,
+      "is_interactive": true,
+      "page": "screens",
+      "title": "Eval detail",
+      "w": 1440,
+      "x": 1520,
+      "y": 5000
+    },
+    "Evals.dc.html": {
+      "expand": "fill",
+      "h": 2400,
+      "is_interactive": true,
+      "page": "screens",
+      "title": "Evals",
+      "w": 1440,
+      "x": 0,
+      "y": 5000
+    },
+    "Execution.dc.html": {
+      "expand": "fill",
+      "h": 1320,
+      "is_interactive": true,
+      "page": "screens",
+      "title": "Execution detail",
+      "w": 1440,
+      "x": 3040,
+      "y": 0
+    },
+    "Executions.dc.html": {
+      "expand": "fill",
+      "h": 1690,
+      "is_interactive": true,
+      "page": "screens",
+      "title": "Executions",
+      "w": 1440,
+      "x": 1520,
+      "y": 0
+    },
+    "Foundations.dc.html": {
+      "h": 1400,
+      "page": "system",
+      "title": "Foundations",
+      "w": 1440,
+      "x": 0,
+      "y": 0
+    },
+    "Main.dc.html": {
+      "expand": "fill",
+      "h": 1760,
+      "is_interactive": true,
+      "page": "screens",
+      "title": "Overview",
+      "w": 1440,
+      "x": 0,
+      "y": 0
+    },
+    "PhaseKit.dc.html": {
+      "h": 980,
+      "page": "system",
+      "title": "Phase kit: model, tools, skills (component states)",
+      "w": 1440,
+      "x": 0,
+      "y": 1830
+    },
+    "PhoneArtifact.dc.html": {
+      "expand": "fill",
+      "h": 1760,
+      "is_interactive": true,
+      "page": "phone",
+      "title": "Artifact viewer",
+      "w": 390,
+      "x": 2820,
+      "y": 0
+    },
+    "PhoneDock.dc.html": {
+      "h": 66,
+      "page": "system",
+      "title": "Phone dock (shared component)",
+      "w": 358,
+      "x": 470,
+      "y": 1640
+    },
+    "PhoneEval.dc.html": {
+      "expand": "fill",
+      "h": 3560,
+      "is_interactive": true,
+      "page": "phone",
+      "title": "Eval detail",
+      "w": 390,
+      "x": 4230,
+      "y": 0
+    },
+    "PhoneEvals.dc.html": {
+      "expand": "fill",
+      "h": 2850,
+      "is_interactive": true,
+      "page": "phone",
+      "title": "Evals",
+      "w": 390,
+      "x": 3760,
+      "y": 0
+    },
+    "PhoneExecution.dc.html": {
+      "expand": "fill",
+      "h": 2220,
+      "is_interactive": true,
+      "page": "phone",
+      "title": "Execution detail",
+      "w": 390,
+      "x": 940,
+      "y": 0
+    },
+    "PhoneExecutions.dc.html": {
+      "expand": "fill",
+      "h": 1620,
+      "is_interactive": true,
+      "page": "phone",
+      "title": "Executions",
+      "w": 390,
+      "x": 470,
+      "y": 0
+    },
+    "PhoneOverview.dc.html": {
+      "expand": "fill",
+      "h": 2350,
+      "is_interactive": true,
+      "page": "phone",
+      "title": "Overview",
+      "w": 390,
+      "x": 0,
+      "y": 0
+    },
+    "PhoneSession.dc.html": {
+      "expand": "fill",
+      "h": 2320,
+      "is_interactive": true,
+      "page": "phone",
+      "title": "Session detail",
+      "w": 390,
+      "x": 1410,
+      "y": 0
+    },
+    "PhoneTop.dc.html": {
+      "h": 68,
+      "page": "system",
+      "title": "Phone top bar (shared component)",
+      "w": 390,
+      "x": 0,
+      "y": 1640
+    },
+    "PhoneTriggers.dc.html": {
+      "expand": "fill",
+      "h": 2040,
+      "is_interactive": true,
+      "page": "phone",
+      "title": "Triggers",
+      "w": 390,
+      "x": 3290,
+      "y": 0
+    },
+    "PhoneWorkflow.dc.html": {
+      "expand": "fill",
+      "h": 2980,
+      "is_interactive": true,
+      "page": "phone",
+      "title": "Workflow detail",
+      "w": 390,
+      "x": 2350,
+      "y": 0
+    },
+    "PhoneWorkflows.dc.html": {
+      "expand": "fill",
+      "h": 1740,
+      "is_interactive": true,
+      "page": "phone",
+      "title": "Workflows",
+      "w": 390,
+      "x": 1880,
+      "y": 0
+    },
+    "Session.dc.html": {
+      "expand": "fill",
+      "h": 1620,
+      "is_interactive": true,
+      "page": "screens",
+      "title": "Session detail",
+      "w": 1440,
+      "x": 4560,
+      "y": 0
+    },
+    "TopNav.dc.html": {
+      "h": 78,
+      "page": "system",
+      "title": "Top nav capsule (shared component)",
+      "w": 1440,
+      "x": 0,
+      "y": 1480
+    },
+    "Triggers.dc.html": {
+      "expand": "fill",
+      "h": 1230,
+      "is_interactive": true,
+      "page": "screens",
+      "title": "Triggers",
+      "w": 1440,
+      "x": 4560,
+      "y": 2200
+    },
+    "UsageMeter.dc.html": {
+      "h": 900,
+      "page": "system",
+      "title": "Usage meter: tokens and cost in one block (component)",
+      "w": 1440,
+      "x": 0,
+      "y": 2890
+    },
+    "Workflow.dc.html": {
+      "expand": "fill",
+      "h": 2380,
+      "is_interactive": true,
+      "page": "screens",
+      "title": "Workflow detail",
+      "w": 1440,
+      "x": 1520,
+      "y": 2200
+    },
+    "Workflows.dc.html": {
+      "expand": "fill",
+      "h": 1350,
+      "is_interactive": true,
+      "page": "screens",
+      "title": "Workflows",
+      "w": 1440,
+      "x": 0,
+      "y": 2200
+    },
+    "Landing.dc.html": {
+      "expand": "fill",
+      "h": 8600,
+      "is_interactive": true,
+      "page": "landing",
+      "title": "syntropic137.com v4 \u00b7 agent work that compounds",
+      "w": 1440,
+      "x": 0,
+      "y": 0
+    },
+    "PhoneLanding.dc.html": {
+      "expand": "fill",
+      "h": 9400,
+      "is_interactive": true,
+      "page": "landing",
+      "title": "syntropic137.com v4 \u00b7 phone",
+      "w": 390,
+      "x": 1520,
+      "y": 0
+    },
+    "LandingV3.dc.html": {
+      "expand": "fill",
+      "h": 6300,
+      "is_interactive": true,
+      "page": "landing",
+      "title": "v3 (evals-first, for comparison)",
+      "w": 1440,
+      "x": 2600,
+      "y": 0
+    },
+    "PhoneLandingV3.dc.html": {
+      "expand": "fill",
+      "h": 6900,
+      "is_interactive": true,
+      "page": "landing",
+      "title": "v3 phone",
+      "w": 390,
+      "x": 4120,
+      "y": 0
+    }
+  },
+  "createdOnFiles": {
+    "at": "2026-10-07T18:40:00Z",
+    "v": 1
+  },
+  "designSystems": [],
+  "launch": {
+    "page": "screens",
+    "view": "canvas"
+  },
+  "notes": {
+    "evals-sample": {
+      "fill": "orange",
+      "page": "screens",
+      "text": "Evals boards: the cases, workflows, baseline, goal and the gpt-5.6-terra run of shared-esp-stream are real. Verdicts, most costs and durations are placeholders until the VPS data can be read.",
+      "w": 420,
+      "x": 3040,
+      "y": 5000
+    },
+    "evals-sample-phone": {
+      "fill": "orange",
+      "page": "phone",
+      "text": "Evals boards: the cases, workflows, baseline, goal and the gpt-5.6-terra run of shared-esp-stream are real. Verdicts, most costs and durations are placeholders until the VPS data can be read.",
+      "w": 420,
+      "x": 4700,
+      "y": 0
+    },
+    "row-build": {
+      "kind": "title1",
+      "maxW": 6000,
+      "page": "screens",
+      "text": "Build \u2014 workflows, artifacts, triggers",
+      "w": 240,
+      "x": 0,
+      "y": 1940
+    },
+    "row-measure": {
+      "kind": "title1",
+      "maxW": 2960,
+      "page": "screens",
+      "text": "Measure \u2014 evals",
+      "w": 240,
+      "x": 0,
+      "y": 4740
+    },
+    "row-observe": {
+      "kind": "title1",
+      "maxW": 6000,
+      "page": "screens",
+      "text": "Observe \u2014 overview, executions, sessions",
+      "w": 240,
+      "x": 0,
+      "y": -260
+    },
+    "row-phone": {
+      "kind": "title1",
+      "maxW": 4620,
+      "page": "phone",
+      "text": "Phone first \u2014 390 wide, dock instead of the capsule",
+      "w": 240,
+      "x": 0,
+      "y": -260
+    },
+    "sys-components": {
+      "kind": "title1",
+      "maxW": 2960,
+      "page": "system",
+      "text": "Components and patterns, every state",
+      "w": 240,
+      "x": 1520,
+      "y": -260
+    },
+    "sys-foundations": {
+      "kind": "title1",
+      "maxW": 1440,
+      "page": "system",
+      "text": "Foundations and shared pieces",
+      "w": 240,
+      "x": 0,
+      "y": -260
+    },
+    "trends-sample": {
+      "fill": "orange",
+      "page": "screens",
+      "text": "Trend charts (Eval detail, Workflow detail, Workflows cards) use sample run history to show the design. Eval runs need a 0-100 judge score and the judge model stored per run; cost, duration and tokens already exist. Agents read the same data with `syn eval trend <id> --json`.",
+      "w": 420,
+      "x": 3040,
+      "y": 5260
+    },
+    "trends-sample-phone": {
+      "fill": "orange",
+      "page": "phone",
+      "text": "Trend charts on Eval and Workflow detail use sample run history to show the design.",
+      "w": 420,
+      "x": 4700,
+      "y": 260
+    },
+    "landing-title": {
+      "kind": "title1",
+      "maxW": 4600,
+      "page": "landing",
+      "text": "syntropic137.com \u2014 v4: agent work that compounds (v3 on the right)",
+      "w": 240,
+      "x": 0,
+      "y": -260
+    },
+    "landing-note": {
+      "fill": "orange",
+      "page": "landing",
+      "text": "Positioning: Syntropic137 turns your coding agents into repeatable workflows. Run them on any harness, see every step, and make every run better than the last. Page order: hero (the S rising from the run city) \u2192 What is it (write once, run anywhere, every run compounds) \u2192 01 Repeatable workflows \u2192 02 Any harness \u2192 03 Fully observable \u2192 04 Compounding improvement (the eval explorer) \u2192 use cases \u2192 why a platform \u2192 get started. Product numbers are sample data.",
+      "w": 420,
+      "x": 1990,
+      "y": 0
+    }
+  },
+  "order": [
+    "Main.dc.html",
+    "Executions.dc.html",
+    "Execution.dc.html",
+    "Session.dc.html",
+    "Workflows.dc.html",
+    "Workflow.dc.html",
+    "Artifact.dc.html",
+    "Triggers.dc.html",
+    "Foundations.dc.html",
+    "TopNav.dc.html",
+    "PhoneOverview.dc.html",
+    "PhoneExecutions.dc.html",
+    "PhoneExecution.dc.html",
+    "PhoneSession.dc.html",
+    "PhoneWorkflows.dc.html",
+    "PhoneWorkflow.dc.html",
+    "PhoneArtifact.dc.html",
+    "PhoneTriggers.dc.html",
+    "PhoneTop.dc.html",
+    "PhoneDock.dc.html",
+    "PhaseKit.dc.html",
+    "Evals.dc.html",
+    "Eval.dc.html",
+    "PhoneEvals.dc.html",
+    "PhoneEval.dc.html",
+    "UsageMeter.dc.html",
+    "CompActions.dc.html",
+    "CompDisplay.dc.html",
+    "CompNav.dc.html",
+    "CompPatterns.dc.html",
+    "Landing.dc.html",
+    "PhoneLanding.dc.html",
+    "LandingV3.dc.html",
+    "PhoneLandingV3.dc.html"
+  ],
+  "pages": [
+    {
+      "id": "screens",
+      "name": "Desktop"
+    },
+    {
+      "id": "phone",
+      "name": "Phone"
+    },
+    {
+      "id": "system",
+      "name": "System"
+    },
+    {
+      "id": "landing",
+      "name": "Landing"
+    }
+  ],
+  "title": "Syn137 \u2014 UI redesign"
+}

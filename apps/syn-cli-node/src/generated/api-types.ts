@@ -99,6 +99,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/workflows/{workflow_id}/trend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Workflow Trend Endpoint
+         * @description The workflow's executions as trend points, newest first, with its definition changes.
+         *
+         *     One row per execution: date, status, cost, duration, tokens and how long
+         *     each phase took. The workflow id may be a unique prefix.
+         */
+        get: operations["get_workflow_trend_endpoint_workflows__workflow_id__trend_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/workflows/{workflow_id}/history": {
         parameters: {
             query?: never;
@@ -111,6 +134,26 @@ export interface paths {
          * @description DEPRECATED: Use /workflows/{workflow_id}/runs instead.
          */
         get: operations["get_workflow_history_endpoint_workflows__workflow_id__history_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workflows/{workflow_id}/latest-outputs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Workflow Latest Outputs Endpoint
+         * @description Each phase's latest output: its newest primary deliverable across all runs.
+         */
+        get: operations["get_workflow_latest_outputs_endpoint_workflows__workflow_id__latest_outputs_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -729,6 +772,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/evals/{eval_id}/trend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Eval Trend Endpoint
+         * @description The eval's current runs as trend points, newest first, with its definition changes.
+         *
+         *     One row per run: date, verifier and judge model, score (0 to 100), verdict,
+         *     cost, duration and tokens. The same runs as `GET /evals/{eval_id}/runs`.
+         */
+        get: operations["get_eval_trend_endpoint_evals__eval_id__trend_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/evals/{eval_id}/runs/{execution_id}/score": {
         parameters: {
             query?: never;
@@ -1196,6 +1262,32 @@ export interface paths {
          *     in the window; below ten phases it reads ``insufficient``.
          */
         get: operations["get_phase_profiles_endpoint_metrics_phase_profiles_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/metrics/shipped": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Shipped Metrics Endpoint
+         * @description What agents shipped over the last ``days`` UTC days, against the ``days`` before.
+         *
+         *     Agent-attributed only, read from the shipped ledger's daily rollup: commits
+         *     runs made, PRs runs created (a successful ``gh pr create``), merges of
+         *     those PRs (``pull_request`` closed+merged events from the GitHub
+         *     pipeline), merge rate as the share of the window's opened PRs merged by
+         *     now, and the repos all of that touched.
+         */
+        get: operations["get_shipped_metrics_endpoint_metrics_shipped_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3132,6 +3224,15 @@ export interface components {
             executed_at: string;
         };
         /**
+         * CostSplitBasis
+         * @description How a cost-by-token-type breakdown was arrived at.
+         *
+         *     The two are not equally strong claims, so a client must be able to tell
+         *     them apart and label the second one.
+         * @enum {string}
+         */
+        CostSplitBasis: "rate_table" | "allocated";
+        /**
          * CoverageState
          * @enum {string}
          */
@@ -3369,6 +3470,53 @@ export interface components {
              * @description Callers blocked waiting for a connection right now.
              */
             waiting: number;
+        };
+        /**
+         * DeclaredSkillResponse
+         * @description A skill a workflow declares, once, and where it declares it.
+         *
+         *     On the workflow LIST so a card can draw its skill chips without one detail
+         *     request per workflow. Same ref shape as a phase's ``skills`` entry, so a
+         *     client matches a chip to a phase by comparing the ref fields.
+         */
+        DeclaredSkillResponse: {
+            /** Source Url */
+            source_url?: string | null;
+            /** Name */
+            name?: string | null;
+            /** Version */
+            version?: string | null;
+            /**
+             * Name Overridden
+             * @default false
+             */
+            name_overridden: boolean;
+            /** Raw */
+            raw?: string | null;
+            /** Phase Ids */
+            phase_ids?: string[];
+            /**
+             * Workflow Scope
+             * @default false
+             */
+            workflow_scope: boolean;
+        };
+        /**
+         * DefinitionChangeKind
+         * @description What changed the definition.
+         * @enum {string}
+         */
+        DefinitionChangeKind: "created" | "updated" | "phase_updated";
+        /**
+         * DefinitionChangeResponse
+         * @description A change to an eval's or workflow's definition: a trend chart's annotation (#1788).
+         */
+        DefinitionChangeResponse: {
+            /** Definition Version */
+            definition_version: string | null;
+            /** Changed At */
+            changed_at: string;
+            kind: components["schemas"]["DefinitionChangeKind"];
         };
         /**
          * DegradedReason
@@ -3723,6 +3871,8 @@ export interface components {
             scorer_version: string | null;
             /** Scored At */
             scored_at: string | null;
+            /** Judge Model */
+            judge_model?: string | null;
         };
         /**
          * EvalRunScoreRequest
@@ -3741,6 +3891,8 @@ export interface components {
             scorer: string;
             /** Scorer Version */
             scorer_version: string;
+            /** Judge Model */
+            judge_model?: string | null;
         };
         /**
          * EvalRunScoreResponse
@@ -3762,6 +3914,8 @@ export interface components {
             scorer_version: string;
             /** Scored At */
             scored_at: string;
+            /** Judge Model */
+            judge_model?: string | null;
         };
         /**
          * EvalRunStatsResponse
@@ -3786,6 +3940,67 @@ export interface components {
             cost_per_pass_usd: string | null;
             /** Cost Per Pass Display */
             cost_per_pass_display: string;
+        };
+        /**
+         * EvalTrendPointResponse
+         * @description One run of an eval as one point on its trend charts (#1788).
+         */
+        EvalTrendPointResponse: {
+            /** Execution Id */
+            execution_id: string;
+            /** Date */
+            date: string | null;
+            /** Workflow Id */
+            workflow_id: string;
+            /** Workflow Version */
+            workflow_version: string | null;
+            /** Eval Definition Version */
+            eval_definition_version: string | null;
+            /** Verifier Model */
+            verifier_model: string | null;
+            /** Observed Models */
+            observed_models: string[];
+            /** Judge Model */
+            judge_model: string | null;
+            /** Score */
+            score: number | null;
+            verdict: components["schemas"]["Verdict"] | null;
+            /** Cost Usd */
+            cost_usd: string | null;
+            /** Cost Is Lower Bound */
+            cost_is_lower_bound: boolean;
+            /** Cost Display */
+            cost_display: string;
+            /** Duration Seconds */
+            duration_seconds: number | null;
+            /** Duration Is Lower Bound */
+            duration_is_lower_bound: boolean;
+            /** Duration Display */
+            duration_display: string;
+            /** Tokens */
+            tokens: number;
+        };
+        /**
+         * EvalTrendResponse
+         * @description One page of an eval's current runs as trend points, newest first (#1788).
+         */
+        EvalTrendResponse: {
+            /** Definition Version */
+            definition_version: string | null;
+            /** Definition Changed At */
+            definition_changed_at: string | null;
+            /** Definition Changes */
+            definition_changes: components["schemas"]["DefinitionChangeResponse"][];
+            /** Eval Id */
+            eval_id: string;
+            /** Items */
+            items: components["schemas"]["EvalTrendPointResponse"][];
+            /** Total */
+            total: number;
+            /** Page */
+            page: number;
+            /** Page Size */
+            page_size: number;
         };
         /**
          * EvalVariantResponse
@@ -5336,6 +5551,11 @@ export interface components {
             breakdown?: {
                 [key: string]: number;
             };
+            /**
+             * Failed
+             * @default 0
+             */
+            failed: number;
         };
         /**
          * HeldProjectionHealth
@@ -6077,6 +6297,18 @@ export interface components {
             /** Output Artifact Types */
             output_artifact_types?: string[];
         };
+        /**
+         * PhaseDurationResponse
+         * @description How long one phase of a run took.
+         */
+        PhaseDurationResponse: {
+            /** Phase Id */
+            phase_id: string;
+            /** Phase Name */
+            phase_name: string;
+            /** Duration Seconds */
+            duration_seconds: number | null;
+        };
         /** PhaseExecutionInfo */
         PhaseExecutionInfo: {
             /** Phase Id */
@@ -6157,6 +6389,17 @@ export interface components {
              * @description The model for humans: the reported id verbatim, or '<alias> (requested)', or 'unknown' (ADR-067 D9).
              */
             readonly model_display: string;
+        };
+        /**
+         * PhaseLatestOutputResponse
+         * @description One phase of a workflow and the output it last produced.
+         */
+        PhaseLatestOutputResponse: {
+            /** Phase Id */
+            phase_id: string;
+            /** Phase Name */
+            phase_name: string;
+            artifact?: components["schemas"]["ArtifactSummaryResponse"] | null;
         };
         /**
          * PhaseMetrics
@@ -7856,6 +8099,7 @@ export interface components {
             cost_by_model?: {
                 [key: string]: string;
             };
+            cost_by_token_type?: components["schemas"]["TokenTypeCostResponse"] | null;
             /** Cache Read Rate Display */
             cache_read_rate_display?: string | null;
             /** Cache Write Rate Display */
@@ -8061,6 +8305,169 @@ export interface components {
              * @default
              */
             actor: string;
+        };
+        /**
+         * ShippedCountPointResponse
+         * @description One UTC day's count.
+         */
+        ShippedCountPointResponse: {
+            /**
+             * Date
+             * Format: date
+             */
+            date: string;
+            /** Value */
+            value: number;
+        };
+        /**
+         * ShippedCountTileResponse
+         * @description A count over the window against the window before it.
+         *
+         *     When ``reason`` is set the count cannot be answered from persisted data:
+         *     every number is null and ``series`` is empty. Never a zero standing in for
+         *     "unknown".
+         */
+        ShippedCountTileResponse: {
+            /** Total */
+            total: number | null;
+            /** Previous Total */
+            previous_total: number | null;
+            /** Delta */
+            delta: number | null;
+            /** Delta Percent */
+            delta_percent: number | null;
+            /** Delta Display */
+            delta_display: string | null;
+            delta_unit: components["schemas"]["ShippedDeltaUnit"];
+            /** Total Display */
+            total_display: string | null;
+            /** Series */
+            series: components["schemas"]["ShippedCountPointResponse"][];
+            /** Source */
+            source: string;
+            /** Reason */
+            reason: string | null;
+        };
+        /**
+         * ShippedDeltaUnit
+         * @description What a tile's ``delta_display`` is expressed in.
+         * @enum {string}
+         */
+        ShippedDeltaUnit: "percent" | "points" | "count";
+        /**
+         * ShippedMetricsResponse
+         * @description What agents shipped over the window, tile by tile (the Overview block).
+         */
+        ShippedMetricsResponse: {
+            window: components["schemas"]["ShippedWindowResponse"];
+            previous: components["schemas"]["ShippedPreviousWindowResponse"];
+            /** Workflow Id */
+            workflow_id: string | null;
+            commits: components["schemas"]["ShippedCountTileResponse"];
+            prs_opened: components["schemas"]["ShippedCountTileResponse"];
+            prs_merged: components["schemas"]["ShippedCountTileResponse"];
+            merge_rate: components["schemas"]["ShippedRateTileResponse"];
+            repos_touched: components["schemas"]["ShippedCountTileResponse"];
+            /** Repos */
+            repos: string[];
+            /** By Workflow */
+            by_workflow: components["schemas"]["ShippedWorkflowResponse"][];
+            /** Unavailable */
+            unavailable: string[];
+        };
+        /**
+         * ShippedPreviousWindowResponse
+         * @description The ``days`` UTC days immediately before the window, inclusive.
+         */
+        ShippedPreviousWindowResponse: {
+            /**
+             * From
+             * Format: date
+             */
+            from: string;
+            /**
+             * To
+             * Format: date
+             */
+            to: string;
+        };
+        /**
+         * ShippedRatePointResponse
+         * @description One UTC day's rate in percent; null on a day with no denominator.
+         */
+        ShippedRatePointResponse: {
+            /**
+             * Date
+             * Format: date
+             */
+            date: string;
+            /** Value */
+            value: number | null;
+        };
+        /**
+         * ShippedRateTileResponse
+         * @description Merge rate: of the run PRs OPENED in the window, the percent merged by now.
+         *
+         *     A cohort conversion, 0 to 100 by construction (the merged PRs are a subset
+         *     of the opened ones). ``previous_total`` asks the same of the previous
+         *     window's cohort, as of now. ``delta`` is in percentage points. A series
+         *     point is that day's opened PRs merged since, null on a day none opened.
+         *     Null totals: no PR was opened, which is not 0%.
+         */
+        ShippedRateTileResponse: {
+            /** Total */
+            total: number | null;
+            /** Previous Total */
+            previous_total: number | null;
+            /** Delta */
+            delta: number | null;
+            /** Delta Display */
+            delta_display: string | null;
+            delta_unit: components["schemas"]["ShippedDeltaUnit"];
+            /** Total Display */
+            total_display: string | null;
+            /** Series */
+            series: components["schemas"]["ShippedRatePointResponse"][];
+            /** Source */
+            source: string;
+            /** Reason */
+            reason: string | null;
+        };
+        /**
+         * ShippedWindowResponse
+         * @description ``days`` UTC calendar days, ``from`` and ``to`` inclusive; ``to`` is today.
+         */
+        ShippedWindowResponse: {
+            /** Days */
+            days: number;
+            /**
+             * From
+             * Format: date
+             */
+            from: string;
+            /**
+             * To
+             * Format: date
+             */
+            to: string;
+        };
+        /**
+         * ShippedWorkflowResponse
+         * @description One workflow's share of what was shipped in the window.
+         */
+        ShippedWorkflowResponse: {
+            /** Workflow Id */
+            workflow_id: string;
+            /** Name */
+            name: string;
+            /** Commits */
+            commits: number;
+            /** Prs Opened */
+            prs_opened: number;
+            /** Prs Merged */
+            prs_merged: number;
+            /** Repos Touched */
+            repos_touched: number;
         };
         /**
          * SideEffectStatus
@@ -8678,6 +9085,25 @@ export interface components {
             p50_display: string;
             /** P90 Display */
             p90_display: string;
+        };
+        /**
+         * TokenTypeCostResponse
+         * @description A session's priced cost split by the kind of token it was spent on.
+         *
+         *     The parts sum to ``total_cost_usd`` (to within the canonical quantum per
+         *     part when ``basis`` is ``allocated``). Unpriced work is in neither, exactly
+         *     as with ``cost_by_model``.
+         */
+        TokenTypeCostResponse: {
+            /** Input Usd */
+            input_usd: string;
+            /** Output Usd */
+            output_usd: string;
+            /** Cache Creation Usd */
+            cache_creation_usd: string;
+            /** Cache Read Usd */
+            cache_read_usd: string;
+            basis: components["schemas"]["CostSplitBasis"];
         };
         /**
          * ToolSummary
@@ -9366,6 +9792,19 @@ export interface components {
             /** Default Eval Id */
             default_eval_id: string | null;
         };
+        /**
+         * WorkflowLatestOutputsResponse
+         * @description Every phase of a workflow, in phase order, with its latest output.
+         *
+         *     One request for the whole workflow detail page instead of one artifact
+         *     query per phase.
+         */
+        WorkflowLatestOutputsResponse: {
+            /** Workflow Id */
+            workflow_id: string;
+            /** Phases */
+            phases: components["schemas"]["PhaseLatestOutputResponse"][];
+        };
         /** WorkflowListResponse */
         WorkflowListResponse: {
             /** Workflows */
@@ -9447,6 +9886,8 @@ export interface components {
             requires_repos: boolean;
             /** Tags */
             tags?: string[];
+            /** Skills */
+            skills?: components["schemas"]["DeclaredSkillResponse"][];
         };
         /**
          * WorkflowTagsResponse
@@ -9457,6 +9898,58 @@ export interface components {
             workflow_id: string;
             /** Tags */
             tags: string[];
+        };
+        /**
+         * WorkflowTrendPointResponse
+         * @description One execution of a workflow as one point on its trend charts (#1788).
+         */
+        WorkflowTrendPointResponse: {
+            /** Execution Id */
+            execution_id: string;
+            /** Date */
+            date: string | null;
+            /** Status */
+            status: string;
+            /** Workflow Version */
+            workflow_version: string | null;
+            /** Cost Usd */
+            cost_usd: string | null;
+            /** Cost Is Lower Bound */
+            cost_is_lower_bound: boolean;
+            /** Cost Display */
+            cost_display: string;
+            /** Duration Seconds */
+            duration_seconds: number | null;
+            /** Duration Is Lower Bound */
+            duration_is_lower_bound: boolean;
+            /** Duration Display */
+            duration_display: string;
+            /** Tokens */
+            tokens: number;
+            /** Phase Durations */
+            phase_durations: components["schemas"]["PhaseDurationResponse"][];
+        };
+        /**
+         * WorkflowTrendResponse
+         * @description One page of a workflow's executions as trend points, newest first (#1788).
+         */
+        WorkflowTrendResponse: {
+            /** Definition Version */
+            definition_version: string | null;
+            /** Definition Changed At */
+            definition_changed_at: string | null;
+            /** Definition Changes */
+            definition_changes: components["schemas"]["DefinitionChangeResponse"][];
+            /** Workflow Id */
+            workflow_id: string;
+            /** Items */
+            items: components["schemas"]["WorkflowTrendPointResponse"][];
+            /** Total */
+            total: number;
+            /** Page */
+            page: number;
+            /** Page Size */
+            page_size: number;
         };
         /**
          * CostSummaryResponse
@@ -9755,6 +10248,47 @@ export interface operations {
             };
         };
     };
+    get_workflow_trend_endpoint_workflows__workflow_id__trend_get: {
+        parameters: {
+            query?: {
+                page?: number;
+                page_size?: number;
+            };
+            header?: never;
+            path: {
+                workflow_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowTrendResponse"];
+                };
+            };
+            /** @description No workflow has this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_workflow_history_endpoint_workflows__workflow_id__history_get: {
         parameters: {
             query?: never;
@@ -9773,6 +10307,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ExecutionHistoryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_workflow_latest_outputs_endpoint_workflows__workflow_id__latest_outputs_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workflow_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowLatestOutputsResponse"];
                 };
             };
             /** @description Validation Error */
@@ -11039,6 +11604,45 @@ export interface operations {
             };
         };
     };
+    get_eval_trend_endpoint_evals__eval_id__trend_get: {
+        parameters: {
+            query?: {
+                page?: number;
+                page_size?: number;
+            };
+            header?: never;
+            path: {
+                eval_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvalTrendResponse"];
+                };
+            };
+            /** @description No eval has this id in the eval read model (it may still be catching up) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The eval id is not a valid eval id */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     score_eval_run_endpoint_evals__eval_id__runs__execution_id__score_post: {
         parameters: {
             query?: never;
@@ -11906,6 +12510,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PhaseProfilesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_shipped_metrics_endpoint_metrics_shipped_get: {
+        parameters: {
+            query?: {
+                /** @description Window length in UTC days: 7, 14 or 30 */
+                days?: 7 | 14 | 30;
+                /** @description Only commits of this workflow's executions */
+                workflow_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShippedMetricsResponse"];
                 };
             };
             /** @description Validation Error */

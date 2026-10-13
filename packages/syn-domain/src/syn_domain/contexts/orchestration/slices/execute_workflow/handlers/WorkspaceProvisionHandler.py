@@ -8,6 +8,8 @@ Reports ProvisionWorkspaceCompletedCommand to the aggregate.
 ADR-058: Repos are pre-cloned during setup phase. After setup, synthetic
 /workspace/AGENTS.md and /workspace/CLAUDE.md are injected with @-imports
 of each repo's distinct instruction files, so Claude starts fully hydrated.
+Where codex may run, those files' content is also installed as codex's global
+instructions, because codex does not expand @-imports (#1835).
 """
 
 from __future__ import annotations
@@ -38,6 +40,10 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.codex_sa
     require_codex_sandbox,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.instruction_imports import (
+    CODEX_INSTRUCTIONS_STAGED,
+    CODEX_POINTER,
+    inline_instruction_files,
+    install_codex_instructions,
     repo_instruction_imports,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.skill_install import (
@@ -167,6 +173,20 @@ def _codex_auth_staged_for(phase: ExecutablePhase) -> bool:
     """
     agents = (phase.agent_config, *((phase.fallback_agent,) if phase.fallback_agent else ()))
     return any(_auth_staging_for(a.provider, a.allow_delegation)[0] for a in agents)
+
+
+def _agents_that_may_run(phase: ExecutablePhase) -> frozenset[AgentProvider]:
+    """Every provider whose CLI may run in this phase's workspace.
+
+    The phase's agent, its fallback (PC-83: it runs in the same workspace after
+    the primary failed), and, under ``allow_delegation``, the other CLI the
+    agent shells out to. Same reasoning as ``_codex_auth_staged_for``: the
+    workspace is prepared once, so it is prepared for all of them.
+    """
+    agents = (phase.agent_config, *((phase.fallback_agent,) if phase.fallback_agent else ()))
+    if any(a.allow_delegation for a in agents):
+        return frozenset(AgentProvider)
+    return frozenset(require_executable_provider(a.provider) for a in agents)
 
 
 def _append_claude_plugin_dirs(
@@ -452,6 +472,9 @@ class WorkspaceProvisionHandler:
                 pinned_commits=pinned_commits,
                 continued_branches=continued_branches,
                 include_codex_auth=include_codex_auth,
+                inline_instructions=not all(
+                    agent.expands_at_imports for agent in _agents_that_may_run(phase)
+                ),
             )
             # Read back BEFORE anything else is staged and long before the agent
             # is launched: a workspace not at its pins is refused here (#967).
@@ -499,8 +522,13 @@ class WorkspaceProvisionHandler:
         pinned_commits: Sequence[SourceCommit] = (),
         continued_branches: Mapping[str, str] | None = None,
         include_codex_auth: bool,
+        inline_instructions: bool,
     ) -> None:
         """Run the secret-injection setup and inject synthetic context files (ADR-058).
+
+        ``inline_instructions`` installs the repo instruction files' content as
+        codex's global instructions, for an agent that does not expand
+        @-imports (#1835). CLAUDE.md keeps the imports either way.
 
         ``phase_name`` is here for the failure message alone. The ADR-024 setup
         step runs INSIDE every phase, so "setup failed" on its own points an
@@ -560,9 +588,15 @@ class WorkspaceProvisionHandler:
         logger.info("Secret-injection setup completed for phase '%s', secrets cleared", phase_name)
 
         # Inject synthetic AGENTS.md + CLAUDE.md (ADR-058)
-        # Both files are identical: direct @-imports of each repo's distinct
-        # instruction files. Direct imports keep repo content at L2 (not L3 via
-        # indirection), preserving maximum @import depth for repo-internal context.
+        # CLAUDE.md, which Claude Code reads, is direct @-imports of each repo's
+        # distinct instruction files. Direct imports keep repo content at L2 (not
+        # L3 via indirection), preserving maximum @import depth for repo-internal
+        # context. AGENTS.md is the same file unless an agent that may run here
+        # reads it without expanding @-imports (codex, #1835); then the files'
+        # content goes to codex's global instructions instead, which every codex
+        # launch reads whatever its working directory and size, and AGENTS.md
+        # only points there. Claude never reads either, so a fallback or
+        # delegation between the two finds its own file already right.
         #
         # Only for repos that are actually ON DISK. Every line of this file is
         # `@/workspace/repos/<name>/...`, so emitting it for a phase that did
@@ -576,9 +610,19 @@ class WorkspaceProvisionHandler:
                 path for name in names for path in await repo_instruction_imports(workspace, name)
             ]
             context = self._generate_workspace_context(imports)
-            await workspace.inject_files(
-                [("AGENTS.md", context.encode()), ("CLAUDE.md", context.encode())]
-            )
+            files = [("AGENTS.md", context.encode()), ("CLAUDE.md", context.encode())]
+            if inline_instructions:
+                inlined = await inline_instruction_files(
+                    workspace, imports, notice=_DEADLINE_NOTICE
+                )
+                files = [
+                    ("AGENTS.md", CODEX_POINTER.encode()),
+                    ("CLAUDE.md", context.encode()),
+                    (CODEX_INSTRUCTIONS_STAGED, inlined.encode()),
+                ]
+            await workspace.inject_files(files)
+            if inline_instructions:
+                await install_codex_instructions(workspace, names)
             logger.info(
                 "Injected /workspace/AGENTS.md + CLAUDE.md (%d repo(s), %d import(s))",
                 len(cloned_repos),
@@ -886,9 +930,9 @@ class WorkspaceProvisionHandler:
 
     @staticmethod
     def _generate_workspace_context(imports: Sequence[str]) -> str:
-        """Generate content for both /workspace/CLAUDE.md and /workspace/AGENTS.md.
+        """Generate /workspace/CLAUDE.md, and AGENTS.md when every agent expands @-imports.
 
-        Both files receive identical content: a direct @-import of each path in
+        The content is a direct @-import of each path in
         ``imports`` (see ``repo_instruction_imports``). Direct imports (not via
         an intermediary file) keep repo content at depth L2, leaving L3-L5 for
         repo-internal imports within Claude Code's 5-level absolute limit.

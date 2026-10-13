@@ -460,6 +460,7 @@ class TestTheVerdictSurvivesEveryHop:
         collector = MagicMock()
         collector.record_tool_started = AsyncMock()
         collector.record_tool_completed = AsyncMock()
+        collector.note_command_ended = AsyncMock()
         collector.record_token_usage = AsyncMock()
         collector.record_session_summary = AsyncMock()
         processor = CodexStreamProcessor(

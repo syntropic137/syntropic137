@@ -20,6 +20,10 @@ from typing import TYPE_CHECKING, Any
 
 from syn_adapters import postgres_pool
 from syn_adapters.events.schema import EventStoreSchema, SchemaValidationError  # noqa: F401
+from syn_adapters.events.shipped_ledger import (
+    PostgresShippedLedger,
+    ensure_shipped_ledger_schema,
+)
 from syn_adapters.events.store_helpers import (
     RESERVED_OBSERVATION_KEYS,
 )
@@ -79,6 +83,12 @@ class AgentEventStore:
         self._schema = schema or EventStoreSchema(
             skip_auto_create=os.environ.get("SYN_SKIP_AUTO_CREATE_TABLES", "").lower() == "true"
         )
+        self._shipped_ledger = PostgresShippedLedger(lambda: self.pool)
+
+    @property
+    def shipped_ledger(self) -> PostgresShippedLedger:
+        """What runs shipped, kept beside the telemetry it comes from (ShippedLedgerProvider)."""
+        return self._shipped_ledger
 
     @property
     def skip_auto_create(self) -> bool:
@@ -123,6 +133,8 @@ class AgentEventStore:
                 conn,  # type: ignore[arg-type]  # asyncpg satisfies the protocol
                 skip_auto_create=self._schema.skip_auto_create,
             )
+            if not self._schema.skip_auto_create:
+                await ensure_shipped_ledger_schema(conn)
 
         self._initialized = True
         logger.info("AgentEventStore initialized")

@@ -14,7 +14,6 @@ import stat
 import time
 import tracemalloc
 from contextlib import contextmanager
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -28,6 +27,7 @@ from syn_adapters.workspace_backends.agentic.adapter_copy import (
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+    from pathlib import Path
 
 pytestmark = [pytest.mark.unit]
 
@@ -405,14 +405,12 @@ def test_symlinked_prefix_directory_is_not_listed(
 def test_walk_relies_only_on_posix_fd_primitives() -> None:
     """The walk lists by fd and opens children by dir_fd, never via /proc.
 
-    Both primitives exist on Linux and macOS. This suite runs on both, so a
-    Linux-only construct (such as resolving an fd through /proc/self/fd)
-    fails here on a developer Mac rather than only in production.
+    Both primitives exist on Linux and macOS. That the walk never reaches for a
+    Linux-only construct instead (such as resolving an fd through /proc/self/fd)
+    is held repo-wide by ci/fitness/code_quality/test_no_linux_only_constructs.py.
     """
     assert os.scandir in os.supports_fd
     assert os.open in os.supports_dir_fd
-    source = Path(workspace_walk.__file__).read_text()
-    assert "/proc" not in source
 
 
 def test_deep_directory_chain_opens_each_directory_once(

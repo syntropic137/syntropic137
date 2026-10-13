@@ -31,6 +31,26 @@ deliverable. Created by `SystemCreated`, removed by `SystemDeleted`.
 A System is how a question like "what did this product cost" becomes answerable:
 it is the unit insights aggregate to.
 
+## Insight
+
+A learning-loop finding: a lesson about how to improve workflows, speed and
+cost, aggregated across Organizations, Systems and Repos. Served by the
+`/insights/*` routes and the `syn insights` command group (overview, cost,
+activity heatmap).
+
+Owner's decision (2026-10-09): "insights" is reserved for this meaning. A
+number is an insight when it tells someone what to change in how work is done,
+not merely how the running platform is behaving.
+
+## Failed Day Count
+
+On the activity heatmap, a day's `failed`: the Executions whose status is
+`failed` and whose `completed_at` falls on that UTC day, selected and bucketed
+by `completed_at` alone, so a run that started long before, or whose start was
+never seen, still counts on the day it ended. Cancelled and interrupted runs
+are not failures. Read from the
+`workflow_executions` read model, never an aggregate.
+
 ## Repo
 
 One repository the platform knows about, registered by `RepoRegistered` and
@@ -111,3 +131,12 @@ Executions against one repository, prevents duplicate registration, or
 something else. Whoever knows should replace this paragraph with the invariant
 the claim enforces - and if nothing enforces it, the aggregate is a candidate
 for the same treatment as the orchestration Pause.
+
+## Words we do NOT use
+
+- **Insight, for operational telemetry.** We do NOT call request latency an
+  insight. API request latency (ADR-075), recorder drop counters, SSE health
+  and build info are **Observability**: how the running platform behaves, Lane
+  2 telemetry. They live under `GET /observability/*` and `syn observe`,
+  never under `/insights` or `syn insights`. See "Observability" in
+  `agent_sessions-ubiquitous-language.md`.

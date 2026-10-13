@@ -82,7 +82,7 @@ def _iso(value: datetime | str | None) -> str | None:
     return value.isoformat() if isinstance(value, datetime) else value
 
 
-def _cost(value: Decimal | str) -> Decimal | None:
+def decimal_or_none(value: Decimal | str) -> Decimal | None:
     try:
         return Decimal(value)
     except (InvalidOperation, TypeError, ValueError):
@@ -107,7 +107,7 @@ def _observed_models(
 
 
 @dataclass(frozen=True)
-class _RunReads:
+class RunReads:
     """Everything the facts of a set of runs need, each source read once for all of them."""
 
     details: dict[str, WorkflowExecutionDetail]
@@ -117,7 +117,7 @@ class _RunReads:
     """By the stored (``pg_safe``) execution id."""
 
     @classmethod
-    async def load(cls, manager: ProjectionManager, execution_ids: Sequence[str]) -> _RunReads:
+    async def load(cls, manager: ProjectionManager, execution_ids: Sequence[str]) -> RunReads:
         details = await manager.workflow_execution_detail.get_many(execution_ids)
         session_ids = [p.session_id for d in details.values() for p in d.phases if p.session_id]
         # Lane 2 fails soft, as on the execution page: a run whose cost cannot
@@ -135,6 +135,13 @@ class _RunReads:
             costs = {}
         return cls(details=details, sessions=sessions, costs=costs)
 
+    def own_model(self, phase: PhaseExecutionDetail) -> str | None:
+        """The model the phase's own session was OBSERVED running (``observed_model_of``)."""
+        session = self.sessions.get(phase.session_id) if phase.session_id else None
+        if session is None:
+            return None
+        return observed_model_of(session.agent_model, session.requested_model).observed
+
     def phase_models(
         self, phase: PhaseExecutionDetail, priced: ExecutionCost | None
     ) -> tuple[PhaseModel, ...]:
@@ -145,11 +152,7 @@ class _RunReads:
         else the session's own (``_enrich_costs`` and ``_load_session_cost``).
         """
         session = self.sessions.get(phase.session_id) if phase.session_id else None
-        own = (
-            None
-            if session is None
-            else observed_model_of(session.agent_model, session.requested_model).observed
-        )
+        own = self.own_model(phase)
         split = cost_by_observed_model(session.cost_by_model) if session is not None else {}
         by_phase = priced.models_by_phase.get(phase.workflow_phase_id) if priced else None
         if by_phase:
@@ -163,14 +166,18 @@ class _RunReads:
         if detail is None:
             models: tuple[PhaseModel, ...] = ()
             cost, duration, unpriced, unknown_phases = None, None, 0, 0
+            final_model: str | None = None
         else:
             stored = self.costs.get(pg_safe(execution_id))
             priced = stored if stored is not None and stored.has_cost_data else None
             models = tuple(m for p in detail.phases for m in self.phase_models(p, priced))
-            cost = _cost(priced.total_cost_usd) if priced is not None else Decimal(0)
+            cost = decimal_or_none(priced.total_cost_usd) if priced is not None else Decimal(0)
             total = DurationTotal.over(phase_duration(p) for p in detail.phases)
             duration, unknown_phases = total.seconds, total.unknown_phase_count
             unpriced = priced.unpriced_observation_count if priced is not None else 0
+            final_model = next(
+                (m for m in (self.own_model(p) for p in reversed(detail.phases)) if m), None
+            )
         return EvalRunFacts(
             execution_id=execution_id,
             workflow_id=row.workflow_id,
@@ -184,6 +191,8 @@ class _RunReads:
             score=score,
             unpriced_observation_count=unpriced,
             unknown_duration_phase_count=unknown_phases,
+            total_tokens=row.total_tokens,
+            final_phase_model=final_model,
         )
 
 
@@ -200,7 +209,7 @@ async def eval_run_facts(
         eval_id, statuses=statuses, offset=offset, limit=limit
     )
     scores = await manager.eval_list.scores(eval_id)
-    reads = await _RunReads.load(manager, [row.workflow_execution_id for row in members.rows])
+    reads = await RunReads.load(manager, [row.workflow_execution_id for row in members.rows])
     return [
         reads.facts(row, scores.get(row.workflow_execution_id)) for row in members.rows
     ], members.total
@@ -216,7 +225,7 @@ async def eval_summaries(
     members = await manager.eval_list.members_of(eval_ids)
     scores = await manager.eval_list.scores_in(eval_ids)
     execution_ids = {row.workflow_execution_id for rows in members.values() for row in rows}
-    reads = await _RunReads.load(manager, sorted(execution_ids))
+    reads = await RunReads.load(manager, sorted(execution_ids))
     return {
         eval_id: summarize(
             reads.facts(row, scores.get((eval_id, row.workflow_execution_id))) for row in rows
@@ -239,7 +248,7 @@ def _excluding(display: str, incomplete: int) -> str:
     return f"{display} (excl. {incomplete} incomplete)" if incomplete else display
 
 
-def _duration_display(seconds: float | None, unknown_phases: int) -> str:
+def duration_display(seconds: float | None, unknown_phases: int) -> str:
     """A run's duration, marked as a lower bound the way ``format_cost`` marks cost."""
     display = format_duration_seconds(seconds)
     return f">={display} (partial)" if seconds is not None and unknown_phases else display
@@ -295,13 +304,14 @@ def _run_response(run: EvalRunFacts) -> EvalRunResponse:
         total_cost_usd=run.total_cost_usd,
         total_cost_display=format_cost(run.total_cost_usd, run.unpriced_observation_count),
         duration_seconds=run.duration_seconds,
-        duration_display=_duration_display(run.duration_seconds, run.unknown_duration_phase_count),
+        duration_display=duration_display(run.duration_seconds, run.unknown_duration_phase_count),
         verdict=None if score is None else score.verdict,
         score=None if score is None else score.score,
         evidence_excerpt=None if score is None else score.evidence[:EVIDENCE_EXCERPT_CHARS],
         scorer=None if score is None else score.scorer,
         scorer_version=None if score is None else score.scorer_version,
         scored_at=None if score is None else score.scored_at,
+        judge_model=None if score is None else score.judge_model,
     )
 
 

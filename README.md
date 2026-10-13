@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <img src="./public/assets/syn137-banner.png" alt="Syntropic137 Banner" width="100%" />
+  <img src="./design/brand/banners/syntropic137.svg" alt="Syntropic137: agent work that compounds" width="100%" />
 </p>
 
 # Syntropic137
@@ -253,6 +253,7 @@ syntropic137/
 │   ├── syn-cli-node/             # CLI tool ("syn") — Node.js
 │   ├── syn-dashboard-ui/        # Dashboard frontend (Vite + React)
 │   ├── syn-docs/                # Public documentation site (Next.js + Fumadocs)
+│   ├── syn-landing/             # syntropic137.com marketing site (Vite + React)
 ├── packages/
 │   ├── syn-domain/              # Domain events, aggregates, ports
 │   ├── syn-adapters/            # Orchestration + observability adapters

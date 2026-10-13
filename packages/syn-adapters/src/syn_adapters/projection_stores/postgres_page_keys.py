@@ -219,12 +219,14 @@ def build_page_query(
     limit = "" if query.limit is None else f" LIMIT {int(query.limit)}"
     offset = f" OFFSET {int(query.offset)}" if query.offset else ""
     # "C" so the text compares by code point, as Python's ``str`` sort does.
-    order = "COALESCE(stamp, '') COLLATE \"C\" DESC, updated_at DESC, id"
+    # Ties break on the key, never ``updated_at``: that moves when a row is
+    # written, so a row could repeat on one page and vanish from the next.
+    order = 'COALESCE(stamp, \'\') COLLATE "C" DESC, id COLLATE "C"'
     sql = (
         "WITH judged AS ("
-        f"SELECT id, updated_at, data->>'{stamp}' AS stamp, {_status_sql(query.status)} AS status, "
+        f"SELECT id, data->>'{stamp}' AS stamp, {_status_sql(query.status)} AS status, "
         f"{verdict} AS verdict "
-        f"FROM (SELECT id, updated_at, {lean_source(lean_ready=lean_ready)} AS data "
+        f"FROM (SELECT id, {lean_source(lean_ready=lean_ready)} AS data "
         f"FROM {table_name}) AS documents WHERE {match} AND {window}"
         ") "
         "SELECT "
@@ -234,7 +236,7 @@ def build_page_query(
         f"(SELECT count(*) FROM judged WHERE verdict = 'inside' AND {selected}) AS total, "
         f"(SELECT count(*) FROM judged WHERE verdict = 'undated' AND {selected}) AS undated, "
         f"(SELECT COALESCE(json_agg(id ORDER BY {order}), '[]') FROM "
-        f"(SELECT id, updated_at, stamp FROM judged WHERE verdict = 'inside' AND {selected} "
+        f"(SELECT id, stamp FROM judged WHERE verdict = 'inside' AND {selected} "
         f"ORDER BY {order}{limit}{offset}) AS p) AS keys"
     )
     return sql, params.values
