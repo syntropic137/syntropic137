@@ -273,7 +273,7 @@ Example: `v0.3.0-beta.1`, `v0.3.0-beta.2`, etc.
 
 8. **Commit Version Bump**
 
-   Stage by name; the pre-commit hook blocks `git add -A`. Use the explicit
+   Stage by name, never `git add -A` (agent Bash guards refuse it). Use the explicit
    file list in `docs/release-process.md` (Production Release, step 2) and check
    `git status --short` for anything else `just bump-version` wrote.
    ```bash
@@ -330,8 +330,9 @@ $(if [ -n "$MESSAGE" ]; then echo "$MESSAGE"; fi)"
     # Check tag exists
     git tag -l "$NEW_VERSION"
 
-    # Check GitHub release
-    gh release view "$NEW_VERSION"
+    # Check GitHub release (stable only, after the release PR pipeline ran;
+    # a beta has no GitHub release - verify its deploy with a real run instead)
+    if [ "$CHANNEL" = "stable" ]; then gh release view "$NEW_VERSION"; fi
 
     # Check CI/CD triggered
     gh run list --limit 3

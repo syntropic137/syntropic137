@@ -504,8 +504,8 @@ release PR body to carry notes.)
 
 ### 2. Commit and Push
 
-Stage by name. The pre-commit hook blocks `git add -A`, and a blanket add would
-sweep in anything else lying in the tree. These are the files `just
+Stage by name. A blanket `git add -A` sweeps in anything else lying in the
+tree, and agent Bash guards (Claude Code `PreToolUse` hooks) refuse it. These are the files `just
 bump-version` rewrote for v1.0.1:
 
 ```bash
@@ -613,8 +613,9 @@ real release through the [Production Release](#production-release) flow.
 
 1. **Tag (optional, a plain git tag only).** `git tag v0.20.0-beta.1 <sha> &&
    git push origin v0.20.0-beta.1`. No workflow triggers on a tag push
-   (`release-containers.yaml` runs only via `workflow_call`), so this marks the
-   commit and nothing else.
+   (`release-containers.yaml` runs via `workflow_call` or a branch-guarded
+   `workflow_dispatch`, never on a tag push), so this marks the commit and
+   nothing else.
 2. **Deploy.** Read the [Test Deploy runbook](deployment/test-deploy.md) in full
    before touching the host. Two build paths:
    - **Direct, the default:** `just pit-stop 0.20.0-beta.1`
@@ -629,8 +630,8 @@ real release through the [Production Release](#production-release) flow.
      builds the six core images for amd64 + arm64 and pushes them to GHCR. It
      skips `event-store` and `agentic-workspace`; move those with `just
      release-retag <image> <from> <to>`. The images are not cosign-signed and
-     carry no SBOM, so the host needs `SYN_IMAGE_VERIFY_ALLOW_LOCAL_IMAGES=true`,
-     and this path never exercises signing. Then follow the runbook's
+     carry no SBOM, so this path never exercises signing; signature problems
+     surface only at the real release. Then follow the runbook's
      update and recreate steps on the host.
 
    Never build on the production host.
@@ -645,9 +646,11 @@ real release through the [Production Release](#production-release) flow.
   `gate`, let it finish. One swapper at a time: no manual `--swap-only` while a
   watch that can swap is armed. After any interruption, run `docker ps -a | grep
   syn137-` on the host and `compose up -d` anything left in `Created`.
-- **An abort after `gate` leaves admission paused.** The abort is fail-closed
-  and does not ungate; the script prints the recovery. The common case is
-  verify timing out during a projection rebuild window. Check images, docker
+- **An abort during swap or verify leaves admission paused.** That abort is
+  fail-closed and does not ungate; the script prints the recovery. (A drain
+  abort reopens admission itself, since nothing was recreated; a probe failure
+  happens after ungate.) The common case is verify timing out during a
+  projection rebuild window. Check images, docker
   CLI and pins by hand (runbook section 5, step 5), wait for `/api/v1/health`
   subscription lag 0, then `PUT /api/v1/maintenance` with `{"active": false,
   "reason": "", "actor": "pit_stop.sh"}` and verify a phase reaches `running`.
