@@ -79,7 +79,7 @@ Every repository a run recorded a commit for (`WorkflowExecutionStarted.source_c
 
 ### 2. Inject Both `/workspace/AGENTS.md` and `/workspace/CLAUDE.md`
 
-After the setup script completes, the Python layer injects both `AGENTS.md` and `CLAUDE.md` at the workspace root with **identical content**: direct `@`-imports of each repo's **distinct** instruction files, `AGENTS.md` before `CLAUDE.md`.
+After the setup script completes, the Python layer injects both `AGENTS.md` and `CLAUDE.md` at the workspace root with **identical content**: direct `@`-imports of each repo's **distinct** instruction files, `AGENTS.md` before `CLAUDE.md`. The exception is a workspace in which codex may run: the files' content is installed as codex's global instructions instead, and `AGENTS.md` only points there, because codex does not expand `@`-imports. See [Codex Reads the Content, Not the Imports (#1835)](#addendum-codex-reads-the-content-not-the-imports-1835).
 
 The handler reads both files from the clone first. A repo's `AGENTS.md` is not imported when it is byte-identical to its `CLAUDE.md`, or when it is a breadcrumb: the whole file is one line that only points at that `CLAUDE.md` (`@CLAUDE.md`, or a Markdown link to it, optionally led by "See", "Read" or "Follow"). A short `AGENTS.md` that says anything else is kept: length is not evidence that content is disposable. Claude Code does not deduplicate imports (see below), so before this rule a repo that kept the two files as copies paid for its instructions twice on every turn. In syntropic137 that was 36,274 bytes, about 9k tokens. A file confirmed not in the checkout is not imported. A read that fails any other way (transport error, timeout, permission) is not absence, so that file is still imported, as before. Two spellings of one repo (`.git`, a trailing slash) are one checkout and are imported once.
 
@@ -143,6 +143,8 @@ Git's credential store supports URL path matching, so each clone uses the correc
 /workspace/
 ├── AGENTS.md                ← synthetic, injected at provisioning time
 │                              identical to CLAUDE.md; for non-Claude platforms
+│                              (a pointer to ~/.codex/AGENTS.md when codex
+│                              may run, #1835)
 ├── CLAUDE.md                ← synthetic, injected at provisioning time
 │                              identical to AGENTS.md; for Claude Code
 ├── artifacts/
@@ -530,3 +532,64 @@ branch" path already keys on, so the prompt is unchanged.
   moment `gh pr create` runs: the platform sees no PR being opened. A PR the
   forge could not be asked about then is recorded as none, so a PR found open
   at resume is refused rather than trusted.
+
+## Addendum: Codex Reads the Content, Not the Imports (#1835)
+
+**Context.** Codex reads `/workspace/AGENTS.md` verbatim. Measured on codex-cli
+0.160.1, the version pinned in the workspace image, codex does not expand an
+`@path` line: the literal line reaches the model and the file never does. Run
+exec-b9d5edbbf478 confirmed it: Claude loaded the repo `CLAUDE.md` once and
+codex loaded it zero times. `/workspace` is not a git repository, so codex never
+walks into `/workspace/repos/<name>/AGENTS.md` on its own either.
+
+**Decision.**
+
+- Expanding imports is a provider capability, `AgentProvider.expands_at_imports`
+  in `syn_shared.agents`, set in a total mapping (claude yes, codex no).
+- When any agent that may run in the workspace does not expand imports, each
+  imported file's content is rendered in import order, each one under
+  `# Instructions from <path>`, with the deadline notice first. The files are
+  the same distinct ones the imports would name. That set is the phase's
+  agent, its fallback (PC-83) and, under `allow_delegation`, the other CLI.
+- That document is **appended to codex's global instructions file**,
+  `${CODEX_HOME:-~/.codex}/AGENTS.md`, after whatever the image ships there.
+  `/workspace/AGENTS.md` becomes a one-line pointer to it, and so does each
+  clone's `AGENTS.override.md` (see Consequences). Two reasons, both
+  measured on codex-cli 0.160.1 with `codex debug prompt-input`:
+  - Codex reads the global file from **every** working directory. A delegated
+    codex keeps its caller's working directory, often inside a clone; codex
+    stops its project-doc walk at the clone's git root and never reads
+    `/workspace/AGENTS.md` from there.
+  - `project_doc_max_bytes` (32768 by default) does **not** cap the global
+    file: a 1,000,000-byte global file reached the model whole. A project doc
+    past the default loses its tail, and the delegated launch (the
+    `agentic_session_store` shim, or the skill's raw `codex exec`) passes no
+    `-c` override. With the content outside the project doc, no codex launch
+    needs one, so none is passed and platform and delegated launches read the
+    same thing.
+- If the global file cannot be written, provisioning fails rather than letting
+  codex run without its instructions.
+- `CLAUDE.md` keeps the `@`-imports in every case. Claude reads neither
+  `AGENTS.md` nor codex's global file, so a fallback in either direction finds
+  its own file already staged. Nothing is restaged mid-phase.
+- A workspace where only claude runs is byte-identical to before.
+- A file that cannot be read is named in place of its content, never dropped.
+  A file confirmed absent is left out, as it is for imports.
+
+**Consequences.**
+
+- A codex turn now carries the repos' instructions, which is the point and also
+  the cost: about as many bytes as a claude turn already carries.
+- `@`-imports *inside* a repo's own instruction file are inlined as written.
+  Codex still does not follow them.
+- A codex launched inside a clone would also read the clone's own `AGENTS.md`
+  natively and see its instructions twice. Codex reads `AGENTS.override.md` in
+  place of `AGENTS.md` in the same directory (codex-cli 0.160.1), so each clone
+  gets a one-line `AGENTS.override.md` pointing at the global file, excluded in
+  the clone's `.git/info/exclude` so it is never committed. Every selected
+  root file then reaches codex once from the clone and from the workspace root,
+  whatever the clone holds: `CLAUDE.md` only, a breadcrumb, a distinct or
+  identical `AGENTS.md`, or `AGENTS.md` only. A repo that ships its own
+  `AGENTS.override.md` keeps it: codex already reads that instead of the
+  `AGENTS.md` made global. Nested `AGENTS.md` files below the clone root are
+  still read natively and are not made global.

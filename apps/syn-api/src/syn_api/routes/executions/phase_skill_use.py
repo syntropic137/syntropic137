@@ -53,13 +53,16 @@ def summarize_skill_use(
         return PhaseSkillUseInfo(status="unavailable")
     declared = [s.name for s in pinned.skills]
     if pinned.provider not in _OBSERVABLE_PROVIDERS:
-        return PhaseSkillUseInfo(status="not_observable", declared=declared)
+        return PhaseSkillUseInfo(
+            status="not_observable", declared=declared, provider=pinned.provider
+        )
     if ops is None:
-        return PhaseSkillUseInfo(status="unavailable", declared=declared)
+        return PhaseSkillUseInfo(status="unavailable", declared=declared, provider=pinned.provider)
 
     return PhaseSkillUseInfo(
         status="observed",
         declared=declared,
+        provider=pinned.provider,
         invoked=[InvokedSkillInfo(name=n, count=c) for n, c in sorted(_invoked(ops).items())],
     )
 

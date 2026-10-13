@@ -20,7 +20,7 @@ Public disclosure before a fix is available gives attackers a head start.
 
 ### How to Report
 
-**Email:** security@syntropic137.dev _(or file a [GitHub private security advisory](https://github.com/syntropic137/syntropic137/security/advisories/new))_
+**Email:** security@syntropic137.com _(or file a [GitHub private security advisory](https://github.com/syntropic137/syntropic137/security/advisories/new))_
 
 Please include:
 - A description of the vulnerability and its impact

@@ -4,6 +4,14 @@ $ARGUMENTS
 
 **Skills:** `testing`, `error-handling`, `security` and `architecture` are installed in this workspace as context, because codex has no Skill tool. Read and apply them when you judge whether each fix closed its finding.
 
+**Say which agent you are.** This phase is declared on codex so that a
+different model family from the implementer reviews the change, with claude as
+its `fallback_agent` for when codex's provider refuses the request (a content
+filter, a spent quota, no capacity). Put the line `Verifier: <provider>/<model>`
+in your report, after whatever lines this file requires first, naming the
+agent you actually are, not the one this file assumes. If you are not codex, add one sentence saying this review
+ran on the fallback agent and was therefore NOT cross-family.
+
 ## Which round this is
 
 **Round 2 of 2.** **This is the final round**: there is no third. This prompt re-verifies after each of up to two fix

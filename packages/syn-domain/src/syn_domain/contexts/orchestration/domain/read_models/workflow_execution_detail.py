@@ -133,9 +133,9 @@ class PhaseExecutionDetail:
     agent_provider: str | None = None
     """The provider of the agent that PRODUCED this phase's result (PC-83).
 
-    Not always the declared one: on capacity or quota the phase re-runs once on
-    its ``fallback_agent``. ``None`` when nothing recorded it, which includes
-    every phase that completed before PC-83.
+    Not always the declared one: on capacity, quota or a content refusal the
+    phase re-runs once on its ``fallback_agent``. ``None`` when nothing recorded
+    it, which includes every phase that completed before PC-83.
     """
 
     agent_model: str | None = None

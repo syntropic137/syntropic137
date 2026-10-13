@@ -5,12 +5,12 @@ Uses CheckpointedProjection (ADR-014) for reliable position tracking.
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import fields, replace
 from datetime import datetime  # noqa: TC003 - runtime annotation on page()
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from collections.abc import Collection
+    from collections.abc import Collection, Sequence
 
     from syn_domain.pagination import Page
 
@@ -20,6 +20,7 @@ from syn_domain.contexts.artifacts.domain.read_models.artifact_summary import (
     ArtifactSummary,
     read_primary_flag,
 )
+from syn_domain.projection_newest import ProjectionNewestPerGroup, newest_per_group
 from syn_domain.projection_scan import ListShape, page_projection
 
 #: What ``page`` windows, orders, tallies and searches by. A store that pages
@@ -30,6 +31,11 @@ _PAGE_SHAPE = ListShape(
     facet_field="artifact_type",
     search_fields=("id", "name", "workflow_id", "phase_id"),
 )
+
+
+#: What ``latest_deliverables`` reads of each winning row: everything but the
+#: body, which the per-phase answer never renders.
+_LATEST_FIELDS = tuple(f.name for f in fields(ArtifactSummary) if f.name != "content")
 
 
 class ArtifactListProjection(AutoDispatchProjection):
@@ -177,6 +183,55 @@ class ArtifactListProjection(AutoDispatchProjection):
             filters={"execution_id": execution_id, "phase_id": phase_id},
         )
         return [ArtifactSummary.from_dict(d) for d in data]
+
+    async def latest_deliverable(self, workflow_id: str, phase_id: str) -> ArtifactSummary | None:
+        """The newest primary deliverable one phase of a workflow produced, or None."""
+        return (await self.latest_deliverables(workflow_id, [phase_id])).get(phase_id)
+
+    async def latest_deliverables(
+        self, workflow_id: str, phase_ids: Sequence[str]
+    ) -> dict[str, ArtifactSummary]:
+        """Each phase's newest primary deliverable, for every phase that has one.
+
+        "What did this phase last produce", asked of the WORKFLOW rather than
+        of one execution: the workflow detail page shows it per phase. A run
+        writes one primary deliverable per phase (#997), so the newest primary
+        row is the last run's output; supporting files never stand in for it.
+
+        One store read for every phase, filtered to dated primary rows in the
+        store and without bodies (``syn_domain.projection_newest``). "Newest"
+        is the latest INSTANT, never the latest text: ``10:00+02:00`` is an
+        hour before ``09:00+00:00``. Equal instants go to the lowest artifact
+        id. An undated row is never the answer, because nothing says it is
+        newer than anything else (#920).
+        """
+        if not phase_ids:
+            return {}
+        filters: dict[str, str | Sequence[str]] = {
+            "workflow_id": workflow_id,
+            "phase_id": list(phase_ids),
+        }
+        if isinstance(self._store, ProjectionNewestPerGroup):
+            newest = await self._store.newest_per_group(
+                self.PROJECTION_NAME,
+                group_field="phase_id",
+                timestamp_field="created_at",
+                fields=_LATEST_FIELDS,
+                filters=filters,
+                flag_field="is_primary_deliverable",
+            )
+            return {phase: ArtifactSummary.from_dict(dict(row)) for phase, row in newest.items()}
+        rows = await self._store.query(self.PROJECTION_NAME, filters=filters)
+        picked = newest_per_group(
+            ((str(row.get("id", "")), row) for row in rows),
+            group_field="phase_id",
+            timestamp_field="created_at",
+            flag_field="is_primary_deliverable",
+        )
+        return {
+            phase: replace(ArtifactSummary.from_dict(dict(row)), content=None)
+            for phase, (_, row) in picked.items()
+        }
 
     async def on_artifact_creation_time_recovered(self, event_data: dict) -> None:
         """Handle ArtifactCreationTimeRecovered event (#1215).

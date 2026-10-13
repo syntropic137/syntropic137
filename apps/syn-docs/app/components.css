@@ -1,0 +1,386 @@
+/*
+ * MDX components and code windows. Base rules read the --color-fd-*
+ * variables, so light mode keeps the docs' palette; .dark rules use Skyline
+ * tokens directly (dark is the Skyline theme).
+ */
+
+/* ── Code theme variables (lib/code-theme.ts) ───────────────────────────
+   The landing code windows: primary text, muted keys, few highlights. */
+.dark {
+  --syn-code-bg: transparent;
+  --syn-code-fg: var(--ds-color-fg);
+  --syn-code-key: var(--ds-color-text-muted);
+  --syn-code-comment: var(--ds-color-text-subtle);
+  --syn-code-punctuation: var(--ds-color-text-subtle);
+  --syn-code-keyword: var(--sky-color-accent-soft-fg);
+  --syn-code-function: var(--ds-color-accent-hover);
+  --syn-code-string: var(--sky-color-success-soft-fg);
+  --syn-code-constant: var(--sky-color-warning-soft-fg);
+  --syn-code-inserted: var(--ds-color-success);
+  --syn-code-deleted: var(--ds-color-danger);
+}
+
+/* ── Code windows ─────────────────────────────────────────────────────── */
+.dark figure.shiki {
+  border-radius: var(--sky-radius-xl);
+  border-color: var(--ds-color-border);
+  background: var(--sky-gradient-panel);
+  box-shadow: var(--sky-shadow-raised-strong);
+}
+
+/* Title bar: the board's three window dots, a mono file name. */
+.dark figure.shiki > div:first-child:has(> figcaption) {
+  border-bottom-color: var(--sky-color-divider);
+  color: var(--ds-color-text-subtle);
+  font-family: var(--font-mono);
+  font-size: var(--ds-text-xs);
+}
+
+.dark figure.shiki > div:first-child:has(> figcaption)::before {
+  content: '';
+  flex: none;
+  width: 9px;
+  height: 9px;
+  margin-right: 30px;
+  border-radius: var(--ds-radius-full);
+  background: var(--sky-color-border-strong);
+  box-shadow: 15px 0 0 var(--sky-color-border-strong), 30px 0 0 var(--sky-color-border-strong);
+}
+
+.dark figure.shiki pre,
+.dark figure.shiki code {
+  color: var(--ds-color-fg);
+}
+
+/* Code tabs (Tabs around code blocks) */
+.dark [data-tabs] > [role='tablist'] {
+  background: transparent;
+}
+
+/* ── Feature cards ────────────────────────────────────────────────────── */
+.syn-feature-grid {
+  display: grid;
+  gap: 16px;
+  margin: 24px 0;
+}
+
+@media (min-width: 40rem) {
+  .syn-feature-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.syn-feature-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 20px;
+  border-radius: var(--sky-radius-xl);
+  border: 1px solid var(--color-fd-border);
+  background: var(--color-fd-card);
+  transition: border-color var(--sky-dur-1) ease;
+}
+
+.syn-feature-card:hover {
+  border-color: color-mix(in oklab, var(--color-fd-primary) 40%, transparent);
+}
+
+.syn-feature-card__icon {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--sky-radius-control);
+  background: color-mix(in oklab, var(--color-fd-primary) 14%, transparent);
+  color: var(--color-fd-primary);
+}
+
+.syn-feature-card__icon svg {
+  width: 22px;
+  height: 22px;
+}
+
+.syn-feature-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.syn-feature-card__title {
+  margin: 0;
+  font-size: var(--ds-text-lg);
+  font-weight: 600;
+  letter-spacing: var(--sky-tracking-title);
+  color: var(--color-fd-foreground);
+}
+
+.syn-feature-card__text {
+  margin: 0;
+  font-size: var(--ds-text-md);
+  line-height: 1.5;
+  color: var(--color-fd-muted-foreground);
+}
+
+.dark .syn-feature-card {
+  border-color: var(--ds-color-border);
+  background: var(--sky-gradient-panel);
+  box-shadow: var(--sky-shadow-raised);
+}
+
+.dark .syn-feature-card:hover {
+  border-color: var(--sky-color-border-hover);
+}
+
+.dark .syn-feature-card__icon {
+  background: var(--sky-color-accent-soft);
+  box-shadow: inset 0 0 0 1px var(--sky-color-accent-ring);
+  color: var(--sky-color-accent-soft-fg);
+}
+
+/* ── Badges ───────────────────────────────────────────────────────────── */
+.syn-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 11px;
+  border-radius: var(--ds-radius-full);
+  border: 1px solid var(--color-fd-border);
+  background: var(--color-fd-muted);
+  color: var(--color-fd-muted-foreground);
+  font-size: var(--ds-text-sm);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.syn-badge svg {
+  width: 14px;
+  height: 14px;
+}
+
+.syn-badge[data-tone='accent'] {
+  border-color: color-mix(in oklab, var(--color-fd-primary) 30%, transparent);
+  background: color-mix(in oklab, var(--color-fd-primary) 12%, transparent);
+  color: var(--color-fd-primary);
+}
+
+.syn-badge[data-tone='success'] {
+  border-color: color-mix(in oklab, var(--color-fd-success) 30%, transparent);
+  background: color-mix(in oklab, var(--color-fd-success) 12%, transparent);
+  color: var(--color-fd-success);
+}
+
+.syn-badge[data-tone='solid'] {
+  border-color: transparent;
+  background: var(--color-fd-primary);
+  color: var(--color-fd-primary-foreground);
+  font-weight: 600;
+}
+
+.dark .syn-badge {
+  border-color: var(--sky-color-border-muted);
+  background: var(--sky-color-neutral-soft);
+  color: var(--sky-color-text-code);
+}
+
+.dark .syn-badge[data-tone='accent'] {
+  border-color: var(--sky-color-accent-ring);
+  background: var(--sky-color-accent-soft);
+  color: var(--sky-color-accent-soft-fg);
+}
+
+.dark .syn-badge[data-tone='success'] {
+  border-color: color-mix(in oklab, var(--ds-color-success) 30%, transparent);
+  background: var(--sky-color-success-soft);
+  color: var(--sky-color-success-soft-fg);
+}
+
+.dark .syn-badge[data-tone='solid'] {
+  background: var(--sky-color-accent-solid);
+  color: var(--sky-color-accent-solid-contrast);
+}
+
+/* ── Buttons (GradientButton, LLM actions) ────────────────────────────── */
+.syn-button-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 24px 0;
+}
+
+.syn-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--sky-size-control-lg);
+  padding: 0 16px;
+  border-radius: var(--sky-radius-control);
+  border: 1px solid transparent;
+  font-size: var(--sky-text-control);
+  font-weight: 600;
+  text-decoration: none;
+  transition: transform var(--sky-dur-1) ease, box-shadow var(--sky-dur-1) ease,
+    background-color var(--sky-dur-1) ease, border-color var(--sky-dur-1) ease;
+}
+
+.syn-button svg {
+  width: 16px;
+  height: 16px;
+}
+
+.syn-button[data-variant='solid'] {
+  background: var(--color-fd-primary);
+  color: var(--color-fd-primary-foreground);
+}
+
+.syn-button[data-variant='control'] {
+  border-color: var(--color-fd-border);
+  background: var(--color-fd-secondary);
+  color: var(--color-fd-secondary-foreground);
+}
+
+.syn-button[data-variant='outline'] {
+  border-color: var(--color-fd-border);
+  color: var(--color-fd-foreground);
+}
+
+.syn-button:hover {
+  border-color: color-mix(in oklab, var(--color-fd-primary) 40%, transparent);
+}
+
+.syn-button[data-variant='solid']:hover {
+  transform: translateY(-1px);
+}
+
+.syn-button:focus-visible,
+.syn-llm-action:focus-visible {
+  outline: var(--sky-focus-ring-width) solid var(--color-fd-ring);
+  outline-offset: var(--sky-focus-ring-offset);
+}
+
+.dark .syn-button[data-variant='solid'] {
+  background: var(--sky-color-accent-solid);
+  color: var(--sky-color-accent-solid-contrast);
+  box-shadow: var(--sky-shadow-glow);
+}
+
+.dark .syn-button[data-variant='solid']:hover {
+  box-shadow: var(--sky-shadow-glow), var(--sky-glow-accent);
+}
+
+.dark .syn-button[data-variant='control'] {
+  border-color: var(--sky-color-border-strong);
+  background: var(--sky-color-control);
+  box-shadow: var(--sky-shadow-raised);
+  color: var(--ds-color-fg);
+}
+
+.dark .syn-button[data-variant='outline'] {
+  border-color: var(--sky-color-border-strong);
+  color: var(--ds-color-fg);
+}
+
+.dark .syn-button[data-variant='control']:hover,
+.dark .syn-button[data-variant='outline']:hover {
+  border-color: var(--sky-color-border-hover);
+  background: var(--sky-color-control-hover);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .syn-button[data-variant='solid']:hover {
+    transform: none;
+  }
+}
+
+.syn-llm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.syn-llm-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--sky-size-control-sm);
+  padding: 0 12px;
+  border-radius: var(--ds-radius-md);
+  border: 1px solid transparent;
+  color: var(--color-fd-muted-foreground);
+  font-size: var(--ds-text-xs);
+  font-weight: 500;
+  text-decoration: none;
+  transition: color var(--sky-duration-fast) ease, background-color var(--sky-duration-fast) ease,
+    border-color var(--sky-duration-fast) ease;
+}
+
+.syn-llm-action svg {
+  width: 14px;
+  height: 14px;
+}
+
+.syn-llm-action:hover {
+  color: var(--color-fd-primary);
+}
+
+.syn-llm-action[data-variant='control'] {
+  border-color: var(--color-fd-border);
+}
+
+.syn-llm-action[data-variant='control']:hover {
+  border-color: color-mix(in oklab, var(--color-fd-primary) 30%, transparent);
+  color: var(--color-fd-foreground);
+}
+
+.syn-llm-action[data-state='copied'] svg {
+  color: var(--color-fd-success);
+}
+
+.dark .syn-llm-action[data-variant='control'] {
+  border-color: var(--sky-color-border-strong);
+  background: var(--sky-color-control);
+  box-shadow: var(--sky-shadow-raised);
+  color: var(--ds-color-text-muted);
+}
+
+.dark .syn-llm-action[data-variant='control']:hover {
+  border-color: var(--sky-color-border-hover);
+  background: var(--sky-color-control-hover);
+  color: var(--ds-color-fg);
+}
+
+.dark .syn-llm-action:hover {
+  color: var(--ds-color-fg);
+}
+
+.dark .syn-llm-action[data-state='copied'] svg {
+  color: var(--sky-color-success-soft-fg);
+}
+
+/* ── Copy tooltip (HeadingCopyLinks) ──────────────────────────────────── */
+.syn-copy-tooltip {
+  position: fixed;
+  z-index: 9999;
+  padding: 4px 12px;
+  border-radius: var(--ds-radius-sm);
+  border: 1px solid color-mix(in oklab, var(--color-fd-primary) 25%, transparent);
+  background: var(--color-fd-popover);
+  color: var(--color-fd-primary);
+  font-size: var(--ds-text-xs);
+  font-weight: 500;
+  white-space: nowrap;
+  pointer-events: none;
+  transition: opacity 0.15s;
+}
+
+.dark .syn-copy-tooltip {
+  border-color: var(--sky-color-border-strong);
+  background: var(--ds-color-surface-raised);
+  box-shadow: var(--sky-shadow-overlay);
+  color: var(--sky-color-accent-soft-fg);
+}

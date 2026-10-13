@@ -232,7 +232,8 @@ needs_just = pytest.mark.skipif(JUST is None, reason="`just` is not installed")
 def test_real_chain_a_failed_prerequisite_prints_not_run(tmp_path: Path, allow: str | None) -> None:
     env = {"PYTHON_EXIT": "72"} | ({"SYN_ALLOW_FITNESS_NOT_RUN": allow} if allow else {})
     run_ = run_real_just(tmp_path, env)
-    assert "recipe `check-untyped-dicts` failed" in run_.output, run_.output
+    # just <= 1.50 says "Recipe", >= 1.51 says "recipe" (PC-135); CI's just is unpinned.
+    assert "recipe `check-untyped-dicts` failed" in run_.output.lower(), run_.output
     assert run_.code == 72, run_.output
     assert f"{NOT_RUN} a fitness-check prerequisite failed (exit 72)" in run_.output
 

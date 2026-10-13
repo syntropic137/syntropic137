@@ -1,0 +1,37 @@
+{
+  "name": "syn-ui",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Skyline: the Svelte 5 UI for Syntropic137 (rebuild of apps/syn-dashboard-ui).",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:fixtures": "VITE_SYN_FIXTURES=1 vite",
+    "build": "pnpm --filter 'syn-ui...' run typecheck && vite build && node scripts/size-budget.mjs",
+    "build:fixtures": "pnpm --filter 'syn-ui...' run typecheck && VITE_SYN_FIXTURES=1 vite build && node scripts/size-budget.mjs",
+    "typecheck": "svelte-check --tsconfig ./tsconfig.json --threshold error",
+    "preview": "vite preview",
+    "check": "svelte-check --tsconfig ./tsconfig.json --fail-on-warnings && node ../../packages/syn-ui/scripts/check-css.mjs src",
+    "test": "vitest run",
+    "size": "node scripts/size-budget.mjs"
+  },
+  "dependencies": {
+    "@lucide/svelte": "1.52.0",
+    "@syn137/skyline-core": "workspace:*",
+    "@syn137/skyline-svelte-v5": "workspace:*",
+    "@syn137/skyline-themes": "workspace:*",
+    "@syn137/syn-ui-data": "workspace:*"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.59.0",
+    "@sveltejs/vite-plugin-svelte": "6.2.4",
+    "@types/node": "24.10.1",
+    "html2canvas-pro": "2.4.3",
+    "jsdom": "30.1.1",
+    "svelte": "5.57.1",
+    "svelte-check": "4.7.6",
+    "typescript": "5.9.3",
+    "vite": "7.3.6",
+    "vitest": "4.1.11"
+  }
+}

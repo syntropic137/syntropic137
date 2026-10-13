@@ -1,0 +1,25 @@
+<!doctype html>
+<!-- X (Twitter) profile header, 1500 x 500. Text and the install command sit in the upper left, clear of the avatar
+     (X places it over the lower-left corner) and of the mobile top/bottom crop. Render with render.sh. -->
+<meta charset="utf-8">
+<style>
+@font-face{font-family:Orbitron;src:url(../../../apps/syn-landing/public/fonts/orbitron-latin.woff2) format("woff2");font-weight:400 900}
+@font-face{font-family:"JetBrains Mono";src:url(../../../apps/syn-landing/public/fonts/jetbrains-mono-latin.woff2) format("woff2");font-weight:400 800}
+@font-face{font-family:"Instrument Sans";src:url(../../../apps/syn-landing/public/fonts/instrument-sans-latin.woff2) format("woff2");font-weight:400 700}
+*{margin:0;box-sizing:border-box}
+html,body{width:1500px;height:500px;background:#0A0C14;overflow:hidden}
+.card{position:relative;width:1500px;height:500px;overflow:hidden;background:#0A0C14;color:#E8EEFB;font-family:"Instrument Sans",sans-serif}
+.render{position:absolute;right:-150px;top:-70px;height:740px}
+.fade{position:absolute;inset:0;background:linear-gradient(90deg,#0A0C14 0%,#0A0C14 30%,rgba(10,12,20,.7) 46%,rgba(10,12,20,0) 66%)}
+.copy{position:absolute;left:96px;top:62px}
+.wm{font-family:Orbitron;font-weight:600;letter-spacing:.01em;line-height:1;font-size:78px}
+.wm b{color:#4D80FF;font-weight:600}
+.tag{font-size:34px;color:#B7C3DD;letter-spacing:-.01em;margin-top:18px}
+.cmd{font-family:"JetBrains Mono";font-weight:500;font-size:22px;color:#C9D4EC;margin-top:26px;display:inline-flex;gap:12px;padding:11px 17px;border:1px solid rgba(120,150,220,.28);border-radius:12px;background:rgba(20,26,44,.6)}
+.cmd i{color:#4D80FF;font-style:normal}
+</style>
+<div class="card">
+  <img class="render" src="hero-1920.jpg" alt="">
+  <div class="fade"></div>
+  <div class="copy"><div class="wm">Syntropic<b>137</b></div><div class="tag">Agent work that compounds.</div><div><div class="cmd"><i>$</i>npx @syntropic137/setup init</div></div></div>
+</div>

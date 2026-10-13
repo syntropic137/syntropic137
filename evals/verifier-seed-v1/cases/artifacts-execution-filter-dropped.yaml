@@ -13,6 +13,14 @@ task: >
   accepts and the fields of each row. Phases use it to find the deliverable a
   specific run wrote.
 expected:
+  # The root cause, for the LLM judge only; never part of `task`.
+  defect: >
+    GET /api/v1/artifacts declares no execution_id query parameter, and
+    FastAPI silently drops unknown query parameters, so filtering by a run's
+    id returns the same unfiltered page as no filter; the rows also carry no
+    execution_id, so a client cannot filter or detect the ignored filter
+    itself. A phase asking for one run's deliverable gets whatever any run
+    wrote most recently.
   files:
     - apps/syn-api/src/syn_api/routes/artifacts.py
   keywords:

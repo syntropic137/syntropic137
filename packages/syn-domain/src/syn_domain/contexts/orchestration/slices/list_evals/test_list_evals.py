@@ -208,6 +208,7 @@ async def _replayed(stream: _Stream, *, times: int) -> EvalListProjection:
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
+    from syn_domain.pagination import ProjectionRecord
     from syn_domain.projection_count import GroupKey
 
 
@@ -260,6 +261,21 @@ class TestReplay:
         assert members["run-attached"].association_kind == "attached"
         assert detail.runs.total == 2
         assert detail.runs.status_counts == {"failed": 1, "running": 1}
+
+    async def test_members_of_many_evals_is_what_members_answers_for_each(self) -> None:
+        """The eval list reads every eval's runs in one query (#1811), the same rows."""
+        evals = await _replayed(await _fixture(), times=1)
+        ids = [str(_EVAL), str(_OTHER), "eval-never-created"]
+
+        many = await evals.members_of(ids)
+
+        assert set(many) == set(ids)
+        for eval_id in ids:
+            one = await evals.members(eval_id)
+            assert sorted(r.workflow_execution_id for r in many[eval_id]) == sorted(
+                r.workflow_execution_id for r in one.rows
+            )
+        assert many["eval-never-created"] == []
 
     async def test_eval_list_counts_runs_by_status(self) -> None:
         evals = await _replayed(await _fixture(), times=1)
@@ -348,3 +364,146 @@ class TestQueries:
         assert (await evals.page(tags=["nightly"])).total == 1
         assert (await evals.page(search="v2")).total == 1
         assert await evals.detail("eval-missing") is None
+
+
+class TestDefinitionChanges:
+    """#1788: an eval's goal and baseline edits are dated, so a trend chart can mark them."""
+
+    @staticmethod
+    async def _stream() -> _Stream:
+        stream = _Stream()
+        await stream.create_eval(_EVAL, "Refactor quality", [])
+        await stream.on_eval(_EVAL, "rename")
+        aggregate = await stream.evals.get_by_id(str(_EVAL))
+        assert aggregate is not None
+        aggregate.update(UpdateEvalCommand(eval_id=_EVAL, goal=Goal("A sharper goal")))
+        await stream.evals.save(aggregate)
+        return stream
+
+    async def test_a_goal_edit_is_a_new_version_and_a_rename_is_not(self) -> None:
+        evals = await _replayed(await self._stream(), times=1)
+
+        record = await evals.record(str(_EVAL))
+
+        assert record is not None
+        versions = [c.definition_version for c in record.definition_changes]
+        assert versions == [1, 2]
+        assert record.definition_changes[0].changed_at == record.created_at
+        assert record.definition_changes[-1].changed_at == record.updated_at
+
+    async def test_replaying_twice_counts_each_change_once(self) -> None:
+        stream = await self._stream()
+
+        once = await (await _replayed(stream, times=1)).record(str(_EVAL))
+        twice = await (await _replayed(stream, times=2)).record(str(_EVAL))
+
+        assert once is not None and twice is not None
+        assert once.definition_changes == twice.definition_changes
+
+    async def test_two_goal_edits_in_the_same_millisecond_are_two_changes(self) -> None:
+        """Identity is the stream position: edits committed together share a time (#1800)."""
+        from datetime import UTC, datetime
+
+        instant = datetime(2026, 10, 2, 12, 0, 0, 123000, tzinfo=UTC)
+
+        class _Frozen(datetime):
+            @classmethod
+            def now(cls, tz: object = None) -> datetime:  # noqa: ARG003
+                return instant
+
+        stream = _Stream()
+        await stream.create_eval(_EVAL, "Refactor quality", [])
+        aggregate = await stream.evals.get_by_id(str(_EVAL))
+        assert aggregate is not None
+        with patch(f"{EvalAggregate.__module__}.datetime", _Frozen):
+            aggregate.update(UpdateEvalCommand(eval_id=_EVAL, goal=Goal("Goal two")))
+            aggregate.update(UpdateEvalCommand(eval_id=_EVAL, goal=Goal("Goal three")))
+        await stream.evals.save(aggregate)
+
+        record = await (await _replayed(stream, times=2)).record(str(_EVAL))
+
+        assert record is not None
+        assert [c.definition_version for c in record.definition_changes] == [1, 2, 3]
+        assert record.definition_changes[1].changed_at == record.definition_changes[2].changed_at
+        assert [c.sequence for c in record.definition_changes] == sorted(
+            {c.sequence for c in record.definition_changes}
+        )
+
+
+async def test_scores_in_many_evals_is_what_scores_answers_for_each() -> None:
+    """One read for every eval on a list page (#1811), keyed by (eval, execution)."""
+    from syn_domain.contexts.orchestration.domain.read_models.eval_runs import EvalRunScore
+
+    store = InMemoryProjectionStore()
+    evals = EvalListProjection(store)
+    for eval_id, execution_id in [("e1", "x1"), ("e1", "x2"), ("e2", "x1"), ("e3", "x9")]:
+        score = EvalRunScore(
+            eval_id=eval_id,
+            execution_id=execution_id,
+            verdict="PASS",
+            scorer="t",
+            scorer_version="1",
+            scored_at="2026-10-08T00:00:00Z",
+        )
+        await store.save(EvalListProjection.SCORES, f"{eval_id}/{execution_id}", score.model_dump())
+
+    many = await evals.scores_in(["e1", "e2"])
+
+    assert set(many) == {("e1", "x1"), ("e1", "x2"), ("e2", "x1")}
+    for eval_id in ("e1", "e2"):
+        one = await evals.scores(eval_id)
+        assert {k[1]: v for k, v in many.items() if k[0] == eval_id} == one
+    assert await evals.scores_in([]) == {}
+
+
+def test_an_eval_definition_change_rejects_an_unknown_field() -> None:
+    """Stored documents are validated strictly (#1800 review nit)."""
+    from pydantic import ValidationError
+
+    from syn_domain.contexts.orchestration.domain.read_models.eval_summary import (
+        EvalDefinitionChange,
+    )
+
+    with pytest.raises(ValidationError):
+        EvalDefinitionChange.model_validate(
+            {"sequence": 1, "definition_version": 1, "changed_at": "2026-10-01T00:00:00Z", "x": 1}
+        )
+
+
+class _NewestWriteFirst(InMemoryProjectionStore):
+    """``get_all`` in ``updated_at DESC`` order, as Postgres reads it: a write moves a row first.
+
+    Not a ``ProjectionPager``, so ``page`` takes the Python fallback.
+    """
+
+    async def save(self, projection: str, key: str, data: ProjectionRecord) -> None:
+        await super().save(projection, key, dict(data))
+        rows = self._data[projection]  # pyright: ignore[reportPrivateUsage]  # the double's own state
+        written = rows.pop(key)
+        self._data[projection] = {key: written, **rows}  # pyright: ignore[reportPrivateUsage]
+
+
+async def test_tied_evals_rewritten_between_pages_neither_repeat_nor_vanish() -> None:
+    """Equal ``created_at``, page size 1, B rewritten between requests: A then B (#1800 review).
+
+    The fallback broke the tie by ``get_all`` order, which a write changes, so
+    page 2 was A again; the key is immutable.
+    """
+    from syn_domain.contexts.orchestration.domain.read_models.eval_summary import EvalRecord
+
+    store = _NewestWriteFirst()
+    evals = EvalListProjection(store)
+    created = "2026-10-01T00:00:00+00:00"
+    for eval_id in ("eval-a", "eval-b"):
+        record = EvalRecord(eval_id=eval_id, name=eval_id, goal="g", created_at=created)
+        await store.save(
+            EvalListProjection.PROJECTION_NAME, eval_id, record.model_dump(mode="json")
+        )
+
+    page_1 = await evals.page(offset=0, limit=1)
+    renamed = EvalRecord(eval_id="eval-b", name="renamed", goal="g", created_at=created)
+    await store.save(EvalListProjection.PROJECTION_NAME, "eval-b", renamed.model_dump(mode="json"))
+    page_2 = await evals.page(offset=1, limit=1)
+
+    assert [row.record.eval_id for row in page_1.rows] == ["eval-a"]
+    assert [row.record.eval_id for row in page_2.rows] == ["eval-b"]

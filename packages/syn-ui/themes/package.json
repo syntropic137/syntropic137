@@ -1,0 +1,24 @@
+{
+  "name": "@syn137/skyline-themes",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Skyline design tokens and themes. CSS only; the only place colour values live.",
+  "type": "module",
+  "sideEffects": ["*.css"],
+  "exports": {
+    "./tokens.css": "./src/tokens.css",
+    "./skyline.css": "./src/skyline.css",
+    "./syn137.css": "./src/syn137.css",
+    "./all.css": "./src/all.css",
+    "./motion.css": "./src/motion.css"
+  },
+  "files": ["src"],
+  "scripts": {
+    "check": "node ../scripts/check-themes.mjs && node ../scripts/check-motion.mjs && node ../scripts/check-token-usage.mjs",
+    "build": "node ../scripts/check-themes.mjs && node ../scripts/check-motion.mjs",
+    "test": "node ../scripts/check-themes.mjs && node ../scripts/check-motion.mjs && node ../scripts/check-token-usage.mjs"
+  },
+  "dependencies": {
+    "@syntropic137/design-tokens": "0.1.1"
+  }
+}

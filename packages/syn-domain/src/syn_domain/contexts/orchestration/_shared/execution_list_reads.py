@@ -16,9 +16,10 @@ from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_sum
 )
 from syn_domain.projection_count import count_by
 from syn_domain.projection_page import PageQuery, StatusOf, page_projection
+from syn_domain.projection_scan import read_by_keys
 
 if TYPE_CHECKING:
-    from collections.abc import Collection
+    from collections.abc import Collection, Sequence
     from datetime import datetime
 
     from event_sourcing import ProjectionStore
@@ -46,6 +47,7 @@ class ExecutionListReads:
         tags: Collection[str] | None = None,
         eval_id: str | None = None,
         in_eval: bool | None = None,
+        workflow_id: str | None = None,
         offset: int = 0,
         limit: int | None = None,
     ) -> Page[WorkflowExecutionSummary]:
@@ -71,11 +73,17 @@ class ExecutionListReads:
 
         `in_eval` keeps only executions in some Eval (`True`) or in none
         (`False`), so eval runs can be shown apart from every other run.
+
+        `workflow_id` keeps only that workflow's executions, applied in the
+        query like `eval_id` (#1788: the workflow trend).
         """
+        equals: dict[str, str] = {} if eval_id is None else {"eval_id": eval_id}
+        if workflow_id is not None:
+            equals["workflow_id"] = workflow_id
         query = PageQuery(
             status=StatusOf.text("status"),
             timestamp_field="started_at",
-            equals={} if eval_id is None else {"eval_id": eval_id},
+            equals=equals,
             present={} if in_eval is None else {"eval_id": in_eval},
             contains_all={"tags": frozenset(tags or ())},
             search=search,
@@ -85,6 +93,7 @@ class ExecutionListReads:
             before=started_before,
             offset=offset,
             limit=limit,
+            key_field="workflow_execution_id",
         )
         return await page_projection(
             self._store,
@@ -99,6 +108,38 @@ class ExecutionListReads:
         if data:
             return WorkflowExecutionSummary.from_dict(data)
         return None
+
+    async def by_ids(self, execution_ids: Sequence[str]) -> dict[str, WorkflowExecutionSummary]:
+        """The rows of ``execution_ids`` the list has projected, in one keyed read.
+
+        A primary-key read (``read_by_keys``), never a JSON filter, so it costs
+        the ids asked for and not the size of the list.
+        """
+        documents = await read_by_keys(self._store, WORKFLOW_EXECUTIONS, execution_ids)
+        return {
+            key: WorkflowExecutionSummary.from_dict(dict(document))
+            for key, document in documents.items()
+        }
+
+    async def members_of(
+        self, eval_ids: Collection[str]
+    ) -> dict[str, list[WorkflowExecutionSummary]]:
+        """Each Eval's current member executions, in one read, unordered (#1811).
+
+        Every id given gets an entry, empty when it has no members. The same
+        rows ``page(eval_id=...)`` pages for each id, without a query per Eval.
+        """
+        members: dict[str, list[WorkflowExecutionSummary]] = {eval_id: [] for eval_id in eval_ids}
+        if not members:
+            return members
+        documents = await self._store.query(
+            WORKFLOW_EXECUTIONS, filters={"eval_id": sorted(members)}
+        )
+        for document in documents:
+            row = WorkflowExecutionSummary.from_dict(dict(document))
+            if row.eval_id is not None and row.eval_id in members:
+                members[row.eval_id].append(row)
+        return members
 
     async def run_tallies(self, eval_ids: Collection[str]) -> dict[str, dict[str, int]]:
         """Each Eval's current member executions tallied by status, in one read.

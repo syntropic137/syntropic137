@@ -6,7 +6,7 @@ from decimal import Decimal
 from enum import StrEnum
 from typing import Any
 
-from syn_shared.pricing import canonical_cost_usd
+from syn_shared.pricing import CostSplitBasis, TokenTypeCost, canonical_cost_usd
 
 
 class CostField(StrEnum):
@@ -85,6 +85,28 @@ def _coerce_cost_fields(raw: object) -> frozenset[CostField]:
     if not isinstance(raw, (list, tuple, set, frozenset)):
         return frozenset(CostField)
     return frozenset(CostField(name) for name in raw if name in set(CostField))
+
+
+def _coerce_token_type_cost(raw: object) -> TokenTypeCost | None:
+    """Read a stored split back; anything unreadable is "not split", not zero."""
+    if not isinstance(raw, dict):
+        return None
+    try:
+        return TokenTypeCost(
+            input_usd=Decimal(str(raw["input_usd"])),
+            output_usd=Decimal(str(raw["output_usd"])),
+            cache_creation_usd=Decimal(str(raw["cache_creation_usd"])),
+            cache_read_usd=Decimal(str(raw["cache_read_usd"])),
+        )
+    except (KeyError, ArithmeticError):
+        return None
+
+
+def _coerce_split_basis(raw: object) -> CostSplitBasis | None:
+    try:
+        return CostSplitBasis(raw) if raw is not None else None
+    except ValueError:
+        return None
 
 
 def _canonical_map(raw: dict[str, Decimal]) -> dict[str, Decimal]:
@@ -192,6 +214,18 @@ class SessionCost:
     total is incomplete, not confidently wrong.
     """
 
+    cost_by_token_type: TokenTypeCost | None = None
+    """``total_cost_usd`` split by token type, or None when it was not split.
+
+    None, never four zeroes, when a read path did not compute it or some
+    priced part of the session had nothing to split it by (a reported total
+    for a model with no rate). A partial split would not sum to the total.
+    Unpriced work is in neither, the same as ``cost_by_model``.
+    """
+
+    cost_by_token_type_basis: CostSplitBasis | None = None
+    """How ``cost_by_token_type`` was arrived at; None exactly when it is None."""
+
     unmeasured_fields: frozenset[CostField] = field(default_factory=lambda: frozenset(CostField))
     """Fields whose value on this record was never measured, only defaulted.
 
@@ -231,6 +265,8 @@ class SessionCost:
         self.cost_by_model = _canonical_map(self.cost_by_model)
         self.cost_by_tool = _canonical_map(self.cost_by_tool)
         self.cost_by_tool_tokens = _canonical_map(self.cost_by_tool_tokens)
+        if self.cost_by_token_type is not None:
+            self.cost_by_token_type = self.cost_by_token_type.canonical()
 
     def record_measured(self, cost_field: CostField) -> None:
         """Declare that this record's value for *cost_field* was really computed.
@@ -286,6 +322,8 @@ class SessionCost:
             tokens_by_model=dict(data.get("tokens_by_model") or {}),
             tokens_by_requested_model=dict(data.get("tokens_by_requested_model") or {}),
             unpriced_observation_count=data.get("unpriced_observation_count", 0),
+            cost_by_token_type=_coerce_token_type_cost(data.get("cost_by_token_type")),
+            cost_by_token_type_basis=_coerce_split_basis(data.get("cost_by_token_type_basis")),
             unmeasured_fields=_coerce_cost_fields(data.get("unmeasured_fields")),
             started_at=_coerce_datetime(data.get("started_at")),
             completed_at=_coerce_datetime(data.get("completed_at")),
@@ -320,6 +358,17 @@ class SessionCost:
             "tokens_by_model": dict(self.tokens_by_model),
             "tokens_by_requested_model": dict(self.tokens_by_requested_model),
             "unpriced_observation_count": self.unpriced_observation_count,
+            "cost_by_token_type": (
+                {
+                    "input_usd": str(self.cost_by_token_type.input_usd),
+                    "output_usd": str(self.cost_by_token_type.output_usd),
+                    "cache_creation_usd": str(self.cost_by_token_type.cache_creation_usd),
+                    "cache_read_usd": str(self.cost_by_token_type.cache_read_usd),
+                }
+                if self.cost_by_token_type is not None
+                else None
+            ),
+            "cost_by_token_type_basis": self.cost_by_token_type_basis,
             "unmeasured_fields": sorted(self.unmeasured_fields),
             "started_at": self.started_at.isoformat() if self.started_at else None,
             "completed_at": self.completed_at.isoformat() if self.completed_at else None,

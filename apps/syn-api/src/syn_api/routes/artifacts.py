@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, HTTPException, Query, Response, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
@@ -36,6 +36,11 @@ from syn_api.types import (
     Result,
 )
 from syn_domain.pagination import Page
+
+if TYPE_CHECKING:
+    from syn_domain.contexts.artifacts.domain.read_models.artifact_summary import (
+        ArtifactSummary as DomainArtifactSummary,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -144,6 +149,55 @@ class ArtifactResponse(BaseModel):
 # =============================================================================
 
 
+def _summary_from_domain(a: DomainArtifactSummary) -> ArtifactSummary:
+    """One projected artifact row as the API's summary DTO.
+
+    One mapping for every read that returns summaries, so the list and the
+    per-phase latest output cannot disagree about a field.
+    """
+    return ArtifactSummary(
+        id=a.id,
+        workflow_id=a.workflow_id,
+        execution_id=a.execution_id,
+        phase_id=a.phase_id,
+        artifact_type=a.artifact_type,
+        title=a.name,
+        size_bytes=a.size_bytes,
+        created_at=datetime.fromisoformat(a.created_at)
+        if isinstance(a.created_at, str)
+        else a.created_at,
+        # Named here or the list answers null for an artifact whose detail
+        # answers correctly - see the comment on excluded_undated in
+        # list_artifacts, which is this same hop (#1284).
+        agent_provider=a.agent_provider,
+        agent_model=observed_model_of(a.agent_model, None).observed,
+    )
+
+
+async def latest_phase_outputs(
+    workflow_id: str, phase_ids: list[str]
+) -> Result[dict[str, ArtifactSummary | None], ArtifactError]:
+    """Each phase's newest primary deliverable for one workflow.
+
+    Keyed by phase id, every requested phase present: ``None`` is the answer
+    "this phase has produced no output yet", which a missing key could not
+    tell apart from a phase nobody asked about.
+
+    One store read for the whole workflow, not one (or several) per phase.
+    """
+    await ensure_connected()
+    try:
+        found = await get_projection_mgr().artifact_list.latest_deliverables(workflow_id, phase_ids)
+    except Exception as e:
+        return Err(ArtifactError.STORAGE_ERROR, message=str(e))
+    return Ok(
+        {
+            phase_id: _summary_from_domain(row) if (row := found.get(phase_id)) else None
+            for phase_id in phase_ids
+        }
+    )
+
+
 async def list_artifacts(
     workflow_id: str | None = None,
     execution_id: str | None = None,
@@ -209,26 +263,7 @@ async def list_artifacts(
         )
         return Ok(
             Page(
-                rows=[
-                    ArtifactSummary(
-                        id=a.id,
-                        workflow_id=a.workflow_id,
-                        execution_id=a.execution_id,
-                        phase_id=a.phase_id,
-                        artifact_type=a.artifact_type,
-                        title=a.name,
-                        size_bytes=a.size_bytes,
-                        created_at=datetime.fromisoformat(a.created_at)
-                        if isinstance(a.created_at, str)
-                        else a.created_at,
-                        # Named here or the list answers null for an artifact
-                        # whose detail answers correctly - see the comment on
-                        # excluded_undated below, which is this same hop (#1284).
-                        agent_provider=a.agent_provider,
-                        agent_model=observed_model_of(a.agent_model, None).observed,
-                    )
-                    for a in domain_page.rows
-                ],
+                rows=[_summary_from_domain(a) for a in domain_page.rows],
                 total=domain_page.total,
                 status_counts=domain_page.status_counts,
                 # Rebuilding the page here re-states every field, so a new one
@@ -600,7 +635,7 @@ _MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 # =============================================================================
 
 
-def _to_artifact_summary_response(a: ArtifactSummary) -> ArtifactSummaryResponse:
+def to_artifact_summary_response(a: ArtifactSummary) -> ArtifactSummaryResponse:
     """Convert an ArtifactSummary to its API response model."""
     return ArtifactSummaryResponse(
         id=a.id,
@@ -678,7 +713,7 @@ async def list_artifacts_endpoint(
 
     artifact_page = result.value
     return ArtifactListResponse(
-        artifacts=[_to_artifact_summary_response(a) for a in artifact_page.rows],
+        artifacts=[to_artifact_summary_response(a) for a in artifact_page.rows],
         # The filtered COLLECTION, not this page. There was no count at all
         # before, so truncation was undetectable from the response (#1204).
         total=artifact_page.total,

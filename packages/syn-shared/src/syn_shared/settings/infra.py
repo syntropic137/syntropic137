@@ -17,8 +17,19 @@ Environment Variables:
 
 from __future__ import annotations
 
+from enum import StrEnum
+
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class GatewayUI(StrEnum):
+    """Which dashboard the gateway serves at ``/`` (docs/syn-ui-rollout.md)."""
+
+    NEXT = "next"
+    """syn-ui (apps/syn-ui) at /; /next redirects to /."""
+    LEGACY = "legacy"
+    """One-release opt-out: the React dashboard at /, syn-ui at /next."""
 
 
 class InfraSettings(BaseSettings):
@@ -270,6 +281,17 @@ class InfraSettings(BaseSettings):
             " address outside 127.0.0.0/8 and ::1 exposes the dashboard and API"
             " to that network, so the gateway requires SYN_API_PASSWORD and"
             " refuses to start without one."
+        ),
+    )
+
+    syn_gateway_ui: GatewayUI = Field(
+        default=GatewayUI.NEXT,
+        description=(
+            "Dashboard the gateway serves at /. 'next' (default) serves the"
+            " Svelte dashboard (apps/syn-ui); /next redirects to / for old"
+            " bookmarks. 'legacy' is a one-release opt-out that restores the"
+            " previous layout: the React dashboard at / and the Svelte one at"
+            " /next. Any other value stops the gateway from starting."
         ),
     )
 

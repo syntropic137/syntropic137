@@ -2,7 +2,14 @@
 @import 'fumadocs-ui/css/neutral.css';
 @import 'fumadocs-ui/css/preset.css';
 
-/* Syntropic137 — Landing page design system, Fumadocs v16 --color-fd-* variables */
+/* Skyline tokens (--ds-*, --sky-*). <html data-theme="syn137"> in app/layout.tsx
+   puts the syn137 palette in scope; the .dark block below maps Fumadocs onto it. */
+@import '@syn137/skyline-themes/all.css';
+@import './docs-brand.css';
+@import './components.css';
+
+/* Fumadocs v16 --color-fd-* variables.
+   Light mode keeps the docs' own values: Skyline is dark only for v1. */
 @theme {
   /* Light mode */
   --color-fd-background: #f5f7ff;
@@ -21,31 +28,53 @@
   --color-fd-accent: #3366e6;
   --color-fd-accent-foreground: #ffffff;
   --color-fd-ring: rgba(77, 128, 255, 0.4);
+
+  /* Type and radii follow Skyline in both modes (no colour in them).
+     next/font loads the faces under hashed names; the Skyline stacks follow. */
+  --font-sans: var(--font-instrument), var(--ds-font-sans);
+  --font-mono: var(--font-jetbrains), var(--ds-font-mono);
+  --font-brand: var(--font-orbitron), var(--sky-font-brand);
+  --radius-lg: var(--ds-radius-md);
+  --radius-xl: var(--sky-radius-row);
+  --radius-2xl: var(--sky-radius-xl);
 }
 
+/* Dark mode: Skyline syn137. */
 .dark {
-  /* Dark mode — exact landing page palette */
-  --color-fd-background: #0f0f1a;   /* --color-bg / --color-base */
-  --color-fd-foreground: #e6f2ff;   /* --color-apex / --color-text-primary */
-  --color-fd-muted: #131320;
-  --color-fd-muted-foreground: rgba(230, 242, 255, 0.55);
-  --color-fd-popover: #14142a;
-  --color-fd-popover-foreground: #e6f2ff;
-  --color-fd-card: #13131f;
-  --color-fd-card-foreground: #e6f2ff;
-  --color-fd-border: rgba(77, 128, 255, 0.15);
-  --color-fd-primary: #4d80ff;      /* --color-accent-primary */
-  --color-fd-primary-foreground: #0f0f1a;
-  --color-fd-secondary: #1a1a2e;
-  --color-fd-secondary-foreground: #e6f2ff;
-  --color-fd-accent: #3366e6;       /* --color-accent-secondary */
-  --color-fd-accent-foreground: #e6f2ff;
-  --color-fd-ring: rgba(77, 128, 255, 0.4);
+  --color-fd-background: var(--ds-color-bg);
+  --color-fd-foreground: var(--ds-color-fg);
+  --color-fd-muted: var(--ds-color-surface);
+  --color-fd-muted-foreground: var(--ds-color-text-muted);
+  --color-fd-popover: var(--ds-color-surface-raised);
+  --color-fd-popover-foreground: var(--ds-color-fg);
+  --color-fd-card: var(--ds-color-surface);
+  --color-fd-card-foreground: var(--ds-color-fg);
+  --color-fd-border: var(--ds-color-border);
+  --color-fd-primary: var(--ds-color-accent);
+  --color-fd-primary-foreground: var(--ds-color-accent-contrast);
+  --color-fd-secondary: var(--ds-color-surface-raised);
+  --color-fd-secondary-foreground: var(--ds-color-fg);
+  --color-fd-accent: var(--ds-color-overlay);
+  --color-fd-accent-foreground: var(--ds-color-fg);
+  --color-fd-ring: var(--sky-color-focus);
+  --color-fd-overlay: var(--sky-color-scrim);
+  --color-fd-info: var(--ds-color-accent);
+  --color-fd-warning: var(--ds-color-warning);
+  --color-fd-error: var(--ds-color-danger);
+  --color-fd-success: var(--ds-color-success);
+  --color-fd-idea: var(--sky-color-data-2);
+}
+
+/* fumadocs-ui/css/neutral.css greys the sidebar in dark; keep it on Skyline. */
+.dark #nd-sidebar {
+  --color-fd-muted: var(--ds-color-surface);
+  --color-fd-secondary: var(--ds-color-surface-raised);
+  --color-fd-muted-foreground: var(--ds-color-text-muted);
 }
 
 /* Code blocks — JetBrains Mono */
 pre, code {
-  font-family: var(--font-jetbrains), ui-monospace, 'Fira Code', monospace;
+  font-family: var(--font-mono);
 }
 
 /* ── Callouts ───────────────────────────────────────────────────────────
@@ -79,7 +108,7 @@ pre code .line {
 }
 
 pre code .line:hover {
-  background: rgba(77, 128, 255, 0.06);
+  background: color-mix(in oklab, var(--color-fd-primary) 6%, transparent);
   cursor: pointer;
 }
 
@@ -103,7 +132,7 @@ pre code .line:hover .line-copy-icon {
 
 /* Flash animation when a line is copied */
 pre code .line-copied {
-  background: rgba(77, 128, 255, 0.15) !important;
+  background: color-mix(in oklab, var(--color-fd-primary) 15%, transparent) !important;
   transition: background 0s;
 }
 
@@ -126,14 +155,15 @@ article thead th {
 }
 
 .dark article thead th {
-  background: rgba(77, 128, 255, 0.05);
+  background: var(--ds-color-surface);
 }
 
 /* ── Inline code ───────────────────────────────────────────────────── */
 .dark article :not(pre) > code {
-  background: rgba(77, 128, 255, 0.1) !important;
-  border: 1px solid rgba(77, 128, 255, 0.12);
-  border-radius: 4px;
+  background: var(--ds-color-surface-raised) !important;
+  border: 1px solid var(--sky-color-border-muted);
+  border-radius: var(--ds-radius-xs);
+  color: var(--sky-color-text-code);
   padding: 1px 5px;
 }
 
@@ -141,7 +171,7 @@ article thead th {
 
 /* ── Accordion open state ────────────────────────────────────────── */
 .dark [data-state="open"] > button {
-  background: linear-gradient(135deg, rgba(77, 128, 255, 0.08), rgba(51, 102, 230, 0.05));
+  background: var(--sky-color-accent-soft);
 }
 
 /* Scrollbar */
@@ -151,16 +181,16 @@ article thead th {
 }
 
 .dark ::-webkit-scrollbar-track {
-  background: #0f0f1a;
+  background: var(--ds-color-bg);
 }
 
 .dark ::-webkit-scrollbar-thumb {
-  background: rgba(77, 128, 255, 0.2);
+  background: var(--sky-color-border-strong);
   border-radius: 3px;
 }
 
 .dark ::-webkit-scrollbar-thumb:hover {
-  background: rgba(77, 128, 255, 0.35);
+  background: var(--sky-color-border-hover);
 }
 
 /* Heading anchor — show icon on heading hover, make it clickable */
@@ -177,7 +207,7 @@ article :is(h1, h2, h3, h4, h5, h6) > a[href^="#"] {
 article a:not([class]) {
   color: var(--color-fd-primary);
   text-decoration: underline;
-  text-decoration-color: rgba(77, 128, 255, 0.4);
+  text-decoration-color: color-mix(in oklab, var(--color-fd-primary) 40%, transparent);
   text-underline-offset: 3px;
   transition: color 0.15s ease, text-decoration-color 0.15s ease;
 }
@@ -185,4 +215,9 @@ article a:not([class]) {
 article a:not([class]):hover {
   color: #6b9aff;
   text-decoration-color: #6b9aff;
+}
+
+.dark article a:not([class]):hover {
+  color: var(--ds-color-accent-hover);
+  text-decoration-color: var(--ds-color-accent-hover);
 }

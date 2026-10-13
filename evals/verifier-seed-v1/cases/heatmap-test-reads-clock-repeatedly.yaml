@@ -14,6 +14,13 @@ task: >
   and then assert on the contribution heatmap bucket for the day they were
   recorded. The suite has been reported flaky.
 expected:
+  # The root cause, for the LLM judge only; never part of `task`.
+  defect: >
+    The heatmap integration tests call _utc_today() (a fresh
+    datetime.now(UTC)) separately when recording, when building the query
+    window and when asserting the bucket, so a run that crosses UTC midnight
+    records on one day and queries/asserts another, and the test fails
+    spuriously (the reported flake). One day should be read once per test.
   files:
     - packages/syn-domain/tests/integration/test_heatmap_canonical_usage_source.py
   keywords:

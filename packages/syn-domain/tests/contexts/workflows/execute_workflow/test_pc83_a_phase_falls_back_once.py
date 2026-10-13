@@ -225,7 +225,7 @@ class TestTheFallbackRuns:
         )
 
     async def test_a_genuine_error_does_not_run_the_fallback(self) -> None:
-        """Only CAPACITY and QUOTA hand over: a bad login is the phase's answer."""
+        """Only CAPACITY, QUOTA and REFUSAL hand over: a bad login is the phase's answer."""
         fake = FakeAgentExecutionHandler.failed(stream_error=NOT_LOGGED_IN)
         phase = _phase(AgentConfiguration(provider=AgentProvider.CODEX), CLAUDE_FALLBACK)
 

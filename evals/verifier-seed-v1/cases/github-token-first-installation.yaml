@@ -14,6 +14,13 @@ task: >
   repository it is working on. The platform's GitHub App may be installed on
   more than one organisation.
 expected:
+  # The root cause, for the LLM judge only; never part of `task`.
+  defect: >
+    WorkspaceProvisionHandler._resolve_github_app_token mints the injected
+    GITHUB_TOKEN from installations[0] regardless of which repository the
+    phase works on, so when the GitHub App is installed on several
+    organisations the agent gets a token for the wrong installation and
+    cannot read the repo's issues/PRs.
   files:
     - packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/WorkspaceProvisionHandler.py
   keywords:

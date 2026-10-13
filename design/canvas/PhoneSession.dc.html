@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Syn137 session detail on a phone</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Orbitron:wght@500;600;700&display=swap">
+<style>
+:root{--ac:#4D80FF}
+body{margin:0;background:#0A0C14}
+a{color:#E8EEFB}a:hover{color:#FFFFFF}
+button{font-family:inherit}
+:focus-visible{outline:2px solid var(--ac);outline-offset:2px}
+</style>
+</helmet>
+<div style="--ac: {{accent}}; display: flex; flex-direction: column; min-height: 100vh; background: #0A0C14; color: #E8EEFB; font-family: 'Instrument Sans', 'Helvetica Neue', system-ui, sans-serif; font-size: 15px; line-height: 1.45; -webkit-font-smoothing: antialiased">
+
+<dc-import name="PhoneTop" hint-size="100%,68px"></dc-import>
+
+<main style="display: flex; flex-direction: column; gap: 16px; flex-grow: 1; box-sizing: border-box; padding: 0 16px 24px">
+
+<nav aria-label="Breadcrumb" style="display: flex; align-items: center; gap: 2px; min-height: 44px; margin: 0 -8px; font-size: 14px">
+<a href="PhoneOverview.dc.html" aria-label="Overview" style="display: flex; align-items: center; justify-content: center; flex-shrink: 0; width: 40px; height: 44px; color: #9AA8C7"><svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M2.75 7.25L8 2.75l5.25 4.5V13a.5.5 0 0 1-.5.5H9.5V9.75h-3v3.75H3.25a.5.5 0 0 1-.5-.5z"></path></svg></a>
+<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="#6F7FA3" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink: 0; opacity: 0.7"><path d="M6 3.5L10.5 8 6 12.5"></path></svg>
+<button type="button" aria-label="Show the full path" style="display: flex; align-items: center; justify-content: center; flex-shrink: 0; width: 40px; height: 44px; padding: 0; border: 0; background: transparent; color: #9AA8C7; font-size: 16px; letter-spacing: 0.08em; cursor: pointer">…</button>
+<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="#6F7FA3" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink: 0; opacity: 0.7"><path d="M6 3.5L10.5 8 6 12.5"></path></svg>
+<a href="PhoneExecution.dc.html" style="flex: 0 1 auto; min-width: 48px; padding: 0 6px; line-height: 44px; color: #9AA8C7; text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">Execution <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px">6350e65e</span></a>
+<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="#6F7FA3" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink: 0; opacity: 0.7"><path d="M6 3.5L10.5 8 6 12.5"></path></svg>
+<span aria-current="page" style="flex: 0 1 auto; min-width: 48px; padding: 0 6px; line-height: 44px; font-weight: 600; color: #E8EEFB; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">build-and-delegate</span>
+</nav>
+
+<section aria-label="Session" style="display: flex; flex-direction: column; gap: 16px; padding: 20px; border-radius: 24px; border: 1px solid #1A2032; background: radial-gradient(70% 70% at 100% 0%, color-mix(in oklab, var(--ac) 20%, transparent), transparent 70%), #0D101A; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05)">
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px">
+<span style="display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px 0 9px; border-radius: 14px; background: color-mix(in oklab, var(--ac) 18%, transparent); color: color-mix(in oklab, var(--ac) 40%, white); font-weight: 600">
+<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7"></path></svg>
+<span>Completed</span>
+</span>
+<span style="display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 12px; border-radius: 14px; border: 1px solid #283048; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px">
+<span style="width: 7px; height: 7px; border-radius: 50%; background: var(--ac)"></span>
+<span>Codex · gpt-5.6-sol</span>
+</span>
+</div>
+<div style="display: flex; flex-direction: column; gap: 6px">
+<h1 style="margin: 0; font-size: 30px; line-height: 1.1; font-weight: 600; letter-spacing: -0.03em; text-wrap: balance">Codex delegates to Claude</h1>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #6F7FA3; overflow-wrap: anywhere">2fd5ec12-51f0-49a7-862b-391734cfd42d</span>
+</div>
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 20px">
+<div style="display: flex; flex-direction: column; gap: 2px"><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3">Duration</span><span style="font-size: 26px; line-height: 1.1; font-weight: 600; letter-spacing: -0.03em; font-variant-numeric: tabular-nums">57s</span></div>
+<div style="display: flex; flex-direction: column; gap: 2px"><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3">Cost</span><span style="font-size: 26px; line-height: 1.1; font-weight: 600; letter-spacing: -0.03em; font-variant-numeric: tabular-nums">$0.2162</span></div>
+<div style="display: flex; flex-direction: column; gap: 2px"><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3">Tool calls</span><span style="font-size: 26px; line-height: 1.1; font-weight: 600; letter-spacing: -0.03em; font-variant-numeric: tabular-nums">8</span></div>
+<div style="display: flex; flex-direction: column; gap: 2px"><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3">Tokens</span><span style="font-size: 26px; line-height: 1.1; font-weight: 600; letter-spacing: -0.03em; font-variant-numeric: tabular-nums">176.0K</span></div>
+</div>
+<button type="button" style="display: flex; align-items: center; justify-content: center; gap: 8px; height: 46px; border-radius: 14px; border: 1px solid #283048; background: #0F121C; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04); color: #E8EEFB; font-size: 15px; font-weight: 600; cursor: pointer">
+<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 1.75h5l3 3v9.5H4zM9 1.75v3h3M6 8h4M6 10.75h4"></path></svg>
+<span>View transcript</span>
+</button>
+</section>
+
+<section aria-label="Usage" style="display: flex; flex-wrap: wrap; align-items: stretch; gap: 20px 40px; padding: 20px; border-radius: 20px; border: 1px solid #1A2032; background: #0D101A; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04)">
+<div style="flex: 0 1 170px; display: flex; flex-direction: column; gap: 4px; min-width: 0">
+<h2 style="margin: 0; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3; font-weight: 500">Usage</h2>
+<span style="font-size: 32px; line-height: 1.1; font-weight: 600; letter-spacing: -0.03em; font-variant-numeric: tabular-nums">$0.2162</span>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px; color: #9AA8C7">176.0K tokens</span>
+</div>
+<div style="flex: 3 1 300px; display: flex; flex-direction: column; gap: 12px; min-width: 0">
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3">Tokens by type</span>
+<svg viewBox="0 0 1000 46" preserveAspectRatio="none" role="img" aria-label="Tokens by type: Cache read 81.9 percent, Input 17.0 percent, Output 1.1 percent" style="display: block; width: 100%; height: 34px">
+<polygon points="799.3,12 815.3,0 815.3,32 799.3,44" style="fill: color-mix(in oklab, #4C8DEA 50%, black)"></polygon>
+<polygon points="0.0,12 799.3,12 815.3,0 16.0,0" style="fill: color-mix(in oklab, #4C8DEA 58%, white)"></polygon>
+<polygon points="0.0,12 799.3,12 799.3,44 0.0,44" style="fill: #4C8DEA"></polygon>
+<polygon points="969.2,12 985.2,0 985.2,32 969.2,44" style="fill: color-mix(in oklab, #C98500 50%, black)"></polygon>
+<polygon points="803.3,12 969.2,12 985.2,0 819.3,0" style="fill: color-mix(in oklab, #C98500 58%, white)"></polygon>
+<polygon points="803.3,12 969.2,12 969.2,44 803.3,44" style="fill: #C98500"></polygon>
+<polygon points="984.0,12 1000.0,0 1000.0,32 984.0,44" style="fill: color-mix(in oklab, #9085E9 50%, black)"></polygon>
+<polygon points="973.2,12 984.0,12 1000.0,0 989.2,0" style="fill: color-mix(in oklab, #9085E9 58%, white)"></polygon>
+<polygon points="973.2,12 984.0,12 984.0,44 973.2,44" style="fill: #9085E9"></polygon>
+</svg>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 12px 16px">
+<div style="display: flex; flex-direction: column; gap: 3px; min-width: 0"><span style="display: flex; flex-wrap: wrap; align-items: center; gap: 4px 7px; font-size: 12.5px; color: #9AA8C7"><span style="flex-shrink: 0; width: 8px; height: 8px; border-radius: 2px; background: #4C8DEA"></span>Cache read <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; padding: 1px 6px; border-radius: 6px; border: 1px solid #283048; color: #9AA8C7">0.1× rate</span></span><span style="display: flex; align-items: baseline; gap: 7px; font-family: 'JetBrains Mono', ui-monospace, monospace"><span style="font-size: 13.5px; font-weight: 600">144,128</span><span style="font-size: 11.5px; color: #9AA8C7">81.9%</span></span></div>
+<div style="display: flex; flex-direction: column; gap: 3px; min-width: 0"><span style="display: flex; flex-wrap: wrap; align-items: center; gap: 4px 7px; font-size: 12.5px; color: #9AA8C7"><span style="flex-shrink: 0; width: 8px; height: 8px; border-radius: 2px; background: #C98500"></span>Input</span><span style="display: flex; align-items: baseline; gap: 7px; font-family: 'JetBrains Mono', ui-monospace, monospace"><span style="font-size: 13.5px; font-weight: 600">29,924</span><span style="font-size: 11.5px; color: #9AA8C7">17.0%</span></span></div>
+<div style="display: flex; flex-direction: column; gap: 3px; min-width: 0"><span style="display: flex; flex-wrap: wrap; align-items: center; gap: 4px 7px; font-size: 12.5px; color: #9AA8C7"><span style="flex-shrink: 0; width: 8px; height: 8px; border-radius: 2px; background: #9085E9"></span>Output</span><span style="display: flex; align-items: baseline; gap: 7px; font-family: 'JetBrains Mono', ui-monospace, monospace"><span style="font-size: 13.5px; font-weight: 600">1,945</span><span style="font-size: 11.5px; color: #9AA8C7">1.1%</span></span></div>
+</div>
+</div>
+<div style="flex: 2 1 260px; display: flex; flex-direction: column; gap: 12px; min-width: 0">
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3">Cost by model</span>
+<div style="display: flex; flex-direction: column; gap: 10px">
+<div style="display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(40px, 1fr) auto; column-gap: 12px; align-items: center"><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">gpt-5.6-sol</span><span aria-hidden="true" style="display: block; height: 6px; border-radius: 3px; background: #1A2134"><span style="display: block; width: 100%; height: 100%; border-radius: 3px; background: #8E9BBC"></span></span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px; text-align: right">$0.2162 <span style="color: #9AA8C7">100%</span></span></div>
+</div>
+</div>
+</section>
+
+<section aria-label="Operations" style="display: flex; flex-direction: column; gap: 16px; padding: 20px 16px 8px; border-radius: 20px; border: 1px solid #1A2032; background: #0D101A; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04)">
+<div style="display: flex; flex-direction: column; gap: 2px; padding: 0 4px">
+<h2 style="margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -0.01em">Operations</h2>
+<span style="font-size: 13px; color: #9AA8C7">{{summary}}</span>
+</div>
+<div style="display: flex; gap: 8px; margin: 0 -16px; padding: 0 16px; overflow-x: auto">
+<button type="button" aria-pressed="{{chip.all.on}}" onClick="{{pickAll}}" style="flex-shrink: 0; height: 44px; padding: 0 16px; border-radius: 22px; border: 1px solid {{chip.all.bd}}; background: {{chip.all.bg}}; color: {{chip.all.fg}}; font-size: 14px; cursor: pointer">All</button>
+<button type="button" aria-pressed="{{chip.bash.on}}" onClick="{{pickBash}}" style="flex-shrink: 0; height: 44px; padding: 0 16px; border-radius: 22px; border: 1px solid {{chip.bash.bd}}; background: {{chip.bash.bg}}; color: {{chip.bash.fg}}; font-size: 14px; cursor: pointer">Bash 6</button>
+<button type="button" aria-pressed="{{chip.edit.on}}" onClick="{{pickEdit}}" style="flex-shrink: 0; height: 44px; padding: 0 16px; border-radius: 22px; border: 1px solid {{chip.edit.bd}}; background: {{chip.edit.bg}}; color: {{chip.edit.fg}}; font-size: 14px; cursor: pointer">Edit 2</button>
+<button type="button" aria-pressed="{{chip.errors.on}}" onClick="{{pickErrors}}" style="flex-shrink: 0; height: 44px; padding: 0 16px; border-radius: 22px; border: 1px solid {{chip.errors.bd}}; background: {{chip.errors.bg}}; color: {{chip.errors.fg}}; font-size: 14px; cursor: pointer">Errors 2</button>
+</div>
+<div style="display: flex; gap: 8px">
+<button type="button" style="display: flex; align-items: center; justify-content: center; gap: 8px; flex: 1 1 0; height: 44px; border-radius: 13px; border: 1px solid #283048; background: #0F121C; color: #E8EEFB; font-size: 14px; font-weight: 600; cursor: pointer">Expand all</button>
+<button type="button" onClick="{{copyAll}}" style="display: flex; align-items: center; justify-content: center; gap: 8px; flex: 1 1 0; height: 44px; border-radius: 13px; border: 1px solid #283048; background: #0F121C; color: #E8EEFB; font-size: 14px; font-weight: 600; cursor: pointer"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 5.5h8v8h-8zM10.5 5.5V2.5h-8v8h3"></path></svg><span>{{copyAllLabel}}</span></button>
+</div>
+<div style="display: flex; flex-direction: column">
+<sc-for list="{{ops}}" as="o" hint-placeholder-count="9">
+<div style="display: grid; grid-template-columns: 32px minmax(0, 1fr); column-gap: 12px">
+<span style="display: flex; flex-direction: column; align-items: center; gap: 4px" aria-hidden="true">
+<span style="display: flex; align-items: center; justify-content: center; flex-shrink: 0; width: 32px; height: 32px; border-radius: 10px; background: {{o.badge}}; color: {{o.tone}}">
+<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="{{o.glyph}}"></path></svg>
+</span>
+<span style="flex-grow: 1; width: 2px; border-radius: 1px; background: #1A2032"></span>
+</span>
+<div style="display: flex; flex-direction: column; gap: 6px; min-width: 0; padding-bottom: 18px">
+<div style="display: flex; align-items: center; gap: 10px; min-height: 44px; margin: -6px 0">
+<span style="flex-grow: 1; font-size: 15px; font-weight: 600">{{o.tool}}</span>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: {{o.statusColor}}">{{o.status}}</span>
+<button class="ghost" type="button" aria-label="{{o.cmdLabel}}" onClick="{{o.copyCmd}}" style="display: flex; align-items: center; justify-content: center; flex-shrink: 0; width: 44px; height: 44px; padding: 0; border: 0; border-radius: 9px; background: transparent; color: {{o.cmdTone}}; cursor: pointer"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{o.cmdIcon}}"></path></svg></button>
+</div>
+<code style="display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; line-height: 1.5; color: #C3CCE2; overflow-wrap: anywhere">{{o.cmd}}</code>
+<sc-if value="{{o.delegated}}" hint-placeholder-val="{{ false }}">
+<a href="PhoneExecution.dc.html" style="display: flex; align-items: center; gap: 8px; align-self: flex-start; min-height: 36px; padding: 0 12px; border-radius: 18px; background: color-mix(in oklab, #D97757 18%, transparent); color: #E8EEFB; font-size: 13px; text-decoration: none">
+<span style="width: 7px; height: 7px; border-radius: 50%; background: #D97757"></span>
+<span>Handed off to Claude →</span>
+</a>
+</sc-if>
+<sc-if value="{{o.hasOut}}" hint-placeholder-val="{{ true }}">
+<div style="position: relative">
+<pre style="margin: 0; padding: 10px 46px 10px 12px; border-radius: 12px; border: 1px solid {{o.outBd}}; background: {{o.outBg}}; color: {{o.outFg}}; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden">{{o.out}}</pre>
+<span style="position: absolute; top: 0; right: 0"><button class="ghost" type="button" aria-label="{{o.outLabel}}" onClick="{{o.copyOut}}" style="display: flex; align-items: center; justify-content: center; flex-shrink: 0; width: 44px; height: 44px; padding: 0; border: 0; border-radius: 9px; background: transparent; color: {{o.outTone}}; cursor: pointer"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{o.outIcon}}"></path></svg></button></span>
+</div>
+</sc-if>
+</div>
+</div>
+</sc-for>
+</div>
+</section>
+
+</main>
+
+<div style="position: sticky; bottom: 0; padding: 8px 16px 16px; background: linear-gradient(to top, #0A0C14 55%, transparent)">
+<dc-import name="PhoneDock" active="executions" hint-size="100%,66px"></dc-import>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#4D80FF","options":["#4D80FF","#4CC9F0","#45E0A0","#A78BFA"]},"$preview":{"width":390,"height":2320}}'>
+class Component extends DCLogic {
+renderVals() {
+const filter = (this.state && this.state.filter) || 'all';
+const GLYPH = {
+Bash: 'M3 4.5L6.5 8 3 11.5M8.5 11.5H13',
+Edit: 'M10.5 2.75l2.75 2.75L6 12.75l-3.25.5.5-3.25z',
+Capture: 'M3.5 8.5l3 3 6-7'
+};
+const mk = (time, tool, cmd, out, opts) => {
+const o = opts || {};
+const failed = !!o.failed;
+const quiet = !!o.quiet;
+return {
+tool,
+kind: tool.toLowerCase(),
+failed,
+cmd,
+out: out || '',
+hasOut: !!out,
+delegated: !!o.delegated,
+glyph: GLYPH[tool],
+status: time + (quiet ? '' : failed ? ' · failed' : ' · ' + (o.dur || '0s')),
+statusColor: failed ? '#FF8A7D' : '#6F7FA3',
+badge: failed ? '#2A1513' : quiet ? '#171C2B' : 'color-mix(in oklab, var(--ac) 16%, transparent)',
+tone: failed ? '#FF6F61' : quiet ? '#9AA8C7' : 'var(--ac)',
+outBg: failed ? '#22130F' : '#0A0C14',
+outBd: failed ? '#4A211B' : '#1A2032',
+outFg: failed ? '#FFB3A8' : '#9AA8C7'
+};
+};
+const all = [
+mk('1:32:22', 'Bash', `sed -n '1,240p' /workspace/.agents/skills/delegating-to-claude-p/SKILL.md && printf '\\n--- AGENTS ---\\n' && se…`, '---'),
+mk('1:32:28', 'Bash', `find /workspace/artifacts/input -maxdepth 1 -type f -print -exec sed -n '1,240p' {} \\; ; find /workspace -maxdept…`, '/workspace/skills-lock.json'),
+mk('1:32:31', 'Edit', '/workspace/palindrome.py', ''),
+mk('1:32:36', 'Bash', `python -m py_compile /workspace/palindrome.py && python - <<'PY' …`, '/bin/bash: line 1: python: command not found', { failed: true }),
+mk('1:32:42', 'Bash', `python3 -m py_compile /workspace/palindrome.py && python3 - <<'PY' …`, '/bin/bash: line 1: python3: command not found', { failed: true }),
+mk('1:32:46', 'Bash', `claude -p --permission-mode bypassPermissions --output-format stream-json --verbose "Review /workspace/palindrome.py…`, `{"type":"system","subtype":"init","cwd":"/workspace","session_id":"35468ba1-dca4-4f8c-9012-4fb500342e79","tools":["Task","Bash","CronCreate"…`, { dur: '6s', delegated: true }),
+mk('1:32:59', 'Edit', '/workspace/artifacts/output/deliverable.md', ''),
+mk('1:33:03', 'Bash', `sed -n '1,120p' /workspace/palindrome.py && sed -n '1,200p' /workspace/artifacts/output/deliverable.md`, '"""Utilities for identifying palindromic strings."""'),
+mk('1:33:08', 'Capture', 'Session captured', '', { quiet: true })
+];
+const copied = (this.state && this.state.copied) || '';
+const COPY = 'M5.5 5.5h8v8h-8zM10.5 5.5V2.5h-8v8h3', DONE = 'M3.5 8.5l3 3 6-7';
+const put = (text, key) => {
+try {
+if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).catch(() => {});
+} catch (e) {}
+this.setState({ copied: key });
+};
+const ops = all.filter((o) => {
+if (filter === 'all') return true;
+if (filter === 'errors') return o.failed;
+return o.kind === filter;
+});
+const chipOf = (key) => {
+const on = filter === key;
+return { on: on ? 'true' : 'false', bg: on ? '#1A2134' : 'transparent', fg: on ? '#E8EEFB' : '#9AA8C7', bd: on ? '#34406A' : '#222A40' };
+};
+return {
+accent: this.props.accent ?? '#4D80FF',
+ops: ops.map((o, i) => Object.assign({}, o, {
+cmdIcon: copied === 'c' + i ? DONE : COPY,
+outIcon: copied === 'o' + i ? DONE : COPY,
+cmdTone: copied === 'c' + i ? 'var(--ac)' : '#9AA8C7',
+outTone: copied === 'o' + i ? 'var(--ac)' : '#9AA8C7',
+cmdLabel: copied === 'c' + i ? 'Copied the ' + o.tool + ' input' : 'Copy the ' + o.tool + ' input',
+outLabel: copied === 'o' + i ? 'Copied the output' : 'Copy the output',
+copyCmd: () => put(o.cmd, 'c' + i),
+copyOut: () => put(o.out, 'o' + i)
+})),
+copyAll: () => put(ops.map((o) => o.time + '  ' + o.tool + '  ' + o.cmd + (o.out ? '\n' + o.out : '')).join('\n\n'), 'all'),
+copyAllLabel: copied === 'all' ? 'Copied all' : 'Copy all',
+summary: filter === 'all' ? '8 tool calls, oldest first' : ops.length + ' of 8 tool calls',
+chip: { all: chipOf('all'), bash: chipOf('bash'), edit: chipOf('edit'), errors: chipOf('errors') },
+pickAll: () => this.setState({ filter: 'all' }),
+pickBash: () => this.setState({ filter: 'bash' }),
+pickEdit: () => this.setState({ filter: 'edit' }),
+pickErrors: () => this.setState({ filter: 'errors' })
+};
+}
+}
+</script>
+</body>
+</html>
