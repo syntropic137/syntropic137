@@ -10,12 +10,15 @@ See ADR-029: Simplified Event System
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from syn_adapters.postgres_text import pg_safe
 from syn_domain import agent_event_span
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     import asyncpg
 
 # Every write into agent_events normalises its session and execution ids through
@@ -248,5 +251,59 @@ async def query_recent_by_types(
             "phase_id": row["phase_id"],
             "data": json.loads(row["data"]) if isinstance(row["data"], str) else row["data"],
         }
+        for row in rows
+    ]
+
+
+#: Groups by the payload keys `UpstreamRetryObservation` writes; a test pins
+#: the two together, so a renamed field fails there and not silently here.
+UPSTREAM_RETRY_COUNTS_SQL = """
+    SELECT data->>'provider' AS provider,
+           data->>'requested_model' AS requested_model,
+           data->>'upstream_kind' AS upstream_kind,
+           COUNT(*) AS retries
+    FROM agent_events
+    WHERE event_type = $1 AND time >= $2
+    GROUP BY 1, 2, 3
+    ORDER BY retries DESC, provider, requested_model, upstream_kind
+"""
+
+
+@dataclass(frozen=True)
+class UpstreamRetryCount:
+    """How many in-phase upstream retries one provider, model and kind took (#1882).
+
+    Each field is read from a JSON payload another process wrote, so each may
+    be absent: None says so rather than inventing a name.
+    """
+
+    provider: str | None
+    requested_model: str | None
+    upstream_kind: str | None
+    retries: int
+
+
+async def query_upstream_retry_counts(
+    pool: asyncpg.Pool, *, event_type: str, since: datetime
+) -> list[UpstreamRetryCount]:
+    """Count ``event_type`` rows recorded at or after ``since``, per provider, model and kind.
+
+    Counted by the database, so the answer covers the whole window rather than
+    whatever page of rows a caller happened to fetch. Most retries first.
+    """
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            UPSTREAM_RETRY_COUNTS_SQL,
+            event_type,
+            since,
+        )
+
+    return [
+        UpstreamRetryCount(
+            provider=row["provider"],
+            requested_model=row["requested_model"],
+            upstream_kind=row["upstream_kind"],
+            retries=int(row["retries"]),
+        )
         for row in rows
     ]
