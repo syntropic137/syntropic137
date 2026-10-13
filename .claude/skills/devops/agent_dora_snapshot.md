@@ -29,7 +29,7 @@ SINCE=$(date -u -v-30d +%Y-%m-%d 2>/dev/null || date -u -d '30 days ago' +%Y-%m-
      | jq '[.[]|((.mergedAt|fromdateiso8601)-(.createdAt|fromdateiso8601))/3600]|sort
            |{prs:length, median_h:.[length/2|floor], p90_h:.[(length*0.9)|floor]}'
    ```
-   Merge to production: for each stable release, hours from the oldest PR merge it carries to `publishedAt` (PRs merged between the previous release's and this release's `publishedAt`). Report both; the second is the one users feel.
+   Merge to production: for each stable release, hours from the oldest PR merge it carries to `publishedAt`. Membership comes from git history, not timestamps: a release pins the commit it was cut from, which can predate approval while `main` moves on, so take the PRs from `git log --first-parent --merges vPREV..vCURRENT` (as `scripts/changelog.py` does) and use `publishedAt` only as the endpoint. Report both; the second is the one users feel.
 3. **Change failure rate**, stable releases followed by a later stable release of the same minor (a patch fix), plus revert PRs:
    ```
    gh release list -R $R --limit 100 --json tagName,isPrerelease,publishedAt \

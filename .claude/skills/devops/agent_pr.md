@@ -17,7 +17,7 @@ round-trips on what local gates catch. Not for `main -> release` PRs
    ```
    A fresh `uv sync` may rewrite `uv.lock`; if the change is not a dependency change, `git checkout -- uv.lock` before committing.
 2. Make the change. Shape commits as logical, revertable units. Rebasing or reordering commits that were never pushed is fine.
-3. Run the local gates against the tree you will push. Before the first push: `just qa-ci` (~3.5 min, every PR-gating job with a local mirror). After that, the pre-push hook runs `just preflight`. If generated files are involved, `just codegen` and commit what it rewrites.
+3. Run the local gates against the tree you will push. Before the first push: `just qa-ci` (~3.5 min, the core PR-gating jobs), plus the path-specific mirror recipe from `scripts/check_ci_parity.py` for any path-filtered workflow the change touches (Skyline, landing, workspace image). After that, the pre-push hook runs `just preflight`. If generated files are involved, `just codegen` and commit what it rewrites.
 4. Stage by explicit path and confirm the tree is clean afterwards; uncommitted auto-fixes make local gates green on a red commit.
    ```
    git add <file> <file>

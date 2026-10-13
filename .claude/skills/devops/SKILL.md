@@ -110,10 +110,12 @@ hand-rolled list missed gates CI then failed on.
 | `release-create.yml` | push to `release` | `create-release` (waits on `release-publish` approval) -> tag + Release -> codegen re-check -> `release-containers.yaml` + `release-cli.yaml` |
 | `release-beta.yaml` | a published GitHub prerelease | beta images + CLI on `next`; exists, but the owner does not want GitHub prereleases (see `agent_release.md`) |
 
-`just qa-ci` runs every PR-gating job that can run locally (~3.5 min);
-`scripts/check_ci_parity.py` fails `preflight` when a PR-gating job has no local
-mirror or stated reason. Not local: osv-scan, pip-audit, dependency-review,
-e2e-container, release-only gates.
+`just qa-ci` runs the core PR-gating jobs locally (~3.5 min), not all of them:
+`scripts/check_ci_parity.py` lists every job left out with its reason and its
+own mirror recipe (workspace image build `just workspace-build`, Skyline
+`just skyline-ci` and friends, landing `just landing-*`). When a PR touches
+those paths, run the listed recipe too. Not local at all: osv-scan, pip-audit,
+dependency-review, release-only gates.
 
 ## Recommended tools and practices (as of 2026-10-13)
 
