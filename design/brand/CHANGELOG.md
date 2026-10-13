@@ -2,6 +2,10 @@
 
 Versions follow semver: major for a new identity, minor for a new asset or surface, patch for a fix. The current kit is described in [BRAND.md](BRAND.md).
 
+## 2.3.0 (2026-10-13)
+
+- **Share image.** `og-image.png` is now the Blender render of the S in the run city with the wordmark, tagline and install command (`og/og.html`, rendered by `og/render.sh` with the real fonts). Same layout at 1280 x 640 for the GitHub social preview. The text-free vector version moves to `og-image-vector.*`.
+
 ## 2.2.0 (2026-10-10)
 
 - **Banners: one centre line.** The S and the title's cap box share the card's vertical centre; the S plus the text column is centred horizontally.

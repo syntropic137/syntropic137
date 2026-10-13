@@ -1,6 +1,6 @@
 # Syntropic137 brand kit
 
-**Version 2.2.0, "Design V2, October 2026". Released 2026-10-09, avatar added 2026-10-10, banner layout and S uplight locked 2026-10-10.** Version in [`VERSION`](VERSION), history in [`CHANGELOG.md`](CHANGELOG.md).
+**Version 2.3.0, "Design V2, October 2026". Released 2026-10-09, avatar added 2026-10-10, banner layout and S uplight locked 2026-10-10, share image 2026-10-13.** Version in [`VERSION`](VERSION), history in [`CHANGELOG.md`](CHANGELOG.md).
 
 <p align="center">
   <img src="renders/syn137-banner-dark-1500.webp" alt="The Syntropic137 S standing in the run city, rendered in Blender" width="100%">
@@ -206,7 +206,7 @@ Full usage and fields: [`banners/README.md`](banners/README.md).
 
 ### Social image (Open Graph, Twitter card)
 
-[`og-image.png`](og-image.png) (1200 x 630, from [`og-image.svg`](og-image.svg)): the S over the run city, generated from `heroCity()` and `sMark()` by `pnpm --filter @syn137/skyline-core run og-image`. No text.
+[`og-image.png`](og-image.png) (1200 x 630): the Blender render of the S in the run city, with the wordmark, "Agent work that compounds." and the install command. Source: [`og/og.html`](og/og.html), rendered with real fonts by [`og/render.sh`](og/render.sh) (also writes the 1280 x 640 GitHub social preview and the copy in `apps/syn-landing/public/`). The older text-free vector version is [`og-image-vector.png`](og-image-vector.png), from `pnpm --filter @syn137/skyline-core run og-image`.
 
 ### Favicon and app icons
 
@@ -256,7 +256,7 @@ Every current v2 asset. Raw URLs on `main` (for use outside GitHub) take the for
 | [`avatar-transparent-1024.png`](avatar-transparent-1024.png) | <img src="avatar-transparent-512.png" alt="Avatar, transparent" height="64"> | [raw](https://raw.githubusercontent.com/syntropic137/syntropic137/main/design/brand/avatar-transparent-1024.png) |
 | [`avatar-transparent-512.png`](avatar-transparent-512.png) | | [raw](https://raw.githubusercontent.com/syntropic137/syntropic137/main/design/brand/avatar-transparent-512.png) |
 | [`social/`](social/) | Upload-ready files per place (see the table at the top) | |
-| [`og-image.svg`](og-image.svg) | | [raw](https://raw.githubusercontent.com/syntropic137/syntropic137/main/design/brand/og-image.svg) |
+| [`og-image-vector.svg`](og-image-vector.svg), [`og-image-vector.png`](og-image-vector.png) | Text-free vector version | |
 | [`og-image.png`](og-image.png) | <img src="og-image.png" alt="Social image" height="96"> | [raw](https://raw.githubusercontent.com/syntropic137/syntropic137/main/design/brand/og-image.png) |
 
 ### Renders (web cuts of the Blender stills)
@@ -327,6 +327,6 @@ Full-resolution PNG and ProRes masters live in the private system monorepo, `ass
 ## How to change the brand
 
 1. Edit the source, never the output: tokens in `packages/syn-ui/themes/src/`, geometry in `sMark.ts`, banners in `banners/repos.json`, renders through `build_hero.py`.
-2. Regenerate: icons with `rsvg-convert` (see [`README.md`](README.md)), `og-image` and `repo-banner` with pnpm, renders on the Mac mini, then cut new `renders/*.webp` from the masters.
+2. Regenerate: icons with `rsvg-convert` (see [`README.md`](README.md)), `og/render.sh` for the share image, `og-image` (vector) and `repo-banner` with pnpm, renders on the Mac mini, then cut new `renders/*.webp` from the masters.
 3. Bump [`VERSION`](VERSION) (semver): major for a new identity, minor for a new asset or surface, patch for a fix.
 4. Add an entry to [`CHANGELOG.md`](CHANGELOG.md).
