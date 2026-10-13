@@ -272,8 +272,11 @@ Example: `v0.3.0-beta.1`, `v0.3.0-beta.2`, etc.
    ```
 
 8. **Commit Version Bump**
+
+   Stage by name; the pre-commit hook blocks `git add -A`. Use the explicit
+   file list in `docs/release-process.md` (Production Release, step 2) and check
+   `git status --short` for anything else `just bump-version` wrote.
    ```bash
-   git add -A
    git commit -m "chore: bump version to $NEW_VERSION"
    ```
 
@@ -307,18 +310,15 @@ $(if [ -n "$MESSAGE" ]; then echo "$MESSAGE"; fi)"
     ```bash
     echo "=== Creating GitHub Release ==="
 
-    # Determine if pre-release
-    PRERELEASE_FLAG=""
+    # NO GitHub prereleases. A beta is a test deploy (plain git tag +
+    # `just pit-stop` or `just release-local`), see docs/release-process.md#beta-release.
+    # A stable release is created by release-create.yml when the main -> release
+    # PR merges; never run `gh release create` by hand.
     if [ "$CHANNEL" = "beta" ]; then
-      PRERELEASE_FLAG="--prerelease"
+      echo "Beta: deploy with just pit-stop ${NEW_VERSION#v}; no GitHub release"
+    else
+      echo "Stable: open the main -> release PR (docs/release-process.md)"
     fi
-
-    gh release create "$NEW_VERSION" \
-      --title "$NEW_VERSION" \
-      --notes "$CHANGELOG" \
-      $PRERELEASE_FLAG
-
-    echo "✓ Created GitHub release"
     ```
 
 ### Phase 6: Post-Release
