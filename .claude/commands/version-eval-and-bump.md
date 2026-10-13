@@ -406,8 +406,8 @@ $(if [ -n "$MESSAGE" ]; then echo "$MESSAGE"; fi)"
 - ✅ Pushed to remote
 
 ### GitHub Release
-- ✅ Release created: {URL}
-- 🔗 {RELEASE_URL}
+- {if beta} None (a beta is a test deploy; no GitHub Release)
+- {if stable} Created by release-create.yml after the release PR merged: {RELEASE_URL}
 
 ---
 
@@ -474,6 +474,6 @@ Proceed? (y/n)
 - ❌ Blocks if QA checks fail
 - ⚠️  Warns before stable release (requires confirmation)
 - ✅ Creates annotated tags with changelog
-- ✅ Marks beta releases as pre-release on GitHub
+- ✅ Never creates a GitHub prerelease for a beta
 
 --- End Command ---
