@@ -457,3 +457,47 @@ async def test_a_running_phase_without_a_running_agent_is_not_active(
     )
     assert report.peak_active_phases == 0
     assert report.lost == ["exec-0"]
+
+
+async def test_a_start_passes_the_api_repository_guard(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The driver's start body clears the API's real ADR-058 guard for implement-v3 (B1).
+
+    The workflow requires a repository and declares none, so a body without
+    ``repos`` is a 422 there. Only the GitHub access check is replaced: it is
+    a network call, and it must receive the fixture repository.
+    """
+    from fastapi import HTTPException
+
+    from syn_api.routes.executions import commands
+    from syn_domain.contexts._shared.repository_ref import RepositoryRef
+    from syn_domain.contexts.orchestration._shared.yaml_to_command import (
+        build_command_from_definition,
+    )
+    from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
+        WorkflowTemplateAggregate,
+    )
+
+    definition = WorkflowDefinition.from_file(_WORKFLOW)
+    template = WorkflowTemplateAggregate()
+    template.create_workflow(build_command_from_definition(definition))
+    checked: list[object] = []
+
+    async def access(repos: object) -> None:
+        checked.append(repos)
+
+    monkeypatch.setattr(commands, "_validate_all_repos_access", access)
+
+    async def guard(target: Target) -> None:
+        request = commands.ExecuteWorkflowRequest.model_validate(driver.start_body(target))
+        typed = [RepositoryRef.parse(r) for r in request.repos]
+        merged = commands._merge_inputs(template, dict(request.inputs), request.task)
+        await commands._preflight_repos_or_reject(
+            template, definition.id, typed, dict(request.inputs), merged, request.task
+        )
+
+    await guard(_TARGET)
+    assert len(checked) == 1
+    assert "syntropic137/loadtest-fixture" in str(checked[0])
+    with pytest.raises(HTTPException) as refused:
+        await guard(Target("http://stack", definition.id, "t", (), None))
+    assert refused.value.status_code == 422

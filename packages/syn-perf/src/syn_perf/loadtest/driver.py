@@ -194,6 +194,16 @@ async def run_load_test(
     return judge(bar, profile, observed, target.containers)
 
 
+def start_body(target: Target) -> dict[str, object]:
+    """The ``POST /workflows/{id}/execute`` body for one load-test start."""
+    return {
+        "task": target.task,
+        "repos": list(target.repos),
+        "tags": ["loadtest"],
+        "no_eval": True,
+    }
+
+
 class _Admitter:
     """Starts ``n`` executions evenly over ``window`` and keeps every outcome.
 
@@ -220,13 +230,7 @@ class _Admitter:
         self._first_sent = sent if self._first_sent is None else min(self._first_sent, sent)
         try:
             response = await self._client.post(
-                f"/workflows/{self._target.workflow_id}/execute",
-                json={
-                    "task": self._target.task,
-                    "repos": list(self._target.repos),
-                    "tags": ["loadtest"],
-                    "no_eval": True,
-                },
+                f"/workflows/{self._target.workflow_id}/execute", json=start_body(self._target)
             )
             response.raise_for_status()
             self.ids.append(_Started.model_validate_json(response.content).execution_id)
