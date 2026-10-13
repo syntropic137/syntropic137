@@ -5,6 +5,7 @@ Versions follow semver: major for a new identity, minor for a new asset or surfa
 ## 2.3.0 (2026-10-13)
 
 - **Share image.** `og-image.png` is now the Blender render of the S in the run city with the wordmark, tagline and install command (`og/og.html`, rendered by `og/render.sh` with the real fonts). Same layout at 1280 x 640 for the GitHub social preview. The text-free vector version moves to `og-image-vector.*`.
+- **X header.** `social/x-header-1500x500.png` from `og/x-header.html`: the same render, with the wordmark, tagline and install command in the upper left, clear of the avatar X places over the lower-left corner.
 
 ## 2.2.0 (2026-10-10)
 
