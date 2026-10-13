@@ -243,7 +243,7 @@ async def started_session_manager(
 @dataclass
 class _Observation:
     observation_type: str
-    data: dict[str, object]
+    data: dict[str, str | int | None]
     execution_id: str | None
     phase_id: str | None
 
@@ -258,7 +258,7 @@ class _RecordedObservations:
         self,
         session_id: str,
         observation_type: str,
-        data: dict[str, object],
+        data: dict[str, str | int | None],
         execution_id: str | None = None,
         phase_id: str | None = None,
         workspace_id: str | None = None,
