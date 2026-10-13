@@ -206,7 +206,11 @@ async def test_driver_counts_active_phases_from_the_server(
                 },
             )
         ops = [{"operation_type": "tool_execution_started"}] * _TOOL_USES
-        return httpx.Response(200, json={"agent_model": SCRIPTED_AGENT_MODEL, "operations": ops})
+        # Every session says running; only exec-0's first phase is running too.
+        return httpx.Response(
+            200,
+            json={"agent_model": SCRIPTED_AGENT_MODEL, "status": "running", "operations": ops},
+        )
 
     real_client = httpx.AsyncClient
     monkeypatch.setattr(
@@ -264,3 +268,36 @@ async def test_driver_stops_at_the_first_real_model(
             timeout=5.0,
         )
     assert reads == ["/sessions/s-0"]
+
+
+async def test_a_running_phase_without_a_running_agent_is_not_active(
+    profile: ScriptedAgentProfile, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``running`` from PhaseStarted covers provisioning; the agent session decides."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if request.method == "POST":
+            return httpx.Response(200, json={"execution_id": "exec-0", "workflow_id": "w"})
+        if path == "/executions":
+            return httpx.Response(200, json={"executions": [], "total": 0})
+        if path.startswith("/executions/"):
+            phase = {"phase_id": "premise", "status": "running", "session_id": "s-0"}
+            body = {"workflow_execution_id": "exec-0", "status": "running", "phases": [phase]}
+            return httpx.Response(200, json=body)
+        return httpx.Response(200, json={"status": "pending", "operations": []})
+
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(
+        driver.httpx,
+        "AsyncClient",
+        lambda **kw: real_client(transport=httpx.MockTransport(handler), **kw),
+    )
+    report = await run_load_test(
+        Target("http://stack", "sdlc-implement-v3", "t", ()),
+        profile,
+        PassBar(n=1, sustain_seconds=0.0, read_p95_seconds=2.0),
+        Pacing(admit_seconds=0.0, sample_seconds=0.1, drain_timeout_seconds=0.0),
+    )
+    assert report.peak_active_phases == 0
+    assert report.lost == ["exec-0"]

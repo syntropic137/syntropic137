@@ -8,9 +8,9 @@ below N, one dropped observation in fifty, a real model in a session).
 Two rules shape it (docs/north-star.md):
 
 - **Concurrent means a phase actively running, counted by the server.** A
-  dispatched execution, a queued phase or an idle slot does not count, so
-  ``Sample.active_phases`` is read off phase status in execution detail, never
-  off what the driver submitted. A run whose peak stays below N is reported as
+  dispatched execution, a queued phase, a phase still provisioning or an idle
+  slot does not count, so ``Sample.active_phases`` is read off phase and
+  session status on the server, never off what the driver submitted. A run whose peak stays below N is reported as
   a queue test with its measured peak, and fails.
 - **Unknown is not a pass.** A measurement the driver could not take (no
   container stats, a session it could not read) fails its check by name
@@ -47,7 +47,8 @@ class Sample:
     at_seconds: float
     """Seconds since the first admission."""
     active_phases: int
-    """Phases of this run's executions whose status is ``running``."""
+    """Phases of this run's executions that are ``running`` with their agent
+    session ``running`` too; a phase still provisioning does not count."""
     budget_running: int | None
     budget_queued: int | None
     list_latency_seconds: float
