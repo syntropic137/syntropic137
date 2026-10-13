@@ -118,22 +118,21 @@ class TestLineage:
         await _assert_chain(store, history)
 
     async def test_a_pre_rename_resume_links_forward(self) -> None:
-        """A resume stored before the rename names its child as `fork_execution_id`."""
+        """A resume stored before the rename names its child as `fork_execution_id`.
+
+        Applied in stream order, in place of each ExecutionResumed.
+        """
         history = await _history()
-        without_resumed: list[EventEnvelope[DomainEvent]] = []
-        legacy: list[tuple[str, dict[str, object]]] = []
-        for envelope in history:
-            if envelope.metadata.event_type == "ExecutionResumed":
-                payload = envelope.event.model_dump(mode="json")
-                payload["fork_execution_id"] = payload.pop("resume_execution_id")
-                legacy.append((str(payload["execution_id"]), payload))
-            else:
-                without_resumed.append(envelope)
         store = InMemoryProjectionStore()
-        await _dispatch(store, without_resumed)
+        coordinator = _coordinator(store)
         detail = WorkflowExecutionDetailProjection(store)
         listing = WorkflowExecutionListProjection(store)
-        for _, payload in legacy:
+        for envelope in history:
+            if envelope.metadata.event_type != "ExecutionResumed":
+                await coordinator.dispatch_event(envelope)
+                continue
+            payload = envelope.event.model_dump(mode="json")
+            payload["fork_execution_id"] = payload.pop("resume_execution_id")
             await detail.on_execution_forked(payload)
             await listing.on_execution_forked(payload)
         await _assert_chain(store, history)
