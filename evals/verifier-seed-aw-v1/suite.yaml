@@ -1,0 +1,52 @@
+# The agentic-workspace verifier seed suite. verifier-seed-v1 pins one
+# repository (syntropic137), and an eval's baseline holds one SHA per
+# repository, so escapes in AgentParadise/agentic-workspace are their own
+# suite. The rules are verifier-seed-v1's, unchanged: how a defect is pinned
+# (the first fix commit's first parent; `check` enforces it), how a clean
+# control is chosen, how a blocked run is judged, train and holdout. Read
+# ../verifier-seed-v1/README.md and ../verifier-seed-v1/suite.yaml; README.md
+# here holds only what differs.
+#
+# TRAIN AND HOLDOUT. Within each batch of added cases, the ~30% whose
+# sha256(id) sorts lowest are holdout, fixed once and never moved to train:
+# 1 of v1's 4 defects and none of its 1 control, 1 of 5 in all.
+#
+# `check` reads the pins from an agentic-workspace checkout, not this one:
+#   git submodule update --init lib/agentic-workspace
+#   git -C lib/agentic-workspace fetch origin
+#   uv run python scripts/eval_suite.py check --suite evals/verifier-seed-aw-v1 \
+#     --repo lib/agentic-workspace
+#
+# v1: the four agentic-workspace escapes of 2026-10-13
+#     (docs/retrospectives/2026-10-13-provider-contract-day.md): AW#47 and
+#     AW#49 were certified by the platform verify (sdlc-implement-v3 /
+#     sdlc-reverify-pr-v1 on codex) and blocked by a second verifier. One
+#     clean control from agentic-workspace's imported mainline, chosen by
+#     verifier-seed-v1's rule. A second candidate, agentic-primitives #355
+#     (the provider logs capability), was dropped: `check` finds #358
+#     rewriting two of its functions within 30 days. The brief's 2-3
+#     controls are NOT met. 4 defects, 1 control, 5 in all.
+#
+# EVERY VERSION KEEPS ITS SCORE: when the version goes up, record the old one
+# under `history`, as verifier-seed-v1 does.
+id: verifier-seed-aw-v1
+# Its own stable eval name: a case eval is tagged `suite:verifier-seed-aw` +
+# `case:<id>`, never shared with verifier-seed-v1's.
+eval_suite: verifier-seed-aw
+version: 1
+goal: >
+  Does the verifier block an agentic-workspace change that carries a known
+  escaped bug, naming the defect and the file it lives in, and certify a
+  merged change that has no known defect?
+repository: AgentParadise/agentic-workspace
+# The same pinned verify workflows verifier-seed-v1 runs; the escapes were
+# certified on codex, so both are listed.
+workflows:
+  - id: eval-verify-pinned-v1
+    path: workflows/evals/verify-pinned/workflow.yaml
+    models:
+      verify: opus
+  - id: eval-verify-pinned-codex-v1
+    path: workflows/evals/verify-pinned-codex/workflow.yaml
+    models:
+      verify: gpt-sol
