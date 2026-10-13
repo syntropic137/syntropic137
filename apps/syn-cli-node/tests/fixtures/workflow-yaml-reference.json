@@ -563,7 +563,7 @@
           "prompt_file": "phases/finalize_pr.md"
         }
       ],
-      "document_sha256": "e57605a82bdef04a278703ec3aaff8c982e23d807ce238c334e92b43a9795d8b"
+      "document_sha256": "b4cef3ed8b99ffb9dae414b233b426a0f96e4f5fe204f7f09031cc50fb98e001"
     },
     "workflows/sdlc/pr-review/workflow.yaml": {
       "phases": [
@@ -819,7 +819,7 @@
           "prompt_file": "phases/finalize_pr.md"
         }
       ],
-      "document_sha256": "d59d8a193403cb5ef56b2c049da38a79d1fd4ca623bae04cfd016b60d466309b"
+      "document_sha256": "c064bc041f7d92e3b88ab1291a3addbcdd7c756ed9c3bff915c65b9aaafb689f"
     },
     "workflows/triggers/ci-fix.yaml": {
       "phases": [

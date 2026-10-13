@@ -612,6 +612,12 @@ jobs:
       # Requires GitHub Advanced Security (free for public repos).
       - name: Dependency Review
         uses: actions/dependency-review-action@f5b971718edcbb31275a1db40004592335c0e031 # v4.9.0
+        with:
+          # #1793: apps/syn-desktop (Tauri 2) pins gtk 0.18 -> glib 0.18.5,
+          # GHSA-wrw7-89jp-8q8g (moderate). The fix (glib 0.20) is unreachable
+          # until Tauri moves. Allowed here only; the OSV scan still reports it.
+          # Remove this line when Tauri 2 releases on gtk 0.20.
+          allow-ghsas: GHSA-wrw7-89jp-8q8g
 
   #############################################################################
   # SUMMARY - Required status check for PRs

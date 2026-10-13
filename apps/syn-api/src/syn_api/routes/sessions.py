@@ -45,6 +45,7 @@ from syn_api.types import (
     SessionDetail,
     SessionError,
     SessionSummary,
+    TokenTypeCostResponse,
     ToolOperation,
 )
 from syn_domain.contexts.orchestration.slices.list_workflows.projection import (
@@ -267,6 +268,15 @@ class SessionResponse(BaseModel):
     than printing a dollar figure they cannot back up (issue #890).
     """
     cost_by_model: dict[CostModelKey, Decimal] = Field(default_factory=dict)
+    cost_by_token_type: TokenTypeCostResponse | None = None
+    """``total_cost_usd`` split into input, output, cache write and cache read.
+
+    Null when no split can be stated: the cost source gave none (a list-path
+    record), or part of the session was priced from a reported total for a
+    model with no rate, so there is nothing to apportion it by. Null, never
+    zeroes: a split that omitted part of the cost would not sum to the total.
+    ``basis`` says whether each part was priced or apportioned.
+    """
     cache_read_rate_display: str | None = None
     """How cache READS are billed relative to fresh input, e.g. ``"0.05x rate"``.
 
@@ -558,6 +568,7 @@ class _CostData:
     """REPORTED model, or None. Never an alias (ADR-067 D9)."""
     requested_model: str | None = None
     cost_by_model: dict[str, Decimal] = field(default_factory=dict)
+    cost_by_token_type: TokenTypeCostResponse | None = None
     duration_seconds: float | None = None
 
 
@@ -631,6 +642,11 @@ async def _load_cost_data(session: DomainSessionSummary) -> _CostData:
         agent_model=recorded.observed,
         requested_model=recorded.requested or session.requested_model,
         cost_by_model=cost_by_observed_model(cost.cost_by_model),
+        cost_by_token_type=(
+            TokenTypeCostResponse.from_split(cost.cost_by_token_type, cost.cost_by_token_type_basis)
+            if cost.cost_by_token_type is not None and cost.cost_by_token_type_basis is not None
+            else None
+        ),
         duration_seconds=(cost.duration_ms / 1000.0) if cost.duration_ms else None,
     )
 
@@ -704,6 +720,7 @@ async def get_session(
             agent_model=cd.agent_model,
             requested_model=cd.requested_model,
             cost_by_model=dict(cd.cost_by_model),
+            cost_by_token_type=cd.cost_by_token_type,
             operations=operations,
             started_at=session.started_at,
             completed_at=session.completed_at,
@@ -945,6 +962,7 @@ async def get_session_endpoint(session_id: str) -> SessionResponse:
         total_cost_display=format_cost(total_cost, detail.unpriced_observation_count),
         unpriced_observation_count=detail.unpriced_observation_count,
         cost_by_model=detail.cost_by_model,
+        cost_by_token_type=detail.cost_by_token_type,
         cache_read_rate_display=cache_rates.cache_read_rate_display,
         cache_write_rate_display=cache_rates.cache_write_rate_display,
         operations=operations,

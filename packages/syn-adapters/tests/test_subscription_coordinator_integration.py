@@ -206,8 +206,9 @@ class TestSubscriptionCoordinatorIntegration:
                 envelope = _make_envelope(event, f"wf-{i}", nonce=1)
                 await event_store.append_events(f"WorkflowTemplate-wf-{i}", [envelope])
 
-            # Wait for all 3 events (global nonce 0, 1, 2)
-            await _wait_for_checkpoint(checkpoint_store, projection.get_name(), target_position=2)
+            # Wait for all 3 events (global nonces 1, 2, 3: numbered from 1, like the
+            # store, since ESP v0.18.0 #405)
+            await _wait_for_checkpoint(checkpoint_store, projection.get_name(), target_position=3)
 
             results = await projection.query(include_archived=True)
             assert len(results) == 3
@@ -237,11 +238,12 @@ class TestSubscriptionCoordinatorIntegration:
         envelope = _make_envelope(event, "wf-existing", nonce=1)
         await event_store.append_events("WorkflowTemplate-wf-existing", [envelope])
 
-        # Pre-seed a checkpoint that claims we already processed nonce 0
+        # Pre-seed a checkpoint that claims we already processed the seeded event,
+        # global nonce 1 (numbered from 1, like the store, since ESP v0.18.0 #405)
         await checkpoint_store.save_checkpoint(
             ProjectionCheckpoint(
                 projection_name=projection.get_name(),
-                global_position=0,
+                global_position=1,
                 updated_at=datetime.now(UTC),
                 version=projection.get_version(),
             )
@@ -264,8 +266,8 @@ class TestSubscriptionCoordinatorIntegration:
             new_envelope = _make_envelope(new_event, "wf-new", nonce=1)
             await event_store.append_events("WorkflowTemplate-wf-new", [new_envelope])
 
-            # Wait for the new event to be processed (global nonce 1)
-            await _wait_for_checkpoint(checkpoint_store, projection.get_name(), target_position=1)
+            # Wait for the new event to be processed (global nonce 2)
+            await _wait_for_checkpoint(checkpoint_store, projection.get_name(), target_position=2)
 
             # Only the new workflow should be in the projection
             # (the existing one was already checkpointed, so skipped)

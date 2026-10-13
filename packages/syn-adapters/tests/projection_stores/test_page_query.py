@@ -116,3 +116,13 @@ def test_a_flag_status_and_a_lean_table_read_the_lean_document() -> None:
 def test_a_field_that_is_not_an_identifier_is_refused(query: PageQuery) -> None:
     with pytest.raises(ValueError, match="unsafe page field"):
         build_page_query("proj_x", query, lean_ready=False)
+
+
+def test_equal_timestamps_break_on_the_immutable_key_never_updated_at() -> None:
+    """``updated_at`` moves on every write, so a tied row could cross a page (#1800 review)."""
+    sql, _ = build_page_query(
+        "proj_x", PageQuery(status=StatusOf.text("status"), timestamp_field="at"), lean_ready=False
+    )
+
+    assert "updated_at" not in sql
+    assert 'ORDER BY COALESCE(stamp, \'\') COLLATE "C" DESC, id COLLATE "C"' in sql

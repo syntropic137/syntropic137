@@ -1,0 +1,144 @@
+/* Closing call to action (#start). Phone first; 64rem up is the desktop board's two columns. */
+.start {
+  overflow: hidden;
+  border-top: 0;
+  background: var(--sky-glow-accent-wash-bottom), var(--sky-color-ground-deep);
+}
+.start::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--sky-texture-grain);
+  pointer-events: none;
+}
+.start__inner {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  max-width: 1320px;
+  margin: 0 auto;
+  padding: 56px var(--sky-gutter) 32px;
+}
+.start__main {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  min-width: 0;
+}
+.start__main .section-intro__lede {
+  max-width: 520px;
+}
+.start__install {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  max-width: 560px;
+}
+.start__note {
+  font-size: var(--sky-text-data);
+  line-height: 1.5;
+  color: var(--ds-color-text-subtle);
+}
+.start__steps {
+  flex: 1 1 0;
+  list-style: none;
+  padding: 4px 0;
+  min-width: 0;
+}
+.start__step {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 0;
+  border-top: var(--ds-border-width) solid var(--sky-color-divider);
+}
+.start__num {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: color-mix(in oklab, var(--ds-color-accent) 18%, transparent);
+  color: var(--ds-color-accent);
+  font-family: var(--ds-font-mono);
+  font-size: 13px;
+  font-weight: var(--ds-font-weight-semibold);
+}
+.start__label {
+  flex-shrink: 0;
+  width: 64px;
+  font-size: 15px;
+  font-weight: var(--ds-font-weight-semibold);
+  color: var(--ds-color-fg);
+}
+.start__code {
+  min-width: 0;
+  font-family: var(--ds-font-mono);
+  font-size: var(--sky-text-data);
+  color: var(--sky-color-text-code);
+  overflow-wrap: anywhere;
+}
+/* The board sets the wordmark at 170px (44px on phones), wider than the viewport, so the S was cut off at the left; it scales down to fit the row instead (Orbitron 700 runs about 8.8em for SYNTROPIC137). */
+.start__brand {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 14px;
+  padding: 0 var(--sky-gutter);
+  transform: translateY(12%);
+}
+.start__mark {
+  display: block;
+  flex-shrink: 0;
+}
+.start__mark[data-size="desktop"] {
+  display: none;
+}
+.start__wordmark {
+  font-family: var(--sky-font-wordmark);
+  font-size: min(44px, calc((100vw - 2 * var(--sky-gutter) - 54px - 14px) / 8.9));
+  font-weight: var(--ds-font-weight-bold);
+  line-height: 0.8;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  color: transparent;
+  -webkit-text-stroke: 1px color-mix(in oklab, var(--ds-color-accent) 40%, var(--ds-color-border));
+}
+@media (forced-colors: active) {
+  .start__wordmark {
+    color: CanvasText;
+  }
+}
+@media (min-width: 48rem) {
+  .start__inner {
+    padding: 140px var(--sky-gutter) 80px;
+  }
+  .start__brand {
+    gap: 36px;
+  }
+  .start__mark[data-size="phone"] {
+    display: none;
+  }
+  .start__mark[data-size="desktop"] {
+    display: block;
+  }
+  .start__wordmark {
+    font-size: min(170px, calc((100vw - 2 * var(--sky-gutter) - 150px - 36px) / 8.9));
+  }
+}
+@media (min-width: 64rem) {
+  .start__inner {
+    flex-direction: row;
+    align-items: center;
+    gap: 80px;
+  }
+  .start__steps {
+    padding: 8px 0;
+  }
+}

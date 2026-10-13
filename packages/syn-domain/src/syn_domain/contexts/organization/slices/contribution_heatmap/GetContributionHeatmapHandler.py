@@ -6,7 +6,7 @@ then queries TimescaleDB for daily activity buckets.
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import date, timedelta
 from typing import TYPE_CHECKING
 
 from syn_domain.contexts.organization._shared.execution_correlation import (
@@ -15,6 +15,9 @@ from syn_domain.contexts.organization._shared.execution_correlation import (
 from syn_domain.contexts.organization.domain.read_models.contribution_heatmap import (
     ContributionHeatmapResult,
     HeatmapDayBucket,
+)
+from syn_domain.contexts.organization.slices.contribution_heatmap.failed_runs import (
+    failed_runs_by_day,
 )
 from syn_domain.contexts.organization.slices.contribution_heatmap.TimescaleHeatmapQuery import (
     TimescaleHeatmapQuery,
@@ -43,6 +46,7 @@ _ZERO_BREAKDOWN: dict[str, float] = {
     "cache_creation_tokens": 0.0,
     "cache_read_tokens": 0.0,
     "unpriced_tokens": 0.0,
+    "failed": 0.0,
 }
 
 
@@ -105,15 +109,22 @@ class GetContributionHeatmapHandler:
             return _empty_result(query, self._build_filter(query))
 
         buckets = await self._timescale.query(query.start_date, query.end_date, execution_ids)
+        failed = await failed_runs_by_day(
+            self._store, query.start_date, query.end_date, execution_ids
+        )
 
-        days = [
-            HeatmapDayBucket(
-                date=b.date,
-                count=b.breakdown.get(query.metric, 0.0),
-                breakdown=b.breakdown,
+        days: list[HeatmapDayBucket] = []
+        for b in buckets:
+            day_failed = failed.get(date.fromisoformat(b.date), 0)
+            breakdown = {**b.breakdown, "failed": float(day_failed)}
+            days.append(
+                HeatmapDayBucket(
+                    date=b.date,
+                    count=breakdown.get(query.metric, 0.0),
+                    breakdown=breakdown,
+                    failed=day_failed,
+                )
             )
-            for b in buckets
-        ]
 
         return ContributionHeatmapResult(
             metric=query.metric,

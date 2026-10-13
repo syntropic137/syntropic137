@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Syn137 workflows</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Orbitron:wght@500;600;700&display=swap">
+<style>
+:root{--ac:#4D80FF}
+body{margin:0;background:#0A0C14}
+a{color:#E8EEFB}a:hover{color:#FFFFFF}
+.row:hover{background:#111626}
+.card:hover{border-color:#34406A}
+.ghost:hover{background:#151A2A}
+button{font-family:inherit}
+input::placeholder{color:#6F7FA3}
+:focus-visible{outline:2px solid var(--ac);outline-offset:2px}
+</style>
+</helmet>
+<div style="--ac: {{accent}}; display: flex; flex-direction: column; min-height: 100vh; background: #0A0C14; color: #E8EEFB; font-family: 'Instrument Sans', 'Helvetica Neue', system-ui, sans-serif; font-size: 14px; line-height: 1.45; -webkit-font-smoothing: antialiased">
+
+<dc-import name="TopNav" active="workflows" hint-size="100%,78px"></dc-import>
+
+<nav aria-label="Breadcrumb" style="display: flex; flex-wrap: wrap; align-items: center; gap: 4px; box-sizing: border-box; width: 100%; max-width: 1400px; margin: 0 auto; padding: 0 40px 14px; font-size: 13px">
+<a href="Main.dc.html" aria-label="Overview" style="display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 10px; color: #9AA8C7"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M2.75 7.25L8 2.75l5.25 4.5V13a.5.5 0 0 1-.5.5H9.5V9.75h-3v3.75H3.25a.5.5 0 0 1-.5-.5z"></path></svg></a>
+<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="#6F7FA3" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink: 0; opacity: 0.7"><path d="M6 3.5L10.5 8 6 12.5"></path></svg>
+<span aria-current="page" style="display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 9px; border: 1px solid #1A2032; background: #0F121C; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04); font-weight: 600; color: #E8EEFB; white-space: nowrap">Workflows</span>
+</nav>
+
+<main style="display: flex; flex-direction: column; gap: 28px; box-sizing: border-box; width: 100%; max-width: 1400px; margin: 0 auto; padding: 8px 40px 64px">
+
+<section aria-label="Workflows" style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 28px 48px; padding: 32px 36px; border-radius: 24px; border: 1px solid #1A2032; background: radial-gradient(50% 130% at 100% 0%, color-mix(in oklab, var(--ac) 18%, transparent), transparent 70%), #0D101A; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05)">
+<div style="display: flex; align-items: center; gap: 24px; min-width: 0">
+<svg width="84" height="84" viewBox="0 0 64 64" aria-hidden="true" style="flex-shrink: 0">
+<ellipse cx="32" cy="59" rx="18" ry="3.5" style="fill: var(--ac); opacity: 0.22"></ellipse>
+<g opacity="0.45">
+<polygon points="32,30 52,40 32,50 12,40" style="fill: color-mix(in oklab, var(--ac) 58%, white)"></polygon>
+<polygon points="12,40 32,50 32,55 12,45" style="fill: var(--ac)"></polygon>
+<polygon points="32,50 52,40 52,45 32,55" style="fill: color-mix(in oklab, var(--ac) 50%, black)"></polygon>
+</g>
+<g opacity="0.72">
+<polygon points="32,19 52,29 32,39 12,29" style="fill: color-mix(in oklab, var(--ac) 58%, white)"></polygon>
+<polygon points="12,29 32,39 32,44 12,34" style="fill: var(--ac)"></polygon>
+<polygon points="32,39 52,29 52,34 32,44" style="fill: color-mix(in oklab, var(--ac) 50%, black)"></polygon>
+</g>
+<polygon points="32,8 52,18 32,28 12,18" style="fill: color-mix(in oklab, var(--ac) 58%, white)"></polygon>
+<polygon points="12,18 32,28 32,33 12,23" style="fill: var(--ac)"></polygon>
+<polygon points="32,28 52,18 52,23 32,33" style="fill: color-mix(in oklab, var(--ac) 50%, black)"></polygon>
+</svg>
+<div style="display: flex; flex-direction: column; gap: 8px; min-width: 0">
+<h1 style="margin: 0; font-size: 44px; line-height: 1.05; font-weight: 600; letter-spacing: -0.035em">Workflows</h1>
+<p style="margin: 0; font-size: 15px; color: #9AA8C7">27 phased definitions your agents can run. Pick one to start it or edit its prompts.</p>
+</div>
+</div>
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px">
+<label style="display: flex; align-items: center; gap: 8px; height: 38px; width: 260px; max-width: 100%; box-sizing: border-box; padding: 0 12px; border-radius: 12px; border: 1px solid #283048; background: #0A0C14; color: #6F7FA3">
+<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="7" cy="7" r="4.25"></circle><path d="M10.25 10.25L13.5 13.5"></path></svg>
+<input type="search" aria-label="Search workflows" placeholder="Search by name or ID" style="flex-grow: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: #E8EEFB; font: inherit; font-size: 13.5px">
+</label>
+<label style="display: flex; align-items: center; gap: 8px; height: 38px; padding: 0 12px; border-radius: 12px; border: 1px solid #283048; background: #0A0C14; font-size: 13px; color: #6F7FA3">
+<span>Sort</span>
+<select style="border: 0; outline: 0; background: transparent; color: #E8EEFB; font: inherit"><option>Most run</option><option>Name</option></select>
+</label>
+</div>
+</section>
+
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px">
+<button type="button" aria-pressed="{{chip.all.on}}" onClick="{{pickAll}}" style="display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 14px; border-radius: 17px; border: 1px solid {{chip.all.bd}}; background: {{chip.all.bg}}; color: {{chip.all.fg}}; font-size: 13px; cursor: pointer">
+<span>All</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #9AA8C7">27</span>
+</button>
+<button type="button" aria-pressed="{{chip.research.on}}" onClick="{{pickResearch}}" style="height: 34px; padding: 0 14px; border-radius: 17px; border: 1px solid {{chip.research.bd}}; background: {{chip.research.bg}}; color: {{chip.research.fg}}; font-size: 13px; cursor: pointer">Research</button>
+<button type="button" aria-pressed="{{chip.implementation.on}}" onClick="{{pickImplementation}}" style="height: 34px; padding: 0 14px; border-radius: 17px; border: 1px solid {{chip.implementation.bd}}; background: {{chip.implementation.bg}}; color: {{chip.implementation.fg}}; font-size: 13px; cursor: pointer">Implementation</button>
+<button type="button" aria-pressed="{{chip.review.on}}" onClick="{{pickReview}}" style="height: 34px; padding: 0 14px; border-radius: 17px; border: 1px solid {{chip.review.bd}}; background: {{chip.review.bg}}; color: {{chip.review.fg}}; font-size: 13px; cursor: pointer">Review</button>
+<button type="button" aria-pressed="{{chip.skills.on}}" onClick="{{pickSkills}}" style="height: 34px; padding: 0 14px; border-radius: 17px; border: 1px solid {{chip.skills.bd}}; background: {{chip.skills.bg}}; color: {{chip.skills.fg}}; font-size: 13px; cursor: pointer">Has skills</button>
+</div>
+
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 14px">
+<sc-for list="{{rows}}" as="w" hint-placeholder-count="12">
+<div class="card" style="display: flex; flex-direction: column; gap: 16px; padding: 20px; border-radius: 18px; border: 1px solid #1A2032; background: #0D101A; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04)">
+<div style="display: flex; align-items: center; justify-content: space-between; gap: 12px">
+<span style="display: flex; align-items: center; gap: 10px; font-size: 12.5px; color: #9AA8C7">
+<span style="display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 9px; background: color-mix(in oklab, var(--ac) 16%, transparent); color: var(--ac)">
+<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{w.icon}}"></path></svg>
+</span>
+<span>{{w.type}}</span>
+</span>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: {{w.runColor}}">{{w.runs}}</span>
+</div>
+<a href="Workflow.dc.html" style="display: flex; flex-direction: column; gap: 4px; flex-grow: 1; min-width: 0; text-decoration: none">
+<span style="font-size: 17px; line-height: 1.3; font-weight: 600; letter-spacing: -0.01em; text-wrap: balance">{{w.name}}</span>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #6F7FA3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{w.slug}}</span>
+</a>
+<sc-if value="{{w.hasSkills}}" hint-placeholder-val="{{ false }}">
+<div aria-label="Skills" style="display: flex; flex-wrap: wrap; align-items: center; gap: 6px">
+<sc-for list="{{w.skills}}" as="s" hint-placeholder-count="2">
+<span style="display: flex; align-items: center; gap: 6px; height: 24px; padding: 0 9px 0 7px; border-radius: 8px; border: 1px solid #222A40; background: #151A2A; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #C3CCE2">
+<svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round" aria-hidden="true" style="color: var(--ac)"><path d="M8 1.75L14.25 8 8 14.25 1.75 8z"></path></svg>
+<span>{{s.name}}</span>
+</span>
+</sc-for>
+</div>
+</sc-if>
+<div style="display: flex; align-items: center; gap: 12px">
+<span style="display: flex; gap: 4px; flex-grow: 1">
+<sc-for list="{{w.pips}}" as="p" hint-placeholder-count="3">
+<span style="flex: 1 1 0; max-width: 46px; height: 8px; border-radius: 3px; background: color-mix(in oklab, var(--ac) 60%, #151A2A); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18)"></span>
+</sc-for>
+</span>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #9AA8C7">{{w.phases}}</span>
+</div>
+<div style="display: flex; align-items: center; gap: 14px; padding-top: 14px; border-top: 1px solid #1A2032">
+<span aria-label="{{w.trendLabel}}" style="display: flex; align-items: center; gap: 10px; flex-grow: 1; min-width: 0">
+<svg viewBox="0 0 200 40" preserveAspectRatio="none" aria-hidden="true" style="flex: 1 1 auto; min-width: 48px; height: 26px; overflow: visible"><path d="{{w.spark}}" fill="none" stroke="{{w.sparkC}}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"></path></svg>
+<span style="display: flex; flex-direction: column; align-items: flex-end; gap: 1px; flex-shrink: 0">
+<span style="font-size: 11.5px; font-weight: 600; color: {{w.trendFg}}; white-space: nowrap">{{w.trendWord}}</span>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; color: #6F7FA3; white-space: nowrap">{{w.trendSub}}</span>
+</span>
+</span>
+<a class="ghost" href="Workflow.dc.html" aria-label="{{w.runLabel}}" style="display: flex; align-items: center; gap: 7px; height: 32px; padding: 0 12px; border-radius: 10px; border: 1px solid #283048; background: #0F121C; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04); font-size: 12.5px; font-weight: 600; text-decoration: none">
+<svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" style="color: var(--ac)"><path d="M4.5 2.75v10.5L13 8z"></path></svg>
+<span>Run</span>
+</a>
+</div>
+</div>
+</sc-for>
+</div>
+
+<div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; font-size: 13px; color: #9AA8C7">
+<span>{{summary}}</span>
+<div style="display: flex; align-items: center; gap: 8px">
+<button type="button" disabled="{{ true }}" style="height: 34px; padding: 0 14px; border-radius: 11px; border: 1px solid #1A2032; background: transparent; color: #6F7FA3; font-size: 13px">Previous</button>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px">1 / 3</span>
+<button class="ghost" type="button" style="height: 34px; padding: 0 14px; border-radius: 11px; border: 1px solid #283048; background: #0F121C; color: #E8EEFB; font-size: 13px; cursor: pointer">Next</button>
+</div>
+</div>
+
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#4D80FF","options":["#4D80FF","#4CC9F0","#45E0A0","#A78BFA"]},"$preview":{"width":1440,"height":1350}}'>
+class Component extends DCLogic {
+renderVals() {
+const filter = (this.state && this.state.filter) || 'all';
+const ICON = {
+Research: 'M11.25 7a4.25 4.25 0 1 1-8.5 0 4.25 4.25 0 0 1 8.5 0zM10.25 10.25L13.5 13.5',
+Implementation: 'M5.5 4.5L2 8l3.5 3.5M10.5 4.5L14 8l-3.5 3.5',
+Review: 'M13.75 8A5.75 5.75 0 1 1 2.25 8a5.75 5.75 0 0 1 11.5 0zM5.5 8.25l1.75 1.75 3.25-3.75',
+Deployment: 'M8 12.5v-9M4.5 7L8 3.5 11.5 7M3 13.25h10'
+};
+const raw = [
+['CI Failure Self-Healing', 'ci-fix-workflow', 'Implementation', 1, 0, []],
+['Claude delegates a subtask to Codex', 'claude-delegates-to-codex', 'Research', 1, 6, []],
+['Code Review', 'code-review', 'Review', 2, 0, []],
+['Codex delegates to Claude', 'codex-delegates-to-claude', 'Research', 1, 26, []],
+['Codex Bridge Demo', 'codex-demo-workflow-v1', 'Research', 1, 13, []],
+['Fix Review Comments', 'fix-review-workflow', 'Implementation', 1, 0, []],
+['GitHub PR Workflow', 'github-pr-workflow', 'Implementation', 2, 0, []],
+['Implementation Workflow', 'implementation-workflow-v1', 'Implementation', 5, 0, []],
+['Multi-agent shared workspace (claude writes / codex reads)', 'multi-agent-claude-then-codex-v2', 'Research', 2, 1, []],
+['Multi-agent shared workspace (claude marker → codex marker)', 'multi-agent-markers', 'Research', 2, 0, []],
+['Multi-agent (claude plans, codex implements)', 'multi-agent-programmatic', 'Research', 2, 3, []],
+['Reply OK (interactive-tmux)', 'reply-ok-interactive', 'Research', 1, 0, []],
+['Research with Prompt Files', 'research-with-prompts-v1', 'Research', 2, 0, []],
+['Research Workflow', 'research-workflow-v2', 'Research', 3, 12, []],
+['CI Self-Healing', 'sdlc-ci-fix', 'Implementation', 3, 0, []],
+['PR Review', 'sdlc-pr-review', 'Review', 3, 1, []],
+['Release Preparation', 'sdlc-release-prep', 'Deployment', 3, 0, []],
+['Self-Heal PR', 'self-heal-pr', 'Implementation', 1, 0, []],
+['Skill Probe', 'skill-probe-v1', 'Research', 3, 1, ['alpha-marker', 'beta-marker', 'gamma-marker']],
+['Starter PR Review', 'skillproof-pr-review-v1', 'Review', 2, 0, ['repo-conventions']],
+['Starter Research', 'skillproof-research-v1', 'Research', 2, 1, ['doc-coauthoring']],
+['Skills Invocation', 'skills-invocation-v1', 'Research', 2, 2, ['furlong-converter']],
+['Skills Matrix', 'skills-matrix-v1', 'Research', 4, 3, ['vendored-scribe', 'remote-herald']],
+['Starter PR Review', 'starter-pr-review-v1', 'Review', 2, 1, ['repo-conventions']],
+['Starter Research', 'starter-research-v1', 'Research', 2, 0, ['doc-coauthoring']],
+['Subagent Observability Demo', 'subagent-demo-workflow-v2', 'Research', 2, 3, []],
+['Multi-agent shared workspace (claude writes / codex reads)', 'write-then-read-headless', 'Research', 2, 2, []]
+];
+const PAGE = 12;
+const matched = raw
+.filter((r) => filter === 'all' || (filter === 'skills' ? r[5].length > 0 : r[2].toLowerCase() === filter))
+.sort((a, b) => b[4] - a[4] || a[0].localeCompare(b[0]) || a[1].localeCompare(b[1]));
+
+const trendOf = (n, k) => {
+if (!n) return { spark: 'M0 38 L200 38', sparkC: '#283048', trendWord: 'No runs yet', trendFg: '#6F7FA3', trendSub: '—', trendLabel: 'No runs yet' };
+const pts = Math.max(2, Math.min(n, 12));
+const slope = ((k * 37) % 7) - 3;
+const ys = Array.from({ length: pts }, (_, j) => { const base = 22 + slope * (j / (pts - 1)) * 5; const wob = ((j * 13 + k * 7) % 5) - 2; return Math.max(4, Math.min(36, base + wob)); });
+const spark = ys.map((y, j) => (j ? 'L' : 'M') + ((j / (pts - 1)) * 200).toFixed(1) + ' ' + y.toFixed(1)).join(' ');
+const faster = slope > 0, slower = slope < 0;
+const pct = Math.abs(slope) * 6;
+return { spark, sparkC: 'var(--ac)', trendWord: pts < 3 ? 'Too few runs' : faster ? 'Faster' : slower ? 'Slower' : 'Steady', trendFg: pts < 3 ? '#9AA8C7' : faster ? '#7FE3B8' : slower ? '#FF8A7D' : '#9AA8C7', trendSub: pts < 3 ? n + (n === 1 ? ' run' : ' runs') : (faster ? '−' : slower ? '+' : '±') + pct + '% time, last ' + pts, trendLabel: 'Duration trend: ' + (faster ? pct + '% faster' : slower ? pct + '% slower' : 'steady') + ' over the last ' + pts + ' runs' };
+};
+const rows = matched
+.slice(0, PAGE)
+.map((r) => {
+const pips = [];
+for (let i = 0; i < r[3]; i++) pips.push({ i });
+return {
+name: r[0],
+slug: r[1],
+type: r[2],
+icon: ICON[r[2]],
+pips,
+skills: r[5].map((name) => ({ name })),
+hasSkills: r[5].length > 0,
+phases: r[3] === 1 ? '1 phase' : r[3] + ' phases',
+runs: r[4] === 0 ? 'never run' : r[4] === 1 ? '1 run' : r[4] + ' runs',
+runColor: r[4] === 0 ? '#6F7FA3' : '#E8EEFB',
+pct: Math.round((r[4] / 26) * 100) + '%',
+runLabel: 'Run ' + r[0], ...trendOf(r[4], r[0].length + r[3])
+};
+});
+const what = filter === 'all' ? 'workflows' : filter === 'skills' ? 'workflows with skills' : filter + ' workflows';
+const chipOf = (key) => {
+const on = filter === key;
+return { on: on ? 'true' : 'false', bg: on ? '#1A2134' : 'transparent', fg: on ? '#E8EEFB' : '#9AA8C7', bd: on ? '#34406A' : '#222A40' };
+};
+return {
+accent: this.props.accent ?? '#4D80FF',
+rows,
+summary: 'Showing ' + rows.length + ' of ' + matched.length + ' ' + what,
+chip: { all: chipOf('all'), research: chipOf('research'), implementation: chipOf('implementation'), review: chipOf('review'), skills: chipOf('skills') },
+pickAll: () => this.setState({ filter: 'all' }),
+pickResearch: () => this.setState({ filter: 'research' }),
+pickImplementation: () => this.setState({ filter: 'implementation' }),
+pickReview: () => this.setState({ filter: 'review' }),
+pickSkills: () => this.setState({ filter: 'skills' })
+};
+}
+}
+</script>
+</body>
+</html>

@@ -234,6 +234,7 @@ async def test_secret_injection_killed_by_a_signal_says_so() -> None:
             phase_name="premise",
             clone_repos=True,
             include_codex_auth=False,
+            inline_instructions=False,
         )
 
     message = str(raised.value)
@@ -284,6 +285,7 @@ async def test_secret_injection_names_the_status_even_with_no_diagnostic() -> No
             phase_name="premise",
             clone_repos=True,
             include_codex_auth=False,
+            inline_instructions=False,
         )
 
     message = str(raised.value)

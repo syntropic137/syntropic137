@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Phone navigation dock</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Orbitron:wght@500;600;700&display=swap">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<nav aria-label="Primary" style="display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 2px; box-sizing: border-box; padding: 6px; border-radius: 24px; border: 1px solid #222A40; background: #0F121C; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 16px 32px -12px rgba(0, 0, 0, 0.85); font-family: 'Instrument Sans', 'Helvetica Neue', system-ui, sans-serif; font-size: 10.5px; line-height: 1.2">
+<a href="PhoneOverview.dc.html" style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; height: 52px; border-radius: 18px; text-decoration: none; background: {{overview.bg}}; color: {{overview.fg}}; font-weight: {{overview.w}}">
+<svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true" style="color: {{overview.ic}}"><path d="M2.5 2.5H7V7H2.5zM9 2.5h4.5V7H9zM2.5 9H7v4.5H2.5zM9 9h4.5v4.5H9z"></path></svg>
+<span>Overview</span>
+</a>
+<a href="PhoneWorkflows.dc.html" style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; height: 52px; border-radius: 18px; text-decoration: none; background: {{workflows.bg}}; color: {{workflows.fg}}; font-weight: {{workflows.w}}">
+<svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true" style="color: {{workflows.ic}}"><circle cx="4" cy="3.25" r="1.5"></circle><circle cx="4" cy="12.75" r="1.5"></circle><circle cx="12" cy="5" r="1.5"></circle><path d="M4 4.75v6.5M12 6.5c0 2.25-2 2.75-4 2.75S4 9.75 4 11"></path></svg>
+<span>Workflows</span>
+</a>
+<a href="PhoneExecutions.dc.html" style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; height: 52px; border-radius: 18px; text-decoration: none; background: {{executions.bg}}; color: {{executions.fg}}; font-weight: {{executions.w}}">
+<svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true" style="color: {{executions.ic}}"><circle cx="8" cy="8" r="5.75"></circle><path d="M6.75 5.75l3.5 2.25-3.5 2.25z"></path></svg>
+<span>Executions</span>
+</a>
+<a href="PhoneArtifact.dc.html" style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; height: 52px; border-radius: 18px; text-decoration: none; background: {{artifacts.bg}}; color: {{artifacts.fg}}; font-weight: {{artifacts.w}}">
+<svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true" style="color: {{artifacts.ic}}"><path d="M4 1.75h5l3 3v9.5H4zM9 1.75v3h3"></path></svg>
+<span>Artifacts</span>
+</a>
+<a href="PhoneTriggers.dc.html" style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; height: 52px; border-radius: 18px; text-decoration: none; background: {{more.bg}}; color: {{more.fg}}; font-weight: {{more.w}}">
+<svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" style="color: {{more.ic}}"><circle cx="3.5" cy="8" r="1.4"></circle><circle cx="8" cy="8" r="1.4"></circle><circle cx="12.5" cy="8" r="1.4"></circle></svg>
+<span>More</span>
+</a>
+</nav>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"active":{"editor":"enum","options":["overview","workflows","executions","artifacts","more"],"default":"overview"},"$preview":{"width":358,"height":66}}'>
+class Component extends DCLogic {
+renderVals() {
+const active = this.props.active ?? 'overview';
+const mk = (key) => {
+const on = active === key;
+return {
+bg: on ? '#1A2134' : 'transparent',
+fg: on ? '#E8EEFB' : '#9AA8C7',
+ic: on ? 'var(--ac, #4D80FF)' : '#6F7FA3',
+w: on ? 600 : 500
+};
+};
+return { overview: mk('overview'), workflows: mk('workflows'), executions: mk('executions'), artifacts: mk('artifacts'), more: mk('more') };
+}
+}
+</script>
+</body>
+</html>

@@ -14,6 +14,9 @@ rule was convention only, and the convention had already been broken.
 - lives in a module whose file name contains ``memory`` or ``fake`` and names
   a port among its bases -- a ``Protocol`` declared in a ``ports`` package or
   a ``*_port.py`` module, or any base whose name ends in ``Port``.
+- is named, by exact ``"<path>::<ClassName>"`` key, in ``_NAMED_CANDIDATES``:
+  in-process state that matches neither pattern but must still be accounted
+  for in the exceptions table (ADR-072 D8's ``RunTodoStore``).
 
 The second rule exists so that renaming ``InMemoryFooStore`` to ``FooStore``
 does not walk it out of the gate (the #1188 lesson: a gate keyed on spelling
@@ -85,6 +88,18 @@ _GUARD_CALL = "assert_test_only"
 _INIT = "__init__"
 _POST_INIT = "__post_init__"
 _EXCEPTIONS_SECTION = "in_memory_adapters_guarded"
+#: Classes that hold in-process state but match neither pattern, named so the
+#: gate sees them and the exceptions table must say why each is allowed. Exact
+#: keys only: a pattern here would exempt classes nobody has reasoned about.
+#: ``RunTodoStore`` is ADR-072 D8's run-scoped to-do cache, rebuilt from durable
+#: events at every claim; naming it means a guard added to it later (which
+#: would refuse production and break every run) fails the stale-exception check.
+_NAMED_CANDIDATES = frozenset(
+    {
+        "packages/syn-domain/src/syn_domain/contexts/orchestration/slices/"
+        "execute_workflow/run_todo_fold.py::RunTodoStore",
+    }
+)
 
 
 #: Modules a guard may be imported from: the definition and its re-export.
@@ -305,11 +320,14 @@ def _class_info(
     base_names = tuple(_simple_name(base) for base in node.bases)
     in_adapter_module = any(word in path.stem.lower() for word in _ADAPTER_MODULE_WORDS)
     names_a_port = any(name in ports or name.endswith("Port") for name in base_names)
+    key = f"{rel_path(path, root)}::{node.name}"
     is_candidate = not _is_protocol(node) and (
-        bool(_ADAPTER_NAME.match(node.name)) or (in_adapter_module and names_a_port)
+        bool(_ADAPTER_NAME.match(node.name))
+        or (in_adapter_module and names_a_port)
+        or key in _NAMED_CANDIDATES
     )
     return _ClassInfo(
-        key=f"{rel_path(path, root)}::{node.name}",
+        key=key,
         name=node.name,
         line=node.lineno,
         path=path,

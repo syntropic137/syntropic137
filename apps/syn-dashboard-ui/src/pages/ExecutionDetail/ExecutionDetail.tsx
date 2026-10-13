@@ -10,6 +10,7 @@ import {
   MetricCard,
   ModelBreakdown,
   PageLoader,
+  SkillUseOverview,
   StatusBadge,
 } from '../../components'
 import { TokenBreakdown } from '../../components/TokenBreakdown'
@@ -44,7 +45,9 @@ function ReposPanel({ repos }: { repos: string[] }) {
                 href={url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-[var(--color-accent)] hover:underline"
+                // A repo name has no break opportunity of its own; without
+                // break-all one long name scrolls the whole page on a phone.
+                className="break-all text-[var(--color-accent)] hover:underline"
                 title={url}
               >
                 {name}
@@ -206,9 +209,9 @@ function ExecutionHeader({ execution, executionId, isConnected, refreshError, no
               />
               <ExecutionEvalBadge evalRun={execution.eval} />
             </div>
-            <p className="mt-1 text-sm text-[var(--color-text-secondary)]">{execution.workflow_name}</p>
+            <p className="mt-1 break-words text-sm text-[var(--color-text-secondary)]">{execution.workflow_name}</p>
             <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[var(--color-text-muted)]">
-              <span className="font-mono break-all">{execution.workflow_execution_id}</span>
+              <span className="break-all font-mono">{execution.workflow_execution_id}</span>
               <span>&bull;</span>
               <span>Duration: {formatDurationFromRange(execution.started_at, execution.completed_at, now)}</span>
             </div>
@@ -329,6 +332,7 @@ export function ExecutionDetail() {
       )}
       <DispatchedTask task={execution.task} />
       <ReposPanel repos={execution.repos ?? []} />
+      <SkillUseOverview use={execution.skill_use} />
       <ExecutionMetricsGrid
         execution={execution}
         hasCostByModel={Object.keys(aggregatedCostByModel).length > 0}

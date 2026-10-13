@@ -126,3 +126,16 @@ a.si-id { color: var(--color-accent); }
   color: var(--color-accent);
   align-self: flex-start;
 }
+
+/* Phone: every control on the detail page is a 40px tap target. */
+@media (max-width: 768px) {
+  .si-button,
+  .phase-inventory-link {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 40px;
+    min-width: 40px;
+  }
+  .si-filters input { min-height: 40px; }
+}

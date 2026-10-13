@@ -1,0 +1,169 @@
+/* Section 2, "What is Syntropic137?" (v4 boards). Phone first. */
+.what-is {
+  max-width: 1320px;
+  margin: 0 auto;
+  padding: 48px var(--sky-gutter);
+  color: var(--ds-color-fg);
+}
+
+.what-is .section-intro[data-align="center"] {
+  align-items: flex-start;
+  margin-inline: 0;
+  text-align: left;
+}
+
+.what-is__steps {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 28px;
+  margin: 28px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.what-is__step {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-3);
+  min-width: 0;
+}
+
+.what-is__step h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.45;
+  letter-spacing: -0.015em;
+  color: var(--ds-color-fg);
+}
+
+.what-is__step p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--ds-color-text-muted);
+}
+
+.what-is__phase {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+  padding: var(--ds-space-3) var(--ds-space-3-5);
+  border: 1px solid var(--ds-color-border);
+  border-radius: var(--sky-radius-row);
+  background: var(--ds-color-bg);
+}
+
+.what-is__phase-head,
+.what-is__phase-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ds-space-2);
+}
+
+.what-is__phase-name {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.what-is__phase-meta {
+  font-family: var(--ds-font-mono);
+  font-size: 11px;
+  color: var(--ds-color-text-muted);
+}
+
+.what-is__progress {
+  display: block;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--sky-color-control-hover);
+  overflow: hidden;
+}
+
+.what-is__progress > span {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--ds-color-accent);
+}
+
+.what-is__cost {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--ds-space-1) var(--ds-space-2-5);
+}
+
+.what-is__cost-value {
+  font-size: 30px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.what-is__cost-detail {
+  font-family: var(--ds-font-mono);
+  font-size: 12px;
+  color: var(--ds-color-text-muted);
+}
+
+.what-is__score {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ds-space-2);
+  padding: var(--ds-space-3);
+  border: 1px solid var(--ds-color-border);
+  border-radius: var(--sky-radius-control);
+  background: var(--ds-color-bg);
+  font-size: 13px;
+  color: var(--ds-color-text-muted);
+}
+
+.what-is__score-value {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--ds-color-fg);
+}
+
+.what-is__score-value span {
+  font-size: 12px;
+  color: var(--ds-color-text-subtle);
+}
+
+.what-is__verdict {
+  font-size: 12.5px;
+  color: var(--sky-color-success-soft-fg);
+}
+
+@media (min-width: 48rem) {
+  .what-is .section-intro[data-align="center"] {
+    align-items: center;
+    margin-inline: auto;
+    text-align: center;
+  }
+}
+
+@media (min-width: 64rem) {
+  .what-is {
+    padding: 120px var(--sky-gutter) 100px;
+  }
+  .what-is__steps {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 24px;
+    margin-top: 56px;
+  }
+  /* Title, line and window share rows across the three steps (subgrid), so
+     the windows start on one line and end on one line whatever the copy wraps to. */
+  @supports (grid-template-rows: subgrid) {
+    .what-is__steps {
+      grid-template-rows: auto auto 1fr;
+    }
+    .what-is__step {
+      display: grid;
+      grid-row: span 3;
+      grid-template-rows: subgrid;
+      row-gap: var(--ds-space-3);
+    }
+  }
+}

@@ -149,6 +149,71 @@ const profilesCommand: CommandDef = {
   },
 };
 
+const shippedCommand: CommandDef = {
+  name: "shipped",
+  description: "What agents shipped: commits, PRs, merge rate, repos touched vs the previous window",
+  options: {
+    days: { type: "string", short: "d", description: "Window in UTC days: 7, 14 or 30", default: "14" },
+    workflow: { type: "string", short: "w", description: "Only this workflow's executions" },
+    json: { type: "boolean", description: "Print the API response as JSON", default: false },
+  },
+  examples: ["syn metrics shipped --days 14 --json", "syn metrics shipped -w sdlc-implement"],
+  handler: async (parsed: ParsedArgs) => {
+    const days = Number((parsed.values["days"] as string | undefined) ?? "14");
+    if (days !== 7 && days !== 14 && days !== 30) {
+      printError("--days must be 7, 14 or 30");
+      process.exitCode = 1;
+      return;
+    }
+    const workflow = (parsed.values["workflow"] as string | undefined) ?? null;
+
+    const d = unwrap(await api.GET("/metrics/shipped", {
+      params: { query: { days, workflow_id: workflow } },
+    }), "Fetch shipped metrics");
+
+    if (parsed.values["json"] === true) {
+      print(JSON.stringify(d, null, 2));
+      return;
+    }
+
+    const scope = d.workflow_id ? ` for ${d.workflow_id}` : "";
+    print(style(`Shipped by agents${scope}, ${d.window.from} to ${d.window.to} (vs ${d.previous.from} to ${d.previous.to})`, CYAN));
+    const table = new Table();
+    table.addColumn("Tile");
+    table.addColumn("Total", { align: "right" });
+    table.addColumn("Delta", { align: "right" });
+    table.addColumn("Note");
+    const tiles = [
+      ["Commits", d.commits],
+      ["PRs opened", d.prs_opened],
+      ["PRs merged", d.prs_merged],
+      ["Merge rate", d.merge_rate],
+      ["Repos touched", d.repos_touched],
+    ] as const;
+    for (const [label, tile] of tiles) {
+      table.addRow(label, tile.total_display ?? "\u2014", tile.delta_display ?? "\u2014", tile.reason ? "unavailable" : "");
+    }
+    table.print();
+    if (d.repos.length > 0) printDim(`Repos: ${d.repos.join(", ")}`);
+    for (const [label, tile] of tiles) {
+      if (tile.reason) printDim(`${label}: ${tile.reason}`);
+    }
+    if (d.by_workflow.length > 0) {
+      const wf = new Table({ title: "By workflow (commits)" });
+      wf.addColumn("Workflow");
+      wf.addColumn("Commits", { align: "right" });
+      wf.addColumn("PRs opened", { align: "right" });
+      wf.addColumn("PRs merged", { align: "right" });
+      wf.addColumn("Repos", { align: "right" });
+      for (const b of d.by_workflow) {
+        wf.addRow(b.name || b.workflow_id, String(b.commits), String(b.prs_opened), String(b.prs_merged), String(b.repos_touched));
+      }
+      wf.print();
+    }
+  },
+};
+
 export const metricsGroup = new CommandGroup("metrics", "View aggregated workflow and session metrics");
 metricsGroup.command(showCommand);
 metricsGroup.command(profilesCommand);
+metricsGroup.command(shippedCommand);

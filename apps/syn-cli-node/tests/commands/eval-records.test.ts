@@ -3,7 +3,7 @@ import { evalGroup } from "../../src/commands/eval.js";
 import { parseBaselineRepo } from "../../src/commands/eval-records.js";
 import { CLIError } from "../../src/framework/errors.js";
 
-describe("syn eval create|list|show|runs|archive (#967)", () => {
+describe("syn eval create|list|show|runs|trend|archive (#967, #1788)", () => {
   const mockFetch = vi.fn();
   const run = (name: string) => evalGroup.getCommand(name)!.handler;
 
@@ -165,6 +165,68 @@ describe("syn eval create|list|show|runs|archive (#967)", () => {
     expect(request.method).toBe("POST");
     expect(new URL(request.url).pathname).toMatch(/\/evals\/eval-a\/archive$/);
     expect(stdout()).toContain("Archived eval eval-a");
+  });
+
+  const TREND = {
+    eval_id: "eval-a",
+    items: [
+      {
+        execution_id: "exec-1",
+        date: "2026-10-07T17:31:00+00:00",
+        workflow_id: "wf-1",
+        workflow_version: "1.0.0",
+        eval_definition_version: "1",
+        verifier_model: "gpt-5.6-terra",
+        observed_models: ["gpt-5.6-terra"],
+        judge_model: "claude-opus-5-5",
+        score: 87,
+        verdict: "PASS",
+        cost_usd: "0.61",
+        cost_is_lower_bound: false,
+        cost_display: "$0.61",
+        duration_seconds: 190,
+        duration_is_lower_bound: false,
+        duration_display: "3m 10s",
+        tokens: 4200,
+      },
+    ],
+    total: 1,
+    page: 1,
+    page_size: 50,
+    definition_version: "1",
+    definition_changed_at: "2026-10-01T00:00:00+00:00",
+    definition_changes: [
+      { definition_version: "1", changed_at: "2026-10-01T00:00:00+00:00", kind: "created" },
+    ],
+  };
+
+  it("trend --json prints the API response unchanged, for agents", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse(TREND));
+
+    await run("trend")({ positionals: ["eval-a"], values: { json: true, page: "1", "page-size": "50" } });
+
+    const url = new URL(sent().url);
+    expect(url.pathname).toMatch(/\/evals\/eval-a\/trend$/);
+    expect(url.searchParams.get("page_size")).toBe("50");
+    expect(JSON.parse(stdout())).toEqual(TREND);
+  });
+
+  it("trend without --json prints one row per run with the server's displays", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse(TREND));
+
+    await run("trend")({ positionals: ["eval-a"], values: {} });
+
+    const out = stdout();
+    expect(out).toContain("gpt-5.6-terra");
+    expect(out).toContain("claude-opus-5-5");
+    expect(out).toContain("87");
+    expect(out).toContain("$0.61");
+    expect(out).toContain("3m 10s");
+  });
+
+  it("trend requires an eval id", async () => {
+    await expect(run("trend")({ positionals: [], values: {} })).rejects.toThrow(CLIError);
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it("surfaces the server's 404 for an eval the read model does not hold", async () => {

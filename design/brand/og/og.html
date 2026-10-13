@@ -1,0 +1,36 @@
+<!doctype html>
+<!-- Social share image (Open Graph / Twitter card), brand kit 2.3.0.
+     Render with design/brand/og/render.sh; size comes from ?w=&h= (default 1200x630).
+     The render is the Blender hero still (assets/blender-hero/stills/syn137-hero-4k-dark.png in the
+     system monorepo), downsized to hero-1920.jpg. Fonts are the landing page's self-hosted woff2. -->
+<meta charset="utf-8">
+<style>
+@font-face{font-family:Orbitron;src:url(../../../apps/syn-landing/public/fonts/orbitron-latin.woff2) format("woff2");font-weight:400 900}
+@font-face{font-family:"Instrument Sans";src:url(../../../apps/syn-landing/public/fonts/instrument-sans-latin.woff2) format("woff2");font-weight:400 700}
+@font-face{font-family:"JetBrains Mono";src:url(../../../apps/syn-landing/public/fonts/jetbrains-mono-latin.woff2) format("woff2");font-weight:400 800}
+*{margin:0;box-sizing:border-box}
+html,body{background:#0A0C14;overflow:hidden}
+.card{position:relative;overflow:hidden;background:#0A0C14;color:#E8EEFB;font-family:"Instrument Sans",sans-serif}
+.render{position:absolute;right:-20.8%;top:-6.3%;height:117.5%}
+.fade{position:absolute;inset:0;background:linear-gradient(90deg,#0A0C14 0%,#0A0C14 34%,rgba(10,12,20,.75) 50%,rgba(10,12,20,0) 72%)}
+.copy{position:absolute;left:6%;top:0;bottom:0;display:flex;flex-direction:column;justify-content:center}
+.wm{font-family:Orbitron;font-weight:600;letter-spacing:.01em;line-height:1;font-size:calc(var(--h) * .1206)}
+.wm b{color:#4D80FF;font-weight:600}
+.tag{font-size:calc(var(--h) * .054);color:#B7C3DD;letter-spacing:-.01em;margin-top:calc(var(--h) * .035)}
+.cmd{font-family:"JetBrains Mono";font-weight:500;font-size:calc(var(--h) * .035);color:#C9D4EC;margin-top:calc(var(--h) * .054);display:inline-flex;gap:.55em;padding:.55em .8em;border:1px solid rgba(120,150,220,.28);border-radius:12px;background:rgba(20,26,44,.6)}
+.cmd i{color:#4D80FF;font-style:normal}
+</style>
+<div class="card" id="card">
+  <img class="render" src="hero-1920.jpg" alt="">
+  <div class="fade"></div>
+  <div class="copy">
+    <div class="wm">Syntropic<b>137</b></div>
+    <div class="tag">Agent work that compounds.</div>
+    <div><div class="cmd"><i>$</i>npx @syntropic137/setup init</div></div>
+  </div>
+</div>
+<script>
+  const q = new URLSearchParams(location.search), w = +(q.get('w') || 1200), h = +(q.get('h') || 630)
+  const c = document.getElementById('card'); c.style.width = w + 'px'; c.style.height = h + 'px'; c.style.setProperty('--h', h + 'px')
+  document.body.style.width = w + 'px'; document.body.style.height = h + 'px'
+</script>

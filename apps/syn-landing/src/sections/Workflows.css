@@ -1,0 +1,33 @@
+/* Section 3, "01 Repeatable workflows" (v4 boards). */
+.workflows__visual {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-3);
+}
+
+.workflows__starts {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--ds-space-2-5);
+}
+
+.workflows__rule {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.55;
+  color: var(--ds-color-fg);
+}
+
+.workflows__rule-word {
+  color: var(--ds-color-text-muted);
+}
+
+.workflows__rule-name {
+  color: color-mix(in oklab, var(--ds-color-accent) 50%, var(--sky-color-display-hi));
+}
+
+@media (min-width: 48rem) {
+  .workflows__starts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

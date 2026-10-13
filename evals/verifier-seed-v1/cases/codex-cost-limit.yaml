@@ -10,6 +10,13 @@ task: >
   declared, validated and enforced for each agent provider, and judge it
   against what each provider's CLI actually reports while a phase runs.
 expected:
+  # The root cause, for the LLM judge only; never part of `task`.
+  defect: >
+    codex exec reports usage only once, on turn.completed when the run has
+    already ended, so the per-phase max_cost_usd check can never stop a
+    running codex agent; it only turns a finished phase into a failed one
+    after all the money is spent. The limit is accepted for codex phases
+    instead of being refused.
   # Repo-relative. The report must name one of them; it is matched by file
   # name, because a verifier writes `minio.py:212` as often as the full path.
   files:

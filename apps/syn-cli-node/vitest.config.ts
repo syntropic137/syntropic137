@@ -15,6 +15,8 @@ export default defineConfig({
   test: {
     include: ["tests/**/*.test.ts"],
     environment: "node",
+    // Unsets the CLI's own env vars before each test file imports anything.
+    setupFiles: ["tests/setup-env.ts"],
     env: {
       SYN_CONFIG_DIR: SYN_TEST_CONFIG_DIR,
     },

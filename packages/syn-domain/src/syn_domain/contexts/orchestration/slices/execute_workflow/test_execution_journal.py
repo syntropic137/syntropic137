@@ -17,8 +17,6 @@ not the other is the plausible mistake.
 
 from __future__ import annotations
 
-from typing import TypedDict
-
 import pytest
 from event_sourcing.core.errors import ConcurrencyConflictError
 
@@ -29,24 +27,18 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.commands impor
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     WorkflowExecutionAggregate,
 )
+from syn_domain.contexts.orchestration.domain.events.PhaseStartedEvent import (
+    PhaseStartedEvent,
+)
+from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEvent import (
+    WorkflowExecutionStartedEvent,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.execution_journal import (
     EventsNotRecordedError,
     ExecutionJournal,
 )
 
 EXECUTION_ID = "exec-journal-1"
-
-
-class _StartedPayload(TypedDict):
-    """The one field these tests read out of a serialised WorkflowExecutionStarted."""
-
-    execution_id: str
-
-
-class _PhaseStartedPayload(TypedDict):
-    """The one field these tests read out of a serialised PhaseStarted."""
-
-    phase_id: str
 
 
 def _running_aggregate() -> WorkflowExecutionAggregate:
@@ -103,13 +95,13 @@ class _RecordingProjection:
         self.started: list[str] = []
         self.phases_started: list[str] = []
 
-    async def on_workflow_execution_started(self, event: _StartedPayload) -> None:
+    async def on_workflow_execution_started(self, event: object) -> None:
         self._trace.append("on_workflow_execution_started")
-        self.started.append(event["execution_id"])
+        self.started.append(WorkflowExecutionStartedEvent.model_validate(event).execution_id)
 
-    async def on_phase_started(self, event: _PhaseStartedPayload) -> None:
+    async def on_phase_started(self, event: object) -> None:
         self._trace.append("on_phase_started")
-        self.phases_started.append(event["phase_id"])
+        self.phases_started.append(PhaseStartedEvent.model_validate(event).phase_id)
 
     async def get_pending(self, execution_id: str) -> list[object]:
         return []
@@ -168,7 +160,7 @@ async def test_an_event_the_projection_ignores_is_not_an_error() -> None:
     trace: list[str] = []
 
     class _NarrowProjection:
-        async def on_phase_started(self, event: _PhaseStartedPayload) -> None:
+        async def on_phase_started(self, event: object) -> None:
             trace.append("on_phase_started")
 
         async def get_pending(self, execution_id: str) -> list[object]:

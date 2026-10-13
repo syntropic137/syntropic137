@@ -14,6 +14,12 @@ task: >
   fixes the Live Commits card. Review whether each row's details, including
   its privacy, are true of the repository GitHub reports.
 expected:
+  # The root cause, for the LLM judge only; never part of `task`.
+  defect: >
+    useRepoList's registeredRow() ignores the GitHub App entry it already
+    matched and takes isPrivate from the stored registration's is_private,
+    which `syn repo register` always sends as false, so a private repository
+    is shown as public on /repos instead of using the App's live privacy.
   files:
     - apps/syn-dashboard-ui/src/hooks/useRepoList.ts
   keywords:

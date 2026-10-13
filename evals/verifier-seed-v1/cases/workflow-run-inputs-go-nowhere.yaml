@@ -11,6 +11,12 @@ task: >
   Review `syn workflow run`, including its -i (input) and -R (repo) flags and
   its --dry-run preview of what would be dispatched.
 expected:
+  # The root cause, for the LLM judge only; never part of `task`.
+  defect: >
+    `syn workflow run` accepts -i inputs and -R repos without checking
+    whether any phase consumes them (no phase prompt references the -i key's
+    placeholder, or the workflow takes no repos), and emits no warning -
+    including under --dry-run - so those values are silently ignored.
   files:
     - apps/syn-cli-node/src/commands/workflow/run.ts
   keywords:

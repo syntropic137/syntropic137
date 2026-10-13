@@ -14,6 +14,14 @@ task: >
   the next phase's workspace: the nested artifacts/input/<phase-id>/ tree and
   the flat artifacts/input/<phase-id>.md alias.
 expected:
+  # The root cause, for the LLM judge only; never part of `task`.
+  defect: >
+    ArtifactCollector._inject_and_log resolves the flat
+    artifacts/input/<phase-id>.md alias (_resolve_phase_outputs) and the
+    nested artifacts/input/<phase-id>/ tree (_resolve_phase_files)
+    independently, so the two can disagree: a phase that resolves as files
+    but not as an output string gets the tree and no alias. The alias should
+    be derived from the tree.
   files:
     - packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/ArtifactCollector.py
   keywords:

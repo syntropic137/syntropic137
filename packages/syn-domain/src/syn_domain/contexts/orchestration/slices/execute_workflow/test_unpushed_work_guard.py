@@ -61,7 +61,10 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     UnpushedWorkQuarantinedError,
     WorkspaceInspectionFailedError,
 )
-from syn_domain.contexts.orchestration.slices.execute_workflow.moved_gitlinks import _unquote
+from syn_domain.contexts.orchestration.slices.execute_workflow.moved_gitlinks import (
+    _unquote,
+    split_moved_gitlinks,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
     PhaseOutputCache,
 )
@@ -4234,6 +4237,292 @@ async def test_a_submodule_change_kept_only_by_a_stash_still_fails_the_phase(
         await superproject.clone.run_gate()
 
     assert _SUBMODULE in str(raised.value)
+
+
+def _publish_a_tag_no_origin_branch_contains(superproject: _WithSubmodule, *tag_args: str) -> str:
+    """#1815's shape: origin has a tag on a commit none of its branches reach, and the clone fetched it.
+
+    What a release tag cut from a since-rewritten branch looks like. Returns
+    the tagged commit, and asserts the fixture really staged the bug: before
+    #1815 that commit read as "missing from every remote".
+    """
+    seed = superproject.clone.root / "plugin.seed"
+    home = superproject.clone.root / "home"
+    _git("checkout", "-b", "since-deleted", cwd=seed, home=home)
+    (seed / "plugin.txt").write_text("released from a branch origin no longer has\n")
+    _git("commit", "-am", "release", cwd=seed, home=home)
+    tagged = _git("rev-parse", "HEAD", cwd=seed, home=home).stdout.strip()
+    _git("tag", *tag_args, "v1.0.0", cwd=seed, home=home)
+    _git("push", str(superproject.clone.root / "plugin.origin.git"), "v1.0.0", cwd=seed, home=home)
+    superproject.git("fetch", "--tags", "origin")
+    # Origin then moves on, as it does after every clone: it now advertises a
+    # tip this clone has never fetched, so the guard must ignore what it lacks.
+    (seed / "plugin.txt").write_text("pushed after the workspace cloned\n")
+    _git("commit", "-am", "later", cwd=seed, home=home)
+    _git(
+        "push",
+        str(superproject.clone.root / "plugin.origin.git"),
+        "HEAD:later",
+        cwd=seed,
+        home=home,
+    )
+    assert superproject.git("rev-list", "HEAD", "--all", "--not", "--remotes").split() == [tagged]
+    return tagged
+
+
+@pytest.mark.parametrize("tag_args", [(), ("-a", "-m", "release")], ids=["light", "annotated"])
+async def test_a_tag_origin_publishes_off_every_branch_does_not_fail_the_phase(
+    superproject: _WithSubmodule, tag_args: tuple[str, ...]
+) -> None:
+    """#1815: a clean submodule at an older pin, holding only what origin already has.
+
+    Remote-tracking refs do not include tags, so the release tag's commit
+    looked unpushed and every reverify of a pre-bump branch was quarantined.
+    """
+    _publish_a_tag_no_origin_branch_contains(superproject, *tag_args)
+    superproject.move_the_gitlink()
+    assert superproject.v2_token() == "SC.."
+    run = _PhaseRun(superproject.clone.workspace)
+
+    await run.complete()
+
+    run.aggregate.complete_phase.assert_called_once()
+    assert run.completed_phase_ids == [_PHASE_ID]
+    assert not _quarantined(superproject.clone)
+
+
+async def test_a_local_tag_named_like_a_published_one_still_fails_the_phase(
+    superproject: _WithSubmodule,
+) -> None:
+    """Origin's tags are subtracted by OBJECT, not by name: a reused name publishes nothing."""
+    _publish_a_tag_no_origin_branch_contains(superproject)
+    (superproject.path / "plugin.txt").write_text("committed, never pushed\n")
+    superproject.git("commit", "-am", "work in the submodule")
+    superproject.git("tag", "-f", "v1.0.0")
+    superproject.git("checkout", "--detach", superproject.new)
+    superproject.move_the_gitlink()
+    assert superproject.v2_token() == "SC.."
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await superproject.clone.run_gate()
+
+    assert _SUBMODULE in str(raised.value)
+
+
+async def test_a_published_tag_still_counts_when_origin_cannot_be_asked(
+    superproject: _WithSubmodule,
+) -> None:
+    """No answer from origin is no evidence: the tagged commit stays counted as work."""
+    _publish_a_tag_no_origin_branch_contains(superproject)
+    superproject.git("remote", "set-url", "origin", str(superproject.clone.root / "gone.git"))
+    superproject.move_the_gitlink()
+    assert superproject.v2_token() == "SC.."
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await superproject.clone.run_gate()
+
+    assert _SUBMODULE in str(raised.value)
+
+
+@pytest.mark.parametrize("kind", ["tracked", "untracked"])
+@pytest.mark.parametrize("source", ["git-config", "gitmodules", "diff-config"])
+async def test_ignore_settings_cannot_pass_a_dirty_moved_submodule_as_clean(
+    superproject: _WithSubmodule, kind: str, source: str
+) -> None:
+    """#1815 review: a repository's ignore setting makes git print ``SC..`` over real dirt.
+
+    Built on the published-tag shape, the one #1815 exempts, so the only
+    thing between the dirt and a completed phase is how cleanliness is read.
+    """
+    _publish_a_tag_no_origin_branch_contains(superproject)
+    superproject.move_the_gitlink()
+    if source == "git-config":
+        superproject.clone.git("config", f"submodule.{_SUBMODULE}.ignore", "dirty")
+    elif source == "diff-config":
+        superproject.clone.git("config", "diff.ignoreSubmodules", "dirty")
+    else:
+        superproject.clone.git(
+            "config", "-f", ".gitmodules", f"submodule.{_SUBMODULE}.ignore", "dirty"
+        )
+        superproject.clone.git("add", ".gitmodules")
+        superproject.clone.git("commit", "-m", "record a submodule status policy")
+        superproject.clone.git("push", "origin", "HEAD:refs/heads/with-policy")
+    (superproject.path / ("plugin.txt" if kind == "tracked" else "never-committed.txt")).write_text(
+        "an agent wrote this\n"
+    )
+    assert superproject.git("status", "--porcelain").strip()
+    assert superproject.v2_token() == "SC..", "the setting should hide the dirt from plain status"
+    run = _PhaseRun(superproject.clone.workspace)
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await run.complete()
+
+    assert _SUBMODULE in str(raised.value)
+    assert run.completed_phase_ids == []
+
+
+@pytest.mark.parametrize("where", ["superproject", "submodule"])
+async def test_hiding_untracked_files_cannot_pass_a_moved_submodule_as_clean(
+    superproject: _WithSubmodule, where: str
+) -> None:
+    """``status.showUntrackedFiles=no`` drops the ``u`` of the token, wherever it is set."""
+    _publish_a_tag_no_origin_branch_contains(superproject)
+    superproject.move_the_gitlink()
+    configure = superproject.clone.git if where == "superproject" else superproject.git
+    configure("config", "status.showUntrackedFiles", "no")
+    (superproject.path / "never-committed.txt").write_text("an agent wrote this\n")
+    assert superproject.v2_token() == "SC..", "the setting should hide the file from plain status"
+    run = _PhaseRun(superproject.clone.workspace)
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await run.complete()
+
+    assert _SUBMODULE in str(raised.value)
+    assert run.completed_phase_ids == []
+
+
+async def test_ignore_all_cannot_hide_a_dirty_submodule_whose_gitlink_never_moved(
+    superproject: _WithSubmodule,
+) -> None:
+    """``ignore=all`` drops the submodule's line from the guard's own listing altogether."""
+    superproject.clone.git("config", f"submodule.{_SUBMODULE}.ignore", "all")
+    (superproject.path / "plugin.txt").write_text("an agent wrote this\n")
+    assert superproject.clone.git("status", "--porcelain") == ""
+
+    with pytest.raises(UnpushedWorkQuarantinedError) as raised:
+        await superproject.clone.run_gate()
+
+    assert _SUBMODULE in str(raised.value)
+
+
+class _RecordsGitCommands:
+    """The real workspace, keeping every argv it ran."""
+
+    def __init__(self, inner: GitWorkspace) -> None:
+        self._inner = inner
+        self.commands: list[list[str]] = []
+
+    async def renew_git_credential(self) -> None:
+        await self._inner.renew_git_credential()
+
+    async def execute(self, command: list[str]) -> ExecutionResult:
+        self.commands.append(command)
+        return await self._inner.execute(command)
+
+
+async def test_every_git_command_judging_a_moved_gitlink_runs_hardened(
+    superproject: _WithSubmodule,
+) -> None:
+    """#1807's hardening on each command whose answer can exempt a line (#1815).
+
+    Driven down the path that runs all three - status, both rev-lists and the
+    ls-remote - against real git, and the argv read as it was executed.
+    Every one loses HOME, ``ls-remote`` included; the remote one gets the
+    provisioned credential store back by explicit ``-c``, from the home the
+    workspace reports, and nothing else of the global config.
+    """
+    _publish_a_tag_no_origin_branch_contains(superproject)
+    superproject.move_the_gitlink()
+    workspace = _RecordsGitCommands(superproject.clone.workspace)
+    repo = f"{WORKSPACE_REPOS_DIR}/{superproject.clone.name}"
+
+    split = await split_moved_gitlinks(workspace, repo, (f" M {_SUBMODULE}",))
+
+    assert split.moved == frozenset({_SUBMODULE})
+    judged = [c for c in workspace.commands if {"status", "rev-list", "ls-remote"} & set(c)]
+    assert [next(a for a in c if a in {"status", "rev-list", "ls-remote"}) for c in judged] == [
+        "status",
+        "rev-list",
+        "ls-remote",
+        "rev-list",
+    ]
+    for command in judged:
+        git_at = command.index("git")
+        env, config = command[:git_at], command[git_at:]
+        assert "GIT_CONFIG_NOSYSTEM=1" in env, command
+        for setting in ("core.hooksPath=/dev/null", "core.fsmonitor=false"):
+            assert setting in config, command
+        assert "HOME=/nonexistent" in env, command
+        helper = [a for a in config if a.startswith("credential.helper=")]
+        if "ls-remote" in command:
+            store = superproject.clone.root / "home" / ".git-credentials"
+            assert helper == [f"credential.helper=store --file={store}"], command
+        else:
+            assert helper == [], command
+
+
+def _authenticating_origin() -> tuple[http.server.HTTPServer, list[str | None]]:
+    """An HTTP origin that demands credentials and records what git offered.
+
+    401 until an Authorization header arrives, so git consults its credential
+    helpers - the only path on which the provisioned store matters.
+    """
+    seen: list[str | None] = []
+
+    class _Demands(http.server.BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            offered = self.headers.get("Authorization")
+            seen.append(offered)
+            self.send_response(404 if offered else 401)
+            if not offered:
+                self.send_header("WWW-Authenticate", 'Basic realm="origin"')
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def log_message(self, *args: object) -> None:
+            """Keep the suite's output the test's, not the server's."""
+
+    return http.server.HTTPServer(("127.0.0.1", 0), _Demands), seen
+
+
+def test_a_hardened_remote_command_authenticates_without_home(tmp_path: Path) -> None:
+    """#1815 review: HOME=/nonexistent on ``ls-remote``, and a private origin still answers.
+
+    Real git over real TCP, run from the argv `git_argv` builds and with a
+    host HOME whose global config is hostile: a helper that hands out the
+    wrong token and a rewrite that sends github.com elsewhere. Only the
+    provisioned store, named by ``-c``, may supply the credential; only the
+    provisioned rewrites may apply.
+    """
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".gitconfig").write_text(
+        '[credential]\n\thelper = "!f() { echo username=leaked; echo password=global; }; f"\n'
+        '[url "https://elsewhere.invalid/"]\n\tinsteadOf = git@github.com:\n'
+    )
+    repo = tmp_path / "repo"
+    _git("init", "-q", str(repo), cwd=tmp_path, home=home)
+    server, seen = _authenticating_origin()
+    url = f"http://127.0.0.1:{server.server_port}/org/repo.git"
+    (home / workspace_git.PROVISIONED_CREDENTIAL_FILE).write_text(
+        f"http://x-access-token:provisioned@127.0.0.1:{server.server_port}/org/repo.git\n"
+    )
+    env = {"PATH": os.environ.get("PATH", ""), "HOME": str(home)}
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        argv = workspace_git.git_argv(
+            str(repo), "ls-remote", url, hardened=True, credentials_home=str(home)
+        )
+        subprocess.run(argv, capture_output=True, text=True, check=False, env=env)
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+    rewrite = workspace_git.git_argv(
+        str(repo),
+        "ls-remote",
+        "--get-url",
+        "git@github.com:org/repo",
+        hardened=True,
+        credentials_home=str(home),
+    )
+    rewritten = subprocess.run(rewrite, capture_output=True, text=True, check=True, env=env)
+
+    assert "HOME=/nonexistent" in argv
+    assert seen[0] is None
+    assert seen[1:] == ["Basic eC1hY2Nlc3MtdG9rZW46cHJvdmlzaW9uZWQ="]  # x-access-token:provisioned
+    assert rewritten.stdout.strip() == "https://github.com/org/repo"
 
 
 _QUOTED_SUBMODULE = "lib/my plugin"

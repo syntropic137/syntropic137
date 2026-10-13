@@ -683,3 +683,335 @@ async def test_unidentified_authored_work_is_kept(
     assert ws.exists()
     assert not archive.saved
     assert not archive.files
+
+
+# --- #1807: host git stays inside the workspace and runs only allowlisted config ---
+
+
+def _outside_repo(tmp_path: Path) -> Path:
+    """A repository outside every workspace, with one commit a remote-tracking ref holds."""
+    outside = tmp_path / "outside"
+    _git(tmp_path, "init", "-b", "main", str(outside))
+    (outside / "README.md").write_text("outside\n")
+    _git(outside, "add", "README.md")
+    _git(outside, "commit", "-m", "outside")
+    _git(outside, "update-ref", "refs/remotes/origin/main", "HEAD")
+    return outside
+
+
+async def test_a_gitdir_file_pointing_outside_the_workspace_is_refused_and_kept(
+    base: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    ws = _workspace(base, "ws-gitdir", tmp_path)
+    outside = _outside_repo(tmp_path)
+    pointed = ws / "repos" / "pointed"
+    pointed.mkdir()
+    (pointed / ".git").write_text(f"gitdir: {outside / '.git'}\n")
+    (pointed / "README.md").write_text("edited through the pointer\n")
+    archive = _Archive()
+    result = await _reclaimer(base, archive=archive).run_once()
+    assert result.kept == ("ws-gitdir",)
+    assert ws.exists()
+    assert archive.saved == []
+    assert archive.files == []
+    assert f"{pointed} reads {outside / '.git'}, outside the workspace" in caplog.text
+
+
+async def test_a_core_worktree_outside_the_workspace_is_refused_and_kept(
+    base: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    ws = _workspace(base, "ws-worktree", tmp_path)
+    secret_dir = tmp_path / "host-secrets"
+    secret_dir.mkdir()
+    (secret_dir / "host_secret.txt").write_text("not the workspace's\n")
+    _git(ws / "repos" / "app", "config", "core.worktree", str(secret_dir))
+    archive = _Archive()
+    result = await _reclaimer(base, archive=archive).run_once()
+    assert result.kept == ("ws-worktree",)
+    assert ws.exists()
+    assert archive.saved == []
+    assert archive.files == []
+    assert "has a core.worktree other than itself" in caplog.text
+
+
+async def test_git_never_searches_above_a_found_repository(
+    base: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A directory shaped like a bare clone but not one must not resolve to an enclosing repo."""
+    _outside_repo(tmp_path)
+    # The workspace base is inside that clean, "pushed" repository.
+    enclosed = tmp_path / "outside" / "workspaces"
+    enclosed.mkdir()
+    ws = _workspace(enclosed, "ws-climb", tmp_path)
+    fake = ws / "repos" / "fake.git"
+    for sub in ("objects", "refs"):
+        (fake / sub).mkdir(parents=True)
+    (fake / "HEAD").write_text("not a ref\n")
+    (fake / "notes.txt").write_text("only copy\n")
+    result = await _reclaimer(enclosed).run_once()
+    assert result.kept == ("ws-climb",)
+    assert (fake / "notes.txt").read_text() == "only copy\n"
+    # Kept because git found no repository there, not by luck in the enclosing one.
+    assert "not a git repository" in caplog.text
+
+
+_RISKY_CONFIG = [
+    ("core.alternateRefsCommand", "touch {marker}"),
+    ("core.sshCommand", "touch {marker}"),
+    ("credential.helper", "!touch {marker}"),
+    ("credential.https://example.com.helper", "!touch {marker}"),
+    ("diff.pc130.command", "touch {marker}"),
+    ("diff.external", "touch {marker}"),
+    ("gpg.ssh.program", "touch {marker}"),
+    ("uploadpack.packObjectsHook", "touch {marker}"),
+    ("core.pager", "touch {marker}; cat"),
+    ("extensions.partialClone", "origin"),
+    ("url.file:///tmp/.insteadOf", "https://"),
+]
+
+
+@pytest.mark.parametrize(("key", "value"), _RISKY_CONFIG)
+async def test_a_config_key_outside_the_allowlist_is_refused_and_kept(
+    base: Path, tmp_path: Path, key: str, value: str
+) -> None:
+    ws = _workspace(base, "ws-risky", tmp_path)
+    app = ws / "repos" / "app"
+    marker = tmp_path / "pwned"
+    _git(app, "config", key, value.format(marker=marker))
+    (app / "README.md").write_text("changed\n")
+    archive = _Archive()
+    result = await _reclaimer(base, archive=archive).run_once()
+    assert result.kept == ("ws-risky",)
+    assert ws.exists()
+    assert archive.saved == []
+    assert not marker.exists()
+
+
+@pytest.mark.parametrize("attribute", ["filter", "diff"])
+async def test_a_filter_or_textconv_never_runs_and_keeps_the_dir(
+    base: Path, tmp_path: Path, attribute: str
+) -> None:
+    ws = _workspace(base, f"ws-{attribute}", tmp_path)
+    app = ws / "repos" / "app"
+    marker = tmp_path / "pwned"
+    key = "filter.pc130.clean" if attribute == "filter" else "diff.pc130.textconv"
+    _git(app, "config", key, f"touch {marker}; cat")
+    (app / ".gitattributes").write_text(f"* {attribute}=pc130\n")
+    (app / "README.md").write_text("changed\n")
+    result = await _reclaimer(base).run_once()
+    assert result.kept == (f"ws-{attribute}",)
+    assert not marker.exists()
+
+
+@pytest.mark.parametrize("directive", ["include.path", "includeIf.gitdir:/.path"])
+async def test_an_included_config_never_takes_effect(
+    base: Path, tmp_path: Path, directive: str
+) -> None:
+    """Even one whose contents are all allowlisted: it is read from outside the workspace."""
+    ws = _workspace(base, "ws-include", tmp_path)
+    app = ws / "repos" / "app"
+    included = tmp_path / "included.gitconfig"
+    included.write_text("[user]\n\tname = harmless\n")
+    _git(app, "config", directive, str(included))
+    result = await _reclaimer(base).run_once()
+    assert result.kept == ("ws-include",)
+    assert ws.exists()
+
+
+async def test_a_repository_with_a_submodule_is_still_salvaged(base: Path, tmp_path: Path) -> None:
+    """A submodule's `.git` file and `core.worktree` both stay inside the workspace."""
+    ws = _workspace(base, "ws-sub", tmp_path)
+    app = ws / "repos" / "app"
+    library = tmp_path / "library.git"
+    _git(tmp_path, "init", "--bare", "-b", "main", str(library))
+    seed = tmp_path / "library-seed"
+    _git(tmp_path, "clone", str(library), str(seed))
+    (seed / "lib.txt").write_text("lib\n")
+    _git(seed, "add", "lib.txt")
+    _git(seed, "commit", "-m", "lib")
+    _git(seed, "push", "origin", "HEAD:main")
+    _git(app, "-c", "protocol.file.allow=always", "submodule", "add", str(library), "lib")
+    _git(app, "commit", "-m", "add lib")
+    _git(app, "push", "origin", "HEAD:main")
+    assert (app / "lib" / ".git").is_file()
+    (app / "lib" / "lib.txt").write_text("edited in the submodule\n")
+    archive = _Archive()
+    result = await _reclaimer(base, archive=archive).run_once()
+    assert result.reclaimed == ("ws-sub",)
+    assert any(b"edited in the submodule" in patch for _, patch in archive.saved)
+
+
+async def test_a_linked_worktree_whose_commondir_is_outside_is_refused_and_kept(
+    base: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    ws = _workspace(base, "ws-commondir", tmp_path)
+    outside = _outside_repo(tmp_path)
+    linked = ws / "repos" / "linked"
+    _git(outside, "worktree", "add", "-b", "linked", str(linked))
+    # Its git dir moved into the workspace; only `commondir` still leads out.
+    git_dir = ws / ".linked-git"
+    (outside / ".git" / "worktrees" / "linked").rename(git_dir)
+    (git_dir / "commondir").write_text(f"{outside / '.git'}\n")
+    (linked / ".git").write_text(f"gitdir: {git_dir}\n")
+    result = await _reclaimer(base).run_once()
+    assert result.kept == ("ws-commondir",)
+    assert f"{linked} reads {outside / '.git'}, outside the workspace" in caplog.text
+
+
+async def test_alternates_outside_the_workspace_are_refused_and_kept(
+    base: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    ws = _workspace(base, "ws-alternates", tmp_path)
+    outside = _outside_repo(tmp_path)
+    app = ws / "repos" / "app"
+    (app / ".git" / "objects" / "info" / "alternates").write_text(
+        f"{outside / '.git' / 'objects'}\n"
+    )
+    result = await _reclaimer(base).run_once()
+    assert result.kept == ("ws-alternates",)
+    assert f"{app} reads {outside / '.git' / 'objects'}, outside the workspace" in caplog.text
+
+
+def _workspace_with_submodule(base: Path, workspace_id: str, tmp_path: Path) -> Path:
+    """`_workspace`, whose `app` has a pushed submodule at `lib`; returns `app`."""
+    ws = _workspace(base, workspace_id, tmp_path)
+    app = ws / "repos" / "app"
+    library = tmp_path / f"{workspace_id}-library.git"
+    _git(tmp_path, "init", "--bare", "-b", "main", str(library))
+    seed = tmp_path / f"{workspace_id}-library-seed"
+    _git(tmp_path, "clone", str(library), str(seed))
+    (seed / "lib.txt").write_text("lib\n")
+    _git(seed, "add", "lib.txt")
+    _git(seed, "commit", "-m", "lib")
+    _git(seed, "push", "origin", "HEAD:main")
+    _git(app, "-c", "protocol.file.allow=always", "submodule", "add", str(library), "lib")
+    _git(app, "commit", "-m", "add lib")
+    _git(app, "push", "origin", "HEAD:main")
+    return app
+
+
+def _record_git_calls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> list[tuple[tuple[str, ...], dict[str, str]]]:
+    """Every subprocess host git starts, as (argv, env); each still runs."""
+    calls: list[tuple[tuple[str, ...], dict[str, str]]] = []
+    real = asyncio.create_subprocess_exec
+
+    async def recording(*argv: str, env: dict[str, str], **kwargs: object) -> object:
+        calls.append((argv, env))
+        return await real(*argv, env=env, **kwargs)
+
+    monkeypatch.setattr(stale_dirs.asyncio, "create_subprocess_exec", recording)
+    return calls
+
+
+@pytest.mark.parametrize(
+    ("key", "attributes"),
+    [("filter.pc130.clean", "* filter=pc130\n"), ("core.fsmonitor", None)],
+)
+async def test_a_submodule_config_never_runs_through_its_superproject(
+    base: Path,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+    key: str,
+    attributes: str | None,
+) -> None:
+    """The superproject's diff runs git inside the submodule, under the submodule's config."""
+    app = _workspace_with_submodule(base, "ws-subconfig", tmp_path)
+    lib = app / "lib"
+    marker = tmp_path / "pwned"
+    _git(lib, "config", key, f"touch {marker}; cat")
+    if attributes is not None:
+        (lib / ".gitattributes").write_text(attributes)
+    # Same size, newer mtime: git has to hash the file, which runs a clean filter.
+    later = time.time() + 60
+    os.utime(lib / "lib.txt", (later, later))
+    calls = _record_git_calls(monkeypatch)
+    result = await _reclaimer(base).run_once()
+    assert result.kept == ("ws-subconfig",)
+    assert f"{lib} sets {key.lower()}, which is not on the host-git allowlist" in caplog.text
+    assert not marker.exists()
+    # Refused before any repository in the workspace was read, not after.
+    assert {argv[argv.index("-C") + 2] for argv, _ in calls} == {"config"}
+
+
+@pytest.mark.parametrize("holder", ["chained", "bare"])
+async def test_alternates_leading_outside_at_any_depth_are_refused_and_kept(
+    base: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture, holder: str
+) -> None:
+    """Git follows alternates of alternates: an intermediate that is no repository leads out too."""
+    ws = _workspace(base, f"ws-{holder}", tmp_path)
+    outside_objects = _outside_repo(tmp_path) / ".git" / "objects"
+    if holder == "chained":
+        repo = ws / "repos" / "app"
+        plain = ws / "plain" / "objects"
+        (plain / "info").mkdir(parents=True)
+        (plain / "info" / "alternates").write_text(f"{outside_objects}\n")
+        (repo / ".git" / "objects" / "info" / "alternates").write_text(
+            "../../../../plain/objects\n"
+        )
+    else:
+        repo = ws / "repos" / "mirror.git"
+        _git(ws / "repos", "clone", "--bare", str(ws / "repos" / "app"), "mirror.git")
+        (repo / "objects" / "info" / "alternates").write_text(f"{outside_objects}\n")
+    result = await _reclaimer(base).run_once()
+    assert result.kept == (f"ws-{holder}",)
+    assert f"{repo} reads {outside_objects}, outside the workspace" in caplog.text
+
+
+async def test_every_host_git_call_runs_guarded(
+    base: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Hooks, fsmonitor, system and global config are off on every call, not on most."""
+    app = _workspace_with_submodule(base, "ws-calls", tmp_path)
+    (app / "README.md").write_text("dirty\n")
+    (app / "untracked.txt").write_text("new\n")
+    (app / "lib" / "lib.txt").write_text("edited in the submodule\n")
+    bare = _workspace(base, "ws-calls-bare", tmp_path)
+    _git(bare / "repos", "clone", "--bare", str(bare / "repos" / "app"), "mirror.git")
+    calls = _record_git_calls(monkeypatch)
+    result = await _reclaimer(base).run_once()
+    assert result.reclaimed == ("ws-calls",)
+    assert result.kept == ("ws-calls-bare",)
+    subcommands = {argv[argv.index("-C") + 2] for argv, _ in calls}
+    assert {"config", "rev-list", "diff", "ls-files"} <= subcommands
+    for argv, env in calls:
+        assert argv[0] == "git"
+        overrides = argv[1 : argv.index("-C")]
+        if argv[argv.index("-C") + 2] == "config":
+            # The listing passes trust only, so our overrides are not read back.
+            assert overrides == ("-c", "safe.directory=*"), argv
+        else:
+            assert "core.hooksPath=/dev/null" in overrides, argv
+            assert "core.fsmonitor=false" in overrides, argv
+        if "diff" in argv and "--no-index" not in argv:
+            assert "--ignore-submodules=dirty" in argv, argv
+        assert env["GIT_CONFIG_NOSYSTEM"] == "1", argv
+        assert env["GIT_CONFIG_GLOBAL"] == "/dev/null", argv
+        assert env["HOME"] == "/nonexistent", argv
+
+
+@pytest.mark.parametrize("shape", ["quoted", "too-deep"])
+async def test_alternates_git_would_read_differently_are_refused_and_kept(
+    base: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture, shape: str
+) -> None:
+    """A C-quoted entry is not parsed as a path, and a chain git stops following is not guessed at."""
+    ws = _workspace(base, f"ws-{shape}", tmp_path)
+    app = ws / "repos" / "app"
+    alternates = app / ".git" / "objects" / "info" / "alternates"
+    if shape == "quoted":
+        alternates.write_text('"../../../../plain/objects"\n')
+        expected = f"{app} has a quoted alternate"
+    else:
+        # Six plain object directories inside the workspace, each naming the next.
+        for depth in range(6):
+            info = ws / "plain" / str(depth) / "objects" / "info"
+            info.mkdir(parents=True)
+            if depth < 5:
+                (info / "alternates").write_text(f"../../{depth + 1}/objects\n")
+        alternates.write_text("../../../../plain/0/objects\n")
+        expected = f"{app} chains alternates past 5"
+    result = await _reclaimer(base).run_once()
+    assert result.kept == (f"ws-{shape}",)
+    assert expected in caplog.text

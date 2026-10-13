@@ -21,6 +21,7 @@ from syn_api._wiring import (
     get_phase_profile_query,
     get_projection_mgr,
 )
+from syn_api.services.shipped_ledger import shipped_metrics_service
 from syn_api.types import (
     DashboardMetrics,
     Err,
@@ -28,7 +29,9 @@ from syn_api.types import (
     Ok,
     PhaseProfilesResponse,
     Result,
+    ShippedMetricsResponse,
 )
+from syn_domain.contexts.orchestration import SHIPPED_WINDOW_DAYS, ShippedMetricsQueryService
 from syn_domain.pagination import Page
 from syn_shared.pricing import canonical_cost_usd
 
@@ -418,3 +421,40 @@ async def get_phase_profiles_endpoint(
             detail="phase profiles are unavailable: the observability store could not be read",
         ) from exc
     return PhaseProfilesResponse.from_profiles(profiles, window_days)
+
+
+def get_shipped_metrics_query() -> ShippedMetricsQueryService:
+    """The process-wide shipped read service (rollup rows behind a cache)."""
+    return shipped_metrics_service()
+
+
+@router.get("/shipped", response_model=ShippedMetricsResponse)
+async def get_shipped_metrics_endpoint(
+    days: int = Query(
+        14,
+        description="Window length in UTC days: 7, 14 or 30",
+        json_schema_extra={"enum": sorted(SHIPPED_WINDOW_DAYS)},
+    ),
+    workflow_id: str | None = Query(None, description="Only commits of this workflow's executions"),
+) -> ShippedMetricsResponse:
+    """What agents shipped over the last ``days`` UTC days, against the ``days`` before.
+
+    Agent-attributed only, read from the shipped ledger's daily rollup: commits
+    runs made, PRs runs created (a successful ``gh pr create``), merges of
+    those PRs (``pull_request`` closed+merged events from the GitHub
+    pipeline), merge rate as the share of the window's opened PRs merged by
+    now, and the repos all of that touched.
+    """
+    if days not in SHIPPED_WINDOW_DAYS:
+        allowed = ", ".join(str(d) for d in sorted(SHIPPED_WINDOW_DAYS))
+        raise HTTPException(status_code=422, detail=f"days must be one of {allowed}")
+    await ensure_connected()
+    try:
+        metrics = await get_shipped_metrics_query().shipped(days=days, workflow_id=workflow_id)
+    except Exception as exc:
+        logger.warning("Failed to read shipped metrics", exc_info=True)
+        raise HTTPException(
+            status_code=503,
+            detail="shipped metrics are unavailable: the observability store could not be read",
+        ) from exc
+    return ShippedMetricsResponse.from_metrics(metrics)

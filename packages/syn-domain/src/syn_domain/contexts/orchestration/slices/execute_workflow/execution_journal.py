@@ -135,19 +135,8 @@ class ExecutionJournal:
         return [envelope.event for envelope in aggregate.get_uncommitted_events()]
 
     async def _project(self, events: Sequence[object]) -> None:
-        """Feed just-saved events to the local projection, in order.
-
-        A projection with no handler for an event type is not a failure: the
-        to-do list reacts to a handful of lifecycle events and ignores the
-        rest, and requiring a handler per event would make every new event a
-        breaking change to every projection.
-        """
-        for event in events:
-            event_type = getattr(event, "event_type", type(event).__name__)
-            event_data = self._serialize_event(event)
-            handler = getattr(self._projection, self._event_type_to_handler(event_type), None)
-            if handler:
-                await handler(event_data)
+        """Feed just-saved events to the local projection, in order."""
+        await project_events(self._projection, events)
 
     @staticmethod
     def _serialize_event(event: object) -> dict[str, Any]:
@@ -163,3 +152,24 @@ class ExecutionJournal:
         """Convert CamelCase event type to on_snake_case handler name."""
         snake = re.sub(r"(?<!^)(?=[A-Z])", "_", event_type).lower()
         return f"on_{snake}"
+
+
+async def project_events(projection: TodoProjection, events: Sequence[object]) -> None:
+    """Feed domain events to a to-do projection, in order, as the journal does.
+
+    The one dispatch from a domain event to a projection handler, shared by
+    the journal's live saves and by `RunScopedTodoFold`'s seeding from the
+    stored stream (ADR-072 D8). Two dispatches would be two folds that agree
+    only until one of them changes.
+
+    A projection with no handler for an event type is not a failure: the
+    to-do list reacts to a handful of lifecycle events and ignores the
+    rest, and requiring a handler per event would make every new event a
+    breaking change to every projection.
+    """
+    for event in events:
+        event_type = getattr(event, "event_type", type(event).__name__)
+        event_data = ExecutionJournal._serialize_event(event)  # pyright: ignore[reportPrivateUsage]
+        handler = getattr(projection, ExecutionJournal._event_type_to_handler(event_type), None)  # pyright: ignore[reportPrivateUsage]
+        if handler:
+            await handler(event_data)
