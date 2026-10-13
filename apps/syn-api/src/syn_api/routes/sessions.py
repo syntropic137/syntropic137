@@ -48,6 +48,7 @@ from syn_api.types import (
     TokenTypeCostResponse,
     ToolOperation,
 )
+from syn_domain.contexts.agent_sessions import AgentLaunch
 from syn_domain.contexts.orchestration.slices.list_workflows.projection import (
     WorkflowListProjection,
 )
@@ -247,6 +248,12 @@ class SessionResponse(BaseModel):
     repos: list[str] = Field(default_factory=list)
     repos_display: str | None = None
     status: str
+    agent_launch: AgentLaunch = AgentLaunch.UNKNOWN
+    """``launched`` once the agent process demonstrably exists (``AgentLaunched``).
+
+    ``status`` is ``running`` while the workspace is still provisioning, so a
+    caller asking "is an agent working" reads this, not ``status`` (#1717).
+    """
     workspace_path: str | None = None
     input_tokens: int = 0
     input_tokens_display: str = "0"
@@ -709,6 +716,7 @@ async def get_session(
             root_session_id=session.root_session_id,
             agent_type=session.agent_type,
             status=session.status,
+            agent_launch=session.agent_launch,
             repos=list(session.repos),
             input_tokens=cd.input_tokens,
             output_tokens=cd.output_tokens,
@@ -947,6 +955,7 @@ async def get_session_endpoint(session_id: str) -> SessionResponse:
         repos=list(detail.repos),
         repos_display=format_repos(detail.repos),
         status=detail.status,
+        agent_launch=detail.agent_launch,
         workspace_path=detail.workspace_path,
         input_tokens=detail.input_tokens,
         input_tokens_display=format_tokens(detail.input_tokens),
