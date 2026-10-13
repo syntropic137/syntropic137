@@ -310,8 +310,18 @@ class _AgentRun:
     ) -> _Ended:
         """Run ``agent`` for as many attempts as a busy upstream earns it."""
         runner, collector = self._for(agent)
+        #: Why the attempt about to run was granted, when it is a retry.
+        retried_for: str | None = None
         while True:
             result = await self._dispatch(agent, runner, collector, claude_cmd, agent_env, grant)
+            if retried_for is not None:
+                # Recorded once the retry has RUN, never between its grant and
+                # its dispatch: the grant carries a timeout read off the clock,
+                # and an await in that gap - a slow telemetry store - spends
+                # the budget the grant still claims, so a successor could start
+                # after the phase's deadline (#1882). Here the next
+                # `wait_before_retry` reads the clock after this write.
+                await self._record_retry(agent, reason=retried_for)
             got_somewhere = _phase_got_somewhere(result, collector)
             if _attempt_is_settled(result):
                 return _Ended(result, may_have_written=collector.may_have_written)
@@ -325,6 +335,7 @@ class _AgentRun:
                 # somewhere, or the failure never qualified for a retry.
                 return _Ended(result, may_have_written=collector.may_have_written)
             grant = successor
+            retried_for = result.stream_result.error_reason
             logger.warning(
                 "Upstream was busy (phase=%s): %s - attempt %d of %d",
                 self._todo.phase_id,
@@ -332,13 +343,12 @@ class _AgentRun:
                 self._attempts.attempt,
                 self._attempts.max_attempts,
             )
-            await self._record_retry(agent, reason=result.stream_result.error_reason)
 
     async def _record_retry(self, agent: AgentConfiguration, *, reason: str | None) -> None:
         """Count this retry against its provider and model (#1882), Lane 2 only.
 
-        Best effort: the retry is already granted and runs whether or not this
-        row lands, so a telemetry store that is down costs a count, not a phase.
+        Best effort: the retry has already run when this is written, so a
+        telemetry store that is down costs a count, not a phase.
         """
         if self._observability is None:
             return

@@ -1202,3 +1202,75 @@ class TestEachRetryIsCountedAgainstItsProvider:
         await _run(handler, observability=observations)
 
         assert observations.of(UPSTREAM_RETRY) == []
+
+
+@dataclass
+class _SlowObservations(_RecordedObservations):
+    """A telemetry store whose every write takes ``takes_seconds`` of ``clock``."""
+
+    clock: FakeClock = field(default_factory=FakeClock)
+    takes_seconds: float = 0.0
+
+    async def record_observation(
+        self,
+        session_id: str,
+        observation_type: str,
+        data: dict[str, str | int | None],
+        execution_id: str | None = None,
+        phase_id: str | None = None,
+        workspace_id: str | None = None,
+    ) -> None:
+        self.clock.advance(self.takes_seconds)
+        await super().record_observation(
+            session_id, observation_type, data, execution_id, phase_id, workspace_id
+        )
+
+
+class TestTelemetryCannotSpendAGrantedBudget:
+    """A retry row is written where no grant is waiting on it (#1882, verify finding 1).
+
+    The row used to be awaited after `wait_before_retry` had granted the
+    successor its timeout and before that successor was dispatched. A slow
+    store spent the budget the grant still claimed, so the successor started
+    after the phase's deadline on a timeout computed before it.
+    """
+
+    async def test_a_recorder_that_eats_the_budget_dispatches_nothing_past_the_deadline(
+        self,
+    ) -> None:
+        deadline = 120.0
+        clock = FakeClock()
+        observations = _SlowObservations(clock=clock, takes_seconds=deadline)
+        started: list[float] = []
+        handler = _RecordingHandler(
+            scripted=FakeAgentExecutionHandler(
+                attempts=[
+                    FakeAgentExecutionHandler.failed(stream_error=AT_CAPACITY),
+                    FakeAgentExecutionHandler.failed(stream_error=AT_CAPACITY),
+                    FakeAgentExecutionHandler.success(),
+                ]
+            )
+        )
+        real_handle = handler.handle
+
+        async def timed_handle(*args: object, **kwargs: object) -> AgentExecutionResult:
+            started.append(clock.now)
+            return await real_handle(*args, **kwargs)  # type: ignore[arg-type]
+
+        handler.handle = timed_handle  # type: ignore[method-assign]
+
+        result = await _run(
+            handler,
+            phase=_phase(timeout_seconds=int(deadline)),
+            retry_policy=UpstreamRetryPolicy(
+                base_delay_seconds=0.0, clock=clock.as_attempt_clock()
+            ),
+            observability=observations,
+        )
+
+        granted = [a.timeout_seconds for a in handler.attempts]
+        assert all(
+            start + timeout <= deadline for start, timeout in zip(started, granted, strict=True)
+        ), f"dispatched at {started} with {granted}: an attempt outlived the {deadline}s deadline"
+        assert len(started) == 2, f"{started}: a successor ran on a budget the recorder spent"
+        assert result.stream_result.error_reason == AT_CAPACITY
