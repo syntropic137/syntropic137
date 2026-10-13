@@ -1,9 +1,12 @@
 """Drive one token-free load test against a running stack (#1310 step 7c, #1717).
 
 Admit N executions of the load-test workflow through the public API, paced
-across the admission window, sample the stack until the sustain window has
-passed and the runs have drained, and hand every observation to
-``pass_bar.judge``. The driver decides nothing itself.
+across the admission window while sampling the stack, keep sampling until
+the sustain window has passed and the runs have drained, and hand every
+observation to ``pass_bar.judge``, which makes every verdict. The driver
+makes two observational decisions and states them where they are made: which
+phases are active (``_sample``) and which timeline operations are tool starts
+and ends (``TOOL_START_OPERATIONS``/``TOOL_END_OPERATIONS``).
 
 It reads only what any client could: ``GET /executions`` (the dashboard list),
 ``GET /executions/{id}`` (the dashboard detail) and ``GET /sessions/{id}``.
@@ -22,17 +25,23 @@ import json
 import shutil
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 import httpx
 from pydantic import BaseModel, ConfigDict
 
 from syn_perf.loadtest.pass_bar import (
     TERMINAL_STATUSES,
+    TOOL_END_OPERATIONS,
+    TOOL_START_OPERATIONS,
+    Admission,
+    ContainerRoles,
     ContainerStat,
     LoadTestReport,
+    Observed,
     PassBar,
     PhaseOutcome,
+    RealHarnessError,
     RunOutcome,
     Sample,
     assert_scripted,
@@ -61,8 +70,16 @@ class Target:
     api_url: str
     workflow_id: str
     task: str
-    containers: tuple[str, ...]
+    repos: tuple[str, ...]
+    """Sent in every start's typed ``repos`` field: the workflow requires one (ADR-058)."""
+    containers: ContainerRoles | None
     """Platform containers to sample: API, Postgres, event store, socket proxy."""
+
+
+DASHBOARD_LIST_PAGE_SIZE: Final = 50
+"""``EXECUTION_LIST_PAGE_SIZE`` in apps/syn-dashboard-ui/src/hooks/useListQuery.ts."""
+LIST_READ_QUERY: Final = f"/executions?page=1&page_size={DASHBOARD_LIST_PAGE_SIZE}"
+"""The request the dashboard's execution list makes (``listAllExecutions``)."""
 
 
 # --- the slice of the API responses the driver reads -----------------------
@@ -124,40 +141,111 @@ async def run_load_test(
     bar: PassBar,
     pacing: Pacing,
 ) -> LoadTestReport:
-    """Admit, sample, drain, then judge. Raises ``RealHarnessError`` on a real model."""
+    """Admit while sampling, drain, then judge.
+
+    The clock starts before the first admission and sampling runs throughout
+    it, so the report covers the initial load. A real model, or an API that
+    fails a read, stops further admissions and the run, and the report is
+    still written with everything observed up to then: an overloaded or
+    misconfigured stack is exactly what this driver exists to report.
+    """
     async with httpx.AsyncClient(base_url=target.api_url, timeout=60.0) as client:
-        ids = await _admit(client, target, bar.n, pacing.admit_seconds)
+        admitter = _Admitter(client, target, bar.n, pacing.admit_seconds)
+        admitting = asyncio.create_task(admitter.run())
         samples: list[Sample] = []
         stats: list[ContainerStat] = []
+        refused: str | None = None
         start = time.monotonic()
         deadline = start + pacing.admit_seconds + bar.sustain_seconds
         drain_deadline = deadline + pacing.drain_timeout_seconds
-        while True:
-            sample, details = await _sample(client, ids, time.monotonic() - start)
-            samples.append(sample)
-            stats.extend(await container_stats(target.containers))
-            now = time.monotonic()
-            drained = all(d is not None and d.status in TERMINAL_STATUSES for d in details)
-            if now >= drain_deadline or (now >= deadline and drained):
-                break
-            await asyncio.sleep(pacing.sample_seconds)
-        runs = await _outcomes(client, ids)
-    return judge(bar, profile, samples, runs, stats, target.containers)
+        try:
+            while True:
+                sample, details = await _sample(client, admitter.ids, time.monotonic() - start)
+                samples.append(sample)
+                stats.extend(await container_stats(target.containers))
+                now = time.monotonic()
+                drained = all(d is not None and d.status in TERMINAL_STATUSES for d in details)
+                # Admission ends on its own (window plus one request timeout), and
+                # the run is not over while starts are still being sent.
+                if admitting.done() and (now >= drain_deadline or (now >= deadline and drained)):
+                    break
+                await asyncio.sleep(pacing.sample_seconds)
+        except RealHarnessError as exc:
+            refused = f"real harness: {exc}"
+        except httpx.HTTPError as exc:
+            refused = f"the API at {target.api_url} failed a read: {exc!r}"
+        if refused is not None:
+            admitting.cancel()
+        await asyncio.gather(admitting, return_exceptions=True)
+        try:
+            runs = await _outcomes(client, admitter.ids)
+        except httpx.HTTPError as exc:
+            # The admitted ids are still in the report; their end state is not.
+            runs = []
+            refused = refused or f"the API at {target.api_url} failed the final reads: {exc!r}"
+    observed = Observed(
+        admission=admitter.result(),
+        samples=samples,
+        runs=runs,
+        containers=stats,
+        list_read_query=LIST_READ_QUERY,
+        refused=refused,
+    )
+    return judge(bar, profile, observed, target.containers)
 
 
-async def _admit(client: httpx.AsyncClient, target: Target, n: int, window: float) -> list[str]:
-    """Start ``n`` executions from ``n`` concurrent clients, evenly over ``window``."""
+class _Admitter:
+    """Starts ``n`` executions evenly over ``window`` and keeps every outcome.
 
-    async def one(i: int) -> str:
-        await asyncio.sleep(window * i / n)
-        response = await client.post(
-            f"/workflows/{target.workflow_id}/execute",
-            json={"task": target.task, "tags": ["loadtest"], "no_eval": True},
+    One refused start does not abandon the others or the ids already admitted:
+    each attempt is recorded, and the ids are readable while admission runs.
+    """
+
+    def __init__(self, client: httpx.AsyncClient, target: Target, n: int, window: float) -> None:
+        self._client = client
+        self._target = target
+        self._n = n
+        self._window = window
+        self.ids: list[str] = []
+        self._rejected: list[str] = []
+        self._first_sent: float | None = None
+        self._last_answered: float | None = None
+
+    async def run(self) -> None:
+        await asyncio.gather(*(self._one(i) for i in range(self._n)))
+
+    async def _one(self, i: int) -> None:
+        await asyncio.sleep(self._window * i / self._n)
+        sent = time.monotonic()
+        self._first_sent = sent if self._first_sent is None else min(self._first_sent, sent)
+        try:
+            response = await self._client.post(
+                f"/workflows/{self._target.workflow_id}/execute",
+                json={
+                    "task": self._target.task,
+                    "repos": list(self._target.repos),
+                    "tags": ["loadtest"],
+                    "no_eval": True,
+                },
+            )
+            response.raise_for_status()
+            self.ids.append(_Started.model_validate_json(response.content).execution_id)
+        except httpx.HTTPStatusError as exc:
+            self._rejected.append(f"start {i}: HTTP {exc.response.status_code} {exc.response.text}")
+        except httpx.HTTPError as exc:
+            self._rejected.append(f"start {i}: {exc!r}")
+        finally:
+            self._last_answered = time.monotonic()
+
+    def result(self) -> Admission:
+        elapsed = (
+            None
+            if self._first_sent is None or self._last_answered is None
+            else self._last_answered - self._first_sent
         )
-        response.raise_for_status()
-        return _Started.model_validate_json(response.content).execution_id
-
-    return list(await asyncio.gather(*(one(i) for i in range(n))))
+        unsent = self._n - len(self.ids) - len(self._rejected)
+        rejected = [*self._rejected, *([f"{unsent} starts never sent"] if unsent else [])]
+        return Admission(tuple(self.ids), tuple(rejected), elapsed)
 
 
 async def _timed_get(client: httpx.AsyncClient, path: str) -> tuple[float, httpx.Response]:
@@ -176,7 +264,7 @@ async def _sample(
     ``running`` too. The same session read proves the model is the scripted
     one, so a real harness stops the run on the tick it is first seen.
     """
-    list_latency, listed = await _timed_get(client, "/executions?page_size=1")
+    list_latency, listed = await _timed_get(client, LIST_READ_QUERY)
     listed.raise_for_status()
     budget = _List.model_validate_json(listed.content).budget
     reads = await asyncio.gather(*(_timed_get(client, f"/executions/{i}") for i in ids))
@@ -198,7 +286,7 @@ async def _sample(
                 True,
                 None,
                 None,
-                (PhaseOutcome(p.phase_id, p.status, p.session_id, None, s.agent_model),),
+                (PhaseOutcome(p.phase_id, p.status, p.session_id, None, None, s.agent_model),),
             )
             for (eid, p), s in zip(running, sessions, strict=True)
             if s is not None
@@ -252,27 +340,31 @@ async def _outcomes(client: httpx.AsyncClient, ids: Sequence[str]) -> list[RunOu
         response.raise_for_status()
         detail = _Detail.model_validate_json(response.content)
         phases = tuple([await _phase_outcome(client, p) for p in detail.phases])
-        run = RunOutcome(execution_id, True, row.status, row.started_at, phases)
-        assert_scripted([run])
-        runs.append(run)
+        runs.append(RunOutcome(execution_id, True, row.status, row.started_at, phases))
     return runs
 
 
 async def _phase_outcome(client: httpx.AsyncClient, phase: _Phase) -> PhaseOutcome:
     session = await _session(client, phase.session_id)
     if session is None:
-        return PhaseOutcome(phase.phase_id, phase.status, phase.session_id, None, None)
-    started = sum(o.operation_type == "tool_execution_started" for o in session.operations)
+        return PhaseOutcome(phase.phase_id, phase.status, phase.session_id, None, None, None)
+    types = [o.operation_type for o in session.operations]
     return PhaseOutcome(
-        phase.phase_id, phase.status, phase.session_id, started, session.agent_model
+        phase.phase_id,
+        phase.status,
+        phase.session_id,
+        sum(t in TOOL_START_OPERATIONS for t in types),
+        sum(t in TOOL_END_OPERATIONS for t in types),
+        session.agent_model,
     )
 
 
-async def container_stats(containers: Sequence[str]) -> list[ContainerStat]:
-    """One ``docker stats`` snapshot of ``containers``; empty without a docker CLI."""
+async def container_stats(roles: ContainerRoles | None) -> list[ContainerStat]:
+    """One ``docker stats`` snapshot of every role; empty without a docker CLI or roles."""
     docker = shutil.which("docker")
-    if not containers or docker is None:
+    if roles is None or docker is None:
         return []
+    containers = roles.by_role().values()
     proc = await asyncio.create_subprocess_exec(
         docker,
         "stats",

@@ -26,6 +26,12 @@ from typing import TYPE_CHECKING, Final
 from pydantic import BaseModel, ConfigDict
 
 from syn_perf.loadtest.scripted_agent_profile import SCRIPTED_AGENT_MODEL
+from syn_shared.events import (
+    SUBAGENT_STARTED,
+    SUBAGENT_STOPPED,
+    TOOL_EXECUTION_COMPLETED,
+    TOOL_EXECUTION_STARTED,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -34,6 +40,19 @@ if TYPE_CHECKING:
 
 TERMINAL_STATUSES: Final = frozenset({"completed", "failed", "cancelled", "interrupted"})
 NOT_YET_STARTED: Final = frozenset({"pending", "queued", "not_started"})
+
+# The session timeline relabels an Agent/Task tool event as a subagent
+# operation (session_tools_dispatch.to_operation), so one recorded tool use is
+# EITHER a tool start OR a subagent start there, never both and never neither.
+TOOL_START_OPERATIONS: Final = frozenset({TOOL_EXECUTION_STARTED, SUBAGENT_STARTED})
+TOOL_END_OPERATIONS: Final = frozenset({TOOL_EXECUTION_COMPLETED, SUBAGENT_STOPPED})
+
+# docs/north-star.md: dashboard reads under 500 ms, N admitted within five
+# minutes, held for thirty. A run held to anything looser is an experiment,
+# and the report says so rather than certifying it.
+NORTH_STAR_READ_P95_SECONDS: Final = 0.5
+NORTH_STAR_ADMIT_SECONDS: Final = 300.0
+NORTH_STAR_SUSTAIN_SECONDS: Final = 1800.0
 
 
 class RealHarnessError(RuntimeError):
@@ -60,9 +79,11 @@ class PhaseOutcome:
     phase_id: str
     status: str
     session_id: str | None
-    tool_operations: int | None
-    """``tool_execution_started`` operations stored for the session; ``None``
-    when the session could not be read."""
+    tool_starts: int | None
+    """Tool and subagent starts stored for the session; ``None`` when the
+    session could not be read."""
+    tool_ends: int | None
+    """Tool and subagent completions stored for the session; ``None`` likewise."""
     agent_model: str | None
 
 
@@ -85,12 +106,51 @@ class ContainerStat:
 
 
 @dataclass(frozen=True)
+class ContainerRoles:
+    """The platform containers the north star names, by role. Names vary by stack."""
+
+    api: str
+    postgres: str
+    event_store: str
+    socket_proxy: str
+
+    def by_role(self) -> dict[str, str]:
+        return {
+            "api": self.api,
+            "postgres": self.postgres,
+            "event_store": self.event_store,
+            "socket_proxy": self.socket_proxy,
+        }
+
+
+@dataclass(frozen=True)
+class Admission:
+    """What admitting the run actually took, as the driver measured it."""
+
+    admitted: tuple[str, ...]
+    """Execution ids the API accepted, in admission order."""
+    rejected: tuple[str, ...]
+    """One line per start the API refused or never answered."""
+    elapsed_seconds: float | None
+    """First POST sent to last POST answered; ``None`` when nothing was sent."""
+
+
+@dataclass(frozen=True)
 class PassBar:
     """What the run is held to. Every figure is an argument, none is a constant."""
 
     n: int
     sustain_seconds: float
     read_p95_seconds: float
+    admit_seconds: float = NORTH_STAR_ADMIT_SECONDS
+
+    @property
+    def is_north_star(self) -> bool:
+        return (
+            self.read_p95_seconds <= NORTH_STAR_READ_P95_SECONDS
+            and self.admit_seconds <= NORTH_STAR_ADMIT_SECONDS
+            and self.sustain_seconds >= NORTH_STAR_SUSTAIN_SECONDS
+        )
 
 
 class Check(BaseModel):
@@ -117,6 +177,13 @@ class LoadTestReport(BaseModel):
 
     n: int
     tier: str
+    list_read_query: str
+    """The dashboard list request each tick timed, so the p95 says what it is of."""
+    refused: str | None
+    """Why the run stopped early, or ``None``; a refused run still reports."""
+    admitted: list[str]
+    admission_rejected: list[str]
+    admission_seconds: float | None
     peak_active_phases: int
     seconds_at_n: float
     list_p95_seconds: float | None
@@ -125,6 +192,7 @@ class LoadTestReport(BaseModel):
     orphaned: list[str]
     dropped_starts: list[str]
     event_count_mismatches: list[str]
+    unscripted_sessions: list[str]
     containers: list[ContainerPeak]
     samples: list[Sample]
     checks: list[Check]
@@ -162,16 +230,41 @@ def assert_scripted(runs: Sequence[RunOutcome]) -> None:
         raise RealHarnessError(msg)
 
 
+def _unscripted(runs: Sequence[RunOutcome]) -> list[str]:
+    """Sessions that did not positively report the scripted model by the end.
+
+    During the run an absent model is not yet evidence; at the end it is the
+    absence of the proof the run depends on, so it fails like a real one.
+    """
+    return sorted(
+        f"{r.execution_id}/{p.phase_id}={p.agent_model}"
+        for r in runs
+        for p in r.phases
+        if p.agent_model != SCRIPTED_AGENT_MODEL
+    )
+
+
+@dataclass(frozen=True)
+class Observed:
+    """Everything one run observed, refused or not."""
+
+    admission: Admission
+    samples: Sequence[Sample]
+    runs: Sequence[RunOutcome]
+    containers: Sequence[ContainerStat]
+    list_read_query: str
+    refused: str | None = None
+
+
 def judge(
     bar: PassBar,
     profile: ScriptedAgentProfile,
-    samples: Sequence[Sample],
-    runs: Sequence[RunOutcome],
-    containers: Sequence[ContainerStat],
-    expected_containers: Sequence[str],
+    observed: Observed,
+    roles: ContainerRoles | None,
 ) -> LoadTestReport:
-    """Hold one run's observations to ``bar``."""
-    assert_scripted(runs)
+    """Hold one run's observations to ``bar``. Never raises on what it observed."""
+    samples, runs, containers = observed.samples, observed.runs, observed.containers
+    admission = observed.admission
     peak = max((s.active_phases for s in samples), default=0)
     at_n = _seconds_at_or_above(samples, bar.n)
     list_p95 = p95([s.list_latency_seconds for s in samples])
@@ -184,10 +277,50 @@ def judge(
         if r.found and r.status not in NOT_YET_STARTED and r.started_at is None
     )
     mismatches = _event_count_mismatches(profile, runs)
+    unscripted = _unscripted(runs)
     peaks = _container_peaks(containers)
-    missing_containers = sorted(set(expected_containers) - {c.container for c in peaks})
+    sampled = {c.container for c in peaks}
+    missing_roles = (
+        ["api", "postgres", "event_store", "socket_proxy"]
+        if roles is None
+        else sorted(role for role, name in roles.by_role().items() if name not in sampled)
+    )
+    admitted_in_time = (
+        len(admission.admitted) == bar.n
+        and admission.elapsed_seconds is not None
+        and admission.elapsed_seconds <= bar.admit_seconds
+    )
 
     checks = [
+        Check(
+            name="north_star_bar",
+            passed=bar.is_north_star,
+            detail=(
+                f"held to read p95 {bar.read_p95_seconds:.3f}s, admit {bar.admit_seconds:.0f}s, "
+                f"sustain {bar.sustain_seconds:.0f}s; the north star is "
+                f"<{NORTH_STAR_READ_P95_SECONDS}s, <={NORTH_STAR_ADMIT_SECONDS:.0f}s, "
+                f">={NORTH_STAR_SUSTAIN_SECONDS:.0f}s"
+            ),
+        ),
+        Check(
+            name="refused",
+            passed=observed.refused is None,
+            detail=observed.refused or "the run was not stopped early",
+        ),
+        Check(
+            name="admission",
+            passed=admitted_in_time,
+            detail=(
+                f"{len(admission.admitted)}/{bar.n} admitted in "
+                f"{admission.elapsed_seconds if admission.elapsed_seconds is not None else 'n/a'}s "
+                f"(limit {bar.admit_seconds:.0f}s); rejected {list(admission.rejected)}"
+            ),
+        ),
+        Check(
+            name="scripted",
+            passed=not unscripted,
+            detail=f"{len(unscripted)} sessions without the scripted model {SCRIPTED_AGENT_MODEL!r}",
+        ),
         Check(
             name="concurrency",
             passed=peak >= bar.n and at_n >= bar.sustain_seconds,
@@ -213,14 +346,14 @@ def judge(
         Check(
             name="event_counts",
             passed=not mismatches,
-            detail=f"{len(mismatches)} completed phases off their scripted tool-use count",
+            detail=f"{len(mismatches)} planned phases off their scripted tool-use count",
         ),
         Check(
             name="container_stats",
-            passed=not missing_containers,
+            passed=not missing_roles,
             detail=(
-                f"no stats for {missing_containers}"
-                if missing_containers
+                f"no stats for roles {missing_roles}"
+                if missing_roles
                 else f"sampled {len(peaks)} containers"
             ),
         ),
@@ -228,6 +361,11 @@ def judge(
     return LoadTestReport(
         n=bar.n,
         tier=profile.tier,
+        list_read_query=observed.list_read_query,
+        refused=observed.refused,
+        admitted=list(admission.admitted),
+        admission_rejected=list(admission.rejected),
+        admission_seconds=admission.elapsed_seconds,
         peak_active_phases=peak,
         seconds_at_n=at_n,
         list_p95_seconds=list_p95,
@@ -236,6 +374,7 @@ def judge(
         orphaned=orphaned,
         dropped_starts=dropped,
         event_count_mismatches=mismatches,
+        unscripted_sessions=unscripted,
         containers=peaks,
         samples=list(samples),
         checks=checks,
@@ -262,17 +401,30 @@ def _latency_check(name: str, value: float | None, limit: float) -> Check:
 
 
 def _event_count_mismatches(profile: ScriptedAgentProfile, runs: Sequence[RunOutcome]) -> list[str]:
-    """Completed phases whose stored tool operations differ from the recording's count."""
+    """Planned phases whose stored tool starts or ends differ from the recording.
+
+    Every phase the profile plans must be present and completed, and must hold
+    exactly the scripted number of starts AND of ends: a missing phase, a
+    failed one, an unreadable session or a dropped completion is a mismatch.
+    A run that never appeared in the list is reported as lost instead.
+    """
+    planned = profile.planned_run().ran
     off: list[str] = []
     for run in runs:
-        for phase in run.phases:
-            if phase.status != "completed":
-                continue
-            expected = profile.phases[phase.phase_id].stream.tool_uses
-            if phase.tool_operations != expected:
+        if not run.found:
+            continue
+        seen = {p.phase_id: p for p in run.phases}
+        for phase_id in planned:
+            expected = profile.phases[phase_id].stream.tool_uses
+            phase = seen.get(phase_id)
+            if phase is None:
+                off.append(f"{run.execution_id}/{phase_id}: phase missing")
+            elif phase.status != "completed":
+                off.append(f"{run.execution_id}/{phase_id}: {phase.status}, not completed")
+            elif phase.tool_starts != expected or phase.tool_ends != expected:
                 off.append(
-                    f"{run.execution_id}/{phase.phase_id}: stored {phase.tool_operations}, "
-                    f"scripted {expected}"
+                    f"{run.execution_id}/{phase_id}: stored {phase.tool_starts} starts and "
+                    f"{phase.tool_ends} ends, scripted {expected}"
                 )
     return sorted(off)
 

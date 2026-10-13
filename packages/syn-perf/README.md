@@ -88,20 +88,35 @@ Iterations: 10
 ## Token-free load test (#1717)
 
 ```bash
-uv run python -m syn_perf.loadtest --n 20 --tier platform \
+SYN_API_URL=http://localhost:18000 uv run python -m syn_perf.loadtest --n 20 --tier platform \
   --streams streams.json --fixture-repo <owner>/<loadtest-fixture> \
-  --api-url http://localhost:18000 \
-  --container syn-api --container syn-db --container syn-event-store --container syn-socket-proxy
+  --api-container syn-api --postgres-container syn-db \
+  --event-store-container syn-event-store --socket-proxy-container syn-socket-proxy
 ```
 
 `streams.json` maps every phase id of `workflows/sdlc/implement-v3/workflow.yaml`
 to a `ScriptedStream` (recording, harness, CLI version, tool-use count). The
 driver writes the validated profile to `--profile-out` for the stack's
-workspaces, admits N executions over `--admit-seconds`, samples every
-`--sample-seconds` for `--sustain-seconds`, drains, and writes the report.
+workspaces, admits N executions over `--admit-seconds` (each start carries
+`--fixture-repo` in its typed `repos` field) while sampling every
+`--sample-seconds`, keeps sampling for `--sustain-seconds`, drains, and writes
+the report. The API URL is `--api-url`, else `$SYN_API_URL`, else the selfhost
+gateway default.
+
+The defaults are the north-star bar (reads under 0.5 s, admission within 300 s,
+held 1800 s). Any looser figure fails the `north_star_bar` check, so a short
+or relaxed run reports what it measured without certifying anything. Each tick
+times the dashboard's own list read (`/executions?page=1&page_size=50`) and
+every detail read. All four container roles must be sampled, or
+`container_stats` names the missing roles.
 
 It requires a stack whose workspace image is the stub agent
 (AgentParadise/agentic-workspace#44). Concurrency is the count of phases the
-server reports `running`, never the executions submitted. Exit 0: pass bar
-held; 1: a check failed (named in the report); 2: refused, including any
-session reporting a model other than `syn-scripted-agent`.
+server reports `running` whose session is `running` too, never the executions
+submitted. Event counts hold every planned phase to its scripted tool-use
+count in starts AND completions, counting Agent/Task uses the timeline
+relabels as subagent operations. Exit 0: pass bar held; 1: a check failed
+(named in the report); 2: refused. A session reporting a model other than
+`syn-scripted-agent` stops further admissions and the run, and the report is
+still written; a session that never reports the scripted model fails the
+`scripted` check.
