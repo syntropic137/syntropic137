@@ -51,6 +51,10 @@ from syn_domain.contexts.orchestration.domain.read_models.phase_progress import 
     inherited_phase_ids,
     record_skips,
 )
+from syn_domain.contexts.orchestration.domain.read_models.resume_lineage import (
+    ResumedFrom,
+    resumed_as,
+)
 from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_detail import (
     WorkflowExecutionDetail,
 )
@@ -144,6 +148,12 @@ def _parse_phase_definitions(definitions: JsonValue) -> _PhaseDefinitions:
     return _PhaseDefinitions(budgets=budgets, declared=declared)
 
 
+def _stored_resumed_from(raw: JsonValue) -> dict[str, str] | None:
+    """The started event's `resumed_from`, as this read model stores it (#1881)."""
+    origin = ResumedFrom.of_started(raw)
+    return None if origin is None else origin.to_stored()
+
+
 class WorkflowExecutionDetailProjection(AutoDispatchProjection):
     """Builds workflow execution detail read model from events.
 
@@ -179,7 +189,10 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
     # v18: declared_phases and inherited_phase_ids from WorkflowExecutionStarted
     # (feedback cee46909), so every run, not only new ones, shows the phases
     # it has still to do.
-    VERSION = 18
+    # v19: resumed_from (from WorkflowExecutionStarted) and resumed_as (from the
+    # parent's ExecutionResumed / pre-rename ExecutionForked), so every resume
+    # already in the store links both ways, not only new ones (#1881).
+    VERSION = 19
 
     def __init__(self, store: ProjectionStore):
         """Initialize with a projection store.
@@ -309,6 +322,10 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
             "phases": [],  # Populated as phases start/complete
             "declared_phases": declared_phases,
             "inherited_phase_ids": inherited_phase_ids(event_data.get("resumed_from")),
+            # Resume lineage (#1881). `resumed_as` is set later, by the
+            # parent's ExecutionResumed on this run's own stream.
+            "resumed_from": _stored_resumed_from(event_data.get("resumed_from")),
+            "resumed_as": None,
             "total_input_tokens": 0,
             "total_output_tokens": 0,
             "total_cache_creation_tokens": 0,
@@ -338,6 +355,25 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
             "phase_budgets": phase_budgets,
         }
         await self._store.save(self.PROJECTION_NAME, execution_id, detail)
+
+    async def on_execution_resumed(self, event_data: dict) -> None:
+        """Handle ExecutionResumed, on the PARENT's stream: link it forward (#1881)."""
+        await self._link_resumed_as(event_data)
+
+    async def on_execution_forked(self, event_data: dict) -> None:
+        """Handle a pre-rename ExecutionForked, which is the same resume (#1881)."""
+        await self._link_resumed_as(event_data)
+
+    async def _link_resumed_as(self, event_data: dict) -> None:
+        execution_id = event_data.get("execution_id")
+        child = resumed_as(event_data)
+        if not execution_id or child is None:
+            return
+        existing = await self._store.get(self.PROJECTION_NAME, execution_id)
+        if not existing:
+            return
+        existing["resumed_as"] = child
+        await self._store.save(self.PROJECTION_NAME, execution_id, existing)
 
     async def on_phase_started(self, event_data: dict) -> None:
         """Handle PhaseStarted event.

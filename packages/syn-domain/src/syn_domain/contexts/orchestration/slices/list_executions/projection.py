@@ -50,6 +50,10 @@ from syn_domain.contexts.orchestration.domain.read_models.phase_progress import 
     inherited_phase_count,
     record_skips,
 )
+from syn_domain.contexts.orchestration.domain.read_models.resume_lineage import (
+    ResumedFrom,
+    resumed_as,
+)
 from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_summary import (
     WorkflowExecutionSummary,
 )
@@ -69,7 +73,10 @@ class WorkflowExecutionListProjection(ExecutionListReads, AutoDispatchProjection
     """
 
     PROJECTION_NAME = WORKFLOW_EXECUTIONS
-    VERSION = 10  # v10: workflow_version, the installed version a run launched from
+    # v10: workflow_version, the installed version a run launched from.
+    # v11: resumed_from and resumed_as, so every resume already in the store
+    # links both ways, not only new ones (#1881).
+    VERSION = 11
 
     def __init__(self, store: ProjectionStore):
         """Initialize with a projection store.
@@ -135,6 +142,7 @@ class WorkflowExecutionListProjection(ExecutionListReads, AutoDispatchProjection
             eval_id=eval_id,
             association_kind=AssociationKind.LAUNCHED.value if eval_id else None,
             workflow_version=event_data.get("workflow_version"),
+            resumed_from=ResumedFrom.of_started(event_data.get("resumed_from")),
         )
         await self._store.save(self.PROJECTION_NAME, execution_id, summary.to_dict())
 
@@ -266,6 +274,24 @@ class WorkflowExecutionListProjection(ExecutionListReads, AutoDispatchProjection
             )
 
         await self._store.save(self.PROJECTION_NAME, execution_id, existing)
+
+    async def on_execution_resumed(self, event_data: dict) -> None:
+        """Handle ExecutionResumed, on the PARENT's stream: link it forward (#1881)."""
+        await self._link_resumed_as(event_data)
+
+    async def on_execution_forked(self, event_data: dict) -> None:
+        """Handle a pre-rename ExecutionForked, which is the same resume (#1881)."""
+        await self._link_resumed_as(event_data)
+
+    async def _link_resumed_as(self, event_data: dict) -> None:
+        execution_id = event_data.get("execution_id")
+        child = resumed_as(event_data)
+        if not execution_id or child is None:
+            return
+        existing = await self._store.get(self.PROJECTION_NAME, execution_id)
+        if existing:
+            existing["resumed_as"] = child
+            await self._store.save(self.PROJECTION_NAME, execution_id, existing)
 
     async def on_execution_cancelled(self, event_data: dict) -> None:
         """Handle ExecutionCancelled event.
