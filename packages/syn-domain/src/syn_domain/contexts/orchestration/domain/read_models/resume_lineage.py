@@ -62,7 +62,7 @@ class ResumedFrom:
 def resumed_as(resumed_event: object) -> str | None:
     """The child a stored `ExecutionResumed` (or pre-rename `ExecutionForked`) admitted.
 
-    The forked shape is upcast first, as the aggregate does, so a resume
+    A pre-rename `ExecutionForked` is upcast first, as the aggregate does, so a resume
     recorded before the rename links forward like any other.
     """
     payload = upcast_forked_payload(resumed_event)
