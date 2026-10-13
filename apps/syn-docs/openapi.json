@@ -8223,6 +8223,16 @@
         "title": "AddTagsRequest",
         "description": "Tags to add to an execution or a workflow. Adds only: never replaces the set."
       },
+      "AgentLaunch": {
+        "type": "string",
+        "enum": [
+          "unknown",
+          "launched",
+          "not_launched"
+        ],
+        "title": "AgentLaunch",
+        "description": "What is known about whether a session's agent process ever started.\n\nThree states rather than a boolean, because \"we have no evidence either\nway\" and \"we have evidence it did not happen\" justify very different\nstatements to a user, and only the second one justifies telling them the\nsession never ran (#1047, #1065).\n\nA boolean has no room for the first state, so every source that cannot\nspeak - a session whose event stream predates this field, a write that\nnever landed, a storage read that failed - is forced to answer \"no\", and\nthe read path cannot tell that answer apart from a real one. Absence of\nevidence is not evidence of absence, and the type is what enforces it."
+      },
       "AliasResolutionBasis": {
         "type": "string",
         "enum": [
@@ -20209,6 +20219,10 @@
           "status": {
             "type": "string",
             "title": "Status"
+          },
+          "agent_launch": {
+            "$ref": "#/components/schemas/AgentLaunch",
+            "default": "unknown"
           },
           "workspace_path": {
             "anyOf": [
