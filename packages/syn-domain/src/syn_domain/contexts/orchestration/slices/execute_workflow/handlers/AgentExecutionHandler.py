@@ -481,9 +481,12 @@ class AgentExecutionHandler:
             on_push=on_push,
         )
 
-        # The launch fact is settled AFTER the stream, not while it runs: the
-        # marker is announced before the exec it predicts, so only the status
-        # the process finally returns says whether that exec happened (#1065).
+        # The launch fact is never taken from the marker alone: it is
+        # announced before the exec it predicts, so a failed exec is decided
+        # by the status the process finally returns (#1065). The agent's first
+        # line after the marker already decides it, and is recorded live so a
+        # working agent is visible while it works (#1717); every other case
+        # is settled AFTER the stream.
         # `finally`, because an agent that announced itself and then blew up
         # mid-stream still existed, and the exception must not swallow that.
         #

@@ -200,12 +200,18 @@
           "minLength": 1,
           "title": "Recording",
           "type": "string"
+        },
+        "tool_uses": {
+          "minimum": 1,
+          "title": "Tool Uses",
+          "type": "integer"
         }
       },
       "required": [
         "harness",
         "recording",
-        "cli_version"
+        "cli_version",
+        "tool_uses"
       ],
       "title": "ScriptedStream",
       "type": "object"
