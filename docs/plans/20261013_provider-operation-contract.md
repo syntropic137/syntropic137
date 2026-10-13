@@ -464,3 +464,7 @@ Ready to implement PR 0 (the plan document). PR 1 onward is blocked on one human
 confirming D1 (APSS JSON Schema as the contract surface, production Python Docker first, Rust
 deferred to promotion).
 
+
+## Implementation log
+
+- 2026-10-13: PR 1 merged as AgentParadise/agent-paradise-standards-system#143 (`3bdbc33`). Deviation from §4.2: the observation page schema requires `state`, so the schema itself enforces "`complete` only on a terminal state". Accepted. Independent verifier: additive verdict parity, all failure fixtures rejected, 4/4 mutations caught. Credential-ref key-name filtering is a heuristic; the value prohibition is a spec rule (§5.1.3).
