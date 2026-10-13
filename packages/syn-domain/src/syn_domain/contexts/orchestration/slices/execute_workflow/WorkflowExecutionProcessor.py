@@ -321,9 +321,9 @@ class WorkflowExecutionProcessor:
             inputs=inputs,
         )
 
-    def _journal_of(self, run: _DispatchContext) -> ExecutionJournal:
+    def _journal_of(self, dispatch_ctx: _DispatchContext) -> ExecutionJournal:
         """The journal a run's saves go through: its own fold's, else the shared one."""
-        return self._journal if run.fold is None else run.fold.journal
+        return self._journal if dispatch_ctx.fold is None else dispatch_ctx.fold.journal
 
     async def resolve_inheritance(self, origin: ResumeOrigin | None) -> None:
         """Raise unless a resume's inherited outputs can be handed over.
