@@ -865,3 +865,65 @@ def test_two_seeds_sharing_a_symlink_both_reach_the_workspace(tmp_path: Path) ->
     assert len(outcome.copied) == 2
     assert (cache / "shared").readlink() == Path("archive/pkg.py")
     assert (cache / "link").readlink() == Path("archive/tool")  # the later seed's
+
+
+async def test_a_hit_is_not_evicted_by_the_same_workspaces_warm(
+    tmp_path: Path, store: DependencySeedStore
+) -> None:
+    """Warm-first must not let a miss's publish prune a hit this workspace is about to copy."""
+    lock_a, lock_b = b"lock = 'a'\n", b"lock = 'b'\n"
+    hit = SeedKey("uv", "org/a", _sha(lock_a))
+    store.publish(hit, _built_cache(tmp_path / "hit", "x" * 400))
+    long_ago = time.time() - 7200
+    os.utime(tmp_path / "seeds" / hit.relative_path, (long_ago, long_ago))
+    # Room for the hit and the warmed miss together only under the grace.
+    store._max_bytes = _size_of(tmp_path / "seeds" / hit.relative_path)
+    ws = _LockfileTaggedCheckout(tmp_path / "ws")
+    clones = _two_clones(ws.path, lock_a, lock_b)
+
+    await dependency_seed.seed_dependency_caches(ws, clones)
+
+    assert (tmp_path / "seeds" / hit.relative_path).is_dir()
+    assert (ws.path / ".cache" / "uv" / "archive" / "pkg.py").read_text() == "x" * 400
+
+
+class _FailingWarms(_LockfileTaggedCheckout):
+    async def execute(
+        self,
+        command: list[str],
+        *,
+        timeout_seconds: int | None = None,
+        working_directory: str | None = None,
+        environment: dict[str, str] | None = None,
+    ) -> ExecutionResult:
+        if command[:2] == ["rm", "-rf"]:
+            return _remove_in_workspace(self.path, command[2])
+        self.commands.append((command, working_directory))
+        return ExecutionResult(exit_code=124, success=False, duration_ms=1.0)
+
+
+async def test_after_a_failed_warm_no_later_warm_of_that_tool_runs(
+    tmp_path: Path, store: DependencySeedStore
+) -> None:
+    ws = _FailingWarms(tmp_path / "ws")
+    clones = _two_clones(ws.path, b"lock = 'a'\n", b"lock = 'b'\n")
+
+    await dependency_seed.seed_dependency_caches(ws, clones)
+
+    assert len(ws.commands) == 1
+
+
+def test_a_publish_that_fails_partway_leaves_no_staging(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = DependencySeedStore(tmp_path / "seeds", max_bytes=10**9)
+    key = SeedKey("uv", "org/app", "2" * 64)
+
+    def broken(_seed: Path) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(dependency_seed, "_make_read_only", broken)
+    with pytest.raises(OSError, match="disk full"):
+        store.publish(key, _built_cache(tmp_path / "b", "x"))
+
+    assert not list((tmp_path / "seeds").rglob(".staging-*"))

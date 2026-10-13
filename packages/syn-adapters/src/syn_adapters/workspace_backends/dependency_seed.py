@@ -204,6 +204,18 @@ class DependencySeedStore:
         """Whether a seed for ``key`` is published right now (it may be pruned later)."""
         return (self._root / key.relative_path).is_dir()
 
+    def touch(self, key: SeedKey) -> None:
+        """Mark ``key``'s seed as just used, so a prune in the meantime keeps it.
+
+        Called for a workspace's hits before its misses are warmed: each warm
+        publishes and prunes, and must not evict a hit this same workspace is
+        about to copy.
+        """
+        source = self._root / key.relative_path
+        with _seed_lease(source, exclusive=False):
+            if source.is_dir():
+                os.utime(source)
+
     def seed(self, workspace_dir: Path, clones: Iterable[tuple[str, Path]]) -> SeedOutcome:
         """Copy every ready seed for ``clones`` into ``workspace_dir``'s caches.
 
@@ -274,15 +286,24 @@ class DependencySeedStore:
             return
         staging = target.parent / f".staging-{uuid.uuid4().hex}"
         staging.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(built_cache, staging, symlinks=True)
-        # copytree carries the source's mtime over, and mtime is the LRU clock:
-        # without this a seed published a moment ago could be pruned first.
-        os.utime(staging)
-        size = _size(staging)
-        _make_read_only(staging)
-        # Recorded once here, so a prune on every cache hit reads one small
-        # file per seed instead of walking every file of every seed.
-        _write_size(target, size)
+        try:
+            shutil.copytree(built_cache, staging, symlinks=True)
+            # copytree carries the source's mtime over, and mtime is the LRU
+            # clock: without this a seed published a moment ago could be
+            # pruned first.
+            os.utime(staging)
+            size = _size(staging)
+            _make_read_only(staging)
+            # Recorded once here, so a prune on every cache hit reads one
+            # small file per seed instead of walking every file of every seed.
+            _write_size(target, size)
+        except BaseException:
+            # A failed publish leaves nothing behind: prune spares a recent
+            # staging directory as a publish in flight, so it must not linger.
+            if staging.exists():
+                with contextlib.suppress(OSError):
+                    _remove(staging)
+            raise
         try:
             staging.rename(target)
         except OSError:
@@ -519,9 +540,21 @@ async def seed_dependency_caches(
             for repository, clone_dir in clones
             for key in seed_keys(repository, clone_dir)
         ]
+        hits = [key for key, _ in keys if store.has(key)]
+        for key in hits:
+            await asyncio.to_thread(store.touch, key)
+        # A warm that fails may leave its command running in the container
+        # (a timeout kills only the client), still writing to the tool's
+        # cache path, so no later warm of that tool in this workspace runs.
+        failed_tools: set[str] = set()
         for key, clone_dir in keys:
-            if not store.has(key) and await _warm(store, workspace, key, clone_dir):
+            if key in hits or key.tool in failed_tools:
+                continue
+            result = await _warm(store, workspace, key, clone_dir)
+            if result is _Warm.PUBLISHED:
                 warmed.append(key)
+            elif result is _Warm.COMMAND_FAILED:
+                failed_tools.add(key.tool)
         # Then every seed, warmed just now or long ago, is copied the same way.
         outcome = await asyncio.to_thread(store.seed, workspace.path, clones)
     except Exception:
@@ -536,10 +569,16 @@ async def seed_dependency_caches(
     )
 
 
+class _Warm(enum.Enum):
+    PUBLISHED = "published"
+    NOT_PUBLISHED = "not_published"
+    COMMAND_FAILED = "command_failed"
+
+
 async def _warm(
     store: DependencySeedStore, workspace: SeedableWorkspace, key: SeedKey, clone_dir: Path
-) -> bool:
-    """Build and publish the seed for ``key`` in an empty cache. True if published.
+) -> _Warm:
+    """Build and publish the seed for ``key`` in an empty cache.
 
     The tool's cache (`/workspace/.cache/<tool>`, the path a seed must be
     built at) is moved aside before the warm, so it starts empty, and the
@@ -575,14 +614,14 @@ async def _warm(
             (result.stderr or "")[-300:],
         )
         await _discard_cache(workspace, cache)
-        return False
+        return _Warm.COMMAND_FAILED
     try:
         await asyncio.to_thread(store.publish, key, cache)
     except OSError:
         logger.exception("Could not publish dependency seed %s", _label(key))
     finally:
         await _discard_cache(workspace, cache)
-    return store.has(key)
+    return _Warm.PUBLISHED if store.has(key) else _Warm.NOT_PUBLISHED
 
 
 def _open_cache_root(root: Path) -> None:
