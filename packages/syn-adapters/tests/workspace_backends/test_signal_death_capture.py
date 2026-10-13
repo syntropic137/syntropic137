@@ -137,7 +137,16 @@ async def test_the_capture_cannot_fail_in_this_environment() -> None:
     ("state", "expected"),
     [
         ("absent", "does not exist in this container"),
-        ("denied", "CAP_SYSLOG"),
+        pytest.param(
+            "denied",
+            "CAP_SYSLOG",
+            # chmod 000 cannot deny root, so as root this case silently becomes
+            # "no_fault" and the assertion fails for a reason unrelated to the
+            # code (seen in the OSS Scanner image, which runs as root).
+            marks=pytest.mark.skipif(
+                os.geteuid() == 0, reason="root ignores file permissions; cannot deny a read"
+            ),
+        ),
         ("no_fault", "held no fault report"),
     ],
 )

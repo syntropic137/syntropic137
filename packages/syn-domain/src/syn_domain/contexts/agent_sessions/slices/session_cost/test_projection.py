@@ -660,3 +660,76 @@ class TestParseTimestamp:
 
     def test_non_string_non_datetime_returns_none(self) -> None:
         assert _parse_timestamp(42) is None
+
+
+class TestGetSessionCosts:
+    """The batch read answers what ``get_session_cost`` answers per id (#1811)."""
+
+    @pytest.mark.asyncio
+    async def test_without_a_pool_it_is_get_session_cost_per_id(
+        self, projection: SessionCostProjection, store: MockProjectionStore
+    ) -> None:
+        await store.save(
+            "session_cost", "s-1", {"session_id": "s-1", "agent_model": "claude-opus-5-5"}
+        )
+
+        many = await projection.get_session_costs(["s-1", "s-missing", "s-1"])
+
+        assert set(many) == {"s-1"}
+        assert many["s-1"] == await projection.get_session_cost("s-1")
+
+    @pytest.mark.asyncio
+    async def test_without_a_pool_it_is_one_keyed_lookup_not_a_read_per_id(
+        self, store: MockProjectionStore
+    ) -> None:
+        reads: list[list[str]] = []
+
+        class _KeyedStore(MockProjectionStore):
+            async def get_many(
+                self, projection_name: str, keys: list[str]
+            ) -> dict[str, dict[str, str]]:
+                reads.append(list(keys))
+                return {k: d for k in keys if (d := await self.get(projection_name, k))}
+
+        keyed = _KeyedStore()
+        for sid in ("s-1", "s-2"):
+            await keyed.save("session_cost", sid, {"session_id": sid})
+        projection = SessionCostProjection(keyed)
+        per_id = 0
+
+        async def counting_get(session_id: str) -> object:
+            nonlocal per_id
+            per_id += 1
+            return None
+
+        projection.get_session_cost = counting_get  # type: ignore[method-assign]  # count per-id reads
+
+        many = await projection.get_session_costs(["s-1", "s-2", "s-none"])
+
+        assert set(many) == {"s-1", "s-2"}
+        assert reads == [["s-1", "s-2", "s-none"]]
+        assert per_id == 0
+
+    @pytest.mark.asyncio
+    async def test_with_a_pool_it_is_one_calculate_many_keyed_by_the_given_id(
+        self, store: MockProjectionStore, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from syn_domain.contexts.agent_sessions.domain.read_models.session_cost import SessionCost
+        from syn_domain.contexts.agent_sessions.slices.session_cost import projection as module
+
+        asked: list[list[str]] = []
+
+        class _Query:
+            def __init__(self, *_args: object) -> None: ...
+
+            async def calculate_many_by_given_id(self, ids: list[str]) -> dict[str, SessionCost]:
+                asked.append(ids)
+                return {sid: SessionCost(session_id=sid) for sid in ids if sid != "s-none"}
+
+        monkeypatch.setattr(module, "TimescaleSessionCostQuery", _Query)
+        projection = SessionCostProjection(store, pool=object())  # type: ignore[arg-type]  # never touched: the query is replaced
+
+        many = await projection.get_session_costs(["s-1", "s-2", "s-none", "s-1"])
+
+        assert asked == [["s-1", "s-2", "s-none"]]
+        assert set(many) == {"s-1", "s-2"}

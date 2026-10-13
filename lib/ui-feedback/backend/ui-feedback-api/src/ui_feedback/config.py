@@ -24,6 +24,10 @@ class Settings(BaseSettings):
         "env_prefix": "UI_FEEDBACK_",
         "env_file": ".env",
         "env_file_encoding": "utf-8",
+        # This package is mounted inside syn-api and shares its .env. Without
+        # this, pydantic-settings rejects every SYN_* key in that file as an
+        # extra input and create_app() fails on any machine with a .env.
+        "extra": "ignore",
     }
 
 

@@ -70,7 +70,17 @@ die() {
     exit 1
 }
 run() { if [ "$DRY" = 1 ]; then printf '   (dry-run) %s\n' "$*"; else "$@"; fi; }
-remote() { ssh -o ConnectTimeout=15 "$HOST" "$@"; }
+# A non-root SSH user runs every remote command under passwordless sudo: the
+# deployment lives in /root/.syntropic137. The tailnet SSH policy stopped
+# permitting root on 2026-10-10, so SYN_PIT_HOST=ubuntu@<vps> is the default
+# path now. The command string is quoted once for the remote login shell.
+remote() {
+    if [ "$HOST" = "${HOST#*@}" ] || [ "${HOST%%@*}" = root ]; then
+        ssh -o ConnectTimeout=15 "$HOST" "$@"
+    else
+        ssh -o ConnectTimeout=15 "$HOST" "sudo -n sh -c $(printf '%q' "$*")"
+    fi
+}
 # Every request to the API goes through here. The credential travels as a curl
 # config on stdin, never as an argument: `-u admin:<password>` sits in curl's
 # argv, readable by any user on this machine through `ps` for the whole call

@@ -74,7 +74,7 @@ class _ScriptedWorkspace:
 class _Collector:
     """The collector surface both stream processors call, recording nothing."""
 
-    def note_agent_activity(self) -> None:
+    def note_agent_activity(self, *, changed_nothing: bool = False) -> None:
         return
 
     def note_observed_model(self, model: str | None) -> None:
@@ -88,6 +88,9 @@ class _Collector:
 
     async def record_tool_started(self, **_kwargs: object) -> None:
         return
+
+    async def note_command_ended(self, *_args: object) -> None:
+        return None
 
     async def record_tool_completed(self, **_kwargs: object) -> None:
         return

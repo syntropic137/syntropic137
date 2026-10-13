@@ -9,7 +9,7 @@ import {
   Box, Layers, Radio, Send, Lock, Unlock, Play, Pause,
   Square, CheckCircle, XCircle, Globe, Container, Cpu, MonitorSmartphone,
 } from 'lucide-react';
-import { getColors } from './theme';
+import { getColors, getSublabelColor } from './theme';
 import { useThemeMode } from './useThemeMode';
 import { NODE_WIDTH, NODE_HEIGHT } from './layout';
 import type { FlowNodeData } from './types';
@@ -78,8 +78,8 @@ function FlowNodeComponent({ data }: NodeProps) {
       >
         <Icon
           size={iconSizes[size]}
-          color={colors.icon}
-          style={{ flexShrink: 0 }}
+          color="currentColor"
+          style={{ flexShrink: 0, color: colors.icon }}
         />
         <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
           <span style={{
@@ -94,7 +94,7 @@ function FlowNodeComponent({ data }: NodeProps) {
           {sublabel && (
             <span style={{
               fontSize: sublabelSizes[size],
-              color: isDark ? '#a1a1aa' : '#71717a',
+              color: getSublabelColor(isDark),
               whiteSpace: 'nowrap',
               lineHeight: 1.2,
             }}>

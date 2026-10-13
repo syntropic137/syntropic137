@@ -21,6 +21,14 @@ task: >
   times out: the shared client factory's retry policy, the execution
   controller's signal queue, and GitHub event deduplication.
 expected:
+  # The root cause, for the LLM judge only; never part of `task`.
+  defect: >
+    resilient_redis_client configures retry_on_timeout=True with
+    Retry(ExponentialBackoff(), retries=3), and the clients it builds run
+    non-idempotent commands (GETDEL in the signal queue, SET NX in GitHub
+    event dedup). A timeout after Redis applied the command retries it:
+    GETDEL returns nothing so the control signal is lost, and SET NX returns
+    false so a first delivery is reported as a duplicate.
   files:
     - packages/syn-adapters/src/syn_adapters/redis_client.py
     - packages/syn-adapters/src/syn_adapters/control/adapters/redis_adapter.py

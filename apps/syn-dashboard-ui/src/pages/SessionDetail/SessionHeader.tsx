@@ -1,6 +1,6 @@
 import { Activity, Bot, Container, FileText } from 'lucide-react'
 import { Link } from 'react-router-dom'
-import { AGENT_PROVIDER_LABELS, ObservedModel, PhaseStartPins, StatusBadge } from '../../components'
+import { AGENT_PROVIDER_LABELS, ObservedModel, PhaseStartPins, SkillUseLine, StatusBadge } from '../../components'
 import type { PhaseStartPinsAnswer } from '../../hooks'
 import type { SessionResponse } from '../../types'
 import { PROVIDER_ENVIRONMENTS } from './sessionConstants'
@@ -76,7 +76,12 @@ export function SessionHeader({
               />
               <WorkspaceEnvironmentBadge provider={session.agent_provider} />
             </div>
-            {startPins !== undefined && <PhaseStartPins pins={startPins.pins} status={startPins.status} />}
+            {startPins !== undefined && (
+              <>
+                <PhaseStartPins pins={startPins.pins} status={startPins.status} />
+                <SkillUseLine use={startPins.skillUse} />
+              </>
+            )}
           </div>
         </div>
 

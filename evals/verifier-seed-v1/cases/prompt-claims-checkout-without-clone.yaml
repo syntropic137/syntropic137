@@ -14,6 +14,13 @@ task: >
   describes the workspace layout and how to start work. A phase may declare
   clone_repos: false when it needs credentials rather than a checkout.
 expected:
+  # The root cause, for the LLM judge only; never part of `task`.
+  defect: >
+    workspace_prompt.py's SYN_WORKSPACE_PROMPT is a single constant that
+    always says the repositories are pre-cloned and tells the agent to work
+    in /workspace/repos/{repo-name}, even for a phase that declares
+    clone_repos: false and has no checkout, so that phase is sent into a
+    directory that does not exist.
   files:
     - packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/workspace_prompt.py
   keywords:

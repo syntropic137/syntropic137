@@ -6,6 +6,8 @@ correct commands back to the aggregate.
 
 from __future__ import annotations
 
+import os
+import shutil
 import subprocess
 from typing import TYPE_CHECKING
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
@@ -38,6 +40,10 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExe
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.ArtifactCollectionHandler import (
     ArtifactCollectionHandler,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.instruction_imports import (
+    CODEX_INSTRUCTIONS_STAGED,
+    INSTALL_CODEX_INSTRUCTIONS,
+)
 from syn_shared.agents import AgentProvider
 from syn_shared.settings import get_settings
 
@@ -46,9 +52,21 @@ from syn_shared.settings import get_settings
 # =========================================================================
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+        AgentConfiguration,
+    )
     from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
         ExecutionResult,
     )
+
+#: How ``_provisioned_files`` names what it installed as codex's global instructions.
+_CODEX_GLOBAL = "~/.codex/AGENTS.md"
+
+_HANDLER_MODULE = (
+    "syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler"
+)
 
 
 @pytest.mark.unit
@@ -863,7 +881,26 @@ async def _provisioned_context(
     execute_error: Exception | None = None,
     read_results: dict[str, ExecutionResult] | None = None,
 ) -> str:
-    """Run the real WorkspaceProvisionHandler.handle() and return the context it injected.
+    """The context a claude phase is given: AGENTS.md and CLAUDE.md carry the same imports."""
+    injected = await _provisioned_files(
+        files, repos=repos, execute_error=execute_error, read_results=read_results
+    )
+    assert injected["AGENTS.md"] == injected["CLAUDE.md"]
+    return injected["CLAUDE.md"]
+
+
+async def _provisioned_files(
+    files: dict[str, str],
+    *,
+    repos: list[str] | None = None,
+    execute_error: Exception | None = None,
+    read_results: dict[str, ExecutionResult] | None = None,
+    agent: AgentConfiguration | None = None,
+    fallback: AgentConfiguration | None = None,
+) -> dict[str, str]:
+    """Run the real WorkspaceProvisionHandler.handle() and return the context files it injected.
+
+    Codex's global instructions, when installed, are returned as ``_CODEX_GLOBAL``.
 
     ``files`` is what the clone put on disk: reading a listed path succeeds
     with its content, reading anything else fails the way a missing file does
@@ -882,7 +919,15 @@ async def _provisioned_context(
         WorkspaceProvisionHandler,
     )
 
+    installed: list[str] = []
+    clones: list[list[str]] = []
+
     async def execute(command: list[str], **_kwargs: object) -> ExecutionResult:
+        if command[:3] == ["sh", "-c", INSTALL_CODEX_INSTRUCTIONS]:
+            # Never run for real: it appends to the test runner's own ~/.codex.
+            installed.append(command[4])
+            clones.append(command[5:])
+            return ExecutionResult(exit_code=0, success=True, duration_ms=1.0)
         if execute_error is not None:
             raise execute_error
         path = command[-1]
@@ -925,11 +970,18 @@ async def _provisioned_context(
         name="Test Phase",
         order=1,
         description="",
-        agent_config=AgentConfiguration(),
+        agent_config=agent or AgentConfiguration(),
         prompt_template="Do the task",
         output_artifact_types=("text",),
+        fallback_agent=fallback,
     )
-    with patch("syn_adapters.workspace_backends.service.SetupPhaseSecrets") as MockSecrets:
+    with (
+        patch("syn_adapters.workspace_backends.service.SetupPhaseSecrets") as MockSecrets,
+        # Codex or delegation in the workspace means a sandbox probe and a skill
+        # install; neither is under test here.
+        patch(f"{_HANDLER_MODULE}.require_codex_sandbox", AsyncMock()),
+        patch.object(WorkspaceProvisionHandler, "_install_baked_delegation_skill", AsyncMock()),
+    ):
         mock_secrets_instance = MagicMock()
         mock_secrets_instance.build_setup_script.return_value = "#!/bin/bash\necho ok\n"
         MockSecrets.create = AsyncMock(return_value=mock_secrets_instance)
@@ -950,9 +1002,19 @@ async def _provisioned_context(
     ]
     assert len(injected) == 1, "the workspace context is injected exactly once"
     (files_injected,) = injected
-    # Each harness reads one of these two files, so both carry the same imports.
-    assert files_injected["AGENTS.md"] == files_injected["CLAUDE.md"]
-    return files_injected["CLAUDE.md"].decode()
+    result = {name: content.decode() for name, content in files_injected.items()}
+    staged = result.pop(CODEX_INSTRUCTIONS_STAGED, None)
+    # Staged exactly when it is installed: a staged file left behind reaches no agent.
+    assert installed == ([f"/workspace/{CODEX_INSTRUCTIONS_STAGED}"] if staged else [])
+    # Every clone whose root files went global gets its override, once (#1835).
+    names = dict.fromkeys(
+        url.rstrip("/").removesuffix(".git").rsplit("/", 1)[-1]
+        for url in (repos or ["https://github.com/org/repo-a"])
+    )
+    assert clones == ([[f"/workspace/repos/{n}" for n in names]] if staged else [])
+    if staged is not None:
+        result[_CODEX_GLOBAL] = staged
+    return result
 
 
 # =========================================================================
@@ -2137,3 +2199,221 @@ class TestWorkspaceProvisionHandlerInjectsTheWholeTree:
         kwargs = collector.inject_from_previous_phases_explicit.await_args.kwargs
         assert kwargs["phase_files"] == {"p-1": files}
         assert collector.inject_from_previous_phases_explicit.await_args.args[2] == {"p-1": "r"}
+
+
+# =========================================================================
+# #1835: an agent that does not expand @-imports gets the content inline
+# =========================================================================
+
+_REPO_CLAUDE = "/workspace/repos/repo-a/CLAUDE.md"
+_REPO_AGENTS = "/workspace/repos/repo-a/AGENTS.md"
+_CLAUDE_BODY = "# Repo rules\n\nRULE_FROM_CLAUDE_MD_7f3a: run the gates.\n"
+
+
+def _agent(provider: str, *, allow_delegation: bool = False) -> AgentConfiguration:
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+        AgentConfiguration,
+    )
+
+    return AgentConfiguration(provider=provider, allow_delegation=allow_delegation)
+
+
+@pytest.mark.unit
+class TestInstructionsReachEveryAgent:
+    """What each provider READS: claude CLAUDE.md (expands @), codex AGENTS.md (does not)."""
+
+    @pytest.mark.anyio
+    async def test_a_codex_phase_reads_the_repo_claude_md_content_exactly_once(self) -> None:
+        injected = await _provisioned_files(
+            {_REPO_CLAUDE: _CLAUDE_BODY}, agent=_agent(AgentProvider.CODEX)
+        )
+        agents_md = injected[_CODEX_GLOBAL]
+        assert agents_md.count("RULE_FROM_CLAUDE_MD_7f3a") == 1
+        assert f"# Instructions from {_REPO_CLAUDE}" in agents_md
+        assert _imports(agents_md) == [], "codex would read a bare @path literally"
+        assert agents_md.count("This phase is killed at") == 1
+        # Codex at the workspace root reads both: the root file must not repeat them.
+        assert "RULE_FROM_CLAUDE_MD_7f3a" not in injected["AGENTS.md"]
+        assert "This phase is killed at" not in injected["AGENTS.md"]
+        # CLAUDE.md is untouched: still the @-import form.
+        assert _imports(injected["CLAUDE.md"]) == [_REPO_CLAUDE]
+
+    @pytest.mark.anyio
+    async def test_distinct_files_are_inlined_once_each_in_import_order(self) -> None:
+        injected = await _provisioned_files(
+            {
+                _REPO_AGENTS: "AGENTS_BODY_1\n",
+                _REPO_CLAUDE: "CLAUDE_BODY_1\n",
+                "/workspace/repos/repo-b/CLAUDE.md": "REPO_B_BODY\n",
+                # A byte-identical copy of repo-b's CLAUDE.md is dropped, as for imports.
+                "/workspace/repos/repo-b/AGENTS.md": "REPO_B_BODY\n",
+            },
+            repos=["https://github.com/org/repo-a", "https://github.com/org/repo-b"],
+            agent=_agent(AgentProvider.CODEX),
+        )
+        agents_md = injected[_CODEX_GLOBAL]
+        order = [agents_md.index(m) for m in ("AGENTS_BODY_1", "CLAUDE_BODY_1", "REPO_B_BODY")]
+        assert order == sorted(order)
+        assert agents_md.count("REPO_B_BODY") == 1
+        assert agents_md.count("# Instructions from ") == 3
+
+    @pytest.mark.anyio
+    async def test_a_claude_phase_is_byte_identical_to_the_import_form(self) -> None:
+        from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
+            WorkspaceProvisionHandler,
+        )
+
+        injected = await _provisioned_files(
+            {_REPO_CLAUDE: _CLAUDE_BODY}, agent=_agent(AgentProvider.CLAUDE)
+        )
+        expected = WorkspaceProvisionHandler._generate_workspace_context([_REPO_CLAUDE])
+        assert injected == {"AGENTS.md": expected, "CLAUDE.md": expected}
+
+    @pytest.mark.anyio
+    @pytest.mark.parametrize(
+        ("primary", "fallback"),
+        [
+            (AgentProvider.CLAUDE, AgentProvider.CODEX),
+            (AgentProvider.CODEX, AgentProvider.CLAUDE),
+        ],
+    )
+    async def test_a_fallback_finds_its_own_file_already_staged(
+        self, primary: AgentProvider, fallback: AgentProvider
+    ) -> None:
+        """The fallback runs in the same workspace (PC-83): both forms are staged up front."""
+        injected = await _provisioned_files(
+            {_REPO_CLAUDE: _CLAUDE_BODY}, agent=_agent(primary), fallback=_agent(fallback)
+        )
+        assert injected[_CODEX_GLOBAL].count("RULE_FROM_CLAUDE_MD_7f3a") == 1
+        assert _imports(injected["CLAUDE.md"]) == [_REPO_CLAUDE]
+
+    @pytest.mark.anyio
+    @pytest.mark.parametrize("primary", [AgentProvider.CLAUDE, AgentProvider.CODEX])
+    async def test_a_delegating_phase_stages_both_forms(self, primary: AgentProvider) -> None:
+        """Under allow_delegation the other CLI runs here too, whichever leads."""
+        injected = await _provisioned_files(
+            {_REPO_CLAUDE: _CLAUDE_BODY}, agent=_agent(primary, allow_delegation=True)
+        )
+        assert injected[_CODEX_GLOBAL].count("RULE_FROM_CLAUDE_MD_7f3a") == 1
+        assert _imports(injected["CLAUDE.md"]) == [_REPO_CLAUDE]
+
+    @pytest.mark.anyio
+    async def test_an_unreadable_file_is_named_not_dropped(self) -> None:
+        from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
+            ExecutionResult,
+        )
+
+        failed = ExecutionResult(exit_code=1, success=False, duration_ms=1.0, stderr="EIO")
+        injected = await _provisioned_files(
+            {_REPO_AGENTS: "A\n"},
+            read_results={_REPO_CLAUDE: failed},
+            agent=_agent(AgentProvider.CODEX),
+        )
+        assert f"# Instructions from {_REPO_CLAUDE}" in injected[_CODEX_GLOBAL]
+        assert "could not be read" in injected[_CODEX_GLOBAL]
+
+
+@pytest.mark.unit
+def test_every_provider_declares_whether_it_expands_at_imports() -> None:
+    """Measured on the pinned CLIs: claude expands @path, codex 0.160.1 does not (#1835)."""
+    assert {p: p.expands_at_imports for p in AgentProvider} == {
+        AgentProvider.CLAUDE: True,
+        AgentProvider.CODEX: False,
+    }
+
+
+_BIG = "x" * 40_000
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+@pytest.mark.skipif(shutil.which("codex") is None, reason="needs the pinned codex CLI")
+@pytest.mark.parametrize(
+    "clone_files",
+    [
+        {"CLAUDE.md": f"RULE_HEAD_5b1e\n{_BIG}\nRULE_TAIL_5b1e\n"},
+        {
+            "CLAUDE.md": f"RULE_HEAD_5b1e\n{_BIG}\nRULE_TAIL_5b1e\n",
+            "AGENTS.md": "@CLAUDE.md\n",
+        },
+        {
+            "CLAUDE.md": f"RULE_HEAD_5b1e\n{_BIG}\nRULE_TAIL_5b1e\n",
+            "AGENTS.md": "DISTINCT_AGENTS_RULE_5b1e\n",
+        },
+        {
+            "CLAUDE.md": f"RULE_HEAD_5b1e\n{_BIG}\nRULE_TAIL_5b1e\n",
+            "AGENTS.md": f"RULE_HEAD_5b1e\n{_BIG}\nRULE_TAIL_5b1e\n",
+        },
+        {"AGENTS.md": f"RULE_HEAD_5b1e\n{_BIG}\nRULE_TAIL_5b1e\n"},
+    ],
+    ids=["claude-md-only", "breadcrumb", "distinct-agents-md", "identical-pair", "agents-md-only"],
+)
+async def test_codex_sees_the_repo_rules_once_from_any_directory_past_32_kib(
+    tmp_path: Path, clone_files: dict[str, str]
+) -> None:
+    """The real codex CLI, offline, as a delegated launch sees it (#1835).
+
+    A delegated codex keeps its caller's working directory, often inside a
+    clone, and gets no ``-c`` overrides, so it reads the image's 32768-byte
+    ``project_doc_max_bytes`` default. The repo's instructions must reach the
+    model from the clone and from the workspace root alike, tail included, and
+    once each: inside the clone codex also discovers the clone's own AGENTS.md.
+    """
+    injected = await _provisioned_files(
+        {f"/workspace/repos/repo-a/{name}": body for name, body in clone_files.items()},
+        agent=_agent(AgentProvider.CLAUDE, allow_delegation=True),
+    )
+    home, workspace = tmp_path / "codex-home", tmp_path / "workspace"
+    clone = workspace / "repos" / "repo-a"
+    (clone / ".git").mkdir(parents=True)
+    home.mkdir()
+    (home / "AGENTS.md").write_text("IMAGE_GLOBAL_RULE\n")
+    (workspace / "AGENTS.md").write_text(injected["AGENTS.md"])
+    for name, body in clone_files.items():
+        (clone / name).write_text(body)
+    staged = workspace / CODEX_INSTRUCTIONS_STAGED
+    staged.parent.mkdir()
+    staged.write_text(injected[_CODEX_GLOBAL])
+    env = {**os.environ, "CODEX_HOME": str(home)}
+    # The handler's real install script, against a stand-in codex home.
+    subprocess.run(
+        ["sh", "-c", INSTALL_CODEX_INSTRUCTIONS, "sh", str(staged), str(clone)],
+        env=env,
+        check=True,
+    )
+    assert not staged.exists()
+    # The override never shows up as a change for the agent to commit.
+    assert "/AGENTS.override.md" in (clone / ".git" / "info" / "exclude").read_text().split()
+
+    rules = {"RULE_HEAD_5b1e", "RULE_TAIL_5b1e", "IMAGE_GLOBAL_RULE"}
+    rules |= {"DISTINCT_AGENTS_RULE_5b1e"} & {b.strip() for b in clone_files.values()}
+    for cwd in (clone, workspace):
+        prompt = subprocess.run(
+            ["codex", "debug", "prompt-input", "probe"],
+            cwd=cwd,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        for rule in sorted(rules):
+            assert prompt.count(rule) == 1, (cwd, rule)
+        assert prompt.count("This phase is killed at") == 1, cwd
+
+
+@pytest.mark.unit
+def test_a_clones_own_override_is_left_alone(tmp_path: Path) -> None:
+    """Codex already reads a repo's AGENTS.override.md instead of its AGENTS.md (#1835)."""
+    clone = tmp_path / "repo-a"
+    (clone / ".git").mkdir(parents=True)
+    (clone / "AGENTS.override.md").write_text("REPO_OWN_OVERRIDE\n")
+    staged = tmp_path / "staged.md"
+    staged.write_text("inlined\n")
+    env = {**os.environ, "CODEX_HOME": str(tmp_path / "home")}
+    subprocess.run(
+        ["sh", "-c", INSTALL_CODEX_INSTRUCTIONS, "sh", str(staged), str(clone)],
+        env=env,
+        check=True,
+    )
+    assert (clone / "AGENTS.override.md").read_text() == "REPO_OWN_OVERRIDE\n"
+    assert not (clone / ".git" / "info" / "exclude").exists()

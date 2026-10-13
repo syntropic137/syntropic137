@@ -17,6 +17,20 @@ This context is Lane 2: observability. Nothing here is replayed to decide state.
 
 ---
 
+## Observability
+
+Telemetry about how the running platform and its agents behave: tokens, cost,
+tool calls, timing, and operational signals such as API request latency
+(ADR-075). Lane 2: append-only, never replayed, never read by an aggregate.
+Served under `GET /observability/*` and the `syn observe` command group
+(`tools`, `tokens`, `latency`). Observability is the concept; `observe` is the
+CLI verb for it.
+
+Not **Insight**. "Insights" is reserved for learning-loop analytics, lessons
+about how to improve workflows, speed and cost, owned by `organization` (see
+`organization-ubiquitous-language.md`). We do NOT call request latency an
+insight.
+
 ## Session
 
 One agent run inside one workspace, identified by a `session_id` the harness
@@ -75,6 +89,22 @@ token usage, a cost figure, a stream chunk. See `agent_observation.py` and
 
 Observations are Lane 2. An Observation is never the reason state changed; if
 something must be replayed to decide state, it belongs in `orchestration`.
+
+## Cost by Token Type
+
+A Session's priced cost split into input, output, cache write and cache read
+(`SessionCost.cost_by_token_type`). Its parts sum to the priced total, and its
+**basis** says how they were arrived at:
+
+- `rate_table` - every priced part is tokens x that type's rate.
+- `allocated` - some part of the total was a harness-reported figure, which
+  states no split; it is apportioned in the rate table's proportions. An
+  estimate, and labelled as one.
+
+Absent (null), never zeroes, when no split can be stated: a read path that
+does not compute it, or a reported total for a model with no rate, which has
+no proportions to apportion by. Unpriced work is in neither the total nor the
+split, the same rule as cost by model.
 
 ## Inventory Reconciliation
 

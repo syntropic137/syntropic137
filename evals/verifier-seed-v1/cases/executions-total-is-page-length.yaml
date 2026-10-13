@@ -11,6 +11,12 @@ task: >
   Review the execution list endpoint (GET /executions) and the pagination
   information it returns to clients.
 expected:
+  # The root cause, for the LLM judge only; never part of `task`.
+  defect: >
+    GET /executions reports total=len(page) - the number of rows on the
+    current page - instead of the size of the whole collection, so
+    page_size=5 reports total 5 and clients cannot paginate or know how many
+    executions exist.
   files:
     - apps/syn-api/src/syn_api/routes/executions/queries.py
   keywords:

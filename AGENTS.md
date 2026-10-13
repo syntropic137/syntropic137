@@ -51,6 +51,7 @@ syntropic137/
 │   ├── syn-cli-node/          # CLI tool ("syn") - Node.js, HTTP client for syn-api
 │   ├── syn-dashboard-ui/      # Dashboard frontend (Vite + React) - operational UI
 │   ├── syn-docs/              # Public-facing documentation site (Next.js + Fumadocs)
+│   ├── syn-landing/           # syntropic137.com marketing site (Vite + React, Vercel; see its AGENTS.md)
 ├── packages/
 │   ├── syn-domain/            # Domain events, aggregates, ports
 │   ├── syn-adapters/          # Orchestration + observability adapters
@@ -555,6 +556,21 @@ Submodules (agentic-workspace, event-sourcing-platform) have independent version
 
 - [Security Practices](docs/security-practices.md) - supply chain hardening, Docker runtime security, credential management
 - [GitHub App Security Model](docs/deployment/github-app-security.md) - PEM handling, token lifecycle, network isolation, token injector architecture
+
+## Design
+
+UI work starts at [design/README.md](design/README.md): the boards, the spec and the design-to-code loop. Three rules:
+
+- **Boards are a spec, not code.** Read `design/canvas/*.dc.html` for layout, copy, tokens, data and behaviour; never ship them.
+- **Code is the source of truth after a screen ships.** Its board is frozen history; small tweaks go straight to code.
+- **No Storybook.** The component reference is `/dev/components` and `/dev/patterns` in apps/syn-ui, plus Playwright screenshot tests of both.
+
+## Brand
+
+The brand kit is [design/brand/BRAND.md](design/brand/BRAND.md) (v2.0): logo, colour, type, motion, voice, surfaces and every asset. Follow it for anything user-facing.
+
+- **Harness claims.** Say "Claude Code and Codex" or "multi-harness"; never "any harness" as a present-tense claim (more harnesses are the goal).
+- **No Claude-only install paths.** Claude Code plugins are deprecated org-wide in favour of multi-harness skills (`npx skills add syntropic137/syntropic137-skills`).
 
 ## Tooling
 

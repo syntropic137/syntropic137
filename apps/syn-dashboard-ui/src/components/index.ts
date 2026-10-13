@@ -26,8 +26,10 @@ export { StaleResults } from './StaleResults'
 export { MetricCard } from './MetricCard'
 export { DispatchedTask } from './provenance/DispatchedTask'
 export { PhaseStartPins } from './provenance/PhaseStartPins'
+export { SkillUseLine, SkillUseOverview } from './provenance/SkillUse'
 export { ModelBreakdown, type ModelBreakdownProps } from './ModelBreakdown'
 export {
+  CardMetric,
   ResourceCardList,
   ResourceTable,
   type ColumnDef,

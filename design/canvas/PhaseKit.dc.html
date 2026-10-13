@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Syn137 phase kit component states</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Orbitron:wght@500;600;700&display=swap">
+<style>
+:root{--ac:#4D80FF}
+body{margin:0;background:#0A0C14}
+a{color:#E8EEFB}a:hover{color:#FFFFFF}
+:focus-visible{outline:2px solid var(--ac);outline-offset:2px}
+</style>
+</helmet>
+<div style="--ac: {{accent}}; display: flex; flex-direction: column; gap: 28px; width: 1440px; height: 980px; box-sizing: border-box; padding: 48px; background: #0A0C14; color: #E8EEFB; font-family: 'Instrument Sans', 'Helvetica Neue', system-ui, sans-serif; font-size: 14px; line-height: 1.45; -webkit-font-smoothing: antialiased">
+<div style="display: flex; flex-direction: column; gap: 6px">
+<h1 style="margin: 0; font-size: 32px; line-height: 1.1; font-weight: 600; letter-spacing: -0.03em">Phase kit</h1>
+<p style="margin: 0; font-size: 15px; color: #9AA8C7">What a phase gets: model, tools and skills. Declared on a workflow, pinned when a run starts.</p>
+</div>
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; align-items: start">
+<section style="display: flex; flex-direction: column; gap: 18px; padding: 22px; border-radius: 18px; border: 1px solid #1A2032; background: #0D101A; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04)">
+<div style="display: flex; flex-direction: column; gap: 4px">
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: color-mix(in oklab, var(--ac) 45%, white)">Declared on a workflow · two skills</span>
+<span style="font-size: 15px; font-weight: 600">Skills Matrix › Both Kinds</span>
+</div>
+<dl style="display: flex; flex-direction: column; gap: 14px; margin: 0">
+<div style="display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 12px; padding-top: 14px; border-top: 1px solid #1A2032">
+<dt style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3; padding-top: 3px">Model</dt>
+<dd style="display: flex; flex-direction: column; gap: 10px; margin: 0; min-width: 0; font-size: 13.5px"><span style="display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px"><span style="display: flex; align-items: center; gap: 6px"><span style="width: 8px; height: 8px; border-radius: 50%; background: #D97757"></span>Claude</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #9AA8C7">haiku → claude-haiku-4-5-20251001</span></span></dd>
+</div>
+<div style="display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 12px; padding-top: 14px; border-top: 1px solid #1A2032">
+<dt style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3; padding-top: 3px">Tools</dt>
+<dd style="display: flex; flex-direction: column; gap: 10px; margin: 0; min-width: 0; font-size: 13.5px">Harness default <span style="color: #9AA8C7">no restriction declared</span></dd>
+</div>
+<div style="display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 12px; padding-top: 14px; border-top: 1px solid #1A2032">
+<dt style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3; padding-top: 3px">Skills</dt>
+<dd style="display: flex; flex-direction: column; gap: 10px; margin: 0; min-width: 0; font-size: 13.5px"><span style="display: flex; align-items: flex-start; gap: 10px; min-width: 0"><span style="display: flex; align-items: center; justify-content: center; flex-shrink: 0; width: 28px; height: 28px; border-radius: 9px; background: color-mix(in oklab, var(--ac) 16%, transparent); color: var(--ac)"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round" aria-hidden="true"><path d="M8 1.75L14.25 8 8 14.25 1.75 8z"></path></svg></span><span style="display: flex; flex-direction: column; gap: 2px; min-width: 0"><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; font-weight: 600">vendored-scribe</span><span style="display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #9AA8C7; overflow-wrap: anywhere"><span>./skills/vendored-scribe</span><span style="color: #6F7FA3">@</span><span style="color: #C3CCE2">sha256-db8ee61</span></span></span></span><span style="display: flex; align-items: flex-start; gap: 10px; min-width: 0"><span style="display: flex; align-items: center; justify-content: center; flex-shrink: 0; width: 28px; height: 28px; border-radius: 9px; background: color-mix(in oklab, var(--ac) 16%, transparent); color: var(--ac)"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round" aria-hidden="true"><path d="M8 1.75L14.25 8 8 14.25 1.75 8z"></path></svg></span><span style="display: flex; flex-direction: column; gap: 2px; min-width: 0"><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; font-weight: 600">remote-herald</span><span style="display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #9AA8C7; overflow-wrap: anywhere"><span>syntropic137/syn-mkt-validation</span><span style="color: #6F7FA3">@</span><span style="color: #C3CCE2">main</span><a href="https://github.com/syntropic137/syn-mkt-validation/tree/main" aria-label="Source of remote-herald at main" style="display: flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 7px; color: color-mix(in oklab, var(--ac) 45%, white)"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 3.5h-3v9h9v-3M9 2.75h4.25V7M13 3L7.5 8.5"></path></svg></a></span></span></span></dd>
+</div>
+</dl>
+</section>
+<section style="display: flex; flex-direction: column; gap: 18px; padding: 22px; border-radius: 18px; border: 1px solid #1A2032; background: #0D101A; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04)">
+<div style="display: flex; flex-direction: column; gap: 4px">
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: color-mix(in oklab, var(--ac) 45%, white)">Declared on a workflow · restricted tools</span>
+<span style="font-size: 15px; font-weight: 600">Starter Research › Investigate</span>
+</div>
+<dl style="display: flex; flex-direction: column; gap: 14px; margin: 0">
+<div style="display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 12px; padding-top: 14px; border-top: 1px solid #1A2032">
+<dt style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3; padding-top: 3px">Model</dt>
+<dd style="display: flex; flex-direction: column; gap: 10px; margin: 0; min-width: 0; font-size: 13.5px"><span style="display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px"><span style="display: flex; align-items: center; gap: 6px"><span style="width: 8px; height: 8px; border-radius: 50%; background: #D97757"></span>Claude</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #9AA8C7">haiku → claude-haiku-4-5-20251001</span></span></dd>
+</div>
+<div style="display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 12px; padding-top: 14px; border-top: 1px solid #1A2032">
+<dt style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3; padding-top: 3px">Tools</dt>
+<dd style="display: flex; flex-direction: column; gap: 10px; margin: 0; min-width: 0; font-size: 13.5px"><span style="display: flex; flex-wrap: wrap; gap: 6px"><span style="height: 22px; padding: 0 8px; border-radius: 7px; background: #151A2A; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; line-height: 22px; color: #C3CCE2">Read</span><span style="height: 22px; padding: 0 8px; border-radius: 7px; background: #151A2A; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; line-height: 22px; color: #C3CCE2">Glob</span><span style="height: 22px; padding: 0 8px; border-radius: 7px; background: #151A2A; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; line-height: 22px; color: #C3CCE2">Grep</span><span style="height: 22px; padding: 0 8px; border-radius: 7px; background: #151A2A; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; line-height: 22px; color: #C3CCE2">Bash</span><span style="height: 22px; padding: 0 8px; border-radius: 7px; background: #151A2A; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; line-height: 22px; color: #C3CCE2">WebSearch</span></span></dd>
+</div>
+<div style="display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 12px; padding-top: 14px; border-top: 1px solid #1A2032">
+<dt style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3; padding-top: 3px">Skills</dt>
+<dd style="display: flex; flex-direction: column; gap: 10px; margin: 0; min-width: 0; font-size: 13.5px"><span style="display: flex; align-items: flex-start; gap: 10px; min-width: 0"><span style="display: flex; align-items: center; justify-content: center; flex-shrink: 0; width: 28px; height: 28px; border-radius: 9px; background: color-mix(in oklab, var(--ac) 16%, transparent); color: var(--ac)"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round" aria-hidden="true"><path d="M8 1.75L14.25 8 8 14.25 1.75 8z"></path></svg></span><span style="display: flex; flex-direction: column; gap: 2px; min-width: 0"><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; font-weight: 600">doc-coauthoring</span><span style="display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #9AA8C7; overflow-wrap: anywhere"><span>anthropics/skills</span><span style="color: #6F7FA3">@</span><span style="color: #C3CCE2">3b3fad9</span><a href="https://github.com/anthropics/skills/tree/3b3fad96af16a10759d930941b4520ba0c40edae" aria-label="Source of doc-coauthoring at 3b3fad9" style="display: flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 7px; color: color-mix(in oklab, var(--ac) 45%, white)"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 3.5h-3v9h9v-3M9 2.75h4.25V7M13 3L7.5 8.5"></path></svg></a></span></span></span></dd>
+</div>
+</dl>
+</section>
+<section style="display: flex; flex-direction: column; gap: 18px; padding: 22px; border-radius: 18px; border: 1px solid #1A2032; background: #0D101A; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04)">
+<div style="display: flex; flex-direction: column; gap: 4px">
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: color-mix(in oklab, var(--ac) 45%, white)">Declared on a workflow · no skills</span>
+<span style="font-size: 15px; font-weight: 600">Research Workflow › Discovery Phase</span>
+</div>
+<dl style="display: flex; flex-direction: column; gap: 14px; margin: 0">
+<div style="display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 12px; padding-top: 14px; border-top: 1px solid #1A2032">
+<dt style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3; padding-top: 3px">Model</dt>
+<dd style="display: flex; flex-direction: column; gap: 10px; margin: 0; min-width: 0; font-size: 13.5px"><span style="display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px"><span style="display: flex; align-items: center; gap: 6px"><span style="width: 8px; height: 8px; border-radius: 50%; background: #D97757"></span>Claude</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #9AA8C7">default → opus → claude-opus-5-5</span></span></dd>
+</div>
+<div style="display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 12px; padding-top: 14px; border-top: 1px solid #1A2032">
+<dt style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3; padding-top: 3px">Tools</dt>
+<dd style="display: flex; flex-direction: column; gap: 10px; margin: 0; min-width: 0; font-size: 13.5px">Harness default <span style="color: #9AA8C7">no restriction declared</span></dd>
+</div>
+<div style="display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 12px; padding-top: 14px; border-top: 1px solid #1A2032">
+<dt style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3; padding-top: 3px">Skills</dt>
+<dd style="display: flex; flex-direction: column; gap: 10px; margin: 0; min-width: 0; font-size: 13.5px"><span style="align-self: flex-start; height: 24px; padding: 0 10px; border-radius: 8px; border: 1px dashed #34406A; font-size: 12.5px; line-height: 24px; color: #9AA8C7">None declared</span></dd>
+</div>
+</dl>
+</section>
+<section style="display: flex; flex-direction: column; gap: 18px; padding: 22px; border-radius: 18px; border: 1px solid #1A2032; background: #0D101A; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04)">
+<div style="display: flex; flex-direction: column; gap: 4px">
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: color-mix(in oklab, var(--ac) 45%, white)">Pinned when a run starts</span>
+<span style="font-size: 15px; font-weight: 600">Skills Matrix › Both Kinds</span>
+</div>
+<dl style="display: flex; flex-direction: column; gap: 14px; margin: 0">
+<div style="display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 12px; padding-top: 14px; border-top: 1px solid #1A2032">
+<dt style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3; padding-top: 3px">Model</dt>
+<dd style="display: flex; flex-direction: column; gap: 10px; margin: 0; min-width: 0; font-size: 13.5px"><span style="display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px"><span style="display: flex; align-items: center; gap: 6px"><span style="width: 8px; height: 8px; border-radius: 50%; background: #D97757"></span>Claude</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #9AA8C7">haiku requested</span></span></dd>
+</div>
+<div style="display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 12px; padding-top: 14px; border-top: 1px solid #1A2032">
+<dt style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3; padding-top: 3px">Tools</dt>
+<dd style="display: flex; flex-direction: column; gap: 10px; margin: 0; min-width: 0; font-size: 13.5px">Harness default</dd>
+</div>
+<div style="display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 12px; padding-top: 14px; border-top: 1px solid #1A2032">
+<dt style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3; padding-top: 3px">Skills</dt>
+<dd style="display: flex; flex-direction: column; gap: 10px; margin: 0; min-width: 0; font-size: 13.5px"><span style="display: flex; align-items: flex-start; gap: 10px; min-width: 0"><span style="display: flex; align-items: center; justify-content: center; flex-shrink: 0; width: 28px; height: 28px; border-radius: 9px; background: color-mix(in oklab, var(--ac) 16%, transparent); color: var(--ac)"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round" aria-hidden="true"><path d="M8 1.75L14.25 8 8 14.25 1.75 8z"></path></svg></span><span style="display: flex; flex-direction: column; gap: 2px; min-width: 0"><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; font-weight: 600">vendored-scribe</span><span style="display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #9AA8C7; overflow-wrap: anywhere"><span>./skills/vendored-scribe</span></span><span style="display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #9AA8C7"><span style="color: #6F7FA3">content</span><span>sha256:db8ee61</span></span></span></span><span style="display: flex; align-items: flex-start; gap: 10px; min-width: 0"><span style="display: flex; align-items: center; justify-content: center; flex-shrink: 0; width: 28px; height: 28px; border-radius: 9px; background: color-mix(in oklab, var(--ac) 16%, transparent); color: var(--ac)"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round" aria-hidden="true"><path d="M8 1.75L14.25 8 8 14.25 1.75 8z"></path></svg></span><span style="display: flex; flex-direction: column; gap: 2px; min-width: 0"><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; font-weight: 600">remote-herald</span><span style="display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #9AA8C7; overflow-wrap: anywhere"><span>syntropic137/syn-mkt-validation</span><span style="color: #6F7FA3">@</span><span style="color: #C3CCE2">main</span><a href="https://github.com/syntropic137/syn-mkt-validation/tree/main" aria-label="Source of remote-herald at main" style="display: flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 7px; color: color-mix(in oklab, var(--ac) 45%, white)"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 3.5h-3v9h9v-3M9 2.75h4.25V7M13 3L7.5 8.5"></path></svg></a></span><span style="display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #9AA8C7"><span style="color: #6F7FA3">content</span><span>sha256:5f79798</span></span></span></span></dd>
+</div>
+<div style="display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 12px; padding-top: 14px; border-top: 1px solid #1A2032">
+<dt style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3; padding-top: 3px">Used</dt>
+<dd style="display: flex; flex-direction: column; gap: 10px; margin: 0; min-width: 0; font-size: 13.5px"><span style="align-self: flex-start; height: 24px; padding: 0 10px; border-radius: 8px; border: 1px dashed #34406A; font-size: 12.5px; line-height: 24px; color: #9AA8C7">Not reported yet</span></dd>
+</div>
+</dl>
+</section>
+<section style="display: flex; flex-direction: column; gap: 18px; padding: 22px; border-radius: 18px; border: 1px solid #1A2032; background: #0D101A; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04)">
+<div style="display: flex; flex-direction: column; gap: 4px">
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: color-mix(in oklab, var(--ac) 45%, white)">Run older than start pins</span>
+<span style="font-size: 15px; font-weight: 600">exec-66e14f23 › Discovery Phase</span>
+</div>
+<dl style="display: flex; flex-direction: column; gap: 14px; margin: 0">
+<div style="display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 12px; padding-top: 14px; border-top: 1px solid #1A2032">
+<dt style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3; padding-top: 3px">Model</dt>
+<dd style="display: flex; flex-direction: column; gap: 10px; margin: 0; min-width: 0; font-size: 13.5px"><span style="display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px"><span style="display: flex; align-items: center; gap: 6px"><span style="width: 8px; height: 8px; border-radius: 50%; background: #D97757"></span>Claude</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #9AA8C7">haiku requested</span></span></dd>
+</div>
+<div style="display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 12px; padding-top: 14px; border-top: 1px solid #1A2032">
+<dt style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3; padding-top: 3px">Tools</dt>
+<dd style="display: flex; flex-direction: column; gap: 10px; margin: 0; min-width: 0; font-size: 13.5px"><span style="align-self: flex-start; height: 24px; padding: 0 10px; border-radius: 8px; border: 1px dashed #34406A; font-size: 12.5px; line-height: 24px; color: #9AA8C7">Not recorded</span></dd>
+</div>
+<div style="display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 12px; padding-top: 14px; border-top: 1px solid #1A2032">
+<dt style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3; padding-top: 3px">Skills</dt>
+<dd style="display: flex; flex-direction: column; gap: 10px; margin: 0; min-width: 0; font-size: 13.5px"><span style="align-self: flex-start; height: 24px; padding: 0 10px; border-radius: 8px; border: 1px dashed #34406A; font-size: 12.5px; line-height: 24px; color: #9AA8C7">Not recorded</span></dd>
+</div>
+<div style="display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 12px; padding-top: 14px; border-top: 1px solid #1A2032">
+<dt style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3; padding-top: 3px">Used</dt>
+<dd style="display: flex; flex-direction: column; gap: 10px; margin: 0; min-width: 0; font-size: 13.5px"><span style="align-self: flex-start; height: 24px; padding: 0 10px; border-radius: 8px; border: 1px dashed #34406A; font-size: 12.5px; line-height: 24px; color: #9AA8C7">Not reported yet</span></dd>
+</div>
+</dl>
+</section>
+<section style="display: flex; flex-direction: column; gap: 18px; padding: 22px; border-radius: 18px; border: 1px solid #1A2032; background: #0D101A; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04)">
+<div style="display: flex; flex-direction: column; gap: 4px">
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: color-mix(in oklab, var(--ac) 45%, white)">Compact forms</span>
+<span style="font-size: 15px; font-weight: 600">On cards and in lists</span>
+</div>
+<div style="display: flex; flex-direction: column; gap: 8px; padding-top: 14px; border-top: 1px solid #1A2032"><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3">Skill chip</span><span style="display: flex; flex-wrap: wrap; gap: 6px"><span style="display: flex; align-items: center; gap: 6px; height: 24px; padding: 0 9px 0 7px; border-radius: 8px; border: 1px solid #222A40; background: #151A2A; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #C3CCE2"><svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round" aria-hidden="true" style="color: var(--ac)"><path d="M8 1.75L14.25 8 8 14.25 1.75 8z"></path></svg><span>vendored-scribe</span></span><span style="display: flex; align-items: center; gap: 6px; height: 24px; padding: 0 9px 0 7px; border-radius: 8px; border: 1px solid #222A40; background: #151A2A; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #C3CCE2"><svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round" aria-hidden="true" style="color: var(--ac)"><path d="M8 1.75L14.25 8 8 14.25 1.75 8z"></path></svg><span>remote-herald</span></span></span></div>
+<div style="display: flex; flex-direction: column; gap: 8px; padding-top: 14px; border-top: 1px solid #1A2032"><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3">Phase card footer</span><span style="display: flex; flex-wrap: wrap; gap: 6px"><span style="height: 22px; padding: 0 8px; border-radius: 7px; background: #151A2A; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; line-height: 22px; color: #9AA8C7">claude-haiku-4-5</span><span style="height: 22px; padding: 0 8px; border-radius: 7px; background: #151A2A; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; line-height: 22px; color: #9AA8C7">5 tools</span><span style="height: 22px; padding: 0 8px; border-radius: 7px; background: color-mix(in oklab, var(--ac) 16%, transparent); font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; line-height: 22px; color: color-mix(in oklab, var(--ac) 45%, white)">1 skill</span><span style="height: 20px; padding: 0 8px; border-radius: 7px; border: 1px dashed #34406A; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; line-height: 20px; color: #9AA8C7">no skills</span></span></div>
+<div style="display: flex; flex-direction: column; gap: 8px; padding-top: 14px; border-top: 1px solid #1A2032"><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3">One line, phone</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #9AA8C7">31.8K tok · $0.0170 · 2 skills</span></div>
+</section>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#4D80FF","options":["#4D80FF","#4CC9F0","#45E0A0","#A78BFA"]},"$preview":{"width":1440,"height":980}}'>
+class Component extends DCLogic {
+renderVals() {
+return { accent: this.props.accent ?? '#4D80FF' };
+}
+}
+</script>
+</body>
+</html>

@@ -2,6 +2,7 @@ import { docs } from '@/.source/server';
 import { type InferPageType, loader } from 'fumadocs-core/source';
 import { createOpenAPI } from 'fumadocs-openapi/server';
 import { createAPIPage, type ApiPageProps } from 'fumadocs-openapi/ui';
+import { codeThemes } from './code-theme';
 
 export const source = loader({
   baseUrl: '/docs',
@@ -12,7 +13,9 @@ export const openapi = createOpenAPI({
   input: ['./openapi.json'],
 });
 
-const BaseAPIPage = createAPIPage(openapi);
+const BaseAPIPage = createAPIPage(openapi, {
+  shikiOptions: { themes: codeThemes },
+});
 
 /**
  * Wraps fumadocs-openapi's APIPage with scoping + parameter spacing.

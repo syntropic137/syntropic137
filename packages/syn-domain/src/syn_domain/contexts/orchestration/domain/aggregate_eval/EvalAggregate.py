@@ -197,6 +197,7 @@ class RunScore:
     scorer: str
     scorer_version: str
     scored_at: datetime
+    judge_model: str | None = None
 
 
 @aggregate("Eval")
@@ -417,6 +418,7 @@ class EvalAggregate(AggregateRoot["EvalCreatedEvent"]):
                 scorer=command.scorer,
                 scorer_version=command.scorer_version,
                 scored_at=datetime.now(UTC),
+                judge_model=command.judge_model,
             )
         )
 
@@ -496,6 +498,7 @@ class EvalAggregate(AggregateRoot["EvalCreatedEvent"]):
             scorer=event.scorer,
             scorer_version=event.scorer_version,
             scored_at=event.scored_at,
+            judge_model=event.judge_model,
         )
 
     @event_sourcing_handler("EvalArchived")

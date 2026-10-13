@@ -107,15 +107,15 @@ describe('PhaseStartPins', () => {
     ])
   })
 
-  it('says skill use is not recorded yet, never that a declared skill went unused', () => {
+  it('lists declared skills and leaves their use to SkillUseLine', () => {
     const { container } = render(<PhaseStartPins pins={PINS} status="recorded" />)
-    expect(container.textContent).toContain('use not recorded yet')
-    expect(container.textContent).not.toMatch(/not used|unused|invoked/i)
+    expect(container.textContent).toContain('1 skill')
+    expect(container.textContent).not.toMatch(/not used|unused|invoked|skill use/i)
   })
 
   it('says "not recorded" for a run from before #1454, and guesses nothing', () => {
     const { container } = render(<PhaseStartPins pins={null} status="not_recorded" />)
-    expect(container.textContent).toBe('Start config: not recorded · skill use not recorded yet')
+    expect(container.textContent).toBe('Start config: not recorded')
   })
 
   it.each([
@@ -123,7 +123,7 @@ describe('PhaseStartPins', () => {
     ['the server sent no status at all', undefined],
   ])('never calls it "not recorded" when %s', (_why, status) => {
     const { container } = render(<PhaseStartPins pins={null} status={status} />)
-    expect(container.textContent).toBe('Start config: unavailable · skill use not recorded yet')
+    expect(container.textContent).toBe('Start config: unavailable')
   })
 
   it('does not read an empty tool list as "no tools"', () => {
