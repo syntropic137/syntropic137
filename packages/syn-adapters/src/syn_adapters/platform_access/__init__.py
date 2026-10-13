@@ -337,14 +337,17 @@ class PlatformTokenService:
         # Judging an EVAL execute awaits the body, and the token can expire or
         # be revoked at teardown meanwhile: the verdict holds only for a grant
         # that is still live once it is reached.
-        current = await self._store.get(_hash(token))
-        if (
-            current is None
-            or current.expires_at <= self._now()
-            or (current.scope, current.eval_id) != (grant.scope, grant.eval_id)
-        ):
+        if not await self._still_live(token, grant):
             return Denial(401, "platform token invalid, expired or revoked")
         return None
+
+    async def _still_live(self, token: str, judged: PlatformTokenGrant) -> bool:
+        """Whether ``token`` still holds an unexpired grant of the scope just judged."""
+        assert self._store is not None
+        current = await self._store.get(_hash(token))
+        if current is None or current.expires_at <= self._now():
+            return False
+        return (current.scope, current.eval_id) == (judged.scope, judged.eval_id)
 
 
 __all__ = [
