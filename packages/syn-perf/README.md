@@ -84,3 +84,40 @@ Iterations: 10
 │ Total Cycle    │ 1.55s   │ 2.61s   │ 1.90s   │ 2.42s   │ 2.58s   │
 └────────────────┴─────────┴─────────┴─────────┴─────────┴─────────┘
 ```
+
+## Token-free load test (#1717)
+
+```bash
+SYN_API_URL=http://localhost:18000 uv run python -m syn_perf.loadtest --n 20 --tier platform \
+  --streams streams.json --fixture-repo <owner>/<loadtest-fixture> \
+  --api-container syn-api --postgres-container syn-db \
+  --event-store-container syn-event-store --socket-proxy-container syn-socket-proxy
+```
+
+`streams.json` maps every phase id of `workflows/sdlc/implement-v3/workflow.yaml`
+to a `ScriptedStream` (recording, harness, CLI version, tool-use count). The
+driver writes the validated profile to `--profile-out` for the stack's
+workspaces, admits N executions over `--admit-seconds` (each start carries
+`--fixture-repo` in its typed `repos` field) while sampling every
+`--sample-seconds`, keeps sampling for `--sustain-seconds`, drains, and writes
+the report. The API URL is `--api-url`, else `$SYN_API_URL`, else the selfhost
+gateway default.
+
+The defaults are the north-star bar (reads under 0.5 s, admission within 300 s,
+held 1800 s). Any looser figure fails the `north_star_bar` check, so a short
+or relaxed run reports what it measured without certifying anything. Each tick
+times the dashboard's own list read (`/executions?page=1&page_size=50`) and
+every detail read. All four container roles must be sampled, or
+`container_stats` names the missing roles.
+
+It requires a stack whose workspace image is the stub agent
+(AgentParadise/agentic-workspace#44). Concurrency is the count of phases the
+server reports `running` whose session is `running` with `agent_launch:
+launched` (the server's `AgentLaunched` fact), never the executions submitted
+and never a phase still provisioning. Event counts hold every planned phase to its scripted tool-use
+count in starts AND completions, counting Agent/Task uses the timeline
+relabels as subagent operations. Exit 0: pass bar held; 1: a check failed
+(named in the report); 2: refused. A session reporting a model other than
+`syn-scripted-agent` stops further admissions and the run, and the report is
+still written; a session that never reports the scripted model fails the
+`scripted` check.

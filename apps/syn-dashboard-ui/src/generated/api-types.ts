@@ -2603,6 +2603,23 @@ export interface components {
             tags: string[];
         };
         /**
+         * AgentLaunch
+         * @description What is known about whether a session's agent process ever started.
+         *
+         *     Three states rather than a boolean, because "we have no evidence either
+         *     way" and "we have evidence it did not happen" justify very different
+         *     statements to a user, and only the second one justifies telling them the
+         *     session never ran (#1047, #1065).
+         *
+         *     A boolean has no room for the first state, so every source that cannot
+         *     speak - a session whose event stream predates this field, a write that
+         *     never landed, a storage read that failed - is forced to answer "no", and
+         *     the read path cannot tell that answer apart from a real one. Absence of
+         *     evidence is not evidence of absence, and the type is what enforces it.
+         * @enum {string}
+         */
+        AgentLaunch: "unknown" | "launched" | "not_launched";
+        /**
          * AliasResolutionBasis
          * @description How confident an alias -> model id resolution is.
          * @enum {string}
@@ -8014,6 +8031,8 @@ export interface components {
             repos_display?: string | null;
             /** Status */
             status: string;
+            /** @default unknown */
+            agent_launch: components["schemas"]["AgentLaunch"];
             /** Workspace Path */
             workspace_path?: string | null;
             /**

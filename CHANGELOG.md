@@ -11,6 +11,8 @@ Releases before 0.33.1 are described in [GitHub releases](https://github.com/syn
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-10-13
+
 ## [1.0.0] - 2026-10-10
 
 ### Added
@@ -86,6 +88,8 @@ Releases before 0.33.1 are described in [GitHub releases](https://github.com/syn
 - You can now add or remove tags on an existing execution or workflow: `syn execution tag add <id> <tag...>`, `syn execution tag remove <id> <tag...>`, and the same under `syn workflow tag`. The API exposes the same operations as `POST`/`DELETE` on `/executions/{id}/tags` and `/workflows/{id}/tags`. (#1541)
 - Workflows and executions can carry tags: `tags:` in workflow YAML, `syn workflow run --tag <t>` (repeatable), and `syn execution list --tag <t>` (repeatable, AND-combined). (#1526)
 - feat(orchestration): provision a resume at its parent's recorded commits (#1458) (#1525)
+- feat: MIT in title, add sitemap.xml and robots.txt (#27)
+- feat: landing page launch prep (#23)
 
 ### Changed
 
@@ -141,6 +145,7 @@ Releases before 0.33.1 are described in [GitHub releases](https://github.com/syn
 - chore(lib): add syntropic137-skills as a submodule (#1533)
 - ci(security): OSV scan was scanning nothing; bump to v2.3.8 + scan nested lockfile (#1535)
 - Security: click raised to 8.3.3 in the ui-feedback API (PYSEC-2026-2132). (#1531)
+- chore(deps-dev): bump @playwright/test from 1.58.2 to 1.59.1 in the all-dependencies group (#20)
 
 ### Removed
 
@@ -212,6 +217,7 @@ Releases before 0.33.1 are described in [GitHub releases](https://github.com/syn
 - `just preflight-agent`, the gate agents run inside workspaces, now runs the architecture fitness check (`fitness-check`, same thresholds as CI) instead of silently skipping it. The first run in a workspace installs stable Rust and builds the `aps` CLI (~10 min total cold, ~5 min warm). (#1536)
 - fix(guard): a submodule gitlink git moved is not unsaved work (#1527)
 - fix(#1528): pin ESP with ProcessManagers drained off the subscription cursor (#1532)
+- fix: remove em dashes from user-facing copy and widen linter scope (#26)
 
 ### Security
 
@@ -227,6 +233,7 @@ Releases before 0.33.1 are described in [GitHub releases](https://github.com/syn
 
 - fix(#1519): pin the event-store INDEX digest, not a child manifest (#1522)
 
-[unreleased]: https://github.com/syntropic137/syntropic137/compare/v1.0.0...HEAD
+[unreleased]: https://github.com/syntropic137/syntropic137/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/syntropic137/syntropic137/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/syntropic137/syntropic137/compare/v0.33.1...v1.0.0
 [0.33.1]: https://github.com/syntropic137/syntropic137/compare/v0.33.0...v0.33.1
