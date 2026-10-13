@@ -253,7 +253,8 @@ def test_the_agentic_workspace_suite_is_its_own_suite_over_its_own_repository() 
 
 
 @pytest.mark.skipif(
-    not (_AW_REPO / ".git").exists() or _git(_AW_REPO, "rev-parse", "--is-shallow-repository") == "true",
+    not (_AW_REPO / ".git").exists()
+    or _git(_AW_REPO, "rev-parse", "--is-shallow-repository") == "true",
     reason="lib/agentic-workspace is not a full checkout",
 )
 @pytest.mark.unit
