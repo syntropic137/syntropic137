@@ -19,6 +19,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
+from event_sourcing import ProjectionResult
 
 from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
 from syn_domain.contexts.orchestration.domain.read_models.resume_lineage import ResumedFrom
@@ -42,6 +43,12 @@ from syn_domain.contexts.orchestration.slices.start_resume.test_1696_a_resumed_s
 from syn_domain.contexts.orchestration.slices.start_resume.test_start_resume import (
     PARENT,
     RESUME,
+)
+from syn_domain.contexts.orchestration.slices.start_resume.test_the_todo_list_has_the_same_gate import (
+    _Checkpoints,
+    _generic,
+    _resume_payload,
+    _unpause_payload,
 )
 
 if TYPE_CHECKING:
@@ -136,6 +143,45 @@ class TestLineage:
             await detail.on_execution_forked(payload)
             await listing.on_execution_forked(payload)
         await _assert_chain(store, history)
+
+    @pytest.mark.parametrize(
+        "projection", [WorkflowExecutionDetailProjection, WorkflowExecutionListProjection]
+    )
+    async def test_a_historical_unpause_does_not_halt_a_rebuild(self, projection: type) -> None:
+        """A pre-rename un-pause replays generic (`replays_generic`) and names no child.
+
+        Placed on the parent's stream after its start, through the real
+        `handle_event`: it must not fail the projection, must not link anything,
+        and every event after it must still apply.
+        """
+        history = await _history()
+        first_start = next(
+            i
+            for i, envelope in enumerate(history)
+            if envelope.metadata.event_type == "WorkflowExecutionStarted"
+        )
+        unpause = _generic("ExecutionResumed", **_unpause_payload())
+        replay = [*history[: first_start + 1], unpause, *history[first_start + 1 :]]
+        store = InMemoryProjectionStore()
+        read_model = projection(store)
+        for envelope in replay:
+            result = await read_model.handle_event(envelope, _Checkpoints())
+            assert result == ProjectionResult.SUCCESS, envelope.metadata.event_type
+        name = read_model.PROJECTION_NAME
+        assert await _lineage(store, name, PARENT) == (None, RESUME)
+        assert (await _lineage(store, name, RESUME_OF_RESUME))[0] == ResumedFrom(
+            RESUME, _resume_phase(history, RESUME_OF_RESUME)
+        )
+
+    @pytest.mark.parametrize(
+        "projection", [WorkflowExecutionDetailProjection, WorkflowExecutionListProjection]
+    )
+    async def test_an_ambiguous_resumed_payload_still_fails(self, projection: type) -> None:
+        """Both markers is not a legacy shape: refused, never guessed (`legacy_event_shapes`)."""
+        store = InMemoryProjectionStore()
+        ambiguous = _generic("ExecutionResumed", **_resume_payload(phase_id="plan"))
+        result = await projection(store).handle_event(ambiguous, _Checkpoints())
+        assert result == ProjectionResult.FAILURE
 
     async def test_versions_were_bumped_so_history_rebuilds(self) -> None:
         assert WorkflowExecutionDetailProjection.VERSION >= 19

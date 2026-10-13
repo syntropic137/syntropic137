@@ -20,6 +20,10 @@ if TYPE_CHECKING:
     from event_sourcing import ProjectionStore
     from pydantic import JsonValue
 
+    from syn_domain.contexts.orchestration.domain.events.ExecutionResumedEvent import (
+        ExecutionResumedEvent,
+    )
+
 from event_sourcing import AutoDispatchProjection
 
 from syn_domain.contexts.orchestration._shared.tags import TagSet, replay_tag_edit
@@ -33,9 +37,6 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 )
 from syn_domain.contexts.orchestration.domain.events.AgentExecutionCompletedEvent import (
     AgentExecutionCompletedEvent,
-)
-from syn_domain.contexts.orchestration.domain.events.ExecutionResumedEvent import (
-    ExecutionResumedEvent,
 )
 from syn_domain.contexts.orchestration.domain.events.ExecutionTagsAddedEvent import (
     ExecutionTagsAddedEvent,
@@ -57,6 +58,7 @@ from syn_domain.contexts.orchestration.domain.read_models.phase_progress import 
 from syn_domain.contexts.orchestration.domain.read_models.resume_lineage import (
     ResumedFrom,
     admitted_resume,
+    resume_to_link,
 )
 from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_detail import (
     WorkflowExecutionDetail,
@@ -359,9 +361,16 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         }
         await self._store.save(self.PROJECTION_NAME, execution_id, detail)
 
-    async def on_execution_resumed(self, event_data: ExecutionResumedEvent) -> None:
-        """Handle ExecutionResumed, on the PARENT's stream: link it forward (#1881)."""
-        await self._link_resumed_as(ExecutionResumedEvent.model_validate(event_data))
+    async def on_execution_resumed(self, event_data: object) -> None:
+        """Handle ExecutionResumed, on the PARENT's stream: link it forward (#1881).
+
+        `object`, not the event class: the store admits a pre-rename un-pause
+        under this name too (`replays_generic`), so the payload's shape is what
+        `resume_to_link` decides, not something this signature can promise.
+        """
+        resume = resume_to_link(event_data)
+        if resume is not None:
+            await self._link_resumed_as(resume)
 
     async def on_execution_forked(self, event_data: ExecutionResumedEvent) -> None:
         """Handle a pre-rename ExecutionForked, which is the same resume (#1881).

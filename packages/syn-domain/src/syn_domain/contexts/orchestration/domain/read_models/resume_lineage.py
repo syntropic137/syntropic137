@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.legacy_event_shapes import (
+    resumed_event_applies,
     upcast_forked_payload,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
@@ -69,3 +70,18 @@ def admitted_resume(stored: object) -> ExecutionResumedEvent:
     rename links forward like any other.
     """
     return ExecutionResumedEvent.model_validate(upcast_forked_payload(stored))
+
+
+def resume_to_link(stored: object) -> ExecutionResumedEvent | None:
+    """A stored `ExecutionResumed` as the resume to link forward, or None.
+
+    None for a pre-rename un-pause, which the store admits as a generic event
+    (`replays_generic`) and which names no child: it is skipped, loudly, so a
+    rebuild advances past it. The shape is decided by `resumed_event_applies`,
+    the same gate the aggregate uses; an ambiguous payload raises there and
+    fails the projection rather than being guessed at.
+    """
+    execution_id = stored.get("execution_id") if isinstance(stored, Mapping) else None
+    if not resumed_event_applies(stored, execution_id):
+        return None
+    return ExecutionResumedEvent.model_validate(stored)
