@@ -134,12 +134,10 @@ async def test_network_isolation_config():
             result = await ws.execute(["curl", "-I", "https://api.anthropic.com"])
             assert result.exit_code == 0
             
-            # Should NOT reach disallowed hosts (if allowlist enforced)
-            # The egress allowlist lives in the Envoy proxy config;
+            # General egress is NOT allowlisted today: agent-net is not an
+            # internal network and only model API traffic routes through
+            # Envoy, so a direct request to any other host succeeds.
             # SYN_SECURITY_ALLOWED_HOSTS was never applied and was removed (#1805).
-            if ALLOWED_HOSTS:
-                result = await ws.execute(["curl", "-I", "https://evil.com"])
-                assert result.exit_code != 0  # Should fail
 ```
 
 ## 🚧 Current State Summary
