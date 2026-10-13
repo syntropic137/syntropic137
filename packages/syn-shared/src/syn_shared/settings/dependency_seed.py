@@ -35,6 +35,8 @@ class DependencySeedSettings(BaseSettings):
         gt=0,
         description=(
             "Retention budget for all seeds together. Least recently used seeds "
-            "are deleted past it. One seed of this repository is about 1-2 GiB."
+            "are deleted past it; seeds used in the last hour may hold the store "
+            "over it, but never past twice this value. A cache larger than the "
+            "budget is never stored. One seed of this repository is about 1-2 GiB."
         ),
     )

@@ -169,10 +169,11 @@ async def test_no_store_configured_leaves_the_workspace_cold(
 
 
 def test_prune_drops_the_least_recently_copied_seed_past_the_budget(tmp_path: Path) -> None:
-    store = DependencySeedStore(tmp_path / "seeds", max_bytes=1)
+    store = DependencySeedStore(tmp_path / "seeds", max_bytes=10**9)
     old, new = SeedKey("uv", "org/app", "a" * 64), SeedKey("pnpm", "org/app", "b" * 64)
     store.publish(old, _built_cache(tmp_path / "old", "x" * 100))
     store.publish(new, _built_cache(tmp_path / "new", "y" * 100))
+    store._max_bytes = 1
     long_ago = time.time() - 7200
     os.utime(tmp_path / "seeds" / old.relative_path, (long_ago, long_ago))
     os.utime(tmp_path / "seeds" / new.relative_path, (long_ago + 60, long_ago + 60))
@@ -186,13 +187,15 @@ def test_prune_drops_the_least_recently_copied_seed_past_the_budget(tmp_path: Pa
 
 
 def test_prune_never_deletes_a_seed_copied_within_the_grace(tmp_path: Path) -> None:
-    store = DependencySeedStore(tmp_path / "seeds", max_bytes=1)
+    store = DependencySeedStore(tmp_path / "seeds", max_bytes=10**9)
     key = SeedKey("uv", "org/app", "c" * 64)
     built = _built_cache(tmp_path / "b", "z" * 100)
     # A cache built long ago is still a seed published just now.
     long_ago = time.time() - 7200
     os.utime(built, (long_ago, long_ago))
     store.publish(key, built)
+    # Over budget, but within the hard ceiling: the grace holds.
+    store._max_bytes = _size_of(tmp_path / "seeds" / key.relative_path) - 1
 
     assert store.prune() == 0
     assert (tmp_path / "seeds" / key.relative_path).is_dir()
@@ -256,6 +259,8 @@ class _FreshCheckout:
         working_directory: str | None = None,
         environment: dict[str, str] | None = None,
     ) -> ExecutionResult:
+        if command[:2] == ["rm", "-rf"]:
+            return _remove_in_workspace(self.path, command[2])
         self.commands.append((command, working_directory))
         assert working_directory is not None
         cwd = self.path / Path(working_directory).relative_to("/workspace")
@@ -266,6 +271,12 @@ class _FreshCheckout:
         return ExecutionResult(
             exit_code=self._exit_code, success=self._exit_code == 0, duration_ms=1.0
         )
+
+
+def _remove_in_workspace(root: Path, in_container: str) -> ExecutionResult:
+    """The container's `rm -rf`, on the host side of `/workspace`."""
+    shutil.rmtree(root / Path(in_container).relative_to("/workspace"), ignore_errors=True)
+    return ExecutionResult(exit_code=0, success=True, duration_ms=1.0)
 
 
 def _cloned(root: Path, files: dict[str, bytes]) -> Path:
@@ -394,7 +405,13 @@ class _LocalWorkspace:
         mapped = {
             name: value.replace("/workspace", str(self.path), 1) for name, value in extra.items()
         }
-        return {**os.environ, "UV_CACHE_DIR": str(self.path / ".cache" / "uv"), **mapped}
+        return {
+            **os.environ,
+            "UV_CACHE_DIR": str(self.path / ".cache" / "uv"),
+            "pnpm_config_store_dir": str(self.path / ".cache" / "pnpm"),
+            "npm_config_store_dir": str(self.path / ".cache" / "pnpm"),
+            **mapped,
+        }
 
     async def execute(
         self,
@@ -404,6 +421,8 @@ class _LocalWorkspace:
         working_directory: str | None = None,
         environment: dict[str, str] | None = None,
     ) -> ExecutionResult:
+        if command[:2] == ["rm", "-rf"]:
+            return _remove_in_workspace(self.path, command[2])
         assert working_directory is not None
         cwd = self.path / Path(working_directory).relative_to("/workspace")
         done = subprocess.run(
@@ -426,7 +445,7 @@ class _LocalWorkspace:
 
 def _aged_store(tmp_path: Path, keys: list[SeedKey], *, max_bytes: int) -> DependencySeedStore:
     """``keys`` published from caches of many files, then last copied two hours ago."""
-    store = DependencySeedStore(tmp_path / "seeds", max_bytes=max_bytes)
+    store = DependencySeedStore(tmp_path / "seeds", max_bytes=10**9)
     long_ago = time.time() - 7200
     for index, key in enumerate(keys):
         built = _built_cache(tmp_path / f"built-{index}", "x" * 100)
@@ -434,6 +453,7 @@ def _aged_store(tmp_path: Path, keys: list[SeedKey], *, max_bytes: int) -> Depen
             (built / "archive" / f"dep{n}.py").write_text("y" * 100)
         store.publish(key, built)
         os.utime(tmp_path / "seeds" / key.relative_path, (long_ago + index, long_ago + index))
+    store._max_bytes = max_bytes
     return store
 
 
@@ -456,9 +476,10 @@ def test_a_burst_over_budget_is_pruned_by_cache_hits_alone_once_the_grace_expire
     others = [SeedKey("uv", "org/other", "f" * 64), SeedKey("pnpm", "org/other", "0" * 64)]
     store = _aged_store(tmp_path, [*others, hit], max_bytes=10**9)
     seed_bytes = _size_of(tmp_path / "seeds" / hit.relative_path)
-    store._max_bytes = seed_bytes
+    # Room for one seed, and the burst of three stays under the hard ceiling.
+    store._max_bytes = seed_bytes * 3 // 2 + 1
     seeds = [tmp_path / "seeds" / key.relative_path for key in [*others, hit]]
-    # The burst: every seed published within the grace, three times the budget.
+    # The burst: every seed published within the grace, twice the budget.
     for path in seeds:
         os.utime(path)
     assert store.prune() == 0
@@ -482,6 +503,8 @@ def test_a_prune_during_a_copy_never_deletes_the_seed_being_copied(
     key = SeedKey("uv", "org/app", _sha(_UV_LOCK))
     store = _aged_store(tmp_path, [key], max_bytes=1)
     source = tmp_path / "seeds" / key.relative_path
+    # Over budget, within the hard ceiling, so a copy's touch protects it.
+    store._max_bytes = _size_of(source) - 1
     seed_files = _files_under(source)
     snapshotted, go = threading.Event(), threading.Event()
     pruned: list[int] = []
@@ -620,6 +643,7 @@ def test_prune_rereads_the_lru_clock_of_a_seed_copied_after_its_snapshot(
     key = SeedKey("uv", "org/app", _sha(_UV_LOCK))
     store = _aged_store(tmp_path, [key], max_bytes=1)
     source = tmp_path / "seeds" / key.relative_path
+    store._max_bytes = _size_of(source) - 1
     workspace_dir, clone = _clone_of_uv_lock(tmp_path)
     real_lease = dependency_seed._seed_lease
     copied_first: list[SeedOutcome] = []
@@ -637,3 +661,207 @@ def test_prune_rereads_the_lru_clock_of_a_seed_copied_after_its_snapshot(
     assert store.prune() == 0
     assert copied_first[0].copied == [key]
     assert source.is_dir()
+
+
+# --- codex review of #1802: isolation, scripts, hard ceiling, overlap --------
+
+
+class _LockfileTaggedCheckout(_FreshCheckout):
+    """Writes one cache file named after the lockfile it warmed, so seeds can be told apart."""
+
+    async def execute(
+        self,
+        command: list[str],
+        *,
+        timeout_seconds: int | None = None,
+        working_directory: str | None = None,
+        environment: dict[str, str] | None = None,
+    ) -> ExecutionResult:
+        if command[:2] == ["rm", "-rf"]:
+            return _remove_in_workspace(self.path, command[2])
+        assert working_directory is not None
+        self.commands.append((command, working_directory))
+        cwd = self.path / Path(working_directory).relative_to("/workspace")
+        lock = cwd / dependency_seed.SEEDED_TOOLS[command[0]]
+        cache = self.path / ".cache" / command[0]
+        cache.mkdir(parents=True, exist_ok=True)
+        (cache / f"dep-{_sha(lock.read_bytes())[:8]}").write_text("x")
+        return ExecutionResult(exit_code=0, success=True, duration_ms=1.0)
+
+
+def _two_clones(root: Path, lock_a: bytes, lock_b: bytes) -> list[tuple[str, Path]]:
+    clones: list[tuple[str, Path]] = []
+    for name, lock in (("a", lock_a), ("b", lock_b)):
+        clone = root / "repos" / name
+        clone.mkdir(parents=True)
+        (clone / "uv.lock").write_bytes(lock)
+        clones.append((f"org/{name}", clone))
+    return clones
+
+
+async def test_a_seed_never_carries_another_repositorys_dependencies(
+    tmp_path: Path, store: DependencySeedStore
+) -> None:
+    lock_a, lock_b = b"lock = 'a'\n", b"lock = 'b'\n"
+    ws = _LockfileTaggedCheckout(tmp_path / "ws")
+    clones = _two_clones(ws.path, lock_a, lock_b)
+
+    await dependency_seed.seed_dependency_caches(ws, clones)
+
+    seed_a = tmp_path / "seeds" / SeedKey("uv", "org/a", _sha(lock_a)).relative_path
+    seed_b = tmp_path / "seeds" / SeedKey("uv", "org/b", _sha(lock_b)).relative_path
+    assert _files_under(seed_a) == {Path(f"dep-{_sha(lock_a)[:8]}")}
+    assert _files_under(seed_b) == {Path(f"dep-{_sha(lock_b)[:8]}")}
+    # The workspace still gets both, copied from the store.
+    assert _files_under(ws.path / ".cache" / "uv") == {
+        Path(f"dep-{_sha(lock_a)[:8]}"),
+        Path(f"dep-{_sha(lock_b)[:8]}"),
+    }
+    assert not list((ws.path / ".cache").glob(".discard-*"))
+
+
+async def test_a_warm_never_publishes_a_seed_already_copied_for_another_repository(
+    tmp_path: Path, store: DependencySeedStore
+) -> None:
+    lock_a, lock_b = b"lock = 'a'\n", b"lock = 'b'\n"
+    private = _built_cache(tmp_path / "private", "repo a only")
+    store.publish(SeedKey("uv", "org/a", _sha(lock_a)), private)
+    ws = _LockfileTaggedCheckout(tmp_path / "ws")
+    clones = _two_clones(ws.path, lock_a, lock_b)
+
+    await dependency_seed.seed_dependency_caches(ws, clones)
+
+    seed_b = tmp_path / "seeds" / SeedKey("uv", "org/b", _sha(lock_b)).relative_path
+    assert _files_under(seed_b) == {Path(f"dep-{_sha(lock_b)[:8]}")}
+    assert (ws.path / ".cache" / "uv" / "archive" / "pkg.py").read_text() == "repo a only"
+
+
+def test_the_pnpm_warm_runs_no_dependency_scripts() -> None:
+    environment = dependency_seed._WARM_ENVIRONMENT
+    assert environment["pnpm_config_ignore_scripts"] == "true"
+    assert environment["npm_config_ignore_scripts"] == "true"
+
+
+_PNPM, _GIT = shutil.which("pnpm"), shutil.which("git")
+
+
+@pytest.mark.skipif(_PNPM is None or _GIT is None, reason="needs the pnpm and git binaries")
+async def test_real_pnpm_warm_never_prepares_a_hostile_git_dependency(
+    tmp_path: Path, store: DependencySeedStore
+) -> None:
+    """A git-hosted dependency whose builds are allowed is still not run during a warm."""
+    assert _PNPM is not None and _GIT is not None
+    canary = tmp_path / "CANARY"
+    dep = tmp_path / "hostile"
+    dep.mkdir()
+    (dep / "package.json").write_text(
+        '{"name":"hostile","version":"1.0.0","scripts":'
+        f'{{"prepare":"echo ran > {canary}","install":"echo ran > {canary}"}}}}'
+    )
+    git = [_GIT, "-C", str(dep), "-c", "user.email=t@t", "-c", "user.name=t"]
+    subprocess.run([*git, "init", "-q"], check=True)
+    subprocess.run([*git, "add", "package.json"], check=True)
+    subprocess.run([*git, "commit", "-qm", "x"], check=True)
+    resolver = tmp_path / "resolve"
+    resolver.mkdir()
+    (resolver / "package.json").write_text(
+        f'{{"name":"app","version":"0.0.0","dependencies":{{"hostile":"git+file://{dep}"}}}}'
+    )
+    subprocess.run(
+        [_PNPM, "install", "--lockfile-only", "--store-dir", str(tmp_path / "s0")],
+        cwd=resolver,
+        check=True,
+        capture_output=True,
+        env={**os.environ, "pnpm_config_ignore_scripts": "true"},
+    )
+    assert not canary.exists()
+
+    class _AllowsBuilds(_LocalWorkspace):
+        """As if config the warm cannot see (a global rc) allowed this package's builds."""
+
+        async def execute(
+            self,
+            command: list[str],
+            *,
+            timeout_seconds: int | None = None,
+            working_directory: str | None = None,
+            environment: dict[str, str] | None = None,
+        ) -> ExecutionResult:
+            if working_directory is not None and command[0] == "pnpm":
+                cwd = self.path / Path(working_directory).relative_to("/workspace")
+                (cwd / "pnpm-workspace.yaml").write_text("allowBuilds:\n  hostile: true\n")
+            return await super().execute(
+                command,
+                timeout_seconds=timeout_seconds,
+                working_directory=working_directory,
+                environment={**(environment or {}), "CI": "true"},
+            )
+
+    ws = _AllowsBuilds(tmp_path / "ws")
+    clone = ws.path / "repos" / "app"
+    clone.mkdir(parents=True)
+    (clone / "pnpm-lock.yaml").write_bytes((resolver / "pnpm-lock.yaml").read_bytes())
+
+    await dependency_seed.seed_dependency_caches(ws, [("org/app", clone)])
+
+    assert ws.exit_codes == [0]
+    assert not canary.exists()
+
+
+def test_a_cache_larger_than_the_budget_is_never_published(tmp_path: Path) -> None:
+    store = DependencySeedStore(tmp_path / "seeds", max_bytes=10)
+    key = SeedKey("uv", "org/app", "1" * 64)
+
+    store.publish(key, _built_cache(tmp_path / "big", "x" * 100))
+
+    assert not (tmp_path / "seeds" / key.relative_path).exists()
+    assert not list((tmp_path / "seeds").rglob(".staging-*"))
+
+
+def test_the_grace_yields_past_the_hard_ceiling(tmp_path: Path) -> None:
+    """A burst of seeds all within the grace is pruned once it passes the ceiling."""
+    keys = [SeedKey("uv", f"org/r{n}", f"{n}" * 64) for n in range(4)]
+    store = DependencySeedStore(tmp_path / "seeds", max_bytes=10**9)
+    for n, key in enumerate(keys):
+        store.publish(key, _built_cache(tmp_path / f"b{n}", "x" * 100))
+    one = _size_of(tmp_path / "seeds" / keys[0].relative_path)
+    # Four seeds, every one fresh, against a budget of one: twice the ceiling.
+    store._max_bytes = one
+
+    store.prune()
+
+    kept = [key for key in keys if (tmp_path / "seeds" / key.relative_path).exists()]
+    # Stated as a number, not as the constant: the ceiling is the contract.
+    assert sum(_size_of(tmp_path / "seeds" / key.relative_path) for key in kept) <= 2 * one
+    assert kept, "the grace still keeps what fits under the ceiling"
+
+
+def test_prune_never_deletes_a_publish_in_flight(tmp_path: Path) -> None:
+    store = DependencySeedStore(tmp_path / "seeds", max_bytes=1)
+    staging = tmp_path / "seeds" / "uv" / "org" / "app" / ".staging-live"
+    staging.mkdir(parents=True)
+    (staging / "big").write_text("x" * 1000)
+
+    store.prune()
+
+    assert staging.is_dir()
+
+
+def test_two_seeds_sharing_a_symlink_both_reach_the_workspace(tmp_path: Path) -> None:
+    store = DependencySeedStore(tmp_path / "seeds", max_bytes=10**9)
+    lock_a, lock_b = b"lock = 'a'\n", b"lock = 'b'\n"
+    for name, lock, link in (("a", lock_a, "archive/pkg.py"), ("b", lock_b, "archive/tool")):
+        built = _built_cache(tmp_path / f"built-{name}", f"from {name}")
+        (built / "shared").symlink_to("archive/pkg.py")  # identical in both
+        (built / "link").unlink()
+        (built / "link").symlink_to(link)  # differs between them
+        store.publish(SeedKey("uv", f"org/{name}", _sha(lock)), built)
+    workspace_dir = tmp_path / "ws"
+    clones = _two_clones(workspace_dir, lock_a, lock_b)
+
+    outcome = store.seed(workspace_dir, clones)
+
+    cache = workspace_dir / ".cache" / "uv"
+    assert len(outcome.copied) == 2
+    assert (cache / "shared").readlink() == Path("archive/pkg.py")
+    assert (cache / "link").readlink() == Path("archive/tool")  # the later seed's

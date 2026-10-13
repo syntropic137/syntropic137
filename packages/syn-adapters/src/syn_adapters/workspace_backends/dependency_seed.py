@@ -20,6 +20,10 @@ agent could plant a poisoned wheel that every later run installs. So:
   alone wrote. No other file of the checkout (a `.venv`, a `uv.toml`, a
   pnpmfile, an `.npmrc`) is present to be run or read. A workspace's cache is
   never read back into the store once an agent has run;
+- every warm builds into an EMPTY cache: it runs before any seed is copied
+  into the workspace, and the cache of each earlier warm is moved out of the
+  way first. A seed therefore holds only what its own lockfile pins, never
+  another repository's dependencies that happened to share the workspace;
 - a workspace never sees the store. `seed` COPIES a seed into the workspace's
   own writable cache from the host side, through the workspace directory the
   host bind-mounts at `/workspace`, so the agent can corrupt its own copy and
@@ -34,7 +38,9 @@ Retention is LRU by the time a seed was last copied, under one byte budget
 (`SYN_DEPENDENCY_SEED_MAX_BYTES`), so the store cannot grow without bound.
 Every `seed` and every `publish` prunes, so a store a burst of publications
 left over budget converges once the grace expires, even if only cache hits
-follow. A copy holds a shared lease on its seed (`_seed_lease`) and a prune
+follow. The grace never holds the store above `_HARD_CEILING_FACTOR` times
+the budget: past that, recently used seeds are pruned too, and a cache larger
+than the budget is never published at all. A copy holds a shared lease on its seed (`_seed_lease`) and a prune
 deletes only under an exclusive one, so a seed is never deleted mid-copy.
 """
 
@@ -93,8 +99,12 @@ WARM_MANIFESTS: Final[dict[str, tuple[str, ...]]] = {"uv": ("pyproject.toml",), 
 #:   the repository's own, and `--no-build` builds no sdist at all, so no build
 #:   backend runs. A lockfile that needs an sdist fails to warm and the run
 #:   goes on cold;
-#: - `pnpm fetch` runs no lifecycle scripts, and `--ignore-pnpmfile` keeps it
-#:   from loading a pnpmfile even if one were present.
+#: - `pnpm fetch` loads no pnpmfile (`--ignore-pnpmfile`) and runs no
+#:   dependency scripts: a git-hosted dependency is otherwise PREPARED during
+#:   a fetch, running its `prepare`/`install` scripts whenever its builds are
+#:   allowed (reproduced with pnpm 11.5.1). `ignore-scripts` is set through the
+#:   environment (`_WARM_ENVIRONMENT`), in both spellings, because a flag one
+#:   pnpm accepts on `fetch` another may reject.
 #:
 #: A malicious lockfile is not a way in: its seed is keyed by its own hash, so
 #: it reaches only runs that would install that lockfile anyway.
@@ -115,7 +125,12 @@ WARM_COMMANDS: Final[dict[str, tuple[str, ...]]] = {
 #: Set for every warm. `UV_NO_CONFIG` ignores any `uv.toml` above the scratch
 #: directory; the scratch directory's own `.venv` is named explicitly so uv
 #: can never pick up an environment the checkout shipped.
-_WARM_ENVIRONMENT: Final[dict[str, str]] = {"UV_NO_CONFIG": "1"}
+_WARM_ENVIRONMENT: Final[dict[str, str]] = {
+    "UV_NO_CONFIG": "1",
+    # pnpm 11+ reads only the `pnpm_config_` spelling, older pnpm only `npm_config_`.
+    "pnpm_config_ignore_scripts": "true",
+    "npm_config_ignore_scripts": "true",
+}
 
 #: A warm that has not finished by then is abandoned and the run goes on cold.
 _WARM_TIMEOUT_SECONDS: Final = 900
@@ -124,6 +139,10 @@ _WARM_TIMEOUT_SECONDS: Final = 900
 #: over budget, so a seed a burst of runs is about to reuse is not thrashed
 #: out and rebuilt. It is NOT what protects a copy in flight: the lease is.
 _PRUNE_GRACE_SECONDS: Final = 3600
+
+#: The grace yields once the store holds this many times its budget: a burst
+#: of distinct lockfiles may overshoot the budget, but never without bound.
+_HARD_CEILING_FACTOR: Final = 2
 
 #: A GitHub ``owner/name``. Checked because it becomes two path components of
 #: the store, and ``..`` there would name a directory outside it.
@@ -179,6 +198,10 @@ class DependencySeedStore:
     def __init__(self, root: Path, *, max_bytes: int) -> None:
         self._root = root
         self._max_bytes = max_bytes
+
+    def has(self, key: SeedKey) -> bool:
+        """Whether a seed for ``key`` is published right now (it may be pruned later)."""
+        return (self._root / key.relative_path).is_dir()
 
     def seed(self, workspace_dir: Path, clones: Iterable[tuple[str, Path]]) -> SeedOutcome:
         """Copy every ready seed for ``clones`` into ``workspace_dir``'s caches.
@@ -239,6 +262,15 @@ class DependencySeedStore:
         renamed into place, so a reader sees either no seed or the whole of one.
         """
         target = self._root / key.relative_path
+        # Checked BEFORE the staging copy: a cache that could never fit the
+        # budget is not worth the disk a copy of it takes.
+        if _size(built_cache) > self._max_bytes:
+            logger.warning(
+                "Not publishing dependency seed %s: larger than the %d-byte budget",
+                _label(key),
+                self._max_bytes,
+            )
+            return
         staging = target.parent / f".staging-{uuid.uuid4().hex}"
         staging.parent.mkdir(parents=True, exist_ok=True)
         shutil.copytree(built_cache, staging, symlinks=True)
@@ -261,9 +293,13 @@ class DependencySeedStore:
         """Delete least recently copied seeds until the store fits its budget.
 
         Returns the bytes freed. A seed copied within the grace period is kept
-        even over budget, so a burst does not thrash. A seed being copied
-        right now is kept whatever its age: its lease is held, and a seed is
-        deleted only under an exclusive lease, after re-reading its LRU clock.
+        over budget, so a burst does not thrash, but only while the store is
+        within `_HARD_CEILING_FACTOR` times the budget; past that the grace
+        yields and recent seeds go too, least recently used first. A seed
+        being copied right now is kept whatever its age: its lease is held,
+        and a seed is deleted only under an exclusive lease, after re-reading
+        its LRU clock. A staging directory inside the grace is a publish in
+        flight and is never deleted.
         """
         seeds = sorted(
             (path.stat().st_mtime, path, _recorded_size(path))
@@ -275,10 +311,15 @@ class DependencySeedStore:
         remaining = sum(size for _, _, size in seeds)
         freed = 0
         cutoff = time.time() - _PRUNE_GRACE_SECONDS
+        ceiling = self._max_bytes * _HARD_CEILING_FACTOR
         for snapshot_mtime, path, size in seeds:
-            # mtimes only move forward, so nothing after this is past the grace.
-            if remaining <= self._max_bytes or snapshot_mtime > cutoff:
+            if remaining <= self._max_bytes:
                 break
+            # mtimes only move forward, so nothing after this is past the grace.
+            if snapshot_mtime > cutoff and remaining <= ceiling:
+                break
+            if snapshot_mtime > cutoff and path.name.startswith(".staging-"):
+                continue  # a publish in flight
             try:
                 with _seed_lease(path, exclusive=True, blocking=False):
                     # Re-read under the lease: a copy may have touched the
@@ -288,7 +329,7 @@ class DependencySeedStore:
                     except FileNotFoundError:
                         remaining -= size  # another prune got there first
                         continue
-                    if mtime > cutoff:
+                    if mtime > cutoff and remaining <= ceiling:
                         continue
                     _remove(path)
                     _sidecar(path, ".size").unlink(missing_ok=True)
@@ -349,7 +390,7 @@ def _copy_writable(source: Path, destination: Path) -> None:
     files get read+write: pnpm hardlinks out of its store, and Linux's
     protected_hardlinks refuses that for a file the linker cannot write.
     """
-    shutil.copytree(source, destination, symlinks=True, dirs_exist_ok=True)
+    _merge_tree(source, destination)
     for directory, _dirs, files in os.walk(destination):
         Path(directory).chmod(0o777)
         for name in files:
@@ -358,6 +399,42 @@ def _copy_writable(source: Path, destination: Path) -> None:
                 continue
             mode = path.stat().st_mode
             path.chmod(0o777 if mode & 0o111 else 0o666)
+
+
+def _merge_tree(source: Path, destination: Path) -> None:
+    """Copy ``source`` into ``destination``, merging with what is already there.
+
+    Two seeds of one tool (two repositories in one workspace) overlap: uv's
+    cache shares wheel entries, many of them symlinks. `shutil.copytree` with
+    `dirs_exist_ok` calls `os.symlink` straight onto an existing link and
+    fails, so links are merged here: one already pointing at the same target
+    is kept, any other is replaced atomically. A file over a file is
+    overwritten (the cache is content-addressed, so it is the same bytes).
+    """
+    destination.mkdir(parents=True, exist_ok=True)
+    for directory, dirs, files in os.walk(source):
+        here = Path(directory)
+        target_dir = destination / here.relative_to(source)
+        target_dir.mkdir(exist_ok=True)
+        links = [name for name in dirs if (here / name).is_symlink()]
+        dirs[:] = [name for name in dirs if name not in links]
+        for name in (*links, *files):
+            src, dst = here / name, target_dir / name
+            if src.is_symlink():
+                _place_symlink(src.readlink(), dst)
+                continue
+            if dst.is_symlink():
+                dst.unlink()
+            shutil.copy2(src, dst, follow_symlinks=False)
+
+
+def _place_symlink(link: Path, destination: Path) -> None:
+    if destination.is_symlink() and destination.readlink() == link:
+        return
+    staged = destination.parent / f".link-{uuid.uuid4().hex}"
+    staged.symlink_to(link)
+    # Fails (and the seed copy with it) if a real directory is in the way.
+    staged.replace(destination)
 
 
 def _make_read_only(root: Path) -> None:
@@ -417,24 +494,45 @@ async def seed_dependency_caches(
     store = configured_store()
     if store is None:
         return
+    warmed: list[SeedKey] = []
     try:
+        # Every missing seed is warmed FIRST, while the workspace's caches
+        # hold nothing copied from another seed, each into an empty cache.
+        keys = [
+            (key, clone_dir)
+            for repository, clone_dir in clones
+            for key in seed_keys(repository, clone_dir)
+        ]
+        for key, clone_dir in keys:
+            if not store.has(key) and await _warm(store, workspace, key, clone_dir):
+                warmed.append(key)
+        # Then every seed, warmed just now or long ago, is copied the same way.
         outcome = await asyncio.to_thread(store.seed, workspace.path, clones)
-        for key, clone_dir in outcome.missing:
-            await _warm(store, workspace, key, clone_dir)
     except Exception:
         logger.exception("Dependency seeding failed; installing from cold (%s)", workspace.path)
         return
     logger.info(
-        "Dependency seeds (workspace=%s, copied=%s, warmed=%s)",
+        "Dependency seeds (workspace=%s, copied=%s, warmed=%s, cold=%s)",
         workspace.path,
         [_label(key) for key in outcome.copied],
+        [_label(key) for key in warmed],
         [_label(key) for key, _ in outcome.missing],
     )
 
 
 async def _warm(
     store: DependencySeedStore, workspace: SeedableWorkspace, key: SeedKey, clone_dir: Path
-) -> None:
+) -> bool:
+    """Build and publish the seed for ``key`` in an empty cache. True if published.
+
+    The tool's cache (`/workspace/.cache/<tool>`, the path a seed must be
+    built at) is moved aside before the warm, so it starts empty, and the
+    warmed cache is moved aside after it, so the next warm starts empty too.
+    What the workspace finally gets is copied from the store, like any hit.
+    """
+    cache = workspace.path / ".cache" / key.tool
+    await asyncio.to_thread(_open_cache_root, cache.parent)
+    await _discard_cache(workspace, cache)
     scratch = await asyncio.to_thread(_warm_inputs, workspace.path, key.tool, clone_dir)
     in_container = Path("/workspace") / scratch.relative_to(workspace.path)
     try:
@@ -460,8 +558,45 @@ async def _warm(
             result.exit_code,
             (result.stderr or "")[-300:],
         )
+        await _discard_cache(workspace, cache)
+        return False
+    try:
+        await asyncio.to_thread(store.publish, key, cache)
+    except OSError:
+        logger.exception("Could not publish dependency seed %s", _label(key))
+    finally:
+        await _discard_cache(workspace, cache)
+    return store.has(key)
+
+
+def _open_cache_root(root: Path) -> None:
+    """Create `.cache` as the host, opened to the container's agent.
+
+    Host-owned, so whatever cache the tool creates under it, the host can
+    still rename it away afterwards.
+    """
+    root.mkdir(parents=True, exist_ok=True)
+    with contextlib.suppress(PermissionError):
+        root.chmod(0o777)
+
+
+async def _discard_cache(workspace: SeedableWorkspace, cache: Path) -> None:
+    """Move a warmed cache out of the tool's path and delete it, best effort.
+
+    The rename must succeed (the next warm, or the copy, needs the path
+    empty); deleting may not: the tool's files belong to the container's
+    user, so they are removed from inside the container, then from the host.
+    """
+    if not (cache.exists() or cache.is_symlink()):
         return
-    await asyncio.to_thread(store.publish, key, workspace.path / ".cache" / key.tool)
+    aside = cache.parent / f".discard-{cache.name}-{uuid.uuid4().hex}"
+    await asyncio.to_thread(cache.rename, aside)
+    with contextlib.suppress(Exception):
+        await workspace.execute(
+            ["rm", "-rf", str(Path("/workspace") / aside.relative_to(workspace.path))],
+            timeout_seconds=_WARM_TIMEOUT_SECONDS,
+        )
+    await asyncio.to_thread(shutil.rmtree, aside, True)
 
 
 def _warm_inputs(workspace_dir: Path, tool: str, clone_dir: Path) -> Path:
