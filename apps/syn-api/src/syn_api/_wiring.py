@@ -98,6 +98,7 @@ from syn_adapters.storage import (
 from syn_adapters.storage.artifact_storage import get_artifact_storage
 from syn_adapters.storage.repositories import (
     get_eval_repository,
+    get_execution_event_stream,
     get_execution_request_repository,
     get_trigger_repository,
     get_workflow_execution_repository,
@@ -305,6 +306,9 @@ async def get_execution_processor() -> WorkflowExecutionProcessor:
         prompt_builder=_build_workspace_prompt,
         command_builder=_build_agent_command,
         todo_projection=ExecutionTodoProjection(store=get_projection_store()),
+        # #1310 1.4 (ADR-072 D8): a claimed run folds its own to-do list from these.
+        execution_events=get_execution_event_stream(),
+        todo_projection_type=ExecutionTodoProjection,
         claude_plugin_materializer=claude_plugin_materializer,
         skill_materializer=skill_materializer,
         session_capture=session_capture,
