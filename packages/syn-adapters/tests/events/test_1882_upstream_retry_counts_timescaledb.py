@@ -80,17 +80,26 @@ class TestUpstreamRetryCountsRoundTrip:
             model="gpt-5.5-codex",
             kind="rate_limited",
         )
-        # Outside the 24h window: written now, then moved two days back.
+        # Outside the 24h window: written now through the production writer,
+        # then re-inserted two days back. Not an UPDATE of `time`: a hypertable
+        # row cannot leave the chunk it was written to (CHECK constraint).
         await _retry(
             event_store, session_id=old, provider=codex, model="gpt-5.5-codex", kind="capacity"
         )
         await _retry(event_store, session_id=old, provider=claude, model=None, kind="rate_limited")
-        async with event_store.pool.acquire() as conn:
+        async with event_store.pool.acquire() as conn, conn.transaction():
             moved = await conn.execute(
-                "UPDATE agent_events SET time = now() - interval '2 days' WHERE session_id = $1",
+                "INSERT INTO agent_events (time, event_type, session_id, execution_id,"
+                " phase_id, data) SELECT now() - interval '2 days', event_type,"
+                " session_id, execution_id, phase_id, data FROM agent_events"
+                " WHERE session_id = $1",
                 old,
             )
-        assert moved == "UPDATE 2"
+            await conn.execute(
+                "DELETE FROM agent_events WHERE session_id = $1 AND time > now() - interval '1 day'",
+                old,
+            )
+        assert moved == "INSERT 0 2"
 
         with patch("syn_api._wiring.get_event_store_instance", return_value=event_store):
             response = await get_upstream_retries(window="24h")
