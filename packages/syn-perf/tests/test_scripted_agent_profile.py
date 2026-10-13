@@ -67,6 +67,7 @@ def _streams(workflow: WorkflowDefinition) -> dict[str, ScriptedStream]:
             harness=(p.agent.provider if p.agent else None) or "claude",
             recording=f"/recordings/{p.id}.jsonl",
             cli_version="9.9.9",
+            tool_uses=7,
             pacing_factor=0.25,
         )
         for p in workflow.phases
@@ -332,7 +333,7 @@ def test_a_validated_platform_profile_cannot_gain_a_pr_opening_phase(
 
 
 def test_the_callers_mapping_is_not_the_profiles(workflow: WorkflowDefinition) -> None:
-    stream = ScriptedStream(harness="claude", recording="/r.jsonl", cli_version="1")
+    stream = ScriptedStream(harness="claude", recording="/r.jsonl", cli_version="1", tool_uses=3)
     report = ScriptedPhase(
         stream=stream, workload=NoWorkload(), side_effect=ReportOnly(), artifact="x"
     )
@@ -347,7 +348,7 @@ def test_the_callers_mapping_is_not_the_profiles(workflow: WorkflowDefinition) -
 
 
 def test_gates_on_a_phase_without_a_tree_is_refused() -> None:
-    stream = ScriptedStream(harness="claude", recording="/r.jsonl", cli_version="1")
+    stream = ScriptedStream(harness="claude", recording="/r.jsonl", cli_version="1", tool_uses=3)
 
     with pytest.raises(ValidationError, match="no working tree"):
         ScriptedPhase(
@@ -356,7 +357,7 @@ def test_gates_on_a_phase_without_a_tree_is_refused() -> None:
 
 
 def test_an_artifact_naming_a_field_the_stub_cannot_fill_is_refused() -> None:
-    stream = ScriptedStream(harness="claude", recording="/r.jsonl", cli_version="1")
+    stream = ScriptedStream(harness="claude", recording="/r.jsonl", cli_version="1", tool_uses=3)
 
     with pytest.raises(ValidationError, match="pr_url"):
         ScriptedPhase(
@@ -633,6 +634,7 @@ def _one_phase_profile(pacing_factor: float, cpu_seconds: float, size: int) -> S
                     harness="claude",
                     recording="/r.jsonl",
                     cli_version="1",
+                    tool_uses=3,
                     pacing_factor=pacing_factor,
                 ),
                 workload=SyntheticWorkload(
