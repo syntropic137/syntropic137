@@ -7,6 +7,7 @@ task recorded it. The claude sentence is the one exec-0ffa4337a4a8 stored on
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 
 import pytest
@@ -19,6 +20,10 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.CodexStreamProces
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
     _extract_error_reason,  # pyright: ignore[reportPrivateUsage]
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.test_1344_raw_stream_activity_stops_a_retry import (
+    _claude,  # pyright: ignore[reportPrivateUsage]
+    _run_claude,  # pyright: ignore[reportPrivateUsage]
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.upstream_failure import (
     UPSTREAM_FAILURES,
@@ -132,3 +137,47 @@ async def test_the_claude_weekly_limit_is_never_retried() -> None:
 
     assert grant is None
     assert clock.slept == []
+
+
+def _claude_error_result(result_text: str) -> str:
+    """One raw claude terminal line: an ``is_error`` result carrying ``result_text``."""
+    return json.dumps({"type": "result", "is_error": True, "result": result_text})
+
+
+def _anthropic_body(error_type: str, message: str) -> str:
+    return json.dumps({"type": "error", "error": {"type": error_type, "message": message}})
+
+
+#: Every shape the claude parser accepts the weekly-limit sentence in. The
+#: structured ones used to lose the sentence to the "Rate limited (HTTP 429)"
+#: label, which reads as a retryable rate limit (#1882, verify finding 4).
+_WEEKLY_LIMIT_SHAPES = {
+    "plain stored text": CLAUDE_WEEKLY_LIMIT,
+    "plain, with surrounding whitespace": f"\n  {CLAUDE_WEEKLY_LIMIT}  \n",
+    "structured HTTP 429": f"API Error: 429 {_anthropic_body('rate_limit_error', CLAUDE_WEEKLY_LIMIT)}",
+    "structured, no status": _anthropic_body("rate_limit_error", CLAUDE_WEEKLY_LIMIT),
+}
+
+
+@pytest.mark.parametrize("result_text", _WEEKLY_LIMIT_SHAPES.values(), ids=_WEEKLY_LIMIT_SHAPES)
+def test_every_shape_of_the_weekly_limit_reads_as_quota(result_text: str) -> None:
+    assert UPSTREAM_FAILURES.kind_of(_claude_reason(result_text)) is UpstreamFailureKind.QUOTA
+
+
+@pytest.mark.parametrize("result_text", _WEEKLY_LIMIT_SHAPES.values(), ids=_WEEKLY_LIMIT_SHAPES)
+async def test_the_weekly_limit_through_the_raw_stream_launches_once(result_text: str) -> None:
+    handler = await _run_claude(_claude(_claude_error_result(result_text)))
+
+    assert len(handler.granted_timeouts) == 1, (
+        f"{len(handler.granted_timeouts)} launches: a spent quota was retried"
+    )
+
+
+async def test_a_structured_rate_limit_without_quota_words_is_still_retried() -> None:
+    """The control: the quota case is not passing because nothing is retried."""
+    raw = f"API Error: 429 {_anthropic_body('rate_limit_error', 'Rate limit exceeded')}"
+
+    handler = await _run_claude(_claude(_claude_error_result(raw)))
+
+    assert UPSTREAM_FAILURES.kind_of(_claude_reason(raw)) is UpstreamFailureKind.RATE_LIMITED
+    assert len(handler.granted_timeouts) == UpstreamRetryPolicy().max_attempts

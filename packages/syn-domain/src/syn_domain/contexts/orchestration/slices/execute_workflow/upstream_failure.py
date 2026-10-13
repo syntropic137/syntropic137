@@ -34,6 +34,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.codex_faults impo
     codex_login_fault_reason,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
+    CLAUDE_QUOTA_LINE,
     ApiErrorType,
     api_error_label,
     api_error_with_message,
@@ -73,13 +74,11 @@ _CODEX_AT_CAPACITY = "Selected model is at capacity. Please try a different mode
 #: case-insensitively and only inside codex's own fault line.
 _CODEX_QUOTA_PHRASES: tuple[str, ...] = ("hit your usage limit", "purchase more credits")
 
-#: How claude's CLI opens its own quota sentence. Observed once, verbatim, as
-#: the whole `is_error` result of exec-0ffa4337a4a8 on 2026-10-13 (PC-151,
-#: #1669): "You've hit your weekly limit · resets Oct 15, 8am (UTC)". The
-#: claude parser passes plain result text through unchanged, so this opening
-#: IS the fault line: a reason that merely contains the sentence further in -
-#: an agent quoting it - is not a quota.
-_CLAUDE_QUOTA_LINE = "You've hit your "
+#: How claude's CLI opens its own quota sentence: the parser's constant, so
+#: the reader matches the reason the parser actually wrote. A reason that
+#: merely contains the sentence further in - an agent quoting it - is not a
+#: quota.
+_CLAUDE_QUOTA_LINE = CLAUDE_QUOTA_LINE
 
 #: Which allowance, after `_CLAUDE_QUOTA_LINE`. Only the one claude has been
 #: seen to say. Its "resets Oct 15, 8am" names no year, so it cannot be placed
