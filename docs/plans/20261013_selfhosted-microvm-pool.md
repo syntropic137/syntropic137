@@ -217,7 +217,7 @@ This is a locally built nested-Docker image and profile used only on the E0 box.
   1. mounts the writable paths;
   2. starts `dockerd` as root, with `--data-root=/var/lib/docker` and a socket at `/run/docker.sock`, group `docker`;
   3. waits for the socket (bounded, failing the workspace on timeout);
-  4. `exec`s the existing entrypoint as `agent` via `setpriv --reuid=agent --regid=agent --init-groups`.
+  4. starts the existing entrypoint as `agent` via `setpriv --reuid=agent --regid=agent --init-groups` **as a child**, and stays resident as PID 1 to supervise it. It must not `exec` into the agent: if it did, nothing would be left to run the shutdown sequence below.
 - `agent` is in group `docker`, which is **root-equivalent inside the guest**. That is accepted only because the VM is the boundary, and is why nested Docker is refused outside `KATA`/`SYSBOX`.
 - **Rejected: rootless dockerd.** It needs setuid `newuidmap`/`newgidmap`, which the image strips (`lib/agentic-workspace/implementations/docker/images/omni-agent/Dockerfile:766`), and nested user namespaces inside a guest, which adds an unmeasured failure mode for no isolation gain over the VM.
 
@@ -231,7 +231,7 @@ This is a locally built nested-Docker image and profile used only on the E0 box.
 | Writable paths | tmpfs `/tmp`, `/home/agent`, `/spool`, `/var/agentic` | the same, plus: `/var/lib/docker` on a per-workspace **block-backed volume** (overlay2 on virtio-fs is not assumed to work; G2 decides); tmpfs `/run`, `/var/run`, `/etc/docker` |
 | PIDs | `--pids-limit=256` | raised to a value G2 measures |
 
-- **Shutdown:** `docker stop` sends SIGTERM to the wrapper. The wrapper stops the agent process tree first, then runs `docker ps -q | xargs -r docker kill` inside the guest, then stops dockerd. Destroy kills the VM regardless. Finalize-before-destroy (D-OP) runs *before* this.
+- **Shutdown:** `docker stop` sends SIGTERM to the resident wrapper (PID 1, see step 4 above). The wrapper forwards it and stops the agent process tree first, then runs `docker ps -q | xargs -r docker kill` inside the guest, then stops dockerd. Destroy kills the VM regardless. Finalize-before-destroy (D-OP) runs *before* this.
 - **Codex:** the image label still derives the Codex policy (`lib/agentic-workspace/lib/python/agentic_isolation/agentic_isolation/providers/docker.py:187-193`). Under Kata the host seccomp/AppArmor do not reach the guest (see Security policy), so the enforced policy has to be set in the guest and tested (G5).
 - **Known unknown:** with Docker (non-CRI), containerd's `privileged_without_host_devices` option is not available. Kata may therefore pass **host devices** into a privileged guest. G2 checks this explicitly. If it does, the profile uses explicit capabilities (`SYS_ADMIN`, `NET_ADMIN`, `MKNOD`, and the like) plus a device allow-list instead of `--privileged`.
 
@@ -280,8 +280,8 @@ CI on a KVM runner would need a workflow change. This workspace cannot push one,
   | Concern | Owner on each box |
   |---|---|
   | Recovery tick | the **executor process on that box**. It constructs the existing `DockerSpoolRecovery` (`packages/syn-adapters/src/syn_adapters/session_inventory/runtime.py:183`) against its *local* daemon. No new recovery adapter |
-  | Source identity | a per-box `source_instance_id` (`packages/syn-adapters/src/syn_adapters/session_inventory/runtime.py:161-164`), so `PostgresCaptureSpools` rows are scoped to the box that holds the volume |
-  | Archive | the archive must be reachable by whichever process serves transcripts. Today it is `LocalSessionTranscriptArchive(settings.archive_dir)` (`:159`), which is local, so SYN-2 must either point every box at shared storage or upload archived transcripts to object storage. Which one is decision #8 |
+  | Source identity | a per-box `source_instance_id` (`packages/syn-adapters/src/syn_adapters/session_inventory/runtime.py:161-164`), so `PostgresCaptureSpools` rows are scoped to the box that holds the volume. Today that identity is stored **in the archive directory** (`<archive_dir>/.source-instance-id`, `packages/syn-adapters/src/syn_adapters/session_inventory/installation_identity.py:18-37`): boxes sharing one archive directory would share one identity and could claim each other's volumes, and distinct overrides against a shared directory fail at startup. SYN-2 must move identity to host-local storage, separate from the archive |
+  | Archive | the archive must be reachable by whichever process serves transcripts. Today it is `LocalSessionTranscriptArchive(settings.archive_dir)` (`:159`), which is local. SYN-2 must either give each box its own archive directory and expose it to the API, or upload archived transcripts to object storage; a single shared directory is ruled out by the identity row above unless identity moves first. Which one is decision #8 |
   | Retained volumes | stay on the box until that box's executor releases them; a dead box's volumes are recoverable only when the box returns |
 
   Tests:
