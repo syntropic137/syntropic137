@@ -34,6 +34,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 from syn_domain.contexts.orchestration.domain.events.AgentExecutionCompletedEvent import (
     AgentExecutionCompletedEvent,
 )
+from syn_domain.contexts.orchestration.domain.events.ExecutionResumedEvent import (
+    ExecutionResumedEvent,
+)
 from syn_domain.contexts.orchestration.domain.events.ExecutionTagsAddedEvent import (
     ExecutionTagsAddedEvent,
 )
@@ -53,7 +56,7 @@ from syn_domain.contexts.orchestration.domain.read_models.phase_progress import 
 )
 from syn_domain.contexts.orchestration.domain.read_models.resume_lineage import (
     ResumedFrom,
-    resumed_as,
+    admitted_resume,
 )
 from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_detail import (
     WorkflowExecutionDetail,
@@ -356,24 +359,23 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         }
         await self._store.save(self.PROJECTION_NAME, execution_id, detail)
 
-    async def on_execution_resumed(self, event_data: dict) -> None:
+    async def on_execution_resumed(self, event_data: ExecutionResumedEvent) -> None:
         """Handle ExecutionResumed, on the PARENT's stream: link it forward (#1881)."""
-        await self._link_resumed_as(event_data)
+        await self._link_resumed_as(ExecutionResumedEvent.model_validate(event_data))
 
-    async def on_execution_forked(self, event_data: dict) -> None:
-        """Handle a pre-rename ExecutionForked, which is the same resume (#1881)."""
-        await self._link_resumed_as(event_data)
+    async def on_execution_forked(self, event_data: ExecutionResumedEvent) -> None:
+        """Handle a pre-rename ExecutionForked, which is the same resume (#1881).
 
-    async def _link_resumed_as(self, event_data: dict) -> None:
-        execution_id = event_data.get("execution_id")
-        child = resumed_as(event_data)
-        if not execution_id or child is None:
-            return
-        existing = await self._store.get(self.PROJECTION_NAME, execution_id)
-        if not existing:
-            return
-        existing["resumed_as"] = child
-        await self._store.save(self.PROJECTION_NAME, execution_id, existing)
+        Annotated as what it upcasts to: the payload arrives in the old shape
+        (`fork_execution_id`), and `admitted_resume` renames it before reading.
+        """
+        await self._link_resumed_as(admitted_resume(event_data))
+
+    async def _link_resumed_as(self, event: ExecutionResumedEvent) -> None:
+        existing = await self._store.get(self.PROJECTION_NAME, event.execution_id)
+        if existing:
+            existing["resumed_as"] = event.resume_execution_id
+            await self._store.save(self.PROJECTION_NAME, event.execution_id, existing)
 
     async def on_phase_started(self, event_data: dict) -> None:
         """Handle PhaseStarted event.

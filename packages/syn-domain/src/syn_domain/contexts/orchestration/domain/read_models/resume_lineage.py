@@ -21,6 +21,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.legacy_event_s
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ResumeOrigin,
 )
+from syn_domain.contexts.orchestration.domain.events.ExecutionResumedEvent import (
+    ExecutionResumedEvent,
+)
 
 if TYPE_CHECKING:
     from pydantic import JsonValue
@@ -59,14 +62,10 @@ class ResumedFrom:
         }
 
 
-def resumed_as(resumed_event: object) -> str | None:
-    """The child a stored `ExecutionResumed` (or pre-rename `ExecutionForked`) admitted.
+def admitted_resume(stored: object) -> ExecutionResumedEvent:
+    """A stored pre-rename `ExecutionForked` payload as the `ExecutionResumed` it always was.
 
-    A pre-rename `ExecutionForked` is upcast first, as the aggregate does, so a resume
-    recorded before the rename links forward like any other.
+    Upcast the way the aggregate upcasts it, so a resume recorded before the
+    rename links forward like any other.
     """
-    payload = upcast_forked_payload(resumed_event)
-    if not isinstance(payload, Mapping):
-        return None
-    child = payload.get("resume_execution_id")
-    return child if isinstance(child, str) and child else None
+    return ExecutionResumedEvent.model_validate(upcast_forked_payload(stored))
