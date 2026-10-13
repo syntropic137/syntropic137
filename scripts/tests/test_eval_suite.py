@@ -1894,7 +1894,7 @@ def test_score_prints_every_version_the_workflow_ran() -> None:
     suite = load_suite(DEFAULT_SUITE).suite
     assert versions_run(suite, _WF) == [1, 3, 4, 5, 6, 7]
     assert versions_run(suite, _CODEX_WF) == [2, 3, 4, 5, 6, 7]
-    assert versions_run(suite, _SONNET_WF) == [3, 4, 5, 6]
+    assert versions_run(suite, _SONNET_WF) == [3, 4, 5, 6, 7]
 
 
 # The twelve cases of #1750's v3: the six v2 defects and the six clean controls.
