@@ -44,6 +44,7 @@ one the upstream states plainly, so the list only needs the plain statements.
 from __future__ import annotations
 
 import asyncio
+import random
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -225,7 +226,7 @@ class PhaseAttempts:
         computed against. The caller dispatches with the number it is handed
         and does not read this object's clock again: see `AttemptGrant`.
         """
-        delay = self._policy.base_delay_seconds * 2 ** (self._attempt - 1)
+        delay = self._policy.backoff_seconds(self._attempt)
         if not self._may_retry(reason=reason, work_done=work_done, delay=delay):
             return None
         await self._clock.sleep(delay)
@@ -322,9 +323,18 @@ class UpstreamRetryPolicy:
     #: small: capacity that has not returned after two backoffs is not the
     #: blip this exists for, and the phases downstream have their own budget.
     max_attempts: int = 3
-    #: Doubles per attempt: 5s, then 10s. Long enough for a queue to drain,
-    #: short enough that a phase measured in minutes does not notice.
-    base_delay_seconds: float = 5.0
+    #: The ceiling of the first backoff; it doubles per attempt, so 60s then
+    #: 120s before jitter. 5s/10s did not outlast the capacity blips of
+    #: 2026-10-13 (#1882): four phases in seven hours still failed and each
+    #: needed a resume. Every second of it is still drawn from the phase's one
+    #: deadline, so a longer wait never buys a phase more time.
+    base_delay_seconds: float = 60.0
+    #: A draw in [0, 1) that places each backoff between half its ceiling and
+    #: the ceiling ("equal jitter", Brooker 2015). Phases that hit the same full
+    #: model at the same second otherwise retry at the same second too, and
+    #: arrive back at a provider that is still full together. Swapped for a
+    #: constant in tests that assert a specific wait.
+    jitter: Callable[[], float] = random.random
     #: How the deadline is read and the backoff served. Swapped for a fake in
     #: tests, which is the only way to assert a 3600-second budget in
     #: milliseconds.
@@ -332,6 +342,11 @@ class UpstreamRetryPolicy:
     #: What kind of upstream fault a failed attempt reported. The port, so the
     #: recognising lives with the harness and not here (#1605).
     upstream: UpstreamFailureReader = UPSTREAM_FAILURES
+
+    def backoff_seconds(self, attempt: int) -> float:
+        """How long to wait after ``attempt`` (1-based) failed, jitter included."""
+        ceiling = self.base_delay_seconds * 2 ** (attempt - 1)
+        return ceiling / 2 + ceiling / 2 * self.jitter()
 
     def begin(self, *, timeout_seconds: float) -> PhaseAttempts:
         """Start this phase's clock. Call once, before the first attempt.

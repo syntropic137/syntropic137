@@ -108,6 +108,11 @@ MIN_USEFUL = _MIN_USEFUL_ATTEMPT_SECONDS
 FIRST_BACKOFF = UpstreamRetryPolicy().base_delay_seconds
 
 
+def _at_the_ceiling() -> float:
+    """The jitter draw that waits the whole nominal backoff, so a test can name it."""
+    return 1.0
+
+
 @dataclass
 class _RecordedAttempt:
     """One call to the agent handler, kept whole so a test can compare attempts."""
@@ -495,13 +500,16 @@ class TestOneDeadlineForTheWholePhase:
         await _run(
             handler,
             phase=_phase(timeout_seconds=3600),
-            retry_policy=UpstreamRetryPolicy(clock=clock.as_attempt_clock()),
+            retry_policy=UpstreamRetryPolicy(
+                clock=clock.as_attempt_clock(), jitter=_at_the_ceiling
+            ),
         )
 
         granted = [a.timeout_seconds for a in handler.attempts]
-        assert granted == [3600, 2995, 2385], (
+        first, second = int(FIRST_BACKOFF), int(2 * FIRST_BACKOFF)
+        assert granted == [3600, 3600 - 600 - first, 3600 - 1200 - first - second], (
             f"{granted}: each attempt must get the phase's REMAINING seconds - "
-            "its own 600s and the 5s/10s backoff already deducted"
+            "its own 600s and the backoffs already deducted"
         )
 
     async def test_the_whole_sequence_fits_inside_the_configured_timeout(self) -> None:
@@ -524,7 +532,9 @@ class TestOneDeadlineForTheWholePhase:
         await _run(
             handler,
             phase=_phase(timeout_seconds=3600),
-            retry_policy=UpstreamRetryPolicy(clock=clock.as_attempt_clock()),
+            retry_policy=UpstreamRetryPolicy(
+                clock=clock.as_attempt_clock(), jitter=_at_the_ceiling
+            ),
         )
 
         assert clock.now <= 3600.0, (
@@ -551,7 +561,9 @@ class TestOneDeadlineForTheWholePhase:
         await _run(
             handler,
             phase=_phase(timeout_seconds=600),
-            retry_policy=UpstreamRetryPolicy(clock=clock.as_attempt_clock()),
+            retry_policy=UpstreamRetryPolicy(
+                clock=clock.as_attempt_clock(), jitter=_at_the_ceiling
+            ),
         )
 
         assert len(handler.attempts) == 1, (
@@ -692,7 +704,9 @@ class TestNothingIsDispatchedOnAnExpiredDeadline:
         await _run(
             handler,
             phase=_phase(timeout_seconds=40),
-            retry_policy=UpstreamRetryPolicy(clock=clock.as_attempt_clock()),
+            retry_policy=UpstreamRetryPolicy(
+                clock=clock.as_attempt_clock(), jitter=_at_the_ceiling
+            ),
         )
 
         assert len(handler.attempts) == 1, (
@@ -707,7 +721,9 @@ class TestNothingIsDispatchedOnAnExpiredDeadline:
         clock = FakeClock(oversleeps_by=3600.0)
         handler = _RecordingHandler(
             clock=clock,
-            takes_seconds=3565.0,
+            # Leaves exactly enough for the backoff and one useful attempt, so
+            # only the overshoot can be what refuses the successor.
+            takes_seconds=3600.0 - MIN_USEFUL - FIRST_BACKOFF,
             scripted=FakeAgentExecutionHandler(
                 attempts=[
                     FakeAgentExecutionHandler.failed(stream_error=AT_CAPACITY),
@@ -719,7 +735,9 @@ class TestNothingIsDispatchedOnAnExpiredDeadline:
         await _run(
             handler,
             phase=_phase(timeout_seconds=3600),
-            retry_policy=UpstreamRetryPolicy(clock=clock.as_attempt_clock()),
+            retry_policy=UpstreamRetryPolicy(
+                clock=clock.as_attempt_clock(), jitter=_at_the_ceiling
+            ),
         )
 
         assert len(handler.attempts) == 1
@@ -747,7 +765,9 @@ class TestNothingIsDispatchedOnAnExpiredDeadline:
         await _run(
             handler,
             phase=_phase(timeout_seconds=70),
-            retry_policy=UpstreamRetryPolicy(clock=clock.as_attempt_clock()),
+            retry_policy=UpstreamRetryPolicy(
+                clock=clock.as_attempt_clock(), jitter=_at_the_ceiling
+            ),
         )
 
         granted = [a.timeout_seconds for a in handler.attempts]
@@ -865,7 +885,9 @@ class TestTheClockMovingBetweenTheDecisionAndTheDispatch:
         await _run(
             handler,
             phase=_phase(timeout_seconds=int(MIN_USEFUL + FIRST_BACKOFF)),
-            retry_policy=UpstreamRetryPolicy(clock=clock.as_attempt_clock()),
+            retry_policy=UpstreamRetryPolicy(
+                clock=clock.as_attempt_clock(), jitter=_at_the_ceiling
+            ),
         )
 
         assert len(handler.attempts) == 1, (
@@ -901,7 +923,9 @@ class TestTheClockMovingBetweenTheDecisionAndTheDispatch:
             # rather than the configured budget minus however long the real
             # one took to be read twice - `int()` truncates, so on a real
             # clock this is 9. That truncation is not what is under test.
-            retry_policy=UpstreamRetryPolicy(clock=clock.as_attempt_clock()),
+            retry_policy=UpstreamRetryPolicy(
+                clock=clock.as_attempt_clock(), jitter=_at_the_ceiling
+            ),
         )
 
         granted = [a.timeout_seconds for a in handler.attempts]
@@ -943,7 +967,7 @@ async def test_retry_dispatch_uses_each_durable_invocation_identity(provider: st
         handler,
         phase=_phase(provider),
         launch=launch,
-        retry_policy=UpstreamRetryPolicy(clock=clock.as_attempt_clock()),
+        retry_policy=UpstreamRetryPolicy(clock=clock.as_attempt_clock(), jitter=_at_the_ceiling),
     )
     deadline = (clock.epoch + timedelta(seconds=ROOMY_SECONDS)).isoformat(timespec="seconds")
     assert manager.session is not None
@@ -1030,7 +1054,9 @@ class TestTheAgentIsToldItsDeadline:
         await _run(
             handler,
             phase=_phase(timeout_seconds=5400),
-            retry_policy=UpstreamRetryPolicy(clock=clock.as_attempt_clock()),
+            retry_policy=UpstreamRetryPolicy(
+                clock=clock.as_attempt_clock(), jitter=_at_the_ceiling
+            ),
         )
 
         (attempt,) = handler.attempts
@@ -1052,7 +1078,11 @@ class TestTheAgentIsToldItsDeadline:
         )
 
         await _run(
-            handler, phase=phase, retry_policy=UpstreamRetryPolicy(clock=clock.as_attempt_clock())
+            handler,
+            phase=phase,
+            retry_policy=UpstreamRetryPolicy(
+                clock=clock.as_attempt_clock(), jitter=_at_the_ceiling
+            ),
         )
 
         (attempt,) = handler.attempts
@@ -1078,7 +1108,9 @@ class TestTheAgentIsToldItsDeadline:
         await _run(
             handler,
             phase=_phase(timeout_seconds=3600),
-            retry_policy=UpstreamRetryPolicy(clock=clock.as_attempt_clock()),
+            retry_policy=UpstreamRetryPolicy(
+                clock=clock.as_attempt_clock(), jitter=_at_the_ceiling
+            ),
         )
 
         first, second = handler.attempts

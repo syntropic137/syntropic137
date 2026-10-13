@@ -1,9 +1,8 @@
 """A spent quota is its own kind, is never retried, and says when it ends (PC-83).
 
 The codex sentence is the one observed on 2026-10-06, byte for byte as the
-task recorded it. No claude quota
-message exists in this repo, agentic-workspace or any fixture, so none is
-pinned here and claude quota text reads as it did before.
+task recorded it. The claude sentence is the one exec-0ffa4337a4a8 stored on
+2026-10-13 (PC-151, #1669), byte for byte, which 1.0.0 read as UNKNOWN.
 """
 
 from __future__ import annotations
@@ -18,6 +17,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.busy_upstream imp
 from syn_domain.contexts.orchestration.slices.execute_workflow.CodexStreamProcessor import (
     codex_fault_reason,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
+    _extract_error_reason,  # pyright: ignore[reportPrivateUsage]
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.upstream_failure import (
     UPSTREAM_FAILURES,
     UpstreamFailureKind,
@@ -30,6 +32,7 @@ CODEX_QUOTA = (
     "You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage to "
     "purchase more credits or try again at Oct 9th, 2026 9:10 PM."
 )
+CLAUDE_WEEKLY_LIMIT = "You've hit your weekly limit · resets Oct 15, 8am (UTC)"
 CODEX_CAPACITY = "Selected model is at capacity. Please try a different model."
 
 
@@ -90,6 +93,41 @@ async def test_a_quota_failure_is_never_granted_a_retry() -> None:
 
     grant = await attempts.wait_before_retry(
         reason=codex_fault_reason(CODEX_QUOTA), work_done=False
+    )
+
+    assert grant is None
+    assert clock.slept == []
+
+
+def _claude_reason(result_text: str) -> str:
+    """The reason the claude parser records for an `is_error` result carrying this text."""
+    return _extract_error_reason(result_text)
+
+
+def test_the_stored_claude_weekly_limit_reads_as_quota() -> None:
+    """PC-151: the exact stored line, through the parser that writes the reason."""
+    reason = _claude_reason(CLAUDE_WEEKLY_LIMIT)
+
+    assert UPSTREAM_FAILURES.kind_of(reason) is UpstreamFailureKind.QUOTA
+    quota = UPSTREAM_FAILURES.quota_of(reason)
+    assert quota is not None
+    assert quota.provider == "claude"
+    # The line names no year, so the reset cannot be placed without guessing one.
+    assert quota.account() == "claude quota exhausted until an unstated time"
+
+
+def test_an_agent_quoting_the_claude_weekly_limit_is_not_quota() -> None:
+    reason = _claude_reason(f"The CLI said: {CLAUDE_WEEKLY_LIMIT}")
+
+    assert UPSTREAM_FAILURES.kind_of(reason) is UpstreamFailureKind.UNKNOWN
+
+
+async def test_the_claude_weekly_limit_is_never_retried() -> None:
+    clock = FakeClock()
+    attempts = UpstreamRetryPolicy(clock=clock.as_attempt_clock()).begin(timeout_seconds=3600)
+
+    grant = await attempts.wait_before_retry(
+        reason=_claude_reason(CLAUDE_WEEKLY_LIMIT), work_done=False
     )
 
     assert grant is None
