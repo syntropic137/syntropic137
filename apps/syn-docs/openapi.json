@@ -4527,6 +4527,58 @@
         }
       }
     },
+    "/observability/upstream-retries": {
+      "get": {
+        "tags": [
+          "observability"
+        ],
+        "summary": "Get Upstream Retries",
+        "description": "How often a busy upstream made a phase retry in place, per provider and model (#1882).\n\nRead from the ``upstream_retry`` observations (Lane 2). A store that cannot\nbe read is a 503, never an empty list: zero retries would tell an operator\nthere is no quota pressure when nobody looked.",
+        "operationId": "get_upstream_retries_observability_upstream_retries_get",
+        "parameters": [
+          {
+            "name": "window",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "1h",
+                "24h",
+                "7d",
+                "30d"
+              ],
+              "type": "string",
+              "description": "How far back to look",
+              "default": "24h",
+              "title": "Window"
+            },
+            "description": "How far back to look"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpstreamRetriesResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/costs/sessions": {
       "get": {
         "tags": [
@@ -23427,6 +23479,96 @@
           "status"
         ],
         "title": "UploadArtifactResponse"
+      },
+      "UpstreamRetriesResponse": {
+        "properties": {
+          "window": {
+            "type": "string",
+            "enum": [
+              "1h",
+              "24h",
+              "7d",
+              "30d"
+            ],
+            "title": "Window"
+          },
+          "since": {
+            "type": "string",
+            "title": "Since"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "counts": {
+            "items": {
+              "$ref": "#/components/schemas/UpstreamRetryCountResponse"
+            },
+            "type": "array",
+            "title": "Counts"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "window",
+          "since",
+          "total",
+          "counts"
+        ],
+        "title": "UpstreamRetriesResponse",
+        "description": "In-phase upstream retries per provider and model, most first (Lane 2, #1882).\n\nCounts retries, not failures: a phase that retried twice and then\nsucceeded counts 2 here. Quota, auth and anything unrecognised are never\nretried, so they never appear."
+      },
+      "UpstreamRetryCountResponse": {
+        "properties": {
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "requested_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested Model"
+          },
+          "upstream_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Upstream Kind"
+          },
+          "retries": {
+            "type": "integer",
+            "title": "Retries"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "provider",
+          "requested_model",
+          "upstream_kind",
+          "retries"
+        ],
+        "title": "UpstreamRetryCountResponse",
+        "description": "In-phase retries one provider, model and upstream kind took in the window (#1882)."
       },
       "ValidateYamlRequest": {
         "properties": {

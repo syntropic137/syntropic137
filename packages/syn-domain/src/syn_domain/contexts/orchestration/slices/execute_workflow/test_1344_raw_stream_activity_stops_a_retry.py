@@ -486,6 +486,58 @@ class TestActivityOnlyARawStreamCanShow:
         )
 
 
+def _claude_failed(result: object) -> str:
+    """A raw claude terminal line: an ``is_error`` result carrying ``result``."""
+    return json.dumps({"type": "result", "is_error": True, "result": result})
+
+
+#: Failures no reader in this repo recognises, as raw claude streams. The
+#: weekly-limit sentence is claude's real quota line (exec-8ad0e101db7b): it
+#: is recognised nowhere here, deliberately (#1605), so it must fall to the
+#: same refusal as everything else unrecognised. A failure with no reason at
+#: all is not here: this double exits zero without one, so it would pass
+#: without asking the rule. `test_busy_upstream.py` pins None and "" instead.
+_UNRECOGNISED_CLAUDE_FAILURES = {
+    "claude's weekly limit, plain": _claude_failed(
+        "You've hit your weekly limit · resets Oct 15, 8am (UTC)"
+    ),
+    "codex's capacity sentence, quoted": _claude_failed(
+        "The CLI said: Selected model is at capacity. Please try a different model."
+    ),
+    "whitespace around unfamiliar text": _claude_failed("\n  Something went wrong  \n"),
+    "an unfamiliar structured error": _claude_failed(
+        'API Error: 418 {"type":"error","error":{"type":"teapot_error","message":"No"}}'
+    ),
+}
+
+
+class TestAnUnrecognisedFailureIsNeverRetried:
+    """Only a kind the reader recognises as transient buys a second attempt.
+
+    Every stream here fails before any activity and is followed by one that
+    would succeed, so a retry that happened would be visible and would win.
+    """
+
+    @pytest.mark.parametrize(
+        "line", _UNRECOGNISED_CLAUDE_FAILURES.values(), ids=_UNRECOGNISED_CLAUDE_FAILURES
+    )
+    async def test_an_unrecognised_claude_failure_launches_once(self, line: str) -> None:
+        handler = await _run_claude(_claude(line), CLAUDE_SUCCEEDS)
+
+        assert len(handler.granted_timeouts) == 1, (
+            f"{len(handler.granted_timeouts)} launches: an unrecognised failure was retried"
+        )
+
+    async def test_an_unrecognised_codex_failure_launches_once(self) -> None:
+        failed = json.dumps({"type": "turn.failed", "error": {"message": "Something broke."}})
+
+        handler = await _run_codex(_codex(failed), CODEX_SUCCEEDS)
+
+        assert len(handler.granted_timeouts) == 1, (
+            f"{len(handler.granted_timeouts)} launches: an unrecognised failure was retried"
+        )
+
+
 class TestTheControlThatKeepsTheRestHonest:
     """Every assertion above is "it did NOT retry", and all of them pass just
     as well on a build that never retries anything - which would silently undo
