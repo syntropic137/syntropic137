@@ -93,8 +93,10 @@ SYN_WORKSPACE_CLOUD_API_KEY=your-e2b-api-key
 # Not configurable, by design. Every workspace container gets agentic_isolation's
 # SecurityConfig.production(): all capabilities dropped, no-new-privileges,
 # read-only root with tmpfs for scratch, pids limit 256, and the seccomp/AppArmor
-# profiles. Egress goes through the Envoy proxy on agent-net. The former
-# SYN_SECURITY_* variables were never applied and were removed (#1805).
+# profiles. agent-net is NOT an internal network: model API calls route through
+# the Envoy proxy, which injects credentials, but other outbound traffic (git to
+# github.com and anything else) leaves directly and is not allowlisted. The
+# former SYN_SECURITY_* variables were never applied and were removed (#1805).
 
 # ---- Docker Settings ----
 SYN_WORKSPACE_DOCKER_IMAGE=syn-workspace:latest

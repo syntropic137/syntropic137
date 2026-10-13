@@ -145,9 +145,11 @@ echo 1 | sudo tee /proc/sys/net/ipv4/ip_forward
 
 ```
 
-Workspace egress is not an env switch: it goes through the Envoy proxy on
-`agent-net` (the former `SYN_SECURITY_ALLOW_NETWORK` was never applied and was
-removed in #1805).
+Workspace egress is not an env switch (the former `SYN_SECURITY_ALLOW_NETWORK`
+was never applied and was removed in #1805). Model API calls route through the
+Envoy proxy, which injects credentials; `agent-net` is not an internal network,
+so other outbound traffic (git and anything else) leaves directly with no
+allowlist.
 
 ## Comparison: Home Lab vs Cloud
 
@@ -220,7 +222,7 @@ Firecracker provides strong isolation but follow these practices:
 
 1. **Never run Firecracker as root in production** - Use jailer
 2. **Limit KVM access** - Only authorized users should access /dev/kvm
-3. **Network isolation** - Keep workspace egress behind the proxy allowlist
+3. **Network isolation** - Restrict workspace egress at the host (bridge firewall rules); the Envoy proxy only covers model API traffic, not general egress
 4. **Resource limits** - Always set memory and CPU limits
 5. **Jailer** - Use Firecracker's jailer for additional isolation
 
