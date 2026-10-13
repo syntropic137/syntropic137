@@ -43,25 +43,28 @@
 #         no behaviour a verifier could judge.
 #     4 defects, 2 controls, 6 in all.
 #
-# v2: the same six cases, and a treatment verifier,
+# v2: v1's six cases and one clean control, and a treatment verifier,
 #     eval-verify-pinned-codex-checks-v1: eval-verify-pinned-codex-v1 with
 #     one variable changed, the verify prompt's three required checks. The
 #     experiment is preregistered in experiments/2026-10-13-checks-treatment.md
 #     before any v2 run. v1 ran eval-verify-pinned-codex-v1 only
 #     (launches.jsonl): catch 2/4, false-block 2/2, keyword judge.
-#     No clean control was added. Every mainline merge commit from
-#     2026-09-13 or earlier was read again, back to the first, and none
-#     passes the README's rules beyond #358 and #395:
-#       #240 workspace run contract (2026-07-13, code and tests): #250 merged
-#         two days later and "supersedes the hand-written Python contract
-#         from #240", changing the files it added
+#     One clean control added, clean-workspace-run-contract (agentic-
+#     primitives #240, 2026-07-14, Python code and tests), train: a batch of
+#     one has no ~30% to hold out, as with verifier-seed-v1's v6 pair. The
+#     brief asked for 3-4; every mainline merge commit from 2026-09-13 or
+#     earlier was read again, back to the first, and no other passes the
+#     README's rules beyond #358 and #395:
 #       #341, #157: version and manifest bumps, no behaviour to judge
 #       #62, #59: their merge diffs are a uv.lock and a plugin.json
-#       #55 plugin-first rewrite: no tests, 46 files, a different codebase
-#     Everything else on that mainline was squash-merged, so it has no PR
-#     head as a merge's second parent and cannot satisfy rule 1 as `check`
-#     enforces it. clean-runtime-exposure-docs is kept: with no replacement,
-#     retiring it would leave the experiment's guard one control.
+#       #55 plugin-first rewrite: skills and hook handlers, no tests
+#     Everything else on that mainline was squash-merged: no PR head is a
+#     merge's second parent, so rule 1 as `check` enforces it cannot hold.
+#     AW-native merges (2026-09-25 on) are under 30 days old today.
+#     clean-runtime-exposure-docs is kept, not retired: retiring it with one
+#     replacement would leave the guard where it started, two controls, and
+#     discard the only v1 control run that both arms share. Retire it when a
+#     code control can take its place.
 #
 # EVERY VERSION KEEPS ITS SCORE: when the version goes up, record the old one
 # under `history`, as verifier-seed-v1 does.

@@ -19,7 +19,7 @@ changes?
 | Prompt | `workflows/evals/verify-pinned-codex/phases/verify.md` | the same text plus one section, `## Required checks` |
 
 Held constant: the agent (codex, `gpt-sol`, `workspace-write`), every phase
-field, the cases and their pins (suite v2, the same six cases as v1), the
+field, the cases and their pins (suite v2), the
 judge (`KeywordJudge`), and the scorer (`scripts/eval_suite.py score`).
 `scripts/tests/test_eval_suite.py` fails if the two workflows differ in
 anything but the prompt section, id, name and description.
@@ -49,26 +49,35 @@ Suite `verifier-seed-aw-v1` v2. One run per case per arm.
 
 - **Train defects (3):** `execute-stderr-merged-into-stdout`,
   `replay-error-result-drops-verdict`, `scripted-agent-tests-not-in-ci`.
-- **Train controls (2):** `clean-runtime-exposure-docs`,
-  `clean-staged-teardown`.
+- **Train controls (3):** `clean-runtime-exposure-docs`,
+  `clean-staged-teardown`, `clean-workspace-run-contract` (new in v2).
 - **Holdout (1):** `replay-keeps-recorded-verdict`. It is not read until the
   decision below is made, and then once.
 
-Control arm: the v1 baseline runs in `launches.jsonl` stand as the control
-(the workflow, prompt, cases and pins are unchanged from v1), so the control
-is not re-run. Treatment arm: one v2 run per case under
-`eval-verify-pinned-codex-checks-v1`.
+Control arm: the six v1 baseline runs in `launches.jsonl` stand for the
+cases v1 held, because the workflow, prompt, cases and pins are unchanged
+from v1, so those are not re-run. The one case v1 did not hold,
+`clean-workspace-run-contract`, gets one v2 run under
+`eval-verify-pinned-codex-v1`. Treatment arm: one v2 run per case, seven,
+under `eval-verify-pinned-codex-checks-v1`. Eight runs in all.
 
-v1 baseline (keyword judge), over all six cases: catch 2/4, false-block 2/2.
-Read from `score --version 1 --split train` before the treatment is judged,
-so both arms are compared on train cases only.
+v1 baseline (keyword judge), over all six v1 cases: catch 2/4, false-block
+2/2. Both arms are compared on train cases only: the control's train figures
+come from `score --version 1 --split train` plus the one v2 control-arm run.
 
 ## Metrics
 
 - **Primary:** catch rate on the 3 train defects (blocked, and a blocking
   finding the keyword judge matches to the expected defect and file).
-- **Guard:** false-block rate on the 2 train controls. It must not rise
+- **Guard:** false-block rate on the 3 train controls. It must not rise
   above the control arm's.
+- **Reported beside the guard:** for each treatment block of a control,
+  whether every blocking finding rests only on check 2 finding no CI job.
+  The three controls are pinned in imported history, which has no
+  `.github/` (README "What differs"), so check 2 can fire on them for a
+  reason that is not in the change. Such a block still counts as a false
+  block in the guard; it is named so the reader can see it, and it is the
+  first thing to fix in the treatment if the guard fails on it.
 - **Mechanism check (not scored):** the treatment's report has a
   `## CHECKS` section with evidence for each of the three checks. A run
   without it is a run where the treatment did not happen; it is reported
@@ -87,7 +96,7 @@ so both arms are compared on train cases only.
 
 ## Stopping rule
 
-One treatment run per case, six runs in all, then stop and score. No
+Eight runs (seven treatment, one control), then stop and score. No
 re-runs to change a result: a run that ERRORs (no verdict) is re-launched
 once, and recorded as an error if it errors again. The holdout case is
 scored once, after the train decision is written below.
@@ -97,8 +106,13 @@ scored once, after the train decision is written below.
 - Three train defects and two train controls. A change of one case is the
   whole difference; this is a screen, not an estimate. A positive result is
   confirmed on a larger suite before it is generalised.
-- The guard rests on two controls, one of them docs-only. Suite v2 found no
-  further control meeting the README's rules (see `suite.yaml`'s v2 note).
+- The guard rests on three controls, one of them docs-only. The brief asked
+  for 3-4 new code controls; suite v2 found one meeting the README's rules
+  (see `suite.yaml`'s v2 note).
+- Every control predates CI in this repository's history; every defect pin
+  has `.github/workflows/ci.yml`. Check 2 therefore sees a different world
+  on the two polarities, which favours the treatment's catch rate on
+  `scripted-agent-tests-not-in-ci` and works against its guard.
 - The control arm's runs are from 2026-10-13 and the treatment's will be
   later; `gpt-sol` is an alias, so a model update between them would be a
   second variable. Record the resolved model of each treatment run.

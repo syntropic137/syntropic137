@@ -30,3 +30,9 @@ missing.
 - **Non-Python expected files.** `scripted-agent-tests-not-in-ci` expects
   `.github/workflows/ci.yml`: the defect is a package the CI matrix omits,
   visible in the diff without running anything.
+- **Imported pins have no CI files.** The import carried no `.github/` before
+  2026-09-22 (`b00e963`), so a control pinned in imported history has no CI
+  workflow at its pin, whatever agentic-primitives ran at the time. A
+  verifier that asks which CI job runs a test will find none there. Score
+  that block as it stands (a control blocked is a false block) and say in
+  the write-up which findings rest only on the missing CI files.
