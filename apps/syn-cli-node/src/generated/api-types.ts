@@ -4420,6 +4420,15 @@ export interface components {
                 [key: string]: string;
             };
             eval?: components["schemas"]["ExecutionEvalRunResponse"] | null;
+            resumed_from?: components["schemas"]["ResumedFromInfo"] | null;
+            /** Resumed As */
+            resumed_as?: string | null;
+            /** Latest Resumed As */
+            latest_resumed_as?: string | null;
+            /** Resumed From Display */
+            resumed_from_display?: string | null;
+            /** Resumed As Display */
+            resumed_as_display?: string | null;
             resume_start?: components["schemas"]["ResumeStartInfo"] | null;
             start_queue?: components["schemas"]["ExecutionStartQueueInfo"] | null;
             read_model_status?: components["schemas"]["ReadModelStatus"] | null;
@@ -4786,6 +4795,9 @@ export interface components {
             repos?: string[];
             /** Tags */
             tags?: string[];
+            resumed_from?: components["schemas"]["ResumedFromInfo"] | null;
+            /** Resumed As */
+            resumed_as?: string | null;
             /** Repos Display */
             repos_display?: string | null;
             eval?: components["schemas"]["ExecutionEvalRunResponse"] | null;
@@ -7556,6 +7568,16 @@ export interface components {
             /** Dispatched At */
             dispatched_at?: string | null;
             start_queue?: components["schemas"]["ExecutionStartQueueInfo"] | null;
+        };
+        /**
+         * ResumedFromInfo
+         * @description The execution a resumed run continues, and the phase it picked up at (#1881).
+         */
+        ResumedFromInfo: {
+            /** Parent Execution Id */
+            parent_execution_id: string;
+            /** Resume Phase Id */
+            resume_phase_id: string;
         };
         /**
          * ReviewVerdict
