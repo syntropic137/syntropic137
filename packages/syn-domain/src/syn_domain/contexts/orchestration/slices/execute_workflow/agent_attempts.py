@@ -42,10 +42,11 @@ execution records the model that actually ran rather than the one declared.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING
 
-from syn_domain.contexts.agent_sessions import InvocationStatus
+from syn_domain.contexts.agent_sessions import InvocationStatus, ObservationType
 from syn_domain.contexts.orchestration.slices.execute_workflow.agent_launch_observation import (
     observer_for,
 )
@@ -328,6 +329,40 @@ class _AgentRun:
                 result.stream_result.error_reason,
                 self._attempts.attempt,
                 self._attempts.max_attempts,
+            )
+            await self._record_retry(agent, reason=result.stream_result.error_reason)
+
+    async def _record_retry(self, agent: AgentConfiguration, *, reason: str | None) -> None:
+        """Count this retry against its provider and model (#1882), Lane 2 only.
+
+        Best effort: the retry is already granted and runs whether or not this
+        row lands, so a telemetry store that is down costs a count, not a phase.
+        """
+        if self._observability is None:
+            return
+        kind = UPSTREAM_FAILURES.kind_of(reason)
+        try:
+            await self._observability.record_observation(
+                session_id=self._session_id,
+                observation_type=ObservationType.UPSTREAM_RETRY,
+                data={
+                    "provider": agent.provider,
+                    "model": agent.model,
+                    "upstream_kind": kind.value if kind is not None else None,
+                    "attempt": self._attempts.attempt,
+                },
+                execution_id=self._todo.execution_id,
+                phase_id=self._todo.phase_id,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.warning(
+                "Failed to record the upstream retry of phase %s on %s/%s",
+                self._todo.phase_id,
+                agent.provider,
+                agent.model,
+                exc_info=True,
             )
 
     async def once(

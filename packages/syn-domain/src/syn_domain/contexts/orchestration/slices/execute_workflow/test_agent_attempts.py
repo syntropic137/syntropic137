@@ -55,6 +55,7 @@ from syn_domain.testing.fake_agent_handler import FakeAgentExecutionHandler
 from syn_domain.testing.fake_clock import FakeClock
 from syn_domain.testing.fake_session_repository import FakeSessionRepository
 from syn_shared.agents import AgentProvider, AgentRunner
+from syn_shared.events import UPSTREAM_RETRY
 from syn_shared.env_constants import (
     ENV_AGENTIC_ATTEMPT_ID,
     ENV_AGENTIC_INVOCATION_ID,
@@ -239,6 +240,36 @@ async def started_session_manager(
     return manager
 
 
+@dataclass
+class _Observation:
+    observation_type: str
+    data: dict[str, object]
+    execution_id: str | None
+    phase_id: str | None
+
+
+@dataclass
+class _RecordedObservations:
+    """An `ObservabilityRecorder` that keeps what it was given."""
+
+    rows: list[_Observation] = field(default_factory=list)
+
+    async def record_observation(
+        self,
+        session_id: str,
+        observation_type: str,
+        data: dict[str, object],
+        execution_id: str | None = None,
+        phase_id: str | None = None,
+        workspace_id: str | None = None,
+    ) -> None:
+        del session_id, workspace_id
+        self.rows.append(_Observation(str(observation_type), data, execution_id, phase_id))
+
+    def of(self, observation_type: str) -> list[_Observation]:
+        return [row for row in self.rows if row.observation_type == observation_type]
+
+
 async def _registered(launch: PhaseLaunch) -> PhaseLaunch:
     """Controlled launches need durable intent (#1398); supply it when a test has none."""
     if launch.session_manager is not None:
@@ -252,6 +283,7 @@ async def _run(
     phase: ExecutablePhase | None = None,
     launch: PhaseLaunch | None = None,
     retry_policy: UpstreamRetryPolicy = NO_WAITING,
+    observability: _RecordedObservations | None = None,
 ) -> AgentExecutionResult:
     return await run_phase_agent(
         handler=handler,
@@ -264,7 +296,7 @@ async def _run(
         phase=phase or _phase(),
         launch=await _registered(launch or _launch()),
         session_id="sess-1",
-        observability=None,
+        observability=observability,
         retry_policy=retry_policy,
     )
 
@@ -1119,3 +1151,54 @@ class TestTheAgentIsToldItsDeadline:
         assert second.agent_env[ENV_SYN_PHASE_DEADLINE] == (
             (clock.epoch + timedelta(seconds=3600)).isoformat(timespec="seconds")
         )
+
+
+class TestEachRetryIsCountedAgainstItsProvider:
+    """#1882: quota pressure is visible per provider and model, in Lane 2."""
+
+    async def test_two_busy_attempts_then_success_record_two_retries(self) -> None:
+        observations = _RecordedObservations()
+        handler = _RecordingHandler(
+            scripted=FakeAgentExecutionHandler(
+                attempts=[
+                    FakeAgentExecutionHandler.failed(stream_error=AT_CAPACITY),
+                    FakeAgentExecutionHandler.failed(stream_error=AT_CAPACITY),
+                    FakeAgentExecutionHandler.success(),
+                ]
+            )
+        )
+        agent = AgentConfiguration(provider="codex", model="gpt-5.5-codex")
+
+        result = await _run(
+            handler, phase=replace(_phase(), agent_config=agent), observability=observations
+        )
+
+        assert result.exit_code == 0
+        retries = observations.of(UPSTREAM_RETRY)
+        assert [row.data for row in retries] == [
+            {
+                "provider": "codex",
+                "model": "gpt-5.5-codex",
+                "upstream_kind": "capacity",
+                "attempt": 2,
+            },
+            {
+                "provider": "codex",
+                "model": "gpt-5.5-codex",
+                "upstream_kind": "capacity",
+                "attempt": 3,
+            },
+        ]
+        assert {(row.execution_id, row.phase_id) for row in retries} == {("exec-1", "verify")}
+
+    async def test_a_failure_that_is_not_retried_records_no_retry(self) -> None:
+        observations = _RecordedObservations()
+        handler = _RecordingHandler(
+            scripted=FakeAgentExecutionHandler(
+                attempts=[FakeAgentExecutionHandler.failed(stream_error=BAD_LOGIN)]
+            )
+        )
+
+        await _run(handler, observability=observations)
+
+        assert observations.of(UPSTREAM_RETRY) == []
