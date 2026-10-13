@@ -8,10 +8,9 @@ audience for it other than you.
 This exists because we stopped distinguishing the two. Seven `v0.28.0-beta.*`
 prereleases were created on GitHub in roughly 48 hours, one per test deploy,
 and none of them marked anything a reader would care about. The habit came
-from [the release process doc](../release-process.md#published-beta-a-release-entry-with-an-audience),
-whose Beta Release section says to run `gh release create` - correct for a beta
-you are asking people to install, wrong for "put the current code on the VPS so
-I can look at it", which is what actually happens most of the time.
+from the release process doc, whose Beta Release section used to say to run
+`gh release create --prerelease`. It no longer does: a beta is a test deploy,
+and [Beta Release](../release-process.md#beta-release) now points here.
 
 Everything below was executed against the selfhost VPS on 2026-09-05 deploying
 `v0.28.0-beta.9`, which created no GitHub Release. Two things went wrong on that

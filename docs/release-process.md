@@ -504,11 +504,75 @@ release PR body to carry notes.)
 
 ### 2. Commit and Push
 
+Stage by name. A blanket `git add -A` sweeps in anything else lying in the
+tree, and agent Bash guards (Claude Code `PreToolUse` hooks) refuse it. These are the files `just
+bump-version` rewrote for v1.0.1:
+
 ```bash
-git add -A
+git add pyproject.toml uv.lock CHANGELOG.md \
+  apps/syn-api/pyproject.toml \
+  packages/syn-adapters/pyproject.toml packages/syn-collector/pyproject.toml \
+  packages/syn-domain/pyproject.toml packages/syn-perf/pyproject.toml \
+  packages/syn-shared/pyproject.toml packages/syn-tokens/pyproject.toml \
+  apps/syn-cli-node/package.json apps/syn-dashboard-ui/package.json \
+  apps/syn-docs/package.json apps/syn-ui/package.json \
+  packages/syn-ui/data/package.json packages/syn-ui/skyline-core/package.json \
+  packages/syn-ui/skyline-svelte-v5/package.json packages/syn-ui/themes/package.json \
+  schemas/plugin/workflow.schema.json schemas/plugin/triggers.schema.json \
+  schemas/plugin/phase-frontmatter.schema.json \
+  apps/syn-docs/openapi.json
+git status --short   # anything else the bump modified? add it by name
 git commit -m "chore: bump version to v0.20.0"
 git push origin main
 ```
+
+The list is not fixed. The Python packages come from `[tool.uv.workspace]`
+(see [Version Files Reference](#version-files-reference)), and `just codegen`
+can rewrite generated types or docs if the API changed since the last
+regeneration. `git status --short` after the add is the check: add by name
+every remaining change the bump produced, and leave out anything it did not.
+
+### 2a. Rehearse the upgrade on production data
+
+Production data must never be lost, and the [Release Validation
+Runbook](testing/release-validation.md) runs against an empty event store, so it
+cannot see a projection rebuild. Before the release PR, replay a fresh
+production event-store backup through the current release and upgrade it in
+place to the candidate, on a local machine:
+
+```bash
+scripts/rehearse_upgrade.sh --dump <events-YYYYMMDDTHHMMSSZ.dump> \
+  --from v0.33.1 --to-ref origin/main \
+  --to-event-store ghcr.io/syntropic137/event-store@sha256:<candidate digest>
+```
+
+The backup is a `pg_dump -Fc` of the `events` table. The script is safe by
+construction and exits 3 before touching anything unless: the Docker daemon is
+local (`DOCKER_CONTEXT` unset, `DOCKER_HOST` unset or `unix://`, the selected
+context a unix socket), the container, volume and network listings all
+succeed and none shows a `syn137rehearse-*` name, `--workdir` (if given) does
+not exist yet, the created API and collector containers run
+`APP_ENVIRONMENT=selfhost` (durable stores) and carry no credential (checked by
+name, before restore and again once running), and each image's own
+`op_available()`, probed in a one-off container, reports 1Password unusable:
+`op` is shadowed by a stub that always fails, so even a cached login cannot
+resolve the vault. The project name is generated, compose runs with an empty
+host environment, and no docker socket is reachable from inside. It starts the
+`--from` release's digest-pinned compose under that project, restores
+the dump, waits for every projection to reach the head, snapshots counts, then
+swaps in the candidate compose and images (built from `--to-ref` unless
+`--to-api-image`/`--to-collector-image` are given) and measures the rebuild.
+It fails on: fewer rows in any table (event store and every projection,
+printed as a before/after table), a table that disappeared, an execution missing or changed with no new events
+on its stream, fewer sessions, `/evals` unavailable, a held or halted
+projection, a spot-checked execution detail that differs, or a catch-up
+timeout. Its exit trap removes the build worktree and, unless `--keep` is
+passed, the compose project and only the volumes and networks carrying its
+generated prefix. The stubbed checks live in
+`scripts/tests/test_1769_rehearse_upgrade_refuses_unsafe.py`; a real run needs a
+local Docker daemon. Quote its catch-up time in the release
+PR's **Upgrade Notes**: that is the read-path window step 2 of the rollout
+constraints above warns about.
 
 ### 3. Open Release PR
 
@@ -580,54 +644,68 @@ behind - which is how v0.28.0 shipped with `@syntropic137/setup` still on
 
 ## Beta Release
 
-**Two different things share this name. Pick one before you start.** They differ
-in whether anyone other than you is meant to install the result.
+**A beta is a test deploy. There are no GitHub prereleases.** Never run
+`gh release create --prerelease`: a GitHub Release is a published claim, and
+seven `v0.28.0-beta.*` prereleases created in roughly 48 hours, one per test
+deploy, filled the release list with entries that marked nothing. A beta
+produces no GitHub Release, no npm publish and no release notes.
 
-| | Test deploy | Published beta |
-|---|---|---|
-| **Question** | "Can I look at the current code running on a host?" | "Can these people install and try this?" |
-| **Audience** | You | Someone else |
-| **Produces** | Container images | Git tag, GitHub Release, images, npm CLI on `next` |
-| **`gh release create`** | **No** | Yes |
+The path: deploy the beta to the selfhost host, test it there, then cut the
+real release through the [Production Release](#production-release) flow.
 
-Seven `v0.28.0-beta.*` prereleases were created in roughly 48 hours, one per test
-deploy, because only the published-beta path was written down. A release entry
-should mark something worth marking, not every image move.
+1. **Tag (optional, a plain git tag only).** `git tag v0.20.0-beta.1 <sha> &&
+   git push origin v0.20.0-beta.1`. No workflow triggers on a tag push
+   (`release-containers.yaml` runs via `workflow_call` or a branch-guarded
+   `workflow_dispatch`, never on a tag push), so this marks the commit and
+   nothing else.
+2. **Deploy.** Read the [Test Deploy runbook](deployment/test-deploy.md) in full
+   before touching the host. Two build paths:
+   - **Direct, the default:** `just pit-stop 0.20.0-beta.1`
+     (`scripts/pit_stop.sh`). It bumps in its own worktree at `origin/main`
+     (`--ref` to change that), builds `linux/amd64` locally, ships with
+     `docker save | docker load` (no registry push), repoints the compose pins,
+     pauses admission, waits for the drain, recreates api + gateway, verifies,
+     resumes admission and proves a phase reaches `running`. Use
+     `--stage-only` while runs are in flight and `--swap-only` once drained;
+     `--dry-run` echoes every mutating command.
+   - **Registry:** `just release-local 0.20.0-beta.1` (`just/release.just`)
+     builds the six core images for amd64 + arm64 and pushes them to GHCR. It
+     skips `event-store` and `agentic-workspace`; move those with `just
+     release-retag <image> <from> <to>`. The images are not cosign-signed and
+     carry no SBOM, so this path never exercises signing; signature problems
+     surface only at the real release. Then follow the runbook's
+     update and recreate steps on the host.
 
-### Test deploy (images only, no GitHub release)
+   Never build on the production host.
+3. **Test.** Verify with a run that completes and delivers, not only a phase
+   reaching `running`.
+4. **Release.** When the beta holds, bump to the stable version and follow
+   [Production Release](#production-release).
 
-Build the images, move them to the host, recreate two containers. No tag, no
-release entry, no npm publish. Follow the
-[Test Deploy runbook](deployment/test-deploy.md) - it covers the drain check
-that must precede any container recreation, the four version-carrying files
-`just bump-version` does not touch, and the tag-prefix reconciliation
-`release-local` needs. The `INCLUDE_DOCKER_CLI` build arg it once could not pass
-is fixed and asserted at build time
-([#1216](https://github.com/syntropic137/syntropic137/issues/1216)).
+**Pit stop safety:**
 
-### Published beta (a release entry with an audience)
-
-Betas bypass the `release` branch entirely:
-
-```bash
-just bump-version 0.20.0-beta.1
-git add -A && git commit -m "chore: bump version to v0.20.0-beta.1"
-git push origin main
-gh release create v0.20.0-beta.1 --prerelease --target main --notes "Beta: <description>"
-```
+- **Never kill a running pit stop.** Read its log tail first; once it is past
+  `gate`, let it finish. One swapper at a time: no manual `--swap-only` while a
+  watch that can swap is armed. After any interruption, run `docker ps -a | grep
+  syn137-` on the host and `compose up -d` anything left in `Created`.
+- **An abort during swap or verify leaves admission paused.** That abort is
+  fail-closed and does not ungate; the script prints the recovery. (A drain
+  abort reopens admission itself, since nothing was recreated; a probe failure
+  happens after ungate.) The common case is verify timing out during a
+  projection rebuild window. Check images, docker
+  CLI and pins by hand (runbook section 5, step 5), wait for `/api/v1/health`
+  subscription lag 0, then `PUT /api/v1/maintenance` with `{"active": false,
+  "reason": "", "actor": "pit_stop.sh"}` and verify a phase reaches `running`.
+- **Group beta content by deploy risk.** A changed projection `VERSION` opens a
+  rebuild window; keep those out of a beta meant to ship unrelated fixes fast.
 
 A prerelease version gets no `CHANGELOG.md` section: `bump-version` leaves its
 changes under `## [Unreleased]`, and they are listed under the stable release
 that ships them.
 
-This fires `release.published` directly, triggering containers + CLI publish with pre-release handling:
-- Docker images: tagged `v0.20.0-beta.1` only (no `latest`)
-- npm CLI: tagged `next` (not `latest`)
-
-The npm package must trust `release-beta.yaml` with environment
-`npm-publish-cli`. npm validates the caller when a reusable workflow publishes;
-trusting only `release-cli.yaml` or `release-create.yml` makes beta publishing
-fail with `ENEEDAUTH`.
+`release-beta.yaml` (fires when a GitHub prerelease is published) still exists,
+which is why npm trusts it as a publisher above. It is not part of this
+process: do not trigger it.
 
 ## Hotfix Release
 

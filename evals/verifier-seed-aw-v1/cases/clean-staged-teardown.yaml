@@ -1,0 +1,18 @@
+id: clean-staged-teardown
+polarity: clean
+# A control, not a defect. agentic-workspace's history before 2026-09-25 is
+# imported from AgentParadise/agentic-primitives, so `source_pr` is the
+# agentic-primitives PR (#358, "let a caller act between the steps of a
+# teardown", merged 2026-08-20). Chosen by verifier-seed-v1's README rule 1-3;
+# searched by hand: no later fix commit or issue in either repository refers
+# to the staged teardown.
+source_pr: 358
+commit: 13b4358220dbdc0bc6100791205b62a4f255cd47
+merge_commit: a4ec3a50dee60743fa6b55b160c53c2167f59e8d
+clean_through: b454d8516a81a66c699fea748d57945b7244997c
+task: >
+  The change under review splits the Docker provider's workspace teardown
+  into steps a caller can act between (stop, then remove), and adds the
+  provider protocol for it. Review whether the steps can run out of order,
+  strand a container, or race the provider's own retention.
+split: train

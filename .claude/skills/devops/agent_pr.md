@@ -1,74 +1,58 @@
-# Agent: Open a normal feature/fix PR against `main`
+# Agent: take a change from a branch to a merged PR on `main`
 
 ## Purpose
 
-Get a feature/fix branch from local working state to a green, reviewable PR against `main` without burning CI round-trips on issues that should have been caught locally. Use this for any non-release PR. Matches SKILL.md "When to invoke" triggers: "Open a PR", "create a pull request", "submit my changes". For tiny follow-ups on already-merged PRs see `agent_hotfix.md`. For `main -> release` PRs see `agent_release.md`.
+Get a feature or fix from local work to a merged PR without spending CI
+round-trips on what local gates catch. Not for `main -> release` PRs
+(`agent_release.md`) or nits on an already-merged PR (`agent_hotfix.md`).
 
 ## Workflow
 
-1. Create an isolated worktree (never switch branches in the main checkout).
+1. Work in a worktree on a new branch from `origin/main`; never switch branches in the main checkout.
    ```
-   /sdlc:git_worktree
+   git fetch origin main
+   git worktree add -b <type>/<slug> ../syntropic137_worktrees/<slug> origin/main
+   cd ../syntropic137_worktrees/<slug>
+   git submodule update --init --recursive && uv sync && pnpm install
    ```
-2. Initialize submodules and dependencies in the fresh worktree.
+   A fresh `uv sync` may rewrite `uv.lock`; if the change is not a dependency change, `git checkout -- uv.lock` before committing.
+2. Make the change. Shape commits as logical, revertable units. Rebasing or reordering commits that were never pushed is fine.
+3. Run the local gates against the tree you will push. Before the first push: `just qa-ci` (~3.5 min, the core PR-gating jobs), plus the path-specific mirror recipe from `scripts/check_ci_parity.py` for any path-filtered workflow the change touches (Skyline, landing, workspace image). After that, the pre-push hook runs `just preflight`. If generated files are involved, `just codegen` and commit what it rewrites.
+   The hook runs long enough that an idle SSH connection to GitHub can time out, so the push silently doesn't land. Push with `GIT_SSH_COMMAND="ssh -o ServerAliveInterval=20" git push`, then confirm with `git ls-remote origin <branch>` that the remote head equals your local HEAD.
+4. Stage by explicit path and confirm the tree is clean afterwards; uncommitted auto-fixes make local gates green on a red commit.
    ```
-   git submodule update --init --recursive
-   pnpm install
-   uv sync
+   git add <file> <file>
+   git commit -m "<type>(<scope>): <summary>"
+   test -z "$(git status --porcelain)"
    ```
-3. Run the pre-PR checklist locally.
+5. Push. If `main` moved, `git merge origin/main` (never rebase a pushed branch), re-run gates, push again. A pushed commit that must change goes on a new branch and PR.
+6. Open the PR. `Closes #N` on its own line auto-closes the issue; a bare `#N` does not. If no issue exists and the change is not trivial, file one first (with milestone and priority).
    ```
-   just fitness-check
-   just docs-sync
-   uv run ruff check .
-   uv run ruff format --check .
-   ```
-   Or `just qa` for the full suite.
-4. Clean up local commits into logical, cherry-pickable units before pushing.
-   ```
-   git rebase -i HEAD~N   # un-pushed local commits only
-   ```
-5. Stage explicit files by name. Never `git add -A` (pre-commit hook blocks it).
-6. If untracked sibling dirs in the repo root (e.g. `markdown-explorer/`) cause spurious `just fitness-check` violations, move them outside the repo, push, then restore them after.
-7. Push. Never `--no-verify` (pre-push hooks fail for real reasons).
-8. Identify the GitHub issue this PR addresses. Most PRs should close one - if there isn't an issue yet, file one first (`gh issue create`) so the work is tracked. The PR body must include `Closes #N` on its own line; bare `#N` does NOT auto-close (per SKILL.md "Common gotchas"). If the change genuinely doesn't map to an issue (e.g. a typo fix), say so explicitly in the body.
-9. Open the PR against `main` with the standard body.
-   ```
-   gh pr create --base main --title "<short title>" --body "$(cat <<'EOF'
-   Closes #<N>
+   gh pr create --base main --title "<type>(<scope>): <summary>" --body "$(cat <<'EOF'
+   Closes #N
 
    ## Summary
-   - <1-3 bullets, "why" not "what">
+   - <why, not what>
+
+   ## Release notes
+   - <one user-facing line; `just changelog` uses the first bullet here>
 
    ## Test plan
-   - [ ] <how to verify>
+   - [ ] <commands run and their result>
    EOF
    )"
    ```
-10. Wait for CI green AND at least one review pass (Copilot at minimum, ideally a human glance) before flagging the PR as ready to merge. If CI was green and the PR had to merge early without a review pass, fetch comments retroactively (`gh api repos/<o>/<r>/pulls/<N>/comments`, `gh pr view <N> --json reviews,comments`) and address them via `agent_hotfix.md` or a small follow-up PR. See `feedback_review_pass_before_merge`: maintenance cost dominates implementation cost, so review-pass discipline is a velocity multiplier, not a tax.
-11. Operator merges manually; never `--auto` on `gh pr merge`.
-12. After merge, verify the linked issue auto-closed (`gh issue view <N>`). If it didn't, the PR body was malformed; close the issue manually and note the cause for the next PR.
+7. Get the review the change needs (see `agent_review_pass.md`): a cross-family review (codex verifies Claude-authored code and vice versa), triaged; a second pass only if pass 1 found something severe; Copilot comments read and answered.
+8. Before merging, re-verify if `main` moved since the last green run or review: merge `origin/main` in, re-run the PR's targeted tests and `just preflight`, and review commits added after the last review (`git log --oneline <reviewed-sha>..HEAD --no-merges`).
+9. Merge when checks are green and the review bar is met: `gh pr merge N --merge`. Never `--squash`, `--rebase` or `--auto`. If `mergeStateStatus` is `BLOCKED` with checks green, the PR touches a CODEOWNERS path: page the owner with the PR link instead of waiting silently.
+10. After merge, `gh issue view N` to confirm it closed. If not, the body was malformed: close it by hand and say why.
 
 ## References
 
-- `AGENTS.md` "Pre-PR Checklist" - source of truth for required local checks.
-- `docs/release-process.md` - canonical branch model.
-- `.githooks/pre-push` - what's actually enforced on push.
-- `SKILL.md` "Hard rules" - the full memory-derived ruleset.
-
-## Hard rules to honor
-
-- Never force-push; new branch + new PR if a commit must change.
-- Never rebase onto a moving `main`; use `git merge main` instead. Local `git rebase -i HEAD~N` on un-pushed commits is fine.
-- Never `git add -A`; stage by name.
-- Never `--no-verify` on commit or push.
-- Never `--auto` on `gh pr merge`; operator merges.
-- No em dashes anywhere; pre-push hook blocks them.
+- CLAUDE.md "Pre-PR Checklist" and "Verification gates" (in-workspace agents use `just preflight-agent` + `uv run pytest -m unit -q`).
+- `.githooks/pre-push`, `scripts/check_ci_parity.py`, `.github/CODEOWNERS`.
+- New Python test modules need the `unit` marker, or the unit gate collects zero tests and goes green.
 
 ## Health check
 
-If this file is out of date with the repository (workflow names changed, file paths moved, hard rules contradicted by current behavior), STOP and:
-1. Note the drift in the response to the user.
-2. Either fix this file inline (preferred for small drift) or escalate to the user with a one-line summary of what needs updating.
-
-Keeping these skill files healthy is a higher priority than completing the immediate task with a stale recipe.
+Depends on: `just qa-ci`, `just preflight`, `just codegen` recipes existing; `.githooks/pre-push` running preflight; `ci.yml` triggering on PRs to `main`; CODEOWNERS being the only owner-gated merge block; `## Release notes` being what `scripts/changelog.py` reads. If any of these changed, note the drift, fix this file in the same session or report it, then continue.
