@@ -1011,6 +1011,23 @@ _PARAPHRASES: dict[str, tuple[tuple[str, str], ...]] = {
             "for that HTTP verb.",
         ),
     ),
+    "start-clock-read-before-settle": (
+        (
+            "WorkflowExecutionProcessor.py:407",
+            "with no run queue, _run_started reads started_at before _start settles cancelled "
+            "work; main settles first, so the default path's order changed.",
+        ),
+        (
+            "execute_workflow/WorkflowExecutionProcessor.py",
+            "the start clock is taken ahead of self._cancelled_work.settle(), so the recorded "
+            "start time includes settling, unlike main.",
+        ),
+        (
+            "WorkflowExecutionProcessor.py:444",
+            "settle() moved after datetime.now(UTC): the flag-off path times the start before "
+            "the cancelled work is settled.",
+        ),
+    ),
     "workflow-run-task-undeliverable": (
         (
             "run.ts:195",
@@ -1515,7 +1532,7 @@ def test_score_reads_verdict_report_cost_and_model_from_the_api() -> None:
 
     table = render(loaded, rows)
     assert "exec-1" in table and "PASS" in table and "$3.75" in table
-    assert "1/1 passed (ERROR excluded, as in the API); 34 not scored" in table
+    assert "1/1 passed (ERROR excluded, as in the API); 35 not scored" in table
 
 
 @pytest.mark.unit
@@ -1875,7 +1892,7 @@ def test_v1_runs_never_count_toward_the_current_version(tmp_path: Path) -> None:
 @pytest.mark.unit
 def test_score_prints_every_version_the_workflow_ran() -> None:
     suite = load_suite(DEFAULT_SUITE).suite
-    assert versions_run(suite, _WF) == [1, 3, 4, 5, 6]
+    assert versions_run(suite, _WF) == [1, 3, 4, 5, 6, 7]
     assert versions_run(suite, _CODEX_WF) == [2, 3, 4, 5, 6]
     assert versions_run(suite, _SONNET_WF) == [3, 4, 5, 6]
 
@@ -1935,7 +1952,7 @@ def test_v5_scores_its_own_cases_under_every_verifier_without_the_v6_controls(
     assert len(v5.cases) == 33
     assert {c.source_pr for c in v5.cases if c.polarity == "clean"} == {917, 1010}
     added = {c.id for c in current.cases} - {c.id for c in v5.cases}
-    assert {c.source_pr for c in current.cases if c.id in added} == _V6_CLEAN_PRS
+    assert {c.source_pr for c in current.cases if c.id in added} == _V6_CLEAN_PRS | {1808}
 
 
 @pytest.mark.unit
@@ -1982,8 +1999,8 @@ def test_a_past_version_under_a_workflow_it_never_ran_is_refused() -> None:
 
 @pytest.mark.unit
 def test_an_unknown_version_is_refused() -> None:
-    with pytest.raises(DefinitionError, match="version 7 is not one of"):
-        load_suite(DEFAULT_SUITE, version=7)
+    with pytest.raises(DefinitionError, match="version 8 is not one of"):
+        load_suite(DEFAULT_SUITE, version=8)
 
 
 @pytest.mark.unit
@@ -2195,8 +2212,8 @@ def test_an_identical_relaunch_is_an_unchanged_install(tmp_path: Path) -> None:
     _, client = _provenanced_server(loaded, templates)
     again = launch_suite(loaded, client, ledger)
 
-    assert first[0].startswith(f"workflow {_CODEX_WF}: created as 6.1.0")
-    assert again[0].startswith(f"workflow {_CODEX_WF}: unchanged as 6.1.0")
+    assert first[0].startswith(f"workflow {_CODEX_WF}: created as 7.1.0")
+    assert again[0].startswith(f"workflow {_CODEX_WF}: unchanged as 7.1.0")
 
 
 @pytest.mark.unit
@@ -2243,7 +2260,7 @@ def test_a_cli_installed_archived_record_is_restored_by_launch_without_force(
     lines = launch_suite(loaded, client, tmp_path / "launches.jsonl")
 
     stored = templates.by_id[_CODEX_WF]
-    assert lines[0].startswith(f"workflow {_CODEX_WF}: created as 6.1.0")
+    assert lines[0].startswith(f"workflow {_CODEX_WF}: created as 7.1.0")
     assert not stored.is_archived
     assert stored.source_digest == install_provenance(loaded, document).source_digest
 
@@ -2294,7 +2311,7 @@ def test_an_unchanged_relaunch_restores_an_archived_template(tmp_path: Path) -> 
     _, client = _provenanced_server(loaded, templates)
     lines = launch_suite(loaded, client, tmp_path / "launches.jsonl")
 
-    assert lines[0].startswith(f"workflow {_CODEX_WF}: created as 6.1.0")
+    assert lines[0].startswith(f"workflow {_CODEX_WF}: created as 7.1.0")
     assert not templates.by_id[_CODEX_WF].is_archived
 
 
@@ -2374,7 +2391,7 @@ def test_score_records_each_verdict_on_the_eval() -> None:
     assert path == "/evals/eval-1/runs/exec-1/score"
     assert body["verdict"] == "PASS"
     assert body["score"] == 1.0
-    assert (body["scorer"], body["scorer_version"]) == ("eval_suite.py", "6")
+    assert (body["scorer"], body["scorer_version"]) == ("eval_suite.py", "7")
     assert isinstance(body["evidence"], str) and _CASE in body["evidence"]
 
 
@@ -2784,7 +2801,7 @@ def test_score_records_a_certified_clean_control_as_a_pass() -> None:
     assert (body["verdict"], body["score"]) == ("PASS", 1.0)
     assert f"{_clean_case().id} (clean)" in str(body["evidence"])
     table = render(loaded, rows)
-    assert "1/1 passed (ERROR excluded, as in the API); 34 not scored" in table
+    assert "1/1 passed (ERROR excluded, as in the API); 35 not scored" in table
     assert "false-block rate (clean controls blocked): 0/1 (0%)" in table
     assert "catch rate (defect cases blocked and named): -" in table
 
@@ -2798,7 +2815,7 @@ def test_score_records_a_blocked_clean_control_as_a_false_block() -> None:
     [(_, body)] = server.scores
     assert (body["verdict"], body["score"]) == ("FAIL", 0.0)
     table = render(loaded, rows)
-    assert "0/1 passed (ERROR excluded, as in the API); 34 not scored" in table
+    assert "0/1 passed (ERROR excluded, as in the API); 35 not scored" in table
     assert "false-block rate (clean controls blocked): 1/1 (100%)" in table
 
 
@@ -2854,7 +2871,7 @@ def test_a_completed_run_with_no_verdict_is_recorded_as_error_whatever_its_repor
     [row] = [r for r in rows if r.case == _CASE]
     assert row.status == "completed" and row.verdict == "ERROR"
     table = render(loaded, rows)
-    assert "0/0 passed (ERROR excluded, as in the API); 1 ERROR; 34 not scored" in table
+    assert "0/0 passed (ERROR excluded, as in the API); 1 ERROR; 35 not scored" in table
     assert "catch rate (defect cases blocked and named): -" in table
     assert (
         f"warning: {_CASE} exec-1: report says VERDICT: BLOCKED, engine recorded no verdict"
@@ -3038,7 +3055,7 @@ def test_llm_judged_score_is_recorded_under_the_judges_identity(
     rows, _ = score_suite(loaded, server.client(), [_LAUNCHED], eval_suite.LlmJudge(model))
 
     [(_, body)] = server.scores
-    assert body["scorer_version"] == "6+llm:claude-sonnet-4-6@prompt-v3"
+    assert body["scorer_version"] == "7+llm:claude-sonnet-4-6@prompt-v3"
     assert body["verdict"] == "PASS"
     assert "LLM judge (`llm:claude-sonnet-4-6@prompt-v3`): `match`" in str(body["evidence"])
     assert "keyword judge: no match" in str(body["evidence"])
@@ -3059,7 +3076,7 @@ def test_keyword_only_scoring_records_the_plain_suite_version(
     score_suite(loaded, server.client(), [_LAUNCHED])
 
     [(_, body)] = server.scores
-    assert (body["scorer_version"], body["verdict"]) == ("6", "FAIL")
+    assert (body["scorer_version"], body["verdict"]) == ("7", "FAIL")
     assert "LLM judge" not in str(body["evidence"])
 
 
