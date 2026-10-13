@@ -152,29 +152,14 @@ async def run_load_test(
     async with httpx.AsyncClient(base_url=target.api_url, timeout=60.0) as client:
         admitter = _Admitter(client, target, bar.n, pacing.admit_seconds)
         admitting = asyncio.create_task(admitter.run())
-        samples: list[Sample] = []
-        stats: list[ContainerStat] = []
-        refused: str | None = None
-        start = time.monotonic()
-        deadline = start + pacing.admit_seconds + bar.sustain_seconds
-        drain_deadline = deadline + pacing.drain_timeout_seconds
+        watched = _Watch(samples=[], stats=[])
         try:
-            while True:
-                sample, details = await _sample(client, admitter.ids, time.monotonic() - start)
-                samples.append(sample)
-                stats.extend(await container_stats(target.containers))
-                now = time.monotonic()
-                drained = all(d is not None and d.status in TERMINAL_STATUSES for d in details)
-                # Admission ends on its own (window plus one request timeout), and
-                # the run is not over while starts are still being sent.
-                if admitting.done() and (now >= drain_deadline or (now >= deadline and drained)):
-                    break
-                await asyncio.sleep(pacing.sample_seconds)
+            await _watch(client, target, bar, pacing, admitter, admitting, watched)
         except RealHarnessError as exc:
-            refused = f"real harness: {exc}"
+            watched.refused = f"real harness: {exc}"
         except httpx.HTTPError as exc:
-            refused = f"the API at {target.api_url} failed a read: {exc!r}"
-        if refused is not None:
+            watched.refused = f"the API at {target.api_url} failed a read: {exc!r}"
+        if watched.refused is not None:
             admitting.cancel()
         await asyncio.gather(admitting, return_exceptions=True)
         try:
@@ -182,14 +167,16 @@ async def run_load_test(
         except httpx.HTTPError as exc:
             # The admitted ids are still in the report; their end state is not.
             runs = []
-            refused = refused or f"the API at {target.api_url} failed the final reads: {exc!r}"
+            watched.refused = (
+                watched.refused or f"the API at {target.api_url} failed the final reads: {exc!r}"
+            )
     observed = Observed(
         admission=admitter.result(),
-        samples=samples,
+        samples=watched.samples,
         runs=runs,
-        containers=stats,
+        containers=watched.stats,
         list_read_query=LIST_READ_QUERY,
-        refused=refused,
+        refused=watched.refused,
     )
     return judge(bar, profile, observed, target.containers)
 
@@ -202,6 +189,41 @@ def start_body(target: Target) -> dict[str, object]:
         "tags": ["loadtest"],
         "no_eval": True,
     }
+
+
+@dataclass
+class _Watch:
+    """What sampling has seen so far; kept when sampling is cut short."""
+
+    samples: list[Sample]
+    stats: list[ContainerStat]
+    refused: str | None = None
+
+
+async def _watch(
+    client: httpx.AsyncClient,
+    target: Target,
+    bar: PassBar,
+    pacing: Pacing,
+    admitter: _Admitter,
+    admitting: asyncio.Task[None],
+    watched: _Watch,
+) -> None:
+    """Sample from the first admission until sustained and drained, or the drain deadline."""
+    start = time.monotonic()
+    deadline = start + pacing.admit_seconds + bar.sustain_seconds
+    drain_deadline = deadline + pacing.drain_timeout_seconds
+    while True:
+        sample, details = await _sample(client, admitter.ids, time.monotonic() - start)
+        watched.samples.append(sample)
+        watched.stats.extend(await container_stats(target.containers))
+        now = time.monotonic()
+        drained = all(d is not None and d.status in TERMINAL_STATUSES for d in details)
+        # Admission ends on its own (window plus one request timeout), and
+        # the run is not over while starts are still being sent.
+        if admitting.done() and (now >= drain_deadline or (now >= deadline and drained)):
+            return
+        await asyncio.sleep(pacing.sample_seconds)
 
 
 class _Admitter:

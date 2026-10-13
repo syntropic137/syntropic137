@@ -279,43 +279,15 @@ def judge(
     mismatches = _event_count_mismatches(profile, runs)
     unscripted = _unscripted(runs)
     peaks = _container_peaks(containers)
-    sampled = {c.container for c in peaks}
-    missing_roles = (
-        ["api", "postgres", "event_store", "socket_proxy"]
-        if roles is None
-        else sorted(role for role, name in roles.by_role().items() if name not in sampled)
-    )
-    admitted_in_time = (
-        len(admission.admitted) == bar.n
-        and admission.elapsed_seconds is not None
-        and admission.elapsed_seconds <= bar.admit_seconds
-    )
 
     checks = [
-        Check(
-            name="north_star_bar",
-            passed=bar.is_north_star,
-            detail=(
-                f"held to read p95 {bar.read_p95_seconds:.3f}s, admit {bar.admit_seconds:.0f}s, "
-                f"sustain {bar.sustain_seconds:.0f}s; the north star is "
-                f"<{NORTH_STAR_READ_P95_SECONDS}s, <={NORTH_STAR_ADMIT_SECONDS:.0f}s, "
-                f">={NORTH_STAR_SUSTAIN_SECONDS:.0f}s"
-            ),
-        ),
+        _north_star_check(bar),
         Check(
             name="refused",
             passed=observed.refused is None,
             detail=observed.refused or "the run was not stopped early",
         ),
-        Check(
-            name="admission",
-            passed=admitted_in_time,
-            detail=(
-                f"{len(admission.admitted)}/{bar.n} admitted in "
-                f"{admission.elapsed_seconds if admission.elapsed_seconds is not None else 'n/a'}s "
-                f"(limit {bar.admit_seconds:.0f}s); rejected {list(admission.rejected)}"
-            ),
-        ),
+        _admission_check(bar, admission),
         Check(
             name="scripted",
             passed=not unscripted,
@@ -348,15 +320,7 @@ def judge(
             passed=not mismatches,
             detail=f"{len(mismatches)} planned phases off their scripted tool-use count",
         ),
-        Check(
-            name="container_stats",
-            passed=not missing_roles,
-            detail=(
-                f"no stats for roles {missing_roles}"
-                if missing_roles
-                else f"sampled {len(peaks)} containers"
-            ),
-        ),
+        _container_check(roles, peaks),
     ]
     return LoadTestReport(
         n=bar.n,
@@ -378,6 +342,50 @@ def judge(
         containers=peaks,
         samples=list(samples),
         checks=checks,
+    )
+
+
+def _north_star_check(bar: PassBar) -> Check:
+    return Check(
+        name="north_star_bar",
+        passed=bar.is_north_star,
+        detail=(
+            f"held to read p95 {bar.read_p95_seconds:.3f}s, admit {bar.admit_seconds:.0f}s, "
+            f"sustain {bar.sustain_seconds:.0f}s; the north star is "
+            f"<{NORTH_STAR_READ_P95_SECONDS}s, <={NORTH_STAR_ADMIT_SECONDS:.0f}s, "
+            f">={NORTH_STAR_SUSTAIN_SECONDS:.0f}s"
+        ),
+    )
+
+
+def _admission_check(bar: PassBar, admission: Admission) -> Check:
+    """All N admitted, and the last answered within ``bar.admit_seconds`` of the first sent."""
+    elapsed = admission.elapsed_seconds
+    return Check(
+        name="admission",
+        passed=len(admission.admitted) == bar.n
+        and elapsed is not None
+        and elapsed <= bar.admit_seconds,
+        detail=(
+            f"{len(admission.admitted)}/{bar.n} admitted in "
+            f"{'n/a' if elapsed is None else f'{elapsed:.1f}'}s "
+            f"(limit {bar.admit_seconds:.0f}s); rejected {list(admission.rejected)}"
+        ),
+    )
+
+
+def _container_check(roles: ContainerRoles | None, peaks: Sequence[ContainerPeak]) -> Check:
+    """Every north-star role sampled at least once; no roles at all misses all four."""
+    sampled = {c.container for c in peaks}
+    missing = (
+        ["api", "postgres", "event_store", "socket_proxy"]
+        if roles is None
+        else sorted(role for role, name in roles.by_role().items() if name not in sampled)
+    )
+    return Check(
+        name="container_stats",
+        passed=not missing,
+        detail=f"no stats for roles {missing}" if missing else f"sampled {len(peaks)} containers",
     )
 
 
