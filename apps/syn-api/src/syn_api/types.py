@@ -4506,6 +4506,34 @@ class LatencyRecorderStatusResponse(BaseModel):
     buffered: int
 
 
+class UpstreamRetryCountResponse(BaseModel):
+    """In-phase retries one provider, model and upstream kind took in the window (#1882)."""
+
+    provider: str | None
+    """The agent provider retried, e.g. ``codex``. None if the row did not say."""
+    model: str | None
+    """The model the phase asked for. None when the phase left it to the provider."""
+    upstream_kind: str | None
+    """The transient kind that earned the retry: ``capacity`` or ``rate_limited``."""
+    retries: int
+
+
+class UpstreamRetriesResponse(BaseModel):
+    """In-phase upstream retries per provider and model, most first (Lane 2, #1882).
+
+    Counts retries, not failures: a phase that retried twice and then
+    succeeded counts 2 here. Quota, auth and anything unrecognised are never
+    retried, so they never appear.
+    """
+
+    window: LatencyWindow
+    since: str
+    """ISO 8601 UTC start of the window."""
+    total: int
+    """Every retry in the window, summed over ``counts``."""
+    counts: list[UpstreamRetryCountResponse]
+
+
 class RequestLatencyResponse(BaseModel):
     """Per-route arrival-to-response-start latency from ``api_request_latency``, slowest p99 first."""
 

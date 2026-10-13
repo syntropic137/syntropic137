@@ -24,6 +24,8 @@ from syn_api.types import (
     SessionTokenMetrics,
     ToolTimelineEntry,
     ToolTimelineResponse,
+    UpstreamRetriesResponse,
+    UpstreamRetryCountResponse,
 )
 
 if TYPE_CHECKING:
@@ -291,4 +293,41 @@ async def get_request_latency(
             for r in rows
         ],
         recorder=recorder,
+    )
+
+
+@router.get("/upstream-retries", response_model=UpstreamRetriesResponse)
+async def get_upstream_retries(
+    window: LatencyWindow = Query("24h", description="How far back to look"),
+) -> UpstreamRetriesResponse:
+    """How often a busy upstream made a phase retry in place, per provider and model (#1882).
+
+    Read from the ``upstream_retry`` observations (Lane 2). A store that cannot
+    be read is a 503, never an empty list: zero retries would tell an operator
+    there is no quota pressure when nobody looked.
+    """
+    from syn_api._wiring import get_event_store_instance
+
+    since = datetime.now(UTC) - _WINDOWS[window]
+    try:
+        rows = await get_event_store_instance().query_upstream_retry_counts(since=since)
+    except Exception as exc:
+        logger.warning("upstream retry counts could not be read", exc_info=True)
+        raise HTTPException(
+            status_code=503, detail=f"upstream retry counts unavailable: {exc}"
+        ) from exc
+    counts = [
+        UpstreamRetryCountResponse(
+            provider=row.provider,
+            model=row.model,
+            upstream_kind=row.upstream_kind,
+            retries=row.retries,
+        )
+        for row in rows
+    ]
+    return UpstreamRetriesResponse(
+        window=window,
+        since=since.isoformat(),
+        total=sum(count.retries for count in counts),
+        counts=counts,
     )

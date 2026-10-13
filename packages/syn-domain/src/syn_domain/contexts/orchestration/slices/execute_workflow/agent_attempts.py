@@ -43,6 +43,7 @@ execution records the model that actually ran rather than the one declared.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import logging
 from typing import TYPE_CHECKING
 
@@ -61,6 +62,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.upstream_failure 
 )
 from syn_shared.agents import runner_for_provider
 from syn_shared.env_constants import ENV_SYN_PHASE_DEADLINE, ENV_SYN_PHASE_TIMEOUT_SECONDS
+from syn_shared.upstream_failure import UpstreamRetryObservation
 
 from .invocation_attempt import invocation_environment, registered_attempt
 
@@ -341,16 +343,18 @@ class _AgentRun:
         if self._observability is None:
             return
         kind = UPSTREAM_FAILURES.kind_of(reason)
+        # Only a transient kind is ever granted a retry, so `kind` is set here.
+        observation = UpstreamRetryObservation(
+            provider=agent.provider,
+            model=agent.model,
+            upstream_kind=str(kind),
+            attempt=self._attempts.attempt,
+        )
         try:
             await self._observability.record_observation(
                 session_id=self._session_id,
                 observation_type=ObservationType.UPSTREAM_RETRY,
-                data={
-                    "provider": agent.provider,
-                    "model": agent.model,
-                    "upstream_kind": kind.value if kind is not None else None,
-                    "attempt": self._attempts.attempt,
-                },
+                data=dataclasses.asdict(observation),
                 execution_id=self._todo.execution_id,
                 phase_id=self._todo.phase_id,
             )

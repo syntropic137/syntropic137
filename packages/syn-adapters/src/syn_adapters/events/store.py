@@ -43,9 +43,14 @@ from syn_adapters.events.store_write import (
     insert_one as _insert_one,
 )
 from syn_domain import tool_call_counts
+from syn_shared.events import UPSTREAM_RETRY
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     import asyncpg
+
+    from syn_adapters.events.queries import UpstreamRetryCount
 
 logger = logging.getLogger(__name__)
 
@@ -293,6 +298,20 @@ class AgentEventStore:
             raise RuntimeError("AgentEventStore pool is not initialized")
 
         return await _query_recent_by_types(self.pool, event_types, limit=limit)
+
+    async def query_upstream_retry_counts(self, *, since: datetime) -> list[UpstreamRetryCount]:
+        """In-phase upstream retries since ``since``, per provider, model and kind (#1882)."""
+        from syn_adapters.events.queries import (
+            query_upstream_retry_counts as _query_upstream_retry_counts,
+        )
+
+        if not self._initialized:
+            await self.initialize()
+
+        if self.pool is None:
+            raise RuntimeError("AgentEventStore pool is not initialized")
+
+        return await _query_upstream_retry_counts(self.pool, event_type=UPSTREAM_RETRY, since=since)
 
     _RESERVED_OBSERVATION_KEYS = RESERVED_OBSERVATION_KEYS
 
