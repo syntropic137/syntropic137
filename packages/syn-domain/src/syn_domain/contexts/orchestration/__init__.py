@@ -189,6 +189,9 @@ from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEve
 )
 from syn_domain.contexts.orchestration.domain.read_models.phase_plan import PlannedPhase
 from syn_domain.contexts.orchestration.domain.read_models.phase_progress import PhaseProgress
+from syn_domain.contexts.orchestration.domain.read_models.workflow_definition_changes import (
+    DefinitionChangeKind,
+)
 from syn_domain.contexts.orchestration.slices.archive_eval.ArchiveEvalHandler import (
     ArchiveEvalHandler,
 )
@@ -284,11 +287,34 @@ from syn_domain.contexts.orchestration.slices.notify_quarantine import (
     PullRequestCommenter,
     QuarantineNoticeProcessManager,
 )
+from syn_domain.contexts.orchestration.slices.phase_profiles import (
+    Percentiles,
+    PhaseProfileQueryService,
+    PhaseProfiles,
+)
 from syn_domain.contexts.orchestration.slices.record_eval_run_score import (
     RecordEvalRunScoreHandler,
 )
 from syn_domain.contexts.orchestration.slices.set_workflow_default_eval import (
     SetWorkflowDefaultEvalHandler,
+)
+from syn_domain.contexts.orchestration.slices.shipped_metrics import (
+    SHIPPED_WINDOW_DAYS,
+    CommitShipped,
+    CreatedPullRequest,
+    ExecutionAttribution,
+    PullRequestMerged,
+    PullRequestOpened,
+    ShippedCountTile,
+    ShippedDayRow,
+    ShippedLedger,
+    ShippedMetrics,
+    ShippedMetricsQueryService,
+    ShippedRecorder,
+    created_pull_requests,
+    is_gh_pr_create,
+    repository_key,
+    utc_day,
 )
 from syn_domain.contexts.orchestration.slices.show_claude_plugin import (
     ClaudePluginNotFoundError,
@@ -327,6 +353,7 @@ __all__ = [
     "PHASE_ID_PATTERN",
     "RESERVED_INPUT_NAMES",
     "RETIRED_PHASE_FIELDS",
+    "SHIPPED_WINDOW_DAYS",
     "SKILL_TOOL_NAME",
     "TASK_PLACEHOLDER",
     # Tag edits after creation (#967)
@@ -360,11 +387,14 @@ __all__ = [
     "ClaudePluginNotRegistered",
     "ClaudePluginRef",
     "ClaudePluginVersionHashMismatch",
+    "CommitShipped",
     "CreateEvalHandler",
     "CreateWorkflowTemplateCommand",
     "CreateWorkflowTemplateHandler",
     "CreateWorkspaceCommand",
+    "CreatedPullRequest",
     "CredentialRenewalFailedError",
+    "DefinitionChangeKind",
     "DelegationAttempt",
     "DelegationFailure",
     "DelegationFailureReason",
@@ -383,6 +413,7 @@ __all__ = [
     "ExecuteWorkflowCommand",
     "ExecuteWorkflowHandler",
     "ExecutionAlreadyRequestedError",
+    "ExecutionAttribution",
     # Query services
     "ExecutionCostQueryService",
     "ExecutionJournal",
@@ -417,8 +448,11 @@ __all__ = [
     "LaunchEval",
     "OrphanedWorkspace",
     "PatchArchive",
+    "Percentiles",
     "PhaseDefinition",
     "PhaseExecutionType",
+    "PhaseProfileQueryService",
+    "PhaseProfiles",
     "PhaseProgress",
     # What a phase spent, as the failure path reports it (#1262)
     "PhaseUsage",
@@ -426,6 +460,8 @@ __all__ = [
     "ProvisionStep",
     "ProvisionStepTimeoutError",
     "PullRequestCommenter",
+    "PullRequestMerged",
+    "PullRequestOpened",
     "QuarantineNoticeProcessManager",
     "QuarantinedRef",
     "ReclaimableDir",
@@ -449,6 +485,12 @@ __all__ = [
     "SecurityPolicy",
     "SetWorkflowDefaultEvalCommand",
     "SetWorkflowDefaultEvalHandler",
+    "ShippedCountTile",
+    "ShippedDayRow",
+    "ShippedLedger",
+    "ShippedMetrics",
+    "ShippedMetricsQueryService",
+    "ShippedRecorder",
     "SideEffectStatus",
     "SidecarConfig",
     "SkillError",
@@ -489,10 +531,12 @@ __all__ = [
     "WorkspaceUsage",
     "announce_as",
     "build_command_from_definition",
+    "created_pull_requests",
     "execution_request_id",
     "guard_orphaned_workspace",
     "guard_stale_workspace_dir",
     "inherited_outputs",
+    "is_gh_pr_create",
     "is_phase_id",
     "launch_eval_for",
     "mint_wrapper_name",
@@ -503,9 +547,11 @@ __all__ = [
     "remove_reclaimed_dir",
     "render_workspace_prompt",
     "replays_generic",
+    "repository_key",
     "require_supported_execution_type",
     "retired_field_notices",
     "salvage_stranded_phase",
+    "utc_day",
     "validate_phase_declarations",
     "validate_workflow_yaml",
 ]

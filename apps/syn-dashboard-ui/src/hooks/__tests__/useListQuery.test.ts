@@ -18,7 +18,7 @@ import { createElement, type ReactNode } from 'react'
 import { MemoryRouter } from 'react-router-dom'
 
 import type { ListQuery } from '../../api/listQuery'
-import { LIST_PAGE_SIZE, useListQuery } from '../useListQuery'
+import { LIST_PAGE_SIZE, RUN_LIST_PAGE_SIZES, useListQuery } from '../useListQuery'
 
 const SEARCH_DEBOUNCE_MS = 300
 
@@ -61,6 +61,17 @@ describe('useListQuery', () => {
     expect(result.current.query.page_size).toBe(50)
     expect(result.current.query.statuses).toBeUndefined()
     expect(result.current.query.q).toBeUndefined()
+  })
+
+  it('asks for the page size a surface names instead of the shared one', () => {
+    // The Executions/Sessions picker offers 100 (feedback 60d9f990); the
+    // chosen size must reach the query, not the shared default.
+    const { result } = renderHook(() => useListQuery('', 100), {
+      wrapper: wrapperAt('/'),
+    })
+
+    expect(RUN_LIST_PAGE_SIZES).toContain(100)
+    expect(result.current.query.page_size).toBe(100)
   })
 
   it('carries the default window as a bound the API will accept', () => {

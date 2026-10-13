@@ -1,0 +1,99 @@
+/* Section 4, "02 Any harness" (v4 boards). The fallback mirrors <sky-harness-lanes>. */
+.harness-lanes__meta {
+  justify-content: space-between;
+}
+
+.harness-lanes {
+  container-type: inline-size;
+  min-width: 0;
+}
+
+.harness-lanes sky-harness-lanes {
+  display: block;
+}
+
+.harness-lanes__fallback {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-4);
+}
+
+.harness-lanes__lane {
+  display: grid;
+  grid-template-columns: 5.375rem minmax(0, 1fr);
+  align-items: center;
+  gap: var(--ds-space-3);
+}
+
+.harness-lanes__name {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+  font-family: var(--ds-font-mono);
+  font-size: var(--sky-text-data);
+  color: var(--ds-color-text-muted);
+}
+
+.harness-lanes__dot {
+  flex-shrink: 0;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+
+.harness-lanes__cells {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+}
+
+.harness-lanes__cell {
+  flex: 1 1 0;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  height: 2.75rem;
+  padding: 0 var(--ds-space-2);
+  overflow: hidden;
+  border: var(--ds-border-width) dashed var(--ds-color-border);
+  border-radius: var(--sky-radius-control);
+  font-size: var(--ds-text-sm);
+  font-weight: var(--ds-font-weight-semibold);
+  color: var(--ds-color-fg);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.harness-lanes__cell[data-on] {
+  border-style: solid;
+  border-color: color-mix(in oklab, var(--lane) 55%, var(--ds-color-border));
+  background: color-mix(in oklab, var(--lane) 22%, var(--ds-color-bg));
+}
+
+@container (min-width: 32rem) {
+  .harness-lanes__lane {
+    grid-template-columns: 7.5rem minmax(0, 1fr);
+  }
+  .harness-lanes__cell {
+    padding: 0 var(--ds-space-3);
+  }
+}
+
+.harness-lanes__facts {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--ds-space-2-5);
+  padding-top: 6px;
+}
+
+.harness-lanes__fact {
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+@media (min-width: 48rem) {
+  .harness-lanes__facts {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}

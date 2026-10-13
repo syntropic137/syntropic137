@@ -44,6 +44,11 @@ _UNIMPLEMENTED: dict[str, str] = {
         "packages/syn-domain/tests/contexts/agent_sessions/"
         "test_delegate_identity_port.py."
     ),
+    "ExecutionStreamProbe": (
+        "Implemented by admission when it is wired to the Run Queue (#1310 "
+        "item 1.3), which reads the event store. Exercised against a test "
+        "double in packages/syn-adapters/tests/test_execution_run_queue_postgres.py."
+    ),
     "GitConfigurationPort": (
         "Declared and never implemented or consumed -- no adapter provides it "
         "and no call site asks for it. Kept here rather than deleted because "

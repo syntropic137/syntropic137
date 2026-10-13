@@ -1,7 +1,7 @@
 {
   "name": "syn-dashboard-ui",
   "private": true,
-  "version": "0.33.1",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "predev": "[ -d node_modules ] || npm install",

@@ -140,7 +140,7 @@ describe("execution commands", () => {
           total_cost_usd: "0.10",
           phases: [
             { name: "phase-1", status: "completed", started_at: "2026-01-01T00:00:00Z", total_tokens: 5000, cost_usd: "0.05", model: "claude-opus-5-5", requested_model: "opus", model_display: "claude-opus-5-5" },
-            { name: "phase-2", status: "completed", started_at: "2026-01-01T00:30:00Z", total_tokens: 5000, cost_usd: "0.05", model: null, requested_model: "gpt-sol", model_display: "unknown (requested: gpt-sol)" },
+            { name: "phase-2", status: "completed", started_at: "2026-01-01T00:30:00Z", total_tokens: 5000, cost_usd: "0.05", model: null, requested_model: "gpt-sol", model_display: "gpt-sol (requested)" },
           ],
         }),
       );
@@ -152,7 +152,7 @@ describe("execution commands", () => {
       expect(out).toContain("phase-1");
       // The phase table names what RAN (ADR-067 D9).
       expect(out).toContain("claude-opus-5-5");
-      expect(out).toContain("unknown (requested: gpt-sol)");
+      expect(out).toContain("gpt-sol (requested)");
     });
 
     const detail = {

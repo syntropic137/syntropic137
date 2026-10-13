@@ -17,7 +17,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { ExecutionEvalRun } from '../../../api/evals'
-import { LIST_PAGE_SIZE } from '../../../hooks/useServerList'
+import { EXECUTION_LIST_PAGE_SIZE as PAGE_SIZE } from '../../../hooks/useServerList'
 import { serveListEndpoint } from '../../../test/fakeListServer'
 import { EXECUTIONS, matchesExecutionSearch } from '../../../test/listFixtures'
 import { ExecutionCard } from '../ExecutionCard'
@@ -64,12 +64,12 @@ const ORDINARY = {
 
 // Enough ordinary runs behind the three above to give the list a real page 2,
 // so the filter's return to page 1 is a transition and not the starting state.
-const FILLER = Array.from({ length: LIST_PAGE_SIZE }, (_, i) => ({
+const FILLER = Array.from({ length: PAGE_SIZE }, (_, i) => ({
   ...ORDINARY,
   workflow_execution_id: `exec-filler-${i}`,
   workflow_name: `Filler run ${i}`,
 }))
-const LAST_FILLER = `Filler run ${LIST_PAGE_SIZE - 1}`
+const LAST_FILLER = `Filler run ${PAGE_SIZE - 1}`
 
 const server = serveListEndpoint({
   path: '/api/v1/executions',

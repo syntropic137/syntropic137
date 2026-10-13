@@ -29,6 +29,22 @@ export const SEARCH_DEBOUNCE_MS = 300
 
 export const LIST_PAGE_SIZE = 50
 
+/**
+ * The sizes an operator can pick on Executions and Sessions (feedback
+ * 60d9f990). The API caps a page at 200.
+ */
+export const RUN_LIST_PAGE_SIZES: readonly number[] = [50, 100]
+
+/**
+ * Sessions open at 100, Executions at 50; either can switch to the other size.
+ * The owner's bound was "100 by default unless it costs over 1.5x of 50". On
+ * the VPS /sessions at 100 measured 0.85-1.22x of 50, inside it. /executions
+ * measured up to 2.04x at p95 - still within the 200 ms budget, but outside
+ * the ratio, so it keeps 50 and offers 100 (PR #1785 has the tables).
+ */
+export const SESSION_LIST_PAGE_SIZE = 100
+export const EXECUTION_LIST_PAGE_SIZE = LIST_PAGE_SIZE
+
 export interface ListQueryState {
   /**
    * The query to issue now. Referentially stable until something that defines
@@ -95,8 +111,10 @@ export function useCollectionPage(collectionKey: string): CollectionPage {
  * @param scopeKey Identity of any narrowing the caller applies that this hook
  *   cannot see, such as Sessions' `workflow_id`. Changing it selects a
  *   different collection, exactly as a shared filter does.
+ * @param pageSize Rows per page. Changing it returns to page 1, since the
+ *   old page number addresses different rows at a different size.
  */
-export function useListQuery(scopeKey: string): ListQueryState {
+export function useListQuery(scopeKey: string, pageSize: number = LIST_PAGE_SIZE): ListQueryState {
   const { selectedStatuses, timeWindow, toggleStatus, setTimeWindow, clearStatuses } =
     useFilterUrlState()
   const resetView = useResetView()
@@ -119,18 +137,18 @@ export function useListQuery(scopeKey: string): ListQueryState {
   const startedAfter = useMemo(() => timeWindowToStartedAfter(timeWindow), [timeWindow])
 
   // Which collection is being paged. See useCollectionPage.
-  const collectionKey = [scopeKey, statusesKey, startedAfter ?? '', search].join(' ')
+  const collectionKey = [scopeKey, statusesKey, startedAfter ?? '', search, pageSize].join(' ')
   const { page, setPage } = useCollectionPage(collectionKey)
 
   const query = useMemo<ListQuery>(
     () => ({
       page,
-      page_size: LIST_PAGE_SIZE,
+      page_size: pageSize,
       statuses,
       started_after: startedAfter,
       q: search || undefined,
     }),
-    [page, statuses, startedAfter, search],
+    [page, pageSize, statuses, startedAfter, search],
   )
 
   return {

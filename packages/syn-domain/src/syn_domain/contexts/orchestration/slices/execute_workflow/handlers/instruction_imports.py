@@ -4,16 +4,23 @@ Every byte the synthetic /workspace/CLAUDE.md imports is resent on every turn
 of every phase, so a repo whose AGENTS.md duplicates its CLAUDE.md must not be
 loaded twice. Dropping an import must never remove the agent's access to a
 distinct instruction file, so anything uncertain is imported anyway.
+
+A provider that does not expand ``@``-imports (codex, #1835) is handed the same
+files' content instead: ``inline_instruction_files`` writes each one, in import
+order, under a header naming its path.
 """
 
 from __future__ import annotations
 
 import logging
 import re
+import shlex
 from enum import Enum
 from typing import TYPE_CHECKING, Final
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
 
 logger = logging.getLogger(__name__)
@@ -105,3 +112,104 @@ async def repo_instruction_imports(workspace: ManagedWorkspace, name: str) -> li
         logger.warning("could not read instruction files of %s, importing both: %s", name, exc)
         return [agents_path, claude_path]
     return _instruction_imports(agents_path, agents, claude_path, claude)
+
+
+def _inlined_section(path: str, content: str | _Unread) -> str:
+    """One instruction file as it appears inlined: a header naming it, then its content."""
+    if isinstance(content, str):
+        return f"# Instructions from {path}\n\n{content.rstrip()}\n"
+    # Never dropped silently: the agent is told the file exists and where.
+    return (
+        f"# Instructions from {path}\n\n"
+        "This file could not be read when the workspace was prepared. Read it yourself.\n"
+    )
+
+
+async def inline_instruction_files(
+    workspace: ManagedWorkspace, paths: Sequence[str], *, notice: str
+) -> str:
+    """Return ``notice`` followed by the content of each file in ``paths``, in order.
+
+    For an agent that reads its instruction file verbatim. A file confirmed
+    absent is left out; one that cannot be read is named rather than left out.
+    """
+    text = notice + "\n"
+    for path in paths:
+        try:
+            content = await _read_instruction_file(workspace, path)
+        except Exception as exc:
+            logger.warning("could not read %s to inline it, naming it instead: %s", path, exc)
+            content = _Unread.UNREADABLE
+        if content is not _Unread.ABSENT:
+            text += "\n" + _inlined_section(path, content)
+    return text
+
+
+#: Where the inlined instructions are staged before ``INSTALL_CODEX_INSTRUCTIONS``
+#: moves them: ``inject_files`` can only write under /workspace.
+CODEX_INSTRUCTIONS_STAGED = ".setup/codex-instructions.md"
+
+#: A clone's root AGENTS.md, as codex reads it once the clone's instructions
+#: are global. Codex reads ``AGENTS.override.md`` in place of ``AGENTS.md`` in
+#: the same directory (codex-cli 0.160.1), so a codex started inside the clone
+#: would otherwise read the clone's AGENTS.md natively and again from the
+#: global file (#1835).
+CLONE_OVERRIDE: Final[str] = (
+    "This repository's root AGENTS.md and CLAUDE.md are already in codex's global "
+    "instructions file (~/.codex/AGENTS.md). The platform wrote this file so codex "
+    "does not read them twice; it is not part of the repository.\n"
+)
+
+#: Append ``$1`` to codex's global instructions file and remove it, then give
+#: each clone directory after it a ``CLONE_OVERRIDE``. Codex reads
+#: ``$CODEX_HOME/AGENTS.md`` from any working directory, so a delegated codex
+#: started inside a clone gets it too, where it never sees /workspace/AGENTS.md;
+#: and ``project_doc_max_bytes`` (32768 by default in codex-cli 0.160.1) does
+#: not cap it, so no launch cuts its tail (#1835). Appended, not overwritten:
+#: the image ships its own global instructions there. A clone's own override
+#: is left alone: codex already reads it instead of the AGENTS.md made global.
+#: Ours is excluded locally so it never shows as a change to commit.
+INSTALL_CODEX_INSTRUCTIONS: Final[str] = (
+    'h="${CODEX_HOME:-$HOME/.codex}"; s="$1"; shift; mkdir -p "$h" && '
+    '{ if [ -s "$h/AGENTS.md" ]; then printf "\\n"; fi; cat -- "$s"; } >> "$h/AGENTS.md" && '
+    'rm -f -- "$s" || exit 1; '
+    'for d in "$@"; do '
+    '[ -e "$d/AGENTS.override.md" ] && continue; '
+    f'printf %s {shlex.quote(CLONE_OVERRIDE)} > "$d/AGENTS.override.md" || exit 1; '
+    'if [ -d "$d/.git" ]; then mkdir -p "$d/.git/info" && '
+    'printf "/AGENTS.override.md\\n" >> "$d/.git/info/exclude" || exit 1; fi; '
+    "done"
+)
+
+#: /workspace/AGENTS.md when the instructions are codex's global instructions:
+#: codex at the workspace root reads both, so this must not repeat them.
+CODEX_POINTER = (
+    "The target repositories' instructions, and this phase's deadline, are in "
+    "codex's global instructions file (~/.codex/AGENTS.md), which codex loads "
+    "in every directory.\n"
+)
+
+
+async def install_codex_instructions(workspace: ManagedWorkspace, names: Sequence[str]) -> None:
+    """Move the staged inlined instructions into codex's global instructions.
+
+    ``names`` are the cloned repos whose root files they contain; each clone
+    gets ``CLONE_OVERRIDE`` so a codex started inside it reads them once.
+
+    A failure is raised, not logged: codex would run with none of the
+    target repos' instructions, which is the defect this exists to close.
+    """
+    result = await workspace.execute(
+        [
+            "sh",
+            "-c",
+            INSTALL_CODEX_INSTRUCTIONS,
+            "sh",
+            f"/workspace/{CODEX_INSTRUCTIONS_STAGED}",
+            *(f"/workspace/repos/{name}" for name in names),
+        ],
+        timeout_seconds=30,
+    )
+    if result.exit_code != 0 or result.timed_out:
+        msg = f"could not install codex's instructions (exit {result.exit_code}): {result.stderr}"
+        raise RuntimeError(msg)

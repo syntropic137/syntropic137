@@ -39,6 +39,7 @@ class RecordedTimeProjection(AutoDispatchProjection):
     """An ``AutoDispatchProjection`` whose handlers can read ``recorded_at``."""
 
     _recorded_at: datetime | None = None
+    _recorded_sequence: int | None = None
 
     @property
     def recorded_at(self) -> datetime | None:
@@ -50,14 +51,27 @@ class RecordedTimeProjection(AutoDispatchProjection):
         """
         return self._recorded_at
 
+    @property
+    def recorded_sequence(self) -> int | None:
+        """The handled event's position in its own stream (``aggregate_nonce``).
+
+        Immutable and unique per stream, so it identifies an event where a
+        recorded time cannot: two events committed in one batch share a
+        millisecond, and clocks can step backwards. None exactly when
+        ``recorded_at`` is.
+        """
+        return self._recorded_sequence
+
     @contextmanager
     def recording(self, envelope: EventEnvelope[DomainEvent]) -> Iterator[None]:
         """Expose ``envelope``'s recorded time to the handlers for one dispatch."""
         self._recorded_at = envelope.metadata.recorded_timestamp
+        self._recorded_sequence = envelope.metadata.aggregate_nonce
         try:
             yield
         finally:
             self._recorded_at = None
+            self._recorded_sequence = None
 
     async def handle_event(
         self,

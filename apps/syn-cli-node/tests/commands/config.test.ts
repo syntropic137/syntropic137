@@ -25,11 +25,6 @@ describe("config commands", () => {
     const handler = configGroup.getCommand("show")!.handler;
 
     it("displays configuration with defaults", async () => {
-      delete process.env["SYN_API_URL"];
-      delete process.env["SYN_API_TOKEN"];
-      delete process.env["SYN_API_USER"];
-      delete process.env["SYN_API_PASSWORD"];
-
       await handler({ positionals: [], values: {} });
       const out = stdout();
       expect(out).toContain("CLI Configuration");
@@ -51,20 +46,12 @@ describe("config commands", () => {
     const handler = configGroup.getCommand("validate")!.handler;
 
     it("passes for localhost with no auth", async () => {
-      delete process.env["SYN_API_URL"];
-      delete process.env["SYN_API_TOKEN"];
-      delete process.env["SYN_API_USER"];
-      delete process.env["SYN_API_PASSWORD"];
-
       await handler({ positionals: [], values: {} });
       expect(stdout()).toContain("valid");
     });
 
     it("fails for remote URL without auth", async () => {
       vi.stubEnv("SYN_API_URL", "https://api.example.com");
-      delete process.env["SYN_API_TOKEN"];
-      delete process.env["SYN_API_USER"];
-      delete process.env["SYN_API_PASSWORD"];
 
       await expect(handler({ positionals: [], values: {} })).rejects.toThrow(CLIError);
     });

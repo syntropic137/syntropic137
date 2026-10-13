@@ -2149,13 +2149,13 @@ evidence, in either direction.
 ### Concurrency
 
 - [ ] `SYN_POLLING_MAX_CONCURRENT_DISPATCHES` is **UNSET** (retired by #1557; set, it is ignored with a startup warning)
-- [ ] `SYN_EXECUTION_MAX_CONCURRENT` fits `API_MEMORY_LIMIT`: at most `(MiB - 128) / 96` (4 for 512m, 20 for 2g). The startup log warns when it does not.
+- [ ] `SYN_EXECUTION_MAX_CONCURRENT` fits `API_MEMORY_LIMIT` by the unvalidated heuristic `(MiB - 128) / 96` (20 for the 2g default, 4 for 512m; the per-run figure is an upper bound pending #1717). The startup log warns when it does not.
 - [ ] Start more executions than the budget: the extras show `status: queued` with a position in `syn execution show <id>`, not a 404, and each starts once a slot frees.
 
 One budget bounds every start path: `POST /execute`, trigger dispatch and
 resume (#1557). The hazard of a high value is API memory, not isolation: #1311
 closed the #865 isolation defect, and #1552 showed 8 concurrent runs OOM-kill a
-512m API, taking every in-flight run with it.
+512m API (the former default; now 2g), taking every in-flight run with it.
 
 ---
 

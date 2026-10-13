@@ -82,6 +82,7 @@ sys.exit(subprocess.call(["bash", "-c", sys.argv[-1].replace("/root/.syntropic13
 
 _CURL = r"""#!/usr/bin/env python3
 import json, os, pathlib, sys
+sys.stdin.read()  # the `-K -` config; unread, api_curl's printf can SIGPIPE
 a = sys.argv[1:]
 url = next(x for x in a if x.startswith("http"))
 with open(os.environ["HAZARD_CALLS"], "a") as f:

@@ -142,8 +142,8 @@ async def test_postgres_page_keys_answers_what_page_query_run_answers(
     pool = await asyncpg.create_pool(e2_database, min_size=1, max_size=2)
     try:
         store = PostgresProjectionStore(pool)
-        # Written oldest key first, so ``updated_at`` cannot hide a tie the
-        # timestamp sort leaves to it in the opposite direction.
+        # Written oldest key first, so a tie broken by ``updated_at`` (write
+        # time) instead of the key would come back in the opposite order.
         for key in reversed(DOCS):
             await store.save(PROJECTION, key, dict(DOCS[key]))
         stored = await store.get_all(PROJECTION)
@@ -151,6 +151,7 @@ async def test_postgres_page_keys_answers_what_page_query_run_answers(
             [(key, DOCS[key]) for key in _keys_in_read_order(stored)],
             document_of=lambda kv: kv[1],
             to_row=lambda kv: kv[0],
+            key_of=lambda kv: kv[0],
         )
 
         assert await store.page_keys(PROJECTION, query) == expected
@@ -159,7 +160,7 @@ async def test_postgres_page_keys_answers_what_page_query_run_answers(
 
 
 def _keys_in_read_order(stored: list[ProjectionRecord]) -> list[str]:
-    """``get_all``'s order, which is the order ``paginate``'s stable sort breaks ties by."""
+    """``get_all``'s order: what ``run`` reads, before it breaks ties by key."""
     names = {str(doc.get("name")): key for key, doc in DOCS.items()}
     return [names[str(doc.get("name"))] for doc in stored]
 
@@ -230,9 +231,47 @@ async def test_the_execution_window_is_answered_from_its_index(e2_database: str)
             [(key, docs[key]) for key in _keys_in_read_order(stored)],
             document_of=lambda kv: kv[1],
             to_row=lambda kv: kv[0],
+            key_of=lambda kv: kv[0],
         )
 
         assert f"idx_{projection}_window_started_at" in plan, plan
         assert await store.page_keys(projection, query) == expected
+    finally:
+        await pool.close()
+
+
+async def test_a_tie_split_across_a_page_boundary_survives_a_rewrite_between_requests(
+    e2_database: str,
+) -> None:
+    """Tied rows, page size 1, the second rewritten between requests (#1800 review).
+
+    ``updated_at`` moves on that write; the key does not. The store and
+    ``PageQuery.run`` (over ``get_all``'s now-reordered read) both page x then y.
+    """
+    tied = "2026-10-01T10:00:00+00:00"
+    query = PageQuery(status=TEXT, timestamp_field="at", limit=1)
+    pool = await asyncpg.create_pool(e2_database, min_size=1, max_size=2)
+    try:
+        store = PostgresProjectionStore(pool)
+        projection = "page_query_tie"
+        for key in ("x", "y"):
+            await store.save(projection, key, {"name": key, "status": "completed", "at": tied})
+
+        page_1 = await store.page_keys(projection, query)
+        await store.save(projection, "y", {"name": "y", "status": "failed", "at": tied})
+        second = PageQuery(status=TEXT, timestamp_field="at", offset=1, limit=1)
+        page_2 = await store.page_keys(projection, second)
+        stored = await store.get_all(projection)
+        fallback = [
+            second.run(
+                [(str(doc["name"]), doc) for doc in stored],
+                document_of=lambda kv: kv[1],
+                to_row=lambda kv: kv[0],
+                key_of=lambda kv: kv[0],
+            ).rows
+        ]
+
+        assert page_1.rows + page_2.rows == ["x", "y"]
+        assert fallback == [page_2.rows]
     finally:
         await pool.close()

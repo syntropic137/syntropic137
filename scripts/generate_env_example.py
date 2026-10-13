@@ -753,6 +753,7 @@ def generate_infra_env_example() -> str:
         "SELF-HOST-SPECIFIC (Optional)": [
             "syn_gateway_port",
             "syn_gateway_bind",
+            "syn_gateway_ui",
             "syn_api_password",
             "syn_api_user",
             "restart_policy",

@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Syn137 evals</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Orbitron:wght@500;600;700&display=swap">
+<style>
+:root{--ac:#4D80FF}
+body{margin:0;background:#0A0C14}
+a{color:#E8EEFB}a:hover{color:#FFFFFF}
+.row:hover{background:#111626}
+.card:hover{border-color:#34406A}
+.ghost:hover{background:#151A2A}
+.cell:hover{background:#151A2A}
+button{font-family:inherit}
+input::placeholder{color:#6F7FA3}
+:focus-visible{outline:2px solid var(--ac);outline-offset:2px}
+</style>
+</helmet>
+<div style="--ac: {{accent}}; display: flex; flex-direction: column; min-height: 100vh; background: #0A0C14; color: #E8EEFB; font-family: 'Instrument Sans', 'Helvetica Neue', system-ui, sans-serif; font-size: 14px; line-height: 1.45; -webkit-font-smoothing: antialiased">
+
+<dc-import name="TopNav" active="evals" hint-size="100%,78px"></dc-import>
+
+<nav aria-label="Breadcrumb" style="display: flex; flex-wrap: wrap; align-items: center; gap: 4px; box-sizing: border-box; width: 100%; max-width: 1400px; margin: 0 auto; padding: 0 40px 14px; font-size: 13px">
+<a href="Main.dc.html" aria-label="Overview" style="display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 10px; color: #9AA8C7"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M2.75 7.25L8 2.75l5.25 4.5V13a.5.5 0 0 1-.5.5H9.5V9.75h-3v3.75H3.25a.5.5 0 0 1-.5-.5z"></path></svg></a>
+<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="#6F7FA3" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink: 0; opacity: 0.7"><path d="M6 3.5L10.5 8 6 12.5"></path></svg>
+<span aria-current="page" style="display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 9px; border: 1px solid #1A2032; background: #0F121C; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04); font-weight: 600; color: #E8EEFB; white-space: nowrap">Evals</span>
+</nav>
+
+<main style="display: flex; flex-direction: column; gap: 28px; box-sizing: border-box; width: 100%; max-width: 1400px; margin: 0 auto; padding: 8px 40px 64px">
+
+<section aria-label="Evals" style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 28px 48px; padding: 32px 36px; border-radius: 24px; border: 1px solid #1A2032; background: radial-gradient(50% 130% at 100% 0%, color-mix(in oklab, var(--ac) 18%, transparent), transparent 70%), #0D101A; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05)">
+<div style="display: flex; align-items: center; gap: 24px; min-width: 0; max-width: 820px">
+<svg width="84" height="84" viewBox="0 0 64 64" aria-hidden="true" style="flex-shrink: 0">
+<ellipse cx="32" cy="58" rx="19" ry="3.5" style="fill: var(--ac); opacity: 0.22"></ellipse>
+<polygon points="26,9 32,9 32,54 11,54 26,25" style="fill: color-mix(in oklab, var(--ac) 58%, white); opacity: 0.4"></polygon>
+<polygon points="32,9 38,9 38,25 53,54 32,54" style="fill: color-mix(in oklab, var(--ac) 50%, black); opacity: 0.55"></polygon>
+<polygon points="19.3,38 32,38 32,54 11,54" style="fill: var(--ac)"></polygon>
+<polygon points="32,38 44.7,38 53,54 32,54" style="fill: color-mix(in oklab, var(--ac) 50%, black)"></polygon>
+<polygon points="19.3,38 32,35 44.7,38 32,41" style="fill: color-mix(in oklab, var(--ac) 58%, white)"></polygon>
+<polygon points="23.5,6 40.5,6 40.5,10 23.5,10" style="fill: color-mix(in oklab, var(--ac) 58%, white)"></polygon>
+</svg>
+<div style="display: flex; flex-direction: column; gap: 8px; min-width: 0">
+<h1 style="margin: 0; font-size: 44px; line-height: 1.05; font-weight: 600; letter-spacing: -0.035em">Evals</h1>
+<p style="margin: 0; font-size: 15px; color: #9AA8C7; text-wrap: pretty">Stable cases run again and again, so the same goal can be compared across workflows and models over time. 65 evals.</p>
+</div>
+</div>
+<label style="display: flex; align-items: center; gap: 8px; height: 38px; width: 280px; max-width: 100%; box-sizing: border-box; padding: 0 12px; border-radius: 12px; border: 1px solid #283048; background: #0A0C14; color: #6F7FA3">
+<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="7" cy="7" r="4.25"></circle><path d="M10.25 10.25L13.5 13.5"></path></svg>
+<input type="search" aria-label="Filter evals by tag" placeholder="Filter by tag, e.g. case:codex-cost-limit" style="flex-grow: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: #E8EEFB; font: inherit; font-size: 13.5px">
+</label>
+</section>
+
+<section aria-label="Verdict board" style="display: flex; flex-direction: column; gap: 20px; padding: 26px 26px 22px; border-radius: 20px; border: 1px solid #1A2032; background: #0D101A; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04); background: radial-gradient(60% 60% at 40% 100%, color-mix(in oklab, var(--ac) 10%, transparent), transparent 75%), #0D101A">
+<div style="display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px 32px">
+<div style="display: flex; flex-direction: column; gap: 8px; min-width: 0; max-width: 760px">
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px">
+<h2 style="margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -0.015em">Verdict board</h2>
+<span style="height: 24px; padding: 0 10px; border-radius: 12px; background: color-mix(in oklab, var(--ac) 14%, transparent); color: color-mix(in oklab, var(--ac) 45%, white); font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; line-height: 24px">verifier-seed-v1 · v2</span>
+</div>
+<p style="margin: 0; font-size: 14.5px; line-height: 1.5; color: #9AA8C7; text-wrap: pretty">Does the verifier block a change that carries a known escaped bug, and name the defect and the file it lives in? Six cases, each pinned to the commit before its fix, under four verifiers.</p>
+</div>
+<div aria-label="Legend" style="display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; font-size: 12.5px; color: #9AA8C7">
+<span style="display: flex; align-items: center; gap: 7px"><span style="width: 10px; height: 16px; border-radius: 2px; background: var(--ac)"></span>Pass</span>
+<span style="display: flex; align-items: center; gap: 7px"><span style="width: 10px; height: 8px; border-radius: 2px; background: #FF6F61"></span>Fail</span>
+<span style="display: flex; align-items: center; gap: 7px"><span style="width: 10px; height: 8px; border-radius: 2px; background: #E5B450"></span>Scorer error</span>
+<span style="display: flex; align-items: center; gap: 7px"><span style="width: 10px; height: 3px; border-radius: 1px; background: #6F7FA3"></span>Unscored</span>
+</div>
+</div>
+
+<div style="display: flex; flex-wrap: wrap; align-items: stretch; gap: 20px 24px">
+
+<div style="flex: 999 1 640px; min-width: 0; overflow-x: auto">
+<div role="table" aria-label="Latest verdict for each case under each verifier" style="display: flex; flex-direction: column; min-width: 700px">
+
+<div role="row" style="display: grid; grid-template-columns: minmax(200px, 1.5fr) repeat(4, minmax(110px, 1fr)); align-items: end; padding: 0 0 10px; border-bottom: 1px solid #1A2032">
+<span role="columnheader" style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3; padding-left: 4px">Case</span>
+<sc-for list="{{cols}}" as="v" hint-placeholder-count="4">
+<div role="columnheader" style="display: flex; flex-direction: column; align-items: center; gap: 3px; min-width: 0; padding: 0 6px; text-align: center">
+<span style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: #9AA8C7"><span style="width: 7px; height: 7px; border-radius: 50%; background: {{v.dot}}"></span>{{v.agent}}</span>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px; font-weight: 600">{{v.model}}</span>
+</div>
+</sc-for>
+</div>
+
+<sc-for list="{{board}}" as="b" hint-placeholder-count="6">
+<div role="row" style="display: grid; grid-template-columns: minmax(200px, 1.5fr) repeat(4, minmax(110px, 1fr)); align-items: center; border-bottom: 1px solid #151A29">
+<div role="rowheader" style="display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 8px 4px">
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13.5px; font-weight: 600; overflow-wrap: anywhere">{{b.name}}</span>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3">{{b.sub}}</span>
+</div>
+<sc-for list="{{b.cells}}" as="c" hint-placeholder-count="4">
+<button class="cell" role="cell" type="button" aria-label="{{c.label}}" aria-pressed="{{c.on}}" onMouseEnter="{{c.pick}}" onFocus="{{c.pick}}" onClick="{{c.pick}}" style="display: flex; flex-direction: column; align-items: center; gap: 0; margin: 4px; padding: 6px 4px 8px; border-radius: 14px; border: 1px solid {{c.bd}}; background: {{c.bg}}; color: #9AA8C7; cursor: pointer">
+<svg width="56" height="48" viewBox="0 0 56 48" aria-hidden="true" style="flex-shrink: 0">
+<ellipse cx="28" cy="43" rx="15" ry="3.2" style="fill: {{c.glow}}; opacity: 0.2"></ellipse>
+<polygon points="{{c.left}}" style="fill: {{c.cLeft}}"></polygon>
+<polygon points="{{c.right}}" style="fill: {{c.cRight}}"></polygon>
+<polygon points="{{c.top}}" style="fill: {{c.cTop}}"></polygon>
+</svg>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: {{c.fg}}">{{c.cost}}</span>
+</button>
+</sc-for>
+</div>
+</sc-for>
+
+<div role="row" style="display: grid; grid-template-columns: minmax(200px, 1.5fr) repeat(4, minmax(110px, 1fr)); align-items: start; padding-top: 14px">
+<div role="rowheader" style="display: flex; flex-direction: column; gap: 2px; padding: 2px 4px">
+<span style="font-size: 14px; font-weight: 600">Bugs caught</span>
+<span style="font-size: 12.5px; color: #9AA8C7">with average cost and time per case</span>
+</div>
+<sc-for list="{{foot}}" as="f" hint-placeholder-count="4">
+<div role="cell" style="display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 0; padding: 0 8px; text-align: center">
+<span style="font-size: 26px; line-height: 1.1; font-weight: 600; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; color: {{f.fg}}">{{f.frac}}</span>
+<span aria-hidden="true" style="display: block; width: 100%; max-width: 110px; height: 6px; border-radius: 3px; background: #1A2134"><span style="display: block; width: {{f.pct}}; height: 100%; border-radius: 3px; background: var(--ac)"></span></span>
+<span style="font-size: 12px; color: #9AA8C7">{{f.note}}</span>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #9AA8C7">{{f.cost}} · {{f.dur}}</span>
+</div>
+</sc-for>
+</div>
+
+</div>
+</div>
+
+<aside aria-label="Selected run" role="status" style="flex: 1 1 280px; min-width: 0; display: flex; flex-direction: column; gap: 14px; padding: 18px; border-radius: 16px; border: 1px solid #283048; background: #111626; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06)">
+<div style="display: flex; align-items: center; justify-content: space-between; gap: 10px">
+<span style="height: 26px; padding: 0 12px; border-radius: 13px; background: {{pick.pillBg}}; color: {{pick.pillFg}}; font-size: 13px; font-weight: 600; line-height: 26px">{{pick.word}}</span>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #9AA8C7">{{pick.date}}</span>
+</div>
+<div style="display: flex; flex-direction: column; gap: 6px; min-width: 0">
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 15px; font-weight: 600; overflow-wrap: anywhere">{{pick.name}}</span>
+<span style="display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; font-size: 13px"><span style="display: flex; align-items: center; gap: 6px"><span style="width: 8px; height: 8px; border-radius: 50%; background: {{pick.dot}}"></span>{{pick.agent}}</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #9AA8C7">{{pick.model}}</span></span>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #6F7FA3; overflow-wrap: anywhere">{{pick.wf}}</span>
+</div>
+<div style="display: flex; flex-direction: column; gap: 6px; padding-top: 14px; border-top: 1px solid #222A40">
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3">Scorer evidence</span>
+<p style="margin: 0; font-size: 13.5px; line-height: 1.5; color: #D3DAEC">{{pick.evidence}}</p>
+</div>
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; padding-top: 14px; border-top: 1px solid #222A40">
+<div style="display: flex; flex-direction: column; gap: 2px"><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 15px; font-weight: 600">{{pick.cost}}</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3; font-size: 10px">Cost</span></div>
+<div style="display: flex; flex-direction: column; gap: 2px"><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 15px; font-weight: 600">{{pick.dur}}</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3; font-size: 10px">Duration</span></div>
+<div style="display: flex; flex-direction: column; gap: 2px"><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 15px; font-weight: 600">1</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3; font-size: 10px">Runs</span></div>
+</div>
+<div style="display: flex; gap: 8px; margin-top: auto">
+<a href="Eval.dc.html" style="display: flex; align-items: center; justify-content: center; flex: 1 1 0; height: 38px; border-radius: 12px; background: color-mix(in oklab, var(--ac) 80%, black); box-shadow: inset 0 1px 0 color-mix(in oklab, var(--ac) 60%, white), 0 10px 24px -10px var(--ac); color: #FFFFFF; font-size: 13.5px; font-weight: 600; text-decoration: none">Open eval</a>
+<a class="ghost" href="Execution.dc.html" style="display: flex; align-items: center; justify-content: center; flex: 1 1 0; height: 38px; border-radius: 12px; border: 1px solid #283048; background: #0F121C; font-size: 13.5px; font-weight: 600; text-decoration: none">Open run</a>
+</div>
+</aside>
+
+</div>
+</section>
+
+<section aria-label="All evals" style="display: flex; flex-direction: column; gap: 14px">
+<div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px">
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px">
+<h2 style="margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -0.015em">All evals</h2>
+<span style="font-size: 14px; color: #9AA8C7">Newest run first. Select a tag to filter.</span>
+</div>
+<sc-if value="{{hasTag}}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: #9AA8C7">
+<span>Tagged</span>
+<button type="button" aria-label="{{clearLabel}}" onClick="{{clearTag}}" style="display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px 0 12px; border: 1px solid #34406A; border-radius: 14px; background: #1A2134; color: #E8EEFB; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; cursor: pointer">
+<span>{{tag}}</span>
+<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"></path></svg>
+</button>
+</div>
+</sc-if>
+</div>
+<div style="display: flex; flex-direction: column; gap: 2px; padding: 8px; border-radius: 20px; border: 1px solid #1A2032; background: #0D101A; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04)">
+<sc-for list="{{rows}}" as="r" hint-placeholder-count="8">
+<div class="row" style="display: flex; align-items: flex-start; gap: 16px; padding: 16px 14px; border-radius: 14px">
+<svg width="44" height="38" viewBox="0 0 56 48" aria-hidden="true" style="flex-shrink: 0">
+<ellipse cx="28" cy="43" rx="15" ry="3.2" style="fill: {{r.glow}}; opacity: 0.2"></ellipse>
+<polygon points="{{r.left}}" style="fill: {{r.cLeft}}"></polygon>
+<polygon points="{{r.right}}" style="fill: {{r.cRight}}"></polygon>
+<polygon points="{{r.top}}" style="fill: {{r.cTop}}"></polygon>
+</svg>
+<div style="display: flex; flex-direction: column; gap: 9px; flex-grow: 1; min-width: 0">
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 20px">
+<a href="Eval.dc.html" style="min-width: 0; font-size: 15.5px; font-weight: 600; text-decoration: none; overflow-wrap: anywhere">{{r.name}}</a>
+<div style="display: flex; align-items: center; gap: 14px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #9AA8C7">
+<span>{{r.runs}}</span>
+<span role="img" aria-label="{{r.sparkLabel}}" style="display: flex; align-items: flex-end; gap: 2px; height: 16px">
+<sc-for list="{{r.spark}}" as="s" hint-placeholder-count="1">
+<span style="width: 6px; height: {{s.h}}; border-radius: 1px; background: {{s.c}}"></span>
+</sc-for>
+</span>
+<span style="min-width: 76px; text-align: right; color: #E8EEFB">{{r.pass}}</span>
+<span style="min-width: 54px; text-align: right">{{r.when}}</span>
+</div>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 6px">
+<sc-for list="{{r.tags}}" as="t" hint-placeholder-count="3">
+<button type="button" onClick="{{t.pick}}" style="max-width: 100%; height: 24px; padding: 0 10px; border: 0; border-radius: 12px; background: color-mix(in oklab, var(--ac) 14%, transparent); color: color-mix(in oklab, var(--ac) 45%, white); font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer">{{t.t}}</button>
+</sc-for>
+</div>
+<span style="display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #9AA8C7"><span style="overflow-wrap: anywhere">{{r.wf}}</span><span style="color: #6F7FA3">·</span><span>{{r.model}}</span><span aria-hidden="true" style="color: #6F7FA3">→</span><span style="color: #E8EEFB">{{r.pass}}</span></span>
+</div>
+</div>
+</sc-for>
+</div>
+<div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; font-size: 13px; color: #9AA8C7">
+<span>{{summary}}</span>
+<div style="display: flex; align-items: center; gap: 8px">
+<button type="button" disabled="{{ true }}" style="height: 34px; padding: 0 14px; border-radius: 11px; border: 1px solid #1A2032; background: transparent; color: #6F7FA3; font-size: 13px">Previous</button>
+<button class="ghost" type="button" style="height: 34px; padding: 0 14px; border-radius: 11px; border: 1px solid #283048; background: #0F121C; color: #E8EEFB; font-size: 13px; cursor: pointer">Next</button>
+</div>
+</div>
+</section>
+
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#4D80FF","options":["#4D80FF","#4CC9F0","#45E0A0","#A78BFA"]},"$preview":{"width":1440,"height":2400}}'>
+class Component extends DCLogic {
+renderVals() {
+const CASES = [
+{ id: 'shared-esp-stream', pr: 1574, sha: '6646da278d17', file: 'ExecutionRequestAggregate.py' },
+{ id: 'execution-id-as-eval-id', pr: 1649, sha: '7047b1c3daf1', file: 'EvalAggregate.py' },
+{ id: 'binary-artifact-minio-key', pr: 1652, sha: 'b2f680f00b4e', file: 'minio.py' },
+{ id: 'codex-cost-limit', pr: 1654, sha: '123b25204fce', file: 'CodexStreamProcessor.py' },
+{ id: 'live-commits-unvalidated-sha', pr: 1679, sha: '4c16d8f95fca', file: 'useEventFeed.ts' },
+{ id: 'repo-privacy-ignores-app', pr: 1680, sha: '4c16d8f95fca', file: 'useRepoList.ts' }
+];
+const VERIFIERS = [
+{ agent: 'Claude', dot: '#D97757', model: 'claude-opus-5-5', short: 'opus', wf: 'eval-verify-pinned-v1', when: '5d ago', date: 'Oct 2, 2026' },
+{ agent: 'Claude', dot: '#D97757', model: 'claude-sonnet-5-5', short: 'sonnet', wf: 'eval-verify-pinned-sonnet-v1', when: '1d ago', date: 'Oct 6, 2026' },
+{ agent: 'Codex', dot: '#8E9BBC', model: 'gpt-5.6-sol', short: 'sol', wf: 'eval-verify-pinned-codex-v1', when: '3d ago', date: 'Oct 4, 2026' },
+{ agent: 'Codex', dot: '#8E9BBC', model: 'gpt-5.6-terra', short: 'terra', wf: 'eval-verify-pinned-codex-gpt-5-6-terra-v1', when: '1h ago', date: 'Oct 7, 2026, 5:31 PM' }
+];
+const P = 'PASS', F = 'FAIL', E = 'ERROR', U = 'UNSCORED';
+const M = [
+[[P, 1.04, 372], [P, 0.52, 245], [P, 0.66, 228], [U, 0.61, 190]],
+[[P, 0.97, 341], [F, 0.47, 228], [P, 0.59, 204], [U, 0.55, 176]],
+[[P, 1.28, 418], [P, 0.61, 276], [F, 0.71, 246], [U, 0.68, 214]],
+[[P, 0.90, 305], [P, 0.44, 214], [P, 0.49, 187], [U, 0.52, 168]],
+[[P, 1.12, 388], [F, 0.55, 251], [F, 0.63, 219], [U, 0.58, 195]],
+[[F, 1.19, 402], [F, 0.58, 263], [E, 0.60, 231], [U, 0.64, 201]]
+];
+const LOOK = {
+PASS: { word: 'Pass', h: 24, face: 'var(--ac)', top: 'color-mix(in oklab, var(--ac) 58%, white)', side: 'color-mix(in oklab, var(--ac) 50%, black)', pillBg: 'color-mix(in oklab, var(--ac) 18%, transparent)', pillFg: 'color-mix(in oklab, var(--ac) 40%, white)', bar: 16 },
+FAIL: { word: 'Fail', h: 9, face: '#FF6F61', top: 'color-mix(in oklab, #FF6F61 58%, white)', side: 'color-mix(in oklab, #FF6F61 50%, black)', pillBg: '#2A1513', pillFg: '#FF8A7D', bar: 8 },
+ERROR: { word: 'Error', h: 9, face: '#E5B450', top: 'color-mix(in oklab, #E5B450 58%, white)', side: 'color-mix(in oklab, #E5B450 50%, black)', pillBg: '#1F1A0E', pillFg: '#EBD9A8', bar: 8 },
+UNSCORED: { word: 'Unscored', h: 3, face: '#4A567A', top: '#6F7FA3', side: '#2B3350', pillBg: '#171C2B', pillFg: '#9AA8C7', bar: 3 }
+};
+const money = (v) => '$' + v.toFixed(2);
+const mins = (s) => Math.floor(s / 60) + 'm ' + String(Math.round(s % 60)).padStart(2, '0') + 's';
+const blockOf = (v) => {
+const k = LOOK[v];
+const y = 34 - k.h;
+return {
+glow: k.face,
+left: '12,' + y + ' 28,' + (y + 8) + ' 28,42 12,34',
+right: '28,' + (y + 8) + ' 44,' + y + ' 44,34 28,42',
+top: '28,' + (y - 8) + ' 44,' + y + ' 28,' + (y + 8) + ' 12,' + y,
+cLeft: k.face,
+cRight: k.side,
+cTop: k.top
+};
+};
+const evidenceOf = (v, c, alt) => {
+if (v === P) return 'Blocked the change. Names ' + c.file + ' and matches every keyword group.';
+if (v === F) return alt ? 'Blocked, but the report never names ' + c.file + '.' : 'Approved the change. The defect in ' + c.file + ' went unreported.';
+if (v === E) return 'The scorer could not read a verdict from the verify report.';
+return 'Not scored yet. A verdict appears once the suite scorer has judged this run.';
+};
+const passDisplay = (v) => (v === P ? '100% (1/1)' : v === F ? '0% (0/1)' : '—');
+const sel = (this.state && this.state.sel) || '0-3';
+const tag = (this.state && this.state.tag) || '';
+const cellOf = (i, j) => {
+const c = CASES[i], v = VERIFIERS[j], m = M[i][j], k = LOOK[m[0]];
+const key = i + '-' + j;
+const on = key === sel;
+return Object.assign(blockOf(m[0]), {
+on: on ? 'true' : 'false',
+bd: on ? 'color-mix(in oklab, var(--ac) 70%, #1A2032)' : 'transparent',
+bg: on ? '#151A2A' : 'transparent',
+fg: on ? '#E8EEFB' : '#9AA8C7',
+cost: money(m[1]),
+label: c.id + ' under ' + v.model + ': ' + k.word + ', ' + money(m[1]),
+pick: () => this.setState({ sel: key })
+});
+};
+const board = CASES.map((c, i) => ({ name: c.id, sub: 'PR #' + c.pr + ' · ' + c.sha.slice(0, 7), cells: VERIFIERS.map((v, j) => cellOf(i, j)) }));
+const foot = VERIFIERS.map((v, j) => {
+const col = M.map((r) => r[j]);
+const pass = col.filter((m) => m[0] === P).length;
+const scored = col.filter((m) => m[0] !== U).length;
+const errs = col.filter((m) => m[0] === E).length;
+const cost = col.reduce((n, m) => n + m[1], 0) / col.length;
+const secs = col.reduce((n, m) => n + m[2], 0) / col.length;
+return {
+frac: scored === 0 ? '—' : pass + '/' + col.length,
+fg: scored === 0 ? '#6F7FA3' : '#E8EEFB',
+pct: Math.round((pass / col.length) * 100) + '%',
+note: scored === 0 ? 'not scored yet' : errs > 0 ? 'caught · ' + errs + ' scorer error' : 'caught',
+cost: money(cost),
+dur: mins(secs)
+};
+});
+const si = Number(sel.split('-')[0]), sj = Number(sel.split('-')[1]);
+const sm = M[si][sj], sk = LOOK[sm[0]], sv = VERIFIERS[sj];
+const pick = { word: sk.word, pillBg: sk.pillBg, pillFg: sk.pillFg, date: sv.date, name: CASES[si].id, agent: sv.agent, dot: sv.dot, model: sv.model, wf: sv.wf, evidence: evidenceOf(sm[0], CASES[si], (si + sj) % 2 === 0), cost: money(sm[1]), dur: mins(sm[2]) };
+const ORDER = [3, 1, 2, 0];
+const all = [];
+ORDER.forEach((j) => CASES.forEach((c, i) => {
+const v = VERIFIERS[j], m = M[i][j], k = LOOK[m[0]];
+const tags = ['case:' + c.id, 'verifier-seed-v1:v2:' + v.wf, 'workflow:' + v.wf];
+all.push(Object.assign(blockOf(m[0]), {
+name: 'verifier-seed-v1 v2: ' + c.id,
+tagList: tags,
+tags: tags.map((t) => ({ t, pick: () => this.setState({ tag: t }) })),
+wf: v.wf,
+model: v.model,
+runs: '1 run',
+pass: passDisplay(m[0]),
+when: v.when,
+spark: [{ h: k.bar + 'px', c: k.face }],
+sparkLabel: 'Last run: ' + k.word
+}));
+}));
+const matched = all.filter((r) => !tag || r.tagList.includes(tag));
+const rows = matched.slice(0, 8);
+return {
+accent: this.props.accent ?? '#4D80FF',
+cols: VERIFIERS,
+board,
+foot,
+pick,
+rows,
+tag,
+hasTag: !!tag,
+clearLabel: 'Clear tag filter ' + tag,
+clearTag: () => this.setState({ tag: '' }),
+summary: tag ? 'Showing ' + rows.length + ' of ' + matched.length + ' evals with this tag' : 'Showing ' + rows.length + ' of 65 evals'
+};
+}
+}
+</script>
+</body>
+</html>

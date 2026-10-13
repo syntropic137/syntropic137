@@ -422,7 +422,7 @@ projections and the SQL row mappers alike. Rows without the `requested_model` ke
 pre-D9: a `model` in the FROZEN `LEGACY_REQUESTED_ALIASES` set was the request and nothing
 observed what ran; any other value (delegate imports, explicit pins) is kept as observed.
 The set is frozen, not derived from the live alias enums, so adding an alias can never
-reclassify history. No backfill: past alias runs honestly read `unknown (requested: opus)`.
+reclassify history. No backfill: past alias runs honestly read `opus (requested)`.
 
 **Cost.** `cost_by_model` is keyed by the reported id; unreported cost goes to
 `UNKNOWN_MODEL_KEY` (`"unattributed-model"`, the bucket that already existed for
@@ -435,7 +435,7 @@ run is a capture fault and is visible as the unknown bucket.
 
 **API.** Run-time `model` / `agent_model` fields hold the reported id or null, beside
 `requested_model` and a backend-formatted `*_display` (`claude-opus-5-5`, or
-`unknown (requested: gpt-sol)`), rendered verbatim by CLI and dashboard. A response-model
+`gpt-sol (requested)`), rendered verbatim by CLI and dashboard. A response-model
 type rejects an alias in any run-time model field or `cost_by_model` key, and a meta-test
 fails when a new run-time model field is added without it.
 
@@ -447,7 +447,7 @@ shell and a real symlink.
 Delivery follows the documented chain: AgentParadise/agentic-primitives#429 (merged) ->
 the AP release PR (#430) -> a submodule bump here together with the release-built
 `PINNED_DIGESTS` (`check-pinned-image-channels` requires both to name the same commit).
-Until then a codex phase honestly reads `unknown (requested: gpt-sol)`.
+Until then a codex phase honestly reads `gpt-sol (requested)`.
 
 ## Consequences
 

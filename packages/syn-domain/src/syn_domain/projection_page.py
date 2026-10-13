@@ -70,6 +70,11 @@ class PageQuery:
     (each field is a JSON list holding every value given), and ``search`` as a
     case-insensitive substring of any ``search_fields``. ``statuses`` and the inclusive
     ``[after, before]`` window are the two dimensions ``paginate`` reports on.
+
+    Rows sharing a timestamp are ordered by their key, ascending: immutable, so
+    a row cannot move between pages when another one is updated. A store breaks
+    the tie by its key column; ``run`` by ``key_field`` of the document, which
+    names the field holding that key (none: the records' own order).
     """
 
     status: StatusOf
@@ -84,6 +89,7 @@ class PageQuery:
     before: datetime | None = None
     offset: int = 0
     limit: int | None = None
+    key_field: str | None = None
 
     def matches(self, record: ProjectionRecord) -> bool:
         """Whether ``record`` passes every filter except status and the window."""
@@ -103,8 +109,15 @@ class PageQuery:
         *,
         document_of: Callable[[R], ProjectionRecord],
         to_row: Callable[[R], T],
+        key_of: Callable[[R], str] | None = None,
     ) -> Page[T]:
-        """This query answered in Python: the definition a store is held to."""
+        """This query answered in Python: the definition a store is held to.
+
+        ``key_of`` is each record's key, the timestamp tie-break; by default
+        the document's ``key_field``.
+        """
+        if key_of is None and self.key_field is not None:
+            key_of = _field_of(document_of, self.key_field)
         return paginate(
             records,
             base_predicate=lambda r: self.matches(document_of(r)),
@@ -116,7 +129,13 @@ class PageQuery:
             to_row=to_row,
             offset=self.offset,
             limit=self.limit,
+            key_of=key_of,
         )
+
+
+def _field_of[R](document_of: Callable[[R], ProjectionRecord], name: str) -> Callable[[R], str]:
+    """A record's ``name`` field as text, for a sort key."""
+    return lambda record: str(document_of(record).get(name) or "")
 
 
 @runtime_checkable

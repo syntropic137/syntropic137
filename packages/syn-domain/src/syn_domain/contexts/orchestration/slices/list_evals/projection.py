@@ -23,9 +23,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from event_sourcing import AutoDispatchProjection
-
 from syn_domain.contexts.orchestration._shared.execution_list_reads import ExecutionListReads
+from syn_domain.contexts.orchestration._shared.recorded_time import RecordedTimeProjection
 from syn_domain.contexts.orchestration._shared.tags import TagSet, replay_tag_edit
 from syn_domain.contexts.orchestration.domain.aggregate_eval.value_objects import Verdict
 from syn_domain.contexts.orchestration.domain.events.EvalArchivedEvent import EvalArchivedEvent
@@ -41,6 +40,7 @@ from syn_domain.contexts.orchestration.domain.events.EvalUpdatedEvent import Eva
 from syn_domain.contexts.orchestration.domain.read_models.eval_runs import EvalRunScore
 from syn_domain.contexts.orchestration.domain.read_models.eval_summary import (
     EvalBaselineRepo,
+    EvalDefinitionChange,
     EvalDetail,
     EvalRecord,
     EvalSummary,
@@ -62,13 +62,19 @@ if TYPE_CHECKING:
     )
 
 
-class EvalListProjection(AutoDispatchProjection):
-    """Builds the eval list and eval detail read models from Eval events."""
+class EvalListProjection(RecordedTimeProjection):
+    """Builds the eval list and eval detail read models from Eval events.
+
+    A ``RecordedTimeProjection`` for the event's stream position only: a
+    definition change is identified and ordered by it (``recorded_sequence``),
+    while its date stays the one the event itself carries.
+    """
 
     PROJECTION_NAME = "evals"
     SCORES = "eval_run_scores"
-    VERSION = 2
-    """2: run scores (``EvalRunScored``) in ``SCORES``."""
+    VERSION = 3
+    """2: run scores (``EvalRunScored``) in ``SCORES``.
+    3: ``judge_model`` on scores; definition version and changes on records (#1788)."""
 
     def __init__(self, store: ProjectionStore):
         self._store = store
@@ -85,6 +91,16 @@ class EvalListProjection(AutoDispatchProjection):
             await self._store.delete_all(self.PROJECTION_NAME)
             await self._store.delete_all(self.SCORES)
 
+    def _sequence(self, changes: tuple[EvalDefinitionChange, ...]) -> int:
+        """The handled event's stream position.
+
+        A handler called without an envelope (a unit test calling ``on_*``
+        directly) has none, and nothing to be redelivered: it is the next one.
+        """
+        if self.recorded_sequence is not None:
+            return self.recorded_sequence
+        return changes[-1].sequence + 1 if changes else 1
+
     async def on_eval_created(self, event_data: EvalCreatedEvent) -> None:
         event = EvalCreatedEvent.model_validate(event_data)
         created_at = event.created_at.isoformat()
@@ -99,6 +115,13 @@ class EvalListProjection(AutoDispatchProjection):
             archived=False,
             created_at=created_at,
             updated_at=created_at,
+            definition_changes=(
+                EvalDefinitionChange(
+                    sequence=self._sequence(()),
+                    definition_version=1,
+                    changed_at=created_at,
+                ),
+            ),
         )
         await self._save(record)
 
@@ -109,6 +132,19 @@ class EvalListProjection(AutoDispatchProjection):
             return
         tags = replay_tag_edit(record.tags, event.tags_added, added=True)
         tags = replay_tag_edit(tags, event.tags_removed, added=False)
+        updated_at = event.updated_at.isoformat()
+        changes = record.definition_changes
+        redefines = event.goal is not None or event.baseline_repos is not None
+        sequence = self._sequence(changes)
+        # A redelivered event has the same stream position: not a second change.
+        if redefines and not any(c.sequence == sequence for c in changes):
+            version = changes[-1].definition_version + 1 if changes else 1
+            changes = (
+                *changes,
+                EvalDefinitionChange(
+                    sequence=sequence, definition_version=version, changed_at=updated_at
+                ),
+            )
         await self._save(
             record.model_copy(
                 update={
@@ -120,7 +156,8 @@ class EvalListProjection(AutoDispatchProjection):
                         else _baseline(event.baseline_repos)
                     ),
                     "tags": tuple(tags),
-                    "updated_at": event.updated_at.isoformat(),
+                    "updated_at": updated_at,
+                    "definition_changes": changes,
                 }
             )
         )
@@ -156,6 +193,7 @@ class EvalListProjection(AutoDispatchProjection):
             scorer=event.scorer,
             scorer_version=event.scorer_version,
             scored_at=event.scored_at.isoformat(),
+            judge_model=event.judge_model,
         )
         await self._store.save(
             self.SCORES,
@@ -168,6 +206,19 @@ class EvalListProjection(AutoDispatchProjection):
         documents = await self._store.query(self.SCORES, filters={"eval_id": eval_id})
         scores = (EvalRunScore.model_validate(document) for document in documents)
         return {score.execution_id: score for score in scores}
+
+    async def scores_in(self, eval_ids: Collection[str]) -> dict[tuple[str, str], EvalRunScore]:
+        """Every run's current score in each Eval given, by ``(eval_id, execution_id)``, in one read.
+
+        What ``scores`` answers for each Eval, without a read per Eval (#1811).
+        Filtered by Eval alone: also filtering by every member's execution id
+        multiplies the filter by the size of the page for no fewer rows.
+        """
+        if not eval_ids:
+            return {}
+        documents = await self._store.query(self.SCORES, filters={"eval_id": sorted(set(eval_ids))})
+        scores = (EvalRunScore.model_validate(document) for document in documents)
+        return {(score.eval_id, score.execution_id): score for score in scores}
 
     async def score(self, eval_id: str, execution_id: str) -> EvalRunScore | None:
         """The run's current score in the eval, or None if it was never scored."""
@@ -240,6 +291,7 @@ class EvalListProjection(AutoDispatchProjection):
             before=created_before,
             offset=offset,
             limit=limit,
+            key_field="eval_id",
         )
         records = await page_projection(
             self._store, self.PROJECTION_NAME, query, to_row=_from_document
@@ -288,6 +340,16 @@ class EvalListProjection(AutoDispatchProjection):
         own stream is projected, even before the Eval's record catches up.
         """
         return await self._runs.page(eval_id=eval_id, statuses=statuses, offset=offset, limit=limit)
+
+    async def members_of(
+        self, eval_ids: Collection[str]
+    ) -> dict[str, list[WorkflowExecutionSummary]]:
+        """Every current member execution of each Eval given, in one read, unordered.
+
+        A page of the eval list needs every run of every eval on it; asking
+        ``members`` once per eval was a query per row (#1811).
+        """
+        return await self._runs.members_of(eval_ids)
 
     async def _record(self, eval_id: str) -> EvalRecord | None:
         document = await self._store.get(self.PROJECTION_NAME, eval_id)

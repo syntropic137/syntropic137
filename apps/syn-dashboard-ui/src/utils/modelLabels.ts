@@ -15,7 +15,7 @@ export function costByModelKeyLabel(key: string): string {
  *
  * Only shown when a model WAS observed and differs from what was requested.
  * When nothing was observed the API's display string already carries
- * "unknown (requested: X)", so repeating it would be noise.
+ * "X (requested)", so repeating it would be noise.
  */
 export function requestedModelNote(
   observed: string | null | undefined,

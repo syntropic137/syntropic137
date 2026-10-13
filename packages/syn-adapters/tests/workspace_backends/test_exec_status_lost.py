@@ -236,7 +236,7 @@ class TestTheCause:
     ) -> None:
         """The loop keeps running while a slow filesystem is being read."""
 
-        def _slow(path: Path, patterns: list[str]) -> list[tuple[str, bytes]]:
+        def _slow(path: Path, patterns: list[str], **_kw: int) -> list[tuple[str, bytes]]:
             time.sleep(0.5)
             return []
 

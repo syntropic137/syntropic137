@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+from syn_domain.contexts.orchestration._shared.shipped_ledger import ShippedLedgerProvider
+from syn_domain.contexts.orchestration._shared.shipped_recorder import shipped_recorder
 from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoAction, TodoItem
 from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins import (
     phase_definitions_of,
@@ -120,6 +122,7 @@ if TYPE_CHECKING:
         ArtifactContentStoragePort,
     )
     from syn_domain.contexts.orchestration._shared.eval_choice import LaunchEval
+    from syn_domain.contexts.orchestration._shared.shipped_ledger import ShippedLedger
     from syn_domain.contexts.orchestration._shared.tags import TagSet
     from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins import (
         ResumeOrigin,
@@ -211,7 +214,15 @@ class WorkflowExecutionProcessor:
         owed_cancelled_work: ProjectionStore | None = None,
         delegation_evidence: DelegationEvidencePort | None = None,
         interrupt_budget_seconds: float = 60.0,
+        shipped_ledger: ShippedLedger | None = None,
     ) -> None:
+        #: Where what each phase shipped is recorded, once, as its stream is read:
+        #: given, else kept by the Lane 2 store itself when it can (ShippedLedgerProvider).
+        self._shipped_ledger = shipped_ledger or (
+            observability_writer.shipped_ledger
+            if isinstance(observability_writer, ShippedLedgerProvider)
+            else None
+        )
         #: How long a shutdown waits for a run's work to be saved and the run
         #: recorded INTERRUPTED before tearing it down (#1381).
         self._interrupt_budget_seconds = interrupt_budget_seconds
@@ -767,6 +778,7 @@ class WorkflowExecutionProcessor:
                 observability=self._observability_writer,
                 retry_policy=self._retry_policy,
                 on_push=push_recorder(aggregate, self._journal, todo.phase_id),
+                shipped=shipped_recorder(self._shipped_ledger, aggregate, todo.execution_id),
             )
             said = result.stream_result.last_agent_message
 

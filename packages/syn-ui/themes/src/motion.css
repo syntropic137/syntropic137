@@ -1,0 +1,126 @@
+/*
+ * Skyline motion: the landing keyframes and the classes that play them,
+ * from the Landing and PhoneLanding boards. Opt-in: import
+ * @syn137/skyline-themes/motion.css after all.css (it reads the
+ * --sky-ease-* and --sky-dur-* tokens from tokens.css).
+ *
+ * Rules (check-motion.mjs enforces the first two):
+ * - Every @keyframes and every animation sits inside
+ *   @media (prefers-reduced-motion: no-preference). With reduced motion, or
+ *   no match, nothing animates and every element shows its own styles: that
+ *   static state is the end state, so keyframes animate from a start state
+ *   toward the element's natural one.
+ * - Nothing loops forever (the landing energy test measures idle CPU after
+ *   35s). Ambient loops run a few cycles and stop; override
+ *   animation-iteration-count to change that, never to infinite. The ticker
+ *   and the caret should also pause while off screen (IntersectionObserver).
+ * - Names carry the sky- prefix so they never meet a page's own keyframes.
+ *
+ * Classes, from the boards:
+ *   sky-rise    city block falls into place (1.1s, ease-out)
+ *   sky-sdrop   S-mark cube drops with a small overshoot (0.9s, out-back)
+ *   sky-pulse   live block brightens in the accent; with sky-rise it waits
+ *               for the rise (4 cycles of 2.6s)
+ *   sky-flash   failed block flares in the danger colour (2 cycles of 5s)
+ *   sky-drift   hero city drifts and zooms out and back (one 30s cycle)
+ *   sky-bob     floating card bobs (3 cycles of 7s); data-motion="alt"
+ *               runs the offset, reversed 8s variant
+ *   sky-type    install command types out (1.8s); set width (e.g. 28ch)
+ *               and, for other lengths, animation-timing-function: steps(n)
+ *   sky-blink   typing caret (20 cycles of 1s)
+ *   sky-draw    trend line draws in (2.6s); give the path pathLength="1400"
+ *   sky-scroll  tool-log ticker scrolls one copy of its duplicated rows (14s)
+ *
+ * Hold: set --sky-motion-play: paused on an ancestor and every class waits
+ * on its first frame (hidden, for the entrances) until it is set back to
+ * running, so an entrance can play when it scrolls into view.
+ */
+
+/* Static layout for the typed line, true with or without motion. */
+.sky-type {
+  display: inline-block;
+  overflow: hidden;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes sky-rise {
+    from { transform: translateY(-60px); opacity: 0; }
+  }
+  @keyframes sky-sdrop {
+    from { transform: translateY(-120px); opacity: 0; }
+  }
+  @keyframes sky-pulse {
+    0%, 100% { filter: none; }
+    50% { filter: brightness(1.55) drop-shadow(0 0 8px var(--ds-color-accent)); }
+  }
+  @keyframes sky-flash {
+    0%, 80%, 100% { filter: none; }
+    88% { filter: brightness(1.4) drop-shadow(0 0 10px var(--ds-color-danger)); }
+  }
+  @keyframes sky-drift {
+    0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+    50% { transform: translate3d(-1.5%, 1%, 0) scale(1.05); }
+  }
+  @keyframes sky-bob {
+    50% { transform: translateY(-10px); }
+  }
+  @keyframes sky-type {
+    from { width: 0; }
+  }
+  @keyframes sky-blink {
+    50% { opacity: 0; }
+  }
+  @keyframes sky-draw {
+    from { stroke-dashoffset: 1400; }
+  }
+  @keyframes sky-scroll {
+    to { transform: translateY(-50%); }
+  }
+
+  .sky-rise { animation: sky-rise var(--sky-dur-3) var(--sky-ease-out) both; }
+  .sky-sdrop { animation: sky-sdrop var(--sky-dur-2) var(--sky-ease-out-back) both; }
+  .sky-pulse { animation: sky-pulse var(--sky-dur-4) ease-in-out 4; }
+  .sky-flash { animation: sky-flash 5s ease-in-out 2; }
+  .sky-rise.sky-pulse {
+    animation:
+      sky-rise var(--sky-dur-3) var(--sky-ease-out) both,
+      sky-pulse var(--sky-dur-4) ease-in-out 1.6s 4;
+  }
+  .sky-rise.sky-flash {
+    animation:
+      sky-rise var(--sky-dur-3) var(--sky-ease-out) both,
+      sky-flash 5s ease-in-out 3s 2;
+  }
+  .sky-drift {
+    transform-origin: 50% 60%;
+    animation: sky-drift 30s ease-in-out 1;
+  }
+  .sky-bob { animation: sky-bob 7s ease-in-out 3; }
+  .sky-bob[data-motion='alt'] { animation: sky-bob 8s ease-in-out 0.6s 3 reverse; }
+  .sky-type { animation: sky-type 1.8s steps(28) 0.8s both; }
+  .sky-blink { animation: sky-blink 1s steps(1) 20; }
+  .sky-draw {
+    stroke-dasharray: 1400;
+    animation: sky-draw var(--sky-dur-4) var(--sky-ease-draw) 0.4s both;
+  }
+  .sky-scroll { animation: sky-scroll 14s linear 1; }
+
+  /* --sky-motion-play (tokens.css) holds every class above until the page plays it. */
+  .sky-rise,
+  .sky-sdrop,
+  .sky-pulse,
+  .sky-flash,
+  .sky-rise.sky-pulse,
+  .sky-rise.sky-flash,
+  .sky-drift,
+  .sky-bob,
+  .sky-bob[data-motion='alt'],
+  .sky-type,
+  .sky-blink,
+  .sky-draw,
+  .sky-scroll {
+    animation-play-state: var(--sky-motion-play);
+  }
+}

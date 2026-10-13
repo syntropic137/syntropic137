@@ -50,12 +50,14 @@ from syn_domain.contexts.agent_sessions._shared.inventory_reconciliation import 
     ReconciliationStage,
 )
 from syn_domain.contexts.agent_sessions.canonical_usage import (
+    CANONICAL_MODEL_COLUMNS,
     CANONICAL_SESSION_USAGE_CTE,
     CANONICAL_USAGE_DECISION_CTE,
     CANONICAL_USAGE_EVENT_FILTER,
     SUMMARY_USAGE_TABLE,
     TURN_USAGE_ROLLUP_TABLE,
     USAGE_ROLLUP_STATE_TABLE,
+    PricingResolver,
     price_canonical_row,
     rollup_usage_sources,
     summary_usage_columns,
@@ -248,6 +250,7 @@ from .domain.read_models.transcript_body_state import (
 )
 
 __all__ = [
+    "CANONICAL_MODEL_COLUMNS",
     "CANONICAL_SESSION_USAGE_CTE",
     "CANONICAL_USAGE_DECISION_CTE",
     "CANONICAL_USAGE_EVENT_FILTER",
@@ -351,6 +354,7 @@ __all__ = [
     "OwnerDeletionReason",
     "PendingEvidence",
     "PricedUsage",
+    "PricingResolver",
     "ProcessHistoryBackfillQueueHandler",
     "QualifiedSessionIdentity",
     "ReadLocalTranscriptHandler",

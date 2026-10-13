@@ -151,19 +151,25 @@ def split_observation_model(data: object) -> RecordedModel:
 
 
 UNKNOWN_MODEL_DISPLAY: Final[str] = "unknown"
+REQUESTED_LABEL: Final[str] = "(requested)"
 
 
 def format_observed_model(observed: str | None, requested: str | None) -> str:
     """Human display for a run-time model. Clients render it verbatim.
 
     ``claude-opus-5-5`` -> ``claude-opus-5-5`` (the explicit id, never
-    prettified: the id IS the proof), unknown with a request ->
-    ``unknown (requested: gpt-sol)``, neither -> ``unknown``.
+    prettified: the id IS the proof), unreported with a request ->
+    ``gpt-sol (requested)``, neither -> ``unknown``.
+
+    The request is shown, labelled, rather than ``unknown``: a running codex
+    phase reports its model only when its stream ends, and until then the
+    request is the one true thing there is to say. The label keeps it from
+    ever reading as what ran.
     """
     if observed:
         return observed
     if requested:
-        return f"{UNKNOWN_MODEL_DISPLAY} (requested: {requested})"
+        return f"{requested} {REQUESTED_LABEL}"
     return UNKNOWN_MODEL_DISPLAY
 
 

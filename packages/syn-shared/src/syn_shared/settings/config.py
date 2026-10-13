@@ -262,6 +262,26 @@ class Settings(BaseSettings):
         ),
     )
 
+    request_latency_io_timeout_s: float = Field(
+        default=5.0,
+        gt=0,
+        description=(
+            "Deadline in seconds for each request-latency telemetry database step "
+            "(acquiring a connection, writing one batch, readying the table) (ADR-075). "
+            "A step that overruns is abandoned and its samples are counted as lost."
+        ),
+    )
+
+    request_latency_shutdown_timeout_s: float = Field(
+        default=10.0,
+        gt=0,
+        description=(
+            "How long shutdown waits for buffered request-latency samples to be "
+            "written (ADR-075). Samples still unwritten at the deadline are counted "
+            "as discarded and shutdown proceeds."
+        ),
+    )
+
     # =========================================================================
     # AGENT CONFIGURATION
     # =========================================================================

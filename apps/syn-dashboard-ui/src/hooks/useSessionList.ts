@@ -24,7 +24,12 @@ import {
   type SortKey,
   type SortState,
 } from './useSortUrlState'
-import { useServerList, type UseServerListResult } from './useServerList'
+import {
+  SESSION_LIST_PAGE_SIZE,
+  RUN_LIST_PAGE_SIZES,
+  useServerList,
+  type UseServerListResult,
+} from './useServerList'
 import { isTerminalSessionStatus } from '../utils/terminalStatus'
 
 const SESSION_SORT_CONFIG: SortConfig<SortKey> = {
@@ -105,12 +110,14 @@ export function useSessionList(): UseSessionListResult {
   const { rows, isDefaultFilters, ...list } = useServerList({
     fetchPage,
     scopeKey: workflowIdFilter,
+    pageSize: SESSION_LIST_PAGE_SIZE,
+    pageSizeChoices: RUN_LIST_PAGE_SIZES,
     liveEvents: SESSION_LIVE_EVENTS,
     isTerminal: isTerminalSession,
   })
 
   // Reorders the page the server sent; the endpoint offers no sort parameter,
-  // so a non-default sort orders these 50 rows and not the collection.
+  // so a non-default sort orders this page's rows and not the collection.
   const sessions = useMemo(
     () => sortSessions(rows, sort.key, sort.dir),
     [rows, sort.key, sort.dir],

@@ -3,7 +3,7 @@
 A workflow definition says ``opus``; the harness reports ``claude-opus-5-5``.
 Only the second proves anything, so it is the only one served as ``model`` /
 ``agent_model``. The alias travels as ``requested_model`` and shows up in the
-display string only as context: ``unknown (requested: opus)``.
+display string only as context: ``opus (requested)``.
 
 Two eras of stored data reach these routes:
 
@@ -133,10 +133,10 @@ async def test_a_legacy_phase_reports_unknown_with_the_alias_as_the_request(
 
     assert response.model is None
     assert response.requested_model == "opus"
-    assert response.model_display == "unknown (requested: opus)"
+    assert response.model_display == "opus (requested)"
     assert response.cost_by_model == {UNKNOWN_MODEL_KEY: "1.25"}
     wire = response.model_dump(mode="json")
-    assert wire["model_display"] == "unknown (requested: opus)"
+    assert wire["model_display"] == "opus (requested)"
 
 
 @pytest.mark.parametrize(
@@ -166,7 +166,7 @@ async def test_a_phase_with_no_usage_row_falls_back_to_the_configured_request() 
 
     assert response.model is None
     assert response.requested_model == "gpt-sol"
-    assert response.model_display == "unknown (requested: gpt-sol)"
+    assert response.model_display == "gpt-sol (requested)"
 
 
 async def test_the_configured_model_never_overrides_a_recorded_request() -> None:
@@ -248,7 +248,7 @@ async def test_a_legacy_session_reports_unknown_with_the_alias_as_the_request(
 
     assert detail.agent_model is None
     assert detail.requested_model == "opus"
-    assert detail.agent_model_display == "unknown (requested: opus)"
+    assert detail.agent_model_display == "opus (requested)"
     assert detail.cost_by_model == {UNKNOWN_MODEL_KEY: Decimal("1.25")}
 
 
@@ -282,7 +282,7 @@ async def test_a_legacy_session_summary_does_not_500_on_the_alias() -> None:
 
     assert response.agent_model is None
     assert response.requested_model == "opus"
-    assert response.agent_model_display == "unknown (requested: opus)"
+    assert response.agent_model_display == "opus (requested)"
 
 
 # ---------------------------------------------------------------------------
@@ -301,8 +301,8 @@ class _ConversationStore:
 @pytest.mark.parametrize(
     ("meta", "model", "requested", "display"),
     [
-        ({"model": "opus"}, None, "opus", "unknown (requested: opus)"),
-        ({"model": None, "requested_model": "opus"}, None, "opus", "unknown (requested: opus)"),
+        ({"model": "opus"}, None, "opus", "opus (requested)"),
+        ({"model": None, "requested_model": "opus"}, None, "opus", "opus (requested)"),
         (
             {"model": "claude-opus-5-5", "requested_model": "opus"},
             "claude-opus-5-5",

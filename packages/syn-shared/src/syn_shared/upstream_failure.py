@@ -41,6 +41,17 @@ class UpstreamFailureKind(StrEnum):
     wait for the reset.
     """
 
+    REFUSAL = "refusal"
+    """The provider's content or safety filter declined the request itself.
+
+    Not a judgement on the change, and not the agent's answer: the model never
+    got to work on it. Distinct from `UNKNOWN` because the same request is
+    routinely served by another provider's model (exec-898cd870650e verified on
+    claude after codex refused it). Never transient - resending the same prompt
+    to the same filter gets the same verdict - and no operator can fix it, so
+    the only useful next step is a different agent (a phase's `fallback_agent`).
+    """
+
     UNAVAILABLE = "unavailable"
     """The service did not answer: a dropped connection, a timeout, a 502/503/504
     after every retry it was allowed (#1593)."""
@@ -72,6 +83,11 @@ class UpstreamFailureKind(StrEnum):
             return (
                 f"Upstream failure: {self.value} - not retried; nothing clears it before "
                 "the provider's reset except a different agent."
+            )
+        if self is UpstreamFailureKind.REFUSAL:
+            return (
+                f"Upstream failure: {self.value} - the provider's content filter declined "
+                "the request; not retried, only a different agent can run it."
             )
         return f"Upstream failure: {self.value} - not recognised; read the reason above."
 

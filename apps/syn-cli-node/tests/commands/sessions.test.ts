@@ -76,7 +76,7 @@ describe("sessions commands", () => {
             agent_provider: "codex",
             agent_model: null,
             requested_model: "gpt-sol",
-            agent_model_display: "unknown (requested: gpt-sol)",
+            agent_model_display: "gpt-sol (requested)",
             total_tokens: 5000,
             total_tokens_display: "5.0k",
             total_cost_usd: "0.05",
@@ -92,7 +92,7 @@ describe("sessions commands", () => {
 
     await sessionsGroup.getCommand("list")!.handler({ positionals: [], values: {} });
     const out = stdout();
-    expect(out).toContain("unknown (requested: gpt-sol)");
+    expect(out).toContain("gpt-sol (requested)");
     expect(out).not.toContain("codex");
   });
 

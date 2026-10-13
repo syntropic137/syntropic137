@@ -74,6 +74,8 @@ export function ExecutionList() {
     lastEventAt,
     page,
     pageSize,
+    pageSizeChoices,
+    setPageSize,
     total,
     excludedUndated,
     setPage,
@@ -153,6 +155,8 @@ export function ExecutionList() {
         total={total}
         excludedUndated={excludedUndated}
         onPageChange={setPage}
+        pageSizeChoices={pageSizeChoices}
+        onPageSizeChange={setPageSize}
         itemLabel="execution"
       />
     </div>

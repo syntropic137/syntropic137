@@ -174,7 +174,7 @@ class SessionListProjection(AutoDispatchProjection):
     """
 
     PROJECTION_NAME = "session_summaries"
-    VERSION = 5  # Bumped: operations list dropped; the timeline is Lane 2 only (#1034)
+    VERSION = 6  # Bumped: requested_model kept from SessionStarted (#1785)
 
     def __init__(self, store: ProjectionStore):
         """Initialize with a projection store.
@@ -217,6 +217,11 @@ class SessionListProjection(AutoDispatchProjection):
             root_session_id=event_data.get("root_session_id"),
             repos=tuple(event_data.get("repos", ())),
             agent_launch=AgentLaunch.UNKNOWN,
+            # SessionStarted's agent_model is the model the workflow ASKED for
+            # (often an alias). It is the only model a running codex session
+            # has until its stream ends, so it is kept - as the request, never
+            # as what ran (#1785, ADR-067 D9).
+            requested_model=event_data.get("agent_model") or None,
         )
         await self._store.save(self.PROJECTION_NAME, session_id, summary.to_dict())
 
