@@ -111,16 +111,6 @@ class ApiErrorType(StrEnum):
     PERMISSION = "permission_error"
 
 
-#: How claude's CLI opens its own quota sentence. Observed once, verbatim, as
-#: the whole `is_error` result of exec-0ffa4337a4a8 on 2026-10-13 (PC-151,
-#: #1669): "You've hit your weekly limit · resets Oct 15, 8am (UTC)". Held by
-#: the parser that writes the reason, because the parser is what would
-#: otherwise LOSE it: a structured HTTP-429 body carrying this sentence used to
-#: be shortened to "Rate limited (HTTP 429)", which reads as a retryable rate
-#: limit, so a spent quota was retried (#1882). See `_format_anthropic_error`.
-CLAUDE_QUOTA_LINE = "You've hit your "
-
-
 # Well-known API error types -> human-readable labels.
 # Public because the codex parser reuses this vocabulary rather than inventing
 # a second one for the same underlying faults (issue #891).
@@ -163,10 +153,6 @@ def _format_anthropic_error(error_obj: dict[str, object], prefix: str) -> str:
     """Format a human-readable label from an Anthropic API error dict."""
     error_type = str(error_obj.get("type", ""))
     message = str(error_obj.get("message", ""))
-    if message.startswith(CLAUDE_QUOTA_LINE):
-        # Kept whole, the shape claude writes it in as plain result text, so
-        # the quota is read before any label replaces it (#1882).
-        return message[:_MAX_ERROR_REASON_LEN]
     label = api_error_label(error_type)
     http_code = _http_code_from_prefix(prefix)
     if http_code:

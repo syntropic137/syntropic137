@@ -34,7 +34,6 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.codex_faults impo
     codex_login_fault_reason,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
-    CLAUDE_QUOTA_LINE,
     ApiErrorType,
     api_error_label,
     api_error_with_message,
@@ -74,18 +73,14 @@ _CODEX_AT_CAPACITY = "Selected model is at capacity. Please try a different mode
 #: case-insensitively and only inside codex's own fault line.
 _CODEX_QUOTA_PHRASES: tuple[str, ...] = ("hit your usage limit", "purchase more credits")
 
-#: How claude's CLI opens its own quota sentence: the parser's constant, so
-#: the reader matches the reason the parser actually wrote. A reason that
-#: merely contains the sentence further in - an agent quoting it - is not a
-#: quota.
-_CLAUDE_QUOTA_LINE = CLAUDE_QUOTA_LINE
-
-#: Which allowance, after `_CLAUDE_QUOTA_LINE`. Only the one claude has been
-#: seen to say. Its "resets Oct 15, 8am" names no year, so it cannot be placed
-#: without guessing one and reads as unstated.
-# TODO(#1669): add claude's other allowances ("limit", "Opus limit") once a real
-# line for each is captured, and a reset reader that can place a yearless date.
-_CLAUDE_QUOTA_PHRASES: tuple[str, ...] = ("weekly limit",)
+#: What claude says when the account's allowance is spent. EMPTY, deliberately:
+#: recognising claude's quota text is harness knowledge, so it is not added
+#: here. Until claude's quota arrives classified, it reads as UNKNOWN - not
+#: retried, and no fallback run.
+# TODO(#1605): claude's quota sentence is now captured ("You've hit your weekly
+# limit", exec-8ad0e101db7b, #1669). Read claude quota off agentic-workspace's
+# harness classification at this entry instead of matching phrases here.
+_CLAUDE_QUOTA_PHRASES: tuple[str, ...] = ()
 
 #: What codex says when its content filter declines the request, as a fragment
 #: of the one real line in this repo (exec-61dad6055e6f, kept as
@@ -159,9 +154,11 @@ _QUOTA_SPELLINGS: tuple[_QuotaSpelling, ...] = (
         phrases=_CODEX_QUOTA_PHRASES,
         resets_at=_codex_quota_reset,
     ),
+    # Which fault line claude's quota arrives on is unknown too (#1669); the
+    # API-error prefix is where every other claude upstream fault is written.
     _QuotaSpelling(
         provider="claude",
-        fault_line=_CLAUDE_QUOTA_LINE,
+        fault_line=api_error_with_message(ApiErrorType.RATE_LIMIT, ""),
         phrases=_CLAUDE_QUOTA_PHRASES,
         resets_at=_no_reset,
     ),

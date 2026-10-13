@@ -147,10 +147,9 @@ our account is spent until a reset it names ("try again at Oct 9th, 2026 9:10
 PM"). Distinct from capacity, which returns in seconds: a quota returns on a
 calendar date, so it is never retried, and the Phase fails with
 `<provider> quota exhausted until <time>`. Recognised from codex's own fault
-line, and from claude's "You've hit your weekly limit · resets Oct 15, 8am
-(UTC)" (PC-151) when that sentence opens the reason. **Unclear:** claude's
-reset names no year, so its time reads as unstated, and claude's other
-allowances ("limit", "Opus limit") have no captured line yet (#1669).
+line only. **Unclear:** claude quota text is not recognised here and reads as
+`unknown`; recognising it is harness knowledge and belongs in agentic-workspace
+(#1605).
 
 ## Upstream Retry
 
