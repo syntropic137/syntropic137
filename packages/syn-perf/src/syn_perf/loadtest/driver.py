@@ -129,9 +129,11 @@ async def run_load_test(
         start = time.monotonic()
         deadline = start + pacing.admit_seconds + bar.sustain_seconds
         drain_deadline = deadline + pacing.drain_timeout_seconds
+        proven: set[str] = set()
         while True:
             sample, details = await _sample(client, ids, time.monotonic() - start)
             samples.append(sample)
+            await _prove_scripted(client, details, proven)
             stats.extend(await container_stats(target.containers))
             now = time.monotonic()
             drained = all(d is not None and d.status in TERMINAL_STATUSES for d in details)
@@ -185,6 +187,28 @@ async def _sample(
         ),
         details,
     )
+
+
+async def _prove_scripted(
+    client: httpx.AsyncClient, details: Sequence[_Detail | None], proven: set[str]
+) -> None:
+    """Stop at the first tick a session shows a real model, not after the run.
+
+    A session joins ``proven`` once it has reported the scripted model; one
+    that has reported no model yet is read again on the next tick.
+    """
+    for detail in details:
+        if detail is None:
+            continue
+        for phase in detail.phases:
+            if phase.session_id is None or phase.session_id in proven:
+                continue
+            outcome = await _phase_outcome(client, phase)
+            assert_scripted(
+                [RunOutcome(detail.workflow_execution_id, True, detail.status, None, (outcome,))]
+            )
+            if outcome.agent_model is not None:
+                proven.add(phase.session_id)
 
 
 async def _outcomes(client: httpx.AsyncClient, ids: Sequence[str]) -> list[RunOutcome]:

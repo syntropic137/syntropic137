@@ -37,7 +37,12 @@ app = typer.Typer(add_completion=False)
 def main(
     n: Annotated[int, typer.Option("--n", min=1, help="Executions to admit")],
     streams: Annotated[
-        Path, typer.Option(help="JSON: phase id -> ScriptedStream (recording, tool_uses, ...)")
+        Path,
+        typer.Option(
+            exists=True,
+            dir_okay=False,
+            help="JSON: phase id -> ScriptedStream (recording, tool_uses, ...)",
+        ),
     ],
     fixture_repo: Annotated[str, typer.Option(help="owner/name the stub pushes to")],
     tier: Annotated[str, typer.Option(help="platform or node")] = "platform",
