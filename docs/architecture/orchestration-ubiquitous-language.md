@@ -1072,9 +1072,10 @@ contract lives in `syn_perf.loadtest.scripted_agent_profile`:
   replayed stream reports. A session with any other observed model means a
   real harness ran, and the load test stops.
 - **Active Phase** - a Phase the server reports as `running` whose agent
-  session is `running` too. A Phase is `running` from `PhaseStarted`, before
-  its workspace exists, so the session is what says an agent is working. The
-  load test's concurrency is the count of Active Phases, never the executions
+  session is `running` with `agent_launch` `launched`. A Phase is `running`
+  from `PhaseStarted` and its session from `SessionStarted`, both before its
+  workspace exists, so only the session's Agent Launch (`AgentLaunched`, see
+  the agent_sessions vocabulary) says an agent is working. The load test's concurrency is the count of Active Phases, never the executions
   it dispatched; a queued start, a provisioning workspace or an idle slot is
   not concurrency (docs/north-star.md).
 - **Pass Bar** (`PassBar`, `syn_perf.loadtest.pass_bar`) - what one load-test
