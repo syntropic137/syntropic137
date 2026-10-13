@@ -43,13 +43,33 @@
 #         no behaviour a verifier could judge.
 #     4 defects, 2 controls, 6 in all.
 #
+# v2: the same six cases, and a treatment verifier,
+#     eval-verify-pinned-codex-checks-v1: eval-verify-pinned-codex-v1 with
+#     one variable changed, the verify prompt's three required checks. The
+#     experiment is preregistered in experiments/2026-10-13-checks-treatment.md
+#     before any v2 run. v1 ran eval-verify-pinned-codex-v1 only
+#     (launches.jsonl): catch 2/4, false-block 2/2, keyword judge.
+#     No clean control was added. Every mainline merge commit from
+#     2026-09-13 or earlier was read again, back to the first, and none
+#     passes the README's rules beyond #358 and #395:
+#       #240 workspace run contract (2026-07-13, code and tests): #250 merged
+#         two days later and "supersedes the hand-written Python contract
+#         from #240", changing the files it added
+#       #341, #157: version and manifest bumps, no behaviour to judge
+#       #62, #59: their merge diffs are a uv.lock and a plugin.json
+#       #55 plugin-first rewrite: no tests, 46 files, a different codebase
+#     Everything else on that mainline was squash-merged, so it has no PR
+#     head as a merge's second parent and cannot satisfy rule 1 as `check`
+#     enforces it. clean-runtime-exposure-docs is kept: with no replacement,
+#     retiring it would leave the experiment's guard one control.
+#
 # EVERY VERSION KEEPS ITS SCORE: when the version goes up, record the old one
 # under `history`, as verifier-seed-v1 does.
 id: verifier-seed-aw-v1
 # Its own stable eval name: a case eval is tagged `suite:verifier-seed-aw` +
 # `case:<id>`, never shared with verifier-seed-v1's.
 eval_suite: verifier-seed-aw
-version: 1
+version: 2
 goal: >
   Does the verifier block an agentic-workspace change that carries a known
   escaped bug, naming the defect and the file it lives in, and certify a
@@ -66,3 +86,18 @@ workflows:
     path: workflows/evals/verify-pinned-codex/workflow.yaml
     models:
       verify: gpt-sol
+  - id: eval-verify-pinned-codex-checks-v1
+    path: workflows/evals/verify-pinned-codex-checks/workflow.yaml
+    models:
+      verify: gpt-sol
+history:
+  - version: 1
+    tag: verifier-seed-aw-v1:v1:eval-verify-pinned-codex-v1
+    workflow: eval-verify-pinned-codex-v1
+    cases:
+      - clean-runtime-exposure-docs
+      - clean-staged-teardown
+      - execute-stderr-merged-into-stdout
+      - replay-error-result-drops-verdict
+      - replay-keeps-recorded-verdict
+      - scripted-agent-tests-not-in-ci
