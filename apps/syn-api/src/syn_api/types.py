@@ -35,6 +35,7 @@ from pydantic import (
 # allowed to define it (#1380).
 from syn_adapters.subscriptions.read_model_lag import ProjectionLag  # noqa: TC001
 from syn_adapters.subscriptions.unapplied_starts import UnappliedStart  # noqa: TC001
+from syn_api.inventory_types import AgentLaunch as AgentLaunch
 from syn_api.inventory_types import CaptureRevisionHashes as CaptureRevisionHashes
 from syn_api.inventory_types import LocalTranscriptResponse as LocalTranscriptResponse
 from syn_api.inventory_types import (
@@ -83,7 +84,6 @@ from syn_api.inventory_types import TranscriptRevocationResponse as TranscriptRe
 from syn_api.model_identity import CostModelKey, ObservedModelId, ResolvedModelId  # noqa: TC001
 from syn_api.services.cpu_throttling import CpuThrottling  # noqa: TC001
 from syn_api.services.degraded_reasons import DegradedReason  # noqa: TC001
-from syn_domain.contexts.agent_sessions import AgentLaunch
 from syn_domain.contexts.orchestration import (
     DefinitionChangeKind,
     DelegationFailure,

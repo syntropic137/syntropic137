@@ -38,6 +38,7 @@ from syn_api.model_identity import (
     observed_model_of,
 )
 from syn_api.types import (
+    AgentLaunch,
     Err,
     GitEventData,
     Ok,
@@ -48,7 +49,6 @@ from syn_api.types import (
     TokenTypeCostResponse,
     ToolOperation,
 )
-from syn_domain.contexts.agent_sessions import AgentLaunch
 from syn_domain.contexts.orchestration.slices.list_workflows.projection import (
     WorkflowListProjection,
 )
