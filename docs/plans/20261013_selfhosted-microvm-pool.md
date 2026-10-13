@@ -503,3 +503,7 @@ No finding was rejected. Each blocker was checked against the working tree and h
 
 Ready to implement AW-1, SYN-1 and the E0a spike now. Every step after E0a is blocked on human decisions #1 (pass bar) and #6 (provide the KVM box and token budget). Production Kata phases are further blocked on D-OP (the provider-operation-contract plan's Docker operation implementation) and ADR-072 items 1.3-1.5.
 
+
+## Implementation log
+
+- 2026-10-13: AW-1 merged as AgentParadise/agentic-workspace#48 (`0f48e8c`). Second verifier approved with one waived cross-repo break: syntropic137 `packages/syn-adapters/tests/test_docker_capture_recovery.py:74` uses `SecurityConfig(use_gvisor=False)`; **SYN-1's submodule bump MUST change it to `runtime=WorkspaceRuntime.RUNC`**. Accepted low: auto mode no longer selects a runsc alias whose path is a wrapper script, or a `gvisor` alias with no path. E0 operators must register Kata by path, not runtimeType only.
