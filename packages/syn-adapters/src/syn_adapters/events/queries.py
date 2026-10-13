@@ -259,13 +259,13 @@ async def query_recent_by_types(
 #: the two together, so a renamed field fails there and not silently here.
 UPSTREAM_RETRY_COUNTS_SQL = """
     SELECT data->>'provider' AS provider,
-           data->>'model' AS model,
+           data->>'requested_model' AS requested_model,
            data->>'upstream_kind' AS upstream_kind,
            COUNT(*) AS retries
     FROM agent_events
     WHERE event_type = $1 AND time >= $2
     GROUP BY 1, 2, 3
-    ORDER BY retries DESC, provider, model, upstream_kind
+    ORDER BY retries DESC, provider, requested_model, upstream_kind
 """
 
 
@@ -278,7 +278,7 @@ class UpstreamRetryCount:
     """
 
     provider: str | None
-    model: str | None
+    requested_model: str | None
     upstream_kind: str | None
     retries: int
 
@@ -301,7 +301,7 @@ async def query_upstream_retry_counts(
     return [
         UpstreamRetryCount(
             provider=row["provider"],
-            model=row["model"],
+            requested_model=row["requested_model"],
             upstream_kind=row["upstream_kind"],
             retries=int(row["retries"]),
         )

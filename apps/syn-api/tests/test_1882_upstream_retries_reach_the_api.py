@@ -56,8 +56,18 @@ def test_the_counts_reach_the_wire_per_provider_and_model() -> None:
     assert body["window"] == "7d"
     assert body["total"] == 9
     assert body["counts"] == [
-        {"provider": "codex", "model": "gpt-5.5-codex", "upstream_kind": "capacity", "retries": 7},
-        {"provider": "claude", "model": None, "upstream_kind": "rate_limited", "retries": 2},
+        {
+            "provider": "codex",
+            "requested_model": "gpt-5.5-codex",
+            "upstream_kind": "capacity",
+            "retries": 7,
+        },
+        {
+            "provider": "claude",
+            "requested_model": None,
+            "upstream_kind": "rate_limited",
+            "retries": 2,
+        },
     ]
     assert store.asked_since is not None
     assert body["since"] == store.asked_since.isoformat()
@@ -84,9 +94,11 @@ def test_the_count_groups_by_the_keys_the_writer_writes() -> None:
     under NULL, which no test at either end alone can see.
     """
     written = dataclasses.asdict(
-        UpstreamRetryObservation(provider="codex", model="m", upstream_kind="capacity", attempt=2)
+        UpstreamRetryObservation(
+            provider="codex", requested_model="m", upstream_kind="capacity", attempt=2
+        )
     )
 
-    for key in ("provider", "model", "upstream_kind"):
+    for key in ("provider", "requested_model", "upstream_kind"):
         assert key in written
         assert f"data->>'{key}' AS {key}" in UPSTREAM_RETRY_COUNTS_SQL

@@ -9787,8 +9787,8 @@ export interface components {
         UpstreamRetryCountResponse: {
             /** Provider */
             provider: string | null;
-            /** Model */
-            model: string | null;
+            /** Requested Model */
+            requested_model: string | null;
             /** Upstream Kind */
             upstream_kind: string | null;
             /** Retries */

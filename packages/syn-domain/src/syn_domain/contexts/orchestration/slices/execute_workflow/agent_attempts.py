@@ -346,7 +346,7 @@ class _AgentRun:
         # Only a transient kind is ever granted a retry, so `kind` is set here.
         observation = UpstreamRetryObservation(
             provider=agent.provider,
-            model=agent.model,
+            requested_model=agent.model,
             upstream_kind=str(kind),
             attempt=self._attempts.attempt,
         )

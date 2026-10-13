@@ -4511,8 +4511,8 @@ class UpstreamRetryCountResponse(BaseModel):
 
     provider: str | None
     """The agent provider retried, e.g. ``codex``. None if the row did not say."""
-    model: str | None
-    """The model the phase asked for. None when the phase left it to the provider."""
+    requested_model: str | None
+    """The model the phase asked for, possibly an alias (ADR-067 D9). None when the phase left it to the provider."""
     upstream_kind: str | None
     """The transient kind that earned the retry: ``capacity`` or ``rate_limited``."""
     retries: int

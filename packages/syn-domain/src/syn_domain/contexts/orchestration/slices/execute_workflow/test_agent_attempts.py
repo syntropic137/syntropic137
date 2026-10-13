@@ -1178,13 +1178,13 @@ class TestEachRetryIsCountedAgainstItsProvider:
         assert [row.data for row in retries] == [
             {
                 "provider": "codex",
-                "model": "gpt-5.5-codex",
+                "requested_model": "gpt-5.5-codex",
                 "upstream_kind": "capacity",
                 "attempt": 2,
             },
             {
                 "provider": "codex",
-                "model": "gpt-5.5-codex",
+                "requested_model": "gpt-5.5-codex",
                 "upstream_kind": "capacity",
                 "attempt": 3,
             },

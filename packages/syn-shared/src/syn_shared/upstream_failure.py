@@ -119,8 +119,10 @@ class UpstreamRetryObservation:
     """
 
     provider: str
-    #: None when the phase left the model to the provider's default.
-    model: str | None
+    #: The model the phase ASKED for, possibly an alias (ADR-067 D9): the
+    #: retry happens before the harness reports which model served it. None
+    #: when the phase left the model to the provider's default.
+    requested_model: str | None
     #: The transient `UpstreamFailureKind` value that earned the retry.
     upstream_kind: str
     #: The attempt the retry is about to start, 1-based: the first retry is 2.

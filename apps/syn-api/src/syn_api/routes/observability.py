@@ -319,7 +319,7 @@ async def get_upstream_retries(
     counts = [
         UpstreamRetryCountResponse(
             provider=row.provider,
-            model=row.model,
+            requested_model=row.requested_model,
             upstream_kind=row.upstream_kind,
             retries=row.retries,
         )

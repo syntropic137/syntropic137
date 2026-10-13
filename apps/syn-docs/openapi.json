@@ -23531,7 +23531,7 @@
             ],
             "title": "Provider"
           },
-          "model": {
+          "requested_model": {
             "anyOf": [
               {
                 "type": "string"
@@ -23540,7 +23540,7 @@
                 "type": "null"
               }
             ],
-            "title": "Model"
+            "title": "Requested Model"
           },
           "upstream_kind": {
             "anyOf": [
@@ -23561,7 +23561,7 @@
         "type": "object",
         "required": [
           "provider",
-          "model",
+          "requested_model",
           "upstream_kind",
           "retries"
         ],
