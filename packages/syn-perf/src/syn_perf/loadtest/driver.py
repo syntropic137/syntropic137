@@ -86,6 +86,8 @@ class _Budget(_Read):
 
 class _Listed(_Read):
     workflow_execution_id: str
+    status: str
+    started_at: str | None = None
 
 
 class _List(_Read):
@@ -212,16 +214,33 @@ async def _prove_scripted(
 
 
 async def _outcomes(client: httpx.AsyncClient, ids: Sequence[str]) -> list[RunOutcome]:
+    """Each submitted execution as the dashboard list and detail describe it.
+
+    Found, status and ``started_at`` come from the list, because that read
+    model is where a dropped start shows: the #598 fallback creates a row with
+    no ``started_at`` for a failure whose start was never applied (#1545,
+    #1550). An execution the list never shows is lost. Phases come from detail.
+    """
     runs: list[RunOutcome] = []
     for execution_id in ids:
-        response = await client.get(f"/executions/{execution_id}")
-        if response.status_code == 404:
+        listed = await client.get("/executions", params={"q": execution_id, "page_size": 5})
+        listed.raise_for_status()
+        row = next(
+            (
+                e
+                for e in _List.model_validate_json(listed.content).executions
+                if e.workflow_execution_id == execution_id
+            ),
+            None,
+        )
+        if row is None:
             runs.append(RunOutcome(execution_id, False, None, None, ()))
             continue
+        response = await client.get(f"/executions/{execution_id}")
         response.raise_for_status()
         detail = _Detail.model_validate_json(response.content)
         phases = tuple([await _phase_outcome(client, p) for p in detail.phases])
-        run = RunOutcome(execution_id, True, detail.status, detail.started_at, phases)
+        run = RunOutcome(execution_id, True, row.status, row.started_at, phases)
         assert_scripted([run])
         runs.append(run)
     return runs

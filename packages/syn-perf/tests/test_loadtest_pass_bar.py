@@ -177,7 +177,14 @@ async def test_driver_counts_active_phases_from_the_server(
             started.append(f"exec-{len(started)}")
             return httpx.Response(200, json={"execution_id": started[-1], "workflow_id": "w"})
         if path == "/executions":
-            return httpx.Response(200, json={"executions": [], "total": 0})
+            # exec-1 lost its start: the list row has no started_at (#1550).
+            q = request.url.params.get("q")
+            rows = [
+                {"workflow_execution_id": q, "status": "completed", "started_at": None}
+                if q == "exec-1"
+                else {"workflow_execution_id": q, "status": "completed", "started_at": "t"}
+            ]
+            return httpx.Response(200, json={"executions": rows if q else [], "total": 1})
         if path.startswith("/executions/"):
             eid = path.rsplit("/", 1)[1]
             first = eid == "exec-0"
@@ -217,6 +224,8 @@ async def test_driver_counts_active_phases_from_the_server(
     assert report.peak_active_phases == 1
     assert "concurrency" in _failed(report)
     assert report.event_count_mismatches == []
+    assert report.dropped_starts == ["exec-1"]
+    assert report.lost == []
 
 
 async def test_driver_stops_at_the_first_real_model(
