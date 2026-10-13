@@ -72,8 +72,9 @@ stop dispatches the probe workflow `telemetry-lag-probe-v1`
 `completed`. Then it cancels the probe and reads the cancel back, because a
 probe still in flight is in-flight work to the next pit stop's drain.
 
-- **It is not free.** No token-free runner exists yet (the
-  `ScriptedAgentProfile` contract from #1609 has no driver), so the probe is a
+- **It is not free.** The token-free load-test driver exists
+  (`python -m syn_perf.loadtest`, #1717) but the stub agent image it needs
+  does not yet (AgentParadise/agentic-workspace#44), so the probe is a
   real `sonnet` agent in a real workspace. It is cancelled the moment a phase
   is running, so it costs workspace startup plus the first agent turns, not the
   ~2 minute heartbeat it would otherwise run.
