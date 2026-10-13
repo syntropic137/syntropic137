@@ -83,7 +83,7 @@ from syn_api.inventory_types import TranscriptRevocationResponse as TranscriptRe
 from syn_api.model_identity import CostModelKey, ObservedModelId, ResolvedModelId  # noqa: TC001
 from syn_api.services.cpu_throttling import CpuThrottling  # noqa: TC001
 from syn_api.services.degraded_reasons import DegradedReason  # noqa: TC001
-from syn_domain.contexts.agent_sessions import AgentLaunch  # noqa: TC002 - Pydantic field type
+from syn_domain.contexts.agent_sessions import AgentLaunch
 from syn_domain.contexts.orchestration import (
     DefinitionChangeKind,
     DelegationFailure,

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -26,6 +27,9 @@ from syn_domain.contexts.agent_sessions.slices.list_sessions.projection import (
 from syn_domain.contexts.orchestration.slices.execute_workflow.SessionLifecycleManager import (
     SessionLifecycleManager,
 )
+
+if TYPE_CHECKING:
+    from syn_domain.contexts.agent_sessions.domain.read_models.session_cost import SessionCost
 
 os.environ.setdefault("APP_ENVIRONMENT", "test")
 
@@ -69,10 +73,10 @@ class _Manager:
 
 @dataclass
 class _NoCost:
-    async def get(self, session_id: str) -> None:
+    async def get(self, session_id: str) -> SessionCost | None:
         return None
 
-    async def get_many(self, session_ids: list[str]) -> dict[str, object]:
+    async def get_many(self, session_ids: list[str]) -> dict[str, SessionCost]:
         return {}
 
 
