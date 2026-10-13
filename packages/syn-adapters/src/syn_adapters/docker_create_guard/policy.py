@@ -35,8 +35,19 @@ after symlinks are resolved (the guard mounts that root read-only), and a bind
 the guard cannot see is refused.
 
 Field names are matched case-insensitively, as the daemon's Go JSON decoder
-does, and an object naming one field twice under different cases is refused
-rather than guessed at.
+does, and an object naming one key twice, exactly or under different cases, is
+refused at parse time rather than guessed at. Python keeps the last duplicate
+while Go decodes every one into the same field, merging nested objects and
+ignoring a later ``null``: ``"HostConfig":{"Privileged":true},"HostConfig":{}``
+reads as harmless here and as privileged in the daemon.
+
+The guard also serves ``POST /containers/{id}/exec`` (``check_exec``). The
+socket proxy allows exec into any container, and the guard and the proxy both
+hold the Docker socket, so one exec into either would bypass every check
+above. Exec is allowed only into a container this policy could have created:
+an allowlisted image, not privileged, no Docker socket mounted, and not a
+Compose service (every control-plane container is one; no platform exec
+target is).
 """
 
 from __future__ import annotations
@@ -136,7 +147,7 @@ class CreatePolicy:
     def check(self, body: bytes, host: HostView) -> Refusal | None:
         """Return why ``body`` (a ``POST /containers/create`` payload) is refused, or None."""
         try:
-            request = json.loads(body)
+            request = loads_strict(body)
             if not isinstance(request, dict):
                 _refuse("the create body is not a JSON object")
             self._check_image(_field(request, "Image"), host)
@@ -153,6 +164,52 @@ class CreatePolicy:
         except ValueError as exc:
             return Refusal(f"the create body is not valid JSON ({exc})")
         return None
+
+    def check_exec(self, body: bytes, target: JsonObject | None, host: HostView) -> Refusal | None:
+        """Why an exec-create ``body`` into ``target`` (the daemon's inspect of it) is refused.
+
+        ``target`` is None when the daemon does not know the container; the
+        daemon would 404 too, so that is refused rather than forwarded blind.
+        """
+        try:
+            request = loads_strict(body)
+            if not isinstance(request, dict):
+                _refuse("the exec body is not a JSON object")
+            _expect(_field(request, "Privileged") in (None, False), "privileged exec is refused")
+            if target is None:
+                _refuse("exec target is not a container the daemon knows")
+            self._check_exec_target(target, host)
+        except _Refused as refused:
+            return Refusal(refused.reason)
+        except ValueError as exc:
+            return Refusal(f"the exec body is not valid JSON ({exc})")
+        return None
+
+    def _check_exec_target(self, target: JsonObject, host: HostView) -> None:
+        config = target.get("Config")
+        config = config if isinstance(config, dict) else {}
+        labels = config.get("Labels")
+        _expect(
+            not (isinstance(labels, dict) and "com.docker.compose.service" in labels),
+            "exec into a Compose service is refused: only containers the platform "
+            "created may be exec'd into",
+        )
+        host_config = target.get("HostConfig")
+        _expect(
+            not (isinstance(host_config, dict) and host_config.get("Privileged") is True),
+            "exec into a privileged container is refused",
+        )
+        mounts = target.get("Mounts")
+        for mount in mounts if isinstance(mounts, list) else []:
+            if not isinstance(mount, dict):
+                continue
+            for end in ("Source", "Destination"):
+                path = mount.get(end)
+                _expect(
+                    not (isinstance(path, str) and path.rstrip("/").endswith("docker.sock")),
+                    "exec into a container that mounts the Docker socket is refused",
+                )
+        self._check_image(config.get("Image"), host)
 
     def _check_image(self, image: object, host: HostView) -> None:
         if not isinstance(image, str) or image == "":
@@ -252,6 +309,8 @@ class CreatePolicy:
         )
         # The API can write a symlink into the workspaces root, and the daemon
         # follows it, so the lexical check alone would let ``root/x -> /`` through.
+        # TODO(#1885): the source can still be swapped for a symlink between this
+        # check at create and the daemon's mount at the (unguarded) start.
         real_root = host.real_path(normal_root)
         real = host.real_path(normal)
         if real_root is None or real is None:
@@ -289,9 +348,9 @@ def _check_seccomp(opt: str) -> None:
     if key.lower() != "seccomp" or profile.lower() in ("", "builtin"):
         return
     try:
-        parsed = json.loads(profile)
-    except ValueError:
-        _refuse("a seccomp profile is not JSON")
+        parsed = loads_strict(profile)
+    except ValueError as exc:
+        _refuse(f"a seccomp profile is not JSON ({exc})")
     if not isinstance(parsed, dict):
         _refuse("a seccomp profile is not a JSON object")
     action = _field(parsed, "defaultAction")
@@ -305,6 +364,26 @@ def _repository_matches(repository: str, entry: str) -> bool:
     if entry.endswith(("/", "-")):
         return repository.startswith(entry)
     return repository == entry
+
+
+def _unique_keys(pairs: list[tuple[str, JsonValue]]) -> JsonObject:
+    seen: dict[str, str] = {}
+    for key, _ in pairs:
+        folded = key.casefold()
+        if folded in seen:
+            raise ValueError(f"key {key!r} is given more than once (also as {seen[folded]!r})")
+        seen[folded] = key
+    return dict(pairs)
+
+
+def loads_strict(document: bytes | str) -> JsonValue:
+    """``json.loads`` that refuses any object naming a key twice, exactly or case-folded.
+
+    Go's decoder applies every duplicate, so the last-wins dict Python builds
+    would not be what the daemon acts on.
+    """
+    value: JsonValue = json.loads(document, object_pairs_hook=_unique_keys)
+    return value
 
 
 def _field(obj: Mapping[str, JsonValue], name: str) -> JsonValue:

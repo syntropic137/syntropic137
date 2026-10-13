@@ -1,8 +1,9 @@
 """HTTP front for the create policy, forwarding allowed creates to the Docker socket (#1806).
 
-The socket proxy routes ``POST /containers/create`` here and nothing else. A
-refused create gets a 403 whose ``message`` the docker CLI prints verbatim; an
-allowed one is replayed against the daemon socket and its response returned.
+The socket proxy routes ``POST /containers/create`` and
+``POST /containers/{id}/exec`` here and nothing else. A refused request gets a
+403 whose ``message`` the docker CLI prints verbatim; an allowed one is
+replayed against the daemon socket and its response returned.
 """
 
 from __future__ import annotations
@@ -18,12 +19,15 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import TYPE_CHECKING, ClassVar
 from urllib.parse import quote, unquote, urlsplit
 
+from syn_adapters.docker_create_guard.policy import Refusal
+
 if TYPE_CHECKING:
-    from syn_adapters.docker_create_guard.policy import CreatePolicy
+    from syn_adapters.docker_create_guard.policy import CreatePolicy, JsonObject
 
 logger = logging.getLogger(__name__)
 
 CREATE_PATH = re.compile(r"^(/v[0-9.]+)?/containers/create/*$", re.IGNORECASE)
+EXEC_PATH = re.compile(r"^(/v[0-9.]+)?/containers/(.+?)/exec/*$", re.IGNORECASE)
 _FORWARDED_RESPONSE_HEADERS = (
     "Content-Type",
     "Api-Version",
@@ -32,6 +36,8 @@ _FORWARDED_RESPONSE_HEADERS = (
     "Server",
 )
 _MAX_BODY_BYTES = 4 * 1024 * 1024
+# Sentinel from ``_check_exec``: the reply (a 502) is already sent.
+_UNREACHABLE = Refusal("the exec target could not be inspected")
 
 
 class _UnixHTTPConnection(http.client.HTTPConnection):
@@ -69,6 +75,16 @@ class DockerSocket:
         document = json.loads(body)
         names = [*(document.get("RepoTags") or []), *(document.get("RepoDigests") or [])]
         return tuple(name for name in names if isinstance(name, str))
+
+    def container(self, name_or_id: str) -> JsonObject | None:
+        """The daemon's inspect of a container, or None when it does not know it."""
+        status, _, body = self.request(
+            "GET", f"/containers/{quote(name_or_id, safe='')}/json", None, {}
+        )
+        if status != 200:
+            return None
+        document = json.loads(body)
+        return document if isinstance(document, dict) else None
 
 
 class GuardHost:
@@ -116,22 +132,46 @@ class CreateGuardHandler(BaseHTTPRequestHandler):
     host: ClassVar[GuardHost]
 
     def do_POST(self) -> None:
-        if not CREATE_PATH.match(unquote(urlsplit(self.path).path)):
-            self._reply(403, f"the create guard only serves container create, not {self.path!r}")
+        path = unquote(urlsplit(self.path).path)
+        exec_target = EXEC_PATH.match(path)
+        if not CREATE_PATH.match(path) and exec_target is None:
+            self._reply(
+                403, f"the create guard only serves container create and exec, not {self.path!r}"
+            )
             return
-        length = self.headers.get("Content-Length")
-        if length is None or not length.isdigit() or int(length) > _MAX_BODY_BYTES:
-            self._reply(411, "container create needs a Content-Length under 4 MiB")
+        body = self._read_body()
+        if body is None:
             return
-        body = self.rfile.read(int(length))
-        refusal = self.policy.check(body, self.host)
+        if exec_target is None:
+            refusal = self.policy.check(body, self.host)
+        else:
+            refusal = self._check_exec(body, exec_target.group(2))
+            if refusal is _UNREACHABLE:
+                return
         if refusal is not None:
-            logger.warning("refused container create: %s", refusal.reason)
+            logger.warning("refused %s: %s", self.path, refusal.reason)
             self._reply(
                 403, f"refused by the Syntropic137 container-create guard: {refusal.reason}"
             )
             return
         self._forward(body)
+
+    def _read_body(self) -> bytes | None:
+        length = self.headers.get("Content-Length")
+        if length is None or not length.isdigit() or int(length) > _MAX_BODY_BYTES:
+            self._reply(411, "container create and exec need a Content-Length under 4 MiB")
+            return None
+        return self.rfile.read(int(length))
+
+    def _check_exec(self, body: bytes, target_name: str) -> Refusal | None:
+        """The exec refusal, or ``_UNREACHABLE`` once a 502 has been sent."""
+        try:
+            target = self.host.docker.container(target_name)
+        except (OSError, ValueError) as exc:
+            logger.error("exec target could not be inspected: %s", exc)
+            self._reply(502, f"the create guard could not inspect the exec target: {exc}")
+            return _UNREACHABLE
+        return self.policy.check_exec(body, target, self.host)
 
     def _forward(self, body: bytes) -> None:
         headers = {"Content-Type": self.headers.get("Content-Type", "application/json")}

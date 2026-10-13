@@ -23,13 +23,20 @@ pytestmark = pytest.mark.unit
 
 
 class _FakeDaemon(DockerSocket):
+    """Records forwarded POSTs; answers container inspects from ``containers``."""
+
     def __init__(self) -> None:
         super().__init__("/nonexistent")
         self.creates: list[tuple[str, bytes]] = []
+        self.containers: dict[str, JsonObject] = {}
 
     def request(
         self, method: str, path: str, body: bytes | None, headers: dict[str, str]
     ) -> tuple[int, list[tuple[str, str]], bytes]:
+        if method == "GET":
+            name = path.removeprefix("/containers/").removesuffix("/json")
+            found = self.containers.get(name)
+            return (200, [], json.dumps(found).encode()) if found else (404, [], b"{}")
         self.creates.append((path, body or b""))
         return (
             201,
@@ -95,7 +102,7 @@ def test_only_create_is_served(guard: tuple[int, _FakeDaemon], path: str) -> Non
     # A body the policy allows, so only the path check can refuse it.
     port, daemon = guard
     status, payload = _post(port, path, sidecar_body())
-    assert status == 403 and "only serves container create" in str(payload["message"])
+    assert status == 403 and "only serves container create and exec" in str(payload["message"])
     assert daemon.creates == []
 
 
@@ -112,3 +119,31 @@ class TestGuardHostResolvesThroughTheMount:
     def test_unmounted_root_sees_nothing(self) -> None:
         host = GuardHost(DockerSocket("/nonexistent"), "/srv/ws", None)
         assert host.real_path("/srv/ws/ws-1") is None
+
+
+def _inspect(labels: JsonObject) -> JsonObject:
+    return {"Config": {"Image": workspace_body()["Image"], "Labels": labels}, "Mounts": []}
+
+
+class TestExec:
+    def test_exec_into_a_workspace_is_forwarded(self, guard: tuple[int, _FakeDaemon]) -> None:
+        port, daemon = guard
+        daemon.containers["ws-1"] = _inspect({"syn.workspace_id": "ws-1"})
+        status, _ = _post(port, "/v1.47/containers/ws-1/exec", {"Cmd": ["true"]})
+        assert status == 201
+        assert [path for path, _ in daemon.creates] == ["/v1.47/containers/ws-1/exec"]
+
+    @pytest.mark.parametrize("name", ["syn-docker-create-guard", "missing"])
+    def test_exec_into_the_guard_or_an_unknown_container_never_reaches_the_daemon(
+        self, guard: tuple[int, _FakeDaemon], name: str
+    ) -> None:
+        port, daemon = guard
+        daemon.containers["syn-docker-create-guard"] = _inspect(
+            {"com.docker.compose.service": "docker-create-guard"}
+        )
+        status, payload = _post(port, f"/v1.47/containers/{name}/exec", {"Cmd": ["python"]})
+        assert status == 403
+        assert str(payload["message"]).startswith(
+            "refused by the Syntropic137 container-create guard"
+        )
+        assert daemon.creates == []

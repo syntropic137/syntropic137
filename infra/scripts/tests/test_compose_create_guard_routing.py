@@ -54,10 +54,12 @@ def _patched(compose: Path, tmp_path: Path) -> str:
 
 
 def _routed(config: str, method: str, path: str) -> bool:
-    match = _ROUTE.search(config)
-    assert match is not None, "no use_backend docker-create-guard rule was inserted"
-    route_method, pattern = match.groups()
-    return method == route_method and re.search(pattern, unquote(path), re.IGNORECASE) is not None
+    routes = _ROUTE.findall(config)
+    assert routes, "no use_backend docker-create-guard rule was inserted"
+    return any(
+        method == route_method and re.search(pattern, unquote(path), re.IGNORECASE) is not None
+        for route_method, pattern in routes
+    )
 
 
 _DENY = re.compile(
@@ -142,6 +144,10 @@ class TestCreateRouting:
             "/v1.47/containers/create/",
             "/v1.47/CONTAINERS/Create",
             "/v1.47/containers/%63reate",
+            # Exec: the guard and the proxy hold the socket, so exec is checked too.
+            "/v1.47/containers/abc/exec",
+            "/containers/syn-docker-create-guard/exec/",
+            "/v1.47/Containers/abc/%65xec",
         ],
     )
     def test_every_create_spelling_is_routed(
@@ -154,7 +160,8 @@ class TestCreateRouting:
         [
             ("GET", "/v1.47/containers/json"),
             ("POST", "/v1.47/containers/abc/start"),
-            ("POST", "/v1.47/containers/abc/exec"),
+            ("GET", "/v1.47/containers/abc/json"),
+            ("POST", "/v1.47/exec/abc/start"),
             ("POST", "/v1.47/images/create"),
         ],
     )

@@ -356,3 +356,97 @@ class TestDeprecatedTopLevelHostConfig:
         del body["HostConfig"]
         body.update(fields)
         assert _check(body) is not None
+
+
+class TestDuplicateKeys:
+    """Go applies every duplicate key (merging objects, ignoring a later null); Python keeps the last.
+
+    Each body below reads as harmless to a last-wins parse and as host access to
+    the daemon, so each must be refused at parse time.
+    """
+
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            '{"Image": IMG, "HostConfig": {"Privileged": true, "Binds": ["/:/host"]}, "HostConfig": {}}',
+            '{"Image": IMG, "HostConfig": {"Privileged": true, "Privileged": null}}',
+            '{"Image": IMG, "HostConfig": {"Privileged": true}, "hostconfig": {}}',
+            '{"Image": "alpine", "Image": IMG}',
+            '{"Image": IMG, "HostConfig": {"Mounts": [{"Type": "bind", "Source": "/", "source": "/srv/syn137/workspaces/x"}]}}',
+            '{"Image": IMG, "HostConfig": {"SecurityOpt": ["seccomp={\\"defaultAction\\":\\"SCMP_ACT_ALLOW\\",\\"defaultAction\\":\\"SCMP_ACT_ERRNO\\"}"]}}',
+        ],
+    )
+    def test_refused(self, raw: str) -> None:
+        body = raw.replace("IMG", json.dumps(DEFAULT_WORKSPACE_IMAGE)).encode()
+        refusal = POLICY.check(body, FakeHost())
+        assert refusal is not None and "more than once" in refusal.reason
+
+
+def _target(
+    image: str = DEFAULT_WORKSPACE_IMAGE,
+    labels: JsonObject | None = None,
+    mounts: list[JsonValue] | None = None,
+    privileged: bool = False,
+) -> JsonObject:
+    """The subset of ``GET /containers/{id}/json`` the exec check reads."""
+    return {
+        "Config": {"Image": image, "Labels": labels or {"syn.workspace_id": "ws-1"}},
+        "HostConfig": {"Privileged": privileged},
+        "Mounts": mounts or [],
+    }
+
+
+_EXEC = json.dumps({"Cmd": ["true"], "AttachStdout": True}).encode()
+
+
+class TestExec:
+    def test_workspace_container_passes(self) -> None:
+        assert POLICY.check_exec(_EXEC, _target(), FakeHost()) is None
+
+    def test_recovery_container_by_local_id_passes(self) -> None:
+        host = FakeHost(images={LOCAL_ID: (DEFAULT_WORKSPACE_IMAGE,)})
+        assert POLICY.check_exec(_EXEC, _target(image=LOCAL_ID), host) is None
+
+    @pytest.mark.parametrize(
+        ("target", "reason"),
+        [
+            (
+                # The guard itself in the published compose: an allowlisted image.
+                _target(
+                    image="ghcr.io/syntropic137/syn-api:1.0.0",
+                    labels={"com.docker.compose.service": "docker-create-guard"},
+                ),
+                "Compose service",
+            ),
+            (
+                _target(
+                    mounts=[
+                        {"Source": "/var/run/docker.sock", "Destination": "/var/run/docker.sock"}
+                    ]
+                ),
+                "Docker socket",
+            ),
+            (
+                _target(mounts=[{"Source": "/run/x", "Destination": "/s/docker.sock/"}]),
+                "Docker socket",
+            ),
+            (_target(privileged=True), "privileged container"),
+            (_target(image="tecnativa/docker-socket-proxy:0.3.0"), "not in the allowlist"),
+            (None, "not a container the daemon knows"),
+        ],
+    )
+    def test_refused_target(self, target: JsonObject | None, reason: str) -> None:
+        refusal = POLICY.check_exec(_EXEC, target, FakeHost())
+        assert refusal is not None and reason in refusal.reason
+
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            b'{"Cmd": ["sh"], "Privileged": true}',
+            b'{"Cmd": ["sh"], "privileged": true}',
+            b'{"Cmd": ["sh"], "Privileged": true, "Privileged": null}',
+            b"[]",
+        ],
+    )
+    def test_refused_body(self, raw: bytes) -> None:
+        assert POLICY.check_exec(raw, _target(), FakeHost()) is not None

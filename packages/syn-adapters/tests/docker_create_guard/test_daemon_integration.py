@@ -171,3 +171,57 @@ def test_deprecated_top_level_host_config_is_refused(
         assert not _exists(daemon, name)
     finally:
         _remove(daemon, name)
+
+
+def _post_raw(port: int, path: str, raw: bytes) -> tuple[int, bytes]:
+    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=60)
+    conn.request("POST", path, body=raw, headers={"Content-Type": "application/json"})
+    response = conn.getresponse()
+    return response.status, response.read()
+
+
+def test_duplicate_host_config_is_refused_and_nothing_is_created(
+    guard: tuple[int, DockerSocket, Path],
+) -> None:
+    # Go merges both HostConfig objects; a last-wins parse would see only {}.
+    port, daemon, _ = guard
+    name = f"syn-guard-test-{uuid.uuid4().hex[:8]}"
+    raw = (
+        f'{{"Image": "{IMAGE}", "Cmd": ["true"], '
+        '"HostConfig": {"Privileged": true, "Binds": ["/:/host"]}, "HostConfig": {}}'
+    ).encode()
+    try:
+        status, _ = _post_raw(port, f"/containers/create?name={name}", raw)
+        assert status == 403
+        assert not _exists(daemon, name)
+    finally:
+        _remove(daemon, name)
+
+
+def _running(daemon: DockerSocket, name: str, labels: dict[str, str]) -> None:
+    body = json.dumps({"Image": IMAGE, "Cmd": ["sleep", "60"], "Labels": labels}).encode()
+    status, _, _ = daemon.request(
+        "POST", f"/containers/create?name={name}", body, {"Content-Type": "application/json"}
+    )
+    assert status == 201
+    status, _, _ = daemon.request("POST", f"/containers/{name}/start", b"", {})
+    assert status == 204
+
+
+@pytest.mark.parametrize(
+    ("labels", "expected"),
+    [({"syn.workspace_id": "ws-1"}, 201), ({"com.docker.compose.service": "api"}, 403)],
+)
+def test_exec_is_allowed_only_into_platform_containers(
+    guard: tuple[int, DockerSocket, Path], labels: dict[str, str], expected: int
+) -> None:
+    port, daemon, _ = guard
+    name = f"syn-guard-test-{uuid.uuid4().hex[:8]}"
+    try:
+        _running(daemon, name, labels)
+        status, _ = _post_raw(
+            port, f"/containers/{name}/exec", json.dumps({"Cmd": ["true"]}).encode()
+        )
+        assert status == expected
+    finally:
+        _remove(daemon, name)
