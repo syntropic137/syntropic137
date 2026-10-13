@@ -35,6 +35,7 @@ from pydantic import (
 # allowed to define it (#1380).
 from syn_adapters.subscriptions.read_model_lag import ProjectionLag  # noqa: TC001
 from syn_adapters.subscriptions.unapplied_starts import UnappliedStart  # noqa: TC001
+from syn_api.inventory_types import AgentLaunch as AgentLaunch
 from syn_api.inventory_types import CaptureRevisionHashes as CaptureRevisionHashes
 from syn_api.inventory_types import LocalTranscriptResponse as LocalTranscriptResponse
 from syn_api.inventory_types import (
@@ -2430,6 +2431,13 @@ class SessionDetail(BaseModel):
     root_session_id: str | None = None
     agent_type: str = ""
     status: str = ""
+    agent_launch: AgentLaunch = AgentLaunch.UNKNOWN
+    """Whether the agent process for this session has demonstrably started.
+
+    ``status`` is ``running`` from ``SessionStarted``, which is written before
+    the workspace is provisioned; this is ``launched`` only once
+    ``AgentLaunched`` is recorded (#1065, #1717).
+    """
     workspace_path: str | None = None
     repos: list[str] = Field(default_factory=list)
     input_tokens: int = 0

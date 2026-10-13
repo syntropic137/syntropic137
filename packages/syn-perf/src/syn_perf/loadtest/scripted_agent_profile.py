@@ -78,6 +78,14 @@ if TYPE_CHECKING:
 SCRIPTED_AGENT_PROFILE_ENV: Final = "SYN_SCRIPTED_AGENT_PROFILE"
 """The one environment variable a stub workspace reads its profile from."""
 
+SCRIPTED_AGENT_MODEL: Final = "syn-scripted-agent"
+"""The model id every replayed stream reports in place of the recorded one.
+
+The stub rewrites the ``model`` of every event it replays to this, so the
+server records it as the session's observed ``agent_model``. The driver holds
+every session of a run to it: any other model means a real harness ran and
+spent tokens (#1717)."""
+
 LOADTEST_BRANCH_PREFIX: Final = "loadtest/"
 """Every load-test branch is ``loadtest/<execution_id>`` on the fixture repo."""
 
@@ -131,6 +139,12 @@ class ScriptedStream(_Contract):
     recording: str = Field(min_length=1)
     """Path of the recording inside the stub image."""
     cli_version: str = Field(min_length=1)
+    tool_uses: int = Field(ge=1)
+    """Tool-use events in the recording. The stub refuses to replay a recording
+    whose count differs, and the driver holds the server's stored count for
+    the phase's session to it, so a dropped observation shows as a shortfall
+    (#1717). Never zero: a recording with no tool use proves nothing about
+    observation loss."""
     pacing_factor: float = Field(default=1.0, ge=0)
     """Recorded inter-event timing multiplied by this. ``0`` replays at once."""
 
