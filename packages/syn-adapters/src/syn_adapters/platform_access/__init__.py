@@ -334,6 +334,16 @@ class PlatformTokenService:
             return Denial(
                 403, f"platform token scope '{grant.scope}' does not allow {method} {path}"
             )
+        # Judging an EVAL execute awaits the body, and the token can expire or
+        # be revoked at teardown meanwhile: the verdict holds only for a grant
+        # that is still live once it is reached.
+        current = await self._store.get(_hash(token))
+        if (
+            current is None
+            or current.expires_at <= self._now()
+            or (current.scope, current.eval_id) != (grant.scope, grant.eval_id)
+        ):
+            return Denial(401, "platform token invalid, expired or revoked")
         return None
 
 
