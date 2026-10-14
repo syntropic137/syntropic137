@@ -5,6 +5,14 @@
  * opens on the first subscribe, closes on the last unsubscribe). Each
  * subscriber receives frames in batches, at most once per animation frame.
  *
+ * Reconnects (#1924). EventSource retries a dropped connection on its own,
+ * but an HTTP error on a retry (the API restarting for a deploy, a 502/524
+ * from the edge) closes it for good, and a long-open tab then never updates
+ * again. The hub reopens a closed source with backoff while anyone still
+ * subscribes. Either way, frames sent while disconnected are gone, so every
+ * reconnect calls `onReconnect`: subscribers refetch instead of trusting
+ * a view that missed events.
+ *
  * In fixtures mode nothing connects; subscribers see state 'fixtures'.
  */
 import { clientConfig } from '../client/config'
@@ -19,6 +27,8 @@ export interface StreamSubscriber {
   /** Only frames whose event_type passes are delivered. A throwing filter counts as false. */
   filter?: (eventType: string) => boolean
   onState?: (state: StreamState) => void
+  /** The stream came back after a disconnect; frames sent in between were missed. */
+  onReconnect?: () => void
 }
 
 /** The subset of EventSource the hub uses; injectable for tests. */
@@ -36,6 +46,11 @@ interface Channel {
   state: StreamState
   subs: Set<Sub>
   lastEventAt: number | null
+  /** Has opened at least once, so the next open is a reconnect. */
+  opened: boolean
+  /** Reopens since the last successful open; drives the backoff. */
+  attempts: number
+  retry: ReturnType<typeof setTimeout> | undefined
 }
 
 interface Sub {
@@ -60,13 +75,15 @@ export class LiveHub {
       createSource?: EventSourceFactory
       schedule?: Scheduler
       fixtures?: () => boolean
+      /** Wait before reopening a closed source, by attempt (0-based). Default 1s doubling to 30s. */
+      reconnectDelayMs?: (attempt: number) => number
     } = {},
   ) {}
 
   subscribe(url: string, spec: StreamSubscriber): () => void {
     let ch = this.channels.get(url)
     if (!ch) {
-      ch = { source: null, state: 'connecting', subs: new Set(), lastEventAt: null }
+      ch = { source: null, state: 'connecting', subs: new Set(), lastEventAt: null, opened: false, attempts: 0, retry: undefined }
       this.channels.set(url, ch)
     }
     const channel = ch
@@ -88,6 +105,7 @@ export class LiveHub {
       sub.batcher.cancel()
       channel.subs.delete(sub)
       if (channel.subs.size === 0) {
+        clearTimeout(channel.retry)
         channel.source?.close()
         this.channels.delete(url)
       }
@@ -118,9 +136,30 @@ export class LiveHub {
     }
     const source = factory(url)
     channel.source = source
-    source.onopen = () => this.setState(channel, 'open')
-    // EventSource retries on its own; CONNECTING (0) after an error means it will.
-    source.onerror = () => this.setState(channel, source.readyState === 0 ? 'connecting' : 'closed')
+    source.onopen = () => {
+      const reconnect = channel.opened
+      channel.opened = true
+      channel.attempts = 0
+      this.setState(channel, 'open')
+      if (reconnect) for (const s of channel.subs) safely(() => s.spec.onReconnect?.())
+    }
+    source.onerror = () => {
+      // EventSource retries on its own; CONNECTING (0) after an error means it will.
+      if (source.readyState === 0) return this.setState(channel, 'connecting')
+      // CLOSED (2): it has given up. Reopen while anyone still listens.
+      source.close()
+      if (channel.source === source) channel.source = null
+      this.setState(channel, 'closed')
+      if (channel.subs.size === 0 || channel.retry) return
+      const delay = (this.options.reconnectDelayMs ?? backoff)(channel.attempts++)
+      channel.retry = setTimeout(() => {
+        channel.retry = undefined
+        if (channel.subs.size > 0 && !channel.source) {
+          this.setState(channel, 'connecting')
+          this.open(url, channel)
+        }
+      }, delay)
+    }
     source.onmessage = (e) => {
       let frame: SSEEventFrame
       try {
@@ -131,6 +170,16 @@ export class LiveHub {
       channel.lastEventAt = Date.now()
       for (const s of channel.subs) if (passes(s.spec, frame.event_type)) s.batcher.push(frame)
     }
+  }
+}
+
+const backoff = (attempt: number) => Math.min(30_000, 1000 * 2 ** attempt)
+
+const safely = (run: () => void) => {
+  try {
+    run()
+  } catch {
+    // one consumer's error never tears down the stream
   }
 }
 

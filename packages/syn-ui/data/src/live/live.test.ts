@@ -89,3 +89,89 @@ describe('LiveHub', () => {
     expect(states).toEqual(['fixtures'])
   })
 })
+
+describe('LiveHub reconnects (#1924)', () => {
+  const setup = () => {
+    vi.useFakeTimers()
+    const s = manualScheduler()
+    const sources: FakeSource[] = []
+    const hub = new LiveHub({
+      createSource: (url) => (sources.push(new FakeSource(url)), sources.at(-1)!),
+      schedule: s.schedule,
+      fixtures: () => false,
+      reconnectDelayMs: (n) => 1000 * 2 ** n,
+    })
+    return { hub, sources }
+  }
+  const open = (src: FakeSource) => {
+    src.readyState = 1
+    src.onopen?.(new Event('open'))
+  }
+  const giveUp = (src: FakeSource) => {
+    src.readyState = 2 // an HTTP error on a retry: EventSource stops for good
+    src.onerror?.(new Event('error'))
+  }
+
+  it('reopens a source the browser closed, with backoff, and tells subscribers they missed frames', () => {
+    const { hub, sources } = setup()
+    try {
+      const onReconnect = vi.fn()
+      const off = hub.subscribe('/sse/activity', { onReconnect })
+      open(sources[0]!)
+      expect(onReconnect).not.toHaveBeenCalled() // the first open is not a reconnect
+      giveUp(sources[0]!)
+      expect(sources[0]!.closed).toBe(true)
+      expect(hub.state('/sse/activity')).toBe('closed')
+      vi.advanceTimersByTime(999)
+      expect(sources).toHaveLength(1)
+      vi.advanceTimersByTime(1)
+      expect(sources).toHaveLength(2)
+      expect(hub.state('/sse/activity')).toBe('connecting')
+      giveUp(sources[1]!) // still down: wait doubles
+      vi.advanceTimersByTime(1999)
+      expect(sources).toHaveLength(2)
+      vi.advanceTimersByTime(1)
+      expect(sources).toHaveLength(3)
+      open(sources[2]!)
+      expect(hub.state('/sse/activity')).toBe('open')
+      expect(onReconnect).toHaveBeenCalledOnce()
+      giveUp(sources[2]!) // a successful open resets the backoff
+      vi.advanceTimersByTime(1000)
+      expect(sources).toHaveLength(4)
+      off()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("signals a reconnect after the browser's own retry too", () => {
+    const { hub, sources } = setup()
+    try {
+      const onReconnect = vi.fn()
+      hub.subscribe('/sse/activity', { onReconnect })
+      open(sources[0]!)
+      sources[0]!.readyState = 0 // network drop: EventSource retries on its own
+      sources[0]!.onerror?.(new Event('error'))
+      expect(hub.state('/sse/activity')).toBe('connecting')
+      expect(sources).toHaveLength(1)
+      open(sources[0]!)
+      expect(onReconnect).toHaveBeenCalledOnce()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not reopen once the last subscriber leaves', () => {
+    const { hub, sources } = setup()
+    try {
+      const off = hub.subscribe('/sse/activity', {})
+      open(sources[0]!)
+      giveUp(sources[0]!)
+      off()
+      vi.advanceTimersByTime(60_000)
+      expect(sources).toHaveLength(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
