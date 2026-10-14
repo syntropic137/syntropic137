@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 from syn_adapters.in_memory import InMemoryAdapter
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Callable, Iterable
 
     from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
         IsolationHandle,
@@ -48,6 +48,7 @@ class MemoryEventStreamAdapter(InMemoryAdapter):
         working_directory: str | None = None,
         environment: dict[str, str] | None = None,
         wrapper_name: str | None = None,
+        withheld: Callable[[], Iterable[str]] | None = None,
     ) -> AsyncIterator[str]:
         """Stream mock output lines.
 
@@ -58,6 +59,8 @@ class MemoryEventStreamAdapter(InMemoryAdapter):
             wrapper_name: Launch announcement name (ignored - no process is
                 created here, so there is nothing that could honestly answer
                 to it, and the session is left UNKNOWN)
+            withheld: Credential values to scrub (ignored - these lines are
+                configured by a test, not printed by a workload)
 
         Yields:
             Pre-configured output lines
@@ -68,6 +71,7 @@ class MemoryEventStreamAdapter(InMemoryAdapter):
             working_directory,
             environment,
             wrapper_name,
+            withheld,
         )  # named for the port; unused here
         lines = self._streams.get(handle.isolation_id, [])
         for line in lines:
