@@ -502,6 +502,35 @@ def _parse_usages(raw: Sequence[str] | None) -> list[_WorkspaceUsageRow]:
     return [_WorkspaceUsageRow.model_validate_json(r) for r in raw or ()]
 
 
+def _killed_attempt(
+    execution_id: str, attempts: Sequence[_WorkspaceUsageRow]
+) -> OomKilledPhase | None:
+    """The newest killed attempt, with its own peak.
+
+    A phase counts once however many attempts or duplicate deliveries wrote a
+    row, and a later clean or unmeasured attempt does not hide the kill.
+    """
+    killed = next((a for a in attempts if a.oom is True), None)
+    if killed is None:
+        return None
+    return OomKilledPhase(
+        execution_id=execution_id,
+        memory_peak_bytes=killed.memory_peak_bytes,
+        oom_kills=killed.oom_kills,
+    )
+
+
+def _not_killed(
+    phases: Iterable[tuple[str, float | None, _WorkspaceUsageRow | None]], killed: set[str]
+) -> int:
+    """Phases whose newest attempt measured no kill and no earlier attempt was killed."""
+    return sum(
+        1
+        for execution_id, _, u in phases
+        if u is not None and u.oom is False and execution_id not in killed
+    )
+
+
 def _resource_profiles(rows: Iterable[asyncpg.Record]) -> list[PhaseResourceProfile]:
     by_phase: dict[str, list[tuple[str, float | None, _WorkspaceUsageRow | None]]] = defaultdict(
         list
@@ -512,28 +541,15 @@ def _resource_profiles(rows: Iterable[asyncpg.Record]) -> list[PhaseResourceProf
         usage = attempts[0] if attempts else None
         wall = None if usage is None else usage.workspace_lifetime_seconds
         by_phase[row["phase_id"]].append((row["execution_id"], wall if wall else None, usage))
-        # The newest killed attempt, with its own peak: a phase counts once
-        # however many attempts or duplicate deliveries wrote a row.
-        killed = next((a for a in attempts if a.oom is True), None)
+        killed = _killed_attempt(row["execution_id"], attempts)
         if killed is not None:
-            killed_by_phase[row["phase_id"]].append(
-                OomKilledPhase(
-                    execution_id=row["execution_id"],
-                    memory_peak_bytes=killed.memory_peak_bytes,
-                    oom_kills=killed.oom_kills,
-                )
-            )
+            killed_by_phase[row["phase_id"]].append(killed)
 
     profiles = []
     for phase_id, phases in sorted(by_phase.items()):
         measured = [(wall, usage) for _, wall, usage in phases if usage is not None]
         killed = sorted(killed_by_phase[phase_id], key=lambda k: k.execution_id)
-        killed_ids = {k.execution_id for k in killed}
-        not_killed = sum(
-            1
-            for execution_id, _, u in phases
-            if u is not None and u.oom is False and execution_id not in killed_ids
-        )
+        not_killed = _not_killed(phases, {k.execution_id for k in killed})
         cpu_rates = [
             usage.cpu_usage_seconds / wall
             for wall, usage in measured
