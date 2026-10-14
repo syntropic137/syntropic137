@@ -706,8 +706,9 @@ make the candidate pass. If you can identify the candidate and write
 `review_verdict` the section at the top requires, even when the candidate is
 BLOCKED.
 
-This includes a normal code, test, or design defect, and a failing gate.
-Put each such item under a `BLOCKING` heading with the
+This includes a normal code, test, or design defect, and a failing gate, but
+not an environment limitation, which is `ORCHESTRATOR_EVIDENCE` (below). Put
+each such item under a `BLOCKING` heading with the
 file and line or affected command, the root cause, the exact action required,
 and what would prove it closed. The one exception is a check whose CI job is
 skipped by design for this PR and covers nothing this PR changes, proven from
@@ -719,10 +720,8 @@ not that exception: without independent evidence it is `BLOCKING`, unless
 producing that evidence needs Docker, a database or a real store, in which
 case it is `ORCHESTRATOR_EVIDENCE`. `success=true` means the verification report
 was delivered so the `fix` phase can run; it does not mean the candidate was
-certified.
-
-An environment limitation that prevents only part of verification, such as
-an unavailable database, is not `BLOCKING` in this workflow. It is
+certified. In this workflow, an environment limitation that prevents only part
+of verification, such as an unavailable database, is not `BLOCKING`. It is
 `ORCHESTRATOR_EVIDENCE`, and so is every other item the evidence precheck
 classifies as a handoff: list it under `## Handed to the orchestrator`. It
 never decides the verdict by itself.
