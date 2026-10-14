@@ -1732,7 +1732,7 @@ selfhost-restore file *args:
     #!/usr/bin/env bash
     set -euo pipefail
     source infra/scripts/selfhost-env.sh
-    exec uv run python infra/scripts/selfhost_backup.py --compose "{{compose_selfhost}}" restore "$@"
+    exec uv run python infra/scripts/selfhost_backup.py --compose "{{compose_selfhost}}" restore -- "$@"
 
 # Pull latest code, rebuild, and restart self-host (auto-detects tunnel)
 selfhost-update *args:

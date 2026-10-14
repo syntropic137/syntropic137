@@ -87,7 +87,7 @@ class Compose:
         """stdout of a command that must succeed; raises CalledProcessError."""
         return subprocess.run(
             self.argv(*args), check=True, stdout=subprocess.PIPE, text=True
-        ).stdout.strip()
+        ).stdout.rstrip("\n")
 
 
 def db_identity(compose: Compose) -> DbIdentity:

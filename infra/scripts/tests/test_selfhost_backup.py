@@ -191,6 +191,26 @@ class TestRestore:
         assert docker.run_call().endswith(f"/restore/{file.name}")
 
 
+class TestArguments:
+    def test_leading_dash_file_name_is_a_file_not_an_option(self, tmp_path, docker, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "-backup.dump").write_text("x")
+        check = PredeployCheck()
+        assert main(["--compose", _COMPOSE, "restore", "--", "-backup.dump", "--force"], check) == 0
+        assert check.args == ["--force"]
+        assert docker.run_call().endswith("db-backup restore /restore/-backup.dump --force")
+
+    def test_identity_keeps_significant_whitespace(self, tmp_path, docker):
+        path = docker.bin_dir / "docker"
+        path.write_text(
+            path.read_text()
+            .replace("echo container_user", "printf '%s\\n' ' spaced user'")
+            .replace("echo container_db", "printf '%s\\n' 'db '")
+        )
+        assert main(["--compose", _COMPOSE, "backup"]) == 0
+        assert "-e PGUSER= spaced user -e PGDATABASE=db  db-backup" in docker.run_call()
+
+
 class TestWritersMatchTheRunbook:
     def test_restore_stops_the_writers_the_upgrade_runbook_stops(self):
         runbook = (_ROOT / "docs" / "deployment" / "timescaledb-2.29-upgrade.md").read_text()
@@ -213,7 +233,7 @@ class TestRecipesOnlyCallTheProgram:
         ("recipe", "call"),
         [
             ("selfhost-backup", "backup"),
-            ("selfhost-restore", 'restore "$@"'),
+            ("selfhost-restore", 'restore -- "$@"'),
         ],
     )
     def test_recipe_is_env_then_one_call(self, recipe, call):
