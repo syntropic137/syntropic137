@@ -25,8 +25,10 @@ missing.
 - **Clean controls come from imported history.** agentic-workspace's mainline
   before 2026-09-25 was imported from `AgentParadise/agentic-primitives`, and
   its own PR numbers restart there. A control merged before then has
-  `source_pr` set to the agentic-primitives PR its merge names. Rule 2's
-  search covers both repositories.
+  `source_pr` set to the agentic-primitives PR its merge names, by number
+  or, for some imported merges (`0dfa63a`), by title only: list merges by
+  parent count, not by "Merge pull request". Rule 2's search covers both
+  repositories.
 - **Non-Python expected files.** `scripted-agent-tests-not-in-ci` expects
   `.github/workflows/ci.yml`: the defect is a package the CI matrix omits,
   visible in the diff without running anything.

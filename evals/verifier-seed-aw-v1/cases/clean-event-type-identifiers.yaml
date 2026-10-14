@@ -1,0 +1,34 @@
+id: clean-event-type-identifiers
+polarity: clean
+# A control, not a defect, added in v2. agentic-workspace's history before
+# 2026-09-25 is imported from AgentParadise/agentic-primitives, so
+# `source_pr` is the agentic-primitives PR (#87, "refactor(events): align
+# EventType identifiers to match string values (ADR-042)", merged
+# 2026-02-20; its GitHub head 9b71abf is 3b83a95 after the import). The
+# imported merge's message carries the PR title, not "Merge pull request #87",
+# which is why a search for numbered merges misses it. Python code and tests in
+# lib/python/agentic_events and agentic_isolation, plus the observability
+# plugin's git hooks. Chosen by verifier-seed-v1's README rule 1-3; `check`
+# holds rules 1-3 for its Python. By hand: the only first-parent commit in the
+# 30 days after the merge that touches its files is 98658fd (#101,
+# 2026-03-13), which adds a new ClaudeToolName enum to types.py and changes
+# none of #87's lines; the git hooks and entrypoint.sh are not touched in that
+# window. No commit message, issue or PR names #87, ADR-042 or EventType as a
+# fix. It deletes test_git_hooks_integration.py: a verifier that blocks on
+# that should say what coverage was lost, and that block is read under the
+# README's candidate-defect rule before it is scored a false block.
+#
+# THE PIN HAS NO CI FILES, as with every imported-history pin. See README
+# "What differs".
+source_pr: 87
+commit: 3b83a95648101790e8f232892298225104b94021
+merge_commit: 0dfa63abba866d87416b3eae882c5f7c8e5f3916
+clean_through: b454d8516a81a66c699fea748d57945b7244997c
+task: >
+  The change under review renames the agentic_events EventType identifiers so
+  each matches its string value (ADR-042), updates the emitter, the Docker
+  provider and the observability plugin's git hooks to the new names, and adds
+  a post-checkout hook. Review whether any emitter, hook or consumer still
+  uses an old identifier or value, and whether an event is now emitted with a
+  type its readers do not recognise.
+split: train
