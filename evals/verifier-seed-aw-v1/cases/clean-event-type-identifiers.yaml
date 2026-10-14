@@ -32,3 +32,4 @@ task: >
   uses an old identifier or value, and whether an event is now emitted with a
   type its readers do not recognise.
 split: train
+retired: v3 - both arms blocked it and its findings were not available to v3 (the artifacts API was unreachable and no run id is recorded), so it is an uninvestigated candidate defect, not a control; the pin deletes test_git_hooks_integration.py. It scores in v2 as it ran
