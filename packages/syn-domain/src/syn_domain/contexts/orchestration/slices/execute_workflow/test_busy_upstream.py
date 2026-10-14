@@ -52,6 +52,11 @@ RATE_LIMITED = api_error_label(ApiErrorType.RATE_LIMIT, "429")
 ROOMY = 3600.0
 
 
+def _at_the_ceiling() -> float:
+    """The jitter draw that waits the whole nominal backoff, so a test can name it."""
+    return 1.0
+
+
 def _begin(
     *, timeout_seconds: float = ROOMY, oversleeps_by: float = 0.0
 ) -> tuple[PhaseAttempts, FakeClock]:
@@ -62,7 +67,7 @@ def _begin(
     promises to.
     """
     clock = FakeClock(oversleeps_by=oversleeps_by)
-    policy = UpstreamRetryPolicy(clock=clock.as_attempt_clock())
+    policy = UpstreamRetryPolicy(clock=clock.as_attempt_clock(), jitter=_at_the_ceiling)
     return policy.begin(timeout_seconds=timeout_seconds), clock
 
 
@@ -84,7 +89,38 @@ class TestTheBackoff:
         assert await attempts.wait_before_retry(reason=AT_CAPACITY, work_done=False)
         assert await attempts.wait_before_retry(reason=AT_CAPACITY, work_done=False)
 
-        assert clock.slept == [5.0, 10.0]
+        assert clock.slept == [FIRST_BACKOFF, 2 * FIRST_BACKOFF]
+
+    @pytest.mark.parametrize("draw", [0.0, 0.25, 0.999])
+    async def test_each_wait_is_jittered_between_half_its_ceiling_and_the_ceiling(
+        self, draw: float
+    ) -> None:
+        """Phases that met the same full model at the same second must not all
+        come back at the same second too (#1882)."""
+        clock = FakeClock()
+        policy = UpstreamRetryPolicy(clock=clock.as_attempt_clock(), jitter=lambda: draw)
+        attempts = policy.begin(timeout_seconds=ROOMY)
+
+        assert await attempts.wait_before_retry(reason=AT_CAPACITY, work_done=False)
+        assert await attempts.wait_before_retry(reason=AT_CAPACITY, work_done=False)
+
+        assert clock.slept == pytest.approx(
+            [FIRST_BACKOFF / 2 * (1 + draw), FIRST_BACKOFF * (1 + draw)]
+        )
+
+    async def test_the_default_jitter_varies_the_wait(self) -> None:
+        """Production's draw, not a pinned one: two phases do not wait alike."""
+        waits: set[float] = set()
+        for _ in range(8):
+            clock = FakeClock()
+            attempts = UpstreamRetryPolicy(clock=clock.as_attempt_clock()).begin(
+                timeout_seconds=ROOMY
+            )
+            assert await attempts.wait_before_retry(reason=AT_CAPACITY, work_done=False)
+            waits |= set(clock.slept)
+
+        assert len(waits) > 1
+        assert all(FIRST_BACKOFF / 2 <= wait <= FIRST_BACKOFF for wait in waits)
 
     async def test_the_attempt_that_will_not_be_retried_does_not_wait(self) -> None:
         """The wait buys a later attempt. With no later attempt it buys
@@ -229,8 +265,8 @@ class TestTheOneDeadline:
 
         await attempts.wait_before_retry(reason=AT_CAPACITY, work_done=False)
 
-        assert clock.slept == [5.0]
-        assert attempts.seconds_left == started_with - 5.0
+        assert clock.slept == [FIRST_BACKOFF]
+        assert attempts.seconds_left == started_with - FIRST_BACKOFF
 
     async def test_an_attempt_gets_what_is_left_not_what_the_phase_started_with(
         self,
@@ -325,7 +361,9 @@ class TestABackoffThatOverslept:
     async def test_a_sleep_that_overshoots_the_deadline_dispatches_no_successor(self) -> None:
         """The reproduction from the review, in its own terms: a budget that
         can afford the wait, a wait that takes far longer than it asked for."""
-        attempts, clock = _begin(timeout_seconds=40.0, oversleeps_by=45.0)
+        attempts, clock = _begin(
+            timeout_seconds=MIN_USEFUL + FIRST_BACKOFF + 10.0, oversleeps_by=45.0
+        )
 
         assert not await attempts.wait_before_retry(reason=AT_CAPACITY, work_done=False), (
             "the backoff came back past the deadline and another attempt was launched anyway"

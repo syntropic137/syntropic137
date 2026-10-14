@@ -1,59 +1,73 @@
-# Agent: Cut a release (bump -> release PR -> approve gate)
+# Agent: version bump, release PR, approval, verification
 
 ## Purpose
 
-Drive a version bump through the `main -> release` PR, the release gate, and the post-merge publish pipeline. Matches SKILL.md "When to invoke" triggers: "Cut a release", "publish v0.X.Y", "ship this", "Bump the version". The canonical procedure lives in `docs/release-process.md`; this file is the operational checklist that points at it.
+Take `main` to a published stable release, or bump the version for a test
+deploy. Cutting a release is the owner's call: when asked only to clear
+blockers, stop at "main is releasable", report what it would carry, and leave
+the bump and the release PR alone. Drafting release notes for the owner is
+fine. The canonical steps are in `docs/release-process.md`; this file is the
+checklist plus the lessons that doc does not carry.
 
-## Workflow
+## Test deploy vs release (decide first)
 
-1. Read `docs/release-process.md` end-to-end before doing anything. It is the source of truth for ordering, recovery, and gate behavior.
-2. If this release bumps any base image tag in `docker/` or `infra/docker/` (envoy, sidecar-proxy, token-injector, etc.), build the affected images locally first to catch upstream apt rot before CI does. This is the v0.25.3 -> v0.25.4 lesson (`feedback_local_build_before_base_bump`).
+| | Test deploy (beta) | Stable release |
+|---|---|---|
+| Produces | images on the VPS; optional plain git tag | tag, GitHub Release, GHCR images, npm CLI, docs |
+| How | `just pit-stop <version>` per `docs/deployment/test-deploy.md` | `main -> release` PR, below |
+| GitHub Release | none | yes |
+
+The owner does not want GitHub prereleases: they are public release-list noise.
+`docs/release-process.md` still documents a "Published beta" via `gh release
+create --prerelease` (which `release-beta.yaml` serves); use it only if the
+owner explicitly asks for a beta with an outside audience. For a validation
+build without a pit stop: merge the bump, push a plain tag (no workflow fires
+on a tag push), `just release-local <version>`. That path does not cosign-sign,
+so it never exercises signing. When to deploy a beta is `orchestrating`'s call.
+
+## Workflow (stable release)
+
+1. Read `docs/release-process.md` in full, including any release-specific constraint section near the top.
+2. Preconditions:
+   - `main` is green: `gh run list --workflow ci.yml --branch main --limit 1`.
+   - If the `lib/event-sourcing-platform` gitlink moved since the last release, ESP has released that version and `just check-event-store-pin` passes. ESP releases before syn137, always.
+   - Projection `VERSION` bumps in the range are listed; they open a read-path rebuild window that goes in Upgrade Notes.
+   - Rehearsal done: a fresh install from the to-be-published compose AND an in-place upgrade from the last release, with images built from `main`, isolated from the live stack (prefer a disposable VM). Until `just rehearse-release` exists (#1865), this is manual.
+   - Base-image bumps built locally once to catch upstream rot, with the same Dockerfile and build context `just/release.just` uses for that image (`token-injector` and `sidecar-proxy` build from their own directory, the rest from the repo root): `docker build -f <Dockerfile> <context>`.
+3. Bump on a branch, through a normal PR into `main` (`agent_pr.md`):
    ```
-   docker build -f infra/docker/<image>/Dockerfile .
-   ```
-3. Bump the version (writes every version-carrying file) and verify consistency.
-   ```
-   just bump-version <X.Y.Z>
+   just bump-version X.Y.Z     # every version file, uv.lock, codegen, CHANGELOG.md section
    just check-version
+   git add <each file the bump changed>   # list them with git status; not -A
+   git commit -m "chore: bump version to vX.Y.Z"
    ```
-4. Open a PR from `main` to `release`. Write the PR body as the GitHub Release notes verbatim - it becomes the release notes when the pipeline runs.
+   The bump touches CODEOWNERS paths, so the bump PR needs the owner.
+4. Write the release notes body to a file BEFORE opening the release PR. It becomes the GitHub Release description verbatim, and the notes check reads the frozen event payload: an edit after opening never clears a red check (the "40-minute release").
    ```
-   gh pr create --base release --head main --title "Release vX.Y.Z" --body "$(cat <<'EOF'
-   ## Highlights
-   - <user-facing changes>
-
-   ## Fixes
-   - <...>
-
-   ## Notes
-   - <upgrade caveats, if any>
-   EOF
-   )"
+   gh pr create --base release --head main --title "Release vX.Y.Z" --body-file notes.md
    ```
-5. Wait for the release gate (`release-gate.yml`) to go green: version-consistency, codegen-sync, multi-arch docker dry-run on native AMD64 + ARM64 runners, OSV scan, pip-audit. Use `agent_ci_triage.md` if anything fails.
-6. Wait for at least one review pass before asking the operator to approve. Releases especially benefit from a Copilot/human read of the diff and the release notes - typos and stale comments shipped here are public-facing. If the release was already merged early, fetch reviews retroactively and address via a follow-up PR (`feedback_review_pass_before_merge`).
-7. Ask the operator to approve the deployment environment gate. NEVER approve it yourself (`feedback_release_approval`).
-8. Operator merges with a merge commit (preserves the release boundary). Merging fires `release-create.yml`: GitHub Release + tag, container build/sign/push to GHCR, then the npm CLI publish (gated on container success per the v0.25.4 fix).
-9. If the pipeline partially failed (e.g. containers landed but CLI publish broke), do NOT re-cut the release. Follow the recovery flow in `docs/release-process.md`.
+   Sections: What's Changed (user-facing), Upgrade Notes (rebuild windows, config changes, rollback limits).
+5. Wait for `release-gate.yml` and `ci.yml` green. Triage with `agent_ci_triage.md`.
+6. The owner merges or asks you to, with a merge commit. The merge is the trigger: `release-create.yml` starts and `create-release` waits on the `release-publish` environment. Tell the owner it is waiting; do not approve it yourself.
+7. After approval: tag + Release, codegen re-check, `release-containers.yaml` (multi-arch build, cosign, GHCR, compose + SHA256SUMS assets) and `release-cli.yaml` (npm, provenance). About 6 minutes.
+8. Verify the artifact, not the pipeline:
+   ```
+   gh release download vX.Y.Z --pattern 'docker-compose.syntropic137.yaml' --pattern 'SHA256SUMS'
+   sha256sum -c SHA256SUMS --ignore-missing
+   # each pinned image ref in the compose:
+   # must be an index (OCI or Docker manifest list) carrying BOTH linux/amd64 and linux/arm64; exits non-zero otherwise
+   docker buildx imagetools inspect <ref> --raw | jq -e '(.mediaType == "application/vnd.oci.image.index.v1+json" or .mediaType == "application/vnd.docker.distribution.manifest.list.v2+json") and ([.manifests[].platform | select(. != null) | "\(.os)/\(.architecture)"] | (index("linux/amd64") != null and index("linux/arm64") != null))'
+   npm view @syntropic137/cli version
+   ```
+   SHA256SUMS attests the bytes, not that the digests resolve. v0.33.0 pinned an arm64 child manifest and broke every amd64 self-host.
+9. npx setup chain (`syntropic137-setup`): the sync PR opens itself, then three human gates stop it: its CI lands `action_required` (bot author), the ruleset requires owner approval for unattributed changes, and `publish.yml` is dispatch-only. Do not self-approve gate 2 even though the `gh` identity can. Verify with `npm view @syntropic137/setup version`.
 
-## References
+## Recovery
 
-- `docs/release-process.md` - canonical procedure, recovery, and failure modes.
-- `.github/workflows/release-create.yml` - publish pipeline ordering.
-- `.github/workflows/release-gate.yml` and `_check-*.yml` - what blocks the release PR.
-
-## Hard rules to honor
-
-- Never approve the deployment gate yourself; human only.
-- Release PRs use merge commits (not squash); preserves the release boundary.
-- Never force-push, never rebase, never `--no-verify`.
-- Build base-image-bump containers locally first.
-- No em dashes; pre-push hook blocks them.
+- A released version cannot be republished: every downstream job gates on `created == 'true'`, so re-merging is a silent no-op, and dispatching `release-containers.yaml` re-pushes new digests under a tag users already pulled. Fix forward with a patch bump and a new release PR.
+- A publish step failed after the Release was created: re-run per `docs/release-process.md` "How to safely re-trigger" (`--ref release`, `dry_run=false`), only when nothing was pushed under that tag yet.
+- Do not create Releases by hand to "trigger" publishing; stable publishing only flows through `release-create.yml`.
 
 ## Health check
 
-If this file is out of date with the repository (workflow names changed, file paths moved, hard rules contradicted by current behavior), STOP and:
-1. Note the drift in the response to the user.
-2. Either fix this file inline (preferred for small drift) or escalate to the user with a one-line summary of what needs updating.
-
-Keeping these skill files healthy is a higher priority than completing the immediate task with a stale recipe.
+Depends on: `just bump-version`, `just check-version`, `just check-event-store-pin`, `just pit-stop`, `just release-local` recipes; `release-create.yml` firing on push to `release` with `environment: release-publish` and the `created == 'true'` gates; `_check-changelog.yml` reading `github.event.pull_request.body`; `release-beta.yaml` firing on prereleases; release asset names `docker-compose.syntropic137.yaml` and `SHA256SUMS`. Check `#1865` for a `just rehearse-release` target and use it once it lands. Fix this file on drift.

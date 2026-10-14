@@ -41,7 +41,9 @@ class IsolationBackendPort(Protocol):
         """Destroy isolation environment. Idempotent.
 
         Returns what the workspace consumed, measured at teardown, or None when
-        this backend does not measure (or the handle was already gone).
+        this backend does not measure (or the handle was already gone). A
+        teardown that does not complete raises and keeps the handle, so
+        destroying it again retries rather than reporting it gone.
         """
         ...
 

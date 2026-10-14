@@ -47,9 +47,14 @@ on:
   #     - '.github/workflows/smoke-test.yml'
   workflow_dispatch:
 
+# Same pattern as ci.yml (#1895). A PR run is superseded by the next push to
+# the same PR, so cancel it. Everything else (main/release pushes, dispatch)
+# gets a group of its own run, so it is never cancelled and never queued:
+# a shared group by ref holds one pending run and cancels the older one, so
+# back-to-back merges left a main commit with no result (9fb6159f's smoke).
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # ISS-259: Least-privilege default
 permissions:

@@ -24,7 +24,7 @@ This table shows the most important event flows in Syn137 (events that feed the 
 | ? | agent_execution_completed | ExecutionTodoProjection, WorkflowExecutionDetailProjection | 2 |
 | ? | agent_observation | ExecutionCostProjection, SessionCostProjection | 2 |
 | ? | artifact_created | ArtifactListProjection, DashboardMetricsProjection | 2 |
-| ? | execution_tags_added | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection | 2 |
+| ? | execution_forked | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection | 2 |
 
 ---
 

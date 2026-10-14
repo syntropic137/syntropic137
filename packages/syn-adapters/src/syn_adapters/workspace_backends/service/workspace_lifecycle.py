@@ -14,6 +14,7 @@ import json
 import logging
 from typing import TYPE_CHECKING
 
+from syn_adapters.workspace_backends.errors import TeardownFailure, WorkspaceTeardownError
 from syn_domain.contexts.orchestration import (
     CreateWorkspaceCommand,
     ImageManifest,
@@ -262,23 +263,44 @@ async def _stop_sidecar(service: WorkspaceService, sidecar_handle: SidecarHandle
         logger.warning("Failed to stop sidecar: %s", e)
 
 
+@dataclasses.dataclass(frozen=True)
+class IsolationTeardown:
+    """What destroying the isolation left behind: usage, and why it failed if it did."""
+
+    usage: WorkspaceUsage | None = None
+    #: Set when teardown did not complete. Never replaces the run's primary
+    #: failure, which propagates from `create_workspace` on its own.
+    failure: TeardownFailure | None = None
+
+
 async def _destroy_isolation(
     service: WorkspaceService, isolation_handle: IsolationHandle
-) -> WorkspaceUsage | None:
-    """Destroy isolation container, logging on failure.
+) -> IsolationTeardown:
+    """Destroy isolation container; a failure is returned and logged, never raised.
 
-    Returns what the backend measured at teardown; None when it measured
-    nothing or the destroy itself failed.
+    Usage is what the backend measured at teardown; None when it measured
+    nothing. A teardown that did not complete keeps its usage and names why.
     """
     try:
         usage: object = await service._isolation.destroy(isolation_handle)
+    except WorkspaceTeardownError as e:
+        logger.error(
+            "Isolation teardown did not complete (isolation=%s): %s",
+            isolation_handle.isolation_id,
+            e,
+        )
+        return IsolationTeardown(usage=e.usage, failure=e.failure)
     except Exception as e:
         logger.warning("Failed to destroy isolation: %s", e)
-        return None
+        return IsolationTeardown(
+            failure=TeardownFailure(
+                state="error", kind=type(e).__name__, message=str(e) or type(e).__name__
+            )
+        )
     # Checked, not trusted: this value is only telemetry, and it is read in a
     # `finally`. A backend that returned something else must cost the record,
     # never the teardown.
-    return usage if isinstance(usage, WorkspaceUsage) else None
+    return IsolationTeardown(usage=usage if isinstance(usage, WorkspaceUsage) else None)
 
 
 async def cleanup_workspace(
@@ -291,11 +313,12 @@ async def cleanup_workspace(
     sidecar_handle: SidecarHandle | None,
     inject_tokens: bool,
     phase_id: str | None = None,
-) -> WorkspaceUsage | None:
+) -> IsolationTeardown:
     """Clean up workspace resources (tokens, sidecar, isolation).
 
-    Returns what the isolation consumed, for the caller to attribute (Lane 2).
-    It is also logged here, once: a provision failure tears down before any
+    Returns what the isolation consumed, for the caller to attribute (Lane 2),
+    and the teardown failure when it did not complete. Usage is also logged
+    here, once: a provision failure tears down before any
     phase runtime holds the workspace, and this line is its only record.
 
     Args:
@@ -310,15 +333,15 @@ async def cleanup_workspace(
     """
     logger.info("Cleaning up workspace (id=%s)", workspace_id)
 
-    usage: WorkspaceUsage | None = None
+    teardown = IsolationTeardown()
     if inject_tokens:
         await _revoke_tokens(service, execution_id)
     if sidecar_handle:
         await _stop_sidecar(service, sidecar_handle)
     if isolation_handle:
-        usage = await _destroy_isolation(service, isolation_handle)
+        teardown = await _destroy_isolation(service, isolation_handle)
         _log_usage(
-            usage,
+            teardown.usage,
             execution_id=execution_id,
             phase_id=phase_id,
             workspace_id=workspace_id,
@@ -333,7 +356,7 @@ async def cleanup_workspace(
     aggregate.terminate_workspace(terminate_cmd)
 
     logger.info("Workspace cleaned up (id=%s)", workspace_id)
-    return usage
+    return teardown
 
 
 def _log_usage(
