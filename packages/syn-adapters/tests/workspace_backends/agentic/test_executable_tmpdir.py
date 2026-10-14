@@ -151,7 +151,8 @@ class _WorkspaceFilesystem:
             duration_ms=1,
         )
 
-    async def destroy(self, workspace: object) -> None:
+    async def teardown(self, *, target: object) -> None:
+        workspace = target
         self.destroyed.append(workspace)
 
 
@@ -236,7 +237,8 @@ class _MkdirHangs(_WorkspaceFilesystem):
 class _MkdirHangsAndReapIsSlow(_MkdirHangs):
     """The reap yields first, so a second cancellation lands while it runs."""
 
-    async def destroy(self, workspace: object) -> None:
+    async def teardown(self, *, target: object) -> None:
+        workspace = target
         await asyncio.sleep(0.05)
         self.destroyed.append(workspace)
 
@@ -244,7 +246,8 @@ class _MkdirHangsAndReapIsSlow(_MkdirHangs):
 class _MkdirHangsAndReapFails(_MkdirHangs):
     """The reap yields, then fails: a second cancellation has already returned the caller."""
 
-    async def destroy(self, workspace: object) -> None:
+    async def teardown(self, *, target: object) -> None:
+        workspace = target
         await asyncio.sleep(0.05)
         raise RuntimeError("docker rm failed")
 
