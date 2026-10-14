@@ -36,7 +36,7 @@ from syn_domain.contexts._shared import (
     AdmissionTicket,
     RepositoryRef,
 )
-from syn_domain.contexts._shared.disk_space import DiskSpaceGuard, DiskUsage
+from syn_domain.contexts._shared.disk_space import DiskSpaceGuard, DiskThresholds, DiskUsage
 from syn_domain.contexts.github.domain.events.TriggerFiredEvent import TriggerFiredEvent
 from syn_domain.contexts.github.slices.dispatch_triggered_workflow.projection import (
     WorkflowDispatchProjection,
@@ -99,7 +99,14 @@ class _Fixture:
         gate = AdmissionGate(
             InMemoryMaintenanceAdapter(),
             disk=DiskSpaceGuard(
-                self.disk, degraded_below_percent=10.0, refuse_admission_below_percent=5.0
+                self.disk,
+                DiskThresholds(
+                    refuse_admission_below_bytes=0,
+                    degraded_below_bytes=0,
+                    refuse_basis="test",
+                    refuse_admission_below_percent=5.0,
+                    degraded_below_percent=10.0,
+                ),
             ),
         )
         self.dispatcher = BackgroundWorkflowDispatcher(

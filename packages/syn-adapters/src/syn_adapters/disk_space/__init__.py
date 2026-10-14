@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 
-from syn_domain.contexts._shared.disk_space import DiskSpaceGuard, DiskUsage
+from syn_domain.contexts._shared.disk_space import DiskSpaceGuard, DiskThresholds, DiskUsage
 
 
 class StatvfsDiskSpace:
@@ -32,10 +32,20 @@ def build_disk_space_guard() -> DiskSpaceGuard:
     from syn_shared.env_constants import ENV_SYN_WORKSPACE_CONTAINER_DIR
     from syn_shared.settings import get_settings
 
-    disk = get_settings().disk
+    settings = get_settings()
+    disk = settings.disk
+    # The admission floor scales with concurrency (#1947): one run reserve per
+    # execution that can be in flight, so each has room to finish.
+    max_concurrent = settings.execution.max_concurrent
     path = disk.path or os.environ.get(ENV_SYN_WORKSPACE_CONTAINER_DIR, "/workspaces")
     return DiskSpaceGuard(
         StatvfsDiskSpace(path),
-        degraded_below_percent=disk.degraded_below_percent,
-        refuse_admission_below_percent=disk.refuse_admission_below_percent,
+        DiskThresholds.from_gib(
+            refuse_admission_below_gib=disk.admission_floor_gib(max_concurrent),
+            degraded_below_gib=disk.degraded_floor_gib(max_concurrent),
+            refuse_basis=disk.admission_floor_basis(max_concurrent),
+            lower_floor_with=disk.admission_floor_setting(),
+            refuse_admission_below_percent=disk.refuse_admission_below_percent,
+            degraded_below_percent=disk.degraded_below_percent,
+        ),
     )
