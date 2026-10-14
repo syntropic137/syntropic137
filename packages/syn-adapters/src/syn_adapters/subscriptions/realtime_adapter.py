@@ -59,6 +59,7 @@ class RealTimeProjectionAdapter(CheckpointedProjection):
             "PhaseCompleted",
             "WorkflowCompleted",
             "WorkflowFailed",
+            "ExecutionCancelled",
             "SessionStarted",
             "OperationRecorded",
             "SessionCompleted",

@@ -254,7 +254,7 @@ describe('detail', () => {
 
 describe('isExecutionEvent', () => {
   it("matches the API's real event_type names, not snake_case guesses", () => {
-    for (const t of ['WorkflowExecutionStarted', 'WorkflowCompleted', 'WorkflowFailed', 'PhaseStarted', 'PhaseCompleted']) expect(isExecutionEvent(t)).toBe(true)
+    for (const t of ['WorkflowExecutionStarted', 'WorkflowCompleted', 'WorkflowFailed', 'ExecutionCancelled', 'PhaseStarted', 'PhaseCompleted']) expect(isExecutionEvent(t)).toBe(true)
     for (const t of ['SessionStarted', 'git_commit', 'connected']) expect(isExecutionEvent(t)).toBe(false)
   })
 })

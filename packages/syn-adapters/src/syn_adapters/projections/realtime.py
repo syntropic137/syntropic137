@@ -270,6 +270,16 @@ class RealTimeProjection:
         await self._forward_event(event, "WorkflowFailed", terminal=True)
         await self.broadcast_global("WorkflowFailed", event)
 
+    async def on_execution_cancelled(self, event: dict[str, JsonValue]) -> None:
+        """Handle ExecutionCancelled event — sends terminal sentinel.
+
+        Also broadcasts on the global activity channel: a cancel is the only
+        event a cancelled run records, so without it a running-filtered list
+        keeps the row until something unrelated refreshes it (#1924).
+        """
+        await self._forward_event(event, "ExecutionCancelled", terminal=True)
+        await self.broadcast_global("ExecutionCancelled", event)
+
     async def on_session_started(self, event: dict[str, JsonValue]) -> None:
         """Handle SessionStarted event.
 

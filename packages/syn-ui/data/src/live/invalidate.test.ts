@@ -41,6 +41,10 @@ describe('invalidationsFor (real API event names)', () => {
       expect(got).toContain(n)
     }
   })
+  it('a cancelled run refreshes the execution list and its own page (#1924)', () => {
+    const got = names(invalidationsFor(frame('ExecutionCancelled', { workflow_id: 'wf', execution_id: 'ex' })))
+    for (const n of ['listExecutions', 'getExecution:ex', 'getWorkflowHistory:wf', 'getContributionHeatmap']) expect(got).toContain(n)
+  })
   it('a run event with no workflow id refreshes every workflow run list', () => {
     expect(invalidationsFor(frame('WorkflowFailed', {}, 'ex'))).toContainEqual({ name: 'listWorkflowRuns' })
   })
