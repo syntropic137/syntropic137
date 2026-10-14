@@ -28,11 +28,12 @@ from agentic_isolation.contract import (
 )
 
 from syn_adapters.diagnostics import capture_signal_death
+from syn_adapters.workspace_backends.agentic.credential_scrubber import CredentialScrubber
 from syn_domain.contexts.orchestration import announce_as, mint_wrapper_name
 from syn_shared.diagnostics import SignalDeath, name_exit_status
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Callable, Iterable
 
     from agentic_isolation.contract import OperationRef, OperationStatus
     from agentic_isolation.providers.base import SupportsOperations, Workspace
@@ -206,6 +207,7 @@ class AgenticEventStreamAdapter:
         working_directory: str | None = None,
         environment: dict[str, str] | None = None,
         wrapper_name: str | None = None,
+        withheld: Callable[[], Iterable[str]] | None = None,
     ) -> AsyncIterator[str]:
         """Stream the agent's output lines as the provider observes them.
 
@@ -223,9 +225,14 @@ class AgenticEventStreamAdapter:
                 name the agent can read is a name it can forge (#1065). It
                 reaches the provider as the spec's ``launch_marker``, which the
                 provider passes on stdin and ``exec`` then replaces.
+            withheld: Further credential values the workload holds (its GitHub
+                tokens), read again before every page because a renewal adds
+                new ones while the stream runs.
 
         Yields:
-            Individual output lines as they are produced
+            Individual output lines as they are produced, with every credential
+            value replaced (#1927): the launch's own credentials, the
+            session-store token and ``withheld``. See ``credential_scrubber``.
 
         ARCHITECTURE NOTE - one stream, stdout and stderr together (ADR-043):
         the operation's observation stream carries both channels in arrival
@@ -240,6 +247,7 @@ class AgenticEventStreamAdapter:
         credentials = self._host.credentials
 
         plain, bindings, parked = credentials.bind_launch(environment or {})
+        bound = credentials.withheld(parked)
         try:
             wrapper = wrapper_name if wrapper_name is not None else mint_wrapper_name()
             spec = OperationSpec(
@@ -262,10 +270,17 @@ class AgenticEventStreamAdapter:
             # Resolved during start, or never needed when the spec or the start
             # failed: no launch value outlives this block either way.
             credentials.release(parked)
-        logger.debug("Started stream operation %s (cmd=%s)", ref.operation_id, command)
+        logger.debug(
+            "Started stream operation %s (cmd=%s)",
+            ref.operation_id,
+            CredentialScrubber(bound).scrub(str(command)),
+        )
+
+        def secrets() -> tuple[str, ...]:
+            return (*bound, *(withheld() if withheld is not None else ()))
 
         try:
-            async for line in self._observe(provider, ref):
+            async for line in self._observe(provider, ref, secrets):
                 yield line
             status = await provider.status(ref)
         except BaseException:
@@ -285,21 +300,36 @@ class AgenticEventStreamAdapter:
             raise
         await self._settle(status, spec)
 
-    async def _observe(self, provider: SupportsOperations, ref: OperationRef) -> AsyncIterator[str]:
+    async def _observe(
+        self,
+        provider: SupportsOperations,
+        ref: OperationRef,
+        secrets: Callable[[], Iterable[str]],
+    ) -> AsyncIterator[str]:
+        """Yield the operation's output as scrubbed lines.
+
+        Scrubbing whole lines is what makes a value split across two pages
+        safe: the decoder carries the unterminated part of a line into the
+        next page, so no line is scrubbed until all of it has arrived.
+        """
         decoder = LineDecoder()
+        scrubber = CredentialScrubber()
         cursor: str | None = None
         while True:
             page = await provider.observe(
                 ref, cursor=cursor, max_bytes=_PAGE_BYTES, wait_seconds=_OBSERVE_WAIT_SECONDS
             )
+            current = tuple(secrets())
+            if not scrubber.covers(current):
+                scrubber = CredentialScrubber(current)
             if isinstance(page.gap, ObservationGap):
                 self._record_gap(page.gap, decoder.gap(), ref)
             for line in decoder.feed(base64.b64decode(page.data_b64)):
-                yield line
+                yield scrubber.scrub(line)
             cursor = page.next_cursor
             if page.complete:
                 for line in decoder.finish():
-                    yield line
+                    yield scrubber.scrub(line)
                 return
 
     def _record_gap(self, gap: ObservationGap, severed_chars: int, ref: OperationRef) -> None:

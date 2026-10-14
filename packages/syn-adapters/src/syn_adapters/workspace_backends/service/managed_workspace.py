@@ -188,6 +188,9 @@ class ManagedWorkspace:
             working_directory=working_directory,
             environment=environment,
             wrapper_name=wrapper_name,
+            # Read live: a renewal installs a new token while the agent runs,
+            # and the agent can print the one on disk (#1927).
+            withheld=lambda: tuple(token.token for token in self._ledger.issued),
         )
         async for line in stream:  # type: ignore[attr-defined]
             yield line
