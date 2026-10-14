@@ -49,7 +49,7 @@ from syn_adapters.storage.repositories import RepositoryAdapter
 from syn_adapters.workspace_backends.service import WorkspaceBackend, WorkspaceService
 from syn_api._wiring_admission import BackgroundWorkflowDispatcher
 from syn_api.execution_budget import ExecutionBudget, StartClaim, StartPath
-from syn_api.routes.executions import commands, control, queries
+from syn_api.routes.executions import commands, control, queries, resume_start_info
 from syn_api.routes.executions.commands import ExecuteWorkflowRequest
 from syn_domain.contexts._shared import AdmissionGate
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
@@ -667,7 +667,7 @@ class TestAQueuedStartIsVisible:
         waiting = [p for p, c in zip(PARENTS, children, strict=True) if c not in world.agent.inside]
         assert waiting, "with two slots and six starts, some resume must be waiting"
 
-        info = await queries._resume_start_of(world.resume_store, waiting[0])  # pyright: ignore[reportPrivateUsage]
+        info = await resume_start_info.resume_start_of(world.resume_store, waiting[0])
 
         assert info is not None
         assert info.status == "dispatched"

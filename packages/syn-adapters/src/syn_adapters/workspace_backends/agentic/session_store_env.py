@@ -25,7 +25,7 @@ redirect an enabled capture at a store of its own choosing.
 :func:`apply_session_store_env` therefore strips every reserved key from
 caller-supplied environment first, then layers this module's own values on top
 (when enabled). A stripped key is logged by NAME only — never by value, because
-one of them is the write token.
+one of them names the write token.
 
 Partition safety
 ----------------
@@ -56,6 +56,8 @@ import re
 from typing import TYPE_CHECKING
 from urllib.parse import quote, unquote
 
+from agentic_isolation.contract import MISSING, CredentialBinding, CredentialRef
+
 from syn_shared.env_constants import (
     ENV_AGENTIC_SESSION_STORE_AUTH,
     ENV_AGENTIC_SESSION_STORE_DEPLOYMENT,
@@ -74,7 +76,15 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Scope of the one credential Syntropic137 resolves itself: the write token
+# held in `SessionStoreSettings`, never the host process environment.
+SESSION_STORE_CREDENTIAL_SCOPE = "syn-session-store"
+SESSION_STORE_AUTH_REF = CredentialRef(
+    schema=MISSING, name=ENV_AGENTIC_SESSION_STORE_AUTH, scope=SESSION_STORE_CREDENTIAL_SCOPE
+)
+
 __all__ = [
+    "SESSION_STORE_AUTH_REF",
     "TAG_DEPLOYMENT",
     "TAG_EXECUTION_ID",
     "TAG_PHASE_ID",
@@ -87,6 +97,7 @@ __all__ = [
     "decode_tag_value",
     "encode_tag_value",
     "sanitize_partition_segment",
+    "session_store_credential_bindings",
 ]
 
 # Tag keys are part of the join contract with the session store: a row in the
@@ -273,10 +284,8 @@ def build_session_store_env(
     result rather than branching, so the disabled path adds literally nothing to
     the container environment.
 
-    The auth token is read from the settings object at this single point and
-    written straight into the returned mapping. It is never logged, never put in
-    an exception message, and never placed in a container label (labels are
-    readable by anyone who can run ``docker inspect``).
+    The auth token is NOT in the returned mapping: see
+    :func:`session_store_credential_bindings`.
     """
     if not settings.is_enabled:
         return {}
@@ -310,12 +319,33 @@ def build_session_store_env(
     if deployment:
         env[ENV_AGENTIC_SESSION_STORE_DEPLOYMENT] = deployment
 
-    # AUTH is always emitted when the store is on, even if the operator runs an
-    # unauthenticated store: the capability treats an empty token as "no auth
-    # header" rather than as a misconfiguration.
-    env[ENV_AGENTIC_SESSION_STORE_AUTH] = settings.auth_value
-
+    # AUTH is deliberately absent: it is a credential, so it travels as a
+    # binding (`session_store_credential_bindings`) that the provider resolves
+    # through `WorkspaceCredentials`, never as a plain environment value.
     return env
+
+
+def session_store_credential_bindings(
+    settings: SessionStoreSettings,
+) -> list[CredentialBinding]:
+    """The credential the session-store contract needs, bound by reference.
+
+    EMPTY when no store is configured, for the same reason
+    :func:`build_session_store_env` is: the disabled path adds nothing.
+
+    The binding is emitted even for an unauthenticated store: the capability
+    treats an empty token as "no auth header" rather than as a
+    misconfiguration, and the resolver delivers the empty string.
+    """
+    if not settings.is_enabled:
+        return []
+    return [
+        CredentialBinding(
+            ref=SESSION_STORE_AUTH_REF,
+            delivery="env",
+            target=ENV_AGENTIC_SESSION_STORE_AUTH,
+        )
+    ]
 
 
 def apply_session_store_env(

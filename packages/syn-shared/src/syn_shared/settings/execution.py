@@ -91,3 +91,15 @@ class ExecutionSettings(BaseSettings):
             "timeout, or Docker kills the process first (#1381)."
         ),
     )
+
+    run_queue_enabled: bool = Field(
+        default=False,
+        description=(
+            "Admit executions into the Postgres run queue instead of running them "
+            "in the admitting process (ADR-072, #1310 1.3). Off by default and NOT "
+            "safe to turn on yet: nothing claims an admitted run until the "
+            "ExecutionHost lands (#1310 1.5), so with this on every execution is "
+            "admitted and never runs. Requires SYN_OBSERVABILITY_DB_URL; the API "
+            "refuses to start an execution without it rather than queue in memory."
+        ),
+    )

@@ -61,6 +61,7 @@ from syn_shared.env_constants import (
     ENV_SYN_PHASE_DEADLINE,
     ENV_SYN_PHASE_TIMEOUT_SECONDS,
 )
+from syn_shared.events import UPSTREAM_RETRY
 
 if TYPE_CHECKING:
     from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
@@ -106,6 +107,11 @@ MIN_USEFUL = _MIN_USEFUL_ATTEMPT_SECONDS
 
 #: What the first backoff costs, at production's configured schedule.
 FIRST_BACKOFF = UpstreamRetryPolicy().base_delay_seconds
+
+
+def _at_the_ceiling() -> float:
+    """The jitter draw that waits the whole nominal backoff, so a test can name it."""
+    return 1.0
 
 
 @dataclass
@@ -234,6 +240,36 @@ async def started_session_manager(
     return manager
 
 
+@dataclass
+class _Observation:
+    observation_type: str
+    data: dict[str, str | int | None]
+    execution_id: str | None
+    phase_id: str | None
+
+
+@dataclass
+class _RecordedObservations:
+    """An `ObservabilityRecorder` that keeps what it was given."""
+
+    rows: list[_Observation] = field(default_factory=list)
+
+    async def record_observation(
+        self,
+        session_id: str,
+        observation_type: str,
+        data: dict[str, str | int | None],
+        execution_id: str | None = None,
+        phase_id: str | None = None,
+        workspace_id: str | None = None,
+    ) -> None:
+        del session_id, workspace_id
+        self.rows.append(_Observation(str(observation_type), data, execution_id, phase_id))
+
+    def of(self, observation_type: str) -> list[_Observation]:
+        return [row for row in self.rows if row.observation_type == observation_type]
+
+
 async def _registered(launch: PhaseLaunch) -> PhaseLaunch:
     """Controlled launches need durable intent (#1398); supply it when a test has none."""
     if launch.session_manager is not None:
@@ -247,6 +283,7 @@ async def _run(
     phase: ExecutablePhase | None = None,
     launch: PhaseLaunch | None = None,
     retry_policy: UpstreamRetryPolicy = NO_WAITING,
+    observability: _RecordedObservations | None = None,
 ) -> AgentExecutionResult:
     return await run_phase_agent(
         handler=handler,
@@ -259,7 +296,7 @@ async def _run(
         phase=phase or _phase(),
         launch=await _registered(launch or _launch()),
         session_id="sess-1",
-        observability=None,
+        observability=observability,
         retry_policy=retry_policy,
     )
 
@@ -495,13 +532,16 @@ class TestOneDeadlineForTheWholePhase:
         await _run(
             handler,
             phase=_phase(timeout_seconds=3600),
-            retry_policy=UpstreamRetryPolicy(clock=clock.as_attempt_clock()),
+            retry_policy=UpstreamRetryPolicy(
+                clock=clock.as_attempt_clock(), jitter=_at_the_ceiling
+            ),
         )
 
         granted = [a.timeout_seconds for a in handler.attempts]
-        assert granted == [3600, 2995, 2385], (
+        first, second = int(FIRST_BACKOFF), int(2 * FIRST_BACKOFF)
+        assert granted == [3600, 3600 - 600 - first, 3600 - 1200 - first - second], (
             f"{granted}: each attempt must get the phase's REMAINING seconds - "
-            "its own 600s and the 5s/10s backoff already deducted"
+            "its own 600s and the backoffs already deducted"
         )
 
     async def test_the_whole_sequence_fits_inside_the_configured_timeout(self) -> None:
@@ -524,7 +564,9 @@ class TestOneDeadlineForTheWholePhase:
         await _run(
             handler,
             phase=_phase(timeout_seconds=3600),
-            retry_policy=UpstreamRetryPolicy(clock=clock.as_attempt_clock()),
+            retry_policy=UpstreamRetryPolicy(
+                clock=clock.as_attempt_clock(), jitter=_at_the_ceiling
+            ),
         )
 
         assert clock.now <= 3600.0, (
@@ -551,7 +593,9 @@ class TestOneDeadlineForTheWholePhase:
         await _run(
             handler,
             phase=_phase(timeout_seconds=600),
-            retry_policy=UpstreamRetryPolicy(clock=clock.as_attempt_clock()),
+            retry_policy=UpstreamRetryPolicy(
+                clock=clock.as_attempt_clock(), jitter=_at_the_ceiling
+            ),
         )
 
         assert len(handler.attempts) == 1, (
@@ -692,7 +736,9 @@ class TestNothingIsDispatchedOnAnExpiredDeadline:
         await _run(
             handler,
             phase=_phase(timeout_seconds=40),
-            retry_policy=UpstreamRetryPolicy(clock=clock.as_attempt_clock()),
+            retry_policy=UpstreamRetryPolicy(
+                clock=clock.as_attempt_clock(), jitter=_at_the_ceiling
+            ),
         )
 
         assert len(handler.attempts) == 1, (
@@ -707,7 +753,9 @@ class TestNothingIsDispatchedOnAnExpiredDeadline:
         clock = FakeClock(oversleeps_by=3600.0)
         handler = _RecordingHandler(
             clock=clock,
-            takes_seconds=3565.0,
+            # Leaves exactly enough for the backoff and one useful attempt, so
+            # only the overshoot can be what refuses the successor.
+            takes_seconds=3600.0 - MIN_USEFUL - FIRST_BACKOFF,
             scripted=FakeAgentExecutionHandler(
                 attempts=[
                     FakeAgentExecutionHandler.failed(stream_error=AT_CAPACITY),
@@ -719,7 +767,9 @@ class TestNothingIsDispatchedOnAnExpiredDeadline:
         await _run(
             handler,
             phase=_phase(timeout_seconds=3600),
-            retry_policy=UpstreamRetryPolicy(clock=clock.as_attempt_clock()),
+            retry_policy=UpstreamRetryPolicy(
+                clock=clock.as_attempt_clock(), jitter=_at_the_ceiling
+            ),
         )
 
         assert len(handler.attempts) == 1
@@ -747,7 +797,9 @@ class TestNothingIsDispatchedOnAnExpiredDeadline:
         await _run(
             handler,
             phase=_phase(timeout_seconds=70),
-            retry_policy=UpstreamRetryPolicy(clock=clock.as_attempt_clock()),
+            retry_policy=UpstreamRetryPolicy(
+                clock=clock.as_attempt_clock(), jitter=_at_the_ceiling
+            ),
         )
 
         granted = [a.timeout_seconds for a in handler.attempts]
@@ -865,7 +917,9 @@ class TestTheClockMovingBetweenTheDecisionAndTheDispatch:
         await _run(
             handler,
             phase=_phase(timeout_seconds=int(MIN_USEFUL + FIRST_BACKOFF)),
-            retry_policy=UpstreamRetryPolicy(clock=clock.as_attempt_clock()),
+            retry_policy=UpstreamRetryPolicy(
+                clock=clock.as_attempt_clock(), jitter=_at_the_ceiling
+            ),
         )
 
         assert len(handler.attempts) == 1, (
@@ -901,7 +955,9 @@ class TestTheClockMovingBetweenTheDecisionAndTheDispatch:
             # rather than the configured budget minus however long the real
             # one took to be read twice - `int()` truncates, so on a real
             # clock this is 9. That truncation is not what is under test.
-            retry_policy=UpstreamRetryPolicy(clock=clock.as_attempt_clock()),
+            retry_policy=UpstreamRetryPolicy(
+                clock=clock.as_attempt_clock(), jitter=_at_the_ceiling
+            ),
         )
 
         granted = [a.timeout_seconds for a in handler.attempts]
@@ -943,7 +999,7 @@ async def test_retry_dispatch_uses_each_durable_invocation_identity(provider: st
         handler,
         phase=_phase(provider),
         launch=launch,
-        retry_policy=UpstreamRetryPolicy(clock=clock.as_attempt_clock()),
+        retry_policy=UpstreamRetryPolicy(clock=clock.as_attempt_clock(), jitter=_at_the_ceiling),
     )
     deadline = (clock.epoch + timedelta(seconds=ROOMY_SECONDS)).isoformat(timespec="seconds")
     assert manager.session is not None
@@ -1030,7 +1086,9 @@ class TestTheAgentIsToldItsDeadline:
         await _run(
             handler,
             phase=_phase(timeout_seconds=5400),
-            retry_policy=UpstreamRetryPolicy(clock=clock.as_attempt_clock()),
+            retry_policy=UpstreamRetryPolicy(
+                clock=clock.as_attempt_clock(), jitter=_at_the_ceiling
+            ),
         )
 
         (attempt,) = handler.attempts
@@ -1052,7 +1110,11 @@ class TestTheAgentIsToldItsDeadline:
         )
 
         await _run(
-            handler, phase=phase, retry_policy=UpstreamRetryPolicy(clock=clock.as_attempt_clock())
+            handler,
+            phase=phase,
+            retry_policy=UpstreamRetryPolicy(
+                clock=clock.as_attempt_clock(), jitter=_at_the_ceiling
+            ),
         )
 
         (attempt,) = handler.attempts
@@ -1078,7 +1140,9 @@ class TestTheAgentIsToldItsDeadline:
         await _run(
             handler,
             phase=_phase(timeout_seconds=3600),
-            retry_policy=UpstreamRetryPolicy(clock=clock.as_attempt_clock()),
+            retry_policy=UpstreamRetryPolicy(
+                clock=clock.as_attempt_clock(), jitter=_at_the_ceiling
+            ),
         )
 
         first, second = handler.attempts
@@ -1087,3 +1151,171 @@ class TestTheAgentIsToldItsDeadline:
         assert second.agent_env[ENV_SYN_PHASE_DEADLINE] == (
             (clock.epoch + timedelta(seconds=3600)).isoformat(timespec="seconds")
         )
+
+
+class TestEachRetryIsCountedAgainstItsProvider:
+    """#1882: quota pressure is visible per provider and model, in Lane 2."""
+
+    async def test_two_busy_attempts_then_success_record_two_retries(self) -> None:
+        observations = _RecordedObservations()
+        handler = _RecordingHandler(
+            scripted=FakeAgentExecutionHandler(
+                attempts=[
+                    FakeAgentExecutionHandler.failed(stream_error=AT_CAPACITY),
+                    FakeAgentExecutionHandler.failed(stream_error=AT_CAPACITY),
+                    FakeAgentExecutionHandler.success(),
+                ]
+            )
+        )
+        agent = AgentConfiguration(provider="codex", model="gpt-5.5-codex")
+
+        result = await _run(
+            handler, phase=replace(_phase(), agent_config=agent), observability=observations
+        )
+
+        assert result.exit_code == 0
+        retries = observations.of(UPSTREAM_RETRY)
+        assert [row.data for row in retries] == [
+            {
+                "provider": "codex",
+                "requested_model": "gpt-5.5-codex",
+                "upstream_kind": "capacity",
+                "attempt": 2,
+            },
+            {
+                "provider": "codex",
+                "requested_model": "gpt-5.5-codex",
+                "upstream_kind": "capacity",
+                "attempt": 3,
+            },
+        ]
+        assert {(row.execution_id, row.phase_id) for row in retries} == {("exec-1", "verify")}
+
+    async def test_a_failure_that_is_not_retried_records_no_retry(self) -> None:
+        observations = _RecordedObservations()
+        handler = _RecordingHandler(
+            scripted=FakeAgentExecutionHandler(
+                attempts=[FakeAgentExecutionHandler.failed(stream_error=BAD_LOGIN)]
+            )
+        )
+
+        await _run(handler, observability=observations)
+
+        assert observations.of(UPSTREAM_RETRY) == []
+
+
+@dataclass
+class _SlowObservations(_RecordedObservations):
+    """A telemetry store whose every write takes ``takes_seconds`` of ``clock``."""
+
+    clock: FakeClock = field(default_factory=FakeClock)
+    takes_seconds: float = 0.0
+
+    async def record_observation(
+        self,
+        session_id: str,
+        observation_type: str,
+        data: dict[str, str | int | None],
+        execution_id: str | None = None,
+        phase_id: str | None = None,
+        workspace_id: str | None = None,
+    ) -> None:
+        self.clock.advance(self.takes_seconds)
+        await super().record_observation(
+            session_id, observation_type, data, execution_id, phase_id, workspace_id
+        )
+
+
+class TestTelemetryCannotSpendAGrantedBudget:
+    """A retry row is written where no grant is waiting on it (#1882, verify finding 1).
+
+    The row used to be awaited after `wait_before_retry` had granted the
+    successor its timeout and before that successor was dispatched. A slow
+    store spent the budget the grant still claimed, so the successor started
+    after the phase's deadline on a timeout computed before it.
+    """
+
+    async def test_a_recorder_that_eats_the_budget_dispatches_nothing_past_the_deadline(
+        self,
+    ) -> None:
+        deadline = 120.0
+        clock = FakeClock()
+        observations = _SlowObservations(clock=clock, takes_seconds=deadline)
+        started: list[float] = []
+        handler = _RecordingHandler(
+            scripted=FakeAgentExecutionHandler(
+                attempts=[
+                    FakeAgentExecutionHandler.failed(stream_error=AT_CAPACITY),
+                    FakeAgentExecutionHandler.failed(stream_error=AT_CAPACITY),
+                    FakeAgentExecutionHandler.success(),
+                ]
+            )
+        )
+        real_handle = handler.handle
+
+        async def timed_handle(*args: object, **kwargs: object) -> AgentExecutionResult:
+            started.append(clock.now)
+            return await real_handle(*args, **kwargs)  # type: ignore[arg-type]
+
+        handler.handle = timed_handle  # type: ignore[method-assign]
+
+        result = await _run(
+            handler,
+            phase=_phase(timeout_seconds=int(deadline)),
+            retry_policy=UpstreamRetryPolicy(
+                base_delay_seconds=0.0, clock=clock.as_attempt_clock()
+            ),
+            observability=observations,
+        )
+
+        granted = [a.timeout_seconds for a in handler.attempts]
+        assert all(
+            start + timeout <= deadline for start, timeout in zip(started, granted, strict=True)
+        ), f"dispatched at {started} with {granted}: an attempt outlived the {deadline}s deadline"
+        assert len(started) == 2, f"{started}: a successor ran on a budget the recorder spent"
+        assert result.stream_result.error_reason == AT_CAPACITY
+
+
+class TestTheBoundIsReadFromTheDurableRecord:
+    """Rebuilding the runner for the same phase does not replenish its attempts.
+
+    `PhaseAttempts` used to count from 1 on every `run_phase_agent`, so a
+    runner reconstructed for the same session launched another
+    `max_attempts` (#1882, verify finding 2). The count now starts from the
+    session's durable invocation registrations.
+    """
+
+    async def test_a_rebuilt_runner_gets_no_retries_the_phase_already_spent(self) -> None:
+        manager = await started_session_manager()
+        launch = replace(_launch(), session_manager=manager)
+        launches: list[int] = []
+        for _ in range(2):
+            handler = _RecordingHandler(
+                scripted=FakeAgentExecutionHandler(
+                    attempts=[FakeAgentExecutionHandler.failed(stream_error=AT_CAPACITY)] * 3
+                )
+            )
+            result = await _run(handler, launch=launch)
+            launches.append(len(handler.attempts))
+            assert result.stream_result.error_reason == AT_CAPACITY
+
+        max_attempts = NO_WAITING.max_attempts
+        assert launches == [max_attempts, 1], (
+            f"{launches}: the rebuilt runner retried attempts the phase had already spent"
+        )
+        assert manager.session is not None
+        assert len(manager.session.invocations) == max_attempts + 1
+
+    async def test_the_first_runner_still_gets_its_full_bound(self) -> None:
+        """The control: a fresh session is not starved by the durable count."""
+        handler = _RecordingHandler(
+            scripted=FakeAgentExecutionHandler(
+                attempts=[FakeAgentExecutionHandler.failed(stream_error=AT_CAPACITY)] * 3
+            )
+        )
+
+        await _run(
+            handler, launch=replace(_launch(), session_manager=await started_session_manager())
+        )
+
+        assert len(handler.attempts) == NO_WAITING.max_attempts

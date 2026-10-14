@@ -190,6 +190,9 @@ async def not_yet_started(
         tags=[],
         total_duration_seconds=None,
         inputs={},
+        # Not opened yet, so there is no read model row to carry lineage (#1881).
+        resumed_from=None,
+        resumed_as=None,
         total_input_tokens=0,
         total_output_tokens=0,
         total_cache_creation_tokens=0,

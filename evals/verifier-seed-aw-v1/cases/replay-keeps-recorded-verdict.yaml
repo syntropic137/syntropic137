@@ -1,0 +1,36 @@
+id: replay-keeps-recorded-verdict
+polarity: defect
+source_pr: 49
+# Escaped on 2026-10-13: the platform verify certified AW#49 at this head; a
+# second verifier blocked it. The pin is the first parent of the fix cfdb177.
+# Evidence at the pin: `Recording.replay` rewrites every recorded event but
+# keeps each one's text, so a recorded codex `agent_message` (or claude
+# assistant text) carrying `TASK_RESULT:` is replayed, and `closing` then
+# appends the profile's verdict after it. The fix replaces recorded report
+# text with `WITHHELD_REPORT`.
+commit: 4cbac7bf42e812dabe949d8091f7c86b0181ddce
+fix_commit: cfdb17745bcc50bb9452bb65402b157554f22f1c
+task: >
+  The change under review teaches the scripted agent to replay recorded
+  `codex exec --json` phases, as it already replays claude ones: the
+  recording's events are re-emitted and the profile's verdict closes the
+  phase. Review the replayed stream against how syntropic137 reads a phase's
+  verdict from it.
+expected:
+  # The root cause, for the LLM judge only; never part of `task`.
+  defect: >
+    The replay keeps the recording's own agent messages verbatim, including
+    the recorded run's final agent_message carrying its own TASK_RESULT, and
+    then appends the profile's TASK_RESULT. syntropic137's VerdictReader
+    settles every report in the stream by precedence (FAILURE over SUCCESS),
+    not by order, so the recording's verdict can win over the profile's: a
+    recorded failure makes every replay read as failed whatever the profile
+    says.
+  files:
+    - lib/python/scripted_agent/scripted_agent/recording.py
+  keywords:
+    - [task result, task_result, verdict, report]
+    - [record, original, replayed, own, previous, earlier, stale, existing]
+    - [two, both, second, duplicate, multiple, also, append, keep, kept, retain, preserv, not strip,
+       not remov, not withh, outrank, precedence, override, overrid, wins, conflict, ambigu]
+split: holdout
