@@ -325,16 +325,36 @@ def find_problems(
     return problems, covered, len(keys)
 
 
+def workflow_triggers(path: Path) -> set[str]:
+    """The trigger names of one workflow file."""
+    document = yaml.safe_load(path.read_text())
+    if not isinstance(document, dict):
+        return set()
+    # PyYAML resolves the bare key `on` to the boolean True.
+    triggers = document.get("on", document.get(True))
+    if isinstance(triggers, (dict, list)):
+        return {str(name) for name in triggers}
+    return {str(triggers)} if triggers else set()
+
+
 def dispatch_only_problems(workflow_dir: Path, pr_triggered: set[str]) -> list[str]:
-    """DISPATCH_ONLY entries that no longer exist or now run on pull requests."""
+    """DISPATCH_ONLY entries that are gone or gained any other trigger.
+
+    Exactly `workflow_dispatch`: a `push`, `schedule`, `workflow_run` or
+    `pull_request_target` added later would run the workflow in a context the
+    reason above never considered.
+    """
     problems: list[str] = []
     for filename in sorted(DISPATCH_ONLY):
-        if not (workflow_dir / filename).is_file():
+        path = workflow_dir / filename
+        if not path.is_file():
             problems.append(f"DISPATCH_ONLY names {filename}, which does not exist")
-        elif filename in pr_triggered:
+            continue
+        triggers = workflow_triggers(path)
+        if filename in pr_triggered or triggers != {"workflow_dispatch"}:
             problems.append(
-                f"{filename} is listed as DISPATCH_ONLY but triggers on pull_request; "
-                f"map its jobs instead"
+                f"{filename} is listed as DISPATCH_ONLY but triggers on {sorted(triggers)}; "
+                f"it must be workflow_dispatch only, or map its jobs instead"
             )
     return problems
 

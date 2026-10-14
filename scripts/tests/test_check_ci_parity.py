@@ -329,7 +329,13 @@ def test_dispatch_only_entry_must_exist_and_stay_off_pull_request(tmp_path: Path
     for listed in DISPATCH_ONLY:
         (tmp_path / listed).write_text("on: workflow_dispatch\njobs: {}\n")
     assert dispatch_only_problems(tmp_path, set()) == []
-    assert any("triggers on pull_request" in p for p in dispatch_only_problems(tmp_path, {name}))
+    assert any("workflow_dispatch only" in p for p in dispatch_only_problems(tmp_path, {name}))
+
+    for extra in ("push", "schedule", "workflow_run", "pull_request_target"):
+        (tmp_path / name).write_text(f"on: [workflow_dispatch, {extra}]\njobs: {{}}\n")
+        assert dispatch_only_problems(tmp_path, set()), extra
+    (tmp_path / name).write_text("on: push\njobs: {}\n")
+    assert dispatch_only_problems(tmp_path, set())
 
 
 def test_real_dispatch_only_workflows_are_clean() -> None:

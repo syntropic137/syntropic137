@@ -23,12 +23,21 @@ name: Mutation Evidence
 #   required write access to push.
 # - The workflow, the runner script and the setup action come from the
 #   dispatched ref (`trusted/`), never from the PR head (`pr/`).
-# - The job that runs PR code has `contents: read`, no secrets, no persisted
-#   credentials and no dependency cache (a cache saved there would be restored
-#   by trusted jobs). The `pull-requests: write` token exists only in the
-#   comment job, on a fresh runner where no PR code ever ran.
+# - PR code never runs on the runner host. `uv sync` (which executes build
+#   backends) and every pytest run happen in a throwaway container: the PR
+#   checkout mounted, its .git read-only, no Docker socket, only the test
+#   variables forwarded. So PR code cannot rewrite the trusted runner or its
+#   report, plant git hooks the host then runs, or reach the runner's
+#   credentials (GITHUB_TOKEN, the Actions runtime token and so the cache).
+#   `cache-mode: none` would be belt and braces, but actionlint 1.7.12 does not
+#   know the key yet; add it once it does.
+# - That job has `contents: read`, no secrets, no persisted credentials and no
+#   uv cache. The `pull-requests: write` token exists only in the comment job,
+#   on a fresh runner, and posts the report the TRUSTED runner wrote.
+# - Trusted host steps run uv with --no-config, so a uv.toml or [tool.uv] on
+#   the PR head cannot redirect a Python or package download.
 
-run-name: Mutation evidence for PR #${{ inputs.pr }}
+run-name: Mutation evidence for PR #${{ inputs.pr }} ${{ inputs.dispatch_id }}
 
 on:
   workflow_dispatch:
@@ -45,6 +54,11 @@ on:
         description: 'Directory of *.patch files on the PR head'
         required: false
         default: '.mutations/'
+        type: string
+      dispatch_id:
+        description: 'Optional nonce shown in the run name, so a dispatcher can find its own run'
+        required: false
+        default: ''
         type: string
 
 permissions: {}
@@ -79,7 +93,8 @@ jobs:
           MUTATION_PR: ${{ inputs.pr }}
           MUTATION_TESTS: ${{ inputs.tests }}
           MUTATION_DIR: ${{ inputs.mutations_dir }}
-        run: uv run --no-project python scripts/mutation_evidence.py validate
+          MUTATION_DISPATCH_ID: ${{ inputs.dispatch_id }}
+        run: uv run --no-project --no-config python scripts/mutation_evidence.py validate
 
       - name: Resolve PR head
         id: head
@@ -151,15 +166,21 @@ jobs:
           working-directory: pr
           timescaledb-network: ${{ job.services.timescaledb.network }}
           timescaledb-container: ${{ job.services.timescaledb.id }}
-          uv-sync-args: --all-extras --frozen
+          install-dependencies: 'false'
           enable-cache: 'false'
 
+      # The script runs on the host from the trusted checkout; every command
+      # that executes PR code goes through `docker run` on SANDBOX_IMAGE. The
+      # image is uv 0.10.6 (the version infra/docker pins) on python:3.12
+      # trixie, which ships git for tests that read the repo.
       - name: Run baseline and every mutation
-        working-directory: pr
+        working-directory: trusted
         env:
+          SANDBOX_IMAGE: ghcr.io/astral-sh/uv:0.10.6-python3.12-trixie@sha256:24a38374048d1def85b62ccc6e0f8e0e9e57b40c52286beeecff8bbad2c77c6d
           MUTATION_PR: ${{ inputs.pr }}
           MUTATION_TESTS: ${{ inputs.tests }}
           MUTATION_DIR: ${{ inputs.mutations_dir }}
+          MUTATION_DISPATCH_ID: ${{ inputs.dispatch_id }}
           MUTATION_SHA: ${{ needs.resolve.outputs.sha }}
           TERM: dumb
           NO_COLOR: "1"
@@ -169,8 +190,9 @@ jobs:
           TEST_EVENTSTORE_HOST: localhost
           TEST_EVENTSTORE_PORT: "55051"
         run: >-
-          uv run --no-project python ../trusted/scripts/mutation_evidence.py
-          run --report "$RUNNER_TEMP/mutation-evidence.md"
+          uv run --no-project --no-config python scripts/mutation_evidence.py
+          run --root "$GITHUB_WORKSPACE/pr" --image "$SANDBOX_IMAGE"
+          --report "$RUNNER_TEMP/mutation-evidence.md"
 
       - name: Job summary
         if: always()

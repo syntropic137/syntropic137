@@ -1218,14 +1218,16 @@ check-no-mutations:
 mutation-evidence $pr $tests $mutations_dir=".mutations/":
     #!/usr/bin/env bash
     set -euo pipefail
-    since="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    gh workflow run mutation-evidence.yml -f pr="$pr" -f tests="$tests" -f mutations_dir="$mutations_dir"
-    me="$(gh api user --jq .login)"
+    # A nonce in the run name identifies THIS dispatch, even when two run for
+    # the same PR at once.
+    nonce="$(uuidgen | tr '[:upper:]' '[:lower:]')"
+    gh workflow run mutation-evidence.yml --ref main -f pr="$pr" -f tests="$tests" \
+        -f mutations_dir="$mutations_dir" -f dispatch_id="$nonce"
     run_id=""
     for _ in $(seq 1 20); do
-        run_id="$(gh run list --workflow mutation-evidence.yml --event workflow_dispatch --user "$me" \
-            --limit 10 --json databaseId,createdAt,displayTitle \
-            --jq "[.[] | select(.createdAt >= \"$since\" and .displayTitle == \"Mutation evidence for PR #$pr\")][0].databaseId // empty")"
+        run_id="$(gh run list --workflow mutation-evidence.yml --event workflow_dispatch \
+            --limit 20 --json databaseId,displayTitle \
+            --jq "[.[] | select(.displayTitle == \"Mutation evidence for PR #$pr $nonce\")][0].databaseId // empty")"
         [ -n "$run_id" ] && break
         sleep 3
     done

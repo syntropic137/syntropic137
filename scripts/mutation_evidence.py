@@ -7,29 +7,41 @@ agent workspaces have no Docker at all. Dispatch it with
 
 The contract, one PR at a time:
 
-1. Every `*.patch` in the mutations dir on the PR head is a reviewed,
+1. Every `*.patch` under `.mutations/` on the PR head is a reviewed,
    versioned mutation of non-test source. No free-form expressions are ever
    accepted: inputs are a PR number, pytest node ids and a path, each validated
    against a strict pattern before anything runs.
 2. The named tests must PASS on the unmutated head. A red baseline makes every
    kill meaningless ("baseline red, evidence void").
-3. Each patch must apply cleanly, must change the tree, and must touch only
-   non-test source. A mutation of a test, a conftest or the pytest config
-   proves nothing, and a patch that changes nothing reads exactly like a kill.
+3. Each patch is vetted BEFORE it is applied: every path it names must be
+   tracked-or-trackable (not ignored), must not be or sit behind a symlink,
+   must not be a named test file, and must not be test code, test config or
+   infrastructure. After applying, the tree must have changed, and only on
+   those paths. A mutation of a test proves nothing, and a patch that changes
+   nothing reads exactly like a kill.
 4. Bytecode is cleared before every run (the stale `.pyc` trap) and the tree is
    proven clean after every restore.
-5. KILLED means at least one named test failed. SURVIVED means all passed. The
-   run fails if any mutation survived or any patch could not be applied.
+5. KILLED means pytest reported a failed test or a collection error. SURVIVED
+   means every named test passed. Anything else (an interrupt, a timeout, no
+   failure on record) is ERROR. The run fails unless every patch was KILLED.
+
+ISOLATION. This script is trusted; the PR is not. With `--image`, every
+command that executes PR code (`uv sync`, which runs build backends, and each
+pytest run) runs in a throwaway container: the PR checkout mounted at /work,
+its `.git` read-only, no Docker socket, the host uid, no host environment
+beyond a fixed list of test variables. PR code therefore cannot rewrite this
+script, the report it writes, the git hooks it runs, or reach the runner's
+credentials or the Actions cache.
 
 What a survival means, and what it does not: these are the NAMED tests only. A
 narrow selection can prove a kill, never that the wider suite misses the
 mutant. And a kill proves the test is real, not that the fix is right for every
 input shape production produces.
 
-Usage (from the PR checkout):
+Usage:
 
-    mutation_evidence.py validate            # inputs from env, exit 1 if bad
-    mutation_evidence.py run --report FILE   # baseline + every patch
+    mutation_evidence.py validate                      # inputs from env
+    mutation_evidence.py run --root PR --report FILE [--image IMAGE]
 """
 
 from __future__ import annotations
@@ -49,21 +61,36 @@ from typing import Final
 
 #: The PR comment carries this marker so each run updates one comment.
 MARKER: Final = "<!-- mutation-evidence -->"
+#: The only place mutation patches may live. ci.yml `mutations-not-merged`
+#: refuses it on main, so every accepted mutations_dir is covered by that check.
+MUTATIONS_ROOT: Final = PurePosixPath(".mutations")
 
 ENV_PR: Final = "MUTATION_PR"
 ENV_TESTS: Final = "MUTATION_TESTS"
 ENV_DIR: Final = "MUTATION_DIR"
 ENV_SHA: Final = "MUTATION_SHA"
+ENV_DISPATCH_ID: Final = "MUTATION_DISPATCH_ID"
+
+#: Host variables forwarded into the test container. Nothing else crosses.
+FORWARDED_ENV: Final = (
+    "TEST_TIMESCALEDB_HOST",
+    "TEST_TIMESCALEDB_PORT",
+    "TEST_EVENTSTORE_HOST",
+    "TEST_EVENTSTORE_PORT",
+    "TERM",
+    "NO_COLOR",
+    "COLUMNS",
+)
+CONTAINER_ROOT: Final = "/work"
 
 MAX_TESTS: Final = 50
 MAX_PATCHES: Final = 40
 PYTEST_TIMEOUT_SECONDS: Final = 15 * 60
+SYNC_TIMEOUT_SECONDS: Final = 20 * 60
 
 _PR_RE: Final = re.compile(r"^[1-9][0-9]{0,6}$")
 _SHA_RE: Final = re.compile(r"^[0-9a-f]{40}$")
-#: One path segment: no leading dash (option injection) and no leading dot
-#: other than the mutations dir convention, which is handled separately.
-_SEGMENT_RE: Final = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]*$")
+_DISPATCH_ID_RE: Final = re.compile(r"^[A-Za-z0-9-]{0,64}$")
 #: `path/to/test_x.py` then zero or more `::Name`, the last may carry a
 #: parametrize id in brackets.
 _NODE_ID_RE: Final = re.compile(
@@ -92,7 +119,7 @@ class Outcome(StrEnum):
     SURVIVED = "SURVIVED"
     APPLY_FAILED = "APPLY FAILED"
     NOT_APPLIED = "NOT APPLIED"
-    TOUCHES_TESTS = "INVALID (touches tests/config)"
+    REFUSED = "REFUSED"
     ERROR = "ERROR"
 
 
@@ -101,6 +128,10 @@ class Inputs:
     pr: int
     tests: tuple[str, ...]
     mutations_dir: PurePosixPath
+
+    @property
+    def test_files(self) -> frozenset[str]:
+        return frozenset(node_id.split("::", 1)[0] for node_id in self.tests)
 
 
 @dataclass(frozen=True)
@@ -187,7 +218,18 @@ def parse_mutations_dir(raw: str) -> PurePosixPath:
     bad_part = any(p in {"..", ".", ".git"} or p.startswith("-") for p in pure.parts)
     if not value or str(pure) == "." or bad_part:
         raise InputError(f"mutations_dir {raw!r} must stay inside the repository")
+    if not pure.is_relative_to(MUTATIONS_ROOT):
+        raise InputError(
+            f"mutations_dir {raw!r} must be {MUTATIONS_ROOT}/ or a directory under it, "
+            "the only place CI refuses on main"
+        )
     return pure
+
+
+def parse_dispatch_id(raw: str) -> str:
+    if not _DISPATCH_ID_RE.fullmatch(raw):
+        raise InputError(f"dispatch_id {raw!r} must match [A-Za-z0-9-]{{0,64}}")
+    return raw
 
 
 def parse_inputs(pr: str, tests: str, mutations_dir: str) -> Inputs:
@@ -195,6 +237,7 @@ def parse_inputs(pr: str, tests: str, mutations_dir: str) -> Inputs:
 
 
 def inputs_from_env(env: dict[str, str]) -> Inputs:
+    parse_dispatch_id(env.get(ENV_DISPATCH_ID, ""))
     return parse_inputs(env.get(ENV_PR, ""), env.get(ENV_TESTS, ""), env.get(ENV_DIR, ""))
 
 
@@ -227,10 +270,10 @@ def find_patches(root: Path, mutations_dir: PurePosixPath) -> list[Path]:
 
 
 def forbidden_reason(path: str, mutations_dir: PurePosixPath) -> str | None:
-    """Why a mutation may not touch `path`, or None if it is non-test source."""
+    """Why a mutation may not touch `path` by name, or None if it is source."""
     pure = PurePosixPath(path)
     name = pure.name
-    if pure.is_relative_to(mutations_dir):
+    if pure.is_relative_to(mutations_dir) or pure.is_relative_to(MUTATIONS_ROOT):
         return "the mutations dir itself"
     if any(path.startswith(prefix) for prefix in _FORBIDDEN_PREFIXES):
         return "CI, fitness or submodule path"
@@ -243,8 +286,60 @@ def forbidden_reason(path: str, mutations_dir: PurePosixPath) -> str | None:
     return None
 
 
+def parse_numstat(output: str) -> list[str]:
+    """Every path named by `git apply --numstat -z` (both sides of a rename)."""
+    paths: list[str] = []
+    fields = output.split("\0")
+    index = 0
+    while index < len(fields):
+        entry = fields[index]
+        index += 1
+        if not entry:
+            continue
+        parts = entry.split("\t", 2)
+        if len(parts) != 3:
+            continue
+        if parts[2]:
+            paths.append(parts[2])
+        else:  # rename or copy: source and destination follow as entries
+            paths.extend(fields[index : index + 2])
+            index += 2
+    return sorted(set(paths))
+
+
+def vet_paths(root: Path, paths: list[str], inputs: Inputs) -> list[str]:
+    """Every reason the patch may not be applied, path by path."""
+    problems: list[str] = []
+    real_root = root.resolve()
+    test_targets = {(root / t).resolve() for t in inputs.test_files}
+    for path in paths:
+        try:
+            pure = _safe_relative(path, "patched path")
+        except InputError as exc:
+            problems.append(str(exc))
+            continue
+        if why := forbidden_reason(path, inputs.mutations_dir):
+            problems.append(f"{path} ({why})")
+            continue
+        if path in inputs.test_files:
+            problems.append(f"{path} (a named test file)")
+            continue
+        lexical = real_root / pure
+        resolved = (root / pure).resolve()
+        if resolved != lexical:
+            problems.append(f"{path} (is or sits behind a symlink)")
+            continue
+        if resolved in test_targets:
+            problems.append(f"{path} (resolves to a named test file)")
+            continue
+        ignored = _git(root, "check-ignore", "-q", "--no-index", "--", path)
+        if ignored.returncode == 0:
+            problems.append(f"{path} (git-ignored, invisible to the tree checks)")
+    return problems
+
+
 # --------------------------------------------------------------------------
-# Git and pytest
+# Git, bytecode, pytest
 # --------------------------------------------------------------------------
 
 
@@ -267,8 +362,9 @@ def changed_paths(root: Path) -> list[str]:
             continue
         paths.append(entry[3:])
         if entry[0] in {"R", "C"}:
-            index += 1  # the rename source follows as its own entry
-    return sorted(paths)
+            paths.append(entries[index])
+            index += 1
+    return sorted(set(paths))
 
 
 def restore(root: Path) -> None:
@@ -286,12 +382,12 @@ def clear_bytecode(root: Path) -> int:
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [d for d in dirnames if d not in _SKIP_WALK]
         if "__pycache__" in dirnames:
-            shutil.rmtree(Path(dirpath) / "__pycache__", ignore_errors=True)
+            shutil.rmtree(Path(dirpath) / "__pycache__")
             dirnames.remove("__pycache__")
             removed += 1
         for name in filenames:
             if name.endswith((".pyc", ".pyo")):
-                (Path(dirpath) / name).unlink(missing_ok=True)
+                (Path(dirpath) / name).unlink()
                 removed += 1
     return removed
 
@@ -308,28 +404,76 @@ def parse_pytest_output(output: str) -> tuple[tuple[str, ...], int]:
     return failing, passed
 
 
-def run_pytest(root: Path, tests: tuple[str, ...]) -> PytestRun:
-    env = {k: v for k, v in os.environ.items() if k != "VIRTUAL_ENV"}
-    env["PYTHONDONTWRITEBYTECODE"] = "1"
+def pytest_args(tests: tuple[str, ...]) -> list[str]:
     # `-m ""` clears the repo's `-m "not integration"` addopt: a named
     # integration test must run, not be deselected into a vacuous pass.
-    cmd = [
+    return [
         "uv", "run", "--frozen", "pytest", "-m", "", "-p", "no:cacheprovider",
         "--color=no", "-rfE", "--", *tests,
     ]  # fmt: skip
-    started = time.monotonic()
-    try:
-        proc = subprocess.run(
-            cmd, cwd=root, env=env, capture_output=True, text=True, check=False,
-            timeout=PYTEST_TIMEOUT_SECONDS,
-        )  # fmt: skip
-    except subprocess.TimeoutExpired:
-        return PytestRun(exit_code=-1, failing=(), passed=0, seconds=time.monotonic() - started)
-    seconds = time.monotonic() - started
-    output = proc.stdout + proc.stderr
-    print(output[-20000:], flush=True)
-    failing, passed = parse_pytest_output(output)
-    return PytestRun(proc.returncode, failing, passed, seconds)
+
+
+@dataclass(frozen=True)
+class Sandbox:
+    """Runs PR code in a container (see ISOLATION in the module docstring)."""
+
+    image: str
+
+    def command(self, root: Path, args: list[str]) -> list[str]:
+        real = root.resolve()
+        cmd = [
+            "docker", "run", "--rm", "--network", "host",
+            "--user", f"{os.getuid()}:{os.getgid()}",
+            "-v", f"{real}:{CONTAINER_ROOT}",
+            "-v", f"{real / '.git'}:{CONTAINER_ROOT}/.git:ro",
+            "-w", CONTAINER_ROOT,
+            "-e", "HOME=/tmp", "-e", "UV_CACHE_DIR=/tmp/uv-cache",
+            "-e", "PYTHONDONTWRITEBYTECODE=1",
+        ]  # fmt: skip
+        for name in FORWARDED_ENV:
+            if name in os.environ:
+                cmd += ["-e", f"{name}={os.environ[name]}"]
+        return [*cmd, self.image, *args]
+
+
+def _host_command(args: list[str]) -> tuple[list[str], dict[str, str]]:
+    env = {k: v for k, v in os.environ.items() if k != "VIRTUAL_ENV"}
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    return args, env
+
+
+def sync_dependencies(root: Path, sandbox: Sandbox) -> None:
+    """`uv sync` inside the sandbox: it runs PR-controlled build backends."""
+    cmd = sandbox.command(root, ["uv", "sync", "--all-extras", "--frozen"])
+    proc = subprocess.run(
+        cmd, capture_output=True, text=True, check=False, timeout=SYNC_TIMEOUT_SECONDS
+    )
+    print((proc.stdout + proc.stderr)[-5000:], flush=True)
+    if proc.returncode != 0:
+        raise RuntimeError(f"uv sync failed in the sandbox (exit {proc.returncode})")
+
+
+def make_runner(sandbox: Sandbox | None) -> Runner:
+    def run(root: Path, tests: tuple[str, ...]) -> PytestRun:
+        if sandbox is None:
+            cmd, env = _host_command(pytest_args(tests))
+            cwd: Path | None = root
+        else:
+            cmd, env, cwd = sandbox.command(root, pytest_args(tests)), dict(os.environ), None
+        started = time.monotonic()
+        try:
+            proc = subprocess.run(
+                cmd, cwd=cwd, env=env, capture_output=True, text=True, check=False,
+                timeout=PYTEST_TIMEOUT_SECONDS,
+            )  # fmt: skip
+        except subprocess.TimeoutExpired:
+            return PytestRun(-1, (), 0, time.monotonic() - started)
+        output = proc.stdout + proc.stderr
+        print(output[-20000:], flush=True)
+        failing, passed = parse_pytest_output(output)
+        return PytestRun(proc.returncode, failing, passed, time.monotonic() - started)
+
+    return run
 
 
 #: Runs the named tests in `root`. Injected so the git machinery is testable
@@ -338,10 +482,11 @@ Runner = Callable[[Path, tuple[str, ...]], PytestRun]
 
 
 def classify(run: PytestRun) -> Outcome:
-    """pytest exit 0 = all passed, 1 = a test failed, 2 = collection error."""
+    """A kill needs a failure ON RECORD: exit 1 (failed) or 2 (collection
+    error) AND a FAILED/ERROR line. An interrupt also exits 2, with none."""
     if run.exit_code == 0:
         return Outcome.SURVIVED
-    if run.exit_code in {1, 2}:
+    if run.exit_code in {1, 2} and run.failing:
         return Outcome.KILLED
     return Outcome.ERROR
 
@@ -353,31 +498,41 @@ def classify(run: PytestRun) -> Outcome:
 
 def evaluate_patch(root: Path, patch: Path, inputs: Inputs, runner: Runner) -> PatchResult:
     name = patch.name
+    numstat = _git(root, "apply", "--numstat", "-z", str(patch))
     check = _git(root, "apply", "--check", str(patch))
-    if check.returncode != 0:
-        return PatchResult(name, Outcome.APPLY_FAILED, detail=check.stderr.strip()[:300])
+    if numstat.returncode != 0 or check.returncode != 0:
+        why = (check.stderr or numstat.stderr).strip()[:300]
+        return PatchResult(name, Outcome.APPLY_FAILED, detail=why)
+    declared = parse_numstat(numstat.stdout)
+    if not declared:
+        return PatchResult(name, Outcome.NOT_APPLIED, detail="patch names no files")
+    problems = vet_paths(root, declared, inputs)
+    if problems:
+        return PatchResult(name, Outcome.REFUSED, files=tuple(declared), detail="; ".join(problems))
     applied = _git(root, "apply", str(patch))
     if applied.returncode != 0:
         return PatchResult(name, Outcome.APPLY_FAILED, detail=applied.stderr.strip()[:300])
     files = tuple(changed_paths(root))
     if not files:
         return PatchResult(name, Outcome.NOT_APPLIED, detail="patch applied but changed nothing")
-    bad = [f"{f} ({why})" for f in files if (why := forbidden_reason(f, inputs.mutations_dir))]
-    if bad:
-        return PatchResult(name, Outcome.TOUCHES_TESTS, files=files, detail="; ".join(bad))
+    if undeclared := sorted(set(files) - set(declared)):
+        return PatchResult(
+            name, Outcome.REFUSED, files=files, detail=f"changed undeclared paths {undeclared}"
+        )
     clear_bytecode(root)
     run = runner(root, inputs.tests)
     outcome = classify(run)
-    detail = "" if outcome is not Outcome.ERROR else f"pytest exit {run.exit_code}"
+    detail = (
+        "" if outcome is not Outcome.ERROR else f"pytest exit {run.exit_code}, no failure on record"
+    )
     return PatchResult(name, outcome, files, run.failing, run.seconds, detail)
 
 
-def execute(root: Path, inputs: Inputs, sha: str, runner: Runner = run_pytest) -> Evidence:
+def execute(root: Path, inputs: Inputs, sha: str, runner: Runner) -> Evidence:
     evidence = Evidence(pr=inputs.pr, sha=sha, tests=inputs.tests)
-    for node_id in inputs.tests:
-        test_path = PurePosixPath(node_id.split("::", 1)[0])
-        if not resolve_inside(root, test_path, "test path").is_file():
-            raise InputError(f"test file {test_path} does not exist on the PR head")
+    for test_file in sorted(inputs.test_files):
+        if not resolve_inside(root, PurePosixPath(test_file), "test path").is_file():
+            raise InputError(f"test file {test_file} does not exist on the PR head")
     patches = find_patches(root, inputs.mutations_dir)
     dirty = changed_paths(root)
     if dirty:
@@ -413,9 +568,9 @@ def execute(root: Path, inputs: Inputs, sha: str, runner: Runner = run_pytest) -
 
 
 def _cell(text: str) -> str:
-    """Neutralise text that came out of PR code before it reaches markdown."""
+    """Text that came out of PR code, made safe to sit inside a code span."""
     cleaned = text.replace("`", "'").replace("|", "\\|").replace("\n", " ").replace("@", "@\u200b")
-    return cleaned[:200]
+    return cleaned[:300]
 
 
 def _code(items: tuple[str, ...]) -> str:
@@ -446,7 +601,7 @@ def render(evidence: Evidence, run_url: str) -> str:
             "|---|---|---|---|---|",
         ]
         for r in evidence.results:
-            result = r.outcome.value + (f" ({_cell(r.detail)})" if r.detail else "")
+            result = r.outcome.value + (f" `{_cell(r.detail)}`" if r.detail else "")
             lines.append(
                 f"| `{_cell(r.patch)}` | {_code(r.files)} | {result} | "
                 f"{_code(r.failing)} | {r.seconds:.1f}s |"
@@ -454,7 +609,7 @@ def render(evidence: Evidence, run_url: str) -> str:
         lines.append("")
     lines += [
         "A kill proves the named test catches the mutant. A survival is against the",
-        "named tests only. Patches are evidence for this PR: delete the mutations dir",
+        "named tests only. Patches are evidence for this PR: delete `.mutations/`",
         "before merge (CI enforces it); this comment is the record.",
     ]
     return "\n".join(lines) + "\n"
@@ -463,7 +618,7 @@ def render(evidence: Evidence, run_url: str) -> str:
 def render_error(pr: int, sha: str, run_url: str, message: str) -> str:
     return (
         f"{MARKER}\n## Mutation evidence\n\n**FAIL** | PR #{pr} | head `{sha}` | "
-        f"[run]({run_url})\n\n{_cell(message)}\n"
+        f"[run]({run_url})\n\n`{_cell(message)}`\n"
     )
 
 
@@ -478,8 +633,10 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("validate", help="validate the inputs in the environment")
-    run = sub.add_parser("run", help="baseline + every patch, from the PR checkout")
+    run = sub.add_parser("run", help="baseline + every patch against a PR checkout")
+    run.add_argument("--root", type=Path, required=True, help="the PR checkout")
     run.add_argument("--report", type=Path, required=True)
+    run.add_argument("--image", default="", help="run PR code in this container image")
     args = parser.parse_args(argv)
     env = dict(os.environ)
 
@@ -497,9 +654,13 @@ def main(argv: list[str] | None = None) -> int:
         print(f"::error::{ENV_SHA} {sha!r} is not a commit sha")
         return 1
     report: Path = args.report
+    root: Path = args.root.resolve()
+    sandbox = Sandbox(args.image) if args.image else None
     try:
-        evidence = execute(Path.cwd(), inputs, sha)
-    except (InputError, RuntimeError) as exc:
+        if sandbox is not None:
+            sync_dependencies(root, sandbox)
+        evidence = execute(root, inputs, sha, make_runner(sandbox))
+    except (InputError, RuntimeError, OSError, subprocess.TimeoutExpired) as exc:
         print(f"::error::{exc}")
         report.write_text(render_error(inputs.pr, sha, _run_url(), str(exc)))
         return 1

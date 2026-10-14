@@ -16,10 +16,13 @@ inputs:
   timescaledb-container:
     description: 'job.services.timescaledb.id'
     required: true
-  uv-sync-args:
-    description: 'Arguments to `uv sync`.'
+  install-dependencies:
+    description: >-
+      Run `uv sync --all-extras` on the host. 'false' for a job that runs
+      untrusted code: sync executes the checkout's build backends, so such a
+      job installs inside its own sandbox instead.
     required: false
-    default: '--all-extras'
+    default: 'true'
   enable-cache:
     description: >-
       setup-uv cache. Off for any job that runs untrusted code: a cache saved
@@ -41,13 +44,10 @@ runs:
         python-version: "3.12"
 
     - name: Install dependencies
+      if: inputs.install-dependencies == 'true'
       shell: bash
       working-directory: ${{ inputs.working-directory }}
-      env:
-        UV_SYNC_ARGS: ${{ inputs.uv-sync-args }}
-      # Word-splitting the args is intended: they are flags from the caller's
-      # workflow file, never user input.
-      run: uv sync $UV_SYNC_ARGS
+      run: uv sync --all-extras
 
     # The event store image is the one the release pins: event-store:v<ESP
     # version> at the lib/event-sourcing-platform gitlink, resolved to its
@@ -60,7 +60,8 @@ runs:
     #
     # The resolver is this action's own copy (action_path), run in the
     # working directory so it reads THAT checkout's gitlink. A caller that
-    # checks out untrusted code elsewhere still runs the trusted script.
+    # checks out untrusted code elsewhere still runs the trusted script, and
+    # --no-config stops that checkout's uv.toml / [tool.uv] steering uv.
     - name: Start event store
       shell: bash
       working-directory: ${{ inputs.working-directory }}
@@ -82,7 +83,7 @@ runs:
           docker logs "$TIMESCALEDB_CONTAINER"
           exit 1
         fi
-        uv run --no-project python "$RESOLVER" --out "$RUNNER_TEMP/event-store-digest"
+        uv run --no-project --no-config python "$RESOLVER" --out "$RUNNER_TEMP/event-store-digest"
         digest="$(cat "$RUNNER_TEMP/event-store-digest")"
         docker run -d --name eventstore \
           --network "$EVENTSTORE_NETWORK" \

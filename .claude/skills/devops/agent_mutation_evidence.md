@@ -29,11 +29,16 @@ reviewer or a verify phase asks "does this test kill the bug?".
    every mutation was killed. The same table is the job summary and ONE PR
    comment (marker `<!-- mutation-evidence -->`, updated in place on re-runs).
 4. Read the verdict:
-   - `killed`: a named test failed (or collection broke) with the patch applied.
+   - `killed`: a named test failed (or collection broke) with the patch applied,
+     and pytest listed it.
    - `SURVIVED`: every named test passed. Fix the test, or the patch is wrong.
    - `APPLY FAILED` / `NOT APPLIED`: the patch is stale or empty. Regenerate it.
-   - `INVALID (touches tests/config)`: a patch may not touch tests, conftest,
-     pyproject/uv.lock, `.github/`, `ci/fitness/` or `lib/`.
+   - `REFUSED`: vetted before applying. A patch may not touch a named test
+     file, anything test-shaped (tests dirs, `test_*.py`, conftest), pytest or
+     build config (pyproject, uv.lock), `.github/`, `ci/fitness/`, `lib/`, a
+     symlinked path, a git-ignored path, or paths it did not declare.
+   - `ERROR`: pytest exited without a failure on record (interrupt, timeout,
+     usage error). Not a kill.
    - Baseline red or zero tests ran: evidence void, nothing else was run.
 5. Before merge, delete `.mutations/` in a final commit. CI job
    `mutations-not-merged` fails any PR into main that still tracks it ("delete
@@ -44,7 +49,13 @@ reviewer or a verify phase asks "does this test kill the bug?".
 ## What the runner guarantees
 
 - Inputs are validated by `scripts/mutation_evidence.py` (strict node-id and
-  path patterns, no `..`, no option-like segments) and reach shell only via env.
+  path patterns, no `..`, no option-like segments, `mutations_dir` under
+  `.mutations/`) and reach shell only via env.
+- PR code never runs on the runner host: `uv sync` and every pytest run happen
+  in a pinned uv container with the checkout mounted, `.git` read-only, no
+  Docker socket and only the test env vars. The trusted runner, its report and
+  the comment token stay out of reach. Consequence: a named test that itself
+  needs Docker cannot run here.
 - The named tests must pass on the unmutated head first.
 - Each patch: `git apply --check`, apply, non-empty diff, non-test files only,
   bytecode cleared, tests run, tree restored and proven clean.
