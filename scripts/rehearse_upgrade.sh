@@ -273,6 +273,18 @@ blank_credentials() {  # every credential "", no docker host, no usable `op`
     echo "      DOCKER_HOST: \"\""
     for v in $CRED_VARS; do echo "      ${v}: \"\""; done
 }
+# The executor (#1310 1.6) exists only from the release that adds it, and a
+# compose override may not add a service its base file lacks. Named under this
+# project and never started, like the gateway: the rehearsal replays the store
+# through the api, and the executor takes no part in that. Its idle flag-off
+# start is the Compose Stack Smoke Test's to prove. (An unused volume, its
+# executor_logs above, is harmless against a release without it.)
+rehearse_executor() {  # $1 the staged compose file
+    grep -q '^  executor:$' "$1" || return 0
+    echo "  executor:"
+    echo "    container_name: PROJECT-executor"
+    echo "    profiles: [\"rehearsal-disabled\"]"
+}
 write_override() {  # $1 out dir, $2 api image, $3 collector image, $4 event-store image ("" = keep)
     local out="$1"; shift
     {
@@ -287,6 +299,7 @@ write_override() {  # $1 out dir, $2 api image, $3 collector image, $4 event-sto
                 gateway|cloudflared|envoy-proxy|token-injector) echo "    profiles: [\"rehearsal-disabled\"]" ;;
             esac
         done
+        rehearse_executor "$out/docker-compose.syntropic137.yaml"
         cat <<'EOF'
   docker-socket-proxy:
     container_name: PROJECT-docker-socket-proxy
@@ -298,6 +311,7 @@ write_override() {  # $1 out dir, $2 api image, $3 collector image, $4 event-sto
 volumes:
   db_data: {name: PROJECT_db_data}
   api_logs: {name: PROJECT_api_logs}
+  executor_logs: {name: PROJECT_executor_logs}
   minio_data: {name: PROJECT_minio_data}
   redis_data: {name: PROJECT_redis_data}
 networks:
