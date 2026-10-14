@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/tests/integration/github_broker/authorizer.py b/packages/syn-adapters/tests/integration/github_broker/authorizer.py
+index 154d9d3b0..8f7014aae 100644
+--- a/packages/syn-adapters/tests/integration/github_broker/authorizer.py
++++ b/packages/syn-adapters/tests/integration/github_broker/authorizer.py
+@@ -56,7 +56,7 @@ class Authorizer(BaseHTTPRequestHandler):
+             return
+         _, _, password = base64.b64decode(param).decode().partition(":")
+         token = GRANTS["git_tokens"].get(f"{match[1]}/{match[2]}")
+-        if password != GRANTS["git_capability"] or token is None:
++        if password != GRANTS["git_capability"]:
+             self._reply(403)
+             return
+         basic = base64.b64encode(f"x-access-token:{token}".encode()).decode()

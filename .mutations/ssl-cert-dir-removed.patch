@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/workspace_backends/service/github_presentation.py b/packages/syn-adapters/src/syn_adapters/workspace_backends/service/github_presentation.py
+index 655e1cc0c..9549c8d30 100644
+--- a/packages/syn-adapters/src/syn_adapters/workspace_backends/service/github_presentation.py
++++ b/packages/syn-adapters/src/syn_adapters/workspace_backends/service/github_presentation.py
+@@ -146,7 +146,7 @@ def present_github(
+     files: list[PresentedFile] = [
+         PresentedFile(f"{BROKER_CA_DIR}/broker-ca.pem", broker.ca_pem, 0o644)
+     ]
+-    env: dict[str, str] = {"SSL_CERT_DIR": f"{SYSTEM_CERT_DIR}:{home.rstrip('/')}/{BROKER_CA_DIR}"}
++    env: dict[str, str] = {}
+ 
+     if git_capability is not None and repositories:
+         git_config.append(GitConfigSetting("credential.helper", "store"))

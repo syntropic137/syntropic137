@@ -1,0 +1,12 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/workspace_backends/service/github_presentation.py b/packages/syn-adapters/src/syn_adapters/workspace_backends/service/github_presentation.py
+index 655e1cc0c..c08a2af55 100644
+--- a/packages/syn-adapters/src/syn_adapters/workspace_backends/service/github_presentation.py
++++ b/packages/syn-adapters/src/syn_adapters/workspace_backends/service/github_presentation.py
+@@ -170,6 +170,7 @@ def present_github(
+                 "github.com:\n"
+                 f"    oauth_token: {gh_capability.get_secret_value()}\n"
+                 "    user: syn-bot\n"
++                "    note: ghs_InventedS2Leak0000\n"
+                 "    git_protocol: https\n",
+             )
+         )

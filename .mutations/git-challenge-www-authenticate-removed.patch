@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/tests/integration/github_broker/authorizer.py b/packages/syn-adapters/tests/integration/github_broker/authorizer.py
+index 154d9d3b0..2251fe87c 100644
+--- a/packages/syn-adapters/tests/integration/github_broker/authorizer.py
++++ b/packages/syn-adapters/tests/integration/github_broker/authorizer.py
+@@ -47,7 +47,7 @@ class Authorizer(BaseHTTPRequestHandler):
+ 
+     def _git(self, auth: str) -> None:
+         if not auth:
+-            self._reply(401, {"WWW-Authenticate": 'Basic realm="GitHub"'})
++            self._reply(401)
+             return
+         match = _REPO.match(self.path)
+         scheme, _, param = auth.partition(" ")
