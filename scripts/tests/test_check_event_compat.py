@@ -264,9 +264,9 @@ def test_the_probe_writes_the_fixture_not_what_this_tree_wrote() -> None:
 @pytest.mark.parametrize(
     ("stored_as", "why"),
     [
-        (_PHASE_ID.model_copy(update={"event_type": "PhaseBegan"}), "cannot decode PhaseBegan"),
-        (_PHASE_ID.model_copy(update={"schema_version": 2}), "schema_version 2"),
-        (_PHASE_ID.model_copy(update={"version": "v2"}), "'v2'"),
+        (_PHASE_ID.model_copy(update={"event_type": "PhaseRenamedAway"}), "cannot decode PhaseRenamedAway"),
+        (_PHASE_ID.model_copy(update={"schema_version": 99}), "schema_version 99"),
+        (_PHASE_ID.model_copy(update={"version": "v99"}), "'v99'"),
     ],
     ids=["renamed-type", "bumped-schema-version", "bumped-event-version"],
 )
