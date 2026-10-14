@@ -247,7 +247,6 @@ class _MkdirHangsAndReapFails(_MkdirHangs):
     """The reap yields, then fails: a second cancellation has already returned the caller."""
 
     async def teardown(self, *, target: object) -> None:
-        workspace = target
         await asyncio.sleep(0.05)
         raise RuntimeError("docker rm failed")
 
