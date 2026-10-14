@@ -32,11 +32,12 @@ from syn_domain.contexts.orchestration import announce_as, mint_wrapper_name
 from syn_shared.diagnostics import SignalDeath, name_exit_status
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Mapping
+    from collections.abc import AsyncIterator
 
-    from agentic_isolation.contract import CredentialBinding, OperationRef, OperationStatus
+    from agentic_isolation.contract import OperationRef, OperationStatus
     from agentic_isolation.providers.base import SupportsOperations, Workspace
 
+    from syn_adapters.workspace_backends.agentic.credentials import WorkspaceCredentials
     from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
         IsolationHandle,
     )
@@ -156,17 +157,7 @@ class OperationHost(Protocol):
     def workspace(self, isolation_id: str) -> Workspace | None: ...
 
     @property
-    def credentials(self) -> LaunchCredentials: ...
-
-
-class LaunchCredentials(Protocol):
-    """Parks launch-scoped credential values behind bindings (see ``WorkspaceCredentials``)."""
-
-    def bind_launch(
-        self, environment: Mapping[str, str]
-    ) -> tuple[dict[str, str], tuple[CredentialBinding, ...], tuple[str, ...]]: ...
-
-    def release(self, names: tuple[str, ...]) -> None: ...
+    def credentials(self) -> WorkspaceCredentials: ...
 
 
 class AgenticEventStreamAdapter:
