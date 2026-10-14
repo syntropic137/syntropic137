@@ -63,7 +63,7 @@ async def test_the_production_startup_and_shutdown_drive_the_host_only_with_the_
 ) -> None:
     """Through ``lifecycle``: OFF is main's global reap+reconcile and no host;
     ON skips both (an admitted run must survive a restart) and runs the host."""
-    from syn_api.services import lifecycle
+    from syn_api.services import lifecycle, process_role
     from syn_shared.settings import reset_settings
 
     monkeypatch.setenv("SYN_EXECUTION_RUN_QUEUE_ENABLED", "true" if queue_on else "false")
@@ -71,7 +71,7 @@ async def test_the_production_startup_and_shutdown_drive_the_host_only_with_the_
     reaped, reconciled, queue = AsyncMock(), AsyncMock(), MagicMock()
     monkeypatch.setattr(runner, "cleanup_orphaned_containers", reaped)
     monkeypatch.setattr(runner, "reconcile_orphaned_executions", reconciled)
-    monkeypatch.setattr(lifecycle, "reconcile_orphaned_sessions", AsyncMock())
+    monkeypatch.setattr(process_role, "reconcile_orphaned_sessions", AsyncMock())
     monkeypatch.setattr(lifecycle, "_SERVICE_REGISTRY", ())
     monkeypatch.setattr(
         runner, "get_execution_run_queue", AsyncMock(return_value=queue if queue_on else None)

@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from syn_api.services import execution_host_runner as runner
-from syn_api.services import lifecycle
+from syn_api.services import lifecycle, process_role
 from syn_shared.settings import reset_settings
 from syn_shared.settings.execution import ProcessRole
 
@@ -51,8 +51,8 @@ async def test_the_role_decides_which_services_startup_runs(
     started: list[str] = []
     sessions, previous, host = AsyncMock(), AsyncMock(), AsyncMock()
     monkeypatch.setattr(lifecycle, "_SERVICE_REGISTRY", _registry(started))
-    monkeypatch.setattr(lifecycle, "reconcile_orphaned_sessions", sessions)
-    monkeypatch.setattr(lifecycle, "resolve_previous_process", previous)
+    monkeypatch.setattr(process_role, "reconcile_orphaned_sessions", sessions)
+    monkeypatch.setattr(process_role, "resolve_previous_process", previous)
     monkeypatch.setattr(lifecycle, "start_execution_host", host)
     try:
         await lifecycle._init_degradable_services(lifecycle.LifecycleState())
@@ -74,7 +74,7 @@ async def test_an_executor_with_the_flag_off_reaps_nothing_and_hosts_nothing(
     reaped, built = AsyncMock(), MagicMock()
     monkeypatch.setattr(runner, "cleanup_orphaned_containers", reaped)
     monkeypatch.setattr(runner, "reconcile_orphaned_executions", AsyncMock())
-    monkeypatch.setattr(lifecycle, "reconcile_orphaned_sessions", AsyncMock())
+    monkeypatch.setattr(process_role, "reconcile_orphaned_sessions", AsyncMock())
     monkeypatch.setattr(lifecycle, "_SERVICE_REGISTRY", ())
     monkeypatch.setattr(runner, "get_execution_run_queue", AsyncMock(return_value=None))
     monkeypatch.setattr(runner, "ExecutionHost", built)
@@ -86,6 +86,61 @@ async def test_an_executor_with_the_flag_off_reaps_nothing_and_hosts_nothing(
     reaped.assert_not_awaited()
     built.assert_not_called()
     assert runner._host_task is None
+
+
+@pytest.mark.parametrize(("queue_on", "survives"), [(True, True), (False, False)])
+async def test_an_api_restart_leaves_a_live_executor_session_running(
+    monkeypatch: pytest.MonkeyPatch, queue_on: bool, survives: bool
+) -> None:
+    """Split topology: the executor's session is live while the api restarts,
+    so api startup must not sweep it to failed. Flag off keeps main's sweep:
+    every execution ran in the api, so a ``running`` row there is orphaned."""
+    import json
+    from dataclasses import dataclass
+
+    from event_sourcing.stores.memory_projection import MemoryProjectionStore
+    from syn_domain.contexts.agent_sessions.domain.aggregate_session.AgentSessionAggregate import (
+        AgentSessionAggregate,
+    )
+    from syn_domain.contexts.agent_sessions.domain.commands.StartSessionCommand import (
+        StartSessionCommand,
+    )
+    from syn_domain.contexts.agent_sessions.slices.list_sessions.projection import (
+        SessionListProjection,
+    )
+
+    @dataclass
+    class _Projections:
+        session_list: SessionListProjection
+
+    store = MemoryProjectionStore()
+    sessions = SessionListProjection(store)
+    aggregate = AgentSessionAggregate()
+    aggregate.start_session(
+        StartSessionCommand(
+            aggregate_id="session-on-executor",
+            workflow_id="workflow-split",
+            execution_id="exec-on-executor",
+            phase_id="phase-running",
+            agent_provider="codex",
+        )
+    )
+    started = aggregate.get_uncommitted_events()[0]
+    await sessions.on_session_started(json.loads(started.event.model_dump_json()))
+
+    monkeypatch.setenv("SYN_EXECUTION_PROCESS_ROLE", "api")
+    monkeypatch.setenv("SYN_EXECUTION_RUN_QUEUE_ENABLED", "true" if queue_on else "false")
+    reset_settings()
+    monkeypatch.setattr("syn_api._wiring.get_projection_mgr", lambda: _Projections(sessions))
+    monkeypatch.setattr(lifecycle, "_SERVICE_REGISTRY", ())
+    monkeypatch.setattr(process_role, "resolve_previous_process", AsyncMock())
+    try:
+        await lifecycle._init_degradable_services(lifecycle.LifecycleState())
+    finally:
+        reset_settings()
+    row = await store.get(sessions.PROJECTION_NAME, "session-on-executor")
+    assert row is not None
+    assert (row["status"] == "running") is survives
 
 
 def test_the_production_registry_keeps_dispatchers_off_the_executor() -> None:
