@@ -1,8 +1,10 @@
 """Runs INSIDE the previous release's environment: can its models read these payloads?
 
-Reads ``[{"name", "event", "payload"}]`` from the file named by argv[1] and
-prints, as JSON, the release's Event Epoch and, per payload, either the
-release's own serialization of it (``written``) or why it refused (``error``).
+Reads ``[{"name", "event", "current", "fixture"}]`` from the file named by
+argv[1] and prints, as JSON, the release's Event Epoch and, per fixture: whether
+the release reads what the current tree writes (``read_error`` when not), and
+the release's own serialization of the fixture itself (``written``), or why it
+cannot hold it (``write_error``).
 
 Stdlib and the release's own packages only: this file is executed by an
 interpreter that has never seen the current tree.
@@ -26,15 +28,23 @@ def _model(name: str) -> type:
         return getattr(importlib.import_module(f"{_EVENTS}.{name}"), name)
 
 
-def _read(name: str, payload: dict[str, object]) -> dict[str, object]:
+def _serialize(
+    name: str, payload: dict[str, object]
+) -> tuple[dict[str, object] | None, str | None]:
     try:
         model = _model(name)
     except (ImportError, AttributeError) as exc:
-        return {"error": f"the release has no {name}: {exc}"}
+        return None, f"the release has no {name}: {exc}"
     try:
-        return {"written": model.model_validate(payload).model_dump(mode="json")}
+        return model.model_validate(payload).model_dump(mode="json"), None
     except ValueError as exc:  # pydantic.ValidationError is a ValueError
-        return {"error": str(exc)}
+        return None, str(exc)
+
+
+def _answer(fixture: dict[str, object]) -> dict[str, object]:
+    _, read_error = _serialize(fixture["event"], fixture["current"])
+    written, write_error = _serialize(fixture["event"], fixture["fixture"])
+    return {"read_error": read_error, "written": written, "write_error": write_error}
 
 
 def main() -> None:
@@ -43,7 +53,7 @@ def main() -> None:
         epoch = importlib.import_module(_EPOCH).ORCHESTRATION_EVENT_EPOCH
     except ImportError:
         epoch = None
-    results = {f["name"]: _read(f["event"], f["payload"]) for f in fixtures}
+    results = {f["name"]: _answer(f) for f in fixtures}
     json.dump({"epoch": epoch, "results": results}, sys.stdout)
 
 

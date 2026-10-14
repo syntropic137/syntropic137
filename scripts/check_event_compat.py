@@ -12,15 +12,22 @@ against the real previous release rather than a hand-written copy of it.
    ``event-sourcing-python`` and ``agentic-events`` from the same tag and
    submodule pins, plus ``grpcio`` (ESP imports it at package import but only
    declares it in an extra).
-3. For each fixture in ``scripts/event_compat/fixtures.json``: the current
-   model reads it and writes it; the release's model must read those bytes;
-   the current model must read what the release writes back.
+3. For each fixture in ``scripts/event_compat/fixtures.json``, two independent
+   directions. Forward: the current model reads it and writes it, and the
+   release's model must read those bytes. Backward: the release's model reads
+   the fixture itself and writes it, filling in its own defaults, and the
+   current model must read that. The backward payload never passes through
+   the current model, so a default the old writer supplies (``None`` where
+   this tree now wants a string) is seen.
 
 A payload the release cannot read passes only when this tree's Event Epoch is
 above the release's: then the claim predicate keeps that release's Executors
 off the run. A release with no epoch has no predicate, so for it every payload
 must be readable. Reading what the release writes is never optional (ADR-007:
-no upcasters).
+no upcasters), and an excused forward direction does not skip it.
+
+The fixture suite must be a non-empty list and must hold a start with non-empty
+``tags`` (#1310 V9's negative fixture); otherwise the check cannot run.
 
 Exit codes: 0 compatible, 1 incompatible, 2 the check itself could not run.
 
@@ -69,11 +76,26 @@ class Fixture(BaseModel, frozen=True, extra="forbid"):
     payload: dict[str, JsonValue]
 
 
-class ReleaseRead(BaseModel, frozen=True, extra="forbid"):
-    """The release's answer for one payload: what it wrote back, or why it refused."""
+class ProbeRequest(BaseModel, frozen=True, extra="forbid"):
+    """One fixture as sent to the release: what this tree writes, and the fixture itself."""
 
+    name: str
+    event: str
+    current: dict[str, JsonValue]
+    fixture: dict[str, JsonValue]
+
+
+class ReleaseRead(BaseModel, frozen=True, extra="forbid"):
+    """The release's answer for one fixture, in both directions.
+
+    ``read_error`` is None when the release read what this tree writes.
+    ``written`` is the release's own serialization of the fixture, or
+    ``write_error`` says why the release cannot hold that fixture at all.
+    """
+
+    read_error: str | None = None
     written: dict[str, JsonValue] | None = None
-    error: str | None = None
+    write_error: str | None = None
 
 
 class ReleaseAnswer(BaseModel, frozen=True, extra="forbid"):
@@ -91,6 +113,44 @@ class Verdict:
     @property
     def ok(self) -> bool:
         return self.problem is None
+
+
+def _is_tagged_start(fixture: Fixture) -> bool:
+    tags = fixture.payload.get("tags")
+    return (
+        fixture.event == "WorkflowExecutionStartedEvent" and isinstance(tags, list) and bool(tags)
+    )
+
+
+def load_fixtures(path: Path) -> list[Fixture]:
+    """The fixture suite, or CompatCheckError: a suite that tests nothing must not pass."""
+    try:
+        raw = json.loads(path.read_text("utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        msg = f"cannot read fixture file {path}: {exc}"
+        raise CompatCheckError(msg) from exc
+    if not isinstance(raw, list):
+        msg = f"fixture file {path} holds a JSON {type(raw).__name__}, not a list of fixtures"
+        raise CompatCheckError(msg)
+    if not raw:
+        msg = f"fixture file {path} is empty; there is nothing to check"
+        raise CompatCheckError(msg)
+    try:
+        fixtures = [Fixture.model_validate(f) for f in raw]
+    except ValidationError as exc:
+        msg = f"fixture file {path} holds a malformed fixture: {exc}"
+        raise CompatCheckError(msg) from exc
+    names = [f.name for f in fixtures]
+    if len(set(names)) != len(names):
+        msg = f"fixture file {path} repeats a fixture name: {sorted(names)}"
+        raise CompatCheckError(msg)
+    if not any(_is_tagged_start(f) for f in fixtures):
+        msg = (
+            f"fixture file {path} has no WorkflowExecutionStartedEvent with non-empty tags; "
+            "#1310 V9 requires that negative fixture"
+        )
+        raise CompatCheckError(msg)
+    return fixtures
 
 
 def _git(*args: str, cwd: Path = ROOT) -> str:
@@ -169,9 +229,9 @@ def _current_model(name: str) -> type[BaseModel]:
         raise CompatCheckError(msg) from exc
 
 
-def _ask_release(python: Path, fixtures: list[Fixture], workdir: Path) -> ReleaseAnswer:
+def _ask_release(python: Path, requests: list[ProbeRequest], workdir: Path) -> ReleaseAnswer:
     request = workdir / "request.json"
-    request.write_text(json.dumps([f.model_dump() for f in fixtures]), "utf-8")
+    request.write_text(json.dumps([r.model_dump() for r in requests]), "utf-8")
     done = subprocess.run(
         [str(python), "-I", str(PROBE), str(request)], capture_output=True, text=True, check=False
     )
@@ -188,43 +248,52 @@ def _ask_release(python: Path, fixtures: list[Fixture], workdir: Path) -> Releas
 def check(tag: str, python: Path, fixtures: list[Fixture], workdir: Path) -> list[Verdict]:
     from syn_domain.contexts.orchestration._shared.event_epoch import ORCHESTRATION_EVENT_EPOCH
 
-    # What this tree actually appends: its own model's serialization of each fixture.
-    written: list[Fixture] = []
+    # Forward sends what this tree actually appends: its own model's serialization.
+    # Backward sends the fixture untouched, so the release writes it independently.
+    requests: list[ProbeRequest] = []
     for fixture in fixtures:
         model = _current_model(fixture.event)
         try:
-            payload = model.model_validate(fixture.payload).model_dump(mode="json")
+            current = model.model_validate(fixture.payload).model_dump(mode="json")
         except ValidationError as exc:
             msg = f"fixture {fixture.name} is stale: this tree cannot read it: {exc}"
             raise CompatCheckError(msg) from exc
-        written.append(fixture.model_copy(update={"payload": payload}))
+        requests.append(
+            ProbeRequest(
+                name=fixture.name, event=fixture.event, current=current, fixture=fixture.payload
+            )
+        )
 
-    answer = _ask_release(python, written, workdir)
+    answer = _ask_release(python, requests, workdir)
     guarded = answer.epoch is not None and answer.epoch < ORCHESTRATION_EVENT_EPOCH
 
     verdicts: list[Verdict] = []
-    for fixture in written:
-        read = answer.results[fixture.name]
-        if read.written is None:
-            problem = (
-                None
-                if guarded
-                else (
-                    f"{tag} cannot read what this tree writes, and the Event Epoch "
-                    f"({ORCHESTRATION_EVENT_EPOCH}) is not above {tag}'s ({answer.epoch}): "
-                    f"{read.error}"
-                )
+    backward_samples = 0
+    for request in requests:
+        read = answer.results.get(request.name)
+        if read is None:
+            msg = f"the release's probe did not answer for fixture {request.name}"
+            raise CompatCheckError(msg)
+        problems: list[str] = []
+        if read.read_error is not None and not guarded:
+            problems.append(
+                f"{tag} cannot read what this tree writes, and the Event Epoch "
+                f"({ORCHESTRATION_EVENT_EPOCH}) is not above {tag}'s ({answer.epoch}): "
+                f"{read.read_error}"
             )
-            verdicts.append(Verdict(fixture.name, problem))
-            continue
-        try:
-            _current_model(fixture.event).model_validate(read.written)
-        except ValidationError as exc:
-            verdicts.append(
-                Verdict(fixture.name, f"this tree cannot read what {tag} writes: {exc}")
-            )
-            continue
-        verdicts.append(Verdict(fixture.name, None))
+        if read.written is not None:
+            backward_samples += 1
+            try:
+                _current_model(request.event).model_validate(read.written)
+            except ValidationError as exc:
+                problems.append(f"this tree cannot read what {tag} writes: {exc}")
+        elif read.write_error is None:
+            msg = f"the release's probe gave neither a payload nor a reason for {request.name}"
+            raise CompatCheckError(msg)
+        verdicts.append(Verdict(request.name, "\n       ".join(problems) or None))
+    if not backward_samples:
+        msg = f"{tag} could write none of the fixtures, so the backward direction went untested"
+        raise CompatCheckError(msg)
     return verdicts
 
 
@@ -235,7 +304,7 @@ def main() -> int:
     )
     args = parser.parse_args()
     try:
-        fixtures = [Fixture.model_validate(f) for f in json.loads(FIXTURES.read_text("utf-8"))]
+        fixtures = load_fixtures(FIXTURES)
         tag = previous_release(args.tag)
         with tempfile.TemporaryDirectory(prefix=f"event-compat-{tag}-") as tmp:
             workdir = Path(tmp)
