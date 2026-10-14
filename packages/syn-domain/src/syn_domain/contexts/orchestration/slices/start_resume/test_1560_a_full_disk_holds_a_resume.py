@@ -19,6 +19,7 @@ from syn_domain.contexts._shared.admission_refusal import AdmissionRefusedError
 from syn_domain.contexts._shared.disk_space import (
     DiskCheck,
     DiskState,
+    DiskThresholds,
     DiskUsage,
     InsufficientDiskSpaceError,
 )
@@ -45,8 +46,13 @@ _FULL = InsufficientDiskSpaceError(
         path="/workspaces",
         state=DiskState.CRITICAL,
         usage=DiskUsage(free_bytes=3, total_bytes=100),
-        degraded_below_percent=10.0,
-        refuse_admission_below_percent=5.0,
+        thresholds=DiskThresholds(
+            refuse_admission_below_bytes=0,
+            degraded_below_bytes=0,
+            refuse_basis="test",
+            refuse_admission_below_percent=5.0,
+            degraded_below_percent=10.0,
+        ),
     )
 )
 
