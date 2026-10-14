@@ -53,11 +53,25 @@ def load_recording(name: str) -> list[dict[str, Any]]:
     return events
 
 
+def _recorded_provider(path: Path) -> str | None:
+    """The harness a recording names in its ``_recording`` header line."""
+    with path.open() as f:
+        header = json.loads(f.readline() or "{}")
+    recording = header.get("_recording") if isinstance(header, dict) else None
+    return recording.get("provider") if isinstance(recording, dict) else None
+
+
 def get_all_recordings() -> list[str]:
-    """Get all available recording files."""
+    """Every Claude stream-json recording; this pipeline parses no other harness.
+
+    The directory also holds recordings of other harnesses (Codex since
+    agentic-workspace #57), which have their own transcript adapters.
+    """
     if not RECORDINGS_DIR.exists():
         return []
-    return [f.name for f in RECORDINGS_DIR.glob("*.jsonl")]
+    return [
+        f.name for f in RECORDINGS_DIR.glob("*.jsonl") if _recorded_provider(f) in ("claude", None)
+    ]
 
 
 # =============================================================================

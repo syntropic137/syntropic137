@@ -18,6 +18,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
+from syn_domain.contexts.orchestration.ports import StreamPresence
+
 if TYPE_CHECKING:
     from event_sourcing import (
         BaseAggregate,
@@ -207,7 +209,8 @@ _WORKFLOW_EXECUTION = "WorkflowExecution"
 class EventStoreExecutionEventStream:
     """One execution's stored domain events, for seeding a run's to-do fold (ADR-072 D8).
 
-    Satisfies `ExecutionEventStream`. Reads the same stream
+    Satisfies `ExecutionEventStream` and, for the Run Queue's `opening`
+    sweep, `ExecutionStreamProbe`. Reads the same stream
     `get_workflow_execution_repository` writes, by the same aggregate type.
     """
 
@@ -236,6 +239,15 @@ class EventStoreExecutionEventStream:
                 return events
             events.extend(envelope.event for envelope in fresh)
             last_nonce = fresh[-1].metadata.aggregate_nonce
+
+    async def presence(self, execution_id: str) -> StreamPresence:
+        """Whether the stream exists. A read that failed is UNKNOWN, never ABSENT (D2)."""
+        try:
+            page = await self._client.read_events(f"{_WORKFLOW_EXECUTION}-{execution_id}", None)
+        except Exception:
+            logger.warning("Stream presence of %s unreadable", execution_id, exc_info=True)
+            return StreamPresence.UNKNOWN
+        return StreamPresence.PRESENT if page else StreamPresence.ABSENT
 
 
 def get_execution_event_stream() -> EventStoreExecutionEventStream:

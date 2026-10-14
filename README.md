@@ -73,7 +73,8 @@ Access: http://localhost:8137
 | Start | `npx @syntropic137/setup start` |
 | Update | `npx @syntropic137/setup update` |
 | Install CLI | `npx @syntropic137/setup cli` |
-| Install plugin | `npx @syntropic137/setup plugin` |
+| Install agent skills | `npx @syntropic137/setup skills` |
+| Factory reset | `npx @syntropic137/setup reset` |
 | GitHub App settings | `npx @syntropic137/setup github-app` |
 | Tunnel setup | `npx @syntropic137/setup tunnel` |
 

@@ -415,3 +415,132 @@ async def test_defer_that_waits_on_the_budget_lock_keeps_its_full_backoff(
             FROM execution_runs WHERE execution_id='work'"""
         )
     assert remaining > 0.1
+
+
+@pytest.mark.parametrize("left_at", ["fencing", "reaped"])
+async def test_a_reconcilers_rows_are_taken_over_only_after_it_leaves(
+    pools: list[asyncpg.Pool], left_at: str
+) -> None:
+    """D5: a reconciler's rows are durable. Its successor finds them in the queue,
+    never in memory, and adopts them only once the old owner's host row is gone."""
+    short = PostgresExecutionRunQueue(pools[0], lease_ttl=timedelta(milliseconds=200))
+    first = PostgresExecutionRunQueue(pools[1])
+    successor = PostgresExecutionRunQueue(pools[2])
+    await _online(short, "dying", capacity=1)
+    await _online(first, "rec-1", capacity=1)
+    await _online(successor, "rec-2", capacity=1)
+    await _admit(short, "exec-adopt")
+    assert await short.claim("dying") is not None
+    await asyncio.sleep(0.5)
+    (fenced,) = await first.fence_expired("rec-1")
+    if left_at == "reaped":
+        await first.mark_reaped(fenced)
+
+    # A fresh reconciler object for the same host rediscovers its own row.
+    (mine,) = await PostgresExecutionRunQueue(pools[3]).reconciling("rec-1")
+    assert (mine.token, mine.reaped) == (fenced.token, left_at == "reaped")
+    # rec-1 is still registered, however stale: no takeover.
+    assert await successor.reconciling("rec-2") == []
+
+    await first.deregister("rec-1")
+    (adopted,) = await successor.reconciling("rec-2")
+    assert (adopted.reconciler, adopted.executor_id) == ("rec-2", "dying")
+    assert adopted.token > fenced.token
+    assert adopted.reaped == (left_at == "reaped")
+    # The old owner's writes are fenced by the new token.
+    with pytest.raises(RunLeaseLost):
+        await (
+            first.close_interrupted(fenced) if left_at == "reaped" else first.mark_reaped(fenced)
+        )
+
+    if not adopted.reaped:
+        await successor.mark_reaped(adopted)
+    await successor.close_interrupted(adopted)
+    assert await successor.reconciling("rec-2") == []
+    counts = await successor.in_use()
+    assert (counts.interrupted, counts.fencing, counts.reaped) == (1, 0, 0)
+    async with pools[0].acquire() as conn:
+        assert (
+            await conn.fetchval("SELECT in_use FROM execution_budget WHERE executor_id='dying'")
+            == 0
+        )
+
+
+async def test_a_restart_in_the_same_container_retires_the_predecessor_not_its_work(
+    pools: list[asyncpg.Pool],
+) -> None:
+    """D5 Restart: the new process gets a new host_id, deletes the old one's host
+    row, and fences the old one's expired run as the OLD host's (so the reap
+    selects the predecessor's containers, never the successor's)."""
+    old = PostgresExecutionRunQueue(pools[0], lease_ttl=timedelta(milliseconds=200))
+    new = PostgresExecutionRunQueue(pools[1])
+    box = "container-1"
+    await old.register(
+        ExecutorHost(host_id="box.aaa", container_id=box, generation="g", epoch=1), 1
+    )
+    await old.heartbeat("box.aaa")
+    await _admit(old, "exec-before-restart")
+    assert await old.claim("box.aaa") is not None
+    await asyncio.sleep(0.5)
+
+    await new.register(
+        ExecutorHost(host_id="box.bbb", container_id=box, generation="g", epoch=1), 1
+    )
+    await new.heartbeat("box.bbb")
+    async with pools[0].acquire() as conn:
+        hosts = await conn.fetch("SELECT host_id FROM executor_hosts")
+        assert [row["host_id"] for row in hosts] == ["box.bbb"]
+    with pytest.raises(LookupError):
+        await old.heartbeat("box.aaa")
+
+    (fenced,) = await new.fence_expired("box.bbb")
+    assert (fenced.executor_id, fenced.reconciler) == ("box.aaa", "box.bbb")
+
+
+async def _machine(pools: list[asyncpg.Pool], box: str) -> tuple[int, dict[str, tuple[int, int]]]:
+    async with pools[0].acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT executor_id,capacity,in_use FROM execution_budget WHERE container_id=$1",
+            box,
+        )
+    budgets = {row["executor_id"]: (row["capacity"], row["in_use"]) for row in rows}
+    return sum(capacity for capacity, _ in budgets.values()), budgets
+
+
+async def test_a_restart_transfers_the_machine_budget_and_never_doubles_it(
+    pools: list[asyncpg.Pool],
+) -> None:
+    """D3 Restart (R1): a capacity-one machine whose old process still holds an
+    unexpired run cannot claim a second one after a restart. The slot moves to
+    the successor when the old run is closed, exactly once."""
+    old = PostgresExecutionRunQueue(pools[0], lease_ttl=timedelta(milliseconds=300))
+    new = PostgresExecutionRunQueue(pools[1], lease_ttl=timedelta(milliseconds=300))
+    box = "container-r1"
+    await old.register(ExecutorHost(host_id="r1.aaa", container_id=box, generation="g", epoch=1), 1)
+    await old.heartbeat("r1.aaa")
+    await _admit(old, "exec-held", "exec-waiting")
+    held = await old.claim("r1.aaa")
+    assert held is not None
+
+    await new.register(ExecutorHost(host_id="r1.bbb", container_id=box, generation="g", epoch=1), 1)
+    await new.heartbeat("r1.bbb")
+    assert await _machine(pools, box) == (1, {"r1.aaa": (1, 1), "r1.bbb": (0, 0)})
+    assert await new.claim("r1.bbb") is None
+
+    await asyncio.sleep(0.5)
+    (fenced,) = await new.fence_expired("r1.bbb")
+    await new.mark_reaped(fenced)
+    await new.close_interrupted(fenced)
+    assert await _machine(pools, box) == (1, {"r1.aaa": (0, 0), "r1.bbb": (1, 0)})
+    # Neither a duplicate close nor the stale owner's terminal commit moves a slot.
+    with pytest.raises(RunLeaseLost):
+        await new.close_interrupted(fenced)
+    with pytest.raises(RunLeaseLost):
+        await old.close(held)
+    assert await _machine(pools, box) == (1, {"r1.aaa": (0, 0), "r1.bbb": (1, 0)})
+
+    claimed = await new.claim("r1.bbb")
+    assert claimed is not None and claimed.execution_id == "exec-waiting"
+    assert await new.claim("r1.bbb") is None
+    await new.close(claimed)
+    assert await _machine(pools, box) == (1, {"r1.aaa": (0, 0), "r1.bbb": (1, 0)})

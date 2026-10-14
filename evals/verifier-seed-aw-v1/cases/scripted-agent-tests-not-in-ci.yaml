@@ -1,0 +1,30 @@
+id: scripted-agent-tests-not-in-ci
+polarity: defect
+source_pr: 49
+# Escaped on 2026-10-13: the platform verify certified AW#49 at this head; a
+# second verifier blocked it. The pin is the first parent of the fix 948a913.
+# Evidence at the pin: lib/python/scripted_agent holds a test suite (74 tests
+# by the second verifier's count), and the python-compatibility job's package
+# list in .github/workflows/ci.yml does not name it, so CI never runs them.
+# The fix adds the one line.
+commit: cfdb17745bcc50bb9452bb65402b157554f22f1c
+fix_commit: 948a913e5ed97595e965cff368de4a98232ba739
+task: >
+  The change under review adds a new Python package, lib/python/scripted_agent,
+  that replays recorded agent phases without contacting a model provider,
+  with its own tests. Review the package and how its tests are run.
+expected:
+  # The root cause, for the LLM judge only; never part of `task`.
+  defect: >
+    The new lib/python/scripted_agent package's tests are never run by CI:
+    the python-compatibility matrix in .github/workflows/ci.yml lists the
+    other packages and omits scripted_agent, so every test it ships passes
+    only locally and a regression in it merges green.
+  files:
+    - .github/workflows/ci.yml
+  keywords:
+    - [scripted agent, scripted_agent, new package, package]
+    - [ci, workflow, matrix, python compatibility, python-compatibility, pipeline, github actions]
+    - [never run, not run, no run, does not run, "doesn't run", omit, missing, not included,
+       not listed, absent, skip, excluded, untested, not exercised, never executed, not wired]
+split: train
