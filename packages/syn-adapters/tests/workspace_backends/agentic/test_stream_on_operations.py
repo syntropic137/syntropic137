@@ -590,3 +590,35 @@ async def test_a_recorded_run_yields_the_same_events_through_provider_pages(
     assert "git_commit" in kinds, "the embedded hook event is among those compared"
     assert kinds.count("tool_execution_started") >= 2
     assert after == before
+
+
+class TestResolveStreamExitCode:
+    """The timeout decision itself (#969), carried over from the deleted
+    ``test_stream_timeout_visibility.py`` when its ``docker exec`` transport
+    tests went with the transport. The function is still the one ``status``
+    resolution goes through, so its branches stay pinned here.
+    """
+
+    def test_timeout_with_a_success_status_becomes_the_timeout_code(self) -> None:
+        assert (
+            stream_adapter._resolve_stream_exit_code(0, timed_out=True)
+            == stream_adapter._TIMEOUT_EXIT_CODE
+        )
+
+    def test_timeout_with_no_status_becomes_the_timeout_code(self) -> None:
+        assert (
+            stream_adapter._resolve_stream_exit_code(None, timed_out=True)
+            == stream_adapter._TIMEOUT_EXIT_CODE
+        )
+
+    def test_a_clean_stream_is_never_rewritten(self) -> None:
+        assert stream_adapter._resolve_stream_exit_code(0, timed_out=False) == 0
+
+    def test_a_real_failure_status_survives_a_timeout(self) -> None:
+        """A specific status beats a generic 'timed out' - the operator needs it."""
+        assert stream_adapter._resolve_stream_exit_code(137, timed_out=True) == 137
+
+    def test_an_interrupt_status_is_left_alone(self) -> None:
+        """130 must reach the cancel path untouched, timed out or not."""
+        assert stream_adapter._resolve_stream_exit_code(130, timed_out=False) == 130
+        assert stream_adapter._resolve_stream_exit_code(130, timed_out=True) == 130

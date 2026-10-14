@@ -16,3 +16,4 @@ task: >
   provider protocol for it. Review whether the steps can run out of order,
   strand a container, or race the provider's own retention.
 split: train
+retired: v3 - both arms of the checks-treatment A/B blocked it for the teardown lock waiter race that AW#56 later fixed; it is the defect case teardown-lock-waiter-race, at the same pin. It scores in v1 and v2 as it ran
