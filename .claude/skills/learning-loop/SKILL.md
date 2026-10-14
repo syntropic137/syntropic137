@@ -160,6 +160,25 @@ head verification was handed. All four passed their own verification against
 a test double or fixture that did not behave like the real backend or CLI. The eval
 asks whether a verifier will catch them now.
 
+From the [2026-10-13 retro](../../../docs/retrospectives/2026-10-13-provider-contract-day.md),
+certified by `sdlc-implement-v3` / `sdlc-reverify-pr-v1` on codex and blocked
+by a second verifier. These are suite cases now: #1808 in
+`evals/verifier-seed-v1` (v7), the agentic-workspace ones in
+`evals/verifier-seed-aw-v1`, a second suite because an eval pins one
+repository:
+
+| Case | Commit to verify | Expected finding |
+|---|---|---|
+| #1808 `start-clock-read-before-settle` | `4e174c54`, the parent of fix 79aece192 (not the certified ce532fef, two commits earlier) | with the flag off, `started_at` is read before `settle()`; main settles first |
+| AW#47 `execute-stderr-merged-into-stdout` | `681aa5c4`, the parent of fix 0fa8c36 | `WorkspaceDockerProvider.execute` merges stderr into stdout, so `stderr` is always empty for callers |
+| AW#49 `replay-keeps-recorded-verdict` | `4cbac7bf`, the parent of fix cfdb177 | the replay keeps the recording's own TASK_RESULT beside the profile's, and the reader settles by precedence |
+| AW#49 `scripted-agent-tests-not-in-ci` | `cfdb1774`, the parent of fix 948a913 | the CI python-compatibility matrix omits `scripted_agent`, so its tests never run |
+| AW#49 `replay-error-result-drops-verdict` | `948a913e`, the parent of fix 55f30bc | an `is_error: true` closing claude result routes the profile's TASK_RESULT to the error reason: no verdict |
+
+A pin is the fix's first parent, not the head the verifier certified, when
+commits came between them. `scripts/eval_suite.py check` refuses any other
+pin.
+
 **A recurring failure class becomes an issue with a test or fitness function.**
 "Recurring" means a second occurrence, or a first one that obviously belongs to
 a class. The issue proposes the check that would have failed:

@@ -120,6 +120,17 @@
       ],
       "document_sha256": "964e2089edf9c895a51a199eea79ac27fcf2cb2df4e9b047e361084a7de686b6"
     },
+    "workflows/evals/verify-pinned-codex-checks/workflow.yaml": {
+      "phases": [
+        {
+          "id": "verify",
+          "order": 1,
+          "model": null,
+          "prompt_file": "phases/verify.md"
+        }
+      ],
+      "document_sha256": "7126a06602f2b9654bb0a99d2ada6e932327878431043fc6dbf1591498e2e5bc"
+    },
     "workflows/evals/verify-pinned-codex-gpt-5-6-luna/workflow.yaml": {
       "phases": [
         {

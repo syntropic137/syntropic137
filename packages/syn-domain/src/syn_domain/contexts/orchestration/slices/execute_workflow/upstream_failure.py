@@ -74,13 +74,12 @@ _CODEX_AT_CAPACITY = "Selected model is at capacity. Please try a different mode
 _CODEX_QUOTA_PHRASES: tuple[str, ...] = ("hit your usage limit", "purchase more credits")
 
 #: What claude says when the account's allowance is spent. EMPTY, deliberately:
-#: no real claude quota message exists in this repo, agentic-workspace or any
-#: fixture, and a spelling invented here would match nothing claude writes.
-#: Until it is filled a claude quota failure reads as UNKNOWN - not retried,
-#: and no fallback run.
-# TODO(#1669): capture the real claude usage-limit line (its sentence, any
-# `|<epoch>` reset suffix, any "resets ..." phrase and its zone, and which
-# stream channel carries it) and add it here with a reset reader.
+#: recognising claude's quota text is harness knowledge, so it is not added
+#: here. Until claude's quota arrives classified, it reads as UNKNOWN - not
+#: retried, and no fallback run.
+# TODO(#1605): claude's quota sentence is now captured ("You've hit your weekly
+# limit", exec-8ad0e101db7b, #1669). Read claude quota off agentic-workspace's
+# harness classification at this entry instead of matching phrases here.
 _CLAUDE_QUOTA_PHRASES: tuple[str, ...] = ()
 
 #: What codex says when its content filter declines the request, as a fragment

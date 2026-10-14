@@ -126,7 +126,7 @@ class ExecutionTodoProjection(AutoDispatchProjection):
     per-execution asyncio.Lock. See the module docstring.
     """
 
-    PROJECTION_NAME = "execution_todo"
+    PROJECTION_NAME: ClassVar[str] = "execution_todo"
     VERSION = 1
 
     # Class-level so all instances in the process serialize per execution.
