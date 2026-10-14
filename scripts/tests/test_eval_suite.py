@@ -247,13 +247,59 @@ def test_the_agentic_workspace_suite_is_its_own_suite_over_its_own_repository() 
 
     assert aw.suite.repository == "AgentParadise/agentic-workspace"
     assert aw.suite.suite_tag == "suite:verifier-seed-aw" != seed.suite.suite_tag
-    assert aw.tag == "verifier-seed-aw-v1:v2:eval-verify-pinned-v1"
-    assert {c.source_pr for c in aw.cases if c.polarity == "defect"} == {47, 49}
+    assert aw.tag == "verifier-seed-aw-v1:v3:eval-verify-pinned-v1"
+    assert {c.source_pr for c in aw.cases if c.polarity == "defect"} == {47, 49, 56}
     assert not {c.id for c in aw.cases} & {c.id for c in seed.cases}
 
 
 _AW_CONTROL_WF = "eval-verify-pinned-codex-v1"
 _AW_CHECKS_WF = "eval-verify-pinned-codex-checks-v1"
+
+
+@pytest.mark.unit
+def test_both_checks_treatment_arms_score_against_the_v2_cases_they_ran() -> None:
+    """v3 retires all three v2 controls; the A/B's fourteen runs must still score as v2."""
+    v2_ids = {
+        load_suite(_AW_SUITE, workflow=wf, version=2).tag: {
+            c.id for c in load_suite(_AW_SUITE, workflow=wf, version=2).cases
+        }
+        for wf in (_AW_CONTROL_WF, _AW_CHECKS_WF)
+    }
+    current = {c.id for c in load_suite(_AW_SUITE).cases}
+
+    assert set(v2_ids) == {
+        f"verifier-seed-aw-v1:v2:{_AW_CONTROL_WF}",
+        f"verifier-seed-aw-v1:v2:{_AW_CHECKS_WF}",
+    }
+    for ids in v2_ids.values():
+        assert len(ids) == 7
+        assert {"clean-staged-teardown", "clean-deployment-identity"} <= ids - current
+
+
+@pytest.mark.unit
+def test_the_reclassified_teardown_case_credits_the_fixed_race_not_the_unfixed_shield() -> None:
+    """The v2 blocks named three things; only the race and docker rm were fixed (AW#56)."""
+    (case,) = (c for c in load_suite(_AW_SUITE).cases if c.id == "teardown-lock-waiter-race")
+    docker = "lib/python/agentic_isolation/agentic_isolation/providers/docker.py"
+    race = _report(
+        (
+            f"{docker}:715",
+            "teardown pops the lock entry when lock.locked() is False, but a waiter woken by "
+            "release() does not hold the lock until it resumes; a third caller then builds a "
+            "fresh lock and tears the workspace down concurrently.",
+        )
+    )
+    shield = _report(
+        (
+            f"{docker}:755",
+            "asyncio.shield around _remove does not survive a second cancellation, so the "
+            "container can be stranded.",
+        )
+    )
+
+    assert isinstance(case, DefectCase) and case.reclassified_from == "clean-staged-teardown"
+    assert score_case(case, "blocked", race).passed
+    assert not score_case(case, "blocked", shield).passed
 
 
 @pytest.mark.unit
