@@ -74,10 +74,16 @@ def _renamed(
 async def _round_trip(
     client: GrpcEventStoreClient, history: list[EventEnvelope[DomainEvent]], ids: set[str]
 ) -> list[EventEnvelope[DomainEvent]]:
-    """Append in domain order, then read back every event of these streams via read_all."""
+    """Append in domain order, then read back every event of these streams via read_all.
+
+    Each event is appended alone, so its stream's head is the event's own
+    aggregate nonce minus one: `None` means 0, which only the first fits.
+    """
     for envelope in history:
         await client.append_events(
-            f"{_STREAM_TYPE}-{envelope.metadata.aggregate_id}", [envelope], expected_version=None
+            f"{_STREAM_TYPE}-{envelope.metadata.aggregate_id}",
+            [envelope],
+            expected_version=envelope.metadata.aggregate_nonce - 1,
         )
     back: list[EventEnvelope[DomainEvent]] = []
     nonce = 0
