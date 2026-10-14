@@ -172,8 +172,22 @@ class _WorkspaceUsageRow(BaseModel):
     cpu_usage_seconds: float | None = None
     cpu_throttled_seconds: float | None = None
     memory_peak_bytes: int | None = None
+    oom_kills: int | None = None
+    oom_killed: bool | None = None
     disk_bytes_at_teardown: int | None = None
     workspace_lifetime_seconds: float | None = None
+
+    @property
+    def oom(self) -> bool | None:
+        """Whether the workspace was OOM-killed; None when nothing measured it.
+
+        The provider's ``oom_killed`` when it reported one. Rows written before
+        it was carried hold only the cgroup count, which answers the same
+        question when it was read. Neither present is unknown, never "no".
+        """
+        if self.oom_killed is not None:
+            return self.oom_killed
+        return None if self.oom_kills is None else self.oom_kills > 0
 
 
 @dataclass(frozen=True)
@@ -195,14 +209,40 @@ class ResourceCoverage:
 
 
 @dataclass(frozen=True)
+class OomKills:
+    """Every phase of one type, in exactly one bucket.
+
+    ``unknown`` holds phases with no usage row or a row that measured no OOM
+    signal: an unmeasured phase is never counted as "not killed".
+    """
+
+    killed: int
+    not_killed: int
+    unknown: int
+
+
+@dataclass(frozen=True)
+class OomKilledPhase:
+    """One phase whose workspace the kernel killed for memory."""
+
+    execution_id: str
+    memory_peak_bytes: int | None
+    oom_kills: int | None
+
+
+@dataclass(frozen=True)
 class PhaseResourceProfile:
     """One phase type's workspace resource use at teardown."""
 
     phase_id: str
+    cpu_usage_seconds: Percentiles
+    wall_seconds: Percentiles
     cpu_seconds_per_wall_second: Percentiles
     cpu_throttled_seconds: Percentiles
     memory_peak_bytes: Percentiles
     disk_bytes_at_teardown: Percentiles
+    oom: OomKills
+    oom_killed_phases: list[OomKilledPhase]
     coverage: ResourceCoverage
 
 
@@ -460,15 +500,27 @@ def _parse_usage(raw: str | None) -> _WorkspaceUsageRow | None:
 
 
 def _resource_profiles(rows: Iterable[asyncpg.Record]) -> list[PhaseResourceProfile]:
-    by_phase: dict[str, list[tuple[float | None, _WorkspaceUsageRow | None]]] = defaultdict(list)
+    by_phase: dict[str, list[tuple[str, float | None, _WorkspaceUsageRow | None]]] = defaultdict(
+        list
+    )
     for row in rows:
         usage = _parse_usage(row["usage"])
         wall = None if usage is None else usage.workspace_lifetime_seconds
-        by_phase[row["phase_id"]].append((wall if wall else None, usage))
+        by_phase[row["phase_id"]].append((row["execution_id"], wall if wall else None, usage))
 
     profiles = []
     for phase_id, phases in sorted(by_phase.items()):
-        measured = [(wall, usage) for wall, usage in phases if usage is not None]
+        measured = [(wall, usage) for _, wall, usage in phases if usage is not None]
+        killed = [
+            OomKilledPhase(
+                execution_id=execution_id,
+                memory_peak_bytes=usage.memory_peak_bytes,
+                oom_kills=usage.oom_kills,
+            )
+            for execution_id, _, usage in sorted(phases, key=lambda p: p[0])
+            if usage is not None and usage.oom is True
+        ]
+        not_killed = sum(1 for _, u in measured if u.oom is False)
         cpu_rates = [
             usage.cpu_usage_seconds / wall
             for wall, usage in measured
@@ -477,6 +529,10 @@ def _resource_profiles(rows: Iterable[asyncpg.Record]) -> list[PhaseResourceProf
         profiles.append(
             PhaseResourceProfile(
                 phase_id=phase_id,
+                cpu_usage_seconds=Percentiles.of(
+                    u.cpu_usage_seconds for _, u in measured if u.cpu_usage_seconds is not None
+                ),
+                wall_seconds=Percentiles.of(wall for wall, _ in measured if wall is not None),
                 cpu_seconds_per_wall_second=Percentiles.of(cpu_rates),
                 cpu_throttled_seconds=Percentiles.of(
                     u.cpu_throttled_seconds
@@ -491,6 +547,12 @@ def _resource_profiles(rows: Iterable[asyncpg.Record]) -> list[PhaseResourceProf
                     for _, u in measured
                     if u.disk_bytes_at_teardown is not None
                 ),
+                oom=OomKills(
+                    killed=len(killed),
+                    not_killed=not_killed,
+                    unknown=len(phases) - len(killed) - not_killed,
+                ),
+                oom_killed_phases=killed,
                 coverage=ResourceCoverage(
                     phases=len(phases),
                     phases_without_usage_row=len(phases) - len(measured),

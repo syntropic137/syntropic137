@@ -9,7 +9,6 @@ each is a place the value can be dropped; these tests read it at the far end.
 from __future__ import annotations
 
 import dataclasses
-
 import logging
 import os
 from dataclasses import dataclass

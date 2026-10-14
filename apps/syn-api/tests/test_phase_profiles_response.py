@@ -39,9 +39,10 @@ def test_unmeasured_phases_are_counted_not_dropped() -> None:
         {"cpu_usage_seconds": 3.0, "memory_peak_bytes": None, "workspace_lifetime_seconds": 30.0}
     )
     no_lifetime = json.dumps({"cpu_usage_seconds": 3.0, "memory_peak_bytes": 1})
-    rows = [{"phase_id": "plan", "usage": usage}, {"phase_id": "plan", "usage": no_lifetime}] + [
-        {"phase_id": "plan", "usage": None} for _ in range(4)
-    ]
+    rows = [
+        {"execution_id": "e1", "phase_id": "plan", "usage": usage},
+        {"execution_id": "e2", "phase_id": "plan", "usage": no_lifetime},
+    ] + [{"execution_id": f"e{i}", "phase_id": "plan", "usage": None} for i in range(3, 7)]
     now = datetime.now(UTC)
     profiles = PhaseProfiles(
         workflow_id="wf",
@@ -63,6 +64,64 @@ def test_unmeasured_phases_are_counted_not_dropped() -> None:
     assert plan.cpu_seconds_per_wall_second.n == 1
     assert plan.cpu_seconds_per_wall_second.p50 is None
     assert plan.cpu_seconds_per_wall_second.p50_display == "insufficient"
+
+
+def _profile_of(rows: list[dict[str, str | None]]) -> PhaseProfilesResponse:
+    now = datetime.now(UTC)
+    profiles = PhaseProfiles(
+        workflow_id="wf",
+        since=now,
+        until=now,
+        executions=len(rows),
+        resources=_resource_profiles(rows),  # type: ignore[arg-type]  # Record stand-ins
+    )
+    return PhaseProfilesResponse.from_profiles(profiles, window_days=7)
+
+
+def test_an_oom_killed_phase_is_named_with_its_peak_memory() -> None:
+    # The exit-137 case: Docker saw the kill, the cgroup count was unreadable.
+    docker_only = {"oom_killed": True, "oom_kills": None, "memory_peak_bytes": 536_870_912}
+    # A row written before oom_killed was carried: the count alone answers it.
+    count_only = {"oom_kills": 2, "memory_peak_bytes": 268_435_456}
+    measured_clean = {"oom_killed": False, "oom_kills": 0, "memory_peak_bytes": 1}
+    unmeasured = {"memory_peak_bytes": 1}
+    rows = [
+        {"execution_id": "e-docker", "phase_id": "build", "usage": json.dumps(docker_only)},
+        {"execution_id": "e-count", "phase_id": "build", "usage": json.dumps(count_only)},
+        {"execution_id": "e-clean", "phase_id": "build", "usage": json.dumps(measured_clean)},
+        {"execution_id": "e-unknown", "phase_id": "build", "usage": json.dumps(unmeasured)},
+        {"execution_id": "e-norow", "phase_id": "build", "usage": None},
+    ]
+
+    (build,) = _profile_of(rows).resources
+
+    assert (build.oom.killed, build.oom.not_killed, build.oom.unknown) == (2, 1, 2)
+    by_execution = {k.execution_id: k for k in build.oom_killed_phases}
+    assert set(by_execution) == {"e-docker", "e-count"}
+    assert by_execution["e-docker"].oom_killed is True
+    assert by_execution["e-docker"].memory_peak_bytes == 536_870_912
+    assert by_execution["e-docker"].oom_kills is None, "an unread count stays unknown, never 0"
+    assert by_execution["e-count"].oom_kills == 2
+
+
+def test_cpu_and_wall_seconds_carry_p90() -> None:
+    rows = [
+        {
+            "execution_id": f"e{i}",
+            "phase_id": "plan",
+            "usage": json.dumps(
+                {"cpu_usage_seconds": float(i), "workspace_lifetime_seconds": 10.0 * i}
+            ),
+        }
+        for i in range(1, 11)
+    ]
+
+    (plan,) = _profile_of(rows).resources
+
+    assert plan.cpu_usage_seconds.p90 == pytest.approx(9.1)
+    assert plan.wall_seconds.p50 == pytest.approx(55.0)
+    assert plan.wall_seconds.p90_display == "91.0s"
+    assert plan.memory_peak_bytes.n == 0, "a missing peak is not a measured 0"
 
 
 OPUS = "claude-opus-5"
