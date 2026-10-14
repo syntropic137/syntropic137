@@ -485,10 +485,12 @@ upgrade executors first.
 
 Both are built (#1310 item 1.7). The snapshot is
 `ci/fitness/event_sourcing/snapshots/orchestration_events.epoch-<N>.json`,
-written once per epoch and never rewritten, checked by
+recording each event's `event_type`, `schema_version` and schema, written once
+per epoch and never rewritten, checked by
 `ci/fitness/event_sourcing/test_orchestration_event_schema_snapshot.py`. The
 compat gate is `scripts/check_event_compat.py`; it resolves the previous
-release from tags, because `release` is not an ancestor of `main`. A payload the
+release from tags, because `release` is not an ancestor of `main`, and decodes
+by `(event_type, schema_version)` as the event store does. A payload the
 previous release cannot read passes only when this epoch is above that
 release's. A release with **no** epoch has no claim predicate, so for it no
 bump excuses an unreadable payload: every payload must be readable.

@@ -38,7 +38,8 @@ Run both: `just fitness`
 
 An Executor claims only runs whose `writer_epoch` is no higher than its own
 `ORCHESTRATION_EVENT_EPOCH`, so the guard is only as honest as the epoch. The
-test compares the validation schema of every orchestration `@event` class with
+test compares the `event_type`, `schema_version`, `@event` version string and
+validation schema of every orchestration `@event` class with
 the snapshot recorded for the current epoch and fails on any difference. A
 snapshot is written once per epoch and the generator refuses to overwrite it,
 so the only way to green after a schema change is a bump. A bump whose snapshot
@@ -343,7 +344,7 @@ Legacy: some tests define config inline. Being consolidated into
 | test_projection_wiring | Correct projection count, unique names, handlers exist | 6 |
 | test_aggregate_guards | @command_handler methods have precondition guards before _apply() | 1 |
 | test_restart_safety | Catch-up replay produces zero process_pending() calls | 3, 5 |
-| test_orchestration_event_schema_snapshot | Orchestration event schemas equal the current Event Epoch's snapshot | 17 |
+| test_orchestration_event_schema_snapshot | Orchestration event types, versions and schemas equal the current Event Epoch's snapshot | 17 |
 | test_dedup_durability | Pipeline uses durable, content-based dedup; dedup port is wired | 4 |
 
 ### Code Quality (`ci/fitness/code_quality/`)

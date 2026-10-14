@@ -774,18 +774,22 @@ without bumping the epoch fails a fitness test.
 
 ## Schema Snapshot
 
-The recorded validation schema of every orchestration event at one Event Epoch,
+The recorded identity and validation schema of every orchestration event at one
+Event Epoch: its `event_type`, its `schema_version` (the version stored and
+decoded by), its `@event` version string, and the schema it accepts,
 `orchestration_events.epoch-<N>.json` under `ci/fitness/event_sourcing/snapshots/`.
 Written once, when the epoch is introduced, and never rewritten. The fitness
-test fails when today's schemas differ from the current epoch's snapshot, so a
-schema change has one way to green: bump the epoch and snapshot the new one.
+test fails when today's events differ from the current epoch's snapshot, so a
+schema change, a renamed type or a bumped version has one way to green: bump the
+epoch and snapshot the new one.
 Titles and descriptions are not part of it; a docstring changes no payload.
 
 ## Event Compatibility Gate
 
 `just check-event-compat`: the previous release's own `syn-domain`, built from
 its tag, must read what this tree writes, and this tree must read what that
-release writes back. A payload the release cannot read is allowed only when the
+release writes back. Both sides read as the event store does, by `event_type`
+and `schema_version`, never by class name. A payload the release cannot read is allowed only when the
 Event Epoch is above the release's, because then the claim predicate keeps that
 release's Executors off the run. The previous release is the newest `vX.Y.Z`
 tag, not an ancestor of `main`.
