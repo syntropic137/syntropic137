@@ -4,8 +4,9 @@ Real Postgres Run Queue and the real event store, wired as in
 ``test_1310_a_claimed_three_phase_run_succeeds_on_real_stores``. Only the reaper
 is a double (Docker-backed reaping is ``test_1310_v7_dead_host_reap_on_real_docker``).
 
-* A lost acknowledgment after ``mark_reaped`` or ``close_interrupted`` commits is
-  resumed on the next turn: one ``WorkflowInterrupted``, slot released once.
+* A failure of ``mark_reaped`` or ``close_interrupted``, either before its
+  commit or as a lost acknowledgment after it, is resumed on the next turn:
+  one ``WorkflowInterrupted``, slot released once.
 * A reconciler that dies after the interrupt append and before closing the row
   is not taken over while still registered; once it leaves, a successor closes
   the row without reaping again or appending a second terminal event.
@@ -60,23 +61,25 @@ class _Reaper:
         return True
 
 
-class _LosesAck:
-    """The real queue, except ``write`` commits once and then raises (a lost ack)."""
+class _FailsOnce:
+    """The real queue, except ``write`` fails once: ``before`` its commit, or
+    ``after`` it (a lost acknowledgment)."""
 
-    def __init__(self, queue: PostgresExecutionRunQueue, write: str) -> None:
-        self._queue, self._write, self.lost = queue, write, False
+    def __init__(self, queue: PostgresExecutionRunQueue, write: str, when: str) -> None:
+        self._queue, self._write, self._when, self.lost = queue, write, when, False
 
     def __getattr__(self, name: str) -> object:
         real = getattr(self._queue, name)
         if name != self._write or self.lost:
             return real
 
-        async def commit_then_raise(run: FencedRun) -> None:
-            await real(run)
+        async def fail_once(run: FencedRun) -> None:
+            if self._when == "after":
+                await real(run)
             self.lost = True
-            raise ConnectionError(f"{name} committed; acknowledgment lost")
+            raise ConnectionError(f"{name} failed {self._when} its commit")
 
-        return commit_then_raise
+        return fail_once
 
 
 async def _expired_claim(world: _Infra, runs: asyncpg.Pool) -> tuple[str, ExecutorHost]:
@@ -120,16 +123,18 @@ async def _assert_closed_once(
     assert in_use == 0
 
 
+@pytest.mark.parametrize("when", ["before", "after"])
 @pytest.mark.parametrize("write", ["mark_reaped", "close_interrupted"])
-async def test_a_lost_acknowledgment_is_resumed_from_the_row(
+async def test_a_failed_write_is_resumed_from_the_row(
     infra: _Infra,  # noqa: F811
     pool: asyncpg.Pool,  # noqa: F811
     write: str,
+    when: str,
 ) -> None:
     execution_id, dead = await _expired_claim(infra, pool)
     me = _host("rec")
     await _online(infra, me)
-    flaky = _LosesAck(infra.queue, write)
+    flaky = _FailsOnce(infra.queue, write, when)
     reaper = _Reaper()
     reconciler = Reconciler(
         flaky,  # type: ignore[arg-type]  # the real queue behind a lost-ack proxy
@@ -141,7 +146,10 @@ async def test_a_lost_acknowledgment_is_resumed_from_the_row(
     assert flaky.lost
     await reconciler.turn()
     await reconciler.turn()
-    assert reaper.calls == [execution_id]
+    # Only a mark_reaped that never committed leaves the row fencing, so the
+    # (idempotent) reap runs again; every other case resumes past it.
+    reaps = 2 if (write, when) == ("mark_reaped", "before") else 1
+    assert reaper.calls == [execution_id] * reaps
     await _assert_closed_once(infra, pool, execution_id, dead)
 
 
