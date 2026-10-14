@@ -2,18 +2,16 @@
 
 The provider (agentic-workspace's `WorkspaceDockerProvider`) owns HOW usage is
 measured - which cgroup files, which exec, which delete - and returns a
-`TeardownReport` from `destroy()`. This module owns only the SHAPE Syntropic137
+`TeardownReport` from `teardown()`, whose `usage` is mapped here. This module owns only the SHAPE Syntropic137
 depends on, as a Protocol, so the domain never imports a harness format and a
 provider that measures nothing (None, or an older one returning no report)
 maps to None rather than to a usage of zeroes.
 
-The field names match `WorkspaceUsage` one for one, on purpose. Today nothing
-checks the provider against `TeardownReportLike` statically: the pinned
-provider's `destroy` is annotated `-> None`, so the adapter receives the report
-as `object`. Until agentic-workspace types `destroy` against this Protocol, a
-provider-side rename is caught at runtime here instead: a report that is not
-None but lacks a field is logged with the missing names, and the fields it
-does carry are still mapped.
+The field names match `WorkspaceUsage` one for one, on purpose, and
+agentic-workspace's `TeardownUsage` matches them in turn. A provider-side
+rename is still caught at runtime here: a report that is not None but lacks a
+field is logged with the missing names, and the fields it does carry are still
+mapped.
 """
 
 from __future__ import annotations

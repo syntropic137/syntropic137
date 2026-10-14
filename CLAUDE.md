@@ -654,3 +654,7 @@ uv run pytest -m unit -q
   (docker-backed) is settled by CI on the same head SHA.
 - New Python test modules need the `unit` marker (`architecture` under
   `ci/fitness/`), or the second gate collects zero tests and goes green.
+- Mutation evidence (do the new tests kill the bug?) is not a workspace gate:
+  it needs Docker. Commit `*.patch` files under `.mutations/` and ask the
+  orchestrator to run `just mutation-evidence`; see
+  [agent_mutation_evidence.md](.claude/skills/devops/agent_mutation_evidence.md).

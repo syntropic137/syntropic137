@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from syn_adapters.platform_access import WorkspacePlatformGrant
+    from syn_adapters.workspace_backends.errors import TeardownFailure
     from syn_adapters.workspace_backends.service.credential_keeper import CredentialLapse
     from syn_adapters.workspace_backends.service.issued_tokens import IssuedToken
     from syn_adapters.workspace_backends.service.setup_phase_secrets import (
@@ -42,6 +43,7 @@ if TYPE_CHECKING:
         WorkspaceAggregate,
     )
 
+from syn_adapters.workspace_backends.dependency_seed import seed_dependency_caches
 from syn_adapters.workspace_backends.service.codex_rollout import read_codex_rollout
 from syn_adapters.workspace_backends.service.credential_keeper import keep_credential_fresh
 from syn_adapters.workspace_backends.service.git_credential_renewal import (
@@ -94,6 +96,10 @@ class ManagedWorkspace:
     #: `finally`) and so only readable after `__aexit__`. None before teardown,
     #: and when the backend measured nothing.
     teardown_usage: WorkspaceUsage | None = None
+    #: Why teardown did not complete, set beside `teardown_usage`. Never the
+    #: run's primary failure: that propagates out of `create_workspace` on its
+    #: own, and this is recorded next to it rather than in its place.
+    teardown_failure: TeardownFailure | None = None
     #: This phase's read-only access to the Syntropic137 API (ADR-072), set by
     #: `create_workspace` and revoked by its teardown. None while platform
     #: access is OFF, which is the default.
@@ -297,6 +303,9 @@ class ManagedWorkspace:
         result = await _run_setup_phase(self, secrets, setup_script)
         if result.exit_code == 0:
             self._ledger.installed(secrets.issued)
+            # After the clone, before the agent: the lockfiles that key the
+            # seeds exist only now, and nothing has run in the workspace yet.
+            await seed_dependency_caches(self, secrets.clones_under(self.path))
         return result
 
     @property

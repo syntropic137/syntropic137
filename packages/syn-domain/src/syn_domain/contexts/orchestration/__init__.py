@@ -100,6 +100,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_eval import (
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
     FailExecutionCommand,
+    InterruptExecutionCommand,
     ResumeExecutionCommand,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.legacy_event_shapes import (
@@ -445,6 +446,7 @@ __all__ = [
     "InjectTokensCommand",
     # Value objects - workflow template
     "InputDeclaration",
+    "InterruptExecutionCommand",
     "InvalidTagsError",
     "IsolationConfig",
     "LaunchEval",

@@ -17,6 +17,10 @@ CREATE TABLE IF NOT EXISTS execution_budget (
     heartbeat_at TIMESTAMPTZ NOT NULL DEFAULT '-infinity',
     CHECK (in_use >= 0 AND in_use <= capacity)
 );
+-- D3 Restart: which machine a budget belongs to, and the process that inherits
+-- its slots as they are released.
+ALTER TABLE execution_budget ADD COLUMN IF NOT EXISTS container_id TEXT;
+ALTER TABLE execution_budget ADD COLUMN IF NOT EXISTS successor_id TEXT;
 
 CREATE TABLE IF NOT EXISTS execution_runs (
     execution_id TEXT PRIMARY KEY,
