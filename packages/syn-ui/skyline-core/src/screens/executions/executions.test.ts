@@ -81,7 +81,8 @@ describe('list', () => {
   })
 
   it('marks a resumed run and names its parent; a fresh run gets no marker (#1926)', () => {
-    expect(resumeRowTag({ parent_execution_id: 'exec-abc' })).toEqual({ label: 'Resumed', title: 'Resumed from exec-abc' })
+    expect(resumeRowTag({ parent_execution_id: 'exec-abc' })).toEqual({ label: 'Resumed', title: 'Resumed from exec-abc', href: '/executions/exec-abc' })
+    expect(resumeRowTag({ parent_execution_id: 'exec abc' }, (p) => `/ui${p}`)?.href).toBe('/ui/executions/exec%20abc')
     expect(resumeRowTag(null)).toBeNull()
     expect(resumeRowTag(undefined)).toBeNull()
   })

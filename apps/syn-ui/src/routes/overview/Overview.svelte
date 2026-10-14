@@ -292,7 +292,7 @@
             <RunRow
               status={outcomeStatus(r.status, r.failure_classification)}
               name={r.workflow_name}
-              tags={[evalBadge(r.eval), resumeRowTag(r.resumed_from)]}
+              tags={[evalBadge(r.eval), resumeRowTag(r.resumed_from, href)]}
               sub={runSubline(r.repos_display ?? r.repos?.[0] ?? null, r.phase_progress?.completed ?? r.completed_phases, r.phase_progress?.possible ?? r.total_phases)}
               href={execHref(r.workflow_execution_id)}
               segments={runSegments({ status: r.status, done: r.phase_progress?.completed ?? r.completed_phases, total: r.phase_progress?.possible ?? r.total_phases })}

@@ -10,6 +10,8 @@ export type RunSegmentTone = 'done' | 'failed' | 'cancelled' | 'running' | 'empt
 export interface RunRowTag {
   label: string
   title?: string
+  /** Its own link (Resumed -> the parent run); the row's link stays the run itself. */
+  href?: string
 }
 
 export interface RunRowProps {

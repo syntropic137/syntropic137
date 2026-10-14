@@ -85,6 +85,19 @@ describe('Executions list resume badge (#1926)', () => {
       const badges = [...target.querySelectorAll('.sky-run-row__tag')].filter((t) => t.textContent === 'Resumed')
       expect(badges).toHaveLength(1)
       expect(badges[0]!.getAttribute('title')).toBe('Resumed from exec-parent-1')
+      // The badge is its own link to the parent, never nested in the row's link (#1926).
+      const badge = badges[0]!
+      expect(badge.tagName).toBe('A')
+      expect(badge.getAttribute('href')).toMatch(/\/executions\/exec-parent-1$/)
+      expect(badge.parentElement!.closest('a')).toBeNull()
+      const row = badge.closest('.sky-run-row')!
+      const own = row.querySelector('a.sky-run-row__link')!
+      expect(own.getAttribute('href')).toMatch(/\/executions\/[^/]+$/)
+      expect(own.getAttribute('href')).not.toMatch(/exec-parent-1$/)
+      // Coexisting with the Eval tag, and a fresh row carries no parent link.
+      const resumedLinks = [...target.querySelectorAll('a.sky-run-row__tag')].filter((t) => t.textContent === 'Resumed')
+      expect(resumedLinks).toHaveLength(1)
+      expect(target.querySelectorAll('a a')).toHaveLength(0)
     } finally {
       stop()
     }

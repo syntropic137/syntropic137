@@ -221,12 +221,17 @@ export interface ResumedFromLike {
 }
 
 /**
- * The run row's "Resumed" marker (#1926), titled with the run it picked up
- * from; null for a run that started fresh. The row is itself a link, so the
- * parent is one click further, on the execution page's lineage banner.
+ * The run row's "Resumed" marker (#1926), titled with and linking to the run
+ * it picked up from; null for a run that started fresh. `href` builds the
+ * app's path (the router's base) from `/executions/<parent>`.
  */
-export function resumeRowTag(resumed: ResumedFromLike | null | undefined): RunRowTag | null {
-  return resumed ? { label: 'Resumed', title: `Resumed from ${resumed.parent_execution_id}` } : null
+export function resumeRowTag(
+  resumed: ResumedFromLike | null | undefined,
+  href: (path: string) => string = (path) => path,
+): RunRowTag | null {
+  if (!resumed) return null
+  const parent = resumed.parent_execution_id
+  return { label: 'Resumed', title: `Resumed from ${parent}`, href: href(`/executions/${encodeURIComponent(parent)}`) }
 }
 
 /** A list row's phase progress as the API words it (`phase_progress`); the counts are the fallback for a server without it. */
