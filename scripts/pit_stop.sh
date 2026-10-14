@@ -609,8 +609,48 @@ if [ "$SERVICE" = gateway ]; then
     exit 0
 fi
 
+# ONE SWAPPER AT A TIME, and never under a compose up already running (#1310
+# 1.6). The lock is a directory on the host, made atomically by mkdir and named
+# for whoever holds it; a pit stop that died holding it leaves it for a person
+# to judge. Read-only and lock-free under --dry-run.
+PIT_LOCK="$COMPOSE_DIR/.pit-stop.lock"
+LOCKED=0
+claim_the_swap() {
+    local ups
+    ups="$(remote "ps -eo args | grep -c '[d]ocker compose.* up' || true")" \
+        || die "could not list processes on $HOST; nothing was gated or recreated"
+    [ "$ups" = 0 ] || die "a docker compose up is already running on $HOST; it is never interrupted. Nothing was gated or recreated"
+    [ "$DRY" = 0 ] || return 0
+    remote "mkdir $PIT_LOCK && echo '$(whoami)@$(hostname) $TAG' > $PIT_LOCK/holder" \
+        || die "another pit stop holds $PIT_LOCK on $HOST ($(remote "cat $PIT_LOCK/holder" 2>/dev/null || echo unknown)). If none is running, remove it by hand. Nothing was gated or recreated"
+    LOCKED=1
+}
+# EVERY EXIT AFTER THE GATE RE-OPENS ADMISSION (#1310 1.6): an abort, a failed
+# verify, Ctrl-C or a TERM. Clearing the flag at the ungate disarms it. The
+# lock goes on every exit too; $TMP still goes as the first trap had it.
+GATED=0
+release_on_exit() {
+    local rc=$?
+    trap - EXIT INT TERM
+    if [ "$GATED" = 1 ]; then
+        if maintenance false ""; then
+            echo "   admission re-opened on exit (code $rc); ignore any PUT /maintenance step printed above" >&2
+        else
+            echo "   WARNING: admission is still PAUSED and could not be re-opened; clear it with PUT /maintenance" >&2
+        fi
+    fi
+    if [ "$LOCKED" = 1 ]; then remote "rm -rf $PIT_LOCK" || echo "   WARNING: could not remove $PIT_LOCK on $HOST" >&2; fi
+    rm -rf "$TMP"
+    exit "$rc"
+}
+trap release_on_exit EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+claim_the_swap
+
 step "gate: pausing execution admission for the rest of the pit stop"
 maintenance true "pit stop $VERSION" || die "could not pause admission; nothing was recreated"
+GATED=1
 status_counts || true
 
 step "drain: waiting for every execution to be terminal (budget ${DRAIN_TIMEOUT}s)"
@@ -700,6 +740,7 @@ fi
 # a version nobody has confirmed is healthy.
 step "gate: resuming execution admission"
 maintenance false "" || die "$TAG is live but the clear did not complete; retry PUT /maintenance (a 503 means admission is open but the paused triggers were not woken, #1387)"
+GATED=0
 
 # THE START PATH, PROVEN (#1641). Every check above passed on beta.8 and beta.9
 # while no execution could start: each direct start was dropped as a duplicate,
