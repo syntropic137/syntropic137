@@ -28,7 +28,7 @@ from syn_api._wiring import (
     get_workflow_dispatcher,
 )
 from syn_api.build_info import get_build_info
-from syn_api.services import cpu_throttling, inventory_lifecycle
+from syn_api.services import cpu_throttling, execution_host_runner, inventory_lifecycle
 from syn_api.services.admission_announcement import (
     announce_admission_if_open,
     start_disk_recovery_watch,
@@ -37,7 +37,6 @@ from syn_api.services.admission_announcement import (
 from syn_api.services.credentials import validate_credentials
 from syn_api.services.degraded_reasons import DegradedReason
 from syn_api.services.disk_pager import start_disk_pager, stop_disk_pager
-from syn_api.services.execution_host_runner import start_execution_host, stop_execution_host
 from syn_api.services.execution_posture import (
     api_memory_limit_mib,
     log_execution_concurrency_posture,
@@ -47,7 +46,6 @@ from syn_api.services.health_probes import describe_codex_auth_health, describe_
 from syn_api.services.read_path_health import _judge_read_path
 from syn_api.services.reconciliation import (
     cleanup_orphaned_containers,
-    reconcile_orphaned_executions,
     reconcile_orphaned_sessions,
 )
 from syn_api.services.request_latency_lifecycle import start_request_latency, stop_request_latency
@@ -210,14 +208,7 @@ async def _init_degradable_services(state: LifecycleState) -> None:
     cleanup = await cleanup_orphaned_containers()
     # AFTER the reap, and only if the reap can say it finished: "this execution
     # is still running" is provably false only once every container is gone.
-    # Not with the Run Queue on (#1310 1.5): an admitted run is RUNNING with no
-    # container while it waits durably for a claim, and failing it here would
-    # destroy exactly what the queue keeps. Its claimed runs are reconciled by
-    # lease expiry instead (ADR-072 D5).
-    from syn_shared.settings import get_settings
-
-    if not get_settings().execution.run_queue_enabled:
-        await reconcile_orphaned_executions(cleanup, started_before=process_started_at)
+    await execution_host_runner.reconcile_unless_queued(cleanup, started_before=process_started_at)
 
     for entry in _SERVICE_REGISTRY:
         try:
@@ -307,9 +298,7 @@ async def startup(
         return result
 
     await _init_degradable_services(_state)
-    # After the startup reap and reconcile above, so the old world is resolved
-    # before this process claims anything (#1310 1.5). A no-op with the flag off.
-    await start_execution_host()
+    await execution_host_runner.start_execution_host()
 
     mode = "degraded" if _state.degraded_reasons else "full"
     return Ok({"mode": mode, "degraded_reasons": _state.degraded_reasons})
@@ -330,10 +319,7 @@ async def shutdown() -> Result[None, LifecycleError]:
                 await _state._recovery_task
             _state._recovery_task = None
 
-        # Before the services its runs append through go away (#1310 1.5).
-        with contextlib.suppress(Exception):
-            await stop_execution_host()
-
+        await execution_host_runner.stop_execution_host()
         # Shutdown services in reverse registration order (ADR-057).
         for entry in reversed(_SERVICE_REGISTRY):
             if entry.shutdown_fn is not None:

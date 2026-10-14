@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from syn_api.services import lifecycle
+from syn_api.services import execution_host_runner, lifecycle
 from syn_api.services.reconciliation import CleanupResult
 
 pytestmark = [pytest.mark.unit, pytest.mark.anyio]
@@ -37,10 +37,11 @@ async def _startup_reconciles(monkeypatch: pytest.MonkeyPatch, *, queue_on: bool
         "cleanup_orphaned_containers",
         AsyncMock(return_value=CleanupResult(fully_reaped=True, failures=())),
     )
-    monkeypatch.setattr(lifecycle, "reconcile_orphaned_executions", reconcile)
+    monkeypatch.setattr(execution_host_runner, "reconcile_orphaned_executions", reconcile)
     monkeypatch.setattr(lifecycle, "_SERVICE_REGISTRY", ())
     monkeypatch.setattr(
-        "syn_shared.settings.get_settings",
+        execution_host_runner,
+        "get_settings",
         lambda: _Settings(_Execution(run_queue_enabled=queue_on)),
     )
     await lifecycle._init_degradable_services(lifecycle.LifecycleState())

@@ -5,6 +5,10 @@ None and nothing here starts: the flag-off path is main's. With it on, admission
 only writes the queue (1.3), so without this nothing would ever drain an
 admitted run. Until the role split (1.6) the API process is the one executor,
 so the startup reap in ``lifecycle`` stays as it is: no other host is live.
+
+``lifecycle`` calls, in order: ``reconcile_unless_queued`` after the startup
+reap, ``start_execution_host`` once startup is done, and ``stop_execution_host``
+first at shutdown, before the services its runs append through go away.
 """
 
 from __future__ import annotations
@@ -13,6 +17,7 @@ import asyncio
 import contextlib
 import logging
 import socket
+from typing import TYPE_CHECKING
 
 from syn_adapters.execution_host import AggregateRunInterrupter, ExecutionHost
 from syn_adapters.storage.repositories import (
@@ -26,13 +31,29 @@ from syn_adapters.workspace_backends.host_labels import (
 )
 from syn_api._wiring import get_execution_processor, get_execution_run_queue
 from syn_api.services.dead_host_reaper import DockerDeadHostReaper
+from syn_api.services.reconciliation import CleanupResult, reconcile_orphaned_executions
 from syn_domain.contexts.orchestration import ORCHESTRATION_EVENT_EPOCH
 from syn_domain.contexts.orchestration.ports import ExecutorHost
 from syn_shared.settings import get_settings
 
+if TYPE_CHECKING:
+    from datetime import datetime
+
 logger = logging.getLogger(__name__)
 
 _host_task: asyncio.Task[None] | None = None
+
+
+async def reconcile_unless_queued(cleanup: CleanupResult, *, started_before: datetime) -> None:
+    """The startup reconcile, except with the Run Queue on.
+
+    An admitted run is RUNNING with no container while it waits durably for a
+    claim, so failing every pre-restart RUNNING execution would destroy exactly
+    what the queue keeps. With the queue on, claimed runs are reconciled by
+    Lease expiry instead (ADR-072 D5). With it off this is main's call.
+    """
+    if not get_settings().execution.run_queue_enabled:
+        await reconcile_orphaned_executions(cleanup, started_before=started_before)
 
 
 async def start_execution_host() -> None:
@@ -69,13 +90,16 @@ async def start_execution_host() -> None:
 
 
 async def stop_execution_host() -> None:
-    """Cancel the loop: held runs take the interruption path, rows await their lease."""
+    """Cancel the loop: held runs take the interruption path, rows await their lease.
+
+    Never raises: a host that already crashed was reported by ``_report_exit``.
+    """
     global _host_task
     task, _host_task = _host_task, None
     if task is None:
         return
     task.cancel()
-    with contextlib.suppress(asyncio.CancelledError):
+    with contextlib.suppress(asyncio.CancelledError, Exception):
         await task
 
 
