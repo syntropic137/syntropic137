@@ -289,17 +289,30 @@ def test_the_reclassified_teardown_case_credits_the_fixed_race_not_the_unfixed_s
             "fresh lock and tears the workspace down concurrently.",
         )
     )
-    shield = _report(
-        (
+    not_the_race = {
+        "shield": (
             f"{docker}:755",
             "asyncio.shield around _remove does not survive a second cancellation, so the "
             "container can be stranded.",
-        )
-    )
+        ),
+        "shield, in a waiter's words": (
+            f"{docker}:755",
+            "Double cancellation of a waiter can interrupt asyncio.shield around _remove; the "
+            "container is stranded.",
+        ),
+        "vague waiter coverage": (f"{docker}:715", "There is no test for a cancelled waiter."),
+        "the opposite lifetime claim": (
+            f"{docker}:715",
+            "_teardown_locks entries are never removed, so the lock entry leaks per workspace.",
+        ),
+    }
 
     assert isinstance(case, DefectCase) and case.reclassified_from == "clean-staged-teardown"
     assert score_case(case, "blocked", race).passed
-    assert not score_case(case, "blocked", shield).passed
+    credited = [
+        k for k, f in not_the_race.items() if score_case(case, "blocked", _report(f)).passed
+    ]
+    assert credited == []
 
 
 @pytest.mark.unit

@@ -43,8 +43,13 @@ expected:
     is reported as torn down.
   files:
     - lib/python/agentic_isolation/agentic_isolation/providers/docker.py
+  # Group 1 is the lock-entry check itself and group 2 the queued caller it
+  # misses; no word sits in both, so one word cannot carry the predicate.
+  # Neither group holds a bare `waiter`, `locked` or `removed`: the v2 runs'
+  # unfixed shield finding says "waiter", and "entry never removed" is the
+  # opposite claim.
   keywords:
-    - [locked(), lock.locked, locked, lock entry, _teardown_locks, waiter, fresh lock, new lock]
-    - [race, concurrent, concurrently, two callers, both, third caller, waiter, woken, wakes, before it resumes,
-       not yet acquired, single-flight, pop, popped, dropped, removed]
+    - [locked(), lock.locked, _teardown_locks, lock entry, per-workspace lock, fresh lock, new lock]
+    - [race, concurrent, concurrently, two callers, third caller, woken, wakes, before it resumes,
+       not yet acquired, still queued, single-flight]
 split: train

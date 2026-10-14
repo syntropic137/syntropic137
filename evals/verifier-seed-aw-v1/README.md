@@ -42,8 +42,11 @@ missing.
 ## Rule 4: a control must have survived, not just waited (from v3)
 
 verifier-seed-v1's rules 1-3 hold, and in this suite they were not enough.
-Both arms of the checks-treatment A/B blocked all three v2 controls, and none
-of the blocks was false:
+Both arms of the checks-treatment A/B blocked all three v2 controls. For two
+of them the A/B brief summarised the findings, and each summarised finding was
+checked against the pin and is true; the full findings of all six blocks were
+never read (see the third bullet), so this says nothing about any other
+finding in them, and nothing at all about the third control:
 
 - `clean-staged-teardown` was blocked for the `lock.locked()` waiter race
   and `_remove` discarding `docker rm`'s exit status. AW#56 fixed both seven
@@ -53,6 +56,14 @@ of the blocks was false:
 - `clean-deployment-identity` was blocked for a probe (`${VAR:-unset}`) that
   cannot tell an absent variable from an empty one, and its own task asked
   whether the tests prove exactly that.
+- `clean-event-type-identifiers` was NOT investigated. v3 had neither its
+  run ids nor its findings: the artifacts API was unreachable from the
+  workspace that cut v3, and `launches.jsonl` records no v2 runs. Its block
+  may be true (the pin deletes `test_git_hooks_integration.py`) or false.
+  It is retired as an uninvestigated candidate defect, which keeps it out of
+  v3's false-block count without scoring it either way. **The per-control
+  decision the v3 brief asked for is incomplete for this case**; read both
+  arms' findings against the pin before it is reclassified, kept or restored.
 
 Thirty quiet days means nobody changed the code. In a repository that moves
 this fast, it does not mean anybody read it again. So from v3, a control must
