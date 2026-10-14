@@ -1,7 +1,8 @@
 """Ratchet: tests that no CI job selects, and disarmed (xfail) guards.
 
 CI runs ``pytest -m unit``, so an unmarked test is collected by nothing and can
-fail on main indefinitely behind a green check. Budgets live in
+fail on main indefinitely behind a green check. ``ci/fitness`` is selected
+separately, by ``-m architecture``, and is censused separately (#1935). Budgets live in
 ``fitness-exceptions.toml`` under ``[test-markers.*]``; both must ratchet to 0.
 
 See docs/retrospectives/2026-08-17-green-checks-that-check-nothing.md
@@ -64,6 +65,17 @@ CI_SELECTED_MARKERS: tuple[str, ...] = ("unit", "integration")
 #: Every test no CI job selects, derived from the selectors above so the two
 #: cannot drift apart.
 UNMARKED_SELECTOR = " and ".join(f"not {marker}" for marker in CI_SELECTED_MARKERS)
+
+#: ``ci/fitness`` is not a testpath: the Architectural Fitness job reaches it
+#: by explicit path, ``pytest ci/fitness/ -m architecture`` (justfile
+#: ``fitness-invariants``), and the unit job never sees it. The census above
+#: walks testpaths only, so a fitness module marked ``unit`` was invisible to
+#: it AND to both jobs: 21 tests, one of them red on main behind a green check
+#: (#1935). ``scripts/tests/test_check_test_markers.py`` pins both values to
+#: the recipe so they cannot drift from what CI runs.
+FITNESS_DIR = "ci/fitness"
+FITNESS_SELECTED_MARKER = "architecture"
+FITNESS_UNSELECTED_SELECTOR = f"not {FITNESS_SELECTED_MARKER}"
 
 
 def is_excluded(path: Path | str) -> bool:
@@ -187,6 +199,16 @@ def evaluate(config: dict[str, dict[str, object]], unmarked: int, xfails: int) -
     return budgets
 
 
+def fitness_budget(unselected: int) -> Budget:
+    """The ci/fitness census. Zero-tolerance with no config entry on purpose.
+
+    A budget in ``fitness-exceptions.toml`` would be a dial for running fewer
+    architectural checks than are written, and there is no ratchet to walk
+    down: the fix for every count is one marker.
+    """
+    return Budget(name="fitness-unselected", actual=unselected, allowed=0, issue="#1935")
+
+
 def main() -> int:
     root = Path.cwd()
     config = tomllib.loads(Path("fitness-exceptions.toml").read_text()).get("test-markers", {})
@@ -194,16 +216,22 @@ def main() -> int:
     total = collect_census()
     unmarked = collect_census("-m", UNMARKED_SELECTOR)
     xfails = count_xfail_markers(root)
+    fitness_unselected = collect_census(FITNESS_DIR, "-m", FITNESS_UNSELECTED_SELECTOR)
 
-    budgets = evaluate(config, unmarked, xfails)
+    budgets = [*evaluate(config, unmarked, xfails), fitness_budget(fitness_unselected)]
     for budget in budgets:
         print(budget.render())
     print(f"  census: {total} tests collected, {unmarked} selected by no CI job")
+    print(
+        f"  census: {fitness_unselected} tests under {FITNESS_DIR} not marked"
+        f" {FITNESS_SELECTED_MARKER}, so the fitness job skips them"
+    )
 
     if any(b.exceeded for b in budgets):
         print(
             "\nA test no job runs is not coverage. Mark it, or lower the budget"
-            " in fitness-exceptions.toml only when the count went DOWN."
+            " in fitness-exceptions.toml only when the count went DOWN. A"
+            f" {FITNESS_DIR} test has no budget: mark it {FITNESS_SELECTED_MARKER}."
         )
         return 1
     return 0
