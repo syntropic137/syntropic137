@@ -3071,9 +3071,25 @@ class DiskSpaceHealth(BaseModel):
     )
     free_percent: float | None = Field(description="Percent free; null when unmeasurable.")
     free_bytes: int | None = Field(description="Bytes available; null when unmeasurable.")
-    degraded_below_percent: float = Field(description="SYN_DISK_DEGRADED_BELOW_PERCENT.")
-    refuse_admission_below_percent: float = Field(
-        description="SYN_DISK_REFUSE_ADMISSION_BELOW_PERCENT."
+    degraded_below_bytes: int = Field(
+        description="Degraded below this many bytes free: SYN_DISK_DEGRADED_BELOW_GIB, "
+        "or twice the admission floor when unset."
+    )
+    refuse_admission_below_bytes: int = Field(
+        description="New executions refused below this many bytes free: "
+        "SYN_DISK_REFUSE_ADMISSION_BELOW_GIB, or SYN_DISK_RUN_RESERVE_GIB x "
+        "SYN_EXECUTION_MAX_CONCURRENT when unset."
+    )
+    degraded_below_percent: float | None = Field(
+        default=None,
+        description="SYN_DISK_DEGRADED_BELOW_PERCENT; null when unset (GiB floor only).",
+    )
+    refuse_admission_below_percent: float | None = Field(
+        default=None,
+        description="SYN_DISK_REFUSE_ADMISSION_BELOW_PERCENT; null when unset (GiB floor only).",
+    )
+    detail: str = Field(
+        description="One line for an operator: free space, the floors and where they came from."
     )
 
 
