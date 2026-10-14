@@ -495,3 +495,52 @@ async def test_a_restart_in_the_same_container_retires_the_predecessor_not_its_w
 
     (fenced,) = await new.fence_expired("box.bbb")
     assert (fenced.executor_id, fenced.reconciler) == ("box.aaa", "box.bbb")
+
+
+async def _machine(pools: list[asyncpg.Pool], box: str) -> tuple[int, dict[str, tuple[int, int]]]:
+    async with pools[0].acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT executor_id,capacity,in_use FROM execution_budget WHERE container_id=$1",
+            box,
+        )
+    budgets = {row["executor_id"]: (row["capacity"], row["in_use"]) for row in rows}
+    return sum(capacity for capacity, _ in budgets.values()), budgets
+
+
+async def test_a_restart_transfers_the_machine_budget_and_never_doubles_it(
+    pools: list[asyncpg.Pool],
+) -> None:
+    """D3 Restart (R1): a capacity-one machine whose old process still holds an
+    unexpired run cannot claim a second one after a restart. The slot moves to
+    the successor when the old run is closed, exactly once."""
+    old = PostgresExecutionRunQueue(pools[0], lease_ttl=timedelta(milliseconds=300))
+    new = PostgresExecutionRunQueue(pools[1], lease_ttl=timedelta(milliseconds=300))
+    box = "container-r1"
+    await old.register(ExecutorHost(host_id="r1.aaa", container_id=box, generation="g", epoch=1), 1)
+    await old.heartbeat("r1.aaa")
+    await _admit(old, "exec-held", "exec-waiting")
+    held = await old.claim("r1.aaa")
+    assert held is not None
+
+    await new.register(ExecutorHost(host_id="r1.bbb", container_id=box, generation="g", epoch=1), 1)
+    await new.heartbeat("r1.bbb")
+    assert await _machine(pools, box) == (1, {"r1.aaa": (1, 1), "r1.bbb": (0, 0)})
+    assert await new.claim("r1.bbb") is None
+
+    await asyncio.sleep(0.5)
+    (fenced,) = await new.fence_expired("r1.bbb")
+    await new.mark_reaped(fenced)
+    await new.close_interrupted(fenced)
+    assert await _machine(pools, box) == (1, {"r1.aaa": (0, 0), "r1.bbb": (1, 0)})
+    # Neither a duplicate close nor the stale owner's terminal commit moves a slot.
+    with pytest.raises(RunLeaseLost):
+        await new.close_interrupted(fenced)
+    with pytest.raises(RunLeaseLost):
+        await old.close(held)
+    assert await _machine(pools, box) == (1, {"r1.aaa": (0, 0), "r1.bbb": (1, 0)})
+
+    claimed = await new.claim("r1.bbb")
+    assert claimed is not None and claimed.execution_id == "exec-waiting"
+    assert await new.claim("r1.bbb") is None
+    await new.close(claimed)
+    assert await _machine(pools, box) == (1, {"r1.aaa": (0, 0), "r1.bbb": (1, 0)})

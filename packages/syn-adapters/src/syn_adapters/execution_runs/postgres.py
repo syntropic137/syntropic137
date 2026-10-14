@@ -65,12 +65,7 @@ class PostgresExecutionRunQueue:
                 host.generation,
                 host.epoch,
             )
-            await conn.execute(
-                """INSERT INTO execution_budget (executor_id,capacity)
-                VALUES ($1,$2) ON CONFLICT (executor_id) DO NOTHING""",
-                host.host_id,
-                capacity,
-            )
+            await self._register_budget(conn, host, capacity)
 
     async def deregister(self, host_id: str) -> None:
         async with self._pool.acquire() as conn:
@@ -290,6 +285,41 @@ class PostgresExecutionRunQueue:
         return RunCounts.model_validate_json(raw or "{}")
 
     @staticmethod
+    async def _register_budget(conn: Connection, host: ExecutorHost, capacity: int) -> None:
+        """D3 Restart: the machine's budget is not doubled by a new process in it.
+
+        A predecessor in the same container keeps exactly the slots its runs
+        still hold; the rest move to the successor now, and each later release
+        moves one more. The machine's summed capacity never changes.
+        """
+        held = await conn.fetch(
+            """SELECT executor_id FROM execution_budget
+            WHERE container_id=$1 AND executor_id<>$2 FOR UPDATE""",
+            host.container_id,
+            host.host_id,
+        )
+        free = await conn.fetchval(
+            """SELECT COALESCE(SUM(capacity-in_use),0)::text FROM execution_budget
+            WHERE container_id=$1 AND executor_id<>$2""",
+            host.container_id,
+            host.host_id,
+        )
+        inserted = await conn.fetchval(
+            """INSERT INTO execution_budget (executor_id,container_id,capacity)
+            VALUES ($1,$2,$3) ON CONFLICT (executor_id) DO NOTHING RETURNING executor_id""",
+            host.host_id,
+            host.container_id,
+            int(free or 0) if held else capacity,
+        )
+        if inserted is not None and held:
+            await conn.execute(
+                """UPDATE execution_budget SET capacity=in_use,successor_id=$2
+                WHERE container_id=$1 AND executor_id<>$2""",
+                host.container_id,
+                host.host_id,
+            )
+
+    @staticmethod
     async def _promote(conn: Connection, execution_id: str) -> bool:
         """``opening``/``abandoned`` -> ``admitted``; whichever writes second does nothing (D2)."""
         promoted = await conn.fetchval(
@@ -330,8 +360,15 @@ class PostgresExecutionRunQueue:
             )
             if charged is None:
                 raise RunLeaseLost(f"{execution_id} is no longer {held} under token {token}")
+            # A retired predecessor's slot goes back to the machine, which is now
+            # its successor's: capacity moves with the release, never sooner (D3).
             await conn.execute(
-                "UPDATE execution_budget SET in_use=in_use-1 WHERE executor_id=$1", charged
+                """WITH b AS (UPDATE execution_budget SET in_use=in_use-1,
+                    capacity=capacity-(successor_id IS NOT NULL)::int
+                    WHERE executor_id=$1 RETURNING successor_id)
+                UPDATE execution_budget s SET capacity=s.capacity+1
+                FROM b WHERE s.executor_id=b.successor_id""",
+                charged,
             )
             if retry_seconds > 0:
                 # now() is the transaction's start, so the lock waits above would

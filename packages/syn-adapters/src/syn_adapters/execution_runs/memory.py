@@ -39,6 +39,7 @@ class _Host(BaseModel):
     heartbeat_at: datetime = _NEVER
     draining: bool = False
     registered: bool = True
+    successor_id: str | None = None
 
 
 class _Run(BaseModel):
@@ -78,9 +79,19 @@ class InMemoryExecutionRunQueue(InMemoryAdapter):
     async def register(self, host: ExecutorHost, capacity: int) -> None:
         if capacity < 0:
             raise ValueError("executor capacity must be nonnegative")
-        for other_id, other in list(self._hosts.items()):
-            if other.host.container_id == host.container_id and other_id != host.host_id:
-                self._hosts[other_id] = other.model_copy(update={"registered": False})
+        held = {
+            other_id: other
+            for other_id, other in self._hosts.items()
+            if other.host.container_id == host.container_id and other_id != host.host_id
+        }
+        if host.host_id not in self._hosts and held:
+            capacity = sum(other.capacity - other.in_use for other in held.values())
+            for other_id, other in held.items():
+                self._hosts[other_id] = other.model_copy(
+                    update={"capacity": other.in_use, "successor_id": host.host_id}
+                )
+        for other_id in held:
+            self._hosts[other_id] = self._hosts[other_id].model_copy(update={"registered": False})
         self._hosts.setdefault(host.host_id, _Host(host=host, capacity=capacity))
 
     async def deregister(self, host_id: str) -> None:
@@ -288,5 +299,13 @@ class InMemoryExecutionRunQueue(InMemoryAdapter):
         if row is None or row.executor_id is None:
             raise RunLeaseLost(f"{execution_id} is no longer {held} under token {token}")
         charged = self._hosts[row.executor_id]
-        self._hosts[row.executor_id] = charged.model_copy(update={"in_use": charged.in_use - 1})
+        moved = int(charged.successor_id is not None)
+        self._hosts[row.executor_id] = charged.model_copy(
+            update={"in_use": charged.in_use - 1, "capacity": charged.capacity - moved}
+        )
+        if charged.successor_id is not None:
+            heir = self._hosts[charged.successor_id]
+            self._hosts[charged.successor_id] = heir.model_copy(
+                update={"capacity": heir.capacity + 1}
+            )
         return self._put(row, state=to, executor_id=None, leased_until=_NEVER)
