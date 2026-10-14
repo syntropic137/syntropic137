@@ -30,6 +30,7 @@ PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "packages" / "syn-shared" / "src"))
 
 from syn_shared.settings.config import Settings  # noqa: E402
+from syn_shared.settings.dependency_seed import DependencySeedSettings  # noqa: E402
 from syn_shared.settings.dev_tooling import DevToolingSettings  # noqa: E402
 from syn_shared.settings.disk import DiskSettings  # noqa: E402
 from syn_shared.settings.execution import ExecutionSettings, ExecutorPoolSettings  # noqa: E402
@@ -46,7 +47,6 @@ from syn_shared.settings.storage import StorageSettings  # noqa: E402
 from syn_shared.settings.workspace import (  # noqa: E402
     ContainerLoggingSettings,
     GitIdentitySettings,
-    WorkspaceSecuritySettings,
     WorkspaceSettings,
 )
 
@@ -462,16 +462,6 @@ def generate_env_example() -> str:
         )
     )
 
-    # Add Workspace Security Settings (SYN_SECURITY_* prefix)
-    lines.extend(
-        generate_settings_section(
-            WorkspaceSecuritySettings,
-            "WORKSPACE SECURITY POLICIES",
-            prefix="SYN_SECURITY_",
-            description="Defaults are maximally restrictive for compromised agent protection.",
-        )
-    )
-
     # Add Git Identity Settings (SYN_GIT_* prefix)
     lines.extend(
         generate_settings_section(
@@ -516,6 +506,15 @@ def generate_env_example() -> str:
             "DISK SPACE (workspace volume)",
             prefix="SYN_DISK_",
             description="Free-space thresholds: /health degrades below the first, admission refuses below the second (#1560).",
+        )
+    )
+
+    lines.extend(
+        generate_settings_section(
+            DependencySeedSettings,
+            "DEPENDENCY SEEDS (warm uv/pnpm caches)",
+            prefix="SYN_DEPENDENCY_SEED_",
+            description="Platform-warmed, read-only seeds copied into each workspace's cache at provision (#1714).",
         )
     )
 

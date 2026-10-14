@@ -13,8 +13,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 import pytest
 
 from syn_api.services.disk_pager import DiskPage, DiskPager, webhook_sender
-from syn_domain.contexts._shared.disk_space import DiskSpaceGuard, DiskUsage
-from syn_shared.settings.disk import DiskSettings
+from syn_domain.contexts._shared.disk_space import DiskSpaceGuard, DiskThresholds, DiskUsage
 
 pytestmark = pytest.mark.unit
 
@@ -30,11 +29,15 @@ class _Disk:
 
 
 def _pager(disk: _Disk, sent: list[DiskPage], *, fail: list[bool] | None = None) -> DiskPager:
-    settings = DiskSettings()
     guard = DiskSpaceGuard(
         disk,
-        degraded_below_percent=settings.degraded_below_percent,
-        refuse_admission_below_percent=settings.refuse_admission_below_percent,
+        DiskThresholds(
+            refuse_admission_below_bytes=0,
+            degraded_below_bytes=0,
+            refuse_basis="test",
+            refuse_admission_below_percent=5.0,
+            degraded_below_percent=15.0,
+        ),
     )
 
     async def send(page: DiskPage) -> None:
