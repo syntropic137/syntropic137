@@ -361,6 +361,7 @@ Legacy: some tests define config inline. Being consolidated into
 | test_compose_consistency | Docker Compose valid, build args match Dockerfiles | 8 |
 | test_phase_definition_roundtrip | PhaseDefinition serialization is lossless | 8 |
 | test_proxy_hostname_agreement | Envoy/injector/proxy URL configs agree | 8 |
+| test_workspace_settings_consumed | Every SYN_WORKSPACE_* / SYN_SECURITY_* setting has a production consumer (#1805) | 8 |
 
 ## Writing New Fitness Tests
 
