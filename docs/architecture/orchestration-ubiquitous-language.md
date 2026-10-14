@@ -700,6 +700,18 @@ no charge and changes no `in_use`. A claimed run is never redelivered.
 An Executor claims only rows whose Event Epoch it can read, and never claims an
 expired Lease to run it.
 
+## Executor Tier
+
+The integer on an Executor's `execution_budget` row that orders placement.
+Local Docker Executors are tier 0; further hosts and remote backends take
+higher tiers. An Executor may Claim only when no live, non-draining Executor
+with a lower tier has a free slot, so work fills tier 0 first, overflows by
+tier, and stays Queued when every tier is full. Specified in ADR-072 D3;
+implementation is #1917.
+
+**Unclear:** whether tier stays operator-set or is derived from backend and
+cost once more placement rules exist (#1917).
+
 ## Lease
 
 How long a Claim stays valid without renewal: `leased_until`, plus a
@@ -1109,6 +1121,11 @@ The workspace image that carries a Scripted Agent is still called the stub
 image in agentic-workspace; that names the image, not these models.
 
 ## Words we do not use
+
+- **Router** (for placement). Placement is the Claim predicate (see Executor
+  Tier), not a component that picks a backend at Admission. A router that
+  counts capacity outside the Claim transaction races, and was rejected in
+  ADR-072 D3.
 
 - **Suite** (as a record or an aggregate). A suite is a tag on Evals. There is
   no Suite stream, and a second aggregate for it was rejected (evals v2).
