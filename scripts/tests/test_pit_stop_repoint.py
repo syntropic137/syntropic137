@@ -165,13 +165,13 @@ class TestRefusesToGuess:
         [
             (
                 "services:\n  api:\n    image: ghcr.io/syntropic137/syn-gateway:v1\n",
-                "exactly one syn-api",
+                "expected a syn-api image line",
             ),
             (
                 "services:\n  a:\n    image: ghcr.io/syntropic137/syn-api:v1\n"
                 "  b:\n    image: ghcr.io/syntropic137/syn-api:v2\n"
                 "  g:\n    image: ghcr.io/syntropic137/syn-gateway:v1\n",
-                "exactly one syn-api",
+                "syn-api image lines disagree",
             ),
             (
                 "services:\n  a:\n    image: ghcr.io/syntropic137/syn-api:${SYN_VERSION:-latest}\n"
@@ -202,3 +202,45 @@ class TestRefusesToGuess:
         assert proc.returncode == 1
         assert reason in proc.stderr
         assert not staged.exists()
+
+
+class TestTheExecutorSharesTheApiPin:
+    """A compose with the executor (#1310 1.6) names syn-api twice: one pin."""
+
+    _SPLIT = (
+        "services:\n"
+        "  api:\n    image: ghcr.io/syntropic137/syn-api@sha256:" + "a" * 64 + "\n"
+        "  executor:\n    image: ghcr.io/syntropic137/syn-api@sha256:" + "a" * 64 + "\n"
+        "  gateway:\n    image: ghcr.io/syntropic137/syn-gateway:v1\n"
+    )
+
+    def test_both_syn_api_lines_move_together_and_pass_the_swap_precheck(
+        self, tmp_path: Path
+    ) -> None:
+        deployed = tmp_path / "deployed.yaml"
+        deployed.write_text(self._SPLIT)
+        staged = tmp_path / "compose.yaml"
+
+        proc = subprocess.run(
+            [sys.executable, str(_HELPER), _TAG, str(deployed), str(staged)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert proc.returncode == 0, proc.stderr
+        assert _image_lines(staged) == [
+            f"image: ghcr.io/syntropic137/syn-api:{_TAG}",
+            f"image: ghcr.io/syntropic137/syn-api:{_TAG}",
+            f"image: ghcr.io/syntropic137/syn-gateway:{_TAG}",
+        ]
+        assert _precheck_count(staged) == 2
+
+    def test_a_half_repointed_split_is_not_on_the_tag(self, tmp_path: Path) -> None:
+        compose = tmp_path / "compose.yaml"
+        compose.write_text(
+            f"services:\n  api:\n    image: ghcr.io/syntropic137/syn-api:{_TAG}\n"
+            "  executor:\n    image: ghcr.io/syntropic137/syn-api:v1\n"
+            f"  gateway:\n    image: ghcr.io/syntropic137/syn-gateway:{_TAG}\n"
+        )
+        assert _precheck_count(compose) == 1

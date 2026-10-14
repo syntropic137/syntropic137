@@ -5,8 +5,8 @@ Called by scripts/pit_stop.sh at `stage`:
     python3 scripts/pit_stop_repoint.py <tag> <deployed-compose> <staged-compose> [--service gateway]
     python3 scripts/pit_stop_repoint.py --on-tag <tag> <compose> <service>
 
-The second form prints 1 when <service> (`api` or `gateway`) has exactly one
-image line and it names exactly the ref `ship` loaded, else 0. It is the count
+The second form prints 1 when every <service> (`api` or `gateway`) image line
+names exactly the ref `ship` loaded, and there is at least one, else 0. It is the count
 the stage and --swap-only prechecks trust, so it reads the image lines the same
 way the repoint writes them: a commented-out line, a longer tag that merely
 starts with <tag> (`beta.1` vs `beta.10`) or a suffixed one is not on the tag.
@@ -25,6 +25,11 @@ registry prefix (#1431). Each service is therefore read on its own, and its
 whole ref is replaced with the exact ref `ship` loaded, never edited in place:
 the images are only in the host's daemon, unpushed, so they have no digest and
 no other spelling resolves to them.
+
+ONE PIN, POSSIBLY SEVERAL LINES. The executor runs the syn-api image in another
+role (ADR-072 D1, #1310 1.6), so a compose with it names syn-api twice. Both
+lines must agree, and are repointed together: two spellings of one image would
+be two build identities, which the split exists to avoid.
 """
 
 from __future__ import annotations
@@ -93,9 +98,12 @@ def repoint(compose: str, tag: str, services: tuple[str, ...] = SERVICES) -> Rep
     }
     old: list[Pin] = []
     for service, found in lines.items():
-        if len(found) != 1:
-            raise RepointError(f"expected exactly one {service} image line, found {len(found)}")
-        pin = Pin(service, found[0]["ref"])
+        if not found:
+            raise RepointError(f"expected a {service} image line, found none")
+        refs = sorted({m["ref"] for m in found})
+        if len(refs) != 1:
+            raise RepointError(f"{service} image lines disagree ({', '.join(refs)}); one pin per image")
+        pin = Pin(service, refs[0])
         if "$" in pin.ref:
             raise RepointError(
                 f"{service} is pinned by a variable ({pin.ref}); this is not a release compose"
@@ -120,8 +128,8 @@ def on_tag(compose: str, tag: str, service: str) -> bool:
     resolves a tag-plus-digest reference by the digest alone, and the image
     `ship` loaded is unpushed, so no digest in a compose file is proven to be
     it. The repoint writes the bare ref, so a staged file never has one."""
-    found = [m["ref"] for m in _IMAGE_LINE.finditer(compose) if _image_name(m["ref"]) == service]
-    return found == [f"{REGISTRY}/{service}:{tag}"]
+    found = {m["ref"] for m in _IMAGE_LINE.finditer(compose) if _image_name(m["ref"]) == service}
+    return found == {f"{REGISTRY}/{service}:{tag}"}
 
 
 def main(argv: list[str]) -> int:
