@@ -11,8 +11,11 @@ pin that, reading the definitions as `POST /workflows` installs them:
 - everything but the identity and four prompts is v3's, field for field;
 - the precheck is ONE text, identical in every review phase that carries it;
 - every other line that differs from v3 is about the precheck;
-- the safety property holds: a handoff never reaches `gh pr ready`, and only a
-  REPAIRABLE item can make a review BLOCKED and so spend a round.
+- the safety property is stated: a handoff never reaches `gh pr ready`, and
+  only a REPAIRABLE item can make a review BLOCKED and so spend a round.
+
+These are prompt-structure checks. They pin what the prompts say; they cannot
+show an agent obeys them. That is what the A/B's mechanism check measures.
 
 The engine half (two bounded rounds, certified skips to `finalize_pr`) is
 covered by registering this id in test_implement_v3_repair_rounds.py.
@@ -65,6 +68,31 @@ def _section(text: str, heading: str) -> str:
     start = text.index(f"{heading}\n")
     end = text.find("\n## ", start + len(heading))
     return text[start : end if end >= 0 else len(text)]
+
+
+#: A `gh pr <verb>` command as Markdown writes it, wrapped across lines or not.
+_GH_PR = re.compile(r"`gh\s+pr\s+(\w+)")
+#: Words that, immediately before the command, make it a prohibition.
+_PROHIBITION = re.compile(r"\b(?:never|do not|don't)(?:\s+\w+)?\s*$", re.I)
+_SHIPPING_VERBS = frozenset({"ready", "merge", "close"})
+
+
+def _instructed_shipping_commands(text: str) -> list[str]:
+    """Every `gh pr ready|merge|close` in `text` that is not directly prohibited.
+
+    Whitespace is normalised first, so a command wrapped over a line break is
+    seen, and every occurrence is checked, so a valid prohibition earlier in
+    the section cannot hide an unsafe instruction later in it.
+    """
+    flat = " ".join(text.split())
+    unsafe: list[str] = []
+    for m in _GH_PR.finditer(flat):
+        if m.group(1) not in _SHIPPING_VERBS:
+            continue
+        clause = re.split(r"[.:;!?]", flat[: m.start()])[-1]
+        if not _PROHIBITION.search(clause):
+            unsafe.append(f"{clause.strip()} `gh pr {m.group(1)}")
+    return unsafe
 
 
 def _without_precheck(text: str) -> str:
@@ -145,9 +173,11 @@ class TestOnlyARepairableItemSpendsARound:
     def test_a_certified_run_with_an_open_handoff_is_never_marked_ready(self) -> None:
         finalize = _prompts(_V4)["finalize_pr"]
         handoff = _section(finalize, "## If CERTIFIED and a handoff is open")
-        verbs = set(re.findall(r"`gh pr (\w+)", handoff))
+        verbs = set(_GH_PR.findall(" ".join(handoff.split())))
         assert "comment" in verbs, "the handoffs must be posted where a person sees them"
-        assert not verbs & {"ready", "merge", "close"}, verbs
+        assert _instructed_shipping_commands(handoff) == []
+        # The explicit policy, not merely the absence of a command.
+        assert "Keep it a **draft**: never call `gh pr ready` here." in " ".join(handoff.split())
         # The plain CERTIFIED path, which does mark ready, must route here first.
         certified = " ".join(_section(finalize, "## If CERTIFIED").split())
         assert "Follow this section only when no handoff is open" in certified
@@ -166,3 +196,76 @@ class TestOnlyARepairableItemSpendsARound:
         assert "the final report's `Precheck:` line copied verbatim" in " ".join(
             _prompts(_V4)["finalize_pr"].split()
         )
+
+
+class TestTheDraftGuardSeesWhatItGuards:
+    """`_instructed_shipping_commands` against reversals of the real prohibition.
+
+    Each case edits the shipped handoff section, so a guard that only matched
+    the unwrapped form, or only the first command, goes red here.
+    """
+
+    _REAL = "Keep it a **draft**: never call `gh pr\nready` here."
+
+    @pytest.fixture
+    def handoff(self) -> str:
+        finalize = _prompts(_V4)["finalize_pr"]
+        section = _section(finalize, "## If CERTIFIED and a handoff is open")
+        assert self._REAL in section, "the wrapped prohibition these cases edit has moved"
+        return section
+
+    def test_the_shipped_prohibition_is_not_an_instruction(self, handoff: str) -> None:
+        assert _instructed_shipping_commands(handoff) == []
+
+    @pytest.mark.parametrize(
+        ("old", "new"),
+        [
+            pytest.param(
+                _REAL,
+                "Publish open handoffs: always call `gh pr\nready <n>` here.",
+                id="wrapped-reversal",
+            ),
+            pytest.param(
+                _REAL,
+                _REAL + " Then call `gh pr ready <n>`.",
+                id="later-instruction-after-a-valid-prohibition",
+            ),
+            pytest.param(
+                "1. Act on the handoffs you can, once each:\n",
+                "1. Act on the handoffs you can, once each:\n   - when all pass: `gh pr\n     ready <n>`;\n",
+                id="second-list-item",
+            ),
+        ],
+    )
+    def test_a_reversal_is_caught(self, handoff: str, old: str, new: str) -> None:
+        assert old in handoff
+        assert _instructed_shipping_commands(handoff.replace(old, new, 1)) != []
+
+
+class TestThePrecheckRulesVerificationAskedFor:
+    """The two transitions round 1 of verification found ambiguous (B1, B2)."""
+
+    @pytest.fixture
+    def precheck(self) -> str:
+        return " ".join(_section(_prompts(_V4)["verify"], _PRECHECK).split())
+
+    def test_a_file_missing_from_an_xdist_log_is_not_a_ci_gap(self, precheck: str) -> None:
+        assert "a file name missing from a CI log is not proof that CI omitted the test" in (
+            precheck
+        )
+        assert "it is not a `CI_GAP` and not a repair round" in precheck
+        assert "Only the static question can show a test is omitted" in precheck
+        # Service-dependent checks keep the strict per-file CI evidence.
+        assert "still needs its per-file CI line on this SHA" in precheck
+
+    def test_a_repeated_external_failure_stays_a_handoff_with_no_second_rerun(
+        self, precheck: str
+    ) -> None:
+        assert "one rerun per failing step, ever" in precheck
+        assert "still `FLAKE/INFRA`, status `base defect: no more reruns`" in precheck
+        assert "never `REPAIRABLE` and never a repair round" in precheck
+        assert "nobody requests a second rerun" in precheck
+        # The contrary case: the PR's own code under an unchanged test.
+        assert "exercises code this PR changed), it is `REPAIRABLE`" in precheck
+        finalize = " ".join(_prompts(_V4)["finalize_pr"].split())
+        assert "`base defect: no more reruns` gets no rerun at all" in finalize
