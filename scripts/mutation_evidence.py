@@ -119,12 +119,19 @@ _DIR_RE: Final = re.compile(r"^[A-Za-z0-9_.][A-Za-z0-9_./-]*$")
 #: Refused: test modules, conftest, the mutations dir, workflow and CI config,
 #: pytest configuration (it decides what the named tests even are) and
 #: lockfiles.
+#: Any `*.lock` (uv, poetry, Cargo, yarn, Pipfile, bun, Gemfile, composer) plus
+#: the lockfiles that do not use that suffix.
 _LOCKFILES: Final = frozenset(
-    {"uv.lock", "poetry.lock", "Cargo.lock", "pnpm-lock.yaml", "package-lock.json", "yarn.lock"}
+    {"pnpm-lock.yaml", "package-lock.json", "npm-shrinkwrap.json", "bun.lockb", "go.sum"}
 )
+#: Every file pytest reads configuration from, at any depth.
 _TEST_CONFIG: Final = frozenset(
-    {"conftest.py", "pyproject.toml", "setup.cfg", "pytest.ini", "tox.ini"}
-)
+    {
+        "conftest.py", "pyproject.toml", "setup.cfg", "tox.ini",
+        "pytest.ini", ".pytest.ini", "pytest.toml", ".pytest.toml",
+    }
+)  # fmt: skip
+_TEST_DIR_NAMES: Final = frozenset({"tests", "test"})
 _FORBIDDEN_PREFIXES: Final = (".github/", "ci/")
 _SKIP_WALK: Final = frozenset({".git", ".venv", "node_modules"})
 
@@ -303,10 +310,14 @@ def forbidden_reason(path: str, mutations_dir: PurePosixPath) -> str | None:
         return "the mutations dir itself"
     if any(path.startswith(prefix) for prefix in _FORBIDDEN_PREFIXES):
         return "workflow or CI config"
-    if name in _LOCKFILES:
+    if name in _LOCKFILES or name.endswith(".lock"):
         return "a lockfile"
     if name in _TEST_CONFIG:
         return "conftest or pytest configuration"
+    if name == "__init__.py" and any(p in _TEST_DIR_NAMES for p in pure.parts[:-1]):
+        # Test package scaffolding, not harness: a raise here is a collection
+        # error, which would read as a kill without touching any behaviour.
+        return "a test package __init__"
     if (name.startswith("test_") and name.endswith(".py")) or name.endswith("_test.py"):
         return "a test module"
     if ".test." in name or ".spec." in name:

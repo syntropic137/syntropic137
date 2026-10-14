@@ -43,8 +43,10 @@ reviewer or a verify phase asks "does this test kill the bug?".
      source, including harness and adapter code that lives under `tests/`
      (a broker stand-in is production for the test). It may not touch a named
      test file, a test module (`test_*.py`, `*_test.py`, `*.test.*`,
-     `*.spec.*`), conftest, pytest config (pyproject, pytest.ini, tox.ini,
-     setup.cfg), a lockfile, `.github/` or `ci/`, `.mutations/`, a symlinked
+     `*.spec.*`), a test package `__init__.py`, conftest, any pytest config
+     (pyproject, pytest.ini, pytest.toml and dot-variants, tox.ini,
+     setup.cfg), a lockfile (`*.lock`, pnpm/npm/bun locks, go.sum), `.github/`
+     or `ci/`, `.mutations/`, a symlinked
      or git-ignored path, or paths it did not declare; renames and copies are
      refused.
    - `ERROR`: pytest exited without a failure on record (interrupt, timeout,
