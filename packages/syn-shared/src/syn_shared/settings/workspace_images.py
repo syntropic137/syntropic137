@@ -757,4 +757,5 @@ PREVIOUS_DEFAULT_WORKSPACE_IMAGES: Final[tuple[str, ...]] = (
     "ghcr.io/agentparadise/agentic-workspace-toolchain@sha256:2f41b47c35db1707458637e6bc19325e12a3b8daf0c8cda386c25cc772a8c15c",  # 6fa4f281
     "ghcr.io/agentparadise/agentic-workspace-toolchain@sha256:41d85bdb8d623b6005898f0f1595dc0ee3ff48bc02257eedeabcaee060e3ba5d",  # a4665941
     "ghcr.io/agentparadise/agentic-workspace-toolchain@sha256:7eb278fda8ef8f574ab340b3177a169939eac8c92f6eb034b73178efae477c7a",  # 29d7dec3
+    "ghcr.io/agentparadise/agentic-workspace-toolchain@sha256:4a76c184a8d36b8663a0f0191842410304ea1e10b0e719516817949ae8c862f8",  # 3f917632
 )
