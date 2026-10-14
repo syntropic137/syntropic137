@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 import struct
+from contextlib import asynccontextmanager
+from typing import TYPE_CHECKING
 
 import asyncpg
 
@@ -19,6 +22,9 @@ from syn_domain.contexts.agent_sessions import (
     turn_usage_columns,
 )
 from syn_shared.events import GIT_COMMIT, SESSION_SUMMARY, TOKEN_USAGE
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 logger = logging.getLogger(__name__)
 
@@ -211,6 +217,18 @@ ROLLUP_TRIGGER_LIVE_SQL = trigger_live_sql("agent_events_day_rollup")
 ROLLUP_SCHEMA_LOCK_KEY: int = struct.unpack(
     ">q", hashlib.blake2b(b"agent_event_day_rollup:schema", digest_size=8).digest()
 )[0]
+
+# Session-level key that spans the day rollup transaction AND the concurrent
+# execution index build after it (#1906). See _day_rollup_startup_lock.
+ROLLUP_STARTUP_LOCK_KEY: int = struct.unpack(
+    ">q", hashlib.blake2b(b"agent_event_day_rollup:startup", digest_size=8).digest()
+)[0]
+
+ROLLUP_STARTUP_TRY_LOCK_SQL = "SELECT pg_try_advisory_lock($1)"
+ROLLUP_STARTUP_UNLOCK_SQL = "SELECT pg_advisory_unlock($1)"
+
+# How often a replica that lost the startup lock asks again. Startup only.
+_STARTUP_LOCK_RETRY_SECONDS = 0.1
 
 
 # TAKE agent_events FIRST. Re-attaching a rollup trigger means DROP TRIGGER
@@ -483,6 +501,33 @@ _ROLLUP_TRIGGERS: tuple[tuple[str, str], ...] = (
 )
 
 
+@asynccontextmanager
+async def _day_rollup_startup_lock(conn: asyncpg.Connection) -> AsyncIterator[None]:
+    """Serialise the day rollup step across replicas, CONCURRENTLY build included (#1906).
+
+    _create_day_rollup's advisory lock is transaction-scoped, so it is released
+    before _create_rollup_execution_index runs CREATE INDEX CONCURRENTLY. A
+    second replica could then enter its rollup transaction and ask for a
+    ShareLock on agent_event_day_rollup (CREATE INDEX IF NOT EXISTS locks
+    before it checks), which conflicts with the concurrent build, while the
+    build waits for that transaction's snapshot to end: a deadlock.
+
+    Holding one session-level lock across both steps closes it. It is taken by
+    retrying pg_try_advisory_lock rather than by blocking in pg_advisory_lock,
+    because a backend blocked inside a statement holds a snapshot, and
+    CREATE INDEX CONCURRENTLY waits for every older snapshot: the waiter would
+    deadlock with the holder's build. Between attempts the waiter holds none.
+    """
+    while not await conn.fetchval(ROLLUP_STARTUP_TRY_LOCK_SQL, ROLLUP_STARTUP_LOCK_KEY):
+        await asyncio.sleep(_STARTUP_LOCK_RETRY_SECONDS)
+    try:
+        yield
+    finally:
+        # Session locks survive the transaction; a pooled connection would
+        # carry this one back to the pool without the unlock.
+        await conn.execute(ROLLUP_STARTUP_UNLOCK_SQL, ROLLUP_STARTUP_LOCK_KEY)
+
+
 class SchemaValidationError(Exception):
     """Raised when database schema doesn't match expected schema."""
 
@@ -574,8 +619,9 @@ class EventStoreSchema:
             await self._create_table(conn)
             await self._create_indexes(conn)
             await self._configure_compression(conn)
-            await self._create_day_rollup(conn)
-            await self._create_rollup_execution_index(conn)
+            async with _day_rollup_startup_lock(conn):
+                await self._create_day_rollup(conn)
+                await self._create_rollup_execution_index(conn)
             await self._create_usage_rollup(conn)
 
         await self.validate(conn)

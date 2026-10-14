@@ -35,6 +35,8 @@ import pytest
 from syn_adapters.events.schema import (
     ROLLUP_BACKFILL_SQL,
     ROLLUP_EXECUTION_INDEX_VALID_SQL,
+    ROLLUP_STARTUP_TRY_LOCK_SQL,
+    ROLLUP_STARTUP_UNLOCK_SQL,
     USAGE_ROLLUP_BACKFILL_SESSIONS_SQL,
     USAGE_ROLLUP_IS_MARKED_COMPLETE_SQL,
     USAGE_ROLLUP_MARK_COMPLETE_SQL,
@@ -190,10 +192,18 @@ class CatalogueConnection:
         #: inside one, so this fake rejects it too rather than letting a build
         #: that would fail in production pass here.
         self.transaction_depth = 0
+        #: Session-level advisory locks this connection holds. Answered from
+        #: the lock and unlock statements executed, so a startup that never
+        #: releases one is visible after it returns (#1906).
+        self.session_locks: set[int] = set()
 
-    async def execute(self, sql: str, *_args: object) -> None:
+    async def execute(self, sql: str, *args: object) -> None:
         self.executed.append(sql)
         self.calls.append(sql)
+        if sql == ROLLUP_STARTUP_UNLOCK_SQL:
+            key = args[0]
+            assert isinstance(key, int)
+            self.session_locks.discard(key)
         if sql == USAGE_ROLLUP_MARK_COMPLETE_SQL:
             self._usage_rollup_marked = True
         elif sql == USAGE_ROLLUP_MARK_INCOMPLETE_SQL:
@@ -221,8 +231,14 @@ class CatalogueConnection:
         if dropped:
             self._indexes.pop(dropped.group(1), None)
 
-    async def fetchval(self, sql: str, *_args: object) -> bool | None:
+    async def fetchval(self, sql: str, *args: object) -> bool | None:
         self.calls.append(sql)
+        if sql == ROLLUP_STARTUP_TRY_LOCK_SQL:
+            # One connection, so nobody else can hold it: always granted.
+            key = args[0]
+            assert isinstance(key, int)
+            self.session_locks.add(key)
+            return True
         if sql == ROLLUP_EXECUTION_INDEX_VALID_SQL:
             # `indisvalid`, or NULL for no such index.
             return self._indexes.get(EXECUTION_INDEX)
