@@ -1,0 +1,107 @@
+name: 'Python integration environment'
+description: >-
+  uv, Python 3.12, the workspace dependencies, and the event store pinned by
+  the lib/event-sourcing-platform gitlink, started against the job's
+  timescaledb service. Shared by ci.yml's Python Integration Tests job and
+  mutation-evidence.yml so the two cannot drift. A composite action cannot
+  declare services, so each caller declares the timescaledb service itself.
+inputs:
+  working-directory:
+    description: 'The checkout whose dependencies and ESP gitlink are used.'
+    required: false
+    default: '.'
+  timescaledb-network:
+    description: 'job.services.timescaledb.network'
+    required: true
+  timescaledb-container:
+    description: 'job.services.timescaledb.id'
+    required: true
+  uv-sync-args:
+    description: 'Arguments to `uv sync`.'
+    required: false
+    default: '--all-extras'
+  enable-cache:
+    description: >-
+      setup-uv cache. Off for any job that runs untrusted code: a cache saved
+      from that job would be restored by trusted jobs on the same branch.
+    required: false
+    default: 'true'
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup uv
+      uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+      with:
+        enable-cache: ${{ inputs.enable-cache }}
+        cache-dependency-glob: ${{ inputs.working-directory }}/uv.lock
+
+    - name: Set up Python
+      uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+      with:
+        python-version: "3.12"
+
+    - name: Install dependencies
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        UV_SYNC_ARGS: ${{ inputs.uv-sync-args }}
+      # Word-splitting the args is intended: they are flags from the caller's
+      # workflow file, never user input.
+      run: uv sync $UV_SYNC_ARGS
+
+    # The event store image is the one the release pins: event-store:v<ESP
+    # version> at the lib/event-sourcing-platform gitlink, resolved to its
+    # index digest by the same script release-containers.yaml runs (#1515).
+    # No hardcoded digest to drift when the gitlink moves. Started here, not
+    # as a service, so it starts after timescaledb accepts TCP: it runs its
+    # migrations at startup and exits if the database is not up yet. The
+    # service health check is not enough: pg_isready over the socket passes
+    # while the image's init server is up, before the real one listens on TCP.
+    #
+    # The resolver is this action's own copy (action_path), run in the
+    # working directory so it reads THAT checkout's gitlink. A caller that
+    # checks out untrusted code elsewhere still runs the trusted script.
+    - name: Start event store
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        EVENTSTORE_NETWORK: ${{ inputs.timescaledb-network }}
+        TIMESCALEDB_CONTAINER: ${{ inputs.timescaledb-container }}
+        RESOLVER: ${{ github.action_path }}/../../../scripts/resolve_event_store_digest.py
+      run: |
+        pg_ready=false
+        for _ in $(seq 1 30); do
+          if docker exec "$TIMESCALEDB_CONTAINER" pg_isready -h localhost -U syn -d syn; then
+            pg_ready=true
+            break
+          fi
+          sleep 2
+        done
+        if [ "$pg_ready" != true ]; then
+          echo "::error::timescaledb never accepted TCP connections"
+          docker logs "$TIMESCALEDB_CONTAINER"
+          exit 1
+        fi
+        uv run --no-project python "$RESOLVER" --out "$RUNNER_TEMP/event-store-digest"
+        digest="$(cat "$RUNNER_TEMP/event-store-digest")"
+        docker run -d --name eventstore \
+          --network "$EVENTSTORE_NETWORK" \
+          -p 55051:50051 \
+          -e BACKEND=postgres \
+          -e DATABASE_URL=postgres://syn:syn_dev_password@timescaledb:5432/syn \
+          -e BIND_ADDR=0.0.0.0:50051 \
+          -e RUST_LOG=info \
+          --health-cmd "bash -c '</dev/tcp/localhost/50051' || exit 1" \
+          --health-interval 2s \
+          --health-timeout 5s \
+          --health-retries 30 \
+          "ghcr.io/syntropic137/event-store@${digest}"
+        for _ in $(seq 1 60); do
+          status="$(docker inspect -f '{{.State.Health.Status}}' eventstore 2>/dev/null || echo missing)"
+          [ "$status" = healthy ] && exit 0
+          [ "$(docker inspect -f '{{.State.Running}}' eventstore)" = true ] || break
+          sleep 2
+        done
+        echo "::error::event store did not become healthy (status: ${status})"
+        docker logs eventstore
+        exit 1
