@@ -100,7 +100,7 @@ hand-rolled list missed gates CI then failed on.
 
 | Workflow | Fires on | What it proves |
 |---|---|---|
-| `ci.yml` | push to `main`/`feat/*`; PRs to `main`/`release`; weekly | Python QA (format, lint, pyright, domain events, vsa, test debt, OpenAPI drift), architectural fitness, unit + integration tests, dashboard, docs site, CLI, submodule check, default workspace image, OSV, pip-audit, dependency review; `ci-success` aggregates |
+| `ci.yml` | push to `main` (one run per commit, never cancelled); PRs to `main`/`release` (superseded PR runs cancel); weekly | Python QA (format, lint, pyright, domain events, vsa, test debt, OpenAPI drift), architectural fitness, unit + integration tests, dashboard, docs site, CLI, submodule check, default workspace image, OSV, pip-audit, dependency review; `ci-success` aggregates |
 | `docs-lint.yml` | every PR; push to `main`/`release` | docs content lint |
 | `syn-ui.yml`, `syn-landing.yml` | PRs and `main` pushes touching Skyline / landing paths | UI build, tests, size budget, gateway serving |
 | `smoke-test.yml` | push to `main`/`release` only (PR trigger disabled) | full selfhost compose stack comes up healthy; a red smoke on `main` is found after merge |
