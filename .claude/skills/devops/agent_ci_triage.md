@@ -27,6 +27,7 @@ release pipeline.
    - Fitness ratchet: a value went up; fix the code, never raise the budget.
    - Reusable-workflow permissions: a callee cannot widen the caller's grants; declare the union on the caller.
    - Base-image rot (2026-05-01 envoy retro): rebuild locally to confirm.
+   - Green in CI, red locally: CI may never collect that test. Check its marker against the job's selection (`-m unit` over testpaths; `ci/fitness -m architecture`) before calling it flaky (#1935).
 6. A red `main` blocks every PR. Fix it first, via `agent_hotfix.md` if trivial.
 7. Search `docs/retrospectives/` for the symptom. Report: workflow, job, step, excerpt, flake or defect, prior occurrences, fix.
 
