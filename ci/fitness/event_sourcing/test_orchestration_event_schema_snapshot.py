@@ -18,6 +18,7 @@ from ci.fitness.event_sourcing._orchestration_event_schemas import (
     load_snapshot,
     snapshot_path,
 )
+
 from syn_domain.contexts.orchestration._shared.event_epoch import ORCHESTRATION_EVENT_EPOCH
 
 _FIX = (

@@ -28,10 +28,11 @@ from typing import TYPE_CHECKING
 
 from ci.fitness._event_discovery import discover_event_classes
 from ci.fitness.conftest import repo_root
-from pydantic import BaseModel, JsonValue
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from pydantic import BaseModel, JsonValue
 
 #: JSON Schema keywords that annotate without constraining what a reader accepts.
 _ANNOTATIONS = frozenset({"title", "description", "examples"})

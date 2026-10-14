@@ -1008,6 +1008,14 @@ check-untyped-dicts:
 check-test-markers:
     @uv run python scripts/check_test_markers.py
 
+# Release gate (ADR-072 D9, #1310 V9): build the previous release's syn-domain
+# from its tag into an isolated venv and check it reads what this tree writes,
+# and this tree reads what it writes back. A payload the release cannot read
+# passes only if ORCHESTRATION_EVENT_EPOCH was bumped above the release's.
+# Fixtures: scripts/event_compat/fixtures.json. Exit 2 = the check could not run.
+check-event-compat *ARGS:
+    uv run python scripts/check_event_compat.py {{ARGS}}
+
 # Run type checker (strict mode)
 typecheck:
     uv run pyright

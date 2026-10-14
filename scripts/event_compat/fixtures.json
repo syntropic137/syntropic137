@@ -1,0 +1,112 @@
+[
+  {
+    "name": "tagged_start",
+    "why": "Negative fixture (#1310 V9): a start with non-empty tags. Releases before v1.0.0 forbid the field.",
+    "event": "WorkflowExecutionStartedEvent",
+    "payload": {
+      "workflow_id": "wf-sdlc-implement",
+      "execution_id": "exec-7f3c2a10",
+      "workflow_name": "SDLC implement",
+      "started_at": "2026-10-14T09:12:03.418000Z",
+      "total_phases": 3,
+      "inputs": {"task": "Add the event epoch guard", "repository": "syntropic137/syntropic137"},
+      "expected_completion_at": "2026-10-14T12:12:03.418000Z",
+      "tags": ["phase-1", "rollout"]
+    }
+  },
+  {
+    "name": "untagged_start",
+    "why": "A plain start: its serializer omits every field an older release does not know.",
+    "event": "WorkflowExecutionStartedEvent",
+    "payload": {
+      "workflow_id": "wf-sdlc-implement",
+      "execution_id": "exec-5b81e9d4",
+      "workflow_name": "SDLC implement",
+      "started_at": "2026-10-14T09:15:40Z",
+      "total_phases": 2,
+      "inputs": {"task": "Fix the flaky poller test"}
+    }
+  },
+  {
+    "name": "phase_started",
+    "event": "PhaseStartedEvent",
+    "payload": {
+      "workflow_id": "wf-sdlc-implement",
+      "execution_id": "exec-7f3c2a10",
+      "phase_id": "implement",
+      "phase_name": "Implement",
+      "phase_order": 1,
+      "started_at": "2026-10-14T09:12:05Z"
+    }
+  },
+  {
+    "name": "agent_execution_completed",
+    "event": "AgentExecutionCompletedEvent",
+    "payload": {
+      "workflow_id": "wf-sdlc-implement",
+      "execution_id": "exec-7f3c2a10",
+      "phase_id": "implement",
+      "session_id": "sess-0c4d9e21",
+      "completed_at": "2026-10-14T09:58:44Z"
+    }
+  },
+  {
+    "name": "phase_completed",
+    "event": "PhaseCompletedEvent",
+    "payload": {
+      "workflow_id": "wf-sdlc-implement",
+      "execution_id": "exec-7f3c2a10",
+      "phase_id": "implement",
+      "completed_at": "2026-10-14T09:58:50Z",
+      "success": true
+    }
+  },
+  {
+    "name": "workflow_completed",
+    "event": "WorkflowCompletedEvent",
+    "payload": {
+      "workflow_id": "wf-sdlc-implement",
+      "execution_id": "exec-7f3c2a10",
+      "completed_at": "2026-10-14T11:02:13Z",
+      "total_phases": 3,
+      "completed_phases": 3,
+      "total_input_tokens": 182340,
+      "total_output_tokens": 24117,
+      "total_tokens": 206457,
+      "total_duration_seconds": 6550.2,
+      "artifact_ids": ["art-implement-md", "art-verify-md"]
+    }
+  },
+  {
+    "name": "workflow_failed",
+    "event": "WorkflowFailedEvent",
+    "payload": {
+      "workflow_id": "wf-sdlc-implement",
+      "execution_id": "exec-5b81e9d4",
+      "failed_at": "2026-10-14T09:40:02Z",
+      "error_message": "Phase verify exited 1: preflight-agent failed",
+      "completed_phases": 1,
+      "total_phases": 2
+    }
+  },
+  {
+    "name": "workflow_interrupted",
+    "event": "WorkflowInterruptedEvent",
+    "payload": {
+      "workflow_id": "wf-sdlc-implement",
+      "execution_id": "exec-7f3c2a10",
+      "phase_id": "verify",
+      "interrupted_at": "2026-10-14T10:20:00Z"
+    }
+  },
+  {
+    "name": "execution_cancelled",
+    "event": "ExecutionCancelledEvent",
+    "payload": {
+      "workflow_id": "wf-sdlc-implement",
+      "execution_id": "exec-5b81e9d4",
+      "phase_id": "verify",
+      "cancelled_at": "2026-10-14T09:39:10Z"
+    }
+  }
+]
