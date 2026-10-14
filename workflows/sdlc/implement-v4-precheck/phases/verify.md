@@ -720,11 +720,9 @@ not that exception: without independent evidence it is `BLOCKING`, unless
 producing that evidence needs Docker, a database or a real store, in which
 case it is `ORCHESTRATOR_EVIDENCE`. `success=true` means the verification report
 was delivered so the `fix` phase can run; it does not mean the candidate was
-certified. In this workflow, an environment limitation that prevents only part
-of verification, such as an unavailable database, is not `BLOCKING`. It is
-`ORCHESTRATOR_EVIDENCE`, and so is every other item the evidence precheck
-classifies as a handoff: list it under `## Handed to the orchestrator`. It
-never decides the verdict by itself.
+certified. Every item the evidence precheck classifies as a handoff goes under
+`## Handed to the orchestrator`, never under `BLOCKING`, and never decides
+the verdict by itself.
 
 Use `TASK_RESULT success=false` only when verification itself could not run at
 all: for example, the implementation artifact is missing or unreadable, the
