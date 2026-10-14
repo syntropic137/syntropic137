@@ -15,6 +15,14 @@ from typing import TYPE_CHECKING
 from unittest.mock import patch
 
 import pytest
+from agentic_isolation import TeardownReport
+from agentic_isolation.contract import (
+    MISSING,
+    FinalizationOutcome,
+    OperationError,
+    WorkspaceRef,
+)
+from agentic_isolation.providers.teardown_report import TeardownUsage
 
 from syn_adapters.workspace_backends.agentic.adapter import AgenticIsolationAdapter
 from syn_adapters.workspace_backends.agentic.teardown_usage import (
@@ -74,41 +82,49 @@ async def test_a_failed_destroy_leaves_usage_unknown() -> None:
     assert workspace.teardown_usage is None
 
 
-@dataclass(frozen=True)
-class _ProviderReport:
-    """The shape agentic-workspace's `TeardownReport` is specified to have."""
-
-    cpu_usage_seconds: float | None = 4.25
-    cpu_throttled_seconds: float | None = None
-    nr_throttled: int | None = 0
-    memory_peak_bytes: int | None = 123_456_789
-    oom_kills: int | None = 0
-    disk_bytes_at_teardown: int | None = 2048
-    delete_failures: tuple[str, ...] | None = ("/ws/a", "/ws/b")
-    net_rx_bytes: int | None = 10
-    net_tx_bytes: int | None = 20
+_USAGE = TeardownUsage(
+    cpu_usage_seconds=4.25,
+    nr_throttled=0,
+    memory_peak_bytes=123_456_789,
+    oom_kills=0,
+    oom_killed=False,
+    disk_bytes_at_teardown=2048,
+    delete_failures=("/ws/a", "/ws/b"),
+    net_rx_bytes=10,
+    net_tx_bytes=20,
+)
+_COMPLETED = FinalizationOutcome(schema=MISSING, state="completed")
 
 
 class _Provider:
-    def __init__(self, report: object) -> None:
-        self._report = report
+    """agentic-workspace's staged teardown, answering with a fixed report."""
 
-    async def destroy(self, _workspace: object) -> object:
+    def __init__(self, report: TeardownReport) -> None:
+        self._report = report
+        self.targets: list[object] = []
+
+    async def teardown(self, *, target: object) -> TeardownReport:
+        self.targets.append(target)
         return self._report
 
 
-def _adapter(report: object) -> AgenticIsolationAdapter:
+def _adapter(report: TeardownReport) -> tuple[AgenticIsolationAdapter, _Provider]:
     adapter = object.__new__(AgenticIsolationAdapter)
-    adapter._workspaces = {"iso-1": object()}  # type: ignore[assignment]
-    adapter._provider = _Provider(report)  # type: ignore[assignment]
-    return adapter
+    workspace = object()
+    adapter._workspaces = {"iso-1": workspace}  # type: ignore[assignment]
+    provider = _Provider(report)
+    adapter._provider = provider  # type: ignore[assignment]
+    return adapter, provider
+
+
+_HANDLE = IsolationHandle(isolation_id="iso-1", isolation_type="docker")
 
 
 @pytest.mark.asyncio
 async def test_agentic_adapter_maps_the_provider_report() -> None:
-    usage = await _adapter(_ProviderReport()).destroy(
-        IsolationHandle(isolation_id="iso-1", isolation_type="docker")
-    )
+    adapter, provider = _adapter(TeardownReport(finalization=_COMPLETED, usage=_USAGE))
+    usage = await adapter.destroy(_HANDLE)
+    assert len(provider.targets) == 1, "torn down through teardown(target=...)"
     assert usage == WorkspaceUsage(
         cpu_usage_seconds=4.25,
         cpu_throttled_seconds=None,
@@ -123,12 +139,26 @@ async def test_agentic_adapter_maps_the_provider_report() -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_provider_that_reports_nothing_maps_to_none() -> None:
-    # The pinned provider today: `destroy` returns None.
-    usage = await _adapter(None).destroy(
-        IsolationHandle(isolation_id="iso-1", isolation_type="docker")
+async def test_a_retained_teardown_is_logged_and_still_reports_usage(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    retained = FinalizationOutcome(
+        schema=MISSING,
+        state="retained",
+        stage="before_delete",
+        error=OperationError(
+            schema=MISSING, kind="provider_unavailable", message="archive upload failed"
+        ),
+        retained=WorkspaceRef(schema=MISSING, provider="docker", resource_id="iso-1"),
     )
-    assert usage is None
+    adapter, _ = _adapter(TeardownReport(finalization=retained, usage=_USAGE))
+
+    with caplog.at_level(logging.ERROR):
+        usage = await adapter.destroy(_HANDLE)
+
+    assert usage is not None and usage.disk_bytes_at_teardown == 2048
+    assert "retained" in caplog.text
+    assert "archive upload failed" in caplog.text
 
 
 @dataclass(frozen=True)
