@@ -309,3 +309,18 @@ async def test_real_setup_file_injection_withholds_codex_token_auth():
     assert access not in joined and refresh not in joined
     assert json.loads(lines[0])["content"].count(REDACTED_MARKER) == 2
     assert lines[1] == "auth_mode chatgpt"
+
+
+async def test_a_short_value_inside_the_launch_marker_leaves_it_byte_identical():
+    from syn_domain.contexts.orchestration import announce_as
+
+    wrapper = "syn-wrapper-1927"
+    marker = announce_as(wrapper)
+    adapter, _, _ = _stream([f"{marker}\nsyn 1927\n".encode()])
+    lines = [
+        line
+        async for line in adapter.stream(
+            _HANDLE, ["claude"], environment={"SYN_API_TOKEN": "syn"}, wrapper_name=wrapper
+        )
+    ]
+    assert lines == [marker, f"{REDACTED_MARKER} 1927"], "byte-identical (#1879)"

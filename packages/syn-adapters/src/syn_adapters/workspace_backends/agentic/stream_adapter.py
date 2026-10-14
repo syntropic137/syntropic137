@@ -283,7 +283,7 @@ class AgenticEventStreamAdapter:
         )
 
         try:
-            async for line in self._observe(provider, ref, secrets):
+            async for line in self._observe(provider, ref, secrets, spec.launch_marker.line):
                 yield line
             status = await provider.status(ref)
         except BaseException:
@@ -310,12 +310,17 @@ class AgenticEventStreamAdapter:
         provider: SupportsOperations,
         ref: OperationRef,
         secrets: Callable[[], Iterable[str]],
+        launch_line: str,
     ) -> AsyncIterator[str]:
         """Yield the operation's output as scrubbed lines.
 
         Scrubbing whole lines is what makes a value split across two pages
         safe: the decoder carries the unterminated part of a line into the
         next page, so no line is scrubbed until all of it has arrived.
+
+        The launch marker's own line is passed through byte-identical: launch
+        detection depends on it (#1879), the platform wrote it, and a short
+        value that happened to occur inside it would otherwise erase it.
         """
         decoder = LineDecoder()
         scrubber = CredentialScrubber()
@@ -330,11 +335,11 @@ class AgenticEventStreamAdapter:
             if isinstance(page.gap, ObservationGap):
                 self._record_gap(page.gap, decoder.gap(), ref)
             for line in decoder.feed(base64.b64decode(page.data_b64)):
-                yield scrubber.scrub(line)
+                yield line if line == launch_line else scrubber.scrub(line)
             cursor = page.next_cursor
             if page.complete:
                 for line in decoder.finish():
-                    yield scrubber.scrub(line)
+                    yield line if line == launch_line else scrubber.scrub(line)
                 return
 
     def _record_gap(self, gap: ObservationGap, severed_chars: int, ref: OperationRef) -> None:
