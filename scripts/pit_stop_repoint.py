@@ -5,8 +5,8 @@ Called by scripts/pit_stop.sh at `stage`:
     python3 scripts/pit_stop_repoint.py <tag> <deployed-compose> <staged-compose> [--service gateway]
     python3 scripts/pit_stop_repoint.py --on-tag <tag> <compose> <service>
 
-The second form prints 1 when every <service> (`api` or `gateway`) image line
-names exactly the ref `ship` loaded, and there is at least one, else 0. It is the count
+The second form prints 1 when the compose service <service> (`api` or
+`gateway`) has one image line and it names exactly the ref `ship` loaded, else 0. It is the count
 the stage and --swap-only prechecks trust, so it reads the image lines the same
 way the repoint writes them: a commented-out line, a longer tag that merely
 starts with <tag> (`beta.1` vs `beta.10`) or a suffixed one is not on the tag.
@@ -26,10 +26,12 @@ whole ref is replaced with the exact ref `ship` loaded, never edited in place:
 the images are only in the host's daemon, unpushed, so they have no digest and
 no other spelling resolves to them.
 
-ONE PIN, POSSIBLY SEVERAL LINES. The executor runs the syn-api image in another
-role (ADR-072 D1, #1310 1.6), so a compose with it names syn-api twice. Both
-lines must agree, and are repointed together: two spellings of one image would
-be two build identities, which the split exists to avoid.
+BY COMPOSE SERVICE, NOT BY IMAGE NAME. The executor runs the syn-api image in
+another role (ADR-072 D1, #1310 1.6), so a compose with it names syn-api twice.
+A pit stop recreates `api` and `gateway` only, so only THEIR lines move: an
+executor pin moved under a container that was never recreated would claim a
+build it is not running, which is drift. The executor's line is left exactly
+as deployed until a pit stop that recreates the executor exists.
 """
 
 from __future__ import annotations
@@ -39,10 +41,11 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-#: What `ship` loads, and therefore what the compose must name, per service.
-SERVICES = ("syn-api", "syn-gateway")
-#: `--service` as pit_stop.sh spells it, to the images that pit stop ships.
-SHIPPED = {"all": SERVICES, "gateway": ("syn-gateway",)}
+#: The compose services a pit stop recreates, to the image `ship` loads for each.
+IMAGES = {"api": "syn-api", "gateway": "syn-gateway"}
+#: `--service` as pit_stop.sh spells it, to the compose services it recreates.
+#: Never `executor`: no pit stop recreates it yet, so none may move its pin.
+SHIPPED = {"all": ("api", "gateway"), "gateway": ("gateway",)}
 REGISTRY = "ghcr.io/syntropic137"
 
 _IMAGE_LINE = re.compile(r"^(?P<lead>\s*image:\s*[\"']?)(?P<ref>[^\s\"'#]+)", re.MULTILINE)
@@ -90,54 +93,71 @@ def _image_name(ref: str) -> str:
     return ref.partition("@")[0].rsplit("/", 1)[-1].partition(":")[0]
 
 
-def repoint(compose: str, tag: str, services: tuple[str, ...] = SERVICES) -> Repoint:
-    """Point `services` at `REGISTRY/<service>:<tag>`, or raise RepointError."""
-    lines = {
-        s: [m for m in _IMAGE_LINE.finditer(compose) if _image_name(m["ref"]) == s]
-        for s in services
-    }
+def _owner(compose: str, at: int) -> str:
+    """The compose service an image line at offset `at` belongs to: the nearest
+    line above it that is indented less, which is the service's own key."""
+    line_start = compose.rfind("\n", 0, at) + 1
+    image_line = compose[line_start : compose.find("\n", at) if "\n" in compose[at:] else None]
+    indent = len(image_line) - len(image_line.lstrip())
+    for line in reversed(compose[:line_start].splitlines()):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if len(line) - len(line.lstrip()) < indent:
+            return stripped.partition(":")[0].strip("\"'")
+    return ""
+
+
+def _lines_of(compose: str, service: str) -> list[re.Match[str]]:
+    """The image lines of compose service `service` (`api`, `gateway`)."""
+    return [m for m in _IMAGE_LINE.finditer(compose) if _owner(compose, m.start()) == service]
+
+
+def repoint(compose: str, tag: str, services: tuple[str, ...] = SHIPPED["all"]) -> Repoint:
+    """Point each of `services` at `REGISTRY/<its image>:<tag>`, or raise RepointError."""
     old: list[Pin] = []
-    for service, found in lines.items():
-        if not found:
-            raise RepointError(f"expected a {service} image line, found none")
-        refs = sorted({m["ref"] for m in found})
-        if len(refs) != 1:
-            raise RepointError(
-                f"{service} image lines disagree ({', '.join(refs)}); one pin per image"
-            )
-        pin = Pin(service, refs[0])
+    for service in services:
+        image = IMAGES[service]
+        found = _lines_of(compose, service)
+        if len(found) != 1:
+            raise RepointError(f"expected one image line for service {service}, found {len(found)}")
+        pin = Pin(image, found[0]["ref"])
+        if _image_name(pin.ref) != image:
+            raise RepointError(f"service {service} runs {pin.ref}, not {image}")
         if "$" in pin.ref:
             raise RepointError(
-                f"{service} is pinned by a variable ({pin.ref}); this is not a release compose"
+                f"{image} is pinned by a variable ({pin.ref}); this is not a release compose"
             )
         if not pin.pin:
-            raise RepointError(f"{service} is not pinned to a tag or a digest ({pin.ref})")
+            raise RepointError(f"{image} is not pinned to a tag or a digest ({pin.ref})")
         old.append(pin)
 
     def new_ref(m: re.Match[str]) -> str:
-        service = _image_name(m["ref"])
-        return m["lead"] + (f"{REGISTRY}/{service}:{tag}" if service in services else m["ref"])
+        service = _owner(compose, m.start())
+        if service in services:
+            return m["lead"] + f"{REGISTRY}/{IMAGES[service]}:{tag}"
+        return m[0]
 
     text = _IMAGE_LINE.sub(new_ref, compose)
     return Repoint(old=tuple(old), text=text, changed=text != compose)
 
 
 def on_tag(compose: str, tag: str, service: str) -> bool:
-    """Whether `service`'s one image line names `REGISTRY/<service>:<tag>`
-    exactly. Compared whole, never as a pattern.
+    """Whether compose service `service`'s one image line names
+    `REGISTRY/<its image>:<tag>` exactly. Compared whole, never as a pattern.
 
     A digest-qualified `...:<tag>@sha256:...` is NOT on the tag: Docker
     resolves a tag-plus-digest reference by the digest alone, and the image
     `ship` loaded is unpushed, so no digest in a compose file is proven to be
     it. The repoint writes the bare ref, so a staged file never has one."""
-    found = {m["ref"] for m in _IMAGE_LINE.finditer(compose) if _image_name(m["ref"]) == service}
-    return found == {f"{REGISTRY}/{service}:{tag}"}
+    found = {m["ref"] for m in _lines_of(compose, service)}
+    return found == {f"{REGISTRY}/{IMAGES[service]}:{tag}"}
 
 
 def main(argv: list[str]) -> int:
     if len(argv) == 4 and argv[0] == "--on-tag":
         _, tag, compose, svc = argv
-        print(1 if on_tag(Path(compose).read_text(), tag, f"syn-{svc}") else 0)
+        print(1 if svc in IMAGES and on_tag(Path(compose).read_text(), tag, svc) else 0)
         return 0
     service = "all"
     if len(argv) == 5 and argv[3] == "--service":

@@ -164,23 +164,24 @@ class TestRefusesToGuess:
         ("compose", "reason"),
         [
             (
-                "services:\n  api:\n    image: ghcr.io/syntropic137/syn-gateway:v1\n",
-                "expected a syn-api image line",
+                "services:\n  api:\n    image: ghcr.io/syntropic137/syn-gateway:v1\n"
+                "  gateway:\n    image: ghcr.io/syntropic137/syn-gateway:v1\n",
+                "service api runs ghcr.io/syntropic137/syn-gateway:v1, not syn-api",
             ),
             (
-                "services:\n  a:\n    image: ghcr.io/syntropic137/syn-api:v1\n"
-                "  b:\n    image: ghcr.io/syntropic137/syn-api:v2\n"
-                "  g:\n    image: ghcr.io/syntropic137/syn-gateway:v1\n",
-                "syn-api image lines disagree",
+                # Only the executor runs syn-api: there is no `api` service to repoint.
+                "services:\n  executor:\n    image: ghcr.io/syntropic137/syn-api:v1\n"
+                "  gateway:\n    image: ghcr.io/syntropic137/syn-gateway:v1\n",
+                "expected one image line for service api, found 0",
             ),
             (
-                "services:\n  a:\n    image: ghcr.io/syntropic137/syn-api:${SYN_VERSION:-latest}\n"
-                "  g:\n    image: ghcr.io/syntropic137/syn-gateway:v1\n",
+                "services:\n  api:\n    image: ghcr.io/syntropic137/syn-api:${SYN_VERSION:-latest}\n"
+                "  gateway:\n    image: ghcr.io/syntropic137/syn-gateway:v1\n",
                 "pinned by a variable",
             ),
             (
-                "services:\n  a:\n    image: ghcr.io/syntropic137/syn-api\n"
-                "  g:\n    image: ghcr.io/syntropic137/syn-gateway:v1\n",
+                "services:\n  api:\n    image: ghcr.io/syntropic137/syn-api\n"
+                "  gateway:\n    image: ghcr.io/syntropic137/syn-gateway:v1\n",
                 "not pinned",
             ),
         ],
@@ -204,43 +205,74 @@ class TestRefusesToGuess:
         assert not staged.exists()
 
 
-class TestTheExecutorSharesTheApiPin:
-    """A compose with the executor (#1310 1.6) names syn-api twice: one pin."""
+class TestTheExecutorPinIsNeverMoved:
+    """A compose with the executor (#1310 1.6) names syn-api twice. A pit stop
+    recreates api and gateway only, so the executor's line stays as deployed:
+    a pin moved under a container that was never recreated is drift."""
 
+    _OLD_EXECUTOR = "image: ghcr.io/syntropic137/syn-api@sha256:" + "a" * 64
     _SPLIT = (
         "services:\n"
-        "  api:\n    image: ghcr.io/syntropic137/syn-api@sha256:" + "a" * 64 + "\n"
-        "  executor:\n    image: ghcr.io/syntropic137/syn-api@sha256:" + "a" * 64 + "\n"
+        "  api:\n    image: ghcr.io/syntropic137/syn-api@sha256:" + "b" * 64 + "\n"
+        '  executor:\n    profiles: ["run-queue"]\n    ' + _OLD_EXECUTOR + "\n"
         "  gateway:\n    image: ghcr.io/syntropic137/syn-gateway:v1\n"
     )
 
-    def test_both_syn_api_lines_move_together_and_pass_the_swap_precheck(
-        self, tmp_path: Path
+    @pytest.mark.parametrize("service", ["all", "gateway"])
+    def test_no_pit_stop_moves_the_executor_pin_and_the_precheck_still_passes(
+        self, tmp_path: Path, service: str
     ) -> None:
         deployed = tmp_path / "deployed.yaml"
         deployed.write_text(self._SPLIT)
         staged = tmp_path / "compose.yaml"
 
         proc = subprocess.run(
-            [sys.executable, str(_HELPER), _TAG, str(deployed), str(staged)],
+            [sys.executable, str(_HELPER), _TAG, str(deployed), str(staged), "--service", service],
             capture_output=True,
             text=True,
             check=False,
         )
 
         assert proc.returncode == 0, proc.stderr
+        api = (
+            f"image: ghcr.io/syntropic137/syn-api:{_TAG}"
+            if service == "all"
+            else "image: ghcr.io/syntropic137/syn-api@sha256:" + "b" * 64
+        )
         assert _image_lines(staged) == [
-            f"image: ghcr.io/syntropic137/syn-api:{_TAG}",
-            f"image: ghcr.io/syntropic137/syn-api:{_TAG}",
+            api,
+            self._OLD_EXECUTOR,
             f"image: ghcr.io/syntropic137/syn-gateway:{_TAG}",
         ]
-        assert _precheck_count(staged) == 2
+        # The count the stage and --swap-only trust reads the api SERVICE, so
+        # the executor's old pin neither fails it nor stands in for api.
+        swapped = "api gateway" if service == "all" else "gateway"
+        assert _precheck_count(staged, swapped=swapped) == len(swapped.split())
 
-    def test_a_half_repointed_split_is_not_on_the_tag(self, tmp_path: Path) -> None:
+    def test_the_next_stage_over_a_split_api_and_executor_succeeds(self, tmp_path: Path) -> None:
+        """The NEXT pit stop finds api and executor on different pins, and
+        must not refuse them as two spellings of one image."""
+        deployed = tmp_path / "deployed.yaml"
+        deployed.write_text(
+            "services:\n  api:\n    image: ghcr.io/syntropic137/syn-api:v2\n"
+            "  executor:\n    image: ghcr.io/syntropic137/syn-api:v1\n"
+            "  gateway:\n    image: ghcr.io/syntropic137/syn-gateway:v2\n"
+        )
+        staged = tmp_path / "compose.yaml"
+        proc = subprocess.run(
+            [sys.executable, str(_HELPER), _TAG, str(deployed), str(staged)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert _image_lines(staged)[1] == "image: ghcr.io/syntropic137/syn-api:v1"
+
+    def test_the_executor_on_the_tag_does_not_count_for_api(self, tmp_path: Path) -> None:
         compose = tmp_path / "compose.yaml"
         compose.write_text(
-            f"services:\n  api:\n    image: ghcr.io/syntropic137/syn-api:{_TAG}\n"
-            "  executor:\n    image: ghcr.io/syntropic137/syn-api:v1\n"
+            "services:\n  api:\n    image: ghcr.io/syntropic137/syn-api:v1\n"
+            f"  executor:\n    image: ghcr.io/syntropic137/syn-api:{_TAG}\n"
             f"  gateway:\n    image: ghcr.io/syntropic137/syn-gateway:{_TAG}\n"
         )
         assert _precheck_count(compose) == 1
