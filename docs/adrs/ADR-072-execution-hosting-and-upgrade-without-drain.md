@@ -2,9 +2,9 @@
 
 - **Status**: Accepted (decision recorded; implementation lands in #1310 Phase 1, items 1.2-1.7, and Phase 2)
 - **Date**: 2026-10-05 (first drafted in parked PR #1597; resumed 2026-10-08 against #1574 and #1651 as merged)
-- **Issue**: #1310 (umbrella; the full plan is the "Full plan" comment there), #1552, #1557, #1381, #1555, #1511, #1734 (implementation of multi-host placement, heartbeat and fencing, moved out of #1310 on 2026-10-07)
+- **Issue**: #1310 (umbrella; the full plan is the "Full plan" comment there), #1552, #1557, #1381, #1555, #1511, #1734 (implementation of multi-host placement, heartbeat and fencing, moved out of #1310 on 2026-10-07). #1734 also carries pools, priority and overflow (D13, amended 2026-10-14)
 - **Related**: ADR-014 (section 7, resume; section 9, who runs an execution), ADR-025, ADR-055, ADR-057, ADR-060 (section 8, dispatch concurrency), ADR-070 (D4/D5, drain-aware rotation)
-- **Vocabulary**: `docs/architecture/orchestration-ubiquitous-language.md` (Executor, Run Queue, Claim, Lease, Heartbeat, Fencing, Drain (of an executor), Event Epoch, Queued, Execution Budget; reserved: Adopt / Reattach)
+- **Vocabulary**: `docs/architecture/orchestration-ubiquitous-language.md` (Executor, Run Queue, Claim, Lease, Heartbeat, Fencing, Drain (of an executor), Event Epoch, Queued, Execution Budget, Executor Pool, Pool Priority, Overflow, Overflow Delay, Claim Check, Capability, Isolation Level, Run Requirements, Unplaceable, Placement, Reap Scope; reserved: Adopt / Reattach, Router)
 
 No earlier ADR covers how the platform itself is deployed. ADR-052 is the docs
 site's Vercel deployment and ADR-057 is service registration inside one
@@ -92,11 +92,15 @@ queue copies that shape; it does not invent a second lease idiom.
 The domain owns the port, `ExecutionRunQueue`, with operations named for what
 callers do (`reserve`, `mark_admitted`, `claim`, `renew`, `defer`,
 `close`, `fence_expired`, `mark_reaped`, `close_interrupted`, `sweep_opening`,
-`heartbeat`, `is_draining`, `in_use`), not a generic lease API. Three tables:
+`heartbeat`, `is_draining`, `in_use`), not a generic lease API. Four tables:
 `execution_runs` (one row per admitted start), `execution_budget` (one row per
-executor: its capacity, slots in use and heartbeat, D3) and `executor_hosts`
-(one row per registered host: its container, generation, epoch and drain flag,
-D5, D9, D10). Production fails fast
+executor: its pool, capacity, slots in use, heartbeat, last claim check,
+full-since and reap scope; D3, D13), `executor_pools` (one row per Executor
+Pool: priority, provider, region, isolation, capabilities and overflow delay;
+D13) and `executor_hosts` (one row per registered host: its container,
+generation, epoch and drain flag, D5, D9, D10). The last claim check,
+full-since and reap scope columns land with D13's later steps (see D13,
+Status). Production fails fast
 without Postgres (ADR-060); the test double inherits `InMemoryAdapter`.
 
 **Row states.**
@@ -150,8 +154,10 @@ threshold and the start ends `admitted`, not stranded.
 **One budget row per executor, from day one.** This is epic #1612 Step 2,
 adopted here in place of the single global row the #1310 plan first proposed.
 `execution_budget` holds one row per executor: `executor_id` (its `host_id`),
-`backend` (`local` today), `capacity`, `in_use` and `heartbeat_at`, with
-`CHECK (in_use >= 0 AND in_use <= capacity)`. **Global capacity is the sum of
+`pool_id` (D13), `capacity`, `in_use` and `heartbeat_at`, with
+`CHECK (in_use >= 0 AND in_use <= capacity)`. A row's provider is its pool's.
+The per-row `backend` column this section first named was never written and is
+dropped. **Global capacity is the sum of
 the rows' capacities**; it is a derived figure for reporting, never a number
 anyone claims against. With one host there is exactly one row, so Phase 1 is
 no larger than with a global row. A second host, or a remote backend, adds a
@@ -163,13 +169,18 @@ host wastes every larger host's capacity.
 **The claim**, one transaction, in the shape of
 `PostgresCaptureDeliveryJobs.claim`:
 
-1. Lock the executor's **own** row:
-   `SELECT ... FROM execution_budget WHERE executor_id = <self> AND in_use < capacity AND heartbeat_at > now() - <stale> FOR UPDATE`.
-   No row (full, stale, or absent) means no claim this turn. A draining host
-   does not reach this step (D10).
-2. Take the oldest claimable `admitted` row:
+1. Lock the executor's **own** row unconditionally. Then, in one statement
+   that sees whatever the lock wait let commit, stamp `claim_checked_at` and
+   read `in_use < capacity`, `NOT draining` and
+   `heartbeat_at > clock_timestamp() - <stale>`. `now()` is the transaction's
+   start and would judge liveness before the wait. No row (full, stale,
+   draining or absent) means no claim this turn. (The `claim_checked_at`
+   stamp lands with D13's claim signals; the rest is the code today.)
+2. Take the oldest `admitted` row this executor's pool may take now (D13):
    `ORDER BY admitted_at, execution_id FOR UPDATE SKIP LOCKED LIMIT 1`. None
-   means no claim.
+   means no claim. (Until D13's placement step lands, every admitted row
+   whose `retry_at` has passed and whose `writer_epoch` this host can read
+   qualifies.)
 3. Set the run's `executor_id = <self>`, `lease_token = lease_token + 1`,
    `leased_until`, and `state = 'claimed'`.
 4. `in_use = in_use + 1` on the locked budget row.
@@ -177,6 +188,11 @@ host wastes every larger host's capacity.
 The capacity predicate is per executor, so no host ever holds more runs than
 its own row allows, and two executors never contend on one budget lock. A count
 taken outside the claim transaction is racy and is not acceptable.
+
+Placement (D13) reads other executors' rows without locking them. Preference
+is therefore decided on a snapshot: while a higher executor's release is in
+flight, several lower executors may each spill a run. Capacity is never
+exceeded, because only an executor's own locked row decides it.
 
 **Release is the reverse, fenced.** A run row carries a **charge** exactly
 while it is `claimed`, `fencing` or `reaped`, and the charge is held by the
@@ -199,6 +215,11 @@ raises `RunLeaseLost` and changes nothing. The slot is freed exactly once, and
 the `CHECK` turns any remaining accounting bug into a failed write rather than
 a leaked or double-freed slot. A deferred row is unowned: its next claim
 charges whichever executor takes it, from step 3 above.
+
+A claimer closes a run only once its backend shows the run's resources gone
+(D13). Otherwise it leaves the run charged for reconciliation. (This gate lands
+with D13's reach-and-release step; until then a claimer closes when its drain
+returns.)
 
 **Closing a row that holds no charge changes no counter.** A row that is
 `opening`, `abandoned` or `admitted` has `executor_id = NULL`, whether it has
@@ -257,10 +278,17 @@ different meaning: a lease says that one run's claim is still held, while a
 heartbeat says only that the executor's claim loop turned recently. Its uses:
 the claim predicate (D3: an executor whose own heartbeat is stale does not
 claim), the global capacity report (live rows only), the reap-window alert
-(D5), and deciding whether an unlabelled container may be reaped (D6). It
-never authorises fencing or takeover. Fencing is decided by an expired
+(D5), deciding whether an unlabelled container may be reaped (D6), and
+whether an executor counts as live for placement (D13). It never authorises
+fencing or takeover. Fencing is decided by an expired
 lease. Takeover is decided by the reconciler having left (D5), and a stopped
 heartbeat is not leaving.
+
+**Claim check.** The claim statement stamps `claim_checked_at` on the
+executor's own row each time it decides. A heartbeat says the loop turned; a
+claim check says the claim ran. Placement trusts only the second to advertise
+room, so a loop whose claim keeps failing stops holding work back. (Lands with
+D13's claim signals.)
 
 ### D5. At most one run per execution, and the limits of that guarantee
 
@@ -271,8 +299,8 @@ only that host takes turns on it:
 
 | Step | Action | Guard |
 |---|---|---|
-| `claimed` → `fencing` | `lease_token + 1`, `reconciler = <host>`, `reader_epoch = LEAST(reader_epoch, <its epoch>)`, one UPDATE | `leased_until < now()` and `writer_epoch <= <its epoch>` (D9) |
-| takeover, in `fencing` or `reaped` | `lease_token + 1`, `reconciler = <host>`, `reader_epoch` recomputed (D9), one UPDATE | the current `reconciler` has **left**: it has no `executor_hosts` row (below), and `writer_epoch <= <its epoch>` |
+| `claimed` → `fencing` | `lease_token + 1`, `reconciler = <host>`, `reader_epoch = LEAST(reader_epoch, <its epoch>)`, one UPDATE | `leased_until < now()` and `writer_epoch <= <its epoch>` (D9), and the claimer's `reap_scope` equals the reconciler's (D13) |
+| takeover, in `fencing` or `reaped` | `lease_token + 1`, `reconciler = <host>`, `reader_epoch` recomputed (D9), one UPDATE | the current `reconciler` has **left**: it has no `executor_hosts` row (below), and `writer_epoch <= <its epoch>`, and the claimer's `reap_scope` equals the reconciler's (D13) |
 | `fencing` → `reaped` | remove containers labelled `syn.host_id=<dead host>`, `syn.execution_id=<id>` | the reap reports complete (the existing `fully_reaped` rule in `reconciliation.py`); otherwise stay `fencing` and retry |
 | `reaped` → `interrupted` | two ordered steps, below | |
 
@@ -386,6 +414,16 @@ incomplete cleanup today. Because the window has no bound, it is watched
 instead: a row in `fencing` for longer than one TTL, or with no executor
 heartbeat able to reap it, raises an operator alert naming the execution and
 the dead host. Removing that host's containers by hand ends the window.
+
+A reconciler can reap only what its backend reaches: a Docker reaper one
+daemon, a provider reaper one account. `execution_budget.reap_scope` records
+that reach. It is derived from the backend and never configured. A run whose
+scope has no live executor stays charged and raises this alert. Rows from
+before the column are given a scope only by a successor in the same container.
+(The scope guards on fencing and takeover land with D13's reach-and-release
+step, before any second machine overflows; until then a reconciler on another
+machine could report a reap it cannot perform, which is why no second machine
+is supported yet.)
 
 Visibility-timeout redelivery (Sidekiq, Celery, SQS) is deliberately not
 adopted: redelivering an hour-long agent phase is exactly the duplicate-effects
@@ -625,6 +663,47 @@ Item 1.2 **builds on its rule and replaces its mechanism**:
 
 #1574 merged first, so 1.2 migrates its budget and status as described above.
 
+### D13. Executor pools, priority and overflow
+
+*Amended 2026-10-14. The plan, the ordered steps and their exit tests are in
+`docs/plans/20261014_pool-priority-placement.md`.*
+
+An **Executor Pool** is a named group of executors sharing a priority (0
+first), a provider, a region, an isolation level and capabilities, held in one
+`executor_pools` row. Every `execution_budget` row names its pool. Pool
+capacity and usage are sums over members: reported, never claimed against
+(D3). A member's declaration that differs from the row is refused while any
+other member is live and not draining.
+
+An executor claims run *r* only when its pool satisfies *r*'s **Run
+Requirements** (allowed providers, allowed regions, minimum isolation, required
+capabilities), the epoch rule (D9) and `retry_at` hold, and no live executor in
+a higher-priority pool that could take *r* is either claiming with room or full
+for less than the claiming pool's **Overflow Delay**. "Full for" is saturation
+duration: how long that executor's row has been full (`full_since`), not the
+run's age. Order is oldest first everywhere. An ineligible run is never
+claimed, so placement never claims and defers. A run no executor may take
+stays `admitted` (D11 `queued`). Requirements whose phases conflict (an empty
+provider or region intersection) are refused at admission and never queued.
+
+Placement is recorded on the run row (`placed_pool`, `overflowed`,
+`claimed_at`) as infrastructure telemetry, never as an event. In this revision
+every run's requirements are empty, so placement is by priority alone.
+
+Rejected: a pool-level counter (a second accounting surface and a hot row);
+locking higher executors' rows (cross-executor contention, which D3 rules out);
+a central router process (a singleton beside a claim transaction that already
+decides placement); and claim-then-defer (churns tokens and penalises the run).
+
+**Status.** The pool model has landed: the `executor_pools` table,
+`execution_budget.pool_id` (existing rows join the seeded `default` pool), the
+dropped `backend` column, the port values, the registration conflict rule and
+`SYN_EXECUTOR_POOL_*`. Placement is not yet in the claim: every executor still
+takes the oldest admitted run. The reach-and-release gate and reap scope (D3,
+D5), the claim signals `claim_checked_at` and `full_since` (D3, D4), priority
+and overflow in the claim, run requirements, and the placement read follow in
+that order, as the plan sets out.
+
 ## Consequences
 
 ### Positive
@@ -652,6 +731,8 @@ Item 1.2 **builds on its rule and replaces its mechanism**:
   install.
 - Mid-phase crash survival is not provided. A host that dies mid-phase still
   loses that phase.
+- Overflow preference is approximate under concurrent release. Capacity is
+  exact (D13).
 
 ### Neutral
 
