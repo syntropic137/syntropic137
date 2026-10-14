@@ -1,15 +1,17 @@
-"""Executor A for the V12 test, run as its own process so it can be SIGSTOPped.
+"""A real executor process for the V7/V12 tests, so it can be SIGKILLed or SIGSTOPped.
 
-Not a test module. Usage (only the V12 test runs it)::
+Not a test module. Usage (only the 1.5 process tests run it)::
 
-    python _v12_stalled_executor.py PG_URL SCHEMA ES_ADDRESS TENANT HOST_ID LEASE_S OUT
+    python _1310_executor_process.py PG_URL SCHEMA ES_ADDRESS TENANT HOST_ID LEASE_S OUT
 
 A real ``ExecutionHost`` over the real Run Queue claims the one admitted run.
 Its drainer starts one real workspace container labelled for this host and run,
 loads the execution aggregate, reports ``claimed`` and stalls. When the host
 self-fences (renew raised ``RunLeaseLost``) the drain is cancelled; the stalled
 owner then tries its terminal commit from the aggregate it loaded and reports
-whether the event store refused it. Every report is one JSON line in OUT.
+whether the event store refused it. Its reconciler is production's: the
+``DockerDeadHostReaper`` and ``AggregateRunInterrupter``, so a live one of these
+fences, reaps and interrupts a dead peer's run. Every report is one JSON line in OUT.
 """
 
 from __future__ import annotations
@@ -23,16 +25,17 @@ from pathlib import Path
 import asyncpg
 from event_sourcing import EventStoreRepository
 
-from syn_adapters.execution_host import ExecutionHost, HostTiming
+from syn_adapters.execution_host import AggregateRunInterrupter, ExecutionHost, HostTiming
 from syn_adapters.execution_runs import PostgresExecutionRunQueue
 from syn_adapters.storage.legacy_tolerant_client import LegacyShapeTolerantGrpcClient
 from syn_adapters.storage.repositories import EventStoreExecutionEventStream, RepositoryAdapter
+from syn_api.services.dead_host_reaper import DockerDeadHostReaper
 from syn_domain.contexts.orchestration import (
     ORCHESTRATION_EVENT_EPOCH,
     InterruptExecutionCommand,
     WorkflowExecutionAggregate,
 )
-from syn_domain.contexts.orchestration.ports import ClaimedRun, ExecutorHost, FencedRun
+from syn_domain.contexts.orchestration.ports import ClaimedRun, ExecutorHost
 
 
 def _report(out: Path, **line: object) -> None:
@@ -45,7 +48,7 @@ class _StallingDrainer:
         self._executions, self._host_id, self._out = executions, host_id, out
 
     async def run_claimed(self, run: ClaimedRun) -> object:
-        name = f"agentic-ws-v12-{run.execution_id}"
+        name = f"agentic-ws-1310-{run.execution_id}"
         proc = await asyncio.create_subprocess_exec(
             "docker", "run", "-d", "--name", name,
             "--label", f"syn.host_id={self._host_id}",
@@ -78,16 +81,6 @@ class _StallingDrainer:
         return None
 
 
-class _NeverReaps:
-    async def reap(self, run: FencedRun) -> bool:
-        return False
-
-
-class _NeverInterrupts:
-    async def interrupt(self, run: FencedRun) -> None:
-        raise AssertionError("A reconciles nothing in V12")
-
-
 async def main(
     pg_url: str, schema: str, es: str, tenant: str, host_id: str, lease: str, out: str
 ) -> None:
@@ -115,8 +108,8 @@ async def main(
         host,
         capacity=1,
         drainer=_StallingDrainer(executions, host_id, Path(out)),
-        reaper=_NeverReaps(),
-        interrupter=_NeverInterrupts(),
+        reaper=DockerDeadHostReaper(),
+        interrupter=AggregateRunInterrupter(executions),
         streams=EventStoreExecutionEventStream(clients[1]),
         timing=HostTiming(loop_interval=timedelta(milliseconds=200), lease_ttl=ttl),
     ).run_until_drained()

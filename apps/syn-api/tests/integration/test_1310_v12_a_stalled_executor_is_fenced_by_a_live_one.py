@@ -1,6 +1,6 @@
 """V12 on real processes, Postgres, event store and Docker (#1310 1.5, ADR-072 D5).
 
-Executor A is a separate process (``_v12_stalled_executor.py``) running a real
+Executor A is a separate process (``_1310_executor_process.py``) running a real
 ``ExecutionHost``: it claims the admitted run, starts its labelled workspace
 container and stalls. It is SIGSTOPped past its Lease. Executor B, in this
 process, fences A's run, reaps it with the production ``DockerDeadHostReaper``
@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import json
 import os
 import shutil
 import signal
@@ -30,6 +29,7 @@ from typing import TYPE_CHECKING
 from uuid import uuid4
 
 import pytest
+from pydantic import BaseModel, ConfigDict
 
 from syn_adapters.execution_host import AggregateRunInterrupter
 from syn_adapters.execution_host.reconciler import Reconciler
@@ -59,18 +59,31 @@ pytestmark = [
     pytest.mark.skipif(shutil.which("docker") is None, reason="requires Docker"),
 ]
 
-_CHILD = Path(__file__).with_name("_v12_stalled_executor.py")
+_CHILD = Path(__file__).with_name("_1310_executor_process.py")
 _LEASE_S = 2.0
 _WAIT_S = 60
 
 
-def _lines(out: Path) -> list[dict[str, object]]:
-    return [json.loads(line) for line in out.read_text().splitlines()] if out.exists() else []
+class _Report(BaseModel):
+    """One JSON line the executor process wrote."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    event: str
+    run: ClaimedRun | None = None
+    container: str | None = None
+    error: str | None = None
 
 
-async def _until(out: Path, event: str) -> dict[str, object]:
+def _lines(out: Path) -> list[_Report]:
+    if not out.exists():
+        return []
+    return [_Report.model_validate_json(line) for line in out.read_text().splitlines()]
+
+
+async def _until(out: Path, event: str) -> _Report:
     async with asyncio.timeout(_WAIT_S):
-        while not (found := [line for line in _lines(out) if line["event"] == event]):
+        while not (found := [line for line in _lines(out) if line.event == event]):
             await asyncio.sleep(0.1)
     return found[0]
 
@@ -120,7 +133,8 @@ async def test_v12_a_stalled_executor_is_fenced_and_its_stale_commit_refused(
         infra.address, infra.tenant, a_host, str(_LEASE_S), str(out),
     )  # fmt: skip
     try:
-        claimed = ClaimedRun.model_validate((await _until(out, "claimed"))["run"])
+        claimed = (await _until(out, "claimed")).run
+        assert claimed is not None
         assert len(await _containers(a_host)) == 1
 
         os.kill(child.pid, signal.SIGSTOP)
@@ -141,7 +155,7 @@ async def test_v12_a_stalled_executor_is_fenced_and_its_stale_commit_refused(
         os.kill(child.pid, signal.SIGCONT)
         await _until(out, "self_fenced")
         refused = await _until(out, "stale_append_refused")
-        assert refused["error"], refused
+        assert refused.error, refused
     finally:
         with contextlib.suppress(ProcessLookupError):
             os.kill(child.pid, signal.SIGCONT)
@@ -152,7 +166,7 @@ async def test_v12_a_stalled_executor_is_fenced_and_its_stale_commit_refused(
         await infra.queue.renew(claimed)
     with pytest.raises(RunLeaseLost):
         await infra.queue.close(claimed)
-    assert [line["event"] for line in _lines(out)].count("claimed") == 1  # one workspace
+    assert [line.event for line in _lines(out)].count("claimed") == 1  # one workspace
     assert await _containers(a_host) == []
     types = await infra.event_types(execution_id)
     assert types.count("WorkflowExecutionStarted") == 1, types
