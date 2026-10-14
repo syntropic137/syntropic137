@@ -64,3 +64,5 @@ def test_the_pre_1947_percent_env_vars_still_reach_the_guard(env: pytest.MonkeyP
     assert thresholds.degraded_below_percent == 15.0
     assert thresholds.refuse_admission_below_bytes == 10 * GIB
     assert thresholds.refuse_basis == "SYN_DISK_REFUSE_ADMISSION_BELOW_GIB"
+    # With an explicit floor, lowering the run reserve would do nothing.
+    assert thresholds.lower_floor_with == "SYN_DISK_REFUSE_ADMISSION_BELOW_GIB"

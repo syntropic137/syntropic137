@@ -154,6 +154,12 @@ class DiskSettings(BaseSettings):
             f"SYN_EXECUTION_MAX_CONCURRENT={max_concurrent}"
         )
 
+    def admission_floor_setting(self) -> str:
+        """The setting that moves the admission floor as it is configured now."""
+        if self.refuse_admission_below_gib is not None:
+            return "SYN_DISK_REFUSE_ADMISSION_BELOW_GIB"
+        return "SYN_DISK_RUN_RESERVE_GIB (or set SYN_DISK_REFUSE_ADMISSION_BELOW_GIB)"
+
     def degraded_floor_gib(self, max_concurrent: int) -> float:
         """GiB free below which /health degrades; never below the admission floor."""
         refuse = self.admission_floor_gib(max_concurrent)

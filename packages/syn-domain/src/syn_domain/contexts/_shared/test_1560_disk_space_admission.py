@@ -71,6 +71,7 @@ _DEFAULTS = DiskThresholds.from_gib(
     refuse_admission_below_gib=12.0,
     degraded_below_gib=24.0,
     refuse_basis="SYN_DISK_RUN_RESERVE_GIB=3 per run x SYN_EXECUTION_MAX_CONCURRENT=4",
+    lower_floor_with="SYN_DISK_RUN_RESERVE_GIB (or set SYN_DISK_REFUSE_ADMISSION_BELOW_GIB)",
 )
 
 #: Percent floors only, as an operator who set the pre-#1947 env vars gets
@@ -167,8 +168,10 @@ def test_a_small_disk_below_the_gib_floor_refuses_whatever_its_percent() -> None
     assert "SYN_DISK_RUN_RESERVE_GIB=3 per run x SYN_EXECUTION_MAX_CONCURRENT=4" in message
     assert "delete finished workspace directories" in message
     assert "docker image prune" in message
-    assert "SYN_DISK_REFUSE_ADMISSION_BELOW_GIB" in message
+    assert "lower SYN_DISK_RUN_RESERVE_GIB (or set SYN_DISK_REFUSE_ADMISSION_BELOW_GIB)" in message
     assert "~/.syntropic137/.env" in message
+    # `restart` keeps the container's old environment; the value needs a recreate.
+    assert "`up -d`" in message
 
 
 @pytest.mark.parametrize(

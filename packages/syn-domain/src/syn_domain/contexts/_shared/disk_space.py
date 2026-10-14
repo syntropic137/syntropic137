@@ -93,12 +93,14 @@ class DiskThresholds:
 
     The two byte floors always apply. A percent floor applies only when set,
     and crossing either kind is enough. ``refuse_basis`` says where the
-    admission floor came from, for the operator reading a refusal.
+    admission floor came from, and ``lower_floor_with`` the setting that
+    actually moves it, for the operator reading a refusal.
     """
 
     refuse_admission_below_bytes: int
     degraded_below_bytes: int
     refuse_basis: str
+    lower_floor_with: str = "SYN_DISK_REFUSE_ADMISSION_BELOW_GIB"
     refuse_admission_below_percent: float | None = None
     degraded_below_percent: float | None = None
 
@@ -109,6 +111,7 @@ class DiskThresholds:
         refuse_admission_below_gib: float,
         degraded_below_gib: float,
         refuse_basis: str,
+        lower_floor_with: str = "SYN_DISK_REFUSE_ADMISSION_BELOW_GIB",
         refuse_admission_below_percent: float | None = None,
         degraded_below_percent: float | None = None,
     ) -> DiskThresholds:
@@ -116,6 +119,7 @@ class DiskThresholds:
             refuse_admission_below_bytes=int(refuse_admission_below_gib * GIB),
             degraded_below_bytes=int(degraded_below_gib * GIB),
             refuse_basis=refuse_basis,
+            lower_floor_with=lower_floor_with,
             refuse_admission_below_percent=refuse_admission_below_percent,
             degraded_below_percent=degraded_below_percent,
         )
@@ -173,14 +177,15 @@ class DiskCheck:
     @property
     def remedy(self) -> str:
         """What to do: free space, or move the floor if it is wrong for this host."""
-        floors = "SYN_DISK_REFUSE_ADMISSION_BELOW_GIB or SYN_DISK_RUN_RESERVE_GIB"
+        change = f"lower {self.thresholds.lower_floor_with}"
         if self.thresholds.refuse_admission_below_percent is not None:
-            floors += " (or unset SYN_DISK_REFUSE_ADMISSION_BELOW_PERCENT)"
+            change += " or unset SYN_DISK_REFUSE_ADMISSION_BELOW_PERCENT"
         return (
             f"To recover, free space on {self.path}: delete finished workspace "
             "directories there and run `docker image prune`, then retry. If the "
-            f"floor is wrong for this host, lower {floors} in {SELFHOST_ENV_FILE} "
-            "and restart the API."
+            f"floor is wrong for this host, {change} in {SELFHOST_ENV_FILE}, then "
+            "recreate the API container so it reads the new value (compose "
+            "`up -d`; a plain `restart` keeps the old environment)."
         )
 
 

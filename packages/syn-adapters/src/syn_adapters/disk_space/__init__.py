@@ -44,6 +44,7 @@ def build_disk_space_guard() -> DiskSpaceGuard:
             refuse_admission_below_gib=disk.admission_floor_gib(max_concurrent),
             degraded_below_gib=disk.degraded_floor_gib(max_concurrent),
             refuse_basis=disk.admission_floor_basis(max_concurrent),
+            lower_floor_with=disk.admission_floor_setting(),
             refuse_admission_below_percent=disk.refuse_admission_below_percent,
             degraded_below_percent=disk.degraded_below_percent,
         ),

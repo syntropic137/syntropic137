@@ -235,8 +235,10 @@ While `critical`, a new execution is refused with **507** before anything is
 written, with a detail naming the GiB free, the path, both floors and what to
 do. Recover by freeing space (finished workspace directories on the workspace
 volume, `docker image prune`) and retry. If the floor is wrong for your host,
-lower `SYN_DISK_REFUSE_ADMISSION_BELOW_GIB` or `SYN_DISK_RUN_RESERVE_GIB` in
-`~/.syntropic137/.env` and restart the API.
+set `SYN_DISK_REFUSE_ADMISSION_BELOW_GIB` (or lower `SYN_DISK_RUN_RESERVE_GIB`
+when that is unset) in `~/.syntropic137/.env`, then recreate the API container
+so it reads the new value: compose `up -d`, since a plain `restart` keeps the
+container's old environment.
 
 ## Tunnels (Optional)
 
