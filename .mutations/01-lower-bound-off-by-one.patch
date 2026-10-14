@@ -1,0 +1,13 @@
+diff --git a/scripts/mutation_probe.py b/scripts/mutation_probe.py
+index aced06a57..9481c01a0 100644
+--- a/scripts/mutation_probe.py
++++ b/scripts/mutation_probe.py
+@@ -5,7 +5,7 @@ from __future__ import annotations
+ 
+ def clamp(value: int, low: int, high: int) -> int:
+     """Clamp `value` into [low, high]."""
+-    if value < low:
++    if value < low - 1:
+         return low
+ 
+     if value > high:

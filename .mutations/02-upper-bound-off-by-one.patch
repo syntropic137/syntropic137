@@ -1,0 +1,11 @@
+diff --git a/scripts/mutation_probe.py b/scripts/mutation_probe.py
+index aced06a57..2bd9480d0 100644
+--- a/scripts/mutation_probe.py
++++ b/scripts/mutation_probe.py
+@@ -9,5 +9,5 @@ def clamp(value: int, low: int, high: int) -> int:
+         return low
+ 
+     if value > high:
+-        return high
++        return high + 1
+     return value
