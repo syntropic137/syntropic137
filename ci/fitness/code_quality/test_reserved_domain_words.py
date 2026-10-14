@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.unit
+pytestmark = pytest.mark.architecture
 
 #: Where the collision would happen. Each is a directory whose subject is the
 #: execution lifecycle, so `fork` there can only mean the retired concept.

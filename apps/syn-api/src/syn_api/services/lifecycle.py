@@ -37,6 +37,11 @@ from syn_api.services.admission_announcement import (
 from syn_api.services.credentials import validate_credentials
 from syn_api.services.degraded_reasons import DegradedReason
 from syn_api.services.disk_pager import start_disk_pager, stop_disk_pager
+from syn_api.services.execution_host_runner import (
+    resolve_previous_process,
+    start_execution_host,
+    stop_execution_host,
+)
 from syn_api.services.execution_posture import (
     api_memory_limit_mib,
     log_execution_concurrency_posture,
@@ -44,11 +49,7 @@ from syn_api.services.execution_posture import (
 from syn_api.services.feedback_lifecycle import init_ui_feedback, shutdown_ui_feedback
 from syn_api.services.health_probes import describe_codex_auth_health, describe_disk_health
 from syn_api.services.read_path_health import _judge_read_path
-from syn_api.services.reconciliation import (
-    cleanup_orphaned_containers,
-    reconcile_orphaned_executions,
-    reconcile_orphaned_sessions,
-)
+from syn_api.services.reconciliation import reconcile_orphaned_sessions
 from syn_api.services.request_latency_lifecycle import start_request_latency, stop_request_latency
 from syn_api.services.seeding import seed_offline_data
 from syn_api.services.subscription_health import render_subscription_health
@@ -206,10 +207,7 @@ async def _init_degradable_services(state: LifecycleState) -> None:
     # narrowing it; the started_before cutoff below is defence in depth.
     process_started_at = datetime.now(UTC)
     await reconcile_orphaned_sessions()
-    cleanup = await cleanup_orphaned_containers()
-    # AFTER the reap, and only if the reap can say it finished: "this execution
-    # is still running" is provably false only once every container is gone.
-    await reconcile_orphaned_executions(cleanup, started_before=process_started_at)
+    await resolve_previous_process(started_before=process_started_at)
 
     for entry in _SERVICE_REGISTRY:
         try:
@@ -227,6 +225,8 @@ async def _init_degradable_services(state: LifecycleState) -> None:
         )
         task.add_done_callback(_handle_recovery_task_exception)
         state._recovery_task = task
+    # Last: the claim loop drains through the processor wired above (ADR-072).
+    await start_execution_host()
 
 
 async def startup(
@@ -312,6 +312,7 @@ async def shutdown() -> Result[None, LifecycleError]:
     """
     try:
         _state._shutting_down = True
+        await stop_execution_host()
 
         if _state._recovery_task is not None:
             _state._recovery_task.cancel()

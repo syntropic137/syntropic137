@@ -127,4 +127,53 @@ the train decision is written below.
 
 ## Results
 
-Not run.
+Fourteen runs, suite v2, keyword judge, one run per case per arm.
+
+| | Control (`eval-verify-pinned-codex-v1`) | Treatment (`eval-verify-pinned-codex-checks-v1`) |
+|---|---|---|
+| Train defects caught | 1/3 | 2/3 (adds `scripted-agent-tests-not-in-ci`) |
+| Train controls blocked | 3/3 | 3/3 |
+| Holdout `replay-keeps-recorded-verdict` | caught | not caught |
+
+**Decision: not adopted yet.** On the primary metric the treatment catches
+one more train defect. The guard cannot be read. A guard only means
+something if the controls are clean, and these were not. Both arms blocked
+every control, and the blocks were true or could not be investigated:
+
+- `clean-staged-teardown` (exec-ca359d2d2e15 control, exec-479751d1afef
+  treatment): the `lock.locked()` waiter race at `providers/docker.py:715`
+  and `_remove` ignoring `docker rm`'s exit status at `:814`. AW#56 fixed
+  both (`e241fdf`). Both arms also named the shield/cancel at `:755`, which
+  #56 lists as not verified. A real defect, so these are correct blocks,
+  not false ones.
+- `clean-deployment-identity` (exec-5b26b73f76d9 control,
+  exec-c1037513be15 treatment): the probe at
+  `tests/integration/test_entrypoint_capabilities.py:4003` cannot tell an
+  absent variable from an empty one, and the task asked whether the tests
+  prove that. A true finding. It is unfixed on AW main.
+- `clean-event-type-identifiers` (exec-c56d8e6252c9 control,
+  exec-f21b0e538b82 treatment): `plugins/observability/hooks/git/install.py:22`
+  leaves the PR's new `post-checkout` hook out of `HOOKS`, so the installer
+  never installs it. Both arms also found that `SessionOutputStream` drops the
+  hook envelopes. The installer defect is true at the pin and unfixed on AW
+  main.
+
+The guard is therefore unmeasured. It has neither passed nor failed. The
+"reported beside the guard" breakdown (blocks resting only on check 2): none.
+The treatment filed a check-2 finding (no CI file at the pin) on all three
+controls, and each of those blocks also carries the non-CI findings the
+control arm filed. All six reports were read from the deployment's session
+store (suite README, "Rule 4"). The
+holdout went the other way (control caught, treatment not). With one run
+per arm, that is a single case, reported and not weighed.
+
+**Not done:** the fourteen runs are not in `launches.jsonl`, which holds
+only the v1 rows. So `score` cannot reproduce these figures from this
+repository. They are the orchestrator's keyword-judge results, as reported
+to suite v3. The one model alias `gpt-sol` was not checked per run here.
+
+**Next:** suite v3 (`suite.yaml` v3 note) reclassifies `clean-staged-teardown`
+as the defect `teardown-lock-waiter-race`, retires the other two controls,
+and adds README rule 4. No current merge passes rule 4, so v3 has no
+controls. The treatment is re-tested once a suite has rule-4 controls to
+guard it.
