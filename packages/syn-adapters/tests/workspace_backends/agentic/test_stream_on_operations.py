@@ -475,21 +475,31 @@ async def test_embedded_hook_jsonl_passes_through_unchanged() -> None:
 # embedded in a tool_result (ADR-043) - must come out identical, in order.
 
 
+@dataclass(frozen=True)
+class _Observation:
+    """One recorded observation; its data is kept as canonical JSON so it compares exactly."""
+
+    kind: str
+    session_id: str
+    data_json: str
+
+
 @dataclass
 class _Observations:
-    recorded: list[tuple[str, str, dict[str, object]]] = field(default_factory=list)
+    recorded: list[_Observation] = field(default_factory=list)
 
     async def record_observation(
         self,
         session_id: str,
         observation_type: ObservationType | str,
-        data: dict[str, object],
+        data: object,
         execution_id: str | None = None,
         phase_id: str | None = None,
         workspace_id: str | None = None,
     ) -> None:
         kind = getattr(observation_type, "value", str(observation_type))
-        self.recorded.append((kind, session_id, data))
+        data_json = json.dumps(data, sort_keys=True, default=str)
+        self.recorded.append(_Observation(kind, session_id, data_json))
 
 
 class _Workspace:
@@ -540,7 +550,7 @@ async def _recorded_lines(recording: Recording) -> list[str]:
 
 async def _process(
     lines: AsyncIterator[str],
-) -> tuple[list[tuple[str, str, dict[str, object]]], tuple[int, int, int]]:
+) -> tuple[list[_Observation], tuple[int, int, int]]:
     observations = _Observations()
     tokens = TokenAccumulator()
     processor = EventStreamProcessor(
@@ -576,7 +586,7 @@ async def test_a_recorded_run_yields_the_same_events_through_provider_pages(
     before = await _process(_direct(lines))
     after = await _process(adapter.stream(_HANDLE, ["claude"]))
 
-    kinds = [kind for kind, _, _ in before[0]]
+    kinds = [observation.kind for observation in before[0]]
     assert "git_commit" in kinds, "the embedded hook event is among those compared"
     assert kinds.count("tool_execution_started") >= 2
     assert after == before
