@@ -31,6 +31,11 @@ name: Mutation Evidence
 #   credentials (GITHUB_TOKEN, the Actions runtime token and so the cache).
 #   `cache-mode: none` would be belt and braces, but actionlint 1.7.12 does not
 #   know the key yet; add it once it does.
+# - EXCEPT with `docker: true`, for tests that drive the Docker daemon
+#   themselves (docker compose with host bind mounts). A container holding the
+#   Docker socket IS the host, so PR code runs on the runner host and could
+#   forge its own report. The guards below still hold; the verdict is evidence
+#   about honest PR code, not a security boundary. Default is the sandbox.
 # - That job has `contents: read`, no secrets, no persisted credentials and no
 #   uv cache. The `pull-requests: write` token exists only in the comment job,
 #   on a fresh runner, and posts the report the TRUSTED runner wrote.
@@ -57,6 +62,13 @@ on:
         required: false
         default: '.mutations/'
         type: string
+      docker:
+        description: >-
+          Run PR code on the runner host so tests can drive the Docker daemon
+          (weaker isolation; see SECURITY MODEL)
+        required: false
+        default: false
+        type: boolean
       dispatch_id:
         description: 'Optional nonce shown in the run name, so a dispatcher can find its own run'
         required: false
@@ -184,6 +196,7 @@ jobs:
           MUTATION_DIR: ${{ inputs.mutations_dir }}
           MUTATION_DISPATCH_ID: ${{ inputs.dispatch_id }}
           MUTATION_SHA: ${{ needs.resolve.outputs.sha }}
+          MUTATION_DOCKER: ${{ inputs.docker }}
           TERM: dumb
           NO_COLOR: "1"
           COLUMNS: "200"
@@ -191,10 +204,10 @@ jobs:
           TEST_TIMESCALEDB_PORT: "15432"
           TEST_EVENTSTORE_HOST: localhost
           TEST_EVENTSTORE_PORT: "55051"
-        run: >-
-          python -I scripts/mutation_evidence.py
-          run --root "$GITHUB_WORKSPACE/pr" --image "$SANDBOX_IMAGE"
-          --report "$RUNNER_TEMP/mutation-evidence.md"
+        run: |
+          if [ "$MUTATION_DOCKER" = true ]; then mode=(--host); else mode=(--image "$SANDBOX_IMAGE"); fi
+          python -I scripts/mutation_evidence.py run --root "$GITHUB_WORKSPACE/pr" \
+            --report "$RUNNER_TEMP/mutation-evidence.md" "${mode[@]}"
 
       - name: Job summary
         if: always()

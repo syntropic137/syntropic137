@@ -35,6 +35,16 @@ beyond a fixed list of test variables. PR code therefore cannot rewrite this
 script, the report it writes, the git hooks it runs, or reach the runner's
 credentials or the Actions cache.
 
+`--host` (workflow input `docker=true`) is the exception, for tests that drive
+the Docker daemon themselves (docker compose with bind mounts, as the broker
+integration suite does): a container holding the Docker socket IS the host, so
+PR code runs on the runner host. The remaining guards are the workflow's: no
+secrets, a read-only token, no persisted credentials, no cache, same-repo PRs,
+and a separate comment job. The limit: a PR written to forge its own verdict
+could. Host-mode evidence is for honest PR code, not a security boundary.
+
+A named test that SKIPS voids the baseline: it would pass under every mutant.
+
 What a survival means, and what it does not: these are the NAMED tests only. A
 narrow selection can prove a kill, never that the wider suite misses the
 mutant. And a kill proves the test is real, not that the fix is right for every
@@ -43,7 +53,7 @@ input shape production produces.
 Usage:
 
     mutation_evidence.py validate                      # inputs from env
-    mutation_evidence.py run --root PR --report FILE [--image IMAGE]
+    mutation_evidence.py run --root PR --report FILE (--image IMAGE | --host)
 """
 
 from __future__ import annotations
@@ -110,6 +120,7 @@ _SKIP_WALK: Final = frozenset({".git", ".venv", "node_modules"})
 
 _SUMMARY_LINE_RE: Final = re.compile(r"^(FAILED|ERROR) (\S+)")
 _PASSED_RE: Final = re.compile(r"\b(\d+) passed\b")
+_SKIPPED_RE: Final = re.compile(r"\b(\d+) skipped\b")
 
 
 class InputError(ValueError):
@@ -142,6 +153,7 @@ class PytestRun:
     failing: tuple[str, ...]
     passed: int
     seconds: float
+    skipped: int = 0
 
 
 @dataclass(frozen=True)
@@ -399,8 +411,8 @@ def clear_bytecode(root: Path) -> int:
     return removed
 
 
-def parse_pytest_output(output: str) -> tuple[tuple[str, ...], int]:
-    """(failing node ids from the -rfE summary, passed count)."""
+def parse_pytest_output(output: str) -> tuple[tuple[str, ...], int, int]:
+    """(failing node ids from the -rfE summary, passed count, skipped count)."""
     failing = tuple(
         dict.fromkeys(
             m.group(2) for line in output.splitlines() if (m := _SUMMARY_LINE_RE.match(line))
@@ -408,7 +420,9 @@ def parse_pytest_output(output: str) -> tuple[tuple[str, ...], int]:
     )
     passed_matches = _PASSED_RE.findall(output)
     passed = int(passed_matches[-1]) if passed_matches else 0
-    return failing, passed
+    skipped_matches = _SKIPPED_RE.findall(output)
+    skipped = int(skipped_matches[-1]) if skipped_matches else 0
+    return failing, passed, skipped
 
 
 def pytest_args(tests: tuple[str, ...]) -> list[str]:
@@ -416,7 +430,7 @@ def pytest_args(tests: tuple[str, ...]) -> list[str]:
     # integration test must run, not be deselected into a vacuous pass.
     return [
         "uv", "run", "--frozen", "pytest", "-m", "", "-p", "no:cacheprovider",
-        "--color=no", "-rfE", "--", *tests,
+        "--color=no", "-rfEs", "--", *tests,
     ]  # fmt: skip
 
 
@@ -449,12 +463,19 @@ def _host_command(args: list[str]) -> tuple[list[str], dict[str, str]]:
     return args, env
 
 
-def sync_dependencies(root: Path, sandbox: Sandbox) -> None:
-    """`uv sync` inside the sandbox: it runs PR-controlled build backends."""
-    cmd = sandbox.command(root, ["uv", "sync", "--all-extras", "--frozen"])
+def sync_dependencies(root: Path, sandbox: Sandbox | None) -> None:
+    """`uv sync`, in the sandbox when there is one: it runs PR-controlled
+    build backends."""
+    args = ["uv", "sync", "--all-extras", "--frozen"]
+    if sandbox is None:
+        cmd, env = _host_command(args)
+        cwd: Path | None = root
+    else:
+        cmd, env, cwd = sandbox.command(root, args), dict(os.environ), None
     proc = subprocess.run(
-        cmd, capture_output=True, text=True, check=False, timeout=SYNC_TIMEOUT_SECONDS
-    )
+        cmd, cwd=cwd, env=env, capture_output=True, text=True, check=False,
+        timeout=SYNC_TIMEOUT_SECONDS,
+    )  # fmt: skip
     print((proc.stdout + proc.stderr)[-5000:], flush=True)
     if proc.returncode != 0:
         raise RuntimeError(f"uv sync failed in the sandbox (exit {proc.returncode})")
@@ -477,8 +498,8 @@ def make_runner(sandbox: Sandbox | None) -> Runner:
             return PytestRun(-1, (), 0, time.monotonic() - started)
         output = proc.stdout + proc.stderr
         print(output[-20000:], flush=True)
-        failing, passed = parse_pytest_output(output)
-        return PytestRun(proc.returncode, failing, passed, time.monotonic() - started)
+        failing, passed, skipped = parse_pytest_output(output)
+        return PytestRun(proc.returncode, failing, passed, time.monotonic() - started, skipped)
 
     return run
 
@@ -561,6 +582,14 @@ def execute(root: Path, inputs: Inputs, sha: str, runner: Runner) -> Evidence:
         )
     elif evidence.baseline.passed == 0:
         evidence.baseline_detail = "baseline ran zero tests, evidence void"
+    elif evidence.baseline.skipped:
+        # A skipped test passes under every mutant, so it would turn real
+        # coverage into a SURVIVED (or hide a gap behind other kills). Usually
+        # a Docker-backed test in sandbox mode: dispatch with docker=true.
+        evidence.baseline_detail = (
+            f"baseline skipped {evidence.baseline.skipped} test(s), evidence void "
+            "(Docker-backed? dispatch with docker=true)"
+        )
     if evidence.baseline_detail:
         return evidence
 
@@ -648,7 +677,13 @@ def main(argv: list[str] | None = None) -> int:
     run = sub.add_parser("run", help="baseline + every patch against a PR checkout")
     run.add_argument("--root", type=Path, required=True, help="the PR checkout")
     run.add_argument("--report", type=Path, required=True)
-    run.add_argument("--image", default="", help="run PR code in this container image")
+    mode = run.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--image", help="run PR code in this container image (sandbox)")
+    mode.add_argument(
+        "--host",
+        action="store_true",
+        help="run PR code on the host, for tests that need the Docker daemon",
+    )
     args = parser.parse_args(argv)
     env = dict(os.environ)
 
@@ -667,10 +702,9 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     report: Path = args.report
     root: Path = args.root.resolve()
-    sandbox = Sandbox(args.image) if args.image else None
+    sandbox = None if args.host else Sandbox(args.image)
     try:
-        if sandbox is not None:
-            sync_dependencies(root, sandbox)
+        sync_dependencies(root, sandbox)
         evidence = execute(root, inputs, sha, make_runner(sandbox))
     except (InputError, RuntimeError, OSError, subprocess.TimeoutExpired) as exc:
         print(f"::error::{exc}")

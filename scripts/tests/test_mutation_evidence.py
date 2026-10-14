@@ -191,7 +191,10 @@ def test_parses_failing_ids_and_passed_count() -> None:
         "FAILED a/test_x.py::test_y - again\n"
         "1 failed, 2 passed, 1 error in 0.1s\n"
     )
-    assert parse_pytest_output(out) == (("a/test_x.py::test_y", "a/test_x.py::test_z"), 2)
+    assert parse_pytest_output(out) == (("a/test_x.py::test_y", "a/test_x.py::test_z"), 2, 0)
+    assert (
+        parse_pytest_output("SKIPPED [1] a.py:3: needs Docker\n1 passed, 2 skipped in 1s\n")[2] == 2
+    )
 
 
 @pytest.mark.parametrize(
@@ -353,6 +356,18 @@ def test_zero_test_baseline_voids_the_evidence(repo: Path) -> None:
     evidence = execute(repo, _inputs(), SHA, empty)
 
     assert "zero tests" in evidence.baseline_detail
+    assert not evidence.ok
+
+
+def test_skipped_baseline_voids_the_evidence(repo: Path) -> None:
+    def skipping(root: Path, tests: tuple[str, ...]) -> PytestRun:
+        return PytestRun(0, (), 1, 0.0, skipped=1)
+
+    evidence = execute(repo, _inputs(), SHA, skipping)
+
+    assert "skipped 1" in evidence.baseline_detail
+    assert "docker=true" in evidence.baseline_detail
+    assert evidence.results == []
     assert not evidence.ok
 
 
