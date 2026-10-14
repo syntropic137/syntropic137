@@ -32,4 +32,4 @@ task: >
   uses an old identifier or value, and whether an event is now emitted with a
   type its readers do not recognise.
 split: train
-retired: v3 - both arms blocked it and its findings were not available to v3 (the artifacts API was unreachable and no run id is recorded), so it is an uninvestigated candidate defect, not a control; the pin deletes test_git_hooks_integration.py. It scores in v2 as it ran
+retired: v3 - both arms blocked it (exec-c56d8e6252c9 control, exec-f21b0e538b82 treatment), and both named plugins/observability/hooks/git/install.py:22, whose HOOKS list omits the post-checkout hook this PR adds (795a270), so the documented installer never installs it. True at the pin and still unfixed on AW main (2f12be8), so it is a real defect with no fix, and so no defect case yet. It scores in v2 as it ran

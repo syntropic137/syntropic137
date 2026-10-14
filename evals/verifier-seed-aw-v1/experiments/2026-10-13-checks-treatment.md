@@ -146,16 +146,24 @@ every control, and the blocks were true or could not be investigated:
   both (`e241fdf`). Both arms also named the shield/cancel at `:755`, which
   #56 lists as not verified. A real defect, so these are correct blocks,
   not false ones.
-- `clean-deployment-identity` (exec-5b26b73f76d9): the probe at
+- `clean-deployment-identity` (exec-5b26b73f76d9 control,
+  exec-c1037513be15 treatment): the probe at
   `tests/integration/test_entrypoint_capabilities.py:4003` cannot tell an
   absent variable from an empty one, and the task asked whether the tests
   prove that. A true finding. It is unfixed on AW main.
-- `clean-event-type-identifiers`: no run id or finding was recorded where
-  suite v3 could read it, so it was not investigated.
+- `clean-event-type-identifiers` (exec-c56d8e6252c9 control,
+  exec-f21b0e538b82 treatment): `plugins/observability/hooks/git/install.py:22`
+  leaves the PR's new `post-checkout` hook out of `HOOKS`, so the installer
+  never installs it. Both arms also found that `SessionOutputStream` drops the
+  hook envelopes. The installer defect is true at the pin and unfixed on AW
+  main.
 
 The guard is therefore unmeasured. It has neither passed nor failed. The
-"reported beside the guard" breakdown (blocks resting only on check 2) is
-not given: the findings for two of the six blocks were not available. The
+"reported beside the guard" breakdown (blocks resting only on check 2): none.
+The treatment filed a check-2 finding (no CI file at the pin) on all three
+controls, and each of those blocks also carries the non-CI findings the
+control arm filed. All six reports were read from the deployment's session
+store (suite README, "Rule 4"). The
 holdout went the other way (control caught, treatment not). With one run
 per arm, that is a single case, reported and not weighed.
 

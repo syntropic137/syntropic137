@@ -42,28 +42,46 @@ missing.
 ## Rule 4: a control must have survived, not just waited (from v3)
 
 verifier-seed-v1's rules 1-3 hold, and in this suite they were not enough.
-Both arms of the checks-treatment A/B blocked all three v2 controls. For two
-of them the A/B brief summarised the findings, and each summarised finding was
-checked against the pin and is true; the full findings of all six blocks were
-never read (see the third bullet), so this says nothing about any other
-finding in them, and nothing at all about the third control:
+Both arms of the checks-treatment A/B blocked all three v2 controls. Every
+one of the six blocked reports was read in full and checked against its pin.
+The platform's artifacts route was unreachable, so the reports were read from
+the `verify.md` each run wrote, in its session transcript in the deployment's
+session store (`GET $AGENTIC_SESSION_STORE_URL/v1/sessions/search?tags=execution_id:<id>`,
+then `/v1/sessions/<session_id>`). None of the blocks was false. Each
+control's every non-CI finding is shared by both arms:
 
-- `clean-staged-teardown` was blocked for the `lock.locked()` waiter race
-  and `_remove` discarding `docker rm`'s exit status. AW#56 fixed both seven
-  weeks after the merge (`e241fdf`). It passed rule 3 because its functions
-  were quiet for 30 days. Nothing touched them until somebody read them
-  closely.
-- `clean-deployment-identity` was blocked for a probe (`${VAR:-unset}`) that
-  cannot tell an absent variable from an empty one, and its own task asked
-  whether the tests prove exactly that.
-- `clean-event-type-identifiers` was NOT investigated. v3 had neither its
-  run ids nor its findings: the artifacts API was unreachable from the
-  workspace that cut v3, and `launches.jsonl` records no v2 runs. Its block
-  may be true (the pin deletes `test_git_hooks_integration.py`) or false.
-  It is retired as an uninvestigated candidate defect, which keeps it out of
-  v3's false-block count without scoring it either way. **The per-control
-  decision the v3 brief asked for is incomplete for this case**; read both
-  arms' findings against the pin before it is reclassified, kept or restored.
+- `clean-staged-teardown` (exec-ca359d2d2e15 control, exec-479751d1afef
+  treatment). Both arms found three things: the `lock.locked()` waiter race
+  (`providers/docker.py:715`), `_remove` discarding `docker rm`'s exit status
+  (`:814`), and a second cancellation releasing the lock while the shielded
+  removal is still running (`:755`). AW#56 fixed the first two seven weeks
+  after the merge (`e241fdf`). It passed rule 3 because its functions were
+  quiet for 30 days. Nothing touched them until somebody read them closely.
+  It is reclassified as `teardown-lock-waiter-race`. The shield finding has
+  no fix, so it is not expected.
+- `clean-deployment-identity` (exec-5b26b73f76d9 control, exec-c1037513be15
+  treatment). Both arms found that the probe at
+  `tests/integration/test_entrypoint_capabilities.py:4003`
+  (`${VAR:-unset}`) cannot tell an absent variable from an empty one. Its
+  own task asked whether the tests prove exactly that. The finding is true
+  and still unfixed on AW main, so the case is retired with no defect case.
+- `clean-event-type-identifiers` (exec-c56d8e6252c9 control,
+  exec-f21b0e538b82 treatment). Both arms found two things:
+  - `plugins/observability/hooks/git/install.py:22`: `HOOKS` omits the
+    `post-checkout` hook this PR adds (`795a270`), so neither documented
+    install mode installs it. At the pin, `HOOKS` is `["post-commit",
+    "post-merge", "post-rewrite", "pre-push"]` beside a `post-checkout`
+    file. The list is unchanged on AW main (`2f12be8`).
+  - `providers/claude_cli/event_parser.py:155`: `SessionOutputStream`
+    dispatches on `type`. The hook envelopes the PR now merges into the
+    Docker stream carry `event_type`, so they are dropped.
+
+  The installer finding is a real defect, and it has no fix. The case is
+  retired as a candidate defect, to be added once a fix exists.
+
+The treatment's further findings (absent CI, at all three pins; test
+adequacy, at event-type) sit beside these shared ones. None of its blocks
+rests on check 2 alone.
 
 Thirty quiet days means nobody changed the code. In a repository that moves
 this fast, it does not mean anybody read it again. So from v3, a control must

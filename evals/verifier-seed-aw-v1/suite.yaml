@@ -93,11 +93,15 @@
 #         the task asks whether the tests prove exactly that. A true finding,
 #         not a false block; still unfixed on AW main, so retired with no
 #         defect case (verifier-seed-v1 README: "once a fix exists").
-#       clean-event-type-identifiers: blocked by both arms per the A/B
-#         summary, but no run id or finding reached v3 (the artifacts API was
-#         unreachable from the workspace that built it, and launches.jsonl
-#         holds only v1 rows). Uninvestigated, so it cannot be kept as a
-#         control: retired as a candidate defect.
+#       clean-event-type-identifiers (exec-c56d8e6252c9 control,
+#         exec-f21b0e538b82 treatment): both arms named
+#         plugins/observability/hooks/git/install.py:22, whose HOOKS list
+#         omits the post-checkout hook the PR adds (795a270), and the
+#         SessionOutputStream parser dropping the hook envelopes the PR merges
+#         into the Docker stream. The installer defect is true at the pin and
+#         unfixed on AW main (2f12be8): a real defect with no fix, retired
+#         with no defect case. The six reports were read from the session
+#         store (README "Rule 4"); the artifacts API was unreachable.
 #     Replacement controls: README rule 4 (new in v3) was applied to every
 #     mainline merge on AW main (37f210b, 2026-10-13) at least 30 days old.
 #     None qualifies, so v3 has NO clean controls and cannot measure false
