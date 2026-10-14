@@ -12,8 +12,15 @@ rewritten: ``write_snapshot`` refuses an epoch that already has one. So a
 schema change leaves exactly one way to green, which is to bump the epoch and
 snapshot the new one.
 
-What is compared is what a reader accepts (the validation schema), with titles,
-descriptions and examples removed: a docstring edit changes no payload.
+Each event is recorded with what a reader decodes it BY as well as what it
+accepts: its ``event_type`` and ``schema_version`` (the ``event_version``
+written to the store and keyed on by ``resolve_event_class``, ESP ADR-027), and
+the ``@event`` version string, which declares that version. Renaming a type or
+bumping its version leaves an older Executor with an event it cannot resolve
+(``UnknownEventVersionError``), even when no field changed.
+
+What is accepted is the validation schema, with titles, descriptions and
+examples removed: a docstring edit changes no payload.
 
 Regenerate after bumping the epoch::
 
@@ -28,6 +35,7 @@ from typing import TYPE_CHECKING
 
 from ci.fitness._event_discovery import discover_event_classes
 from ci.fitness.conftest import repo_root
+from event_sourcing.decorators.events import get_event_metadata
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -79,10 +87,25 @@ def _without_annotations(schema: JsonValue, *, named: bool = False) -> JsonValue
     }
 
 
-def current_schemas() -> dict[str, JsonValue]:
-    """The schema each orchestration event accepts today, by class name."""
+def _identity(model: type[BaseModel]) -> dict[str, JsonValue]:
+    metadata = get_event_metadata(model)
+    if metadata is None:
+        msg = f"{model.__name__} was discovered as an event but carries no @event metadata"
+        raise TypeError(msg)
     return {
-        name: _without_annotations(model.model_json_schema(mode="validation"))
+        "event_type": metadata.event_type,
+        "version": metadata.version,
+        "schema_version": getattr(model, "schema_version", None),
+    }
+
+
+def current_schemas() -> dict[str, JsonValue]:
+    """How each orchestration event is identified and what it accepts today, by class name."""
+    return {
+        name: {
+            **_identity(model),
+            "schema": _without_annotations(model.model_json_schema(mode="validation")),
+        }
         for name, model in _event_models().items()
     }
 

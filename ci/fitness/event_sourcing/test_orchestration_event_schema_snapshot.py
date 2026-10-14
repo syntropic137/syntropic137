@@ -1,7 +1,8 @@
 """Fitness function: no orchestration event schema changes without an epoch bump.
 
-ADR-072 D9 (V13 in the #1310 plan). The schema of every orchestration event
-must equal the snapshot recorded for the current ``ORCHESTRATION_EVENT_EPOCH``.
+ADR-072 D9 (V13 in the #1310 plan). The type, version and schema of every
+orchestration event must equal the snapshot recorded for the current
+``ORCHESTRATION_EVENT_EPOCH``.
 A whole-codebase static property, so it lives here and not beside one event.
 
 The release-time half, which loads the previous release's models and parses
@@ -43,7 +44,7 @@ def test_orchestration_event_schemas_match_the_current_epoch_snapshot() -> None:
     changed = sorted(n for n in current.keys() & snapshot.keys() if current[n] != snapshot[n])
 
     assert not (added or removed or changed), (
-        f"Orchestration event schemas differ from Event Epoch "
+        f"Orchestration event types, versions or schemas differ from Event Epoch "
         f"{ORCHESTRATION_EVENT_EPOCH}'s snapshot: changed={changed}, added={added}, "
         f"removed={removed}. An older Executor would claim runs whose events it "
         f"cannot read. {_FIX}"
