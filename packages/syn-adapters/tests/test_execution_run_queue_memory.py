@@ -22,7 +22,7 @@ class _Clock:
 
 
 def _host(host_id: str) -> ExecutorHost:
-    return ExecutorHost(host_id=host_id, container_id="c", generation="g1", epoch=1)
+    return ExecutorHost(host_id=host_id, container_id=f"c-{host_id}", generation="g1", epoch=1)
 
 
 async def _queue_with(clock: _Clock, capacity: int, *ids: str) -> InMemoryExecutionRunQueue:
@@ -100,3 +100,30 @@ async def test_expired_lease_is_fenced_never_reclaimed() -> None:
     await queue.close_interrupted(fenced[0])
     counts = await queue.in_use()
     assert (counts.interrupted, counts.claimed) == (1, 0)
+
+
+async def test_reconciling_adopts_only_from_a_reconciler_that_left_and_a_restart_leaves() -> None:
+    """Mirrors the Postgres takeover and restart predicates (ADR-072 D5)."""
+    clock = _Clock()
+    queue = await _queue_with(clock, 1, "a")
+    for host in ("rec-1", "rec-2"):
+        await queue.register(_host(host), 1)
+        await queue.heartbeat(host)
+    assert await queue.others_live("rec-2")
+    assert await queue.claim("h1") is not None
+    clock.now += timedelta(minutes=5)
+    (fenced,) = await queue.fence_expired("rec-1")
+    assert await queue.reconciling("rec-2") == []
+    # rec-1 restarts in its container: the new process retires it.
+    await queue.register(
+        ExecutorHost(host_id="rec-1b", container_id="c-rec-1", generation="g1", epoch=1), 1
+    )
+    (adopted,) = await queue.reconciling("rec-2")
+    assert (adopted.reconciler, adopted.token) == ("rec-2", fenced.token + 1)
+    with pytest.raises(RunLeaseLost):
+        await queue.mark_reaped(fenced)
+    await queue.mark_reaped(adopted)
+    (again,) = await queue.reconciling("rec-2")
+    assert again.reaped
+    await queue.close_interrupted(again)
+    assert await queue.reconciling("rec-2") == []
