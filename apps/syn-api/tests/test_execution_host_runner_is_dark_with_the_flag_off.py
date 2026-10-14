@@ -45,6 +45,7 @@ async def test_flag_on_starts_one_host_and_stop_cancels_it(
     monkeypatch.setattr(runner, "get_workflow_execution_repository", MagicMock())
     monkeypatch.setattr(runner, "get_execution_event_stream", MagicMock())
     monkeypatch.setattr(runner, "ExecutionHost", built)
+    monkeypatch.setattr(runner, "reap_unlabelled_if_alone", AsyncMock())
     await runner.start_execution_host()
     await runner.start_execution_host()  # idempotent while running
     await asyncio.wait_for(started.wait(), 1)
@@ -81,6 +82,7 @@ async def test_the_production_startup_and_shutdown_drive_the_host_only_with_the_
     built = MagicMock()
     built.return_value.run_until_drained = lambda: asyncio.Event().wait()
     monkeypatch.setattr(runner, "ExecutionHost", built)
+    monkeypatch.setattr(runner, "reap_unlabelled_if_alone", AsyncMock())
     try:
         await lifecycle._init_degradable_services(lifecycle.LifecycleState())
         assert (reaped.await_count, reconciled.await_count) == ((0, 0) if queue_on else (1, 1))

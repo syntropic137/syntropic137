@@ -95,6 +95,17 @@ class PostgresExecutionRunQueue:
             )
         return draining == "true"
 
+    async def others_live(self, host_id: str) -> bool:
+        async with self._pool.acquire() as conn:
+            live = await conn.fetchval(
+                """SELECT EXISTS (SELECT 1 FROM executor_hosts h
+                JOIN execution_budget b ON b.executor_id=h.host_id WHERE h.host_id<>$1
+                AND b.heartbeat_at>clock_timestamp()-$2::double precision*interval '1 second')""",
+                host_id,
+                self._stale_seconds,
+            )
+        return bool(live)
+
     async def reserve(self, execution_id: str, writer_epoch: int, *, is_resume: bool) -> bool:
         async with self._pool.acquire() as conn:
             inserted = await conn.fetchval(

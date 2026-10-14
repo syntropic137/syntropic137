@@ -98,6 +98,13 @@ class InMemoryExecutionRunQueue(InMemoryAdapter):
         entry = self._hosts.get(host_id)
         return entry is not None and entry.registered and entry.draining
 
+    async def others_live(self, host_id: str) -> bool:
+        cutoff = self._now() - self._stale
+        return any(
+            other_id != host_id and entry.registered and entry.heartbeat_at > cutoff
+            for other_id, entry in self._hosts.items()
+        )
+
     async def reserve(self, execution_id: str, writer_epoch: int, *, is_resume: bool) -> bool:
         if execution_id in self._runs:
             return False

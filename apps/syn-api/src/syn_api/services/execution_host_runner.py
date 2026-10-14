@@ -34,6 +34,7 @@ from syn_api.services.reconciliation import (
     cleanup_orphaned_containers,
     reconcile_orphaned_executions,
 )
+from syn_api.services.unlabelled_containers import reap_unlabelled_if_alone
 from syn_domain.contexts.orchestration import ORCHESTRATION_EVENT_EPOCH
 from syn_domain.contexts.orchestration.ports import ExecutorHost
 from syn_shared.settings import get_settings
@@ -94,6 +95,7 @@ async def start_execution_host() -> None:
         interrupter=AggregateRunInterrupter(get_workflow_execution_repository()),
         streams=get_execution_event_stream(),
     )
+    await reap_unlabelled_if_alone(queue, host.host_id)
     _host_task = asyncio.create_task(executor.run_until_drained(), name="execution-host")
     _host_task.add_done_callback(_report_exit)
     logger.info("ExecutionHost %s claiming from the Run Queue", host.host_id)

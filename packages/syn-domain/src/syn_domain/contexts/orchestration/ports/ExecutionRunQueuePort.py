@@ -119,6 +119,10 @@ class ExecutionRunQueue(Protocol):
 
     async def is_draining(self, host_id: str) -> bool: ...
 
+    async def others_live(self, host_id: str) -> bool:
+        """Whether any executor other than ``host_id`` has a live heartbeat (D6)."""
+        ...
+
     async def reserve(self, execution_id: str, writer_epoch: int, *, is_resume: bool) -> bool:
         """Insert an ``opening`` row. False when the execution already has one."""
         ...
