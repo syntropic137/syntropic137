@@ -156,6 +156,7 @@ class Writer:
     stop: asyncio.Event = field(default_factory=asyncio.Event)
     warmed_up: asyncio.Event = field(default_factory=asyncio.Event)
     inserted: int = 0
+    pid: int = 0
 
     def _next(self, i: int) -> Row:
         # Alternate between sessions early and late in the backfill's order,
@@ -174,6 +175,7 @@ class Writer:
         import asyncpg
 
         conn = await asyncpg.connect(self.dsn)
+        self.pid = conn.get_server_pid()
         try:
             while not self.stop.is_set():
                 async with self.turn:
@@ -207,22 +209,33 @@ class Probe:
                 rows.append(_turn(session, 20_000 + self._n, model))
         return rows
 
+    async def _diagnose(self, who: str, pid: int) -> None:
+        """Record what ``pid`` is waiting on, and on whom, while it still waits."""
+        try:
+            seen = await asyncio.wait_for(
+                self.diag.fetchrow(_WAITING_ON_SQL, pid), timeout=PROBE_HARD_TIMEOUT_S
+            )
+        except Exception as exc:  # a diagnosis must never mask the failure itself
+            self.last_wait = f"{who} could not be diagnosed: {exc!r}"
+            return
+        assert seen is not None
+        self.last_wait = (
+            f"{who} (pid {pid}) waiting on {seen['waiting']}; blocked by {seen['blockers']}"
+        )
+
     async def _insert(self, rows: list[Row]) -> None:
-        """One COPY, never queued behind the writer, bounded on every wait."""
-        await asyncio.wait_for(self.writer.turn.acquire(), timeout=PROBE_HARD_TIMEOUT_S)
+        """One COPY, never concurrent with a writer insert, bounded on every wait."""
+        acquiring = asyncio.create_task(self.writer.turn.acquire())
+        done, _ = await asyncio.wait({acquiring}, timeout=PROBE_DIAGNOSE_AFTER_S)
+        if not done:
+            # The writer's own insert is stuck: whatever holds it is the blocker.
+            await self._diagnose("the background writer's insert", self.writer.pid)
+        await asyncio.wait_for(acquiring, timeout=PROBE_HARD_TIMEOUT_S)
         try:
             copying = asyncio.create_task(copy_rows(self.conn, rows))
             done, _ = await asyncio.wait({copying}, timeout=PROBE_DIAGNOSE_AFTER_S)
             if not done:
-                with contextlib.suppress(Exception):
-                    seen = await asyncio.wait_for(
-                        self.diag.fetchrow(_WAITING_ON_SQL, self.conn.get_server_pid()),
-                        timeout=PROBE_HARD_TIMEOUT_S,
-                    )
-                    if seen is not None:
-                        self.last_wait = (
-                            f"waiting on {seen['waiting']}; blocked by {seen['blockers']}"
-                        )
+                await self._diagnose("the probe insert", self.conn.get_server_pid())
             await asyncio.wait_for(copying, timeout=PROBE_HARD_TIMEOUT_S)
         finally:
             self.writer.turn.release()
@@ -262,7 +275,7 @@ class Probe:
                 )
                 held = [f"{r['locktype']} {r['relation']} {r['mode']}" for r in records]
             pytest.fail(
-                f"an insert into {batch} waited on the backfill's open batch transaction "
+                f"an insert into {batch} waited for the backfill's open batch transaction "
                 f"(lock_timeout {PROBE_LOCK_TIMEOUT}, backfill pid {pid}): {self.last_wait}. "
                 "The backfill held: " + "; ".join(held)
             )
