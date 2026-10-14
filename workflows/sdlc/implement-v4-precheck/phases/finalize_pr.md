@@ -70,7 +70,52 @@ the first-pass SHA is the pre-fix head. If they differ, something pushed over
 the branch after verification: leave the PR as a draft, comment saying so with
 both SHAs, and stop.
 
+## Read the handoffs
+
+Every verification report in this workflow ends its evidence precheck with a
+`Precheck:` line and a `## Handed to the orchestrator` section. They list what
+a repair round could not close: `FLAKE/INFRA` (a check to rerun once),
+`ORCHESTRATOR_EVIDENCE` (a command that needs Docker, a database or a real
+store), and `CI_GAP` (a retarget, or a `.github/workflows/` patch a workspace
+cannot push). Read that section from `reverify.md`. Do not merge it with the
+sections of older rounds: each round carries forward the handoffs still open
+and drops the closed ones.
+
+A handoff is **open** when the final report lists it, or when the final
+report has no `## Handed to the orchestrator` section at all. A report that
+says nothing about handoffs has not shown that there are none. A final report
+whose section is the single word `None.` has no open handoffs.
+
+## If CERTIFIED and a handoff is open
+
+The review found nothing a repair round could fix, and something is still
+unproven, so the PR is **not** ready. Keep it a **draft**: never call `gh pr
+ready` here.
+
+1. Act on the handoffs you can, once each:
+   - a `CI_GAP` retarget: `gh pr edit <n> --base <default-branch>`;
+   - a `FLAKE/INFRA` rerun the report did not already get accepted:
+     `gh run rerun <run-id> --failed`. If the report says the same step
+     already failed after a rerun, do not rerun it again: that is a defect on
+     the base, and the comment says so.
+
+   A refusal (HTTP 403, "Resource not accessible by integration") is expected
+   for a rerun, because the App token is documented as `Actions: Read`. Quote
+   it verbatim and carry on. It is not a failure of this phase.
+2. Rewrite the PR description as `## If CERTIFIED` describes, and add the
+   handoff table under a `## Handed to the orchestrator` heading.
+3. Post one comment (`gh pr comment <n>`) that opens with
+   `Certified pending orchestrator evidence`. Give the head SHA, then the
+   handoff table row for row, with the exact command or patch for each item,
+   what you did about each one in step 1 and its output, and the path of any
+   `artifacts/output/ci-coverage.patch` the report names. Whoever runs those
+   commands and sees them pass marks the PR ready. That is a person's
+   decision, not this run's.
+
 ## If CERTIFIED
+
+Follow this section only when no handoff is open (see `## Read the
+handoffs`). Otherwise use `## If CERTIFIED and a handoff is open`.
 
 1. Rewrite the PR description (`gh pr edit <n> --body-file <file>`). It must
    contain:
@@ -99,7 +144,9 @@ Keep it a **draft**. Do not close it. Post one comment (`gh pr comment <n>`)
 that names the blocking finding, quotes what `reverify.md` says would close it,
 gives the head SHA it applies to, and says how many repair rounds ran (`2 of 2`
 means the bound was reached; another round is a person's decision, not this
-run's). The run then completes with unresolved findings, and a person continues
+run's). If the report also lists open handoffs, put its handoff table in the
+same comment, so the blocker and what the orchestrator owes are on one
+thread. The run then completes with unresolved findings, and a person continues
 it by resuming it: the resume re-runs round 2's fix against this comment, then
 its re-verification and this phase. A draft carrying a known defect with the
 blocker written on it is recoverable; a branch nobody can find is not.
@@ -112,6 +159,9 @@ Do not merge. Never push, never force push, never rebase.
 nothing under `artifacts/output/` FAILS - after the work is done, and the
 work is lost with the workspace.** Write the file before you finish.
 
-First line: `READY` or `DRAFT`. Then `Repair rounds: N of 2`, the PR URL, the
+First line: `READY` or `DRAFT`. Then `Repair rounds: N of 2`, then the final
+report's `Precheck:` line copied verbatim (or `Precheck: missing` if it has
+none), then the PR URL, the
 branch, the head SHA, and - if it stayed a draft - the blocking finding in one
-sentence (or `FINAL_REPORT_UNUSABLE` and why).
+sentence (or `FINAL_REPORT_UNUSABLE` and why, or `Certified pending
+orchestrator evidence` and the handoffs).

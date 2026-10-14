@@ -66,6 +66,163 @@ result after this point would describe the wrong code, and a green run against
 the wrong tree is worse than a red one because it certifies nothing while looking
 like proof.
 
+## Evidence precheck: classify before you block
+
+Run this right after the checkout above, before the gates. It sorts every
+problem with the evidence into one of four classes, and **only one of them,
+`REPAIRABLE`, can make this review BLOCKED**. Under v3, repair rounds kept
+going to things a fix phase in a workspace cannot change: a head CI never ran
+on, a check that fails in files the PR did not touch, a registry rate limit,
+a package missing from the CI matrix, and Docker or database evidence that no
+workspace can produce. Each of those cost a full fix plus re-verify and came
+back still open. The precheck hands them to `finalize_pr` instead, which
+keeps the PR a draft and posts them for whoever can act.
+
+| Class | What it is | Who closes it | Repair round? |
+|---|---|---|---|
+| `REPAIRABLE` | a fix phase can close it by changing and pushing this branch | the next `fix` | yes: it is BLOCKING |
+| `FLAKE/INFRA` | a red or missing check whose cause is outside this diff | one rerun, by `finalize_pr` or the orchestrator | never |
+| `ORCHESTRATOR_EVIDENCE` | evidence that needs Docker, a database or a real store, which this workspace lacks | the orchestrator, running the exact command you give | never |
+| `CI_GAP` | CI cannot see this PR until something outside the branch changes: the PR's base, or `.github/workflows/`, which a workspace credential cannot push | the orchestrator, with the command or patch you give | never |
+
+**A handoff never makes a PR ready.** `finalize_pr` leaves a PR with any open
+handoff as a draft, so putting a real defect in a handoff class does not ship
+it. It parks the defect in front of a person who has less context than you
+do. **A class whose required evidence (below) you cannot show is
+`REPAIRABLE`.**
+
+### 1. The PR's head, base and checks
+
+```
+gh pr view <n> --json headRefOid,mergeStateStatus,baseRefName,statusCheckRollup
+gh repo view --json defaultBranchRef --jq .defaultBranchRef.name
+```
+
+`headRefOid` must equal `git rev-parse HEAD`. If it does not, stop as the
+checkout section says. Then:
+
+- **`mergeStateStatus` is `DIRTY`** (it conflicts with its base, so
+  `pull_request` CI never ran on it): `REPAIRABLE`, "merge main first". The fix
+  is `git fetch origin && git merge origin/<base>`, resolve, push. That is
+  never a rebase and never a force push. Do not wait on CI for this head, as
+  nothing is coming.
+- **`baseRefName` is not the default branch** (for example, a PR stacked on a
+  branch that has since merged): `CI_GAP`, "retarget". The command is
+  `gh pr edit <n> --base <default>`. CI that ran against the old base says
+  nothing about the merge into the default branch.
+- **`statusCheckRollup` is empty**, for neither reason above: re-read it once
+  after your gates have run, since they take minutes and CI may only have
+  been queued. If it is still empty, run `gh run list --commit <sha> --json
+  name,status,conclusion,event`. Report `CI never ran: <reason>`, with the
+  reason taken from that output and not guessed. Classify it `FLAKE/INFRA`
+  when the cause is the platform (Actions outage, a run that never started)
+  and `CI_GAP` when the cause is configuration outside the branch. Every check
+  that CI would have settled is then unsettled. Say so; never call it passed.
+
+### 2. Every new or changed test file has a CI job that runs it
+
+```
+git diff --name-only --diff-filter=AM origin/<base>...HEAD
+```
+
+For every test file in that list, name the CI job that runs it. Read the
+job's command in `.github/workflows/` (read it, never edit it) and show the
+file's progress line in that job's log on this SHA, as the CI section below
+describes. A test that no PR-gating job collects is a blocking finding
+(`no CI job runs <file>`). Typical causes are a package missing from a job's
+matrix, a path no job's command reaches, or a marker no job selects. Classify
+it by where the fix lives:
+
+- **in the branch** (add the marker, move the file under a collected path,
+  add it to the package's own test config): `REPAIRABLE`.
+- **in `.github/workflows/`**: `CI_GAP`. The workspace credential refuses any
+  push that touches that directory, so a fix round cannot close it. Write the
+  change as a unified diff to `artifacts/output/ci-coverage.patch` and name it
+  in the handoff.
+
+This check and the checks treatment in
+`workflows/evals/verify-pinned-codex-checks/` ask the same question.
+`EXPERIMENT.md` counts these findings separately so the two can be told apart.
+
+### 3. A failing check whose cause is outside this diff
+
+For every check that failed on this SHA, read the failing step, not the
+summary:
+
+```
+gh run view --job <job-id> --log-failed | tail -n 80
+git diff --name-only origin/<base>...HEAD
+```
+
+It is `FLAKE/INFRA` only when **all** of these hold, and you show each one:
+
+1. The failure is in a step, file or test that this PR's diff does not
+   contain. Name the files in the failure (the test file, the traceback
+   frames, the build target).
+2. None of those files imports, builds or reads anything in the diff. A test
+   the PR did not edit that exercises code the PR did edit is the PR's
+   failure, and is `REPAIRABLE`.
+3. The failure matches a known flake or infrastructure class (see
+   `.claude/skills/devops/agent_ci_triage.md` step 4: apt or DNS failures,
+   corepack/pnpm fetch, `UND_ERR_SOCKET`, registry 5xx or rate limit), or the
+   same check fails the same way on the base branch.
+4. It has not already failed on this same step after a rerun. **Failing twice
+   on the same step is a defect, not a flake.** Report it as a defect on the
+   base, still never as a repair round on this PR: this branch did not cause
+   it and cannot fix it. The PR stays a draft until the base is green.
+
+Request one rerun yourself: `gh run rerun <run-id> --failed`. This workspace's
+GitHub App token is documented as `Actions: Read`, so a refusal (HTTP 403,
+"Resource not accessible by integration") is expected and is not an error. Put
+the command and the refusal, verbatim, in the handoff. If the rerun is
+accepted, wait on it as the CI section below says (`timeout 25m gh pr checks
+<n> --watch --interval 60`) and read it again. Green on this SHA closes the
+item.
+
+### 4. Evidence this workspace cannot produce
+
+A check whose evidence needs Docker, a database, a real event store or object
+store, or any other service this workspace does not have, and which CI does
+not settle on this SHA (read as the CI section below says), is
+`ORCHESTRATOR_EVIDENCE`. Give:
+
+- the exact command, run from the repository root at this SHA, including any
+  `just` recipe or compose profile it needs;
+- what output proves it: the test count, the line, the exit code;
+- the changed files it covers.
+
+It is never `BLOCKING` and never a repair round, because a fix phase in a
+workspace cannot run it any more than you can. Code you *can* run here,
+because it needs no such service, is not this class: run it.
+
+### Write it down
+
+Your report carries exactly one line of this form, counting the items under
+each class:
+
+```
+Precheck: REPAIRABLE=<n> FLAKE_INFRA=<n> ORCHESTRATOR_EVIDENCE=<n> CI_GAP=<n>
+```
+
+It also carries a `## Handed to the orchestrator` section. That section holds
+a table with one row per open non-`REPAIRABLE` item, or the single word
+`None.`:
+
+| Class | Item | Exact command or patch | What closes it |
+|---|---|---|---|
+
+Every `REPAIRABLE` item also goes under BLOCKING, written as the instruction
+a fix phase can act on (see below). Your verdict is `blocked` if and only if
+at least one `REPAIRABLE` item is open. When every open item is a handoff, the
+verdict is `certified`: there is nothing left for a repair round to do.
+`finalize_pr` reads the handoff table and keeps the PR a draft until those
+items close.
+
+In a re-verification, carry forward every handoff in the report the fix
+round acted on, and run the precheck again on the candidate SHA. A fix push
+starts new CI, so a flake may have cleared, and a handoff that is now closed
+leaves the table, with the evidence that closed it.
+
 ## Run the gates
 
 **The gates belong to the repository you are verifying, not to this prompt.**
@@ -205,8 +362,9 @@ the outcome:
   `timeout 25m gh pr checks <n> --watch --interval 60`, then read it again as
   above. Do not write your own `sleep` loop. If `timeout` exits 124, CI did not
   finish in time: report the check open and pending, not passed.
-- **Failed on this SHA:** it IS a blocker. Put it under BLOCKING with the failing
-  job's link and a log excerpt from
+- **Failed on this SHA:** it IS a blocker, unless the evidence precheck
+  showed it is `FLAKE/INFRA`, in which case it is a handoff. Put it under
+  BLOCKING with the failing job's link and a log excerpt from
   `gh run view --job <job-id> --log-failed | tail -n 80`.
 - **Skipped by design for this PR:** CI deliberately does not run the job for
   this PR's base or event. Prove it from the job's `if:` condition in
@@ -228,6 +386,9 @@ the outcome:
     workspace can, or cite another CI job that ran them on this SHA, read as
     above. Without either, it IS a blocker: put it under BLOCKING with the job
     name, the changed files it covers, and the run that would close it.
+    The exception is a run that needs Docker, a database or a real store,
+    which no fix round can produce either. That is `ORCHESTRATOR_EVIDENCE`
+    (see the evidence precheck): hand it off with the exact command.
 - **No CI evidence for this SHA** (no PR yet, the PR head is a different SHA, or
   no job ran the test although its `if:` admits this PR): nothing has answered
   the question. Report the check as not run, name it, and never claim CI passed
@@ -439,7 +600,8 @@ work is lost with the workspace.** Write the file before you finish, even
 if the outcome was a refusal: a refusal is a deliverable and is often the
 most valuable one.
 
-The verdict, the gate output, the mutation results, and the exact head you verified.
+The verdict, the `Precheck:` line and the `## Handed to the orchestrator`
+section, the gate output, the mutation results, and the exact head you verified.
 A verdict: is the change correct and complete, or not. The first two lines are
 the verdict and `Round: 0 of 2`, as the verdict section at the top says. Which
 gates you ran, where each came from (declared, found, or none), and their output, each
@@ -534,9 +696,8 @@ make the candidate pass. If you can identify the candidate and write
 `review_verdict` the section at the top requires, even when the candidate is
 BLOCKED.
 
-This includes a normal code, test, or design defect; a failing gate; and an
-environment limitation that prevents only part of verification, such as an
-unavailable database. Put each such item under a `BLOCKING` heading with the
+This includes a normal code, test, or design defect, and a failing gate.
+Put each such item under a `BLOCKING` heading with the
 file and line or affected command, the root cause, the exact action required,
 and what would prove it closed. The one exception is a check whose CI job is
 skipped by design for this PR and covers nothing this PR changes, proven from
@@ -544,9 +705,17 @@ the job's `if:` and the diff as the CI section above describes: it is never
 `BLOCKING`, even when this workspace also lacks what it needs, such as a
 database. List it under `Unverified by design` instead, and carry that heading
 into the PR body. A skipped job that covers code or tests this PR changes is
-not that exception: without independent evidence it is `BLOCKING`. `success=true` means the verification report
+not that exception: without independent evidence it is `BLOCKING`, unless
+producing that evidence needs Docker, a database or a real store, in which
+case it is `ORCHESTRATOR_EVIDENCE`. `success=true` means the verification report
 was delivered so the `fix` phase can run; it does not mean the candidate was
 certified.
+
+An environment limitation that prevents only part of verification, such as
+an unavailable database, is not `BLOCKING` in this workflow. It is
+`ORCHESTRATOR_EVIDENCE`, and so is every other item the evidence precheck
+classifies as a handoff: list it under `## Handed to the orchestrator`. It
+never decides the verdict by itself.
 
 Use `TASK_RESULT success=false` only when verification itself could not run at
 all: for example, the implementation artifact is missing or unreadable, the
