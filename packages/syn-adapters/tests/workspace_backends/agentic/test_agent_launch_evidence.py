@@ -124,7 +124,7 @@ async def test_a_process_in_the_container_is_evidence_and_its_output_is_untouche
 ) -> None:
     """The positive case, through the real wrapper.
 
-    Drop the announce-then-exec wrapper from ``_build_exec_command`` and this
+    Drop the launch marker from the stream adapter's ``OperationSpec`` and this
     fails: nothing else in the stream can attest a launch. The marker must also
     stay out of the stream - a processor parsing JSONL would choke on it.
 
