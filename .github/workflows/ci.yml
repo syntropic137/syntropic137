@@ -13,12 +13,13 @@ on:
     - cron: '0 2 * * 0'
 
 # A PR run is superseded by the next push to the same PR, so cancel it.
-# Everything else (main pushes, cron, dispatch) is grouped by commit and never
-# cancelled: a group keyed on the ref would leave at most one pending run, and
-# GitHub cancels the older pending run when a newer one queues, so back-to-back
-# merges would leave a main commit with no "CI Success" at all.
+# Everything else (main pushes, cron, dispatch) gets a group of its own run, so
+# it is never cancelled and never queued behind another run. Any shared group
+# (by ref or even by SHA) holds at most one pending run, and GitHub cancels the
+# older pending run when a newer one queues: back-to-back merges, or a dispatch
+# at the same SHA, would leave a main commit with no "CI Success" at all.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.sha }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # ISS-259: Least-privilege default — jobs that need write access (e.g. publishing)
