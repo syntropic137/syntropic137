@@ -47,8 +47,8 @@ from syn_api.services.execution_posture import (
 )
 from syn_api.services.feedback_lifecycle import init_ui_feedback, shutdown_ui_feedback
 from syn_api.services.health_probes import describe_codex_auth_health, describe_disk_health
-from syn_api.services.read_path_health import _judge_read_path
 from syn_api.services.process_role import resolve_previous_world
+from syn_api.services.read_path_health import _judge_read_path
 from syn_api.services.request_latency_lifecycle import start_request_latency, stop_request_latency
 from syn_api.services.seeding import seed_offline_data
 from syn_api.services.subscription_health import render_subscription_health

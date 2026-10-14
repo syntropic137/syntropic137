@@ -99,6 +99,7 @@ async def test_an_api_restart_leaves_a_live_executor_session_running(
     from dataclasses import dataclass
 
     from event_sourcing.stores.memory_projection import MemoryProjectionStore
+
     from syn_domain.contexts.agent_sessions.domain.aggregate_session.AgentSessionAggregate import (
         AgentSessionAggregate,
     )
@@ -160,3 +161,36 @@ def test_the_role_defaults_to_one_process(monkeypatch: pytest.MonkeyPatch) -> No
 
     monkeypatch.delenv("SYN_EXECUTION_PROCESS_ROLE", raising=False)
     assert ExecutionSettings(_env_file=None).process_role is ProcessRole.ALL  # type: ignore[call-arg]
+
+
+@pytest.mark.parametrize("queue_on", [False, True])
+@pytest.mark.parametrize(
+    ("role", "serves_api"), [("api", True), ("executor", False), ("all", True)]
+)
+async def test_the_app_an_executor_builds_serves_liveness_and_starts_no_api_work(
+    monkeypatch: pytest.MonkeyPatch, role: str, serves_api: bool, queue_on: bool
+) -> None:
+    """The outer boundary: the routes ``create_app`` mounts and what its
+    lifespan starts. The executor is the same image, not the same process."""
+    from syn_api import main
+    from syn_api.services import shipped_ledger
+    from syn_api.types import Ok
+
+    monkeypatch.setenv("SYN_EXECUTION_PROCESS_ROLE", role)
+    monkeypatch.setenv("SYN_EXECUTION_RUN_QUEUE_ENABLED", "true" if queue_on else "false")
+    reset_settings()
+    backfill = MagicMock()
+    monkeypatch.setattr(lifecycle, "startup", AsyncMock(return_value=Ok({"mode": "full"})))
+    monkeypatch.setattr(lifecycle, "shutdown", AsyncMock())
+    monkeypatch.setattr(shipped_ledger, "start_shipped_ledger", backfill)
+    try:
+        app = main.create_app()
+        async with main.lifespan(app):
+            pass
+    finally:
+        reset_settings()
+    paths = {getattr(route, "path", None) for route in app.routes}
+    assert {"/health", "/version"} <= paths
+    assert ("/workflows" in paths) is serves_api
+    assert ("/executions" in paths) is serves_api
+    assert backfill.call_count == (1 if serves_api else 0)
