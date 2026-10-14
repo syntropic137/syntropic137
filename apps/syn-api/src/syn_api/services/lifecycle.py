@@ -85,6 +85,7 @@ if TYPE_CHECKING:
         CheckRunIngestionService,
         GitHubEventIngestionScheduler,
     )
+    from syn_shared.settings.execution import ProcessRole
 
 logger = logging.getLogger(__name__)
 SubscriptionHealthResult = tuple[SubscriptionHealth | None, tuple[DegradedReason, ...]]
@@ -140,6 +141,9 @@ class _ServiceEntry:
     init_fn: Callable[[LifecycleState], Awaitable[None]]
     recoverable: bool = False
     shutdown_fn: Callable[[LifecycleState], Awaitable[None]] | None = None
+    #: Started only where the process serves the API (ADR-072 D1): the
+    #: subscription and the pollers dispatch work, and an executor must not.
+    api_only: bool = False
 
 
 # Registry is defined after _init_* functions below — see _SERVICE_REGISTRY.
@@ -205,11 +209,18 @@ async def _init_degradable_services(state: LifecycleState) -> None:
     # previous process from work this one just started. Resolving the old world
     # before opening the door to a new one removes the race rather than
     # narrowing it; the started_before cutoff below is defence in depth.
-    process_started_at = datetime.now(UTC)
-    await reconcile_orphaned_sessions()
-    await resolve_previous_process(started_before=process_started_at)
+    from syn_shared.settings import get_settings
 
-    for entry in _SERVICE_REGISTRY:
+    process_started_at = datetime.now(UTC)
+    role = get_settings().execution.process_role
+    # The previous process's executions are the API's to resolve: with the Run
+    # Queue off they ran inside it, and an executor's global reap would take
+    # the containers of the API beside it.
+    if role.serves_api:
+        await reconcile_orphaned_sessions()
+        await resolve_previous_process(started_before=process_started_at)
+
+    for entry in _role_services(role):
         try:
             await entry.init_fn(state)
         except Exception:
@@ -226,7 +237,8 @@ async def _init_degradable_services(state: LifecycleState) -> None:
         task.add_done_callback(_handle_recovery_task_exception)
         state._recovery_task = task
     # Last: the claim loop drains through the processor wired above (ADR-072).
-    await start_execution_host()
+    if role.hosts_executions:
+        await start_execution_host()
 
 
 async def startup(
@@ -939,26 +951,35 @@ _SERVICE_REGISTRY: tuple[_ServiceEntry, ...] = (
         init_fn=init_ui_feedback,
         recoverable=True,
         shutdown_fn=shutdown_ui_feedback,
+        api_only=True,
     ),
     _ServiceEntry(
         reason=DegradedReason.SUBSCRIPTION_COORDINATOR,
         init_fn=_init_subscriptions,
         recoverable=True,
         shutdown_fn=_shutdown_subscriptions,
+        api_only=True,
     ),
     _ServiceEntry(
         reason=DegradedReason.EVENT_POLLER,
         init_fn=_init_event_poller,
         recoverable=False,
         shutdown_fn=_shutdown_event_poller,
+        api_only=True,
     ),
     _ServiceEntry(
         reason=DegradedReason.CHECK_RUN_POLLER,
         init_fn=_init_check_run_poller,
         recoverable=False,
         shutdown_fn=_shutdown_check_run_poller,
+        api_only=True,
     ),
 )
+
+
+def _role_services(role: ProcessRole) -> tuple[_ServiceEntry, ...]:
+    """The registry entries a process of this role starts (ADR-072 D1)."""
+    return tuple(e for e in _SERVICE_REGISTRY if role.serves_api or not e.api_only)
 
 
 # ── Recovery helpers (ADR-057) ─────────────────────────────────────

@@ -5,6 +5,8 @@ See ADR-004 (settings) and ADR-060 (admission and dispatch limits).
 
 from __future__ import annotations
 
+from enum import StrEnum
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -42,6 +44,28 @@ API_BASELINE_MEMORY_MIB = 128
 def executions_that_fit(memory_limit_mib: int) -> int:
     """How many concurrent executions an API memory limit can hold, at least 1."""
     return max(1, (memory_limit_mib - API_BASELINE_MEMORY_MIB) // EXECUTION_API_MEMORY_MIB)
+
+
+class ProcessRole(StrEnum):
+    """Which half of the platform this process runs (ADR-072 D1, #1310 1.6).
+
+    One image, two roles. ``api`` serves HTTP and owns the subscription, the
+    pollers and, with the Run Queue off, every in-process execution. ``executor``
+    only hosts the claim loop, so with the Run Queue off it runs idle. ``all`` is
+    both, the single-process topology dev and tests keep.
+    """
+
+    API = "api"
+    EXECUTOR = "executor"
+    ALL = "all"
+
+    @property
+    def serves_api(self) -> bool:
+        return self is not ProcessRole.EXECUTOR
+
+    @property
+    def hosts_executions(self) -> bool:
+        return self is not ProcessRole.API
 
 
 class ExecutionSettings(BaseSettings):
@@ -101,5 +125,18 @@ class ExecutionSettings(BaseSettings):
             "ExecutionHost lands (#1310 1.5), so with this on every execution is "
             "admitted and never runs. Requires SYN_OBSERVABILITY_DB_URL; the API "
             "refuses to start an execution without it rather than queue in memory."
+        ),
+    )
+
+    #: Read as SYN_EXECUTION_PROCESS_ROLE. ADR-072 spells it SYN_PROCESS_ROLE;
+    #: the prefix is kept for the reason given at DEFAULT_INTERRUPT_BUDGET_SECONDS.
+    process_role: ProcessRole = Field(
+        default=ProcessRole.ALL,
+        description=(
+            "Which half of the platform this process runs (ADR-072 D1): 'api' "
+            "serves HTTP, the subscription and the pollers; 'executor' only hosts "
+            "the Run Queue claim loop, and is idle while "
+            "SYN_EXECUTION_RUN_QUEUE_ENABLED is off; 'all' runs both in one "
+            "process. Pinned per service by the compose files, not an operator knob."
         ),
     )
