@@ -150,26 +150,44 @@ def test_dispatch_id_is_validated() -> None:
 @pytest.mark.parametrize(
     "path",
     [
-        "pkg/tests/helper.py",
-        "pkg/test/x.py",
         "pkg/test_mod.py",
+        "pkg/tests/test_mod.py",
         "pkg/mod_test.py",
         "pkg/conftest.py",
+        "pkg/tests/conftest.py",
+        "apps/web/src/a.test.ts",
+        "apps/web/src/a.spec.tsx",
         "pyproject.toml",
         "apps/a/pyproject.toml",
+        "pytest.ini",
         "uv.lock",
+        "pnpm-lock.yaml",
+        "Cargo.lock",
         ".github/workflows/ci.yml",
-        "ci/fitness/x.py",
-        "lib/event-sourcing-platform/x.py",
+        ".github/actions/x/action.yml",
+        "ci/fitness/helpers.py",
         ".mutations/other.patch",
     ],
 )
-def test_forbids_tests_config_and_infra(path: str) -> None:
+def test_forbids_tests_config_ci_and_lockfiles(path: str) -> None:
     assert forbidden_reason(path, PurePosixPath(".mutations")) is not None
 
 
-@pytest.mark.parametrize("path", ["pkg/mod.py", "apps/syn-api/src/x/testing_utils.py", "README.md"])
-def test_allows_source(path: str) -> None:
+@pytest.mark.parametrize(
+    "path",
+    [
+        "pkg/mod.py",
+        # Owner decision (#1941): harness and adapter code beside the tests is
+        # production stand-in, and mutating it is the point.
+        "packages/syn-adapters/tests/integration/github_broker/authorizer.py",
+        "packages/syn-adapters/tests/integration/github_broker/envoy.yaml",
+        "pkg/tests/helpers.py",
+        "apps/syn-api/src/x/testing_utils.py",
+        "lib/agentic-workspace/x.py",
+        "README.md",
+    ],
+)
+def test_allows_production_and_harness_source(path: str) -> None:
     assert forbidden_reason(path, PurePosixPath(".mutations")) is None
 
 
@@ -534,3 +552,24 @@ def test_run_name_carries_the_pr_and_the_dispatch_nonce() -> None:
     value = line.removeprefix("run-name:").strip()
     assert value.startswith('"') and value.endswith('"'), line
     assert "${{ inputs.pr }}" in value and "${{ inputs.dispatch_id }}" in value
+
+
+def test_a_harness_file_under_tests_is_mutated_and_killed(repo: Path) -> None:
+    harness = repo / "pkg" / "tests" / "authorizer.py"
+    harness.write_text("ALLOW = False\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", "harness")
+    patch = _commit_patch(
+        repo, "05-harness.patch", _diff_patch(repo, "pkg/tests/authorizer.py", "ALLOW = True\n")
+    )
+
+    def deny_path_test(root: Path, tests: tuple[str, ...]) -> PytestRun:
+        allowed = (root / "pkg" / "tests" / "authorizer.py").read_text() == "ALLOW = True\n"
+        return PytestRun(1, tests, 0, 0.0) if allowed else PytestRun(0, (), 1, 0.0)
+
+    result = evaluate_patch(repo, patch, _inputs(), deny_path_test)
+    restore(repo)
+
+    assert result.outcome is Outcome.KILLED
+    assert result.files == ("pkg/tests/authorizer.py",)
+    assert harness.read_text() == "ALLOW = False\n"
