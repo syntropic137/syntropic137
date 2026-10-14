@@ -268,18 +268,38 @@ jobs:
       - name: Install just
         uses: extractions/setup-just@dd310ad5a97d8e7b41793f8ef055398d51ad4de6 # v2
 
-      # GitHub runners pull from Docker Hub anonymously and hit its 429 rate
-      # limit on busy days, which failed this job twice on 2026-10-09 before a
-      # single line of ours ran. AWS public ECR mirrors the same official images
-      # without that limit; tagging them locally lets `docker build` resolve the
-      # Dockerfile's `FROM node:22-alpine` / `FROM nginx:...` without a registry
-      # round trip. The Dockerfile itself is unchanged.
-      - name: Pre-pull base images from the ECR mirror of Docker Hub
+      # GitHub runners pull anonymously, and both anonymous sources we tried
+      # are rate limited per shared runner IP: Docker Hub (429, twice on
+      # 2026-10-09) and then AWS public ECR ("toomanyrequests: Rate exceeded",
+      # six Skyline UI failures on 2026-10-13/14, e.g. run 38492192835).
+      # mirror.gcr.io is Google's anonymous pull-through cache of Docker Hub's
+      # official images and serves the same index digests. Each FROM ref is
+      # pulled by digest and tagged locally, so `docker build` resolves the
+      # Dockerfile's `FROM node:22-alpine` / `FROM nginx:...` without a
+      # registry round trip. The Dockerfile itself is unchanged.
+      #
+      # The digests are the Docker Hub index digests for these tags
+      # (`docker buildx imagetools inspect docker.io/library/<ref>`). A FROM ref
+      # with no entry here fails the step, so bumping the Dockerfile forces a
+      # bump here. `node:22-alpine` floats upstream; this pin only freezes
+      # what CI builds the UI stages with, not what a release builds.
+      - name: Pre-pull base images by digest from mirror.gcr.io
         run: |
-          for img in $(grep -E '^FROM ' infra/docker/images/gateway/Dockerfile | awk '{print $2}' | sort -u); do
-            docker pull "public.ecr.aws/docker/library/$img"
-            docker tag "public.ecr.aws/docker/library/$img" "$img"
-          done
+          set -euo pipefail
+          declare -A PINNED=(
+            ["node:22-alpine"]="sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402"
+            ["nginx:1.28.2-alpine"]="sha256:5b4900b042ccfa8b0a73df622c3a60f2322faeb2be800cbee5aa7b44d241649e"
+          )
+          while read -r img; do
+            digest="${PINNED[$img]:-}"
+            if [ -z "$digest" ]; then
+              echo "::error::No pinned digest for gateway base image '$img'. Add it to PINNED in .github/workflows/syn-ui.yml."
+              exit 1
+            fi
+            src="mirror.gcr.io/library/${img%%:*}@${digest}"
+            docker pull "$src"
+            docker tag "$src" "$img"
+          done < <(grep -E '^FROM ' infra/docker/images/gateway/Dockerfile | awk '{print $2}' | sort -u)
 
       # Builds infra/docker/images/gateway (both UI stages, the Skyline size
       # budget included), runs it in each SYN_GATEWAY_UI mode with no API
