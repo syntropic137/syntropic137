@@ -47,6 +47,7 @@ from syn_adapters.workspace_backends.agentic.credential_scrubber import (
     CredentialScrubber,
     scrub_bytes,
 )
+from syn_adapters.workspace_backends.agentic.credentials import names_a_credential
 from syn_adapters.workspace_backends.service.codex_rollout import read_codex_rollout
 from syn_adapters.workspace_backends.service.credential_keeper import keep_credential_fresh
 from syn_adapters.workspace_backends.service.git_credential_renewal import (
@@ -95,8 +96,9 @@ class ManagedWorkspace:
     #: the renewal task reads the installed credential's expiry from, and what
     #: teardown revokes. In-process only - see `issued_tokens`.
     _ledger: IssuanceLedger = field(default_factory=IssuanceLedger, repr=False)
-    #: Every other credential value the setup phase put in this workspace
-    #: (model keys, file credentials), withheld from its stream (#1927).
+    #: Every other credential value this workspace was given - by the setup
+    #: phase (model keys, file credentials) or by a launch's environment (the
+    #: platform grant) - withheld from its stream and its files (#1927).
     _withheld: set[str] = field(default_factory=set, repr=False)
     #: What the isolation consumed, set by teardown (`create_workspace`'s
     #: `finally`) and so only readable after `__aexit__`. None before teardown,
@@ -188,6 +190,9 @@ class ManagedWorkspace:
         if self.platform_grant is not None:
             await self._bound_platform_grant_to_phase(phase_deadline_of(environment))
             environment = {**(environment or {}), **self.platform_grant.env}
+        # A launch credential is in the workload's environment, so it can be in
+        # any file the workload writes: collection withholds it too (#1927).
+        self.withhold(v for k, v in (environment or {}).items() if names_a_credential(k))
         stream = self._service._event_stream.stream(
             self.isolation_handle,
             command,

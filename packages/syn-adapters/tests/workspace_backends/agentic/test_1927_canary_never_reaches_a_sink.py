@@ -11,7 +11,8 @@ observation pages (agentic-workspace).
 Each remaining test pins one shape an earlier suite left open: a renewal
 issued after the first page, every chunk of wrapped base64, every item of a
 JSON list, JSON keys, short values in an injected credential file, and a
-nonempty file the agent captured its own output in.
+nonempty file the agent captured its own output in, whether the canary was
+issued, launch-only, or the session-store token only the adapter holds.
 """
 
 import base64
@@ -21,12 +22,14 @@ import os
 import subprocess
 import sys
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 from urllib.parse import quote
 
 import pytest
 from test_stream_on_operations import _HANDLE, _Observations, _stream, _Workspace
 
+from syn_adapters.workspace_backends.agentic.adapter import AgenticIsolationAdapter
 from syn_adapters.workspace_backends.agentic.credential_scrubber import REDACTED_MARKER
 from syn_adapters.workspace_backends.service.issued_tokens import IssuedToken
 from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
@@ -34,6 +37,7 @@ from syn_adapters.workspace_backends.service.setup_phase import run_setup_phase
 from syn_adapters.workspace_backends.service.setup_phase_secrets import SetupPhaseSecrets
 from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
     ExecutionResult,
+    IsolationHandle,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
     EventStreamProcessor,
@@ -49,6 +53,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.test_empty_artifa
 from syn_domain.contexts.orchestration.slices.execute_workflow.TokenAccumulator import (
     TokenAccumulator,
 )
+from syn_shared.settings.session_store import SessionStoreSettings
 
 pytestmark = pytest.mark.unit
 
@@ -146,9 +151,14 @@ async def test_a_printed_canary_reaches_no_sink_in_any_form(caplog: pytest.LogCa
     assert not _leaks(sinks), "\n".join(_leaks(sinks))
 
 
+def _service(isolation: object, adapter: object = None) -> MagicMock:
+    return MagicMock(_isolation=isolation, _event_stream=adapter or MagicMock())
+
+
 def _workspace(adapter: object, isolation: MagicMock) -> ManagedWorkspace:
-    service = MagicMock(_isolation=isolation, _event_stream=adapter)
-    return ManagedWorkspace("ws-1927", "exec-1927", MagicMock(), _HANDLE, None, service)
+    return ManagedWorkspace(
+        "ws-1927", "exec-1927", MagicMock(), _HANDLE, None, _service(isolation, adapter)
+    )
 
 
 def _setup_isolation(injected: dict[str, bytes]) -> MagicMock:
@@ -193,6 +203,50 @@ async def test_a_nonempty_captured_artifact_is_scrubbed_on_collection():
     assert len(repo.saved) == 1
     content = _stored(repo)[0][1]
     assert REDACTED_MARKER in content
+    assert not _leaks({"stored artifact": content}), _leaks({"stored artifact": content})
+
+
+async def _store(files: list[tuple[str, bytes]]) -> str:
+    repo = _Repo()
+    await _collect(repo, [(f"artifacts/output/{p}", c) for p, c in files])
+    assert len(repo.saved) == 1
+    return _stored(repo)[0][1]
+
+
+@pytest.mark.parametrize("key", ["SYN_API_TOKEN", "OPENAI_API_KEY"])
+async def test_a_launch_only_credential_is_scrubbed_from_collected_files(key: str):
+    """The canary is in nothing but the launch environment: no ledger, no setup phase."""
+    captured = _workload_output()
+    adapter, _, _ = _stream([captured])
+    isolation = MagicMock(copy_from=AsyncMock(return_value=[("report.md", captured)]))
+    workspace = _workspace(adapter, isolation)
+
+    lines = [line async for line in workspace.stream(["workload"], environment={key: CANARY})]
+    assert not _leaks({"stream": "\n".join(lines)})
+
+    content = await _store(await workspace.collect_files(patterns=["artifacts/output/**/*"]))
+    assert REDACTED_MARKER in content
+    assert "workload output: " in content, "useful output survives"
+    assert not _leaks({"stored artifact": content}), _leaks({"stored artifact": content})
+
+
+async def test_the_session_store_token_is_scrubbed_from_collected_files(tmp_path: Path):
+    """Bound at create, never in a launch: only the isolation adapter knows it."""
+    store = SessionStoreSettings(_env_file=None, auth_token=CANARY)  # type: ignore[arg-type]
+    isolation = AgenticIsolationAdapter(session_store=store)
+    (tmp_path / "artifacts" / "output").mkdir(parents=True)
+    (tmp_path / "artifacts" / "output" / "report.md").write_bytes(_workload_output())
+    handle = IsolationHandle(
+        isolation_id="ws-1927", isolation_type="docker", host_workspace_path=str(tmp_path)
+    )
+    workspace = ManagedWorkspace(
+        "ws-1927", "exec-1927", MagicMock(), handle, None, _service(isolation)
+    )
+
+    files = await workspace.collect_files(patterns=["artifacts/output/**/*"])
+    content = await _store([(Path(p).name, c) for p, c in files])
+    assert REDACTED_MARKER in content
+    assert "workload output: " in content, "useful output survives"
     assert not _leaks({"stored artifact": content}), _leaks({"stored artifact": content})
 
 
