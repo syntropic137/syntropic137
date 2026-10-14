@@ -1,9 +1,14 @@
-"""One swapper at a time, never under a running compose up, and every exit
-after the gate re-opens admission (#1310 1.6).
+"""One swapper at a time, taken before anything ships, and what each exit does
+to admission (#1310 1.6, with #1575 narrowed rather than reversed).
 
-These run the script's own block, from its lock to the gate, with ``remote``
-playing the host and ``maintenance`` recording every PUT, then end the run the
-ways a pit stop ends: a ``die``, a TERM, an INT, and the ungate.
+Before the swap, every exit after the gate RE-OPENS admission: nothing was
+recreated, so a gate left shut is pure outage. From the first ``swap_up`` on,
+every exit leaves admission PAUSED and prints RECOVERY: a build that has not
+passed verify never takes traffic.
+
+These run the script's own lines (the lock-and-trap block, the gate, and the
+``SWAPPING=1`` that precedes the swap) with ``remote`` playing the host and
+``maintenance`` recording every PUT, then end the run the ways a pit stop ends.
 """
 
 from __future__ import annotations
@@ -17,34 +22,68 @@ pytestmark = pytest.mark.unit
 
 _SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "pit_stop.sh"
 _START = "# ONE SWAPPER AT A TIME"
+_CLAIM = 'if [ "$DRY" = 0 ]; then claim_the_swap; fi'
 _GATE = 'maintenance true "pit stop $VERSION"'
+_SWAP = "if ! swap_up; then"
 
 
-def _block() -> str:
-    """From the lock through the gate, verbatim."""
-    lines = _SCRIPT.read_text().splitlines()
+def _lines() -> list[str]:
+    return _SCRIPT.read_text().splitlines()
+
+
+def _lock_block() -> str:
+    """From the lock through the claim, verbatim."""
+    lines = _lines()
     start = next(i for i, line in enumerate(lines) if line.startswith(_START))
+    return "\n".join(lines[start : lines.index(_CLAIM) + 1])
+
+
+def _gate() -> str:
+    """The gate as written: the flag, then the PUT."""
+    lines = _lines()
     gate = next(i for i, line in enumerate(lines) if line.startswith(_GATE))
-    assert lines[gate + 1] == "GATED=1", "the gate must arm the exit trap on its next line"
-    return "\n".join(lines[start : gate + 2])
+    assert lines[gate - 1] == "GATED=1", "the flag must be armed on the line BEFORE the pause PUT"
+    return "\n".join(lines[gate - 1 : gate + 1])
+
+
+def _swap_begins() -> str:
+    """The line that marks the swap begun, which must sit right before it."""
+    lines = _lines()
+    swap = lines.index(_SWAP)
+    assert lines[swap - 1] == "SWAPPING=1", "SWAPPING=1 must be set immediately before the first swap_up"
+    return lines[swap - 1]
 
 
 def _run(
-    tmp: Path, then: str, *, compose_ups: int = 0, held: bool = False, dry: int = 0
+    tmp: Path,
+    then: str,
+    *,
+    compose_ups: int = 0,
+    held: bool = False,
+    dry: int = 0,
+    pause_fails: bool = False,
 ) -> tuple[subprocess.CompletedProcess[str], list[str], list[str]]:
     host = tmp / "host"
     host.mkdir()
     if held:
         (host / ".pit-stop.lock").mkdir()
-        (host / ".pit-stop.lock" / "holder").write_text("someone@else v1\n")
+        (host / ".pit-stop.lock" / "holder").write_text(
+            "pid=4242 host=laptop user=someone started=2026-10-14T09:00:00Z tag=v1\n"
+        )
     work = tmp / "work"
     work.mkdir()
+    fail_true = "if [ \"$1\" = true ]; then return 1; fi" if pause_fails else ":"
     preamble = f"""
 set -euo pipefail
 TAG=v1.1.0-beta.1; VERSION=1.1.0-beta.1; DRY={dry}; HOST=fake-host; TMP={work}
 COMPOSE_DIR={host}; T0=$(date +%s)
+RECOVERY=""; RECOVERY_SHOWN=0
 step() {{ printf '==> %s\\n' "$*"; }}
-die() {{ printf 'PIT STOP ABORTED: %s\\n' "$*" >&2; exit 1; }}
+die() {{
+    printf 'PIT STOP ABORTED: %s\\n' "$*" >&2
+    if [ -n "$RECOVERY" ]; then printf '%s\\n' "$RECOVERY" >&2; RECOVERY_SHOWN=1; fi
+    exit 1
+}}
 remote() {{
     echo "$*" >> {tmp}/remote_calls
     case "$*" in
@@ -52,10 +91,11 @@ remote() {{
     *) sh -c "$*" ;;
     esac
 }}
-maintenance() {{ echo "maintenance $1" >> {tmp}/maintenance_calls; }}
+maintenance() {{ echo "maintenance $1" >> {tmp}/maintenance_calls; {fail_true}; }}
 """
+    script = "\n".join([preamble, _lock_block(), _gate(), then])
     proc = subprocess.run(
-        ["bash", "-c", preamble + _block() + "\n" + then, str(_SCRIPT)],
+        ["bash", "-c", script, str(_SCRIPT)],
         stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
@@ -71,21 +111,45 @@ maintenance() {{ echo "maintenance $1" >> {tmp}/maintenance_calls; }}
     )
 
 
-@pytest.mark.parametrize(
-    ("then", "code"),
-    [
-        ('die "verify failed after the swap"', 1),
-        ("kill -TERM $$; sleep 5", 143),
-        ("kill -INT $$; sleep 5", 130),
-        ("false", 1),
-    ],
-)
-def test_every_abort_after_the_gate_reopens_admission(tmp_path: Path, then: str, code: int) -> None:
+_ABORTS = [
+    ('die "the drain failed"', 1),
+    ("kill -TERM $$; sleep 5", 143),
+    ("kill -INT $$; sleep 5", 130),
+    ("false", 1),
+]
+
+
+@pytest.mark.parametrize(("then", "code"), _ABORTS)
+def test_an_abort_before_the_swap_reopens_admission(tmp_path: Path, then: str, code: int) -> None:
     proc, maintenance, _ = _run(tmp_path, then)
     assert proc.returncode == code, proc.stderr
     assert maintenance == ["maintenance true", "maintenance false"]
+    assert "admission is OPEN again" in proc.stderr
     assert not (tmp_path / "host" / ".pit-stop.lock").exists()
     assert not (tmp_path / "work").exists()
+
+
+@pytest.mark.parametrize(("then", "code"), _ABORTS)
+def test_an_abort_after_the_swap_began_leaves_admission_paused(
+    tmp_path: Path, then: str, code: int
+) -> None:
+    """#1575: a build that failed verify never takes traffic."""
+    swap = f'RECOVERY="RECOVERY: finish by hand"\n{_swap_begins()}\n{then}'
+    proc, maintenance, _ = _run(tmp_path, swap)
+    assert proc.returncode == code, proc.stderr
+    assert maintenance == ["maintenance true"]
+    assert f"admission is still PAUSED on purpose (code {code})" in proc.stderr
+    # RECOVERY exactly once, whether die printed it or the trap had to.
+    assert proc.stderr.count("RECOVERY: finish by hand") == 1
+    assert not (tmp_path / "host" / ".pit-stop.lock").exists()
+
+
+def test_a_failed_pause_put_is_still_undone(tmp_path: Path) -> None:
+    """A PUT that persisted but failed in flight would otherwise stay shut."""
+    proc, maintenance, _ = _run(tmp_path, "exit 0", pause_fails=True)
+    assert proc.returncode == 1
+    assert "could not pause admission" in proc.stderr
+    assert maintenance == ["maintenance true", "maintenance false"]
 
 
 def test_the_ungate_disarms_the_trap(tmp_path: Path) -> None:
@@ -95,10 +159,20 @@ def test_the_ungate_disarms_the_trap(tmp_path: Path) -> None:
     assert not (tmp_path / "host" / ".pit-stop.lock").exists()
 
 
-def test_a_second_swapper_is_refused_before_the_gate(tmp_path: Path) -> None:
+def test_the_lock_names_its_pid_host_and_start(tmp_path: Path) -> None:
+    proc, _, _ = _run(tmp_path, f"cat {tmp_path}/host/.pit-stop.lock/holder; exit 0")
+    assert proc.returncode == 0, proc.stderr
+    holder = proc.stdout
+    for field in ("pid=", "host=", "started=", "tag=v1.1.0-beta.1"):
+        assert field in holder, holder
+
+
+def test_a_second_swapper_is_refused_with_the_holder(tmp_path: Path) -> None:
     proc, maintenance, _ = _run(tmp_path, "exit 0", held=True)
     assert proc.returncode == 1
-    assert "another pit stop holds" in proc.stderr and "someone@else" in proc.stderr
+    assert "another pit stop holds" in proc.stderr
+    assert "pid=4242 host=laptop" in proc.stderr
+    assert "started=2026-10-14T09:00:00Z" in proc.stderr
     assert maintenance == []
     # Its lock is not ours to remove.
     assert (tmp_path / "host" / ".pit-stop.lock" / "holder").exists()
@@ -115,4 +189,22 @@ def test_a_running_compose_up_is_never_interrupted(tmp_path: Path) -> None:
 def test_a_dry_run_takes_no_lock(tmp_path: Path) -> None:
     proc, _, remote = _run(tmp_path, "exit 0", dry=1)
     assert proc.returncode == 0, proc.stderr
-    assert not any("mkdir" in call for call in remote)
+    assert remote == []
+
+
+def test_the_lock_is_taken_before_anything_ships_in_every_mode() -> None:
+    """Two pit stops that each shipped and staged before either locked would
+    each repoint the compose file under the other. The claim is top level
+    (not inside a mode branch) and precedes the ship, the stage, the
+    --stage-only exit, the --swap-only precheck and the gateway-only path."""
+    lines = _lines()
+    claim = lines.index(_CLAIM)
+    for later in (
+        'step "ship: docker save | docker load on $HOST"',
+        'step "stage: back up the deployed compose and repoint $REPOINTS"',
+        'if [ "$MODE" = "stage" ]; then',
+        'if [ "$MODE" = "swap" ] && [ "$DRY" = 0 ]; then',
+        'if [ "$SERVICE" = gateway ]; then',
+    ):
+        at = next(i for i, line in enumerate(lines) if line.strip() == later)
+        assert claim < at, f"the lock is claimed after: {later}"

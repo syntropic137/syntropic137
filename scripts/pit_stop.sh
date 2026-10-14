@@ -64,9 +64,10 @@ step() { printf '\n==> [%s +%ss] %s\n' "$(date -u +%H:%M:%SZ)" "$(( $(date +%s) 
 # admission paused. Never silently: RECOVERY is set at the swap and every die
 # from then on prints how to finish by hand (#1575).
 RECOVERY=""
+RECOVERY_SHOWN=0
 die() {
     printf '\nPIT STOP ABORTED: %s\n' "$*" >&2
-    if [ -n "$RECOVERY" ]; then printf '%s\n' "$RECOVERY" >&2; fi
+    if [ -n "$RECOVERY" ]; then printf '%s\n' "$RECOVERY" >&2; RECOVERY_SHOWN=1; fi
     exit 1
 }
 run() { if [ "$DRY" = 1 ]; then printf '   (dry-run) %s\n' "$*"; else "$@"; fi; }
@@ -351,15 +352,16 @@ RUN
 
 # A drain that cannot finish ends the pit stop, and RE-OPENS admission first.
 # Nothing has been recreated, so the platform is exactly as it was apart from
-# the gate, and a gate left shut with no pit stop running to clear it is what
-# held admission for 2.25h in PC-115. Re-running with --swap-only closes it
-# again in one step; the stage already on the host is untouched.
+# the gate. Re-running with --swap-only closes it again in one step; the stage
+# already on the host is untouched. Reported ONCE: GATED is cleared either way,
+# so the exit trap does not PUT and report a second time.
 abort_drain() {
     if maintenance false ""; then
         echo "   admission is OPEN again" >&2
     else
-        echo "   WARNING: admission is still PAUSED; clear it with PUT /maintenance" >&2
+        echo "   WARNING: admission may still be PAUSED: PUT /maintenance active=false did not confirm (a 503 means open but the paused triggers were not woken, #1387). Check GET /maintenance" >&2
     fi
+    GATED=0
     die "$*; nothing was recreated"
 }
 
@@ -431,6 +433,60 @@ fi
 
 step "precheck: free space on the data volume"
 disk_space
+
+# ONE SWAPPER AT A TIME, and never under a compose up already running (#1310
+# 1.6). Taken BEFORE anything is shipped, in every mode but --dry-run, and held
+# through verify: two pit stops that each loaded and staged before either
+# locked would each repoint the compose file under the other. The lock is a
+# directory on the host, made atomically by mkdir; its holder file names the
+# pid, host and start time, so a pit stop that died holding it (SIGKILL, a lost
+# laptop) leaves a person enough to judge whether it is stale.
+PIT_LOCK="$COMPOSE_DIR/.pit-stop.lock"
+LOCKED=0
+claim_the_swap() {
+    local ups holder
+    ups="$(remote "ps -eo args | grep -c '[d]ocker compose.* up' || true")" \
+        || die "could not list processes on $HOST; nothing was shipped, gated or recreated"
+    [ "$ups" = 0 ] || die "a docker compose up is already running on $HOST; it is never interrupted. Nothing was shipped, gated or recreated"
+    holder="pid=$$ host=$(hostname) user=$(whoami) started=$(date -u +%Y-%m-%dT%H:%M:%SZ) tag=$TAG"
+    if ! remote "mkdir $PIT_LOCK && echo '$holder' > $PIT_LOCK/holder"; then
+        die "another pit stop holds $PIT_LOCK on $HOST: $(remote "cat $PIT_LOCK/holder" 2>/dev/null || echo 'holder unreadable'). If that pid is not running on that host, remove the directory by hand. Nothing was shipped, gated or recreated"
+    fi
+    LOCKED=1
+}
+# What every exit does, decided in ONE place (#1310 1.6, narrowed by #1575).
+#   Gated, nothing recreated yet (a drain abort, Ctrl-C, a failed PUT): RE-OPEN
+#     admission. The platform is exactly as it was apart from the gate, and a
+#     gate left shut with no pit stop to clear it held admission 2.25h (PC-115).
+#   Gated, and the swap has begun (SWAPPING=1): stay PAUSED and print RECOVERY.
+#     A build that has not passed verify never takes traffic (#1575).
+# GATED is set BEFORE the pause PUT, so a PUT that persisted but failed in
+# flight is still undone. The lock goes on every exit; $TMP as the first trap.
+GATED=0
+SWAPPING=0
+release_on_exit() {
+    local rc=$?
+    trap - EXIT INT TERM
+    if [ "$GATED" = 1 ] && [ "$SWAPPING" = 0 ]; then
+        if maintenance false ""; then
+            echo "   admission is OPEN again (re-opened on exit, code $rc); nothing was recreated" >&2
+        else
+            echo "   WARNING: admission may still be PAUSED: PUT /maintenance active=false did not confirm (a 503 means open but the paused triggers were not woken, #1387). Check GET /maintenance" >&2
+        fi
+    elif [ "$GATED" = 1 ]; then
+        echo "   admission is still PAUSED on purpose (code $rc): the swap began and verify did not pass, so the new build takes no traffic (#1575)" >&2
+        # die prints RECOVERY itself; a signal or a bare `set -e` exit does not.
+        if [ "$RECOVERY_SHOWN" = 0 ] && [ -n "$RECOVERY" ]; then printf '%s\n' "$RECOVERY" >&2; fi
+    fi
+    if [ "$LOCKED" = 1 ]; then remote "rm -rf $PIT_LOCK" || echo "   WARNING: could not remove $PIT_LOCK on $HOST" >&2; fi
+    rm -rf "$TMP"
+    exit "$rc"
+}
+trap release_on_exit EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+# Read-only and lock-free under --dry-run.
+if [ "$DRY" = 0 ]; then claim_the_swap; fi
 
 if [ "$MODE" != "swap" ]; then
     step "prepare: worktree at $REF, bump to $VERSION"
@@ -609,48 +665,9 @@ if [ "$SERVICE" = gateway ]; then
     exit 0
 fi
 
-# ONE SWAPPER AT A TIME, and never under a compose up already running (#1310
-# 1.6). The lock is a directory on the host, made atomically by mkdir and named
-# for whoever holds it; a pit stop that died holding it leaves it for a person
-# to judge. Read-only and lock-free under --dry-run.
-PIT_LOCK="$COMPOSE_DIR/.pit-stop.lock"
-LOCKED=0
-claim_the_swap() {
-    local ups
-    ups="$(remote "ps -eo args | grep -c '[d]ocker compose.* up' || true")" \
-        || die "could not list processes on $HOST; nothing was gated or recreated"
-    [ "$ups" = 0 ] || die "a docker compose up is already running on $HOST; it is never interrupted. Nothing was gated or recreated"
-    [ "$DRY" = 0 ] || return 0
-    remote "mkdir $PIT_LOCK && echo '$(whoami)@$(hostname) $TAG' > $PIT_LOCK/holder" \
-        || die "another pit stop holds $PIT_LOCK on $HOST ($(remote "cat $PIT_LOCK/holder" 2>/dev/null || echo unknown)). If none is running, remove it by hand. Nothing was gated or recreated"
-    LOCKED=1
-}
-# EVERY EXIT AFTER THE GATE RE-OPENS ADMISSION (#1310 1.6): an abort, a failed
-# verify, Ctrl-C or a TERM. Clearing the flag at the ungate disarms it. The
-# lock goes on every exit too; $TMP still goes as the first trap had it.
-GATED=0
-release_on_exit() {
-    local rc=$?
-    trap - EXIT INT TERM
-    if [ "$GATED" = 1 ]; then
-        if maintenance false ""; then
-            echo "   admission re-opened on exit (code $rc); ignore any PUT /maintenance step printed above" >&2
-        else
-            echo "   WARNING: admission is still PAUSED and could not be re-opened; clear it with PUT /maintenance" >&2
-        fi
-    fi
-    if [ "$LOCKED" = 1 ]; then remote "rm -rf $PIT_LOCK" || echo "   WARNING: could not remove $PIT_LOCK on $HOST" >&2; fi
-    rm -rf "$TMP"
-    exit "$rc"
-}
-trap release_on_exit EXIT
-trap 'exit 130' INT
-trap 'exit 143' TERM
-claim_the_swap
-
 step "gate: pausing execution admission for the rest of the pit stop"
-maintenance true "pit stop $VERSION" || die "could not pause admission; nothing was recreated"
 GATED=1
+maintenance true "pit stop $VERSION" || die "could not pause admission; nothing was recreated"
 status_counts || true
 
 step "drain: waiting for every execution to be terminal (budget ${DRAIN_TIMEOUT}s)"
@@ -695,7 +712,8 @@ RECOVERY="RECOVERY: admission is still PAUSED. Once syn137-api is healthy, finis
    ssh $HOST 'cd $COMPOSE_DIR && docker compose -f $COMPOSE up -d gateway'
    curl -fsS -u admin:\$SYN_API_PASSWORD $API/version     # image_tag must be $TAG
    curl -fsS -u admin:\$SYN_API_PASSWORD -X PUT $API/maintenance -H 'Content-Type: application/json' -d '{\"active\": false, \"reason\": \"\", \"actor\": \"manual\"}'"
-# Re-checked immediately above; the swap runs in the same breath.
+# From here on an exit leaves admission PAUSED (release_on_exit, #1575).
+SWAPPING=1
 if ! swap_up; then
     # The usual cause: the gateway waits on `api: service_healthy` and the API
     # took longer than its health window. Wait for it, then start what compose

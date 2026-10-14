@@ -247,10 +247,11 @@ def test_a_gateway_that_will_not_start_aborts_with_the_recovery(
         assert "admission was never paused" in run.proc.stderr
     else:
         assert "admission is still PAUSED" in run.proc.stderr
-        # Re-opened by the exit trap, never left paused (#1310 1.6).
+        # The swap began, so the exit trap leaves admission paused: a build
+        # that failed verify never takes traffic (#1575, narrowed by #1310 1.6).
         assert [c for c in run.calls if '"active": true' in c]
-        assert [c for c in run.calls if '"active": false' in c]
-        assert "admission re-opened on exit (code 1)" in run.proc.stderr
+        assert not [c for c in run.calls if '"active": false' in c]
+        assert "admission is still PAUSED on purpose (code 1)" in run.proc.stderr
 
 
 @pytest.mark.parametrize("service", ["gateway", "all"])
