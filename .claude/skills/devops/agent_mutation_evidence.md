@@ -43,7 +43,8 @@ reviewer or a verify phase asks "does this test kill the bug?".
      symlinked path, a git-ignored path, or paths it did not declare.
    - `ERROR`: pytest exited without a failure on record (interrupt, timeout,
      usage error). Not a kill.
-   - Baseline red, zero tests ran, or a named test SKIPPED: evidence void,
+   - Baseline red, zero tests ran, or a named test SKIPPED, XFAILED or
+     XPASSED: evidence void,
      nothing else was run. A skip would pass under every mutant; it usually
      means a Docker-backed test was run without `docker=true`.
 5. Before merge, delete `.mutations/` in a final commit. CI job

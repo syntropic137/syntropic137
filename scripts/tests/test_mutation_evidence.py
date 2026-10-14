@@ -191,10 +191,11 @@ def test_parses_failing_ids_and_passed_count() -> None:
         "FAILED a/test_x.py::test_y - again\n"
         "1 failed, 2 passed, 1 error in 0.1s\n"
     )
-    assert parse_pytest_output(out) == (("a/test_x.py::test_y", "a/test_x.py::test_z"), 2, 0)
-    assert (
-        parse_pytest_output("SKIPPED [1] a.py:3: needs Docker\n1 passed, 2 skipped in 1s\n")[2] == 2
-    )
+    assert parse_pytest_output(out) == (("a/test_x.py::test_y", "a/test_x.py::test_z"), 2, 0, 0)
+    skips = parse_pytest_output("SKIPPED [1] a.py:3: needs Docker\n1 passed, 2 skipped in 1s\n")
+    assert skips[1:] == (1, 2, 0)
+    xs = parse_pytest_output("XFAIL a.py::t - why\n1 passed, 1 xfailed, 2 xpassed in 1s\n")
+    assert xs[1:] == (1, 0, 3)
 
 
 @pytest.mark.parametrize(
@@ -369,6 +370,16 @@ def test_skipped_baseline_voids_the_evidence(repo: Path) -> None:
     assert "docker=true" in evidence.baseline_detail
     assert evidence.results == []
     assert not evidence.ok
+
+
+def test_xfail_or_xpass_in_the_baseline_voids_the_evidence(repo: Path) -> None:
+    def xfailing(root: Path, tests: tuple[str, ...]) -> PytestRun:
+        return PytestRun(0, (), 1, 0.0, xfail=1)
+
+    evidence = execute(repo, _inputs(), SHA, xfailing)
+
+    assert "xfailed/xpassed" in evidence.baseline_detail
+    assert evidence.results == []
 
 
 def test_empty_patch_is_never_a_kill(repo: Path) -> None:

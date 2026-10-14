@@ -43,7 +43,8 @@ secrets, a read-only token, no persisted credentials, no cache, same-repo PRs,
 and a separate comment job. The limit: a PR written to forge its own verdict
 could. Host-mode evidence is for honest PR code, not a security boundary.
 
-A named test that SKIPS voids the baseline: it would pass under every mutant.
+A named test that SKIPS, XFAILS or XPASSES voids the baseline: none of those
+is a pass, and each would read as one under every mutant.
 
 What a survival means, and what it does not: these are the NAMED tests only. A
 narrow selection can prove a kill, never that the wider suite misses the
@@ -121,6 +122,7 @@ _SKIP_WALK: Final = frozenset({".git", ".venv", "node_modules"})
 _SUMMARY_LINE_RE: Final = re.compile(r"^(FAILED|ERROR) (\S+)")
 _PASSED_RE: Final = re.compile(r"\b(\d+) passed\b")
 _SKIPPED_RE: Final = re.compile(r"\b(\d+) skipped\b")
+_XFAIL_RE: Final = re.compile(r"\b(\d+) x(?:failed|passed)\b")
 
 
 class InputError(ValueError):
@@ -154,6 +156,7 @@ class PytestRun:
     passed: int
     seconds: float
     skipped: int = 0
+    xfail: int = 0
 
 
 @dataclass(frozen=True)
@@ -411,8 +414,8 @@ def clear_bytecode(root: Path) -> int:
     return removed
 
 
-def parse_pytest_output(output: str) -> tuple[tuple[str, ...], int, int]:
-    """(failing node ids from the -rfE summary, passed count, skipped count)."""
+def parse_pytest_output(output: str) -> tuple[tuple[str, ...], int, int, int]:
+    """(failing ids from the -rfE summary, passed, skipped, xfailed + xpassed)."""
     failing = tuple(
         dict.fromkeys(
             m.group(2) for line in output.splitlines() if (m := _SUMMARY_LINE_RE.match(line))
@@ -422,7 +425,9 @@ def parse_pytest_output(output: str) -> tuple[tuple[str, ...], int, int]:
     passed = int(passed_matches[-1]) if passed_matches else 0
     skipped_matches = _SKIPPED_RE.findall(output)
     skipped = int(skipped_matches[-1]) if skipped_matches else 0
-    return failing, passed, skipped
+    summary = next((ln for ln in reversed(output.splitlines()) if _XFAIL_RE.search(ln)), "")
+    xfail = sum(int(n) for n in _XFAIL_RE.findall(summary))
+    return failing, passed, skipped, xfail
 
 
 def pytest_args(tests: tuple[str, ...]) -> list[str]:
@@ -430,7 +435,7 @@ def pytest_args(tests: tuple[str, ...]) -> list[str]:
     # integration test must run, not be deselected into a vacuous pass.
     return [
         "uv", "run", "--frozen", "pytest", "-m", "", "-p", "no:cacheprovider",
-        "--color=no", "-rfEs", "--", *tests,
+        "--color=no", "-rfEsxX", "--", *tests,
     ]  # fmt: skip
 
 
@@ -498,8 +503,9 @@ def make_runner(sandbox: Sandbox | None) -> Runner:
             return PytestRun(-1, (), 0, time.monotonic() - started)
         output = proc.stdout + proc.stderr
         print(output[-20000:], flush=True)
-        failing, passed, skipped = parse_pytest_output(output)
-        return PytestRun(proc.returncode, failing, passed, time.monotonic() - started, skipped)
+        failing, passed, skipped, xfail = parse_pytest_output(output)
+        elapsed = time.monotonic() - started
+        return PytestRun(proc.returncode, failing, passed, elapsed, skipped, xfail)
 
     return run
 
@@ -589,6 +595,12 @@ def execute(root: Path, inputs: Inputs, sha: str, runner: Runner) -> Evidence:
         evidence.baseline_detail = (
             f"baseline skipped {evidence.baseline.skipped} test(s), evidence void "
             "(Docker-backed? dispatch with docker=true)"
+        )
+    elif evidence.baseline.xfail:
+        # xfail and xpass are not passes either: an xfail(run=False) never
+        # executes, and a non-strict xpass is green whether or not it works.
+        evidence.baseline_detail = (
+            f"baseline has {evidence.baseline.xfail} xfailed/xpassed test(s), evidence void"
         )
     if evidence.baseline_detail:
         return evidence

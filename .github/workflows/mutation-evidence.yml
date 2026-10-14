@@ -29,8 +29,11 @@ name: Mutation Evidence
 #   variables forwarded. So PR code cannot rewrite the trusted runner or its
 #   report, plant git hooks the host then runs, or reach the runner's
 #   credentials (GITHUB_TOKEN, the Actions runtime token and so the cache).
-#   `cache-mode: none` would be belt and braces, but actionlint 1.7.12 does not
-#   know the key yet; add it once it does.
+# - `cache-mode: none` for the whole workflow: a dispatch on main may otherwise
+#   write default-branch caches, and in docker mode PR code on the host can
+#   recover the runtime token. With no cache access, nothing it plants is ever
+#   restored by another workflow. (actionlint 1.7.12 does not know the key yet;
+#   .github/actionlint.yaml ignores exactly that error for this file.)
 # - EXCEPT with `docker: true`, for tests that drive the Docker daemon
 #   themselves (docker compose with host bind mounts). A container holding the
 #   Docker socket IS the host, so PR code runs on the runner host and could
@@ -76,6 +79,8 @@ on:
         type: string
 
 permissions: {}
+
+cache-mode: none
 
 # Dispatch-only, so a newer run for the same PR always supersedes the older.
 concurrency:
