@@ -44,7 +44,7 @@ pytestmark = [
 IMAGE = "python:3.12-slim"
 
 
-async def _usage_row_after(command: str, memory: str) -> str:
+async def _usage_row_after(command: str, memory: str, *, exit_code: int) -> str:
     """Run ``command`` in a real workspace and return its Lane 2 usage row."""
     provider = WorkspaceDockerProvider(default_image=IMAGE, security=SecurityConfig.development())
     workspace = await provider.create(
@@ -54,6 +54,7 @@ async def _usage_row_after(command: str, memory: str) -> str:
         result = await provider.execute(workspace, command, timeout=120)
     finally:
         report = await provider.destroy(workspace)
+    assert result.exit_code == exit_code, (result, report)
     usage = usage_from_report(report.usage)
     assert usage is not None, (result, report)
     return json.dumps({**dataclasses.asdict(usage), "workspace_lifetime_seconds": 1.0})
@@ -61,11 +62,11 @@ async def _usage_row_after(command: str, memory: str) -> str:
 
 async def test_an_oom_killed_workspace_reaches_the_api_as_one() -> None:
     # `tail` buffers an endless line, so it grows until the kernel kills it.
-    killed = await _usage_row_after("tail /dev/zero", "32m")
-    quiet = await _usage_row_after("true", "256m")
+    killed = await _usage_row_after("tail /dev/zero", "32m", exit_code=137)
+    quiet = await _usage_row_after("true", "256m", exit_code=0)
     rows = [
-        {"execution_id": "exec-oom", "phase_id": "build", "usage": killed},
-        {"execution_id": "exec-quiet", "phase_id": "build", "usage": quiet},
+        {"execution_id": "exec-oom", "phase_id": "build", "usages": [killed]},
+        {"execution_id": "exec-quiet", "phase_id": "build", "usages": [quiet]},
     ]
     now = datetime.now(UTC)
     profiles = PhaseProfiles(

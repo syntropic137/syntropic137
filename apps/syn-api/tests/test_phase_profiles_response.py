@@ -40,9 +40,9 @@ def test_unmeasured_phases_are_counted_not_dropped() -> None:
     )
     no_lifetime = json.dumps({"cpu_usage_seconds": 3.0, "memory_peak_bytes": 1})
     rows = [
-        {"execution_id": "e1", "phase_id": "plan", "usage": usage},
-        {"execution_id": "e2", "phase_id": "plan", "usage": no_lifetime},
-    ] + [{"execution_id": f"e{i}", "phase_id": "plan", "usage": None} for i in range(3, 7)]
+        {"execution_id": "e1", "phase_id": "plan", "usages": [usage]},
+        {"execution_id": "e2", "phase_id": "plan", "usages": [no_lifetime]},
+    ] + [{"execution_id": f"e{i}", "phase_id": "plan", "usages": None} for i in range(3, 7)]
     now = datetime.now(UTC)
     profiles = PhaseProfiles(
         workflow_id="wf",
@@ -66,7 +66,7 @@ def test_unmeasured_phases_are_counted_not_dropped() -> None:
     assert plan.cpu_seconds_per_wall_second.p50_display == "insufficient"
 
 
-def _profile_of(rows: list[dict[str, str | None]]) -> PhaseProfilesResponse:
+def _profile_of(rows: list[dict[str, str | list[str] | None]]) -> PhaseProfilesResponse:
     now = datetime.now(UTC)
     profiles = PhaseProfiles(
         workflow_id="wf",
@@ -86,11 +86,11 @@ def test_an_oom_killed_phase_is_named_with_its_peak_memory() -> None:
     measured_clean = {"oom_killed": False, "oom_kills": 0, "memory_peak_bytes": 1}
     unmeasured = {"memory_peak_bytes": 1}
     rows = [
-        {"execution_id": "e-docker", "phase_id": "build", "usage": json.dumps(docker_only)},
-        {"execution_id": "e-count", "phase_id": "build", "usage": json.dumps(count_only)},
-        {"execution_id": "e-clean", "phase_id": "build", "usage": json.dumps(measured_clean)},
-        {"execution_id": "e-unknown", "phase_id": "build", "usage": json.dumps(unmeasured)},
-        {"execution_id": "e-norow", "phase_id": "build", "usage": None},
+        {"execution_id": "e-docker", "phase_id": "build", "usages": [json.dumps(docker_only)]},
+        {"execution_id": "e-count", "phase_id": "build", "usages": [json.dumps(count_only)]},
+        {"execution_id": "e-clean", "phase_id": "build", "usages": [json.dumps(measured_clean)]},
+        {"execution_id": "e-unknown", "phase_id": "build", "usages": [json.dumps(unmeasured)]},
+        {"execution_id": "e-norow", "phase_id": "build", "usages": None},
     ]
 
     (build,) = _profile_of(rows).resources
@@ -102,6 +102,26 @@ def test_an_oom_killed_phase_is_named_with_its_peak_memory() -> None:
     assert by_execution["e-docker"].memory_peak_bytes == 536_870_912
     assert by_execution["e-docker"].oom_kills is None, "an unread count stays unknown, never 0"
     assert by_execution["e-count"].oom_kills == 2
+    assert by_execution["e-count"].memory_peak_bytes == 268_435_456
+
+
+def test_a_retry_after_an_oom_kill_does_not_erase_it() -> None:
+    # Newest first, as _RESOURCE_QUERY aggregates them: the retry ran clean,
+    # the clean row was delivered twice, and the first attempt was killed.
+    killed = json.dumps({"oom_killed": True, "oom_kills": 1, "memory_peak_bytes": 536_870_912})
+    clean = json.dumps({"oom_killed": False, "oom_kills": 0, "memory_peak_bytes": 8_388_608})
+    unmeasured = json.dumps({"memory_peak_bytes": None})
+    rows = [
+        {"execution_id": "e-clean-retry", "phase_id": "build", "usages": [clean, clean, killed]},
+        {"execution_id": "e-blind-retry", "phase_id": "build", "usages": [unmeasured, killed]},
+    ]
+
+    (build,) = _profile_of(rows).resources
+
+    assert (build.oom.killed, build.oom.not_killed, build.oom.unknown) == (2, 0, 0)
+    assert [k.memory_peak_bytes for k in build.oom_killed_phases] == [536_870_912] * 2
+    # The resource sample is still the newest attempt's.
+    assert build.memory_peak_bytes.n == 1
 
 
 def test_cpu_and_wall_seconds_carry_p90() -> None:
@@ -109,9 +129,9 @@ def test_cpu_and_wall_seconds_carry_p90() -> None:
         {
             "execution_id": f"e{i}",
             "phase_id": "plan",
-            "usage": json.dumps(
-                {"cpu_usage_seconds": float(i), "workspace_lifetime_seconds": 10.0 * i}
-            ),
+            "usages": [
+                json.dumps({"cpu_usage_seconds": float(i), "workspace_lifetime_seconds": 10.0 * i})
+            ],
         }
         for i in range(1, 11)
     ]

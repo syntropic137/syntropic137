@@ -88,16 +88,19 @@ FROM tagged t
 JOIN phase_sessions ps ON ps.session_id = t.session_id
 """
 
-# Every phase seen in the window, with its usage row when one was written.
-# The CPU rate's denominator is the workspace lifetime recorded IN that row:
-# the counters are cumulative over the workspace's whole life, so any span
-# derived from telemetry or from the window would divide a lifetime of CPU by
-# part of it. A row that carries no lifetime has no rate.
+# Every phase seen in the window, with every usage row written for it, newest
+# first. A retried phase tears down one workspace per attempt; the newest row
+# is the phase's resource sample, and an earlier attempt's OOM kill is still
+# read from its own row, so a clean retry cannot erase it. The CPU rate's
+# denominator is the workspace lifetime recorded IN that row: the counters are
+# cumulative over the workspace's whole life, so any span derived from
+# telemetry or from the window would divide a lifetime of CPU by part of it. A
+# row that carries no lifetime has no rate.
 _RESOURCE_QUERY = """
 SELECT
     execution_id,
     phase_id,
-    (ARRAY_AGG(data ORDER BY time DESC) FILTER (WHERE event_type = $4))[1] AS usage
+    ARRAY_AGG(data ORDER BY time DESC) FILTER (WHERE event_type = $4) AS usages
 FROM agent_events
 WHERE execution_id = ANY($1::text[])
   AND phase_id IS NOT NULL
@@ -494,33 +497,43 @@ def _divide_vendor_cost(
     return costs
 
 
-def _parse_usage(raw: str | None) -> _WorkspaceUsageRow | None:
+def _parse_usages(raw: Sequence[str] | None) -> list[_WorkspaceUsageRow]:
     """asyncpg hands JSONB back as text unless a codec is registered."""
-    return None if raw is None else _WorkspaceUsageRow.model_validate_json(raw)
+    return [_WorkspaceUsageRow.model_validate_json(r) for r in raw or ()]
 
 
 def _resource_profiles(rows: Iterable[asyncpg.Record]) -> list[PhaseResourceProfile]:
     by_phase: dict[str, list[tuple[str, float | None, _WorkspaceUsageRow | None]]] = defaultdict(
         list
     )
+    killed_by_phase: dict[str, list[OomKilledPhase]] = defaultdict(list)
     for row in rows:
-        usage = _parse_usage(row["usage"])
+        attempts = _parse_usages(row["usages"])
+        usage = attempts[0] if attempts else None
         wall = None if usage is None else usage.workspace_lifetime_seconds
         by_phase[row["phase_id"]].append((row["execution_id"], wall if wall else None, usage))
+        # The newest killed attempt, with its own peak: a phase counts once
+        # however many attempts or duplicate deliveries wrote a row.
+        killed = next((a for a in attempts if a.oom is True), None)
+        if killed is not None:
+            killed_by_phase[row["phase_id"]].append(
+                OomKilledPhase(
+                    execution_id=row["execution_id"],
+                    memory_peak_bytes=killed.memory_peak_bytes,
+                    oom_kills=killed.oom_kills,
+                )
+            )
 
     profiles = []
     for phase_id, phases in sorted(by_phase.items()):
         measured = [(wall, usage) for _, wall, usage in phases if usage is not None]
-        killed = [
-            OomKilledPhase(
-                execution_id=execution_id,
-                memory_peak_bytes=usage.memory_peak_bytes,
-                oom_kills=usage.oom_kills,
-            )
-            for execution_id, _, usage in sorted(phases, key=lambda p: p[0])
-            if usage is not None and usage.oom is True
-        ]
-        not_killed = sum(1 for _, u in measured if u.oom is False)
+        killed = sorted(killed_by_phase[phase_id], key=lambda k: k.execution_id)
+        killed_ids = {k.execution_id for k in killed}
+        not_killed = sum(
+            1
+            for execution_id, _, u in phases
+            if u is not None and u.oom is False and execution_id not in killed_ids
+        )
         cpu_rates = [
             usage.cpu_usage_seconds / wall
             for wall, usage in measured
