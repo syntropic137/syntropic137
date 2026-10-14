@@ -51,6 +51,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExe
     AgentExecutionHandler,
     AgentExecutionResult,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.phase_completion import (
+    complete_phase,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_conversation import (
     record_phase_conversation,
 )
@@ -62,7 +65,6 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.phase_delegation 
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_outcome import (
     completed_execution,
-    completed_phase,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_push import push_recorder
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_retry import (
@@ -88,11 +90,11 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.resume_handoff im
     record_continuation,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.run_reservation import open_start
+from syn_domain.contexts.orchestration.slices.execute_workflow.run_todo_fold import (
+    RunScopedTodoFold,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.shutdown_interruption import (
     preserve_interrupted_run,
-)
-from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_guard import (
-    refuse_to_complete_unsaved_phase,
 )
 
 if TYPE_CHECKING:
@@ -146,6 +148,10 @@ if TYPE_CHECKING:
         SessionRepository,
         TodoProjection,
     )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.run_todo_fold import (
+        ExecutionEventStream,
+        TodoProjectionType,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -179,6 +185,10 @@ class _DispatchContext:
     #: number an agent is told to work on. Nothing downstream could detect it:
     #: a prompt is valid whichever run's inputs it names.
     inputs: dict[str, Any] = field(default_factory=dict)
+    #: The run's own to-do list and the journal that keeps it current, for a
+    #: claimed run (ADR-072 D8, #1310 1.4). None is today's path: the
+    #: processor's shared list, which `run` and `run_resume` still drain.
+    fold: RunScopedTodoFold | None = None
 
 
 class WorkflowExecutionProcessor:
@@ -211,11 +221,17 @@ class WorkflowExecutionProcessor:
         interrupt_budget_seconds: float = 60.0,
         run_queue: ExecutionRunQueue | None = None,
         shipped_ledger: ShippedLedger | None = None,
+        execution_events: ExecutionEventStream | None = None,
+        todo_projection_type: TodoProjectionType | None = None,
     ) -> None:
         #: Where an admitted run waits for an Executor (ADR-072, #1310 1.3).
         #: None is today's path: `run` starts AND drains in this call. Set,
         #: `run` and `run_resume` only admit, and `run_claimed` drains.
         self._run_queue = run_queue
+        #: What `run_claimed` folds a claimed run's own to-do list from (D8).
+        self._execution_repo = execution_repository
+        self._execution_events = execution_events
+        self._todo_projection_type = todo_projection_type
         #: Where what each phase shipped is recorded, once, as its stream is read:
         #: given, else kept by the Lane 2 store itself when it can (ShippedLedgerProvider).
         self._shipped_ledger = shipped_ledger or (
@@ -275,6 +291,7 @@ class WorkflowExecutionProcessor:
         self,
         execution_id: str,
         inputs: dict[str, Any],
+        journal: ExecutionJournal | None = None,
     ) -> PhaseWorkspace:
         """The storage seam of a phase: provision it, claim what it produced.
 
@@ -300,9 +317,13 @@ class WorkflowExecutionProcessor:
             claude_plugin_materializer=self._claude_plugin_materializer,
             skill_materializer=self._skill_materializer,
             runtime=self._runtimes.of(execution_id),
-            journal=self._journal,
+            journal=journal or self._journal,
             inputs=inputs,
         )
+
+    def _journal_of(self, dispatch_ctx: _DispatchContext) -> ExecutionJournal:
+        """The journal a run's saves go through: its own fold's, else the shared one."""
+        return self._journal if dispatch_ctx.fold is None else dispatch_ctx.fold.journal
 
     async def resolve_inheritance(self, origin: ResumeOrigin | None) -> None:
         """Raise unless a resume's inherited outputs can be handed over.
@@ -452,11 +473,27 @@ class WorkflowExecutionProcessor:
         Everything `run` was handed is read back from the start pins: phases,
         inputs, the resume origin, and the repositories, rebuilt from the
         source commits, which keep each repository even where its SHA is
-        unknown. The to-do list is read from the shared projection store the
-        start was projected into; the run-scoped fold that replaces it is
-        #1310 1.4. Closing the run row is the claimer's (1.5), not this.
+        unknown. The to-do list is the run's own (ADR-072 D8, #1310 1.4):
+        folded from this execution's stream at the claim and kept current by
+        the run's own saves, never read from the shared `execution_todo`
+        store, whose other writers this run cannot see. Closing the run row
+        is the claimer's (1.5), not this.
+
+        Raises:
+            RuntimeError: the processor was built without the event stream and
+                projection type the fold is made from - a wiring defect.
+            LookupError: the claimed execution has no stream.
         """
-        aggregate = await self._journal.reload(claimed.execution_id)
+        if self._execution_events is None or self._todo_projection_type is None:
+            msg = "run_claimed needs execution_events and todo_projection_type (ADR-072 D8)"
+            raise RuntimeError(msg)
+        fold = await RunScopedTodoFold.for_execution(
+            claimed.execution_id,
+            self._execution_repo,
+            self._execution_events,
+            self._todo_projection_type,
+        )
+        aggregate = await fold.journal.reload(claimed.execution_id)
         if aggregate is None:
             msg = f"Claimed run {claimed.execution_id} has no execution stream"
             raise LookupError(msg)
@@ -467,7 +504,7 @@ class WorkflowExecutionProcessor:
             aggregate,
             aggregate.workflow_id or "",
             pins.pinned_phases,
-            _DispatchContext(inputs=dict(pins.inputs)),
+            _DispatchContext(inputs=dict(pins.inputs), fold=fold),
             repos or None,
             pins.resumed_from,
             phase_outputs,
@@ -487,6 +524,7 @@ class WorkflowExecutionProcessor:
     ) -> WorkflowExecutionResult:
         """Drain the to-do list of a started run until it ends."""
         execution_id = aggregate.id or ""
+        journal = self._journal_of(dispatch_ctx)
         phase_map = {p.phase_id: p for p in phases}
 
         phase_results: list[PhaseResult] = []
@@ -513,7 +551,7 @@ class WorkflowExecutionProcessor:
                 return await record_cancel_and_release(
                     aggregate=aggregate,
                     runtime=self._runtimes.of(execution_id),
-                    workspaces=self._workspaces_for(execution_id, {}),
+                    workspaces=self._workspaces_for(execution_id, {}, journal),
                     ledger=self._cancelled_work,
                     execution_id=execution_id,
                     workflow_id=workflow_id,
@@ -531,6 +569,7 @@ class WorkflowExecutionProcessor:
                 phase_results,
                 all_artifact_ids,
                 started_at,
+                journal,
             )
         except Exception as e:
             logger.exception(
@@ -551,6 +590,7 @@ class WorkflowExecutionProcessor:
                 started_at,
                 failed_phase_id=dispatch_ctx.current_phase_id,
                 kept_artifact_ids=dispatch_ctx.kept_artifact_ids,
+                journal=journal,
             )
         except asyncio.CancelledError:
             # Platform shutdown (#1381): neither path above saves the work on a
@@ -559,8 +599,8 @@ class WorkflowExecutionProcessor:
             await preserve_interrupted_run(
                 aggregate=aggregate,
                 runtime=self._runtimes.of(execution_id),
-                workspaces=self._workspaces_for(execution_id, {}),
-                journal=self._journal,
+                workspaces=self._workspaces_for(execution_id, {}, journal),
+                journal=journal,
                 workflow_id=workflow_id,
                 execution_id=execution_id,
                 phase_id=dispatch_ctx.current_phase_id,
@@ -590,8 +630,11 @@ class WorkflowExecutionProcessor:
         dispatch_ctx: _DispatchContext,
     ) -> None:
         """Process to-do items until the list is empty (all phases done or cancelled)."""
+        todo_list = (
+            self._todo_projection if dispatch_ctx.fold is None else dispatch_ctx.fold.projection
+        )
         while True:
-            todos = await self._todo_projection.get_pending(execution_id)
+            todos = await todo_list.get_pending(execution_id)
             if not todos:
                 break
             await self._dispatch(
@@ -626,8 +669,9 @@ class WorkflowExecutionProcessor:
         # real phase id and unstrand the inner phase record. Stored on
         # the per-run _DispatchContext, never on the shared processor.
         dispatch_ctx.current_phase_id = todo.phase_id
+        journal = self._journal_of(dispatch_ctx)
         if todo.action == TodoAction.PROVISION_WORKSPACE:
-            await self._workspaces_for(todo.execution_id, dispatch_ctx.inputs).start_phase(
+            await self._workspaces_for(todo.execution_id, dispatch_ctx.inputs, journal).start_phase(
                 todo,
                 phase,
                 aggregate,
@@ -638,7 +682,7 @@ class WorkflowExecutionProcessor:
         elif todo.action == TodoAction.RUN_AGENT:
             await self._handle_run_agent(todo, phase, aggregate, dispatch_ctx)
         elif todo.action == TodoAction.COLLECT_ARTIFACTS:
-            await self._workspaces_for(todo.execution_id, dispatch_ctx.inputs).collect(
+            await self._workspaces_for(todo.execution_id, dispatch_ctx.inputs, journal).collect(
                 todo,
                 phase,
                 aggregate,
@@ -647,7 +691,7 @@ class WorkflowExecutionProcessor:
             )
         elif todo.action == TodoAction.COMPLETE_PHASE:
             await self._handle_complete_phase(
-                todo, phase, aggregate, phase_results, completed_phase_ids
+                todo, phase, aggregate, phase_results, completed_phase_ids, journal
             )
             # The phase finished cleanly; a later workflow-level failure
             # (between phases) must not be attributed to it.
@@ -662,11 +706,12 @@ class WorkflowExecutionProcessor:
         phase_results: list[PhaseResult],
         all_artifact_ids: list[str],
         started_at: datetime,
+        journal: ExecutionJournal,
     ) -> WorkflowExecutionResult:
         """Build completion command, save, and return success result."""
         completion = completed_execution(phase_results, all_artifact_ids)
         aggregate.complete_execution(completion.as_command(execution_id, total_phases=len(phases)))
-        await self._journal.append(aggregate)
+        await journal.append(aggregate)
         return completion.execution_result(workflow_id, execution_id, started_at=started_at)
 
     async def _fail_execution(
@@ -682,6 +727,7 @@ class WorkflowExecutionProcessor:
         started_at: datetime,
         failed_phase_id: str | None = None,
         kept_artifact_ids: list[str] | None = None,
+        journal: ExecutionJournal | None = None,
     ) -> WorkflowExecutionResult:
         """Close open sessions, save failure event, and return failed result.
 
@@ -697,8 +743,8 @@ class WorkflowExecutionProcessor:
             error,
             aggregate,
             runtime=self._runtimes.of(execution_id),
-            workspaces=self._workspaces_for(execution_id, {}),
-            journal=self._journal,
+            workspaces=self._workspaces_for(execution_id, {}, journal),
+            journal=journal or self._journal,
             remote_branches=self._remote_branches,
             execution_id=execution_id,
             workflow_id=workflow_id,
@@ -728,6 +774,7 @@ class WorkflowExecutionProcessor:
         assert todo.phase_id is not None
         session_id = todo.session_id or ""
         runtime = self._runtimes.of(todo.execution_id)
+        journal = self._journal_of(dispatch_ctx)
         launch = runtime.launch(todo.phase_id, session_id=session_id)
         workflow_id = aggregate.workflow_id or ""
 
@@ -762,7 +809,7 @@ class WorkflowExecutionProcessor:
                 session_id=session_id,
                 observability=self._observability_writer,
                 retry_policy=self._retry_policy,
-                on_push=push_recorder(aggregate, self._journal, todo.phase_id),
+                on_push=push_recorder(aggregate, journal, todo.phase_id),
                 shipped=shipped_recorder(self._shipped_ledger, aggregate, todo.execution_id),
             )
             said = result.stream_result.last_agent_message
@@ -799,7 +846,7 @@ class WorkflowExecutionProcessor:
                     said,
                     UnfinishedPhase.INTERRUPTED,
                 )
-                await self._handle_cancel_signal(todo, result, aggregate)
+                await self._handle_cancel_signal(todo, result, aggregate, journal)
                 return
 
             command = result.command
@@ -824,7 +871,7 @@ class WorkflowExecutionProcessor:
                     todo,
                     aggregate,
                     runtime,
-                    self._journal,
+                    journal,
                     reason=result.stream_result.error_reason,
                     failure=str(failure),
                 ):
@@ -832,7 +879,7 @@ class WorkflowExecutionProcessor:
                 raise failure
 
             aggregate.agent_execution_completed(command)
-            await self._journal.append(aggregate)
+            await journal.append(aggregate)
         except Exception:
             if not kept:
                 await self._keep(
@@ -852,7 +899,7 @@ class WorkflowExecutionProcessor:
     ) -> None:
         """Keep what an unfinished phase wrote or said, before its workspace goes."""
         dispatch_ctx.kept_artifact_ids = await self._workspaces_for(
-            todo.execution_id, dispatch_ctx.inputs
+            todo.execution_id, dispatch_ctx.inputs, self._journal_of(dispatch_ctx)
         ).keep_unfinished_output(
             todo,
             phase,
@@ -867,6 +914,7 @@ class WorkflowExecutionProcessor:
         todo: TodoItem,
         result: AgentExecutionResult,
         aggregate: WorkflowExecutionAggregate,
+        journal: ExecutionJournal,
     ) -> None:
         """Dispatch CancelExecutionCommand when the agent stream was interrupted by a cancel signal."""
         assert todo.phase_id is not None, "phase_id must be set for a running agent todo"
@@ -876,7 +924,7 @@ class WorkflowExecutionProcessor:
             reason=result.stream_result.interrupt_reason or "Cancelled by user",
         )
         aggregate.cancel_execution(cancel_cmd)
-        await self._journal.append(aggregate)
+        await journal.append(aggregate)
 
     async def _handle_complete_phase(
         self,
@@ -885,53 +933,15 @@ class WorkflowExecutionProcessor:
         aggregate: WorkflowExecutionAggregate,
         phase_results: list[PhaseResult],
         completed_phase_ids: list[str],
+        journal: ExecutionJournal | None = None,
     ) -> None:
-        """Dispatch COMPLETE_PHASE.
-
-        THE ORDER OF THE FOUR STEPS BELOW IS THE GUARANTEE (#1184). The guard
-        runs before the phase gives anything up, before the aggregate is told
-        it succeeded, before that is persisted, and before the runtime tears
-        the workspace down. Every one of those is a point of no return, and the
-        guard is only a guard on the near side of all four.
-
-        `phase` is here for the guard, which cannot tell an authored edit from
-        a build tool's side effect without the phase's own declaration (#1308).
-        Every other handler already took it; this one dropped it, which is why
-        the declaration had nowhere to arrive.
-        """
-        assert todo.phase_id is not None
-        runtime = self._runtimes.of(todo.execution_id)
-        # FIRST, and on the real path rather than inside a try: nothing has
-        # been popped, the workspace is still alive and the aggregate has not
-        # been told this phase succeeded, so the raise IS the outcome (#1184).
-        await refuse_to_complete_unsaved_phase(
-            runtime.live_workspaces,
+        """Dispatch COMPLETE_PHASE, in the order `complete_phase` guarantees (#1184)."""
+        await complete_phase(
             todo,
-            delivers_repo_changes=phase.delivers_repo_changes,
-        )
-
-        harvest = runtime.harvest(todo.execution_id, todo.phase_id)
-        outcome = completed_phase(
-            execution_id=todo.execution_id,
-            workflow_id=aggregate.workflow_id or "",
-            phase_id=todo.phase_id,
-            session_id=todo.session_id,
-            started_at=harvest.started_at,
-            artifact_ids=harvest.artifact_ids,
-            auth_tokens=harvest.auth_tokens,
-        )
-        phase_results.append(outcome.result)
-        completed_phase_ids.append(todo.phase_id)
-
-        aggregate.complete_phase(outcome.command)
-        await self._journal.append(aggregate)
-
-        await runtime.finalize(
-            todo.phase_id,
-            input_tokens=outcome.input_tokens,
-            output_tokens=outcome.output_tokens,
-            cache_creation_tokens=outcome.cache_creation_tokens,
-            cache_read_tokens=outcome.cache_read_tokens,
-            total_tokens=outcome.total_tokens,
-            duration_seconds=outcome.duration_seconds,
+            phase,
+            aggregate,
+            phase_results,
+            completed_phase_ids,
+            runtime=self._runtimes.of(todo.execution_id),
+            journal=journal or self._journal,
         )

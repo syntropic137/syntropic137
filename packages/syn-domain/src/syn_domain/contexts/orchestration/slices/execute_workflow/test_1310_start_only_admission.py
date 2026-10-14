@@ -27,7 +27,10 @@ from event_sourcing.client.memory import MemoryEventStoreClient
 
 from syn_adapters.execution_runs.memory import InMemoryExecutionRunQueue
 from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
-from syn_adapters.storage.repositories import RepositoryAdapter
+from syn_adapters.storage.repositories import (
+    EventStoreExecutionEventStream,
+    RepositoryAdapter,
+)
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
 from syn_domain.contexts.orchestration import ORCHESTRATION_EVENT_EPOCH, DuplicateExecutionError
 from syn_domain.contexts.orchestration._shared.workflow_definition import WorkflowDefinition
@@ -102,7 +105,9 @@ class _World:
         template.create_workflow(build_command_from_definition(self.definition))
         await self.templates.save_new(template)
 
-    def processor(self, *, queued: bool) -> WorkflowExecutionProcessor:
+    def processor(
+        self, *, queued: bool, shared_todos: object | None = None
+    ) -> WorkflowExecutionProcessor:
         """A fresh processor: nothing in it survives from any other."""
         return WorkflowExecutionProcessor(
             execution_repository=RepositoryAdapter(
@@ -122,8 +127,10 @@ class _World:
             controller=None,
             prompt_builder=AsyncMock(return_value="test prompt"),
             command_builder=MagicMock(return_value=["claude"]),
-            todo_projection=ExecutionTodoProjection(store=self.todos),
+            todo_projection=ExecutionTodoProjection(store=shared_todos or self.todos),  # type: ignore[arg-type]
             run_queue=self.queue if queued else None,
+            execution_events=EventStoreExecutionEventStream(self.store),
+            todo_projection_type=ExecutionTodoProjection,
         )
 
     async def handle(self, processor: WorkflowExecutionProcessor, execution_id: str) -> str:
@@ -187,6 +194,58 @@ async def test_v5_start_then_run_claimed_in_a_fresh_processor_matches_todays_run
     assert await world.event_types("exec-claimed") == golden
     assert result.status == "failed"
     world.workspace.create_workspace.assert_called()
+
+
+class _SharedTodosRefused:
+    """A shared `execution_todo` store that fails any read or write of it."""
+
+    def __getattr__(self, name: str) -> object:
+        async def refused(*_args: object, **_kwargs: object) -> object:
+            raise AssertionError(f"a claimed run touched the shared to-do store ({name})")
+
+        return refused
+
+
+async def test_1_4_a_claimed_run_drains_its_own_fold_and_never_the_shared_list() -> None:
+    """ADR-072 D8: the claimed drain reads and writes only the run's own fold.
+
+    The claiming processor's shared store refuses every call, so a drain that
+    still read `get_pending` from it, or projected a save into it, would fail
+    on the first touch and write a different sequence from today's run.
+    """
+    world = _World()
+    await world.install()
+    await world.handle(world.processor(queued=False), "exec-golden")
+    golden = await world.event_types("exec-golden")
+    await world.handle(world.processor(queued=True), "exec-own-fold")
+    await world.queue.register(_HOST, capacity=1)
+    await world.queue.heartbeat(_HOST.host_id)
+    claimed = await world.queue.claim(_HOST.host_id)
+    assert claimed is not None
+
+    processor = world.processor(queued=True, shared_todos=_SharedTodosRefused())
+    result = await processor.run_claimed(claimed)
+
+    assert len(golden) > 2, golden
+    assert await world.event_types("exec-own-fold") == golden
+    assert result.status == "failed"
+
+
+async def test_1_4_run_claimed_refuses_a_processor_built_without_the_fold_inputs() -> None:
+    world = _World()
+    await world.install()
+    await world.handle(world.processor(queued=True), "exec-unwired")
+    await world.queue.register(_HOST, capacity=1)
+    await world.queue.heartbeat(_HOST.host_id)
+    claimed = await world.queue.claim(_HOST.host_id)
+    assert claimed is not None
+    processor = world.processor(queued=True)
+    processor._execution_events = None  # pyright: ignore[reportPrivateUsage]
+
+    with pytest.raises(RuntimeError, match="execution_events"):
+        await processor.run_claimed(claimed)
+
+    assert await world.event_types("exec-unwired") == ["WorkflowExecutionStarted"]
 
 
 async def test_a_reservation_whose_stream_write_failed_is_not_a_duplicate() -> None:
