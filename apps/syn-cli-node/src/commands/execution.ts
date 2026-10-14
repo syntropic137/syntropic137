@@ -135,6 +135,9 @@ const showCommand: CommandDef = {
     }
     if (ex.error_message) print(`  ${style("Error:", RED)}        ${ex.error_message}`);
     if (ex.resume_start) printResumeStart(ex.resume_start);
+    // Resume lineage (#1881): the backend words both directions.
+    if (ex.resumed_from_display) print(`  Lineage:      ${ex.resumed_from_display}`);
+    if (ex.resumed_as_display) print(`  Lineage:      ${ex.resumed_as_display}`);
 
     const repos = ex.repos ?? [];
     if (repos.length > 0) {

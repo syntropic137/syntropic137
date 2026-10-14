@@ -377,6 +377,16 @@ reappears in this context before that issue claims it.
 Until 2026-09-29 the code used `fork` for what this file calls Resume. See
 ADR-014 section 7.
 
+## Resume Lineage
+
+The link between an Execution and its Resume, read both ways (#1881). On the
+resumed Execution, `resumed_from` names the original and its Resume Phase,
+projected from its own `WorkflowExecutionStarted`. On the original,
+`resumed_as` names the resumed Execution, projected from its own
+`ExecutionResumed`. One Resume per Execution, so `resumed_as` is one id, never
+a list, and a chain of Resumes is a line: `latest_resumed_as` follows
+`resumed_as` to its end, the run a reader of a failed original wants to open.
+
 ## Inherited Phase
 
 A Phase a resumed Execution does not re-run, because the Execution it came from

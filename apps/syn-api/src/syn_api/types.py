@@ -717,6 +717,15 @@ class PlannedPhaseInfo(BaseModel):
         )
 
 
+class ResumedFromInfo(BaseModel):
+    """The execution a resumed run continues, and the phase it picked up at (#1881)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    parent_execution_id: str
+    resume_phase_id: str
+
+
 class ExecutionSummary(BaseModel):
     """Summary of a workflow execution run."""
 
@@ -790,6 +799,10 @@ class ExecutionSummary(BaseModel):
     """Full GitHub URLs of repositories cloned for this execution (ADR-058)."""
     tags: list[str] = Field(default_factory=list)
     """The execution's current tags, normalised and sorted (#967)."""
+    resumed_from: ResumedFromInfo | None = None
+    """The execution this run resumed, or None for a fresh run (#1881)."""
+    resumed_as: str | None = None
+    """The execution that resumed this one, or None. At most one (#1881)."""
 
 
 class ExecutionDetail(BaseModel):
@@ -2366,6 +2379,10 @@ class ExecutionDetailFull(BaseModel):
     Enough to re-dispatch the run: a caller retrying one that died on the
     platform posts these back rather than reconstructing them from its own
     notes (#1307)."""
+    resumed_from: ResumedFromInfo | None = None
+    """The execution this run resumed, or None for a fresh run (#1881)."""
+    resumed_as: str | None = None
+    """The execution that resumed this one, or None. At most one (#1881)."""
 
 
 class ControlResult(BaseModel):
