@@ -8,6 +8,8 @@ each is a place the value can be dropped; these tests read it at the far end.
 
 from __future__ import annotations
 
+import dataclasses
+
 import logging
 import os
 from dataclasses import dataclass
@@ -171,11 +173,29 @@ async def test_agentic_adapter_maps_the_provider_report() -> None:
         nr_throttled=0,
         memory_peak_bytes=123_456_789,
         oom_kills=0,
+        oom_killed=False,
         disk_bytes_at_teardown=2048,
         delete_failures=("/ws/a", "/ws/b"),
         net_rx_bytes=10,
         net_tx_bytes=20,
     )
+
+
+@pytest.mark.asyncio
+async def test_an_oom_kill_seen_only_by_docker_reaches_the_domain() -> None:
+    # Docker's State.OOMKilled can report a kill when the cgroup counters
+    # could not be read: the flag must arrive, and the unread count must stay
+    # unknown rather than becoming 0.
+    report = TeardownReport(
+        finalization=_COMPLETED,
+        usage=TeardownUsage(oom_killed=True, memory_peak_bytes=268_435_456),
+    )
+    adapter, _ = _adapter(report)
+    usage = await adapter.destroy(_HANDLE)
+    assert usage is not None
+    assert usage.oom_killed is True
+    assert usage.oom_kills is None
+    assert usage.memory_peak_bytes == 268_435_456
 
 
 _RETAINED = FinalizationOutcome(
@@ -323,6 +343,14 @@ def test_the_protocol_names_exactly_the_usage_fields() -> None:
         name for name, value in vars(TeardownReportLike).items() if isinstance(value, property)
     }
     assert members == set(USAGE_FIELDS)
+
+
+def test_every_field_the_real_provider_reports_is_mapped() -> None:
+    # Pinned against agentic-workspace's own `TeardownUsage`, not a double:
+    # a field the provider adds and syn does not map is dropped silently by
+    # `usage_from_report`, which is how `oom_killed` was once lost.
+    provider_fields = {f.name for f in dataclasses.fields(TeardownUsage)}
+    assert provider_fields == set(USAGE_FIELDS)
 
 
 @pytest.mark.asyncio
