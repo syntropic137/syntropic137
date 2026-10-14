@@ -902,7 +902,11 @@ class EventStoreSchema:
             batch = sessions[start : start + size]
             async with conn.transaction():
                 await conn.execute("SELECT pg_advisory_xact_lock($1)", USAGE_ROLLUP_SCHEMA_LOCK_KEY)
-                await conn.execute("SELECT 1 FROM agent_turn_usage_rollup WHERE NOT backfilled AND session_id = ANY($1::text[]) FOR UPDATE", batch)  # MUTANT
+                await conn.execute(  # MUTANT: row-lock the trigger's rows
+                    "SELECT 1 FROM agent_turn_usage_rollup WHERE NOT backfilled"
+                    " AND session_id = ANY($1::text[]) FOR UPDATE",
+                    batch,
+                )
                 for statement in USAGE_ROLLUP_BACKFILL_SQL:
                     await conn.execute(statement, batch)
         async with conn.transaction():
