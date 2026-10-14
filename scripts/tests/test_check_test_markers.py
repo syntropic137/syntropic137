@@ -61,6 +61,19 @@ class TestWorktreesAreExcluded:
     def test_vendored_trees_are_excluded(self, path: str) -> None:
         assert is_excluded(path)
 
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "scripts/test_node_modules_policy.py",
+            "scripts/tests/test_site-packages.py",
+            "packages/my.venv_tools/tests/test_a.py",
+            "docs/claude/worktrees/test_b.py",
+        ],
+    )
+    def test_a_fragment_inside_a_name_is_not_excluded(self, path: str) -> None:
+        """Whole directory components only: a substring match hid real tests."""
+        assert not is_excluded(path)
+
     def test_duplicate_copies_are_counted_once(self, tmp_path: Path) -> None:
         """Two worktree copies of one file must not treble the count.
 

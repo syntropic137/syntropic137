@@ -141,6 +141,12 @@ def test_no_test_file_lives_outside_testpaths() -> None:
     )
 
 
+#: `ci/fitness` is run by its own job, so it is exempt from the testpaths
+#: check, but a `test_` method on a non-`Test*` class is skipped there too. It
+#: is scanned for hidden methods like everything else (#1935).
+_HIDDEN_METHOD_SCANNED = {"ci/fitness"}
+
+
 def _test_files() -> list[pathlib.Path]:
     files: list[pathlib.Path] = []
     for pattern in ("test_*.py", "*_test.py"):
@@ -149,10 +155,52 @@ def _test_files() -> list[pathlib.Path]:
                 continue
             if str(path.relative_to(_REPO_ROOT)) in _EXCLUDED_FILES:
                 continue
-            if _is_excluded(str(path.parent.relative_to(_REPO_ROOT))):
+            directory = str(path.parent.relative_to(_REPO_ROOT))
+            scanned = any(
+                directory == kept or directory.startswith(f"{kept}/")
+                for kept in _HIDDEN_METHOD_SCANNED
+            )
+            if _is_excluded(directory) and not scanned:
                 continue
             files.append(path)
     return files
+
+
+def _hidden_methods(path: pathlib.Path) -> list[str]:
+    """Each non-`Test*` class in `path` that declares `test_` methods."""
+    try:
+        tree = ast.parse(path.read_text(errors="ignore"))
+    except SyntaxError:  # pragma: no cover - ruff/CI catch these first
+        return []
+    hidden: list[str] = []
+    for node in tree.body:
+        if not isinstance(node, ast.ClassDef) or node.name.startswith("Test"):
+            continue
+        methods = [
+            child.name
+            for child in node.body
+            if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef)
+            and child.name.startswith("test_")
+        ]
+        if methods:
+            hidden.append(f"{node.name} ({len(methods)} methods)")
+    return hidden
+
+
+def test_fitness_modules_are_scanned_for_hidden_methods() -> None:
+    """ci/fitness is exempt from testpaths, not from this check."""
+    scanned = {str(p.relative_to(_REPO_ROOT)) for p in _test_files()}
+    assert any(path.startswith("ci/fitness/") for path in scanned)
+
+
+def test_a_hidden_method_is_found(tmp_path: pathlib.Path) -> None:
+    """The scanner itself, against the shape it exists to catch, plus a control."""
+    module = tmp_path / "test_invariants.py"
+    module.write_text(
+        "class InvariantChecks:\n    def test_a(self) -> None: ...\n\n\n"
+        "class TestCollected:\n    def test_b(self) -> None: ...\n"
+    )
+    assert _hidden_methods(module) == ["InvariantChecks (1 methods)"]
 
 
 def test_no_test_method_hides_in_a_non_test_class() -> None:
@@ -163,26 +211,11 @@ def test_no_test_method_hides_in_a_non_test_class() -> None:
     file outside testpaths, one level down, and equally invisible to a gate
     that asks pytest what it selected.
     """
-    hidden: list[str] = []
-
-    for path in _test_files():
-        try:
-            tree = ast.parse(path.read_text(errors="ignore"))
-        except SyntaxError:  # pragma: no cover - ruff/CI catch these first
-            continue
-
-        for node in tree.body:
-            if not isinstance(node, ast.ClassDef) or node.name.startswith("Test"):
-                continue
-            methods = [
-                child.name
-                for child in node.body
-                if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef)
-                and child.name.startswith("test_")
-            ]
-            if methods:
-                relative = path.relative_to(_REPO_ROOT)
-                hidden.append(f"{relative}::{node.name} ({len(methods)} methods)")
+    hidden = [
+        f"{path.relative_to(_REPO_ROOT)}::{entry}"
+        for path in _test_files()
+        for entry in _hidden_methods(path)
+    ]
 
     assert not hidden, (
         "test methods live in classes pytest does not collect (must match "

@@ -81,10 +81,21 @@ FITNESS_UNSELECTED_SELECTOR = f"not {FITNESS_SELECTED_MARKER}"
 def is_excluded(path: Path | str) -> bool:
     """True when a path lies under a directory that is not first-party source.
 
+    Matches whole DIRECTORY components, never substrings and never the file
+    name: a substring test excluded ``scripts/test_node_modules_policy.py``,
+    so a first-party test escaped every guard that shares this function.
     Uses ``as_posix`` so the check behaves identically on Windows separators.
     """
-    text = Path(path).as_posix()
-    return any(fragment in text for fragment in EXCLUDED_PATH_FRAGMENTS)
+    directories = Path(path).as_posix().split("/")[:-1]
+    for fragment in EXCLUDED_PATH_FRAGMENTS:
+        wanted = fragment.split("/")
+        width = len(wanted)
+        if any(
+            directories[start : start + width] == wanted
+            for start in range(len(directories) - width + 1)
+        ):
+            return True
+    return False
 
 
 def iter_test_files(root: Path) -> list[Path]:
