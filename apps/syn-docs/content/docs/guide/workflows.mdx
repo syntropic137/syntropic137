@@ -6,21 +6,28 @@ description: Install, create, and distribute pre-built workflow packages.
 import { Files, Folder, File } from 'fumadocs-ui/components/files';
 
 Workflow packages are the standard format for distributing pre-built workflows in Syntropic137.
-After running `npx syntropic137 setup`, installing a workflow package is the fastest way to start
+After running `npx @syntropic137/setup init`, installing a workflow package is the fastest way to start
 doing useful work with the platform.
 
 ## Quick Start
 
 ```bash
-# Install the starter research workflow
+# Install the starter research workflow (the path is inside a clone of
+# syntropic137/syntropic137; any local package directory works the same way)
 syn workflow install ./workflows/examples/research-package/
 
-# Run it
-syn workflow run research-package-v1 --task "Investigate event sourcing patterns for our platform"
+# Run it against a repository the GitHub App is installed on
+syn workflow run research-package-v1 -R owner/repo \
+  --task "Investigate event sourcing patterns for our platform"
 
 # See what's installed
-syn workflow installed
+syn workflow packages
 ```
+
+`-R` (`--repo`, repeatable) names the repositories the workspace clones. A
+workflow needs at least one unless its YAML sets `requires_repos: false`, and
+running on a repository currently needs the GitHub App
+([#1948](https://github.com/syntropic137/syntropic137/issues/1948)).
 
 `--task` (`-t`) must say something. `syn workflow run <name> -t ""` (or a
 whitespace-only task) is refused by the CLI before any request is sent, and the

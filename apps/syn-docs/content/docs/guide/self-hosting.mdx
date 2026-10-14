@@ -21,12 +21,14 @@ The dashboard will be available at `http://localhost:8137`.
 
 ## Services
 
-| Service | Port | Description |
-|---------|------|-------------|
-| `api` | 8000 | FastAPI backend: REST API, SSE |
-| `gateway` | 80 | nginx reverse proxy + React dashboard frontend |
+Only the gateway is published on the host, at `127.0.0.1:8137` by default. The ports below are internal to the stack's Docker network and are not reachable from your machine.
+
+| Service | Internal port | Description |
+|---------|---------------|-------------|
+| `gateway` | 80 | nginx reverse proxy + dashboard frontend, published at `127.0.0.1:8137` |
+| `api` | 8000 | FastAPI backend: REST API, SSE (served under `/api/v1/` through the gateway) |
 | `event-store` | 50051 | gRPC event sourcing server |
-| `event-collector` | 8080 | High-throughput event ingestion |
+| `collector` | 8080 | High-throughput event ingestion |
 | `timescaledb` | 5432 | PostgreSQL + TimescaleDB for events and metrics |
 | `redis` | 6379 | Caching, pub/sub, projection store |
 | `minio` | 9000 | S3-compatible artifact storage |
@@ -221,6 +223,6 @@ See the [Tunnels guide](/docs/guide/tunnels) for setup instructions.
 
 ## Secrets
 
-Infrastructure secrets (database, Redis, MinIO) are stored as `chmod 600` files and mounted via Docker Compose's secrets mechanism, never baked into image layers. Application-level API keys (e.g. `ANTHROPIC_API_KEY`) are supplied via environment variables.
+Infrastructure secrets (database, Redis, MinIO) are stored as files in a `secrets/` directory only the installing user can read, and mounted via Docker Compose's secrets mechanism, never baked into image layers. Application-level API keys (e.g. `ANTHROPIC_API_KEY`) are supplied via environment variables.
 
 See [Secrets Management](/docs/guide/secrets) for details on how secrets work and optional 1Password integration.
