@@ -1,5 +1,8 @@
 """Run the container-create guard: ``python -m syn_adapters.docker_create_guard``.
 
+``--healthcheck`` instead exits 0 when the guard accepts a TCP connection on its
+port and 1 otherwise; compose's healthcheck calls it.
+
 Environment:
     SYN_WORKSPACE_HOST_DIR: host path workspace bind mounts must sit under.
     SYN_WORKSPACE_CONTAINER_DIR: where that root is mounted (read-only) in the guard.
@@ -11,8 +14,11 @@ Environment:
 
 from __future__ import annotations
 
+import argparse
 import logging
 import os
+import socket
+import sys
 
 from syn_adapters.docker_create_guard.policy import (
     DEFAULT_IMAGE_PREFIXES,
@@ -33,9 +39,29 @@ def policy_from_env(env: dict[str, str]) -> CreatePolicy:
     )
 
 
-def main() -> None:
-    logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"))
+DEFAULT_PORT = 2375
+
+
+def healthcheck(port: int, *, timeout: float = 3.0) -> bool:
+    """True when the guard is accepting connections on ``port``."""
+    try:
+        socket.create_connection(("127.0.0.1", port), timeout).close()
+    except OSError:
+        return False
+    return True
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(prog="python -m syn_adapters.docker_create_guard")
+    parser.add_argument(
+        "--healthcheck", action="store_true", help="exit 0 if the guard accepts connections"
+    )
+    args = parser.parse_args(argv)
     env = dict(os.environ)
+    port = int(env.get("SYN_DOCKER_CREATE_GUARD_PORT", str(DEFAULT_PORT)))
+    if args.healthcheck:
+        sys.exit(0 if healthcheck(port) else 1)
+    logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"))
     serve(
         policy_from_env(env),
         GuardHost(
@@ -43,7 +69,7 @@ def main() -> None:
             host_root=env.get("SYN_WORKSPACE_HOST_DIR") or None,
             mounted_root=env.get("SYN_WORKSPACE_CONTAINER_DIR") or None,
         ),
-        int(env.get("SYN_DOCKER_CREATE_GUARD_PORT", "2375")),
+        port,
     )
 
 

@@ -98,51 +98,14 @@ services:
     image: tecnativa/docker-socket-proxy:0.3.0
     # Upstream policy plus inspect (GET) and release (DELETE) of retained
     # capture volumes, by exact syn-capture-<64 hex> name only (#1398), plus
-    # container create routed through docker-create-guard, which refuses
-    # privileged / host-access HostConfig shapes (#1806).
-    # Inline so the standalone published compose needs no extra host asset.
-    entrypoint:
-      - /bin/sh
-      - -ec
-      - |
-        set -eu
-        template=/usr/local/etc/haproxy/haproxy.cfg.template
-        # Transform the image's pristine template, kept aside on first start:
-        # a restart keeps this filesystem, and transforming the output again
-        # would duplicate the resolvers and backend sections, which haproxy
-        # refuses to load.
-        pristine="$$template.pristine"
-        [ -f "$$pristine" ] || cp "$$template" "$$pristine"
-        [ "$$(grep -c '^[[:space:]]*http-request deny$$' "$$pristine")" = 1 ]
-        [ "$$(grep -c '^[[:space:]]*default_backend dockerbackend$$' "$$pristine")" = 1 ]
-        [ "$$(grep -c '^frontend dockerfrontend$$' "$$pristine")" = 1 ]
-        awk '
-        /^[[:space:]]*http-request deny$$/ {
-            print "    http-request allow if { method GET DELETE } { path -m reg ^(/v[0-9.]+)?/volumes/syn-capture-[a-f0-9]{64}$$ }"
-        }
-        { print }
-        # Ahead of every upstream allow: the API may pull images, never name one itself.
-        /^frontend dockerfrontend$$/ {
-            print "    http-request deny if { method POST } { path,url_dec -m reg -i /images/(load|.+/tag)/*$$ }"
-            print "    http-request deny if { method POST } { path,url_dec -m reg -i /images/create/*$$ } !{ url_param(fromImage) -m reg . }"
-            print "    http-request deny if { method POST } { path,url_dec -m reg -i /images/create/*$$ } { req.hdr(content-type) -m sub -i x-www-form-urlencoded }"
-        }
-        /^[[:space:]]*default_backend dockerbackend$$/ {
-            print "    use_backend docker-create-guard if { method POST } { path,url_dec -m reg -i /containers/create/*$$ }"
-            # Exec too: the guard and this proxy hold the socket, so one exec into
-            # either would bypass the create checks (#1806).
-            print "    use_backend docker-create-guard if { method POST } { path,url_dec -m reg -i /containers/.+/exec/*$$ }"
-        }
-        END {
-            print "resolvers docker"
-            print "    parse-resolv-conf"
-            print "backend docker-create-guard"
-            print "    server guard docker-create-guard:2375 resolvers docker init-addr last,libc,none"
-        }
-        ' "$$pristine" > /tmp/capture-haproxy.template
-        cat /tmp/capture-haproxy.template > "$$template"
-        exec /docker-entrypoint.sh "$$@"
-      - capture-policy
+    # container create and exec routed through docker-create-guard, which
+    # refuses privileged / host-access HostConfig shapes (#1806). The policy is
+    # a generated file (scripts/docker_socket_proxy_config.py), mounted
+    # read-only over the image's template; the image's own entrypoint renders
+    # it at start. The published compose inlines it as config content.
+    configs:
+      - source: docker-socket-proxy-haproxy
+        target: /usr/local/etc/haproxy/haproxy.cfg.template
     command: ["haproxy", "-f", "/usr/local/etc/haproxy/haproxy.cfg"]
     environment:
       CONTAINERS: 1     # Allow /containers/* path prefix (inspect, list, rm)
@@ -203,7 +166,7 @@ services:
     tmpfs:
       - /tmp
     healthcheck:
-      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 2375), 3).close()"]
+      test: ["CMD", "python", "-m", "syn_adapters.docker_create_guard", "--healthcheck"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -376,3 +339,9 @@ networks:
 
 volumes:
   session_inventory_data:
+
+configs:
+  # docker-socket-proxy policy (#1398, #1806). Generated, never edit by hand:
+  # just gen-compose (scripts/docker_socket_proxy_config.py).
+  docker-socket-proxy-haproxy:
+    file: ./generated/docker-socket-proxy.haproxy.cfg.template

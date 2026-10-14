@@ -1,16 +1,15 @@
 """The socket proxy must send every container create to docker-create-guard (#1806).
 
 The proxy filters on method and path only, so a create body asking for
-``Privileged`` or a bind of ``/`` reached the daemon untouched. Each compose
-file patches haproxy to route ``POST /containers/create`` to the guard
-service. This runs the real entrypoint transformation from each compose file
-against a template shaped like the proxy's, then evaluates the routing rule.
+``Privileged`` or a bind of ``/`` reached the daemon untouched. The proxy's
+haproxy template is generated (scripts/docker_socket_proxy_config.py) and each
+compose file mounts it: the repo files by path, the published file inlined as
+config content. These tests read both of those sources and evaluate the rules.
 """
 
 from __future__ import annotations
 
 import re
-import subprocess
 from pathlib import Path
 from urllib.parse import parse_qs, unquote
 
@@ -20,50 +19,34 @@ import yaml
 pytestmark = pytest.mark.unit
 
 _ROOT = Path(__file__).resolve().parents[3]
-_COMPOSE = [
-    _ROOT / "docker" / "docker-compose.yaml",
-    _ROOT / "docker" / "docker-compose.syntropic137.yaml",
-]
-# The shape of tecnativa/docker-socket-proxy 0.3.0's haproxy.cfg frontend.
-_TEMPLATE = (
-    "frontend dockerfrontend\n"
-    "    http-request deny unless METH_GET || { env(POST) -m bool }\n"
-    "    http-request allow if { path,url_dec -m reg -i ^(/v[\\d\\.]+)?/images } { env(IMAGES) -m bool }\n"
-    "    http-request deny\n"
-    "    default_backend dockerbackend\n"
-    "\n"
-    "    use_backend docker-events if { path,url_dec -m reg -i ^(/v[\\d\\.]+)?/events }\n"
-)
+_BASE = _ROOT / "docker" / "docker-compose.yaml"
+_PUBLISHED = _ROOT / "docker" / "docker-compose.syntropic137.yaml"
+_COMPOSE = [_BASE, _PUBLISHED]
+_GENERATED = _ROOT / "docker" / "generated" / "docker-socket-proxy.haproxy.cfg.template"
+_TEMPLATE_TARGET = "/usr/local/etc/haproxy/haproxy.cfg.template"
 _ROUTE = re.compile(
     r"use_backend docker-create-guard if \{ method (\w+) \} \{ path,url_dec -m reg -i (\S+) \}"
 )
 
 
-def _patched(compose: Path, tmp_path: Path, *, fresh: bool = True) -> str:
-    service = yaml.safe_load(compose.read_text())["services"]["docker-socket-proxy"]
-    shell, flags, script = service["entrypoint"][:3]
-    template = tmp_path / "haproxy.cfg.template"
-    if fresh:
-        template.write_text(_TEMPLATE)
-    script = script.replace("$$", "$").replace(
-        "/usr/local/etc/haproxy/haproxy.cfg.template", str(template)
-    )
-    script = script.replace("/tmp/capture-haproxy.template", str(tmp_path / "out.template"))
-    script = script.replace('exec /docker-entrypoint.sh "$@"', "true")
-    subprocess.run([shell, flags, script], check=True)
-    return template.read_text()
+def _mounted_config(compose: Path) -> str:
+    """The haproxy template this compose file puts in the proxy, as the container sees it."""
+    data = yaml.safe_load(compose.read_text())
+    proxy = data["services"]["docker-socket-proxy"]
+    (mount,) = [m for m in proxy["configs"] if m["target"] == _TEMPLATE_TARGET]
+    config = data["configs"][mount["source"]]
+    if "file" in config:
+        return (compose.parent / config["file"]).read_text()
+    # Compose interpolates content; `$$` is a literal `$`.
+    return str(config["content"]).replace("$$", "$")
 
 
-def test_a_restart_transforms_the_pristine_template_again(tmp_path: Path) -> None:
-    """A restarted proxy keeps its filesystem; a second pass must not stack sections."""
-    for compose in _COMPOSE:
-        work = tmp_path / compose.stem
-        work.mkdir()
-        first = _patched(compose, work)
-        second = _patched(compose, work, fresh=False)
-        assert second == first
-        assert second.count("\nresolvers docker\n") == 1
-        assert second.count("backend docker-create-guard\n") == 1
+@pytest.mark.parametrize("compose", _COMPOSE, ids=lambda p: p.name)
+def test_every_compose_mounts_the_generated_template(compose: Path) -> None:
+    """No runtime patching: the stock entrypoint renders the committed file."""
+    proxy = yaml.safe_load(compose.read_text())["services"]["docker-socket-proxy"]
+    assert "entrypoint" not in proxy
+    assert _mounted_config(compose) == _GENERATED.read_text()
 
 
 def _routed(config: str, method: str, path: str) -> bool:
@@ -123,9 +106,9 @@ class TestImageNaming:
         ],
     )
     def test_load_tag_and_import_are_denied(
-        self, compose: Path, tmp_path: Path, path: str, query: str, content_type: str
+        self, compose: Path, path: str, query: str, content_type: str
     ) -> None:
-        assert _denied(_patched(compose, tmp_path), path, query, content_type)
+        assert _denied(_mounted_config(compose), path, query, content_type)
 
     @pytest.mark.parametrize(
         ("path", "query"),
@@ -135,13 +118,11 @@ class TestImageNaming:
             ("/v1.47/containers/create", ""),
         ],
     )
-    def test_pull_and_create_are_not_denied(
-        self, compose: Path, tmp_path: Path, path: str, query: str
-    ) -> None:
-        assert not _denied(_patched(compose, tmp_path), path, query)
+    def test_pull_and_create_are_not_denied(self, compose: Path, path: str, query: str) -> None:
+        assert not _denied(_mounted_config(compose), path, query)
 
-    def test_denies_precede_every_upstream_allow(self, compose: Path, tmp_path: Path) -> None:
-        frontend = _patched(compose, tmp_path).split("frontend dockerfrontend", 1)[1]
+    def test_denies_precede_every_upstream_allow(self, compose: Path) -> None:
+        frontend = _mounted_config(compose).split("frontend dockerfrontend", 1)[1]
         last_deny = max(m.start() for m in _DENY.finditer(frontend))
         assert len(_DENY.findall(frontend)) == 3
         assert last_deny < frontend.index("http-request allow")
@@ -163,10 +144,8 @@ class TestCreateRouting:
             "/v1.47/Containers/abc/%65xec",
         ],
     )
-    def test_every_create_spelling_is_routed(
-        self, compose: Path, tmp_path: Path, path: str
-    ) -> None:
-        assert _routed(_patched(compose, tmp_path), "POST", path)
+    def test_every_create_spelling_is_routed(self, compose: Path, path: str) -> None:
+        assert _routed(_mounted_config(compose), "POST", path)
 
     @pytest.mark.parametrize(
         ("method", "path"),
@@ -179,23 +158,27 @@ class TestCreateRouting:
         ],
     )
     def test_other_requests_keep_the_default_backend(
-        self, compose: Path, tmp_path: Path, method: str, path: str
+        self, compose: Path, method: str, path: str
     ) -> None:
-        assert not _routed(_patched(compose, tmp_path), method, path)
+        assert not _routed(_mounted_config(compose), method, path)
 
-    def test_route_sits_in_the_frontend_and_backend_is_defined(
-        self, compose: Path, tmp_path: Path
-    ) -> None:
-        config = _patched(compose, tmp_path)
+    def test_route_sits_in_the_frontend_and_backend_is_defined(self, compose: Path) -> None:
+        config = _mounted_config(compose)
         frontend = config.split("frontend dockerfrontend", 1)[1].split("\nresolvers ", 1)[0]
         assert "use_backend docker-create-guard" in frontend
         assert "backend docker-create-guard\n    server guard docker-create-guard:2375" in config
 
-    def test_guard_service_holds_the_socket_and_no_capabilities(
-        self, compose: Path, tmp_path: Path
-    ) -> None:
+    def test_guard_service_holds_the_socket_and_no_capabilities(self, compose: Path) -> None:
         guard = yaml.safe_load(compose.read_text())["services"]["docker-create-guard"]
         assert guard["command"] == ["python", "-m", "syn_adapters.docker_create_guard"]
+        # A module entry point (tested beside the guard), not an inline `python -c`.
+        assert guard["healthcheck"]["test"] == [
+            "CMD",
+            "python",
+            "-m",
+            "syn_adapters.docker_create_guard",
+            "--healthcheck",
+        ]
         assert "/var/run/docker.sock:/var/run/docker.sock" in guard["volumes"]
         assert guard["cap_drop"] == ["ALL"] and "cap_add" not in guard
         assert guard["networks"] == ["docker-proxy"]
