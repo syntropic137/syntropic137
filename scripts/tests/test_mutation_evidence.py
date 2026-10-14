@@ -191,7 +191,11 @@ def test_parses_failing_ids_and_passed_count() -> None:
         "FAILED a/test_x.py::test_y - again\n"
         "1 failed, 2 passed, 1 error in 0.1s\n"
     )
-    assert parse_pytest_output(out) == (("a/test_x.py::test_y", "a/test_x.py::test_z"), 2)
+    assert parse_pytest_output(out) == (("a/test_x.py::test_y", "a/test_x.py::test_z"), 2, 0, 0)
+    skips = parse_pytest_output("SKIPPED [1] a.py:3: needs Docker\n1 passed, 2 skipped in 1s\n")
+    assert skips[1:] == (1, 2, 0)
+    xs = parse_pytest_output("XFAIL a.py::t - why\n1 passed, 1 xfailed, 2 xpassed in 1s\n")
+    assert xs[1:] == (1, 0, 3)
 
 
 @pytest.mark.parametrize(
@@ -356,6 +360,28 @@ def test_zero_test_baseline_voids_the_evidence(repo: Path) -> None:
     assert not evidence.ok
 
 
+def test_skipped_baseline_voids_the_evidence(repo: Path) -> None:
+    def skipping(root: Path, tests: tuple[str, ...]) -> PytestRun:
+        return PytestRun(0, (), 1, 0.0, skipped=1)
+
+    evidence = execute(repo, _inputs(), SHA, skipping)
+
+    assert "skipped 1" in evidence.baseline_detail
+    assert "docker=true" in evidence.baseline_detail
+    assert evidence.results == []
+    assert not evidence.ok
+
+
+def test_xfail_or_xpass_in_the_baseline_voids_the_evidence(repo: Path) -> None:
+    def xfailing(root: Path, tests: tuple[str, ...]) -> PytestRun:
+        return PytestRun(0, (), 1, 0.0, xfail=1)
+
+    evidence = execute(repo, _inputs(), SHA, xfailing)
+
+    assert "xfailed/xpassed" in evidence.baseline_detail
+    assert evidence.results == []
+
+
 def test_empty_patch_is_never_a_kill(repo: Path) -> None:
     patch = _commit_patch(repo, "05-noop.patch", "")
     result = evaluate_patch(repo, patch, _inputs(), _runner_sensitive_to_mod)
@@ -496,3 +522,15 @@ def test_report_has_marker_table_and_neutralised_cells() -> None:
     assert "`a|b" not in text
     # Detail text from PR code renders inside a code span, never as a link.
     assert "ERROR `[click](https://evil.invalid) <img>`" in text
+
+
+def test_run_name_carries_the_pr_and_the_dispatch_nonce() -> None:
+    # Unquoted, ` #` starts a YAML comment and the run name drops both, so a
+    # dispatcher can never find its own run by name.
+    workflow = (
+        Path(__file__).resolve().parents[2] / ".github" / "workflows" / "mutation-evidence.yml"
+    )
+    line = next(x for x in workflow.read_text().splitlines() if x.startswith("run-name:"))
+    value = line.removeprefix("run-name:").strip()
+    assert value.startswith('"') and value.endswith('"'), line
+    assert "${{ inputs.pr }}" in value and "${{ inputs.dispatch_id }}" in value
