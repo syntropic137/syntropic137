@@ -496,3 +496,15 @@ def test_report_has_marker_table_and_neutralised_cells() -> None:
     assert "`a|b" not in text
     # Detail text from PR code renders inside a code span, never as a link.
     assert "ERROR `[click](https://evil.invalid) <img>`" in text
+
+
+def test_run_name_carries_the_pr_and_the_dispatch_nonce() -> None:
+    # Unquoted, ` #` starts a YAML comment and the run name drops both, so a
+    # dispatcher can never find its own run by name.
+    workflow = (
+        Path(__file__).resolve().parents[2] / ".github" / "workflows" / "mutation-evidence.yml"
+    )
+    line = next(x for x in workflow.read_text().splitlines() if x.startswith("run-name:"))
+    value = line.removeprefix("run-name:").strip()
+    assert value.startswith('"') and value.endswith('"'), line
+    assert "${{ inputs.pr }}" in value and "${{ inputs.dispatch_id }}" in value

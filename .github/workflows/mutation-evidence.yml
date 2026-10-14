@@ -39,7 +39,7 @@ name: Mutation Evidence
 #   working directory, and a PR can commit a `.venv` whose `bin/python` is
 #   anything. Nothing on the host reads the PR's uv config or environment.
 
-run-name: Mutation evidence for PR #${{ inputs.pr }} ${{ inputs.dispatch_id }}
+run-name: "Mutation evidence for PR #${{ inputs.pr }} ${{ inputs.dispatch_id }}"
 
 on:
   workflow_dispatch:
