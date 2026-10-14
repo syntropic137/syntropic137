@@ -37,6 +37,7 @@ from syn_api.services.admission_announcement import (
 from syn_api.services.credentials import validate_credentials
 from syn_api.services.degraded_reasons import DegradedReason
 from syn_api.services.disk_pager import start_disk_pager, stop_disk_pager
+from syn_api.services.execution_host_runner import start_execution_host, stop_execution_host
 from syn_api.services.execution_posture import (
     api_memory_limit_mib,
     log_execution_concurrency_posture,
@@ -299,6 +300,9 @@ async def startup(
         return result
 
     await _init_degradable_services(_state)
+    # After the startup reap and reconcile above, so the old world is resolved
+    # before this process claims anything (#1310 1.5). A no-op with the flag off.
+    await start_execution_host()
 
     mode = "degraded" if _state.degraded_reasons else "full"
     return Ok({"mode": mode, "degraded_reasons": _state.degraded_reasons})
@@ -318,6 +322,10 @@ async def shutdown() -> Result[None, LifecycleError]:
             with contextlib.suppress(asyncio.CancelledError):
                 await _state._recovery_task
             _state._recovery_task = None
+
+        # Before the services its runs append through go away (#1310 1.5).
+        with contextlib.suppress(Exception):
+            await stop_execution_host()
 
         # Shutdown services in reverse registration order (ADR-057).
         for entry in reversed(_SERVICE_REGISTRY):
