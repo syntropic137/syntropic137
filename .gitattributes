@@ -1,0 +1,5 @@
+# Mutation patches read by .github/workflows/mutation-evidence.yml must reach
+# `git apply` byte for byte: no end-of-line conversion, and no whitespace
+# errors flagged on their context lines (a patch line may legitimately carry
+# trailing whitespace from the source it mutates).
+/.mutations/** -text -whitespace
