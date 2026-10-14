@@ -10,4 +10,5 @@ pytestmark = pytest.mark.unit
 
 def test_clamp_raises_values_below_low() -> None:
     assert clamp(-5, 0, 10) == 0
+    assert clamp(-1, 0, 10) == 0  # the boundary: catches `< low - 1`
     assert clamp(5, 0, 10) == 5
