@@ -17,7 +17,7 @@ npx @syntropic137/setup init
 
 ## Prerequisites
 
-- **Node.js 20.12+**: for the setup CLI and the `syn` CLI (older versions stop with a clear message)
+- **Node.js 22+**: the `syn` CLI declares Node.js 22 or later. The setup CLI alone runs on 20.12+ and stops older versions with a clear message
 - **Docker** with **Docker Compose v2.20+**: for the service stack and the isolated agent workspaces
 - **A Claude credential**: an Anthropic API key, or a Claude subscription token from `claude setup-token`
 - **A GitHub account**: for the GitHub App that lets workflows clone and work on your repos
@@ -33,7 +33,7 @@ Each tier adds to the one before it.
 
 | Tier | You add | You get |
 |------|---------|---------|
-| **Core** | Docker, Node.js 20.12+, a Claude credential | The stack, the dashboard, observability, the `syn` CLI and the agent skills |
+| **Core** | Docker, Node.js 22+, a Claude credential | The stack, the dashboard, observability, the `syn` CLI and the agent skills |
 | **Repos and polling triggers** | A GitHub account, and two clicks: create the GitHub App, install it on your repos | Workflows that clone and work on your repos, and triggers on PRs, pushes, issues and CI results through polling (no public URL needed) |
 | **Codex** | A Codex login, its `~/.codex/auth.json` contents set as `CODEX_AUTH_JSON` in `~/.syntropic137/.env` | Codex phases, alongside or instead of Claude phases |
 | **Instant webhooks and remote access** | A Cloudflare account, a domain and a tunnel token | Real-time webhook delivery (about 1s instead of a polling interval), the CI/CD events only webhooks carry, and the dashboard from anywhere |

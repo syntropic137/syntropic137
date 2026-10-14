@@ -263,23 +263,35 @@ fails on its first command.
 
 ### `allowed_tools` and the two harnesses
 
-**`allowed_tools` restricts nothing today, on either harness.** Treat it as
-documentation of intent, not as a control.
+`allowed_tools` is enforced on claude phases and refused on codex phases (since
+v0.28.0).
 
-Per [ADR-069](https://github.com/syntropic137/syntropic137/blob/main/docs/adrs/ADR-069-harness-neutral-phase-definition.md),
-`_build_agent_config_from_phase` builds `AgentConfiguration` from `provider`,
-`model` and `allow_delegation` only. `allowed_tools` keeps its default of `()`,
-so the guard that would emit `--tools` never fires and every phase inherits the
-full toolset. A closed-vocabulary validator still rejects `bash` for `Bash` at
-authoring time, which enforces a restriction that is never applied.
+**Claude phases.** Each name is checked against a fixed vocabulary when the
+workflow is created or installed: `Bash`, `Edit`, `Glob`, `Grep`, `Read`,
+`Skill`, `Task`, `WebFetch`, `WebSearch` and `Write`
+([`ToolName`](https://github.com/syntropic137/syntropic137/blob/main/packages/syn-shared/src/syn_shared/tools.py)).
+Matching is case-insensitive, so `bash` is accepted as `Bash`, and an unknown
+name such as `git` is refused. The list is passed to the CLI as
+`claude --tools <list>`
+([`_build_claude_command`](https://github.com/syntropic137/syntropic137/blob/main/apps/syn-api/src/syn_api/_wiring_agent_command.py)),
+so the agent can use only those tools. An empty or omitted list means
+unrestricted. It restricts **tools, not commands**: a phase granted `Bash` can
+run any shell command, including `git`. When the workflow declares skills and
+the phase lists tools, `Skill` is added automatically so the skills stay usable.
 
-The codex path additionally carries an `UnsupportedToolPolicyError` guard,
-because codex exposes no tool flag and translating an allowlist into a sandbox
-mode would be a category error. That guard is currently unreachable for the same
-reason: `allowed_tools` never arrives populated.
-
-To bound what a codex phase can write, declare `sandbox: workspace-write`; see
+**Codex phases.** Codex has no tool vocabulary: it enforces where a process may
+write, not which tools exist. A non-empty `allowed_tools` on a phase whose
+`agent` or `fallback_agent` is codex is therefore refused when the workflow is
+created or installed (`PhaseYamlDefinition.validate_tool_policy_is_supported_by_provider`),
+again before a workspace is provisioned, and again when the command is built.
+That includes a list inherited from a prompt file's `allowed-tools`
+frontmatter. To bound what a codex phase can write, declare
+`sandbox: workspace-write`; see
 [What `sandbox` actually does](#what-sandbox-actually-does).
+
+**Frontmatter.** A phase prompt file's `allowed-tools` frontmatter applies only
+when the phase in `workflow.yaml` omits `allowed_tools`; a value in
+`workflow.yaml` wins.
 
 ### Codex authentication
 

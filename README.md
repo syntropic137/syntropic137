@@ -44,7 +44,7 @@ Claude Code and Codex are compared here as the bare CLIs you would drive by hand
 
 ## Self-Hosting (recommended)
 
-Get your own instance running in minutes. Prerequisites: **Node.js 20.12+** and **Docker**.
+Get your own instance running in minutes. Prerequisites: **Node.js 22+** (the setup CLI alone needs 20.12+; the `syn` CLI declares 22+) and **Docker**.
 
 ```bash
 npx @syntropic137/setup init
