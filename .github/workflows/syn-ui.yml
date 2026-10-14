@@ -273,7 +273,8 @@ jobs:
       # 2026-10-09) and then AWS public ECR ("toomanyrequests: Rate exceeded",
       # six Skyline UI failures on 2026-10-13/14, e.g. run 38492192835).
       # mirror.gcr.io is Google's anonymous pull-through cache of Docker Hub's
-      # official images and serves the same index digests. Each FROM ref is
+      # official images and serves the same index digests (Docker Hub and ECR
+      # remain as fallbacks for an evicted digest). Each FROM ref is
       # pulled by digest and tagged locally, so `docker build` resolves the
       # Dockerfile's `FROM node:22-alpine` / `FROM nginx:...` without a
       # registry round trip. The Dockerfile itself is unchanged.
@@ -296,9 +297,20 @@ jobs:
               echo "::error::No pinned digest for gateway base image '$img'. Add it to PINNED in .github/workflows/syn-ui.yml."
               exit 1
             fi
-            src="mirror.gcr.io/library/${img%%:*}@${digest}"
-            docker pull "$src"
-            docker tag "$src" "$img"
+            # mirror.gcr.io is a cache and can evict a digest, so fall back to
+            # Docker Hub, then public ECR, by the SAME digest. Any source that
+            # serves it serves identical bytes.
+            pulled=""
+            for registry in mirror.gcr.io/library docker.io/library public.ecr.aws/docker/library; do
+              src="${registry}/${img%%:*}@${digest}"
+              if docker pull "$src"; then pulled="$src"; break; fi
+              echo "::warning::Could not pull $src; trying the next source."
+            done
+            if [ -z "$pulled" ]; then
+              echo "::error::No source served $img@$digest."
+              exit 1
+            fi
+            docker tag "$pulled" "$img"
           done < <(grep -E '^FROM ' infra/docker/images/gateway/Dockerfile | awk '{print $2}' | sort -u)
 
       # Builds infra/docker/images/gateway (both UI stages, the Skyline size
