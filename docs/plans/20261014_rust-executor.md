@@ -1,555 +1,477 @@
-# Plan (final): #1891 phase 2, where Rust enters the executor and the gates before it
-
-Intended home once accepted: `docs/plans/20261014_rust-executor.md`. This phase produces the plan
-only. Nothing is committed, prototyped or measured.
+# Rust ExecutionHost: revised plan (replaces `docs/plans/20261014_rust-executor.md` on PR #1874)
 
 **Baselines.**
-- syntropic137 `d646b67bd` (= `origin/main`, 2026-10-14).
-- PR #1894 (ExecutionHost claim loop, OPEN) @ `777544489`.
-- PR #1908 (operation adoption, OPEN).
-- AgentParadise/agentic-workspace#60, merged as `900d021`. It is **not** in the pinned gitlink
-  `5c4e559`.
-- Provider-operation plan `docs/plans/20261013_provider-operation-contract.md`, on branch
-  `docs/runtime-research-20261012`.
+- syntropic137 `main` = `1ffef8404`. Every unprefixed `file:line` below was re-read at this commit in this phase.
+- agentic-workspace (AW) `main` = `34a4872`. Citations marked **AW** are relative to the AW repository root. They were
+  read at that commit by the research and review phases (`git show`, without moving the pin). This phase could not
+  re-read them, because the syntropic137 gitlink pins AW at `914129d`, which predates the Rust operations port (AW#60,
+  merged as `900d021`).
+- #1894 and #1908 are **merged** (2026-10-14). The old plan listed them as open.
+- #1921 (the #1310 1.7 schema gate) is **open**.
 
-**Citation tags.** Citations without a tag were re-read on `main` for this revision. Tags mark the
-other sources:
-- **(#1894)**, **(#1908)**: the PR branch.
-- **(AW 900d021)**: the agentic-workspace commit. Not checked out at the pin, so it could not be
-  re-read here. These citations come from the review and the research.
-- **(rr-branch)**: the runtime-research branch.
+**This document is the in-place revision of `docs/plans/20261014_rust-executor.md`.** That file exists only on branch
+`docs/runtime-research-20261012`. It is not on `main` and was not in this phase's checkout, and this phase had no git
+tool. So this text has not been committed yet. See Readiness.
 
 ---
 
-## Decision in one paragraph
+## 0. Decision (recorded, not argued)
 
-**Recommendation: no Rust ExecutionHost in phase 2. Boundary (c): Python stays the only
-implementation of domain decisions and the only Lane 1 and Lane 2 writer.** Phase 2 does three
-things, in order:
+> **H1, decided by the owner on 2026-10-14.** We move execution away from Python and build the Rust ExecutionHost, as
+> briefed. Rust is the host. It calls the Python domain code (aggregates, decisions, Lane 1 and Lane 2 writers)
+> through a bridge that Rust owns. The Python domain then moves to Rust one slice at a time behind that seam. The
+> same event-stream conformance tests prove each slice. **The measurement experiment runs first. Its numbers order
+> the work; they do not decide whether the work happens.**
 
-1. **Measure** the post-split Python executor and **attribute** its CPU. The split is how much goes
-   to stream I/O, to JSONL decode and harness parsing, and to aggregates and the journal.
-2. Only if that attribution says I/O is worth moving, put **workspace I/O only** behind a Rust
-   **operation bridge** owned by agentic-workspace. That covers the `docker exec` stream, spooling,
-   bounded paging, cancel, finalize and owner-loss cleanup. **Decoding, line framing and harness
-   parsing stay in Python in phase 2.** The seam merged in AW#60 is a byte transport, not a
-   normalization boundary.
-3. Moving harness normalization to Rust needs a **normalized live-stream contract** that does not
-   exist. It is a separate, gated step (R2). Its contract is specified here, but it is not scheduled.
+The previous version recommended "Python stays the executor" (boundary (c)) and rejected options (a), (b) and (d).
+That recommendation is withdrawn. Its reasoning survives only where it names a real risk, in §8, and each such risk
+has a mitigation. Old option (d), a Rust claim loop supervising Python workers, is now Stage A of this plan. It is a
+waypoint, not the destination.
 
-A full Rust ExecutionHost is deferred behind gate G3. It needs a language-neutral decision kernel
-that does not exist and is not designed here. The brief asked for a Rust executor, so this rescope
-**needs the owner's decision (H1)**.
+## 1. Where we start
 
----
+One Python process serves the API and also runs every execution. `start_execution_host` constructs `ExecutionHost`
+inside the API process (`apps/syn-api/src/syn_api/services/execution_host_runner.py:70`, `:89`; stop at `:104`).
 
-## 1. Problem
-
-The north star is 20 concurrent executions now, 100 next and 1,000 for production
-(`docs/north-star.md:11-13`). The pass bar is:
-- p95 of the dashboard list and detail reads under 500 ms;
-- zero lost or orphaned executions;
-- reconciled event counts;
-- held for 30 minutes, with every run admitted within 5 minutes (`docs/north-star.md:15-21`).
-
-At 100, the capacity model's "single process" line describes the **API process**: "100 `docker
-exec` streams and every projection in one process". It is labelled **hypothesis**, and its remedy is
-the executor/API split (`docs/north-star.md:166`). ADR-072 D1 then moves projections to the `api`
-role and keeps them out of the `executor` role
-(`docs/adrs/ADR-072-execution-hosting-and-upgrade-without-drain.md:66-70`). So the thing a Rust
-executor would speed up is the **post-split executor**: claim loop, `run_claimed`, agent streams,
-credential keeper, artifact collection and reconciliation. Nobody has measured it. Per-run RSS is
-"**unmeasured**" (`docs/north-star.md:77`). The host-CPU estimate (about 1.2 CPU per run, 7.5x over
-at 100) is mostly **workspace** load, which no executor language reduces
-(`docs/north-star.md:73,163`).
-
-Every domain decision runs in-process in the executor today, for example
-`aggregate.complete_execution(...)` followed by `journal.append(aggregate)`
-(`packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/WorkflowExecutionProcessor.py:713-714`).
-A second-language executor therefore needs either a second implementation of domain truth or a
-boundary that does not exist.
-
-#1891's own rule is "No phase starts without the measurement that justifies it", and that
-measurement does not exist yet.
-
-**Observable goal.** N concurrent runs hold the pass bar with lower executor CPU-seconds and memory
-per active run. The streams must be byte-for-byte equivalent (after canonicalization, §3) to what the
-Python path writes. The queue must keep its fencing and lease guarantees unchanged.
-
-## 2. Ownership boundary (brief item 1)
-
-### 2.1 Options weighed
-
-**(a) Port the aggregates to Rust and append through the Rust ESP SDK.** Rejected.
-- The SDK's error contract is compatible. `ConcurrencyConflict` is a separate variant from transient
-  errors (`lib/event-sourcing-platform/event-sourcing/rust/src/error.rs:25-31`), and saves carry an
-  idempotency key (`lib/event-sourcing-platform/event-sourcing/rust/src/repository.rs:6-27`). That
-  matches what `packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/execution_journal.py`
-  relies on.
-- The cost is a second implementation of the decision rules:
-  - 18 command handlers in
-    `packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/WorkflowExecutionAggregate.py`;
-  - about 1.3k lines of value objects;
-  - the legacy-shape readers;
-  - the slice-level decisions (`phase_verdict.py`, `phase_outcome.py`, `unpushed_work_guard.py`,
-    about 2.6k lines);
-  - the AgentSession and Artifact aggregates the executor also writes.
-- Only sampling tests would keep the two in agreement.
-- The D9 epoch fitness function, which would stop a differently built writer from mis-reading
-  events, is not built
-  (`packages/syn-domain/src/syn_domain/contexts/orchestration/_shared/event_epoch.py:5-6`).
-
-**(b) A Rust executor drives phases and calls a thin Python command API.** Rejected.
-- No such API exists. The decisions are interleaved with infrastructure work across about 22.7k lines
-  of `slices/execute_workflow`. Either Rust re-derives the decisions, which is (a), or every step is
-  an RPC and Rust is a loop around Python.
-- It also makes running executions depend on the API being up. That reverses ADR-072's stated gain
-  that an API OOM no longer takes executions with it
-  (`docs/adrs/ADR-072-execution-hosting-and-upgrade-without-drain.md:634-635`).
-
-**(d) A Rust claim loop that supervises Python run workers.** Rejected for phase 2.
-- The loop does one heartbeat and claim every 5 s (#1894 `HostTiming`), so its CPU cost is
-  negligible.
-- Porting it duplicates the compare-and-set SQL of D3/D4/D5/D9
-  (`packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py:107-148`) for no measured gain.
-- Process isolation is already available as k Python executors, each with its own budget row
-  (`docs/adrs/ADR-072-execution-hosting-and-upgrade-without-drain.md:150-161`).
-
-**(c) Chosen: Python keeps every decision; Rust enters below the workspace operation seam, staged
-and gated.**
-
-### 2.2 Ownership after phase 2
-
-| Concern | Owner | Where today |
+| Piece | Where | What it does |
 |---|---|---|
-| Claim, heartbeat, renew, defer, close, fence, reconcile (D3-D5, D9) | **Python** ExecutionHost (#1894) | `packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py:107-148` |
-| Aggregate decisions, phase verdicts, unpushed-work guard, every Lane 1 append | **Python** processor through `ExecutionJournal` | `packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/WorkflowExecutionProcessor.py:470-715` |
-| Pricing, cost, attribution, every Lane 2 write | **Python** | `apps/syn-api/src/syn_api/_wiring.py:303` |
-| JSONL decode, line framing | **Python** in phase 2 (the #1908 decoder); moves only with R2 | `packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/stream_adapter.py:186` (`read_lines`) |
-| Harness parsing (Claude, Codex) into tool, token, session and subagent facts | **Python** in phase 2; AW-owned normalization only with R2 | `packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/EventStreamProcessor.py`, `CodexStreamProcessor.py`, chosen at `packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/AgentExecutionHandler.py:401-449` |
-| Domain judgments on those facts: cost limit, push observer, cancel via controller | **Python, always** | `packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/AgentExecutionHandler.py:412-413,436-449` |
-| Workspace I/O: exec, byte stream, spool, page, cancel, finalize, owner-loss cleanup | **`SupportsOperations` port.** Python provider by default (#1908); Rust bridge for the canary (R1) | `packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/stream_adapter.py:176-182`; the duplicate exec path documented at `:150-153` |
-| Credential renewal schedule, setup-then-clear, revocation | **Python** keeper; values reach Rust only through the bridge's resolver callback (§4.3) | `packages/syn-adapters/src/syn_adapters/workspace_backends/service/credential_keeper.py:87-110` |
+| Claim loop | `packages/syn-adapters/src/syn_adapters/execution_host/host.py:57` | Each turn heartbeats, sweeps `opening`, reconciles, then claims while it has room (`:113-127`). Sleeps `loop_interval` between turns (`:97`) |
+| Timing | `packages/syn-adapters/src/syn_adapters/execution_host/host.py:44-54` | Loop 5 s; lease TTL 90 s; opening sweep 2 min; renew every TTL/3 |
+| Per-run drive | `packages/syn-adapters/src/syn_adapters/execution_host/host.py:134-156` | Drain task plus `LeaseKeeper`. A drain that escapes with an exception leaves the row `claimed` for its lease to expire (`:144-148`). Close happens under the token (`:154`) |
+| Shutdown | `packages/syn-adapters/src/syn_adapters/execution_host/host.py:86-105` | Cancels held runs (each takes the #1381 interruption path), awaits them, and leaves the rows for their leases |
+| Lease keeper | `packages/syn-adapters/src/syn_adapters/execution_host/lease.py:32-46` | Renews while the drain task is alive. **Liveness is "task not done", not output progress** |
+| Reconciler | `packages/syn-adapters/src/syn_adapters/execution_host/reconciler.py:1-7`, `:44-72` | An expired claim is never re-run. It goes fence, then reap, then interrupt through the aggregate, then close |
+| Seams | `packages/syn-adapters/src/syn_adapters/execution_host/ports.py:16-22` (`ClaimedRunDrainer`), `:25-34` (`DeadHostReaper`), `:37-44` (`RunInterrupter`) | Protocols |
+| Queue SQL | `packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py` | register `:49`, heartbeat `:74`, reserve `:104`, claim `:120-161` (epoch predicate `writer_epoch<=$2` at `:142`), renew `:163`, fence `:196-209` (epoch `:203`), takeover `:211-231` (epoch `:219`), close_interrupted `:246`, budget handover `:287-320` |
+| Drainer | `packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/WorkflowExecutionProcessor.py:470-512` | `run_claimed`: folds this run's to-dos from its stream (`:490`), reloads the aggregate (`:496`), drains |
+| To-do loop | `packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/WorkflowExecutionProcessor.py:620-698` | Four dispatch branches. The enum has a fifth action, `COMPLETE_EXECUTION` (`packages/syn-domain/src/syn_domain/contexts/orchestration/_shared/TodoValueObjects.py:23-27`). Terminal completion, failure and cancel run **outside** the loop (`WorkflowExecutionProcessor.py:545-594`, `:700-715`) |
+| Journal | `packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/execution_journal.py:105-126` | `EventsNotRecordedError` means the write is not durable only when caused by a concurrency conflict, and unknown otherwise. Any other exception means the events are durable |
+| Execution repository | `packages/syn-adapters/src/syn_adapters/storage/repositories.py:189-203`; `save` at `:98-102` | Delegates straight to the SDK. **There is no append-side epoch raise** |
+| Epoch | `packages/syn-domain/src/syn_domain/contexts/orchestration/_shared/event_epoch.py:13` (`= 1`); `:5-6` says the fitness function and the append-side check are not built | Only the claim/fence predicates enforce it today |
+| Stream (after #1908) | `packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/stream_adapter.py:151-160` (`OperationHost`), `:242` `bind_launch`, `:260` `start`, `:270` `status`, `:278` `cancel`, `:288-303` bounded `observe` with gap recording (`_PAGE_BYTES` `:61`) | Already on AW's operation contract (Python twin) |
+| Lane 2 writer | `apps/syn-api/src/syn_api/_wiring.py:304` | `observability_writer=event_store` |
+| Container identity | `packages/syn-adapters/src/syn_adapters/workspace_backends/host_labels.py:38-44` | `syn.host_id` = `SYN_HOST_ID` (or hostname) plus a **per-process** random suffix when the run queue is on |
 
-**One source of domain truth.** Every decision has exactly one implementation, in Python. Rust never
-writes an event, never writes Lane 2, and never decides anything. In R1 it moves bytes. In R2
-(gated) it emits **harness facts**: what the CLI said. Python turns those facts into the same
-commands and judgments it makes today.
+The AW Rust side already exists on AW `main` but is not pinned here:
+- **AW** `crates/workspace-core/src/operations/mod.rs:42-84` (`SupportsOperations`: describe, start (idempotent per
+  `(workspace, operation_key)` with an equal spec), status, observe (one bounded page), cancel, finalize). Its module
+  docs say it does not widen `WorkspaceProvider` (**AW** `crates/workspace-core/src/operations/mod.rs:3`).
+- **AW** `crates/workspace-core/src/operations/mod.rs:32-37` (`CredentialResolver`).
+- **AW** `crates/workspace-core/src/lib.rs:365` (`WorkspaceProvider`: provision, hydrate, collect, destroy).
+- **AW** `crates/workspace-core/src/operations/contract.rs:1,8-10,566`: the APSS EXP-V1-0006 0.2.0 serde models, a
+  twin of the Python models on shared fixtures, plus the 0.2.1 `lost` flag.
+- **AW** `implementations/docker/src/operations.rs:686` (`DockerOperations`) and `:1014` (the impl). It spawns one
+  `docker` CLI child per operation (`:834-840`) and enforces same-key spec equality (`:1070`). **Its operation
+  records are in memory** (`:694`, `:716`), so re-attach works only while the provider instance lives.
 
-**What R1 actually buys, stated narrowly.**
-- Today one `asyncio.create_subprocess_exec` of the docker CLI runs per agent, and Python reads it
-  line by line through a pipe buffer of up to 10 MB
-  (`packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/stream_adapter.py:176-182`).
-- Under R1, one Rust process per executor holds every exec stream, spools it and serves bounded
-  pages. Python still decodes and parses every byte.
-- So R1's gain is bounded by the I/O share of executor CPU and by the pipe and buffer memory. It
-  saves nothing on parsing or the journal. Whether that share is worth a phase is what G1 decides.
-- The AW Docker provider is "still one `docker exec` client per running operation"
-  (rr-branch, `docs/plans/20261013_provider-operation-contract.md` §5.2). Whether the Rust bridge
-  keeps docker CLI children or attaches through the Engine API is AW's choice, and it materially
-  changes R1's gain. It is recorded as H5.
+There is no Rust code in syntropic137 today, no PyO3 anywhere, and no AW bridge daemon.
 
-### 2.3 R2: the normalized live-stream contract (specified, not scheduled)
+---
 
-R2 moves harness normalization into the AW Rust bridge. It runs only if G1 attributes executor CPU
-mainly to JSONL decode and harness parsing. Before any code moves, AW publishes a JSON-Schema
-`HarnessFact` stream as an extension of `HarnessTranscript`/`TranscriptExtractionResult`, per
-CLAUDE.md "Where does this change belong?".
+## 2. The experiment: PR 1, first, before any host or bridge code
 
-The stream carries harness facts only:
-- `session_started{harness_session_id, model}`;
-- `tool_started{tool_use_id, name, input_digest, input}` and `tool_finished{tool_use_id, is_error, output}`;
-- `subagent_started` and `subagent_finished`;
-- `token_usage{input, output, cache_read, cache_write, model}` per turn;
-- `embedded_jsonl{source:"tool_result", line}` for the post-commit hook lines that arrive inside a
-  `tool_result` (`packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/stream_adapter.py:140-145`);
-- `result{status, error}`;
-- `raw_unrecognized{line}`, so no line is ever silently dropped.
+**Why new tooling is needed.** `ContainerRoles` has `api`, `postgres`, `event_store` and `socket_proxy` and **no
+executor** (`packages/syn-perf/src/syn_perf/loadtest/pass_bar.py:110-116`). The load test samples `docker stats` per
+container (`packages/syn-perf/src/syn_perf/loadtest/driver.py:404-421`). The executor runs inside the API process, so
+today nothing can separate executor CPU from API CPU.
 
-These stay in Python and consume the facts:
-- `PhaseCostLimit` (cost is pricing, which is domain);
-- the `PushObserver`;
-- cancel through the controller;
-- observation attribution (`execution_id`, `phase_id`, `workspace_id`);
-- every `record_observation` call
-  (`packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/EventStreamProcessor.py:85-96`).
+**Method.**
+- Run the existing scripted-agent load test at N = 20 and N = 50, and at N = 100 if the box has the cores.
+- During the run, `py-spy record --idle=false --format raw` samples the `all`-role process.
+- A pure bucketing module in `packages/syn-perf/src/syn_perf/loadtest/` folds every stack into exactly one bucket.
+  The deepest matching repository-root path wins. It is written in the same "pure judge over observations" style as
+  `packages/syn-perf/src/syn_perf/loadtest/pass_bar.py:1-18`.
 
-The R2 exit gate is the §3 L1 corpus. The Python and Rust normalizers must emit identical
-`HarnessFact` sequences for every recorded Claude and Codex transcript. The §3 L2 fixture must then
-pass with the Rust normalizer selected. R2 gets its own plan once G1 passes for it.
-
-## 3. Parity contract (brief item 2)
-
-There are three layers. Each one fails if the thing it guards is reverted.
-
-**L0: queue semantics, unchanged.**
-- The host stays Python, so the six `test_1310_*` files (#1894) run unchanged and stay required.
-- The stale-write rejection asserted by the subprocess harness (#1894
-  `apps/syn-api/tests/integration/_1310_executor_process.py:65`) is kept as it is.
-
-**L1: provider contract (AW-owned).**
-- The same recorded byte stream is fed through the Python and Rust providers. The resulting
-  `ObservationPage` sequences must reassemble to identical bytes.
-- Page boundaries, gap/loss reporting and cursor resumption must agree.
-- This reuses the #1908 recording tests, which already exercise page boundaries and gaps (#1908
-  `packages/syn-adapters/tests/workspace_backends/agentic/test_stream_on_operations.py`).
-- For R2 only: identical `HarnessFact` sequences.
-
-**L2: the production-path parity fixture (new, PR 4).** V5 as it stands cannot detect a provider
-defect. Both its reference run and its claimed run use `FakeAgentExecutionHandler`, a memory
-workspace backend and `observability_writer=None`
-(`apps/syn-api/tests/integration/test_1310_a_claimed_three_phase_run_succeeds_on_real_stores.py:13,189,221,291,308`).
-It also compares event types only (`apps/syn-api/tests/integration/test_1310_a_claimed_three_phase_run_succeeds_on_real_stores.py:239,335`).
-V5 is kept as is, as a queue test, and a new fixture is added beside it. It runs on the real-infra
-fixtures (Postgres 16 image, event store, MinIO):
-- **Real path.** A real labelled workspace container runs the #1717 stub agent image. It replays a
-  committed corpus of recorded Claude **and** Codex JSONL, including embedded `tool_result` JSONL, a
-  subagent, a tool error and a cost-limit trip.
-- **Real handlers.** The real `AgentExecutionHandler`, the real stream adapter on the selected
-  provider, real Lane 2 (`AgentEventStore`), and real capture and artifact collection.
-- **Runs.** The identical corpus is run once per provider (`python`, `rust`).
-- **Bridge traversal is proven, not described.** The Rust bridge keeps a per-operation call ledger
-  (`start`, `observe` count, `cancel`, `finalize`) that the test reads back from the bridge process.
-  The `rust` case asserts ≥1 `start` and `finalize` per phase and ≥1 `observe` per phase. A wiring
-  revert to the Python provider leaves the ledger empty, and the case fails. `describe()` identity is
-  not used as proof.
-- **Comparison: every stream, every payload.** WorkflowExecution, every AgentSession and every
-  Artifact stream are read back in full, together with every Lane 2 row for the run.
-  - Volatile fields (timestamps, durations) are masked by **one** allowlist in one function.
-    Anything not on it is compared.
-  - Generated ids are **canonicalized by correspondence**, not erased. Each distinct id is replaced
-    by `<kind>#n` in first-seen order across all streams, so a broken cross-stream link
-    (session→execution, artifact→phase) changes the canonical form and fails.
-  - Lane 2 rows are compared as full rows, after the same canonicalization: observation type, the
-    full `data` payload, `execution_id`, `phase_id` and `workspace_id`. A multiset of types and
-    counts would accept corruption.
-- **Mutation checks (exit test of PR 4).** The test fails for each of these, injected one at a time
-  through a test-only perturbing provider:
-  1. a changed token count where totals are kept equal by a compensating change;
-  2. a tool name or `tool_use_id` altered with types and counts unchanged;
-  3. a dropped `session_id` attribution on one observation;
-  4. a swapped artifact→phase link;
-  5. one dropped embedded-JSONL line.
-
-**L3: owner death (PR 5).** Under the Rust bridge:
-1. Start a real Rust operation whose agent process forks a descendant.
-2. SIGKILL the owning executor process, and separately SIGSTOP it past the TTL.
-3. Assert:
-   - the bridge terminates the operation (no `docker exec` child and no agent descendant remain in
-     the container);
-   - the dead host's containers are reaped through `syn.host_id`;
-   - the row ends `interrupted`;
-   - a late write from the stopped executor is rejected (the retained stale-write assertion).
-
-This is the new risk the bridge introduces, and #1894's `_StallingDrainer` cannot exercise it,
-because it launches `docker run ... sleep 600` directly with no operation in between
-(#1894 `apps/syn-api/tests/integration/_1310_executor_process.py:46-64`).
-
-The brief's literal requirement, "identical event sequences vs the Python executor", holds by
-construction, because there is one executor. L2 checks it per provider.
-
-## 4. Telemetry, capture and credential parity (brief item 3)
-
-### 4.1 Lane 2
-- Writing stays in Python. The bridge never connects to `SYN_OBSERVABILITY_DB_URL`.
-- Parity is the full-row Lane 2 comparison in L2.
-
-### 4.2 Capture
-- Session capture and transcript extraction are unchanged in phase 2. Python still parses.
-- Parity is the AgentSession stream equality in L2, plus the #1550 reconciliation ("per-run event
-  counts match the recorded transcripts", `docs/north-star.md:21`), run during every canary step.
-
-### 4.3 Credentials
-The bridge's `CredentialResolver` is a Rust trait (AW 900d021). Across the process boundary it
-becomes a **callback over the bridge's own socket**:
-- the bridge asks Python for a named credential when it starts an operation;
-- Python answers with the value;
-- the bridge delivers it to `docker exec` only as `-e NAME` with the value in the child's
-  environment, never in argv (AW plan §5.2);
-- the value is held only for that call.
-
-The renewal schedule, setup-then-clear (ADR-024) and revocation stay in the Python keeper.
-`keep_credential_fresh` exposes injectable `now` and `sleep`
-(`packages/syn-adapters/src/syn_adapters/workspace_backends/service/credential_keeper.py:87-100`).
-It renews first at 40 minutes, then every 40 minutes, retrying every 3 minutes
-(`packages/syn-adapters/src/syn_adapters/workspace_backends/service/credential_keeper.py:47-51`).
-It replaces credentials and never revokes them, because revocation is teardown's job
-(`packages/syn-adapters/src/syn_adapters/workspace_backends/service/credential_keeper.py:25-28`).
-
-The PR 5 exit test runs each case against a **real selected-provider operation**, for both
-providers:
-- **No secret leaks.** No secret value appears in any host process argv (`/proc/*/cmdline` sampled
-  while the operation runs), in the bridge's ledger or logs, or in any Lane 2 row.
-- **Setup-then-clear.** The agent's exec environment after setup lacks the cleared values.
-- **Renewal succeeds.** With the injected clock driven past `FIRST_RENEWAL`, a renewal lands while
-  the operation is running, and the next exec the agent makes uses the new token.
-- **Lapse.** With renewals failing until expiry, `on_lapse` fires exactly once with a
-  `CredentialLapse`, and the operation keeps running.
-- **Cancellation.** When the operation ends, the keeper task is cancelled with no renewal after it.
-- **Teardown.** Revocation runs once for each unexpired minted token
-  (`packages/syn-adapters/src/syn_adapters/workspace_backends/service/managed_workspace.py:328`).
-
-## 5. Rollout (brief item 4)
-
-### 5.1 Shipping the bridge
-- `PINNED_DIGESTS` pins **workspace images** only
-  (`packages/syn-shared/src/syn_shared/settings/workspace_images.py:598,680`). It does not identify a
-  host-side binary.
-- The `syn-api` image installs AW **Python source** from the gitlink today
-  (`infra/docker/images/syn-api/Dockerfile:31-33,59-61`).
-- The bridge binary is therefore **built from the same gitlink** in a cargo stage of the `syn-api`
-  Dockerfile and copied into the final image. Its identity is the `lib/agentic-workspace` gitlink
-  plus the `syn-api` image digest. That is still "one pin, one build identity"
-  (`docs/adrs/ADR-072-execution-hosting-and-upgrade-without-drain.md:72-74`), and no ADR change is
-  needed (H3 confirms).
-- The bridge prints its gitlink SHA in `describe()`, and the executor logs it at registration.
-
-### 5.2 Pool
-- A second compose service, `executor-rs`, runs the same image with `SYN_PROCESS_ROLE=executor`,
-  `SYN_WORKSPACE_OPERATION_PROVIDER=rust` and `SYN_EXECUTOR_POOL=rs`.
-- Both settings live in Pydantic Settings classes per ADR-004 and are regenerated into
-  `.env.example`.
-- The service registers its own `host_id`, so it has its own `execution_budget` row (D3).
-
-### 5.3 Canary share: an enforced cohort
-A capacity ratio is **not** a share. The claim takes the oldest eligible run and checks only the
-claiming host's room (`packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py:115-130`).
-A one-slot Rust host can take every run that arrives sparsely. Global capacity in D3 is a reporting
-sum, not an allocation rule
-(`docs/adrs/ADR-072-execution-hosting-and-upgrade-without-drain.md:154-156`), so a run-eligibility
-rule does not weaken D3. The plan therefore adds one:
-
-- **Schema.** `execution_runs.pool TEXT NOT NULL DEFAULT 'default'` and
-  `executor_hosts.pool TEXT NOT NULL DEFAULT 'default'`. They are added with idempotent
-  `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` statements after the `CREATE TABLE IF NOT EXISTS`
-  blocks. Changing the declarations alone would not alter existing installations
-  (`packages/syn-adapters/src/syn_adapters/execution_runs/schema.sql:1,21`). The index is
-  `(state, pool, admitted_at)`.
-- **Admission.** `reserve` stamps `pool='rs'` when
-  `hash(execution_id) mod 10000 < SYN_EXECUTION_CANARY_BASIS_POINTS`. The share is decided per run,
-  deterministically, at admission.
-- **Claim.** One added predicate in the candidate CTE
-  (`packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py:127-130`):
-  `AND (r.pool = $host_pool OR r.admitted_at < clock_timestamp() - $hold)`.
-  - An `rs` host claims only `rs` rows, so sparse arrivals cannot pull default work onto it.
-  - A default host takes an `rs` row only after `hold` (default 120 s). A dead or drained canary
-    pool therefore never strands work. The cost is that the share is an upper bound during a canary
-    outage, and that case is reported.
-- **Measured share.** Every step reports the realized share: runs closed by `rs` hosts out of all
-  closed runs, from `execution_runs` joined to `executor_hosts`. It also reports how many `rs` rows a
-  default host took after `hold`.
-- **Steps.**
-  1. 1% (100 bp);
-  2. 10%;
-  3. 25%;
-  4. 50%;
-  5. 100%.
-
-  Each step is held for at least one beta and one #1550 detector run. The Python-provider pool is
-  then kept registered at capacity ≥1 for one release as the rollback target.
-- **Tests (PR 6).**
-  - Saturated load: the realized share is within ±5 points of the target across 200 runs.
-  - Sparse arrivals (one run at a time, both pools idle): an `rs` host never claims a `default` row.
-  - Canary pool down: `rs` rows are claimed by a default host after `hold` and not before.
-
-H4 asks the owner to accept this predicate on the hot claim. The alternative is an explicit
-"concurrency ceiling, uncontrolled share", with the realized share measured. The plan recommends
-the cohort.
-
-### 5.4 Kill switch
-- **Routing:** set `SYN_EXECUTION_CANARY_BASIS_POINTS=0`. New runs go to `default` at admission,
-  and `rs` rows already admitted fall back after `hold`.
-- **Lossless:** drain the `executor-rs` host with `PUT /executors/{host_id}/drain`. It stops
-  claiming, finishes what it holds, deletes its row and exits 0
-  (`docs/adrs/ADR-072-execution-hosting-and-upgrade-without-drain.md:577-585`). **This route does not
-  exist on `main`**: the only drain-related route file, `apps/syn-api/src/syn_api/routes/maintenance.py`,
-  is the pit-stop drain. It is a prerequisite (P0), or PR 6 builds it.
-- **Immediate:** stop the container. Its runs become `interrupted` through D5 reconciliation and are
-  never re-run.
-
-### 5.5 Rollback
-Route to 0 and drain `executor-rs`. Both providers write the same streams (L2), so nothing is
-migrated and no projection is rebuilt.
-
-## 6. Measurement (brief item 5)
-
-### 6.1 Entry point
-The load test already has one: `python -m syn_perf.loadtest --n N --tier platform|node`
-(`packages/syn-perf/src/syn_perf/loadtest/__main__.py:1-6,44-80`). The earlier draft said it lacked
-one; that was wrong. PR 1 extends it with an `--executor-container` option (repeatable) and an
-`--arm` label.
-
-### 6.2 What is wrong with the current instruments
-- `ContainerStat` has CPU percent and memory bytes, with no timestamp and no active-run count
-  (`packages/syn-perf/src/syn_perf/loadtest/pass_bar.py:102-106`).
-- The samples come from `docker stats --no-stream` snapshots
-  (`packages/syn-perf/src/syn_perf/loadtest/driver.py:404-413`).
-- `ContainerRoles` has no executor role (`packages/syn-perf/src/syn_perf/loadtest/pass_bar.py:109-124`).
-- `PassBar.read_p95_seconds` is the **threshold**, not an observation
-  (`packages/syn-perf/src/syn_perf/loadtest/pass_bar.py:145`). The observed values are
-  `LoadTestReport.list_p95_seconds` and `detail_p95_seconds`
-  (`packages/syn-perf/src/syn_perf/loadtest/pass_bar.py:190-191`).
-
-### 6.3 PR 1 instruments
-- **Raw executor samples.** A new `ExecutorSample` is taken every 5 s for each executor container,
-  and for the bridge process wherever it runs. It holds:
-  - `at` (monotonic and wall clock);
-  - the container id;
-  - cumulative cgroup v2 `cpu.stat usage_usec`;
-  - `memory.current` (cgroup usage, including page cache);
-  - `memory.stat anon` (reported as the RSS proxy, labelled as such);
-  - the executor's `execution_budget.in_use`, read from Postgres in the same tick;
-  - the count of that executor's active phases.
-
-  All raw samples are written to the report.
-- **Derived values, per arm.**
-  - **CPU:** CPU-seconds per active-run-minute, from the cumulative `usage_usec` deltas divided by
-    the in-use integral. The cgroup includes `docker exec` and bridge children.
-  - **Memory:** the regression of `anon` on in-use per executor, reporting the **intercept** (fixed
-    per-process memory) and the **slope** (marginal per-run memory) with 95% intervals.
-    `memory.current` is reported beside it.
-  - **Idle baseline:** executors registered with zero runs for 5 minutes.
-  - **Pool totals.**
-- **Attribution (decides R1 vs R2 vs neither).** On the test stack only, the executor in arm A runs
-  under `py-spy record` for 10 minutes at N=20 (needs `SYS_PTRACE`). Its samples are bucketed by
-  frame into four buckets:
-  - stream I/O (`read_lines`, subprocess pipes);
-  - decode and harness parse (`EventStreamProcessor`, `CodexStreamProcessor`);
-  - domain and journal (aggregates, `ExecutionJournal`, event-store client);
-  - other.
-- **Claim latency.**
-  - Columns `first_claimed_at` and `claimed_at`, added through idempotent
-    `ADD COLUMN IF NOT EXISTS`. `claim` sets `claimed_at = clock_timestamp()` and
-    `first_claimed_at = COALESCE(first_claimed_at, clock_timestamp())` in the same UPDATE
-    (`packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py:131-134`).
-  - First-claim latency = `first_claimed_at − admitted_at`.
-  - Re-claim latency (after `defer`) = `claimed_at − retry_at` for rows whose
-    `claimed_at > first_claimed_at`. It is reported separately.
-  - The driver exports p50/p95 of both with one SQL query, and the report names the query.
-- **Dashboard reads.** Observed `list_p95_seconds` **and** `detail_p95_seconds`.
-- **Pass bar unchanged.** 30-minute sustain, admission within 5 minutes, zero lost or orphaned,
-  counts reconciled (`docs/north-star.md:16-21`).
-- **Repetition.** 3 runs per arm and N. The report gives the median and the min-max range, and an
-  arm difference is claimed only when the ranges do not overlap.
-
-### 6.4 Arms (same host; N=20, then N=100)
-
-| Arm | Executors | Provider | Purpose |
-|---|---|---|---|
-| A | 1 process | Python | post-split baseline (the control) |
-| B | k processes (k = N/10) | Python | does isolation alone clear the bottleneck? |
-| C | 1 process | Rust bridge (R1) | the R1 effect |
-| D | k processes | Rust bridge (R1) | the R1 effect with isolation |
-
-Arm B stays the honesty control. If k Python processes already clear the 100-tier executor limit,
-Rust has to win on cost, not on feasibility.
-
-### 6.5 Gates
-- **G1, after PR 1, arms A and B at N=20, then N=100.** Proceed to R1 only if **both** hold:
-  - the executor role is ≥10% of host CPU-seconds per active run, or its memory intercept plus 100 ×
-    slope exceeds one executor container's limit; **and**
-  - the stream-I/O bucket is ≥30% of executor CPU.
-
-  If decode and parse dominate instead, write the R2 plan (§2.3) and skip R1. If neither holds, stop.
-  The effort goes to cheaper runs (#1714) and to budget sizing (#1715): below 10%, even an infinitely
-  fast executor saves less than 10% of host CPU. The thresholds are H2.
-- **G2, after PR 7 (canary at 100%), arms C and D.** R1 is kept only if arm C beats arm A on executor
-  CPU per active-run-minute or on the memory slope, by non-overlapping ranges. Otherwise it is rolled
-  back and the bridge is not shipped as the default.
-- **G3.** A full Rust ExecutionHost is re-proposed, with its own ADR and a decision-kernel design,
-  only if the remaining Python executor cost still binds at 100 after G2.
-
-## 7. Ordered PRs with exit tests (brief item 6)
-
-**P0, prerequisites (not planned here):**
-- #1894 merged.
-- ADR-072 Phase 1: `SYN_PROCESS_ROLE` and an `executor` compose service. Today the only API-role
-  service is at `docker/docker-compose.syntropic137.yaml:237`.
-- The `PUT /executors/{host_id}/drain` route.
-- #1717's stub agent image (7b).
-- **#1908 reviewed and merged.** It brings the Python `OperationHost`, the operations-backed adapter,
-  the line decoder, observe/status handling and cancellation. Its recording tests are reused for L1.
-  This plan does **not** re-implement that seam.
-
-| # | Repo | Change | Exit test (what it asserts; what reverting the change does) |
-|---|---|---|---|
-| 1 | syn | **Measure.** The §6.3 instruments: `ExecutorSample`, executor and bridge roles, attribution, the claim-latency columns through idempotent ALTERs plus the export query, observed list and detail p95, repetitions. | (i) `packages/syn-perf/tests/test_loadtest_pass_bar.py`: a report lacking executor samples, lacking `detail_p95_seconds`, or whose dashboard figure equals `PassBar.read_p95_seconds` rather than being computed from samples **fails validation**. (ii) A schema test applies the **current** `schema.sql`, inserts rows, runs the new `ensure_ready` twice and asserts the columns exist and the rows survive. (iii) A `test_1310_*`-style claim test asserts `admitted_at ≤ first_claimed_at ≤ claim return`, and that after `defer` and re-claim `first_claimed_at` is unchanged while `claimed_at` moves. **Then run arms A and B at 20 and 100 and record them in `docs/experiments/`. G1 is decided here.** |
-| 2 | AW | **Bridge contract.** A JSON-Schema (APSS) request/response protocol over a Unix socket: `start`, `observe(cursor, max_bytes)` with bounded pages, `status`, `cancel`, `finalize`, `resolve_credential` (bridge→host callback), and `ledger`. Owner loss: the socket closing, or the parent's death through `PR_SET_PDEATHSIG`, cancels every operation and kills its exec children. Failures are typed (`not_found`, `lost`, `provider_error`, `credential_unavailable`) with a stated mapping to Python exceptions. | Schema fixtures validated by both the Python and Rust implementations. A Rust test: closing the socket mid-operation leaves no exec child within 5 s. A page never exceeds `max_bytes`. |
-| 3 | AW | **Bridge binary** (`aw-opd`) over `implementations/docker` (AW 900d021), implementing PR 2. Released from AW `release`. | L1: recorded streams reassemble byte-identically under both providers, with page and gap behaviour equal (the #1908 corpus). |
-| 4 | syn | **Bump the AW gitlink** to include PRs 2-3. **Add the L2 production-path parity fixture** (§3), Python provider only at first, with the five mutation checks. V5 stays as is. | Each mutation in §3 L2 fails the fixture. An unperturbed run passes. Fixture run time is recorded. `git merge-base --is-ancestor 900d021 <gitlink>` holds. |
-| 5 | syn | **Provider selection.** `SYN_WORKSPACE_OPERATION_PROVIDER`, a cargo stage in the `syn-api` Dockerfile building `aw-opd` from the gitlink, a Python `BridgeOperations` client satisfying `SupportsOperations`, the L2 fixture parametrized over the provider, L3 owner death, and the §4.3 credential cases. | The `rust` case reads a non-empty ledger for every phase; reverting the wiring fails it. L3 passes under SIGKILL and SIGSTOP. Every §4.3 credential case passes on both providers. The six `test_1310_*` files stay green. |
-| 6 | syn | **Pool and cohort.** The `pool` columns (idempotent ALTERs), stamping in `reserve`, the claim predicate with `hold`, `SYN_EXECUTOR_POOL` and `SYN_EXECUTION_CANARY_BASIS_POINTS`, the `executor-rs` compose service, the drain route if P0 did not deliver it, and the realized-share query. | The §5.3 tests: share under saturation, no default row on an `rs` host under sparse arrivals, fallback after `hold`. The six `test_1310_*` files stay green with the predicate in place. |
-| 7 | ops | **Canary** steps 1% → 100% (§5.3), each held for at least one beta and one #1550 run, with a kill-switch drill (route to 0, then drain) at step 1. Then arms C and D at 20 and 100. **G2 is decided here.** | The #1550 detector reports zero dropped starts. Per-run event counts of `rs` runs equal their transcripts. The realized share is reported per step. A drained `executor-rs` exits 0 with `in_use=0`. |
-
-PRs 2-3 can proceed in parallel with PR 1 once the contract (PR 2) is agreed. They are only
-*merged into use* (PR 5 onward) if G1 selects R1.
-
-**Maintenance cost.**
-- **syn** gains:
-  - two settings and two pool columns;
-  - one claim predicate;
-  - one compose service during the canary;
-  - a cargo stage;
-  - the parity fixture with its allowlist and recorded corpus.
-- **AW** gains a bridge binary and protocol. AW already committed to two provider implementations
-  held together by shared fixtures.
-- **The domain** gains **zero** second implementations.
-- **Net:** adopting the operation seam (#1908) removes the documented second exec path
-  (`packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/stream_adapter.py:150-153`).
-
-## 8. Risks
-
-| Risk | Signal / mitigation |
+| Bucket | Paths (repository root) |
 |---|---|
-| R1's gain is negligible, because executor CPU is mostly parse and journal, or host CPU is mostly workspace (`docs/north-star.md:163`) | G1 attribution stops R1 before any syn change. If G2 shows no non-overlapping improvement, roll back |
-| The bridge keeps docker CLI children, so per-run processes do not fall | H5; visible in G2 as a flat memory slope |
-| A Rust operation outlives a dead executor (orphan agent, effects after reap) | L3 in PR 5. In production: containers labelled with a departed `syn.host_id` after `interrupted`, and the D5 reap-window alert |
-| A provider page or gap bug corrupts a stream while counts still match | L2 full-row comparison plus the mutation checks; the #1550 per-run counts in the canary |
-| A secret leaks through argv, the ledger or a bridge log | §4.3 cases in PR 5; the callback holds a value only for the call |
-| The claim predicate slows the hot claim or starves a pool | The PR 6 share tests; claim latency p95 from PR 1 compared before and after PR 6; `hold` fallback |
-| AW delivery latency (merge → release → gitlink) stalls PRs 3-5 | PR 2 is agreed before PR 1 finishes. Flag it if PR 3 is not released two weeks after G1 |
-| #1908 changes shape before it merges | It is a P0 prerequisite; PR 4 rebases on whatever merges |
-| The bridge build adds cargo to the `syn-api` image build and to CI | Map the new job in `scripts/check_ci_parity.py`. `just preflight-agent` cannot run cargo; CI does |
+| host-loop | `packages/syn-adapters/src/syn_adapters/execution_host/`, `packages/syn-adapters/src/syn_adapters/execution_runs/` |
+| stream | `packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/stream_adapter.py`, the `agentic_isolation` package |
+| harness-parse | `packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/EventStreamProcessor.py`, `packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/CodexStreamProcessor.py` and the parser/accumulator modules beside them |
+| lane2-write | `packages/syn-adapters/src/syn_adapters/events/` |
+| lane1-decide-append | `packages/syn-domain/src/syn_domain/contexts/orchestration/domain/`, `packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/execution_journal.py`, the ESP Python SDK |
+| workspace-io | `packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/phase_workspace.py`, `packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/` (provision and collect) |
+| credentials | `packages/syn-adapters/src/syn_adapters/workspace_backends/service/credential_keeper.py`, `packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/credentials.py` |
+| api | `apps/syn-api/src/syn_api/routes/`, the projection coordinator, the pollers |
+| other | everything else |
 
-## 9. Verification
+The run also records:
+- CPU-seconds per execution-minute (all buckets except `api`);
+- the RSS slope against active executions, in MB per concurrent execution, because #1552 was an OOM.
 
-- `uv run pytest packages/syn-perf/tests/test_loadtest_pass_bar.py -q`: the report validation from
-  PR 1.
-- `uv run pytest apps/syn-api/tests/integration -k "1310" -q`: the six queue files, green on the
-  PR 4, 5 and 6 heads.
-- The L2 fixture, with `-k "python or rust"`: both providers pass, and each mutation fails.
-- L3 and the credential cases (PR 5).
-- The cohort tests (PR 6).
-- `just preflight-agent` and `uv run pytest -m unit -q`. CI runs cargo, docker and integration.
-- Load runs:
-  `uv run python -m syn_perf.loadtest --n 20 --arm A --executor-container <name> ...`, then
-  `--n 100`. Results go in `docs/experiments/`, with the G1 and G2 verdicts and the raw samples.
+**Validity bars.** A run that fails any one of these is reported as **not evidence**:
+1. The existing `concurrency` check passes. It requires both the peak and the sustained concurrency
+   (`packages/syn-perf/src/syn_perf/loadtest/pass_bar.py:297-305`); otherwise it was a queue test.
+2. The profiler actually collected samples, and its output parsed. A missing or empty profile fails the run by name,
+   in the same way `container_stats` fails (`packages/syn-perf/src/syn_perf/loadtest/pass_bar.py:387-389`).
+3. `other` is under 10% of the non-`api` samples.
+4. Two runs at the same N agree on every bucket's share within ±5 percentage points.
 
-## 10. Out of scope
+**Pass and fail, and what each changes.** Stage A always comes first, because Stage A *is* the host. The outcome
+reorders only C1–C3 and D (§5). The rules are applied **in this precedence order**, and the first one that matches
+sets the order. That makes overlapping thresholds deterministic.
 
-- Porting any aggregate, projection or the run queue to Rust.
-- A Rust ExecutionHost (G3, its own ADR).
-- R2 normalization (its own plan, after G1).
-- The D9 epoch fitness function. It is needed anyway but is not on this path.
-- Multi-host placement (#1734), remote sandboxes (#350), Adopt/Reattach.
-- Event-store, Postgres or Redis upgrades.
+| # | Observation (share of non-`api` CPU at the largest valid N) | Resulting order after A → B |
+|---|---|---|
+| 1 | RSS slope × 1,000 exceeds the executor host's RAM | Memory binds. Add a per-run memory budget to Stage A's acceptance. **Then also apply the first matching rule from 2–5** |
+| 2 | stream + harness-parse + lane2-write ≥ 40% | C1 → C2 → C3 → D |
+| 3 | workspace-io ≥ 30% | C2 → C1 → C3 → D |
+| 4 | lane1-decide-append ≥ 25% | C1 → D → C2 → C3 (D still needs every prerequisite in §6) |
+| 5 | none of the above | Default: C1 → C2 → C3 → D |
+|, | Two attempts are both invalid | Use the default order. **The two invalid reports, with their failure reasons, are the PR 1 deliverable.** Re-measure in PR 6, where the Rust host has its own container and `docker stats` separates it |
 
-## 11. Needs a human decision
+**No outcome stops the program.** The thresholds above are defaults the owner may change. They are not an approval
+gate.
 
-1. **H1, the rescope.** Accept "Python remains the executor; Rust enters as an I/O bridge below the
-   operation seam (R1), with normalization (R2) and a Rust ExecutionHost (G3) gated", instead of the
-   brief's Rust ExecutionHost. This is the owner's call.
-2. **H2, the G1 thresholds.** The executor share of host CPU (10%) and the stream-I/O share of
-   executor CPU (30%), and the G2 criterion (non-overlapping ranges over 3 repeats).
-3. **H3, building the bridge from the AW gitlink inside the `syn-api` image.** Confirm that this
-   satisfies ADR-072 D1, or amend D1.
-4. **H4, the canary.** Approve the cohort predicate on the hot claim, with `hold` = 120 s, or accept
-   a ceiling-only canary with uncontrolled share.
-5. **H5, AW bridge internals.** A long-lived per-executor daemon (recommended: a per-operation
-   subprocess re-adds a process per run, which is the cost being cut). Also whether exec goes
-   through the docker CLI or the Engine API. AW owns both.
-6. **H6, timing.** P0 (#1894, the role split and drain route, the 7b image, #1908) lands before
-   PR 1's measurement can run.
+**Acceptance for PR 1 (V1).**
+- A unit test feeds one **captured** stack per bucket (fixtures recorded from a real run, not hand-written) and
+  asserts the bucket for each.
+- A second unit test asserts that **every path in the bucket map exists in the checkout**. A module rename then fails
+  the test instead of silently moving CPU into `other`.
+- A third asserts that an unknown module lands in `other`, and that a report with `other` ≥ 10% is marked invalid.
+- The merged PR includes the report: either the valid numbers, or the two invalid attempts.
+
+---
+
+## 3. The Rust host: responsibilities
+
+**Packaging.** The host is a new crate, `crates/syn-executor/`, and the repository's first Rust crate. It ships as a
+second binary in the **same** `syn-api` image, so it keeps ADR-072 D1 (two roles, one image:
+`docs/adrs/ADR-072-execution-hosting-and-upgrade-without-drain.md:61-74`). It runs in the `executor` role. The role
+split (`SYN_PROCESS_ROLE`) is not built yet. It is a prerequisite (§7, P1).
+
+| Responsibility | Contract it keeps | Proven by |
+|---|---|---|
+| Register, deregister, budget handover | `packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py:49-72`, `:287-320` (D3: capacity never doubles across a restart) | V2 |
+| Heartbeat, honouring `draining` | `packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py:74-84`; `packages/syn-adapters/src/syn_adapters/execution_host/host.py:113-127` | V2 |
+| Claim (capacity + epoch in one transaction) | `packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py:120-161`. **The same SQL text, loaded from shared `.sql` files**, never re-typed in Rust | V2, V5 |
+| Lease renewal every TTL/3 and self-fence on loss | `packages/syn-adapters/src/syn_adapters/execution_host/host.py:44-54`, `packages/syn-adapters/src/syn_adapters/execution_host/lease.py:32-46`. Renewal is bound to **worker liveness for that run's lease token** (§4.4), not to agent output | V2, V6a, V6b |
+| Drain: stop claiming and wait | `packages/syn-adapters/src/syn_adapters/execution_host/host.py:82-105` | V2 |
+| Reconcile: fence, reap, interrupt, close | `packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py:196-247`; `packages/syn-adapters/src/syn_adapters/execution_host/reconciler.py:44-72`. The interrupt is a domain decision and goes over the bridge (`packages/syn-adapters/src/syn_adapters/execution_host/ports.py:37-44`) | V2 |
+| Shutdown | Cancel every held run over the bridge. Python takes the #1381 preserve-and-re-raise path (`packages/syn-adapters/src/syn_adapters/execution_host/ports.py:19`, `packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/WorkflowExecutionProcessor.py:595-610`). Rows are then left for lease expiry, as `host.py:86-105` does today | V2 |
+| Executor identity on containers | Every container created for a run must carry the **host's** registered `syn.host_id`, because the reaper selects by `syn.host_id=<run.executor_id>` (`packages/syn-adapters/src/syn_adapters/execution_host/ports.py:28`). Today each Python process draws its own suffix (`packages/syn-adapters/src/syn_adapters/workspace_backends/host_labels.py:33-44`), so workers would label with the wrong id. The host injects its full executor id, and `executor_host_id()` returns it verbatim (code change in PR 3) | V2 reap cases; V6a |
+| Operation calls (start, observe, status, cancel, finalize) from Stage C1 | **AW** `crates/workspace-core/src/operations/mod.rs:42-84` and `:32-37`; the APSS EXP-V1-0006 0.2.x contract per **AW** `crates/workspace-core/src/operations/contract.rs:1,8-10,566`; Docker via **AW** `implementations/docker/src/operations.rs:686,1014`. The host **links** these crates and never reimplements them | AW LH-1..LH-7 conformance; V7 |
+| Workspace lifecycle (provision, collect, destroy) from Stage C2 | **AW** `crates/workspace-core/src/lib.rs:365` (`WorkspaceProvider`), a **separate port** from operations (**AW** `crates/workspace-core/src/operations/mod.rs:3`) | V8 |
+
+**Operation keys** are derived deterministically from `(execution_id, phase_id, attempt)`. Same-key starts with an
+equal spec return the existing operation (**AW** `implementations/docker/src/operations.rs:1070`). This lets a host
+that still holds its provider re-attach to a live agent. It does **not** survive a host restart: provider records
+are in memory (**AW** `implementations/docker/src/operations.rs:694,716`). After a host crash, runs are interrupted
+and never re-attached, exactly as today.
+
+**Out of the host, permanently:** harness stream and transcript parsing. Under "Where does this change belong?",
+that is AW work, behind AW's `HarnessTranscript` / `TranscriptExtractionResult` normalisers.
+
+---
+
+## 4. The bridge
+
+### 4.1 Recommendation: IPC to supervised Python decision workers
+
+- The Rust host spawns a small, fixed pool of Python **decision workers** as child processes in the executor
+  container. They die with the host (parent-death signal on the process group).
+- They speak gRPC over a Unix-domain socket. One `.proto` file generates both sides' types. gRPC is already the
+  event-store wire protocol in both languages (`lib/event-sourcing-platform/event-sourcing/python/pyproject.toml:29-30`).
+- Workers live in the executor's failure domain, never the API's. This keeps ADR-072's consequence that "an API OOM
+  no longer takes executions with it" (`docs/adrs/ADR-072-execution-hosting-and-upgrade-without-drain.md:634-635`).
+- **Run affinity:** a run is pinned to one worker for its whole life. That worker holds the aggregate, the
+  run-scoped fold, the `PhaseRuntime`, and the in-memory result lists that today's `_drain` keeps
+  (`packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/WorkflowExecutionProcessor.py:530-532`).
+
+**Why not PyO3 embedding:**
+- A Python fault or OOM kills the host and every run it holds. With IPC, the blast radius is one worker's runs.
+- The GIL caps decisions at one core per host, which would make 1,000 concurrent executions depend on Python
+  free-threading.
+- `run_claimed` is `async`. Driving it from tokio needs a pyo3 asyncio bridge with no prior art here.
+
+**What would reverse the choice:** the PR 4 spike (V4) shows IPC round-trip p99 above the bar at N = 100, and
+batching does not fix it.
+
+### 4.2 Interface by stage (each stage deletes the previous surface)
+
+- **Stage A (coarse):** `RunClaimed(claimed, lease_token) -> stream<Liveness> then Result`, plus
+  `Cancel(execution_id)` and `Interrupt(fenced_run)`. This is exactly `ClaimedRunDrainer` and `RunInterrupter`
+  (`packages/syn-adapters/src/syn_adapters/execution_host/ports.py:16-22,37-44`). Python still does all I/O through
+  the Python AW provider. **The host owns claim, lease, drain and reconcile; Python owns the run.**
+
+- **Stage B (loop inverted, infrastructure still Python):** the host runs the to-do loop that is today
+  `packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/WorkflowExecutionProcessor.py:620-650`.
+  The bridge becomes:
+  - `Open(claimed) -> Opened | NoStream`. The worker builds the fold, reloads the aggregate and reads the start pins
+    (`WorkflowExecutionProcessor.py:487-512`).
+  - `Next(execution_id) -> TodoItem | Empty`.
+  - `Act(execution_id, TodoItem) -> Continue | Terminal(result)`. **The worker executes today's dispatch branch for
+    that item, unchanged**: provision with session lifecycle and prompt/command build
+    (`packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/phase_workspace.py:167-216`),
+    run agent (`WorkflowExecutionProcessor.py:766-778`), collect, and complete phase (`WorkflowExecutionProcessor.py:673-698`).
+    An exception inside `Act` takes today's `_fail_execution` path in the worker (`WorkflowExecutionProcessor.py:574-594`),
+    which returns `Terminal`.
+  - `Finish(execution_id) -> Terminal(result)` when `Next` is `Empty`. It runs today's completion or
+    cancel-and-release path (`WorkflowExecutionProcessor.py:545-573`, `:700-715`).
+  - `Cancel` and `Interrupt` as in Stage A.
+
+  Stage B removes `RunClaimed` only because `Open`/`Act`/`Finish` cover every capability it had, including the
+  terminal paths. No capability is dropped. The host holds **no** business logic. It loops `Next` → `Act` until
+  `Terminal`, which is the "processor reads the to-do list and dispatches" role in CLAUDE.md.
+
+- **Stage C (infrastructure moves to the host, one `Act` branch at a time):** each C slice replaces the Python body
+  of one action with host-side code. The worker keeps only the domain part:
+  - **C1:** the host owns the operation (start, observe, cursor, cancel) through Rust `SupportsOperations`. Python
+    supplies a typed `LaunchSpec` (environment, command, fallback) from `PrepareLaunch(execution_id, phase_id)`, and
+    observed pages go back to Python's harness processor
+    (`packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/AgentExecutionHandler.py:401`)
+    until AW ships Rust harness normalisers.
+  - **C2:** the host provisions and collects through Rust `WorkspaceProvider` (**AW** `crates/workspace-core/src/lib.rs:365`).
+    Python's `Decide(ProvisionCompleted | ArtifactsCollected)` appends the domain events.
+  - **C3:** the credential keeper (`packages/syn-adapters/src/syn_adapters/workspace_backends/service/credential_keeper.py:47-51`
+    schedule kept) and `CredentialResolver`.
+
+  The four-way outcome appears with `Decide`: `Recorded(version)`, `NotRecorded` (conflict cause only), `Unknown`
+  (store acknowledgement lost) and `Rejected(domain_error)`. It carries the journal's distinction
+  (`packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/execution_journal.py:105-126`)
+  across the wire. What to do with each variant is decided in Python (reload or fail), not by the host.
+
+- **Stage D:** `Decide` for a command family is implemented in Rust (§6).
+
+**Lane 1 until Stage D:** only Python appends orchestration events. The host never does.
+
+### 4.3 Failure and restart semantics
+
+The rule: **a worker restart is not a run recovery.** The worker holds infrastructure state (workspace handles,
+context managers, environment, command, fallback, pre-run starting points) that the stream cannot rebuild:
+- `PhaseRuntime.attach_workspace` stores the workspace, environment and command
+  (`packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/phase_runtime.py:384-389`) before
+  the provision event is appended
+  (`packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/phase_workspace.py:194-216`).
+- `launch` indexes those maps directly and raises without them
+  (`packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/phase_runtime.py:429-445`).
+- The starting point can only be read before the agent runs
+  (`packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/phase_runtime.py:391-401`).
+
+So a lost worker's runs take **today's dead-host path: fence, reap, interrupt, never re-run**
+(`packages/syn-adapters/src/syn_adapters/execution_host/reconciler.py:1-7`).
+
+| Failure | Host behaviour | Why it is safe |
+|---|---|---|
+| Worker crashes (any stage A–C) | For every run pinned to it: stop renewing (as today, when a drain escapes: `packages/syn-adapters/src/syn_adapters/execution_host/host.py:144-150`), do not re-dispatch, start a fresh worker for **new** claims. The leases expire, and a reconciler (possibly this host) fences, reaps by `(syn.host_id, syn.execution_id)` and interrupts through the aggregate | Same as a process crash today. No second agent launch and no decision on an empty runtime. Output in the workspace is lost only as it is on a crash today |
+| Worker hangs (no liveness for that run's token within the deadline) | Stop renewing those runs, SIGKILL the worker, then as above | Prevents a Rust host keeping a lease alive for a dead Python decision (R1) |
+| Healthy run with a quiet agent (no output for minutes) | Keep renewing. Liveness is the worker's event loop answering for the token, not agent output | Matches today's renewal, which watches the drain task (`packages/syn-adapters/src/syn_adapters/execution_host/lease.py:32-33`) |
+| `Act` or `Decide` returns `Unknown` or `NotRecorded` | Not handled by the host. Python decides, as today (reload or the failure path) | The host holds no business logic |
+| Host shutdown (SIGTERM) | `Cancel` every held run. Python runs the #1381 preserve path and re-raises. Rows are left for their leases | Identical to `packages/syn-adapters/src/syn_adapters/execution_host/host.py:86-105` |
+| Host crash or executor-container OOM | Workers die with it. Leases expire, and another executor reconciles (ADR-072 D5). The API is untouched | Identical to today, plus API isolation |
+
+**Blast radius.** One worker loss interrupts the runs pinned to that worker: at most `capacity / pool_size` runs.
+The pool size is a host setting. PR 4's spike reports the trade-off between pool size and per-worker run count.
+
+**When a worker restart may *resume* instead of interrupt.** Only after the host holds **every** piece of runtime
+state for a phase: the workspace handle (C2), the `LaunchSpec`, the credential reference (C3), the operation key and
+cursor (C1), and the recorded starting point (moved into a `Decide` result in C2). The ordered PRs list that as an
+explicit milestone, "R-resume", with its own crash tests (V9). Until it lands, interrupt is the contract.
+
+### 4.4 Liveness, separately from progress
+
+- Each `RunClaimed`/`Act` call is bound to the run's `lease_token`.
+- The worker answers a `Liveness(token)` probe from its event loop every TTL/3. The answer covers awaits on the agent
+  and slow store calls.
+- The host renews a lease only if the last liveness answer for that token is younger than the deadline (default
+  TTL/3 × 2).
+- A probe for a stale token (a fenced and re-claimed run) is answered `Unknown token`, and the host stops renewing.
+
+---
+
+## 5. Which slices move, in what order
+
+| Stage | What moves to Rust | Domain change |
+|---|---|---|
+| A | Claim, heartbeat, lease, drain, reconcile, shutdown. The executor role runs the binary | None |
+| B | The to-do loop (`Next`/`Act`/`Finish`) | None. The Python branches run unchanged inside `Act` |
+| C1 | Operation start/observe/cancel and the stream cursor. Later, Lane 2 writes (after the AW Rust harness normaliser contract) | Python keeps parsing until then |
+| C2 | Workspace provision, collect, destroy via `WorkspaceProvider`; starting-point read | `Decide` events only |
+| C3 | Credential keeper and resolver | None |
+| R-resume | Worker restart resumes instead of interrupting | Crash tests (V9) |
+| D | `WorkflowExecutionAggregate` decisions and fold, one command family at a time, shadow first (`packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/WorkflowExecutionAggregate.py`, commands `:480-806`, applies `:807-1022`) | Rust appends Lane 1 |
+
+A and B are fixed first. PR 1's outcome orders C1–C3 and D (§2). R-resume follows the last of C1–C3.
+
+---
+
+## 6. Event compatibility (#1310 1.7) once a Rust slice writes Lane 1
+
+Stage D may not start until all of the following hold:
+
+1. **#1921 is merged.** It provides the write-once
+   `ci/fitness/event_sourcing/snapshots/orchestration_events.epoch-N.json` snapshot of every orchestration `@event`'s
+   type, version and Pydantic validation schema; the snapshot fitness test (V13 in #1310); and
+   `just check-event-compat` (V9 in #1310). None of these is on `main` today.
+2. **The append-side epoch guard exists.** ADR-072 D9 requires it on **every** append, because the API appends to
+   executions it did not admit (`docs/adrs/ADR-072-execution-hosting-and-upgrade-without-drain.md:486-497`). The ADR
+   specifies the raise and the 409 (`docs/adrs/ADR-072-execution-hosting-and-upgrade-without-drain.md:516-528`). It is
+   **not implemented**:
+   - `packages/syn-domain/src/syn_domain/contexts/orchestration/_shared/event_epoch.py:5-6` says so;
+   - `RepositoryAdapter.save` delegates straight to the SDK (`packages/syn-adapters/src/syn_adapters/storage/repositories.py:98-102`).
+
+   The ADR's citation of `packages/syn-adapters/src/syn_adapters/storage/repositories.py:182`
+   (`docs/adrs/ADR-072-execution-hosting-and-upgrade-without-drain.md:562`) now points at the `WorkflowTemplate`
+   repository, not at an execution write gate. PR P2 builds the guard in the execution repository path
+   (`packages/syn-adapters/src/syn_adapters/storage/repositories.py:189-203`) for all writers: the executor journal
+   and the API's eval, tag, resume and reconciliation routes. It is tested with mixed-epoch appends in every row
+   state of the table, including a race against a claim. **The Rust SDK writer in Stage D calls the same guard SQL
+   (from the shared `.sql` directory) before it appends.**
+3. **The Rust side:** a test serializes every Rust event type's fixtures and validates them against the current
+   epoch's snapshot schema.
+4. **The Python side:** #1921's probe is extended to parse a corpus of **Rust-written** payloads with the current and
+   the previous `syn-domain`. This closes research Q3: aliases and datetime format are not captured by a validation
+   schema alone.
+5. **One epoch:**
+   - while Python decides, the host registers the epoch its workers report at startup;
+   - once Rust folds a stream, a fitness test fails if the Rust constant differs from
+     `packages/syn-domain/src/syn_domain/contexts/orchestration/_shared/event_epoch.py:13`.
+6. **Differential conformance** for every moved command family:
+   - the same stream prefix, the same command, and injected ids and clock must give byte-equal canonical events from
+     Python `Decide` and Rust `Decide`;
+   - the corpus is #1921's nine lifecycle fixtures plus streams recorded from the `apps/syn-api/tests/integration/test_1310_*.py` runs.
+7. **Shadow before cutover:** for one release, Rust `Decide` runs beside Python's. Python's result is appended.
+   Divergences are counted, and cutover needs zero over the agreed volume.
+
+The Rust append uses the ESP Rust SDK's distinct conflict variant
+(`lib/event-sourcing-platform/event-sourcing/rust/src/error.rs:31`) and its idempotency key
+(`lib/event-sourcing-platform/event-sourcing/rust/src/repository.rs:5-32`). That SDK is labelled Alpha in ESP. Any
+gap found there is fixed in the submodule, not worked around.
+
+---
+
+## 7. Ordered PRs
+
+**Nothing in the host and bridge track opens before PR 1 has merged with its report.**
+
+| # | PR | Depends on | Repo |
+|---|---|---|---|
+| 1 | **Experiment.** Profiler bucketing module, the report section in `syn-perf`, runs at N = 20 and 50 (and 100); report merged with the PR. V1 | none | syn |
+| P1 | ADR-072 D1 role split (`SYN_PROCESS_ROLE`, `executor` service in compose) and the drain route. Neither exists on `main`. Bump the AW gitlink `914129d` → ≥ `34a4872`. That also moves the Python twin to contract 0.2.x, so syn's suite must pass on it | 1 | syn |
+| P2 | Append-side epoch guard for all execution writers, with mixed-epoch and race tests (§6.2). If #1310 already tracks it, this plan depends on that item instead of duplicating it | 1 | syn |
+| 2 | Bridge contract: `.proto`, generated Python and Rust types, a Python decision worker serving the Stage A RPCs over the existing `run_claimed`, `Liveness(token)`. Bridge vocabulary (decision worker, Act, Liveness) added to `docs/architecture/orchestration-ubiquitous-language.md`. V3 | 1, P1 | syn |
+| 3 | Executor identity injection: `executor_host_id()` returns a host-provided id verbatim (`packages/syn-adapters/src/syn_adapters/workspace_backends/host_labels.py:38-44`) | 1 | syn |
+| 4 | Bridge spike (IPC vs PyO3, worker pool size) against the V4 bar. The outcome is recorded in this document | 2 | syn |
+| 5 | **Stage A host.** `crates/syn-executor/`; queue SQL moved to shared `.sql` files loaded by both implementations; claim, lease, drain, reconcile, shutdown; the `executor` role runs the binary; `ContainerRoles` gains `executor`. V2, V5, V6a, V6b | P1, 2, 3, 4 | syn |
+| 6 | Bounded-concurrency canary: one Rust executor beside Python executors on one queue. Its capacity caps its **concurrency**. It does not set a traffic share, because every host claims the oldest eligible work while it has room (`packages/syn-adapters/src/syn_adapters/execution_host/host.py:120`, `packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py:139-143`). Record the actual workload mix each host took | 5 | syn |
+| 7 | Re-measure with PR 1's tooling and per-container stats. Confirm or change the C order | 5 | syn |
+| 8 | **Stage B.** `Open`/`Next`/`Act`/`Finish`; delete `RunClaimed` in the same PR. V3 extended to every action and terminal path | 5 | syn |
+| 9.x | C1, C2, C3 in the order fixed by PR 7. C1's Lane 2 half needs an AW contract PR first (Rust harness normalisers). V7, V8 | 8 | AW + syn |
+| 10 | R-resume: worker restart resumes runs whose state the host holds. V9 | last of 9.x | syn |
+| 11.x | Stage D per command family: conformance, then shadow, then cutover | 8, P2, #1921 | syn |
+|, | CI: a cargo job and its `scripts/check_ci_parity.py` mapping. **Delivered as a patch** in the PR 5 workspace's `artifacts/output/`, because workspace credentials cannot push `.github/workflows/`; the owner pushes it | 5 | owner |
+
+---
+
+## 8. H2–H6 under this direction, and risks kept from the rejected rescope
+
+- **H2 (G1 thresholds as go/no-go): dropped.** The owner's caveat makes it moot. The thresholds survive only as the
+  ordering rules in §2.
+- **H3 (bridge built from the AW gitlink inside the `syn-api` image): reshaped and still open.** No AW bridge binary
+  is built. The question is now whether the `syn-api` image gains a cargo build stage for `syn-executor`. Yes keeps
+  ADR-072 D1; a separate image would amend D1.
+- **H4 (canary cohort predicate on the hot claim): dropped.** Each host's own budget row already bounds its
+  concurrency (`packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py:125-160`). The canary is described as
+  bounded-concurrency, not a traffic share (PR 6).
+- **H5 (AW bridge daemon; CLI vs Engine API): daemon half dropped.** The host links the crates in process. The
+  CLI-per-operation spawn (**AW** `implementations/docker/src/operations.rs:834-840`) becomes an AW performance
+  follow-up, filed only if PR 7 shows process spawn in a hot bucket.
+- **H6 (P0 timing): reduced to P1 and P2.** #1894 and #1908 are merged.
+
+| Old argument | Real risk | Mitigation |
+|---|---|---|
+| (a) porting aggregates means two implementations | The API still appends through the Python aggregate (`docs/adrs/ADR-072-execution-hosting-and-upgrade-without-drain.md:486-490`), so the Python and Rust folds must agree during D | Differential conformance and shadow (§6); D comes last |
+| (b) a thin Python command API | Hosted in the API, it re-couples executions to API uptime | Workers are host children in the executor container (§4.1) |
+| (a)/(b) a second serializer of orchestration events | A differently built writer is what D9 guards against, and the guard is not built | Python is the only Lane 1 writer until D; P2 builds the guard; #1921 plus the Rust-payload probe |
+| (d) a supervisor adds a process boundary | Lease renewal decoupled from the work it protects, and worker state lost across that boundary | Token-bound liveness (§4.4); worker loss takes the interrupt path, never a re-run (§4.3) |
+
+## 9. Risks
+
+| # | Risk | Signal |
+|---|---|---|
+| R1 | The host renews a lease for a hung worker's run | V6a fails. In production: a run with no liveness answer past the deadline (host metric) |
+| R2 | A restart re-runs an agent | Two starts for one `(execution, phase, attempt)` operation key; duplicate `PhaseCommitPushed` |
+| R3 | Rust and Python queue SQL diverge | V5 fails |
+| R4 | A Rust-written event is unreadable by Python | §6.4 probe fails; validation errors on reload |
+| R5 | The folds disagree during D | Shadow divergence > 0 |
+| R6 | IPC overhead erases the gain | PR 7 CPU per execution-minute (host plus workers) > PR 1 baseline + 10% at N = 20 |
+| R7 | Image build time and size grow with a cargo stage | Reported in PR 5 |
+| R8 | AW crates are pinned at an unreviewed `main` commit | Owner decision below |
+| R9 | Containers are labelled with a worker id, not the host id, so a reap misses them | V2 reap cases fail; orphaned containers after a worker kill |
+
+**Standing cost:**
+- From PR 5 on, the repository carries two languages, one `.proto` file and one shared SQL directory.
+- During D it carries **two implementations of the execution aggregate**, held together only by conformance and the
+  shadow counter. That ends only when the API's own appends also move to Rust, which is outside this plan.
+
+## 10. Verification
+
+- **V0 (this revision):**
+  - `docs/plans/20261014_rust-executor.md` no longer contains "Python stays the only implementation" or
+    "no Rust ExecutionHost";
+  - it contains "decided by the owner";
+  - every `file:line` resolves at `1ffef8404` (syn) or `34a4872` (AW);
+  - the diff against `main` touches only that file.
+- **V1 (PR 1):** §2 acceptance.
+- **V2 (PR 5):** convert behaviours and host launch sites, not just a file count.
+  - **Launch sites:** the subprocess executor `apps/syn-api/tests/integration/_1310_executor_process.py:155`, and the
+    in-process host builder in
+    `apps/syn-api/tests/integration/test_1310_execution_host_claims_fences_and_reconciles_on_real_stores.py:98`, which
+    its budget, completion and expiry cases construct directly. Both must be parameterised to launch either the
+    Python host or `syn-executor` (the production binary), plus a mixed Python and Rust peer pair.
+  - **Behaviours covered:** budget and capacity handover, completion and close, drain, fencing by a live peer
+    (`apps/syn-api/tests/integration/test_1310_v12_a_stalled_executor_is_fenced_by_a_live_one.py`), killed-executor
+    reap (`apps/syn-api/tests/integration/test_1310_v7_a_killed_executor_is_reaped_by_a_live_one.py`), and
+    reconciliation resume (`apps/syn-api/tests/integration/test_1310_reconciliation_resumes_from_the_row_on_real_stores.py`).
+  - **New epoch-negative cases.** Every existing test registers with the current epoch
+    (for example `apps/syn-api/tests/integration/test_1310_v12_a_stalled_executor_is_fenced_by_a_live_one.py:147`).
+    Add a future-epoch `admitted` row that must not be claimed, and a future-epoch expired `claimed` row that must not
+    be fenced or taken over (`packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py:142,203,219`).
+  - **Mutation check:** removing the epoch predicate from the shared SQL fails those cases.
+- **V3 (PR 2, PR 8):** a contract test drives every RPC and every response variant against the Python worker. This
+  includes `Terminal` from completion, failure and cancel. `NotRecorded` must appear only for a conflict cause, and a
+  store timeout must give `Unknown`. Collapsing the variants fails the test.
+- **V4 (PR 4):** 100 concurrent runs × `Act`/`Decide`. Proposed bar: p99 round-trip < 5 ms, and host plus worker CPU
+  within 10% of in-process.
+- **V5 (PR 5):** a fitness test asserts that no inline queue SQL remains in
+  `packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py` or `crates/syn-executor/`, and that both load the
+  same files.
+- **V6a (PR 5):** SIGSTOP a worker. `leased_until` stops advancing, and a peer fences the run within TTL plus one loop
+  interval.
+- **V6b (PR 5):** a scripted agent silent for more than 2 × TTL keeps its lease and completes.
+- **V6c (PR 5):** SIGKILL a worker at three points:
+  - after the provision event is durable and before RUN_AGENT;
+  - during observation;
+  - after agent completion and before collection.
+
+  Each must end `interrupted` through the reconciler, with the workspace reaped by host id and no second agent
+  launch for that operation key.
+- **V7 (PR 9, C1):** replaying a recorded stream through Rust observe gives the same pages, gaps and `agent_events`
+  rows as the Python path.
+- **V8 (PR 9, C2):** provision and collect through Rust `WorkspaceProvider` give the same `WorkspaceProvisionedForPhase`
+  and `ArtifactsCollectedForPhase` events (differential, ids injected).
+- **V9 (PR 10):** V6c's three crash points re-run with the expectation reversed: the run **resumes**, with exactly one
+  agent operation per key and the output preserved.
+- **V10 (PR 11.x):** §6.3–6.7.
+- **Gates for each code PR:** `just preflight-agent` and `uv run pytest -m unit -q` in workspaces; `just qa-ci`
+  locally for anything that touches cargo, because `preflight-agent` cannot run cargo.
+
+## 11. Out of scope
+
+- Source changes in this revision (docs only).
+- Moving the API, its routes or its appends to Rust.
+- Rust harness normalisers (AW's own contract PR).
+- The Docker CLI vs Engine API choice inside AW.
+- Bumping the APSS gitlink. The host consumes AW's vendored contract (**AW** `crates/workspace-core/src/operations/contract.rs:8-10`).
+- Re-arguing H1.
+
+## 12. Needs a human decision
+
+1. **H3, reshaped:** may the `syn-api` image gain a cargo build stage for `syn-executor`? Needed before PR 5.
+2. **The AW crate source:** is a reviewed AW `main` commit acceptable as a crate source, or must it come from AW
+   `release`? Needed before P1's gitlink bump. CLAUDE.md treats `main` as `:edge`, which is unreviewed for images.
+3. **Defaults the owner may override:** the ordering thresholds (40/30/25%, RSS rule), the V4 bridge bar, the liveness
+   deadline, and the shadow volume for a Stage D cutover. These are not gates. PR 1 runs with the defaults if the
+   owner says nothing.
 
 ---
 
@@ -557,18 +479,22 @@ PRs 2-3 can proceed in parallel with PR 1 once the contract (PR 2) is agreed. Th
 
 | finding | accepted / rejected | what changed |
 |---|---|---|
-| B1: the operation seam is a byte transport, not a normalization boundary; there is no bridge | **Accepted.** The syn side is verified: `EventStreamPort.stream` yields `str` (`packages/syn-domain/src/syn_domain/contexts/orchestration/_shared/ports.py:198-210`), and the Python processors are selected at `packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/AgentExecutionHandler.py:401-449`. The AW-side claims could not be re-read at the pin and are taken from the review | The scope is narrowed: R1 moves I/O only, and decode and parse stay in Python (§2.2). R2 is a specified, unscheduled `HarnessFact` contract that keeps domain judgments (cost limit, push observer, attribution) in Python (§2.3). AW PRs 2-3 are added for the bridge protocol and binary: bounded pages, the credential callback, owner-loss cancel, typed failures. H5 now carries a recommendation |
-| B2: the parity and orphan tests can pass without touching a Rust operation | **Accepted.** Verified: V5 uses `FakeAgentExecutionHandler`, a memory backend and `observability_writer=None` (`apps/syn-api/tests/integration/test_1310_a_claimed_three_phase_run_succeeds_on_real_stores.py:13,221,291,308`) | V5 is kept as a queue test. A new L2 production-path fixture is added: real container, stub agent replaying Claude and Codex, real handler, Lane 2, MinIO. A bridge call ledger replaces the `describe()` check. Ids are canonicalized by correspondence. Lane 2 is compared as full rows. Five mutation checks are added. L3 owner death runs against a real Rust operation with a descendant |
-| B3: PR 1 does not instrument the G1/G2 measurements | **Accepted.** Verified: `read_p95_seconds` is the threshold (`packages/syn-perf/src/syn_perf/loadtest/pass_bar.py:145`) and `ContainerStat` has no timestamp (`packages/syn-perf/src/syn_perf/loadtest/pass_bar.py:102-106`). `CREATE TABLE IF NOT EXISTS` would not add a column (`packages/syn-adapters/src/syn_adapters/execution_runs/schema.sql:1,21`) | §6 is rewritten: cumulative cgroup CPU, `anon` vs `memory.current`, in-use per executor, intercept and slope, idle baseline, observed list **and** detail p95, 3 repeats with ranges, py-spy attribution, first-claim vs re-claim, idempotent ALTERs with an old-schema test, the export query, and validation tests that fail on a missing metric. Also corrected the plan's own error: `python -m syn_perf.loadtest` already exists (`packages/syn-perf/src/syn_perf/loadtest/__main__.py:1-6`) |
-| B4: a capacity ratio is not a canary share | **Accepted.** Verified: the claim picks the oldest eligible run and checks only the claimer's room (`packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py:115-130`). D3's global capacity is "a derived figure for reporting" (`docs/adrs/ADR-072-execution-hosting-and-upgrade-without-drain.md:154-156`), so the "splits global capacity" rejection was unsupported | The capacity-ratio canary is dropped, and rejected alternative (e) is reversed. Added a deterministic admission cohort (`pool` columns), a claim predicate with a `hold` fallback, a realized-share report, and tests for saturated, sparse and pool-down cases. H4 is reframed |
-| I1: depend on #1908 rather than re-scheduling the seam | **Accepted** (#1908 read through the review, not re-read here) | #1908 is a P0 prerequisite. The old PR 4 ("operation seam, Python provider") is deleted. L1 reuses #1908's recording tests |
-| I2: abbreviated citations; `PINNED_DIGESTS` does not pin a host binary | **Accepted.** Verified: `packages/syn-shared/src/syn_shared/settings/workspace_images.py:598,680` pins images, and `infra/docker/images/syn-api/Dockerfile:31-33,59-61` installs AW Python source | Every citation now uses its repository-root path. The bridge is built from the AW gitlink in a cargo stage of the `syn-api` image, and its identity is the gitlink plus the image digest (§5.1, H3) |
-| I3: credential parity misses renewal, lapse and teardown; the line-55 citation is wrong | **Accepted.** Verified: `:55` is `CredentialLapse`, the schedule is at `packages/syn-adapters/src/syn_adapters/workspace_backends/service/credential_keeper.py:47-51`, and the injectable clock at `:87-100` | §4.3 adds renewal-during-operation, lapse, keeper cancellation and teardown revocation cases for both providers, driven by the injected clock. The citation is corrected |
-| I4: the baseline describes the API process, not the executor | **Accepted.** Verified: `docs/north-star.md:166` is the "API process" row, and D1 keeps projections out of the executor (`docs/adrs/ADR-072-execution-hosting-and-upgrade-without-drain.md:66-70`) | §1 is reworded. Arm A is now explicitly the post-split Python executor. The memory intercept (fixed per process) and slope (per run) are both reported, and arm B is kept |
+| B1: worker restart ≠ aggregate reload | **Accepted.** Verified: runtime state is attached before the provision append (`packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/phase_workspace.py:194-216`), `launch` indexes it directly (`packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/phase_runtime.py:429-445`), and the reconciler interrupts rather than re-runs (`packages/syn-adapters/src/syn_adapters/execution_host/reconciler.py:1-7`) | §4.3 rewritten: worker loss takes the fence, reap, interrupt path and is never re-run. "R-resume" became an explicit later milestone (PR 10) that lists the state the host must hold. Added crash tests V6c (interrupt, no second launch) and V9 (resume). Operation-key re-attach limited to a live provider (**AW** `implementations/docker/src/operations.rs:694,716`) |
+| B2: Stage B deletes `RunClaimed` before replacing its capabilities | **Accepted.** Verified: `TodoItem` holds only ids (`packages/syn-domain/src/syn_domain/contexts/orchestration/_shared/TodoValueObjects.py:30-42`); terminal paths sit outside the loop (`WorkflowExecutionProcessor.py:545-594`, `:700-715`); `SupportsOperations` does not widen `WorkspaceProvider` (**AW** `crates/workspace-core/src/operations/mod.rs:3`) | Stage B is now `Open`/`Next`/`Act`/`Finish`, with Python running each existing branch and the terminal paths unchanged. Infrastructure moves per action in Stage C. C2 uses `WorkspaceProvider` (**AW** `crates/workspace-core/src/lib.rs:365`), separately from operations. V3 covers terminal variants |
+| B3: append-side epoch guard described as present | **Accepted.** Verified: `packages/syn-adapters/src/syn_adapters/storage/repositories.py:182` is in `get_workflow_repository` (WorkflowTemplate); the execution `save` at `:98-102` has no raise; `packages/syn-domain/src/syn_domain/contexts/orchestration/_shared/event_epoch.py:5-6` says it is not built | Removed every "the raise stays in its one place" claim. Added PR P2 (guard for all writers, mixed-epoch and race tests) as a Stage D prerequisite, separate from #1921. Noted the stale citation at `docs/adrs/ADR-072-execution-hosting-and-upgrade-without-drain.md:562` |
+| B4: V2 leaves tests green with Rust broken | **Accepted.** Verified: the in-process builder `apps/syn-api/tests/integration/test_1310_execution_host_claims_fences_and_reconciles_on_real_stores.py:98` bypasses the subprocess helper, and every test registers `ORCHESTRATION_EVENT_EPOCH` (for example `apps/syn-api/tests/integration/test_1310_v12_a_stalled_executor_is_fenced_by_a_live_one.py:147`) | V2 now names the launch sites and behaviours, adds a mixed-peer pair, adds future-epoch claim and fence/takeover negatives, and a mutation check on the epoch predicate |
+| B5: PR graph does not require the experiment first | **Accepted** | PR 1 is now the predecessor of every other PR, including the prerequisites. Thresholds have a fixed precedence order. Two invalid attempts and their reasons are the required deliverable before the default order applies. Thresholds are labelled defaults, not a gate |
+| I1: capacity is a concurrency ceiling, not a traffic cohort | **Accepted.** Verified: `packages/syn-adapters/src/syn_adapters/execution_host/host.py:120`, `packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py:139-143` | PR 6 renamed to a bounded-concurrency canary, which records the actual workload mix. H4's text was corrected the same way |
+| I2: the synthetic bucketing test misses renames | **Accepted** | V1 uses captured stacks, a test that every mapped path exists in the checkout, and a validity bar that the profiler collected and parsed |
+| I3: specify liveness separately from progress | **Accepted.** Verified: today's renewal watches only `drain.done()` (`packages/syn-adapters/src/syn_adapters/execution_host/lease.py:32-33`) | New §4.4: token-bound `Liveness` from the worker's event loop. Blast radius per worker stated. Positive quiet-run test V6b added beside the SIGSTOP test V6a |
+| I4: citation cleanup; four branches vs five actions | **Accepted** | All paths are written from the repository root, with no ellipses. §1 states four dispatch branches and five enum actions (`COMPLETE_EXECUTION`) |
+| (new, found in this phase) worker processes label containers with their own executor id | n/a (own finding) | `packages/syn-adapters/src/syn_adapters/workspace_backends/host_labels.py:33-44` draws a per-process suffix, and the reaper selects by `syn.host_id=<run.executor_id>` (`packages/syn-adapters/src/syn_adapters/execution_host/ports.py:28`). Added an identity row in §3, PR 3, risk R9, and reap assertions in V2 and V6c |
 
 ## Readiness
 
-Blocked on a human decision: H1, whether the owner accepts rescoping phase 2 from a Rust
-ExecutionHost to a gated Rust I/O bridge with Python as the sole executor. Execution also waits on
-the P0 prerequisites (#1894, the executor role and drain route, the 7b stub image, #1908).
+PR 1 (the experiment) is ready to implement now. PR 5 (the Rust host) is blocked on two owner decisions: whether
+the `syn-api` image may gain a cargo build stage (H3), and whether AW crates may come from a reviewed AW `main`
+commit or must come from AW `release`. **This text is not yet committed to `docs/plans/20261014_rust-executor.md` on
+`docs/runtime-research-20261012`:** this phase was granted no git or shell tool, so a follow-up step must commit and
+push it.
 
