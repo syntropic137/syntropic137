@@ -1,0 +1,54 @@
+id: eval-verify-pinned-codex-checks-v1
+name: "Eval: verify the pinned checkout on codex, with three required checks (v1)"
+description: >
+  eval-verify-pinned-codex-v1 with one variable changed, the verify prompt: it
+  adds three required checks with evidence (callers of changed public symbols
+  in consuming repositories, the CI job running each new or changed test, and
+  the test that fails if each critical line is reverted). The treatment arm of
+  evals/verifier-seed-aw-v1/experiments/2026-10-13-checks-treatment.md.
+type: custom
+classification: standard
+requires_repos: true
+
+inputs:
+  - name: task
+    description: "What the change under review claims to do, and where to look"
+    required: true
+
+# ONE VARIABLE: THE PROMPT. This file is
+# workflows/evals/verify-pinned-codex/workflow.yaml with only phases/verify.md
+# changed: the same agent, model and sandbox, the same phase fields. The prompt
+# is that workflow's prompt with one section inserted, `## Required checks`.
+# scripts/tests/test_eval_suite.py fails when anything else diverges, so a
+# score difference is the checks and nothing else. Change the control's prompt
+# and this one's base text together, or neither.
+#
+# THE MODEL IS PART OF THE MEASUREMENT. evals/verifier-seed-aw-v1/suite.yaml
+# records this workflow's id and each phase's model, and the test fails when
+# they disagree. Change the model here and bump the suite's version with it.
+
+phases:
+  - id: verify
+    name: Verify the pinned checkout independently
+    order: 1
+    execution_type: sequential
+    input_artifacts: []
+    output_artifacts:
+      - markdown
+    timeout_seconds: 3600
+    delivers_repo_changes: false
+    # A review: no review_verdict fails the phase instead of completing it, so
+    # the eval scores ERROR rather than a FAIL nobody judged (PC-116, #1780).
+    requires_verdict: true
+    # No allowed_tools: codex enforces a filesystem sandbox, not a tool
+    # vocabulary, so the validator refuses a tool list on it. The sandbox is
+    # workspace-write, not read-only: read-only is refused at authoring and at
+    # execution (require_runnable_sandbox) because it blocks the report's write
+    # to artifacts/output/. The prompt's rule against fetching or checking out
+    # another ref is what keeps the review on the pinned commit, exactly as it
+    # does for the claude workflow, whose Bash could fetch too.
+    agent:
+      provider: codex
+      model: gpt-sol
+      sandbox: workspace-write
+    prompt_file: phases/verify.md

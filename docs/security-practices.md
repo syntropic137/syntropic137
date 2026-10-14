@@ -26,7 +26,7 @@ All workflows declare `permissions: contents: read` at the top level. Jobs that 
 
 ### Dependency vulnerability scanning — OSV Scanner
 
-CI runs [Google's OSV Scanner](https://github.com/google/osv-scanner) on every push and PR. It checks all lock files against the [OSV database](https://osv.dev) (covers CVEs, GitHub Security Advisories, and ecosystem advisories for PyPI, npm, crates.io, and more).
+CI runs [Google's OSV Scanner](https://github.com/google/osv-scanner) on every PR and every push to `main`. It checks all lock files against the [OSV database](https://osv.dev) (covers CVEs, GitHub Security Advisories, and ecosystem advisories for PyPI, npm, crates.io, and more).
 
 **Lock files scanned:**
 - `uv.lock` — Python workspace

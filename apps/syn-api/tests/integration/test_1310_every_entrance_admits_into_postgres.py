@@ -37,7 +37,7 @@ from syn_adapters.execution_runs import PostgresExecutionRunQueue
 from syn_adapters.maintenance import InMemoryMaintenanceAdapter
 from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
 from syn_adapters.storage.legacy_tolerant_client import LegacyShapeTolerantGrpcClient
-from syn_adapters.storage.repositories import RepositoryAdapter
+from syn_adapters.storage.repositories import EventStoreExecutionEventStream, RepositoryAdapter
 from syn_api import _wiring
 from syn_api._wiring_admission import BackgroundWorkflowDispatcher
 from syn_api.routes.executions import commands
@@ -150,7 +150,9 @@ class _Infra:
         template.create_workflow(build_command_from_definition(self.definition))
         await (await self.templates()).save_new(template)
 
-    async def processor(self, *, queued: bool) -> WorkflowExecutionProcessor:
+    async def processor(
+        self, *, queued: bool, shared_todos: object | None = None
+    ) -> WorkflowExecutionProcessor:
         """A fresh processor over a fresh client: nothing in it survives from any other."""
         return WorkflowExecutionProcessor(
             execution_repository=await self.executions(),
@@ -164,8 +166,10 @@ class _Infra:
             controller=None,
             prompt_builder=AsyncMock(return_value="test prompt"),
             command_builder=MagicMock(return_value=["claude"]),
-            todo_projection=ExecutionTodoProjection(store=self.todos),
+            todo_projection=ExecutionTodoProjection(store=shared_todos or self.todos),  # type: ignore[arg-type]
             run_queue=self.queue if queued else None,
+            execution_events=EventStoreExecutionEventStream(await self.client()),
+            todo_projection_type=ExecutionTodoProjection,
         )
 
     async def handler(self, *, queued: bool) -> ExecuteWorkflowHandler:
@@ -392,6 +396,56 @@ async def test_v5_claimed_from_postgres_and_drained_fresh_matches_todays_run(
     assert claimed is not None
     assert claimed.execution_id == claimed_id
     result = await (await infra.processor(queued=True)).run_claimed(claimed)
+
+    assert len(golden) > 2, golden
+    assert await infra.event_types(claimed_id) == golden
+    assert result.status == "failed"
+
+
+class _SharedTodosRefused:
+    """A shared `execution_todo` store that fails any read or write of it."""
+
+    def __getattr__(self, name: str) -> object:
+        async def refused(*_args: object, **_kwargs: object) -> object:
+            raise AssertionError(f"a claimed run touched the shared to-do store ({name})")
+
+        return refused
+
+
+async def test_1_4_a_claimed_run_drains_its_own_fold_from_the_real_event_store(
+    infra: _Infra,
+) -> None:
+    """ADR-072 D8 against Postgres and the real event store (#1574).
+
+    The fold is seeded by `EventStoreExecutionEventStream` from the stream the
+    admitting processor wrote, and the claiming processor's shared store
+    refuses every call: the sequence matches today's run only if the drain read
+    and wrote nothing but the run's own fold.
+    """
+    golden_id = f"exec-{uuid4().hex[:12]}"
+    claimed_id = f"exec-{uuid4().hex[:12]}"
+
+    def command(execution_id: str) -> ExecuteWorkflowCommand:
+        return ExecuteWorkflowCommand(
+            aggregate_id=infra.definition.id,
+            execution_id=execution_id,
+            repos=[_REPO],
+            inputs={"task": "fix it"},
+        )
+
+    await (await infra.handler(queued=False)).handle(command(golden_id))
+    golden = await infra.event_types(golden_id)
+    assert (await (await infra.handler(queued=True)).handle(command(claimed_id))).status == (
+        "admitted"
+    )
+    await infra.queue.register(_HOST, capacity=1)
+    await infra.queue.heartbeat(_HOST.host_id)
+    claimed = await infra.queue.claim(_HOST.host_id)
+    assert claimed is not None
+    assert claimed.execution_id == claimed_id
+
+    processor = await infra.processor(queued=True, shared_todos=_SharedTodosRefused())
+    result = await processor.run_claimed(claimed)
 
     assert len(golden) > 2, golden
     assert await infra.event_types(claimed_id) == golden

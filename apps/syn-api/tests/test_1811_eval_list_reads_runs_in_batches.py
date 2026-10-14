@@ -7,8 +7,10 @@ execution cost. 88 evals with ~250 runs took 24.5 s on the VPS. The summary need
 none of the timeline, so it now reads the execution details, the session costs
 and the execution costs once each, for every run on the page.
 
-The Lane 2 double charges a simulated round trip per call and counts calls, so
-a per-run read shows up both as calls that grow with the page and as time.
+The Lane 2 double and the projection store both count their reads, so a
+per-run read shows up as reads that grow with the page. Counts, not wall-clock
+time: a time budget measured the runner (it failed at 734 ms against 500 under
+pytest-xdist, #1902), and a read count is what the batching actually promises.
 """
 
 from __future__ import annotations
@@ -18,7 +20,6 @@ import os
 os.environ.setdefault("APP_ENVIRONMENT", "test")
 
 import asyncio
-import time
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
@@ -42,7 +43,7 @@ from syn_domain.contexts.orchestration.slices.execution_cost.query_service impor
 from syn_shared.observed_model import UNKNOWN_MODEL_KEY
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Iterator, Sequence
+    from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Sequence
 
 pytestmark = [pytest.mark.unit, pytest.mark.anyio]
 
@@ -52,7 +53,16 @@ PHASES_PER_RUN = 2
 OPUS = "claude-opus-5-5"
 #: What one TimescaleDB round trip costs the API on a quiet VPS, roughly.
 ROUND_TRIP_S = 0.002
-BUDGET_MS = 500
+#: The projection store's read methods, each counted per call.
+_STORE_READS = (
+    "get",
+    "get_many",
+    "get_all",
+    "count",
+    "query",
+    "newest_per_group",
+    "get_by_prefix",
+)
 
 
 @pytest.fixture(autouse=True)
@@ -123,6 +133,32 @@ async def lane2(monkeypatch: pytest.MonkeyPatch) -> _Lane2:
     for name in ("get_execution_cost", "list_costs_for_ids"):
         monkeypatch.setattr(manager.execution_cost, name, getattr(fake, name))
     return fake
+
+
+class _StoreReads:
+    """Every read the projection store answers, counted."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+
+@pytest.fixture
+async def store_reads(monkeypatch: pytest.MonkeyPatch, lane2: _Lane2) -> _StoreReads:
+    from syn_api._wiring import get_projection_mgr
+
+    counter = _StoreReads()
+
+    def count_calls(read: Callable[..., Awaitable[object]]) -> Callable[..., Awaitable[object]]:
+        async def counted(*args: object, **kwargs: object) -> object:
+            counter.calls += 1
+            return await read(*args, **kwargs)
+
+        return counted
+
+    store = get_projection_mgr().store
+    for name in _STORE_READS:
+        monkeypatch.setattr(store, name, count_calls(getattr(store, name)))
+    return counter
 
 
 @pytest.fixture
@@ -196,19 +232,23 @@ async def _seed() -> None:
 
 
 async def test_a_page_of_100_evals_with_10_runs_each_answers_from_batched_reads(
-    client: AsyncClient, lane2: _Lane2
+    client: AsyncClient, lane2: _Lane2, store_reads: _StoreReads
 ) -> None:
     await _seed()
     await client.get("/evals", params={"page_size": 1})  # warm the app
-    # Best of three: the budget is for the read, not for whatever else a
-    # loaded CI runner (or xdist) is doing at the same moment.
-    timings: list[float] = []
-    for _ in range(3):
-        lane2.calls = 0
-        started = time.perf_counter()
-        response = await client.get("/evals", params={"page_size": EVALS})
-        timings.append((time.perf_counter() - started) * 1000)
-    elapsed_ms = min(timings)
+
+    def reads() -> int:
+        return store_reads.calls + lane2.calls
+
+    before = reads()
+    small = await client.get("/evals", params={"page_size": 10})
+    small_reads = reads() - before
+    assert small.status_code == 200, small.text
+
+    lane2.calls = 0
+    before = reads()
+    response = await client.get("/evals", params={"page_size": EVALS})
+    page_reads = reads() - before
 
     assert response.status_code == 200, response.text
     body = response.json()
@@ -223,8 +263,11 @@ async def test_a_page_of_100_evals_with_10_runs_each_answers_from_batched_reads(
     # One session-cost read and one execution-cost read for the whole page,
     # never one per run or per phase.
     assert lane2.calls <= 2, f"{lane2.calls} Lane 2 round trips for one page"
-    print(f"\nGET /evals?page_size={EVALS} ({EVALS * RUNS_PER_EVAL} runs): {elapsed_ms:.0f} ms")
-    assert elapsed_ms < BUDGET_MS, f"{elapsed_ms:.0f} ms for {EVALS} evals"
+    # Ten times the evals (100 to 1,000 runs) costs not one read more: every
+    # source is read once per page, never once per eval, run or phase.
+    assert page_reads == small_reads, (
+        f"{page_reads} reads for {EVALS} evals, {small_reads} for 10: a read grows with the page"
+    )
 
 
 SONNET = "claude-sonnet-5"

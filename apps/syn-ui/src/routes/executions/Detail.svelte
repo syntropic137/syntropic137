@@ -263,6 +263,19 @@
       </Callout>
     {/if}
 
+    {#if d.resumed_as && d.resumed_as_display}
+      <Callout tone="note" title="This run was resumed.">
+        {d.resumed_as_display}.
+        <a href={href(`/executions/${d.latest_resumed_as ?? d.resumed_as}`)}>Open the latest continuation</a>
+      </Callout>
+    {/if}
+    {#if d.resumed_from && d.resumed_from_display}
+      <Callout tone="note" title="Resumed run.">
+        {d.resumed_from_display}.
+        <a href={href(`/executions/${d.resumed_from.parent_execution_id}`)}>Open the run it continued</a>
+      </Callout>
+    {/if}
+
     <div class="sky-exec__body">
       <div class="sky-exec__side">
         {#if tokens}
