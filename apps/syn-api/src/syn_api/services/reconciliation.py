@@ -376,8 +376,11 @@ async def cleanup_orphaned_containers() -> CleanupResult:
     return CleanupResult(fully_reaped=not failures, failures=tuple(failures))
 
 
-async def _guard_orphaned_workspaces() -> list[ReclaimableDir] | None:
+async def _guard_orphaned_workspaces(*narrower: str) -> list[ReclaimableDir] | None:
     """Run the unpushed-work guard in every orphaned workspace container (#1560).
+
+    ``narrower`` filters restrict it to the containers about to be removed, so a
+    host-scoped reap (ADR-072 D6) never execs into a live host's workspace.
 
     Returns the directories it cleared, or None when the orphans could not even
     be listed - "found none" and "could not look" are different answers. Never
@@ -387,7 +390,7 @@ async def _guard_orphaned_workspaces() -> list[ReclaimableDir] | None:
     from syn_domain.contexts.orchestration import guard_orphaned_workspace
 
     try:
-        ids = await _docker_ps_ids("name=agentic-ws-")
+        ids = await _docker_ps_ids("name=agentic-ws-", *narrower)
         orphans = await find_orphaned_workspaces(ids)
     except Exception:
         logger.warning(
@@ -411,14 +414,15 @@ def _remove_reclaimed_dirs(reclaimable: list[ReclaimableDir]) -> None:
         remove_reclaimed_dir(directory, remover)
 
 
-async def _docker_ps_ids(filter_arg: str) -> list[str]:
-    """IDs of running containers matching ``filter_arg``. Raises on timeout."""
+async def _docker_ps_ids(filter_arg: str, *narrower: str) -> list[str]:
+    """IDs of running containers matching ``filter_arg`` and every ``narrower``. Raises on timeout."""
     proc = await asyncio.create_subprocess_exec(
         "docker",
         "ps",
         "-q",
         "--filter",
         filter_arg,
+        *(arg for f in narrower for arg in ("--filter", f)),
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.DEVNULL,
     )

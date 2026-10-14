@@ -13,6 +13,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from syn_adapters.workspace_backends.host_labels import LABEL_HOST_ID
+from syn_api.services.reconciliation import _guard_orphaned_workspaces, _remove_reclaimed_dirs
 
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.ports import ExecutionRunQueue
@@ -37,7 +38,11 @@ async def reap_unlabelled_if_alone(queue: ExecutionRunQueue, host_id: str) -> No
         )
         return
     logger.info("Reaping unlabelled container(s) %s: no other executor is live", unlabelled)
-    await _docker("rm", "-f", *unlabelled)
+    # BEFORE the removal (#1560), narrowed to exactly these containers.
+    reclaimable = await _guard_orphaned_workspaces(*(f"id={c}" for c in unlabelled))
+    removed = await _docker("rm", "-f", *unlabelled)
+    if reclaimable is not None and removed is not None:
+        await asyncio.to_thread(_remove_reclaimed_dirs, reclaimable)
 
 
 async def _unlabelled_ids() -> list[str]:

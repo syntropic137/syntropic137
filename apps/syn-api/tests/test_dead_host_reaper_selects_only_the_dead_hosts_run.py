@@ -19,6 +19,16 @@ pytestmark = [pytest.mark.unit, pytest.mark.anyio]
 _RUN = FencedRun(execution_id="exec-dead", executor_id="host-dead", reconciler="host-live", token=3)
 
 
+@pytest.fixture(autouse=True)
+def _no_guard() -> object:
+    """The #1560 guard's own narrowing is pinned in test_host_scoped_reap_guards_unpushed_work_first."""
+    with patch(
+        "syn_api.services.dead_host_reaper._guard_orphaned_workspaces",
+        new=AsyncMock(return_value=[]),
+    ) as guard:
+        yield guard
+
+
 def _ps(stdout: bytes) -> MagicMock:
     proc = MagicMock()
     proc.communicate = AsyncMock(return_value=(stdout, b""))
