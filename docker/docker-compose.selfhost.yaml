@@ -303,7 +303,15 @@ services:
   # same credentials an in-process one does. Only SYN_EXECUTION_PROCESS_ROLE
   # differs; infra/scripts/tests/test_1310_executor_compose_service.py fails
   # when the two drift.
+  #
+  # Behind the `run-queue` profile, so a default install starts NO executor:
+  # an idle container holding docker-proxy access, /workspaces and every
+  # credential is attack surface for nothing. Enabling the run queue is two
+  # lines in .env, together:
+  #   COMPOSE_PROFILES=run-queue
+  #   SYN_EXECUTION_RUN_QUEUE_ENABLED=true
   executor:
+    profiles: ["run-queue"]
     container_name: syn137-executor
     extends:
       file: generated/api.env.yaml

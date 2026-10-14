@@ -453,6 +453,8 @@ services:
         max-file: "3"
     image: ghcr.io/syntropic137/syn-api:${SYN_VERSION:-latest}
   executor:
+    profiles:
+    - run-queue
     container_name: syn137-executor
     stop_grace_period: 200s
     cpu_shares: ${CONTROL_PLANE_CPU_SHARES:-4096}

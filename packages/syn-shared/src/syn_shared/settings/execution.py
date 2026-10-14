@@ -124,7 +124,10 @@ class ExecutionSettings(BaseSettings):
             "safe to turn on yet: nothing claims an admitted run until the "
             "ExecutionHost lands (#1310 1.5), so with this on every execution is "
             "admitted and never runs. Requires SYN_OBSERVABILITY_DB_URL; the API "
-            "refuses to start an execution without it rather than queue in memory."
+            "refuses to start an execution without it rather than queue in memory. "
+            "On a compose install, also set COMPOSE_PROFILES=run-queue in .env: the "
+            "executor service that claims runs is behind that profile and does not "
+            "start without it (#1310 1.6)."
         ),
     )
 

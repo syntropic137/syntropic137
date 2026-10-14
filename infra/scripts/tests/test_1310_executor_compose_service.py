@@ -1,4 +1,5 @@
-"""Both selfhost composes run an executor from the api image (#1310 1.6, ADR-072 D1).
+"""Both selfhost composes define an executor from the api image (#1310 1.6, ADR-072 D1),
+behind the `run-queue` compose profile so a default install starts none.
 
 The handwritten overlay is the input and the published file is generated from
 it, so each is read: a selfhost stack and a downloaded one must agree, and a
@@ -98,3 +99,23 @@ def test_a_bare_list_entry_stays_a_passthrough() -> None:
     executor = _env(_services(_PUBLISHED)["executor"])
     assert "SYN_WORKSPACE_DOCKER_IMAGE" in executor
     assert executor["SYN_WORKSPACE_DOCKER_IMAGE"] is None
+
+
+@_COMPOSES
+def test_the_executor_starts_only_under_the_run_queue_profile(compose: Path) -> None:
+    """A default install runs no executor (#1310 1.6): an idle container holding
+    docker-proxy access, /workspaces and every credential is surface for
+    nothing. ``COMPOSE_PROFILES=run-queue`` is what starts it."""
+    services = _services(compose)
+    assert services["executor"].get("profiles") == ["run-queue"]
+    # api is never profiled: it is the platform, not an opt-in.
+    assert "profiles" not in services["api"]
+
+
+def test_enabling_the_run_queue_documents_the_profile() -> None:
+    """The flag alone admits runs nothing would claim; the operator reading
+    .env.example must learn the profile from the same place."""
+    example = (_DOCKER.parent / ".env.example").read_text()
+    flag = example.index("SYN_EXECUTION_RUN_QUEUE_ENABLED=")
+    comment = example[example.rindex("\n\n", 0, flag) : flag]
+    assert "COMPOSE_PROFILES=run-queue" in comment
