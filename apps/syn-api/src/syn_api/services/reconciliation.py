@@ -475,8 +475,12 @@ async def _docker_stop_bounded(ids: list[str], label: str) -> None:
         )
 
 
-async def _docker_rm(filter_arg: str, label: str) -> str | None:
-    """Find and force-remove Docker containers matching *filter_arg*.
+async def _docker_rm(filter_arg: str, label: str, *narrower: str) -> str | None:
+    """Find and force-remove Docker containers matching *filter_arg* and every *narrower*.
+
+    *narrower* filters are ANDed with *filter_arg*: an executor's reap of a dead
+    host passes its ``syn.host_id`` and ``syn.execution_id`` here, so it never
+    selects a live host's containers (ADR-072 D5, D6).
 
     Returns None when the reap is known to have finished, or a short reason
     when it is NOT known to have finished. Every path that used to `return`
@@ -492,6 +496,7 @@ async def _docker_rm(filter_arg: str, label: str) -> str | None:
             "-q",
             "--filter",
             filter_arg,
+            *(arg for f in narrower for arg in ("--filter", f)),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
         )
