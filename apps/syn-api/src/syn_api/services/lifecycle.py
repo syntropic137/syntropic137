@@ -202,10 +202,12 @@ async def _init_degradable_services(state: LifecycleState) -> None:
     # narrowing it; the started_before cutoff below is defence in depth.
     process_started_at = datetime.now(UTC)
     await reconcile_orphaned_sessions()
-    cleanup = await cleanup_orphaned_containers()
-    # AFTER the reap, and only if the reap can say it finished: "this execution
-    # is still running" is provably false only once every container is gone.
-    await execution_host_runner.reconcile_unless_queued(cleanup, started_before=process_started_at)
+    # The reap first; the reconcile acts only if the reap can say it finished:
+    # "this execution is still running" is provably false only once every
+    # container is gone.
+    await execution_host_runner.reconcile_unless_queued(
+        await cleanup_orphaned_containers(), started_before=process_started_at
+    )
 
     for entry in _SERVICE_REGISTRY:
         try:
