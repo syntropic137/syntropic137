@@ -667,6 +667,62 @@ async def test_a_member_that_is_no_longer_live_does_not_hold_its_pools_definitio
         assert (await _pool_row(conn, "p1"))[0] == 7
 
 
+async def test_a_registration_that_waits_on_the_pool_lock_is_live_when_it_commits(
+    pools: list[asyncpg.Pool],
+) -> None:
+    """Until its first heartbeat a member's registration is its liveness.
+
+    now() is the transaction's start, so a registration that waited out the
+    staleness window on a lock must not commit already stale.
+    """
+    queue = PostgresExecutionRunQueue(pools[0], heartbeat_stale=timedelta(seconds=1))
+    joining: asyncio.Task[None] | None = None
+    try:
+        async with pools[1].acquire() as blocker, blocker.transaction():
+            await blocker.execute("SELECT 1 FROM executor_pools WHERE pool_id='default' FOR UPDATE")
+            joining = asyncio.create_task(queue.register(_host("fresh-after-wait"), 1))
+            await _blocked_until_waiting(pools[2], "FROM executor_pools")
+            await asyncio.sleep(1.2)
+        await joining
+
+        competing = ExecutorPool(pool_id="default", priority=1, provider="docker")
+        with pytest.raises(PoolDefinitionConflict):
+            await queue.register(_in_pool("conflicting-after-wait", competing), 1)
+    finally:
+        if joining is not None:
+            if not joining.done():
+                joining.cancel()
+            await asyncio.gather(joining, return_exceptions=True)
+
+
+async def test_a_restart_that_waits_on_its_predecessors_budget_lock_is_live_when_it_commits(
+    pools: list[asyncpg.Pool],
+) -> None:
+    """The same rule for the budget lock D3 Restart takes on the predecessor's row."""
+    queue = PostgresExecutionRunQueue(pools[0], heartbeat_stale=timedelta(seconds=1))
+    await queue.register(_in_pool("a.1", _P1, container_id="box"), 1)
+    joining: asyncio.Task[None] | None = None
+    try:
+        async with pools[1].acquire() as blocker, blocker.transaction():
+            await blocker.execute(
+                "SELECT 1 FROM execution_budget WHERE executor_id='a.1' FOR UPDATE"
+            )
+            joining = asyncio.create_task(
+                queue.register(_in_pool("a.2", _P1, container_id="box"), 1)
+            )
+            await _blocked_until_waiting(pools[2], "FROM execution_budget")
+            await asyncio.sleep(1.2)
+        await joining
+
+        with pytest.raises(PoolDefinitionConflict):
+            await queue.register(_in_pool("b", _P1.model_copy(update={"priority": 7})), 1)
+    finally:
+        if joining is not None:
+            if not joining.done():
+                joining.cancel()
+            await asyncio.gather(joining, return_exceptions=True)
+
+
 async def test_a_restart_that_changes_pool_moves_the_machines_free_capacity_to_the_new_row(
     pools: list[asyncpg.Pool],
 ) -> None:

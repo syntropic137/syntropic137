@@ -60,15 +60,19 @@ class PostgresExecutionRunQueue:
                 host.host_id,
             )
             await self._join_pool(conn, host)
+            await self._register_budget(conn, host, capacity)
+            # Last, after every lock wait above: registered_at is this member's
+            # liveness until its first heartbeat, and now() is the transaction's
+            # start, so a long wait would commit a member already stale.
             await conn.execute(
-                """INSERT INTO executor_hosts (host_id,container_id,generation,epoch)
-                VALUES ($1,$2,$3,$4) ON CONFLICT (host_id) DO NOTHING""",
+                """INSERT INTO executor_hosts
+                (host_id,container_id,generation,epoch,registered_at)
+                VALUES ($1,$2,$3,$4,clock_timestamp()) ON CONFLICT (host_id) DO NOTHING""",
                 host.host_id,
                 host.container_id,
                 host.generation,
                 host.epoch,
             )
-            await self._register_budget(conn, host, capacity)
 
     async def deregister(self, host_id: str) -> None:
         async with self._pool.acquire() as conn:
