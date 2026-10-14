@@ -5,6 +5,7 @@ import {
   runDurationText,
   ageGroupTitle,
   calendarDaysAgo,
+  dayBounds,
   evalBadge,
   evalRowTag,
   runRowSub,
@@ -66,6 +67,16 @@ describe('list', () => {
     expect(parseTimeWindow('nope')).toBe('all')
     expect(timeWindowStart('all', NOW)).toBeUndefined()
     expect(timeWindowStart('1h', NOW)).toBe('2026-10-08T11:00:00.000Z')
+  })
+
+  it('turns ?day= into that UTC day, the day the Skyline bucketed it under (#1938)', () => {
+    expect(dayBounds('2026-10-13')).toEqual({
+      started_after: '2026-10-13T00:00:00.000Z',
+      started_before: '2026-10-13T23:59:59.999Z',
+    })
+    expect(dayBounds(null)).toBeNull()
+    expect(dayBounds('2026-02-30')).toBeNull()
+    expect(dayBounds('yesterday')).toBeNull()
   })
 
   it('defaults the lists to 24h; All stays selectable as ?window=all', () => {

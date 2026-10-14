@@ -2,7 +2,8 @@
   Executions (boards: Executions, PhoneExecutions). One responsive page:
   base styles are the phone board, the table header and wider hero arrive
   at 48rem. Filters live in the URL (?status=, ?q=, ?window=, ?eval=, ?page=) so a
-  link reproduces the view. Live: refetches when an execution event lands.
+  link reproduces the view. ?day=YYYY-MM-DD (the Skyline's "Runs →") pins
+  one UTC day and replaces the time window until its chip is removed. Live: refetches when an execution event lands.
 -->
 <script lang="ts">
   import { formatCost, formatRelativeTime, formatTokens } from '@syn137/skyline-core/format'
@@ -20,13 +21,14 @@
     listSummary,
     outcomeTotals,
     DEFAULT_LIST_WINDOW,
+    dayBounds,
     parseTimeWindow,
     runDurationMs,
     runDurationText,
     timeWindowParam,
     timeWindowStart,
   } from '@syn137/skyline-core/screens/executions'
-  import { Button, Callout, EmptyState, Input, Pagination, Skeleton, Toggle, ToggleGroup } from '@syn137/skyline-svelte-v5'
+  import { Button, Callout, EmptyState, Input, Pagination, Skeleton, Tag, Toggle, ToggleGroup } from '@syn137/skyline-svelte-v5'
   import { ObjectIcon, RunRow } from '@syn137/skyline-svelte-v5/patterns'
   import { ApiError, MAX_PAGE_SIZE, listExecutions } from '@syn137/syn-ui-data'
   import type { ExecutionListResponse } from '@syn137/syn-ui-data/types'
@@ -48,6 +50,8 @@
   const page = $derived(Math.max(1, Number(router.query.get('page')) || 1))
   const q = $derived(router.query.get('q') ?? '')
   const evalsOnly = $derived(parseEvalFilter(router.query.get('eval')))
+  const day = $derived(router.query.get('day'))
+  const dayRange = $derived(dayBounds(day))
 
   // The search box is local while typing; the URL follows after a pause.
   let search = $state(router.query.get('q') ?? '')
@@ -64,7 +68,7 @@
         page,
         page_size: PAGE_SIZE,
         statuses: status === 'all' ? undefined : [status],
-        started_after: timeWindowStart(window, Date.now()),
+        ...(dayRange ?? { started_after: timeWindowStart(window, Date.now()) }),
         q: q || undefined,
         in_eval: evalsOnly || undefined,
       }
@@ -92,7 +96,7 @@
     })),
   )
 
-  const filtered = $derived(status !== 'all' || window !== DEFAULT_LIST_WINDOW || q !== '' || evalsOnly)
+  const filtered = $derived(status !== 'all' || window !== DEFAULT_LIST_WINDOW || q !== '' || evalsOnly || dayRange !== null)
 
   function rowSub(r: Row): string {
     const repo = r.repos_display ?? null
@@ -111,7 +115,7 @@
 
   function clearFilters() {
     search = ''
-    router.setQuery({ status: null, window: null, q: null, eval: null, page: null })
+    router.setQuery({ status: null, window: null, q: null, eval: null, day: null, page: null })
   }
 </script>
 
@@ -169,6 +173,9 @@
       title="Only runs that belong to an eval"
       onPressedChange={(p) => router.setQuery({ eval: p ? '1' : null, page: null })}>Evals</Toggle
     >
+    {#if dayRange}
+      <Tag variant="accent" removeLabel={`Remove filter: started ${day} UTC`} onremove={() => router.setQuery({ day: null, page: null })}>Started {day} UTC</Tag>
+    {/if}
     </div>
     <ToggleGroup
       class="sky-execs__window"
@@ -177,8 +184,8 @@
       mono
       aria-label="Time window"
       items={TIME_WINDOWS.map((w) => ({ value: w.value, label: w.label }))}
-      value={[window]}
-      onValueChange={(v) => router.setQuery({ window: timeWindowParam(v[0], DEFAULT_LIST_WINDOW), page: null })}
+      value={dayRange ? [] : [window]}
+      onValueChange={(v) => router.setQuery({ window: timeWindowParam(v[0], DEFAULT_LIST_WINDOW), day: null, page: null })}
     />
   </div>
 

@@ -39,6 +39,29 @@ export function timeWindowParam(window: string | undefined, fallback: TimeWindow
   return w === fallback ? null : w
 }
 
+/** `started_at` bounds for one day: both inclusive, as the API takes them. */
+export interface DayBounds {
+  started_after: string
+  started_before: string
+}
+
+/**
+ * `?day=YYYY-MM-DD` (the Skyline's "Runs →" link, #1938) -> that day's
+ * `started_at` bounds, or null when the value is not a real date. The day is
+ * a UTC day because the Skyline buckets by UTC day (#1371), and the two must
+ * name the same 24 hours. The day is [00:00, 24:00); `started_before` is
+ * inclusive, so the upper bound is the last millisecond of the day.
+ */
+export function dayBounds(day: string | null | undefined): DayBounds | null {
+  if (!day || !/^\d{4}-\d{2}-\d{2}$/.test(day)) return null
+  const start = Date.parse(`${day}T00:00:00Z`)
+  if (Number.isNaN(start) || new Date(start).toISOString().slice(0, 10) !== day) return null
+  return {
+    started_after: new Date(start).toISOString(),
+    started_before: new Date(start + 86_400_000 - 1).toISOString(),
+  }
+}
+
 /** Inclusive lower bound for `started_after`, ISO 8601 with an offset (the API rejects naive bounds); undefined for "all". */
 export function timeWindowStart(window: TimeWindow, now: number): string | undefined {
   if (window === 'all') return undefined
