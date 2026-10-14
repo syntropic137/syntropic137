@@ -64,6 +64,13 @@ _TIMEOUT_SECONDS = 10
 #: the real installer's `rm -rf` of its destination would.
 _HANG_SECONDS = 2 * _TIMEOUT_SECONDS + 3
 
+#: Opens every directory the container identity made under /workspace to the
+#: host. `alpine:3` runs as root, so on a host that is not root (a CI runner)
+#: teardown cannot delete what the container wrote and reports the workspace
+#: retained. Production images run as the host's uid and never get here. Only
+#: the container's own entries: `--cap-drop=ALL` leaves it no CAP_FOWNER.
+_HAND_BACK_TO_HOST = 'find /workspace -user "$(id -u)" -type d -exec chmod a+rwx {} +'
+
 #: Stands in for the real `skills` CLI. Records every call. The first
 #: /workspace/.hang_calls calls hang past the deadline and then wipe the
 #: install; every later call installs.
@@ -176,7 +183,13 @@ async def live(
         )
         yield result
     finally:
-        await adapter.destroy(handle)
+        try:
+            handed_back = await adapter.execute(
+                handle, ["sh", "-c", _HAND_BACK_TO_HOST], timeout_seconds=30
+            )
+            assert handed_back.exit_code == 0, handed_back.stderr
+        finally:
+            await adapter.destroy(handle)
 
 
 async def test_a_hung_first_install_is_retried_once_and_succeeds(live: _Live) -> None:
