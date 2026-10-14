@@ -13,8 +13,9 @@
   import StatusBadge from '../StatusBadge/StatusBadge.svelte'
   import type { RunRowProps } from './types'
 
-  let { status, name, tag, sub, href, segments, barPercent, slots, duration, tokens, cost, when, ...rest }: RunRowProps = $props()
+  let { status, name, tags, sub, href, segments, barPercent, slots, duration, tokens, cost, when, ...rest }: RunRowProps = $props()
   const columns = $derived(runBarColumns(segments.length, slots))
+  const shown = $derived((tags ?? []).filter((t) => t != null))
 </script>
 
 <div class="sky-run-row-host">
@@ -23,7 +24,7 @@
     <span class="sky-run-row__name">
       <span class="sky-run-row__headline">
         <span class="sky-run-row__title">{name}</span>
-        {#if tag}<span class="sky-run-row__tag" title={tag.title}>{tag.label}</span>{/if}
+        {#each shown as t (t.label)}<span class="sky-run-row__tag" title={t.title}>{t.label}</span>{/each}
       </span>
       {#if sub}<span class="sky-run-row__sub">{sub}</span>{/if}
     </span>

@@ -9,6 +9,7 @@ import {
   evalBadge,
   evalRowTag,
   runRowSub,
+  resumeRowTag,
   parseEvalFilter,
   phaseProgressText,
   isExecutionEvent,
@@ -77,6 +78,12 @@ describe('list', () => {
     expect(dayBounds(null)).toBeNull()
     expect(dayBounds('2026-02-30')).toBeNull()
     expect(dayBounds('yesterday')).toBeNull()
+  })
+
+  it('marks a resumed run and names its parent; a fresh run gets no marker (#1926)', () => {
+    expect(resumeRowTag({ parent_execution_id: 'exec-abc' })).toEqual({ label: 'Resumed', title: 'Resumed from exec-abc' })
+    expect(resumeRowTag(null)).toBeNull()
+    expect(resumeRowTag(undefined)).toBeNull()
   })
 
   it('defaults the lists to 24h; All stays selectable as ?window=all', () => {

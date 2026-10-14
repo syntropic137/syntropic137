@@ -73,3 +73,20 @@ describe('Executions list ?day= (#1938)', () => {
     }
   }, 30_000)
 })
+
+describe('Executions list resume badge (#1926)', () => {
+  it('badges a resumed run with the run it resumed from, and only that run', async () => {
+    decorate = (r) => ({
+      ...r,
+      executions: r.executions.map((e, i) => (i === 0 ? { ...e, resumed_from: { parent_execution_id: 'exec-parent-1', resume_phase_id: 'p2' } } : e)),
+    })
+    const { target, stop } = await mountList('?window=all')
+    try {
+      const badges = [...target.querySelectorAll('.sky-run-row__tag')].filter((t) => t.textContent === 'Resumed')
+      expect(badges).toHaveLength(1)
+      expect(badges[0]!.getAttribute('title')).toBe('Resumed from exec-parent-1')
+    } finally {
+      stop()
+    }
+  }, 30_000)
+})

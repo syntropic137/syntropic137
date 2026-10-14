@@ -30,7 +30,7 @@ afterEach(() => {
 
 describe('Execution detail phases', () => {
   it('marks the running phase row, and only that row', async () => {
-    const running = (await listExecutions({ statuses: ['running'] })).executions[0]!
+    const running = (await listExecutions({ page: 1, page_size: 10, statuses: ['running'] })).executions[0]!
     const { default: Detail } = await import('./Detail.svelte')
     const target = document.createElement('div')
     document.body.append(target)

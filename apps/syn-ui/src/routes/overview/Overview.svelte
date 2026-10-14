@@ -43,7 +43,7 @@
     seenToggleLabel,
     splitSeenRuns,
   } from '@syn137/skyline-core/screens/overview'
-  import { evalBadge } from '@syn137/skyline-core/screens/executions'
+  import { evalBadge, resumeRowTag } from '@syn137/skyline-core/screens/executions'
   import { Button, Callout, EmptyState, Skeleton, ToggleGroup } from '@syn137/skyline-svelte-v5'
   import { IsoCity, OutcomeRing, RunRow, StatusBadge } from '@syn137/skyline-svelte-v5/patterns'
   import { ApiError, getContributionHeatmap, getMetrics, getShippedMetrics, listExecutions, listTriggers, listWorkflows } from '@syn137/syn-ui-data'
@@ -292,7 +292,7 @@
             <RunRow
               status={outcomeStatus(r.status, r.failure_classification)}
               name={r.workflow_name}
-              tag={evalBadge(r.eval)}
+              tags={[evalBadge(r.eval), resumeRowTag(r.resumed_from)]}
               sub={runSubline(r.repos_display ?? r.repos?.[0] ?? null, r.phase_progress?.completed ?? r.completed_phases, r.phase_progress?.possible ?? r.total_phases)}
               href={execHref(r.workflow_execution_id)}
               segments={runSegments({ status: r.status, done: r.phase_progress?.completed ?? r.completed_phases, total: r.phase_progress?.possible ?? r.total_phases })}

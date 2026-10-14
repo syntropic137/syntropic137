@@ -6,12 +6,23 @@ import { statusKind, type StatusKind } from './status'
 
 export type RunSegmentTone = 'done' | 'failed' | 'cancelled' | 'running' | 'empty'
 
+/** A small marker after a run row's name: "Eval · PASS", "Resumed". */
+export interface RunRowTag {
+  label: string
+  title?: string
+}
+
 export interface RunRowProps {
   /** Raw API status; mapped once by statusSemantics(). */
   status: string
   name: string
-  /** Skyline: a small marker after the name, such as "Eval" for a run that belongs to an eval (evalBadge()). */
-  tag?: { label: string; title?: string } | null
+  /**
+   * Skyline: small markers after the name, such as "Eval" for a run that
+   * belongs to an eval (evalBadge()) or "Resumed" for a resumed run
+   * (resumeRowTag()). Null entries are skipped, so a caller can pass each
+   * helper's answer as is.
+   */
+  tags?: readonly (RunRowTag | null | undefined)[]
   /** Mono line under the name; build it with runSubline() when you have repo and phase counts. */
   sub?: string
   href?: string

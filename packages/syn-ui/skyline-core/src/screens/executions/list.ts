@@ -4,7 +4,7 @@
  */
 import { durationBetween, formatDuration } from '../../format/duration'
 import { toTime } from '../../format/shared'
-import { runSubline } from '../../patterns/runRow'
+import { type RunRowTag, runSubline } from '../../patterns/runRow'
 import { statusSemantics } from '../../patterns/status'
 import { phaseProgressText } from './detail'
 
@@ -211,6 +211,20 @@ export function evalRowTag(e: ExecutionEvalLike | null | undefined): EvalBadge |
   const badge = evalBadge(e)
   if (!badge) return null
   return e?.verdict ? { ...badge, label: `Eval · ${e.verdict}` } : badge
+}
+
+/** The lineage a list row carries when the run was resumed from another (the API's `resumed_from`). */
+export interface ResumedFromLike {
+  parent_execution_id: string
+}
+
+/**
+ * The run row's "Resumed" marker (#1926), titled with the run it picked up
+ * from; null for a run that started fresh. The row is itself a link, so the
+ * parent is one click further, on the execution page's lineage banner.
+ */
+export function resumeRowTag(resumed: ResumedFromLike | null | undefined): RunRowTag | null {
+  return resumed ? { label: 'Resumed', title: `Resumed from ${resumed.parent_execution_id}` } : null
 }
 
 /** A list row's phase progress as the API words it (`phase_progress`); the counts are the fallback for a server without it. */

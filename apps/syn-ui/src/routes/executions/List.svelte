@@ -11,6 +11,7 @@
   import {
     EXECUTION_FILTERS,
     evalRowTag,
+    resumeRowTag,
     runRowSub,
     parseEvalFilter,
     TIME_WINDOWS,
@@ -246,7 +247,7 @@
                 href={href(`/executions/${r.workflow_execution_id}`)}
                 status={outcomeStatus(r.status, r.failure_classification)}
                 name={r.workflow_name || r.workflow_id}
-                tag={evalRowTag(r.eval)}
+                tags={[evalRowTag(r.eval), resumeRowTag(r.resumed_from)]}
                 sub={rowSub(r)}
                 segments={runSegments({ status: r.status, done: r.phase_progress?.completed ?? r.completed_phases, total: r.phase_progress?.possible ?? r.total_phases })}
                 barPercent={runBarPercent(runDurationMs(r, now || Date.now()) ?? 0, longest)}
