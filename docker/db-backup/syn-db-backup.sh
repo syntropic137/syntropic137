@@ -29,12 +29,29 @@
 #                                PGDATABASE up into SYN_BACKUP_DIR (default
 #                                /backups) and stops if that backup fails.
 #   cron-match "CRON" "M H DOM MON DOW"   exit 0 match, 1 no match, 2 invalid
+#   identity DIR                 run by the timescaledb healthcheck, in the
+#                                database container: write DIR/identity with
+#                                this container's POSTGRES_USER and POSTGRES_DB
+#                                (never the password) for the schedule to read.
+#                                Always exits 0: a failed write must not mark the
+#                                database unhealthy; the next backup reports it.
 set -eu
 
 fail() {
     echo "syn-db-backup: $*" >&2
     exit 1
 }
+
+# Before anything else: the database container runs this and needs no password.
+# Written to a temp name and renamed, so a reader never sees half a file.
+if [ "${1:-}" = identity ]; then
+    [ $# -eq 2 ] || { echo "syn-db-backup: usage: identity DIR" >&2; exit 0; }
+    if ! { printf 'PGUSER=%s\nPGDATABASE=%s\n' "${POSTGRES_USER:-}" "${POSTGRES_DB:-}" >"$2/.identity.new" &&
+        mv -f "$2/.identity.new" "$2/identity"; }; then
+        echo "syn-db-backup: could not write the database identity to $2" >&2
+    fi
+    exit 0
+fi
 
 if [ -n "${POSTGRES_PASSWORD_FILE:-}" ] && [ -z "${PGPASSWORD:-}" ]; then
     PGPASSWORD=$(cat "$POSTGRES_PASSWORD_FILE")
@@ -603,5 +620,5 @@ case $cmd in
     schedule) [ $# -eq 3 ] || fail "usage: schedule DIR CRON DAYS"; schedule "$1" "$2" "$3" ;;
     restore) [ $# -ge 1 ] && [ $# -le 2 ] || fail "usage: restore FILE [--force]"; restore "$@" ;;
     cron-match) [ $# -eq 2 ] || fail "usage: cron-match CRON 'M H DOM MON DOW'"; cron_match "$1" "$2" ;;
-    *) fail "usage: syn-db-backup backup|prune|schedule|restore|cron-match ..." ;;
+    *) fail "usage: syn-db-backup backup|prune|schedule|restore|cron-match|identity ..." ;;
 esac

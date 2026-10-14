@@ -43,14 +43,16 @@ services:
       - db_data:/var/lib/postgresql/data
       - ./init-db:/docker-entrypoint-initdb.d:ro
       - db_identity:/syn-db-identity
+      - ./db-backup/syn-db-backup.sh:/usr/local/bin/syn-db-backup:ro
     # Base healthcheck, plus a handoff for scheduled backups: the user and
     # database name this container runs with (never the password), so
     # db-backup connects as the running database says, not as infra/.env
-    # says now. A failed write leaves health alone; the backup reports it.
+    # says now. The handoff is syn-db-backup's `identity` subcommand, which
+    # never fails the healthcheck; the backup reports a missing identity.
     healthcheck:
       test:
         - CMD-SHELL
-        - 'pg_isready -U ${POSTGRES_USER:-syn} -d ${POSTGRES_DB:-syn} || exit 1; printf "PGUSER=%s\nPGDATABASE=%s\n" "$$POSTGRES_USER" "$$POSTGRES_DB" > /syn-db-identity/.identity.new && mv -f /syn-db-identity/.identity.new /syn-db-identity/identity; exit 0'
+        - pg_isready -U ${POSTGRES_USER:-syn} -d ${POSTGRES_DB:-syn} && sh /usr/local/bin/syn-db-backup identity /syn-db-identity
     restart: always
     read_only: true
     security_opt:

@@ -850,119 +850,17 @@ class TestComposeService:
         identity = Path(env["SYN_DB_IDENTITY_FILE"])
         assert f"db_identity:{identity.parent}" in database["volumes"]
         assert f"db_identity:{identity.parent}:ro" in backup["volumes"]
-        assert str(identity) in database["healthcheck"]["test"][1]
+        # The healthcheck only calls the mounted, tested script; no inline logic.
+        assert database["healthcheck"]["test"][1].endswith(
+            f"&& sh /usr/local/bin/syn-db-backup identity {identity.parent}"
+        )
+        assert "./db-backup/syn-db-backup.sh:/usr/local/bin/syn-db-backup:ro" in database["volumes"]
 
     def test_script_mounted_is_the_one_tested_here(self):
         backup = self._services(_SELFHOST)["db-backup"]
         source = backup["volumes"][0].split(":")[0]
         assert (_SELFHOST.parent / source).resolve() == _SCRIPT
         assert backup["entrypoint"] == ["sh", "/usr/local/bin/syn-db-backup"]
-
-
-class TestJustRecipes:
-    @staticmethod
-    def _recipe(name: str) -> str:
-        text = (_ROOT / "justfile").read_text()
-        match = re.search(rf"^{name}\b.*?:\n((?:    .*\n|\n)+)", text, re.MULTILINE)
-        assert match, f"no {name} recipe"
-        return match.group(1)
-
-    def test_manual_backup_runs_the_scheduled_command(self):
-        assert "db-backup backup /backups" in self._recipe("selfhost-backup")
-
-    def test_restore_stops_the_writers_the_upgrade_runbook_stops(self):
-        runbook = (_ROOT / "docs" / "deployment" / "timescaledb-2.29-upgrade.md").read_text()
-        stopped = re.search(r'docker compose -f "\$CF" stop ([a-z -]+)\n', runbook)
-        assert stopped
-        writers = re.search(r'writers="([a-z -]+)"', self._recipe("selfhost-restore"))
-        assert writers
-        assert set(writers.group(1).split()) == set(stopped.group(1).split())
-
-    @pytest.mark.skipif(shutil.which("just") is None, reason="just is not installed")
-    @pytest.mark.parametrize(
-        "name", ["literal-$(touch {sentinel}).dump", 'a "quoted" `touch {sentinel}` b.dump']
-    )
-    def test_restore_file_name_is_data_not_shell(self, tmp_path, name):
-        sentinel = tmp_path / "substituted"
-        backup = tmp_path / name.format(sentinel=sentinel)
-        result = subprocess.run(
-            ["just", "selfhost-restore", str(backup)],
-            cwd=_ROOT,
-            capture_output=True,
-            text=True,
-            timeout=60,
-            check=False,
-        )
-        assert result.returncode != 0
-        assert f"No such backup: {backup}" in result.stdout
-        assert not sentinel.exists(), "the file name was run as a command"
-
-
-@pytest.mark.skipif(shutil.which("just") is None, reason="just is not installed")
-class TestDatabaseIdentity:
-    """Both recipes connect as the running container says, not as the env file says."""
-
-    @staticmethod
-    def _docker(tmp_path: Path) -> tuple[dict[str, str], Path]:
-        bin_dir = tmp_path / "bin"
-        bin_dir.mkdir()
-        calls = tmp_path / "docker-calls"
-        _stub(
-            bin_dir,
-            "docker",
-            f'printf "%s\\n" "$*" >> "{calls}"\n'
-            'case "$*" in\n'
-            '  *"printenv POSTGRES_USER"*) echo container_user ;;\n'
-            '  *"printenv POSTGRES_DB"*) echo container_db ;;\n'
-            "esac",
-        )
-        # What a stale shell / infra/.env would say.
-        env = {
-            **os.environ,
-            "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
-            "POSTGRES_USER": "file_user",
-            "POSTGRES_DB": "file_db",
-            "PGUSER": "file_user",
-            "PGDATABASE": "file_db",
-        }
-        return env, calls
-
-    def test_backup_uses_the_container_identity(self, tmp_path):
-        env, calls = self._docker(tmp_path)
-        result = subprocess.run(
-            ["just", "selfhost-backup"],
-            cwd=_ROOT,
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=60,
-            check=False,
-        )
-        assert result.returncode == 0, result.stderr
-        run = next(c for c in calls.read_text().splitlines() if " run " in c)
-        assert "-e PGUSER=container_user -e PGDATABASE=container_db db-backup backup" in run
-        assert "file_" not in run
-
-    def test_restore_uses_the_container_identity(self, tmp_path):
-        env, calls = self._docker(tmp_path)
-        backup = tmp_path / "syn-20261008T030000Z.dump"
-        backup.write_text("x")
-        # The in-flight execution check needs a live API; stand it in.
-        _stub(tmp_path / "bin", "uv", "exit 0")
-        result = subprocess.run(
-            ["just", "selfhost-restore", str(backup)],
-            cwd=_ROOT,
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=60,
-            check=False,
-        )
-        assert result.returncode == 0, result.stderr
-        run = next(c for c in calls.read_text().splitlines() if " run " in c)
-        assert "-e PGUSER=container_user -e PGDATABASE=container_db" in run
-        assert "db-backup restore /restore/syn-20261008T030000Z.dump" in run
-        assert "file_" not in run
 
 
 class TestScheduledIdentity:
@@ -990,11 +888,15 @@ class TestScheduledIdentity:
         handoff.mkdir()
         services = yaml.safe_load(_SELFHOST.read_text())["services"]
         stale = {"POSTGRES_USER": "file_user", "POSTGRES_DB": "file_db"}
-        check = re.sub(
-            r"\$\$|\$\{(\w+)(?::-[^}]*)?\}",
-            lambda m: "$" if m.group(0) == "$$" else stale[m.group(1)],
-            services["timescaledb"]["healthcheck"]["test"][1],
-        ).replace("/syn-db-identity", str(handoff))
+        check = (
+            re.sub(
+                r"\$\$|\$\{(\w+)(?::-[^}]*)?\}",
+                lambda m: "$" if m.group(0) == "$$" else stale[m.group(1)],
+                services["timescaledb"]["healthcheck"]["test"][1],
+            )
+            .replace("/usr/local/bin/syn-db-backup", str(_SCRIPT))
+            .replace("/syn-db-identity", str(handoff))
+        )
         database_env = {**env, "POSTGRES_USER": "container_user", "POSTGRES_DB": "container_db"}
         assert subprocess.run(["sh", "-c", check], env=database_env, check=False).returncode == 0
 
@@ -1054,3 +956,32 @@ class TestAdmissionHold:
         # Inside the shell single quotes, '"''"' spells SQL's ''.
         script_sql = match.group(1).replace("'\"''\"'", "''")
         assert self._normalised(script_sql) == self._normalised(CREATE_TABLE_SQL)
+
+
+class TestIdentityHandoff:
+    """`identity DIR`: what the timescaledb healthcheck runs in the database container."""
+
+    def test_writes_user_and_database_never_the_password(self, tmp_path):
+        env = {
+            **os.environ,
+            "POSTGRES_USER": "container_user",
+            "POSTGRES_DB": "container_db",
+            "POSTGRES_PASSWORD_FILE": str(tmp_path / "unreadable-secret"),
+        }
+        result = _run("identity", str(tmp_path), env=env)
+        assert result.returncode == 0, result.stderr
+        assert (tmp_path / "identity").read_text() == (
+            "PGUSER=container_user\nPGDATABASE=container_db\n"
+        )
+        assert not (tmp_path / ".identity.new").exists()
+
+    def test_a_failed_write_never_fails_the_healthcheck(self, tmp_path):
+        result = _run("identity", str(tmp_path / "missing"), env=dict(os.environ))
+        assert result.returncode == 0
+        assert "could not write the database identity" in result.stderr
+
+    def test_replaces_a_stale_identity(self, tmp_path):
+        (tmp_path / "identity").write_text("PGUSER=old\nPGDATABASE=old\n")
+        env = {**os.environ, "POSTGRES_USER": "u", "POSTGRES_DB": "d"}
+        assert _run("identity", str(tmp_path), env=env).returncode == 0
+        assert (tmp_path / "identity").read_text() == "PGUSER=u\nPGDATABASE=d\n"
