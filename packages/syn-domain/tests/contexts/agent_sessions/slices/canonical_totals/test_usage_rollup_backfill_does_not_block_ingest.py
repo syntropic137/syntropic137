@@ -73,7 +73,11 @@ WRITER_WARMUP_TIMEOUT_S = 30.0  # generous: connection setup on a slow runner is
 # How long a probe insert may WAIT ON A LOCK. Not a speed bound: an insert
 # that is not blocked waits zero, and one that is blocked waits until the
 # backfill batch commits, which never happens while the probe holds it open.
-PROBE_LOCK_TIMEOUT = "5s"
+PROBE_LOCK_TIMEOUT = "10s"
+# Not a bound either: when a probe has not finished after this long, the test
+# records what it is waiting on while it is still waiting, so a failure names
+# the blocker rather than guessing it.
+PROBE_DIAGNOSE_AFTER_S = 2.0
 # Belt and braces only: lock_timeout ends a blocked probe long before this.
 PROBE_HARD_TIMEOUT_S = 60.0
 # A watchdog, not a bound under test: a backfill wedged on a lock must fail
@@ -87,6 +91,16 @@ SELECT locktype, COALESCE(relation::regclass::text, '') AS relation, mode
 FROM pg_locks
 WHERE pid = $1 AND granted
 ORDER BY locktype, relation, mode
+"""
+_WAITING_ON_SQL = """
+SELECT
+    COALESCE((SELECT string_agg(
+        l.locktype || ' ' || COALESCE(l.relation::regclass::text, '')
+        || ' ' || l.mode || COALESCE(' xid ' || l.transactionid::text, ''), '; ')
+        FROM pg_locks l WHERE l.pid = $1 AND NOT l.granted), 'no ungranted lock') AS waiting,
+    COALESCE((SELECT string_agg(
+        b.pid::text || ' [' || COALESCE(b.state, '') || '] ' || left(b.query, 160), ' | ')
+        FROM pg_stat_activity b WHERE b.pid = ANY(pg_blocking_pids($1))), 'none') AS blockers
 """
 _HOLDS_ADVISORY_SQL = """
 SELECT EXISTS (
@@ -177,10 +191,12 @@ class Probe:
     """Inserts into a batch's own sessions just before that batch commits."""
 
     conn: asyncpg.Connection
+    diag: asyncpg.Connection
     writer: Writer
     sessions_listed: int = 0
     seeded: int = 0
     transactions: list[int] = field(default_factory=list)
+    last_wait: str = "the probe was never seen waiting"
     _n: int = 0
 
     def _rows(self, sessions: list[str]) -> list[Row]:
@@ -195,7 +211,19 @@ class Probe:
         """One COPY, never queued behind the writer, bounded on every wait."""
         await asyncio.wait_for(self.writer.turn.acquire(), timeout=PROBE_HARD_TIMEOUT_S)
         try:
-            await asyncio.wait_for(copy_rows(self.conn, rows), timeout=PROBE_HARD_TIMEOUT_S)
+            copying = asyncio.create_task(copy_rows(self.conn, rows))
+            done, _ = await asyncio.wait({copying}, timeout=PROBE_DIAGNOSE_AFTER_S)
+            if not done:
+                with contextlib.suppress(Exception):
+                    seen = await asyncio.wait_for(
+                        self.diag.fetchrow(_WAITING_ON_SQL, self.conn.get_server_pid()),
+                        timeout=PROBE_HARD_TIMEOUT_S,
+                    )
+                    if seen is not None:
+                        self.last_wait = (
+                            f"waiting on {seen['waiting']}; blocked by {seen['blockers']}"
+                        )
+            await asyncio.wait_for(copying, timeout=PROBE_HARD_TIMEOUT_S)
         finally:
             self.writer.turn.release()
 
@@ -230,12 +258,13 @@ class Probe:
             held: list[str] = []
             with contextlib.suppress(Exception):
                 records = await asyncio.wait_for(
-                    self.conn.fetch(_HELD_LOCKS_SQL, pid), timeout=PROBE_HARD_TIMEOUT_S
+                    self.diag.fetch(_HELD_LOCKS_SQL, pid), timeout=PROBE_HARD_TIMEOUT_S
                 )
                 held = [f"{r['locktype']} {r['relation']} {r['mode']}" for r in records]
             pytest.fail(
                 f"an insert into {batch} waited on the backfill's open batch transaction "
-                f"(lock_timeout {PROBE_LOCK_TIMEOUT}); the backfill held: " + "; ".join(held)
+                f"(lock_timeout {PROBE_LOCK_TIMEOUT}, backfill pid {pid}): {self.last_wait}. "
+                "The backfill held: " + "; ".join(held)
             )
         assert backfill.is_in_transaction(), "the batch committed before the probe returned"
 
@@ -373,10 +402,11 @@ async def test_inserts_flow_during_the_backfill_and_each_is_counted_once(
         await prepare_pre_e1_schema(dsn)
         conn = await asyncpg.connect(dsn)
         probe_conn = await asyncpg.connect(dsn)
+        diag_conn = await asyncpg.connect(dsn)
         try:
             await probe_conn.execute(f"SET lock_timeout = '{PROBE_LOCK_TIMEOUT}'")
             writer = Writer(dsn)
-            probe = Probe(probe_conn, writer)
+            probe = Probe(probe_conn, diag_conn, writer)
 
             async def probed(
                 backfill: asyncpg.Connection, *, batch_sessions: int | None = None
@@ -437,5 +467,6 @@ async def test_inserts_flow_during_the_backfill_and_each_is_counted_once(
             await unprobed(conn)
             await _assert_rollup_equals_raw(conn)
         finally:
+            await diag_conn.close()
             await probe_conn.close()
             await conn.close()
