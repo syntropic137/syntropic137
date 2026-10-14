@@ -2,9 +2,9 @@
 
 - **Status**: Accepted (decision recorded; implementation lands in #1310 Phase 1, items 1.2-1.7, and Phase 2)
 - **Date**: 2026-10-05 (first drafted in parked PR #1597; resumed 2026-10-08 against #1574 and #1651 as merged)
-- **Issue**: #1310 (umbrella; the full plan is the "Full plan" comment there), #1552, #1557, #1381, #1555, #1511, #1734 (implementation of multi-host placement, heartbeat and fencing, moved out of #1310 on 2026-10-07)
+- **Issue**: #1310 (umbrella; the full plan is the "Full plan" comment there), #1552, #1557, #1381, #1555, #1511, #1734 (implementation of multi-host placement, heartbeat and fencing, moved out of #1310 on 2026-10-07), #1917 (placement by tier)
 - **Related**: ADR-014 (section 7, resume; section 9, who runs an execution), ADR-025, ADR-055, ADR-057, ADR-060 (section 8, dispatch concurrency), ADR-070 (D4/D5, drain-aware rotation)
-- **Vocabulary**: `docs/architecture/orchestration-ubiquitous-language.md` (Executor, Run Queue, Claim, Lease, Heartbeat, Fencing, Drain (of an executor), Event Epoch, Queued, Execution Budget; reserved: Adopt / Reattach)
+- **Vocabulary**: `docs/architecture/orchestration-ubiquitous-language.md` (Executor, Executor Tier, Run Queue, Claim, Lease, Heartbeat, Fencing, Drain (of an executor), Event Epoch, Queued, Execution Budget; reserved: Adopt / Reattach)
 
 No earlier ADR covers how the platform itself is deployed. ADR-052 is the docs
 site's Vercel deployment and ADR-057 is service registration inside one
@@ -177,6 +177,26 @@ host wastes every larger host's capacity.
 The capacity predicate is per executor, so no host ever holds more runs than
 its own row allows, and two executors never contend on one budget lock. A count
 taken outside the claim transaction is racy and is not acceptable.
+
+**Placement by tier (amended 2026-10-14, #1917).** Each budget row also
+carries an integer `tier`. Local Docker executors are tier 0; further hosts and
+remote backends (E2B and later ones) take higher tiers, set by the operator
+when the executor registers. Step 1 gains one condition: an executor may lock
+its row only if no live, non-draining row with a **lower** tier has
+`in_use < capacity`. So work fills tier 0 first, overflows to tier 1 only when
+tier 0 is full, and so on; when every tier is full, runs stay `admitted`, which
+is the queue (D11 reports them as queued). The condition lives in the one
+`ExecutionRunQueue.claim` implementation, inside the same transaction, so it
+inherits the race-freedom above. It generalises the research doc's
+"remote claims only when no local slot is free" clause
+(`docs/research/2026-10-08-remote-executor-e2b.md`, decision 2) from two
+levels to any number. Accepted race: a lower-tier slot freed just after a
+higher-tier claim does not pull the run back (no preemption, no migration,
+D5). Disabling a tier's claims uses the draining state, never
+`capacity = 0`, which the `CHECK` would reject while runs are charged. Later
+placement rules (cost, credential class, workload kind) are further conditions
+in this predicate; an admission-time router that counts capacity outside the
+claim transaction stays rejected.
 
 **Release is the reverse, fenced.** A run row carries a **charge** exactly
 while it is `claimed`, `fencing` or `reaped`, and the charge is held by the
