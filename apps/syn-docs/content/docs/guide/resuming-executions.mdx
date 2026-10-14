@@ -333,12 +333,11 @@ process. If no child execution shows up:
    problem is in the run rather than the resume.
 2. Check whether admission is closed. A held start resumes on its own when
    maintenance reopens.
-3. Check the API logs for `Background resume start raised exception` and for the
-   resume-start records the process manager writes. The record does now carry the
-   outcome - held, retrying, given up, and the reason - but it is **not** readable
-   through `syn` or the API yet (#1464), so reaching it needs log or database
-   access that a self-hosted operator may not have. That gap is why this step
-   reads the way it does.
+3. Run `syn execution show <parent-id>` and read `Resume start:`: its status
+   (`pending`, `paused`, `retryable`, `dispatched`, `started` or `failed`), `Attempts`
+   and `Reason`. Over the API it is
+   `resume_start` on `GET /executions/{execution_id}` for the parent. The API logs
+   (`Background resume start raised exception`) carry the stack trace.
 4. Causes worth ruling out in order: maintenance mode, artifact-list projection
    lag, whether the inherited artifacts still exist, and event-store errors.
 
@@ -351,8 +350,8 @@ Worth doing once on a disposable workflow after upgrading:
 2. Run a workflow that completes one phase and then fails inside the next. Note
    the parent id and the completed phase's artifacts.
 3. Resume it with no flags. Expect **409** mentioning external effects. A refusal
-   writes nothing, so the next step must still succeed - that is how you confirm
-   it, since the parent's resume state is not exposed through `syn` yet (#1464).
+   writes nothing: `syn execution show <parent-id>` shows no `Resume start:`
+   block, and the next step must still succeed.
 4. Resume it with `--acknowledge-external-effects`. Expect **200**, a new child id,
    the right resume phase and inherited prefix. Resume the parent again and expect
    **409** naming the resume it already has.
@@ -371,13 +370,11 @@ overrides, so you cannot currently resume a run with a different model or an edi
 phase. That is future capability, not a switch you are missing.
 
 <Callout type="warn">
-  Two further limits matter if you are thinking about controlled comparisons. The
-  commit each repository was at **is** recorded on an execution, but the workspace
-  still clones the default branch rather than checking out that commit, so two
-  runs cannot be asserted to have seen the same code. And a resume inherits its
-  parent's configuration and inputs, so what can differ between a parent and its
-  resume is which phases ran, and - until #1458 - the code on the default branch at
-  the moment each one is provisioned.
+  The commit each repository was at is recorded on an execution, and a workspace
+  checks each repository out at that commit (a resume at its parent's), refusing
+  to start if origin no longer has it. A resume inherits its parent's
+  configuration and inputs, so what can differ between a parent and its resume is
+  which phases ran.
 </Callout>
 
 ## See also

@@ -25,7 +25,7 @@ Running without a command shows an interactive menu.
 | `update` | Pull latest container images and restart |
 | `skills` | Install, update (`skills update`) or check (`skills status`) the [agent skills](/docs/guide/agent-skills) for Claude Code and Codex. `plugin` is a deprecated alias |
 | `reset` | Factory reset; a dry run until you add `--yes` ([details](#reset)) |
-| `github-app` | Create or reconfigure the GitHub App |
+| `github-app` | Open the configured GitHub App's settings, permissions or installations page in your browser (the App itself is created by `init`) |
 
 ## `init` Options
 
@@ -50,7 +50,7 @@ npx @syntropic137/setup init [options]
 ├── .env                               # Your configuration (chmod 600)
 ├── init-db/
 │   └── 01-create-databases.sql        # Database initialization
-├── secrets/                           # All chmod 600
+├── secrets/                           # Directory chmod 700; files 644 so containers can read them
 │   ├── db-password.secret
 │   ├── redis-password.secret
 │   ├── minio-password.secret
@@ -85,7 +85,7 @@ in the backup.
 
 ## Reconfiguring
 
-Run `init` again to reconfigure. The wizard detects an existing installation and asks whether to reconfigure from scratch or update specific settings. Existing secrets are backed up to `.bak` files.
+Run `init` again to reconfigure. The wizard detects an existing installation and asks one question: reconfigure from scratch? Yes runs `docker compose down -v`, which deletes the stack's volumes and data, then regenerates secrets (the old ones are backed up to `.bak` files). No keeps the existing configuration and offers to start the stack.
 
 <Callout type="idea">
 **Planned:** Tunnel management and secrets reconfiguration directly from the interactive TUI. Tracked in [syntropic137/syntropic137#422](https://github.com/syntropic137/syntropic137/issues/422).
