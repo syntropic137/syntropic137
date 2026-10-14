@@ -11,6 +11,12 @@ ONE JUDGEMENT, TWO READERS. `DiskSpaceGuard.check()` is the only place the
 thresholds are compared, so /health and admission cannot disagree about one
 filesystem. The measurement is a port, so tests never touch a real disk.
 
+GIB FIRST, PERCENT ONLY IF ASKED FOR (#1947). A run needs a number of bytes,
+not a share of the disk: 3.9% free of a 2 TB disk is 71 GiB, room for many
+runs, while 6% of a 100 GB disk is 6 GiB. So both floors are absolute. A
+percent floor is still honoured when an operator sets one, as a second way to
+cross the same line: either floor crossed is enough.
+
 AN UNMEASURABLE DISK IS REPORTED, NOT REFUSED. If the path cannot be measured
 (misconfigured mount, missing directory), /health says so as degraded, but
 admission does not refuse on that alone: a refusal must name a fact, and "I
@@ -27,6 +33,17 @@ from typing import Protocol
 from syn_domain.contexts._shared.admission_refusal import AdmissionRefusedError
 
 logger = logging.getLogger(__name__)
+
+GIB = 2**30
+
+#: Where self-host settings live, named in every refusal so the operator knows
+#: which file to edit when the floor itself is wrong for their host.
+SELFHOST_ENV_FILE = "~/.syntropic137/.env"
+
+
+def format_gib(num_bytes: float) -> str:
+    """Bytes as GiB to one decimal, without a trailing ``.0``."""
+    return f"{num_bytes / GIB:.1f}".removesuffix(".0")
 
 
 @dataclass(frozen=True)
@@ -66,6 +83,65 @@ class DiskState(StrEnum):
     CRITICAL = "critical"
 
 
+def _below_percent(usage: DiskUsage, percent: float | None) -> bool:
+    return percent is not None and usage.free_percent < percent
+
+
+@dataclass(frozen=True)
+class DiskThresholds:
+    """The floors one filesystem is judged against.
+
+    The two byte floors always apply. A percent floor applies only when set,
+    and crossing either kind is enough. ``refuse_basis`` says where the
+    admission floor came from, for the operator reading a refusal.
+    """
+
+    refuse_admission_below_bytes: int
+    degraded_below_bytes: int
+    refuse_basis: str
+    refuse_admission_below_percent: float | None = None
+    degraded_below_percent: float | None = None
+
+    @classmethod
+    def from_gib(
+        cls,
+        *,
+        refuse_admission_below_gib: float,
+        degraded_below_gib: float,
+        refuse_basis: str,
+        refuse_admission_below_percent: float | None = None,
+        degraded_below_percent: float | None = None,
+    ) -> DiskThresholds:
+        return cls(
+            refuse_admission_below_bytes=int(refuse_admission_below_gib * GIB),
+            degraded_below_bytes=int(degraded_below_gib * GIB),
+            refuse_basis=refuse_basis,
+            refuse_admission_below_percent=refuse_admission_below_percent,
+            degraded_below_percent=degraded_below_percent,
+        )
+
+    def refuses(self, usage: DiskUsage) -> bool:
+        return usage.free_bytes < self.refuse_admission_below_bytes or _below_percent(
+            usage, self.refuse_admission_below_percent
+        )
+
+    def degrades(self, usage: DiskUsage) -> bool:
+        return usage.free_bytes < self.degraded_below_bytes or _below_percent(
+            usage, self.degraded_below_percent
+        )
+
+    def describe(self) -> str:
+        degraded = f"degraded below {format_gib(self.degraded_below_bytes)} GiB"
+        if self.degraded_below_percent is not None:
+            degraded += f" or {self.degraded_below_percent:g}%"
+        refused = (
+            f"new executions refused below {format_gib(self.refuse_admission_below_bytes)} GiB"
+        )
+        if self.refuse_admission_below_percent is not None:
+            refused += f" or {self.refuse_admission_below_percent:g}%"
+        return f"{degraded}; {refused} ({self.refuse_basis})"
+
+
 @dataclass(frozen=True)
 class DiskCheck:
     """The verdict and the facts behind it, as /health publishes them."""
@@ -73,8 +149,7 @@ class DiskCheck:
     path: str
     state: DiskState
     usage: DiskUsage | None
-    degraded_below_percent: float
-    refuse_admission_below_percent: float
+    thresholds: DiskThresholds
 
     @property
     def is_degraded(self) -> bool:
@@ -90,10 +165,22 @@ class DiskCheck:
         if self.usage is None:
             return f"Free space on {self.path} could not be measured."
         return (
-            f"{self.usage.free_percent:.1f}% free on {self.path} "
-            f"({self.usage.free_bytes // 2**30} GiB of {self.usage.total_bytes // 2**30} GiB); "
-            f"degraded below {self.degraded_below_percent:g}%, "
-            f"new executions refused below {self.refuse_admission_below_percent:g}%."
+            f"{format_gib(self.usage.free_bytes)} GiB free on {self.path} "
+            f"({self.usage.free_percent:.1f}% of {format_gib(self.usage.total_bytes)} GiB); "
+            f"{self.thresholds.describe()}."
+        )
+
+    @property
+    def remedy(self) -> str:
+        """What to do: free space, or move the floor if it is wrong for this host."""
+        floors = "SYN_DISK_REFUSE_ADMISSION_BELOW_GIB or SYN_DISK_RUN_RESERVE_GIB"
+        if self.thresholds.refuse_admission_below_percent is not None:
+            floors += " (or unset SYN_DISK_REFUSE_ADMISSION_BELOW_PERCENT)"
+        return (
+            f"To recover, free space on {self.path}: delete finished workspace "
+            "directories there and run `docker image prune`, then retry. If the "
+            f"floor is wrong for this host, lower {floors} in {SELFHOST_ENV_FILE} "
+            "and restart the API."
         )
 
 
@@ -110,8 +197,8 @@ class InsufficientDiskSpaceError(AdmissionRefusedError):
         super().__init__(
             "Refusing to start a new execution: the workspace volume is nearly full. "
             + check.detail
-            + " Free space (old workspace directories under the workspace volume, "
-            "unused Docker images) and retry."
+            + " "
+            + check.remedy
         )
         self.check = check
 
@@ -119,16 +206,9 @@ class InsufficientDiskSpaceError(AdmissionRefusedError):
 class DiskSpaceGuard:
     """Judges the workspace volume against the configured thresholds."""
 
-    def __init__(
-        self,
-        port: DiskSpacePort,
-        *,
-        degraded_below_percent: float,
-        refuse_admission_below_percent: float,
-    ) -> None:
+    def __init__(self, port: DiskSpacePort, thresholds: DiskThresholds) -> None:
         self._port = port
-        self._degraded_below = degraded_below_percent
-        self._refuse_below = refuse_admission_below_percent
+        self._thresholds = thresholds
 
     def check(self) -> DiskCheck:
         """Measure now and judge. Never raises."""
@@ -141,8 +221,7 @@ class DiskSpaceGuard:
             path=self._port.path,
             state=self._judge(usage),
             usage=usage,
-            degraded_below_percent=self._degraded_below,
-            refuse_admission_below_percent=self._refuse_below,
+            thresholds=self._thresholds,
         )
 
     def refuse_if_full(self) -> None:
@@ -154,8 +233,8 @@ class DiskSpaceGuard:
     def _judge(self, usage: DiskUsage | None) -> DiskState:
         if usage is None:
             return DiskState.UNMEASURABLE
-        if usage.free_percent < self._refuse_below:
+        if self._thresholds.refuses(usage):
             return DiskState.CRITICAL
-        if usage.free_percent < self._degraded_below:
+        if self._thresholds.degrades(usage):
             return DiskState.LOW
         return DiskState.OK

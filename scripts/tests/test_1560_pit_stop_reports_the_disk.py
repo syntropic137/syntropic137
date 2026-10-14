@@ -91,3 +91,12 @@ def test_the_disk_is_shown_before_images_are_shipped_and_after_the_swap() -> Non
     assert len(calls) == 2, f"expected disk_space called twice, found {len(calls)}"
     assert calls[0] < ship
     assert calls[1] > swap
+
+
+def test_the_api_detail_names_the_gib_floors(tmp_path: Path) -> None:
+    """#1947: the floors are GiB, and /health says which in `detail`."""
+    detail = "71 GiB free on /workspaces (3.9% of 1858 GiB); degraded below 24 GiB; ..."
+    disk = {**_disk("ok", 3.9), "detail": detail}
+    result = _report(tmp_path, {"status": "healthy", "disk": disk})
+    assert result.returncode == 0, result.stderr
+    assert detail in result.stdout
