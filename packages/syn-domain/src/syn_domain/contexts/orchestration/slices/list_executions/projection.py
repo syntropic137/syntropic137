@@ -280,12 +280,12 @@ class WorkflowExecutionListProjection(ExecutionListReads, AutoDispatchProjection
 
         await self._store.save(self.PROJECTION_NAME, execution_id, existing)
 
-    async def on_execution_resumed(self, event_data: object) -> None:
+    async def on_execution_resumed(self, event_data: ExecutionResumedEvent) -> None:
         """Handle ExecutionResumed, on the PARENT's stream: link it forward (#1881).
 
-        `object`, not the event class: the store admits a pre-rename un-pause
-        under this name too (`replays_generic`), so the payload's shape is what
-        `resume_to_link` decides, not something this signature can promise.
+        Annotated as the event it usually is, but the store admits a
+        pre-rename un-pause under this name too (`replays_generic`), so
+        `resume_to_link` decides the payload's shape before anything reads it.
         """
         resume = resume_to_link(event_data)
         if resume is not None:
