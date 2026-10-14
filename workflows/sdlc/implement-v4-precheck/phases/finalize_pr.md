@@ -95,9 +95,10 @@ ready` here.
 1. Act on the handoffs you can, once each:
    - a `CI_GAP` retarget: `gh pr edit <n> --base <default-branch>`;
    - a `FLAKE/INFRA` rerun the report did not already get accepted:
-     `gh run rerun <run-id> --failed`. If the report says the same step
-     already failed after a rerun, do not rerun it again: that is a defect on
-     the base, and the comment says so.
+     `gh run rerun <run-id> --failed`. A `FLAKE/INFRA` row whose status is
+     `base defect: no more reruns` gets no rerun at all: it is a defect on
+     the base, it stays open until the same check is green on the default
+     branch, and the comment says so.
 
    A refusal (HTTP 403, "Resource not accessible by integration") is expected
    for a rerun, because the App token is documented as `Actions: Read`. Quote

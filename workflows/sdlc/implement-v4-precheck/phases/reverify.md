@@ -65,7 +65,7 @@ keeps the PR a draft and posts them for whoever can act.
 | Class | What it is | Who closes it | Repair round? |
 |---|---|---|---|
 | `REPAIRABLE` | a fix phase can close it by changing and pushing this branch | the next `fix` | yes: it is BLOCKING |
-| `FLAKE/INFRA` | a red or missing check whose cause is outside this diff | one rerun, by `finalize_pr` or the orchestrator | never |
+| `FLAKE/INFRA` | a red or missing check whose cause is outside this diff | one rerun, by `finalize_pr` or the orchestrator; if that rerun fails the same way, the base going green | never |
 | `ORCHESTRATOR_EVIDENCE` | evidence that needs Docker, a database or a real store, which this workspace lacks | the orchestrator, running the exact command you give | never |
 | `CI_GAP` | CI cannot see this PR until something outside the branch changes: the PR's base, or `.github/workflows/`, which a workspace credential cannot push | the orchestrator, with the command or patch you give | never |
 
@@ -109,10 +109,24 @@ checkout section says. Then:
 git diff --name-only --diff-filter=AM origin/<base>...HEAD
 ```
 
-For every test file in that list, name the CI job that runs it. Read the
-job's command in `.github/workflows/` (read it, never edit it) and show the
-file's progress line in that job's log on this SHA, as the CI section below
-describes. A test that no PR-gating job collects is a blocking finding
+For every test file in that list, name the CI job that runs it. That is two
+separate questions, answered with two kinds of evidence:
+
+- **Does a job collect it?** (static, on this head) Read the job's command in
+  `.github/workflows/` (read it, never edit it): its paths or matrix, its
+  marker. Then collect the file with exactly that selection here:
+  `uv run pytest --collect-only -q -m <the job's marker> <test-file>`. A
+  path the command reaches, a matrix entry that includes the package, and a
+  nonzero count with the job's marker answer it.
+- **Did it pass on this head?** (runtime) Where the job's log prints a line
+  per file, show it, as the CI section below describes. Where it does not,
+  run the file here on this head with the job's selection and show the
+  result. A job that runs `pytest -n auto` (xdist) prints aggregate dots with
+  no file names, so **a file name missing from a CI log is not proof that CI
+  omitted the test**: it is not a `CI_GAP` and not a repair round. Only the
+  static question can show a test is omitted.
+
+A test that no PR-gating job collects is a blocking finding
 (`no CI job runs <file>`). Typical causes are a package missing from a job's
 matrix, a path no job's command reaches, or a marker no job selects. Classify
 it by where the fix lives:
@@ -150,18 +164,29 @@ It is `FLAKE/INFRA` only when **all** of these hold, and you show each one:
    `.claude/skills/devops/agent_ci_triage.md` step 4: apt or DNS failures,
    corepack/pnpm fetch, `UND_ERR_SOCKET`, registry 5xx or rate limit), or the
    same check fails the same way on the base branch.
-4. It has not already failed on this same step after a rerun. **Failing twice
-   on the same step is a defect, not a flake.** Report it as a defect on the
-   base, still never as a repair round on this PR: this branch did not cause
-   it and cannot fix it. The PR stays a draft until the base is green.
+Those three make it `FLAKE/INFRA`. Whether it gets a rerun is a separate
+question with its own rule: **one rerun per failing step, ever.**
 
-Request one rerun yourself: `gh run rerun <run-id> --failed`. This workspace's
+- **First failure on this step:** `FLAKE/INFRA`, status `rerun requested`.
+  Request the one rerun (below).
+- **The rerun failed the same way on the same step:** still `FLAKE/INFRA`,
+  status `base defect: no more reruns`. Failing twice on the same step is a
+  defect, not a flake, but it is a defect on the base: this branch did not
+  cause it and cannot fix it, so it is **never `REPAIRABLE` and never a repair
+  round**, and nobody requests a second rerun. What closes it is the same
+  check green on the default branch, then one rerun on this SHA. The PR stays
+  a draft until then.
+
+If predicate 2 fails at any point (the failing test exercises code this PR
+changed), it is `REPAIRABLE`, whatever the rerun showed.
+
+Request the one rerun yourself: `gh run rerun <run-id> --failed`. This workspace's
 GitHub App token is documented as `Actions: Read`, so a refusal (HTTP 403,
 "Resource not accessible by integration") is expected and is not an error. Put
 the command and the refusal, verbatim, in the handoff. If the rerun is
 accepted, wait on it as the CI section below says (`timeout 25m gh pr checks
 <n> --watch --interval 60`) and read it again. Green on this SHA closes the
-item.
+item; the same failure again moves it to `base defect: no more reruns`.
 
 ### 4. Evidence this workspace cannot produce
 
@@ -189,6 +214,11 @@ rules give way to this precheck:
 - "Without either, it IS a blocker", for a job that is skipped by design but
   covers changed code, does not apply when the missing evidence needs Docker,
   a database or a real store. That is `ORCHESTRATOR_EVIDENCE`.
+- The per-file progress line is the evidence only where the job's reporter
+  prints one. For a test this workspace can run, whose job prints none
+  (xdist), check 2's collection and run on this head settle it. A check that
+  needs Docker, a database or a real store still needs its per-file CI line
+  on this SHA, exactly as that section says, or it is `ORCHESTRATOR_EVIDENCE`.
 
 Everything else in that section stands, including that a pass on an older
 head proves nothing.
@@ -208,6 +238,10 @@ a table with one row per open non-`REPAIRABLE` item, or the single word
 
 | Class | Item | Exact command or patch | What closes it |
 |---|---|---|---|
+
+A `FLAKE/INFRA` row's Item names its status, `rerun requested` or `base
+defect: no more reruns`, so the next phase knows whether a rerun is still
+owed.
 
 Every `REPAIRABLE` item also goes under BLOCKING, written as the instruction
 a fix phase can act on (see below). Your verdict is `blocked` if and only if

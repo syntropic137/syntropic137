@@ -27,10 +27,20 @@ The precheck covers the four checks the brief asked for:
 2. Each new or changed test file must have a CI job that runs it. When the
    fix is inside the branch, the item is `REPAIRABLE`. When the fix is in
    `.github/workflows/`, it is `CI_GAP` with a patch, because the workspace
-   credential refuses any push that touches that directory.
+   credential refuses any push that touches that directory. Whether a job
+   collects the file is answered statically (its command, paths, matrix and
+   marker, and `--collect-only` on the head); whether it passed is answered
+   from a per-file CI line where the reporter prints one, else by running it
+   on the head. An xdist log prints no file names, so a name missing from it
+   proves nothing and is never a `CI_GAP`.
 3. A failure in files the PR did not change, matching a known flake class, is
-   `FLAKE/INFRA` and gets one rerun. Failing twice on the same step is a
-   defect on the base and never a flake.
+   `FLAKE/INFRA`. Eligibility for the class and eligibility for its rerun
+   are separate: each failing step gets **one** rerun, ever. If that rerun
+   fails the same way, the item stays `FLAKE/INFRA` with status `base defect:
+   no more reruns`: never `REPAIRABLE`, never a round, no second rerun, and
+   it closes when the same check is green on the default branch. A failing
+   test the PR did not edit that exercises code the PR did edit is
+   `REPAIRABLE`.
 4. Docker, database or real-store evidence is `ORCHESTRATOR_EVIDENCE`, with
    the exact command.
 
@@ -48,7 +58,9 @@ report with no handoff section counts as having open handoffs.
   the copies drift. The engine needs no change: the precheck only changes
   which items count toward `review_verdict`, and the aggregate already skips
   every round on `certified`.
-- **The safety property is structural, not trusted.** If a verifier puts a
+- **The safety property is structural, not trusted.** (Structural in the
+  workflow: the tests check the prompt text says this, and cannot show an
+  agent obeys it. The A/B's mechanism check is what measures that.) If a verifier puts a
   real defect in a handoff class, the PR does not ship. It stays a draft
   with the item posted on it. An item whose class the verifier cannot
   evidence is `REPAIRABLE`. The worst-case cost of a wrong classification is
@@ -71,7 +83,10 @@ Phase ids, order, agents (opus implements and fixes; codex `gpt-sol`
 verifies, with an opus fallback), timeouts, skills, `requires_verdict`, the
 two-round bound, and every prompt except `verify.md`, `reverify.md`,
 `reverify_2.md` and `finalize_pr.md`. All of this is pinned by
-`scripts/tests/test_implement_v4_precheck_variant.py`. Every line that
+`scripts/tests/test_implement_v4_precheck_variant.py`, which checks the
+definitions and prompt text, including that finalize's handoff section never
+instructs `gh pr ready` however the line wraps; it does not check what an
+agent does. Every line that
 differs outside the precheck section must name a precheck term.
 
 ### Deviations and provenance
@@ -123,8 +138,13 @@ this workflow is installed, excluding `quickfix`-shaped tasks (README:
 "is there anything to prove?"). Assignment alternates in dispatch order
 (1: v4, 2: v3, 3: v4, ...), fixed now so that task choice cannot follow the
 arm. No task runs on both arms. Each run is tagged
-`experiment=v4-precheck-ab` plus `arm=control` or `arm=treatment`
-(`syn execution tag`).
+`experiment:v4-precheck-ab` plus `arm:control` or `arm:treatment` (tags
+accept only `[a-z0-9._/:-]`, so `=` is rejected):
+
+```
+syn execution tag add <execution-id> experiment:v4-precheck-ab arm:treatment
+syn execution tag add <execution-id> experiment:v4-precheck-ab arm:control
+```
 
 ### Mechanism check (before any metric is read)
 
