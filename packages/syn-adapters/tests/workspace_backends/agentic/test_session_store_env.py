@@ -406,6 +406,29 @@ class TestAdapterIntegration:
     """The adapter is the seam that actually reaches the provider."""
 
     @pytest.mark.asyncio
+    async def test_the_real_provider_is_built_with_the_resolver_that_fills_the_binding(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The binding is only half: the provider resolves it with what it was built with."""
+        from syn_adapters.workspace_backends.agentic import adapter as adapter_module
+
+        real = adapter_module.WorkspaceDockerProvider
+        resolvers: list[object] = []
+
+        def recording_provider(*args: object, **kwargs: object) -> object:
+            resolvers.append(kwargs.get("credentials"))
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(adapter_module, "WorkspaceDockerProvider", recording_provider)
+        adapter = AgenticIsolationAdapter(session_store=_enabled_settings())
+
+        [resolver] = resolvers
+        assert resolver is adapter.credentials
+        assert isinstance(resolver, WorkspaceCredentials)
+        [binding] = session_store_credential_bindings(_enabled_settings())
+        assert await resolver.resolve(binding.ref) == STORE_TOKEN
+
+    @pytest.mark.asyncio
     async def test_configured_store_reaches_the_provider(self) -> None:
         provider = await _create(_enabled_settings())
         ws_config = provider.create.await_args.args[0]

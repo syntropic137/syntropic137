@@ -240,40 +240,50 @@ class AgenticEventStreamAdapter:
         credentials = self._host.credentials
 
         plain, bindings, parked = credentials.bind_launch(environment or {})
-        wrapper = wrapper_name if wrapper_name is not None else mint_wrapper_name()
-        spec = OperationSpec(
-            schema=MISSING,
-            execution_id=handle.isolation_id,
-            operation_key=uuid.uuid4().hex,
-            argv=tuple(command),
-            working_directory=_relative_working_directory(working_directory),
-            environment=plain,
-            credential_bindings=bindings,
-            launch_marker=LaunchMarker(argv0=wrapper, line=announce_as(wrapper)),
-            timeout_seconds=_timeout_seconds(timeout_seconds),
-            metadata={},
-        )
-        self._last_exit_code = None
-        self._last_signal_death = None
-        self._last_lost_bytes = 0
         try:
+            wrapper = wrapper_name if wrapper_name is not None else mint_wrapper_name()
+            spec = OperationSpec(
+                schema=MISSING,
+                execution_id=handle.isolation_id,
+                operation_key=uuid.uuid4().hex,
+                argv=tuple(command),
+                working_directory=_relative_working_directory(working_directory),
+                environment=plain,
+                credential_bindings=bindings,
+                launch_marker=LaunchMarker(argv0=wrapper, line=announce_as(wrapper)),
+                timeout_seconds=_timeout_seconds(timeout_seconds),
+                metadata={},
+            )
+            self._last_exit_code = None
+            self._last_signal_death = None
+            self._last_lost_bytes = 0
             ref = await provider.start(workspace, spec)
         finally:
-            # Resolved during start: nothing needs the values after it.
+            # Resolved during start, or never needed when the spec or the start
+            # failed: no launch value outlives this block either way.
             credentials.release(parked)
         logger.debug("Started stream operation %s (cmd=%s)", ref.operation_id, command)
 
-        status: OperationStatus | None = None
         try:
             async for line in self._observe(provider, ref):
                 yield line
             status = await provider.status(ref)
-        finally:
-            if status is None:
-                # The reader stopped early or was cancelled: the operation must
-                # not outlive the stream nobody is reading.
-                status = await provider.cancel(ref, grace_seconds=_CANCEL_GRACE_SECONDS)
-            await self._settle(status, spec)
+        except BaseException:
+            # The reader stopped early, was cancelled, or observation failed:
+            # the operation must not outlive the stream nobody is reading. The
+            # primary failure stays primary - a cancel or settle that also
+            # fails is logged with its cause, never raised in its place.
+            try:
+                await self._settle(
+                    await provider.cancel(ref, grace_seconds=_CANCEL_GRACE_SECONDS), spec
+                )
+            except Exception:
+                logger.exception(
+                    "Cancelling stream operation %s after it stopped also failed",
+                    ref.operation_id,
+                )
+            raise
+        await self._settle(status, spec)
 
     async def _observe(self, provider: SupportsOperations, ref: OperationRef) -> AsyncIterator[str]:
         decoder = LineDecoder()

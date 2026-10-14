@@ -20,12 +20,16 @@ from agentic_isolation.contract import (
     MISSING,
     ObservationGap,
     ObservationPage,
+    OperationError,
     OperationRef,
     OperationSpec,
     OperationStatus,
     WorkspaceRef,
 )
 from agentic_isolation.providers.base import Workspace
+from agentic_isolation.providers.docker_operations import DockerOperations
+from agentic_isolation.providers.operation_spool import OperationFailure
+from pydantic import ValidationError
 
 from syn_adapters.platform_access import WorkspacePlatformGrant
 from syn_adapters.workspace_backends.agentic import stream_adapter
@@ -211,6 +215,102 @@ async def test_environment_and_platform_grant_reach_the_workload_but_not_the_spe
     assert spec.working_directory == "repo"
     with pytest.raises(Exception, match="not one Syntropic137 binds"):
         await credentials.resolve(spec.credential_bindings[0].ref)  # released after start
+
+
+async def test_every_credential_agentic_workspace_names_is_bound_never_carried() -> None:
+    """AUTH as a whole word is a credential too (AW's WorkspaceConfig rule), not only *_TOKEN."""
+    store = "SYNTHETIC_STORE_AUTH_NOT_A_CREDENTIAL"
+    grant = WorkspacePlatformGrant("http://envoy-proxy:8081/syn-platform", _TOKEN)
+    environment = {
+        "AGENTIC_SESSION_STORE_AUTH": store,
+        "GIT_AUTHOR_NAME": "syn-bot",
+        **grant.env,
+    }
+    adapter, ops, _ = _stream([b"x\n"])
+
+    await _lines(adapter, environment=environment)
+
+    spec = ops.specs[0]
+    assert ops.workload_env == environment, "every value reaches the workload"
+    assert sorted(b.target for b in spec.credential_bindings) == [
+        "AGENTIC_SESSION_STORE_AUTH",
+        "SYN_API_TOKEN",
+    ]
+    assert spec.environment["GIT_AUTHOR_NAME"] == "syn-bot", "AUTHOR is not AUTH"
+    # The argv agentic-workspace's real Docker transport would spawn for this spec.
+    argv = DockerOperations(
+        credentials=None, retention_bytes=1024, max_page_bytes=1024
+    ).client_argv(
+        "ws-container", spec, secret_names=tuple(b.target for b in spec.credential_bindings)
+    )
+    for value in (store, _TOKEN):
+        assert value not in spec.model_dump_json()
+        assert not any(value in arg for arg in argv)
+
+
+async def test_a_spec_that_fails_validation_parks_no_launch_credential() -> None:
+    adapter, ops, credentials = _stream([b"x\n"])
+    stream = adapter.stream(_HANDLE, [], environment={"SYN_API_TOKEN": _TOKEN})
+
+    with pytest.raises(ValidationError):
+        _ = [line async for line in stream]
+
+    assert ops.specs == []
+    assert not credentials._launch
+
+
+async def test_a_start_that_fails_parks_no_launch_credential() -> None:
+    adapter, ops, credentials = _stream([b"x\n"])
+    refused = OperationFailure(OperationError(kind="provider_unavailable", message="no daemon"))
+
+    async def failed_start(*_a: object, **_k: object) -> None:
+        raise refused
+
+    ops.start = failed_start  # type: ignore[method-assign]
+    with pytest.raises(OperationFailure) as caught:
+        await _lines(adapter, environment={"SYN_API_TOKEN": _TOKEN})
+
+    assert caught.value is refused
+    assert not credentials._launch
+
+
+async def test_an_observation_failure_stays_primary_when_cancel_also_fails(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    adapter, ops, _ = _stream([b"x\n"])
+    primary = OperationFailure(OperationError(kind="provider_unavailable", message="observe"))
+    secondary = OperationFailure(OperationError(kind="provider_unavailable", message="cancel"))
+
+    async def failed_observe(*_a: object, **_k: object) -> None:
+        raise primary
+
+    async def failed_cancel(*_a: object, **_k: object) -> None:
+        ops.calls.append("cancel")
+        raise secondary
+
+    ops.observe = failed_observe  # type: ignore[method-assign]
+    ops.cancel = failed_cancel  # type: ignore[method-assign]
+    with caplog.at_level(logging.ERROR), pytest.raises(OperationFailure) as caught:
+        await _lines(adapter)
+
+    assert caught.value is primary
+    assert "cancel" in ops.calls, "the operation was still told to stop"
+    assert "provider_unavailable: cancel" in caplog.text, "the secondary failure is surfaced"
+
+
+async def test_a_status_failure_with_no_primary_error_still_propagates() -> None:
+    adapter, ops, _ = _stream([b"x\n"])
+    lost = OperationFailure(OperationError(kind="provider_unavailable", message="status"))
+
+    async def failed_status(*_a: object, **_k: object) -> None:
+        raise lost
+
+    ops.status = failed_status  # type: ignore[method-assign]
+    with pytest.raises(OperationFailure) as caught:
+        await _lines(adapter)
+
+    assert caught.value is lost
+    assert ops.cancelled
 
 
 async def test_the_launch_marker_is_the_one_the_evidence_counts() -> None:

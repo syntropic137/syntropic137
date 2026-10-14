@@ -22,7 +22,7 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING
 
-from agentic_isolation.config import CredentialPolicyError
+from agentic_isolation.config import CredentialPolicyError, _reject_credential_environment
 from agentic_isolation.contract import MISSING, CredentialBinding, CredentialRef
 from agentic_isolation.contract._base import CredentialFreeStringMap
 from pydantic import TypeAdapter, ValidationError
@@ -37,17 +37,20 @@ if TYPE_CHECKING:
 #: Scope of a credential that exists for one stream launch only.
 LAUNCH_CREDENTIAL_SCOPE = "syn-launch"
 
-# agentic-workspace's own rule for which environment keys name a credential.
-# Asked, never re-derived: a copy here would drift the moment the contract's
-# pattern changes, and the drift would surface as a refused launch.
+# agentic-workspace's own rules for which environment keys name a credential.
+# Asked, never re-derived: a copy here would drift the moment either pattern
+# changes. Both are asked because they differ: the contract's map misses AUTH
+# as a whole word (AGENTIC_SESSION_STORE_AUTH), which WorkspaceConfig's rule
+# adds, and a key either one names must never travel as a plain value.
 _CREDENTIAL_FREE = TypeAdapter(CredentialFreeStringMap)
 
 
 def names_a_credential(key: str) -> bool:
-    """Whether the contract refuses `key` in a credential-free environment map."""
+    """Whether agentic-workspace refuses `key` as a plain environment entry."""
     try:
         _CREDENTIAL_FREE.validate_python({key: ""})
-    except ValidationError:
+        _reject_credential_environment({key: ""})
+    except (ValidationError, ValueError):
         return True
     return False
 
