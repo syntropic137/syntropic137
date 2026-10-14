@@ -84,7 +84,8 @@ are applied by hand. 4c needs a test run, which a git-only `check` cannot do.
 
 | Merge | Fails | Why |
 |---|---|---|
-| #359, #360, #362 | 4c (and rule 3, by hand) | They pass 4a: no function changed through main. But their Python changes are tests or docstrings only, and their shell changes are rewritten within 30 days (`suite.yaml` v1/v2 notes) |
+| #359, #360 | 4c (and rule 3, by hand) | They pass 4a: no function changed through main. But their Python changes are tests or docstrings only, and their shell changes are rewritten within 30 days (`suite.yaml` v1/v2 notes) |
+| #362 | rule 3, by hand | It passes 4a, and it has one product Python change with a test (`build-provider.py` copies with `symlinks=True`). But #363, #369, #382 and #387 change the omni-agent Dockerfile it touched within 30 days (`suite.yaml` v1 note). It is the nearest miss |
 | #355 | rule 3 | `check`: #358 rewrites two of its functions |
 | #345 | 4a | `fbb5cbb` and `0f48e8c` change `SecurityConfig.to_docker_run_args` |
 | #346 | 4a | `119f465` changes `doctor._exporter_present` |

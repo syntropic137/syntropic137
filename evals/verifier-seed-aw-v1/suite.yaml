@@ -102,9 +102,9 @@
 #     mainline merge on AW main (37f210b, 2026-10-13) at least 30 days old.
 #     None qualifies, so v3 has NO clean controls and cannot measure false
 #     blocks. Read in full in README "Rule 4"; in short, the only merges whose
-#     changed functions survive to main untouched (#359, #360, #362) change
-#     Python only in tests or docstrings, and their shell was rewritten within
-#     30 days. Every other merge either changes no Python or has a function
+#     changed functions survive to main untouched are #359, #360 and #362.
+#     #359 and #360 change Python only in tests or docstrings. #362's shell
+#     and Dockerfile changes were rewritten within 30 days. Every other merge either changes no Python or has a function
 #     rewritten later (#355, #345, #346, #55) or is a known defect (#240).
 #     TRAIN AND HOLDOUT for the v3 batch of one defect: none is holdout. v3:
 #     5 live cases, 1 holdout (replay-keeps-recorded-verdict); train is 4
