@@ -102,6 +102,8 @@ class ExecutionRunQueue(Protocol):
     async def register(self, host: ExecutorHost, capacity: int) -> None:
         """Add the host's ``executor_hosts`` row and its own ``execution_budget`` row.
 
+        First deletes any other host's row in the same ``container_id``: the
+        restart is the proof that process stopped, so it has **left** (D5).
         Idempotent for the same host. ``capacity`` is seeded from
         ``SYN_EXECUTION_MAX_CONCURRENT`` by the caller (D12).
         """

@@ -464,3 +464,34 @@ async def test_a_reconcilers_rows_are_taken_over_only_after_it_leaves(
             await conn.fetchval("SELECT in_use FROM execution_budget WHERE executor_id='dying'")
             == 0
         )
+
+
+async def test_a_restart_in_the_same_container_retires_the_predecessor_not_its_work(
+    pools: list[asyncpg.Pool],
+) -> None:
+    """D5 Restart: the new process gets a new host_id, deletes the old one's host
+    row, and fences the old one's expired run as the OLD host's (so the reap
+    selects the predecessor's containers, never the successor's)."""
+    old = PostgresExecutionRunQueue(pools[0], lease_ttl=timedelta(milliseconds=200))
+    new = PostgresExecutionRunQueue(pools[1])
+    box = "container-1"
+    await old.register(
+        ExecutorHost(host_id="box.aaa", container_id=box, generation="g", epoch=1), 1
+    )
+    await old.heartbeat("box.aaa")
+    await _admit(old, "exec-before-restart")
+    assert await old.claim("box.aaa") is not None
+    await asyncio.sleep(0.5)
+
+    await new.register(
+        ExecutorHost(host_id="box.bbb", container_id=box, generation="g", epoch=1), 1
+    )
+    await new.heartbeat("box.bbb")
+    async with pools[0].acquire() as conn:
+        hosts = await conn.fetch("SELECT host_id FROM executor_hosts")
+        assert [row["host_id"] for row in hosts] == ["box.bbb"]
+    with pytest.raises(LookupError):
+        await old.heartbeat("box.aaa")
+
+    (fenced,) = await new.fence_expired("box.bbb")
+    assert (fenced.executor_id, fenced.reconciler) == ("box.aaa", "box.bbb")

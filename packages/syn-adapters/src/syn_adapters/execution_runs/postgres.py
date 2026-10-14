@@ -50,6 +50,13 @@ class PostgresExecutionRunQueue:
         if capacity < 0:
             raise ValueError("executor capacity must be nonnegative")
         async with self._pool.acquire() as conn, conn.transaction():
+            # D5 Restart: a process starting in a container that already has a
+            # host row is the proof that row's process stopped; it has left.
+            await conn.execute(
+                "DELETE FROM executor_hosts WHERE container_id=$1 AND host_id<>$2",
+                host.container_id,
+                host.host_id,
+            )
             await conn.execute(
                 """INSERT INTO executor_hosts (host_id,container_id,generation,epoch)
                 VALUES ($1,$2,$3,$4) ON CONFLICT (host_id) DO NOTHING""",

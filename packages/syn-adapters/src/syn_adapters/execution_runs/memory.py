@@ -78,6 +78,9 @@ class InMemoryExecutionRunQueue(InMemoryAdapter):
     async def register(self, host: ExecutorHost, capacity: int) -> None:
         if capacity < 0:
             raise ValueError("executor capacity must be nonnegative")
+        for other_id, other in list(self._hosts.items()):
+            if other.host.container_id == host.container_id and other_id != host.host_id:
+                self._hosts[other_id] = other.model_copy(update={"registered": False})
         self._hosts.setdefault(host.host_id, _Host(host=host, capacity=capacity))
 
     async def deregister(self, host_id: str) -> None:
