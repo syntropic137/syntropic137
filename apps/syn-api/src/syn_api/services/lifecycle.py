@@ -47,7 +47,7 @@ from syn_api.services.execution_posture import (
 )
 from syn_api.services.feedback_lifecycle import init_ui_feedback, shutdown_ui_feedback
 from syn_api.services.health_probes import describe_codex_auth_health, describe_disk_health
-from syn_api.services.process_role import resolve_previous_world
+from syn_api.services.process_role import current_role, resolve_previous_world, role_services
 from syn_api.services.read_path_health import _judge_read_path
 from syn_api.services.request_latency_lifecycle import start_request_latency, stop_request_latency
 from syn_api.services.seeding import seed_offline_data
@@ -84,7 +84,6 @@ if TYPE_CHECKING:
         CheckRunIngestionService,
         GitHubEventIngestionScheduler,
     )
-    from syn_shared.settings.execution import ProcessRole
 
 logger = logging.getLogger(__name__)
 SubscriptionHealthResult = tuple[SubscriptionHealth | None, tuple[DegradedReason, ...]]
@@ -208,12 +207,10 @@ async def _init_degradable_services(state: LifecycleState) -> None:
     # previous process from work this one just started. Resolving the old world
     # before opening the door to a new one removes the race rather than
     # narrowing it; the started_before cutoff below is defence in depth.
-    from syn_shared.settings import get_settings
-
-    role = get_settings().execution.process_role
+    role = current_role()
     await resolve_previous_world(role, started_before=datetime.now(UTC))
 
-    for entry in _role_services(role):
+    for entry in role_services(_SERVICE_REGISTRY, role):
         try:
             await entry.init_fn(state)
         except Exception:
@@ -968,11 +965,6 @@ _SERVICE_REGISTRY: tuple[_ServiceEntry, ...] = (
         api_only=True,
     ),
 )
-
-
-def _role_services(role: ProcessRole) -> tuple[_ServiceEntry, ...]:
-    """The registry entries a process of this role starts (ADR-072 D1)."""
-    return tuple(e for e in _SERVICE_REGISTRY if role.serves_api or not e.api_only)
 
 
 # ── Recovery helpers (ADR-057) ─────────────────────────────────────

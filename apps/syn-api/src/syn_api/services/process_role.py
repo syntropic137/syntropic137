@@ -11,7 +11,7 @@ expiry and reaped by its own ``syn.host_id`` instead (ADR-072 D5, D6).
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from syn_api.services.execution_host_runner import resolve_previous_process
 from syn_api.services.reconciliation import reconcile_orphaned_sessions
@@ -23,6 +23,23 @@ if TYPE_CHECKING:
     from syn_shared.settings.execution import ProcessRole
 
 logger = logging.getLogger(__name__)
+
+
+class RoleScoped(Protocol):
+    """A startup service that says whether only an API process starts it."""
+
+    @property
+    def api_only(self) -> bool: ...
+
+
+def current_role() -> ProcessRole:
+    """This process's role, as SYN_EXECUTION_PROCESS_ROLE pins it."""
+    return get_settings().execution.process_role
+
+
+def role_services[S: RoleScoped](registry: tuple[S, ...], role: ProcessRole) -> tuple[S, ...]:
+    """The registry entries a process of this role starts (ADR-072 D1)."""
+    return tuple(e for e in registry if role.serves_api or not e.api_only)
 
 
 async def resolve_previous_world(role: ProcessRole, *, started_before: datetime) -> None:

@@ -145,7 +145,10 @@ async def test_an_api_restart_leaves_a_live_executor_session_running(
 
 
 def test_the_production_registry_keeps_dispatchers_off_the_executor() -> None:
-    executor = {e.reason for e in lifecycle._role_services(ProcessRole.EXECUTOR)}
+    executor = {
+        e.reason
+        for e in process_role.role_services(lifecycle._SERVICE_REGISTRY, ProcessRole.EXECUTOR)
+    }
     api_only = {
         lifecycle.DegradedReason.SUBSCRIPTION_COORDINATOR,
         lifecycle.DegradedReason.EVENT_POLLER,
@@ -153,7 +156,9 @@ def test_the_production_registry_keeps_dispatchers_off_the_executor() -> None:
     }
     assert executor
     assert not executor & api_only
-    assert set(lifecycle._role_services(ProcessRole.API)) == set(lifecycle._SERVICE_REGISTRY)
+    assert set(process_role.role_services(lifecycle._SERVICE_REGISTRY, ProcessRole.API)) == set(
+        lifecycle._SERVICE_REGISTRY
+    )
 
 
 def test_the_role_defaults_to_one_process(monkeypatch: pytest.MonkeyPatch) -> None:
