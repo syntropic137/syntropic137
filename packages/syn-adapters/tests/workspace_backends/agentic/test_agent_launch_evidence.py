@@ -56,7 +56,14 @@ if TYPE_CHECKING:
 
 from syn_shared.settings.session_store import SessionStoreSettings
 
-pytestmark = pytest.mark.unit
+# The launcher these tests drive is agentic-workspace's Local provider, which
+# refuses to run on anything but Linux (it reads /proc and uses setsid).
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.skipif(
+        sys.platform != "linux", reason="agentic-workspace Local operations require Linux"
+    ),
+]
 
 
 class _Launch(NamedTuple):
