@@ -8,7 +8,12 @@ import pytest
 
 from syn_adapters.execution_runs.memory import InMemoryExecutionRunQueue
 from syn_adapters.in_memory import InMemoryAdapterError
-from syn_domain.contexts.orchestration.ports import ExecutorHost, RunLeaseLost
+from syn_domain.contexts.orchestration.ports import (
+    ExecutorHost,
+    ExecutorPool,
+    PoolDefinitionConflict,
+    RunLeaseLost,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -150,3 +155,47 @@ async def test_a_restart_moves_the_machine_budget_one_release_at_a_time() -> Non
     claimed = await queue.claim("h1.new")
     assert claimed is not None and claimed.execution_id == "waiting"
     assert await queue.claim("h1.new") is None
+
+
+_P1 = ExecutorPool(pool_id="p1", priority=1, provider="docker")
+
+
+def _in_pool(host_id: str, pool: ExecutorPool, container_id: str | None = None) -> ExecutorHost:
+    return ExecutorHost(
+        host_id=host_id,
+        container_id=container_id or f"c-{host_id}",
+        generation="g1",
+        epoch=1,
+        pool=pool,
+    )
+
+
+async def test_a_differing_declaration_is_refused_while_a_member_is_live_and_writes_nothing() -> (
+    None
+):
+    """Mirrors the Postgres D13 rule, including a member that has not yet beaten."""
+    clock = _Clock()
+    queue = await _queue_with(clock, 2, "a")
+    await queue.register(_in_pool("m", _P1), 1)
+    with pytest.raises(PoolDefinitionConflict):
+        # In h1's container: a committed registration would have retired h1.
+        await queue.register(_in_pool("n", _P1.model_copy(update={"priority": 4}), "c-h1"), 1)
+    with pytest.raises(LookupError):
+        await queue.heartbeat("n")
+    await queue.heartbeat("h1")
+    assert await queue.claim("h1") is not None
+
+    # Once m is no longer live the pool may be redefined, and that is what binds next.
+    clock.now += timedelta(minutes=5)
+    await queue.register(_in_pool("n", _P1.model_copy(update={"priority": 4}), "c-h1"), 1)
+    await queue.heartbeat("n")
+    with pytest.raises(PoolDefinitionConflict):
+        await queue.register(_in_pool("o", _P1), 1)
+
+
+async def test_a_sole_member_restarting_in_its_container_may_redefine_its_pool() -> None:
+    queue = InMemoryExecutionRunQueue(clock=_Clock())
+    await queue.register(_in_pool("a.1", _P1, "box"), 1)
+    await queue.heartbeat("a.1")
+    await queue.register(_in_pool("a.2", _P1.model_copy(update={"region": "eu-west"}), "box"), 1)
+    await queue.heartbeat("a.2")
