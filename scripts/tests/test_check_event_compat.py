@@ -22,15 +22,22 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import check_event_compat
 from check_event_compat import (
     CompatCheckError,
+    EventIdentity,
     Fixture,
     ProbeRequest,
     ReleaseAnswer,
     ReleaseRead,
+    ReleaseWrite,
     check,
     load_fixtures,
 )
+from event_compat import probe
 
 from syn_domain.contexts.orchestration._shared import event_epoch
+from syn_domain.contexts.orchestration.domain.events import (
+    PhaseStartedEvent,
+    WorkflowExecutionStartedEvent,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -62,10 +69,14 @@ _PHASE = Fixture(
     },
 )
 
-#: What v1.0.0's PhaseStartedEvent writes for _PHASE: its own default, ``session_id: null``.
-_OLD_PHASE_WRITE = {**_PHASE.payload, "session_id": None}
+_START_ID = EventIdentity.of(WorkflowExecutionStartedEvent)
+_PHASE_ID = EventIdentity.of(PhaseStartedEvent)
 
-_READABLE = ReleaseRead(written=_START.payload)
+#: What v1.0.0's PhaseStartedEvent writes for _PHASE: its own default, ``session_id: null``.
+_OLD_PHASE_WRITE = ReleaseWrite(identity=_PHASE_ID, payload={**_PHASE.payload, "session_id": None})
+
+_START_WRITE = ReleaseWrite(identity=_START_ID, payload=_START.payload)
+_READABLE = ReleaseRead(written=_START_WRITE)
 
 
 def _release_answers(
@@ -92,7 +103,7 @@ def test_unreadable_payload_fails_when_the_epoch_was_not_bumped(
     _release_answers(
         monkeypatch,
         epoch=event_epoch.ORCHESTRATION_EVENT_EPOCH,
-        result=ReleaseRead(read_error="extra_forbidden", written=_START.payload),
+        result=ReleaseRead(read_error="extra_forbidden", written=_START_WRITE),
     )
     problem = _verdict(tmp_path)
     assert problem is not None
@@ -105,7 +116,7 @@ def test_unreadable_payload_passes_when_the_epoch_is_above_the_releases(
     _release_answers(
         monkeypatch,
         epoch=1,
-        result=ReleaseRead(read_error="extra_forbidden", written=_START.payload),
+        result=ReleaseRead(read_error="extra_forbidden", written=_START_WRITE),
     )
     monkeypatch.setattr(event_epoch, "ORCHESTRATION_EVENT_EPOCH", 2)
     assert _verdict(tmp_path) is None
@@ -117,7 +128,7 @@ def test_a_release_with_no_epoch_has_no_claim_guard_so_no_bump_excuses_it(
     _release_answers(
         monkeypatch,
         epoch=None,
-        result=ReleaseRead(read_error="extra_forbidden", written=_START.payload),
+        result=ReleaseRead(read_error="extra_forbidden", written=_START_WRITE),
     )
     monkeypatch.setattr(event_epoch, "ORCHESTRATION_EVENT_EPOCH", 99)
     assert _verdict(tmp_path) is not None
@@ -133,7 +144,7 @@ def test_what_the_release_writes_back_must_be_readable_even_after_a_bump(
         result=ReleaseRead(read_error="extra_forbidden", written=_OLD_PHASE_WRITE),
     )
     monkeypatch.setattr(event_epoch, "ORCHESTRATION_EVENT_EPOCH", 2)
-    monkeypatch.setattr(check_event_compat, "_current_model", lambda _name: _DefaultedSession)
+    monkeypatch.setattr(check_event_compat, "_current_decoder", lambda _id: _DefaultedSession)
     problem = _verdict(tmp_path, _PHASE)
     assert problem is not None
     assert "cannot read what vX writes" in problem
@@ -177,7 +188,7 @@ def test_an_old_nullable_default_fails_a_defaulted_non_nullable_reader(
 ) -> None:
     """The release writes ``session_id: null`` for a fixture that omits it (verify R1)."""
     _release_answers(monkeypatch, epoch=None, result=ReleaseRead(written=_OLD_PHASE_WRITE))
-    monkeypatch.setattr(check_event_compat, "_current_model", lambda _name: _DefaultedSession)
+    monkeypatch.setattr(check_event_compat, "_current_decoder", lambda _id: _DefaultedSession)
     problem = _verdict(tmp_path, _PHASE)
     assert problem is not None
     assert "session_id" in problem
@@ -192,6 +203,79 @@ def test_a_release_that_can_write_no_fixture_cannot_certify_anything(
     monkeypatch.setattr(event_epoch, "ORCHESTRATION_EVENT_EPOCH", 2)
     with pytest.raises(CompatCheckError, match="backward direction went untested"):
         _verdict(tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("stored_as", "why"),
+    [
+        (_START_ID.model_copy(update={"event_type": "WorkflowExecutionBegan"}), "no Workflow"),
+        (_START_ID.model_copy(update={"schema_version": 2}), "schema_version 2"),
+        (_START_ID.model_copy(update={"version": "v2"}), "'v2'"),
+    ],
+    ids=["renamed-type", "bumped-schema-version", "bumped-event-version"],
+)
+def test_what_the_release_stores_under_another_identity_is_unreadable_here(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, stored_as: EventIdentity, why: str
+) -> None:
+    """The store decodes by type and version, so a valid payload alone is not enough."""
+    written = ReleaseWrite(identity=stored_as, payload=_START.payload)
+    _release_answers(monkeypatch, epoch=None, result=ReleaseRead(written=written))
+    problem = _verdict(tmp_path)
+    assert problem is not None
+    assert "cannot read what vX writes" in problem
+    assert why in problem
+
+
+def test_the_release_is_told_the_identity_this_tree_stores_the_event_under(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    seen = _release_answers(monkeypatch, epoch=None, result=_READABLE)
+    _verdict(tmp_path)
+    [sent] = seen
+    assert sent.identity == EventIdentity(
+        event_type="WorkflowExecutionStarted", version="v1", schema_version=1
+    )
+
+
+# The probe itself, run here against this tree standing in for the release.
+
+
+def _probe_request(identity: EventIdentity, current: dict[str, object]) -> dict[str, object]:
+    return {
+        "name": _PHASE.name,
+        "event": _PHASE.event,
+        "identity": identity.model_dump(),
+        "current": current,
+        "fixture": _PHASE.payload,
+    }
+
+
+def test_the_probe_writes_the_fixture_not_what_this_tree_wrote() -> None:
+    """Kills "the backward direction reads ``current``" (verify M5)."""
+    current = {**_PHASE.payload, "phase_id": "written-by-this-tree"}
+    answer = probe._answer(_probe_request(_PHASE_ID, current))
+    assert answer["read_error"] is None
+    assert answer["written"] == {
+        "identity": _PHASE_ID.model_dump(),
+        "payload": PhaseStartedEvent.model_validate(_PHASE.payload).model_dump(mode="json"),
+    }
+
+
+@pytest.mark.parametrize(
+    ("stored_as", "why"),
+    [
+        (_PHASE_ID.model_copy(update={"event_type": "PhaseBegan"}), "cannot decode PhaseBegan"),
+        (_PHASE_ID.model_copy(update={"schema_version": 2}), "schema_version 2"),
+        (_PHASE_ID.model_copy(update={"version": "v2"}), "'v2'"),
+    ],
+    ids=["renamed-type", "bumped-schema-version", "bumped-event-version"],
+)
+def test_the_probe_cannot_read_an_event_stored_under_an_identity_it_does_not_know(
+    stored_as: EventIdentity, why: str
+) -> None:
+    answer = probe._answer(_probe_request(stored_as, _PHASE.payload))
+    assert isinstance(answer["read_error"], str)
+    assert why in answer["read_error"]
 
 
 def _suite(tmp_path: Path, content: object) -> Path:

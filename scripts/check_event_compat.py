@@ -20,6 +20,11 @@ against the real previous release rather than a hand-written copy of it.
    the current model, so a default the old writer supplies (``None`` where
    this tree now wants a string) is seen.
 
+Both directions read the way the event store does: by the stored
+``event_type`` and ``schema_version`` (ESP ADR-027), never by class name, and
+the ``@event`` version string must agree. A renamed type or a bumped version is
+unreadable to the other side even when no field changed.
+
 A payload the release cannot read passes only when this tree's Event Epoch is
 above the release's: then the claim predicate keeps that release's Executors
 off the run. A release with no epoch has no predicate, so for it every payload
@@ -47,6 +52,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from event_sourcing.decorators.events import get_event_metadata, resolve_event_class
 from pydantic import BaseModel, JsonValue, ValidationError
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -69,6 +75,10 @@ class CompatCheckError(Exception):
     """The check could not run; says nothing about compatibility."""
 
 
+class UnregisteredEventError(Exception):
+    """This tree has no class for an identity the release stores events under."""
+
+
 class Fixture(BaseModel, frozen=True, extra="forbid"):
     name: str
     why: str | None = None
@@ -76,13 +86,41 @@ class Fixture(BaseModel, frozen=True, extra="forbid"):
     payload: dict[str, JsonValue]
 
 
+class EventIdentity(BaseModel, frozen=True, extra="forbid"):
+    """What an event is stored under and decoded by, and the version ``@event`` declares."""
+
+    event_type: str
+    version: str
+    schema_version: int
+
+    @classmethod
+    def of(cls, model: type[BaseModel]) -> EventIdentity:
+        metadata = get_event_metadata(model)
+        if metadata is None:
+            msg = f"{model.__name__} carries no @event metadata"
+            raise CompatCheckError(msg)
+        return cls(
+            event_type=metadata.event_type,
+            version=metadata.version,
+            schema_version=getattr(model, "schema_version", 1),
+        )
+
+
 class ProbeRequest(BaseModel, frozen=True, extra="forbid"):
     """One fixture as sent to the release: what this tree writes, and the fixture itself."""
 
     name: str
     event: str
+    identity: EventIdentity
     current: dict[str, JsonValue]
     fixture: dict[str, JsonValue]
+
+
+class ReleaseWrite(BaseModel, frozen=True, extra="forbid"):
+    """An event as the release stores it: its identity and its payload."""
+
+    identity: EventIdentity
+    payload: dict[str, JsonValue]
 
 
 class ReleaseRead(BaseModel, frozen=True, extra="forbid"):
@@ -94,7 +132,7 @@ class ReleaseRead(BaseModel, frozen=True, extra="forbid"):
     """
 
     read_error: str | None = None
-    written: dict[str, JsonValue] | None = None
+    written: ReleaseWrite | None = None
     write_error: str | None = None
 
 
@@ -229,6 +267,22 @@ def _current_model(name: str) -> type[BaseModel]:
         raise CompatCheckError(msg) from exc
 
 
+def _current_decoder(identity: EventIdentity) -> type[BaseModel]:
+    """The class this tree decodes ``identity`` with, as its event store would."""
+    model = resolve_event_class(identity.event_type, identity.schema_version)
+    if model is None:
+        msg = f"no {identity.event_type} schema_version {identity.schema_version} is registered"
+        raise UnregisteredEventError(msg)
+    declared = EventIdentity.of(model).version
+    if declared != identity.version:
+        msg = (
+            f"{identity.event_type} is declared @event version {declared!r} here, "
+            f"{identity.version!r} there"
+        )
+        raise UnregisteredEventError(msg)
+    return model
+
+
 def _ask_release(python: Path, requests: list[ProbeRequest], workdir: Path) -> ReleaseAnswer:
     request = workdir / "request.json"
     request.write_text(json.dumps([r.model_dump() for r in requests]), "utf-8")
@@ -260,7 +314,11 @@ def check(tag: str, python: Path, fixtures: list[Fixture], workdir: Path) -> lis
             raise CompatCheckError(msg) from exc
         requests.append(
             ProbeRequest(
-                name=fixture.name, event=fixture.event, current=current, fixture=fixture.payload
+                name=fixture.name,
+                event=fixture.event,
+                identity=EventIdentity.of(model),
+                current=current,
+                fixture=fixture.payload,
             )
         )
 
@@ -284,8 +342,8 @@ def check(tag: str, python: Path, fixtures: list[Fixture], workdir: Path) -> lis
         if read.written is not None:
             backward_samples += 1
             try:
-                _current_model(request.event).model_validate(read.written)
-            except ValidationError as exc:
+                _current_decoder(read.written.identity).model_validate(read.written.payload)
+            except (UnregisteredEventError, ValidationError) as exc:
                 problems.append(f"this tree cannot read what {tag} writes: {exc}")
         elif read.write_error is None:
             msg = f"the release's probe gave neither a payload nor a reason for {request.name}"
