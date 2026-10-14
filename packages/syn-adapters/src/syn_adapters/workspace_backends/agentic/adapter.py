@@ -23,6 +23,8 @@ from agentic_isolation import (
     SecurityConfig,
     WorkspaceDockerProvider,
 )
+from agentic_isolation.contract import OperationError
+from agentic_isolation.providers.operation_spool import OperationFailure
 
 from syn_adapters.diagnostics import capture_signal_death
 from syn_adapters.workspace_backends.agentic.adapter_copy import (
@@ -44,7 +46,11 @@ from syn_adapters.workspace_backends.agentic.session_store_env import (
 # `from ...agentic.adapter import WorkspaceProvisionError` call sites keep
 # working unchanged.
 from syn_adapters.workspace_backends.agentic.teardown_usage import usage_from_report
-from syn_adapters.workspace_backends.errors import WorkspaceProvisionError
+from syn_adapters.workspace_backends.errors import (
+    TeardownFailure,
+    WorkspaceProvisionError,
+    WorkspaceTeardownError,
+)
 from syn_adapters.workspace_backends.exec_status_lost import (
     diagnose_lost_status,
     status_was_lost,
@@ -64,6 +70,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from agentic_isolation import AgenticWorkspace
+    from agentic_isolation.contract import FinalizationOutcome
     from agentic_isolation.providers.base import SupportsOperations, Workspace
 
     from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
@@ -448,11 +455,23 @@ class AgenticIsolationAdapter:
             # Logged inside the task: a second cancellation can return the
             # caller before the reap finishes, and nothing would see its error.
             try:
-                await provider.teardown(target=workspace)  # type: ignore[arg-type]  # Workspace vs AgenticWorkspace adapter boundary
+                report = await provider.teardown(target=workspace)  # type: ignore[arg-type]  # Workspace vs AgenticWorkspace adapter boundary
+                failure = _teardown_failure(report.finalization)
             except Exception:
                 logger.exception(
                     "Could not destroy workspace for execution %s after a failed provision",
                     execution_id,
+                )
+                return
+            if failure is not None:
+                logger.error(
+                    "Workspace reap %s for execution %s after a failed provision "
+                    "(stage=%s, %s): %s",
+                    failure.state,
+                    execution_id,
+                    failure.stage,
+                    failure.kind,
+                    failure.message,
                 )
 
         reap = asyncio.create_task(reap_and_log())
@@ -473,26 +492,43 @@ class AgenticIsolationAdapter:
         Returns:
             What the workspace consumed, from the provider's teardown report,
             or None when the provider reported nothing.
+
+        Raises:
+            WorkspaceTeardownError: the teardown failed, was retained or
+                raised. The handle stays registered, so destroying it again
+                reaches the provider again rather than "not found".
         """
-        workspace = self._workspaces.pop(handle.isolation_id, None)
+        workspace = self._workspaces.get(handle.isolation_id)
         if workspace is None:
             logger.warning("Workspace not found: %s", handle.isolation_id)
             return None
 
         logger.info("Destroying workspace (id=%s)", handle.isolation_id)
-        report = await self._provider.teardown(target=workspace)  # type: ignore[arg-type]  # Workspace vs AgenticWorkspace adapter boundary
-        if report.finalization.state != "completed":
-            # Not raised: the caller's primary failure, if any, is the one that
-            # propagates, and the container is stopped and removed either way.
-            # The workspace directory may remain; say so rather than drop it.
-            logger.error(
-                "Workspace teardown %s (id=%s, stage=%s): %s",
-                report.finalization.state,
-                handle.isolation_id,
-                report.finalization.stage,
-                report.finalization.error,
+        try:
+            report = await self._provider.teardown(target=workspace)  # type: ignore[arg-type]  # Workspace vs AgenticWorkspace adapter boundary
+        except Exception as e:
+            failure = TeardownFailure(
+                state="error",
+                kind=e.error.kind if isinstance(e, OperationFailure) else type(e).__name__,
+                message=str(e) or type(e).__name__,
             )
-        return usage_from_report(report.usage)
+            raise WorkspaceTeardownError(failure) from e
+        usage = usage_from_report(report.usage)
+        failure = _teardown_failure(report.finalization)
+        if failure is not None:
+            # What remains depends on the stage: a `while_running` failure
+            # leaves the container itself, `before_delete` its directory.
+            logger.error(
+                "Workspace teardown %s (id=%s, stage=%s, %s): %s",
+                failure.state,
+                handle.isolation_id,
+                failure.stage,
+                failure.kind,
+                failure.message,
+            )
+            raise WorkspaceTeardownError(failure, usage)
+        self._workspaces.pop(handle.isolation_id, None)
+        return usage
 
     async def execute(
         self,
@@ -608,3 +644,16 @@ class AgenticIsolationAdapter:
     ) -> list[tuple[str, bytes]]:
         """Copy files from workspace via mounted volume."""
         return await copy_files_from_workspace(handle, patterns, base_path)
+
+
+def _teardown_failure(outcome: FinalizationOutcome) -> TeardownFailure | None:
+    """The provider's non-completed finalization in Syntropic137's terms; None when completed."""
+    if outcome.state == "completed":
+        return None
+    error = outcome.error
+    return TeardownFailure(
+        state=outcome.state,
+        kind=error.kind if isinstance(error, OperationError) else "unknown",
+        message=error.message if isinstance(error, OperationError) else "no error reported",
+        stage=outcome.stage if isinstance(outcome.stage, str) else None,
+    )

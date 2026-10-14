@@ -534,7 +534,7 @@ class WorkspaceService:
             if workspace is not None:
                 await workspace.revoke_issued_credentials()
                 await self._revoke_platform_grant(workspace)
-            usage = await cleanup_workspace(
+            teardown = await cleanup_workspace(
                 self,
                 aggregate,
                 workspace_id,
@@ -547,4 +547,5 @@ class WorkspaceService:
             # Handed back on the object every caller still holds after
             # `__aexit__`, so the frame that knows the session can record it.
             if workspace is not None:
-                workspace.teardown_usage = usage
+                workspace.teardown_usage = teardown.usage
+                workspace.teardown_failure = teardown.failure
