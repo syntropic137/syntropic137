@@ -523,8 +523,9 @@ async def _day_rollup_startup_lock(conn: asyncpg.Connection) -> AsyncIterator[No
     try:
         yield
     finally:
-        # Session locks survive the transaction; a pooled connection would
-        # carry this one back to the pool without the unlock.
+        # Session locks survive the transaction, so release promptly here.
+        # If this cannot run (cancelled mid-acquire, broken connection), the
+        # pool's reset (pg_advisory_unlock_all) or the session ending frees it.
         await conn.execute(ROLLUP_STARTUP_UNLOCK_SQL, ROLLUP_STARTUP_LOCK_KEY)
 
 

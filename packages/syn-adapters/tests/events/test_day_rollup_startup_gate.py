@@ -45,6 +45,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from syn_adapters.events import schema as schema_module
 from syn_adapters.events.schema import (
     ROLLUP_BACKFILL_SQL,
     ROLLUP_EXECUTION_INDEX_SQL,
@@ -363,7 +364,7 @@ class TestTheIndexBuildIsInsideTheStartupLock:
 
         await _startup(conn, EventStoreSchema())
 
-        assert conn.session_locks == set()
+        assert conn.session_locks == {}
 
     async def test_it_is_released_when_the_rollup_step_fails(self) -> None:
         conn = _OrderedConnection()
@@ -376,4 +377,19 @@ class TestTheIndexBuildIsInsideTheStartupLock:
         with pytest.raises(RuntimeError, match="rollup step failed"):
             await _startup(conn, schema)
 
-        assert conn.session_locks == set()
+        assert conn.session_locks == {}
+
+    async def test_a_replica_that_is_refused_retries_and_does_nothing_meanwhile(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Refused means retry, never proceed: no rollup DDL until the lock is granted."""
+        monkeypatch.setattr(schema_module, "_STARTUP_LOCK_RETRY_SECONDS", 0)
+        conn = _OrderedConnection()
+        conn.refuse_try_locks = 3
+
+        await _startup(conn, EventStoreSchema())
+
+        attempts = [i for i, sql in enumerate(conn.calls) if sql == ROLLUP_STARTUP_TRY_LOCK_SQL]
+        assert len(attempts) == 4
+        assert attempts[-1] < conn.calls.index(_OrderedConnection.BEGIN)
+        assert conn.session_locks == {}
