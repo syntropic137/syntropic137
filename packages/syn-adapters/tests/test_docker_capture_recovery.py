@@ -9,7 +9,13 @@ from typing import TYPE_CHECKING
 from uuid import uuid4
 
 import pytest
-from agentic_isolation import MountConfig, SecurityConfig, WorkspaceConfig, WorkspaceDockerProvider
+from agentic_isolation import (
+    MountConfig,
+    SecurityConfig,
+    WorkspaceConfig,
+    WorkspaceDockerProvider,
+    WorkspaceRuntime,
+)
 
 from syn_adapters.session_inventory.docker_recovery import DockerSpoolRecovery, _docker
 from syn_adapters.session_inventory.evidence_reader import PostgresSessionEvidence
@@ -71,7 +77,7 @@ async def test_killed_workspace_recovers_native_bytes_without_remote_store(
     provider = WorkspaceDockerProvider(
         default_network="none",
         workspace_base_dir=tmp_path / "workspaces",
-        security=SecurityConfig(use_gvisor=False),
+        security=SecurityConfig(runtime=WorkspaceRuntime.RUNC),
     )
     workspace = None
     try:
@@ -103,7 +109,7 @@ async def test_killed_workspace_recovers_native_bytes_without_remote_store(
         assert written.exit_code == 0, written.stderr
         killed = await _docker(["kill", workspace.metadata["container_name"]])
         assert killed.exit_code == 0
-        await provider.destroy(workspace)
+        await provider.teardown(target=workspace)
         workspace = None
         archive = LocalSessionTranscriptArchive(tmp_path / "archive")
         await archive.ensure_ready()
@@ -125,5 +131,5 @@ async def test_killed_workspace_recovers_native_bytes_without_remote_store(
         assert await journal.watermark(run) == 1
     finally:
         if workspace is not None:
-            await provider.destroy(workspace)
+            await provider.teardown(target=workspace)
         await _docker(["volume", "rm", location.volume_name])
