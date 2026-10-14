@@ -270,14 +270,17 @@ class AgenticEventStreamAdapter:
             # Resolved during start, or never needed when the spec or the start
             # failed: no launch value outlives this block either way.
             credentials.release(parked)
-        logger.debug(
-            "Started stream operation %s (cmd=%s)",
-            ref.operation_id,
-            CredentialScrubber(bound).scrub(str(command)),
-        )
 
         def secrets() -> tuple[str, ...]:
             return (*bound, *(withheld() if withheld is not None else ()))
+
+        # One secret set for everything this method retains or emits: the
+        # lines, the start log and the signal diagnostic (#1927).
+        logger.debug(
+            "Started stream operation %s (cmd=%s)",
+            ref.operation_id,
+            CredentialScrubber(secrets()).scrub(str(command)),
+        )
 
         try:
             async for line in self._observe(provider, ref, secrets):
@@ -290,7 +293,9 @@ class AgenticEventStreamAdapter:
             # fails is logged with its cause, never raised in its place.
             try:
                 await self._settle(
-                    await provider.cancel(ref, grace_seconds=_CANCEL_GRACE_SECONDS), spec
+                    await provider.cancel(ref, grace_seconds=_CANCEL_GRACE_SECONDS),
+                    spec,
+                    CredentialScrubber(secrets()),
                 )
             except Exception:
                 logger.exception(
@@ -298,7 +303,7 @@ class AgenticEventStreamAdapter:
                     ref.operation_id,
                 )
             raise
-        await self._settle(status, spec)
+        await self._settle(status, spec, CredentialScrubber(secrets()))
 
     async def _observe(
         self,
@@ -345,7 +350,9 @@ class AgenticEventStreamAdapter:
             severed_chars,
         )
 
-    async def _settle(self, status: OperationStatus, spec: OperationSpec) -> None:
+    async def _settle(
+        self, status: OperationStatus, spec: OperationSpec, scrubber: CredentialScrubber
+    ) -> None:
         timed_out = status.state == "timed_out"
         reported = _exit_code_of(status)
         exit_code = _resolve_stream_exit_code(reported, timed_out=timed_out)
@@ -359,8 +366,11 @@ class AgenticEventStreamAdapter:
         self._last_exit_code = exit_code
         # THE MOMENT OF DEATH for the agent process itself - the shape that
         # takes a whole phase with tokens=0+0 and no terminal event (#1295,
-        # #1319). The argv is the spec's, which carries no credential.
-        self._last_signal_death = await capture_signal_death(list(spec.argv), exit_code)
+        # #1319). The argv is the spec's, and the agent's command line can
+        # still name a value it was given, so it is scrubbed first (#1927).
+        self._last_signal_death = await capture_signal_death(
+            [scrubber.scrub(arg) for arg in spec.argv], exit_code
+        )
         if self._last_signal_death is not None:
             logger.error(
                 "Agent process died on a signal (operation=%s):\n%s",

@@ -107,6 +107,9 @@ async def run_setup_phase(
         raise TypeError(f"Expected ManagedWorkspace, got {type(ws).__name__}")
 
     setup_env = _build_setup_env(secrets)
+    # Before anything is injected: from here on the workspace holds these
+    # values, and its stream must withhold them (#1927).
+    ws.withhold(secrets.credential_values())
 
     # Write setup script to container
     script = setup_script or secrets.build_setup_script()

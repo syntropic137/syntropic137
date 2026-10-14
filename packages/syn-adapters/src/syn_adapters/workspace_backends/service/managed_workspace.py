@@ -18,7 +18,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects 
 from syn_shared.env_constants import phase_deadline_of
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Awaitable, Callable
+    from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
     from contextlib import AbstractAsyncContextManager
     from datetime import datetime
     from pathlib import Path
@@ -91,6 +91,9 @@ class ManagedWorkspace:
     #: the renewal task reads the installed credential's expiry from, and what
     #: teardown revokes. In-process only - see `issued_tokens`.
     _ledger: IssuanceLedger = field(default_factory=IssuanceLedger, repr=False)
+    #: Every other credential value the setup phase put in this workspace
+    #: (model keys, file credentials), withheld from its stream (#1927).
+    _withheld: set[str] = field(default_factory=set, repr=False)
     #: What the isolation consumed, set by teardown (`create_workspace`'s
     #: `finally`) and so only readable after `__aexit__`. None before teardown,
     #: and when the backend measured nothing.
@@ -190,7 +193,10 @@ class ManagedWorkspace:
             wrapper_name=wrapper_name,
             # Read live: a renewal installs a new token while the agent runs,
             # and the agent can print the one on disk (#1927).
-            withheld=lambda: tuple(token.token for token in self._ledger.issued),
+            withheld=lambda: (
+                *(token.token for token in self._ledger.issued),
+                *self._withheld,
+            ),
         )
         async for line in stream:  # type: ignore[attr-defined]
             yield line
@@ -306,6 +312,10 @@ class ManagedWorkspace:
         if result.exit_code == 0:
             self._ledger.installed(secrets.issued)
         return result
+
+    def withhold(self, values: Iterable[str]) -> None:
+        """Withhold ``values`` from this workspace's stream from now on (#1927)."""
+        self._withheld.update(values)
 
     @property
     def credential_expires_at(self) -> datetime | None:
