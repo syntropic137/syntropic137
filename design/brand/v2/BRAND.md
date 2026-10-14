@@ -270,7 +270,7 @@ Every current v2 asset. Raw URLs on `main` (for use outside GitHub) take the for
 | [`renders/syn137-hero-dark-1920.webp`](renders/syn137-hero-dark-1920.webp) | 1920 x 1080, on its own floor | <img src="renders/syn137-hero-dark-1920.webp" alt="Hero render" height="96"> |
 | [`renders/syn137-banner-dark-1500.webp`](renders/syn137-banner-dark-1500.webp) | 1500 x 500, X header | <img src="renders/syn137-banner-dark-1500.webp" alt="Banner render" height="64"> |
 
-Raw: `https://raw.githubusercontent.com/syntropic137/syntropic137/main/design/brand/renders/<file>`.
+Raw: `https://raw.githubusercontent.com/syntropic137/syntropic137/main/design/brand/v2/renders/<file>`.
 
 ### README banners
 
