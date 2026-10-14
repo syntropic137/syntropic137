@@ -100,7 +100,7 @@ hand-rolled list missed gates CI then failed on.
 
 | Workflow | Fires on | What it proves |
 |---|---|---|
-| `ci.yml` | push to `main`/`feat/*`; PRs to `main`/`release`; weekly | Python QA (format, lint, pyright, domain events, vsa, test debt, OpenAPI drift), architectural fitness, unit + integration tests, dashboard, docs site, CLI, submodule check, default workspace image, OSV, pip-audit, dependency review; `ci-success` aggregates |
+| `ci.yml` | push to `main` (one run per commit, never cancelled); PRs to `main`/`release` (superseded PR runs cancel); weekly | Python QA (format, lint, pyright, domain events, vsa, test debt, OpenAPI drift), architectural fitness, unit + integration tests, dashboard, docs site, CLI, submodule check, default workspace image, OSV, pip-audit, dependency review; `ci-success` aggregates |
 | `docs-lint.yml` | every PR; push to `main`/`release` | docs content lint |
 | `syn-ui.yml`, `syn-landing.yml` | PRs and `main` pushes touching Skyline / landing paths | UI build, tests, size budget, gateway serving |
 | `smoke-test.yml` | push to `main`/`release` only (PR trigger disabled) | full selfhost compose stack comes up healthy; a red smoke on `main` is found after merge |
@@ -109,6 +109,15 @@ hand-rolled list missed gates CI then failed on.
 | `release-gate.yml` | PRs into `release` | `_check-version`, `_check-changelog` (PR body >= 20 chars, read from the frozen event payload), `_check-codegen-sync`, `_check-docker-dry-run`, OSV, pip-audit, dependency review |
 | `release-create.yml` | push to `release` | `create-release` (waits on `release-publish` approval) -> tag + Release -> codegen re-check -> `release-containers.yaml` + `release-cli.yaml` |
 | `release-beta.yaml` | a published GitHub prerelease | beta images + CLI on `next`; exists, but the owner does not want GitHub prereleases (see `agent_release.md`) |
+
+Concurrency: `ci.yml`, `smoke-test.yml`, `syn-ui.yml`, `syn-landing.yml` and
+`e2e-container.yml` share one rule (#1895): a PR run is cancelled by the next
+push to that PR; every push/dispatch run gets its own group and is never
+cancelled. Never group a `main`/`release` run by ref: a shared group cancels
+the older pending run, so back-to-back merges leave a commit with no result
+(the required `Compose Stack Smoke Test` on 9fb6159f). The release workflows
+keep `cancel-in-progress: false` on a shared group on purpose: they must run
+one at a time.
 
 `just qa-ci` runs the core PR-gating jobs locally (~3.5 min), not all of them:
 `scripts/check_ci_parity.py` lists every job left out with its reason and its

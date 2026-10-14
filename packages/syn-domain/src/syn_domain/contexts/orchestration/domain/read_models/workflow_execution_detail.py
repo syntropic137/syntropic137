@@ -29,6 +29,7 @@ from syn_domain.contexts.orchestration.domain.read_models.phase_plan import (
     plan_phases,
 )
 from syn_domain.contexts.orchestration.domain.read_models.phase_progress import PhaseProgress
+from syn_domain.contexts.orchestration.domain.read_models.resume_lineage import ResumedFrom
 
 logger = logging.getLogger(__name__)
 
@@ -331,6 +332,12 @@ class WorkflowExecutionDetail:
     inherited_phase_ids: tuple[str, ...] = ()
     """Phases a resumed run took over completed from its parent (ADR-014 s7)."""
 
+    resumed_from: ResumedFrom | None = None
+    """The execution this run resumed, and the phase it picked up at (#1881)."""
+
+    resumed_as: str | None = None
+    """The execution that resumed this one, if any. At most one (#1881)."""
+
     artifact_ids: tuple[str, ...] = field(default_factory=tuple)
     """IDs of all artifacts produced."""
 
@@ -487,6 +494,8 @@ class WorkflowExecutionDetail:
                 for d in data.get("declared_phases") or ()
             ),
             inherited_phase_ids=tuple(data.get("inherited_phase_ids") or ()),
+            resumed_from=ResumedFrom.from_stored(data.get("resumed_from")),
+            resumed_as=data.get("resumed_as"),
             artifact_ids=tuple(data.get("artifact_ids", [])),
             error_message=data.get("error_message"),
             # Through `from_stored` for the reason it exists: a row written
@@ -540,6 +549,8 @@ class WorkflowExecutionDetail:
                 for d in self.declared_phases
             ],
             "inherited_phase_ids": list(self.inherited_phase_ids),
+            "resumed_from": None if self.resumed_from is None else self.resumed_from.to_stored(),
+            "resumed_as": self.resumed_as,
             "artifact_ids": list(self.artifact_ids),
             "error_message": self.error_message,
             "failure_classification": self.failure_classification.value,

@@ -10,7 +10,7 @@ Syntropic137 uses **trunk-based development** with a dedicated `release` branch 
 |--------|---------|---------|
 | `main` | Development trunk, all PRs target here | Nothing (CI only) |
 | `release` | Production deployments | Docker images, CLI, docs |
-| `feat/*` | Feature branches (short-lived) | Nothing (CI only) |
+| `feat/*` | Feature branches (short-lived) | Nothing (CI runs on the PR, not the branch push) |
 
 ## First-Time Setup
 

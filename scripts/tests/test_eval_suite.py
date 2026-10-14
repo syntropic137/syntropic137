@@ -247,9 +247,115 @@ def test_the_agentic_workspace_suite_is_its_own_suite_over_its_own_repository() 
 
     assert aw.suite.repository == "AgentParadise/agentic-workspace"
     assert aw.suite.suite_tag == "suite:verifier-seed-aw" != seed.suite.suite_tag
-    assert aw.tag == "verifier-seed-aw-v1:v1:eval-verify-pinned-v1"
-    assert {c.source_pr for c in aw.cases if c.polarity == "defect"} == {47, 49}
+    assert aw.tag == "verifier-seed-aw-v1:v3:eval-verify-pinned-v1"
+    assert {c.source_pr for c in aw.cases if c.polarity == "defect"} == {47, 49, 56}
     assert not {c.id for c in aw.cases} & {c.id for c in seed.cases}
+
+
+_AW_CONTROL_WF = "eval-verify-pinned-codex-v1"
+_AW_CHECKS_WF = "eval-verify-pinned-codex-checks-v1"
+
+
+@pytest.mark.unit
+def test_both_checks_treatment_arms_score_against_the_v2_cases_they_ran() -> None:
+    """v3 retires all three v2 controls; the A/B's fourteen runs must still score as v2."""
+    v2_ids = {
+        load_suite(_AW_SUITE, workflow=wf, version=2).tag: {
+            c.id for c in load_suite(_AW_SUITE, workflow=wf, version=2).cases
+        }
+        for wf in (_AW_CONTROL_WF, _AW_CHECKS_WF)
+    }
+    current = {c.id for c in load_suite(_AW_SUITE).cases}
+
+    assert set(v2_ids) == {
+        f"verifier-seed-aw-v1:v2:{_AW_CONTROL_WF}",
+        f"verifier-seed-aw-v1:v2:{_AW_CHECKS_WF}",
+    }
+    for ids in v2_ids.values():
+        assert len(ids) == 7
+        assert {"clean-staged-teardown", "clean-deployment-identity"} <= ids - current
+
+
+@pytest.mark.unit
+def test_the_reclassified_teardown_case_credits_the_fixed_race_not_the_unfixed_shield() -> None:
+    """The v2 blocks named three things; only the race and docker rm were fixed (AW#56)."""
+    (case,) = (c for c in load_suite(_AW_SUITE).cases if c.id == "teardown-lock-waiter-race")
+    docker = "lib/python/agentic_isolation/agentic_isolation/providers/docker.py"
+    race = _report(
+        (
+            f"{docker}:715",
+            "teardown pops the lock entry when lock.locked() is False, but a waiter woken by "
+            "release() does not hold the lock until it resumes; a third caller then builds a "
+            "fresh lock and tears the workspace down concurrently.",
+        )
+    )
+    not_the_race = {
+        "shield": (
+            f"{docker}:755",
+            "asyncio.shield around _remove does not survive a second cancellation, so the "
+            "container can be stranded.",
+        ),
+        "shield, in a waiter's words": (
+            f"{docker}:755",
+            "Double cancellation of a waiter can interrupt asyncio.shield around _remove; the "
+            "container is stranded.",
+        ),
+        "vague waiter coverage": (f"{docker}:715", "There is no test for a cancelled waiter."),
+        "the opposite lifetime claim": (
+            f"{docker}:715",
+            "_teardown_locks entries are never removed, so the lock entry leaks per workspace.",
+        ),
+    }
+
+    assert isinstance(case, DefectCase) and case.reclassified_from == "clean-staged-teardown"
+    assert score_case(case, "blocked", race).passed
+    credited = [
+        k for k, f in not_the_race.items() if score_case(case, "blocked", _report(f)).passed
+    ]
+    assert credited == []
+
+
+@pytest.mark.unit
+def test_the_agentic_workspace_baseline_launches_score_under_their_own_version() -> None:
+    """The six v1 rows are the experiment's control arm: `score` must find them.
+
+    `score` selects rows by the version's tag, so a row whose `suite` is not
+    exactly history v1's tag, or a case or pin v1 does not hold, scores as never
+    launched and the control arm silently disappears.
+    """
+    v1 = load_suite(_AW_SUITE, workflow=_AW_CONTROL_WF, version=1)
+    rows = read_launches(_AW_SUITE / "launches.jsonl")
+    pins = {c.id: c.commit for c in v1.cases}
+
+    assert len(rows) == 6
+    assert {r.suite for r in rows} == {v1.tag}
+    assert {r.workflow_id for r in rows} == {_AW_CONTROL_WF}
+    assert {r.case: r.commit for r in rows} == pins
+
+
+@pytest.mark.unit
+def test_the_checks_treatment_differs_from_its_control_only_in_the_added_prompt_section() -> None:
+    """One variable: same agent and phase fields, and the control's prompt plus one section."""
+    refs = {r.id: r for r in load_suite(_AW_SUITE).suite.workflows}
+    control_path, treatment_path = refs[_AW_CONTROL_WF].path, refs[_AW_CHECKS_WF].path
+
+    def strip_identity(doc: dict[str, object]) -> dict[str, object]:
+        return {k: v for k, v in doc.items() if k not in ("id", "name", "description")}
+
+    assert strip_identity(_workflow_yaml(control_path)) == strip_identity(
+        _workflow_yaml(treatment_path)
+    )
+
+    control = ((ROOT / control_path).parent / "phases" / "verify.md").read_text(encoding="utf-8")
+    treatment = ((ROOT / treatment_path).parent / "phases" / "verify.md").read_text(
+        encoding="utf-8"
+    )
+    before, marker, after = treatment.partition("## Required checks\n")
+    added, report, rest = after.partition("## Report\n")
+    assert marker and report
+    assert before + report + rest == control
+    for check in ("callers", "CI job", "reverted"):
+        assert check in added
 
 
 @pytest.mark.skipif(

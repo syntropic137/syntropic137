@@ -14,8 +14,11 @@ round-trips on what local gates catch. Not for `main -> release` PRs
    git worktree add -b <type>/<slug> ../syntropic137_worktrees/<slug> origin/main
    cd ../syntropic137_worktrees/<slug>
    git submodule update --init --recursive && uv sync && pnpm install
+   mkdir -p .topology && uv run vsa manifest --config vsa.yaml --output .topology/syn-manifest.json --include-domain
    ```
+   Run the submodule command only inside the worktree; in the main checkout it moves the owner's submodule pins. Without the submodules, the pre-push hook fails on `uv` metadata, and without the manifest, docs-sync fails with "Manifest not found".
    A fresh `uv sync` may rewrite `uv.lock`; if the change is not a dependency change, `git checkout -- uv.lock` before committing.
+   Clean up after the merge with `git worktree remove --force <path>`; initialised submodules make a plain `remove` refuse. Check first that HEAD is an ancestor of `origin/main`.
 2. Make the change. Shape commits as logical, revertable units. Rebasing or reordering commits that were never pushed is fine.
 3. Run the local gates against the tree you will push. Before the first push: `just qa-ci` (~3.5 min, the core PR-gating jobs), plus the path-specific mirror recipe from `scripts/check_ci_parity.py` for any path-filtered workflow the change touches (Skyline, landing, workspace image). After that, the pre-push hook runs `just preflight`. If generated files are involved, `just codegen` and commit what it rewrites.
    The hook runs long enough that an idle SSH connection to GitHub can time out, so the push silently doesn't land. Push with `GIT_SSH_COMMAND="ssh -o ServerAliveInterval=20" git push`, then confirm with `git ls-remote origin <branch>` that the remote head equals your local HEAD.

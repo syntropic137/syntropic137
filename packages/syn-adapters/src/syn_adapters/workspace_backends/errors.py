@@ -11,7 +11,14 @@ compatibility.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from enum import StrEnum
+from typing import TYPE_CHECKING, Literal
+
+if TYPE_CHECKING:
+    from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
+        WorkspaceUsage,
+    )
 
 
 class ProvisionFailureReason(StrEnum):
@@ -71,3 +78,32 @@ __all__ = [
     "ProvisionFailureReason",
     "WorkspaceProvisionError",
 ]
+
+
+@dataclass(frozen=True)
+class TeardownFailure:
+    """Why destroying a workspace did not complete. Never the run's primary failure.
+
+    ``state`` is the provider's finalization state (``failed`` or ``retained``),
+    or ``error`` when the teardown call itself raised. ``kind`` is the
+    provider's typed error kind, for dispatch; ``message`` is for people.
+    """
+
+    state: Literal["failed", "retained", "error"]
+    kind: str
+    message: str
+    stage: str | None = None
+
+
+class WorkspaceTeardownError(RuntimeError):
+    """Raised by ``destroy`` when teardown did not complete.
+
+    The backend keeps the handle registered, so a later ``destroy`` of the same
+    handle reaches the provider again. ``usage`` is whatever was measured
+    before the failure, so telemetry survives it.
+    """
+
+    def __init__(self, failure: TeardownFailure, usage: WorkspaceUsage | None = None) -> None:
+        super().__init__(f"workspace teardown {failure.state} ({failure.kind}): {failure.message}")
+        self.failure = failure
+        self.usage = usage
