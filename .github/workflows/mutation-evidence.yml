@@ -34,8 +34,10 @@ name: Mutation Evidence
 # - That job has `contents: read`, no secrets, no persisted credentials and no
 #   uv cache. The `pull-requests: write` token exists only in the comment job,
 #   on a fresh runner, and posts the report the TRUSTED runner wrote.
-# - Trusted host steps run uv with --no-config, so a uv.toml or [tool.uv] on
-#   the PR head cannot redirect a Python or package download.
+# - Trusted host steps run stdlib-only scripts on setup-python's interpreter
+#   with `python -I`, never through uv: `uv run` discovers a virtualenv in the
+#   working directory, and a PR can commit a `.venv` whose `bin/python` is
+#   anything. Nothing on the host reads the PR's uv config or environment.
 
 run-name: Mutation evidence for PR #${{ inputs.pr }} ${{ inputs.dispatch_id }}
 
@@ -83,10 +85,10 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Setup uv
-        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
-          enable-cache: false
+          python-version: "3.12"
 
       - name: Validate inputs
         env:
@@ -94,7 +96,7 @@ jobs:
           MUTATION_TESTS: ${{ inputs.tests }}
           MUTATION_DIR: ${{ inputs.mutations_dir }}
           MUTATION_DISPATCH_ID: ${{ inputs.dispatch_id }}
-        run: uv run --no-project --no-config python scripts/mutation_evidence.py validate
+        run: python -I scripts/mutation_evidence.py validate
 
       - name: Resolve PR head
         id: head
@@ -190,7 +192,7 @@ jobs:
           TEST_EVENTSTORE_HOST: localhost
           TEST_EVENTSTORE_PORT: "55051"
         run: >-
-          uv run --no-project --no-config python scripts/mutation_evidence.py
+          python -I scripts/mutation_evidence.py
           run --root "$GITHUB_WORKSPACE/pr" --image "$SANDBOX_IMAGE"
           --report "$RUNNER_TEMP/mutation-evidence.md"
 

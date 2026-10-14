@@ -377,6 +377,25 @@ def test_patch_adding_an_ignored_file_is_refused(repo: Path) -> None:
     assert not (repo / "build").exists()
 
 
+def test_rename_out_of_an_ignored_path_is_refused(repo: Path) -> None:
+    # numstat names only `pkg/disabled.py`; the ignored source would vanish
+    # unvetted and could break an import the named tests rely on.
+    (repo / "build").mkdir()
+    (repo / "build" / "dep.py").write_text("VALUE = 1\n")
+    text = (
+        "diff --git a/build/dep.py b/pkg/disabled.py\nsimilarity index 100%\n"
+        "rename from build/dep.py\nrename to pkg/disabled.py\n"
+    )
+    patch = _commit_patch(repo, "05-rename.patch", text)
+
+    result = evaluate_patch(repo, patch, _inputs(), _runner_sensitive_to_mod)
+    restore(repo)
+
+    assert result.outcome is Outcome.REFUSED
+    assert "renames" in result.detail
+    assert (repo / "build" / "dep.py").read_text() == "VALUE = 1\n"
+
+
 def test_patch_of_a_named_test_with_an_unconventional_name_is_refused(repo: Path) -> None:
     text = _diff_patch(repo, "checks/spec.py", "def test_guard():\n    assert False\n")
     patch = _commit_patch(repo, "05-spec.patch", text)

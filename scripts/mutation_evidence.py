@@ -13,7 +13,9 @@ The contract, one PR at a time:
    against a strict pattern before anything runs.
 2. The named tests must PASS on the unmutated head. A red baseline makes every
    kill meaningless ("baseline red, evidence void").
-3. Each patch is vetted BEFORE it is applied: every path it names must be
+3. Each patch is vetted BEFORE it is applied. Renames and copies are refused
+   (git reports only their destination, so a source could escape vetting).
+   Every path it names must be
    tracked-or-trackable (not ignored), must not be or sit behind a symlink,
    must not be a named test file, and must not be test code, test config or
    infrastructure. After applying, the tree must have changed, and only on
@@ -307,6 +309,11 @@ def parse_numstat(output: str) -> list[str]:
     return sorted(set(paths))
 
 
+def is_rename_or_copy(summary_line: str) -> bool:
+    """A `git apply --summary` line that renames or copies a file."""
+    return summary_line.lstrip().startswith(("rename ", "copy "))
+
+
 def vet_paths(root: Path, paths: list[str], inputs: Inputs) -> list[str]:
     """Every reason the patch may not be applied, path by path."""
     problems: list[str] = []
@@ -503,6 +510,11 @@ def evaluate_patch(root: Path, patch: Path, inputs: Inputs, runner: Runner) -> P
     if numstat.returncode != 0 or check.returncode != 0:
         why = (check.stderr or numstat.stderr).strip()[:300]
         return PatchResult(name, Outcome.APPLY_FAILED, detail=why)
+    summary = _git(root, "apply", "--summary", str(patch)).stdout
+    if renames := [line.strip() for line in summary.splitlines() if is_rename_or_copy(line)]:
+        # numstat names only a rename's DESTINATION, so the source (which may
+        # be ignored, or a test) would escape vetting. A mutation never needs one.
+        return PatchResult(name, Outcome.REFUSED, detail=f"renames or copies: {renames}")
     declared = parse_numstat(numstat.stdout)
     if not declared:
         return PatchResult(name, Outcome.NOT_APPLIED, detail="patch names no files")

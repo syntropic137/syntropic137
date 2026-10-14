@@ -60,8 +60,10 @@ runs:
     #
     # The resolver is this action's own copy (action_path), run in the
     # working directory so it reads THAT checkout's gitlink. A caller that
-    # checks out untrusted code elsewhere still runs the trusted script, and
-    # --no-config stops that checkout's uv.toml / [tool.uv] steering uv.
+    # checks out untrusted code elsewhere still runs the trusted script. It is
+    # stdlib-only and runs on setup-python's interpreter with -I, NOT through
+    # uv: `uv run --no-project` still discovers a virtualenv in the working
+    # directory, and a PR can commit a `.venv` whose `bin/python` is anything.
     - name: Start event store
       shell: bash
       working-directory: ${{ inputs.working-directory }}
@@ -83,7 +85,7 @@ runs:
           docker logs "$TIMESCALEDB_CONTAINER"
           exit 1
         fi
-        uv run --no-project --no-config python "$RESOLVER" --out "$RUNNER_TEMP/event-store-digest"
+        python -I "$RESOLVER" --out "$RUNNER_TEMP/event-store-digest"
         digest="$(cat "$RUNNER_TEMP/event-store-digest")"
         docker run -d --name eventstore \
           --network "$EVENTSTORE_NETWORK" \
