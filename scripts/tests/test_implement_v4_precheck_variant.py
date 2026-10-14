@@ -274,7 +274,7 @@ class TestThePrecheckRulesVerificationAskedFor:
             "What closes it is the same check green on the default branch, "
             "and nothing on this SHA: it gets no further rerun here." in bullet
         )
-        assert {m for m in re.findall(r"(\w+) (\w+) rerun\b", bullet)} <= {
+        assert set(re.findall(r"(\w+) (\w+) rerun\b", bullet)) <= {
             ("a", "second"),
             ("no", "further"),
         }
