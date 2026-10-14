@@ -8,7 +8,7 @@ import pytest
 from scripts.validate_codex_observability import ExpectedEvents, derive_expected
 
 _FIXTURE = (
-    Path(__file__).resolve().parents[1]
+    Path(__file__).resolve().parents[2]
     / "packages/syn-domain/tests/fixtures/codex/codex_exec_recording.jsonl"
 )
 

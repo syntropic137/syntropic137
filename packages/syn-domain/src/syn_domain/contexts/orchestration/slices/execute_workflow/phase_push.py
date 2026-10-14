@@ -34,7 +34,7 @@ about another's hook. A push's hook writes its line to stderr before git
 writes `To <url>` and the status table there, so a hook's push is the output
 after its line and before the next push's hook: it is confirmed only when
 that span holds exactly one `To` block, for the hook's remote URL - the URL
-itself, not the repository name, which a fork shares. Anything else is
+itself, not the repository name, which a copy under another owner shares. Anything else is
 ambiguous and establishes nothing.
 
 What this cannot see: `git push --dry-run` runs the hook and prints the
