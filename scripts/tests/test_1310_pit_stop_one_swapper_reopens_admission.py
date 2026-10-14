@@ -46,11 +46,20 @@ def _gate() -> str:
     return "\n".join(lines[gate - 1 : gate + 1])
 
 
+def _abort_drain() -> str:
+    """The script's own abort_drain, verbatim."""
+    lines = _lines()
+    start = lines.index("abort_drain() {")
+    return "\n".join(lines[start : lines.index("}", start) + 1])
+
+
 def _swap_begins() -> str:
     """The line that marks the swap begun, which must sit right before it."""
     lines = _lines()
     swap = lines.index(_SWAP)
-    assert lines[swap - 1] == "SWAPPING=1", "SWAPPING=1 must be set immediately before the first swap_up"
+    assert lines[swap - 1] == "SWAPPING=1", (
+        "SWAPPING=1 must be set immediately before the first swap_up"
+    )
     return lines[swap - 1]
 
 
@@ -62,6 +71,7 @@ def _run(
     held: bool = False,
     dry: int = 0,
     pause_fails: bool = False,
+    clear_fails: bool = False,
 ) -> tuple[subprocess.CompletedProcess[str], list[str], list[str]]:
     host = tmp / "host"
     host.mkdir()
@@ -72,7 +82,8 @@ def _run(
         )
     work = tmp / "work"
     work.mkdir()
-    fail_true = "if [ \"$1\" = true ]; then return 1; fi" if pause_fails else ":"
+    fail_true = 'if [ "$1" = true ]; then return 1; fi' if pause_fails else ":"
+    fail_false = 'if [ "$1" = false ]; then return 1; fi' if clear_fails else ":"
     preamble = f"""
 set -euo pipefail
 TAG=v1.1.0-beta.1; VERSION=1.1.0-beta.1; DRY={dry}; HOST=fake-host; TMP={work}
@@ -91,7 +102,8 @@ remote() {{
     *) sh -c "$*" ;;
     esac
 }}
-maintenance() {{ echo "maintenance $1" >> {tmp}/maintenance_calls; {fail_true}; }}
+maintenance() {{ echo "maintenance $1" >> {tmp}/maintenance_calls; {fail_true}; {fail_false}; }}
+{_abort_drain()}
 """
     script = "\n".join([preamble, _lock_block(), _gate(), then])
     proc = subprocess.run(
@@ -208,3 +220,17 @@ def test_the_lock_is_taken_before_anything_ships_in_every_mode() -> None:
     ):
         at = next(i for i, line in enumerate(lines) if line.strip() == later)
         assert claim < at, f"the lock is claimed after: {later}"
+
+
+@pytest.mark.parametrize(
+    ("clear_fails", "report"), [(False, "admission is OPEN again"), (True, "may still be PAUSED")]
+)
+def test_a_drain_abort_reports_the_clear_once(
+    tmp_path: Path, clear_fails: bool, report: str
+) -> None:
+    """abort_drain clears the gate itself; the exit trap must not PUT and
+    report a second time (a 503 used to print "still PAUSED" twice)."""
+    proc, maintenance, _ = _run(tmp_path, 'abort_drain "the drain failed"', clear_fails=clear_fails)
+    assert proc.returncode == 1
+    assert maintenance == ["maintenance true", "maintenance false"]
+    assert proc.stderr.count(report) == 1, proc.stderr
