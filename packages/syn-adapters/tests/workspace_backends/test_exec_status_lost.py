@@ -35,7 +35,7 @@ from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
 import pytest
-from agentic_isolation import ExecuteResult, WorkspaceDockerProvider
+from agentic_isolation import ExecuteResult
 
 from syn_adapters.workspace_backends import exec_status_lost
 from syn_adapters.workspace_backends.agentic import adapter_copy
@@ -143,26 +143,11 @@ def _codex_secrets() -> SetupPhaseSecrets:
     return SetupPhaseSecrets.for_testing(codex_auth_json='{"invented":"not-a-credential"}')
 
 
-class TestTheMechanism:
-    async def test_a_deadline_that_lapses_while_the_loop_is_blocked_loses_the_status(
-        self,
-    ) -> None:
-        """The real provider, a real process that SUCCEEDS, and a blocked loop.
-
-        `sleep 0.1` exits 0 a moment after the loop is blocked, and the loop is
-        held for longer than the exec's timeout, as the workspace walk held it
-        in production. The
-        exit status the process reported is never read: the result is the
-        lost-status shape (or, if the kill lands first, a timeout) - never 0.
-        """
-        provider = object.__new__(WorkspaceDockerProvider)
-        loop = asyncio.get_running_loop()
-        loop.call_later(0.05, time.sleep, 1.0)  # the blocked loop
-
-        result = await provider._run_exec(["sh", "-c", "sleep 0.1"], timeout=0.3)
-
-        assert result.exit_code != 0, "the process exited 0 and that is what was lost"
-        assert exec_status_lost.status_was_lost(result) or result.timed_out, result
+# TestTheMechanism reproduced the lost status inside agentic-workspace's
+# private `WorkspaceDockerProvider._run_exec`. AW #57 replaced that path with
+# the operation contract (execute = start + drain + status), so the mechanism
+# it pinned no longer exists on this side to drive. How a blocked loop shows up
+# through the contract is AW's to pin, beside its provider.
 
 
 class TestTheSetupPhase:
