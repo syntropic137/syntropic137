@@ -196,14 +196,14 @@ class InMemoryExecutionRunQueue(InMemoryAdapter):
         if entry is None or not entry.registered:
             return []
         owned: list[FencedRun] = []
-        for row in list(self._runs.values()):
-            if row.state not in ("fencing", "reaped"):
+        for held in list(self._runs.values()):
+            if held.state not in ("fencing", "reaped"):
                 continue
-            if row.reconciler != reconciler:
-                left = self._hosts.get(row.reconciler or "")
-                if (left is not None and left.registered) or row.writer_epoch > entry.host.epoch:
+            row = held
+            if held.reconciler != reconciler:
+                if not self._adoptable(held, entry.host.epoch):
                     continue
-                row = self._put(row, reconciler=reconciler, token=row.token + 1)
+                row = self._put(held, reconciler=reconciler, token=held.token + 1)
             owned.append(
                 FencedRun(
                     execution_id=row.execution_id,
@@ -258,6 +258,11 @@ class InMemoryExecutionRunQueue(InMemoryAdapter):
             and entry.in_use < entry.capacity
             and entry.heartbeat_at > now - self._stale
         )
+
+    def _adoptable(self, row: _Run, epoch: int) -> bool:
+        """The Postgres takeover predicate: its reconciler has left, and the epoch is readable."""
+        left = self._hosts.get(row.reconciler or "")
+        return (left is None or not left.registered) and row.writer_epoch <= epoch
 
     def _promote(self, execution_id: str) -> bool:
         row = self._runs.get(execution_id)
