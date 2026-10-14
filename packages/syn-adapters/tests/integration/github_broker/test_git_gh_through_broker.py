@@ -70,13 +70,21 @@ class Harness:
     def compose(self, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             ["docker", "compose", "-f", str(HERE / "compose.yaml"), *args],
-            env=self._env, capture_output=True, text=True, check=check, timeout=300,
+            env=self._env,
+            capture_output=True,
+            text=True,
+            check=check,
+            timeout=300,
         )
 
-    def run(self, command: str) -> tuple[subprocess.CompletedProcess[str], list[dict[str, str | None]]]:
+    def run(
+        self, command: str
+    ) -> tuple[subprocess.CompletedProcess[str], list[dict[str, str | None]]]:
         """Run ``command`` in a freshly provisioned sandbox; return what GitHub saw."""
         seen = len(self._log.read_text().splitlines())
-        result = self.compose("run", "--rm", "-T", "sandbox", f"{self._setup}\n{command}", check=False)
+        result = self.compose(
+            "run", "--rm", "-T", "sandbox", f"{self._setup}\n{command}", check=False
+        )
         requests = [json.loads(line) for line in self._log.read_text().splitlines()[seen:]]
         return result, requests
 
@@ -106,16 +114,55 @@ def _setup_script(presentation: GitHubPresentation) -> str:
 
 def _certs(directory: Path) -> str:
     """A broker CA, and a leaf for github.com/api.github.com signed by it."""
+
     def openssl(*args: str) -> None:
         subprocess.run(["openssl", *args], cwd=directory, check=True, capture_output=True)
 
-    openssl("req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1",
-            "-subj", "/CN=syn-s2-broker-ca", "-keyout", "ca.key", "-out", "ca.pem")
-    openssl("req", "-newkey", "rsa:2048", "-nodes", "-subj", "/CN=github.com",
-            "-keyout", "broker.key", "-out", "broker.csr")
+    openssl(
+        "req",
+        "-x509",
+        "-newkey",
+        "rsa:2048",
+        "-nodes",
+        "-days",
+        "1",
+        "-subj",
+        "/CN=syn-s2-broker-ca",
+        "-keyout",
+        "ca.key",
+        "-out",
+        "ca.pem",
+    )
+    openssl(
+        "req",
+        "-newkey",
+        "rsa:2048",
+        "-nodes",
+        "-subj",
+        "/CN=github.com",
+        "-keyout",
+        "broker.key",
+        "-out",
+        "broker.csr",
+    )
     (directory / "san.ext").write_text("subjectAltName=DNS:github.com,DNS:api.github.com\n")
-    openssl("x509", "-req", "-in", "broker.csr", "-CA", "ca.pem", "-CAkey", "ca.key",
-            "-CAcreateserial", "-days", "1", "-extfile", "san.ext", "-out", "broker.pem")
+    openssl(
+        "x509",
+        "-req",
+        "-in",
+        "broker.csr",
+        "-CA",
+        "ca.pem",
+        "-CAkey",
+        "ca.key",
+        "-CAcreateserial",
+        "-days",
+        "1",
+        "-extfile",
+        "san.ext",
+        "-out",
+        "broker.pem",
+    )
     for name in ("broker.key", "broker.pem"):
         (directory / name).chmod(0o644)  # read by envoy inside its container
     return (directory / "ca.pem").read_text()
@@ -141,10 +188,14 @@ def harness(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Harness]:
         ),
         "SYN_S2_CERTS": str(certs),
         "SYN_S2_OUT": str(out),
-        "S2_GRANTS": json.dumps({
-            "git_capability": GIT_CAP, "git_tokens": REAL_GIT,
-            "gh_capability": GH_CAP, "gh_token": REAL_GH,
-        }),
+        "S2_GRANTS": json.dumps(
+            {
+                "git_capability": GIT_CAP,
+                "git_tokens": REAL_GIT,
+                "gh_capability": GH_CAP,
+                "gh_token": REAL_GH,
+            }
+        ),
     }
     h = Harness(env, out, presentation)
     h.compose("up", "-d", "--wait", "envoy", "authorizer", "fake-github")
@@ -195,8 +246,8 @@ def test_clone_fetch_push_via_insteadof_carry_the_repos_real_token(harness: Harn
 def test_unauthenticated_git_request_gets_the_basic_challenge(harness: Harness) -> None:
     result, requests = harness.run(
         "/opt/venv/bin/python3 -I -c 'import urllib.request as u, urllib.error as e\n"
-        "try: u.urlopen(\"http://github-git.broker:8081/o/r/info/refs?service=git-upload-pack\")\n"
-        "except e.HTTPError as x: print(x.code, x.headers.get(\"www-authenticate\"))'"
+        'try: u.urlopen("http://github-git.broker:8081/o/r/info/refs?service=git-upload-pack")\n'
+        'except e.HTTPError as x: print(x.code, x.headers.get("www-authenticate"))\''
     )
     assert result.stdout.split()[:2] == ["401", "Basic"], result.stdout + result.stderr
     assert requests == []  # the challenge is the broker's; GitHub never saw it

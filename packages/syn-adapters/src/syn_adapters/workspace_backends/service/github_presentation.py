@@ -143,7 +143,9 @@ def present_github(
     ``owner/repo`` gh defaults to when there is no git tree to infer it from.
     """
     git_config: list[GitConfigSetting] = []
-    files: list[PresentedFile] = [PresentedFile(f"{BROKER_CA_DIR}/broker-ca.pem", broker.ca_pem, 0o644)]
+    files: list[PresentedFile] = [
+        PresentedFile(f"{BROKER_CA_DIR}/broker-ca.pem", broker.ca_pem, 0o644)
+    ]
     env: dict[str, str] = {"SSL_CERT_DIR": f"{SYSTEM_CERT_DIR}:{home.rstrip('/')}/{BROKER_CA_DIR}"}
 
     if git_capability is not None and repositories:
