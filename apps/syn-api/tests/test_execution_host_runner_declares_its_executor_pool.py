@@ -26,6 +26,8 @@ pytestmark = [pytest.mark.unit, pytest.mark.anyio]
 
 async def _started_host(monkeypatch: pytest.MonkeyPatch) -> ExecutorHost:
     executor = MagicMock()
+    executor.join = AsyncMock()
+    executor.leave = AsyncMock()
     executor.run_until_drained = AsyncMock()
     built = MagicMock(return_value=executor)
     monkeypatch.setattr(runner, "get_execution_run_queue", AsyncMock(return_value=MagicMock()))
