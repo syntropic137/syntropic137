@@ -902,6 +902,7 @@ class EventStoreSchema:
             batch = sessions[start : start + size]
             async with conn.transaction():
                 await conn.execute("SELECT pg_advisory_xact_lock($1)", USAGE_ROLLUP_SCHEMA_LOCK_KEY)
+                await conn.execute("LOCK TABLE agent_events IN EXCLUSIVE MODE")  # MUTANT
                 for statement in USAGE_ROLLUP_BACKFILL_SQL:
                     await conn.execute(statement, batch)
         async with conn.transaction():
