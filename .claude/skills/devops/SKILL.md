@@ -48,6 +48,7 @@ Do NOT use when:
 | Answer review comments on an open PR (Copilot, codex, human) | `agent_review_pass.md` |
 | Tiny follow-up on an already-merged PR, straight to `main` | `agent_hotfix.md` |
 | A red check: PR CI, `main`, release gate, release pipeline | `agent_ci_triage.md` |
+| Prove a PR's tests kill its bug (mutation patches, GitHub runner, no local Docker) | `agent_mutation_evidence.md` |
 | Version bump, release PR, approval gate, post-release verification | `agent_release.md` |
 | Triage every open PR: merge main in, rerun flakes, ready/blocked table, merge order | `agent_pr_backlog.md` |
 | DORA four-keys snapshot from merged PRs, releases and runs | `agent_dora_snapshot.md` |

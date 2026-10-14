@@ -37,8 +37,11 @@ def describe_disk_health() -> tuple[DiskSpaceHealth | None, list[DegradedReason]
         state=check.state.value,
         free_percent=None if check.usage is None else round(check.usage.free_percent, 2),
         free_bytes=None if check.usage is None else check.usage.free_bytes,
-        degraded_below_percent=check.degraded_below_percent,
-        refuse_admission_below_percent=check.refuse_admission_below_percent,
+        degraded_below_bytes=check.thresholds.degraded_below_bytes,
+        refuse_admission_below_bytes=check.thresholds.refuse_admission_below_bytes,
+        degraded_below_percent=check.thresholds.degraded_below_percent,
+        refuse_admission_below_percent=check.thresholds.refuse_admission_below_percent,
+        detail=check.detail,
     )
     return health, [DegradedReason.DISK_SPACE] if check.is_degraded else []
 
