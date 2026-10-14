@@ -46,7 +46,6 @@ from syn_shared.settings.storage import StorageSettings  # noqa: E402
 from syn_shared.settings.workspace import (  # noqa: E402
     ContainerLoggingSettings,
     GitIdentitySettings,
-    WorkspaceSecuritySettings,
     WorkspaceSettings,
 )
 
@@ -448,16 +447,6 @@ def generate_env_example() -> str:
             "WORKSPACE IMAGE SIGNATURE VERIFICATION (cosign keyless)",
             prefix="SYN_IMAGE_VERIFY_",
             description="Verification is ON by default and fails closed. Requires cosign v2 on PATH.",
-        )
-    )
-
-    # Add Workspace Security Settings (SYN_SECURITY_* prefix)
-    lines.extend(
-        generate_settings_section(
-            WorkspaceSecuritySettings,
-            "WORKSPACE SECURITY POLICIES",
-            prefix="SYN_SECURITY_",
-            description="Defaults are maximally restrictive for compromised agent protection.",
         )
     )
 

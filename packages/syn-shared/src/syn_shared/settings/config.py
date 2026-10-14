@@ -40,7 +40,6 @@ if TYPE_CHECKING:
     from syn_shared.settings.workspace import (
         ContainerLoggingSettings,
         GitIdentitySettings,
-        WorkspaceSecuritySettings,
         WorkspaceSettings,
     )
 
@@ -717,19 +716,6 @@ class Settings(BaseSettings):
         from syn_shared.settings.workspace import WorkspaceSettings
 
         return WorkspaceSettings()
-
-    @property
-    def workspace_security(self) -> WorkspaceSecuritySettings:
-        """Get workspace security settings.
-
-        Returns security policies applied to all isolated workspaces.
-        Defaults are maximally restrictive (no network, read-only root, resource limits).
-
-        See ADR-021: Isolated Workspace Architecture
-        """
-        from syn_shared.settings.workspace import WorkspaceSecuritySettings
-
-        return WorkspaceSecuritySettings()
 
     @property
     def platform_access(self) -> PlatformAccessSettings:
