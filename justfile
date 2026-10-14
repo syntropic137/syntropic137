@@ -1231,7 +1231,7 @@ check-test-debt:
 # Mirrors ci.yml python-unit-tests, including -x (stop on first failure) and
 # the coverage flags, so a locally-green run is the run CI performs.
 test-unit-ci:
-    TERM=dumb NO_COLOR=1 COLUMNS=200 uv run pytest -m unit \
+    TERM=dumb NO_COLOR=1 COLUMNS=200 uv run pytest -m unit -n auto \
         --cov=apps/syn-api/src \
         --cov=packages/syn-domain/src \
         --cov=packages/syn-adapters/src \

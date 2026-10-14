@@ -221,8 +221,11 @@ jobs:
           TERM: dumb
           NO_COLOR: "1"
           COLUMNS: "200"
+        # -n auto: one pytest-xdist worker per vCPU (4 on ubuntu-latest).
+        # Serial, this step took 15-20 min (#1902). pytest-cov combines the
+        # workers' coverage data, so the report is the whole suite's.
         run: |
-          uv run pytest -m unit \
+          uv run pytest -m unit -n auto \
             --cov=apps/syn-api/src \
             --cov=packages/syn-domain/src \
             --cov=packages/syn-adapters/src \
