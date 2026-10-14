@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from pydantic import SecretStr
+from sandbox_leak_scan import leak_scan
 
 from syn_adapters.workspace_backends.service.github_presentation import (
     GitHubBroker,
@@ -269,6 +270,36 @@ def test_an_ungranted_repository_is_offered_nothing(harness: Harness) -> None:
     assert _for(requests, "/o/unlisted") == []
 
 
+def _present_git_capability(repo: str) -> str:
+    """Python that sends the git capability straight to the broker for ``repo``, prints the status."""
+    auth = "Basic " + base64.b64encode(f"x-access-token:{GIT_CAP}".encode()).decode()
+    url = f"{GIT_AUTHORITY}/{repo}/info/refs?service=git-upload-pack"
+    return (
+        "/opt/venv/bin/python3 -I -c 'import urllib.request as u, urllib.error as e\n"
+        f'r = u.Request("{url}", headers={{"Authorization": "{auth}"}})\n'
+        "try: print(u.urlopen(r).status)\n"
+        "except e.HTTPError as x: print(x.code)'"
+    )
+
+
+@pytest.mark.parametrize(
+    ("repo", "status"), [("o/r", "200"), ("o/unlisted", "403")], ids=["granted", "ungranted"]
+)
+def test_a_valid_capability_opens_only_the_repositories_it_was_granted(
+    harness: Harness, repo: str, status: str
+) -> None:
+    # Bypasses the credential helper, which never offers the capability for an
+    # ungranted repo: this is the broker's own deny. "granted" is the control
+    # proving the same request reaches the grant check and would be forwarded.
+    result, requests = harness.run(_present_git_capability(repo))
+    assert result.stdout.split() == [status], result.stdout + result.stderr
+    forwarded = _for(requests, f"/{repo}/")
+    if status == "200":
+        assert {r["authorization"] for r in forwarded} == {_git_auth(repo)}
+    else:
+        assert forwarded == []  # no token, real or otherwise, reached GitHub
+
+
 # --- gh -----------------------------------------------------------------------
 
 GH_CASES = {
@@ -292,11 +323,11 @@ def test_gh_reaches_github_with_the_real_gh_token(harness: Harness, command: str
 
 
 def test_sandbox_files_and_env_hold_capabilities_never_real_tokens(harness: Harness) -> None:
-    patterns = " ".join(f"-e {t}" for t in REAL_TOKENS)
+    # Any GitHub-token-shaped value counts, not only REAL_TOKENS (see sandbox_leak_scan).
     result, _ = harness.run(
         "git clone -q https://github.com/o/r r && (cd r && git submodule update -q --init);"
         " gh api repos/o/r >/dev/null;"
-        f" grep -rlF {patterns} {HOME} /tmp 2>/dev/null; env | grep -F {patterns};"
+        f" {leak_scan([HOME, '/tmp'], REAL_TOKENS)};"
         f" echo CAPS; grep -rlF -e {GIT_CAP} -e {GH_CAP} {HOME}"
     )
     leaked, _, caps = result.stdout.partition("CAPS")
