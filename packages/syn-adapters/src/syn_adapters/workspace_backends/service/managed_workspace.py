@@ -43,6 +43,10 @@ if TYPE_CHECKING:
         WorkspaceAggregate,
     )
 
+from syn_adapters.workspace_backends.agentic.credential_scrubber import (
+    CredentialScrubber,
+    scrub_bytes,
+)
 from syn_adapters.workspace_backends.service.codex_rollout import read_codex_rollout
 from syn_adapters.workspace_backends.service.credential_keeper import keep_credential_fresh
 from syn_adapters.workspace_backends.service.git_credential_renewal import (
@@ -193,10 +197,7 @@ class ManagedWorkspace:
             wrapper_name=wrapper_name,
             # Read live: a renewal installs a new token while the agent runs,
             # and the agent can print the one on disk (#1927).
-            withheld=lambda: (
-                *(token.token for token in self._ledger.issued),
-                *self._withheld,
-            ),
+            withheld=self._withheld_values,
         )
         async for line in stream:  # type: ignore[attr-defined]
             yield line
@@ -279,11 +280,15 @@ class ManagedWorkspace:
             List of (relative_path, content) tuples
         """
         pats = patterns or ["artifacts/**/*"]
-        return await self._service._isolation.copy_from(
+        collected = await self._service._isolation.copy_from(
             self.isolation_handle,
             pats,
             base_path=base_path,
         )
+        # A file the agent wrote can hold whatever it printed, so it leaves the
+        # workspace through the same scrubber as the stream (#1927).
+        scrubber = CredentialScrubber(self._withheld_values())
+        return [(path, scrub_bytes(scrubber, content)) for path, content in collected]
 
     async def run_setup_phase(
         self,
@@ -312,6 +317,14 @@ class ManagedWorkspace:
         if result.exit_code == 0:
             self._ledger.installed(secrets.issued)
         return result
+
+    def _withheld_values(self) -> tuple[str, ...]:
+        """Every value this workspace holds that its output must not carry.
+
+        Read live: a renewal installs a new token while the agent runs, and
+        the agent can print the one on disk (#1927).
+        """
+        return (*(token.token for token in self._ledger.issued), *self._withheld)
 
     def withhold(self, values: Iterable[str]) -> None:
         """Withhold ``values`` from this workspace's stream from now on (#1927)."""

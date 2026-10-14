@@ -14,7 +14,6 @@ ensure git picks the right token for each clone.
 
 from __future__ import annotations
 
-import json
 import logging
 import shlex
 from dataclasses import dataclass, field
@@ -212,31 +211,6 @@ def _resolve_codex_credentials() -> str | None:
 
     codex_auth_json = get_settings().codex_auth_json
     return codex_auth_json.get_secret_value() if codex_auth_json else None
-
-
-#: Shortest string in a credential file that is withheld. Shorter strings in
-#: one are its labels and modes ("apikey", "chatgpt"), never a credential.
-_FILE_CREDENTIAL_MIN_LENGTH: Final = 16
-
-
-def _file_credential_values(contents: str) -> list[str]:
-    """The values in a credential file: its long strings, or the whole file."""
-    try:
-        document: object = json.loads(contents)
-    except ValueError:
-        return [contents.strip()]
-    found: list[str] = []
-    pending: list[object] = [document]
-    while pending:
-        node = pending.pop()
-        if isinstance(node, str):
-            if len(node) >= _FILE_CREDENTIAL_MIN_LENGTH:
-                found.append(node)
-        elif isinstance(node, dict):
-            pending.extend(node.values())
-        elif isinstance(node, list):
-            pending.extend(node)
-    return found
 
 
 class GitHubAppNotConfiguredError(Exception):
@@ -865,24 +839,6 @@ class SetupPhaseSecrets:
                 "GHEOF",
             ],
         )
-
-    def credential_values(self) -> tuple[str, ...]:
-        """Every credential value these secrets put in the workspace (#1927).
-
-        What the agent's output must never carry: the stream boundary withholds
-        each one. A file credential (Codex's auth file) is read as a document,
-        not as a harness format: every long string in it is withheld, and a
-        file that is not JSON is withheld whole.
-        """
-        values = [
-            *self.repo_tokens.values(),
-            self.gh_token,
-            self.claude_code_oauth_token,
-            self.anthropic_api_key,
-        ]
-        if self.codex_auth_json:
-            values.extend(_file_credential_values(self.codex_auth_json))
-        return tuple(v for v in values if v)
 
     def _credentials(self) -> list[str]:
         """Every git-credential-store entry this workspace is given, in order."""

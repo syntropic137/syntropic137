@@ -307,8 +307,10 @@ async def test_real_setup_file_injection_withholds_codex_token_auth():
     lines = [line async for line in workspace.stream(["codex", "exec"])]
     joined = "\n".join(lines)
     assert access not in joined and refresh not in joined
-    assert json.loads(lines[0])["content"].count(REDACTED_MARKER) == 2
-    assert lines[1] == "auth_mode chatgpt"
+    # Every string the file injects is withheld, the label included: no
+    # length says a short string is not a credential (#1927).
+    assert json.loads(lines[0])["content"].count(REDACTED_MARKER) == 3
+    assert lines[1] == f"auth_mode {REDACTED_MARKER}"
 
 
 async def test_a_short_value_inside_the_launch_marker_leaves_it_byte_identical():

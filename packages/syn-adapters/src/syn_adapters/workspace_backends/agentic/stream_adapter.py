@@ -117,6 +117,11 @@ def _timeout_seconds(timeout_seconds: float | None) -> int:
     return max(1, math.ceil(timeout_seconds))
 
 
+def _refreshed(scrubber: CredentialScrubber, current: tuple[str, ...]) -> CredentialScrubber:
+    """``scrubber``, or a new one when the secret set it matches has changed."""
+    return scrubber if scrubber.covers(current) else CredentialScrubber(current)
+
+
 class LineDecoder:
     """Turns observation pages into lines, whatever a page boundary splits.
 
@@ -329,18 +334,19 @@ class AgenticEventStreamAdapter:
             page = await provider.observe(
                 ref, cursor=cursor, max_bytes=_PAGE_BYTES, wait_seconds=_OBSERVE_WAIT_SECONDS
             )
-            current = tuple(secrets())
-            if not scrubber.covers(current):
-                scrubber = CredentialScrubber(current)
+            # Refreshed every page: a token renewed mid-stream is withheld
+            # from the next page on.
+            scrubber = _refreshed(scrubber, tuple(secrets()))
             if isinstance(page.gap, ObservationGap):
                 self._record_gap(page.gap, decoder.gap(), ref)
-            for line in decoder.feed(base64.b64decode(page.data_b64)):
-                yield line if line == launch_line else scrubber.scrub(line)
-            cursor = page.next_cursor
+            lines = decoder.feed(base64.b64decode(page.data_b64))
             if page.complete:
-                for line in decoder.finish():
-                    yield line if line == launch_line else scrubber.scrub(line)
+                lines = [*lines, *decoder.finish()]
+            for line in lines:
+                yield line if line == launch_line else scrubber.scrub(line)
+            if page.complete:
                 return
+            cursor = page.next_cursor
 
     def _record_gap(self, gap: ObservationGap, severed_chars: int, ref: OperationRef) -> None:
         if gap.lost_bytes is None or self._last_lost_bytes == -1:
