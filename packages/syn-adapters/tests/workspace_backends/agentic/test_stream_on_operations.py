@@ -670,8 +670,12 @@ async def test_a_value_withheld_mid_stream_is_redacted_from_the_next_page() -> N
     adapter, ops, _ = _stream([b"first\n", printed])
     original_observe = ops.observe
 
-    async def renew_then_observe(ref: OperationRef, **kwargs: Any) -> ObservationPage:
-        page = await original_observe(ref, **kwargs)
+    async def renew_then_observe(
+        ref: OperationRef, *, cursor: str | None, max_bytes: int, wait_seconds: float = 0
+    ) -> ObservationPage:
+        page = await original_observe(
+            ref, cursor=cursor, max_bytes=max_bytes, wait_seconds=wait_seconds
+        )
         issued.append(_CANARY)
         return page
 

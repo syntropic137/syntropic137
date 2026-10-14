@@ -6,8 +6,9 @@ Real ``WorkspaceDockerProvider``, real container. Run with:
       uv run pytest -m integration packages/syn-adapters/tests/test_docker_operation_contract.py
 
 The credential reaches the workload's environment through a binding resolved
-by ``WorkspaceCredentials``, and is absent from the docker argv, the labels and
-the provider's logs. The agent stream reaches the workload through
+by ``WorkspaceCredentials``, and is absent from the docker argv, the labels,
+the provider's logs and - redacted at the stream boundary (#1927) - the lines
+the workload printed it on. The agent stream reaches the workload through
 ``start``/``observe`` and keeps its launch marker and exit status.
 """
 
@@ -27,6 +28,7 @@ from agentic_isolation import (
     WorkspaceRuntime,
 )
 
+from syn_adapters.workspace_backends.agentic.credential_scrubber import REDACTED_MARKER
 from syn_adapters.workspace_backends.agentic.credentials import WorkspaceCredentials
 from syn_adapters.workspace_backends.agentic.session_store_env import (
     session_store_credential_bindings,
@@ -116,8 +118,11 @@ async def test_bound_credentials_reach_the_workload_and_nothing_else(
         ]
 
         assert lines[0] == announce_as(wrapper), "the launch marker is the first line"
-        assert f"store={_TOKEN}" in lines
-        assert f"grant={_GRANT}" in lines
+        # The workload received both values, and printed them; neither left
+        # the stream boundary (#1927).
+        assert f"store={REDACTED_MARKER}" in lines
+        assert f"grant={REDACTED_MARKER}" in lines
+        assert not any(_TOKEN in line or _GRANT in line for line in lines)
         assert adapter.last_exit_code == 7
 
         inspected = json.loads(
