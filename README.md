@@ -44,7 +44,7 @@ Claude Code and Codex are compared here as the bare CLIs you would drive by hand
 
 ## Self-Hosting (recommended)
 
-Get your own instance running in minutes. Prerequisites: **Node.js 20.12+** (the `syn` CLI needs 22+) and **Docker**.
+Get your own instance running in minutes. Prerequisites: **Node.js 22+** (the setup CLI alone needs 20.12+; the `syn` CLI declares 22+) and **Docker**.
 
 ```bash
 npx @syntropic137/setup init
@@ -56,7 +56,7 @@ Access: http://localhost:8137
 
 > [!NOTE]
 > **Optional features** (configurable during setup or anytime after):
-> - **Cloudflare Tunnel**: remote access + webhook delivery (highly recommended, free; required for GitHub webhook delivery; without it, triggers still fire via GitHub Events API polling (on by default, slower than webhooks) and the dashboard is on localhost only; domain costs $10-15/year if buying new)
+> - **Cloudflare Tunnel**: remote access + webhook delivery (highly recommended, free; needed for instant webhook delivery and remote access; without it, GitHub triggers still work through polling and the dashboard is on localhost only; domain costs $10-15/year if buying new)
 > - **1Password**: encrypted secrets management
 
 > [!WARNING]
@@ -141,13 +141,13 @@ syn workflow show <id>
 syn workflow create my-feature --type implementation --repo https://github.com/owner/repo --description "Feature X"
 syn workflow delete <id>                      # archive (soft-delete) a template
 syn workflow delete <id> --force              # skip confirmation prompt
-syn workflow run <id> --task "Implement retry logic" --input key=value
+syn workflow run <id> -R owner/repo --task "Implement retry logic" --input key=value
 syn workflow status <id>
 syn workflow validate path/to/workflow.yaml
 
 # Examples
 syn workflow run research-workflow-v2 --task "$(gh issue view 211 --json body -q .body)"
-syn workflow run github-pr --task "Add error handling" -i repository=owner/repo
+syn workflow run github-pr -R owner/repo --task "Add error handling"
 ```
 
 ### Execution Control

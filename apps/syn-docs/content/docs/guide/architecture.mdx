@@ -49,6 +49,8 @@ Syntropic137 uses **Server-Sent Events (SSE)** for real-time monitoring of execu
 GET /api/v1/sse/executions/{execution_id}
 ```
 
+Global activity across all executions streams from `GET /api/v1/sse/activity`. From the CLI, `syn watch execution <id>` and `syn watch activity` follow the same streams.
+
 Control commands are sent via standard REST API calls rather than a persistent connection.
 
 ### Execution State Machine

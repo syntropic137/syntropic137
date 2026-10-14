@@ -17,15 +17,18 @@ Running without a command shows an interactive menu.
 
 | Command | Purpose |
 |---------|---------|
-| `init` | Full setup wizard: Docker check, secrets, API key, GitHub App, agent skills, pull images, start stack |
+| `init` | Full setup wizard: Docker check, secrets, Claude credential, GitHub App, agent skills, `syn` CLI, pull images, start stack |
 | `status` | Show running services (`docker compose ps`) and the agent skills state |
 | `start` | Start the stack |
 | `stop` | Stop the stack |
 | `logs` | Tail service logs (`docker compose logs -f`) |
 | `update` | Pull latest container images and restart |
+| `cli` | Install or update the `syn` CLI |
 | `skills` | Install, update (`skills update`) or check (`skills status`) the [agent skills](/docs/guide/agent-skills) for Claude Code and Codex. `plugin` is a deprecated alias |
 | `reset` | Factory reset; a dry run until you add `--yes` ([details](#reset)) |
-| `github-app` | Open the configured GitHub App's settings, permissions or installations page in your browser (the App itself is created by `init`) |
+| `github-app` | Open the GitHub App's settings and installation pages in your browser. Creating an App happens during `init` |
+| `tunnel` | Set up remote access and webhook delivery through a Cloudflare tunnel ([details](/docs/guide/tunnels)) |
+| `credentials` | View, rotate, or roll back service credentials (`show`, `rotate`, `rollback`) |
 
 ## `init` Options
 
@@ -38,6 +41,9 @@ npx @syntropic137/setup init [options]
 --skip-github        Skip GitHub App creation
 --skip-docker        Generate config files only, don't pull images or start services
 --webhook-url <url>  Set webhook URL for the GitHub App
+--install-cli        Install the syn CLI without asking (--no-install-cli skips it)
+-y, --yes            Answer yes instead of asking (the agent skills and the syn CLI
+                     in a non-interactive init)
 ```
 
 ## What `init` Creates
@@ -50,7 +56,7 @@ npx @syntropic137/setup init [options]
 ├── .env                               # Your configuration (chmod 600)
 ├── init-db/
 │   └── 01-create-databases.sql        # Database initialization
-├── secrets/                           # Directory chmod 700; files 644 so containers can read them
+├── secrets/                           # Readable only by you
 │   ├── db-password.secret
 │   ├── redis-password.secret
 │   ├── minio-password.secret

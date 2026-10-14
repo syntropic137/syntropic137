@@ -584,8 +584,4 @@ text = "syn control resume"
 reason = "History: names the command removed in v0.32, in a callout that says it was removed."
 
 [docs_drift.budget]
-# The three getting-started pages are being rewritten for #1946 (PR #1957);
-# that PR lowers or deletes these entries.
-"apps/syn-docs/content/docs/guide/getting-started.mdx" = { max = 1, issue = "#1946" }
 "apps/syn-docs/content/docs/guide/plugins.mdx" = { max = 1, issue = "#1946" }
-"apps/syn-docs/content/docs/guide/workflows.mdx" = { max = 1, issue = "#1946" }
