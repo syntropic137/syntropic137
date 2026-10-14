@@ -265,6 +265,19 @@ class TestThePrecheckRulesVerificationAskedFor:
         assert "still `FLAKE/INFRA`, status `base defect: no more reruns`" in precheck
         assert "never `REPAIRABLE` and never a repair round" in precheck
         assert "nobody requests a second rerun" in precheck
+        # Terminal closure: the base going green closes it, and nothing in the
+        # bullet may grant this SHA another rerun. Every "rerun" there must be
+        # one of the two refusals, so "then one rerun on this SHA" fails.
+        bullet = precheck.split("status `base defect: no more reruns`. ", 1)[1]
+        bullet = bullet.split("The PR stays a draft until then.", 1)[0]
+        assert (
+            "What closes it is the same check green on the default branch, "
+            "and nothing on this SHA: it gets no further rerun here." in bullet
+        )
+        assert {m for m in re.findall(r"(\w+) (\w+) rerun\b", bullet)} <= {
+            ("a", "second"),
+            ("no", "further"),
+        }
         # The contrary case: the PR's own code under an unchanged test.
         assert "exercises code this PR changed), it is `REPAIRABLE`" in precheck
         finalize = " ".join(_prompts(_V4)["finalize_pr"].split())

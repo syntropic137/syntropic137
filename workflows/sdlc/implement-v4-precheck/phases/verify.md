@@ -190,8 +190,8 @@ question with its own rule: **one rerun per failing step, ever.**
   defect, not a flake, but it is a defect on the base: this branch did not
   cause it and cannot fix it, so it is **never `REPAIRABLE` and never a repair
   round**, and nobody requests a second rerun. What closes it is the same
-  check green on the default branch, then one rerun on this SHA. The PR stays
-  a draft until then.
+  check green on the default branch, and nothing on this SHA: it gets no
+  further rerun here. The PR stays a draft until then.
 
 If predicate 2 fails at any point (the failing test exercises code this PR
 changed), it is `REPAIRABLE`, whatever the rerun showed.
