@@ -130,6 +130,8 @@ class TestSynCommands:
             "syn workflow run wf --help",
             "syn workflow run <id> [--input K=V]...",
             "syn workflow run wf -n/--dry-run",
+            "syn workflow run wf -ix=1",
+            "syn workflow run wf -qi a=b",
             "npx @syntropic137/cli workflow list",
         ],
     )
@@ -155,8 +157,21 @@ class TestSynCommands:
             tmp_path, f"`{cmd}`"
         )
 
-    def test_value_flag_consumes_a_value_that_looks_like_a_flag_name(self, tmp_path: Path) -> None:
-        assert problems(tmp_path, '`syn workflow run wf --input "--not-a-flag"`') == []
+    def test_a_quoted_separator_does_not_hide_the_rest_of_the_command(self, tmp_path: Path) -> None:
+        page = '`syn workflow run wf --input "a; b" --no-such-flag`'
+        assert any("--no-such-flag" in p for p in problems(tmp_path, page))
+
+    @pytest.mark.parametrize(
+        "cmd",
+        [
+            "syn workflow run wf --input",
+            "syn workflow run wf --input --no-such-flag",
+            "syn workflow run wf -qi",
+        ],
+    )
+    def test_a_value_flag_needs_a_value(self, tmp_path: Path, cmd: str) -> None:
+        # Node's strict parseArgs refuses a missing or flag-like value.
+        assert any("needs a value" in p for p in problems(tmp_path, f"`{cmd}`"))
 
 
 @pytest.mark.unit
@@ -184,6 +199,11 @@ class TestApiRoutes:
             ('```\nAPI="$U/api/v1"\ncurl "$API/nope"\n```', "no such path"),
             # A placeholder never matches a literal segment.
             ("POST /api/v1/workflows/{id}", "no such path"),
+            ("```\ncurl -XDELETE $SYN_API_URL/api/v1/executions/x\n```", "DELETE not served"),
+            (
+                "```\ncurl --request=DELETE $SYN_API_URL/api/v1/executions/x\n```",
+                "DELETE not served",
+            ),
         ],
     )
     def test_rejected(self, tmp_path: Path, page: str, expected: str) -> None:
@@ -223,6 +243,7 @@ class TestSetupCommands:
                 "npx @syntropic137/setup --skip-docker",
                 "setup (no command) does not use flag --skip-docker",
             ),
+            ("npx @syntropic137/setup init --org", "setup flag --org needs a value"),
         ],
     )
     def test_rejected(self, tmp_path: Path, cmd: str, expected: str) -> None:

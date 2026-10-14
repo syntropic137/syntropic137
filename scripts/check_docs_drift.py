@@ -59,7 +59,6 @@ CLI_PACKAGE: Final = "@syntropic137/cli"
 
 _FENCE = re.compile(r"^\s*(```|~~~)")
 _INLINE_CODE = re.compile(r"(?<!`)`([^`\n]+)`(?!`)")
-_SHELL_SEPARATORS = re.compile(r"\s*(?:&&|\|\||;|\||\$\(|`)\s*")
 _ENV_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=\S*$")
 _PROMPT = re.compile(r"^\s*(?:\$|>|#)\s+")
 _PATH_CHARS = r"[^\s`'\")\]\[,;|]"
@@ -74,7 +73,7 @@ _BARE_ROUTE = re.compile(
 )
 # `API="$SYN_API_URL/api/v1"` then `$API/executions/...` in the same block.
 _API_VAR_ASSIGN = re.compile(r"\b(?P<var>[A-Za-z_]\w*)=[\"']?\S*/api/v1/?[\"']?(?:\s|$)")
-_CURL_METHOD = re.compile(r"(?:-X|--request)\s+['\"]?(GET|POST|PUT|PATCH|DELETE)\b")
+_CURL_METHOD = re.compile(r"(?:-X\s*|--request[=\s]\s*)['\"]?(GET|POST|PUT|PATCH|DELETE)\b")
 # A path segment a reader is meant to substitute: {id}, <id>, :id, $ID, ${ID}, ...
 _PLACEHOLDER_SEGMENT = re.compile(r"^(?:\{[^}]*\}|<[^>]*>|:\w+|\$\{?\w+\}?|\.\.\.|\[[^\]]*\])$")
 _SHORT_SLASH_LONG = re.compile(r"^-\w/--[\w-]+$")
@@ -256,9 +255,45 @@ def _strip_comment(line: str) -> str:
     return line
 
 
+def _split_shell(line: str) -> list[str]:
+    """Split on && || ; | ` and $( outside quotes ($( also inside double quotes)."""
+    parts: list[str] = []
+    buf: list[str] = []
+    quote: str | None = None
+    i = 0
+    while i < len(line):
+        ch = line[i]
+        two = line[i : i + 2]
+        if quote != "'" and two == "$(":
+            parts.append("".join(buf))
+            buf = []
+            i += 2
+            continue
+        if quote:
+            if ch == quote:
+                quote = None
+            buf.append(ch)
+        elif ch in "'\"":
+            quote = ch
+            buf.append(ch)
+        elif two in ("&&", "||"):
+            parts.append("".join(buf))
+            buf = []
+            i += 2
+            continue
+        elif ch in ";|`":
+            parts.append("".join(buf))
+            buf = []
+        else:
+            buf.append(ch)
+        i += 1
+    parts.append("".join(buf))
+    return parts
+
+
 def _command_segments(line: str) -> Iterator[str]:
     line = _PROMPT.sub("", line, count=1)
-    for seg in _SHELL_SEPARATORS.split(_strip_comment(line)):
+    for seg in _split_shell(_strip_comment(line)):
         seg = seg.strip().rstrip(")")
         if seg:
             yield seg
@@ -372,6 +407,36 @@ def extract(file: str, text: str) -> list[Snippet]:
 # ── Validation ──────────────────────────────────────────────────────────────
 
 
+def _value_problem(args: Sequence[str], i: int, label: str, flag: str) -> str | None:
+    """A value flag at ``args[i]`` needs a next token that is not itself a flag.
+
+    Node's strict ``parseArgs`` (src/framework/cli.ts) refuses a missing value
+    and a value that starts with ``-``.
+    """
+    if i + 1 >= len(args):
+        return f"{label} flag {flag} needs a value"
+    nxt = args[i + 1]
+    if nxt.startswith("-") and nxt != "-" and not _PLACEHOLDER_TOKEN.match(nxt):
+        return f"{label} flag {flag} needs a value, got {nxt}"
+    return None
+
+
+def _check_bundle(flag: str, cmd: Command, cli: CliManifest, label: str) -> tuple[str | None, bool]:
+    """Bundled short flags (-nq, -ix=1). Returns (problem, value_attached).
+
+    Like parseArgs: a value-taking flag consumes the rest of the token, or the
+    next argument when it ends the bundle.
+    """
+    body = flag[1:]
+    for pos, ch in enumerate(body):
+        opt = cmd.find(f"-{ch}", cli.global_options)
+        if opt is None:
+            return f"{label} has no flag -{ch}", False
+        if opt.takes_value:
+            return None, pos + 1 < len(body)
+    return None, True
+
+
 def _check_flags(args: Sequence[str], cmd: Command, cli: CliManifest, label: str) -> str | None:
     i = 0
     while i < len(args):
@@ -382,29 +447,36 @@ def _check_flags(args: Sequence[str], cmd: Command, cli: CliManifest, label: str
             tok = tok[1:].rstrip(".").rstrip("]")  # usage syntax: [--page N]
         if _SHORT_SLASH_LONG.match(tok):
             # Reference syntax: -n/--dry-run names one flag twice.
-            short, long_ = tok.split("/", 1)
-            for flag in (short, long_):
-                if cmd.find(flag, cli.global_options) is None:
-                    return f"{label} has no flag {flag}"
+            missing = [f for f in tok.split("/", 1) if cmd.find(f, cli.global_options) is None]
+            if missing:
+                return f"{label} has no flag {missing[0]}"
             i += 1
             continue
-        if tok.startswith("-") and tok != "-" and not _PLACEHOLDER_TOKEN.match(tok):
-            flag, has_inline_value = (tok.split("=", 1)[0], True) if "=" in tok else (tok, False)
-            if not flag.startswith("--") and len(flag) > 2:
-                # Bundled short flags (-nj): each must exist and take no value.
-                for ch in flag[1:]:
-                    opt = cmd.find(f"-{ch}", cli.global_options)
-                    if opt is None:
-                        return f"{label} has no flag -{ch}"
+        if not tok.startswith("-") or tok == "-" or _PLACEHOLDER_TOKEN.match(tok):
+            i += 1
+            continue
+        flag, has_inline_value = (tok.split("=", 1)[0], True) if "=" in tok else (tok, False)
+        if not flag.startswith("--") and len(flag) > 2:
+            problem, attached = _check_bundle(tok, cmd, cli, label)
+            if problem:
+                return problem
+            if not attached:
+                problem = _value_problem(args, i, label, flag)
+                if problem:
+                    return problem
                 i += 1
-                continue
-            opt = cmd.find(flag, cli.global_options)
-            if opt is None:
-                return f"{label} has no flag {flag}"
-            if opt.takes_value and not has_inline_value:
-                i += 1  # consume the value
-            elif not opt.takes_value and has_inline_value:
-                return f"{label} flag {flag} takes no value"
+            i += 1
+            continue
+        opt = cmd.find(flag, cli.global_options)
+        if opt is None:
+            return f"{label} has no flag {flag}"
+        if opt.takes_value and not has_inline_value:
+            problem = _value_problem(args, i, label, flag)
+            if problem:
+                return problem
+            i += 1  # consume the value
+        elif not opt.takes_value and has_inline_value:
+            return f"{label} flag {flag} takes no value"
         i += 1
     return None
 
@@ -456,6 +528,8 @@ def check_setup(args: Sequence[str], setup: SetupManifest) -> str | None:
                 where = f"setup {command.name}" if command else "setup (no command)"
                 return f"{where} does not use flag {flag}"
             if flag in value_flags and "=" not in tok:
+                if i + 1 >= len(rest) or rest[i + 1].startswith("-"):
+                    return f"setup flag {flag} needs a value"
                 i += 1
         elif command is not None and not _PLACEHOLDER_TOKEN.match(tok):
             if tok not in command.actions:
@@ -586,6 +660,12 @@ def scan(
 def main(argv: Sequence[str]) -> int:
     files = [Path(a).resolve() for a in argv] or doc_files()
     report = scan(files)
+    if argv:
+        # A partial scan cannot call an allow entry for an unscanned page stale.
+        scanned = {
+            f.relative_to(REPO_ROOT).as_posix() for f in files if f.is_relative_to(REPO_ROOT)
+        }
+        report.stale_allows = [a for a in report.stale_allows if a.file in scanned]
     for f in report.findings:
         print(f.render())
     for a in report.stale_allows:

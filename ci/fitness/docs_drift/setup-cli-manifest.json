@@ -26,6 +26,7 @@
     { "name": "github-app", "flags": ["--dir", "--org"] },
     { "name": "tunnel", "flags": ["--dir"] },
     { "name": "credentials", "flags": ["--dir"], "actions": ["show", "rotate", "rollback"] },
+    { "name": "help", "flags": [] },
     { "name": "reset", "flags": ["--dir", "--yes", "-y", "--no-backup", "--images", "--cli", "--skills", "--all"] }
   ]
 }

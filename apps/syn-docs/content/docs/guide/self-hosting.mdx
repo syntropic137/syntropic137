@@ -41,7 +41,7 @@ Each agent execution runs in an isolated Docker workspace with a two-phase secur
 
 **Setup Phase**: Secrets are used to write git and gh credential files and are removed from the environment before the agent starts. The GitHub installation token stays in those files, readable by the agent, for the run ([#725](https://github.com/syntropic137/syntropic137/issues/725) tracks removing it).
 
-**Agent Phase**: A claude phase runs with its Anthropic credential, `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`, as its only environment secret. A codex phase's credential is staged to `~/.codex/auth.json` during provisioning, and its environment carries no Claude credential unless the phase sets `allow_delegation: true` or declares a fallback agent of the other provider, which stages both. `CODEX_AUTH_JSON` is a deployment variable, not something the agent sees. Git operations use cached credentials from the setup phase.
+**Agent Phase**: A claude phase runs with its Anthropic credential, `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`, as its only environment secret. A codex phase's credential is staged to `~/.codex/auth.json` during provisioning, and its environment carries no Claude credential unless the phase sets `allow_delegation: true`, which stages both. A claude `fallback_agent` gets the Claude credential only for its own run. `CODEX_AUTH_JSON` is a deployment variable, not something the agent sees. Git operations use cached credentials from the setup phase.
 
 ### AppArmor hosts (Codex workspaces)
 

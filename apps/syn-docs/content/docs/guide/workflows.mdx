@@ -305,8 +305,9 @@ The agent process itself never receives that environment variable. Provisioning
 stages the value to a file, relocates it to `~/.codex/auth.json` inside the
 workspace at mode 0600, and deletes the staged copy. A codex agent's
 environment carries no Claude credentials, which keeps `ANTHROPIC_API_KEY` and
-`CLAUDE_CODE_OAUTH_TOKEN` out of reach of a codex run; it holds only the
-repository identity (`GH_REPO`) that every phase working on a repository gets. The exception is
+`CLAUDE_CODE_OAUTH_TOKEN` out of reach of a codex run; besides its credential
+file it gets only non-secret run variables (such as `GH_REPO`, the phase deadline
+and attempt identifiers). The exception is
 `allow_delegation: true`, which stages both providers' credentials so the agent
 can call the other CLI. A claude `fallback_agent` gets the Claude credentials
 for its own run, and a codex `fallback_agent` on a claude phase puts

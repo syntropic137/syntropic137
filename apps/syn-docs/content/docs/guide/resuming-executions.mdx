@@ -372,9 +372,11 @@ phase. That is future capability, not a switch you are missing.
 <Callout type="warn">
   The commit each repository was at is recorded on an execution, and a workspace
   checks each repository out at that commit (a resume at its parent's), refusing
-  to start if origin no longer has it. A resume inherits its parent's
-  configuration and inputs, so what can differ between a parent and its resume is
-  which phases ran.
+  to start if origin no longer has it. The exception is the phase a resume
+  resumes: a branch its parent's attempt already pushed is checked out at that
+  branch's current head, so its next push lands on the same PR. A resume also
+  inherits its parent's configuration and inputs, so what can differ between a
+  parent and its resume is which phases ran and the head of any continued branch.
 </Callout>
 
 ## See also
