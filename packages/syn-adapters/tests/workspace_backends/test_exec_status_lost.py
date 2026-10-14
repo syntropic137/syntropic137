@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -234,29 +235,34 @@ class TestTheCause:
     async def test_collecting_artifacts_does_not_block_the_event_loop(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The loop keeps running while a slow filesystem is being read."""
+        """The loop keeps running while a slow filesystem is being read.
+
+        The read blocks until a task on the loop releases it. Off the loop, the
+        loop runs that task and the read returns at once. On the loop, nothing
+        can run it and the read gives up after its timeout. A handshake, not a
+        tick count: counting 10 ms ticks measured how busy the runner was
+        (pytest-xdist, #1902), not whether the loop was free.
+        """
+        released = threading.Event()
+        unblocked: list[bool] = []
 
         def _slow(path: Path, patterns: list[str], **_kw: int) -> list[tuple[str, bytes]]:
-            time.sleep(0.5)
+            unblocked.append(released.wait(timeout=5.0))
             return []
 
         monkeypatch.setattr(adapter_copy, "collect_matching_files", _slow)
-        ticks = 0
 
-        async def _tick() -> None:
-            nonlocal ticks
-            while True:
-                ticks += 1
-                await asyncio.sleep(0.01)
+        async def _release() -> None:
+            released.set()
 
-        ticker = asyncio.create_task(_tick())
+        releaser = asyncio.create_task(_release())
         handle = IsolationHandle(
             isolation_id=_ISOLATION_ID, isolation_type="docker", host_workspace_path=str(tmp_path)
         )
         await adapter_copy.copy_from_workspace(handle, ["artifacts/output/**/*"])
-        ticker.cancel()
+        await releaser
 
-        assert ticks >= 10, f"the event loop ran {ticks} times in 0.5s: it was blocked"
+        assert unblocked == [True], "the read ran on the event loop: nothing else could run"
 
     async def test_collecting_artifacts_never_walks_the_whole_workspace(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
