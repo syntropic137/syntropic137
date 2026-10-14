@@ -25,6 +25,10 @@ reviewer or a verify phase asks "does this test kill the bug?".
    ```
    just mutation-evidence 1929 "packages/x/tests/test_y.py::test_z scripts/tests/test_a.py"
    ```
+   Tests that drive Docker themselves (docker compose, e.g. the broker
+   integration suite) need a third argument, `true`:
+   `just mutation-evidence 1929 "<ids>" true`. That runs PR code on the runner
+   host; see "What the runner guarantees".
    It prints the run URL, waits, prints the table, and exits non-zero unless
    every mutation was killed. The same table is the job summary and ONE PR
    comment (marker `<!-- mutation-evidence -->`, updated in place on re-runs).
@@ -39,7 +43,10 @@ reviewer or a verify phase asks "does this test kill the bug?".
      symlinked path, a git-ignored path, or paths it did not declare.
    - `ERROR`: pytest exited without a failure on record (interrupt, timeout,
      usage error). Not a kill.
-   - Baseline red or zero tests ran: evidence void, nothing else was run.
+   - Baseline red, zero tests ran, or a named test SKIPPED, XFAILED or
+     XPASSED: evidence void,
+     nothing else was run. A skip would pass under every mutant; it usually
+     means a Docker-backed test was run without `docker=true`.
 5. Before merge, delete `.mutations/` in a final commit. CI job
    `mutations-not-merged` fails any PR into main that still tracks it ("delete
    .mutations/ before merge; evidence is in the mutation-evidence comment").
@@ -55,7 +62,10 @@ reviewer or a verify phase asks "does this test kill the bug?".
   in a pinned uv container with the checkout mounted, `.git` read-only, no
   Docker socket and only the test env vars. The trusted runner, its report and
   the comment token stay out of reach. Consequence: a named test that itself
-  needs Docker cannot run here.
+  needs Docker cannot run there. With `docker=true` PR code runs on the host
+  instead, where it can reach the Docker daemon and so could forge its own
+  report: that evidence is for honest PR code. No secrets or write tokens exist
+  in the job either way.
 - The named tests must pass on the unmutated head first.
 - Each patch: `git apply --check`, apply, non-empty diff, non-test files only,
   bytecode cleared, tests run, tree restored and proven clean.
