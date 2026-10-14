@@ -657,3 +657,16 @@ Ready to implement the docs edit (§9). The five owner items in §12 have recomm
 block nothing. Item 1 (#1931 drops its copy of the plan file) must be agreed before #1931 merges,
 or the two PRs conflict.
 
+
+---
+
+## Addendum: control plane vs workspace runtimes (owner, 2026-10-14)
+
+This plan was written before the owner made the following point. It governs every section above.
+
+- **The control plane is always hosted on our own infrastructure.** That covers the API, event store, dashboard and the executor processes that claim and drive runs. Today it is the VPS; later it is Kubernetes (#1909). A workspace provider is never where the system is hosted.
+- **Workspace runtimes are where agent code runs.** These are local Docker on the VPS, self-hosted microVM boxes, and E2B. E2B is paid per workspace run and never for system hosting.
+- **Capability matching on claim** decides which runtime a run's workspace lands on. The VPS keeps running work.
+- **Cloud hosting of Syntropic137 for other users uses the same deployment approach as self-host**, with workspace providers plugged in behind it. Nothing here may assume a deployment shape that only the owner's install has.
+
+Where the text above says "executor" it means the control-plane process, and "box" or "pool" means a workspace runtime. When this plan is implemented, keep the two vocabularies separate in code and in `docs/architecture/orchestration-ubiquitous-language.md`.
