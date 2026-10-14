@@ -75,13 +75,48 @@
 #     hold out). v2: 7 live cases, 1 holdout; train is 3 defects and 3
 #     controls, all code.
 #
+# v3: after the checks-treatment A/B (experiments/2026-10-13-checks-treatment.md,
+#     Results). Both arms blocked all three v2 controls, and none of the
+#     blocks could be scored as false:
+#       clean-staged-teardown: both arms (exec-ca359d2d2e15 control,
+#         exec-479751d1afef treatment) named the lock.locked() waiter race at
+#         providers/docker.py:715 and _remove discarding docker rm's exit
+#         status (:814). AW#56 fixed both in e241fdf ("lock.locked() cannot
+#         tell: a waiter woken by release() does not hold the lock until it
+#         resumes"). A real defect: retired, and reclassified as
+#         teardown-lock-waiter-race at the same pin. The shield/cancel finding
+#         (:755) has no fix (#56 lists it as not verified), so it is not
+#         expected.
+#       clean-deployment-identity (exec-5b26b73f76d9): the probe at
+#         tests/integration/test_entrypoint_capabilities.py:4003 echoes
+#         ${...:-unset}, which cannot tell an absent var from an empty one, and
+#         the task asks whether the tests prove exactly that. A true finding,
+#         not a false block; still unfixed on AW main, so retired with no
+#         defect case (verifier-seed-v1 README: "once a fix exists").
+#       clean-event-type-identifiers: blocked by both arms per the A/B
+#         summary, but no run id or finding reached v3 (the artifacts API was
+#         unreachable from the workspace that built it, and launches.jsonl
+#         holds only v1 rows). Uninvestigated, so it cannot be kept as a
+#         control: retired as a candidate defect.
+#     Replacement controls: README rule 4 (new in v3) was applied to every
+#     mainline merge on AW main (37f210b, 2026-10-13) at least 30 days old.
+#     None qualifies, so v3 has NO clean controls and cannot measure false
+#     blocks. Read in full in README "Rule 4"; in short, the only merges whose
+#     changed functions survive to main untouched (#359, #360, #362) change
+#     Python only in tests or docstrings, and their shell was rewritten within
+#     30 days. Every other merge either changes no Python or has a function
+#     rewritten later (#355, #345, #346, #55) or is a known defect (#240).
+#     TRAIN AND HOLDOUT for the v3 batch of one defect: none is holdout. v3:
+#     5 live cases, 1 holdout (replay-keeps-recorded-verdict); train is 4
+#     defects and 0 controls.
+#
 # EVERY VERSION KEEPS ITS SCORE: when the version goes up, record the old one
 # under `history`, as verifier-seed-v1 does.
 id: verifier-seed-aw-v1
 # Its own stable eval name: a case eval is tagged `suite:verifier-seed-aw` +
 # `case:<id>`, never shared with verifier-seed-v1's.
 eval_suite: verifier-seed-aw
-version: 2
+version: 3
 goal: >
   Does the verifier block an agentic-workspace change that carries a known
   escaped bug, naming the defect and the file it lives in, and certify a
@@ -108,6 +143,28 @@ history:
     workflow: eval-verify-pinned-codex-v1
     cases:
       - clean-runtime-exposure-docs
+      - clean-staged-teardown
+      - execute-stderr-merged-into-stdout
+      - replay-error-result-drops-verdict
+      - replay-keeps-recorded-verdict
+      - scripted-agent-tests-not-in-ci
+  - version: 2
+    tag: verifier-seed-aw-v1:v2:eval-verify-pinned-codex-v1
+    workflow: eval-verify-pinned-codex-v1
+    cases:
+      - clean-deployment-identity
+      - clean-event-type-identifiers
+      - clean-staged-teardown
+      - execute-stderr-merged-into-stdout
+      - replay-error-result-drops-verdict
+      - replay-keeps-recorded-verdict
+      - scripted-agent-tests-not-in-ci
+  - version: 2
+    tag: verifier-seed-aw-v1:v2:eval-verify-pinned-codex-checks-v1
+    workflow: eval-verify-pinned-codex-checks-v1
+    cases:
+      - clean-deployment-identity
+      - clean-event-type-identifiers
       - clean-staged-teardown
       - execute-stderr-merged-into-stdout
       - replay-error-result-drops-verdict
