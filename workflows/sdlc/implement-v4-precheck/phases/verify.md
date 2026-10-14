@@ -195,6 +195,20 @@ It is never `BLOCKING` and never a repair round, because a fix phase in a
 workspace cannot run it any more than you can. Code you *can* run here,
 because it needs no such service, is not this class: run it.
 
+### What this changes in the rules below
+
+The CI section below is the same as in sdlc-implement-v3, and two of its
+rules give way to this precheck:
+
+- "**Failed on this SHA:** it IS a blocker" does not apply to a failure you
+  showed above to be `FLAKE/INFRA`. That failure is a handoff.
+- "Without either, it IS a blocker", for a job that is skipped by design but
+  covers changed code, does not apply when the missing evidence needs Docker,
+  a database or a real store. That is `ORCHESTRATOR_EVIDENCE`.
+
+Everything else in that section stands, including that a pass on an older
+head proves nothing.
+
 ### Write it down
 
 Your report carries exactly one line of this form, counting the items under
@@ -362,9 +376,8 @@ the outcome:
   `timeout 25m gh pr checks <n> --watch --interval 60`, then read it again as
   above. Do not write your own `sleep` loop. If `timeout` exits 124, CI did not
   finish in time: report the check open and pending, not passed.
-- **Failed on this SHA:** it IS a blocker, unless the evidence precheck
-  showed it is `FLAKE/INFRA`, in which case it is a handoff. Put it under
-  BLOCKING with the failing job's link and a log excerpt from
+- **Failed on this SHA:** it IS a blocker. Put it under BLOCKING with the failing
+  job's link and a log excerpt from
   `gh run view --job <job-id> --log-failed | tail -n 80`.
 - **Skipped by design for this PR:** CI deliberately does not run the job for
   this PR's base or event. Prove it from the job's `if:` condition in
@@ -386,9 +399,6 @@ the outcome:
     workspace can, or cite another CI job that ran them on this SHA, read as
     above. Without either, it IS a blocker: put it under BLOCKING with the job
     name, the changed files it covers, and the run that would close it.
-    The exception is a run that needs Docker, a database or a real store,
-    which no fix round can produce either. That is `ORCHESTRATOR_EVIDENCE`
-    (see the evidence precheck): hand it off with the exact command.
 - **No CI evidence for this SHA** (no PR yet, the PR head is a different SHA, or
   no job ran the test although its `if:` admits this PR): nothing has answered
   the question. Report the check as not run, name it, and never claim CI passed
