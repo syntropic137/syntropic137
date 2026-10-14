@@ -622,6 +622,36 @@ jobs:
           allow-ghsas: GHSA-wrw7-89jp-8q8g
 
   #############################################################################
+  # MUTATIONS NOT MERGED - .mutations/ is PR-scoped evidence, never main
+  #
+  # mutation-evidence.yml reads reviewed *.patch files from .mutations/ on a PR
+  # head and records the verdict in a PR comment. Kept on main, the patches rot
+  # as the code moves and stop applying, so the comment is the record and the
+  # directory is deleted before merge. Red here while the patches are on the
+  # branch is expected: it is the "not mergeable yet" signal. Not in preflight,
+  # because the pre-push hook would then block pushing the very patches the
+  # evidence workflow needs. Local mirror: `just check-no-mutations`.
+  #############################################################################
+
+  mutations-not-merged:
+    name: Mutation Patches Not Merged
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' && github.base_ref == 'main'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          persist-credentials: false
+
+      - name: Refuse .mutations/ on main
+        run: |
+          if [ -n "$(git ls-files -- .mutations)" ]; then
+            echo "::error::delete .mutations/ before merge; evidence is in the mutation-evidence comment"
+            git ls-files -- .mutations
+            exit 1
+          fi
+          echo "no .mutations/ on this head"
+
+  #############################################################################
   # SUMMARY - Required status check for PRs
   #############################################################################
 
@@ -641,6 +671,7 @@ jobs:
       - osv-scan
       - pip-audit
       - dependency-review
+      - mutations-not-merged
     runs-on: ubuntu-latest
     steps:
       - name: Check all jobs
@@ -654,7 +685,8 @@ jobs:
              [[ "${{ needs.docs-site.result }}" == "failure" ]] || \
              [[ "${{ needs.submodule-check.result }}" == "failure" ]] || \
              [[ "${{ needs.osv-scan.result }}" == "failure" ]] || \
-             [[ "${{ needs.pip-audit.result }}" == "failure" ]]; then
+             [[ "${{ needs.pip-audit.result }}" == "failure" ]] || \
+             [[ "${{ needs.mutations-not-merged.result }}" == "failure" ]]; then
             echo "❌ CI checks failed"
             exit 1
           fi

@@ -1195,6 +1195,56 @@ check-agent-docs:
     fi
     echo "✅ CLAUDE.md matches AGENTS.md"
 
+# Mirrors ci.yml `mutations-not-merged`. Deliberately NOT in preflight: the
+# pre-push hook would block pushing the very patches mutation-evidence.yml
+# reads. Delete the dir before merge; the PR comment is the record. See
+# .claude/skills/devops/agent_mutation_evidence.md.
+# Fail if `.mutations/` is tracked (PR-scoped evidence, never main).
+check-no-mutations:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ -n "$(git ls-files -- .mutations)" ]; then
+        echo "❌ delete .mutations/ before merge; evidence is in the mutation-evidence comment"
+        git ls-files -- .mutations
+        exit 1
+    fi
+    echo "✅ no .mutations/ tracked"
+
+#   just mutation-evidence 1929 "scripts/tests/test_x.py::test_y"
+# The patches are `*.patch` files committed under mutations_dir on the PR head.
+# Exits non-zero when a mutation survived, a patch failed to apply, or the
+# baseline was red. The table is printed and posted as one PR comment.
+# Dispatch mutation-evidence.yml for a PR, wait, print the verdict table.
+mutation-evidence $pr $tests $mutations_dir=".mutations/":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    since="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    gh workflow run mutation-evidence.yml -f pr="$pr" -f tests="$tests" -f mutations_dir="$mutations_dir"
+    me="$(gh api user --jq .login)"
+    run_id=""
+    for _ in $(seq 1 20); do
+        run_id="$(gh run list --workflow mutation-evidence.yml --event workflow_dispatch --user "$me" \
+            --limit 10 --json databaseId,createdAt,displayTitle \
+            --jq "[.[] | select(.createdAt >= \"$since\" and .displayTitle == \"Mutation evidence for PR #$pr\")][0].databaseId // empty")"
+        [ -n "$run_id" ] && break
+        sleep 3
+    done
+    if [ -z "$run_id" ]; then
+        echo "❌ dispatched, but no run appeared; check: gh run list --workflow mutation-evidence.yml"
+        exit 1
+    fi
+    echo "run: $(gh run view "$run_id" --json url --jq .url)"
+    status=0
+    gh run watch "$run_id" --interval 30 --exit-status >/dev/null || status=$?
+    out="$(mktemp -d)"
+    if gh run download "$run_id" -n mutation-evidence -D "$out" 2>/dev/null; then
+        cat "$out/mutation-evidence.md"
+    else
+        echo "(no report artifact; read the run log)"
+    fi
+    rm -rf "$out"
+    exit "$status"
+
 # Fail when a ci.yml job has no local equivalent, so `just qa-ci` cannot
 # quietly stop meaning "CI will pass". Runs inside preflight, which CI runs.
 check-ci-parity:
