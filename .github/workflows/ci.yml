@@ -277,69 +277,13 @@ jobs:
         with:
           submodules: true
 
-      - name: Setup uv
-        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+      # uv, Python, dependencies and the gitlink-pinned event store, shared
+      # with mutation-evidence.yml (#1904).
+      - name: Python integration environment
+        uses: ./.github/actions/python-integration-env
         with:
-          enable-cache: true
-          cache-dependency-glob: "uv.lock"
-
-      - name: Set up Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
-        with:
-          python-version: "3.12"
-
-      - name: Install dependencies
-        run: uv sync --all-extras
-
-      # The event store image is the one the release pins: event-store:v<ESP
-      # version> at the lib/event-sourcing-platform gitlink, resolved to its
-      # index digest by the same script release-containers.yaml runs (#1515).
-      # No hardcoded digest to drift when the gitlink moves. Started here, not
-      # as a service, so it starts after timescaledb accepts TCP: it runs its
-      # migrations at startup and exits if the database is not up yet. The
-      # service health check is not enough: pg_isready over the socket passes
-      # while the image's init server is up, before the real one listens on TCP.
-      - name: Start event store
-        env:
-          EVENTSTORE_NETWORK: ${{ job.services.timescaledb.network }}
-          TIMESCALEDB_CONTAINER: ${{ job.services.timescaledb.id }}
-        run: |
-          pg_ready=false
-          for _ in $(seq 1 30); do
-            if docker exec "$TIMESCALEDB_CONTAINER" pg_isready -h localhost -U syn -d syn; then
-              pg_ready=true
-              break
-            fi
-            sleep 2
-          done
-          if [ "$pg_ready" != true ]; then
-            echo "::error::timescaledb never accepted TCP connections"
-            docker logs "$TIMESCALEDB_CONTAINER"
-            exit 1
-          fi
-          uv run --no-project python scripts/resolve_event_store_digest.py --out "$RUNNER_TEMP/event-store-digest"
-          digest="$(cat "$RUNNER_TEMP/event-store-digest")"
-          docker run -d --name eventstore \
-            --network "$EVENTSTORE_NETWORK" \
-            -p 55051:50051 \
-            -e BACKEND=postgres \
-            -e DATABASE_URL=postgres://syn:syn_dev_password@timescaledb:5432/syn \
-            -e BIND_ADDR=0.0.0.0:50051 \
-            -e RUST_LOG=info \
-            --health-cmd "bash -c '</dev/tcp/localhost/50051' || exit 1" \
-            --health-interval 2s \
-            --health-timeout 5s \
-            --health-retries 30 \
-            "ghcr.io/syntropic137/event-store@${digest}"
-          for _ in $(seq 1 60); do
-            status="$(docker inspect -f '{{.State.Health.Status}}' eventstore 2>/dev/null || echo missing)"
-            [ "$status" = healthy ] && exit 0
-            [ "$(docker inspect -f '{{.State.Running}}' eventstore)" = true ] || break
-            sleep 2
-          done
-          echo "::error::event store did not become healthy (status: ${status})"
-          docker logs eventstore
-          exit 1
+          timescaledb-network: ${{ job.services.timescaledb.network }}
+          timescaledb-container: ${{ job.services.timescaledb.id }}
 
       - name: Run integration tests
         env:
@@ -678,6 +622,36 @@ jobs:
           allow-ghsas: GHSA-wrw7-89jp-8q8g
 
   #############################################################################
+  # MUTATIONS NOT MERGED - .mutations/ is PR-scoped evidence, never main
+  #
+  # mutation-evidence.yml reads reviewed *.patch files from .mutations/ on a PR
+  # head and records the verdict in a PR comment. Kept on main, the patches rot
+  # as the code moves and stop applying, so the comment is the record and the
+  # directory is deleted before merge. Red here while the patches are on the
+  # branch is expected: it is the "not mergeable yet" signal. Not in preflight,
+  # because the pre-push hook would then block pushing the very patches the
+  # evidence workflow needs. Local mirror: `just check-no-mutations`.
+  #############################################################################
+
+  mutations-not-merged:
+    name: Mutation Patches Not Merged
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' && github.base_ref == 'main'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          persist-credentials: false
+
+      - name: Refuse .mutations/ on main
+        run: |
+          if [ -n "$(git ls-files -- .mutations)" ]; then
+            echo "::error::delete .mutations/ before merge; evidence is in the mutation-evidence comment"
+            git ls-files -- .mutations
+            exit 1
+          fi
+          echo "no .mutations/ on this head"
+
+  #############################################################################
   # SUMMARY - Required status check for PRs
   #############################################################################
 
@@ -697,6 +671,7 @@ jobs:
       - osv-scan
       - pip-audit
       - dependency-review
+      - mutations-not-merged
     runs-on: ubuntu-latest
     steps:
       - name: Check all jobs
@@ -710,7 +685,8 @@ jobs:
              [[ "${{ needs.docs-site.result }}" == "failure" ]] || \
              [[ "${{ needs.submodule-check.result }}" == "failure" ]] || \
              [[ "${{ needs.osv-scan.result }}" == "failure" ]] || \
-             [[ "${{ needs.pip-audit.result }}" == "failure" ]]; then
+             [[ "${{ needs.pip-audit.result }}" == "failure" ]] || \
+             [[ "${{ needs.mutations-not-merged.result }}" == "failure" ]]; then
             echo "❌ CI checks failed"
             exit 1
           fi

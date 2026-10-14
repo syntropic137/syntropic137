@@ -199,9 +199,10 @@ if not d:
     sys.exit(0)
 free = "unmeasurable" if d.get("free_percent") is None else f"{d['free_percent']:.1f}% free"
 mark = "" if d.get("state") == "ok" else "  DEGRADED"
-print(f"   disk: {d.get('path')} {free} state={d.get('state')} "
-      f"(degraded below {d.get('degraded_below_percent')}%, "
-      f"admission refused below {d.get('refuse_admission_below_percent')}%){mark}")
+# `detail` names the GiB floors (#1947); an API from before it has only percents.
+floors = d.get("detail") or (f"degraded below {d.get('degraded_below_percent')}%, "
+                             f"admission refused below {d.get('refuse_admission_below_percent')}%")
+print(f"   disk: {d.get('path')} {free} state={d.get('state')} ({floors}){mark}")
 DISK
 }
 
