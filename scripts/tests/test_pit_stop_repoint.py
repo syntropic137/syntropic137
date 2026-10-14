@@ -19,6 +19,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import yaml
 
 pytestmark = pytest.mark.unit
 
@@ -276,3 +277,84 @@ class TestTheExecutorPinIsNeverMoved:
             f"  gateway:\n    image: ghcr.io/syntropic137/syn-gateway:{_TAG}\n"
         )
         assert _precheck_count(compose) == 1
+
+
+class TestBlankLinesDoNotMoveOwnership:
+    """A blank or whitespace-only line above an image key is the same YAML.
+    The image-line pattern once matched across it, so `_owner` measured the
+    blank line's indent: a valid file was refused, or an executor label named
+    `api` was taken for the api service and the executor's pin moved."""
+
+    @staticmethod
+    def _release() -> str:
+        """The compose the generator publishes, pinned the way a release pins it."""
+        sys.path.insert(0, str(_ROOT / "scripts"))
+        from generate_published_compose import generate, render
+
+        return render(generate()).replace("${SYN_VERSION:-latest}", "v1")
+
+    @staticmethod
+    def _services(path: Path) -> dict[str, dict[str, object]]:
+        loaded = yaml.safe_load(path.read_text())
+        assert isinstance(loaded, dict)
+        services = loaded["services"]
+        assert isinstance(services, dict)
+        return services
+
+    @pytest.mark.parametrize("gap", ["\n", "  \n", "\n\n"])
+    @pytest.mark.parametrize("service", ["api", "gateway"])
+    def test_a_blank_line_before_an_image_still_stages(
+        self, tmp_path: Path, service: str, gap: str
+    ) -> None:
+        source = self._release()
+        target = f"    image: ghcr.io/syntropic137/syn-{service}:v1"
+        assert target in source
+        deployed = tmp_path / "deployed.yaml"
+        deployed.write_text(source.replace(target, gap + target, 1))
+        assert yaml.safe_load(deployed.read_text()) == yaml.safe_load(source)
+        staged = tmp_path / "compose.yaml"
+
+        proc = subprocess.run(
+            [sys.executable, str(_HELPER), _TAG, str(deployed), str(staged)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert proc.returncode == 0, proc.stderr
+        after = self._services(staged)
+        for name in ("api", "gateway"):
+            assert after[name]["image"] == f"ghcr.io/syntropic137/syn-{name}:{_TAG}"
+        assert after["executor"] == self._services(deployed)["executor"]
+        assert _precheck_count(staged) == 2
+
+    def test_an_executor_label_named_api_never_owns_the_api_pin(self, tmp_path: Path) -> None:
+        source = self._release()
+        target = "    image: ghcr.io/syntropic137/syn-api:v1"
+        first, middle, last = source.split(target)
+        deployed = tmp_path / "deployed.yaml"
+        deployed.write_text(
+            first
+            + "\n"
+            + target
+            + middle
+            + "    labels:\n      api: same-image\n        \n"
+            + target
+            + last
+        )
+        before = self._services(deployed)
+        assert before["executor"]["labels"] == {"api": "same-image"}
+        staged = tmp_path / "compose.yaml"
+
+        proc = subprocess.run(
+            [sys.executable, str(_HELPER), _TAG, str(deployed), str(staged)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert proc.returncode == 0, proc.stderr
+        after = self._services(staged)
+        assert after["executor"]["image"] == "ghcr.io/syntropic137/syn-api:v1"
+        assert after["api"]["image"] == f"ghcr.io/syntropic137/syn-api:{_TAG}"
+        assert _precheck_count(staged) == 2

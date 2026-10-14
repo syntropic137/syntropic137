@@ -48,7 +48,10 @@ IMAGES = {"api": "syn-api", "gateway": "syn-gateway"}
 SHIPPED = {"all": ("api", "gateway"), "gateway": ("gateway",)}
 REGISTRY = "ghcr.io/syntropic137"
 
-_IMAGE_LINE = re.compile(r"^(?P<lead>\s*image:\s*[\"']?)(?P<ref>[^\s\"'#]+)", re.MULTILINE)
+#: Horizontal whitespace only: `\s` crosses newlines, so a blank line above an
+#: image key would start the match there and `_owner` would measure the blank
+#: line's indent, not the key's, and pick the wrong service or none.
+_IMAGE_LINE = re.compile(r"^(?P<lead>[ \t]*image:[ \t]*[\"']?)(?P<ref>[^\s\"'#]+)", re.MULTILINE)
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
 
 
