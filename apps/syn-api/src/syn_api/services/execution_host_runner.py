@@ -16,6 +16,7 @@ import asyncio
 import contextlib
 import logging
 import socket
+from datetime import timedelta
 from typing import TYPE_CHECKING
 
 from syn_adapters.execution_host import AggregateRunInterrupter, ExecutionHost
@@ -36,7 +37,12 @@ from syn_api.services.reconciliation import (
 )
 from syn_api.services.unlabelled_containers import reap_unlabelled_if_alone
 from syn_domain.contexts.orchestration import ORCHESTRATION_EVENT_EPOCH
-from syn_domain.contexts.orchestration.ports import ExecutorHost
+from syn_domain.contexts.orchestration.ports import (
+    Capability,
+    ExecutorHost,
+    ExecutorPool,
+    IsolationLevel,
+)
 from syn_shared.settings import get_settings
 
 if TYPE_CHECKING:
@@ -85,6 +91,7 @@ async def start_execution_host() -> None:
         container_id=socket.gethostname(),
         generation=labels[LABEL_HOST_GENERATION],
         epoch=ORCHESTRATION_EVENT_EPOCH,
+        pool=_executor_pool(),
     )
     executor = ExecutionHost(
         queue,
@@ -99,6 +106,25 @@ async def start_execution_host() -> None:
     _host_task = asyncio.create_task(executor.run_until_drained(), name="execution-host")
     _host_task.add_done_callback(_report_exit)
     logger.info("ExecutionHost %s claiming from the Run Queue", host.host_id)
+
+
+def _executor_pool() -> ExecutorPool:
+    """The Executor Pool this process declares (ADR-072 D13).
+
+    Provider and isolation are what this process's workspaces actually run on:
+    Docker containers. They move to the backend adapter once it exists
+    (placement plan PR 2); they are never settings.
+    """
+    settings = get_settings().executor_pool
+    return ExecutorPool(
+        pool_id=settings.id,
+        priority=settings.priority,
+        provider="docker",
+        region=settings.region,
+        isolation=IsolationLevel.CONTAINER,
+        capabilities=frozenset(Capability(name) for name in settings.capabilities),
+        overflow_delay=timedelta(seconds=settings.overflow_delay_s),
+    )
 
 
 async def stop_execution_host() -> None:

@@ -14,8 +14,10 @@ from typing import TYPE_CHECKING
 from syn_domain.contexts.orchestration.ports import (
     ClaimedRun,
     ExecutorHost,
+    ExecutorPool,
     FencedRun,
     OpeningSweep,
+    PoolDefinitionConflict,
     RunCounts,
     RunLeaseLost,
     StreamPresence,
@@ -57,6 +59,7 @@ class PostgresExecutionRunQueue:
                 host.container_id,
                 host.host_id,
             )
+            await self._join_pool(conn, host)
             await conn.execute(
                 """INSERT INTO executor_hosts (host_id,container_id,generation,epoch)
                 VALUES ($1,$2,$3,$4) ON CONFLICT (host_id) DO NOTHING""",
@@ -284,13 +287,69 @@ class PostgresExecutionRunQueue:
             )
         return RunCounts.model_validate_json(raw or "{}")
 
+    async def _join_pool(self, conn: Connection, host: ExecutorHost) -> None:
+        """D13: define ``host.pool`` if new; redefine it only when no other member is live.
+
+        The row lock serialises two members registering into one pool. A member
+        is live while its host row is not draining and it heartbeat, or
+        registered, within the staleness window: a crashed member never blocks
+        a redefinition, and one that has not yet beaten still does.
+        """
+        declared = host.pool
+        values = (
+            declared.pool_id,
+            declared.priority,
+            declared.provider,
+            declared.region,
+            int(declared.isolation),
+            sorted(declared.capabilities),
+            int(declared.overflow_delay.total_seconds()),
+        )
+        await conn.execute(
+            """INSERT INTO executor_pools
+            (pool_id,priority,provider,region,isolation,capabilities,overflow_delay_s)
+            VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (pool_id) DO NOTHING""",
+            *values,
+        )
+        raw = await conn.fetchval(
+            """SELECT jsonb_build_object('pool_id',pool_id,'priority',priority,
+                'provider',provider,'region',region,'isolation',isolation,
+                'capabilities',capabilities,'overflow_delay',overflow_delay_s)::text
+            FROM executor_pools WHERE pool_id=$1 FOR UPDATE""",
+            declared.pool_id,
+        )
+        held = ExecutorPool.model_validate_json(raw or "")
+        if held == declared:
+            return
+        others = await conn.fetchval(
+            """SELECT EXISTS (SELECT 1 FROM executor_hosts h
+            JOIN execution_budget b ON b.executor_id=h.host_id
+            WHERE b.pool_id=$1 AND h.host_id<>$2 AND NOT h.draining
+            AND GREATEST(b.heartbeat_at,h.registered_at)
+                >clock_timestamp()-$3::double precision*interval '1 second')::text""",
+            declared.pool_id,
+            host.host_id,
+            self._stale_seconds,
+        )
+        if others == "true":
+            raise PoolDefinitionConflict(
+                f"executor {host.host_id!r} declares Executor Pool {declared!r}, "
+                f"but live members hold {held!r}; drain them or declare the same definition"
+            )
+        await conn.execute(
+            """UPDATE executor_pools SET priority=$2,provider=$3,region=$4,isolation=$5,
+            capabilities=$6,overflow_delay_s=$7,defined_at=now() WHERE pool_id=$1""",
+            *values,
+        )
+
     @staticmethod
     async def _register_budget(conn: Connection, host: ExecutorHost, capacity: int) -> None:
         """D3 Restart: the machine's budget is not doubled by a new process in it.
 
         A predecessor in the same container keeps exactly the slots its runs
         still hold; the rest move to the successor now, and each later release
-        moves one more. The machine's summed capacity never changes.
+        moves one more. The machine's summed capacity never changes. Capacity
+        belongs to the machine; the pool belongs to the new row (D13).
         """
         held = await conn.fetch(
             """SELECT executor_id FROM execution_budget
@@ -305,11 +364,12 @@ class PostgresExecutionRunQueue:
             host.host_id,
         )
         inserted = await conn.fetchval(
-            """INSERT INTO execution_budget (executor_id,container_id,capacity)
-            VALUES ($1,$2,$3) ON CONFLICT (executor_id) DO NOTHING RETURNING executor_id""",
+            """INSERT INTO execution_budget (executor_id,container_id,capacity,pool_id)
+            VALUES ($1,$2,$3,$4) ON CONFLICT (executor_id) DO NOTHING RETURNING executor_id""",
             host.host_id,
             host.container_id,
             int(free or 0) if held else capacity,
+            host.pool.pool_id,
         )
         if inserted is not None and held:
             await conn.execute(
