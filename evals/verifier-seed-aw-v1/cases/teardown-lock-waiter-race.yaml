@@ -1,0 +1,55 @@
+id: teardown-lock-waiter-race
+polarity: defect
+source_pr: 56
+# Was the v1/v2 clean control clean-staged-teardown (agentic-primitives #358),
+# which both arms of the 2026-10-13 checks-treatment A/B blocked for this
+# defect (exec-ca359d2d2e15 control, exec-479751d1afef treatment); it is
+# retired, not re-polarised. Pinned at that control's own commit, so the
+# reviewed tree is unchanged (`reclassified_from`): a strict ancestor of the
+# first fix commit, so the bug is present and nothing of the fix is.
+# Evidence at the pin, providers/docker.py:
+#   :705-716 `teardown` takes a per-workspace lock and, after `async with`,
+#   drops the entry when `not lock.locked()`. asyncio.Lock.release() clears
+#   the flag and only wakes the first waiter, which does not hold the lock
+#   until it resumes; in that gap `locked()` is False, the entry is popped,
+#   and a third caller builds a FRESH lock and tears down concurrently - the
+#   very race the comment above it says the pop must not allow.
+#   :804-814 `_remove` awaits `docker rm -f` and discards its exit status, so
+#   a failed removal is reported as a completed teardown.
+# The fix is AgentParadise/agentic-workspace#56 (merged 0138add): its first
+# fix commit e241fdf replaces the check with a users-counted `_TeardownLock`
+# ("lock.locked() cannot tell: a waiter woken by release() does not hold the
+# lock until it resumes") and makes `_remove` return `proc.wait() == 0`. The
+# v2 runs also named the shield/cancel at :755; #56 lists double cancellation
+# under "Not verified" and nothing fixes it, so it is not expected here.
+reclassified_from: clean-staged-teardown
+commit: 13b4358220dbdc0bc6100791205b62a4f255cd47
+fix_commit: e241fdf36a97448a615547ed88057ff56ffe8e25
+task: >
+  The change under review splits the Docker provider's workspace teardown
+  into steps a caller can act between (stop, then remove), and adds the
+  provider protocol for it. Review whether the steps can run out of order,
+  strand a container, or race the provider's own retention.
+expected:
+  # The root cause, for the LLM judge only; never part of `task`.
+  defect: >
+    WorkspaceDockerProvider.teardown drops its per-workspace lock entry when
+    lock.locked() is False, but asyncio.Lock.release() wakes a waiter that
+    does not hold the lock until it resumes, so in that gap the entry is
+    popped while a caller is still queued; a third caller then creates a
+    fresh lock and tears the same workspace down concurrently, deleting the
+    directory another teardown is still archiving from. Separately, _remove
+    ignores docker rm's exit status, so a container that failed to be removed
+    is reported as torn down.
+  files:
+    - lib/python/agentic_isolation/agentic_isolation/providers/docker.py
+  # Group 1 is the lock-entry check itself and group 2 the queued caller it
+  # misses; no word sits in both, so one word cannot carry the predicate.
+  # Neither group holds a bare `waiter`, `locked` or `removed`: the v2 runs'
+  # unfixed shield finding says "waiter", and "entry never removed" is the
+  # opposite claim.
+  keywords:
+    - [locked(), lock.locked, _teardown_locks, lock entry, per-workspace lock, fresh lock, new lock]
+    - [race, concurrent, concurrently, two callers, third caller, woken, wakes, before it resumes,
+       not yet acquired, still queued, single-flight]
+split: train

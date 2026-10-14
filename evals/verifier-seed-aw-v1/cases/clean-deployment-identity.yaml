@@ -30,3 +30,4 @@ task: >
   Review whether an unset or empty value can stamp a fabricated identity,
   whether the contract and init.sh agree, and whether the tests prove both.
 split: train
+retired: v3 - both arms blocked it (exec-5b26b73f76d9 among them) because the integration probe echoes ${SESSION_STORE_ORIGIN_DEPLOYMENT:-unset}, which maps empty and unset alike (tests/integration/test_entrypoint_capabilities.py:4003), so the test the task asks about cannot prove absent stays absent. A true test-adequacy finding, not a false block; unfixed on AW main, so no defect case. It scores in v2 as it ran
