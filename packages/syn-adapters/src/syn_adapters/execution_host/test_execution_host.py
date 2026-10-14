@@ -179,7 +179,7 @@ async def test_a_held_lease_is_renewed_while_the_run_drains() -> None:
     # Shutdown cancels the run into its interruption path and leaves the row.
     assert drainer.cancelled == ["e1"]
     assert queue.closed == []
-    assert not queue.deregistered
+    assert queue.deregistered
 
 
 async def test_a_draining_host_claims_nothing() -> None:

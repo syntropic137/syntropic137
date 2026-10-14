@@ -88,7 +88,8 @@ class ExecutionHost:
 
         Cancelling it is a shutdown: every held run is cancelled, takes the
         interruption path and is awaited; its row is left for its Lease to
-        expire and a live executor to reconcile, never re-run (D5 C).
+        expire and a live executor to reconcile, never re-run (D5 C). The host
+        leaves either way, so a restart never inherits its ``draining`` flag.
         """
         await self._queue.register(self._host, self._capacity)
         try:
@@ -100,7 +101,14 @@ class ExecutionHost:
                 run.cancel()
             await asyncio.gather(*runs, return_exceptions=True)
             raise
-        await self._queue.deregister(self._host.host_id)
+        finally:
+            await self._leave()
+
+    async def _leave(self) -> None:
+        try:
+            await asyncio.shield(self._queue.deregister(self._host.host_id))
+        except Exception:
+            logger.exception("ExecutionHost %s could not deregister", self._host.host_id)
 
     async def _turn(self) -> bool:
         """One loop turn; returns whether the host is draining."""
