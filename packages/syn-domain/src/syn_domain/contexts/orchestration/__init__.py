@@ -37,6 +37,7 @@ from syn_domain.contexts.orchestration._shared.eval_choice import (
 from syn_domain.contexts.orchestration._shared.eval_membership_edit import (
     EvalMembershipResult,
 )
+from syn_domain.contexts.orchestration._shared.event_epoch import ORCHESTRATION_EVENT_EPOCH
 from syn_domain.contexts.orchestration._shared.execution_list_reads import ExecutionListReads
 from syn_domain.contexts.orchestration._shared.repository_baseline import BaselineRequest
 from syn_domain.contexts.orchestration._shared.resolved_claude_plugin import (
@@ -99,6 +100,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_eval import (
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
     FailExecutionCommand,
+    InterruptExecutionCommand,
     ResumeExecutionCommand,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.legacy_event_shapes import (
@@ -349,6 +351,7 @@ __all__ = [
     # Constants
     "AGENT_LAUNCH_MARKER",
     "MAX_START_ATTEMPTS",
+    "ORCHESTRATION_EVENT_EPOCH",
     "OWED_STATUSES",
     "PHASE_ID_PATTERN",
     "RESERVED_INPUT_NAMES",
@@ -443,6 +446,7 @@ __all__ = [
     "InjectTokensCommand",
     # Value objects - workflow template
     "InputDeclaration",
+    "InterruptExecutionCommand",
     "InvalidTagsError",
     "IsolationConfig",
     "LaunchEval",

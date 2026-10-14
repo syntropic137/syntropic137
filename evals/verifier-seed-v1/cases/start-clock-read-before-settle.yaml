@@ -1,0 +1,36 @@
+id: start-clock-read-before-settle
+polarity: defect
+source_pr: 1808
+# Escaped on 2026-10-13: sdlc-implement-v3 / sdlc-reverify-pr-v1 on codex
+# certified #1808 at ce532fef2 (2026-10-09); a second verifier blocked it (B4).
+# The pin is not ce532fef2 but the first parent of the fix 79aece192: the B2
+# tests (7b8f43fe8) and a merge of main (4e174c541) came between, and the
+# defect is still there. Evidence at the pin, in `_run_started`:
+# `started_at = datetime.now(UTC)` (line 407) runs before `_start` calls
+# `await self._cancelled_work.settle()` (line 444); main settles first (lines
+# 403-404). The same fix also moved the opening -> admitted bracket out for a
+# file-length limit (B1); that is not this case.
+commit: 4e174c54170686dcc47e27549a1037c1fc66daf4
+fix_commit: 79aece192de56c84713ab46b09a774573c1a11b9
+task: >
+  The change under review adds start-only admission behind
+  SYN_EXECUTION_RUN_QUEUE_ENABLED: with a run queue, the workflow execution
+  processor records the start, admits the run and returns. Review the start
+  path with the flag off and on, against what main does today, including the
+  order of what happens before the start is recorded and timed.
+expected:
+  # The root cause, for the LLM judge only; never part of `task`.
+  defect: >
+    With the flag off (no run queue), _run_started reads the start clock
+    (started_at = datetime.now(UTC)) before _start settles cancelled work
+    (self._cancelled_work.settle()), where main settles first and then reads
+    the clock. The default path's order changed, so started_at, and every
+    duration measured from it, now includes the time spent settling
+    cancelled work: the flag-off path no longer behaves as main does.
+  files:
+    - packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/WorkflowExecutionProcessor.py
+  keywords:
+    - [settle, cancelled work, cancelled_work]
+    - [started at, started_at, start clock, start time, datetime.now, clock, timestamp, timing, timed]
+    - [before, after, order, first, ahead, earlier, later, sequence, swap, reorder, moved]
+split: train

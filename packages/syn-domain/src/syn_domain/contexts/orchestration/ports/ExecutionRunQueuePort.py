@@ -70,6 +70,8 @@ class FencedRun(BaseModel):
     executor_id: str
     reconciler: str
     token: int = Field(ge=1)
+    reaped: bool = False
+    """The row is ``reaped``: the dead host's containers are already gone."""
 
 
 class OpeningSweep(BaseModel):
@@ -100,6 +102,8 @@ class ExecutionRunQueue(Protocol):
     async def register(self, host: ExecutorHost, capacity: int) -> None:
         """Add the host's ``executor_hosts`` row and its own ``execution_budget`` row.
 
+        First deletes any other host's row in the same ``container_id``: the
+        restart is the proof that process stopped, so it has **left** (D5).
         Idempotent for the same host. ``capacity`` is seeded from
         ``SYN_EXECUTION_MAX_CONCURRENT`` by the caller (D12).
         """
@@ -114,6 +118,10 @@ class ExecutionRunQueue(Protocol):
         ...
 
     async def is_draining(self, host_id: str) -> bool: ...
+
+    async def others_live(self, host_id: str) -> bool:
+        """Whether any executor other than ``host_id`` has a live heartbeat (D6)."""
+        ...
 
     async def reserve(self, execution_id: str, writer_epoch: int, *, is_resume: bool) -> bool:
         """Insert an ``opening`` row. False when the execution already has one."""
@@ -141,6 +149,15 @@ class ExecutionRunQueue(Protocol):
 
     async def fence_expired(self, reconciler: str) -> list[FencedRun]:
         """Every expired ``claimed`` run this host can read -> ``fencing``, owned by ``reconciler``."""
+        ...
+
+    async def reconciling(self, reconciler: str) -> list[FencedRun]:
+        """Every ``fencing``/``reaped`` row ``reconciler`` owns, read from the row (D5).
+
+        First takes over, under a new token, each such row whose reconciler has
+        **left** (its ``executor_hosts`` row is gone). A stale heartbeat alone is
+        not leaving, so a stalled reconciler is never taken over while registered.
+        """
         ...
 
     async def mark_reaped(self, run: FencedRun) -> None:

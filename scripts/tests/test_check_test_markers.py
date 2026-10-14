@@ -25,11 +25,15 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from check_test_markers import (
+    FITNESS_DIR,
+    FITNESS_SELECTED_MARKER,
+    FITNESS_UNSELECTED_SELECTOR,
     UNMARKED_SELECTOR,
     Budget,
     collect_census,
     count_xfail_markers,
     evaluate,
+    fitness_budget,
     is_excluded,
     iter_test_files,
     parse_collected,
@@ -56,6 +60,19 @@ class TestWorktreesAreExcluded:
     )
     def test_vendored_trees_are_excluded(self, path: str) -> None:
         assert is_excluded(path)
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "scripts/test_node_modules_policy.py",
+            "scripts/tests/test_site-packages.py",
+            "packages/my.venv_tools/tests/test_a.py",
+            "docs/claude/worktrees/test_b.py",
+        ],
+    )
+    def test_a_fragment_inside_a_name_is_not_excluded(self, path: str) -> None:
+        """Whole directory components only: a substring match hid real tests."""
+        assert not is_excluded(path)
 
     def test_duplicate_copies_are_counted_once(self, tmp_path: Path) -> None:
         """Two worktree copies of one file must not treble the count.
@@ -271,3 +288,69 @@ class TestCollectionErrorsAreNotAnImprovement:
         )
 
         assert collect_census(str(tmp_path), "-m", UNMARKED_SELECTOR) == 1
+
+
+@pytest.mark.unit
+class TestFitnessModulesReachTheFitnessJob:
+    """#1935: two ci/fitness modules marked ``unit`` ran in no job.
+
+    The unit job walks testpaths, which exclude ci/fitness; the fitness job
+    selects ``-m architecture``. A module carrying only ``unit`` fell between
+    them, and the reserved-word guard sat red on main behind a green check.
+    """
+
+    UNIT_ONLY = "import pytest\n\npytestmark = pytest.mark.unit\n\n\ndef test_a() -> None: ...\n"
+    ARCH = "import pytest\n\npytestmark = pytest.mark.architecture\n\n\ndef test_b() -> None: ...\n"
+    BOTH = (
+        "import pytest\n\npytestmark = [pytest.mark.unit, pytest.mark.architecture]\n\n\n"
+        "def test_c() -> None: ...\n"
+    )
+
+    def test_the_census_selector_is_the_one_the_fitness_job_runs(self) -> None:
+        """The constants must name the recipe CI runs, or the census measures nothing."""
+        justfile = (Path(__file__).resolve().parents[2] / "justfile").read_text()
+        recipe = justfile.split("\nfitness-invariants:\n", 1)[1].split("\n\n", 1)[0]
+        assert f"pytest {FITNESS_DIR}/" in recipe
+        assert f"-m {FITNESS_SELECTED_MARKER}" in recipe
+
+    def test_a_unit_only_fitness_module_is_counted(self, tmp_path: Path) -> None:
+        """The real defect, reproduced: a unit-marked module the job never selects."""
+        (tmp_path / "test_unit_only.py").write_text(self.UNIT_ONLY)
+        (tmp_path / "test_arch.py").write_text(self.ARCH)
+        (tmp_path / "test_both.py").write_text(self.BOTH)
+
+        assert collect_census(str(tmp_path), "-m", FITNESS_UNSELECTED_SELECTOR) == 1
+
+    def test_a_marked_tree_is_a_census_of_zero(self, tmp_path: Path) -> None:
+        """The control: architecture, alone or with unit, is selected."""
+        (tmp_path / "test_arch.py").write_text(self.ARCH)
+        (tmp_path / "test_both.py").write_text(self.BOTH)
+
+        assert collect_census(str(tmp_path), "-m", FITNESS_UNSELECTED_SELECTOR) == 0
+
+    def test_one_unselected_fitness_test_fails_the_gate(self) -> None:
+        assert fitness_budget(1).exceeded
+        assert "FAIL" in fitness_budget(1).render()
+
+    def test_zero_is_clean(self) -> None:
+        assert not fitness_budget(0).exceeded
+
+    UNCOLLECTABLE = (
+        "import pytest\n\npytestmark = pytest.mark.architecture\n\n\n"
+        "class TestInvariant:\n    def __init__(self) -> None:\n        pass\n\n"
+        "    def test_invariant(self) -> None:\n        assert False\n"
+    )
+
+    def test_an_uncollectable_test_class_fails_the_census(self, tmp_path: Path) -> None:
+        """pytest skips a ``Test*`` class with ``__init__`` behind a warning.
+
+        Its tests then run in no job and every census reads zero. The repo's
+        pytest config makes that warning an error, so the census refuses.
+        """
+        (tmp_path / "test_uncollectable.py").write_text(self.UNCOLLECTABLE)
+        pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
+
+        with pytest.raises(SystemExit) as raised:
+            collect_census(str(tmp_path), "-c", str(pyproject), "-m", FITNESS_UNSELECTED_SELECTOR)
+
+        assert "PytestCollectionWarning" in str(raised.value)

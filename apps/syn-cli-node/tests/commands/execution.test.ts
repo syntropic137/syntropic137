@@ -318,6 +318,21 @@ describe("execution commands", () => {
       expect(out).toContain("artifact art-1 not found");
     });
 
+    it("prints resume lineage both ways (#1881)", async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({
+        ...detail,
+        resumed_from: { parent_execution_id: "exec-parent", resume_phase_id: "implement" },
+        resumed_as: "exec-child",
+        latest_resumed_as: "exec-grandchild",
+        resumed_from_display: "Resumed from exec-parent at phase implement",
+        resumed_as_display: "Resumed as exec-child; latest continuation exec-grandchild",
+      })).mockResolvedValueOnce(jsonResponse({ detail: "denied" }, 403));
+      await handler({ positionals: ["exec-001"], values: {} });
+      const out = stdout();
+      expect(out).toContain("Resumed from exec-parent at phase implement");
+      expect(out).toContain("Resumed as exec-child; latest continuation exec-grandchild");
+    });
+
     it("prints a queued execution with its place in the budget (#1557)", async () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({
         ...detail,
