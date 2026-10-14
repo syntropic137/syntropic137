@@ -65,7 +65,7 @@ pytestmark = [
 
 _LEASE_S = 2.0
 _WAIT_S = 60
-# 25 of B's 200 ms idle turns: a live B's heartbeat is never this old.
+# 25 of B's 200 ms idle turns: wide enough that a live, idle B is not read as stale.
 _OBSERVER_STALE = timedelta(seconds=5)
 
 
@@ -80,22 +80,24 @@ async def _spawn(
 
 async def _turned_since_now(runs: asyncpg.Pool, host_id: str) -> None:
     """Return once ``host_id``'s loop has started a turn, so heartbeated, after this call."""
-    async with runs.acquire() as conn:
+    async with asyncio.timeout(_WAIT_S), runs.acquire() as conn:
         since = await conn.fetchval("SELECT clock_timestamp()")
-        async with asyncio.timeout(_WAIT_S):
-            while not await conn.fetchval(
-                "SELECT heartbeat_at > $2 FROM execution_budget WHERE executor_id=$1",
-                host_id,
-                since,
-            ):
-                await asyncio.sleep(0.1)
+        while not await conn.fetchval(
+            "SELECT heartbeat_at > $2 FROM execution_budget WHERE executor_id=$1",
+            host_id,
+            since,
+        ):
+            await asyncio.sleep(0.1)
 
 
-async def _docker(*args: str) -> str:
+async def _docker(*args: str, check: bool = True) -> str:
+    """Run one docker command; with ``check``, a failure raises rather than reading as empty."""
     proc = await asyncio.create_subprocess_exec(
         "docker", *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL
     )
-    out, _ = await proc.communicate()
+    async with asyncio.timeout(_WAIT_S):
+        out, _ = await proc.communicate()
+    assert not check or proc.returncode == 0, f"docker {args[0]} exited {proc.returncode}"
     return out.decode().strip()
 
 
@@ -177,5 +179,5 @@ async def test_v7_and_v7b_a_killed_executor_is_reaped_by_a_live_one(
             await child.wait()
         for host_id in (a_host, b_host):
             for container in await _containers(host_id):
-                await _docker("rm", "-f", container)
-        await _docker("rm", "-f", unlabelled)
+                await _docker("rm", "-f", container, check=False)
+        await _docker("rm", "-f", unlabelled, check=False)
