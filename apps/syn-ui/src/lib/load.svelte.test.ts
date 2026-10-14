@@ -1,8 +1,20 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { flushSync } from 'svelte'
 import { queryCache, queryKey } from '@syn137/syn-ui-data'
+import type { StreamSubscriber } from '@syn137/syn-ui-data/live'
 import { type Resource, resource } from './load.svelte'
+
+// The activity stream, driven by hand: what a page sees when SSE drops and comes back.
+const subscribers = new Set<StreamSubscriber>()
+vi.mock('@syn137/syn-ui-data/live', () => ({
+  subscribeActivity: (spec: StreamSubscriber) => {
+    subscribers.add(spec)
+    spec.onState?.('connecting')
+    return () => subscribers.delete(spec)
+  },
+}))
+const streamState = (state: 'open' | 'connecting') => subscribers.forEach((s) => s.onState?.(state))
 
 const settle = async () => {
   for (let i = 0; i < 5; i++) {
@@ -33,6 +45,47 @@ describe('resource() over the query cache', () => {
       expect(r!.loading).toBe(false)
     } finally {
       stop()
+    }
+  })
+})
+
+describe('resource() live catch-up (#1924)', () => {
+  const mountLive = () => {
+    let calls = 0
+    const fetcher = async () => ++calls
+    const stop = $effect.root(() => {
+      resource(fetcher, { live: () => true, liveIntervalMs: 0 })
+    })
+    return { calls: () => calls, stop }
+  }
+
+  it('refetches when the stream re-opens after a drop, not on the first open', async () => {
+    const r = mountLive()
+    try {
+      await settle()
+      const loaded = r.calls()
+      streamState('open')
+      await settle()
+      expect(r.calls()).toBe(loaded)
+      streamState('connecting')
+      streamState('open')
+      await settle()
+      expect(r.calls()).toBe(loaded + 1)
+    } finally {
+      r.stop()
+    }
+  })
+
+  it('refetches when the tab becomes visible again', async () => {
+    const r = mountLive()
+    try {
+      await settle()
+      const loaded = r.calls()
+      document.dispatchEvent(new Event('visibilitychange'))
+      await settle()
+      expect(r.calls()).toBe(loaded + 1)
+    } finally {
+      r.stop()
     }
   })
 })
