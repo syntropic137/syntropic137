@@ -32,6 +32,19 @@ Run both: `just fitness`
 | 14 | Answer Honesty | test_unknown_has_a_representation | fitness_exceptions.toml `[unknown_has_a_representation]` | Enforced |
 | 15 | Harness Format Boundary (#1398) | test_harness_format_boundary | fitness_exceptions.toml `[harness_format_boundary]` | Enforced |
 | 16 | Codex Sandbox Stays On (#1398) | test_no_codex_sandbox_bypass | no exemptions | Enforced |
+| 17 | Cross-Generation Event Compatibility | test_orchestration_event_schema_snapshot (ADR-072 D9) | snapshots/orchestration_events.epoch-<N>.json; release-time half is `just check-event-compat` | Enforced |
+
+### 17. Cross-Generation Event Compatibility (#1310, ADR-072 D9)
+
+An Executor claims only runs whose `writer_epoch` is no higher than its own
+`ORCHESTRATION_EVENT_EPOCH`, so the guard is only as honest as the epoch. The
+test compares the validation schema of every orchestration `@event` class with
+the snapshot recorded for the current epoch and fails on any difference. A
+snapshot is written once per epoch and the generator refuses to overwrite it,
+so the only way to green after a schema change is a bump. A bump whose snapshot
+equals the previous epoch's also fails: it would strand queued work for nothing.
+The release-time half, `just check-event-compat`, parses real payloads with the
+previous release's own models.
 
 ### 16. Codex Sandbox Stays On (#1398)
 
@@ -330,6 +343,7 @@ Legacy: some tests define config inline. Being consolidated into
 | test_projection_wiring | Correct projection count, unique names, handlers exist | 6 |
 | test_aggregate_guards | @command_handler methods have precondition guards before _apply() | 1 |
 | test_restart_safety | Catch-up replay produces zero process_pending() calls | 3, 5 |
+| test_orchestration_event_schema_snapshot | Orchestration event schemas equal the current Event Epoch's snapshot | 17 |
 | test_dedup_durability | Pipeline uses durable, content-based dedup; dedup port is wired | 4 |
 
 ### Code Quality (`ci/fitness/code_quality/`)
