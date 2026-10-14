@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <img src="./design/brand/banners/syntropic137.svg" alt="Syntropic137: agent work that compounds" width="100%" />
+  <img src="./design/brand/v2/readme-banners/syntropic137.svg" alt="Syntropic137: agent work that compounds" width="100%" />
 </p>
 
 # Syntropic137
