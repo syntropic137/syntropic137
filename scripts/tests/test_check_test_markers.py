@@ -334,3 +334,23 @@ class TestFitnessModulesReachTheFitnessJob:
 
     def test_zero_is_clean(self) -> None:
         assert not fitness_budget(0).exceeded
+
+    UNCOLLECTABLE = (
+        "import pytest\n\npytestmark = pytest.mark.architecture\n\n\n"
+        "class TestInvariant:\n    def __init__(self) -> None:\n        pass\n\n"
+        "    def test_invariant(self) -> None:\n        assert False\n"
+    )
+
+    def test_an_uncollectable_test_class_fails_the_census(self, tmp_path: Path) -> None:
+        """pytest skips a ``Test*`` class with ``__init__`` behind a warning.
+
+        Its tests then run in no job and every census reads zero. The repo's
+        pytest config makes that warning an error, so the census refuses.
+        """
+        (tmp_path / "test_uncollectable.py").write_text(self.UNCOLLECTABLE)
+        pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
+
+        with pytest.raises(SystemExit) as raised:
+            collect_census(str(tmp_path), "-c", str(pyproject), "-m", FITNESS_UNSELECTED_SELECTOR)
+
+        assert "PytestCollectionWarning" in str(raised.value)
