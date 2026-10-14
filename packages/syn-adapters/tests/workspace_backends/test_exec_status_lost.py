@@ -237,22 +237,28 @@ class TestTheCause:
     ) -> None:
         """The loop keeps running while a slow filesystem is being read.
 
-        The read blocks until a task on the loop releases it. Off the loop, the
-        loop runs that task and the read returns at once. On the loop, nothing
-        can run it and the read gives up after its timeout. A handshake, not a
-        tick count: counting 10 ms ticks measured how busy the runner was
-        (pytest-xdist, #1902), not whether the loop was free.
+        Once the read has started, it blocks until a task on the loop releases
+        it. Off the loop, the loop runs that task and the read returns at once.
+        On the loop, nothing can run it and the read gives up after its
+        timeout. The release waits for the read to start, so a read that runs
+        on the loop after one early yield cannot find it already released. A
+        handshake, not a tick count: counting 10 ms ticks measured how busy the
+        runner was (pytest-xdist, #1902), not whether the loop was free.
         """
+        loop = asyncio.get_running_loop()
+        started = asyncio.Event()
         released = threading.Event()
         unblocked: list[bool] = []
 
         def _slow(path: Path, patterns: list[str], **_kw: int) -> list[tuple[str, bytes]]:
+            loop.call_soon_threadsafe(started.set)
             unblocked.append(released.wait(timeout=5.0))
             return []
 
         monkeypatch.setattr(adapter_copy, "collect_matching_files", _slow)
 
         async def _release() -> None:
+            await started.wait()
             released.set()
 
         releaser = asyncio.create_task(_release())
