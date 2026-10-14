@@ -210,7 +210,14 @@ async def _init_degradable_services(state: LifecycleState) -> None:
     cleanup = await cleanup_orphaned_containers()
     # AFTER the reap, and only if the reap can say it finished: "this execution
     # is still running" is provably false only once every container is gone.
-    await reconcile_orphaned_executions(cleanup, started_before=process_started_at)
+    # Not with the Run Queue on (#1310 1.5): an admitted run is RUNNING with no
+    # container while it waits durably for a claim, and failing it here would
+    # destroy exactly what the queue keeps. Its claimed runs are reconciled by
+    # lease expiry instead (ADR-072 D5).
+    from syn_shared.settings import get_settings
+
+    if not get_settings().execution.run_queue_enabled:
+        await reconcile_orphaned_executions(cleanup, started_before=process_started_at)
 
     for entry in _SERVICE_REGISTRY:
         try:
