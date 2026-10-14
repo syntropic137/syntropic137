@@ -110,6 +110,15 @@ hand-rolled list missed gates CI then failed on.
 | `release-create.yml` | push to `release` | `create-release` (waits on `release-publish` approval) -> tag + Release -> codegen re-check -> `release-containers.yaml` + `release-cli.yaml` |
 | `release-beta.yaml` | a published GitHub prerelease | beta images + CLI on `next`; exists, but the owner does not want GitHub prereleases (see `agent_release.md`) |
 
+Concurrency: `ci.yml`, `smoke-test.yml`, `syn-ui.yml`, `syn-landing.yml` and
+`e2e-container.yml` share one rule (#1895): a PR run is cancelled by the next
+push to that PR; every push/dispatch run gets its own group and is never
+cancelled. Never group a `main`/`release` run by ref: a shared group cancels
+the older pending run, so back-to-back merges leave a commit with no result
+(the required `Compose Stack Smoke Test` on 9fb6159f). The release workflows
+keep `cancel-in-progress: false` on a shared group on purpose: they must run
+one at a time.
+
 `just qa-ci` runs the core PR-gating jobs locally (~3.5 min), not all of them:
 `scripts/check_ci_parity.py` lists every job left out with its reason and its
 own mirror recipe (workspace image build `just workspace-build`, Skyline
