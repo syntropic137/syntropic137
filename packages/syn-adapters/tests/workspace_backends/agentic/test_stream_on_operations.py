@@ -10,11 +10,15 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import io
+import json
 import logging
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
+from agentic_events import EventEmitter, Recording
 from agentic_isolation import WorkspaceConfig
 from agentic_isolation.contract import (
     MISSING,
@@ -38,6 +42,7 @@ from syn_adapters.workspace_backends.agentic.stream_adapter import (
     AgenticEventStreamAdapter,
     LineDecoder,
 )
+from syn_adapters.workspace_backends.recording import RecordingEventStreamAdapter
 from syn_domain.contexts.orchestration import announce_as
 from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
     IsolationHandle,
@@ -45,11 +50,24 @@ from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects 
 from syn_domain.contexts.orchestration.slices.execute_workflow.agent_launch_observation import (
     AgentLaunchEvidence,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
+    EventStreamProcessor,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.SubagentTracker import (
+    SubagentTracker,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.TokenAccumulator import (
+    TokenAccumulator,
+)
 from syn_shared.in_memory import InMemoryAdapter
 from syn_shared.settings.session_store import SessionStoreSettings
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import AsyncIterator, Sequence
+
+    from syn_domain.contexts.agent_sessions.domain.events.agent_observation import (
+        ObservationType,
+    )
 
 pytestmark = pytest.mark.unit
 
@@ -447,3 +465,118 @@ async def test_embedded_hook_jsonl_passes_through_unchanged() -> None:
     pages = [blob[i : i + 7] for i in range(0, len(blob), 7)]
     adapter, _, _ = _stream(pages)
     assert await _lines(adapter) == recorded
+
+
+# A recorded run yields the same events read directly or through provider pages.
+# The "before" path feeds a recording's lines straight into the production
+# `EventStreamProcessor`; the "after" path serves the same bytes as observation
+# pages cut at awkward boundaries and reads them back through the stream
+# adapter. Every observation - tool lifecycle, tokens, and the git hook event
+# embedded in a tool_result (ADR-043) - must come out identical, in order.
+
+
+@dataclass
+class _Observations:
+    recorded: list[tuple[str, str, dict[str, object]]] = field(default_factory=list)
+
+    async def record_observation(
+        self,
+        session_id: str,
+        observation_type: ObservationType | str,
+        data: dict[str, object],
+        execution_id: str | None = None,
+        phase_id: str | None = None,
+        workspace_id: str | None = None,
+    ) -> None:
+        kind = getattr(observation_type, "value", str(observation_type))
+        self.recorded.append((kind, session_id, data))
+
+
+class _Workspace:
+    async def interrupt(self) -> bool:
+        return True
+
+
+def _hook_tool_lines() -> list[str]:
+    """A Bash tool whose output carries the commit event the git hook's producer emits."""
+    buffer = io.StringIO()
+    EventEmitter(session_id="s-1", provider="claude", output=buffer).git_commit(
+        message="feat: x", sha="abc123", branch="feat", repo="api"
+    )
+    use = {
+        "type": "assistant",
+        "message": {
+            "content": [
+                {
+                    "type": "tool_use",
+                    "id": "t-hook",
+                    "name": "Bash",
+                    "input": {"command": "git commit"},
+                }
+            ]
+        },
+    }
+    result = {
+        "type": "user",
+        "message": {
+            "content": [
+                {
+                    "type": "tool_result",
+                    "tool_use_id": "t-hook",
+                    "content": f"[feat abc123] feat: x\n{buffer.getvalue()}",
+                    "is_error": False,
+                }
+            ]
+        },
+    }
+    return [json.dumps(use), json.dumps(result)]
+
+
+async def _recorded_lines(recording: Recording) -> list[str]:
+    lines = [line async for line in RecordingEventStreamAdapter(recording).stream(_HANDLE, [])]
+    # The hook tool goes before the final result line, where a real run puts it.
+    return [*lines[:-1], *_hook_tool_lines(), lines[-1]]
+
+
+async def _process(
+    lines: AsyncIterator[str],
+) -> tuple[list[tuple[str, str, dict[str, object]]], tuple[int, int, int]]:
+    observations = _Observations()
+    tokens = TokenAccumulator()
+    processor = EventStreamProcessor(
+        tokens=tokens,
+        subagents=SubagentTracker(),
+        observability=observations,
+        controller=None,
+        execution_id="exec-eq",
+        phase_id="phase-eq",
+        session_id="s-1",
+        workspace_id="ws-1",
+        agent_model="claude-sonnet",
+    )
+    result = await processor.process_stream(lines, _Workspace())
+    return observations.recorded, (result.line_count, tokens.input_tokens, tokens.output_tokens)
+
+
+async def _direct(lines: list[str]) -> AsyncIterator[str]:
+    for line in lines:
+        yield line
+
+
+@pytest.mark.parametrize("recording", [Recording.MULTI_TOOL, Recording.CONTEXT_TRACKING])
+@pytest.mark.parametrize("page_bytes", [1, 7, 4093])
+async def test_a_recorded_run_yields_the_same_events_through_provider_pages(
+    recording: Recording, page_bytes: int
+) -> None:
+    lines = await _recorded_lines(recording)
+    blob = ("\n".join(lines) + "\n").encode()
+    pages = [blob[i : i + page_bytes] for i in range(0, len(blob), page_bytes)]
+    adapter, _, _ = _stream(pages)
+
+    before = await _process(_direct(lines))
+    after = await _process(adapter.stream(_HANDLE, ["claude"]))
+
+    kinds = [kind for kind, _, _ in before[0]]
+    assert "git_commit" in kinds, "the embedded hook event is among those compared"
+    assert kinds.count("tool_execution_started") >= 2
+    assert after == before
