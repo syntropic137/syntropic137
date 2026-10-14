@@ -9,20 +9,26 @@ Now the trigger commits first and the backfill runs afterwards in batches,
 under no lock an insert waits on. Two claims, both tested here against a
 real database:
 
-  1. NO INSERT WAITS ON THE BACKFILL. At the end of every batch, with the
-     batch's transaction still open and therefore still holding every lock
-     it took, an insert into one of the batch's own sessions must commit
-     from another connection under ``lock_timeout``. A backfill that held a
-     lock an insert conflicts with (a table lock, the trigger DDL, a row lock
-     on the rollup) makes that insert wait, the wait hits the timeout, and
-     the test names the locks the backfill was holding.
+  1. NO INSERT WAITS ON THE BACKFILL. Just before every batch commits, with
+     every statement run and so every lock it will take still held, inserts
+     into that batch's own sessions must commit from another connection
+     under ``lock_timeout``. Those sessions were given a trigger-written row
+     on every model before the first batch, so each probe UPDATEs a row that
+     existed when the batch ran. A backfill that held a lock an insert
+     conflicts with (a table lock, the trigger DDL, a row lock on the
+     trigger's rollup rows) makes the probe wait, the wait hits the
+     timeout, and the test names the locks the backfill held. Every batch
+     must be probed, each in a transaction of its own (distinct txids), so
+     one long transaction across the batches fails too.
 
      This used to be a RATE: inserts completed during the backfill, as a
      fraction of the writer's free-running rate (#1860). A shared runner
      made that a flake (#1952: 4 inserts in 740 ms against 178/s). Blocking
      is a lock conflict, not a speed, so the test now asks Postgres directly
      whether the insert can get its locks while the backfill holds its own.
-     ``lock_timeout`` counts only lock waits, so a slow runner cannot fail it.
+     ``lock_timeout`` counts only lock waits, so a slow runner cannot fail
+     it, and the background writer never runs concurrently with a probe, so
+     the only lock a probe can wait on is the backfill's.
   2. EVERY EVENT IS COUNTED EXACTLY ONCE. After the dust settles, the rollup
      equals a fresh aggregation of agent_events: per turn key (every token
      column and the observation count) and per summary row (as a multiset).
@@ -52,6 +58,8 @@ from syn_shared.events import SESSION_STARTED, SESSION_SUMMARY, TOKEN_USAGE
 from .usage_rollup_seed import Row, copy_rows, prepare_pre_e1_schema, throwaway_database
 
 if TYPE_CHECKING:
+    from types import TracebackType
+
     import asyncpg
     from asyncpg.transaction import Transaction
 
@@ -68,6 +76,9 @@ WRITER_WARMUP_TIMEOUT_S = 30.0  # generous: connection setup on a slow runner is
 PROBE_LOCK_TIMEOUT = "5s"
 # Belt and braces only: lock_timeout ends a blocked probe long before this.
 PROBE_HARD_TIMEOUT_S = 60.0
+# A watchdog, not a bound under test: a backfill wedged on a lock must fail
+# the test rather than hang the job.
+ENSURE_SCHEMA_TIMEOUT_S = 600.0
 _MODELS = ("claude-sonnet-5", "claude-haiku-4-5-20251001")
 _T0 = datetime(2026, 9, 1, tzinfo=UTC)
 
@@ -119,9 +130,15 @@ def _history() -> list[Row]:
 
 @dataclass
 class Writer:
-    """Inserts one event at a time until told to stop: ingest, running throughout."""
+    """Inserts one event at a time until told to stop: ingest, running throughout.
+
+    Each insert holds ``turn``, which the probe takes too, so a probe never
+    queues behind a writer insert on the same session's rows: a probe that
+    waits, waits on the backfill.
+    """
 
     dsn: str
+    turn: asyncio.Lock = field(default_factory=asyncio.Lock)
     stop: asyncio.Event = field(default_factory=asyncio.Event)
     warmed_up: asyncio.Event = field(default_factory=asyncio.Event)
     inserted: int = 0
@@ -145,7 +162,8 @@ class Writer:
         conn = await asyncpg.connect(self.dsn)
         try:
             while not self.stop.is_set():
-                await copy_rows(conn, [self._next(self.inserted)])
+                async with self.turn:
+                    await copy_rows(conn, [self._next(self.inserted)])
                 self.inserted += 1
                 if self.inserted >= WRITER_WARMUP_INSERTS:
                     self.warmed_up.set()
@@ -156,67 +174,129 @@ class Writer:
 
 @dataclass
 class Probe:
-    """Inserts into a batch's own session while that batch's transaction is open."""
+    """Inserts into a batch's own sessions just before that batch commits."""
 
     conn: asyncpg.Connection
-    probed: int = 0
+    writer: Writer
     sessions_listed: int = 0
+    seeded: int = 0
+    transactions: list[int] = field(default_factory=list)
+    _n: int = 0
 
-    async def during_batch(self, backfill: asyncpg.Connection, batch: list[str]) -> None:
+    def _rows(self, sessions: list[str]) -> list[Row]:
+        rows: list[Row] = []
+        for session in sessions:
+            for model in _MODELS:
+                self._n += 1
+                rows.append(_turn(session, 20_000 + self._n, model))
+        return rows
+
+    async def _insert(self, rows: list[Row]) -> None:
+        """One COPY, never queued behind the writer, bounded on every wait."""
+        await asyncio.wait_for(self.writer.turn.acquire(), timeout=PROBE_HARD_TIMEOUT_S)
+        try:
+            await asyncio.wait_for(copy_rows(self.conn, rows), timeout=PROBE_HARD_TIMEOUT_S)
+        finally:
+            self.writer.turn.release()
+
+    async def seed(self, sessions: list[str]) -> None:
+        """Give every session a TRIGGER-written row on every model, before any batch.
+
+        The trigger only ever updates its own rows (``backfilled = FALSE``),
+        so a probe into a key with no such row inserts a fresh one and could
+        not notice a backfill that row-locked the trigger's rows. Seeded here,
+        after the trigger is live and before the first batch, every probe
+        updates a row that existed when its batch ran.
+        """
+        rows = self._rows(sessions)
+        await self._insert(rows)
+        self.seeded = len(rows)
+
+    async def before_commit(self, backfill: asyncpg.Connection, batch: list[str]) -> None:
         import asyncpg
 
-        # The batch has run every statement and not committed: it holds every
-        # lock it will take, and its advisory lock proves the transaction is
-        # the backfill's and is open right now.
+        # Every statement of the batch has run and COMMIT has not: the batch
+        # holds every lock it will ever take. Its advisory lock and its own
+        # transaction id prove the open transaction is this batch's alone.
         assert backfill.is_in_transaction(), "the probe must run inside the batch"
         pid = backfill.get_server_pid()
         assert await self.conn.fetchval(_HOLDS_ADVISORY_SQL, pid) is True, (
             "the backfill's batch transaction is not holding its schema lock"
         )
-        n = 20_000 + self.probed
-        row = _turn(batch[0], n, _MODELS[n % 2])
+        self.transactions.append(int(await backfill.fetchval("SELECT txid_current()")))
         try:
-            await asyncio.wait_for(copy_rows(self.conn, [row]), timeout=PROBE_HARD_TIMEOUT_S)
+            await self._insert(self._rows(batch))
         except (asyncpg.exceptions.LockNotAvailableError, TimeoutError):
-            held = await self.conn.fetch(_HELD_LOCKS_SQL, pid)
+            held: list[str] = []
+            with contextlib.suppress(Exception):
+                records = await asyncio.wait_for(
+                    self.conn.fetch(_HELD_LOCKS_SQL, pid), timeout=PROBE_HARD_TIMEOUT_S
+                )
+                held = [f"{r['locktype']} {r['relation']} {r['mode']}" for r in records]
             pytest.fail(
-                f"an insert into {batch[0]} waited on the backfill's batch transaction "
-                f"(lock_timeout {PROBE_LOCK_TIMEOUT}); the backfill held: "
-                + "; ".join(f"{r['locktype']} {r['relation']} {r['mode']}" for r in held)
+                f"an insert into {batch} waited on the backfill's open batch transaction "
+                f"(lock_timeout {PROBE_LOCK_TIMEOUT}); the backfill held: " + "; ".join(held)
             )
         assert backfill.is_in_transaction(), "the batch committed before the probe returned"
-        self.probed += 1
+
+
+class _ProbedTransaction:
+    """The batch's transaction, probing on a clean exit just before COMMIT."""
+
+    def __init__(self, inner: Transaction, conn: _ProbedConnection) -> None:
+        self._inner = inner
+        self._conn = conn
+
+    async def __aenter__(self) -> None:
+        await self._inner.__aenter__()
+        self._conn.batch = None
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
+        batch, self._conn.batch = self._conn.batch, None
+        if exc_type is None and batch is not None:
+            try:
+                await self._conn.probe.before_commit(self._conn.inner, batch)
+            except BaseException as err:
+                await self._inner.__aexit__(type(err), err, err.__traceback__)
+                raise
+        await self._inner.__aexit__(exc_type, exc, tb)
 
 
 class _ProbedConnection:
-    """The backfill's connection, probing after each batch's last statement.
+    """The backfill's connection, seeding before the first batch, probing each one.
 
     Delegates exactly what backfill_usage_rollup uses, so a change to that
     surface fails loudly here instead of silently skipping the probe.
     """
 
     def __init__(self, inner: asyncpg.Connection, probe: Probe) -> None:
-        self._inner = inner
-        self._probe = probe
+        self.inner = inner
+        self.probe = probe
+        self.batch: list[str] | None = None
 
     async def fetch(self, query: str, *args: object) -> list[asyncpg.Record]:
         from syn_adapters.events import schema
 
-        rows = await self._inner.fetch(query, *args)
+        rows = await self.inner.fetch(query, *args)
         if query == schema.USAGE_ROLLUP_BACKFILL_SESSIONS_SQL:
-            self._probe.sessions_listed = len(rows)
+            self.probe.sessions_listed = len(rows)
+            await self.probe.seed([str(r["session_id"]) for r in rows])
         return rows
 
-    def transaction(self) -> Transaction:
-        return self._inner.transaction()
+    def transaction(self) -> _ProbedTransaction:
+        return _ProbedTransaction(self.inner.transaction(), self)
 
     async def execute(self, query: str, *args: object) -> str:
         from syn_adapters.events import schema
 
-        result = await self._inner.execute(query, *args)
-        if query == schema.USAGE_ROLLUP_BACKFILL_SQL[-1]:
-            batch = cast("list[str]", args[0])
-            await self._probe.during_batch(self._inner, batch)
+        result = await self.inner.execute(query, *args)
+        if query in schema.USAGE_ROLLUP_BACKFILL_SQL:
+            self.batch = cast("list[str]", args[0])
         return result
 
 
@@ -295,7 +375,8 @@ async def test_inserts_flow_during_the_backfill_and_each_is_counted_once(
         probe_conn = await asyncpg.connect(dsn)
         try:
             await probe_conn.execute(f"SET lock_timeout = '{PROBE_LOCK_TIMEOUT}'")
-            probe = Probe(probe_conn)
+            writer = Writer(dsn)
+            probe = Probe(probe_conn, writer)
 
             async def probed(
                 backfill: asyncpg.Connection, *, batch_sessions: int | None = None
@@ -308,7 +389,6 @@ async def test_inserts_flow_during_the_backfill_and_each_is_counted_once(
             await copy_rows(conn, _history())
             await conn.execute("ANALYZE agent_events")
 
-            writer = Writer(dsn)
             writing = asyncio.create_task(writer.run())
             warm = asyncio.create_task(writer.warmed_up.wait())
             done, _ = await asyncio.wait(
@@ -327,20 +407,27 @@ async def test_inserts_flow_during_the_backfill_and_each_is_counted_once(
                 )
 
             try:
-                await EventStoreSchema().ensure_schema(conn)
+                await asyncio.wait_for(
+                    EventStoreSchema().ensure_schema(conn), timeout=ENSURE_SCHEMA_TIMEOUT_S
+                )
             finally:
                 await _stop(writer, writing)
             if writing.done() and not writing.cancelled():
                 writing.result()  # the writer died mid-backfill: raise its error
 
-            # 1. Every batch was probed, so no batch held a lock an insert needs.
+            # 1. Every batch was probed, each in a transaction of its own, so
+            # no batch held a lock an insert needs, at the moment it held most.
             assert probe.sessions_listed >= HISTORY_SESSIONS
+            assert probe.seeded == probe.sessions_listed * len(_MODELS)
             batches = -(-probe.sessions_listed // BATCH_SESSIONS)
-            assert probe.probed == batches, (
-                f"{probe.probed} of {batches} backfill batches were probed; "
+            assert len(probe.transactions) == batches, (
+                f"{len(probe.transactions)} of {batches} backfill batches were probed; "
                 "the backfill no longer runs the statements this test hooks"
             )
-            print(f"\n{probe.probed} batches each let an insert commit while still open")
+            assert len(set(probe.transactions)) == batches, (
+                "backfill batches shared a transaction, so their locks outlive a batch"
+            )
+            print(f"\n{batches} batches each let an insert commit before they did")
 
             # 2. Exactly once, against a fresh aggregation of everything written.
             keys, summaries = await _assert_rollup_equals_raw(conn)
