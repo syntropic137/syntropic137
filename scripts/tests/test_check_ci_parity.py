@@ -317,3 +317,28 @@ def test_the_pinned_python_version_is_read_from_the_workflow() -> None:
 
 def test_the_local_python_version_is_a_minor_version() -> None:
     assert local_python_version().count(".") == 1
+
+
+def test_dispatch_only_entry_must_exist_and_stay_off_pull_request(tmp_path: Path) -> None:
+    from scripts.check_ci_parity import DISPATCH_ONLY, dispatch_only_problems
+
+    name = next(iter(DISPATCH_ONLY))
+    missing = dispatch_only_problems(tmp_path, set())
+    assert any("does not exist" in p for p in missing)
+
+    for listed in DISPATCH_ONLY:
+        (tmp_path / listed).write_text("on: workflow_dispatch\njobs: {}\n")
+    assert dispatch_only_problems(tmp_path, set()) == []
+    assert any("workflow_dispatch only" in p for p in dispatch_only_problems(tmp_path, {name}))
+
+    for extra in ("push", "schedule", "workflow_run", "pull_request_target"):
+        (tmp_path / name).write_text(f"on: [workflow_dispatch, {extra}]\njobs: {{}}\n")
+        assert dispatch_only_problems(tmp_path, set()), extra
+    (tmp_path / name).write_text("on: push\njobs: {}\n")
+    assert dispatch_only_problems(tmp_path, set())
+
+
+def test_real_dispatch_only_workflows_are_clean() -> None:
+    from scripts.check_ci_parity import WORKFLOW_DIR, dispatch_only_problems
+
+    assert dispatch_only_problems(WORKFLOW_DIR, set(pr_triggered_workflows(WORKFLOW_DIR))) == []
