@@ -28,7 +28,7 @@ from syn_api._wiring import (
     get_workflow_dispatcher,
 )
 from syn_api.build_info import get_build_info
-from syn_api.services import cpu_throttling, execution_host_runner, inventory_lifecycle
+from syn_api.services import cpu_throttling, inventory_lifecycle
 from syn_api.services.admission_announcement import (
     announce_admission_if_open,
     start_disk_recovery_watch,
@@ -44,7 +44,11 @@ from syn_api.services.execution_posture import (
 from syn_api.services.feedback_lifecycle import init_ui_feedback, shutdown_ui_feedback
 from syn_api.services.health_probes import describe_codex_auth_health, describe_disk_health
 from syn_api.services.read_path_health import _judge_read_path
-from syn_api.services.reconciliation import cleanup_orphaned_containers, reconcile_orphaned_sessions
+from syn_api.services.reconciliation import (
+    cleanup_orphaned_containers,
+    reconcile_orphaned_executions,
+    reconcile_orphaned_sessions,
+)
 from syn_api.services.request_latency_lifecycle import start_request_latency, stop_request_latency
 from syn_api.services.seeding import seed_offline_data
 from syn_api.services.subscription_health import render_subscription_health
@@ -202,12 +206,10 @@ async def _init_degradable_services(state: LifecycleState) -> None:
     # narrowing it; the started_before cutoff below is defence in depth.
     process_started_at = datetime.now(UTC)
     await reconcile_orphaned_sessions()
-    # The reap first; the reconcile acts only if the reap can say it finished:
-    # "this execution is still running" is provably false only once every
-    # container is gone.
-    await execution_host_runner.reconcile_unless_queued(
-        await cleanup_orphaned_containers(), started_before=process_started_at
-    )
+    cleanup = await cleanup_orphaned_containers()
+    # AFTER the reap, and only if the reap can say it finished: "this execution
+    # is still running" is provably false only once every container is gone.
+    await reconcile_orphaned_executions(cleanup, started_before=process_started_at)
 
     for entry in _SERVICE_REGISTRY:
         try:
@@ -297,7 +299,6 @@ async def startup(
         return result
 
     await _init_degradable_services(_state)
-    await execution_host_runner.start_execution_host()
 
     mode = "degraded" if _state.degraded_reasons else "full"
     return Ok({"mode": mode, "degraded_reasons": _state.degraded_reasons})
@@ -318,7 +319,6 @@ async def shutdown() -> Result[None, LifecycleError]:
                 await _state._recovery_task
             _state._recovery_task = None
 
-        await execution_host_runner.stop_execution_host()
         # Shutdown services in reverse registration order (ADR-057).
         for entry in reversed(_SERVICE_REGISTRY):
             if entry.shutdown_fn is not None:

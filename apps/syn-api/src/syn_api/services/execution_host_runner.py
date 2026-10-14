@@ -6,9 +6,11 @@ only writes the queue (1.3), so without this nothing would ever drain an
 admitted run. Until the role split (1.6) the API process is the one executor,
 so the startup reap in ``lifecycle`` stays as it is: no other host is live.
 
-``lifecycle`` calls, in order: ``reconcile_unless_queued`` after the startup
-reap, ``start_execution_host`` once startup is done, and ``stop_execution_host``
-first at shutdown, before the services its runs append through go away.
+``lifecycle`` is meant to call, in order: ``reconcile_unless_queued`` in place
+of the startup reconcile, ``start_execution_host`` once startup is done, and
+``stop_execution_host`` first at shutdown. Not wired yet: ``lifecycle.py`` is at
+its max-loc-file limit, so the hookup waits on extracting its startup block
+(FIXME(#1310)). Until then this module is dark even with the flag on.
 """
 
 from __future__ import annotations
