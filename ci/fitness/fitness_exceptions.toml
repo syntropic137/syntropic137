@@ -584,4 +584,4 @@ text = "syn control resume"
 reason = "History: names the command removed in v0.32, in a callout that says it was removed."
 
 [docs_drift.budget]
-"apps/syn-docs/content/docs/guide/plugins.mdx" = { max = 1, issue = "#1946" }
+# Empty: every page passes. Add an entry only for debt owned by an open issue.
