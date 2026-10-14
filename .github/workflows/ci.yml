@@ -1,8 +1,10 @@
 name: CI
 
 on:
+  # main only. A feature branch gets CI from its pull_request run. Pushing
+  # `feat/*` here as well ran the whole suite twice for every PR push (#1893).
   push:
-    branches: [main, feat/*]
+    branches: [main]
   pull_request:
     branches: [main, release]
   workflow_dispatch:
@@ -10,9 +12,15 @@ on:
     # Run integration tests weekly on Sunday at 2am UTC
     - cron: '0 2 * * 0'
 
+# A PR run is superseded by the next push to the same PR, so cancel it.
+# Everything else (main pushes, cron, dispatch) gets a group of its own run, so
+# it is never cancelled and never queued behind another run. Any shared group
+# (by ref or even by SHA) holds at most one pending run, and GitHub cancels the
+# older pending run when a newer one queues: back-to-back merges, or a dispatch
+# at the same SHA, would leave a main commit with no "CI Success" at all.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # ISS-259: Least-privilege default — jobs that need write access (e.g. publishing)
 # must explicitly declare it. Prevents a compromised step from pushing code or
@@ -213,8 +221,11 @@ jobs:
           TERM: dumb
           NO_COLOR: "1"
           COLUMNS: "200"
+        # -n auto: one pytest-xdist worker per vCPU (4 on ubuntu-latest).
+        # Serial, this step took 15-20 min (#1902). pytest-cov combines the
+        # workers' coverage data, so the report is the whole suite's.
         run: |
-          uv run pytest -m unit \
+          uv run pytest -m unit -n auto \
             --cov=apps/syn-api/src \
             --cov=packages/syn-domain/src \
             --cov=packages/syn-adapters/src \
@@ -257,16 +268,9 @@ jobs:
           --health-timeout 5s
           --health-retries 5
 
-      # TODO(#343): Enable EventStore + Collector services when containers are published
-      # eventstore:
-      #   image: ghcr.io/syntropic137/event-store:latest
-      #   ports:
-      #     - 55051:50051
-      #   options: >-
-      #     --health-cmd "grpc_health_probe -addr=:50051"
-      #     --health-interval 10s
-      #     --health-timeout 5s
-      #     --health-retries 5
+      # The event store is NOT a service: a service image must be static, and
+      # this one is resolved from the ESP gitlink by the step below (#1899).
+      # TODO(#343): Add the collector to this job.
 
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
@@ -287,6 +291,56 @@ jobs:
       - name: Install dependencies
         run: uv sync --all-extras
 
+      # The event store image is the one the release pins: event-store:v<ESP
+      # version> at the lib/event-sourcing-platform gitlink, resolved to its
+      # index digest by the same script release-containers.yaml runs (#1515).
+      # No hardcoded digest to drift when the gitlink moves. Started here, not
+      # as a service, so it starts after timescaledb accepts TCP: it runs its
+      # migrations at startup and exits if the database is not up yet. The
+      # service health check is not enough: pg_isready over the socket passes
+      # while the image's init server is up, before the real one listens on TCP.
+      - name: Start event store
+        env:
+          EVENTSTORE_NETWORK: ${{ job.services.timescaledb.network }}
+          TIMESCALEDB_CONTAINER: ${{ job.services.timescaledb.id }}
+        run: |
+          pg_ready=false
+          for _ in $(seq 1 30); do
+            if docker exec "$TIMESCALEDB_CONTAINER" pg_isready -h localhost -U syn -d syn; then
+              pg_ready=true
+              break
+            fi
+            sleep 2
+          done
+          if [ "$pg_ready" != true ]; then
+            echo "::error::timescaledb never accepted TCP connections"
+            docker logs "$TIMESCALEDB_CONTAINER"
+            exit 1
+          fi
+          uv run --no-project python scripts/resolve_event_store_digest.py --out "$RUNNER_TEMP/event-store-digest"
+          digest="$(cat "$RUNNER_TEMP/event-store-digest")"
+          docker run -d --name eventstore \
+            --network "$EVENTSTORE_NETWORK" \
+            -p 55051:50051 \
+            -e BACKEND=postgres \
+            -e DATABASE_URL=postgres://syn:syn_dev_password@timescaledb:5432/syn \
+            -e BIND_ADDR=0.0.0.0:50051 \
+            -e RUST_LOG=info \
+            --health-cmd "bash -c '</dev/tcp/localhost/50051' || exit 1" \
+            --health-interval 2s \
+            --health-timeout 5s \
+            --health-retries 30 \
+            "ghcr.io/syntropic137/event-store@${digest}"
+          for _ in $(seq 1 60); do
+            status="$(docker inspect -f '{{.State.Health.Status}}' eventstore 2>/dev/null || echo missing)"
+            [ "$status" = healthy ] && exit 0
+            [ "$(docker inspect -f '{{.State.Running}}' eventstore)" = true ] || break
+            sleep 2
+          done
+          echo "::error::event store did not become healthy (status: ${status})"
+          docker logs eventstore
+          exit 1
+
       - name: Run integration tests
         env:
           TERM: dumb
@@ -299,6 +353,10 @@ jobs:
           TEST_EVENTSTORE_PORT: "55051"
         run: |
           uv run pytest -m integration -x -q
+
+      - name: Event store logs
+        if: failure()
+        run: docker logs eventstore || true
 
   #############################################################################
   # DASHBOARD UI - TypeScript checks

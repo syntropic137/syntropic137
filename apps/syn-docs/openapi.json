@@ -12543,6 +12543,60 @@
               }
             ]
           },
+          "resumed_from": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResumedFromInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "resumed_as": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resumed As"
+          },
+          "latest_resumed_as": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Resumed As"
+          },
+          "resumed_from_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resumed From Display"
+          },
+          "resumed_as_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resumed As Display"
+          },
           "resume_start": {
             "anyOf": [
               {
@@ -13354,6 +13408,27 @@
             },
             "type": "array",
             "title": "Tags"
+          },
+          "resumed_from": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResumedFromInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "resumed_as": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resumed As"
           },
           "repos_display": {
             "anyOf": [
@@ -19096,6 +19171,26 @@
         ],
         "title": "ResumeStartInfo",
         "description": "How starting the child of this execution's resume is going (#1480).\n\nA resume is admitted with a 200 and its child is started afterwards, in a\nbackground task. When that start fails, this is the only place an operator\ncan see it: the child execution never appears, so there is nothing else to\nlook at."
+      },
+      "ResumedFromInfo": {
+        "properties": {
+          "parent_execution_id": {
+            "type": "string",
+            "title": "Parent Execution Id"
+          },
+          "resume_phase_id": {
+            "type": "string",
+            "title": "Resume Phase Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "parent_execution_id",
+          "resume_phase_id"
+        ],
+        "title": "ResumedFromInfo",
+        "description": "The execution a resumed run continues, and the phase it picked up at (#1881)."
       },
       "ReviewVerdict": {
         "type": "string",

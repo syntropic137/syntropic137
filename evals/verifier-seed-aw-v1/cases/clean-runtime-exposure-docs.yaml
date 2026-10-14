@@ -22,3 +22,4 @@ task: >
   version. Review whether the guidance and the commands it gives are correct
   and safe to follow.
 split: train
+retired: v2 - docs-only, nothing a verifier can run; replaced by code-and-tests controls. It scores in v1 as it ran

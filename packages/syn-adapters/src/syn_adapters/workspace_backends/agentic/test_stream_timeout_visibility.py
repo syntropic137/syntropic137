@@ -37,22 +37,31 @@ pytestmark = pytest.mark.unit
 # HANDLES SIGTERM by exiting 0, reproducing `docker exec`'s behaviour.
 # (It does not ignore the signal - it catches it and exits successfully,
 # which is the property that makes truncation invisible.)
+# It says "ready" on stderr once the handler is installed. Tests wait for that
+# instead of sleeping: a fixed sleep raced interpreter start-up on a loaded
+# runner (pytest-xdist, #1902), and a SIGTERM that lands before the handler
+# exits -15, which is not the behaviour under test.
 _EXITS_ZERO_ON_SIGTERM = (
     "import signal, sys, time\n"
     "signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))\n"
+    "sys.stderr.write('ready\\n'); sys.stderr.flush()\n"
     "sys.stdout.write('line one\\n'); sys.stdout.flush()\n"
     "time.sleep(30)\n"
 )
 
 
 async def _spawn() -> asyncio.subprocess.Process:
-    return await asyncio.create_subprocess_exec(
+    """The SIGTERM-handling child, returned once its handler is installed."""
+    proc = await asyncio.create_subprocess_exec(
         "python3",
         "-c",
         _EXITS_ZERO_ON_SIGTERM,
         stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.STDOUT,
+        stderr=asyncio.subprocess.PIPE,
     )
+    assert proc.stderr is not None
+    assert await proc.stderr.readline() == b"ready\n"
+    return proc
 
 
 async def test_the_transport_really_does_hide_the_timeout() -> None:
@@ -62,7 +71,6 @@ async def test_the_transport_really_does_hide_the_timeout() -> None:
     fail and tell you the other tests had become tautologies.
     """
     proc = await _spawn()
-    await asyncio.sleep(0.3)
     assert await _cleanup_process(proc) == 0, (
         "the fake process must exit 0 on SIGTERM, or these tests cannot fail"
     )

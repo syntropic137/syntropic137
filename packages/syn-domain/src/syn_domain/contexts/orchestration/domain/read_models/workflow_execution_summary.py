@@ -12,6 +12,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
     ReportedFailureReason,
 )
 from syn_domain.contexts.orchestration.domain.read_models.phase_progress import PhaseProgress
+from syn_domain.contexts.orchestration.domain.read_models.resume_lineage import ResumedFrom
 
 
 @dataclass(frozen=True)
@@ -118,6 +119,12 @@ class WorkflowExecutionSummary:
     workflow_version: str | None = None
     """The workflow's installed version or source digest at launch (Evals v2)."""
 
+    resumed_from: ResumedFrom | None = None
+    """The execution this run resumed, and the phase it picked up at (#1881)."""
+
+    resumed_as: str | None = None
+    """The execution that resumed this one, if any. At most one (#1881)."""
+
     @property
     def phase_progress(self) -> PhaseProgress:
         """How far through its phases the run is, skipped phases accounted for."""
@@ -172,6 +179,8 @@ class WorkflowExecutionSummary:
             eval_id=data.get("eval_id"),
             association_kind=data.get("association_kind"),
             workflow_version=data.get("workflow_version"),
+            resumed_from=ResumedFrom.from_stored(data.get("resumed_from")),
+            resumed_as=data.get("resumed_as"),
         )
 
     @staticmethod
@@ -213,4 +222,6 @@ class WorkflowExecutionSummary:
             "eval_id": self.eval_id,
             "association_kind": self.association_kind,
             "workflow_version": self.workflow_version,
+            "resumed_from": None if self.resumed_from is None else self.resumed_from.to_stored(),
+            "resumed_as": self.resumed_as,
         }

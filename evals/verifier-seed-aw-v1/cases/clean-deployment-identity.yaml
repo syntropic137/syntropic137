@@ -1,0 +1,32 @@
+id: clean-deployment-identity
+polarity: clean
+# A control, not a defect, added in v2. `source_pr` is the agentic-primitives
+# PR (#348, "feat/deployment-slot", merged 2026-08-19; its head is c415b46
+# after the import). Python code (agentic_session_store contract.py), the
+# session-store init.sh and integration tests. Chosen by verifier-seed-v1's
+# README rule 1-3; `check` holds rules 1-3 for its Python. Rule 3 for the
+# shell and the tests, by hand: in the 30 days after the merge, #359 (same
+# day) and #360 add tests to test_entrypoint_capabilities.py and every one of
+# the 155 lines #348 added there is still present at cc89e13 (2026-09-07, the
+# last mainline commit in the window); #362 renames seshmagic/init.sh to
+# apss/init.sh and changes only its header comment, and changes only a
+# docstring in contract.py. v1's note excluded #348 for that rename; a rename
+# that leaves the changed lines intact is a move, which rule 3 says does not
+# hide an edit and is not one. No commit message, issue or PR names #348 or
+# AGENTIC_SESSION_STORE_DEPLOYMENT as a fix (14c94d2 and 001ffd3 fix the
+# rename, not the deployment identity).
+#
+# THE PIN HAS NO CI FILES, as with every imported-history pin. See README
+# "What differs".
+source_pr: 348
+commit: c415b4664ed397e54fdad32f3446a0fe1c568828
+merge_commit: 55f087703bc7b66c4a0707d56998c58beed49f35
+clean_through: b454d8516a81a66c699fea748d57945b7244997c
+task: >
+  The change under review adds an optional deployment identity to the
+  session-store capability: a new AGENTIC_SESSION_STORE_DEPLOYMENT variable in
+  the contract, translated by init.sh into the exporter's
+  SESSION_STORE_ORIGIN_DEPLOYMENT only when set, with integration tests.
+  Review whether an unset or empty value can stamp a fabricated identity,
+  whether the contract and init.sh agree, and whether the tests prove both.
+split: train
