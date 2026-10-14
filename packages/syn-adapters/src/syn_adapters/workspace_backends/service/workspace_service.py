@@ -259,8 +259,7 @@ class WorkspaceService:
             security=security,
             capture_source_instance_id=capture_source_instance_id,
         )
-        event_stream = AgenticEventStreamAdapter()
-        event_stream.set_provider(isolation._provider)
+        event_stream = AgenticEventStreamAdapter(isolation)
 
         # Shared Envoy proxy for credential injection (ISS-43).
         # Agents never see API keys — the proxy injects them via ext_authz.

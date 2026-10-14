@@ -31,9 +31,11 @@ from syn_adapters.workspace_backends.agentic.adapter_copy import (
     copy_files_to_workspace,
 )
 from syn_adapters.workspace_backends.agentic.cpu_hints import with_cpu_hints
+from syn_adapters.workspace_backends.agentic.credentials import WorkspaceCredentials
 from syn_adapters.workspace_backends.agentic.session_store_env import (
     apply_session_store_env,
     deployment_identity,
+    session_store_credential_bindings,
 )
 
 # Re-exported for backward compatibility (issue #771 item 7): the canonical
@@ -62,6 +64,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from agentic_isolation import AgenticWorkspace
+    from agentic_isolation.providers.base import SupportsOperations, Workspace
 
     from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
         ExecutionResult,
@@ -222,14 +225,27 @@ class AgenticIsolationAdapter:
         # but cannot reach the internet directly.
         agent_network = os.environ.get(ENV_SYN_AGENT_NETWORK, "agent-net")
 
+        #: Shared with the event stream, which binds launch-scoped credentials
+        #: (the platform grant) through it.
+        self.credentials = WorkspaceCredentials(session_store)
         self._provider = WorkspaceDockerProvider(
             default_image=default_image,
             security=self._security,
             workspace_base_dir=container_dir,
             workspace_host_dir=host_dir,  # For Docker volume mounts
             default_network=agent_network,
+            credentials=self.credentials,
         )
         self._workspaces: dict[str, AgenticWorkspace] = {}
+
+    @property
+    def operations(self) -> SupportsOperations:
+        """The provider's operation contract, which the event stream launches through."""
+        return self._provider
+
+    def workspace(self, isolation_id: str) -> Workspace | None:
+        """The live provider workspace behind a handle, or None once destroyed."""
+        return self._workspaces.get(isolation_id)  # type: ignore[return-value]  # Workspace vs AgenticWorkspace adapter boundary
 
     @staticmethod
     def is_available() -> bool:
@@ -305,9 +321,10 @@ class AgenticIsolationAdapter:
         # not on WorkspaceConfig. Containers join agent-net to reach the shared
         # Envoy proxy but cannot reach the internet directly.
         #
-        # NOTE: the session-store write token is in `environment` only. It must
-        # never be copied into `labels` — labels are readable by anyone who can
-        # run `docker inspect`.
+        # The session-store write token is NOT in `environment`: it is a
+        # credential binding the provider resolves at launch through the
+        # `WorkspaceCredentials` it was constructed with, and delivers into
+        # the workload environment only - never argv, labels or logs.
         image = config.image or self._default_image
 
         # Supply-chain gate: verify the cosign signature of the exact image
@@ -327,6 +344,7 @@ class AgenticIsolationAdapter:
             image=image,
             working_dir="/workspace",
             environment=environment,
+            credentials=session_store_credential_bindings(self._session_store),
             mounts=capture_mounts,
             labels=_container_labels(config),
             security=self._security,
@@ -430,7 +448,7 @@ class AgenticIsolationAdapter:
             # Logged inside the task: a second cancellation can return the
             # caller before the reap finishes, and nothing would see its error.
             try:
-                await provider.destroy(workspace)  # type: ignore[arg-type]  # Workspace vs AgenticWorkspace adapter boundary
+                await provider.teardown(target=workspace)  # type: ignore[arg-type]  # Workspace vs AgenticWorkspace adapter boundary
             except Exception:
                 logger.exception(
                     "Could not destroy workspace for execution %s after a failed provision",
@@ -462,12 +480,19 @@ class AgenticIsolationAdapter:
             return None
 
         logger.info("Destroying workspace (id=%s)", handle.isolation_id)
-        # `object`: the pinned provider is annotated `-> None`, so pyright
-        # cannot check its report against `TeardownReportLike` yet; a field
-        # mismatch is logged at runtime by `usage_from_report` instead. Once
-        # agentic-workspace types `destroy` against the Protocol, drop this.
-        report: object = await self._provider.destroy(workspace)  # type: ignore[arg-type,func-returns-value]  # Workspace vs AgenticWorkspace adapter boundary
-        return usage_from_report(report)
+        report = await self._provider.teardown(target=workspace)  # type: ignore[arg-type]  # Workspace vs AgenticWorkspace adapter boundary
+        if report.finalization.state != "completed":
+            # Not raised: the caller's primary failure, if any, is the one that
+            # propagates, and the container is stopped and removed either way.
+            # The workspace directory may remain; say so rather than drop it.
+            logger.error(
+                "Workspace teardown %s (id=%s, stage=%s): %s",
+                report.finalization.state,
+                handle.isolation_id,
+                report.finalization.stage,
+                report.finalization.error,
+            )
+        return usage_from_report(report.usage)
 
     async def execute(
         self,
