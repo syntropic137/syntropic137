@@ -46,7 +46,7 @@ reviewer or a verify phase asks "does this test kill the bug?".
      `*.spec.*`), a test package `__init__.py`, conftest, any pytest config
      (pyproject, pytest.ini, pytest.toml and dot-variants, tox.ini,
      setup.cfg), a lockfile (`*.lock`, pnpm/npm/bun locks, go.sum), `.github/`
-     or `ci/`, `.mutations/`, a symlinked
+     or `ci/`, `.mutations/`, a submodule (mutate it in its own repo), a symlinked
      or git-ignored path, or paths it did not declare; renames and copies are
      refused.
    - `ERROR`: pytest exited without a failure on record (interrupt, timeout,

@@ -195,7 +195,6 @@ def test_forbids_tests_config_ci_and_lockfiles(path: str) -> None:
         "pkg/tests/helpers.py",
         "pkg/__init__.py",
         "apps/syn-api/src/x/testing_utils.py",
-        "lib/agentic-workspace/x.py",
         "README.md",
     ],
 )
@@ -585,3 +584,31 @@ def test_a_harness_file_under_tests_is_mutated_and_killed(repo: Path) -> None:
     assert result.outcome is Outcome.KILLED
     assert result.files == ("pkg/tests/authorizer.py",)
     assert harness.read_text() == "ALLOW = False\n"
+
+
+def test_patch_inside_a_submodule_is_refused(repo: Path, tmp_path: Path) -> None:
+    sub = tmp_path / "sub"
+    sub.mkdir()
+    _git(sub, "init", "-q")
+    _git(sub, "config", "user.email", "t@example.invalid")
+    _git(sub, "config", "user.name", "t")
+    (sub / "x.py").write_text("X = 1\n")
+    _git(sub, "add", ".")
+    _git(sub, "commit", "-q", "-m", "sub")
+    subprocess.run(
+        ["git", "-c", "protocol.file.allow=always", "submodule", "add", "-q", str(sub), "lib/sub"],
+        cwd=repo, check=True, capture_output=True,
+    )  # fmt: skip
+    _git(repo, "commit", "-q", "-m", "submodule")
+    text = (
+        "diff --git a/lib/sub/x.py b/lib/sub/x.py\n--- a/lib/sub/x.py\n+++ b/lib/sub/x.py\n"
+        "@@ -1 +1 @@\n-X = 1\n+X = 2\n"
+    )
+    patch = _commit_patch(repo, "05-sub.patch", text)
+
+    result = evaluate_patch(repo, patch, _inputs(), _runner_sensitive_to_mod)
+    restore(repo)
+
+    assert result.outcome is Outcome.REFUSED
+    assert "submodule" in result.detail
+    assert (repo / "lib" / "sub" / "x.py").read_text() == "X = 1\n"

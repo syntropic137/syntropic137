@@ -351,16 +351,33 @@ def is_rename_or_copy(summary_line: str) -> bool:
     return summary_line.lstrip().startswith(("rename ", "copy "))
 
 
+def gitlinks(root: Path) -> list[PurePosixPath]:
+    """Every submodule path (index entries with mode 160000)."""
+    out = _git(root, "ls-files", "--stage", "-z").stdout
+    found: list[PurePosixPath] = []
+    for entry in out.split("\0"):
+        meta, _, path = entry.partition("\t")
+        if path and meta.startswith("160000 "):
+            found.append(PurePosixPath(path))
+    return found
+
+
 def vet_paths(root: Path, paths: list[str], inputs: Inputs) -> list[str]:
     """Every reason the patch may not be applied, path by path."""
     problems: list[str] = []
     real_root = root.resolve()
     test_targets = {(root / t).resolve() for t in inputs.test_files}
+    submodules = gitlinks(root)
     for path in paths:
         try:
             pure = _safe_relative(path, "patched path")
         except InputError as exc:
             problems.append(str(exc))
+            continue
+        if any(pure.is_relative_to(sub) for sub in submodules):
+            # Restore and the tree checks are parent-repo only, so a nested
+            # edit would survive restore. Mutate a submodule in its own repo.
+            problems.append(f"{path} (inside submodule; mutate it in its own repository)")
             continue
         if why := forbidden_reason(path, inputs.mutations_dir):
             problems.append(f"{path} ({why})")
