@@ -181,6 +181,30 @@ class InMemoryExecutionRunQueue(InMemoryAdapter):
                 )
         return fenced
 
+    async def reconciling(self, reconciler: str) -> list[FencedRun]:
+        entry = self._hosts.get(reconciler)
+        if entry is None or not entry.registered:
+            return []
+        owned: list[FencedRun] = []
+        for row in list(self._runs.values()):
+            if row.state not in ("fencing", "reaped"):
+                continue
+            if row.reconciler != reconciler:
+                left = self._hosts.get(row.reconciler or "")
+                if (left is not None and left.registered) or row.writer_epoch > entry.host.epoch:
+                    continue
+                row = self._put(row, reconciler=reconciler, token=row.token + 1)
+            owned.append(
+                FencedRun(
+                    execution_id=row.execution_id,
+                    executor_id=row.executor_id or "",
+                    reconciler=reconciler,
+                    token=row.token,
+                    reaped=row.state == "reaped",
+                )
+            )
+        return sorted(owned, key=lambda run: run.execution_id)
+
     async def mark_reaped(self, run: FencedRun) -> None:
         row = self._held(run.execution_id, run.token, "fencing")
         if row is None or row.reconciler != run.reconciler:

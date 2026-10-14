@@ -415,3 +415,52 @@ async def test_defer_that_waits_on_the_budget_lock_keeps_its_full_backoff(
             FROM execution_runs WHERE execution_id='work'"""
         )
     assert remaining > 0.1
+
+
+@pytest.mark.parametrize("left_at", ["fencing", "reaped"])
+async def test_a_reconcilers_rows_are_taken_over_only_after_it_leaves(
+    pools: list[asyncpg.Pool], left_at: str
+) -> None:
+    """D5: a reconciler's rows are durable. Its successor finds them in the queue,
+    never in memory, and adopts them only once the old owner's host row is gone."""
+    short = PostgresExecutionRunQueue(pools[0], lease_ttl=timedelta(milliseconds=200))
+    first = PostgresExecutionRunQueue(pools[1])
+    successor = PostgresExecutionRunQueue(pools[2])
+    await _online(short, "dying", capacity=1)
+    await _online(first, "rec-1", capacity=1)
+    await _online(successor, "rec-2", capacity=1)
+    await _admit(short, "exec-adopt")
+    assert await short.claim("dying") is not None
+    await asyncio.sleep(0.5)
+    (fenced,) = await first.fence_expired("rec-1")
+    if left_at == "reaped":
+        await first.mark_reaped(fenced)
+
+    # A fresh reconciler object for the same host rediscovers its own row.
+    (mine,) = await PostgresExecutionRunQueue(pools[3]).reconciling("rec-1")
+    assert (mine.token, mine.reaped) == (fenced.token, left_at == "reaped")
+    # rec-1 is still registered, however stale: no takeover.
+    assert await successor.reconciling("rec-2") == []
+
+    await first.deregister("rec-1")
+    (adopted,) = await successor.reconciling("rec-2")
+    assert (adopted.reconciler, adopted.executor_id) == ("rec-2", "dying")
+    assert adopted.token > fenced.token
+    assert adopted.reaped == (left_at == "reaped")
+    # The old owner's writes are fenced by the new token.
+    with pytest.raises(RunLeaseLost):
+        await (
+            first.close_interrupted(fenced) if left_at == "reaped" else first.mark_reaped(fenced)
+        )
+
+    if not adopted.reaped:
+        await successor.mark_reaped(adopted)
+    await successor.close_interrupted(adopted)
+    assert await successor.reconciling("rec-2") == []
+    counts = await successor.in_use()
+    assert (counts.interrupted, counts.fencing, counts.reaped) == (1, 0, 0)
+    async with pools[0].acquire() as conn:
+        assert (
+            await conn.fetchval("SELECT in_use FROM execution_budget WHERE executor_id='dying'")
+            == 0
+        )

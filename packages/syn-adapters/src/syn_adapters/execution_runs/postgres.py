@@ -195,6 +195,28 @@ class PostgresExecutionRunQueue:
             )
         return [FencedRun.model_validate_json(row["run"]) for row in rows]
 
+    async def reconciling(self, reconciler: str) -> list[FencedRun]:
+        async with self._pool.acquire() as conn, conn.transaction():
+            # Take over rows whose reconciler has left. The row lock serialises two
+            # adopters; the second re-reads the predicate and finds a live owner.
+            await conn.execute(
+                """UPDATE execution_runs r SET reconciler=me.host_id,lease_token=r.lease_token+1
+                FROM executor_hosts me
+                WHERE me.host_id=$1 AND r.state IN ('fencing','reaped')
+                AND r.reconciler IS DISTINCT FROM me.host_id AND r.writer_epoch<=me.epoch
+                AND NOT EXISTS (SELECT 1 FROM executor_hosts h WHERE h.host_id=r.reconciler)""",
+                reconciler,
+            )
+            rows = await conn.fetch(
+                """SELECT jsonb_build_object('execution_id',execution_id,
+                    'executor_id',executor_id,'reconciler',reconciler,
+                    'token',lease_token,'reaped',state='reaped')::text AS run
+                FROM execution_runs WHERE reconciler=$1 AND state IN ('fencing','reaped')
+                ORDER BY execution_id""",
+                reconciler,
+            )
+        return [FencedRun.model_validate_json(row["run"]) for row in rows]
+
     async def mark_reaped(self, run: FencedRun) -> None:
         async with self._pool.acquire() as conn:
             reaped = await conn.fetchval(

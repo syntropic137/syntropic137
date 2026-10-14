@@ -5,17 +5,10 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Protocol
 
-from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
-    InterruptExecutionCommand,
-)
-from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
-    ExecutionStatus,
-)
+from syn_domain.contexts.orchestration import ExecutionStatus, InterruptExecutionCommand
 
 if TYPE_CHECKING:
-    from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
-        WorkflowExecutionAggregate,
-    )
+    from syn_domain.contexts.orchestration import WorkflowExecutionAggregate
     from syn_domain.contexts.orchestration.ports import FencedRun
 
 logger = logging.getLogger(__name__)

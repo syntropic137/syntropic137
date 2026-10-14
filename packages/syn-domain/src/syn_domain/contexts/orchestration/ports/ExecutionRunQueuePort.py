@@ -70,6 +70,8 @@ class FencedRun(BaseModel):
     executor_id: str
     reconciler: str
     token: int = Field(ge=1)
+    reaped: bool = False
+    """The row is ``reaped``: the dead host's containers are already gone."""
 
 
 class OpeningSweep(BaseModel):
@@ -141,6 +143,15 @@ class ExecutionRunQueue(Protocol):
 
     async def fence_expired(self, reconciler: str) -> list[FencedRun]:
         """Every expired ``claimed`` run this host can read -> ``fencing``, owned by ``reconciler``."""
+        ...
+
+    async def reconciling(self, reconciler: str) -> list[FencedRun]:
+        """Every ``fencing``/``reaped`` row ``reconciler`` owns, read from the row (D5).
+
+        First takes over, under a new token, each such row whose reconciler has
+        **left** (its ``executor_hosts`` row is gone). A stale heartbeat alone is
+        not leaving, so a stalled reconciler is never taken over while registered.
+        """
         ...
 
     async def mark_reaped(self, run: FencedRun) -> None:

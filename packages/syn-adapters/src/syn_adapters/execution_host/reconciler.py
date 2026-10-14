@@ -21,12 +21,12 @@ logger = logging.getLogger(__name__)
 
 
 class Reconciler:
-    """One host's share of reconciliation; owns the runs it fenced until they close.
+    """One host's share of reconciliation, driven entirely by the queue's rows.
 
-    The runs it is part-way through are held in memory: they are this process's
-    work in progress, not domain state. If this host dies too, those rows stay
-    ``fencing``/``reaped`` and hold their slot (FIXME(#1310): 1.5 has no port to
-    re-adopt another reconciler's rows; tracked on the plan).
+    Holds nothing between turns. Every turn re-reads the ``fencing``/``reaped``
+    rows this host owns (adopting any whose reconciler has left), so a write that
+    failed before commit, an acknowledgment lost after commit, or a reconciler
+    that died part-way are all resumed from what the row says, never from memory.
     """
 
     def __init__(
@@ -40,49 +40,33 @@ class Reconciler:
         self._host_id = host_id
         self._reaper = reaper
         self._interrupter = interrupter
-        self._to_reap: dict[str, FencedRun] = {}
-        self._to_interrupt: dict[str, FencedRun] = {}
 
     async def turn(self) -> None:
         for run in await self._queue.fence_expired(self._host_id):
             logger.warning(
                 "Fenced %s: executor %s let its lease expire", run.execution_id, run.executor_id
             )
-            self._to_reap[run.execution_id] = run
-        for run in list(self._to_reap.values()):
-            await self._reap(run)
-        for run in list(self._to_interrupt.values()):
-            await self._interrupt(run)
+        for run in await self._queue.reconciling(self._host_id):
+            try:
+                await self._advance(run)
+            except RunLeaseLost:
+                logger.warning("Reconciliation of %s moved on without this host", run.execution_id)
+            except Exception:
+                logger.exception(
+                    "Reconciling %s failed; its row says where to resume", run.execution_id
+                )
 
-    async def _reap(self, run: FencedRun) -> None:
-        try:
-            reaped = await self._reaper.reap(run)
-        except Exception:
-            logger.exception("Reaping fenced run %s failed; staying fencing", run.execution_id)
-            return
-        if not reaped:
-            logger.warning(
-                "Reap of %s on dead executor %s not shown complete; staying fencing",
-                run.execution_id,
-                run.executor_id,
-            )
-            return
-        del self._to_reap[run.execution_id]
-        try:
+    async def _advance(self, run: FencedRun) -> None:
+        if not run.reaped:
+            if not await self._reaper.reap(run):
+                logger.warning(
+                    "Reap of %s on dead executor %s not shown complete; staying fencing",
+                    run.execution_id,
+                    run.executor_id,
+                )
+                return
             await self._queue.mark_reaped(run)
-        except RunLeaseLost:
-            logger.warning("Reconciliation of %s was taken over", run.execution_id)
-            return
-        self._to_interrupt[run.execution_id] = run
-
-    async def _interrupt(self, run: FencedRun) -> None:
-        try:
-            await self._interrupter.interrupt(run)
-        except Exception:
-            logger.exception("Interrupting fenced run %s failed; retrying", run.execution_id)
-            return
-        del self._to_interrupt[run.execution_id]
-        try:
-            await self._queue.close_interrupted(run)
-        except RunLeaseLost:
-            logger.warning("Fenced run %s was closed by another writer", run.execution_id)
+        # Interrupting is a no-op on a non-RUNNING aggregate, so a retry after a
+        # lost acknowledgment never appends a second terminal event.
+        await self._interrupter.interrupt(run)
+        await self._queue.close_interrupted(run)

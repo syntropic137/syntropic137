@@ -43,8 +43,12 @@ class _Queue:
         self.closed: list[str] = []
         self.renewed = 0
         self.fenced: list[FencedRun] = []
+        self.rows: dict[str, FencedRun] = {}
+        """The durable ``fencing``/``reaped`` rows; ``reconciling`` reads only these."""
         self.reaped: list[str] = []
         self.interrupted: list[str] = []
+        self.fail: dict[str, str] = {}
+        """Write name -> ``before`` (raise, row unchanged) or ``after`` (commit, then raise)."""
         self.deregistered = False
 
     async def register(self, host: ExecutorHost, capacity: int) -> None: ...
@@ -70,13 +74,28 @@ class _Queue:
 
     async def fence_expired(self, reconciler: str) -> list[FencedRun]:
         fenced, self.fenced = self.fenced, []
+        self.rows.update({run.execution_id: run for run in fenced})
         return fenced
 
+    async def reconciling(self, reconciler: str) -> list[FencedRun]:
+        return list(self.rows.values())
+
     async def mark_reaped(self, run: FencedRun) -> None:
+        self._maybe_fail("mark_reaped", "before")
+        self.rows[run.execution_id] = run.model_copy(update={"reaped": True})
         self.reaped.append(run.execution_id)
+        self._maybe_fail("mark_reaped", "after")
 
     async def close_interrupted(self, run: FencedRun) -> None:
+        self._maybe_fail("close_interrupted", "before")
+        del self.rows[run.execution_id]
         self.interrupted.append(run.execution_id)
+        self._maybe_fail("close_interrupted", "after")
+
+    def _maybe_fail(self, write: str, when: str) -> None:
+        if self.fail.get(write) == when:
+            del self.fail[write]
+            raise ConnectionError(f"{write} lost its connection {when} commit")
 
 
 class _Drainer:
@@ -203,5 +222,38 @@ async def test_an_incomplete_reap_keeps_the_run_fencing_until_a_later_turn_compl
     await reconciler.turn()
     assert reaper.calls == [("dead", "e9"), ("dead", "e9")]
     assert queue.reaped == ["e9"]
+    assert interrupter.calls == ["e9"]
+    assert queue.interrupted == ["e9"]
+
+
+@pytest.mark.parametrize("write", ["mark_reaped", "close_interrupted"])
+@pytest.mark.parametrize("when", ["before", "after"])
+async def test_a_failed_reconciliation_write_is_resumed_from_the_row(write: str, when: str) -> None:
+    queue = _Queue([])
+    queue.fenced = [
+        FencedRun(execution_id="e9", executor_id="dead", reconciler=_HOST.host_id, token=2)
+    ]
+    queue.fail = {write: when}
+    reaper, interrupter = _Reaper(complete=True), _Interrupter()
+    reconciler = Reconciler(queue, _HOST.host_id, reaper, interrupter)  # type: ignore[arg-type]
+    await reconciler.turn()
+    await reconciler.turn()
+    assert queue.interrupted == ["e9"]
+    assert queue.reaped == ["e9"]
+    assert queue.rows == {}
+    await reconciler.turn()
+    assert queue.interrupted == ["e9"]
+
+
+async def test_a_fresh_reconciler_finishes_a_row_its_predecessor_left_reaped() -> None:
+    queue = _Queue([])
+    queue.rows = {
+        "e9": FencedRun(
+            execution_id="e9", executor_id="dead", reconciler=_HOST.host_id, token=3, reaped=True
+        )
+    }
+    reaper, interrupter = _Reaper(complete=True), _Interrupter()
+    await Reconciler(queue, _HOST.host_id, reaper, interrupter).turn()  # type: ignore[arg-type]
+    assert reaper.calls == []  # already reaped: the row says so
     assert interrupter.calls == ["e9"]
     assert queue.interrupted == ["e9"]
