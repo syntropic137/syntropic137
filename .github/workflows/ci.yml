@@ -301,10 +301,19 @@ jobs:
           EVENTSTORE_NETWORK: ${{ job.services.timescaledb.network }}
           TIMESCALEDB_CONTAINER: ${{ job.services.timescaledb.id }}
         run: |
+          pg_ready=false
           for _ in $(seq 1 30); do
-            docker exec "$TIMESCALEDB_CONTAINER" pg_isready -h localhost -U syn -d syn && break
+            if docker exec "$TIMESCALEDB_CONTAINER" pg_isready -h localhost -U syn -d syn; then
+              pg_ready=true
+              break
+            fi
             sleep 2
           done
+          if [ "$pg_ready" != true ]; then
+            echo "::error::timescaledb never accepted TCP connections"
+            docker logs "$TIMESCALEDB_CONTAINER"
+            exit 1
+          fi
           uv run --no-project python scripts/resolve_event_store_digest.py --out "$RUNNER_TEMP/event-store-digest"
           digest="$(cat "$RUNNER_TEMP/event-store-digest")"
           docker run -d --name eventstore \
