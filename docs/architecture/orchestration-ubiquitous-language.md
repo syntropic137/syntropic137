@@ -557,7 +557,8 @@ successful API response reports the first.
 
 ## Execution Budget
 
-How many Executions one API process runs at once (`SYN_EXECUTION_MAX_CONCURRENT`).
+How many Executions one Executor runs at once (`SYN_EXECUTION_MAX_CONCURRENT`);
+with the Run Queue off, that Executor is the API process itself.
 ONE budget bounds every start path: a direct start, a trigger dispatch and the
 start of a resumed Execution all claim a slot from it. Sized against memory,
 not isolation: each running Execution costs the API memory, and an API killed
@@ -578,6 +579,10 @@ second setting. Its value is measured from memory per running
 Execution against the Executor's memory limit. A slot is in use while a run
 row is `claimed`, `fencing` or `reaped`, so a crash can hold a slot but never
 free one early. (ADR-072 D3, D12.)
+
+Every budget row names its Executor Pool (`execution_budget.pool_id`). A
+pool's capacity is the sum of its members' rows, reported and never claimed
+against, exactly as global capacity is the sum of every row. (ADR-072 D13.)
 
 ## Queued Start
 
@@ -648,11 +653,109 @@ Executions and never runs one. Implemented by `ExecutionHost`. One host has a
 `host_id` and a generation (its image tag), recorded in `executor_hosts` and
 on every container it creates (`syn.host_id`, `syn.host_generation`). The
 Run Queue's value for a registered host is `ExecutorHost`: its `host_id`,
-container, generation and Event Epoch.
+container, generation, Event Epoch and the Executor Pool it joins.
 Specified in ADR-072.
 
 An Executor is a host, not an Execution: nothing about an Execution's stream
 says which Executor ran it.
+
+## Executor Pool
+
+A named group of Executors that share a Pool Priority, a provider, a region,
+an Isolation Level and a set of Capabilities: one `executor_pools` row, the
+port value `ExecutorPool`. Every Executor joins exactly one, named by
+`SYN_EXECUTOR_POOL_ID` (default `default`), when it registers. Its capacity
+and health are derived from its members' `execution_budget` rows and never
+stored. Provider and Isolation Level come from what runs the workspaces, never
+from a setting; region and Capabilities are operator facts.
+
+A pool's definition is the row. An Executor declaring a different definition
+for a pool is refused (`PoolDefinitionConflict`) while any other member is
+live and not draining; once every other member is draining or gone, the
+declaration overwrites the row. That is how a single-member pool is
+redefined: change the setting and restart.
+
+Always written in full, "Executor Pool". Bare "pool" means an asyncpg
+connection pool in infrastructure code (the `pools` test fixture), and the
+short word is left to it. (ADR-072 D13.)
+
+## Pool Priority
+
+The order Executor Pools are tried in: an integer, 0 first. A lower-priority
+pool takes a run only by Overflow. Never "tier". (ADR-072 D13.)
+
+## Overflow
+
+An Executor in a lower-priority Executor Pool claiming a run because every
+higher-priority Executor that could take it is full for longer than the
+Overflow Delay, draining, stale, or not claiming. A run that overflowed is
+recorded as such on its row (`overflowed`), as telemetry, never as an event.
+Placement is decided in the claim itself, never by a separate process.
+(ADR-072 D13; lands after the pool model.)
+
+## Overflow Delay
+
+How long a higher-priority Executor must have been **full** before a lower
+pool may overflow past it: saturation duration, measured from that
+Executor's `full_since`, not the run's age. Defined per Executor Pool
+(`overflow_delay_s`, `SYN_EXECUTOR_POOL_OVERFLOW_DELAY_S`, default 60 s).
+Recorded with the pool now; the claim reads it once Overflow lands.
+(ADR-072 D13.)
+
+## Claim Check
+
+The claim statement's stamp on the claiming Executor's own row,
+`claim_checked_at`, written each time the claim decides, with or without a
+run. A Heartbeat says the loop turned; a Claim Check says the claim ran.
+Placement trusts only the Claim Check to advertise room, so an Executor whose
+claim keeps failing stops holding work back from lower pools. (ADR-072 D4,
+D13; lands after the pool model.)
+
+## Capability
+
+A feature of an Executor Pool's hosts that platform code must understand to
+use, such as `nested_docker`. A closed set (`Capability`), because each one
+needs code that relies on it; an unknown capability refuses startup. Region
+and provider are not Capabilities: they are operator data, held as validated
+slugs. (ADR-072 D13.)
+
+## Isolation Level
+
+How strongly an Executor Pool keeps one workspace from another, ordered so it
+can be compared as a minimum: `CONTAINER` (10, a shared kernel) below
+`MICROVM` (30, a kernel of its own). Taken from the backend, never a setting.
+(ADR-072 D13.)
+
+## Run Requirements
+
+What a run needs of the Executor Pool that takes it: allowed providers,
+allowed regions, a minimum Isolation Level and required Capabilities. Empty
+today, so every pool satisfies every run and placement is by Pool Priority
+alone. Requirements that can never be met together are refused at admission.
+(ADR-072 D13; lands after Overflow.)
+
+## Unplaceable
+
+An admitted run that no Executor Pool currently registered can satisfy. It
+stays `admitted` (Queued) and is counted as unplaceable; it is never claimed
+and deferred. Distinct from **waiting**, where a pool could take it but is
+full. (ADR-072 D13.)
+
+## Placement
+
+Which Executor Pool an admitted run is claimed into, and whether it got there
+by Overflow, decided inside the claim transaction. Recorded on the run row
+(`placed_pool`, `overflowed`, `claimed_at`) as infrastructure telemetry.
+(ADR-072 D13.)
+
+## Reap Scope
+
+What an Executor's reconciler can actually reap: one Docker daemon, one
+provider account. Recorded on its budget row (`reap_scope`), derived from the
+backend and never configured. A reconciler fences, takes over and reaps only
+runs claimed in its own Reap Scope, so a reconciler on another machine can
+never free a slot whose workspace may still be running. (ADR-072 D5, D13;
+lands before any Overflow to a second machine.)
 
 ## Run Queue
 
@@ -752,7 +855,9 @@ container is removed. That effect belongs to the one run (ADR-072 D5).
 
 An Executor stops claiming, finishes the Executions it holds, then exits.
 Requested by setting `executor_hosts.draining`, which the host reads between
-Claims. It is a property of the host: no Execution is signalled, paused or
+Claims. A local drain (`ExecutionHost.drain()`) is published to the same flag,
+so other Executors and Executor Pool redefinition see it too (ADR-072 D13;
+the local publish lands with the Claim Check). It is a property of the host: no Execution is signalled, paused or
 moved, and admission stays open while it happens. Draining one generation
 while the next is already claiming is how Executors upgrade without waiting.
 
@@ -1131,6 +1236,14 @@ The workspace image that carries a Scripted Agent is still called the stub
 image in agentic-workspace; that names the image, not these models.
 
 ## Words we do not use
+
+- **Tier** (of executors). We say Pool Priority: an Executor Pool has a
+  priority, and "tier" invites a second, fixed hierarchy beside it.
+
+- **Router** (as a process). Reserved for deriving Run Requirements from a
+  workflow, which may come later. Placement is decided in the claim
+  transaction; there is no routing process, and a central one was rejected
+  (ADR-072 D13).
 
 - **Suite** (as a record or an aggregate). A suite is a tag on Evals. There is
   no Suite stream, and a second aggregate for it was rejected (evals v2).
