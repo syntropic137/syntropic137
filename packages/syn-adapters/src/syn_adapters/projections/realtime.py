@@ -66,6 +66,27 @@ class SSEEventFrame(BaseModel):
     timestamp: str
 
 
+class ExecutionCancelledPayload(BaseModel):
+    """What a cancel frame carries: the ``ExecutionCancelled`` event's fields.
+
+    Typed rather than a ``dict`` (#1268): the adapter validates the event's
+    dump into this before calling ``on_execution_cancelled``. Extra fields are
+    ignored so a field added to the event does not drop the frame.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    workflow_id: str
+    execution_id: str
+    phase_id: str | None = None
+    cancelled_at: str
+    reason: str | None = None
+
+
+# Handlers that take a typed payload instead of the event's raw dump, by event type.
+TYPED_PAYLOADS: dict[str, type[BaseModel]] = {"ExecutionCancelled": ExecutionCancelledPayload}
+
+
 # ---------------------------------------------------------------------------
 # Projection
 # ---------------------------------------------------------------------------
@@ -270,15 +291,16 @@ class RealTimeProjection:
         await self._forward_event(event, "WorkflowFailed", terminal=True)
         await self.broadcast_global("WorkflowFailed", event)
 
-    async def on_execution_cancelled(self, event: dict[str, JsonValue]) -> None:
+    async def on_execution_cancelled(self, event: ExecutionCancelledPayload) -> None:
         """Handle ExecutionCancelled event — sends terminal sentinel.
 
         Also broadcasts on the global activity channel: a cancel is the only
         event a cancelled run records, so without it a running-filtered list
         keeps the row until something unrelated refreshes it (#1924).
         """
-        await self._forward_event(event, "ExecutionCancelled", terminal=True)
-        await self.broadcast_global("ExecutionCancelled", event)
+        data: dict[str, JsonValue] = event.model_dump(mode="json")
+        await self.broadcast(event.execution_id, "ExecutionCancelled", data, terminal=True)
+        await self.broadcast_global("ExecutionCancelled", data)
 
     async def on_session_started(self, event: dict[str, JsonValue]) -> None:
         """Handle SessionStarted event.

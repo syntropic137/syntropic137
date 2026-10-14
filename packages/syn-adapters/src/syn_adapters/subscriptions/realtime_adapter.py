@@ -21,6 +21,8 @@ from event_sourcing import (
 )
 from pydantic import BaseModel, ConfigDict
 
+from syn_adapters.projections.realtime import TYPED_PAYLOADS
+
 if TYPE_CHECKING:
     from event_sourcing.core.checkpoint import DispatchContext
 
@@ -79,7 +81,8 @@ class RealTimeProjectionAdapter(CheckpointedProjection):
             handler_name = f"on_{_camel_to_snake(event_type)}"
             handler = getattr(self._realtime, handler_name, None)
             if handler:
-                await handler(event_data)
+                payload = TYPED_PAYLOADS.get(event_type)
+                await handler(payload.model_validate(event_data) if payload else event_data)
                 logger.debug(
                     "Broadcasted event to SSE clients",
                     extra={"event_type": event_type, "handler": handler_name},
