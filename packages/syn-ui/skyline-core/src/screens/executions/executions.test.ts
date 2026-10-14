@@ -73,7 +73,7 @@ describe('list', () => {
   it('turns ?day= into that UTC day, the day the Skyline bucketed it under (#1938)', () => {
     expect(dayBounds('2026-10-13')).toEqual({
       started_after: '2026-10-13T00:00:00.000Z',
-      started_before: '2026-10-13T23:59:59.999Z',
+      started_before: '2026-10-13T23:59:59.999999Z',
     })
     expect(dayBounds(null)).toBeNull()
     expect(dayBounds('2026-02-30')).toBeNull()

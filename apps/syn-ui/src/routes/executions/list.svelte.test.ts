@@ -51,7 +51,7 @@ describe('Executions list ?day= (#1938)', () => {
   it('asks for exactly that UTC day and shows it as a removable chip', async () => {
     const { target, stop } = await mountList('?day=2026-10-13')
     try {
-      expect(queries.at(-1)).toMatchObject({ started_after: '2026-10-13T00:00:00.000Z', started_before: '2026-10-13T23:59:59.999Z' })
+      expect(queries.at(-1)).toMatchObject({ started_after: '2026-10-13T00:00:00.000Z', started_before: '2026-10-13T23:59:59.999999Z' })
       const chip = [...target.querySelectorAll('button')].find((b) => b.textContent?.includes('Started 2026-10-13 UTC'))
       expect(chip).toBeDefined()
       chip!.click()

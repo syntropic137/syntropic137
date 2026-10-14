@@ -1,16 +1,17 @@
 // The Skyline's "Runs →" day and the list's ?day= filter must name the same
 // 24 hours (#1938, #1939), whatever zone the viewer is in. Both are UTC days
 // (#1371): a viewer west of UTC sees a late-evening run under the next day.
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { dayFromMs } from '../../geometry/skyline'
 import { dayBounds } from './list'
 
-const zone = process.env.TZ
+// vi.stubEnv, not process.env: skyline-core compiles with `types: []` (it is
+// browser code), so Node's globals are not in scope here.
 beforeAll(() => {
-  process.env.TZ = 'America/Los_Angeles'
+  vi.stubEnv('TZ', 'America/Los_Angeles')
 })
 afterAll(() => {
-  process.env.TZ = zone
+  vi.unstubAllEnvs()
 })
 
 const inBounds = (ms: number, day: string) => {

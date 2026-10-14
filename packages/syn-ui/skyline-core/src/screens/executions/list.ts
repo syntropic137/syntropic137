@@ -50,7 +50,9 @@ export interface DayBounds {
  * `started_at` bounds, or null when the value is not a real date. The day is
  * a UTC day because the Skyline buckets by UTC day (#1371), and the two must
  * name the same 24 hours. The day is [00:00, 24:00); `started_before` is
- * inclusive, so the upper bound is the last millisecond of the day.
+ * inclusive and the API compares at microsecond precision (Python datetimes),
+ * so the upper bound is the day's last microsecond. The last millisecond would
+ * drop a run stamped 23:59:59.9995.
  */
 export function dayBounds(day: string | null | undefined): DayBounds | null {
   if (!day || !/^\d{4}-\d{2}-\d{2}$/.test(day)) return null
@@ -58,7 +60,7 @@ export function dayBounds(day: string | null | undefined): DayBounds | null {
   if (Number.isNaN(start) || new Date(start).toISOString().slice(0, 10) !== day) return null
   return {
     started_after: new Date(start).toISOString(),
-    started_before: new Date(start + 86_400_000 - 1).toISOString(),
+    started_before: `${day}T23:59:59.999999Z`,
   }
 }
 
