@@ -1,0 +1,101 @@
+---
+title: Agent Skills for Claude Code and Codex
+description: Install the Syntropic137 agent skills so Claude Code and Codex can run workflows, follow executions, and read sessions for you.
+---
+
+The [Syntropic137 agent skills](https://github.com/syntropic137/syntropic137-skills)
+teach your coding agent to operate a deployed Syntropic137 instance: design and run
+workflows, follow and resume executions, wire GitHub triggers, and explain what a
+session did and what it cost, without leaving your terminal. The same skills serve
+**Claude Code** and **Codex**.
+
+<Callout type="info">
+These skills run on **your machine**, in the agent you talk to. They are not the
+[workflow skills](/docs/guide/skills) that a workflow declares for the agents running
+inside its workspaces, and not a [Syntropic137 plugin](/docs/guide/plugins) (workflow
+package).
+</Callout>
+
+## Installation
+
+The setup CLI installs them for you. During `init` it detects `claude` and `codex` on
+your `PATH` and offers to install the skills for whichever you have:
+
+```bash
+npx @syntropic137/setup init
+```
+
+To install or refresh them on their own:
+
+```bash
+npx @syntropic137/setup skills          # install for every agent found
+npx @syntropic137/setup skills update   # refresh to the latest skills
+npx @syntropic137/setup skills status   # what is installed, and where
+```
+
+Skills are installed per user (globally), so they work in every project. A failed
+skills install never stops `init`: it prints a warning and the manual command.
+
+### Manual installation
+
+The setup CLI runs the [`skills`](https://www.npmjs.com/package/skills) CLI, pinned to
+an exact version. You can run it yourself (Node 20.12 or newer):
+
+```bash
+npx -y skills@1.7.0 add syntropic137/syntropic137-skills --skill '*' -g -a claude-code -a codex -y
+```
+
+Drop `-a claude-code` or `-a codex` for an agent you do not use. Codex reads the skills
+from `~/.agents/skills/`; Claude Code from `~/.claude/skills/`.
+
+## Skills
+
+Agents load a skill when your request matches it; you do not invoke them by name.
+Asking "run code-review on my latest PR, then tell me why it failed" uses
+**syn-workflow** and then **execution-control**.
+
+| Skill | Use it when |
+|-------|-------------|
+| **authoring-workflows** | Writing or changing a workflow definition: phases, prompts, inputs, the agent block |
+| **syn-workflow** | Finding a workflow, reading its inputs, starting it with the right task and repositories, registering or updating it |
+| **workflow-marketplace** | Searching, reviewing, installing or publishing workflow packages from a marketplace |
+| **execution-control** | Following a run live, cancelling it, resuming a failed run, or finding out why it failed |
+| **github-triggers** | Running a workflow on GitHub events, or working out why a trigger did or did not fire |
+| **observing-sessions** | What a session did, why it failed, or why it cost what it did, by phase, model, tool and cache |
+| **discovering-run-sessions** | Every session of one run, including delegates and native transcripts, and whether the list is complete |
+| **mining-session-logs** | Turning a batch of finished runs into written lessons: recurring failures, wasted effort, cost concentration |
+| **organization-hierarchy** | Grouping repositories into organizations and systems, and reading health and cost by repo or system |
+
+The skills use only the product surface: the HTTP API and the [`syn` CLI](/docs/cli).
+Install the CLI with `npx @syntropic137/setup cli`.
+
+## Upgrading from the Claude Code plugin
+
+Earlier versions of setup installed a Claude Code plugin (`syntropic137@syntropic137`,
+from `syntropic137/syntropic137-claude-plugin`). The agent skills replace it, and
+keeping both duplicates commands. Once the skills are installed, `npx @syntropic137/setup skills`
+detects the plugin and offers to remove it. To do it by hand:
+
+```bash
+claude plugin uninstall syntropic137@syntropic137
+claude plugin marketplace remove syntropic137
+```
+
+`npx @syntropic137/setup plugin` still works as a deprecated alias for `skills`.
+
+## Removing
+
+To remove only the skills, leaving your other skills alone:
+
+```bash
+npx -y skills@1.7.0 remove -g -y authoring-workflows discovering-run-sessions \
+  execution-control github-triggers mining-session-logs observing-sessions \
+  organization-hierarchy syn-workflow workflow-marketplace
+```
+
+A full factory reset (`npx @syntropic137/setup reset --all`) removes them along with the
+rest of the install. See [Setup CLI](/docs/guide/setup-cli#reset).
+
+## Source
+
+The skills live in [`syntropic137/syntropic137-skills`](https://github.com/syntropic137/syntropic137-skills).

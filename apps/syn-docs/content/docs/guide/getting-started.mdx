@@ -27,7 +27,8 @@ npx @syntropic137/setup stop        # Stop the stack
 npx @syntropic137/setup logs        # Tail service logs
 npx @syntropic137/setup update      # Pull latest images and restart
 npx @syntropic137/setup github-app  # Configure GitHub App integration
-npx @syntropic137/setup plugin      # Install Claude Code plugin
+npx @syntropic137/setup skills      # Install agent skills (Claude Code, Codex)
+npx @syntropic137/setup reset       # Factory reset (dry run until --yes)
 ```
 
 ## Prerequisites
@@ -55,11 +56,11 @@ The `init` wizard walks you through the full setup step-by-step:
 3. **Secret generation**: creates cryptographically random passwords for Postgres, Redis, and MinIO (stored as `chmod 600` files)
 4. **API key**: prompts for your `ANTHROPIC_API_KEY`. To run codex phases, add `CODEX_AUTH_JSON` to your `.env` afterwards
 5. **GitHub App**: opens your browser to create a GitHub App via manifest flow for webhook-triggered workflows
-6. **Claude Code plugin** *(optional)*: installs the Syntropic137 plugin for Claude Code if the `claude` CLI is detected
+6. **Agent skills** *(optional)*: installs the [Syntropic137 agent skills](/docs/guide/agent-skills) for Claude Code and Codex, whichever is on your `PATH`
 7. **Pull & start**: downloads container images and starts the full stack
 
 <Callout type="info">
-The Claude Code plugin step is optional: skip it during setup and add later with `npx @syntropic137/setup plugin`. The GitHub App is required for event-driven workflows (self-healing, triggers, etc.).
+The agent skills step is optional: skip it during setup and add later with `npx @syntropic137/setup skills`. The GitHub App is required for event-driven workflows (self-healing, triggers, etc.).
 </Callout>
 
 Once complete, the dashboard is live at **http://localhost:8137**.
@@ -102,6 +103,6 @@ After setup, your `~/.syntropic137/` directory contains a Docker Compose stack w
 
 - [Core Concepts](/docs/guide/core-concepts): understand the mental model: events, workspaces, workflows
 - [Workflows](/docs/guide/workflows): create and distribute workflow packages
-- [Claude Code Plugin](/docs/guide/claude-code-plugin): manage Syntropic137 from inside Claude Code
+- [Agent Skills](/docs/guide/agent-skills): drive Syntropic137 from Claude Code or Codex
 - [GitHub Integration](/docs/guide/github-integration): trigger workflows from GitHub events
 - [Setup CLI Reference](/docs/guide/setup-cli): all `npx @syntropic137/setup` commands
