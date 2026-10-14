@@ -2,10 +2,11 @@
 
 Executors A and B are separate processes (``_1310_executor_process.py``), each
 a real ``ExecutionHost`` with production's reaper and interrupter, each holding
-one admitted run in a real labelled workspace container.
+one admitted run in a real workspace container and a legacy sidecar, both
+labelled by production's label producers.
 
 * V7: A is SIGKILLed. B, still live, fences A's run on Lease expiry, reaps it
-  and interrupts it. Only A's container is removed, B's survives and B's run
+  and interrupts it. Only A's workspace and sidecar are removed, B's survive and B's run
   stays claimed; A's stream ends ``WorkflowInterrupted`` and A's slot is
   released.
 * V7b: an unlabelled workspace container is left, with a WARN, while B's real
@@ -105,7 +106,8 @@ async def test_v7_and_v7b_a_killed_executor_is_reaped_by_a_live_one(
             assert run.execution_id == execution_id
             claimed.append(execution_id)
         a, b = children
-        assert len(await _containers(a_host)) == len(await _containers(b_host)) == 1
+        # Each host holds a workspace and a legacy sidecar for its run.
+        assert len(await _containers(a_host)) == len(await _containers(b_host)) == 2
 
         # V7: A dies; B's own loop fences, reaps and interrupts A's run.
         a.kill()
@@ -114,7 +116,7 @@ async def test_v7_and_v7b_a_killed_executor_is_reaped_by_a_live_one(
             while (await infra.queue.in_use()).interrupted != 1:
                 await asyncio.sleep(0.2)
         assert await _containers(a_host) == []
-        assert len(await _containers(b_host)) == 1
+        assert len(await _containers(b_host)) == 2
         a_types = await infra.event_types(claimed[0])
         assert a_types.count("WorkflowInterrupted") == 1, a_types
         assert a_types[-1] == "WorkflowInterrupted", a_types

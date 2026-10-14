@@ -2,13 +2,14 @@
 
 Executor A is a separate process (``_1310_executor_process.py``) running a real
 ``ExecutionHost``: it claims the admitted run, starts its labelled workspace
-container and stalls. It is SIGSTOPped past its Lease. Executor B, in this
+and legacy sidecar containers and stalls. It is SIGSTOPped past its Lease. Executor B, in this
 process, fences A's run, reaps it with the production ``DockerDeadHostReaper``
 and interrupts it through the aggregate. A is then SIGCONTed. Asserted:
 
-* removal of A's container precedes the interruption append;
+* removal of A's containers precedes the interruption append;
 * A's renewal is refused, A self-fences, and its terminal commit from the
-  aggregate it loaded before the stall is refused by the event store;
+  aggregate it loaded before the stall is refused by the event store with
+  ``ConcurrencyConflictError``: any other failure of that commit fails the test;
 * the stream has one ``WorkflowExecutionStarted`` and one terminal event,
   ``WorkflowInterrupted``; A made one workspace, never a second;
 * A's stale token can neither renew nor close the row.
@@ -135,7 +136,7 @@ async def test_v12_a_stalled_executor_is_fenced_and_its_stale_commit_refused(
     try:
         claimed = (await _until(out, "claimed")).run
         assert claimed is not None
-        assert len(await _containers(a_host)) == 1
+        assert len(await _containers(a_host)) == 2  # workspace and sidecar
 
         os.kill(child.pid, signal.SIGSTOP)
         await asyncio.sleep(_LEASE_S * 2)
@@ -155,7 +156,7 @@ async def test_v12_a_stalled_executor_is_fenced_and_its_stale_commit_refused(
         os.kill(child.pid, signal.SIGCONT)
         await _until(out, "self_fenced")
         refused = await _until(out, "stale_append_refused")
-        assert refused.error, refused
+        assert refused.error == "ConcurrencyConflictError", refused
     finally:
         with contextlib.suppress(ProcessLookupError):
             os.kill(child.pid, signal.SIGCONT)
