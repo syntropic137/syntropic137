@@ -595,16 +595,35 @@ AP_ROLLBACK_IMAGES: Final[Mapping[WorkspaceImageProvider, str]] = MappingProxyTy
 # claude-cli       claude-cli manifest 2.4.0. Verified by running OUT OF THIS
 #                  DIGEST: "2.1.293 (Claude Code)", "codex-cli 0.160.1", no
 #                  exporter (unchanged).
+#
+#                  Previous pins, for the record: claude-cli 927641f9,
+#                  omni-agent 2cabc694, toolchain 4a76c184, all from
+#                  agentic-workspace 5c4e5595 (release PR #42).
+# AGENTIC-WORKSPACE PROVIDER OPERATION CONTRACT, 2026-10-14. Taken from
+# release-branch run 38507707241 ("Release Workspace Images", push to release,
+# success) of agentic-workspace 914129db (release PR #57), the commit
+# lib/agentic-workspace pins. Each digest below is the docker-content-digest
+# GHCR returns for the full-commit tag 914129db33405a5d831d0db2b954ccbfa952c62f,
+# media type application/vnd.oci.image.index.v1+json (the INDEX, not a
+# per-arch manifest). This release carries AW #57: the provider operation
+# contract (OperationSpec start/observe, CredentialBinding resolved by an
+# injected CredentialResolver, WorkspaceRuntime replacing use_gvisor,
+# teardown(target=) returning TeardownReport). Image contents are rebuilt from
+# the same manifests; the harness CLIs are unchanged from 5c4e5595.
+#
+# omni-agent       a5146248, the build's OMNI_IMAGE.
+# toolchain        70033400, built FROM omni a5146248 in the same run.
+# claude-cli       b3f39a35.
 PINNED_DIGESTS: Final[Mapping[WorkspaceImageProvider, str]] = MappingProxyType(
     {
         WorkspaceImageProvider.CLAUDE_CLI: (
-            "sha256:927641f9e7f1d18a19fce9c11f9923ef68e2e498ca48105cc32de21122614843"
+            "sha256:b3f39a3577a46dee75347ce0db7803014ab4569083c7aa353be63643df810231"
         ),
         WorkspaceImageProvider.OMNI_AGENT: (
-            "sha256:2cabc694d450807ca953ea634ca0d50d53fcfdb6864be58c91464ab5008fe6e4"
+            "sha256:a5146248dadd474623f6fe1f6f0d1c6939f2ae6a619ed27a728135461e48f735"
         ),
         WorkspaceImageProvider.TOOLCHAIN: (
-            "sha256:4a76c184a8d36b8663a0f0191842410304ea1e10b0e719516817949ae8c862f8"
+            "sha256:70033400c2e8489c905eb808bbd27cc44bb656d752c88c6891759257f6c407a5"
         ),
     }
 )
