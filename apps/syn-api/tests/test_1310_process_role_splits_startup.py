@@ -26,9 +26,7 @@ def _registry(started: list[str]) -> tuple[lifecycle._ServiceEntry, ...]:
         async def init(_state: lifecycle.LifecycleState) -> None:
             started.append(name)
 
-        return lifecycle._ServiceEntry(
-            reason=MagicMock(name=name), init_fn=init, api_only=api_only
-        )
+        return lifecycle._ServiceEntry(reason=MagicMock(name=name), init_fn=init, api_only=api_only)
 
     return (entry("storage", api_only=False), entry("subscription", api_only=True))
 

@@ -102,7 +102,9 @@ def repoint(compose: str, tag: str, services: tuple[str, ...] = SERVICES) -> Rep
             raise RepointError(f"expected a {service} image line, found none")
         refs = sorted({m["ref"] for m in found})
         if len(refs) != 1:
-            raise RepointError(f"{service} image lines disagree ({', '.join(refs)}); one pin per image")
+            raise RepointError(
+                f"{service} image lines disagree ({', '.join(refs)}); one pin per image"
+            )
         pin = Pin(service, refs[0])
         if "$" in pin.ref:
             raise RepointError(
