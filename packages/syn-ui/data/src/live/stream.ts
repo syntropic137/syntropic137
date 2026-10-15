@@ -136,40 +136,49 @@ export class LiveHub {
     }
     const source = factory(url)
     channel.source = source
-    source.onopen = () => {
-      const reconnect = channel.opened
-      channel.opened = true
-      channel.attempts = 0
-      this.setState(channel, 'open')
-      if (reconnect) for (const s of channel.subs) safely(() => s.spec.onReconnect?.())
+    source.onopen = () => this.onOpen(channel)
+    source.onerror = () => this.onError(url, channel, source)
+    source.onmessage = (e) => this.onMessage(channel, e)
+  }
+
+  private onOpen(channel: Channel) {
+    const reconnect = channel.opened
+    channel.opened = true
+    channel.attempts = 0
+    this.setState(channel, 'open')
+    if (reconnect) for (const s of channel.subs) safely(() => s.spec.onReconnect?.())
+  }
+
+  private onError(url: string, channel: Channel, source: EventSourceLike) {
+    // EventSource retries on its own; CONNECTING (0) after an error means it will.
+    if (source.readyState === 0) return this.setState(channel, 'connecting')
+    // CLOSED (2): it has given up. Reopen while anyone still listens.
+    source.close()
+    if (channel.source === source) channel.source = null
+    this.setState(channel, 'closed')
+    this.scheduleReopen(url, channel)
+  }
+
+  private scheduleReopen(url: string, channel: Channel) {
+    if (channel.subs.size === 0 || channel.retry) return
+    const delay = (this.options.reconnectDelayMs ?? backoff)(channel.attempts++)
+    channel.retry = setTimeout(() => {
+      channel.retry = undefined
+      if (channel.subs.size === 0 || channel.source) return
+      this.setState(channel, 'connecting')
+      this.open(url, channel)
+    }, delay)
+  }
+
+  private onMessage(channel: Channel, e: MessageEvent<string>) {
+    let frame: SSEEventFrame
+    try {
+      frame = JSON.parse(e.data) as SSEEventFrame
+    } catch {
+      return // malformed frame
     }
-    source.onerror = () => {
-      // EventSource retries on its own; CONNECTING (0) after an error means it will.
-      if (source.readyState === 0) return this.setState(channel, 'connecting')
-      // CLOSED (2): it has given up. Reopen while anyone still listens.
-      source.close()
-      if (channel.source === source) channel.source = null
-      this.setState(channel, 'closed')
-      if (channel.subs.size === 0 || channel.retry) return
-      const delay = (this.options.reconnectDelayMs ?? backoff)(channel.attempts++)
-      channel.retry = setTimeout(() => {
-        channel.retry = undefined
-        if (channel.subs.size > 0 && !channel.source) {
-          this.setState(channel, 'connecting')
-          this.open(url, channel)
-        }
-      }, delay)
-    }
-    source.onmessage = (e) => {
-      let frame: SSEEventFrame
-      try {
-        frame = JSON.parse(e.data) as SSEEventFrame
-      } catch {
-        return // malformed frame
-      }
-      channel.lastEventAt = Date.now()
-      for (const s of channel.subs) if (passes(s.spec, frame.event_type)) s.batcher.push(frame)
-    }
+    channel.lastEventAt = Date.now()
+    for (const s of channel.subs) if (passes(s.spec, frame.event_type)) s.batcher.push(frame)
   }
 }
 
