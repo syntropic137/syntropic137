@@ -188,6 +188,19 @@ class Writer:
             await conn.close()
 
 
+async def _settle(task: asyncio.Task[bool] | asyncio.Task[None]) -> bool:
+    """Cancel ``task`` if still running and wait for it; whether it succeeded.
+
+    Its own outcome is the caller's business: this only guarantees nothing
+    is left running behind a failure or a cancellation.
+    """
+    if not task.done():
+        task.cancel()
+    with contextlib.suppress(Exception, asyncio.CancelledError):
+        await task
+    return task.done() and not task.cancelled() and task.exception() is None
+
+
 @dataclass
 class Probe:
     """Inserts into a batch's own sessions just before that batch commits."""
@@ -224,20 +237,30 @@ class Probe:
         )
 
     async def _insert(self, rows: list[Row]) -> None:
-        """One COPY, never concurrent with a writer insert, bounded on every wait."""
+        """One COPY, never concurrent with a writer insert, bounded on every wait.
+
+        Every child task is settled on every exit, cancellation included, so
+        the turn is released only once the COPY has ended and never leaks.
+        """
         acquiring = asyncio.create_task(self.writer.turn.acquire())
-        done, _ = await asyncio.wait({acquiring}, timeout=PROBE_DIAGNOSE_AFTER_S)
-        if not done:
-            # The writer's own insert is stuck: whatever holds it is the blocker.
-            await self._diagnose("the background writer's insert", self.writer.pid)
-        await asyncio.wait_for(acquiring, timeout=PROBE_HARD_TIMEOUT_S)
         try:
-            copying = asyncio.create_task(copy_rows(self.conn, rows))
+            done, _ = await asyncio.wait({acquiring}, timeout=PROBE_DIAGNOSE_AFTER_S)
+            if not done:
+                # The writer's own insert is stuck: whatever holds it is the blocker.
+                await self._diagnose("the background writer's insert", self.writer.pid)
+            await asyncio.wait_for(asyncio.shield(acquiring), timeout=PROBE_HARD_TIMEOUT_S)
+        except BaseException:
+            if await _settle(acquiring):
+                self.writer.turn.release()
+            raise
+        copying = asyncio.create_task(copy_rows(self.conn, rows))
+        try:
             done, _ = await asyncio.wait({copying}, timeout=PROBE_DIAGNOSE_AFTER_S)
             if not done:
                 await self._diagnose("the probe insert", self.conn.get_server_pid())
-            await asyncio.wait_for(copying, timeout=PROBE_HARD_TIMEOUT_S)
+            await asyncio.wait_for(asyncio.shield(copying), timeout=PROBE_HARD_TIMEOUT_S)
         finally:
+            await _settle(copying)
             self.writer.turn.release()
 
     async def seed(self, sessions: list[str]) -> None:
