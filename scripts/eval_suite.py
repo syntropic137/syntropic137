@@ -1407,9 +1407,17 @@ def _member_runs(client: httpx.Client, eval_id: str) -> list[_RunSummary]:
 
 
 def _case_evals(client: httpx.Client, loaded: LoadedSuite, case: Case) -> list[_Eval]:
-    """The case's stable eval: tagged with the suite and the case (repeated `tag` is AND)."""
+    """The case's active stable eval: tagged with the suite and the case (repeated `tag` is AND).
+
+    An archived eval is not the case's: the duplicate migration archives what it folds.
+    """
     params = httpx.QueryParams(
-        [("tag", loaded.suite.suite_tag), ("tag", case.tag), ("page_size", 200)]
+        [
+            ("tag", loaded.suite.suite_tag),
+            ("tag", case.tag),
+            ("status", "active"),
+            ("page_size", 200),
+        ]
     )
     response = client.get("/evals", params=params)
     response.raise_for_status()
@@ -1734,9 +1742,36 @@ def install_workflow(loaded: LoadedSuite, client: httpx.Client, root: Path = ROO
     )
 
 
+def stable_key(loaded: LoadedSuite, case: Case) -> str:
+    """What names the case's one eval to the server: the suite and the case tag (#1920)."""
+    return f"{loaded.suite.suite_tag}\n{case.tag}"
+
+
+def create_stable_eval(loaded: LoadedSuite, case: Case, client: httpx.Client) -> httpx.Response:
+    """POST the case's eval under its `stable_key`: idempotent, however many launches race.
+
+    The server derives the eval id from the key, so every caller writes the same
+    stream and the event store admits one create; the others get that eval back.
+    """
+    s = loaded.suite
+    return client.post(
+        "/evals",
+        json={
+            "stable_key": stable_key(loaded, case),
+            "name": f"{s.eval_suite or s.id}: {case.id}",
+            "goal": s.goal,
+            "baseline_repos": [{"repository": s.repository, "requested_ref": case.commit}],
+            "tags": [s.suite_tag, case.tag],
+        },
+    )
+
+
 def stable_eval(loaded: LoadedSuite, case: Case, client: httpx.Client) -> _Created:
     """The case's one eval: found by `suite:` + `case:` tags, created once if missing.
 
+    The tag lookup only saves a request and keeps an eval made before #1920
+    in use. It reads a projection, so two launches can both miss: that is
+    safe because the create is keyed by `stable_key`, not by this read.
     Refuses to go on when two evals carry the tags (run the duplicate
     migration first) or when the one found pins another commit.
     """
@@ -1750,15 +1785,7 @@ def stable_eval(loaded: LoadedSuite, case: Case, client: httpx.Client) -> _Creat
     if found:
         created = _Created(eval_id=found[0].eval_id, baseline_repos=found[0].baseline_repos)
     else:
-        response = client.post(
-            "/evals",
-            json={
-                "name": f"{s.eval_suite or s.id}: {case.id}",
-                "goal": s.goal,
-                "baseline_repos": [{"repository": s.repository, "requested_ref": case.commit}],
-                "tags": [s.suite_tag, case.tag],
-            },
-        )
+        response = create_stable_eval(loaded, case, client)
         response.raise_for_status()
         created = _Created.model_validate(response.json())
     pinned = [b.commit_sha for b in created.baseline_repos]
@@ -1821,7 +1848,7 @@ def describe_launch(loaded: LoadedSuite) -> list[str]:
         f"{loaded.suite.version}.0.0 with its sha256 digest, then "
         f"GET /workflows/{w.id} must match its phases, prompts and models {w.models}",
     ] + [
-        f"{c.id}: GET /evals?tag={s.suite_tag}&tag={c.tag}, else POST /evals baseline "
+        f"{c.id}: GET /evals?tag={s.suite_tag}&tag={c.tag}, else POST /evals keyed by suite+case, baseline "
         f"{s.repository}@{c.commit} with those tags; then POST /workflows/{w.id}/execute "
         f"with that eval_id and tags {loaded.run_tags}; run recorded in launches.jsonl"
         for c in loaded.cases
