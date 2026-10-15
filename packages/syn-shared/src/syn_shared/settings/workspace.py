@@ -50,6 +50,11 @@ class IsolationBackend(StrEnum):
     CLOUD = "cloud"
 
 
+#: What `WorkspaceSettings.runtime` reads (env_prefix + field name). Named so
+#: the doctor reports the same variable the settings parse.
+ENV_SYN_WORKSPACE_RUNTIME = "SYN_WORKSPACE_RUNTIME"
+
+
 class WorkspaceRuntime(StrEnum):
     """The OCI runtime an operator asks workspace containers to run under.
 

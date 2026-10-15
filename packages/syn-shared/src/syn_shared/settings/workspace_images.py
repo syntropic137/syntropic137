@@ -607,7 +607,7 @@ AP_ROLLBACK_IMAGES: Final[Mapping[WorkspaceImageProvider, str]] = MappingProxyTy
 # media type application/vnd.oci.image.index.v1+json (the INDEX, not a
 # per-arch manifest). This release carries AW #57: the provider operation
 # contract (OperationSpec start/observe, CredentialBinding resolved by an
-# injected CredentialResolver, WorkspaceRuntime replacing use_gvisor,
+# injected CredentialResolver, WorkspaceRuntime replacing the boolean gVisor flag,
 # teardown(target=) returning TeardownReport). Image contents are rebuilt from
 # the same manifests; the harness CLIs are unchanged from 5c4e5595.
 #

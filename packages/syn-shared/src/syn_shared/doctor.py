@@ -90,6 +90,7 @@ from syn_shared.settings.session_store import (
     usable_deployment,
     usable_label,
 )
+from syn_shared.settings.workspace import ENV_SYN_WORKSPACE_RUNTIME, WorkspaceRuntime
 from syn_shared.settings.workspace_images import (
     DEFAULT_WORKSPACE_PROVIDER,
     PINNED_DIGESTS,
@@ -262,13 +263,21 @@ class DoctorReport:
     label_usable: bool
     label_declared: bool
     execution_concurrency: VariableReport
+    #: The runtime asked for. The one a workspace actually runs under is
+    #: agentic-workspace's resolver's answer, per workspace and per host, so it
+    #: is not knowable here; see `_RUNTIME_EFFECTIVE_NOTE`.
+    workspace_runtime: VariableReport
     image_ref: str
     exporter_version: str | None
 
     @property
     def findings(self) -> tuple[Finding, ...]:
         """Every finding, in report order. The single source for the exit code."""
-        return (*_environment_findings(self), *_capture_findings(self))
+        return (
+            *_environment_findings(self),
+            *_capture_findings(self),
+            *_runtime_findings(self),
+        )
 
     @property
     def exit_code(self) -> int:
@@ -617,6 +626,7 @@ def build_report(sources: EnvSources) -> DoctorReport:
             sources,
             default=str(DEFAULT_MAX_CONCURRENT_EXECUTIONS),
         ),
+        workspace_runtime=resolve_variable(ENV_SYN_WORKSPACE_RUNTIME, sources, default="auto"),
         image_ref=image_ref,
         exporter_version=_exporter_version(provider),
     )
@@ -689,6 +699,34 @@ def _environment_findings(report: DoctorReport) -> list[Finding]:
                 f"silently selects no 1Password vault, which is why an unusable tier "
                 f"can look like missing secrets rather than a typo. Known: "
                 f"{_KNOWN_TIERS}.",
+            )
+        ]
+    return []
+
+
+_KNOWN_RUNTIMES = ", ".join(member.value for member in WorkspaceRuntime)
+
+#: Where the effective runtime is recorded. The doctor reads configuration only;
+#: probing Docker is agentic-workspace's resolver's job, and it does it at each
+#: workspace's creation, on whichever host runs it.
+_RUNTIME_EFFECTIVE_NOTE = (
+    "resolved per workspace by agentic-workspace; logged as 'Workspace runtime'"
+)
+
+
+def _runtime_findings(report: DoctorReport) -> list[Finding]:
+    """A runtime value Settings would refuse at startup."""
+    runtime = report.workspace_runtime
+    if runtime.source is Source.DEFAULT or not runtime.is_set:
+        return []
+    value = runtime.value
+    if value not in {m.value for m in WorkspaceRuntime}:
+        return [
+            Finding(
+                Severity.ERROR,
+                f"{ENV_SYN_WORKSPACE_RUNTIME}={value!r} is not a known runtime. Settings "
+                f"reject it at startup rather than fall back to auto. Known: "
+                f"{_KNOWN_RUNTIMES}; unset it for auto.",
             )
         ]
     return []
@@ -823,6 +861,13 @@ def render(report: DoctorReport, *, show_values: bool) -> str:
 
     lines.append("Execution concurrency (direct, trigger and resume starts)")
     lines.append(_variable_line(report.execution_concurrency, show_values=True))
+    lines.append("")
+
+    lines.append("Workspace runtime")
+    lines.append(_variable_line(report.workspace_runtime, show_values=True))
+    lines.append(_plain_line("effective", _RUNTIME_EFFECTIVE_NOTE))
+    for finding in _runtime_findings(report):
+        lines.extend(_wrap_finding(finding))
     lines.append("")
 
     lines.append("Workspace image (pinned)")

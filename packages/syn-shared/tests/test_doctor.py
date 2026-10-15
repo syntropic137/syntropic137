@@ -766,3 +766,43 @@ def test_the_label_rule_has_one_definition() -> None:
     for candidate in ("mac-mini", "prod:west", "", "a" * 65, "  spaced  "):
         settings = SessionStoreSettings(label=candidate, _env_file=None)  # pyright: ignore[reportCallIssue]
         assert settings.display_label == usable_label(candidate)
+
+
+# ---------------------------------------------------------------------------
+# Workspace runtime (SYN_WORKSPACE_RUNTIME)
+# ---------------------------------------------------------------------------
+
+
+def test_unset_runtime_is_reported_as_auto() -> None:
+    report = build_report(_sources())
+    text = render(report, show_values=False)
+    assert "Workspace runtime" in text
+    assert "SYN_WORKSPACE_RUNTIME" in text
+    assert "auto" in text
+    assert report.exit_code == 0
+
+
+def test_requested_runtime_and_where_its_effective_value_is_recorded_are_reported() -> None:
+    report = build_report(_sources(dotenv={"SYN_WORKSPACE_RUNTIME": "kata"}))
+    text = render(report, show_values=False)
+    assert report.workspace_runtime.value == "kata"
+    runtime_section = text.split("Workspace runtime\n", 1)[1].split("\n\n", 1)[0]
+    assert "kata" in runtime_section
+    assert "resolved per workspace by agentic-workspace" in runtime_section
+    assert report.exit_code == 0
+
+
+def test_a_runtime_settings_would_refuse_fails_the_doctor() -> None:
+    """`runsc` is Docker's alias, not the runtime: the likeliest typo, refused at startup."""
+    report = build_report(_sources(environ={"SYN_WORKSPACE_RUNTIME": "runsc"}))
+    assert report.exit_code == 1
+    text = render(report, show_values=False)
+    assert "'runsc' is not a known runtime" in text
+    assert "gvisor" in text
+
+
+def test_the_doctor_reports_the_variable_settings_read() -> None:
+    from syn_shared.settings.workspace import ENV_SYN_WORKSPACE_RUNTIME, WorkspaceSettings
+
+    prefix = WorkspaceSettings.model_config.get("env_prefix")
+    assert f"{prefix}runtime".upper() == ENV_SYN_WORKSPACE_RUNTIME
