@@ -98,23 +98,7 @@ class Reconciler:
         if not acquire or self._clock() >= deadline:
             return
         owned = {run.execution_id: run for run in await self._queue.reconciling(self._host_id)}
-        # Busy is what holds a slot: a task in flight, or a row this host owns
-        # and has never attempted. A row waiting to retry does not, so rows whose
-        # reaps keep failing never stop this host acquiring healthy ones.
-        busy = len(self._attempts) + sum(
-            1 for execution_id in owned if execution_id not in self._tried
-        )
-        free = self._concurrency - busy
-        if free > 0 and self._clock() < deadline:
-            for run in await self._queue.take_over(self._host_id, limit=free):
-                owned[run.execution_id] = run
-                free -= 1
-        if free > 0 and self._clock() < deadline:
-            for run in await self._queue.fence_expired(self._host_id, limit=free):
-                logger.warning(
-                    "Fenced %s: executor %s let its lease expire", run.execution_id, run.executor_id
-                )
-                owned[run.execution_id] = run
+        owned.update(await self._acquire(owned, deadline))
         self._tried &= owned.keys()
         self._in_line = {
             execution_id: self._in_line.get(execution_id) or next(self._ticket)
@@ -128,6 +112,28 @@ class Reconciler:
         )
         for run in waiting[: self._concurrency - len(self._attempts)]:
             self._start(run)
+
+    async def _acquire(self, owned: dict[str, FencedRun], deadline: float) -> dict[str, FencedRun]:
+        """Take over, then fence, no more rows than this host has free slots (D5)."""
+        # Busy is what holds a slot: a task in flight, or a row this host owns
+        # and has never attempted. A row waiting to retry does not, so rows whose
+        # reaps keep failing never stop this host acquiring healthy ones.
+        busy = len(self._attempts) + sum(
+            1 for execution_id in owned if execution_id not in self._tried
+        )
+        free = self._concurrency - busy
+        acquired: dict[str, FencedRun] = {}
+        if free > 0 and self._clock() < deadline:
+            for run in await self._queue.take_over(self._host_id, limit=free):
+                acquired[run.execution_id] = run
+        free -= len(acquired)
+        if free > 0 and self._clock() < deadline:
+            for run in await self._queue.fence_expired(self._host_id, limit=free):
+                logger.warning(
+                    "Fenced %s: executor %s let its lease expire", run.execution_id, run.executor_id
+                )
+                acquired[run.execution_id] = run
+        return acquired
 
     async def aclose(self) -> None:
         """Cancel and await every in-flight attempt; for shutdown only.
