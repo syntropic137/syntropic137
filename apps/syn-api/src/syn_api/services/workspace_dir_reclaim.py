@@ -54,11 +54,18 @@ if TYPE_CHECKING:
         ContainerMounts,
         WorkspaceDirListing,
     )
+    from syn_domain.contexts.agent_sessions.domain.read_models.session_summary import (
+        SessionSummary,
+    )
     from syn_domain.contexts.orchestration import (
         HostWorkspaceGit,
         OwnerExecution,
         RemoteRefs,
     )
+    from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_summary import (
+        WorkflowExecutionSummary,
+    )
+    from syn_domain.pagination import Page
 
 logger = logging.getLogger(__name__)
 
@@ -532,12 +539,25 @@ def _epoch(value: datetime | str | None) -> float | None:
     return moment.timestamp()
 
 
-async def _execution_record(execution_id: str) -> OwnerExecution | None:
+class ExecutionRows(Protocol):
+    async def get_by_id(self, execution_id: str) -> WorkflowExecutionSummary | None: ...
+
+
+class SpoolIndex(Protocol):
+    async def session_ids(self, execution_id: str) -> set[str]: ...
+
+
+class SessionPages(Protocol):
+    async def page(
+        self, *, execution_id: str | None = None, limit: int | None = None
+    ) -> Page[SessionSummary]: ...
+
+
+async def execution_record_from(rows: ExecutionRows, execution_id: str) -> OwnerExecution | None:
     """The owner as the execution read model has it, keyed by its id."""
-    from syn_api._wiring import get_projection_mgr
     from syn_domain.contexts.orchestration import TERMINAL_EXECUTION_STATUSES, OwnerExecution
 
-    row = await get_projection_mgr().workflow_execution_list.get_by_id(execution_id)
+    row = await rows.get_by_id(execution_id)
     if row is None:
         return None
     terminal = row.status in TERMINAL_EXECUTION_STATUSES
@@ -549,25 +569,39 @@ async def _execution_record(execution_id: str) -> OwnerExecution | None:
     )
 
 
-async def _capture_unproven(execution_id: str) -> str | None:
+async def capture_unproven_from(
+    spools: SpoolIndex, sessions: SessionPages, execution_id: str
+) -> str | None:
     """Why the owner's capture may be in its workspace (design 1.3), or None.
 
     Every top-level session of the execution must have a spool record: AW
     lets only ``/spool`` outlive a container, and syn137 mounts it as a named
     volume. No session recorded at all is not proof either.
     """
-    from syn_api._wiring import get_projection_mgr
-    from syn_api._wiring_inventory import get_inventory_runtime
-
-    spooled = await get_inventory_runtime().spools.session_ids(execution_id)
-    page = await get_projection_mgr().session_list.page(execution_id=execution_id, limit=None)
-    sessions = {row.id for row in page.rows if row.parent_session_id is None}
-    if not sessions:
+    spooled = await spools.session_ids(execution_id)
+    page = await sessions.page(execution_id=execution_id, limit=None)
+    top_level = {row.id for row in page.rows if row.parent_session_id is None}
+    if not top_level:
         return "no session of the execution is recorded"
-    missing = sorted(sessions - spooled)
+    missing = sorted(top_level - spooled)
     if missing:
         return f"{len(missing)} session(s) have no spool capture record, e.g. {missing[0]}"
     return None
+
+
+async def _execution_record(execution_id: str) -> OwnerExecution | None:
+    from syn_api._wiring import get_projection_mgr
+
+    return await execution_record_from(get_projection_mgr().workflow_execution_list, execution_id)
+
+
+async def _capture_unproven(execution_id: str) -> str | None:
+    from syn_api._wiring import get_projection_mgr
+    from syn_api._wiring_inventory import get_inventory_runtime
+
+    return await capture_unproven_from(
+        get_inventory_runtime().spools, get_projection_mgr().session_list, execution_id
+    )
 
 
 def default_reclaimer(is_live: Callable[[], bool]) -> WorkspaceDirReclaimer:
