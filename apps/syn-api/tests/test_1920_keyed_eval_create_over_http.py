@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from syn_api.types import CreateEvalRequest, EvalBaselineRepoRequest
 from syn_domain.contexts.orchestration.domain.aggregate_eval import EvalId
 from syn_domain.contexts.orchestration.slices.create_eval.test_1920_concurrent_keyed_creates_make_one_eval import (
     SHA,
@@ -44,14 +45,14 @@ def _reset_storage() -> Iterator[None]:
     reset_projection_manager()
 
 
-def _body(stable_key: str | None) -> dict[str, object]:
-    return {
-        "stable_key": stable_key,
-        "name": "verifier-seed: teardown-lock-waiter-race",
-        "goal": "The verifier blocks what it should",
-        "baseline_repos": [{"repository": "acme/app", "requested_ref": SHA}],
-        "tags": ["suite:verifier-seed", "case:teardown-lock-waiter-race"],
-    }
+def _body(stable_key: str | None) -> CreateEvalRequest:
+    return CreateEvalRequest(
+        stable_key=stable_key,
+        name="verifier-seed: teardown-lock-waiter-race",
+        goal="The verifier blocks what it should",
+        baseline_repos=[EvalBaselineRepoRequest(repository="acme/app", requested_ref=SHA)],
+        tags=["suite:verifier-seed", "case:teardown-lock-waiter-race"],
+    )
 
 
 async def test_two_creates_with_one_stable_key_answer_with_one_eval(
@@ -64,7 +65,8 @@ async def test_two_creates_with_one_stable_key_answer_with_one_eval(
     monkeypatch.setattr("syn_api.routes.evals.get_revision_resolver", lambda: resolver)
     async with AsyncClient(transport=ASGITransport(app=create_app()), base_url="http://t") as c:
         first, second = await asyncio.gather(
-            c.post("/evals", json=_body(KEY)), c.post("/evals", json=_body(KEY))
+            c.post("/evals", json=_body(KEY).model_dump()),
+            c.post("/evals", json=_body(KEY).model_dump()),
         )
 
     assert (first.status_code, second.status_code) == (201, 201), (first.text, second.text)
@@ -82,7 +84,7 @@ async def test_a_create_without_a_stable_key_still_gets_a_fresh_id(
     resolver = RendezvousResolver(parties=1)
     monkeypatch.setattr("syn_api.routes.evals.get_revision_resolver", lambda: resolver)
     async with AsyncClient(transport=ASGITransport(app=create_app()), base_url="http://t") as c:
-        response = await c.post("/evals", json=_body(None))
+        response = await c.post("/evals", json=_body(None).model_dump())
 
     assert response.status_code == 201, response.text
     assert response.json()["eval_id"] != str(EvalId.for_key(KEY))
