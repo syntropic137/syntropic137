@@ -533,3 +533,55 @@ allowed_prefixes = [
 "WorkspaceSettings.docker_network" = { issue = "#1805" }
 "WorkspaceSettings.docker_runtime" = { issue = "#1805" }
 "WorkspaceSettings.isolation_backend" = { issue = "#1805" }
+
+[docs_drift]
+# ci/fitness/code_quality/test_docs_drift.py (#1960). Every `syn` command,
+# `npx @syntropic137/setup` command and /api/v1 route in the public docs must be
+# one the software accepts (scripts/check_docs_drift.py says how each is read).
+#
+# [[docs_drift.allow]]: one snippet that is illustrative ON PURPOSE. `text` is
+# the snippet exactly as the checker prints it; `reason` says why it is not a
+# claim a reader can run. An entry that matches nothing fails, so fixing the
+# page removes its waiver in the same diff.
+#
+# [docs_drift.budget]: existing false claims in one file, owned by an open
+# issue. EXACT both ways: more fails, and fewer fails until the budget comes
+# down. "<path>" = { max = N, issue = "#NNN" }
+
+[[docs_drift.allow]]
+file = "README.md"
+text = "npx @syntropic137/cli <command>"
+reason = "Usage shape for running the CLI without installing it; <command> is any command."
+
+[[docs_drift.allow]]
+file = "apps/syn-docs/content/docs/guide/setup-cli.mdx"
+text = "npx @syntropic137/setup [command]"
+reason = "Usage shape of the setup CLI; the command table below it lists every command."
+
+[[docs_drift.allow]]
+file = "apps/syn-docs/content/docs/guide/event-ingestion.mdx"
+text = "GET /repos/{owner}/{repo}/commits/{sha}/check-runs"
+reason = "GitHub's Checks API, which the check-run poller calls; not a Syntropic137 route."
+
+[[docs_drift.allow]]
+file = "apps/syn-docs/content/docs/guide/github-integration.mdx"
+text = "POST /app/installations/{id}/access_tokens"
+reason = "GitHub's installation token API, called during workspace setup; not a Syntropic137 route."
+
+[[docs_drift.allow]]
+file = "apps/syn-docs/content/docs/guide/observability.mdx"
+text = "POST /events"
+reason = "syn-collector's ingest route (packages/syn-collector/src/syn_collector/collector/routes.py), not the API."
+
+[[docs_drift.allow]]
+file = "apps/syn-docs/content/docs/guide/observability.mdx"
+text = "POST /v1/metrics"
+reason = "syn-collector's OTLP route (packages/syn-collector/src/syn_collector/collector/routes.py), not the API."
+
+[[docs_drift.allow]]
+file = "apps/syn-docs/content/docs/guide/resuming-executions.mdx"
+text = "syn control resume"
+reason = "History: names the command removed in v0.32, in a callout that says it was removed."
+
+[docs_drift.budget]
+# Empty: every page passes. Add an entry only for debt owned by an open issue.

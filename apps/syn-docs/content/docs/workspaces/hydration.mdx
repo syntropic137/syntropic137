@@ -16,7 +16,7 @@ When an agent clones its own repositories, several things go wrong:
 - The agent wastes turns on setup instead of actual work
 - Cloning errors disrupt the workflow mid-run
 
-Workspace hydration solves all of these. Cloning happens during the setup phase using short-lived GitHub App installation tokens. Those tokens are cleared before the agent starts. The agent inherits cached git credentials and pre-populated repos - but never sees a raw token.
+Workspace hydration solves all of these. Cloning happens during the setup phase using short-lived GitHub App installation tokens. The agent inherits pre-populated repos and the credentials the setup phase wrote. Those credentials are never in the agent's environment, but they are raw installation tokens in `~/.git-credentials` and `~/.config/gh/hosts.yml`, which the agent can read.
 
 ## The `repos` Field
 
@@ -53,7 +53,7 @@ overridden at run time or opted out per phase with [`clone_repos`](#phases-that-
 
 ### Execute Override
 
-Pass `--repo` at run time to override or extend the template's default repos:
+Pass `--repo` at run time to replace the template's default repos. Run-time repos are never merged with the template's:
 
 ```bash
 # Override - use these repos instead of the template defaults
@@ -69,7 +69,8 @@ syn workflow run my-workflow-v1 \
 The execute API accepts the same field:
 
 ```bash
-curl -X POST /v1/workflows/{id}/execute \
+curl -X POST "$SYN_API_URL/api/v1/workflows/{id}/execute" \
+  -u "${SYN_API_USER:-admin}:$SYN_API_PASSWORD" \
   -H "Content-Type: application/json" \
   -d '{
     "task": "Review the latest changes",
@@ -92,11 +93,10 @@ last segment of the URL with any `.git` suffix removed. The owner is not part of
 | `github.com/other-org/api-service` | `/workspace/repos/api-service/` |
 
 <Callout type="warn">
-The first and third rows collide, and the collision is silent. The clone is guarded by
-`[ -d <dest> ] || git clone ...`, so when two repos with the same name from different
-orgs are configured on one workflow, the second clone is skipped without an error and
-the agent works on the first org's checkout believing it is the second's. Do not
-configure two same-named repos on one workflow.
+The first and third rows collide. When two different repos with the same name are
+configured on one execution, provisioning refuses the execution with a
+`RepoNameCollisionError` before any agent runs. Listing the same repo twice (for
+example with and without `.git`) is not a collision: it is cloned once.
 </Callout>
 
 ## `$GH_REPO`
@@ -128,7 +128,7 @@ done
 
 ## AGENTS.md and CLAUDE.md Injection
 
-When one or more repos are cloned, the orchestrator synthesizes `/workspace/AGENTS.md` and `/workspace/CLAUDE.md` at container start. Both files receive identical content: `@`-imports of the AGENTS.md and the CLAUDE.md of every cloned repo:
+When one or more repos are cloned, the orchestrator synthesizes `/workspace/AGENTS.md` and `/workspace/CLAUDE.md` at container start. `CLAUDE.md` holds `@`-imports of the AGENTS.md and the CLAUDE.md of every cloned repo. A repo's AGENTS.md is dropped when it only duplicates or points at its CLAUDE.md:
 
 ```markdown
 @/workspace/repos/api-service/AGENTS.md
@@ -137,7 +137,7 @@ When one or more repos are cloned, the orchestrator synthesizes `/workspace/AGEN
 @/workspace/repos/web-app/CLAUDE.md
 ```
 
-Each harness loads its own file automatically: Claude Code reads the synthesized `CLAUDE.md`, and Codex reads `AGENTS.md`. This means the agent inherits repo-specific conventions, architecture notes, and coding standards from every configured repository - with no manual setup.
+Claude Code reads the synthesized `CLAUDE.md`. When only Claude may run in the phase, `AGENTS.md` has the same content. When codex may run (as the agent, a fallback, or a delegate), codex does not expand `@`-imports, so the repo files are inlined into codex's global instructions file `~/.codex/AGENTS.md` instead, and `/workspace/AGENTS.md` is a short pointer to it. Either way the agent inherits repo-specific conventions, architecture notes, and coding standards from every configured repository - with no manual setup.
 
 If a cloned repo does not have an AGENTS.md or CLAUDE.md, it is skipped silently. If no repos are cloned - because none are configured, or because the phase set `clone_repos: false` - no synthesis happens and neither file is created.
 
@@ -147,7 +147,7 @@ A hydrated workspace for a phase that clones looks like this:
 
 ```
 /workspace/
-  AGENTS.md              # Synthesized - imports each repo's AGENTS.md
+  AGENTS.md              # Synthesized; a pointer to ~/.codex/AGENTS.md when codex may run
   CLAUDE.md              # Synthesized - imports each repo's CLAUDE.md
   artifacts/
     input/               # Previous phase outputs (read-only)
@@ -158,7 +158,6 @@ A hydrated workspace for a phase that clones looks like this:
 /opt/agentic/
   plugins/               # Pre-bundled plugins
   config/                # Runtime configuration
-  version.json           # Image version manifest
   entrypoint.sh
 ```
 
@@ -210,10 +209,10 @@ there. The directory is shown rather than omitted for the reason above - an agen
 
 Repo cloning uses GitHub App installation tokens, not personal access tokens. The lifecycle:
 
-1. **Setup phase** - Orchestrator generates a short-lived installation token per repo's org and injects it into the workspace via the sidecar proxy
-2. **Clone** - Each repo is cloned using the installation token; git credential helper caches the token for the repo URL
-3. **Token revocation** - Raw tokens are cleared from the environment before the agent phase starts (ADR-024)
-4. **Agent phase** - Agent uses cached git credentials for push/pull operations; it never handles the original token
+1. **Setup phase** - Orchestrator generates a short-lived installation token per repo's org and writes it to `~/.git-credentials` (per repo) and `~/.config/gh/hosts.yml`
+2. **Clone** - Each repo is cloned using those credentials
+3. **Renewal** - When the token is renewed, both files are rewritten with the fresh one
+4. **Agent phase** - Agent uses the stored credentials for push/pull and `gh`. The token is never in the agent's environment, but the files holding it are readable by the agent
 
 The agent can push commits and open PRs using the cached credentials. The GitHub App's configured permissions determine what it can do.
 
@@ -319,8 +318,7 @@ remote. Submodule commits survive only if the phase pushed them itself.
 Configured repos are surfaced throughout the platform:
 
 - **Execution detail** - The `repos` field appears on `WorkflowExecutionDetail`, visible in the dashboard and via `syn execution show <id>`
-- **Workflow detail** - `syn workflow show <id>` displays the template's default repos
-- **Execution list** - Executions show their configured repos for filtering and audit
+- **Execution list** - `syn execution list` shows each execution's configured repos
 
 ## Related
 
