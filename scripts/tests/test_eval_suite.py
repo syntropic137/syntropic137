@@ -53,6 +53,7 @@ from eval_suite import (
     score_case,
     score_report,
     score_suite,
+    stable_key,
     verdict_mismatch,
     versions_run,
 )
@@ -1705,6 +1706,12 @@ def test_launch_on_a_fresh_server_installs_the_workflow_before_any_eval(tmp_path
         c.commit for c in loaded.cases
     ]
     assert [c["tags"] for c in creates] == [["suite:verifier-seed", c.tag] for c in loaded.cases]
+    # Every create is keyed by its case, so a concurrent launch's create of the
+    # same case is the same eval (#1920).
+    keys = [c["stable_key"] for c in creates]
+    assert keys == [f"suite:verifier-seed\n{c.tag}" for c in loaded.cases]
+    assert keys == [stable_key(loaded, c) for c in loaded.cases]
+    assert len(set(keys)) == len(loaded.cases)
     assert all(s["tags"] == ["suite-version:7", f"verifier:{_WF}"] for s in starts)
     assert [s["eval_id"] for s in starts] == [f"eval-{c.commit[:6]}" for c in loaded.cases]
     assert len(lines) == 1 + len(loaded.cases)

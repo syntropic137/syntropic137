@@ -72,8 +72,16 @@ _openapi:
       - content: List evals, newest first, each with its run count and status tally.
         heading: list-evals-endpoint
       - content: >-
-          Create an eval, pinning each baseline ref to a commit SHA. The id is
-          minted here.
+          Create an eval, pinning each baseline ref to a commit SHA.
+
+
+          The id is minted here, or derived from `stable_key`. A derived id is
+          one
+
+          stream however many creators race for it: the store admits the first
+          and
+
+          the rest answer with that eval (#1920).
         heading: create-eval-endpoint
       - content: >-
           One eval with its Baseline and run tally. Its runs are `GET
