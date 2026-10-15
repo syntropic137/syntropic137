@@ -19,17 +19,20 @@ enters the agent environment, argv, logs or the setup script text. Codex's own
 env-var route (``CODEX_API_KEY``) would put it in the agent environment, which
 is exactly what the codex path refuses to do.
 
-Pure: no settings access and no logging, so the health probe and the setup
-phase resolve with one rule and the caller decides what to report.
+No logging: the health probe and the setup phase resolve with one rule and
+each caller decides what to report.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Final, Literal
+from typing import TYPE_CHECKING, Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+
+if TYPE_CHECKING:
+    from syn_shared.settings import Settings
 
 #: The ``auth_mode`` codex writes for an API-key login. codex-rs serialises
 #: ``AuthMode::ApiKey`` with ``rename_all = "lowercase"``
@@ -105,3 +108,25 @@ def resolve_codex_credential(
             both_configured=False,
         )
     return None
+
+
+def resolve_configured_codex_credential(
+    settings: Settings | None = None,
+) -> ResolvedCodexCredential | None:
+    """`resolve_codex_credential` over the deployment's settings (default: loaded).
+
+    The one place both settings are read, so a codex phase and ``/health``
+    cannot disagree about which credential is in force.
+    """
+    if settings is None:
+        from syn_shared.settings import get_settings
+
+        settings = get_settings()
+    return resolve_codex_credential(
+        codex_auth_json=(
+            settings.codex_auth_json.get_secret_value() if settings.codex_auth_json else None
+        ),
+        openai_api_key=(
+            settings.openai_api_key.get_secret_value() if settings.openai_api_key else None
+        ),
+    )

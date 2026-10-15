@@ -59,20 +59,11 @@ def describe_codex_auth_health() -> CodexAuthStatus | None:
     """
     try:
         from syn_shared.codex_auth_status import describe_codex_auth
-        from syn_shared.codex_credentials import resolve_codex_credential
-        from syn_shared.settings import get_settings
+        from syn_shared.codex_credentials import resolve_configured_codex_credential
 
-        settings = get_settings()
         # The same precedence a codex phase gets (#1971): CODEX_AUTH_JSON, then
         # OPENAI_API_KEY. Only a state and a detail leave this function.
-        resolved = resolve_codex_credential(
-            codex_auth_json=(
-                settings.codex_auth_json.get_secret_value() if settings.codex_auth_json else None
-            ),
-            openai_api_key=(
-                settings.openai_api_key.get_secret_value() if settings.openai_api_key else None
-            ),
-        )
+        resolved = resolve_configured_codex_credential()
         if resolved is None:
             return describe_codex_auth(None)
         return describe_codex_auth(resolved.auth_json, source=resolved.source)
