@@ -1082,10 +1082,20 @@ class EvalBaselineRepoRequest(BaseModel):
 
 
 class CreateEvalRequest(BaseModel):
-    """A new eval (#967). The server mints its id; see `EvalCreatedResponse`."""
+    """A new eval (#967). The server mints its id unless `stable_key` names one."""
 
     model_config = ConfigDict(extra="forbid")
 
+    stable_key: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=1000,
+        description=(
+            "Makes the create idempotent (#1920): the eval id is derived from this key, so "
+            "every create with the same key, concurrent ones included, answers with the one "
+            "eval. A create that differs from the one that made it is refused."
+        ),
+    )
     name: str = Field(min_length=1, max_length=200)
     goal: str = Field(min_length=1, description="What the eval sets out to measure.")
     starting_workflow_id: str | None = Field(
