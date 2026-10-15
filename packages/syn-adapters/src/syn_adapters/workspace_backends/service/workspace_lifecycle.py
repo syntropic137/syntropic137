@@ -36,6 +36,7 @@ if TYPE_CHECKING:
         CapabilityType,
         IsolationBackendType,
         IsolationHandle,
+        IsolationRuntime,
         SidecarHandle,
     )
 
@@ -216,6 +217,13 @@ async def provision_workspace(
         isolation_config.execution_id,
     )
     isolation_handle = await service._isolation.create(isolation_config)
+    _log_runtime(
+        isolation_handle.runtime,
+        execution_id=isolation_config.execution_id,
+        phase_id=isolation_config.phase_id,
+        workspace_id=workspace_id,
+        isolation_id=isolation_handle.isolation_id,
+    )
 
     # Read image version manifest from container (best-effort)
     manifest = await _read_image_manifest(service, isolation_handle)
@@ -357,6 +365,39 @@ async def cleanup_workspace(
 
     logger.info("Workspace cleaned up (id=%s)", workspace_id)
     return teardown
+
+
+def _log_runtime(
+    runtime: IsolationRuntime | None,
+    *,
+    execution_id: str,
+    phase_id: str | None,
+    workspace_id: str,
+    isolation_id: str,
+) -> None:
+    """One structured line per created isolation: the runtime it really runs under.
+
+    Lane 2: what the provider's resolver chose, not what the settings asked
+    for. None when the backend has no OCI runtime or recorded none.
+    """
+    logger.info(
+        "Workspace runtime (execution=%s, phase=%s, workspace=%s, isolation=%s, "
+        "requested=%s, effective=%s)",
+        execution_id,
+        phase_id,
+        workspace_id,
+        isolation_id,
+        (runtime.requested or "auto") if runtime else None,
+        runtime.effective if runtime else None,
+        extra={
+            "execution_id": execution_id,
+            "phase_id": phase_id,
+            "workspace_id": workspace_id,
+            "isolation_id": isolation_id,
+            "runtime_requested": str(runtime.requested or "auto") if runtime else None,
+            "runtime_effective": str(runtime.effective) if runtime else None,
+        },
+    )
 
 
 def _log_usage(

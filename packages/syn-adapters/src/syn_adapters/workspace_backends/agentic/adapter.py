@@ -45,6 +45,9 @@ from syn_adapters.workspace_backends.agentic.session_store_env import (
 # raised/imported without depending on this Docker-specific module. Existing
 # `from ...agentic.adapter import WorkspaceProvisionError` call sites keep
 # working unchanged.
+from syn_adapters.workspace_backends.agentic.runtime_mapping import (
+    isolation_runtime_from_metadata,
+)
 from syn_adapters.workspace_backends.agentic.teardown_usage import usage_from_report
 from syn_adapters.workspace_backends.errors import (
     TeardownFailure,
@@ -405,6 +408,7 @@ class AgenticIsolationAdapter:
             proxy_url=None,
             workspace_path="/workspace",
             host_workspace_path=workspace_obj.metadata.get("workspace_dir", ""),
+            runtime=isolation_runtime_from_metadata(workspace_obj.metadata),
         )
 
     async def _ensure_tmpdir(
