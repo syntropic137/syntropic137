@@ -44,6 +44,28 @@ def executions_that_fit(memory_limit_mib: int) -> int:
     return max(1, (memory_limit_mib - API_BASELINE_MEMORY_MIB) // EXECUTION_API_MEMORY_MIB)
 
 
+#: The fewest executions the API memory default is sized for, whatever the
+#: budget: the north star's current tier (docs/north-star.md). It is the floor
+#: under `api_memory_limit_for`. Without it the default concurrency of 4 would
+#: derive 128 + 4 x 96 = 512MiB, the limit #1552 was OOM-killed at. With it, an
+#: operator who raises SYN_EXECUTION_MAX_CONCURRENT up to this tier does not
+#: also have to remember API_MEMORY_LIMIT.
+API_MEMORY_FLOOR_EXECUTIONS = 20
+
+
+def api_memory_limit_for(max_concurrent: int) -> str:
+    """The API memory limit, in Docker notation, that holds `max_concurrent` executions.
+
+    This is the inverse of `executions_that_fit`, using the same baseline and
+    per-run allowance, and never sized below `API_MEMORY_FLOOR_EXECUTIONS`.
+    It is written in whole gigabytes when it divides evenly, because that is
+    how the compose fallback spells it.
+    """
+    executions = max(max_concurrent, API_MEMORY_FLOOR_EXECUTIONS)
+    mib = API_BASELINE_MEMORY_MIB + executions * EXECUTION_API_MEMORY_MIB
+    return f"{mib // 1024}g" if mib % 1024 == 0 else f"{mib}m"
+
+
 class ExecutionSettings(BaseSettings):
     """The execution concurrency budget. Override via ``SYN_EXECUTION_*``."""
 
