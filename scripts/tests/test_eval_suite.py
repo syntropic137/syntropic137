@@ -1911,7 +1911,7 @@ def test_launch_on_a_fresh_server_installs_the_workflow_before_any_eval(tmp_path
     assert keys == [f"suite:verifier-seed\n{c.tag}" for c in loaded.cases]
     assert keys == [stable_key(loaded, c) for c in loaded.cases]
     assert len(set(keys)) == len(loaded.cases)
-    assert all(s["tags"] == ["suite-version:7", f"verifier:{_WF}"] for s in starts)
+    assert all(s["tags"] == ["suite-version:8", f"verifier:{_WF}"] for s in starts)
     assert [s["eval_id"] for s in starts] == [f"eval-{c.commit[:6]}" for c in loaded.cases]
     assert len(lines) == 1 + len(loaded.cases)
 
@@ -1993,7 +1993,7 @@ def test_launch_under_the_codex_verifier_runs_and_records_the_codex_workflow(
     # The case evals are shared by every verifier; the run says which one it was.
     assert all("starting_workflow_id" not in c for c in creates)
     starts = [json.loads(r.content) for r in server.requests if r.url.path.endswith("/execute")]
-    assert {tuple(s["tags"]) for s in starts} == {("suite-version:7", f"verifier:{_CODEX_WF}")}
+    assert {tuple(s["tags"]) for s in starts} == {("suite-version:8", f"verifier:{_CODEX_WF}")}
     assert all(not any(t.startswith("verifier") for t in c["tags"][1:]) for c in creates)
     starts = [r.url.path for r in server.requests if r.url.path.endswith("/execute")]
     assert set(starts) == {f"/workflows/{_CODEX_WF}/execute"}
@@ -2204,9 +2204,9 @@ def test_v1_runs_never_count_toward_the_current_version(tmp_path: Path) -> None:
 @pytest.mark.unit
 def test_score_prints_every_version_the_workflow_ran() -> None:
     suite = load_suite(DEFAULT_SUITE).suite
-    assert versions_run(suite, _WF) == [1, 3, 4, 5, 6, 7]
-    assert versions_run(suite, _CODEX_WF) == [2, 3, 4, 5, 6, 7]
-    assert versions_run(suite, _SONNET_WF) == [3, 4, 5, 6, 7]
+    assert versions_run(suite, _WF) == [1, 3, 4, 5, 6, 8]
+    assert versions_run(suite, _CODEX_WF) == [2, 3, 4, 5, 6, 8]
+    assert versions_run(suite, _SONNET_WF) == [3, 4, 5, 6, 8]
 
 
 # The twelve cases of #1750's v3: the six v2 defects and the six clean controls.
@@ -2317,8 +2317,8 @@ def test_a_past_version_under_a_workflow_it_never_ran_is_refused() -> None:
 
 @pytest.mark.unit
 def test_an_unknown_version_is_refused() -> None:
-    with pytest.raises(DefinitionError, match="version 8 is not one of"):
-        load_suite(DEFAULT_SUITE, version=8)
+    with pytest.raises(DefinitionError, match="version 9 is not one of"):
+        load_suite(DEFAULT_SUITE, version=9)
 
 
 @pytest.mark.unit
@@ -2375,7 +2375,7 @@ def test_a_train_launch_never_starts_a_holdout_case(tmp_path: Path) -> None:
 
     holdout = {c.id for c in load_suite(DEFAULT_SUITE, split="holdout").cases}
     launched = {x.case for x in read_launches(ledger)}
-    assert len(launched) == 26
+    assert len(launched) == 29
     assert not launched & holdout
 
 
@@ -2394,7 +2394,7 @@ def test_the_split_flag_selects_the_cases_check_reports(
 
     monkeypatch.setattr(eval_suite, "check_commits", record)
     assert main(["check", "--split", "holdout"]) == 0
-    assert [c.split for c in checked[0].cases] == ["holdout"] * 10
+    assert [c.split for c in checked[0].cases] == ["holdout"] * 11
     out = capsys.readouterr().out
     assert ": 10 case(s)" in out
     assert "case:binary-artifact-minio-key" not in out
@@ -2530,8 +2530,8 @@ def test_an_identical_relaunch_is_an_unchanged_install(tmp_path: Path) -> None:
     _, client = _provenanced_server(loaded, templates)
     again = launch_suite(loaded, client, ledger)
 
-    assert first[0].startswith(f"workflow {_CODEX_WF}: created as 7.1.0")
-    assert again[0].startswith(f"workflow {_CODEX_WF}: unchanged as 7.1.0")
+    assert first[0].startswith(f"workflow {_CODEX_WF}: created as 8.1.0")
+    assert again[0].startswith(f"workflow {_CODEX_WF}: unchanged as 8.1.0")
 
 
 @pytest.mark.unit
@@ -2578,7 +2578,7 @@ def test_a_cli_installed_archived_record_is_restored_by_launch_without_force(
     lines = launch_suite(loaded, client, tmp_path / "launches.jsonl")
 
     stored = templates.by_id[_CODEX_WF]
-    assert lines[0].startswith(f"workflow {_CODEX_WF}: created as 7.1.0")
+    assert lines[0].startswith(f"workflow {_CODEX_WF}: created as 8.1.0")
     assert not stored.is_archived
     assert stored.source_digest == install_provenance(loaded, document).source_digest
 
@@ -2629,7 +2629,7 @@ def test_an_unchanged_relaunch_restores_an_archived_template(tmp_path: Path) -> 
     _, client = _provenanced_server(loaded, templates)
     lines = launch_suite(loaded, client, tmp_path / "launches.jsonl")
 
-    assert lines[0].startswith(f"workflow {_CODEX_WF}: created as 7.1.0")
+    assert lines[0].startswith(f"workflow {_CODEX_WF}: created as 8.1.0")
     assert not templates.by_id[_CODEX_WF].is_archived
 
 
@@ -2695,7 +2695,7 @@ def test_launch_reuses_each_case_eval_and_creates_none(tmp_path: Path) -> None:
     assert not any(r.method == "POST" and r.url.path == "/evals" for r in server.requests)
     starts = [json.loads(r.content) for r in server.requests if r.url.path.endswith("/execute")]
     assert [s["eval_id"] for s in starts] == [f"eval-{c.commit[:6]}" for c in loaded.cases]
-    assert {tuple(s["tags"]) for s in starts} == {("suite-version:7", f"verifier:{_WF}")}
+    assert {tuple(s["tags"]) for s in starts} == {("suite-version:8", f"verifier:{_WF}")}
 
 
 @pytest.mark.unit
@@ -2709,7 +2709,7 @@ def test_score_records_each_verdict_on_the_eval() -> None:
     assert path == "/evals/eval-1/runs/exec-1/score"
     assert body["verdict"] == "PASS"
     assert body["score"] == 1.0
-    assert (body["scorer"], body["scorer_version"]) == ("eval_suite.py", "7")
+    assert (body["scorer"], body["scorer_version"]) == ("eval_suite.py", "8")
     assert isinstance(body["evidence"], str) and _CASE in body["evidence"]
 
 
@@ -3394,7 +3394,7 @@ def test_keyword_only_scoring_records_the_plain_suite_version(
     score_suite(loaded, server.client(), [_LAUNCHED])
 
     [(_, body)] = server.scores
-    assert (body["scorer_version"], body["verdict"]) == ("7", "FAIL")
+    assert (body["scorer_version"], body["verdict"]) == ("8", "FAIL")
     assert "LLM judge" not in str(body["evidence"])
 
 
