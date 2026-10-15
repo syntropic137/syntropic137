@@ -1,0 +1,12 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/execution_host/host.py b/packages/syn-adapters/src/syn_adapters/execution_host/host.py
+index 37d441306..7e87b1229 100644
+--- a/packages/syn-adapters/src/syn_adapters/execution_host/host.py
++++ b/packages/syn-adapters/src/syn_adapters/execution_host/host.py
+@@ -184,7 +184,6 @@ class ExecutionHost:
+             await self._reconciler.turn(acquire=not draining)
+             while (
+                 not draining
+-                and self._clock() - started < budget
+                 and (claimed := await self._queue.claim(self._host.host_id))
+             ):
+                 self._spawn(claimed)

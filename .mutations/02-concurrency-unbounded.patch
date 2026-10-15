@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/execution_host/reconciler.py b/packages/syn-adapters/src/syn_adapters/execution_host/reconciler.py
+index 4980f163e..213dffffb 100644
+--- a/packages/syn-adapters/src/syn_adapters/execution_host/reconciler.py
++++ b/packages/syn-adapters/src/syn_adapters/execution_host/reconciler.py
+@@ -107,7 +107,7 @@ class Reconciler:
+             (run for run in owned if run.execution_id not in self._attempts),
+             key=lambda run: self._in_line[run.execution_id],
+         )
+-        for run in waiting[: self._concurrency - len(self._attempts)]:
++        for run in waiting:
+             self._start(run)
+ 
+     async def aclose(self) -> None:

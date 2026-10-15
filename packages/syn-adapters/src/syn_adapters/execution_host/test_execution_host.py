@@ -268,3 +268,34 @@ async def test_a_fresh_reconciler_finishes_a_row_its_predecessor_left_reaped() -
     assert reaper.calls == []  # already reaped: the row says so
     assert interrupter.calls == ["e9"]
     assert queue.interrupted == ["e9"]
+
+
+class _FailingFirstReaper:
+    """Reaps of ``failing`` rows never complete; every other row's does."""
+
+    def __init__(self, failing: set[str]) -> None:
+        self.failing = failing
+        self.calls: list[str] = []
+
+    async def reap(self, run: FencedRun) -> bool:
+        self.calls.append(run.execution_id)
+        return run.execution_id not in self.failing
+
+
+async def test_rows_whose_reaps_keep_failing_do_not_starve_the_rows_behind_them() -> None:
+    queue = _Queue([])
+    ids = [f"e{n}" for n in range(1, 7)]
+    queue.rows = {
+        row: FencedRun(execution_id=row, executor_id="dead", reconciler=_HOST.host_id, token=2)
+        for row in ids
+    }
+    reaper = _FailingFirstReaper(failing=set(ids[:4]))
+    reconciler = Reconciler(  # type: ignore[arg-type]
+        queue, _HOST.host_id, reaper, _Interrupter(), concurrency=4
+    )
+    for _ in range(2):
+        await _turn(reconciler)
+    assert sorted(queue.interrupted) == ["e5", "e6"]
+    for _ in range(2):
+        await _turn(reconciler)
+    assert all(reaper.calls.count(row) >= 2 for row in ids[:4])

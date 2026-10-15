@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/execution_host/reconciler.py b/packages/syn-adapters/src/syn_adapters/execution_host/reconciler.py
+index 4980f163e..c13955805 100644
+--- a/packages/syn-adapters/src/syn_adapters/execution_host/reconciler.py
++++ b/packages/syn-adapters/src/syn_adapters/execution_host/reconciler.py
+@@ -105,7 +105,7 @@ class Reconciler:
+         # never hold up the rows behind them.
+         waiting = sorted(
+             (run for run in owned if run.execution_id not in self._attempts),
+-            key=lambda run: self._in_line[run.execution_id],
++            key=lambda run: run.execution_id,
+         )
+         for run in waiting[: self._concurrency - len(self._attempts)]:
+             self._start(run)

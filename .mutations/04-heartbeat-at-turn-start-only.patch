@@ -1,0 +1,25 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/execution_host/host.py b/packages/syn-adapters/src/syn_adapters/execution_host/host.py
+index 37d441306..33875d44d 100644
+--- a/packages/syn-adapters/src/syn_adapters/execution_host/host.py
++++ b/packages/syn-adapters/src/syn_adapters/execution_host/host.py
+@@ -180,7 +180,7 @@ class ExecutionHost:
+         draining = self._draining
+         try:
+             draining = await self._queue.heartbeat(self._host.host_id) or draining
+-            self._tend_sweep(start=not draining)
++            await self._queue.sweep_opening(self._timing.opening_older_than, self._streams)
+             await self._reconciler.turn(acquire=not draining)
+             while (
+                 not draining
+diff --git a/packages/syn-adapters/src/syn_adapters/execution_host/reconciler.py b/packages/syn-adapters/src/syn_adapters/execution_host/reconciler.py
+index 4980f163e..2f5c903cb 100644
+--- a/packages/syn-adapters/src/syn_adapters/execution_host/reconciler.py
++++ b/packages/syn-adapters/src/syn_adapters/execution_host/reconciler.py
+@@ -109,6 +109,7 @@ class Reconciler:
+         )
+         for run in waiting[: self._concurrency - len(self._attempts)]:
+             self._start(run)
++        await asyncio.gather(*(attempt.task for attempt in list(self._attempts.values())))
+ 
+     async def aclose(self) -> None:
+         """Cancel and await every in-flight attempt; for shutdown only.

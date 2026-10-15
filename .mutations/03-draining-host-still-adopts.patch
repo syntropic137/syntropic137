@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/execution_host/reconciler.py b/packages/syn-adapters/src/syn_adapters/execution_host/reconciler.py
+index 4980f163e..0927e276d 100644
+--- a/packages/syn-adapters/src/syn_adapters/execution_host/reconciler.py
++++ b/packages/syn-adapters/src/syn_adapters/execution_host/reconciler.py
+@@ -89,8 +89,6 @@ class Reconciler:
+         attempt; the tasks it already started run to their end.
+         """
+         self._warn_long_running()
+-        if not acquire:
+-            return
+         for run in await self._queue.fence_expired(self._host_id):
+             logger.warning(
+                 "Fenced %s: executor %s let its lease expire", run.execution_id, run.executor_id
