@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/events/store_helpers.py b/packages/syn-adapters/src/syn_adapters/events/store_helpers.py
+index ed3760c83..41945bcb3 100644
+--- a/packages/syn-adapters/src/syn_adapters/events/store_helpers.py
++++ b/packages/syn-adapters/src/syn_adapters/events/store_helpers.py
+@@ -214,7 +214,7 @@ async def record_observation(
+         "event_type": observation_type,
+         "session_id": session_id,
+         "timestamp": datetime.now(UTC),
+-        "workspace_id": workspace_id,
++        "workspace_id": None,
+         **safe_data,
+     }
+     # Lazy import to avoid circular dependency with store_write
