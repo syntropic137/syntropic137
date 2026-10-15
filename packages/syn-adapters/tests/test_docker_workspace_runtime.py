@@ -21,10 +21,12 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 from typing import TYPE_CHECKING
 
 import pytest
-from agentic_isolation import SecurityConfig, WorkspaceConfig, WorkspaceDockerProvider
+from agentic_isolation import SecurityConfig, Workspace, WorkspaceConfig, WorkspaceDockerProvider
+from agentic_isolation.providers.docker import ContainerRemovalError
 
 from syn_adapters.workspace_backends.agentic.runtime_mapping import (
     isolation_runtime_from_metadata,
@@ -39,11 +41,14 @@ from syn_shared.settings.workspace import WorkspaceRuntime
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from agentic_isolation.providers.teardown_report import TeardownReport
+
 # busybox:1.36.1, multi-arch index digest: the bytes cannot move under the tag.
 _PINNED_IMAGE = "busybox@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662"
 IMAGE = os.environ.get("SYN_CONTRACT_TEST_IMAGE") or _PINNED_IMAGE
 
-pytestmark = pytest.mark.integration
+# What the Docker CLI prints when the object is absent, and only then.
+_NO_SUCH_CONTAINER = "No such container"
 
 
 def _docker(*args: str) -> subprocess.CompletedProcess[str]:
@@ -53,7 +58,7 @@ def _docker(*args: str) -> subprocess.CompletedProcess[str]:
         pytest.fail(f"docker CLI not found on PATH; these tests need a Docker host: {e}")
 
 
-@pytest.fixture(scope="module", autouse=True)
+@pytest.fixture(scope="module")
 def _image_present() -> None:
     """Provision IMAGE on this host, or fail saying why it could not."""
     info = _docker("info", "--format", "{{.ServerVersion}}")
@@ -99,22 +104,52 @@ async def _recorded_and_enforced(
             inspected["HostConfig"]["Runtime"],
         )
     finally:
+        await _teardown_and_confirm_removed(provider, workspace, container)
+
+
+async def _teardown_and_confirm_removed(
+    provider: WorkspaceDockerProvider, workspace: Workspace, container: str
+) -> None:
+    """Tear the workspace down, then prove with Docker that the container is gone.
+
+    The Docker check sits in a ``finally`` so it runs exactly when it matters
+    most: a teardown that raises (AW's ``ContainerRemovalError``) is the case
+    most likely to leave a container behind. Its error still propagates, and a
+    cleanup failure raised here chains onto it rather than replacing it.
+    """
+    try:
         report = await provider.teardown(target=workspace)
-        _assert_removed(container, report.finalization.state)
+    finally:
+        _assert_removed(container)
+    assert report.finalization.state == "completed"
 
 
-def _assert_removed(container: str, finalization: str) -> None:
-    """Fail if teardown left the container behind, removing it first.
+def _assert_removed(container: str) -> None:
+    """Fail unless Docker confirms ``container`` no longer exists, removing it first.
 
     A teardown that does not raise can still retain the workspace, so the
     report alone is not proof the container is gone; ``docker inspect`` is.
+    Only "No such container" counts as absence: an inspect that fails for any
+    other reason (daemon unreachable, permission denied) proves nothing.
     """
-    if _docker("inspect", container).returncode == 0:
-        _docker("rm", "-f", container)
-        pytest.fail(f"teardown ({finalization}) left container {container} behind")
-    assert finalization == "completed"
+    inspect = _docker("container", "inspect", container)
+    if inspect.returncode != 0:
+        if _NO_SUCH_CONTAINER in inspect.stderr:
+            return
+        pytest.fail(
+            f"could not confirm container {container} was removed: {inspect.stderr.strip()}"
+        )
+    removal = _docker("rm", "-f", container)
+    if removal.returncode != 0:
+        pytest.fail(
+            f"teardown left container {container} behind and `docker rm -f` failed: "
+            f"{removal.stderr.strip()}"
+        )
+    pytest.fail(f"teardown left container {container} behind; removed it with `docker rm -f`")
 
 
+@pytest.mark.integration
+@pytest.mark.usefixtures("_image_present")
 async def test_explicit_runc_is_recorded_and_enforced(tmp_path: Path) -> None:
     recorded, _, enforced = await _recorded_and_enforced(tmp_path, WorkspaceRuntime.RUNC)
 
@@ -124,6 +159,8 @@ async def test_explicit_runc_is_recorded_and_enforced(tmp_path: Path) -> None:
     assert enforced == "runc"
 
 
+@pytest.mark.integration
+@pytest.mark.usefixtures("_image_present")
 async def test_auto_records_the_runtime_docker_ran(tmp_path: Path) -> None:
     """Auto on any host: the record is AW's resolution, and Docker enforced it.
 
@@ -138,3 +175,95 @@ async def test_auto_records_the_runtime_docker_ran(tmp_path: Path) -> None:
     assert recorded == IsolationRuntime(requested=None, effective=expected.effective)
     assert alias == expected.alias
     assert enforced == alias
+
+
+# The cleanup path itself, with Docker's CLI replaced so each failure can be
+# produced on demand. These run in the unit gate: the Docker tests above only
+# reach this path when a real teardown goes wrong.
+
+_GONE = subprocess.CompletedProcess[str]([], 1, "", f"Error: {_NO_SUCH_CONTAINER}: c1")
+_PRESENT = subprocess.CompletedProcess[str]([], 0, "[{}]", "")
+_REMOVED = subprocess.CompletedProcess[str]([], 0, "c1", "")
+_DAEMON_DOWN = subprocess.CompletedProcess[str](
+    [], 1, "", "Cannot connect to the Docker daemon at unix:///var/run/docker.sock"
+)
+
+
+def _fake_docker(
+    monkeypatch: pytest.MonkeyPatch,
+    inspect: subprocess.CompletedProcess[str],
+    rm: subprocess.CompletedProcess[str] = _REMOVED,
+) -> list[tuple[str, ...]]:
+    calls: list[tuple[str, ...]] = []
+
+    def docker(*args: str) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        return rm if args[0] == "rm" else inspect
+
+    monkeypatch.setattr(sys.modules[__name__], "_docker", docker)
+    return calls
+
+
+def _failing_teardown(tmp_path: Path) -> tuple[WorkspaceDockerProvider, Workspace]:
+    provider = WorkspaceDockerProvider(workspace_base_dir=tmp_path)
+
+    async def teardown(target: Workspace) -> TeardownReport:
+        raise ContainerRemovalError(f"docker rm failed for {target.id}")
+
+    provider.teardown = teardown  # type: ignore[method-assign]  # inject AW's removal failure
+    workspace = Workspace(
+        id="c1", provider="docker", path=tmp_path, config=WorkspaceConfig(provider="docker")
+    )
+    return provider, workspace
+
+
+@pytest.mark.unit
+async def test_raising_teardown_still_removes_the_container_and_keeps_its_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    calls = _fake_docker(monkeypatch, inspect=_PRESENT)
+    provider, workspace = _failing_teardown(tmp_path)
+
+    with pytest.raises(pytest.fail.Exception, match="left container c1 behind") as failed:
+        await _teardown_and_confirm_removed(provider, workspace, "c1")
+
+    assert ("rm", "-f", "c1") in calls
+    assert isinstance(failed.value.__context__, ContainerRemovalError)
+
+
+@pytest.mark.unit
+async def test_raising_teardown_with_container_gone_propagates_the_teardown_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    calls = _fake_docker(monkeypatch, inspect=_GONE)
+    provider, workspace = _failing_teardown(tmp_path)
+
+    with pytest.raises(ContainerRemovalError):
+        await _teardown_and_confirm_removed(provider, workspace, "c1")
+
+    assert calls == [("container", "inspect", "c1")]
+
+
+@pytest.mark.unit
+def test_failed_inspection_is_not_proof_of_removal(monkeypatch: pytest.MonkeyPatch) -> None:
+    _fake_docker(monkeypatch, inspect=_DAEMON_DOWN)
+
+    with pytest.raises(pytest.fail.Exception, match="could not confirm container c1"):
+        _assert_removed("c1")
+
+
+@pytest.mark.unit
+def test_failed_forced_removal_is_reported(monkeypatch: pytest.MonkeyPatch) -> None:
+    _fake_docker(monkeypatch, inspect=_PRESENT, rm=_DAEMON_DOWN)
+
+    with pytest.raises(pytest.fail.Exception, match="`docker rm -f` failed: Cannot connect"):
+        _assert_removed("c1")
+
+
+@pytest.mark.unit
+def test_confirmed_absence_passes(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _fake_docker(monkeypatch, inspect=_GONE)
+
+    _assert_removed("c1")
+
+    assert calls == [("container", "inspect", "c1")]
