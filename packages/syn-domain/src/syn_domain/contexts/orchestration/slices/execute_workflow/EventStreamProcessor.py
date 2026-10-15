@@ -9,6 +9,7 @@ Refactored in ISS-196 to delegate telemetry to ObservabilityCollector (Lane 2).
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 from collections.abc import Mapping
@@ -24,8 +25,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.announced_model i
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.CancelSignalPoller import (
     CancelSignalPoller,
-    PollResult,
-    read_until_interrupted,
+    StreamRead,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.EmbeddedEventScanner import (
     EmbeddedEventScanner,
@@ -520,16 +520,15 @@ class EventStreamProcessor:
         """
         conversation_lines: list[str] = []
 
-        async def step(line: str, line_count: int) -> PollResult:
-            outcome = await self._process_line(line, line_count, workspace)
-            if line.strip():
-                conversation_lines.append(line)
-            return PollResult(
-                should_interrupt=outcome.action is _LineAction.BREAK,
-                reason=outcome.interrupt_reason,
-            )
-
-        read = await read_until_interrupted(stream, self._cancel_poller, workspace, step)
+        read = StreamRead(self._cancel_poller, workspace)
+        async with contextlib.aclosing(read.lines(stream)) as lines:
+            async for line in lines:
+                outcome = await self._process_line(line, read.line_count, workspace)
+                if line.strip():
+                    conversation_lines.append(line)
+                if outcome.action is _LineAction.BREAK:
+                    read.stop(outcome.interrupt_reason)
+                    break
         line_count = read.line_count
 
         # Read from what the agent SAID, not only from the terminal `result`

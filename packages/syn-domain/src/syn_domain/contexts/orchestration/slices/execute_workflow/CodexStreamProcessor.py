@@ -50,6 +50,7 @@ which assumed ``item.item.id``): ``item`` fields live directly under the
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import time
@@ -62,8 +63,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.announced_model i
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.CancelSignalPoller import (
     CancelSignalPoller,
-    PollResult,
-    read_until_interrupted,
+    StreamRead,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.codex_faults import (
     codex_fault_reason,
@@ -465,13 +465,15 @@ class CodexStreamProcessor:
         started_at = time.monotonic()
         conversation_lines: list[str] = []
 
-        async def step(line: str, line_count: int) -> PollResult:
-            if line.strip():
-                conversation_lines.append(line)
-            stop, reason = await self._step(line, line_count, workspace)
-            return PollResult(should_interrupt=stop, reason=reason)
-
-        read = await read_until_interrupted(stream, self._cancel_poller, workspace, step)
+        read = StreamRead(self._cancel_poller, workspace)
+        async with contextlib.aclosing(read.lines(stream)) as lines:
+            async for line in lines:
+                if line.strip():
+                    conversation_lines.append(line)
+                stop, reason = await self._step(line, read.line_count, workspace)
+                if stop:
+                    read.stop(reason)
+                    break
 
         if not self._totals.saw_terminal_turn:
             # THE single place `_error_reason` is decided. Nothing mid-stream
