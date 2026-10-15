@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/advisory_locks.py b/packages/syn-adapters/src/syn_adapters/advisory_locks.py
+index 5cbe7fe1d..ef3f4200a 100644
+--- a/packages/syn-adapters/src/syn_adapters/advisory_locks.py
++++ b/packages/syn-adapters/src/syn_adapters/advisory_locks.py
+@@ -32,7 +32,7 @@ USAGE_ROLLUP_SCHEMA_LOCK_KEY: int = advisory_lock_key("agent_usage_rollup:schema
+ # The Run Queue's schema.sql, applied by the api and every executor at once (#1965).
+ RUN_QUEUE_SCHEMA_LOCK_KEY: int = advisory_lock_key("execution_run_queue:schema")
+ 
+-TRY_SESSION_LOCK_SQL = "SELECT pg_try_advisory_lock($1)"
++TRY_SESSION_LOCK_SQL = "SELECT true FROM pg_advisory_lock($1)"
+ SESSION_UNLOCK_SQL = "SELECT pg_advisory_unlock($1)"
+ 
+ # How often a process that lost a startup lock asks again. Startup only.

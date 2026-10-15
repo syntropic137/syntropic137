@@ -8,6 +8,7 @@ data) is ``test_1965_run_queue_schema_postgres.py``, marked integration.
 from __future__ import annotations
 
 import hashlib
+import re
 import struct
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
@@ -20,7 +21,6 @@ from syn_adapters.advisory_locks import (
     ROLLUP_STARTUP_LOCK_KEY,
     RUN_QUEUE_SCHEMA_LOCK_KEY,
     SESSION_UNLOCK_SQL,
-    TRY_SESSION_LOCK_SQL,
     USAGE_ROLLUP_SCHEMA_LOCK_KEY,
 )
 from syn_adapters.execution_runs import PostgresExecutionRunQueue
@@ -37,6 +37,16 @@ pytestmark = pytest.mark.unit
 _BEGIN = "BEGIN"
 _COMMIT = "COMMIT"
 _ROLLBACK = "ROLLBACK"
+# Written out rather than imported: an oracle that is the production constant
+# moves with it, so `pg_advisory_lock` in its place would still pass (#1965).
+TRY_SESSION_LOCK_SQL = "SELECT pg_try_advisory_lock($1)"
+# A blocked waiter holds a snapshot that CREATE INDEX CONCURRENTLY waits on (#1906).
+_BLOCKING_LOCK = re.compile(r"\bpg_advisory(_xact)?_lock(_shared)?\s*\(")
+
+
+def _refuse_blocking_lock(query: str) -> None:
+    if _BLOCKING_LOCK.search(query):
+        raise AssertionError(f"a startup lock must never block: {query!r}")
 
 
 class _Transaction:
@@ -61,12 +71,14 @@ class _RecordingConnection:
 
     async def execute(self, query: str, *args: object) -> object:
         self.calls.append((query, args))
+        _refuse_blocking_lock(query)
         if self._fail_on is not None and query == self._fail_on:
             raise RuntimeError("step failed")
         return "OK"
 
     async def fetchval(self, query: str, *args: object) -> str | None:
         self.calls.append((query, args))
+        _refuse_blocking_lock(query)
         if query == TRY_SESSION_LOCK_SQL:
             if self._refusals:
                 self._refusals -= 1

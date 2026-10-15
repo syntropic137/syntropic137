@@ -35,7 +35,6 @@ import pytest
 from syn_adapters.events.schema import (
     ROLLUP_BACKFILL_SQL,
     ROLLUP_EXECUTION_INDEX_VALID_SQL,
-    ROLLUP_STARTUP_TRY_LOCK_SQL,
     ROLLUP_STARTUP_UNLOCK_SQL,
     USAGE_ROLLUP_BACKFILL_SESSIONS_SQL,
     USAGE_ROLLUP_IS_MARKED_COMPLETE_SQL,
@@ -43,6 +42,20 @@ from syn_adapters.events.schema import (
     USAGE_ROLLUP_MARK_INCOMPLETE_SQL,
     EventStoreSchema,
 )
+
+# Written out rather than imported: an oracle that is the production constant
+# moves with it, so `pg_advisory_lock` in its place would still pass (#1965).
+ROLLUP_STARTUP_TRY_LOCK_SQL = "SELECT pg_try_advisory_lock($1)"
+# A session lock waited for inside a statement holds a snapshot, and the
+# concurrent index build waits on it (#1906). The xact lock is the schema
+# transaction's own (#1371) and is not refused.
+_BLOCKING_SESSION_LOCK = re.compile(r"\bpg_advisory_lock(_shared)?\s*\(")
+
+
+def _refuse_blocking_session_lock(sql: str) -> None:
+    if _BLOCKING_SESSION_LOCK.search(sql):
+        msg = f"the startup lock must never block: {sql!r}"
+        raise AssertionError(msg)
 
 # CI runs `pytest -m unit`; an unmarked module collects zero tests and the
 # gate goes green having run none of them (#1065).
@@ -204,6 +217,7 @@ class CatalogueConnection:
     async def execute(self, sql: str, *args: object) -> None:
         self.executed.append(sql)
         self.calls.append(sql)
+        _refuse_blocking_session_lock(sql)
         if sql == ROLLUP_STARTUP_UNLOCK_SQL:
             key = args[0]
             assert isinstance(key, int)
@@ -241,6 +255,7 @@ class CatalogueConnection:
 
     async def fetchval(self, sql: str, *args: object) -> bool | None:
         self.calls.append(sql)
+        _refuse_blocking_session_lock(sql)
         if sql == ROLLUP_STARTUP_TRY_LOCK_SQL:
             if self.refuse_try_locks > 0:
                 self.refuse_try_locks -= 1
