@@ -1,0 +1,13 @@
+diff --git a/scripts/check_integration_skips.py b/scripts/check_integration_skips.py
+index c421c366f..e0969c7f9 100644
+--- a/scripts/check_integration_skips.py
++++ b/scripts/check_integration_skips.py
+@@ -368,7 +368,7 @@ def _marker_problems(marks: Iterable[ast.expr]) -> tuple[bool, list[Problem]]:
+         reason, issue = keywords.get("reason"), keywords.get("issue")
+         if not (isinstance(reason, ast.Constant) and isinstance(reason.value, str) and reason.value.strip()):
+             problems.append(Problem.NO_REASON)
+-        if not (isinstance(issue, ast.Constant) and isinstance(issue.value, str) and _ISSUE.match(issue.value)):
++        if not (isinstance(issue, ast.Constant) and isinstance(issue.value, str) and issue.value):
+             problems.append(Problem.NO_ISSUE)
+     return declared, problems
+ 
