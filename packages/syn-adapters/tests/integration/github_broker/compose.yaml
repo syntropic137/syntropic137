@@ -1,0 +1,47 @@
+# S2 spike harness (#1735). Driven by test_git_gh_through_broker.py, which
+# generates certs/ and out/ and sets SYN_S2_WORKSPACE_IMAGE.
+#
+# The sandbox sits on an internal network whose only other member is Envoy,
+# aliased as github.com, api.github.com and github-git.broker. It cannot reach
+# the fake GitHub or the authorizer directly, nor anything else.
+name: syn-s2-github-broker
+networks:
+  sandbox_net: {internal: true}
+  upstream_net: {internal: true}
+services:
+  envoy:
+    image: envoyproxy/envoy:v1.35.10
+    environment: {ENVOY_UID: "0"}
+    command: ["envoy", "-c", "/etc/envoy/envoy.yaml", "--log-level", "warn"]
+    volumes:
+      - ./envoy.yaml:/etc/envoy/envoy.yaml:ro
+      - ${SYN_S2_CERTS:?}:/certs:ro
+    networks:
+      sandbox_net: {aliases: [github.com, api.github.com, github-git.broker]}
+      upstream_net: {}
+    depends_on: [authorizer, fake-github]
+  authorizer:
+    image: ${SYN_S2_WORKSPACE_IMAGE:?}
+    user: "0"
+    entrypoint: ["/opt/venv/bin/python3", "-I", "/harness/authorizer.py"]
+    environment:
+      S2_GRANTS: ${S2_GRANTS:?}
+    volumes: ["./authorizer.py:/harness/authorizer.py:ro"]
+    networks: [upstream_net]
+  fake-github:
+    image: ${SYN_S2_WORKSPACE_IMAGE:?}
+    user: "0"
+    entrypoint: ["/opt/venv/bin/python3", "-I", "/harness/fake_github.py"]
+    volumes:
+      - ./fake_github.py:/harness/fake_github.py:ro
+      - ${SYN_S2_OUT:?}:/out
+    networks: [upstream_net]
+  sandbox:
+    image: ${SYN_S2_WORKSPACE_IMAGE:?}
+    entrypoint: ["bash", "-c"]
+    environment:
+      GH_PROMPT_DISABLED: "1"
+      GH_NO_UPDATE_NOTIFIER: "1"
+      NO_COLOR: "1"
+    networks: [sandbox_net]
+    depends_on: [envoy]

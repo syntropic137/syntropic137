@@ -207,11 +207,13 @@ def _resolve_claude_credentials() -> tuple[str | None, str | None]:
 
 
 def _resolve_codex_credentials() -> str | None:
-    """Resolve the Codex auth file contents from settings."""
-    from syn_shared.settings import get_settings
+    """Codex auth.json: CODEX_AUTH_JSON, else one built from OPENAI_API_KEY (#1971)."""
+    from syn_shared.codex_credentials import resolve_configured_codex_credential
 
-    codex_auth_json = get_settings().codex_auth_json
-    return codex_auth_json.get_secret_value() if codex_auth_json else None
+    resolved = resolve_configured_codex_credential()
+    if resolved is not None and resolved.both_configured:
+        logger.warning("Both CODEX_AUTH_JSON and OPENAI_API_KEY are set. Using CODEX_AUTH_JSON.")
+    return resolved.auth_json if resolved is not None else None
 
 
 class GitHubAppNotConfiguredError(Exception):
@@ -505,7 +507,7 @@ class SetupPhaseSecrets:
         repositories: Full repo URLs to clone during setup phase
         claude_code_oauth_token: Claude Code OAuth token (takes priority over API key)
         anthropic_api_key: Claude API key (fallback when OAuth token not set)
-        codex_auth_json: Full contents of the Codex auth.json file
+        codex_auth_json: Full contents of the Codex auth.json file (see _resolve_codex_credentials)
         git_author_name: Git commit author name (from GitHub App bot)
         git_author_email: Git commit author email (from GitHub App bot)
     """
