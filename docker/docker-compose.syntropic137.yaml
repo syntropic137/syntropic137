@@ -249,9 +249,8 @@ services:
       test:
       - CMD
       - python
-      - -m
-      - syn_adapters.docker_create_guard
-      - --healthcheck
+      - -I
+      - /app/packages/syn-adapters/src/syn_adapters/docker_create_guard/healthcheck.py
       interval: 10s
       timeout: 5s
       retries: 5

@@ -171,13 +171,12 @@ class TestCreateRouting:
     def test_guard_service_holds_the_socket_and_no_capabilities(self, compose: Path) -> None:
         guard = yaml.safe_load(compose.read_text())["services"]["docker-create-guard"]
         assert guard["command"] == ["python", "-m", "syn_adapters.docker_create_guard"]
-        # A module entry point (tested beside the guard), not an inline `python -c`.
+        # A stdlib-only script run by path (tested beside the guard), not `python -c`.
         assert guard["healthcheck"]["test"] == [
             "CMD",
             "python",
-            "-m",
-            "syn_adapters.docker_create_guard",
-            "--healthcheck",
+            "-I",
+            "/app/packages/syn-adapters/src/syn_adapters/docker_create_guard/healthcheck.py",
         ]
         assert "/var/run/docker.sock:/var/run/docker.sock" in guard["volumes"]
         assert guard["cap_drop"] == ["ALL"] and "cap_add" not in guard

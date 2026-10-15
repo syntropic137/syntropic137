@@ -166,7 +166,8 @@ services:
     tmpfs:
       - /tmp
     healthcheck:
-      test: ["CMD", "python", "-m", "syn_adapters.docker_create_guard", "--healthcheck"]
+      # By path, stdlib only: `-m` would import all of syn_adapters per probe.
+      test: ["CMD", "python", "-I", "/app/packages/syn-adapters/src/syn_adapters/docker_create_guard/healthcheck.py"]
       interval: 10s
       timeout: 5s
       retries: 5

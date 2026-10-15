@@ -1,7 +1,8 @@
 """Run the container-create guard: ``python -m syn_adapters.docker_create_guard``.
 
 ``--healthcheck`` instead exits 0 when the guard accepts a TCP connection on its
-port and 1 otherwise; compose's healthcheck calls it.
+port and 1 otherwise. Compose runs ``healthcheck.py`` by path instead, which
+skips this package's import cost (see that module).
 
 Environment:
     SYN_WORKSPACE_HOST_DIR: host path workspace bind mounts must sit under.
@@ -17,9 +18,9 @@ from __future__ import annotations
 import argparse
 import logging
 import os
-import socket
 import sys
 
+from syn_adapters.docker_create_guard.healthcheck import DEFAULT_PORT, healthcheck
 from syn_adapters.docker_create_guard.policy import (
     DEFAULT_IMAGE_PREFIXES,
     CreatePolicy,
@@ -37,18 +38,6 @@ def policy_from_env(env: dict[str, str]) -> CreatePolicy:
         workspace_root=env.get("SYN_WORKSPACE_HOST_DIR") or None,
         image_prefixes=DEFAULT_IMAGE_PREFIXES + tuple(p for p in extra if p),
     )
-
-
-DEFAULT_PORT = 2375
-
-
-def healthcheck(port: int, *, timeout: float = 3.0) -> bool:
-    """True when the guard is accepting connections on ``port``."""
-    try:
-        socket.create_connection(("127.0.0.1", port), timeout).close()
-    except OSError:
-        return False
-    return True
 
 
 def main(argv: list[str] | None = None) -> None:
