@@ -41,7 +41,7 @@ import time
 import urllib.request
 from dataclasses import dataclass
 from datetime import datetime  # noqa: TC003 - Pydantic resolves it at runtime
-from typing import TYPE_CHECKING, Protocol, cast
+from typing import TYPE_CHECKING, cast
 
 from pydantic import BaseModel, ConfigDict
 
@@ -54,7 +54,6 @@ if TYPE_CHECKING:
 
     from syn_adapters.session_inventory.database import Pool as InventoryPool
     from syn_api.services.workspace_dir_reclaim import ReclaimPass, WorkspaceDirReclaimer
-    from syn_domain.contexts.orchestration import OwnerExecution
 
 #: /health reasons that mean a read model this tool trusts may be incomplete.
 _READ_MODEL_REASONS = frozenset(
@@ -129,12 +128,6 @@ def quiescence_lost(state: QuiescenceState) -> str | None:
     return None
 
 
-class QuiescencePort(Protocol):
-    async def read(self) -> QuiescenceState: ...
-
-    async def set_maintenance(self, active: bool, reason: str) -> None: ...
-
-
 @dataclass(frozen=True)
 class RunOptions:
     apply: bool
@@ -144,7 +137,7 @@ class RunOptions:
 
 async def run(
     options: RunOptions,
-    quiescence: QuiescencePort,
+    quiescence: ApiQuiescence,
     build_reclaimer: Callable[
         [Callable[[], Awaitable[str | None]], RunOptions], WorkspaceDirReclaimer
     ],
@@ -278,9 +271,8 @@ def production_reclaimer(
     )
     from syn_api._wiring_db import get_shared_db_pool
     from syn_api.services.workspace_dir_reclaim import (
+        ReclaimReadModels,
         WorkspaceDirReclaimer,
-        capture_unproven_from,
-        execution_record_from,
     )
     from syn_domain.contexts.agent_sessions.slices.list_sessions.projection import (
         SessionListProjection,
@@ -302,14 +294,9 @@ def production_reclaimer(
     spools = PostgresCaptureSpools(
         cast("InventoryPool", pool), _source_instance_id(settings.session_inventory.archive_dir)
     )
-    executions = WorkflowExecutionListProjection(store)
-    sessions = SessionListProjection(store)
-
-    async def execution_record(execution_id: str) -> OwnerExecution | None:
-        return await execution_record_from(executions, execution_id)
-
-    async def capture_unproven(execution_id: str) -> str | None:
-        return await capture_unproven_from(spools, sessions, execution_id)
+    models = ReclaimReadModels(
+        WorkflowExecutionListProjection(store), spools, SessionListProjection(store)
+    )
 
     async def whole() -> str | None:
         return None
@@ -319,8 +306,8 @@ def production_reclaimer(
         settle_seconds=settings.disk.reclaim_settle_minutes * 60,
         list_containers=list_containers,
         workspace_owners=WorkspaceOwnershipProjection(store).owners,
-        execution_record=execution_record,
-        capture_unproven=capture_unproven,
+        execution_record=models.execution_record,
+        capture_unproven=models.capture_unproven,
         scan_dirs=scan_workspace_dirs,
         git=SubprocessHostWorkspaceGit(),
         remotes=GitLsRemote(github_app_credential),

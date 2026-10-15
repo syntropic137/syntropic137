@@ -21,7 +21,14 @@ from syn_adapters.workspace_backends.stale_dirs import (
     claim_workspace_dir,
     mark_for_deletion,
 )
-from syn_api.vps_reclaim import QuiescenceState, RunOptions, parse_args, quiescence_lost, run
+from syn_api.vps_reclaim import (
+    ApiQuiescence,
+    QuiescenceState,
+    RunOptions,
+    parse_args,
+    quiescence_lost,
+    run,
+)
 from syn_domain.contexts.orchestration import RetainedReason
 
 if TYPE_CHECKING:
@@ -84,10 +91,15 @@ def test_a_quiet_host_with_an_unrelated_degradation_is_quiescent() -> None:
 # --- the run ---
 
 
-class _Port:
+async def _no_running() -> int:
+    return 0
+
+
+class _Port(ApiQuiescence):
     """Quiescence as a sequence of states: each read returns the next, the last repeats."""
 
     def __init__(self, *states: QuiescenceState) -> None:
+        super().__init__("http://unused.invalid", _no_running)
         self.states = list(states)
         self.reads = 0
         self.set_calls: list[bool] = []
