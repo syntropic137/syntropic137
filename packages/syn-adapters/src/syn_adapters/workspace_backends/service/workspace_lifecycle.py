@@ -380,6 +380,7 @@ def _log_runtime(
     Lane 2: what the provider's resolver chose, not what the settings asked
     for. None when the backend has no OCI runtime or recorded none.
     """
+    fields = runtime.telemetry() if runtime else {}
     logger.info(
         "Workspace runtime (execution=%s, phase=%s, workspace=%s, isolation=%s, "
         "requested=%s, effective=%s)",
@@ -387,15 +388,15 @@ def _log_runtime(
         phase_id,
         workspace_id,
         isolation_id,
-        (runtime.requested or "auto") if runtime else None,
-        runtime.effective if runtime else None,
+        fields.get("runtime_requested"),
+        fields.get("runtime_effective"),
         extra={
             "execution_id": execution_id,
             "phase_id": phase_id,
             "workspace_id": workspace_id,
             "isolation_id": isolation_id,
-            "runtime_requested": str(runtime.requested or "auto") if runtime else None,
-            "runtime_effective": str(runtime.effective) if runtime else None,
+            "runtime_requested": fields.get("runtime_requested"),
+            "runtime_effective": fields.get("runtime_effective"),
         },
     )
 

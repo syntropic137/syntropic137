@@ -23,6 +23,7 @@ from agentic_isolation import SecurityConfig, WorkspaceConfig, WorkspaceDockerPr
 
 from syn_adapters.workspace_backends.agentic.runtime_mapping import (
     isolation_runtime_from_metadata,
+    resolve_host_runtime,
     to_aw_runtime,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
@@ -81,9 +82,16 @@ async def test_explicit_runc_is_recorded_and_enforced(tmp_path: Path) -> None:
 
 
 async def test_auto_records_the_runtime_docker_ran(tmp_path: Path) -> None:
-    """Auto on any host: the record is what was enforced, whichever that was."""
+    """Auto on any host: the record is AW's resolution, and Docker enforced it.
+
+    The expected runtime is asked of agentic-workspace's resolver for this
+    host, never inferred from the alias name, so a record that disagrees with
+    the resolver fails even when the alias matches.
+    """
+    expected = resolve_host_runtime(None)
     recorded, alias, enforced = await _recorded_and_enforced(tmp_path, None)
 
-    assert recorded is not None
-    assert recorded.requested is None
+    assert expected.error is None
+    assert recorded == IsolationRuntime(requested=None, effective=expected.effective)
+    assert alias == expected.alias
     assert enforced == alias

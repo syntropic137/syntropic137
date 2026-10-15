@@ -100,11 +100,13 @@ from syn_shared.settings.workspace_images import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Mapping
 
 __all__ = [
     "CaptureVerdict",
     "DoctorReport",
+    "EffectiveRuntime",
+    "RuntimeProbe",
     "Severity",
     "Source",
     "VariableReport",
@@ -115,6 +117,7 @@ __all__ = [
     "render",
     "resolve_variable",
     "resolver_tier",
+    "with_effective_runtime",
 ]
 
 
@@ -244,6 +247,27 @@ class Finding:
 
 
 @dataclass(frozen=True, slots=True)
+class EffectiveRuntime:
+    """agentic-workspace's resolver's answer for the requested runtime on this host.
+
+    Exactly one of `effective` and `error` is set. `error` is the resolver's own
+    refusal (an explicit runtime Docker has not registered, a failed
+    ``docker info``): a workspace asking for the same runtime is refused the
+    same way.
+    """
+
+    effective: WorkspaceRuntime | None
+    alias: str | None
+    error: str | None
+
+
+#: The port the doctor asks for the effective runtime through. syn-shared cannot
+#: import agentic-workspace and must not detect runtimes itself, so the entry
+#: point that can (``scripts/doctor.py``) supplies the agentic-workspace resolver.
+type RuntimeProbe = Callable[[WorkspaceRuntime | None], EffectiveRuntime]
+
+
+@dataclass(frozen=True, slots=True)
 class DoctorReport:
     """Everything the command found, ready to render."""
 
@@ -263,12 +287,14 @@ class DoctorReport:
     label_usable: bool
     label_declared: bool
     execution_concurrency: VariableReport
-    #: The runtime asked for. The one a workspace actually runs under is
-    #: agentic-workspace's resolver's answer, per workspace and per host, so it
-    #: is not knowable here; see `_RUNTIME_EFFECTIVE_NOTE`.
+    #: The runtime asked for. The one it resolves to is `effective_runtime`.
     workspace_runtime: VariableReport
     image_ref: str
     exporter_version: str | None
+    #: agentic-workspace's answer for `workspace_runtime` on this host's Docker,
+    #: filled by `with_effective_runtime`. None when no resolver was supplied or
+    #: the requested value is invalid, so there was nothing to ask.
+    effective_runtime: EffectiveRuntime | None = None
 
     @property
     def findings(self) -> tuple[Finding, ...]:
@@ -706,30 +732,75 @@ def _environment_findings(report: DoctorReport) -> list[Finding]:
 
 _KNOWN_RUNTIMES = ", ".join(member.value for member in WorkspaceRuntime)
 
-#: Where the effective runtime is recorded. The doctor reads configuration only;
-#: probing Docker is agentic-workspace's resolver's job, and it does it at each
-#: workspace's creation, on whichever host runs it.
-_RUNTIME_EFFECTIVE_NOTE = (
-    "resolved per workspace by agentic-workspace; logged as 'Workspace runtime'"
-)
+_NOT_RESOLVED = "not resolved (no agentic-workspace resolver in this process)"
+
+
+class _InvalidRuntime(ValueError):
+    """The requested value is one Settings would refuse."""
+
+
+def _requested_runtime(report: DoctorReport) -> WorkspaceRuntime | None:
+    """The setting as Settings would parse it. None is auto."""
+    runtime = report.workspace_runtime
+    if runtime.source is Source.DEFAULT or not runtime.is_set:
+        return None
+    try:
+        return WorkspaceRuntime(runtime.value)
+    except ValueError as error:
+        raise _InvalidRuntime(runtime.value) from error
+
+
+def with_effective_runtime(report: DoctorReport, probe: RuntimeProbe | None) -> DoctorReport:
+    """Ask agentic-workspace what the requested runtime resolves to on this host.
+
+    The resolution is the probe's, never the doctor's. An invalid request is
+    not asked about: Settings refuses it before any workspace would be.
+    """
+    if probe is None:
+        return report
+    try:
+        requested = _requested_runtime(report)
+    except _InvalidRuntime:
+        return report
+    return replace(report, effective_runtime=probe(requested))
 
 
 def _runtime_findings(report: DoctorReport) -> list[Finding]:
-    """A runtime value Settings would refuse at startup."""
-    runtime = report.workspace_runtime
-    if runtime.source is Source.DEFAULT or not runtime.is_set:
-        return []
-    value = runtime.value
-    if value not in {m.value for m in WorkspaceRuntime}:
+    """A runtime value Settings would refuse, or one agentic-workspace cannot resolve."""
+    try:
+        requested = _requested_runtime(report)
+    except _InvalidRuntime as invalid:
         return [
             Finding(
                 Severity.ERROR,
-                f"{ENV_SYN_WORKSPACE_RUNTIME}={value!r} is not a known runtime. Settings "
-                f"reject it at startup rather than fall back to auto. Known: "
+                f"{ENV_SYN_WORKSPACE_RUNTIME}={str(invalid)!r} is not a known runtime. "
+                f"Settings reject it at startup rather than fall back to auto. Known: "
                 f"{_KNOWN_RUNTIMES}; unset it for auto.",
             )
         ]
+    effective = report.effective_runtime
+    if effective is not None and effective.error is not None:
+        return [
+            Finding(
+                Severity.ERROR,
+                f"agentic-workspace cannot resolve runtime {requested or 'auto'} on this "
+                f"host, so workspaces will refuse to launch: {effective.error}",
+            )
+        ]
     return []
+
+
+def _effective_runtime_line(report: DoctorReport) -> str:
+    effective = report.effective_runtime
+    if effective is None:
+        return _plain_line("effective", _NOT_RESOLVED)
+    if effective.effective is None:
+        return _plain_line("effective", "unresolved (see below)")
+    return _plain_line(
+        "effective",
+        f"{effective.effective} (Docker alias {effective.alias!r}; resolved by "
+        "agentic-workspace against this host's Docker)",
+    )
 
 
 def _capture_findings(report: DoctorReport) -> list[Finding]:
@@ -865,7 +936,7 @@ def render(report: DoctorReport, *, show_values: bool) -> str:
 
     lines.append("Workspace runtime")
     lines.append(_variable_line(report.workspace_runtime, show_values=True))
-    lines.append(_plain_line("effective", _RUNTIME_EFFECTIVE_NOTE))
+    lines.append(_effective_runtime_line(report))
     for finding in _runtime_findings(report):
         lines.extend(_wrap_finding(finding))
     lines.append("")
@@ -888,7 +959,7 @@ def render(report: DoctorReport, *, show_values: bool) -> str:
     return "\n".join(lines)
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, *, runtime_probe: RuntimeProbe | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="just doctor",
         description="Report Syntropic137 configuration health and where each value came from.",
@@ -917,7 +988,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     sources = collect_sources(args.repo_root, consult_vault=not args.no_1password)
-    report = build_report(sources)
+    report = with_effective_runtime(build_report(sources), runtime_probe)
     print(render(report, show_values=args.show_values))
     return report.exit_code
 

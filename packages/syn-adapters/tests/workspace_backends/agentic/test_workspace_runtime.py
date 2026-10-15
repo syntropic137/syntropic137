@@ -13,15 +13,17 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Callable
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from agentic_isolation import WorkspaceConfig
+from agentic_isolation import SecurityConfig, WorkspaceConfig
 from agentic_isolation import WorkspaceRuntime as AwRuntime
 from agentic_isolation.providers.base import ExecuteResult
 
 from syn_adapters.workspace_backends.agentic.runtime_mapping import (
     isolation_runtime_from_metadata,
+    resolve_host_runtime,
     to_aw_runtime,
 )
 from syn_adapters.workspace_backends.service.workspace_lifecycle import (
@@ -37,6 +39,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects 
     IsolationHandle,
     IsolationRuntime,
 )
+from syn_shared.doctor import EffectiveRuntime
 from syn_shared.settings.workspace import WorkspaceRuntime, WorkspaceSettings
 
 pytestmark = pytest.mark.unit
@@ -196,9 +199,9 @@ async def test_provisioning_logs_the_effective_runtime(caplog: pytest.LogCapture
         return_value=IsolationHandle(
             isolation_id="iso-1",
             isolation_type="docker",
-            runtime=IsolationRuntime(
-                requested=WorkspaceRuntime.KATA, effective=WorkspaceRuntime.KATA
-            ),
+            # Auto that resolved to gVisor: the two fields differ, so a log
+            # that wrote one from the other's source fails here.
+            runtime=IsolationRuntime(requested=None, effective=WorkspaceRuntime.GVISOR),
         )
     )
     service._isolation.execute = AsyncMock(side_effect=RuntimeError("no manifest"))
@@ -216,7 +219,57 @@ async def test_provisioning_logs_the_effective_runtime(caplog: pytest.LogCapture
         await provision_workspace(service, config, aggregate, "ws-1", with_sidecar=False)
 
     (record,) = [r for r in caplog.records if r.getMessage().startswith("Workspace runtime")]
-    assert record.__dict__["runtime_requested"] == "kata"
-    assert record.__dict__["runtime_effective"] == "kata"
+    assert record.__dict__["runtime_requested"] == "auto"
+    assert record.__dict__["runtime_effective"] == "gvisor"
     assert record.__dict__["workspace_id"] == "ws-1"
     assert record.__dict__["phase_id"] == "phase-2"
+
+
+# The doctor's probe runs agentic-workspace's own resolver; only Docker's
+# runtime registry is synthetic. Each host shape below is one `docker info`.
+_RUNC_ONLY = {"runc": "runc"}
+_GVISOR_HOST = {"runc": "runc", "runsc": "/usr/local/bin/runsc"}
+
+
+type DockerHost = Callable[[dict[str, str]], None]
+
+
+@pytest.fixture
+def docker_host(monkeypatch: pytest.MonkeyPatch) -> DockerHost:
+    def use(registry: dict[str, str]) -> None:
+        monkeypatch.setattr(SecurityConfig, "_docker_runtimes", registry)
+        monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/docker")
+
+    return use
+
+
+@pytest.mark.parametrize(
+    ("registry", "effective", "alias"),
+    [(_RUNC_ONLY, WorkspaceRuntime.RUNC, "runc"), (_GVISOR_HOST, WorkspaceRuntime.GVISOR, "runsc")],
+)
+def test_doctor_probe_reports_what_auto_resolves_to(
+    docker_host: DockerHost, registry: dict[str, str], effective: WorkspaceRuntime, alias: str
+) -> None:
+    docker_host(registry)
+
+    assert resolve_host_runtime(None) == EffectiveRuntime(
+        effective=effective, alias=alias, error=None
+    )
+
+
+def test_doctor_probe_reports_an_explicit_runtime(docker_host: DockerHost) -> None:
+    docker_host({**_GVISOR_HOST, "kata": "/opt/kata/bin/containerd-shim-kata-v2"})
+
+    assert resolve_host_runtime(WorkspaceRuntime.KATA) == EffectiveRuntime(
+        effective=WorkspaceRuntime.KATA, alias="kata", error=None
+    )
+
+
+def test_doctor_probe_reports_the_resolvers_refusal(docker_host: DockerHost) -> None:
+    docker_host(_RUNC_ONLY)
+
+    result = resolve_host_runtime(WorkspaceRuntime.KATA)
+
+    assert result.effective is None
+    assert result.error is not None
+    assert "runtime kata was requested" in result.error

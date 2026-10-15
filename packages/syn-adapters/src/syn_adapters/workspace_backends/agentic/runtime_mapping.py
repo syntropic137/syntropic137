@@ -16,15 +16,17 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, assert_never
 
+from agentic_isolation import DockerDetectionError, SecurityConfig
 from agentic_isolation import WorkspaceRuntime as AwRuntime
 
 from syn_domain.contexts.orchestration import IsolationRuntime
+from syn_shared.doctor import EffectiveRuntime
 from syn_shared.settings.workspace import WorkspaceRuntime
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-__all__ = ["isolation_runtime_from_metadata", "to_aw_runtime"]
+__all__ = ["isolation_runtime_from_metadata", "resolve_host_runtime", "to_aw_runtime"]
 
 logger = logging.getLogger(__name__)
 
@@ -92,3 +94,19 @@ def isolation_runtime_from_metadata(metadata: Mapping[str, str]) -> IsolationRun
             effective,
         )
         return None
+
+
+def resolve_host_runtime(runtime: WorkspaceRuntime | None) -> EffectiveRuntime:
+    """What agentic-workspace's resolver answers for `runtime` on this host's Docker.
+
+    The doctor's `RuntimeProbe`. The same `SecurityConfig.resolve_runtime` a
+    workspace launch calls, so a refusal here is the refusal a workspace would
+    get; only its `DockerDetectionError` is turned into a report.
+    """
+    try:
+        resolved = SecurityConfig(runtime=to_aw_runtime(runtime)).resolve_runtime()
+    except DockerDetectionError as error:
+        return EffectiveRuntime(effective=None, alias=None, error=str(error))
+    return EffectiveRuntime(
+        effective=_from_aw_runtime(resolved.effective), alias=resolved.alias, error=None
+    )

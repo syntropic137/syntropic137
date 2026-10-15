@@ -776,6 +776,7 @@ class WorkflowExecutionProcessor:
         runtime = self._runtimes.of(todo.execution_id)
         journal = self._journal_of(dispatch_ctx)
         launch = runtime.launch(todo.phase_id, session_id=session_id)
+        await runtime.record_runtime(todo.phase_id)
         workflow_id = aggregate.workflow_id or ""
 
         # EVERY WAY OUT OF HERE THAT ENDS THE RUN GOES PAST THE SAME DOOR

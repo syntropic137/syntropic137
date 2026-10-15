@@ -286,6 +286,13 @@ class IsolationRuntime:
     requested: WorkspaceRuntime | None
     effective: WorkspaceRuntime
 
+    def telemetry(self) -> dict[str, str]:
+        """The one payload every sink writes: the log line and the observation."""
+        return {
+            "runtime_requested": str(self.requested or "auto"),
+            "runtime_effective": str(self.effective),
+        }
+
 
 @dataclass(frozen=True)
 class WorkspaceUsage:
