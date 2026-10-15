@@ -161,6 +161,20 @@ describe('LiveHub reconnects (#1924)', () => {
     }
   })
 
+  it('signals a reconnect when the first connection never opened', () => {
+    const { hub, sources } = setup()
+    try {
+      const onReconnect = vi.fn()
+      hub.subscribe('/sse/activity', { onReconnect })
+      giveUp(sources[0]!) // the page loaded over REST but the stream failed at once
+      vi.advanceTimersByTime(1000)
+      open(sources[1]!)
+      expect(onReconnect).toHaveBeenCalledOnce()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('does not reopen once the last subscriber leaves', () => {
     const { hub, sources } = setup()
     try {

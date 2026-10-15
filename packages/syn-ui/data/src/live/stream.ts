@@ -46,8 +46,8 @@ interface Channel {
   state: StreamState
   subs: Set<Sub>
   lastEventAt: number | null
-  /** Has opened at least once, so the next open is a reconnect. */
-  opened: boolean
+  /** An error since the last open, so frames may have been missed and the next open is a reconnect. */
+  missed: boolean
   /** Reopens since the last successful open; drives the backoff. */
   attempts: number
   retry: ReturnType<typeof setTimeout> | undefined
@@ -83,7 +83,7 @@ export class LiveHub {
   subscribe(url: string, spec: StreamSubscriber): () => void {
     let ch = this.channels.get(url)
     if (!ch) {
-      ch = { source: null, state: 'connecting', subs: new Set(), lastEventAt: null, opened: false, attempts: 0, retry: undefined }
+      ch = { source: null, state: 'connecting', subs: new Set(), lastEventAt: null, missed: false, attempts: 0, retry: undefined }
       this.channels.set(url, ch)
     }
     const channel = ch
@@ -142,14 +142,15 @@ export class LiveHub {
   }
 
   private onOpen(channel: Channel) {
-    const reconnect = channel.opened
-    channel.opened = true
+    const reconnect = channel.missed
+    channel.missed = false
     channel.attempts = 0
     this.setState(channel, 'open')
     if (reconnect) for (const s of channel.subs) safely(() => s.spec.onReconnect?.())
   }
 
   private onError(url: string, channel: Channel, source: EventSourceLike) {
+    channel.missed = true
     // EventSource retries on its own; CONNECTING (0) after an error means it will.
     if (source.readyState === 0) return this.setState(channel, 'connecting')
     // CLOSED (2): it has given up. Reopen while anyone still listens.
