@@ -1,7 +1,7 @@
 # Mutation evidence for #1570
 
 Each patch re-introduces one way a read by id can stop working while
-`artifact_summaries` lags. Run with Docker, since the integration tests need the event store and MinIO.
+`artifact_summaries` lags. Run with Docker, since the integration tests need the event store and MinIO; when no test-stack MinIO answers, the integration fixture starts a MinIO container itself, so the event-store-only CI environment is enough. "Lags" there is a held subscription checkpoint, not an unfed projection.
 
 | Patch | Bug it re-introduces | Tests meant to kill it |
 |---|---|---|

@@ -7,34 +7,40 @@ Recovering the content took ssh and ``docker exec`` into MinIO.
 
 WHAT IS REAL HERE. The event store (the artifact is created through
 ``CreateArtifactHandler`` and saved to it), MinIO (the bytes are uploaded under
-the workflow/execution/artifact key that broke #1652), the projection
-(``ArtifactListProjection``) and the three route functions with their prefix
+the workflow/execution/artifact key that broke #1652), the subscription
+(``CoordinatorSubscriptionService`` delivering to ``ArtifactListProjection``
+with its own checkpoint) and the three route functions with their prefix
 resolution.
 
-"BEHIND" IS A HELD CHECKPOINT. The projection is the real one over a real
-store, but no subscription delivers to it: it sits at the position it held
-before the artifact was created. Each test asserts its row is absent before
-reading, so none passes by finding it. Afterwards the checkpoint is released
--- the stored events are read back from the event store and applied -- and the
-same projection answers with the same storage key, so the projection under
-test was genuinely behind, not a stand-in that could never have a row.
+"BEHIND" IS A HELD CHECKPOINT. The projection is subscribed before the artifact
+is created, and the coordinator does deliver ``ArtifactCreated`` to it, but its
+handler is held at the door: it neither writes the row nor saves the
+checkpoint until the test lets go. Each test asserts the event was delivered,
+the ``artifact_summaries`` checkpoint is still short of the event's global
+position and the row is absent, then reads. Afterwards the hold is released
+and the same subscription moves the checkpoint past the event and writes the
+row with the same storage key, so the projection under test was genuinely
+behind, not a stand-in that could never have a row.
 
-Needs the test stack's event store and MinIO (``TEST_MINIO_URL``, default
-``localhost:19000``). Skips, never passes, when MinIO does not answer.
+MinIO is the test stack's (``TEST_MINIO_URL``, default ``localhost:19000``)
+when one answers, otherwise a throwaway container. Skips, never passes, when
+there is neither.
 """
 
 from __future__ import annotations
 
+import asyncio
 import os
 import socket
-from contextlib import contextmanager
+from contextlib import AsyncExitStack, contextmanager
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import pytest
 from event_sourcing import EventStoreRepository
+from event_sourcing.stores.memory_checkpoint import MemoryCheckpointStore
 from fastapi import HTTPException
 
 from syn_adapters.object_storage.minio import MinioStorage
@@ -42,6 +48,7 @@ from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
 from syn_adapters.storage.artifact_storage.minio import MinioArtifactStorage
 from syn_adapters.storage.legacy_tolerant_client import LegacyShapeTolerantGrpcClient
 from syn_adapters.storage.repositories import RepositoryAdapter
+from syn_adapters.subscriptions.coordinator_service import CoordinatorSubscriptionService
 from syn_api.routes.artifacts import (
     get_artifact_content_endpoint,
     get_artifact_endpoint,
@@ -62,6 +69,13 @@ from syn_shared.testing import ENV_TEST_MINIO_URL, TEST_STACK_PORTS
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Iterator
 
+    from event_sourcing import (
+        DispatchContext,
+        DomainEvent,
+        EventEnvelope,
+        ProjectionCheckpointStore,
+        ProjectionResult,
+    )
     from syn_tests.fixtures.infrastructure import TestInfrastructure
 
 pytestmark = [pytest.mark.integration, pytest.mark.anyio]
@@ -70,6 +84,13 @@ pytestmark = [pytest.mark.integration, pytest.mark.anyio]
 FINDINGS = "# Findings\n\n" + "x" * 34_609
 #: Not valid UTF-8: survives only byte-for-byte, and only from object storage.
 SCREENSHOT = bytes(range(256)) * 4
+#: The image the compose stacks run, so the container matches what ships.
+MINIO_IMAGE = (
+    "ghcr.io/syntropic137/minio:RELEASE.2025-04-22T22-12-26Z"
+    "@sha256:bbac678936882e4033b6068efd0a19d103b219002d979087f7c5bd330172e00d"
+)
+#: How long a released subscription may take to apply one held event.
+CATCH_UP_S = 10.0
 
 
 def _minio_endpoint() -> str:
@@ -86,6 +107,29 @@ def _reachable(endpoint: str) -> bool:
         return False
 
 
+class _HeldArtifactList(ArtifactListProjection):
+    """``ArtifactListProjection`` whose handler waits at the door until released.
+
+    The coordinator delivers to it as to any projection. While held, nothing
+    the real handler does has happened: no row, no checkpoint save.
+    """
+
+    def __init__(self, store: InMemoryProjectionStore) -> None:
+        super().__init__(store)
+        self.delivered = asyncio.Event()
+        self.released = asyncio.Event()
+
+    async def handle_event(
+        self,
+        envelope: EventEnvelope[DomainEvent],
+        checkpoint_store: ProjectionCheckpointStore,
+        context: DispatchContext | None = None,
+    ) -> ProjectionResult:
+        self.delivered.set()
+        await self.released.wait()
+        return await super().handle_event(envelope, checkpoint_store, context)
+
+
 @dataclass(frozen=True)
 class _ProjectionManager:
     """The two members of the projection manager the artifact routes read."""
@@ -95,7 +139,10 @@ class _ProjectionManager:
 
 
 class _World:
-    """One event-store tenant, one bucket, and a projection nobody feeds."""
+    """One event-store tenant, one bucket, and a subscribed projection held behind."""
+
+    #: The checkpoint the hold keeps behind.
+    PROJECTION: ClassVar[str] = "artifact_summaries"
 
     def __init__(self, client: LegacyShapeTolerantGrpcClient, storage: MinioArtifactStorage):
         self.client = client
@@ -108,7 +155,14 @@ class _World:
             )
         )
         self.store = InMemoryProjectionStore()
-        self.projection = ArtifactListProjection(self.store)
+        self.projection = _HeldArtifactList(self.store)
+        assert self.projection.get_name() == self.PROJECTION
+        self.checkpoints = MemoryCheckpointStore()
+        self.subscription = CoordinatorSubscriptionService(
+            event_store=client,
+            projections=[self.projection],
+            checkpoint_store=self.checkpoints,
+        )
         self.workflow_id = f"wf-1570-{uuid4().hex[:8]}"
         self.execution_id = f"exec-1570-{uuid4().hex[:8]}"
 
@@ -139,12 +193,33 @@ class _World:
         )
         return artifact_id, uploaded.storage_uri
 
-    async def release_checkpoint(self, artifact_id: str) -> None:
-        """Deliver what the event store holds to the projection, as a subscription would."""
+    async def created_at(self, artifact_id: str) -> int:
+        """The global position of the artifact's ArtifactCreated in the event store."""
         events = await self.client.read_events(f"Artifact-{artifact_id}")
         assert events, f"no Artifact-{artifact_id} stream in the event store"
-        for envelope in events:
-            await self.projection.on_artifact_created(envelope.event.model_dump())
+        nonce = events[0].metadata.global_nonce
+        assert nonce is not None
+        return nonce
+
+    async def checkpoint(self) -> int | None:
+        saved = await self.checkpoints.get_checkpoint(self.PROJECTION)
+        return None if saved is None else saved.global_position
+
+    async def assert_held_behind(self, artifact_id: str) -> int:
+        """The event reached the projection; its checkpoint and row did not move."""
+        position = await self.created_at(artifact_id)
+        await asyncio.wait_for(self.projection.delivered.wait(), CATCH_UP_S)
+        held = await self.checkpoint()
+        assert held is None or held < position, (held, position)
+        assert await self.projection.get_by_id(artifact_id) is None
+        return position
+
+    async def release_checkpoint(self, position: int) -> None:
+        """Let the subscription apply what it holds, and wait until it has."""
+        self.projection.released.set()
+        async with asyncio.timeout(CATCH_UP_S):
+            while (await self.checkpoint() or 0) < position:
+                await asyncio.sleep(0.05)
 
     @contextmanager
     def serving(self) -> Iterator[None]:
@@ -162,14 +237,42 @@ class _World:
             yield
 
 
-@pytest.fixture
-async def world(test_infrastructure: TestInfrastructure) -> AsyncIterator[_World]:
+def _docker_available() -> bool:
+    try:
+        import docker
+
+        docker.from_env().ping()
+    except Exception:
+        return False
+    return True
+
+
+@pytest.fixture(scope="module")
+def minio_endpoint() -> Iterator[str]:
+    """The test stack's MinIO when it answers, otherwise a container of our own."""
     endpoint = _minio_endpoint()
-    if not _reachable(endpoint):
-        pytest.skip(f"no MinIO at {endpoint} (set {ENV_TEST_MINIO_URL})")
+    if _reachable(endpoint):
+        yield endpoint
+        return
+    if not _docker_available():
+        pytest.skip(f"no MinIO at {endpoint} (set {ENV_TEST_MINIO_URL}) and no Docker to start one")
+    from testcontainers.minio import MinioContainer
+
+    with MinioContainer(
+        MINIO_IMAGE,
+        access_key=os.getenv("TEST_MINIO_ACCESS_KEY", "minioadmin"),
+        secret_key=os.getenv("TEST_MINIO_SECRET_KEY", "minioadmin"),
+    ) as container:
+        yield str(container.get_config()["endpoint"])
+
+
+@pytest.fixture
+async def world(
+    test_infrastructure: TestInfrastructure, minio_endpoint: str
+) -> AsyncIterator[_World]:
     storage = MinioArtifactStorage(
         MinioStorage(
-            endpoint=endpoint,
+            endpoint=minio_endpoint,
             access_key=os.getenv("TEST_MINIO_ACCESS_KEY", "minioadmin"),
             secret_key=os.getenv("TEST_MINIO_SECRET_KEY", "minioadmin"),
             bucket_name=f"artifacts-1570-{uuid4().hex[:16]}",
@@ -182,17 +285,21 @@ async def world(test_infrastructure: TestInfrastructure) -> AsyncIterator[_World
         tenant_id=f"t-1570-{uuid4().hex}",
     )
     await client.connect()
-    try:
-        yield _World(client, storage)
-    finally:
-        await client.disconnect()
+    world = _World(client, storage)
+    async with AsyncExitStack() as cleanup:
+        cleanup.push_async_callback(client.disconnect)
+        await world.subscription.start()
+        cleanup.push_async_callback(world.subscription.stop)
+        # Unblock a handler a failed test left waiting, so stop() is not stuck on it.
+        cleanup.callback(world.projection.released.set)
+        yield world
 
 
 async def test_a_text_artifact_reads_by_id_and_content_while_the_projection_lags(
     world: _World,
 ) -> None:
     artifact_id, storage_uri = await world.create(FINDINGS, ContentType.TEXT_MARKDOWN)
-    assert await world.projection.get_by_id(artifact_id) is None
+    position = await world.assert_held_behind(artifact_id)
 
     with world.serving():
         detail = await get_artifact_endpoint(artifact_id, include_content=True)
@@ -202,7 +309,7 @@ async def test_a_text_artifact_reads_by_id_and_content_while_the_projection_lags
     assert detail.content == FINDINGS
     assert content.content == FINDINGS
 
-    await world.release_checkpoint(artifact_id)
+    await world.release_checkpoint(position)
     caught_up = await world.projection.get_by_id(artifact_id)
     assert caught_up is not None
     assert caught_up.storage_uri == storage_uri
@@ -219,7 +326,7 @@ async def test_a_binary_artifact_reads_raw_from_its_scoped_storage_key_while_the
     """
     artifact_id, storage_uri = await world.create(SCREENSHOT, ContentType.IMAGE_PNG)
     assert f"/{world.workflow_id}/{world.execution_id}/" in storage_uri
-    assert await world.projection.get_by_id(artifact_id) is None
+    position = await world.assert_held_behind(artifact_id)
 
     with world.serving():
         raw = await get_artifact_raw_endpoint(artifact_id)
@@ -227,6 +334,11 @@ async def test_a_binary_artifact_reads_raw_from_its_scoped_storage_key_while_the
     assert raw.status_code == 200
     assert raw.body == SCREENSHOT
     assert raw.media_type == ContentType.IMAGE_PNG.value
+
+    await world.release_checkpoint(position)
+    caught_up = await world.projection.get_by_id(artifact_id)
+    assert caught_up is not None
+    assert caught_up.storage_uri == storage_uri
 
 
 async def test_an_artifact_that_was_never_created_is_still_not_found(world: _World) -> None:
