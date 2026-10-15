@@ -4,7 +4,7 @@
  * its key command, over the landing ground (accent glow wash, 28px dot
  * grid), with a slow train of the repo's key phrases running round the card
  * edge (edgeTrain.ts). One SVG per entry in
- * design/brand/banners/repos.json, written to design/brand/banners/<name>.svg.
+ * design/brand/v2/readme-banners/repos.json, written to design/brand/v2/readme-banners/<name>.svg.
  *
  *   pnpm --filter @syn137/skyline-core run repo-banner [--config file] [--out dir] [name ...]
  *
@@ -46,7 +46,7 @@ const MARK_CX = 236
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..')
 const fontDir = resolve(root, 'apps/syn-landing/public/fonts')
-const configDir = resolve(root, 'design/brand/banners')
+const configDir = resolve(root, 'design/brand/v2/readme-banners')
 
 const FONTS: Record<'brand' | 'sans' | 'mono', FontSpec> = {
   brand: { family: 'Orbitron', file: resolve(fontDir, 'orbitron-latin.woff2'), axes: { wght: 600 }, weight: 600 },
@@ -298,7 +298,7 @@ ${textBlock(list)}
 `
 }
 
-/** `[--config repos.json] [--out dir] [name ...]`; defaults to design/brand/banners for both. */
+/** `[--config repos.json] [--out dir] [name ...]`; defaults to design/brand/v2/readme-banners for both. */
 function parseArgs(argv: string[]): { config: string; out: string; only: Set<string> } {
   const opts = { config: resolve(configDir, 'repos.json'), out: configDir, only: new Set<string>() }
   for (let i = 0; i < argv.length; i++) {

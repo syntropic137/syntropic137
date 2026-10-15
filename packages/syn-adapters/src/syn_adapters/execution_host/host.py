@@ -78,20 +78,34 @@ class ExecutionHost:
         self._reconciler = Reconciler(queue, host.host_id, reaper, interrupter)
         self._runs: dict[str, asyncio.Task[None]] = {}
         self._draining = False
+        self._joined = False
+
+    async def join(self) -> None:
+        """Register this host into its Executor Pool, once.
+
+        Await it before starting ``run_until_drained`` in a background task, so
+        a refused registration (``PoolDefinitionConflict``, D13) reaches the
+        caller instead of ending a task nobody awaits. Whoever joins also
+        calls ``leave``: a task cancelled before its first step never runs the
+        loop's own ``finally``.
+        """
+        if not self._joined:
+            await self._queue.register(self._host, self._capacity)
+            self._joined = True
 
     def drain(self) -> None:
         """Stop claiming; ``run_until_drained`` returns once the runs it holds have ended."""
         self._draining = True
 
     async def run_until_drained(self) -> None:
-        """Register, loop until draining with no run held, then deregister.
+        """Join if not yet joined, loop until draining with no run held, then deregister.
 
         Cancelling it is a shutdown: every held run is cancelled, takes the
         interruption path and is awaited; its row is left for its Lease to
         expire and a live executor to reconcile, never re-run (D5 C). The host
         leaves either way, so a restart never inherits its ``draining`` flag.
         """
-        await self._queue.register(self._host, self._capacity)
+        await self.join()
         try:
             while not (await self._turn() and not self._runs):
                 await asyncio.sleep(self._timing.loop_interval.total_seconds())
@@ -102,9 +116,13 @@ class ExecutionHost:
             await asyncio.gather(*runs, return_exceptions=True)
             raise
         finally:
-            await self._leave()
+            await self.leave()
 
-    async def _leave(self) -> None:
+    async def leave(self) -> None:
+        """Deregister if joined; never raises. A no-op once left or never joined."""
+        if not self._joined:
+            return
+        self._joined = False
         try:
             await asyncio.shield(self._queue.deregister(self._host.host_id))
         except Exception:

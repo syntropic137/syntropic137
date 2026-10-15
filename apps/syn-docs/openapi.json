@@ -3,7 +3,7 @@
   "info": {
     "title": "Syntropic137 API",
     "description": "API for Syntropic137. Provides real-time observability for workflow execution, agent sessions, and artifacts.",
-    "version": "1.0.1"
+    "version": "1.0.2"
   },
   "paths": {
     "/workflows": {
@@ -10538,15 +10538,44 @@
             "title": "Free Bytes",
             "description": "Bytes available; null when unmeasurable."
           },
+          "degraded_below_bytes": {
+            "type": "integer",
+            "title": "Degraded Below Bytes",
+            "description": "Degraded below this many bytes free: SYN_DISK_DEGRADED_BELOW_GIB, or twice the admission floor when unset."
+          },
+          "refuse_admission_below_bytes": {
+            "type": "integer",
+            "title": "Refuse Admission Below Bytes",
+            "description": "New executions refused below this many bytes free: SYN_DISK_REFUSE_ADMISSION_BELOW_GIB, or SYN_DISK_RUN_RESERVE_GIB x SYN_EXECUTION_MAX_CONCURRENT when unset."
+          },
           "degraded_below_percent": {
-            "type": "number",
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Degraded Below Percent",
-            "description": "SYN_DISK_DEGRADED_BELOW_PERCENT."
+            "description": "SYN_DISK_DEGRADED_BELOW_PERCENT; null when unset (GiB floor only)."
           },
           "refuse_admission_below_percent": {
-            "type": "number",
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Refuse Admission Below Percent",
-            "description": "SYN_DISK_REFUSE_ADMISSION_BELOW_PERCENT."
+            "description": "SYN_DISK_REFUSE_ADMISSION_BELOW_PERCENT; null when unset (GiB floor only)."
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "One line for an operator: free space, the floors and where they came from."
           }
         },
         "additionalProperties": false,
@@ -10556,8 +10585,9 @@
           "state",
           "free_percent",
           "free_bytes",
-          "degraded_below_percent",
-          "refuse_admission_below_percent"
+          "degraded_below_bytes",
+          "refuse_admission_below_bytes",
+          "detail"
         ],
         "title": "DiskSpaceHealth",
         "description": "Free space on the workspace volume, as /health reports it (#1560)."

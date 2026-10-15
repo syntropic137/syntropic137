@@ -13,15 +13,17 @@ from syn_adapters.in_memory import InMemoryAdapter
 from syn_domain.contexts.orchestration.ports import (
     ClaimedRun,
     ExecutorHost,
+    ExecutorPool,
     FencedRun,
     OpeningSweep,
+    PoolDefinitionConflict,
     RunCounts,
     RunLeaseLost,
     StreamPresence,
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterable
 
     from syn_domain.contexts.orchestration.ports import ExecutionStreamProbe
 
@@ -35,6 +37,7 @@ class _Host(BaseModel):
 
     host: ExecutorHost
     capacity: int
+    registered_at: datetime
     in_use: int = 0
     heartbeat_at: datetime = _NEVER
     draining: bool = False
@@ -73,6 +76,7 @@ class InMemoryExecutionRunQueue(InMemoryAdapter):
         super().__init__()
         self._ttl, self._stale, self._now = lease_ttl, heartbeat_stale, clock
         self._hosts: dict[str, _Host] = {}
+        self._pools: dict[str, ExecutorPool] = {}
         self._runs: dict[str, _Run] = {}
         self._lock = asyncio.Lock()
 
@@ -84,6 +88,7 @@ class InMemoryExecutionRunQueue(InMemoryAdapter):
             for other_id, other in self._hosts.items()
             if other.host.container_id == host.container_id and other_id != host.host_id
         }
+        self._join_pool(host, retired=held.keys())
         if host.host_id not in self._hosts and held:
             capacity = sum(other.capacity - other.in_use for other in held.values())
             for other_id, other in held.items():
@@ -92,7 +97,31 @@ class InMemoryExecutionRunQueue(InMemoryAdapter):
                 )
         for other_id in held:
             self._hosts[other_id] = self._hosts[other_id].model_copy(update={"registered": False})
-        self._hosts.setdefault(host.host_id, _Host(host=host, capacity=capacity))
+        self._hosts.setdefault(
+            host.host_id, _Host(host=host, capacity=capacity, registered_at=self._now())
+        )
+
+    def _join_pool(self, host: ExecutorHost, retired: Iterable[str]) -> None:
+        """Postgres's rule (D13); ``retired`` are this container's predecessors, already gone."""
+        declared = host.pool
+        held = self._pools.setdefault(declared.pool_id, declared)
+        if held == declared:
+            return
+        now, gone = self._now(), set(retired)
+        if any(
+            other.registered
+            and not other.draining
+            and other_id != host.host_id
+            and other_id not in gone
+            and other.host.pool.pool_id == declared.pool_id
+            and max(other.heartbeat_at, other.registered_at) > now - self._stale
+            for other_id, other in self._hosts.items()
+        ):
+            raise PoolDefinitionConflict(
+                f"executor {host.host_id!r} declares Executor Pool {declared!r}, "
+                f"but live members hold {held!r}; drain them or declare the same definition"
+            )
+        self._pools[declared.pool_id] = declared
 
     async def deregister(self, host_id: str) -> None:
         if host_id in self._hosts:

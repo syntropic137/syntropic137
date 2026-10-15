@@ -344,10 +344,10 @@ The `APIPage` component from `fumadocs-openapi` is registered in `lib/source.ts`
 
 ### Nav branding (`lib/layout.shared.tsx`)
 
-- **Title:** `<SMark />` (inline SVG from `design/brand/s-mark.svg` geometry, faces from the `--sky-color-cube-*` and `--sky-face-*` tokens) + `<Wordmark />` (Orbitron, "137" in the accent) + a mono "Docs" tag. Links to `/docs/guide/getting-started`. Swap `SMark` for skyline-core's `sMark()` / `<sky-s-mark>` once the elements build lands.
+- **Title:** `<SMark />` (inline SVG from `design/brand/v2/logo/s-mark.svg` geometry, faces from the `--sky-color-cube-*` and `--sky-face-*` tokens) + `<Wordmark />` (Orbitron, "137" in the accent) + a mono "Docs" tag. Links to `/docs/guide/getting-started`. Swap `SMark` for skyline-core's `sMark()` / `<sky-s-mark>` once the elements build lands.
 - **Site nav:** `components/DocsNav.tsx` is the landing page's capsule nav: Workflows, Harnesses, Observability, Evals (`https://syntropic137.com/#<section>`), Docs (selected, `aria-current="page"`). Passed as a `type: 'custom', on: 'nav'` link; hidden below 80rem (no room beside search). The same links are `on: 'menu'` items for the mobile sidebar.
 - **Footer:** `components/DocsFooter.tsx` (rendered by the docs page) follows the v4 Landing board: lockup, tagline, docs version (links to the release tag), Product / Guides / Community columns. Styles in `app/docs-brand.css`.
-- **Icons:** `public/favicon.svg`, `favicon-32x32.png`, `apple-touch-icon.png`, copied from `design/brand/`.
+- **Icons:** `public/favicon.svg`, `favicon-32x32.png`, `apple-touch-icon.png`, copied from `design/brand/v2/app-icons/`.
 - **Home:** `/` redirects (307) to `/docs/guide/getting-started`; `/docs` redirects there too (`next.config.mjs`).
 
 ### Sidebar tabs

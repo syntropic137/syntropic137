@@ -110,6 +110,23 @@ RUNNABLE_BUT_EXCLUDED: Final[dict[str, str]] = {
     "syn-landing.yml:energy": "path-filtered, needs a Playwright browser and ~2 minutes; `just landing-energy`",
     "syn-landing.yml:codeql": "path-filtered, needs the CodeQL CLI and query packs; `codeql database create` by hand",
     "syn-landing.yml:secret-scan": 'path-filtered; `gitleaks detect --log-opts="--full-history -m -- apps/syn-landing"`',
+    "ci.yml:mutations-not-merged": (
+        "red BY DESIGN while a PR carries .mutations/ evidence patches, so it "
+        "cannot sit in preflight: the pre-push hook would block pushing them; "
+        "`just check-no-mutations`"
+    ),
+}
+
+#: Workflows that never run on a pull request at all, so the job discovery
+#: above never sees them, with why they have no local equivalent. Listed so the
+#: decision is written down; a listed file that gains a `pull_request` trigger
+#: or disappears fails the check.
+DISPATCH_ONLY: Final[dict[str, str]] = {
+    "mutation-evidence.yml": (
+        "workflow_dispatch only; runs PR-head code against mutation patches on a "
+        "GitHub runner because local Docker verifier runs are banned and agent "
+        "workspaces have no Docker. Reach it with `just mutation-evidence`"
+    ),
 }
 
 
@@ -308,6 +325,40 @@ def find_problems(
     return problems, covered, len(keys)
 
 
+def workflow_triggers(path: Path) -> set[str]:
+    """The trigger names of one workflow file."""
+    document = yaml.safe_load(path.read_text())
+    if not isinstance(document, dict):
+        return set()
+    # PyYAML resolves the bare key `on` to the boolean True.
+    triggers = document.get("on", document.get(True))
+    if isinstance(triggers, (dict, list)):
+        return {str(name) for name in triggers}
+    return {str(triggers)} if triggers else set()
+
+
+def dispatch_only_problems(workflow_dir: Path, pr_triggered: set[str]) -> list[str]:
+    """DISPATCH_ONLY entries that are gone or gained any other trigger.
+
+    Exactly `workflow_dispatch`: a `push`, `schedule`, `workflow_run` or
+    `pull_request_target` added later would run the workflow in a context the
+    reason above never considered.
+    """
+    problems: list[str] = []
+    for filename in sorted(DISPATCH_ONLY):
+        path = workflow_dir / filename
+        if not path.is_file():
+            problems.append(f"DISPATCH_ONLY names {filename}, which does not exist")
+            continue
+        triggers = workflow_triggers(path)
+        if filename in pr_triggered or triggers != {"workflow_dispatch"}:
+            problems.append(
+                f"{filename} is listed as DISPATCH_ONLY but triggers on {sorted(triggers)}; "
+                f"it must be workflow_dispatch only, or map its jobs instead"
+            )
+    return problems
+
+
 def main() -> int:
     workflows = pr_triggered_workflows(WORKFLOW_DIR)
     if not workflows:
@@ -317,6 +368,7 @@ def main() -> int:
     justfile = JUSTFILE.read_text()
     problems, covered, total = find_problems(workflows, justfile)
     problems.extend(script_step_problems(workflows, justfile))
+    problems.extend(dispatch_only_problems(WORKFLOW_DIR, set(workflows)))
 
     if problems:
         print("❌ local QA has drifted from CI:")
@@ -346,6 +398,8 @@ def main() -> int:
     )
     for job, why in sorted(RUNNABLE_BUT_EXCLUDED.items()):
         print(f"    {job} -- {why}")
+    for filename, why in sorted(DISPATCH_ONLY.items()):
+        print(f"  Dispatch-only, never on a PR: {filename} -- {why}")
     return 0
 
 

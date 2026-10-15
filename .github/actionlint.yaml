@@ -1,0 +1,7 @@
+# actionlint 1.7.12 (the latest release) predates the `cache-mode` workflow
+# key. Ignore exactly that error, for exactly the file that needs the key.
+# Delete this once actionlint knows `cache-mode`.
+paths:
+  .github/workflows/mutation-evidence.yml:
+    ignore:
+      - 'unexpected key "cache-mode" for "workflow" section'

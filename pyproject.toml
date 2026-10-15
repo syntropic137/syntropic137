@@ -1,6 +1,6 @@
 [project]
 name = "syntropic137"
-version = "1.0.1"
+version = "1.0.2"
 description = "Event-sourced system for tracking AI agent work across workflows"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -186,6 +186,9 @@ python_files = ["test_*.py", "*_test.py"]
 python_functions = ["test_*"]
 asyncio_mode = "auto"
 addopts = ["-ra", "-q", "--strict-markers", "-m", "not integration"]
+# pytest skips a `Test*` class that defines __init__ or __new__ with only a
+# warning, so its tests run in no job and no census counts them (#1935).
+filterwarnings = ["error::pytest.PytestCollectionWarning"]
 markers = [
     "unit: Unit tests (fast, no external dependencies)",
     "integration: Integration tests (may use Docker services)",
