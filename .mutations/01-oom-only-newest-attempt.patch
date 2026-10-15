@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/phase_profiles/query_service.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/phase_profiles/query_service.py
+index 87795f5de..7e60a1c45 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/phase_profiles/query_service.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/phase_profiles/query_service.py
+@@ -510,7 +510,7 @@ def _killed_attempt(
+     A phase counts once however many attempts or duplicate deliveries wrote a
+     row, and a later clean or unmeasured attempt does not hide the kill.
+     """
+-    killed = next((a for a in attempts if a.oom is True), None)
++    killed = next((a for a in attempts[:1] if a.oom is True), None)
+     if killed is None:
+         return None
+     return OomKilledPhase(

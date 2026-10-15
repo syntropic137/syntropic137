@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/teardown_usage.py b/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/teardown_usage.py
+index 4e935a028..7617995e6 100644
+--- a/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/teardown_usage.py
++++ b/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/teardown_usage.py
+@@ -76,7 +76,7 @@ def usage_from_report(report: object) -> WorkspaceUsage | None:
+         )
+     if len(missing) == len(USAGE_FIELDS):
+         return None
+-    usage = WorkspaceUsage(**{name: getattr(report, name, None) for name in USAGE_FIELDS})
++    usage = WorkspaceUsage(**{name: None if name.startswith("oom") else getattr(report, name, None) for name in USAGE_FIELDS})
+     if usage.delete_failures is not None:
+         usage = dataclasses.replace(usage, delete_failures=tuple(usage.delete_failures))
+     return usage
