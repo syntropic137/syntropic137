@@ -111,7 +111,7 @@ _PINNED_CODEX_WFS = {
 def test_the_seed_suite_loads_and_records_its_workflow_and_models() -> None:
     loaded = load_suite(DEFAULT_SUITE)
 
-    assert loaded.tag == "verifier-seed-v1:v7:eval-verify-pinned-v1"
+    assert loaded.tag == "verifier-seed-v1:v8:eval-verify-pinned-v1"
     assert loaded.workflow.id == "eval-verify-pinned-v1"
     assert loaded.workflow.models == {"verify": "opus"}
     by_polarity = {
@@ -120,7 +120,7 @@ def test_the_seed_suite_loads_and_records_its_workflow_and_models() -> None:
     }
     assert by_polarity["defect"] >= {1574, 1649, 1652, 1654, 1679, 1680}
     assert by_polarity["clean"] == {917, 1010} | _V6_CLEAN_PRS
-    assert sum(c.polarity == "defect" for c in loaded.cases) == 32
+    assert sum(c.polarity == "defect" for c in loaded.cases) == 36
     assert sum(c.polarity == "clean" for c in loaded.cases) == 4
 
 
@@ -131,7 +131,7 @@ def test_the_same_cases_load_under_the_codex_verifier_with_their_own_tag() -> No
 
     assert codex.workflow.id == _CODEX_WF
     assert codex.workflow.models == {"verify": "gpt-sol"}
-    assert codex.tag == f"verifier-seed-v1:v7:{_CODEX_WF}"
+    assert codex.tag == f"verifier-seed-v1:v8:{_CODEX_WF}"
     assert codex.tag != opus.tag
     assert codex.cases == opus.cases
 
@@ -143,7 +143,7 @@ def test_the_same_cases_load_under_the_sonnet_verifier_with_their_own_tag() -> N
 
     assert sonnet.workflow.id == _SONNET_WF
     assert sonnet.workflow.models == {"verify": "sonnet"}
-    assert sonnet.tag == f"verifier-seed-v1:v7:{_SONNET_WF}"
+    assert sonnet.tag == f"verifier-seed-v1:v8:{_SONNET_WF}"
     assert sonnet.cases == opus.cases
 
 
@@ -154,7 +154,7 @@ def test_the_same_cases_load_under_each_pinned_codex_verifier(variant: str, slug
     pinned = load_suite(DEFAULT_SUITE, workflow=variant)
 
     assert pinned.workflow.models == {"verify": slug}
-    assert pinned.tag == f"verifier-seed-v1:v7:{variant}"
+    assert pinned.tag == f"verifier-seed-v1:v8:{variant}"
     assert pinned.cases == opus.cases
 
 
@@ -248,8 +248,8 @@ def test_the_agentic_workspace_suite_is_its_own_suite_over_its_own_repository() 
 
     assert aw.suite.repository == "AgentParadise/agentic-workspace"
     assert aw.suite.suite_tag == "suite:verifier-seed-aw" != seed.suite.suite_tag
-    assert aw.tag == "verifier-seed-aw-v1:v3:eval-verify-pinned-v1"
-    assert {c.source_pr for c in aw.cases if c.polarity == "defect"} == {47, 49, 56}
+    assert aw.tag == "verifier-seed-aw-v1:v4:eval-verify-pinned-v1"
+    assert {c.source_pr for c in aw.cases if c.polarity == "defect"} == {47, 49, 56, 66}
     assert not {c.id for c in aw.cases} & {c.id for c in seed.cases}
 
 
@@ -860,6 +860,74 @@ def _case(case_id: str) -> DefectCase:
 # the keyword tables - including the three per seed the verification probe at
 # ca52f38c wrote, of which the scorer then passed 1 in 12. Each must pass.
 _PARAPHRASES: dict[str, tuple[tuple[str, str], ...]] = {
+    "event-schema-gate-ignores-identity": (
+        (
+            "_orchestration_event_schemas.py:85",
+            "the snapshot records only each model's validation schema, never the event type "
+            "name or version, so bumping @event from v1 to v2 passes the gate.",
+        ),
+        (
+            "scripts/event_compat/probe.py:24",
+            "the compat probe resolves models by class name, so renaming an event_type leaves "
+            "check-event-compat green while stored events no longer resolve.",
+        ),
+        (
+            "_orchestration_event_schemas.py",
+            "the schema gate compares shape only; an identity change (type or version) is "
+            "invisible to the snapshot.",
+        ),
+    ),
+    "broker-deny-path-untested": (
+        (
+            "test_git_gh_through_broker.py:120",
+            "no test sends a valid capability for an ungranted repo to the broker, so the "
+            "deny is never exercised.",
+        ),
+        (
+            "github_broker/test_git_gh_through_broker.py",
+            "test_an_ungranted_repository_is_offered_nothing only checks the sandbox; the "
+            "broker could grant an unlisted repository and no test would fail.",
+        ),
+        (
+            "test_git_gh_through_broker.py",
+            "the refusal path is untested: a mutation that makes the broker allow everything "
+            "survives every case.",
+        ),
+    ),
+    "docker-runtime-tests-skip-on-clean-runner": (
+        (
+            "test_docker_workspace_runtime.py:30",
+            "the module is skipped unless SYN_CONTRACT_TEST_IMAGE is set, so on a clean runner "
+            "the Docker tests never run.",
+        ),
+        (
+            "packages/syn-adapters/tests/test_docker_workspace_runtime.py",
+            "a skipif on an unset environment variable means CI reports skipped tests, which "
+            "look the same as evidence nobody collected.",
+        ),
+        (
+            "test_docker_workspace_runtime.py",
+            "with no image configured the whole suite skips instead of pulling a pinned image "
+            "and failing.",
+        ),
+    ),
+    "fence-bound-fails-on-real-postgres": (
+        (
+            "execution_runs/postgres.py:254",
+            "fence_expired picks rows with an IN (SELECT ... FOR UPDATE SKIP LOCKED LIMIT $2) "
+            "subquery that a nested loop can rescan, so the limit does not bound the statement.",
+        ),
+        (
+            "postgres.py",
+            "the per-call bound is unbounded in practice: each rescan of the semi join locks "
+            "LIMIT more rows, so one call fences every expired run.",
+        ),
+        (
+            "syn_adapters/execution_runs/postgres.py",
+            "take_over has the same shape; pick the rows once in a MATERIALIZED CTE or the "
+            "limit is per rescan, not per statement.",
+        ),
+    ),
     "binary-artifact-minio-key": (
         (
             "minio.py:212",
@@ -1931,7 +1999,7 @@ def test_launch_under_the_codex_verifier_runs_and_records_the_codex_workflow(
     assert set(starts) == {f"/workflows/{_CODEX_WF}/execute"}
     recorded = read_launches(ledger)
     assert {(x.suite, x.workflow_id) for x in recorded} == {
-        (f"verifier-seed-v1:v7:{_CODEX_WF}", _CODEX_WF)
+        (f"verifier-seed-v1:v8:{_CODEX_WF}", _CODEX_WF)
     }
 
 
@@ -2129,7 +2197,7 @@ def test_v1_runs_never_count_toward_the_current_version(tmp_path: Path) -> None:
     current = load_suite(DEFAULT_SUITE)
     rows, unrecorded = score_suite(current, _LedgerServer(launches).client(), launches)
 
-    assert len(rows) == 36 and {r.status for r in rows} == {"not launched"}
+    assert len(rows) == 40 and {r.status for r in rows} == {"not launched"}
     assert unrecorded == ()
 
 
@@ -2288,7 +2356,7 @@ def test_the_holdout_is_new_cases_only_and_within_its_share() -> None:
     cases = load_suite(DEFAULT_SUITE).cases
     holdout = {c.id for c in cases if c.split == "holdout"}
 
-    assert len(holdout) == 10 and len(cases) == 36
+    assert len(holdout) == 11 and len(cases) == 40
     # The pre-v4 defects were already run against the verifiers: never holdout.
     assert not holdout & _V2_CASES
 
@@ -2342,7 +2410,7 @@ def test_a_suite_with_too_little_holdout_is_refused(tmp_path: Path) -> None:
     for path in (suite_dir / "cases").glob("*.yaml"):
         path.write_text(path.read_text().replace("split: holdout", "split: train"))
 
-    with pytest.raises(DefinitionError, match="0 of 36 cases are holdout"):
+    with pytest.raises(DefinitionError, match="0 of 40 cases are holdout"):
         load_suite(suite_dir)
 
 
@@ -3299,7 +3367,7 @@ def test_llm_judged_score_is_recorded_under_the_judges_identity(
     rows, _ = score_suite(loaded, server.client(), [_LAUNCHED], eval_suite.LlmJudge(model))
 
     [(_, body)] = server.scores
-    assert body["scorer_version"] == "7+llm:claude-sonnet-4-6@prompt-v3"
+    assert body["scorer_version"] == "8+llm:claude-sonnet-4-6@prompt-v3"
     assert body["verdict"] == "PASS"
     assert "LLM judge (`llm:claude-sonnet-4-6@prompt-v3`): `match`" in str(body["evidence"])
     assert "keyword judge: no match" in str(body["evidence"])
