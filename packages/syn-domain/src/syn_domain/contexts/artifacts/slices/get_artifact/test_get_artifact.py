@@ -57,9 +57,7 @@ class _Repo:
         self._envelopes: dict[str, list[EventEnvelope[DomainEvent]]] = {}
 
     async def save(self, aggregate: ArtifactAggregate) -> None:
-        self._envelopes.setdefault(str(aggregate.id), []).extend(
-            aggregate.get_uncommitted_events()
-        )
+        self._envelopes.setdefault(str(aggregate.id), []).extend(aggregate.get_uncommitted_events())
         aggregate.mark_events_as_committed()
 
     async def get_by_id(self, aggregate_id: str) -> ArtifactAggregate | None:
@@ -76,7 +74,7 @@ class _Repo:
 
 async def _created(repo: _Repo) -> ArtifactAggregate:
     aggregate = ArtifactAggregate()
-    aggregate._handle_command(  # noqa: SLF001
+    aggregate._handle_command(
         CreateArtifactCommand(
             aggregate_id=ARTIFACT_ID,
             workflow_id="wf-1570",
@@ -156,7 +154,7 @@ async def test_a_deleted_artifact_is_not_found_while_the_projection_lags(
 ) -> None:
     repo = _Repo()
     aggregate = await _created(repo)
-    aggregate._handle_command(DeleteArtifactCommand(aggregate_id=ARTIFACT_ID))  # noqa: SLF001
+    aggregate._handle_command(DeleteArtifactCommand(aggregate_id=ARTIFACT_ID))
     await repo.save(aggregate)
 
     assert await GetArtifactHandler(projection, repo).handle(ARTIFACT_ID) is None

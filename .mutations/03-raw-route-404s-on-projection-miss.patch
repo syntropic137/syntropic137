@@ -1,0 +1,19 @@
+diff --git a/apps/syn-api/src/syn_api/routes/artifacts.py b/apps/syn-api/src/syn_api/routes/artifacts.py
+index 75ce0bdda..6681cb204 100644
+--- a/apps/syn-api/src/syn_api/routes/artifacts.py
++++ b/apps/syn-api/src/syn_api/routes/artifacts.py
+@@ -824,12 +824,10 @@ async def get_artifact_raw_endpoint(artifact_id: str) -> Response:
+     text form for the JSON endpoints to carry (#990). Text artifacts are
+     served the same way, as their UTF-8 bytes.
+     """
+-    from syn_api.prefix_resolver import resolve_prefix_or_keep
++    from syn_api.prefix_resolver import resolve_or_raise
+ 
+     mgr = get_projection_mgr()
+-    artifact_id = await resolve_prefix_or_keep(
+-        mgr.store, "artifact_summaries", artifact_id, "Artifact"
+-    )
++    artifact_id = await resolve_or_raise(mgr.store, "artifact_summaries", artifact_id, "Artifact")
+     result = await get_artifact_bytes(artifact_id)
+     if isinstance(result, Err):
+         raise HTTPException(status_code=404, detail=f"Artifact {artifact_id} content not found")

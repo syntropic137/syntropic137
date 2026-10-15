@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/artifacts/slices/get_artifact/GetArtifactHandler.py b/packages/syn-domain/src/syn_domain/contexts/artifacts/slices/get_artifact/GetArtifactHandler.py
+index c642d939d..813dc7881 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/artifacts/slices/get_artifact/GetArtifactHandler.py
++++ b/packages/syn-domain/src/syn_domain/contexts/artifacts/slices/get_artifact/GetArtifactHandler.py
+@@ -74,7 +74,7 @@ def _summary_of(artifact_id: str, aggregate: ArtifactAggregate) -> ArtifactSumma
+         content=aggregate.content,
+         content_hash=aggregate.content_hash,
+         content_type=aggregate.content_type.value,
+-        storage_uri=aggregate.storage_uri,
++        storage_uri=None,
+         is_primary_deliverable=aggregate.is_primary_deliverable,
+         source_path=aggregate.source_path,
+         agent_provider=aggregate.agent.provider,
