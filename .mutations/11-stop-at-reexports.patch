@@ -1,0 +1,14 @@
+diff --git a/scripts/check_integration_skips.py b/scripts/check_integration_skips.py
+index 7176f2866..fec8ff298 100644
+--- a/scripts/check_integration_skips.py
++++ b/scripts/check_integration_skips.py
+@@ -314,7 +314,8 @@ class Scanner:
+         target = self.module(target_path) if target_path else None
+         if target is None:
+             return None
+-        return self._resolve(target, target_name, seen | {(mod.path, name)})
++        found = target.functions.get(target_name)
++        return (target, found) if found is not None else None
+ 
+     def _conftests(self, path: Path) -> Iterator[_Module]:
+         """conftest.py modules that apply to ``path``, nearest first."""

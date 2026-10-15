@@ -33,6 +33,17 @@ Run both: `just fitness`
 | 15 | Harness Format Boundary (#1398) | test_harness_format_boundary | fitness_exceptions.toml `[harness_format_boundary]` | Enforced |
 | 16 | Codex Sandbox Stays On (#1398) | test_no_codex_sandbox_bypass | no exemptions | Enforced |
 | 17 | Cross-Generation Event Compatibility | test_orchestration_event_schema_snapshot (ADR-072 D9) | snapshots/orchestration_events.epoch-<N>.json; release-time half is `just check-event-compat` | Enforced |
+| 18 | Tests Exercise Reality (PC-192/PC-193) | test_integration_skips_are_declared | fitness_exceptions.toml `[integration_skips]` | Enforced (ratchet) |
+
+### 18. Tests Exercise Reality (PC-192/PC-193)
+
+A skipped integration test reports as a pass. An integration test that can skip
+(a `skip`/`skipif` mark, `pytest.skip`, `importorskip`, or a fixture that does
+any of them) must declare it with `@pytest.mark.may_skip(reason="...",
+issue="#N")`. The checker is `scripts/check_integration_skips.py` (in
+`scripts/` so mutation evidence may patch it); the undeclared count is an exact
+ratchet in `[integration_skips] max_undeclared`, failing above and below it. A
+`may_skip` with no reason or no `#N` issue always fails.
 
 ### 17. Cross-Generation Event Compatibility (#1310, ADR-072 D9)
 
@@ -323,6 +334,7 @@ Sections:
 - `[projection_purity]` - project-specific allowed import prefixes
 - `[in_memory_state]` - registry of in-memory state requiring classification
 - `[in_memory_adapters_guarded]` - classes matching the in-memory adapter rule that are not guarded (ADR-060). A non-adapter carries a `reason`; a real violation carries a `reason` and an `issue`. Stale entries fail the test
+- `[integration_skips]` - `max_undeclared`: exact count of integration tests that can skip without a `may_skip` marker. Ratchet: fails above and below
 
 ### 3. Inline in test files (being migrated to TOML)
 
@@ -358,6 +370,7 @@ Legacy: some tests define config inline. Being consolidated into
 | test_in_memory_state_audit | Every in-memory state var is classified | 9 |
 | test_in_memory_adapters_are_guarded | No in-memory adapter is constructible in production (ADR-060) | 9 |
 | test_harness_format_boundary | Vendor formats only in adapters; one inference owner; no harness branches | 15 |
+| test_integration_skips_are_declared | Integration tests that can skip declare `may_skip(reason, issue)`; undeclared count ratcheted | 18 |
 
 ### API (`ci/fitness/api/`)
 

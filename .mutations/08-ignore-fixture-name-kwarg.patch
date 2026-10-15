@@ -1,0 +1,13 @@
+diff --git a/scripts/check_integration_skips.py b/scripts/check_integration_skips.py
+index 7176f2866..0c0aef0e4 100644
+--- a/scripts/check_integration_skips.py
++++ b/scripts/check_integration_skips.py
+@@ -143,7 +143,7 @@ def _fixtures(body: Sequence[ast.stmt]) -> tuple[dict[str, _Fn], list[_Fn]]:
+         if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
+             decl = _fixture_decl(stmt)
+             if decl is not None:
+-                fixtures[decl[0] or stmt.name] = stmt
++                fixtures[stmt.name] = stmt
+                 if decl[1]:
+                     autouse.append(stmt)
+     return fixtures, autouse

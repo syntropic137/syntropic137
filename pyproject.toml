@@ -195,6 +195,7 @@ markers = [
     "e2e: End-to-end tests (full system)",
     "regression: Regression tests for known bugs",
     "architecture: Architectural fitness functions (CI-enforced structural checks)",
+    "may_skip(reason, issue): Integration test that can skip on purpose; reason and a #N issue are required (ci/fitness test_integration_skips_are_declared)",
 ]
 
 [tool.coverage.run]
