@@ -18,6 +18,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from syn_adapters.execution_host import ExecutionHost, HostTiming
+from syn_adapters.execution_host.reconciler import Reconciler
 from syn_adapters.execution_runs.memory import InMemoryExecutionRunQueue
 from syn_domain.contexts.orchestration.ports import (
     ClaimedRun,
@@ -33,6 +34,8 @@ _WINDOW = 90.0
 _TIMING = HostTiming()  # the production defaults: 5 s loop, 15 s budget, 4 concurrent, 90 s TTL
 _LIVE = ExecutorHost(host_id="live", container_id="c-live", generation="g", epoch=1)
 _DEAD = ExecutorHost(host_id="dead", container_id="c-dead", generation="g", epoch=1)
+_PEER_B = ExecutorHost(host_id="b", container_id="c-b", generation="g", epoch=1)
+_PEER_C = ExecutorHost(host_id="c", container_id="c-c", generation="g", epoch=1)
 
 
 class _FakeTime:
@@ -137,6 +140,19 @@ class _Streams:
         return StreamPresence.UNKNOWN
 
 
+class _GatedStreams:
+    """A stream probe that answers only once the test opens its gate."""
+
+    def __init__(self) -> None:
+        self.gate = asyncio.Event()
+        self.probed: list[str] = []
+
+    async def presence(self, execution_id: str) -> StreamPresence:
+        self.probed.append(execution_id)
+        await self.gate.wait()
+        return StreamPresence.ABSENT
+
+
 class _Queue(InMemoryExecutionRunQueue):
     """The real in-memory queue, with the slow or wedged store calls a test asks for."""
 
@@ -146,6 +162,9 @@ class _Queue(InMemoryExecutionRunQueue):
         )
         self._time = time
         self.claim_takes = 0.0
+        self.reconcile_call_takes = 0.0
+        self.claimed_by: list[tuple[str, str]] = []
+        self.sweep_for_real = False
         self.claims = 0
         self.heartbeats: list[float] = []
         self.wedge_fencing = False
@@ -165,17 +184,26 @@ class _Queue(InMemoryExecutionRunQueue):
         self._time.spend(self.claim_takes)
         claimed = await super().claim(host_id)
         self.claims += claimed is not None
+        if claimed is not None:
+            self.claimed_by.append((host_id, claimed.execution_id))
         return claimed
 
-    async def fence_expired(self, reconciler: str) -> list[FencedRun]:
+    async def fence_expired(self, reconciler: str, *, limit: int) -> list[FencedRun]:
         self.acquisitions.append("fence_expired")
+        self._time.spend(self.reconcile_call_takes)
         if self.wedge_fencing:
             self.wedged.set()
             await asyncio.Event().wait()  # a store call that never returns
-        return await super().fence_expired(reconciler)
+        return await super().fence_expired(reconciler, limit=limit)
+
+    async def take_over(self, reconciler: str, *, limit: int) -> list[FencedRun]:
+        self.acquisitions.append("take_over")
+        self._time.spend(self.reconcile_call_takes)
+        return await super().take_over(reconciler, limit=limit)
 
     async def reconciling(self, reconciler: str) -> list[FencedRun]:
         self.acquisitions.append("reconciling")
+        self._time.spend(self.reconcile_call_takes)
         return await super().reconciling(reconciler)
 
     async def sweep_opening(self, older_than: timedelta, streams: object) -> OpeningSweep:
@@ -183,6 +211,8 @@ class _Queue(InMemoryExecutionRunQueue):
         self.sweeps_in_flight += 1
         self.max_sweeps_in_flight = max(self.max_sweeps_in_flight, self.sweeps_in_flight)
         try:
+            if self.sweep_for_real:
+                return await super().sweep_opening(older_than, streams)  # type: ignore[arg-type]
             if self.sweep_gate is not None:
                 await self.sweep_gate.wait()
             if self.sweep_raises is not None:
@@ -211,7 +241,11 @@ async def _a_dead_peer_holding(queue: _Queue, time: _FakeTime, count: int) -> No
 
 
 def _live_host(
-    queue: _Queue, time: _FakeTime, reaper: _GatedReaper, capacity: int
+    queue: _Queue,
+    time: _FakeTime,
+    reaper: _GatedReaper,
+    capacity: int,
+    streams: _Streams | _GatedStreams | None = None,
 ) -> ExecutionHost:
     return ExecutionHost(
         queue,
@@ -220,7 +254,7 @@ def _live_host(
         drainer=_HeldDrainer(),
         reaper=reaper,
         interrupter=_Interrupter(),
-        streams=_Streams(),
+        streams=streams or _Streams(),
         timing=_TIMING,
         sleep=time.sleep,
         clock=time.monotonic,
@@ -266,9 +300,9 @@ async def test_a_reconciling_host_still_claims_new_work() -> None:
     loop = await _start(_live_host(queue, time, reaper, capacity=4), time)
     assert reaper.max_in_flight == _TIMING.reconcile_concurrency
 
-    await _admit(queue, 1)
+    (new,) = await _admit(queue, 1)
     await time.turn()
-    assert (await queue.in_use()).claimed == 1  # the new run, held by ``live``
+    assert (_LIVE.host_id, new) in queue.claimed_by
     await _stop(loop)
 
 
@@ -375,7 +409,9 @@ async def test_draining_finishes_started_reconciliation_and_leaves_the_rest() ->
     await time.last_turn(loop)
     assert reaper.calls == started  # no new attempt once draining
     counts = await queue.in_use()
-    assert (counts.interrupted, counts.fencing) == (4, 6)
+    # Acquisition was bounded by the free slots, so the rest were never fenced:
+    # they are still expired claims, left for a live peer.
+    assert (counts.interrupted, counts.fencing, counts.claimed) == (4, 0, 6)
 
 
 async def test_shutdown_cancels_reconciliation_and_sweep_tasks() -> None:
@@ -387,8 +423,13 @@ async def test_shutdown_cancels_reconciliation_and_sweep_tasks() -> None:
     await _stop(loop)
     assert sorted(reaper.cancelled) == sorted(reaper.calls)
     assert queue.sweeps_in_flight == 0
-    assert (await queue.in_use()).fencing == 6
+    counts = await queue.in_use()
+    assert (counts.fencing, counts.claimed) == (4, 2)  # acquired up to the free slots only
     assert not await queue.others_live("observer")  # deregistered
+    # The rows it owned are taken over once it has left (D5).
+    await queue.register(_PEER_B, 4)
+    taken = await queue.take_over(_PEER_B.host_id, limit=10)
+    assert sorted(run.execution_id for run in taken) == sorted(reaper.calls)
 
 
 async def test_a_failed_reconciliation_task_is_logged(caplog: pytest.LogCaptureFixture) -> None:
@@ -419,4 +460,98 @@ async def test_a_reap_running_longer_than_the_ttl_is_warned_once(
     hung = [r for r in caplog.records if "its reap may be hung" in r.getMessage()]
     assert len(hung) == 1
     assert "dead-000" in hung[0].getMessage()
+    await _stop(loop)
+
+
+async def _peers(queue: _Queue, reaper: _GatedReaper) -> list[Reconciler]:
+    for peer in (_PEER_B, _PEER_C):
+        await queue.register(peer, 4)
+        await queue.heartbeat(peer.host_id)
+    return [
+        Reconciler(queue, peer.host_id, reaper, _Interrupter(), concurrency=4)
+        for peer in (_PEER_B, _PEER_C)
+    ]
+
+
+async def _owned(queue: _Queue, peers: list[Reconciler]) -> list[set[str]]:
+    return [
+        {run.execution_id for run in await queue.reconciling(peer.host_id)}
+        for peer in (_PEER_B, _PEER_C)
+    ]
+
+
+async def test_expired_claims_are_shared_among_live_reconcilers() -> None:
+    time = _FakeTime()
+    queue, reaper = _Queue(time), _GatedReaper()
+    await _a_dead_peer_holding(queue, time, 10)
+    peers = await _peers(queue, reaper)
+
+    for peer in peers:
+        await peer.turn(acquire=True)
+    b, c = await _owned(queue, peers)
+    assert (len(b), len(c)) == (4, 4)
+    assert not b & c
+    assert (await queue.in_use()).claimed == 2  # waiting for a free slot, not taken
+    await asyncio.gather(*(peer.aclose() for peer in peers))
+
+
+async def test_a_departed_reconcilers_backlog_is_shared() -> None:
+    time = _FakeTime()
+    queue, reaper = _Queue(time), _GatedReaper()
+    await _a_dead_peer_holding(queue, time, 10)
+    gone = ExecutorHost(host_id="gone", container_id="c-gone", generation="g", epoch=1)
+    await queue.register(gone, 1)
+    assert len(await queue.fence_expired(gone.host_id, limit=10)) == 10
+    await queue.deregister(gone.host_id)
+    peers = await _peers(queue, reaper)
+
+    for peer in peers:
+        await peer.turn(acquire=True)
+    b, c = await _owned(queue, peers)
+    assert (len(b), len(c)) == (4, 4)
+    assert not b & c
+    await asyncio.gather(*(peer.aclose() for peer in peers))
+
+
+async def test_a_turn_of_slow_reconciliation_store_calls_stays_within_its_budget() -> None:
+    """Each store call returns, but slowly: their sum must not outrun the staleness window."""
+    time = _FakeTime()
+    queue, reaper = _Queue(time), _GatedReaper()
+    queue.reconcile_call_takes = 50.0
+    await _a_dead_peer_holding(queue, time, 10)
+    loop = await _start(_live_host(queue, time, reaper, capacity=4), time)
+    budget = _TIMING.turn_budget.total_seconds()
+
+    for _ in range(10):
+        assert time.mono - queue.heartbeats[-1] <= budget + queue.reconcile_call_takes
+        assert await queue.others_live("observer"), f"live read stale at {time.mono}s"
+        await time.turn()
+    await _stop(loop)
+
+
+async def test_an_opening_sweep_running_past_the_ttl_is_warned_once(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    time = _FakeTime()
+    queue, reaper = _Queue(time), _GatedReaper()
+    queue.sweep_for_real = True
+    streams = _GatedStreams()
+    assert await queue.reserve("stranded", 1, is_resume=False)  # never admitted: ``opening``
+    time.spend(_TIMING.opening_older_than.total_seconds() + 1)
+    ttl = _TIMING.lease_ttl.total_seconds()
+
+    with caplog.at_level(logging.WARNING):
+        loop = await _start(_live_host(queue, time, reaper, capacity=4, streams=streams), time)
+        swept_from = queue.heartbeats[0]
+        for _ in range(40):  # 200 s of fake time
+            hung = [r for r in caplog.records if "opening sweep has run" in r.getMessage()]
+            assert len(hung) == (1 if time.mono - swept_from > ttl else 0), time.mono
+            assert await queue.others_live("observer")
+            await time.turn()
+    assert streams.probed == ["stranded"]  # one pass in flight, never restarted
+
+    streams.gate.set()
+    await time.turn()
+    await time.turn()
+    assert (await queue.in_use()).abandoned == 1
     await _stop(loop)

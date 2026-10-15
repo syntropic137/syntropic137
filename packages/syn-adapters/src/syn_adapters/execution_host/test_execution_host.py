@@ -73,10 +73,13 @@ class _Queue:
     async def close(self, run: ClaimedRun) -> None:
         self.closed.append(run.execution_id)
 
-    async def fence_expired(self, reconciler: str) -> list[FencedRun]:
-        fenced, self.fenced = self.fenced, []
+    async def fence_expired(self, reconciler: str, *, limit: int) -> list[FencedRun]:
+        fenced, self.fenced = self.fenced[:limit], self.fenced[limit:]
         self.rows.update({run.execution_id: run for run in fenced})
         return fenced
+
+    async def take_over(self, reconciler: str, *, limit: int) -> list[FencedRun]:
+        return []
 
     async def reconciling(self, reconciler: str) -> list[FencedRun]:
         return list(self.rows.values())

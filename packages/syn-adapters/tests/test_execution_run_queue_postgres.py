@@ -197,11 +197,11 @@ async def test_an_expired_lease_is_never_claimed_and_is_fenced_to_interrupted(
     with pytest.raises(RunLeaseLost):
         await short.renew(held)
 
-    fenced = await other.fence_expired("survivor")
+    fenced = await other.fence_expired("survivor", limit=10)
     assert [(f.execution_id, f.executor_id, f.reconciler) for f in fenced] == [
         ("exec-expire", "dying", "survivor")
     ]
-    assert await other.fence_expired("survivor") == []
+    assert await other.fence_expired("survivor", limit=10) == []
     assert await other.claim("survivor") is None
     with pytest.raises(RunLeaseLost):
         await short.close(held)
@@ -234,7 +234,7 @@ async def test_fence_leaves_a_live_lease_alone(pools: list[asyncpg.Pool]) -> Non
     run = await queue.claim("h1")
     assert run is not None
 
-    assert await reconciler.fence_expired("rec") == []
+    assert await reconciler.fence_expired("rec", limit=10) == []
     assert (await queue.in_use()).claimed == 1
     await queue.renew(run)
     await queue.close(run)
@@ -436,7 +436,7 @@ async def test_a_reconcilers_rows_are_taken_over_only_after_it_leaves(
     await _admit(short, "exec-adopt")
     assert await short.claim("dying") is not None
     await asyncio.sleep(0.5)
-    (fenced,) = await first.fence_expired("rec-1")
+    (fenced,) = await first.fence_expired("rec-1", limit=10)
     if left_at == "reaped":
         await first.mark_reaped(fenced)
 
@@ -444,10 +444,11 @@ async def test_a_reconcilers_rows_are_taken_over_only_after_it_leaves(
     (mine,) = await PostgresExecutionRunQueue(pools[3]).reconciling("rec-1")
     assert (mine.token, mine.reaped) == (fenced.token, left_at == "reaped")
     # rec-1 is still registered, however stale: no takeover.
-    assert await successor.reconciling("rec-2") == []
+    assert await successor.take_over("rec-2", limit=10) == []
 
     await first.deregister("rec-1")
-    (adopted,) = await successor.reconciling("rec-2")
+    assert await successor.reconciling("rec-2") == []  # reading adopts nothing
+    (adopted,) = await successor.take_over("rec-2", limit=10)
     assert (adopted.reconciler, adopted.executor_id) == ("rec-2", "dying")
     assert adopted.token > fenced.token
     assert adopted.reaped == (left_at == "reaped")
@@ -497,7 +498,7 @@ async def test_a_restart_in_the_same_container_retires_the_predecessor_not_its_w
     with pytest.raises(LookupError):
         await old.heartbeat("box.aaa")
 
-    (fenced,) = await new.fence_expired("box.bbb")
+    (fenced,) = await new.fence_expired("box.bbb", limit=10)
     assert (fenced.executor_id, fenced.reconciler) == ("box.aaa", "box.bbb")
 
 
@@ -532,7 +533,7 @@ async def test_a_restart_transfers_the_machine_budget_and_never_doubles_it(
     assert await new.claim("r1.bbb") is None
 
     await asyncio.sleep(0.5)
-    (fenced,) = await new.fence_expired("r1.bbb")
+    (fenced,) = await new.fence_expired("r1.bbb", limit=10)
     await new.mark_reaped(fenced)
     await new.close_interrupted(fenced)
     assert await _machine(pools, box) == (1, {"r1.aaa": (0, 0), "r1.bbb": (1, 0)})
@@ -816,3 +817,54 @@ async def test_upgrading_a_pre_pool_schema_keeps_rows_assigns_default_and_drops_
         )
     # An executor that names no pool joins the seeded one.
     await queue.register(_host("new"), 1)
+
+
+async def test_fencing_is_bounded_oldest_first_and_concurrent_fencers_never_share_a_row(
+    pools: list[asyncpg.Pool],
+) -> None:
+    """D5: a reconciler acquires no more than its free slots, so expired rows are shared."""
+    short = PostgresExecutionRunQueue(pools[0], lease_ttl=timedelta(milliseconds=200))
+    first = PostgresExecutionRunQueue(pools[1])
+    second = PostgresExecutionRunQueue(pools[2])
+    await _online(short, "dying", capacity=6)
+    await _online(first, "rec-1", capacity=1)
+    await _online(second, "rec-2", capacity=1)
+    for n in range(6):
+        await _admit(short, f"exec-{n}")
+        assert await short.claim("dying") is not None
+    await asyncio.sleep(0.5)
+
+    a, b = await asyncio.gather(
+        first.fence_expired("rec-1", limit=2), second.fence_expired("rec-2", limit=2)
+    )
+    assert (len(a), len(b)) == (2, 2)
+    assert not {r.execution_id for r in a} & {r.execution_id for r in b}
+    assert (await first.in_use()).claimed == 2
+    assert await first.reconciling("rec-1") == sorted(a, key=lambda r: r.execution_id)
+
+
+async def test_takeover_is_bounded_and_concurrent_adopters_never_share_a_row(
+    pools: list[asyncpg.Pool],
+) -> None:
+    short = PostgresExecutionRunQueue(pools[0], lease_ttl=timedelta(milliseconds=200))
+    gone = PostgresExecutionRunQueue(pools[1])
+    first = PostgresExecutionRunQueue(pools[2])
+    second = PostgresExecutionRunQueue(pools[3])
+    await _online(short, "dying", capacity=5)
+    await _online(gone, "gone", capacity=1)
+    await _online(first, "rec-1", capacity=1)
+    await _online(second, "rec-2", capacity=1)
+    for n in range(5):
+        await _admit(short, f"exec-{n}")
+        assert await short.claim("dying") is not None
+    await asyncio.sleep(0.5)
+    assert len(await gone.fence_expired("gone", limit=10)) == 5
+    assert await first.take_over("rec-1", limit=10) == []  # still registered
+    await gone.deregister("gone")
+
+    a, b = await asyncio.gather(
+        first.take_over("rec-1", limit=2), second.take_over("rec-2", limit=2)
+    )
+    assert (len(a), len(b)) == (2, 2)
+    assert not {r.execution_id for r in a} & {r.execution_id for r in b}
+    assert len(await first.reconciling("rec-1")) == 2

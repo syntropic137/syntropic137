@@ -171,7 +171,7 @@ async def test_a_dead_reconcilers_row_is_finished_by_its_successor_only_after_it
     await _online(infra, successor)
 
     # rec-1 fences, reaps and interrupts, then dies before closing the row.
-    (fenced,) = await infra.queue.fence_expired(first.host_id)
+    (fenced,) = await infra.queue.fence_expired(first.host_id, limit=10)
     await infra.queue.mark_reaped(fenced)
     await AggregateRunInterrupter(await infra.executions()).interrupt(fenced)
 

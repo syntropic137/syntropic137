@@ -8,6 +8,8 @@ retried on a later turn from where it stopped, never skipped.
 A turn never waits for a reap (D4): each attempt runs in a task the Reconciler
 starts and tracks, at most ``concurrency`` at once, so however many rows a host
 owns and however slowly Docker answers, the loop turn that drives it stays short.
+A turn acquires (takes over, then fences) no more rows than it has free slots,
+so a dead or departed host's rows are shared among live executors (D5).
 """
 
 from __future__ import annotations
@@ -15,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import itertools
 import logging
+import math
 import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -44,8 +47,7 @@ class Reconciler:
 
     Holds only the tasks it started and when each row was last attempted; what
     a row has reached is always read from the row. Every acquiring turn
-    re-reads the ``fencing``/``reaped`` rows this host owns (adopting any whose
-    reconciler has left), so a write that failed before commit, an
+    re-reads the ``fencing``/``reaped`` rows this host owns, so a write that failed before commit, an
     acknowledgment lost after commit, or a reconciler that died part-way are
     all resumed from what the row says, never from memory.
     """
@@ -76,35 +78,52 @@ class Reconciler:
         # is a new host_id, so losing it loses nothing the rows do not say.
         self._in_line: dict[str, int] = {}
         self._ticket = itertools.count(1)
+        self._tried: set[str] = set()
 
     @property
     def idle(self) -> bool:
         """True when no reconciliation task is in flight."""
         return not self._attempts
 
-    async def turn(self, *, acquire: bool) -> None:
-        """Start attempts on owned rows without awaiting them; ``acquire=False`` starts nothing.
+    async def turn(self, *, acquire: bool, deadline: float = math.inf) -> None:
+        """Acquire up to the free slots and start attempts without awaiting them.
 
-        A draining host (D10) fences nothing, adopts nothing and starts no new
-        attempt; the tasks it already started run to their end.
+        ``acquire=False`` (a draining host, D10) reads nothing, fences nothing,
+        takes over nothing and starts no new attempt; the tasks it already
+        started run to their end. No store call starts once the Reconciler's
+        clock has reached ``deadline``: what is left waits for the next turn,
+        so a turn of slow store calls overruns its budget by one call at most.
         """
         self._warn_long_running()
-        if not acquire:
+        if not acquire or self._clock() >= deadline:
             return
-        for run in await self._queue.fence_expired(self._host_id):
-            logger.warning(
-                "Fenced %s: executor %s let its lease expire", run.execution_id, run.executor_id
-            )
-        owned = await self._queue.reconciling(self._host_id)
-        owned_ids = {run.execution_id for run in owned}
+        owned = {run.execution_id: run for run in await self._queue.reconciling(self._host_id)}
+        # Busy is what holds a slot: a task in flight, or a row this host owns
+        # and has never attempted. A row waiting to retry does not, so rows whose
+        # reaps keep failing never stop this host acquiring healthy ones.
+        busy = len(self._attempts) + sum(
+            1 for execution_id in owned if execution_id not in self._tried
+        )
+        free = self._concurrency - busy
+        if free > 0 and self._clock() < deadline:
+            for run in await self._queue.take_over(self._host_id, limit=free):
+                owned[run.execution_id] = run
+                free -= 1
+        if free > 0 and self._clock() < deadline:
+            for run in await self._queue.fence_expired(self._host_id, limit=free):
+                logger.warning(
+                    "Fenced %s: executor %s let its lease expire", run.execution_id, run.executor_id
+                )
+                owned[run.execution_id] = run
+        self._tried &= owned.keys()
         self._in_line = {
             execution_id: self._in_line.get(execution_id) or next(self._ticket)
-            for execution_id in sorted(owned_ids)
+            for execution_id in sorted(owned)
         }
         # Least recently attempted first, so rows whose reaps keep failing
         # never hold up the rows behind them.
         waiting = sorted(
-            (run for run in owned if run.execution_id not in self._attempts),
+            (run for run in owned.values() if run.execution_id not in self._attempts),
             key=lambda run: self._in_line[run.execution_id],
         )
         for run in waiting[: self._concurrency - len(self._attempts)]:
@@ -124,6 +143,7 @@ class Reconciler:
     def _start(self, run: FencedRun) -> None:
         execution_id = run.execution_id
         self._in_line[execution_id] = next(self._ticket)
+        self._tried.add(execution_id)
         task = asyncio.create_task(self._advance_logged(run), name=f"reconcile:{execution_id}")
         self._attempts[execution_id] = _Attempt(task=task, started=self._clock())
         task.add_done_callback(lambda _: self._attempts.pop(execution_id, None))

@@ -246,33 +246,60 @@ class PostgresExecutionRunQueue:
     async def close(self, run: ClaimedRun) -> None:
         await self._release(run.execution_id, run.token, "claimed", "done")
 
-    async def fence_expired(self, reconciler: str) -> list[FencedRun]:
+    async def fence_expired(self, reconciler: str, *, limit: int) -> list[FencedRun]:
+        if limit < 1:
+            return []
         async with self._pool.acquire() as conn:
+            # SKIP LOCKED keeps two fencers from blocking on, or sharing, a row;
+            # the outer predicate is re-checked once the row is locked.
             rows = await conn.fetch(
                 """UPDATE execution_runs r SET state='fencing',lease_token=r.lease_token+1,
                     reconciler=h.host_id, reader_epoch=LEAST(r.reader_epoch,h.epoch)
                 FROM executor_hosts h
                 WHERE h.host_id=$1 AND r.state='claimed' AND r.leased_until<now()
                 AND r.writer_epoch<=h.epoch
+                AND r.execution_id IN (SELECT c.execution_id FROM execution_runs c
+                    WHERE c.state='claimed' AND c.leased_until<now()
+                    AND c.writer_epoch<=(SELECT epoch FROM executor_hosts WHERE host_id=$1)
+                    ORDER BY c.leased_until, c.execution_id
+                    FOR UPDATE OF c SKIP LOCKED LIMIT $2)
                 RETURNING jsonb_build_object('execution_id',r.execution_id,
                     'executor_id',r.executor_id,'reconciler',r.reconciler,
                     'token',r.lease_token)::text AS run""",
                 reconciler,
+                limit,
             )
         return [FencedRun.model_validate_json(row["run"]) for row in rows]
 
-    async def reconciling(self, reconciler: str) -> list[FencedRun]:
-        async with self._pool.acquire() as conn, conn.transaction():
-            # Take over rows whose reconciler has left. The row lock serialises two
-            # adopters; the second re-reads the predicate and finds a live owner.
-            await conn.execute(
+    async def take_over(self, reconciler: str, *, limit: int) -> list[FencedRun]:
+        if limit < 1:
+            return []
+        async with self._pool.acquire() as conn:
+            # Take over rows whose reconciler has left. SKIP LOCKED keeps two
+            # adopters apart; the outer predicate is re-checked after the lock,
+            # so a second adopter finds a live owner and takes nothing.
+            rows = await conn.fetch(
                 """UPDATE execution_runs r SET reconciler=me.host_id,lease_token=r.lease_token+1
                 FROM executor_hosts me
                 WHERE me.host_id=$1 AND r.state IN ('fencing','reaped')
                 AND r.reconciler IS DISTINCT FROM me.host_id AND r.writer_epoch<=me.epoch
-                AND NOT EXISTS (SELECT 1 FROM executor_hosts h WHERE h.host_id=r.reconciler)""",
+                AND NOT EXISTS (SELECT 1 FROM executor_hosts h WHERE h.host_id=r.reconciler)
+                AND r.execution_id IN (SELECT o.execution_id FROM execution_runs o
+                    WHERE o.state IN ('fencing','reaped') AND o.reconciler IS DISTINCT FROM $1
+                    AND o.writer_epoch<=(SELECT epoch FROM executor_hosts WHERE host_id=$1)
+                    AND NOT EXISTS (SELECT 1 FROM executor_hosts h WHERE h.host_id=o.reconciler)
+                    ORDER BY o.leased_until, o.execution_id
+                    FOR UPDATE OF o SKIP LOCKED LIMIT $2)
+                RETURNING jsonb_build_object('execution_id',r.execution_id,
+                    'executor_id',r.executor_id,'reconciler',r.reconciler,
+                    'token',r.lease_token,'reaped',r.state='reaped')::text AS run""",
                 reconciler,
+                limit,
             )
+        return [FencedRun.model_validate_json(row["run"]) for row in rows]
+
+    async def reconciling(self, reconciler: str) -> list[FencedRun]:
+        async with self._pool.acquire() as conn:
             rows = await conn.fetch(
                 """SELECT jsonb_build_object('execution_id',execution_id,
                     'executor_id',executor_id,'reconciler',reconciler,
