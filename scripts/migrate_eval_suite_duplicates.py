@@ -15,8 +15,8 @@ each create one. For each case this script:
    ``case:<id>`` and any version tag of the suite (current or ``history``),
 3. moves each duplicate's runs into the stable eval (detach, then attach;
    attach never copies a baseline, so a duplicate that pins another commit
-   is skipped and reported, never folded, and so is a case whose stable eval
-   pins another commit),
+   is skipped and reported, never folded, and so is a case any of whose stable
+   evals pins another commit),
 4. archives the duplicate once it has no runs left. Archive is a soft delete:
    its events remain.
 
@@ -207,15 +207,23 @@ def migrate(
     for case in loaded.cases:
         keep = str(EvalId.for_key(stable_key(loaded, case)))
         tagged = _case_evals(client, loaded, case)
+        moved = next(
+            (
+                ev
+                for ev in tagged
+                if [(b.repository, b.commit_sha) for b in ev.baseline_repos]
+                != [(s.repository, case.commit)]
+            ),
+            None,
+        )
+        if moved is not None:
+            moved_pin = [(b.repository, b.commit_sha) for b in moved.baseline_repos]
+            out.append(
+                f"{case.id}: SKIP, stable eval {moved.eval_id} pins {moved_pin}, "
+                f"the case pins {case.commit[:12]}"
+            )
+            continue
         stable = [ev for ev in tagged if ev.eval_id == keep]
-        if stable:
-            stable_pin = [(b.repository, b.commit_sha) for b in stable[0].baseline_repos]
-            if stable_pin != [(s.repository, case.commit)]:
-                out.append(
-                    f"{case.id}: SKIP, stable eval {keep} pins {stable_pin}, "
-                    f"the case pins {case.commit[:12]}"
-                )
-                continue
         found = {ev.eval_id: ev for ev in tagged if ev.eval_id != keep}
         found.update({ev.eval_id: ev for ev in _duplicates(client, loaded, case, keep)})
         duplicates = [found[k] for k in sorted(found)]

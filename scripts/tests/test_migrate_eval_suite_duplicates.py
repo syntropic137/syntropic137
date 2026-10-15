@@ -11,12 +11,16 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from eval_suite import DEFAULT_SUITE, load_suite
+from eval_suite import DEFAULT_SUITE, load_suite, stable_key
 from migrate_eval_suite_duplicates import migrate
+
+from syn_domain.contexts.orchestration.domain.aggregate_eval.value_objects import EvalId
 
 _LOADED = load_suite(DEFAULT_SUITE)
 _CASE = _LOADED.cases[0]
 _V1 = _LOADED.suite.history[0].tag
+_KEYED = str(EvalId.for_key(stable_key(_LOADED, _CASE)))
+"""The id the server derives from the case's stable key (#1920)."""
 
 
 def _eval(eval_id: str, tags: list[str], pin: str) -> dict[str, object]:
@@ -51,10 +55,14 @@ class _Api:
             found = [e for e in self.evals.values() if tags <= set(e["tags"])]  # type: ignore[arg-type]
             return httpx.Response(200, json={"evals": found, "total": len(found)})
         if method == "POST" and path == "/evals":
+            # As the server does: the id is derived from the key, and a second
+            # create of it answers with the first (#1920).
             body = json.loads(request.content)
-            self.evals["stable"] = _eval("stable", body["tags"], _CASE.commit)
-            self.members["stable"] = []
-            return httpx.Response(201, json=self.evals["stable"])
+            eval_id = str(EvalId.for_key(body["stable_key"]))
+            if eval_id not in self.evals:
+                self.evals[eval_id] = _eval(eval_id, body["tags"], _CASE.commit)
+                self.members[eval_id] = []
+            return httpx.Response(201, json=self.evals[eval_id])
         if method == "GET" and path.startswith("/executions/"):
             rid = path.split("/")[2]
             owner = next((e for e, runs in self.members.items() if rid in runs), None)
@@ -92,7 +100,7 @@ def test_dry_run_changes_nothing_and_says_what_it_would_do() -> None:
 
     assert api.writes == []
     assert f"{_CASE.id}: would archive dup-a" in lines
-    assert f"{_CASE.id}: would move run run-2 dup-b -> <new>" in lines
+    assert f"{_CASE.id}: would move run run-2 dup-b -> {_KEYED}" in lines
 
 
 @pytest.mark.unit
@@ -101,9 +109,9 @@ def test_duplicates_fold_into_one_stable_eval_and_are_archived(tmp_path: Path) -
 
     migrate(_LOADED, api.client(), dry_run=False, journal=tmp_path / "journal.jsonl")
 
-    assert set(api.evals) == {"stable"}
-    assert api.evals["stable"]["tags"] == [_LOADED.suite.suite_tag, _CASE.tag]
-    assert sorted(api.members["stable"]) == ["run-1", "run-2"]
+    assert set(api.evals) == {_KEYED}
+    assert api.evals[_KEYED]["tags"] == [_LOADED.suite.suite_tag, _CASE.tag]
+    assert sorted(api.members[_KEYED]) == ["run-1", "run-2"]
     assert migrate(_LOADED, api.client(), dry_run=True) == []
 
 
@@ -129,9 +137,9 @@ def test_a_move_cut_between_detach_and_attach_is_finished_on_the_next_run(
 
     lines = migrate(_LOADED, api.client(), dry_run=False, journal=journal)
 
-    assert "recover: attach run-1 -> stable" in lines
-    assert set(api.evals) == {"stable"}
-    assert sorted(api.members["stable"]) == ["run-1", "run-2"]
+    assert f"recover: attach run-1 -> {_KEYED}" in lines
+    assert set(api.evals) == {_KEYED}
+    assert sorted(api.members[_KEYED]) == ["run-1", "run-2"]
 
 
 @pytest.mark.unit
@@ -156,9 +164,28 @@ def test_recovery_never_attaches_into_a_target_whose_baseline_moved(tmp_path: Pa
     api.fail_attach = 1
     with pytest.raises(RuntimeError, match="attach run-1"):
         migrate(_LOADED, api.client(), dry_run=False, journal=journal)
-    api.evals["stable"] = _eval("stable", [_LOADED.suite.suite_tag, _CASE.tag], "e" * 40)
+    api.evals[_KEYED] = _eval(_KEYED, [_LOADED.suite.suite_tag, _CASE.tag], "e" * 40)
 
     with pytest.raises(RuntimeError, match="now pins"):
         migrate(_LOADED, api.client(), dry_run=False, journal=journal)
 
     assert all("run-1" not in runs for runs in api.members.values())
+
+
+@pytest.mark.unit
+def test_a_raced_pair_of_stable_evals_folds_into_the_keyed_one(tmp_path: Path) -> None:
+    """Two launches before #1920 each created the case's eval under a random id."""
+    api = _Api()
+    tags = [_LOADED.suite.suite_tag, _CASE.tag]
+    api.evals = {
+        "eval-be5021e1": _eval("eval-be5021e1", tags, _CASE.commit),
+        "eval-c956828e": _eval("eval-c956828e", tags, _CASE.commit),
+    }
+    api.members = {"eval-be5021e1": ["run-1"], "eval-c956828e": ["run-2"]}
+
+    lines = migrate(_LOADED, api.client(), dry_run=False, journal=tmp_path / "journal.jsonl")
+
+    assert not any("SKIP" in line for line in lines), lines
+    assert set(api.evals) == {_KEYED}
+    assert sorted(api.members[_KEYED]) == ["run-1", "run-2"]
+    assert migrate(_LOADED, api.client(), dry_run=True) == []
