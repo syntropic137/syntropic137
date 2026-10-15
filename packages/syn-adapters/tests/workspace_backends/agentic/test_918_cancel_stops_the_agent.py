@@ -66,13 +66,16 @@ class SignalIgnoringOperations(InMemoryAdapter):
     """An operation that keeps producing output until the provider cancels it.
 
     ``cancel`` is the provider's escalation (TERM, KILL, container stop), so it
-    is the only thing that ends this workload. ``still_running_after_cancel``
-    models a provider that could not confirm the stop.
+    is the only thing that ends this workload. ``state_after_cancel`` models a
+    provider that could not confirm the stop: still ``running``, or the
+    terminal ``failed`` AW settles an unconfirmed cancel into.
     """
 
-    def __init__(self, *, still_running_after_cancel: bool = False) -> None:
+    def __init__(self, *, state_after_cancel: str = "cancelled", quiet: bool = False) -> None:
         super().__init__()
-        self._still_running = still_running_after_cancel
+        self._state_after_cancel = state_after_cancel
+        self._quiet = quiet
+        self.spoke = asyncio.Event()
         self.state = "running"
         self.cancels: list[tuple[str, float]] = []
 
@@ -84,6 +87,21 @@ class SignalIgnoringOperations(InMemoryAdapter):
     ) -> ObservationPage:
         index = int(cursor or 0)
         complete = self.state != "running"
+        if self._quiet and index > 0 and not complete:
+            # Says one line, then nothing: the provider's long poll comes back
+            # empty, as the real one does after ``wait_seconds``.
+            self.spoke.set()
+            await asyncio.sleep(min(wait_seconds, 0.01))
+            return ObservationPage(
+                schema=MISSING,
+                ref=ref,
+                state="running",
+                cursor=str(index),
+                next_cursor=str(index),
+                data_b64="",
+                gap=MISSING,
+                complete=False,
+            )
         return ObservationPage(
             schema=MISSING,
             ref=ref,
@@ -111,8 +129,7 @@ class SignalIgnoringOperations(InMemoryAdapter):
 
     async def cancel(self, ref: OperationRef, *, grace_seconds: float) -> OperationStatus:
         self.cancels.append((ref.operation_id, grace_seconds))
-        if not self._still_running:
-            self.state = "cancelled"
+        self.state = self._state_after_cancel
         return await self.status(ref)
 
 
@@ -139,6 +156,23 @@ class _CancellingController:
         )
 
 
+class _UserCancelsLater:
+    """No signal until ``cancel()``; then CANCEL with no reason, as the API sends it."""
+
+    def __init__(self) -> None:
+        self.pending = False
+        self.polls = 0
+
+    def cancel(self) -> None:
+        self.pending = True
+
+    async def check_signal(self, execution_id: str) -> ControlSignal | None:
+        self.polls += 1
+        if not self.pending:
+            return None
+        return ControlSignal(signal_type=ControlSignalType.CANCEL, execution_id=execution_id)
+
+
 def _workspace(ops: SignalIgnoringOperations) -> ManagedWorkspace:
     service = MagicMock()
     service._event_stream = AgenticEventStreamAdapter(_Host(ops))  # type: ignore[arg-type]
@@ -152,12 +186,12 @@ def _workspace(ops: SignalIgnoringOperations) -> ManagedWorkspace:
     )
 
 
-def _processor() -> EventStreamProcessor:
+def _processor(controller: object | None = None) -> EventStreamProcessor:
     return EventStreamProcessor(
         tokens=TokenAccumulator(),
         subagents=SubagentTracker(),
         observability=None,
-        controller=_CancellingController(),  # type: ignore[arg-type]
+        controller=controller or _CancellingController(),  # type: ignore[arg-type]
         execution_id="exec-918",
         phase_id="phase-1",
         session_id="s-918",
@@ -183,10 +217,48 @@ async def test_a_cancel_stops_an_agent_that_ignores_its_signals() -> None:
         await stream.aclose()  # type: ignore[attr-defined]
 
 
+async def test_a_cancel_stops_an_agent_that_has_gone_quiet() -> None:
+    """The verifier's B1 shape: one line, then silence, then a reasonless CANCEL.
+
+    With polling tied to output, no further line meant no further poll at any
+    elapsed time. The bound asserted is the poll interval plus slack, and the
+    outer timeout only fails the test; it is not what stops the agent.
+    """
+    ops = SignalIgnoringOperations(quiet=True)
+    workspace = _workspace(ops)
+    controller = _UserCancelsLater()
+    processor = _processor(controller)
+    processor._cancel_poller.poll_seconds = 0.05
+    stream: AsyncIterator[str] = workspace.stream(["claude", "-p", "x"])
+    try:
+        task = asyncio.create_task(processor.process_stream(stream, workspace))
+        async with asyncio.timeout(5):
+            await ops.spoke.wait()
+            await asyncio.sleep(0.2)  # well past a poll: it is quiet, not stopped
+            assert not task.done()
+            assert ops.state == "running"
+            controller.cancel()
+            cancelled_at = asyncio.get_running_loop().time()
+            result = await task
+        took = asyncio.get_running_loop().time() - cancelled_at
+
+        assert result.interrupt_requested
+        assert result.interrupt_reason is None
+        assert result.line_count == 1
+        # First from interrupt(); closing the abandoned read may cancel again,
+        # which the provider answers idempotently.
+        assert ops.cancels[0] == ("op-918", 5.0)
+        assert ops.state == "cancelled"
+        assert took < 1.0, f"cancel took {took:.2f}s against a 0.05s poll"
+    finally:
+        await stream.aclose()  # type: ignore[attr-defined]
+
+
+@pytest.mark.parametrize("state_after_cancel", ["running", "failed"])
 async def test_interrupt_reports_a_stop_the_provider_could_not_confirm(
-    caplog: pytest.LogCaptureFixture,
+    state_after_cancel: str, caplog: pytest.LogCaptureFixture
 ) -> None:
-    ops = SignalIgnoringOperations(still_running_after_cancel=True)
+    ops = SignalIgnoringOperations(state_after_cancel=state_after_cancel)
     workspace = _workspace(ops)
     stream = workspace.stream(["claude"])
     try:
@@ -194,7 +266,7 @@ async def test_interrupt_reports_a_stop_the_provider_could_not_confirm(
         with caplog.at_level(logging.ERROR):
             assert await workspace.interrupt() is False
         assert ops.cancels, "the provider was asked"
-        assert "still running" in caplog.text
+        assert "not confirmed stopped" in caplog.text
     finally:
         await stream.aclose()  # type: ignore[attr-defined]
 

@@ -50,6 +50,7 @@ which assumed ``item.item.id``): ``item`` fields live directly under the
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import time
@@ -62,6 +63,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.announced_model i
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.CancelSignalPoller import (
     CancelSignalPoller,
+    with_idle_ticks,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.codex_faults import (
     codex_fault_reason,
@@ -430,6 +432,15 @@ class CodexStreamProcessor:
         finally:
             await self._held_rows.flush(self._announced_model, raise_errors=False)
 
+    async def _poll_while_quiet(
+        self, line_count: int, workspace: InterruptibleWorkspace
+    ) -> tuple[bool, str | None]:
+        """No output for a while: ask about CANCEL anyway (#918)."""
+        poll = await self._cancel_poller.poll(line_count)
+        if poll.should_interrupt:
+            await workspace.interrupt()
+        return poll.should_interrupt, poll.reason
+
     async def _step(
         self, line: str, line_count: int, workspace: InterruptibleWorkspace
     ) -> tuple[bool, str | None]:
@@ -466,14 +477,23 @@ class CodexStreamProcessor:
         interrupt_requested = False
         interrupt_reason: str | None = None
 
-        async for line in stream:
-            line_count += 1
-            if line.strip():
-                conversation_lines.append(line)
-
-            interrupt_requested, interrupt_reason = await self._step(line, line_count, workspace)
-            if interrupt_requested:
-                break
+        # Silence wakes the loop too, so a quiet agent is still cancellable (#918).
+        ticks = with_idle_ticks(stream, self._cancel_poller.poll_seconds)
+        async with contextlib.aclosing(ticks) as lines:
+            async for line in lines:
+                if line is None:
+                    interrupt_requested, interrupt_reason = await self._poll_while_quiet(
+                        line_count, workspace
+                    )
+                else:
+                    line_count += 1
+                    if line.strip():
+                        conversation_lines.append(line)
+                    interrupt_requested, interrupt_reason = await self._step(
+                        line, line_count, workspace
+                    )
+                if interrupt_requested:
+                    break
 
         if not self._totals.saw_terminal_turn:
             # THE single place `_error_reason` is decided. Nothing mid-stream

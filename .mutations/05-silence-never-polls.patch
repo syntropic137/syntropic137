@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/CancelSignalPoller.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/CancelSignalPoller.py
+index a05605f9c..9013b4d27 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/CancelSignalPoller.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/CancelSignalPoller.py
+@@ -110,7 +110,7 @@ async def with_idle_ticks(
+                 pending = asyncio.ensure_future(anext(lines))
+             done, _ = await asyncio.wait({pending}, timeout=every_seconds)
+             if not done:
+-                yield None
++                pass  # MUTATION: silence never wakes the reader
+                 continue
+             read, pending = pending, None
+             try:

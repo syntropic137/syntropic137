@@ -54,14 +54,17 @@ if TYPE_CHECKING:
 IMAGE = os.environ.get("SYN_CONTRACT_TEST_IMAGE", "busybox:1.36")
 _MARKER = "syn-918-ignores-signals"
 #: The provider's grace (5s), its KILL wait (2s), a container stop and the
-#: first cancel poll, with room for a slow runner. Unbounded is the defect.
+#: next cancel poll (2s), with room for a slow runner. Unbounded is the defect.
 _BOUND_SECONDS = 45
+#: Long enough past the first line for several polls to find nothing.
+_QUIET_SECONDS = 8
 
 # `trap "" INT TERM` ignores both, and the ignore is inherited by `sleep`.
 _WORKLOAD = [
     "sh",
     "-c",
-    'trap "" INT TERM; while :; do echo \'{"type":"system","subtype":"tick"}\'; sleep 0.1; done',
+    # One line, then silence: a poll tied to output would never run again (#918 B1).
+    'trap "" INT TERM; echo \'{"type":"system","subtype":"init"}\'; while :; do sleep 0.1; done',
     _MARKER,
 ]
 
@@ -86,11 +89,19 @@ class _Host:
         return self._workspace
 
 
-class _CancellingController:
-    async def check_signal(self, execution_id: str) -> ControlSignal:
-        return ControlSignal(
-            signal_type=ControlSignalType.CANCEL, execution_id=execution_id, reason="user cancel"
-        )
+class _UserCancelsLater:
+    """No signal until ``cancel()``; then CANCEL with no reason, as the API sends it."""
+
+    def __init__(self) -> None:
+        self.pending = False
+
+    def cancel(self) -> None:
+        self.pending = True
+
+    async def check_signal(self, execution_id: str) -> ControlSignal | None:
+        if not self.pending:
+            return None
+        return ControlSignal(signal_type=ControlSignalType.CANCEL, execution_id=execution_id)
 
 
 def _container_exists(container: str) -> bool:
@@ -126,11 +137,12 @@ async def test_a_cancel_stops_an_agent_that_ignores_its_signals(tmp_path: Path) 
             sidecar_handle=None,
             _service=service,
         )
+        controller = _UserCancelsLater()
         processor = EventStreamProcessor(
             tokens=TokenAccumulator(),
             subagents=SubagentTracker(),
             observability=None,
-            controller=_CancellingController(),  # type: ignore[arg-type]
+            controller=controller,  # type: ignore[arg-type]
             execution_id="exec-918",
             phase_id="phase-1",
             session_id="s-918",
@@ -139,13 +151,20 @@ async def test_a_cancel_stops_an_agent_that_ignores_its_signals(tmp_path: Path) 
         )
         stream = managed.stream(_WORKLOAD, timeout_seconds=600)
         try:
+            task = asyncio.create_task(processor.process_stream(stream, managed))
+            # Let it start, speak, and go quiet before the user cancels.
+            await asyncio.sleep(_QUIET_SECONDS)
+            assert not task.done(), "the workload ended before it was cancelled"
+            controller.cancel()
             started = time.monotonic()
-            async with asyncio.timeout(_BOUND_SECONDS):
-                result = await processor.process_stream(stream, managed)
+            # The timeout only fails the test; the stop must come from cancel.
+            async with asyncio.timeout(_BOUND_SECONDS * 2):
+                result = await task
             elapsed = time.monotonic() - started
 
             assert result.interrupt_requested
-            assert elapsed < _BOUND_SECONDS
+            assert result.interrupt_reason is None
+            assert elapsed < _BOUND_SECONDS, f"cancel took {elapsed:.1f}s"
             ps = await provider.execute(workspace, "ps -o args", timeout=30)
             assert _MARKER not in ps.stdout, f"the agent outlived its cancel:\n{ps.stdout}"
         finally:

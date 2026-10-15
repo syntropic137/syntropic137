@@ -67,6 +67,11 @@ _OBSERVE_WAIT_SECONDS = 1.0
 #: Given to the operation to exit on its own when it is cancelled - by an
 #: interrupt, or because the reader stopped early - before the provider KILLs it.
 _CANCEL_GRACE_SECONDS = 5.0
+#: What a cancel answer must say for the process to be known over. ``failed``
+#: is not among them: after a cancel it is how the provider reports a stop it
+#: could not confirm (the container may still be running), so it is never read
+#: as stopped (#918).
+_STOPPED_STATES = TERMINAL_STATES - {"failed"}
 
 _CONTAINER_WORKSPACE = "/workspace"
 
@@ -318,9 +323,12 @@ class AgenticEventStreamAdapter:
                 ref.operation_id,
             )
             return False
-        if status.state not in TERMINAL_STATES:
+        if status.state not in _STOPPED_STATES:
             logger.error(
-                "Cancelled stream operation %s is still %s", ref.operation_id, status.state
+                "Cancelled stream operation %s is %s, not confirmed stopped: "
+                "the agent may still be running",
+                ref.operation_id,
+                status.state,
             )
             return False
         logger.info("Stream operation %s cancelled (%s)", ref.operation_id, status.state)

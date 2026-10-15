@@ -9,6 +9,7 @@ Refactored in ISS-196 to delegate telemetry to ObservabilityCollector (Lane 2).
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 from collections.abc import Mapping
@@ -24,6 +25,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.announced_model i
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.CancelSignalPoller import (
     CancelSignalPoller,
+    with_idle_ticks,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.EmbeddedEventScanner import (
     EmbeddedEventScanner,
@@ -521,15 +523,26 @@ class EventStreamProcessor:
         interrupt_requested = False
         interrupt_reason: str | None = None
 
-        async for line in stream:
-            line_count += 1
-            outcome = await self._process_line(line, line_count, workspace)
-            if line.strip():
-                conversation_lines.append(line)
-            if outcome.action is _LineAction.BREAK:
-                interrupt_requested = outcome.interrupt_requested
-                interrupt_reason = outcome.interrupt_reason
-                break
+        # A quiet agent must still be cancellable, so silence wakes the loop
+        # too (#918); closing the ticks on break cancels the waiting read.
+        ticks = with_idle_ticks(stream, self._cancel_poller.poll_seconds)
+        async with contextlib.aclosing(ticks) as lines:
+            async for line in lines:
+                if line is None:
+                    poll = await self._cancel_poller.poll(line_count)
+                    if poll.should_interrupt:
+                        await workspace.interrupt()
+                        interrupt_requested, interrupt_reason = True, poll.reason
+                        break
+                    continue
+                line_count += 1
+                outcome = await self._process_line(line, line_count, workspace)
+                if line.strip():
+                    conversation_lines.append(line)
+                if outcome.action is _LineAction.BREAK:
+                    interrupt_requested = outcome.interrupt_requested
+                    interrupt_reason = outcome.interrupt_reason
+                    break
 
         # Read from what the agent SAID, not only from the terminal `result`
         # line: a phase that was killed or timed out after stating its verdict
