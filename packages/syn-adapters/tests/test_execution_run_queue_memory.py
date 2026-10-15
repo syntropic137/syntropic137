@@ -135,6 +135,30 @@ async def test_reconciling_adopts_only_from_a_reconciler_that_left_and_a_restart
     assert await queue.reconciling("rec-2") == []
 
 
+async def test_fencing_and_takeover_are_bounded_and_oldest_first() -> None:
+    """D5: a reconciler acquires no more rows than its free slots, oldest lease first."""
+    clock = _Clock()
+    queue = await _queue_with(clock, 5, "e0", "e1", "e2", "e3", "e4")
+    for _ in range(5):
+        assert await queue.claim("h1") is not None  # claimed one second apart
+        clock.now += timedelta(seconds=1)
+    for host in ("rec-1", "rec-2", "rec-3"):
+        await queue.register(_host(host), 1)
+    clock.now += timedelta(minutes=5)
+
+    first = await queue.fence_expired("rec-1", limit=2)
+    assert sorted(run.execution_id for run in first) == ["e0", "e1"]
+    rest = await queue.fence_expired("rec-2", limit=10)
+    assert sorted(run.execution_id for run in rest) == ["e2", "e3", "e4"]
+    assert await queue.reconciling("rec-3") == []
+
+    assert await queue.take_over("rec-3", limit=2) == []  # rec-2 is still registered
+    await queue.deregister("rec-2")
+    taken = await queue.take_over("rec-3", limit=2)
+    assert sorted(run.execution_id for run in taken) == ["e2", "e3"]
+    assert [run.execution_id for run in await queue.reconciling("rec-3")] == ["e2", "e3"]
+
+
 async def test_a_restart_moves_the_machine_budget_one_release_at_a_time() -> None:
     """Mirrors the Postgres D3 restart rule: summed capacity never changes."""
     clock = _Clock()

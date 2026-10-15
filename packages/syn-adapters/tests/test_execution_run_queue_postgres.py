@@ -819,7 +819,7 @@ async def test_upgrading_a_pre_pool_schema_keeps_rows_assigns_default_and_drops_
     await queue.register(_host("new"), 1)
 
 
-async def test_fencing_is_bounded_oldest_first_and_concurrent_fencers_never_share_a_row(
+async def test_fencing_is_bounded_and_concurrent_fencers_never_share_a_row(
     pools: list[asyncpg.Pool],
 ) -> None:
     """D5: a reconciler acquires no more than its free slots, so expired rows are shared."""
