@@ -1,0 +1,13 @@
+diff --git a/apps/syn-api/src/syn_api/routes/evals.py b/apps/syn-api/src/syn_api/routes/evals.py
+index a2ea6c63d..95f70f49d 100644
+--- a/apps/syn-api/src/syn_api/routes/evals.py
++++ b/apps/syn-api/src/syn_api/routes/evals.py
+@@ -303,7 +303,7 @@ async def create_eval_endpoint(body: CreateEvalRequest) -> EvalCreatedResponse:
+     except ValidationError as exc:
+         raise HTTPException(status_code=422, detail=exc.errors()[0]["msg"]) from exc
+     await ensure_connected()
+-    eval_id = EvalId.new() if body.stable_key is None else EvalId.for_key(body.stable_key)
++    eval_id = EvalId.new()
+     repository = get_eval_repo()
+     handler = CreateEvalHandler(repository, get_revision_resolver(), get_publisher())
+     result = await handler.handle(

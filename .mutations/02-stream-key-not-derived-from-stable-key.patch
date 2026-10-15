@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_eval/value_objects.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_eval/value_objects.py
+index ecc9759fc..95f73ab27 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_eval/value_objects.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_eval/value_objects.py
+@@ -56,7 +56,7 @@ class EvalId(RootModel[str]):
+         """
+         if not key:
+             raise ValueError("a stable eval key must not be empty")
+-        return cls(f"eval-{hashlib.sha256(key.encode('utf-8')).hexdigest()[:32]}")
++        return cls.new()
+ 
+     @classmethod
+     def recorded(cls, value: str) -> Self:

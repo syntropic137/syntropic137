@@ -1,0 +1,21 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/create_eval/CreateEvalHandler.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/create_eval/CreateEvalHandler.py
+index 8825f1cff..455590328 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/create_eval/CreateEvalHandler.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/create_eval/CreateEvalHandler.py
+@@ -111,15 +111,7 @@ class CreateEvalHandler:
+             return HandlerResult(success=False, error=str(e))
+         events = aggregate.get_uncommitted_events()
+ 
+-        try:
+-            await self._repository.save_new(aggregate)
+-        except StreamAlreadyExistsError:
+-            logger.info("Concurrent eval create collision", extra={"eval_id": str(eval_id)})
+-            winner = await self._repository.get_by_id(command.aggregate_id)
+-            if winner is None:
+-                msg = f"StreamAlreadyExistsError for eval {eval_id} but it cannot be loaded"
+-                raise RuntimeError(msg) from None
+-            return _retry_or_conflict(winner, request, command.aggregate_id)
++        await self._repository.save(aggregate)
+ 
+         if self._event_publisher is not None:
+             await self._event_publisher.publish(events)
