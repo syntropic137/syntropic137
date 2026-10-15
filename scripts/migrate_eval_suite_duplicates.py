@@ -66,7 +66,6 @@ from eval_suite import (
 )
 
 from syn_domain.contexts.orchestration.domain.aggregate_eval.value_objects import EvalId
-
 from syn_shared.settings.dev_tooling import get_dev_api_url
 
 

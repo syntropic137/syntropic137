@@ -50,10 +50,10 @@ from eval_suite import (
     read_launches,
     render,
     run_verdict,
-    stable_key,
     score_case,
     score_report,
     score_suite,
+    stable_key,
     verdict_mismatch,
     versions_run,
 )
