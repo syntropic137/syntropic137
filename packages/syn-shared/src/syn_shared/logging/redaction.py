@@ -51,9 +51,11 @@ _API_KEY: Final = re.compile(r"(?<![A-Za-z0-9_-])sk-[A-Za-z0-9_-]{16,}")
 #: The value assigned to a named agent credential, in env (``K=v``), YAML
 #: (``K: v``) or JSON (``"K": "v"``) form. Catches a key with no ``sk-`` prefix,
 #: such as the API-key auth.json synthesised for codex echoed back by a script.
+#: Only horizontal whitespace around the separator: ``\s`` would let an empty
+#: assignment (``K=`` then a newline) swallow the next line of output.
 _NAMED_CREDENTIAL: Final = re.compile(
     r"(?P<name>(?<![A-Za-z0-9_])(?:OPENAI_API_KEY|ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN)"
-    r"[\"']?\s*[:=]\s*[\"']?)(?!\*\*\*)[^\s\"',}]+"
+    r"[\"']?[ \t]*[:=][ \t]*[\"']?)(?!\*\*\*)[^\s\"',}]+"
 )
 
 _INSTALLED_ATTR: Final = "_syn_credential_redaction"

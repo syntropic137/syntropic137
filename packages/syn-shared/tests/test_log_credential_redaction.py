@@ -156,6 +156,15 @@ def test_ordinary_text_is_untouched() -> None:
     assert redact_credentials(text) == text
 
 
+def test_an_empty_assignment_does_not_swallow_the_next_line() -> None:
+    """``K=`` with no value must not mask the following line (#1972 review)."""
+    for text in (
+        "OPENAI_API_KEY=\nENOENT:/workspace/repo/package.json\n",
+        "OPENAI_API_KEY:\nENOENT:/workspace/repo/package.json\n",
+    ):
+        assert redact_credentials(text) == text
+
+
 def test_workspace_redaction_masks_the_whole_key() -> None:
     """The container-side patterns had the same underscore gap (#1971 review)."""
     from syn_shared.settings.workspace_security import ContainerLoggingSettings
