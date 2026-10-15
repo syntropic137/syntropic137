@@ -720,7 +720,11 @@ export interface paths {
         put?: never;
         /**
          * Create Eval Endpoint
-         * @description Create an eval, pinning each baseline ref to a commit SHA. The id is minted here.
+         * @description Create an eval, pinning each baseline ref to a commit SHA.
+         *
+         *     The id is minted here, or derived from `stable_key`. A derived id is one
+         *     stream however many creators race for it: the store admits the first and
+         *     the rest answer with that eval (#1920).
          */
         post: operations["create_eval_endpoint_evals_post"];
         delete?: never;
@@ -3338,9 +3342,14 @@ export interface components {
         };
         /**
          * CreateEvalRequest
-         * @description A new eval (#967). The server mints its id; see `EvalCreatedResponse`.
+         * @description A new eval (#967). The server mints its id unless `stable_key` names one.
          */
         CreateEvalRequest: {
+            /**
+             * Stable Key
+             * @description Makes the create idempotent (#1920): the eval id is derived from this key, so every create with the same key, concurrent ones included, answers with the one eval. A create that differs from the one that made it is refused.
+             */
+            stable_key?: string | null;
             /** Name */
             name: string;
             /**

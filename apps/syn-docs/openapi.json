@@ -2435,7 +2435,7 @@
           "evals"
         ],
         "summary": "Create Eval Endpoint",
-        "description": "Create an eval, pinning each baseline ref to a commit SHA. The id is minted here.",
+        "description": "Create an eval, pinning each baseline ref to a commit SHA.\n\nThe id is minted here, or derived from `stable_key`. A derived id is one\nstream however many creators race for it: the store admits the first and\nthe rest answer with that eval (#1920).",
         "operationId": "create_eval_endpoint_evals_post",
         "requestBody": {
           "required": true,
@@ -9888,6 +9888,20 @@
       },
       "CreateEvalRequest": {
         "properties": {
+          "stable_key": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 1000,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stable Key",
+            "description": "Makes the create idempotent (#1920): the eval id is derived from this key, so every create with the same key, concurrent ones included, answers with the one eval. A create that differs from the one that made it is refused."
+          },
           "name": {
             "type": "string",
             "maxLength": 200,
@@ -9935,7 +9949,7 @@
           "goal"
         ],
         "title": "CreateEvalRequest",
-        "description": "A new eval (#967). The server mints its id; see `EvalCreatedResponse`."
+        "description": "A new eval (#967). The server mints its id unless `stable_key` names one."
       },
       "CreateOrganizationRequest": {
         "properties": {

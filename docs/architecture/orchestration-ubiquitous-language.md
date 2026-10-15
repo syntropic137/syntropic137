@@ -931,9 +931,17 @@ it loses nothing.
 
 An experiment: a Goal, measured by runs that all start from the same Repository
 Baseline. Recorded as its own event stream, the Eval aggregate, identified by an
-Eval id (`eval-` plus a uuid when the caller supplies none). Its name and tags
+Eval id (`eval-` plus a uuid when the caller supplies none, or derived from a
+Stable Key). Its name and tags
 describe it and stay editable for its whole life. Its Goal and Baseline are what
 it measures, and Freezing fixes them.
+
+A **Stable Key** names one Eval to every caller that holds it: the Eval id is
+derived from it (`EvalId.for_key`), so every create with the same key writes the
+same stream, and the event store admits only the first. A later or concurrent
+create with the key gets that Eval back, or is refused if it asks for a
+different one. `eval_suite` keys each case's Eval by its suite and case tags, so
+overlapping launches cannot split a case across two Evals. (#1920)
 
 An Eval does not list its runs. An Execution records which Eval it belongs to,
 so attaching a run is one write to the Execution and the Eval's stream does not
