@@ -289,6 +289,11 @@ class WorkspaceUsage:
     nr_throttled: int | None = None
     memory_peak_bytes: int | None = None
     oom_kills: int | None = None
+    #: True when the provider saw an OOM kill from any source: `oom_kills > 0`
+    #: or Docker's `State.OOMKilled`. Kept beside the count because Docker can
+    #: know of a kill when the cgroup counters could not be read. None is
+    #: "not measured", never "not killed"; an exit 137 alone does not set it.
+    oom_killed: bool | None = None
     disk_bytes_at_teardown: int | None = None
     #: Paths the workspace-dir delete could not remove. None when the delete
     #: was not observed; () when it was, and removed everything.

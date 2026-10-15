@@ -79,9 +79,11 @@ money.
 
 What a Phase of one type usually uses, read over every Phase of a Workflow in a
 window (#1716): per model, p50/p90 input, output, cache-write and cache-read
-tokens and cost; per Phase, p50/p95 CPU-seconds per wall-second, throttled
-seconds, memory peak and disk at teardown, each with the `n` it stands on and
-coverage counts for Phases that recorded no usage. A "phase type" is a Phase id:
+tokens and cost; per Phase, p50/p90/p95 CPU-seconds, wall-seconds, CPU-seconds
+per wall-second, throttled seconds, memory peak and disk at teardown, each with
+the `n` it stands on and coverage counts for Phases that recorded no usage; and
+how many Phases were [OOM-killed](#oom-killed), were not, or are unknown, with
+every OOM-killed Phase named by Execution and its memory peak. A "phase type" is a Phase id:
 every Execution of a Workflow runs the same Phase definitions. Lane 2 only:
 read from observations, never from an aggregate. Below ten Phases a percentile
 reads `insufficient`. Sizes the capacity model and the
@@ -1182,6 +1184,16 @@ failed measurement or write never fails a Phase. Each field is independently
 unknown rather than zero when its read failed. A Phase retried after a failed
 attempt held one workspace per attempt, so it has one usage per attempt. It
 exists to size the platform against `docs/north-star.md`.
+
+## OOM-killed
+
+A Phase whose workspace the kernel killed for memory, as the provider measured
+it (`WorkspaceUsage.oom_killed`): the cgroup's `oom_kill` count above zero, or
+Docker's `State.OOMKilled` when the count could not be read. Never inferred
+from an exit code: an exit 137 is any SIGKILL, including a stop or a timeout.
+Unmeasured is unknown, never "not OOM-killed". Read from
+[Workspace Resource Usage](#workspace-resource-usage) through the
+[Phase Profile](#phase-profile).
 
 ## Stale Workspace Directory
 

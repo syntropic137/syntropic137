@@ -4163,15 +4163,17 @@ class TokenPercentilesResponse(BaseModel):
 
 
 class ResourcePercentilesResponse(BaseModel):
-    """p50/p95 of one measure over ``n`` measured phases; null below ten."""
+    """p50/p90/p95 of one measure over ``n`` measured phases; null below ten."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     n: int
     p50: float | None
+    p90: float | None
     p95: float | None
     p50_display: str
     """``"insufficient"`` when ``n < 10``."""
+    p90_display: str
     p95_display: str
 
     @classmethod
@@ -4181,8 +4183,10 @@ class ResourcePercentilesResponse(BaseModel):
         return cls(
             n=stat.n,
             p50=stat.p50,
+            p90=stat.p90,
             p95=stat.p95,
             p50_display=_display(stat.p50, kind),
+            p90_display=_display(stat.p90, kind),
             p95_display=_display(stat.p95, kind),
         )
 
@@ -4227,17 +4231,56 @@ class ResourceCoverageResponse(BaseModel):
     """e.g. ``"0/42 phases measured"``."""
 
 
+class OomKillsResponse(BaseModel):
+    """Every phase of this type in exactly one bucket.
+
+    ``unknown`` is a phase nothing measured: no usage row, or a row with no
+    OOM signal. It is never folded into ``not_killed``.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    killed: int
+    not_killed: int
+    unknown: int
+
+
+class OomKilledPhaseResponse(BaseModel):
+    """One phase whose workspace was OOM-killed, as the provider measured it.
+
+    Set from the provider's ``oom_killed`` (cgroup ``oom_kill`` count or
+    Docker's ``State.OOMKilled``), never inferred from an exit code: an exit
+    137 is any SIGKILL.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    execution_id: str
+    oom_killed: Literal[True]
+    memory_peak_bytes: int | None
+    """Null when the cgroup peak could not be read."""
+    oom_kills: int | None
+    """The cgroup's kill count; null when it could not be read."""
+
+
 class PhaseResourceProfileResponse(BaseModel):
     """One phase type's workspace resource use at teardown (cgroup counters)."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     phase_id: str
+    cpu_usage_seconds: ResourcePercentilesResponse
+    """Absolute CPU-seconds the workspace used over its lifetime."""
+    wall_seconds: ResourcePercentilesResponse
+    """The workspace lifetime recorded with the usage, creation to termination."""
     cpu_seconds_per_wall_second: ResourcePercentilesResponse
     """CPU-seconds over the workspace lifetime recorded with them, creation to termination."""
     cpu_throttled_seconds: ResourcePercentilesResponse
     memory_peak_bytes: ResourcePercentilesResponse
     disk_bytes_at_teardown: ResourcePercentilesResponse
+    oom: OomKillsResponse
+    oom_killed_phases: list[OomKilledPhaseResponse]
+    """Every OOM-killed phase of this type in the window, by execution id."""
     coverage: ResourceCoverageResponse
 
 
@@ -4285,6 +4328,10 @@ class PhaseProfilesResponse(BaseModel):
             resources=[
                 PhaseResourceProfileResponse(
                     phase_id=r.phase_id,
+                    cpu_usage_seconds=ResourcePercentilesResponse.of(
+                        r.cpu_usage_seconds, "seconds"
+                    ),
+                    wall_seconds=ResourcePercentilesResponse.of(r.wall_seconds, "seconds"),
                     cpu_seconds_per_wall_second=ResourcePercentilesResponse.of(
                         r.cpu_seconds_per_wall_second, "ratio"
                     ),
@@ -4295,6 +4342,18 @@ class PhaseProfilesResponse(BaseModel):
                     disk_bytes_at_teardown=ResourcePercentilesResponse.of(
                         r.disk_bytes_at_teardown, "bytes"
                     ),
+                    oom=OomKillsResponse(
+                        killed=r.oom.killed, not_killed=r.oom.not_killed, unknown=r.oom.unknown
+                    ),
+                    oom_killed_phases=[
+                        OomKilledPhaseResponse(
+                            execution_id=k.execution_id,
+                            oom_killed=True,
+                            memory_peak_bytes=k.memory_peak_bytes,
+                            oom_kills=k.oom_kills,
+                        )
+                        for k in r.oom_killed_phases
+                    ],
                     coverage=ResourceCoverageResponse(
                         phases=r.coverage.phases,
                         phases_without_usage_row=r.coverage.phases_without_usage_row,
