@@ -193,7 +193,7 @@ def api_wired_to() -> Iterator[list[_World]]:
         patch("syn_api.routes.artifacts.ensure_connected", new=AsyncMock()),
         patch("syn_api.routes.artifacts.get_projection_mgr", side_effect=mgr),
         patch(
-            "syn_api.prefix_resolver.resolve_or_raise", new=AsyncMock(side_effect=lambda *a: a[2])
+            "syn_api.prefix_resolver.resolve_prefix_or_keep", new=AsyncMock(side_effect=lambda *a: a[2])
         ),
         patch(
             "syn_adapters.storage.artifact_storage.get_artifact_storage",
