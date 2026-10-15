@@ -716,6 +716,14 @@ jobs:
             exit 1
           fi
 
+          # .mutations/ must be PROVEN absent on a PR into main: a cancelled or
+          # skipped check proves nothing (#1941).
+          if [[ "${{ github.event_name }}" == "pull_request" && "${{ github.base_ref }}" == "main" ]] && \
+             [[ "${{ needs.mutations-not-merged.result }}" != "success" ]]; then
+            echo "❌ Mutation Patches Not Merged did not pass (result: ${{ needs.mutations-not-merged.result }})"
+            exit 1
+          fi
+
           # Dependency review only runs on PRs (requires base/head comparison)
           if [[ "${{ github.event_name }}" == "pull_request" ]] && \
              [[ "${{ needs.dependency-review.result }}" == "failure" ]]; then

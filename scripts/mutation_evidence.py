@@ -17,9 +17,10 @@ The contract, one PR at a time:
    (git reports only their destination, so a source could escape vetting).
    Every path it names must be
    tracked-or-trackable (not ignored), must not be or sit behind a symlink,
-   must not be a named test file, and must not be test code, test config or
-   infrastructure. After applying, the tree must have changed, and only on
-   those paths. A mutation of a test proves nothing, and a patch that changes
+   must not be a named test file, a test module, conftest, pytest config, a
+   lockfile, or workflow/CI config. Harness and adapter source beside the tests
+   IS allowed: it stands in for production and is where gaps hide. After
+   applying, the tree must have changed, and only on those paths. A mutation of a test proves nothing, and a patch that changes
    nothing reads exactly like a kill.
 4. Bytecode is cleared before every run (the stale `.pyc` trap) and the tree is
    proven clean after every restore.
@@ -35,7 +36,7 @@ beyond a fixed list of test variables. PR code therefore cannot rewrite this
 script, the report it writes, the git hooks it runs, or reach the runner's
 credentials or the Actions cache.
 
-`--host` (workflow input `docker=true`) is the exception, for tests that drive
+`--host` (workflow input `docker=true`, the DEFAULT) is the exception, for tests that drive
 the Docker daemon themselves (docker compose with bind mounts, as the broker
 integration suite does): a container holding the Docker socket IS the host, so
 PR code runs on the runner host. The remaining guards are the workflow's: no
@@ -112,11 +113,26 @@ _NODE_ID_RE: Final = re.compile(
 )
 _DIR_RE: Final = re.compile(r"^[A-Za-z0-9_.][A-Za-z0-9_./-]*$")
 
-_TEST_DIR_NAMES: Final = frozenset({"tests", "test"})
-_CONFIG_NAMES: Final = frozenset(
-    {"conftest.py", "pyproject.toml", "setup.cfg", "pytest.ini", "tox.ini", "uv.lock"}
+#: What a mutation may touch is decided by the owner (#1941): ANY production
+#: source, including harness and adapter code that lives beside the tests (a
+#: broker stand-in under tests/ is where an uncaught deny-path mutant lived).
+#: Refused: test modules, conftest, the mutations dir, workflow and CI config,
+#: pytest configuration (it decides what the named tests even are) and
+#: lockfiles.
+#: Any `*.lock` (uv, poetry, Cargo, yarn, Pipfile, bun, Gemfile, composer) plus
+#: the lockfiles that do not use that suffix.
+_LOCKFILES: Final = frozenset(
+    {"pnpm-lock.yaml", "package-lock.json", "npm-shrinkwrap.json", "bun.lockb", "go.sum"}
 )
-_FORBIDDEN_PREFIXES: Final = (".github/", "ci/fitness/", "lib/")
+#: Every file pytest reads configuration from, at any depth.
+_TEST_CONFIG: Final = frozenset(
+    {
+        "conftest.py", "pyproject.toml", "setup.cfg", "tox.ini",
+        "pytest.ini", ".pytest.ini", "pytest.toml", ".pytest.toml",
+    }
+)  # fmt: skip
+_TEST_DIR_NAMES: Final = frozenset({"tests", "test"})
+_FORBIDDEN_PREFIXES: Final = (".github/", "ci/")
 _SKIP_WALK: Final = frozenset({".git", ".venv", "node_modules"})
 
 _SUMMARY_LINE_RE: Final = re.compile(r"^(FAILED|ERROR) (\S+)")
@@ -293,12 +309,18 @@ def forbidden_reason(path: str, mutations_dir: PurePosixPath) -> str | None:
     if pure.is_relative_to(mutations_dir) or pure.is_relative_to(MUTATIONS_ROOT):
         return "the mutations dir itself"
     if any(path.startswith(prefix) for prefix in _FORBIDDEN_PREFIXES):
-        return "CI, fitness or submodule path"
-    if name in _CONFIG_NAMES:
-        return "test or build configuration"
-    if any(part in _TEST_DIR_NAMES for part in pure.parts[:-1]):
-        return "inside a tests directory"
-    if name.startswith("test_") or name.endswith("_test.py"):
+        return "workflow or CI config"
+    if name in _LOCKFILES or name.endswith(".lock"):
+        return "a lockfile"
+    if name in _TEST_CONFIG:
+        return "conftest or pytest configuration"
+    if name == "__init__.py" and any(p in _TEST_DIR_NAMES for p in pure.parts[:-1]):
+        # Test package scaffolding, not harness: a raise here is a collection
+        # error, which would read as a kill without touching any behaviour.
+        return "a test package __init__"
+    if (name.startswith("test_") and name.endswith(".py")) or name.endswith("_test.py"):
+        return "a test module"
+    if ".test." in name or ".spec." in name:
         return "a test module"
     return None
 
@@ -329,16 +351,33 @@ def is_rename_or_copy(summary_line: str) -> bool:
     return summary_line.lstrip().startswith(("rename ", "copy "))
 
 
+def gitlinks(root: Path) -> list[PurePosixPath]:
+    """Every submodule path (index entries with mode 160000)."""
+    out = _git(root, "ls-files", "--stage", "-z").stdout
+    found: list[PurePosixPath] = []
+    for entry in out.split("\0"):
+        meta, _, path = entry.partition("\t")
+        if path and meta.startswith("160000 "):
+            found.append(PurePosixPath(path))
+    return found
+
+
 def vet_paths(root: Path, paths: list[str], inputs: Inputs) -> list[str]:
     """Every reason the patch may not be applied, path by path."""
     problems: list[str] = []
     real_root = root.resolve()
     test_targets = {(root / t).resolve() for t in inputs.test_files}
+    submodules = gitlinks(root)
     for path in paths:
         try:
             pure = _safe_relative(path, "patched path")
         except InputError as exc:
             problems.append(str(exc))
+            continue
+        if any(pure.is_relative_to(sub) for sub in submodules):
+            # Restore and the tree checks are parent-repo only, so a nested
+            # edit would survive restore. Mutate a submodule in its own repo.
+            problems.append(f"{path} (inside submodule; mutate it in its own repository)")
             continue
         if why := forbidden_reason(path, inputs.mutations_dir):
             problems.append(f"{path} ({why})")
@@ -591,7 +630,7 @@ def execute(root: Path, inputs: Inputs, sha: str, runner: Runner) -> Evidence:
     elif evidence.baseline.skipped:
         # A skipped test passes under every mutant, so it would turn real
         # coverage into a SURVIVED (or hide a gap behind other kills). Usually
-        # a Docker-backed test in sandbox mode: dispatch with docker=true.
+        # a Docker-backed test in sandbox mode (docker=false).
         evidence.baseline_detail = (
             f"baseline skipped {evidence.baseline.skipped} test(s), evidence void "
             "(Docker-backed? dispatch with docker=true)"

@@ -1219,13 +1219,13 @@ check-no-mutations:
     echo "✅ no .mutations/ tracked"
 
 #   just mutation-evidence 1929 "scripts/tests/test_x.py::test_y"
-#   just mutation-evidence 1929 "<ids>" true    # tests that drive Docker themselves
+#   just mutation-evidence 1929 "<ids>" false   # sandbox: no Docker, stronger isolation
 # The patches are `*.patch` files committed under mutations_dir on the PR head.
-# docker=true runs PR code on the runner host (weaker isolation; see the workflow).
+# docker=true (default) runs PR code on the runner host with Docker, like ci.yml.
 # Exits non-zero when a mutation survived, a patch failed to apply, or the
 # baseline was red. The table is printed and posted as one PR comment.
 # Dispatch mutation-evidence.yml for a PR, wait, print the verdict table.
-mutation-evidence $pr $tests $docker="false" $mutations_dir=".mutations/":
+mutation-evidence $pr $tests $docker="true" $mutations_dir=".mutations/":
     #!/usr/bin/env bash
     set -euo pipefail
     # A nonce in the run name identifies THIS dispatch, even when two run for

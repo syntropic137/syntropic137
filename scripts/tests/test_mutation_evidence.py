@@ -150,26 +150,55 @@ def test_dispatch_id_is_validated() -> None:
 @pytest.mark.parametrize(
     "path",
     [
-        "pkg/tests/helper.py",
-        "pkg/test/x.py",
         "pkg/test_mod.py",
+        "pkg/tests/test_mod.py",
         "pkg/mod_test.py",
         "pkg/conftest.py",
+        "pkg/tests/conftest.py",
+        "apps/web/src/a.test.ts",
+        "apps/web/src/a.spec.tsx",
         "pyproject.toml",
         "apps/a/pyproject.toml",
+        "pytest.ini",
+        "pkg/tests/.pytest.ini",
+        "pkg/tests/pytest.toml",
+        "pkg/tests/.pytest.toml",
+        "pkg/tests/tox.ini",
+        "pkg/tests/__init__.py",
+        "pkg/tests/integration/broker/__init__.py",
         "uv.lock",
+        "pnpm-lock.yaml",
+        "Cargo.lock",
+        "pkg/tests/harness/Pipfile.lock",
+        "pkg/tests/harness/npm-shrinkwrap.json",
+        "apps/x/bun.lock",
+        "apps/x/bun.lockb",
+        "svc/go.sum",
         ".github/workflows/ci.yml",
-        "ci/fitness/x.py",
-        "lib/event-sourcing-platform/x.py",
+        ".github/actions/x/action.yml",
+        "ci/fitness/helpers.py",
         ".mutations/other.patch",
     ],
 )
-def test_forbids_tests_config_and_infra(path: str) -> None:
+def test_forbids_tests_config_ci_and_lockfiles(path: str) -> None:
     assert forbidden_reason(path, PurePosixPath(".mutations")) is not None
 
 
-@pytest.mark.parametrize("path", ["pkg/mod.py", "apps/syn-api/src/x/testing_utils.py", "README.md"])
-def test_allows_source(path: str) -> None:
+@pytest.mark.parametrize(
+    "path",
+    [
+        "pkg/mod.py",
+        # Owner decision (#1941): harness and adapter code beside the tests is
+        # production stand-in, and mutating it is the point.
+        "packages/syn-adapters/tests/integration/github_broker/authorizer.py",
+        "packages/syn-adapters/tests/integration/github_broker/envoy.yaml",
+        "pkg/tests/helpers.py",
+        "pkg/__init__.py",
+        "apps/syn-api/src/x/testing_utils.py",
+        "README.md",
+    ],
+)
+def test_allows_production_and_harness_source(path: str) -> None:
     assert forbidden_reason(path, PurePosixPath(".mutations")) is None
 
 
@@ -534,3 +563,52 @@ def test_run_name_carries_the_pr_and_the_dispatch_nonce() -> None:
     value = line.removeprefix("run-name:").strip()
     assert value.startswith('"') and value.endswith('"'), line
     assert "${{ inputs.pr }}" in value and "${{ inputs.dispatch_id }}" in value
+
+
+def test_a_harness_file_under_tests_is_mutated_and_killed(repo: Path) -> None:
+    harness = repo / "pkg" / "tests" / "authorizer.py"
+    harness.write_text("ALLOW = False\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", "harness")
+    patch = _commit_patch(
+        repo, "05-harness.patch", _diff_patch(repo, "pkg/tests/authorizer.py", "ALLOW = True\n")
+    )
+
+    def deny_path_test(root: Path, tests: tuple[str, ...]) -> PytestRun:
+        allowed = (root / "pkg" / "tests" / "authorizer.py").read_text() == "ALLOW = True\n"
+        return PytestRun(1, tests, 0, 0.0) if allowed else PytestRun(0, (), 1, 0.0)
+
+    result = evaluate_patch(repo, patch, _inputs(), deny_path_test)
+    restore(repo)
+
+    assert result.outcome is Outcome.KILLED
+    assert result.files == ("pkg/tests/authorizer.py",)
+    assert harness.read_text() == "ALLOW = False\n"
+
+
+def test_patch_inside_a_submodule_is_refused(repo: Path, tmp_path: Path) -> None:
+    sub = tmp_path / "sub"
+    sub.mkdir()
+    _git(sub, "init", "-q")
+    _git(sub, "config", "user.email", "t@example.invalid")
+    _git(sub, "config", "user.name", "t")
+    (sub / "x.py").write_text("X = 1\n")
+    _git(sub, "add", ".")
+    _git(sub, "commit", "-q", "-m", "sub")
+    subprocess.run(
+        ["git", "-c", "protocol.file.allow=always", "submodule", "add", "-q", str(sub), "lib/sub"],
+        cwd=repo, check=True, capture_output=True,
+    )  # fmt: skip
+    _git(repo, "commit", "-q", "-m", "submodule")
+    text = (
+        "diff --git a/lib/sub/x.py b/lib/sub/x.py\n--- a/lib/sub/x.py\n+++ b/lib/sub/x.py\n"
+        "@@ -1 +1 @@\n-X = 1\n+X = 2\n"
+    )
+    patch = _commit_patch(repo, "05-sub.patch", text)
+
+    result = evaluate_patch(repo, patch, _inputs(), _runner_sensitive_to_mod)
+    restore(repo)
+
+    assert result.outcome is Outcome.REFUSED
+    assert "submodule" in result.detail
+    assert (repo / "lib" / "sub" / "x.py").read_text() == "X = 1\n"

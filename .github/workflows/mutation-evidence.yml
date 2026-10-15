@@ -38,7 +38,10 @@ name: Mutation Evidence
 #   themselves (docker compose with host bind mounts). A container holding the
 #   Docker socket IS the host, so PR code runs on the runner host and could
 #   forge its own report. The guards below still hold; the verdict is evidence
-#   about honest PR code, not a security boundary. Default is the sandbox.
+#   about honest PR code, not a security boundary. This is the DEFAULT, as in
+#   ci.yml's integration job: the first real target (#1929) runs docker
+#   compose. `docker: false` opts into the sandbox for tests that need no
+#   Docker, and is the stronger guarantee when it applies.
 # - That job has `contents: read`, no secrets, no persisted credentials and no
 #   uv cache. The `pull-requests: write` token exists only in the comment job,
 #   on a fresh runner, and posts the report the TRUSTED runner wrote.
@@ -67,10 +70,11 @@ on:
         type: string
       docker:
         description: >-
-          Run PR code on the runner host so tests can drive the Docker daemon
-          (weaker isolation; see SECURITY MODEL)
+          Run PR code on the runner host so tests can drive the Docker daemon,
+          as ci.yml does. false = socket-less sandbox (stronger isolation; see
+          SECURITY MODEL)
         required: false
-        default: false
+        default: true
         type: boolean
       dispatch_id:
         description: 'Optional nonce shown in the run name, so a dispatcher can find its own run'
