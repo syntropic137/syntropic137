@@ -161,6 +161,12 @@ class TestSynCommands:
         page = '`syn workflow run wf --input "a; b" --no-such-flag`'
         assert any("--no-such-flag" in p for p in problems(tmp_path, page))
 
+    def test_an_escaped_separator_does_not_hide_the_rest_of_the_command(
+        self, tmp_path: Path
+    ) -> None:
+        page = "```\nsyn workflow run wf --input a\\;b --no-such-flag\n```"
+        assert any("--no-such-flag" in p for p in problems(tmp_path, page))
+
     @pytest.mark.parametrize(
         "cmd",
         [
@@ -200,6 +206,12 @@ class TestApiRoutes:
             # A placeholder never matches a literal segment.
             ("POST /api/v1/workflows/{id}", "no such path"),
             ("```\ncurl -XDELETE $SYN_API_URL/api/v1/executions/x\n```", "DELETE not served"),
+            ("```\ncurl -X TRACE $SYN_API_URL/api/v1/executions/x\n```", "TRACE not served"),
+            (
+                "```\ncurl -X GET $SYN_API_URL/api/v1/executions/a; "
+                "curl -X DELETE $SYN_API_URL/api/v1/executions/b\n```",
+                "DELETE not served",
+            ),
             (
                 "```\ncurl --request=DELETE $SYN_API_URL/api/v1/executions/x\n```",
                 "DELETE not served",

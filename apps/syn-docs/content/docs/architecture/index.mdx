@@ -24,7 +24,7 @@ All data in Syntropic137 flows through two strictly separated lanes:
 | **Purpose** | Source of truth for business logic and state transitions | High-throughput telemetry for dashboards and debugging |
 | **Validation** | Aggregate invariants: commands can be rejected | Schema only, always accepted |
 | **Storage** | TimescaleDB (append-only, replay-safe) | TimescaleDB (hypertable, time-series optimized) |
-| **Pipeline** | Command → Aggregate → Event → Projection | Agent stdout → Collector → EventBuffer → TimescaleDB |
+| **Pipeline** | Command → Aggregate → Event → Projection | Agent stdout → API stream processor → AgentEventStore → TimescaleDB |
 | **Examples** | `WorkflowTemplateCreated`, `WorkflowExecutionStarted`, `github.TriggerFired` | `tool_execution_completed`, `token_usage`, `session_summary` |
 
 <Callout type="info">

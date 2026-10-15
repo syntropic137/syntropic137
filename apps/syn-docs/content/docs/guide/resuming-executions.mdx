@@ -372,11 +372,14 @@ phase. That is future capability, not a switch you are missing.
 <Callout type="warn">
   The commit each repository was at is recorded on an execution, and a workspace
   checks each repository out at that commit (a resume at its parent's), refusing
-  to start if origin no longer has it. The exception is the phase a resume
+  to start if origin no longer has it. A repository whose commit could not be
+  resolved at start (for example, a run started without GitHub access) pins
+  nothing and clones the default branch's head. The other exception is the phase a resume
   resumes: a branch its parent's attempt already pushed is checked out at that
   branch's current head, so its next push lands on the same PR. A resume also
   inherits its parent's configuration and inputs, so what can differ between a
-  parent and its resume is which phases ran and the head of any continued branch.
+  parent and its resume is which phases ran, the head of any continued branch, and
+  the code of any repository that was never pinned.
 </Callout>
 
 ## See also

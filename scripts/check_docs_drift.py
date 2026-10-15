@@ -73,7 +73,8 @@ _BARE_ROUTE = re.compile(
 )
 # `API="$SYN_API_URL/api/v1"` then `$API/executions/...` in the same block.
 _API_VAR_ASSIGN = re.compile(r"\b(?P<var>[A-Za-z_]\w*)=[\"']?\S*/api/v1/?[\"']?(?:\s|$)")
-_CURL_METHOD = re.compile(r"(?:-X\s*|--request[=\s]\s*)['\"]?(GET|POST|PUT|PATCH|DELETE)\b")
+# Any method curl is told to send, so an unsupported one (TRACE) is checked too.
+_CURL_METHOD = re.compile(r"(?:-X\s*|--request[=\s]\s*)['\"]?([A-Z]+)\b")
 # A path segment a reader is meant to substitute: {id}, <id>, :id, $ID, ${ID}, ...
 _PLACEHOLDER_SEGMENT = re.compile(r"^(?:\{[^}]*\}|<[^>]*>|:\w+|\$\{?\w+\}?|\.\.\.|\[[^\]]*\])$")
 _SHORT_SLASH_LONG = re.compile(r"^-\w/--[\w-]+$")
@@ -264,6 +265,10 @@ def _split_shell(line: str) -> list[str]:
     while i < len(line):
         ch = line[i]
         two = line[i : i + 2]
+        if quote != "'" and ch == "\\" and i + 1 < len(line):
+            buf.append(line[i : i + 2])  # an escaped character never splits or quotes
+            i += 2
+            continue
         if quote != "'" and two == "$(":
             parts.append("".join(buf))
             buf = []
@@ -375,9 +380,11 @@ def extract(file: str, text: str) -> list[Snippet]:
                 hit = classify(seg)
                 if hit:
                     out.append(Snippet(file, lineno, hit[0], seg))
-            out.extend(
-                _api_snippets(file, lineno, logical, in_code=True, api_vars=frozenset(api_vars))
-            )
+            # Per shell segment, so one command's -X never applies to another's path.
+            for seg in _split_shell(_strip_comment(logical)):
+                out.extend(
+                    _api_snippets(file, lineno, seg, in_code=True, api_vars=frozenset(api_vars))
+                )
 
     for lineno, line in enumerate(lines, 1):
         if _FENCE.match(line):
