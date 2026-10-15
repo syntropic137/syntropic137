@@ -1838,7 +1838,7 @@ def test_score_reads_verdict_report_cost_and_model_from_the_api() -> None:
 
     table = render(loaded, rows)
     assert "exec-1" in table and "PASS" in table and "$3.75" in table
-    assert "1/1 passed (ERROR excluded, as in the API); 35 not scored" in table
+    assert "1/1 passed (ERROR excluded, as in the API); 39 not scored" in table
 
 
 @pytest.mark.unit
@@ -2264,7 +2264,7 @@ def test_v5_scores_its_own_cases_under_every_verifier_without_the_v6_controls(
     assert len(v5.cases) == 33
     assert {c.source_pr for c in v5.cases if c.polarity == "clean"} == {917, 1010}
     added = {c.id for c in current.cases} - {c.id for c in v5.cases}
-    assert {c.source_pr for c in current.cases if c.id in added} == _V6_CLEAN_PRS | {1808}
+    assert {c.source_pr for c in current.cases if c.id in added} == _V6_CLEAN_PRS | {1808, 1921, 1929, 1968, 1975}
 
 
 @pytest.mark.unit
@@ -2276,8 +2276,14 @@ def test_v6_scores_its_own_cases_under_every_verifier_without_v7s_escape(workflo
     assert v6.tag == f"verifier-seed-v1:v6:{workflow}"
     assert len(v6.cases) == 35
     added = {c.id for c in current.cases} - {c.id for c in v6.cases}
-    assert added == {"start-clock-read-before-settle"}
-    assert {c.source_pr for c in current.cases if c.id in added} == {1808}
+    assert added == {
+        "start-clock-read-before-settle",
+        "event-schema-gate-ignores-identity",
+        "broker-deny-path-untested",
+        "docker-runtime-tests-skip-on-clean-runner",
+        "fence-bound-fails-on-real-postgres",
+    }
+    assert {c.source_pr for c in current.cases if c.id in added} == {1808, 1921, 1929, 1968, 1975}
 
 
 @pytest.mark.unit
@@ -3113,7 +3119,7 @@ def test_score_records_a_certified_clean_control_as_a_pass() -> None:
     assert (body["verdict"], body["score"]) == ("PASS", 1.0)
     assert f"{_clean_case().id} (clean)" in str(body["evidence"])
     table = render(loaded, rows)
-    assert "1/1 passed (ERROR excluded, as in the API); 35 not scored" in table
+    assert "1/1 passed (ERROR excluded, as in the API); 39 not scored" in table
     assert "false-block rate (clean controls blocked): 0/1 (0%)" in table
     assert "catch rate (defect cases blocked and named): -" in table
 
@@ -3127,7 +3133,7 @@ def test_score_records_a_blocked_clean_control_as_a_false_block() -> None:
     [(_, body)] = server.scores
     assert (body["verdict"], body["score"]) == ("FAIL", 0.0)
     table = render(loaded, rows)
-    assert "0/1 passed (ERROR excluded, as in the API); 35 not scored" in table
+    assert "0/1 passed (ERROR excluded, as in the API); 39 not scored" in table
     assert "false-block rate (clean controls blocked): 1/1 (100%)" in table
 
 
@@ -3183,7 +3189,7 @@ def test_a_completed_run_with_no_verdict_is_recorded_as_error_whatever_its_repor
     [row] = [r for r in rows if r.case == _CASE]
     assert row.status == "completed" and row.verdict == "ERROR"
     table = render(loaded, rows)
-    assert "0/0 passed (ERROR excluded, as in the API); 1 ERROR; 35 not scored" in table
+    assert "0/0 passed (ERROR excluded, as in the API); 1 ERROR; 39 not scored" in table
     assert "catch rate (defect cases blocked and named): -" in table
     assert (
         f"warning: {_CASE} exec-1: report says VERDICT: BLOCKED, engine recorded no verdict"

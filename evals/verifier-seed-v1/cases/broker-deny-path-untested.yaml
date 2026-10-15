@@ -26,6 +26,6 @@ expected:
   files:
     - packages/syn-adapters/tests/integration/github_broker/test_git_gh_through_broker.py
   keywords:
-    - [deny, refuse, refused, reject, ungranted, unlisted, not granted, unauthori]
+    - [deny, refuse, refused, refusal, reject, ungranted, unlisted, not granted, unauthori]
     - [test, tests, tested, untested, exercised, never sent, no case, mutation]
 split: train
