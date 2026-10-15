@@ -9,6 +9,7 @@ including that a declared skip passes and a half-written declaration does not.
 
 from __future__ import annotations
 
+import subprocess
 import sys
 import textwrap
 from pathlib import Path
@@ -308,3 +309,196 @@ def test_tests_that_cannot_skip_or_are_not_integration_pass(tmp_path: Path) -> N
         )
         == []
     )
+
+
+# Each shape below skips under real pytest without a skip call in the test body
+# or a skip mark on the test itself. The checker must see all of them, and each
+# test also runs the planted tree through pytest so the checker's model of
+# pytest cannot drift from pytest unnoticed.
+_SHAPES: dict[str, tuple[str, dict[str, str]]] = {
+    "parameter_skip_mark": (
+        "test_real",
+        {
+            "tests/test_a.py": """
+                import pytest
+
+                @pytest.mark.integration
+                @pytest.mark.parametrize("n", [pytest.param(1, marks=pytest.mark.skip(reason="no store"))])
+                def test_real(n):
+                    pass
+            """
+        },
+    ),
+    "fixture_parameter_skip_mark": (
+        "test_real",
+        {
+            "tests/test_a.py": """
+                import pytest
+
+                @pytest.fixture(params=[pytest.param(1, marks=pytest.mark.skipif(True, reason="no store"))])
+                def store(request):
+                    return request.param
+
+                @pytest.mark.integration
+                def test_real(store):
+                    pass
+            """
+        },
+    ),
+    "class_fixture": (
+        "TestReal::test_real",
+        {
+            "tests/test_a.py": """
+                import pytest
+
+                @pytest.mark.integration
+                class TestReal:
+                    @pytest.fixture
+                    def store(self):
+                        pytest.skip("no store")
+
+                    def test_real(self, store):
+                        pass
+            """
+        },
+    ),
+    "renamed_fixture": (
+        "test_real",
+        {
+            "tests/test_a.py": """
+                import pytest
+
+                @pytest.fixture(name="store")
+                def _store():
+                    pytest.skip("no store")
+
+                @pytest.mark.integration
+                def test_real(store):
+                    pass
+            """
+        },
+    ),
+    "pytest_module_alias": (
+        "test_real",
+        {
+            "tests/test_a.py": """
+                import pytest as pt
+
+                @pt.mark.integration
+                def test_real():
+                    pt.skip("no store")
+            """
+        },
+    ),
+    "package_reexport": (
+        "test_real",
+        {
+            "src/helpers/__init__.py": """
+                from .requirement import require_store
+            """,
+            "src/helpers/requirement.py": """
+                import pytest
+
+                def require_store():
+                    pytest.skip("no store")
+            """,
+            "tests/test_a.py": """
+                import pytest
+                from helpers import require_store
+
+                @pytest.mark.integration
+                def test_real():
+                    require_store()
+            """,
+        },
+    ),
+    "setup_method": (
+        "TestReal::test_real",
+        {
+            "tests/test_a.py": """
+                import pytest
+
+                @pytest.mark.integration
+                class TestReal:
+                    def setup_method(self):
+                        pytest.skip("no store")
+
+                    def test_real(self):
+                        pass
+            """
+        },
+    ),
+    "setup_module": (
+        "test_real",
+        {
+            "tests/test_a.py": """
+                import pytest
+
+                def setup_module():
+                    pytest.skip("no store")
+
+                @pytest.mark.integration
+                def test_real():
+                    pass
+            """
+        },
+    ),
+}
+
+_PYTEST_INI = """\
+[pytest]
+pythonpath = src
+markers =
+    integration: x
+    may_skip(reason, issue): x
+"""
+
+
+def _with_declaration(files: dict[str, str], declaration: str) -> dict[str, str]:
+    declared = dict(files)
+    declared["tests/test_a.py"] = (
+        textwrap.dedent(files["tests/test_a.py"])
+        + f"\nimport pytest\npytestmark = pytest.mark.may_skip({declaration})\n"
+    )
+    return declared
+
+
+@pytest.mark.parametrize("shape", sorted(_SHAPES))
+def test_a_skip_pytest_reaches_without_a_marker_fails(tmp_path: Path, shape: str) -> None:
+    test, files = _SHAPES[shape]
+    assert _scan(tmp_path, files) == [(test, _UNDECLARED)]
+    (tmp_path / "pytest.ini").write_text(_PYTEST_INI)
+    run = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-p",
+            "no:cacheprovider",
+            "-p",
+            "no:randomly",
+            "-q",
+            "-m",
+            "integration",
+            "tests",
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert "1 skipped" in run.stdout, run.stdout + run.stderr
+
+
+@pytest.mark.parametrize("shape", sorted(_SHAPES))
+def test_a_declared_skip_of_each_shape_passes(tmp_path: Path, shape: str) -> None:
+    _, files = _SHAPES[shape]
+    assert _scan(tmp_path, _with_declaration(files, 'reason="no store", issue="#1982"')) == []
+
+
+@pytest.mark.parametrize("shape", sorted(_SHAPES))
+def test_a_malformed_declaration_of_each_shape_fails(tmp_path: Path, shape: str) -> None:
+    test, files = _SHAPES[shape]
+    assert _scan(tmp_path, _with_declaration(files, 'reason="no store"')) == [
+        (test, Problem.NO_ISSUE)
+    ]
