@@ -20,6 +20,7 @@ import sys
 from dataclasses import asdict, dataclass, field, replace
 from decimal import Decimal
 from pathlib import Path
+from typing import get_args
 
 import httpx
 import pytest
@@ -598,17 +599,23 @@ def test_an_unknown_escape_class_is_refused(
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("label", get_args(eval_suite.EscapeClass))
 def test_the_escape_class_does_not_change_a_score(
-    tmp_path: Path, history: tuple[Path, str, str, str]
+    tmp_path: Path, history: tuple[Path, str, str, str], label: str
 ) -> None:
     _, bug, fix, _ = history
     labelled = load_suite(
-        _one_case_suite(tmp_path / "a", bug, fix, "bug.py", escape_class="deny path untested")
+        _one_case_suite(tmp_path / "a", bug, fix, "bug.py", escape_class=label)
     ).cases[0]
     plain = load_suite(_one_case_suite(tmp_path / "b", bug, fix, "bug.py")).cases[0]
-    report = "## BLOCKING\n\n1. **File:** bug.py\n   **Defect:** broken\n"
-    for verdict in ("blocked", "certified"):
-        assert score_case(labelled, verdict, report) == score_case(plain, verdict, report)
+    # A report that names the defect: a label that only bent a matched score
+    # would otherwise compare two misses and pass (PR #1980 verify, B1).
+    report = _report(("bug.py", "broken"))
+    assert score_case(plain, "blocked", report).passed
+    for verdict in ("blocked", "certified", None):
+        unlabelled = score_case(plain, verdict, report)
+        assert unlabelled.findings == 1 and unlabelled.named_file is not None
+        assert score_case(labelled, verdict, report) == unlabelled
 
 
 @pytest.mark.unit
