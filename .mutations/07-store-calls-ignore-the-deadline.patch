@@ -1,13 +1,13 @@
 diff --git a/packages/syn-adapters/src/syn_adapters/execution_host/reconciler.py b/packages/syn-adapters/src/syn_adapters/execution_host/reconciler.py
-index 2b6992549..f987dd7a1 100644
+index 3ee374f43..bbc5da936 100644
 --- a/packages/syn-adapters/src/syn_adapters/execution_host/reconciler.py
 +++ b/packages/syn-adapters/src/syn_adapters/execution_host/reconciler.py
-@@ -105,7 +105,7 @@ class Reconciler:
-             1 for execution_id in owned if execution_id not in self._tried
+@@ -123,7 +123,7 @@ class Reconciler:
          )
          free = self._concurrency - busy
+         acquired: dict[str, FencedRun] = {}
 -        if free > 0 and self._clock() < deadline:
 +        if free > 0:
              for run in await self._queue.take_over(self._host_id, limit=free):
-                 owned[run.execution_id] = run
-                 free -= 1
+                 acquired[run.execution_id] = run
+         free -= len(acquired)

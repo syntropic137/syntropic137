@@ -1,8 +1,8 @@
 diff --git a/packages/syn-adapters/src/syn_adapters/execution_host/reconciler.py b/packages/syn-adapters/src/syn_adapters/execution_host/reconciler.py
-index 2b6992549..a191f58cb 100644
+index 3ee374f43..a191f58cb 100644
 --- a/packages/syn-adapters/src/syn_adapters/execution_host/reconciler.py
 +++ b/packages/syn-adapters/src/syn_adapters/execution_host/reconciler.py
-@@ -95,9 +95,26 @@ class Reconciler:
+@@ -95,7 +95,7 @@ class Reconciler:
          so a turn of slow store calls overruns its budget by one call at most.
          """
          self._warn_long_running()
@@ -10,58 +10,4 @@ index 2b6992549..a191f58cb 100644
 +        if self._clock() >= deadline:
              return
          owned = {run.execution_id: run for run in await self._queue.reconciling(self._host_id)}
-+        owned.update(await self._acquire(owned, deadline))
-+        self._tried &= owned.keys()
-+        self._in_line = {
-+            execution_id: self._in_line.get(execution_id) or next(self._ticket)
-+            for execution_id in sorted(owned)
-+        }
-+        # Least recently attempted first, so rows whose reaps keep failing
-+        # never hold up the rows behind them.
-+        waiting = sorted(
-+            (run for run in owned.values() if run.execution_id not in self._attempts),
-+            key=lambda run: self._in_line[run.execution_id],
-+        )
-+        for run in waiting[: self._concurrency - len(self._attempts)]:
-+            self._start(run)
-+
-+    async def _acquire(self, owned: dict[str, FencedRun], deadline: float) -> dict[str, FencedRun]:
-+        """Take over, then fence, no more rows than this host has free slots (D5)."""
-         # Busy is what holds a slot: a task in flight, or a row this host owns
-         # and has never attempted. A row waiting to retry does not, so rows whose
-         # reaps keep failing never stop this host acquiring healthy ones.
-@@ -105,29 +122,18 @@ class Reconciler:
-             1 for execution_id in owned if execution_id not in self._tried
-         )
-         free = self._concurrency - busy
-+        acquired: dict[str, FencedRun] = {}
-         if free > 0 and self._clock() < deadline:
-             for run in await self._queue.take_over(self._host_id, limit=free):
--                owned[run.execution_id] = run
--                free -= 1
-+                acquired[run.execution_id] = run
-+        free -= len(acquired)
-         if free > 0 and self._clock() < deadline:
-             for run in await self._queue.fence_expired(self._host_id, limit=free):
-                 logger.warning(
-                     "Fenced %s: executor %s let its lease expire", run.execution_id, run.executor_id
-                 )
--                owned[run.execution_id] = run
--        self._tried &= owned.keys()
--        self._in_line = {
--            execution_id: self._in_line.get(execution_id) or next(self._ticket)
--            for execution_id in sorted(owned)
--        }
--        # Least recently attempted first, so rows whose reaps keep failing
--        # never hold up the rows behind them.
--        waiting = sorted(
--            (run for run in owned.values() if run.execution_id not in self._attempts),
--            key=lambda run: self._in_line[run.execution_id],
--        )
--        for run in waiting[: self._concurrency - len(self._attempts)]:
--            self._start(run)
-+                acquired[run.execution_id] = run
-+        return acquired
- 
-     async def aclose(self) -> None:
-         """Cancel and await every in-flight attempt; for shutdown only.
+         owned.update(await self._acquire(owned, deadline))
