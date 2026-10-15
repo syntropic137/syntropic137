@@ -8,8 +8,8 @@ own ``WorkspaceDockerProvider`` and ``TeardownReport``, syn's
 writes it, the profile query's row reader, and the API response model.
 ``test_phase_profiles_reach_the_api.py`` pins the Postgres read separately.
 
-Needs Docker. It skips without it, so a green run without Docker proves
-nothing: read the pass and skip counts. Run with:
+Needs Docker, and FAILS without it rather than skipping: a skip would pass
+under every bug this module exists to catch (PC-193). Run with:
 
     uv run pytest -m integration -q \
         apps/syn-api/tests/integration/test_oom_killed_phase_reaches_the_api.py
@@ -36,17 +36,26 @@ from syn_domain.contexts.orchestration.slices.phase_profiles.query_service impor
     _resource_profiles,
 )
 
-pytestmark = [
-    pytest.mark.integration,
-    pytest.mark.skipif(not WorkspaceDockerProvider.is_available(), reason="Docker not available"),
-]
+pytestmark = pytest.mark.integration
 
 IMAGE = "python:3.12-slim"
 
 
-async def _usage_row_after(command: str, memory: str, *, exit_code: int) -> str:
+@pytest.fixture
+def provider() -> WorkspaceDockerProvider:
+    """The real Docker provider; no Docker daemon is a failure, never a skip."""
+    if not WorkspaceDockerProvider.is_available():
+        pytest.fail(
+            "Docker is not available: this module drives a real workspace and "
+            "cannot be skipped (PC-193). Run it where the Docker daemon is reachable."
+        )
+    return WorkspaceDockerProvider(default_image=IMAGE, security=SecurityConfig.development())
+
+
+async def _usage_row_after(
+    provider: WorkspaceDockerProvider, command: str, memory: str, *, exit_code: int
+) -> str:
     """Run ``command`` in a real workspace and return its Lane 2 usage row."""
-    provider = WorkspaceDockerProvider(default_image=IMAGE, security=SecurityConfig.development())
     workspace = await provider.create(
         WorkspaceConfig(provider="docker", image=IMAGE, limits=ResourceLimits(memory=memory))
     )
@@ -60,10 +69,12 @@ async def _usage_row_after(command: str, memory: str, *, exit_code: int) -> str:
     return json.dumps({**dataclasses.asdict(usage), "workspace_lifetime_seconds": 1.0})
 
 
-async def test_an_oom_killed_workspace_reaches_the_api_as_one() -> None:
+async def test_an_oom_killed_workspace_reaches_the_api_as_one(
+    provider: WorkspaceDockerProvider,
+) -> None:
     # `tail` buffers an endless line, so it grows until the kernel kills it.
-    killed = await _usage_row_after("tail /dev/zero", "32m", exit_code=137)
-    quiet = await _usage_row_after("true", "256m", exit_code=0)
+    killed = await _usage_row_after(provider, "tail /dev/zero", "32m", exit_code=137)
+    quiet = await _usage_row_after(provider, "true", "256m", exit_code=0)
     rows = [
         {"execution_id": "exec-oom", "phase_id": "build", "usages": [killed]},
         {"execution_id": "exec-quiet", "phase_id": "build", "usages": [quiet]},
