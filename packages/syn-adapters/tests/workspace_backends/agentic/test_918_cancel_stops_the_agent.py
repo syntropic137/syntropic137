@@ -123,7 +123,10 @@ class _Host:
 
     def workspace(self, isolation_id: str) -> Workspace | None:
         return Workspace(
-            id=isolation_id, provider="recording", path=Path("/nonexistent"), config=WorkspaceConfig()
+            id=isolation_id,
+            provider="recording",
+            path=Path("/nonexistent"),
+            config=WorkspaceConfig(),
         )
 
 
