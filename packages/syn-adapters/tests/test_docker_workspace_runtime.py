@@ -69,21 +69,28 @@ def _image_present() -> None:
 async def _recorded_and_enforced(
     tmp_path: Path, requested: WorkspaceRuntime | None
 ) -> tuple[IsolationRuntime | None, str, str]:
-    """Create one container; return syn's record, its alias, and Docker's HostConfig.Runtime."""
+    """Create one container; return syn's record, its alias, and Docker's HostConfig.Runtime.
+
+    The runtime rides on ``WorkspaceConfig.security``, as
+    ``AgenticIsolationAdapter.create`` sends it. The provider's own ``security``
+    is never consulted once a config is passed: that field defaults to an
+    instance, so a request made only on the provider resolves as auto.
+    """
+    security = SecurityConfig(runtime=to_aw_runtime(requested))
     provider = WorkspaceDockerProvider(
         default_image=IMAGE,
         default_network="none",
         workspace_base_dir=tmp_path / "workspaces",
-        security=SecurityConfig(runtime=to_aw_runtime(requested)),
+        security=security,
     )
-    workspace = await provider.create(WorkspaceConfig(provider="docker", image=IMAGE))
+    workspace = await provider.create(
+        WorkspaceConfig(provider="docker", image=IMAGE, security=security)
+    )
+    container = workspace.metadata.get("container_id", workspace.id)
     try:
         inspected = json.loads(
             subprocess.run(
-                ["docker", "inspect", workspace.metadata.get("container_id", workspace.id)],
-                capture_output=True,
-                text=True,
-                check=True,
+                ["docker", "inspect", container], capture_output=True, text=True, check=True
             ).stdout
         )[0]
         return (
@@ -92,7 +99,20 @@ async def _recorded_and_enforced(
             inspected["HostConfig"]["Runtime"],
         )
     finally:
-        await provider.teardown(target=workspace)
+        report = await provider.teardown(target=workspace)
+        _assert_removed(container, report.finalization.state)
+
+
+def _assert_removed(container: str, finalization: str) -> None:
+    """Fail if teardown left the container behind, removing it first.
+
+    A teardown that does not raise can still retain the workspace, so the
+    report alone is not proof the container is gone; ``docker inspect`` is.
+    """
+    if _docker("inspect", container).returncode == 0:
+        _docker("rm", "-f", container)
+        pytest.fail(f"teardown ({finalization}) left container {container} behind")
+    assert finalization == "completed"
 
 
 async def test_explicit_runc_is_recorded_and_enforced(tmp_path: Path) -> None:
