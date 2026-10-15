@@ -720,7 +720,11 @@ export interface paths {
         put?: never;
         /**
          * Create Eval Endpoint
-         * @description Create an eval, pinning each baseline ref to a commit SHA. The id is minted here.
+         * @description Create an eval, pinning each baseline ref to a commit SHA.
+         *
+         *     The id is minted here, or derived from `stable_key`. A derived id is one
+         *     stream however many creators race for it: the store admits the first and
+         *     the rest answer with that eval (#1920).
          */
         post: operations["create_eval_endpoint_evals_post"];
         delete?: never;
@@ -3338,9 +3342,14 @@ export interface components {
         };
         /**
          * CreateEvalRequest
-         * @description A new eval (#967). The server mints its id; see `EvalCreatedResponse`.
+         * @description A new eval (#967). The server mints its id unless `stable_key` names one.
          */
         CreateEvalRequest: {
+            /**
+             * Stable Key
+             * @description Makes the create idempotent (#1920): the eval id is derived from this key, so every create with the same key, concurrent ones included, answers with the one eval. A create that differs from the one that made it is refused.
+             */
+            stable_key?: string | null;
             /** Name */
             name: string;
             /**
@@ -6089,6 +6098,42 @@ export interface components {
             cost_usd: string;
         };
         /**
+         * OomKilledPhaseResponse
+         * @description One phase whose workspace was OOM-killed, as the provider measured it.
+         *
+         *     Set from the provider's ``oom_killed`` (cgroup ``oom_kill`` count or
+         *     Docker's ``State.OOMKilled``), never inferred from an exit code: an exit
+         *     137 is any SIGKILL.
+         */
+        OomKilledPhaseResponse: {
+            /** Execution Id */
+            execution_id: string;
+            /**
+             * Oom Killed
+             * @constant
+             */
+            oom_killed: true;
+            /** Memory Peak Bytes */
+            memory_peak_bytes: number | null;
+            /** Oom Kills */
+            oom_kills: number | null;
+        };
+        /**
+         * OomKillsResponse
+         * @description Every phase of this type in exactly one bucket.
+         *
+         *     ``unknown`` is a phase nothing measured: no usage row, or a row with no
+         *     OOM signal. It is never folded into ``not_killed``.
+         */
+        OomKillsResponse: {
+            /** Killed */
+            killed: number;
+            /** Not Killed */
+            not_killed: number;
+            /** Unknown */
+            unknown: number;
+        };
+        /**
          * OperationInfo
          * @description Information about a session operation.
          */
@@ -6591,10 +6636,15 @@ export interface components {
         PhaseResourceProfileResponse: {
             /** Phase Id */
             phase_id: string;
+            cpu_usage_seconds: components["schemas"]["ResourcePercentilesResponse"];
+            wall_seconds: components["schemas"]["ResourcePercentilesResponse"];
             cpu_seconds_per_wall_second: components["schemas"]["ResourcePercentilesResponse"];
             cpu_throttled_seconds: components["schemas"]["ResourcePercentilesResponse"];
             memory_peak_bytes: components["schemas"]["ResourcePercentilesResponse"];
             disk_bytes_at_teardown: components["schemas"]["ResourcePercentilesResponse"];
+            oom: components["schemas"]["OomKillsResponse"];
+            /** Oom Killed Phases */
+            oom_killed_phases: components["schemas"]["OomKilledPhaseResponse"][];
             coverage: components["schemas"]["ResourceCoverageResponse"];
         };
         /**
@@ -7470,17 +7520,21 @@ export interface components {
         };
         /**
          * ResourcePercentilesResponse
-         * @description p50/p95 of one measure over ``n`` measured phases; null below ten.
+         * @description p50/p90/p95 of one measure over ``n`` measured phases; null below ten.
          */
         ResourcePercentilesResponse: {
             /** N */
             n: number;
             /** P50 */
             p50: number | null;
+            /** P90 */
+            p90: number | null;
             /** P95 */
             p95: number | null;
             /** P50 Display */
             p50_display: string;
+            /** P90 Display */
+            p90_display: string;
             /** P95 Display */
             p95_display: string;
         };
