@@ -7,6 +7,7 @@ the rest of the test session.
 
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 import textwrap
@@ -14,7 +15,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from syn_shared.logging.redaction import redact_url_credentials
+from syn_shared.logging.redaction import redact_credentials, redact_url_credentials
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -107,3 +108,89 @@ def test_every_output_path_is_masked(tmp_path: Path) -> None:
     for marker in ("early", "late", "extra", "boom", "structlog", "print"):
         assert marker in written, marker
     assert written.count("redis://:***@redis:6379/0") >= 6
+
+
+# Obviously fake keys in every shape that matters: an underscore in the body is
+# the case a `[A-Za-z0-9-]` class cut short, leaving the tail in the log (#1971).
+_FAKE_KEYS = (
+    "sk-proj-FAKEfakeFAKE0000_tail1111tail2222-end3333",
+    "sk-svcacct-FAKE0000fake_1111FAKE-2222",
+    "sk-admin-FAKE_0000_fake_1111_2222",
+    "sk-ant-oat01-FAKE0000_fake1111-FAKE2222",
+    "sk-FAKE0000fake1111FAKE2222fake3333",
+)
+
+
+def _fragments(key: str) -> list[str]:
+    """Every piece of ``key`` long enough to identify it, split on its separators."""
+    body = key.removeprefix("sk-")
+    pieces = [p for p in re.split(r"[-_]", body) if len(p) >= 4]
+    return [key, body, *pieces]
+
+
+@pytest.mark.parametrize("key", _FAKE_KEYS)
+@pytest.mark.parametrize(
+    "template",
+    [
+        "stderr: {key}",
+        "OPENAI_API_KEY={key}",
+        '{{"auth_mode":"apikey","OPENAI_API_KEY":"{key}"}}',
+        "ANTHROPIC_API_KEY: {key} trailing",
+        "Authorization: Bearer {key}.",
+    ],
+)
+def test_api_keys_are_masked_whole(key: str, template: str) -> None:
+    out = redact_credentials(template.format(key=key))
+    for fragment in _fragments(key):
+        assert fragment not in out, (fragment, out)
+
+
+def test_a_named_key_without_the_sk_prefix_is_masked() -> None:
+    out = redact_credentials('{"OPENAI_API_KEY":"fakeNoPrefix0000_1111"}')
+    assert "fakeNoPrefix0000" not in out
+    assert "1111" not in out
+
+
+def test_ordinary_text_is_untouched() -> None:
+    text = "task-runner sk-learn OPENAI_API_KEY are set; see https://x.y/p"
+    assert redact_credentials(text) == text
+
+
+def test_workspace_redaction_masks_the_whole_key() -> None:
+    """The container-side patterns had the same underscore gap (#1971 review)."""
+    from syn_shared.settings.workspace_security import ContainerLoggingSettings
+
+    redactor = ContainerLoggingSettings()
+    for key in _FAKE_KEYS:
+        out = redactor.redact(f"leaked {key} here")
+        for fragment in _fragments(key):
+            assert fragment not in out, (fragment, out)
+
+
+_KEY_SCENARIO = textwrap.dedent(
+    f"""
+    import logging, sys
+    from syn_shared.logging.redaction import install_credential_redaction
+    install_credential_redaction()
+    logging.basicConfig(stream=sys.stderr, format="%(levelname)s %(message)s")
+    log = logging.getLogger("setup")
+    for key in {_FAKE_KEYS!r}:
+        log.error("Secret-injection setup failed: %s", "boom " + key)
+        print("print", key)
+    """
+)
+
+
+def test_every_output_path_masks_api_keys() -> None:
+    done = subprocess.run(
+        [sys.executable, "-c", _KEY_SCENARIO],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=True,
+    )
+    written = done.stdout + done.stderr
+    assert written.count("Secret-injection setup failed") == len(_FAKE_KEYS)
+    for key in _FAKE_KEYS:
+        for fragment in _fragments(key):
+            assert fragment not in written, fragment

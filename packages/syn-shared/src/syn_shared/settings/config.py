@@ -24,6 +24,8 @@ from syn_shared.agents import (
     ModelAlias,
     PhaseModelDefaults,
 )
+from syn_shared.codex_auth_file import CODEX_AUTH_FILE_FORMAT
+from syn_shared.codex_credential_port import CodexCredentialFileKind
 from syn_shared.env_constants import ENV_CODEX_AUTH_JSON
 
 if TYPE_CHECKING:
@@ -390,6 +392,16 @@ class Settings(BaseSettings):
 
         if not isinstance(parsed, dict):
             msg = f"{ENV_CODEX_AUTH_JSON} must be a JSON object, got {type(parsed).__name__}"
+            raise ValueError(msg)
+
+        # An API-key auth.json with no usable key would pass as configured and
+        # then fail inside codex (#1971). The message names nothing from the file.
+        if CODEX_AUTH_FILE_FORMAT.classify(raw).kind is CodexCredentialFileKind.API_KEY_WITHOUT_KEY:
+            msg = (
+                f"{ENV_CODEX_AUTH_JSON} is an API-key auth.json without a usable "
+                "OPENAI_API_KEY (missing, null or blank). Set OPENAI_API_KEY instead, "
+                f"or put a complete auth.json in {ENV_CODEX_AUTH_JSON}."
+            )
             raise ValueError(msg)
 
         # Return the normalised SOURCE TEXT, not a re-serialisation of `parsed`.

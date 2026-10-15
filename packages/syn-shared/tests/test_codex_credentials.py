@@ -6,11 +6,21 @@ import json
 
 import pytest
 
+from syn_shared.codex_auth_file import CODEX_AUTH_FILE_FORMAT
+from syn_shared.codex_credential_port import (
+    CodexCredentialFileClassification,
+    CodexCredentialFileFormat,
+    CodexCredentialFileKind,
+)
 from syn_shared.codex_credentials import (
     CodexCredentialSource,
-    codex_api_key_auth_json,
     resolve_codex_credential,
 )
+
+
+def codex_api_key_auth_json(api_key: str) -> str:
+    return CODEX_AUTH_FILE_FORMAT.api_key_credential_file(api_key)
+
 
 pytestmark = pytest.mark.unit
 
@@ -86,3 +96,39 @@ class TestNeverLeaks:
             assert resolved is not None
             assert _KEY not in repr(resolved)
             assert "access_token" not in repr(resolved)
+
+
+class _RecordingFormat:
+    """A port double: proves precedence depends on the port, not on codex's format."""
+
+    def __init__(self) -> None:
+        self.serialised: list[str] = []
+
+    def api_key_credential_file(self, api_key: str) -> str:
+        self.serialised.append(api_key)
+        return "<double-file>"
+
+    def classify(self, credential_file: str) -> CodexCredentialFileClassification:
+        return CodexCredentialFileClassification(CodexCredentialFileKind.TOKENS)
+
+
+class TestPort:
+    def test_the_adapter_satisfies_the_port(self) -> None:
+        port: CodexCredentialFileFormat = CODEX_AUTH_FILE_FORMAT
+        assert json.loads(port.api_key_credential_file(_KEY))["OPENAI_API_KEY"] == _KEY
+
+    def test_the_key_becomes_whatever_the_port_says(self) -> None:
+        double = _RecordingFormat()
+        resolved = resolve_codex_credential(
+            codex_auth_json=None, openai_api_key=_KEY, credential_format=double
+        )
+        assert resolved is not None
+        assert resolved.auth_json == "<double-file>"
+        assert double.serialised == [_KEY]
+
+    def test_auth_json_is_never_reserialised(self) -> None:
+        double = _RecordingFormat()
+        resolve_codex_credential(
+            codex_auth_json=_AUTH_JSON, openai_api_key=_KEY, credential_format=double
+        )
+        assert double.serialised == []

@@ -347,3 +347,61 @@ async def test_key_only_is_scoped_to_codex_phases(
     )
     assert claude_secrets.codex_auth_json is None
     assert _FAKE_KEY not in claude_secrets.build_setup_script()
+
+
+# An underscore and hyphens in the body: the shape a partial redaction cut short.
+_FAKE_PROJECT_KEY = "sk-proj-FAKEfake0000_tail1111-tail2222"
+
+
+def _key_fragments(key: str) -> list[str]:
+    body = key.removeprefix("sk-")
+    return [key, body, *(p for p in body.replace("_", "-").split("-") if len(p) >= 4)]
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+async def test_a_failing_setup_that_echoes_the_key_logs_and_returns_none_of_it(
+    codex_settings: Callable[[str, str], None], caplog: pytest.LogCaptureFixture
+) -> None:
+    """The hazard the review found: setup stderr carrying the key, verbatim.
+
+    A script that echoes its staged auth file (or a shell trace) puts the key on
+    stderr. That output is logged here and returned to the caller, which quotes
+    it into the failure an execution records. No fragment may survive either.
+    """
+    codex_settings("", _FAKE_PROJECT_KEY)
+    secrets = await SetupPhaseSecrets.create(
+        ledger=IssuanceLedger(), require_github=False, include_codex_auth=True
+    )
+    leaked = f'cat: {{"auth_mode":"apikey","OPENAI_API_KEY":"{_FAKE_PROJECT_KEY}"}}\n'
+    probe = _execute_side_effect(0)
+
+    def _run(cmd: list[str], **kwargs: object) -> ExecutionResult:
+        if cmd == ["bash", "/workspace/.setup/setup.sh"]:
+            return ExecutionResult(
+                exit_code=1,
+                success=False,
+                duration_ms=1,
+                stdout=f"echo {_FAKE_PROJECT_KEY}",
+                stderr=leaked + f"token {_FAKE_PROJECT_KEY}",
+            )
+        return probe(cmd, **kwargs)
+
+    workspace = _workspace()
+    workspace.execute = AsyncMock(side_effect=_run)
+    with (
+        caplog.at_level(logging.DEBUG),
+        patch(
+            "syn_adapters.workspace_backends.service.setup_phase.clear_secrets",
+            new=AsyncMock(),
+        ),
+    ):
+        result = await run_setup_phase(workspace, secrets)
+
+    assert result.exit_code == 1
+    assert "Secret-injection setup failed" in caplog.text
+    for fragment in _key_fragments(_FAKE_PROJECT_KEY):
+        assert fragment not in caplog.text, fragment
+        assert all(fragment not in r.getMessage() for r in caplog.records), fragment
+        assert fragment not in result.stderr, fragment
+        assert fragment not in result.stdout, fragment

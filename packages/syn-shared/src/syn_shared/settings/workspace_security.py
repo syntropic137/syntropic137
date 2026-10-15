@@ -57,8 +57,10 @@ class ContainerLoggingSettings(BaseSettings):
 
     redaction_patterns: list[str] = Field(
         default_factory=lambda: [
-            r"sk-ant-[a-zA-Z0-9-]+",
-            r"sk-[a-zA-Z0-9-]+",
+            # `_` belongs in the body: without it an OpenAI project key
+            # (sk-proj-..._...) was cut at its first underscore, leaving the
+            # rest in the log (#1971 review).
+            r"sk-[a-zA-Z0-9_-]+",
             r"ghp_[a-zA-Z0-9]+",
             r"github_pat_[a-zA-Z0-9_]+",
             r"gho_[a-zA-Z0-9]+",

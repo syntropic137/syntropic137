@@ -10,14 +10,14 @@ Two settings can carry one:
 prefers ``CLAUDE_CODE_OAUTH_TOKEN`` over ``ANTHROPIC_API_KEY``.
 
 WHY THE KEY BECOMES A FILE. Codex reads its credential from
-``$CODEX_HOME/auth.json``; the stored file is what ``codex login --with-api-key``
-writes, and it is the shape synthesised here (codex-rs ``login_with_api_key``,
-``login/src/auth/manager.rs`` at rust-v0.160.1). Turning the key into that file
-lets it ride the existing staging path - staged under ``.setup/``, relocated to
-``~/.codex/auth.json`` at 0600, removal verified fail-closed - so it never
-enters the agent environment, argv, logs or the setup script text. Codex's own
-env-var route (``CODEX_API_KEY``) would put it in the agent environment, which
-is exactly what the codex path refuses to do.
+``$CODEX_HOME/auth.json``. The file a key becomes is codex format knowledge, so
+it comes from the `CodexCredentialFileFormat` port (`codex_credential_port`),
+never from here. Turning the key into that file lets it ride the existing
+staging path - staged under ``.setup/``, relocated to ``~/.codex/auth.json`` at
+0600, removal verified fail-closed - so it never enters the agent environment,
+argv, logs or the setup script text. Codex's own env-var route
+(``CODEX_API_KEY``) would put it in the agent environment, which is exactly
+what the codex path refuses to do.
 
 No logging: the health probe and the setup phase resolve with one rule and
 each caller decides what to report.
@@ -27,17 +27,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import TYPE_CHECKING, Final, Literal
+from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, ConfigDict, Field
+from syn_shared.codex_auth_file import CODEX_AUTH_FILE_FORMAT
 
 if TYPE_CHECKING:
+    from syn_shared.codex_credential_port import CodexCredentialFileFormat
     from syn_shared.settings import Settings
-
-#: The ``auth_mode`` codex writes for an API-key login. codex-rs serialises
-#: ``AuthMode::ApiKey`` with ``rename_all = "lowercase"``
-#: (``protocol/src/auth.rs`` at rust-v0.160.1).
-CODEX_API_KEY_AUTH_MODE: Final = "apikey"
 
 
 class CodexCredentialSource(StrEnum):
@@ -45,31 +41,6 @@ class CodexCredentialSource(StrEnum):
 
     CODEX_AUTH_JSON = "codex_auth_json"
     OPENAI_API_KEY = "openai_api_key"
-
-
-class CodexApiKeyAuthFile(BaseModel):
-    """The ``auth.json`` codex writes for ``codex login --with-api-key``.
-
-    Field names are codex's: ``auth_mode`` and the upper-case ``OPENAI_API_KEY``
-    (``AuthDotJson`` in ``login/src/auth/storage.rs`` at rust-v0.160.1, which
-    renames ``openai_api_key`` to ``OPENAI_API_KEY``). Verified against
-    codex-cli 0.160.1, the version the agentic-workspace image pins, on
-    2026-10-14 (#1971).
-    """
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    auth_mode: Literal["apikey"] = CODEX_API_KEY_AUTH_MODE
-    openai_api_key: str = Field(serialization_alias="OPENAI_API_KEY", repr=False)
-
-
-def codex_api_key_auth_json(api_key: str) -> str:
-    """The ``auth.json`` text that authenticates codex with ``api_key``.
-
-    Serialised by Pydantic, so a key containing a quote or a backslash is
-    escaped rather than breaking the file.
-    """
-    return CodexApiKeyAuthFile(openai_api_key=api_key).model_dump_json(by_alias=True)
 
 
 @dataclass(frozen=True)
@@ -87,11 +58,16 @@ class ResolvedCodexCredential:
 
 
 def resolve_codex_credential(
-    *, codex_auth_json: str | None, openai_api_key: str | None
+    *,
+    codex_auth_json: str | None,
+    openai_api_key: str | None,
+    credential_format: CodexCredentialFileFormat = CODEX_AUTH_FILE_FORMAT,
 ) -> ResolvedCodexCredential | None:
     """Apply the precedence: ``CODEX_AUTH_JSON`` first, ``OPENAI_API_KEY`` second.
 
-    Blank values count as unset. Returns None when neither is configured.
+    Blank values count as unset. Returns None when neither is configured. The
+    key becomes a credential file through ``credential_format``, the port that
+    owns codex's file format.
     """
     auth_json = codex_auth_json if codex_auth_json and codex_auth_json.strip() else None
     api_key = openai_api_key.strip() if openai_api_key else ""
@@ -103,7 +79,7 @@ def resolve_codex_credential(
         )
     if api_key:
         return ResolvedCodexCredential(
-            auth_json=codex_api_key_auth_json(api_key),
+            auth_json=credential_format.api_key_credential_file(api_key),
             source=CodexCredentialSource.OPENAI_API_KEY,
             both_configured=False,
         )

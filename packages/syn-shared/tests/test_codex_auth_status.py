@@ -215,3 +215,31 @@ class TestApiKey:
         d = describe_codex_auth(None).detail
         assert "CODEX_AUTH_JSON" in d
         assert "OPENAI_API_KEY" in d
+
+
+@pytest.mark.unit
+class TestApiKeyWithoutKey:
+    """API-key mode with no usable key is NOT api_key (#1971 review)."""
+
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            '{"auth_mode": "apikey"}',
+            '{"auth_mode": "apikey", "OPENAI_API_KEY": null}',
+            '{"auth_mode": "apikey", "OPENAI_API_KEY": ""}',
+            '{"auth_mode": "apikey", "OPENAI_API_KEY": "   "}',
+        ],
+        ids=["missing", "null", "empty", "whitespace"],
+    )
+    def test_reports_unreadable_not_api_key(self, raw: str) -> None:
+        s = describe_codex_auth(raw)
+        assert s.state is CodexAuthState.UNREADABLE
+        assert "no usable OPENAI_API_KEY" in s.detail
+        assert "apikey" not in s.detail
+
+    def test_every_undated_kind_has_a_detail(self) -> None:
+        from syn_shared.codex_auth_status import _UNDATED_DETAIL
+        from syn_shared.codex_credential_port import CodexCredentialFileKind
+
+        dated = {CodexCredentialFileKind.API_KEY, CodexCredentialFileKind.TOKENS}
+        assert set(_UNDATED_DETAIL) == set(CodexCredentialFileKind) - dated

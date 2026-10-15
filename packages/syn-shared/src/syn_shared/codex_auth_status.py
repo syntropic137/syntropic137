@@ -28,9 +28,6 @@ of looking ``UNREADABLE``. Only its mode is inspected; the key is never returned
 
 from __future__ import annotations
 
-import base64
-import binascii
-import json
 import time
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -38,17 +35,17 @@ from typing import TYPE_CHECKING, Final
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from syn_shared.codex_credentials import CODEX_API_KEY_AUTH_MODE, CodexCredentialSource
+from syn_shared.codex_auth_file import CODEX_AUTH_FILE_FORMAT
+from syn_shared.codex_credential_port import CodexCredentialFileKind
+from syn_shared.codex_credentials import CodexCredentialSource
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from syn_shared.codex_credential_port import CodexCredentialFileFormat
 
 #: Below this, the credential is close enough that a re-mint should be scheduled.
 #: 48h is deliberately generous: re-minting needs a human at a browser, and a
 #: warning nobody can act on before it expires is just an alarm.
 WARN_THRESHOLD_HOURS: Final = 48.0
-
-_JWT_SEGMENTS: Final = 3
 
 
 class CodexAuthState(StrEnum):
@@ -99,51 +96,8 @@ class CodexAuthStatus(BaseModel):
         return self.state in (CodexAuthState.EXPIRED, CodexAuthState.EXPIRING)
 
 
-def _decode_exp(access_token: str) -> float | None:
-    """Read the ``exp`` claim out of a JWT payload. None if it is not one.
-
-    Padding is restored before decoding because JWT segments are base64url with
-    padding stripped, which ``urlsafe_b64decode`` rejects.
-    """
-    if access_token.count(".") != _JWT_SEGMENTS - 1:
-        return None
-    payload = access_token.split(".")[1]
-    payload += "=" * (-len(payload) % 4)
-    try:
-        claims = json.loads(base64.urlsafe_b64decode(payload))
-    except (binascii.Error, ValueError, UnicodeDecodeError):
-        return None
-    if not isinstance(claims, dict):
-        return None
-    exp = claims.get("exp")
-    return float(exp) if isinstance(exp, (int, float)) else None
-
-
 def _unreadable(detail: str) -> CodexAuthStatus:
     return CodexAuthStatus(state=CodexAuthState.UNREADABLE, detail=detail)
-
-
-#: Fields whose presence makes codex resolve a mode-less auth.json to something
-#: other than an API key (``AuthDotJson::resolved_mode``,
-#: ``login/src/auth/manager.rs`` at rust-v0.160.1).
-_NON_API_KEY_FIELDS: Final = ("personal_access_token", "bedrock_api_key", "bedrock_access_keys")
-
-
-def _is_api_key_auth(parsed: Mapping[object, object]) -> bool:
-    """Whether codex would read this auth.json as API-key auth.
-
-    Mirrors codex's ``resolved_mode``: an explicit ``auth_mode`` decides; without
-    one, a non-empty ``OPENAI_API_KEY`` means API key unless a field codex checks
-    first is present. An older ChatGPT auth.json carries ``"OPENAI_API_KEY":
-    null``, which is not a string and so stays a ChatGPT login here.
-    """
-    mode = parsed.get("auth_mode")
-    if mode is not None:
-        return mode == CODEX_API_KEY_AUTH_MODE
-    if any(parsed.get(name) is not None for name in _NON_API_KEY_FIELDS):
-        return False
-    key = parsed.get("OPENAI_API_KEY")
-    return isinstance(key, str) and bool(key)
 
 
 def _api_key_status(source: CodexCredentialSource) -> CodexAuthStatus:
@@ -161,37 +115,51 @@ def _api_key_status(source: CodexCredentialSource) -> CodexAuthStatus:
     )
 
 
-def _extract_expiry(raw: str) -> float | CodexAuthStatus:
+#: Why a credential file of each non-dated kind cannot be dated. Must cover every
+#: kind except API_KEY and TOKENS; ``test_every_undated_kind_has_a_detail``
+#: pins that, so a new kind fails a test rather than raising KeyError in /health
+#: (where ``describe_codex_auth_health`` would swallow it and drop the block).
+_UNDATED_DETAIL: Final[dict[CodexCredentialFileKind, str]] = {
+    CodexCredentialFileKind.NOT_JSON: "CODEX_AUTH_JSON is not valid JSON.",
+    CodexCredentialFileKind.NOT_AN_OBJECT: "CODEX_AUTH_JSON is not a JSON object.",
+    CodexCredentialFileKind.MALFORMED: (
+        "CODEX_AUTH_JSON is a JSON object whose fields do not have the types codex expects."
+    ),
+    CodexCredentialFileKind.API_KEY_WITHOUT_KEY: (
+        "CODEX_AUTH_JSON is in API-key mode but carries no usable OPENAI_API_KEY; "
+        "codex phases cannot authenticate."
+    ),
+}
+
+
+def _extract_expiry(
+    raw: str, credential_format: CodexCredentialFileFormat
+) -> float | CodexAuthStatus:
     """The access token's ``exp``, or the status explaining why there isn't one.
 
     Split out of ``describe_codex_auth`` so that parsing and classification are
     separately readable: every branch here is a reason the credential cannot be
-    dated, and every branch there is a judgement about a date we have.
+    dated, and every branch there is a judgement about a date we have. Reading
+    the file is the port's job (``credential_format``); this only maps kinds.
     """
-    try:
-        parsed: object = json.loads(raw)
-    except ValueError:
-        return _unreadable("CODEX_AUTH_JSON is not valid JSON.")
-    if not isinstance(parsed, dict):
-        return _unreadable("CODEX_AUTH_JSON is not a JSON object.")
-    if _is_api_key_auth(parsed):
+    found = credential_format.classify(raw)
+    if found.kind is CodexCredentialFileKind.API_KEY:
         return _api_key_status(CodexCredentialSource.CODEX_AUTH_JSON)
-
-    tokens = parsed.get("tokens")
-    access_token = tokens.get("access_token") if isinstance(tokens, dict) else None
-    exp = _decode_exp(access_token) if isinstance(access_token, str) else None
-    if exp is None:
+    if found.kind is not CodexCredentialFileKind.TOKENS:
+        return _unreadable(_UNDATED_DETAIL[found.kind])
+    if found.access_token_expiry is None:
         return _unreadable(
             "Credential present but carries no decodable access-token expiry. "
             "Expected for access-token auth, which does not expire on a timer."
         )
-    return exp
+    return found.access_token_expiry
 
 
 def describe_codex_auth(
     raw: str | None,
     *,
     source: CodexCredentialSource = CodexCredentialSource.CODEX_AUTH_JSON,
+    credential_format: CodexCredentialFileFormat = CODEX_AUTH_FILE_FORMAT,
 ) -> CodexAuthStatus:
     """Describe the credential's freshness from its raw JSON.
 
@@ -213,7 +181,7 @@ def describe_codex_auth(
     if source is CodexCredentialSource.OPENAI_API_KEY:
         return _api_key_status(source)
 
-    found = _extract_expiry(raw)
+    found = _extract_expiry(raw, credential_format)
     if isinstance(found, CodexAuthStatus):
         return found
 

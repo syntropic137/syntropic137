@@ -17,6 +17,7 @@ See ADR-024: Secure Token Architecture
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import logging
 from enum import StrEnum
 from typing import TYPE_CHECKING, Final, NamedTuple
@@ -32,6 +33,7 @@ from syn_shared.env_constants import (
     ENV_GIT_COMMITTER_EMAIL,
     ENV_GIT_COMMITTER_NAME,
 )
+from syn_shared.logging.redaction import redact_credentials
 from syn_shared.settings import get_settings
 
 if TYPE_CHECKING:
@@ -162,6 +164,15 @@ _SETUP_ATTEMPTS: Final = 2
 _SETUP_RETRY_BACKOFF_SECONDS: Final = 1.0
 
 
+def _redacted(result: ExecutionResult) -> ExecutionResult:
+    """The setup run's result with credentials masked out of its output."""
+    return dataclasses.replace(
+        result,
+        stdout=redact_credentials(result.stdout),
+        stderr=redact_credentials(result.stderr),
+    )
+
+
 async def _run_setup_script(
     ws: ManagedWorkspace,
     secrets: SetupPhaseSecrets,
@@ -195,10 +206,14 @@ async def _run_setup_script(
             attempt,
             _SETUP_ATTEMPTS,
         )
-        result = await ws.execute(
-            ["bash", "/workspace/.setup/setup.sh"],
-            environment=setup_env,
-            timeout_seconds=get_settings().setup_phase_timeout_seconds,
+        # Masked HERE, before anything reads it: the output is logged below and
+        # by the caller, and quoted into the failure an execution records (#1971).
+        result = _redacted(
+            await ws.execute(
+                ["bash", "/workspace/.setup/setup.sh"],
+                environment=setup_env,
+                timeout_seconds=get_settings().setup_phase_timeout_seconds,
+            )
         )
         if not is_status_lost(result) or attempt == _SETUP_ATTEMPTS:
             return result
@@ -297,7 +312,7 @@ def _attempt_record(result: ExecutionResult) -> str:
     if result.timed_out:
         return record + f" (timed out after {_exec_timeout_seconds()}s)"
     if is_status_lost(result):
-        record += f" ({result.stderr[:_ATTEMPT_DETAIL_CHARS]})"
+        record += f" ({redact_credentials(result.stderr)[:_ATTEMPT_DETAIL_CHARS]})"
     return record
 
 
@@ -340,7 +355,7 @@ async def _staged_credential_state(ws: ManagedWorkspace) -> _CredentialState:
             "remains (workspace=%s, exit=%s): %s",
             ws.workspace_id,
             format_exit_code(probe.exit_code),
-            probe.stderr,
+            redact_credentials(probe.stderr),
         )
         return _CredentialState.UNVERIFIABLE
 
@@ -388,7 +403,7 @@ async def _remove_staged_credential(ws: ManagedWorkspace) -> _GuardOutcome:
             attempt,
             _MAX_ATTEMPTS,
             format_exit_code(removal.exit_code),
-            removal.stderr,
+            redact_credentials(removal.stderr),
         )
         await _wait_before_retry(attempt)
 
@@ -564,7 +579,7 @@ rm -rf /tmp/secrets* /tmp/setup* 2>/dev/null || true
             "Secret cleanup script exited non-zero (exit=%s, workspace=%s): %s",
             format_exit_code(cleanup.exit_code),
             ws.workspace_id,
-            cleanup.stderr,
+            redact_credentials(cleanup.stderr),
         )
 
     # Clean up the cleanup script too
