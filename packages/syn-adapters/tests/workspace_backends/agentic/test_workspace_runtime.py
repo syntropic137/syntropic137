@@ -119,9 +119,7 @@ async def test_unset_setting_reaches_the_provider_as_auto() -> None:
 
 
 @pytest.mark.parametrize(("ours", "theirs"), _PAIRS)
-def test_recorded_effective_runtime_is_read_back(
-    ours: WorkspaceRuntime, theirs: AwRuntime
-) -> None:
+def test_recorded_effective_runtime_is_read_back(ours: WorkspaceRuntime, theirs: AwRuntime) -> None:
     # The keys and spellings are the ones AW's DockerProvider writes from its
     # ResolvedRuntime: str(requested or "auto"), str(effective).
     recorded = {"runtime_requested": "auto", "runtime_effective": str(theirs)}
