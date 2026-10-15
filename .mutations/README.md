@@ -21,7 +21,18 @@ just mutation-evidence 1975 "packages/syn-adapters/src/syn_adapters/execution_ho
 ```
 
 Each patch was applied locally in this workspace and its listed tests failed;
-the unpatched baseline passes. The Postgres adapter's bounded `FOR UPDATE SKIP
-LOCKED` acquisition is pinned by contract tests in
-`packages/syn-adapters/tests/test_execution_run_queue_postgres.py` (integration,
-Docker), which have no patch here.
+the unpatched baseline passes.
+
+## Postgres acquisition (`store/`, integration: `docker=true`)
+
+| Patch | Bug re-introduced | Killed by |
+|---|---|---|
+| `store/10-store-acquisition-unbounded.patch` | `fence_expired` and `take_over` select up to 1000 rows whatever `limit` says, so the first concurrent acquirer takes every row | `packages/syn-adapters/tests/test_execution_run_queue_postgres.py::test_fencing_is_bounded_and_concurrent_fencers_never_share_a_row`, `packages/syn-adapters/tests/test_execution_run_queue_postgres.py::test_takeover_is_bounded_and_concurrent_adopters_never_share_a_row` |
+
+These tests need Postgres, so this patch was not run in the agent workspace
+(no Docker); the expected failure is the `(len(a), len(b)) == (2, 2)` count
+assertion. Dispatch it separately:
+
+```
+just mutation-evidence 1975 "packages/syn-adapters/tests/test_execution_run_queue_postgres.py::test_fencing_is_bounded_and_concurrent_fencers_never_share_a_row packages/syn-adapters/tests/test_execution_run_queue_postgres.py::test_takeover_is_bounded_and_concurrent_adopters_never_share_a_row" true .mutations/store/
+```
