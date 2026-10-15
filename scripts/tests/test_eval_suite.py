@@ -2264,7 +2264,13 @@ def test_v5_scores_its_own_cases_under_every_verifier_without_the_v6_controls(
     assert len(v5.cases) == 33
     assert {c.source_pr for c in v5.cases if c.polarity == "clean"} == {917, 1010}
     added = {c.id for c in current.cases} - {c.id for c in v5.cases}
-    assert {c.source_pr for c in current.cases if c.id in added} == _V6_CLEAN_PRS | {1808, 1921, 1929, 1968, 1975}
+    assert {c.source_pr for c in current.cases if c.id in added} == _V6_CLEAN_PRS | {
+        1808,
+        1921,
+        1929,
+        1968,
+        1975,
+    }
 
 
 @pytest.mark.unit
