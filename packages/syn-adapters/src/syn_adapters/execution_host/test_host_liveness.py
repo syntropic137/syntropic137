@@ -210,7 +210,9 @@ async def _a_dead_peer_holding(queue: _Queue, time: _FakeTime, count: int) -> No
     time.spend(_WINDOW + 1)
 
 
-def _live_host(queue: _Queue, time: _FakeTime, reaper: _GatedReaper, capacity: int) -> ExecutionHost:
+def _live_host(
+    queue: _Queue, time: _FakeTime, reaper: _GatedReaper, capacity: int
+) -> ExecutionHost:
     return ExecutionHost(
         queue,
         _LIVE,
