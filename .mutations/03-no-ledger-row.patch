@@ -1,0 +1,12 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py b/packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py
+index 969623fb3..ef76f66be 100644
+--- a/packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py
++++ b/packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py
+@@ -92,7 +92,6 @@ class PostgresExecutionRunQueue:
+             for step in SCHEMA_STEPS:
+                 async with conn.transaction():
+                     await conn.execute(step.sql)
+-                    await conn.execute(_RECORD_STEP_SQL, step.name)
+ 
+     async def register(self, host: ExecutorHost, capacity: int) -> None:
+         if capacity < 0:

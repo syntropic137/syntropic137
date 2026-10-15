@@ -1,0 +1,12 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py b/packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py
+index 969623fb3..8a1ecd917 100644
+--- a/packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py
++++ b/packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py
+@@ -86,6 +86,7 @@ class PostgresExecutionRunQueue:
+         """
+         async with (
+             self._pool.acquire() as conn,
++            conn.transaction(),
+             session_advisory_lock(conn, RUN_QUEUE_SCHEMA_LOCK_KEY),
+         ):
+             await conn.execute(_SCHEMA_LEDGER_SQL)
