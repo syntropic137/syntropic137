@@ -51,12 +51,17 @@ from syn_domain.contexts.orchestration.ports.DelegationEvidencePort import (
     DelegationOutcome,
 )
 from syn_domain.contexts.orchestration.ports.ExecutionRunQueuePort import (
+    DEFAULT_EXECUTOR_POOL,
+    Capability,
     ClaimedRun,
     ExecutionRunQueue,
     ExecutionStreamProbe,
     ExecutorHost,
+    ExecutorPool,
     FencedRun,
+    IsolationLevel,
     OpeningSweep,
+    PoolDefinitionConflict,
     RunCounts,
     RunLeaseLost,
     StreamPresence,
@@ -88,8 +93,10 @@ from syn_domain.contexts.orchestration.ports.WorkspaceServicePort import (
 )
 
 __all__ = [
+    "DEFAULT_EXECUTOR_POOL",
     "ArtifactQueryServicePort",
     "ArtifactRepositoryPort",
+    "Capability",
     "ClaimedRun",
     "ClaudePluginFile",
     "ClaudePluginRegistrationRepositoryPort",
@@ -102,10 +109,13 @@ __all__ = [
     "ExecutionRunQueue",
     "ExecutionStreamProbe",
     "ExecutorHost",
+    "ExecutorPool",
     "FencedRun",
     "GlobalClaudePluginRegistryRepositoryPort",
+    "IsolationLevel",
     "ObservabilityServicePort",
     "OpeningSweep",
+    "PoolDefinitionConflict",
     "RemoteBranchPort",
     "RemoteBranchReading",
     "RunCounts",

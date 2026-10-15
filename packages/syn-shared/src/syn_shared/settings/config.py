@@ -27,9 +27,10 @@ from syn_shared.agents import (
 from syn_shared.env_constants import ENV_CODEX_AUTH_JSON
 
 if TYPE_CHECKING:
+    from syn_shared.settings.dependency_seed import DependencySeedSettings
     from syn_shared.settings.dev_tooling import DevToolingSettings
     from syn_shared.settings.disk import DiskSettings
-    from syn_shared.settings.execution import ExecutionSettings
+    from syn_shared.settings.execution import ExecutionSettings, ExecutorPoolSettings
     from syn_shared.settings.github import GitHubAppSettings
     from syn_shared.settings.image_verification import ImageVerificationSettings
     from syn_shared.settings.platform_access import PlatformAccessSettings
@@ -40,7 +41,6 @@ if TYPE_CHECKING:
     from syn_shared.settings.workspace import (
         ContainerLoggingSettings,
         GitIdentitySettings,
-        WorkspaceSecuritySettings,
         WorkspaceSettings,
     )
 
@@ -719,19 +719,6 @@ class Settings(BaseSettings):
         return WorkspaceSettings()
 
     @property
-    def workspace_security(self) -> WorkspaceSecuritySettings:
-        """Get workspace security settings.
-
-        Returns security policies applied to all isolated workspaces.
-        Defaults are maximally restrictive (no network, read-only root, resource limits).
-
-        See ADR-021: Isolated Workspace Architecture
-        """
-        from syn_shared.settings.workspace import WorkspaceSecuritySettings
-
-        return WorkspaceSecuritySettings()
-
-    @property
     def platform_access(self) -> PlatformAccessSettings:
         """Workspace access to the Syntropic137 API. Default OFF (ADR-072)."""
         from syn_shared.settings.platform_access import PlatformAccessSettings
@@ -899,6 +886,13 @@ class Settings(BaseSettings):
 
         return ExecutionSettings()
 
+    @property
+    def executor_pool(self) -> ExecutorPoolSettings:
+        """The Executor Pool this process's ExecutionHost joins (ADR-072 D13)."""
+        from syn_shared.settings.execution import ExecutorPoolSettings
+
+        return ExecutorPoolSettings()
+
     # =========================================================================
     # DISK (#1560) - free space on the workspace volume
     # =========================================================================
@@ -909,6 +903,13 @@ class Settings(BaseSettings):
         from syn_shared.settings.disk import DiskSettings
 
         return DiskSettings()
+
+    @property
+    def dependency_seed(self) -> DependencySeedSettings:
+        """Where platform-warmed uv/pnpm seeds live and how much disk they get (#1714)."""
+        from syn_shared.settings.dependency_seed import DependencySeedSettings
+
+        return DependencySeedSettings()
 
 
 @lru_cache

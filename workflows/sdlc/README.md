@@ -124,6 +124,19 @@ the three disagree, so a switch that misses a round cannot certify round 1 on on
 model and round 2 on another. Remember a verifier on the same model as the fix
 phases (`opus`) is no longer a cross-model review; say so when you rely on it.
 
+## Experiment arm: `implement-v4-precheck`
+
+`sdlc-implement-v4-precheck` is `sdlc-implement-v3` with one change, an A/B
+arm and not a successor. Verify and every reverify start with an evidence
+precheck. What a workspace cannot fix (a flaky or infrastructure failure,
+Docker or database evidence, a retarget or a `.github/workflows/` change) is
+handed to `finalize_pr`, which keeps the PR a draft and posts it, so no
+repair round is spent on it. Its design note and preregistered A/B are in
+[`implement-v4-precheck/EXPERIMENT.md`](implement-v4-precheck/EXPERIMENT.md).
+`scripts/tests/test_implement_v4_precheck_variant.py` fails if it differs
+from v3 in anything else. **Change a shared prompt in `implement-v3/phases/`
+and copy it here too.**
+
 ## Verification gates
 
 `sdlc-implement-v3` and `sdlc-reverify-pr-v1` verify a change by running the
