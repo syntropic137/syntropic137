@@ -9,6 +9,7 @@ Refactored in ISS-196 to delegate telemetry to ObservabilityCollector (Lane 2).
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 from collections.abc import Mapping
@@ -24,6 +25,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.announced_model i
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.CancelSignalPoller import (
     CancelSignalPoller,
+    StreamRead,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.EmbeddedEventScanner import (
     EmbeddedEventScanner,
@@ -517,19 +519,17 @@ class EventStreamProcessor:
             StreamResult with accumulated state
         """
         conversation_lines: list[str] = []
-        line_count = 0
-        interrupt_requested = False
-        interrupt_reason: str | None = None
 
-        async for line in stream:
-            line_count += 1
-            outcome = await self._process_line(line, line_count, workspace)
-            if line.strip():
-                conversation_lines.append(line)
-            if outcome.action is _LineAction.BREAK:
-                interrupt_requested = outcome.interrupt_requested
-                interrupt_reason = outcome.interrupt_reason
-                break
+        read = StreamRead(self._cancel_poller, workspace)
+        async with contextlib.aclosing(read.lines(stream)) as lines:
+            async for line in lines:
+                outcome = await self._process_line(line, read.line_count, workspace)
+                if line.strip():
+                    conversation_lines.append(line)
+                if outcome.action is _LineAction.BREAK:
+                    read.stop(outcome.interrupt_reason)
+                    break
+        line_count = read.line_count
 
         # Read from what the agent SAID, not only from the terminal `result`
         # line: a phase that was killed or timed out after stating its verdict
@@ -551,8 +551,8 @@ class EventStreamProcessor:
 
         return StreamResult(
             line_count=line_count,
-            interrupt_requested=interrupt_requested,
-            interrupt_reason=interrupt_reason,
+            interrupt_requested=read.interrupt_requested,
+            interrupt_reason=read.interrupt_reason,
             verdict=verdict,
             conversation_lines=conversation_lines,
             total_cost_usd=self._result_cost_usd,
