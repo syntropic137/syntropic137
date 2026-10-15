@@ -2396,7 +2396,7 @@ def test_the_split_flag_selects_the_cases_check_reports(
     assert main(["check", "--split", "holdout"]) == 0
     assert [c.split for c in checked[0].cases] == ["holdout"] * 11
     out = capsys.readouterr().out
-    assert ": 10 case(s)" in out
+    assert ": 11 case(s)" in out
     assert "case:binary-artifact-minio-key" not in out
 
 
