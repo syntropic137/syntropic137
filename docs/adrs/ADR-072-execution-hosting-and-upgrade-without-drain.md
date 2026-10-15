@@ -716,6 +716,26 @@ D5), the claim signals `claim_checked_at` and `full_since` (D3, D4), priority
 and overflow in the claim, run requirements, and the placement read follow in
 that order, as the plan sets out.
 
+**Applying the schema (#1965).** The api and every executor apply the Run Queue
+schema as they start, so they apply it concurrently. `ensure_ready` therefore
+holds one session advisory lock (`RUN_QUEUE_SCHEMA_LOCK_KEY` in
+`syn_adapters.advisory_locks`, beside every other startup key) for the whole
+apply, taken by retrying `pg_try_advisory_lock` so a waiter holds no snapshot
+(the #1906 deadlock). `schema.sql` is divided into named `-- step:` sections;
+each runs in its own transaction with its row in
+`execution_run_queue_schema_steps`, which records when this database first
+applied it. Every step stays idempotent and runs at every start: the ledger is
+a record, not a gate, so a database whose ledger is missing or behind is still
+brought up to date.
+
+**Downgrade.** Dropping `backend` does not make the Run Queue forward-only: no
+code before #1931 read or wrote it. An image from before pools runs against an
+upgraded database: its `CREATE TABLE IF NOT EXISTS` does nothing, its budget
+insert names no pool and joins the seeded `default` one. Nothing refuses an
+older image, because nothing needs to; the downgrade test in
+`test_1965_run_queue_schema_postgres.py` pins this. A later step that does break
+older images must say so here and refuse them explicitly.
+
 ## Consequences
 
 ### Positive

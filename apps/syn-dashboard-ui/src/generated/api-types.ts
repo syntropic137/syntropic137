@@ -3072,7 +3072,7 @@ export interface components {
          * @description Freshness of the configured codex credential.
          * @enum {string}
          */
-        CodexAuthState: "absent" | "ok" | "expiring" | "expired" | "unreadable";
+        CodexAuthState: "absent" | "ok" | "expiring" | "expired" | "unreadable" | "api_key";
         /**
          * CodexAuthStatus
          * @description A non-secret description of the configured codex credential.
