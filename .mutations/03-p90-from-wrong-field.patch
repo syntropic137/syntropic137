@@ -1,0 +1,13 @@
+diff --git a/apps/syn-api/src/syn_api/types.py b/apps/syn-api/src/syn_api/types.py
+index 5acc2e638..7fc8da1e1 100644
+--- a/apps/syn-api/src/syn_api/types.py
++++ b/apps/syn-api/src/syn_api/types.py
+@@ -4146,7 +4146,7 @@ class TokenPercentilesResponse(BaseModel):
+         return cls(
+             n=stat.n,
+             p50=stat.p50,
+-            p90=stat.p90,
++            p90=stat.p95,
+             p50_display=_display(stat.p50, kind),
+             p90_display=_display(stat.p90, kind),
+         )

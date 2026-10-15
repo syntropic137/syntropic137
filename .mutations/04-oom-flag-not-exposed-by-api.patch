@@ -1,0 +1,12 @@
+diff --git a/apps/syn-api/src/syn_api/types.py b/apps/syn-api/src/syn_api/types.py
+index 5acc2e638..5e8bf0dac 100644
+--- a/apps/syn-api/src/syn_api/types.py
++++ b/apps/syn-api/src/syn_api/types.py
+@@ -4343,6 +4343,7 @@ class PhaseProfilesResponse(BaseModel):
+                             oom_kills=k.oom_kills,
+                         )
+                         for k in r.oom_killed_phases
++                        if False
+                     ],
+                     coverage=ResourceCoverageResponse(
+                         phases=r.coverage.phases,
