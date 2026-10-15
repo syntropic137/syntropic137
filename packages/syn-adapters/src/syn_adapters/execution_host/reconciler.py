@@ -13,6 +13,7 @@ owns and however slowly Docker answers, the loop turn that drives it stays short
 from __future__ import annotations
 
 import asyncio
+import itertools
 import logging
 import time
 from dataclasses import dataclass, field
@@ -70,11 +71,11 @@ class Reconciler:
         self._lease_ttl = lease_ttl
         self._clock = clock
         self._attempts: dict[str, _Attempt] = {}
-        # A scheduling hint, never state: the turn each owned row was last
-        # attempted, or first seen. A restart is a new host_id, so losing it
-        # loses nothing the rows do not already say.
-        self._last_attempt: dict[str, int] = {}
-        self._turns = 0
+        # A scheduling hint, never state: each owned row's place in line, taken
+        # when it is first seen and again each time it is attempted. A restart
+        # is a new host_id, so losing it loses nothing the rows do not say.
+        self._in_line: dict[str, int] = {}
+        self._ticket = itertools.count(1)
 
     @property
     def idle(self) -> bool:
@@ -87,7 +88,6 @@ class Reconciler:
         A draining host (D10) fences nothing, adopts nothing and starts no new
         attempt; the tasks it already started run to their end.
         """
-        self._turns += 1
         self._warn_long_running()
         if not acquire:
             return
@@ -97,15 +97,15 @@ class Reconciler:
             )
         owned = await self._queue.reconciling(self._host_id)
         owned_ids = {run.execution_id for run in owned}
-        self._last_attempt = {
-            execution_id: self._last_attempt.get(execution_id, self._turns)
-            for execution_id in owned_ids
+        self._in_line = {
+            execution_id: self._in_line.get(execution_id) or next(self._ticket)
+            for execution_id in sorted(owned_ids)
         }
         # Least recently attempted first, so rows whose reaps keep failing
         # never hold up the rows behind them.
         waiting = sorted(
             (run for run in owned if run.execution_id not in self._attempts),
-            key=lambda run: (self._last_attempt[run.execution_id], run.execution_id),
+            key=lambda run: self._in_line[run.execution_id],
         )
         for run in waiting[: self._concurrency - len(self._attempts)]:
             self._start(run)
@@ -123,7 +123,7 @@ class Reconciler:
 
     def _start(self, run: FencedRun) -> None:
         execution_id = run.execution_id
-        self._last_attempt[execution_id] = self._turns
+        self._in_line[execution_id] = next(self._ticket)
         task = asyncio.create_task(self._advance_logged(run), name=f"reconcile:{execution_id}")
         self._attempts[execution_id] = _Attempt(task=task, started=self._clock())
         task.add_done_callback(lambda _: self._attempts.pop(execution_id, None))
