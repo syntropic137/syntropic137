@@ -1,0 +1,13 @@
+diff --git a/scripts/check_integration_skips.py b/scripts/check_integration_skips.py
+index 2382da4d9..f5044a70a 100644
+--- a/scripts/check_integration_skips.py
++++ b/scripts/check_integration_skips.py
+@@ -360,7 +360,7 @@ class _Census:
+                     findings.append(Finding(rel, test.name, "malformed", error))
+             if INTEGRATION_MARKER not in names or declarations:
+                 continue
+-            skip_marks = sorted(n for n in names if n in _SKIP_MARKERS)
++            skip_marks: list[str] = []
+             via = (
+                 (f"marked {skip_marks[0]}" if skip_marks else None)
+                 or module.module_level_skip()

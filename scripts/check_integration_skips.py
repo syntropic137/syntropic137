@@ -41,12 +41,14 @@ from __future__ import annotations
 
 import ast
 import re
-from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from check_test_markers import is_excluded
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Iterator
+    from pathlib import Path
 
 INTEGRATION_MARKER = "integration"
 OPT_OUT_MARKER = "may_skip"
@@ -145,9 +147,12 @@ def _called_name(call: ast.Call) -> str | None:
     func = call.func
     if isinstance(func, ast.Name):
         return func.id
-    if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
-        if func.value.id in {"self", "cls"}:
-            return func.attr
+    if (
+        isinstance(func, ast.Attribute)
+        and isinstance(func.value, ast.Name)
+        and func.value.id in {"self", "cls"}
+    ):
+        return func.attr
     return None
 
 
@@ -205,9 +210,7 @@ class _Module:
     rel: str
     tree: ast.Module
     skip_aliases: frozenset[str]
-    functions: dict[str, list[ast.FunctionDef | ast.AsyncFunctionDef]] = field(
-        default_factory=dict
-    )
+    functions: dict[str, list[ast.FunctionDef | ast.AsyncFunctionDef]] = field(default_factory=dict)
     fixtures: dict[str, _Fixture] = field(default_factory=dict)
     _reach: dict[int, str | None] = field(default_factory=dict)
 
@@ -362,9 +365,7 @@ class _Census:
                 (f"marked {skip_marks[0]}" if skip_marks else None)
                 or module.module_level_skip()
                 or module.body_skips(test)
-                or scope.fixture_skips(
-                    [*_params(test), *_usefixtures(marks), *scope.autouse()]
-                )
+                or scope.fixture_skips([*_params(test), *_usefixtures(marks), *scope.autouse()])
             )
             if via:
                 findings.append(Finding(rel, test.name, "undeclared", f"can skip: {via}"))
@@ -382,14 +383,15 @@ def _tests(
         elif isinstance(node, ast.ClassDef) and node.name.startswith("Test"):
             class_marks = [*node.decorator_list, *_pytestmark_marks(node.body)]
             for item in node.body:
-                if isinstance(item, ast.FunctionDef | ast.AsyncFunctionDef):
-                    if item.name.startswith("test"):
-                        yield item, class_marks
+                if isinstance(
+                    item, ast.FunctionDef | ast.AsyncFunctionDef
+                ) and item.name.startswith("test"):
+                    yield item, class_marks
 
 
-def find_integration_skips(root: Path, paths: Iterable[Path] | None = None) -> list[Finding]:
+def find_integration_skips(root: Path) -> list[Finding]:
     """Every integration test under ``root`` that can skip undeclared, and every
-    malformed ``may_skip``. ``paths`` limits the census to some files."""
-    census = _Census(root.resolve())
-    targets = _test_files(root.resolve()) if paths is None else [p.resolve() for p in paths]
-    return [finding for path in targets for finding in census.file_findings(path)]
+    malformed ``may_skip``, in path order."""
+    root = root.resolve()
+    census = _Census(root)
+    return [finding for path in _test_files(root) for finding in census.file_findings(path)]

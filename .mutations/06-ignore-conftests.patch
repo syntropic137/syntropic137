@@ -1,0 +1,13 @@
+diff --git a/scripts/check_integration_skips.py b/scripts/check_integration_skips.py
+index 2382da4d9..4476c14a6 100644
+--- a/scripts/check_integration_skips.py
++++ b/scripts/check_integration_skips.py
+@@ -336,7 +336,7 @@ class _Census:
+         directory = path.parent
+         while True:
+             conftest = self._conftest(directory)
+-            if conftest is not None:
++            if False:
+                 chain.append(conftest)
+             if directory == self._root or self._root not in directory.parents:
+                 break
