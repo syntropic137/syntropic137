@@ -215,6 +215,22 @@ control it must certify. Clean controls are what make blocking cost something:
 without them a verifier that blocks everything is never wrong."""
 
 
+EscapeClass = Literal[
+    "schema gate covers shape not identity",
+    "deny path untested",
+    "evidence that cannot run on CI",
+]
+"""Why verification let a defect through: a recurring kind of escaped miss.
+
+- schema gate covers shape not identity: a gate compares an event's fields and
+  never its type or version, so a renamed or re-versioned event passes it.
+- deny path untested: the refusal branch of an access check has no test, so a
+  change that grants too much passes every test there is.
+- evidence that cannot run on CI: the tests that would show the defect skip or
+  never run where the change is verified (a real store, a pinned image, Docker).
+"""
+
+
 def _full_sha(value: str) -> str:
     if not _SHA.fullmatch(value):
         raise ValueError(f"{value!r} is not a full 40-character lowercase SHA")
@@ -238,6 +254,9 @@ class _CaseBase(_Frozen):
     """Why the case left the suite, and in which version. A retired case is not part
     of the current version: it is kept so the history versions that held it still
     score their runs against it, as it was. Never re-polarise a case in place."""
+    escape_class: EscapeClass | None = None
+    """What kind of miss the case is, so escapes can be counted by kind. A label
+    only: nothing that loads, launches or scores a case reads it."""
 
     @property
     def tag(self) -> str:
@@ -257,18 +276,31 @@ class DefectCase(_CaseBase):
     """When the fix is a series of commits, the first of them; default `fix_commit`.
 
     `commit` must be this commit's first parent: the tree just before the fix,
-    so the bug is present and nothing of the fix is.
+    so the bug is present and nothing of the fix is - unless the pin is a
+    judged tree (`judged_tree`).
     """
     expected: Expected
     reclassified_from: str | None = Field(default=None, min_length=1)
     """The retired clean control this defect was found in, when the case is that
     control reclassified. Its pin is then the control's own commit, kept so the
     reviewed tree does not change: an ancestor of the fix, not its first parent."""
+    certified_in: str | None = Field(
+        default=None, pattern=r"^https://github\.com/[^/\s]+/[^/\s]+/pull/\d+#\S+$"
+    )
+    """The verify record (a PR comment URL) that judged `commit` as the PR's head
+    and missed the defect. The pin is then that head: on a PR that merges main
+    before its fix, the fix's first parent is the merge, a tree no verifier saw."""
 
     @property
     def fix_start(self) -> str:
-        """The first commit of the fix; `commit` must be its first parent."""
+        """The first commit of the fix; `commit` must be its first parent or a judged tree."""
         return self.first_fix_commit or self.fix_commit
+
+    @property
+    def judged_tree(self) -> bool:
+        """Whether `commit` is a tree a verifier reviewed, kept as reviewed: then it
+        need only come before the fix, not be the fix's first parent."""
+        return self.reclassified_from is not None or self.certified_in is not None
 
 
 class CleanCase(_CaseBase):
@@ -519,7 +551,7 @@ def check_commits(loaded: LoadedSuite, repo: Path) -> list[str]:
 def _defect_problems(case: DefectCase, repo: Path) -> list[str]:
     """Every SHA is a commit here, the pin is the first parent of the fix's first
     commit (the tree just before the fix, not merely some ancestor of it) - or,
-    for a reclassified control, a strict ancestor of it - that commit leads to
+    for a judged tree, a strict ancestor of it - that commit leads to
     the fix, every expected file exists at the pin, and the fix
     changes at least one of them - so the files are where the bug lived, not a guess.
     """
@@ -527,13 +559,13 @@ def _defect_problems(case: DefectCase, repo: Path) -> list[str]:
         return [f"{case.id}: no such commit {', '.join(missing)} (try `git fetch origin`)"]
     problems: list[str] = []
     parent = _git_out(repo, "rev-parse", f"{case.fix_start}^1").strip()
-    if case.reclassified_from:
+    if case.judged_tree:
         if case.commit == case.fix_start or not _git_ok(
             repo, "merge-base", "--is-ancestor", case.commit, case.fix_start
         ):
             problems.append(
                 f"{case.id}: pins {case.commit[:12]}, which is not before the fix "
-                f"{case.fix_start[:12]}; a reclassified control's pin must precede it"
+                f"{case.fix_start[:12]}; a judged tree's pin must precede it"
             )
     elif parent != case.commit:
         problems.append(

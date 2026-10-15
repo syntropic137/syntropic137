@@ -454,7 +454,12 @@ def history(tmp_path: Path) -> tuple[Path, str, str, str]:
 
 
 def _one_case_suite(
-    tmp_path: Path, commit: str, fix: str, file: str, first_fix: str | None = None
+    tmp_path: Path,
+    commit: str,
+    fix: str,
+    file: str,
+    first_fix: str | None = None,
+    **extra: object,
 ) -> Path:
     suite_dir = _copy_suite(tmp_path)
     suite_file = suite_dir / "suite.yaml"
@@ -476,8 +481,134 @@ def _one_case_suite(
     }
     if first_fix is not None:
         case["first_fix_commit"] = first_fix
+    case.update(extra)
     (cases / "seed.yaml").write_text(json.dumps(case))
     return suite_dir
+
+
+_VERIFY_RECORD = "https://github.com/o/r/pull/1#issuecomment-1"
+
+
+@pytest.fixture
+def merged_history(tmp_path: Path) -> tuple[Path, str, str, str]:
+    """A PR branch: certified head -> merge of main -> fix (touching bug.py).
+
+    Returns the repo, the certified head, the merge and the fix.
+    """
+    repo = tmp_path / "merged"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    _git(repo, "config", "user.email", "t@example.com")
+    _git(repo, "config", "user.name", "t")
+    (repo / "bug.py").write_text("ok\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "base")
+    _git(repo, "checkout", "-qb", "pr")
+    (repo / "bug.py").write_text("broken\n")
+    _git(repo, "commit", "-qam", "bug")
+    head = _git(repo, "rev-parse", "HEAD")
+    _git(repo, "checkout", "-q", "main")
+    (repo / "main.py").write_text("x\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "main moves on")
+    _git(repo, "checkout", "-q", "pr")
+    _git(repo, "merge", "-q", "--no-edit", "main")
+    merge = _git(repo, "rev-parse", "HEAD")
+    (repo / "bug.py").write_text("fixed\n")
+    _git(repo, "commit", "-qam", "fix")
+    fix = _git(repo, "rev-parse", "HEAD")
+    return repo, head, merge, fix
+
+
+@pytest.mark.unit
+def test_check_passes_the_certified_head_across_a_merge_of_main(
+    tmp_path: Path, merged_history: tuple[Path, str, str, str]
+) -> None:
+    repo, head, _, fix = merged_history
+    suite = _one_case_suite(tmp_path, head, fix, "bug.py", certified_in=_VERIFY_RECORD)
+    assert check_commits(load_suite(suite), repo) == []
+
+
+@pytest.mark.unit
+def test_check_still_refuses_the_certified_head_when_no_record_names_it(
+    tmp_path: Path, merged_history: tuple[Path, str, str, str]
+) -> None:
+    # Without the verify record the old rule holds: the fix's first parent is the merge.
+    repo, head, merge, fix = merged_history
+    problems = check_commits(load_suite(_one_case_suite(tmp_path, head, fix, "bug.py")), repo)
+    assert problems == [
+        f"seed: pins {head[:12]}, but the fix {fix[:12]}'s first parent is {merge[:12]}; "
+        "pin the tree just before the fix"
+    ]
+
+
+@pytest.mark.unit
+def test_check_still_passes_the_fixs_first_parent_on_a_merged_branch(
+    tmp_path: Path, merged_history: tuple[Path, str, str, str]
+) -> None:
+    repo, _, merge, fix = merged_history
+    assert check_commits(load_suite(_one_case_suite(tmp_path, merge, fix, "bug.py")), repo) == []
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("pin", ["fix", "after"])
+def test_check_refuses_a_certified_head_that_is_not_before_the_fix(
+    tmp_path: Path, history: tuple[Path, str, str, str], pin: str
+) -> None:
+    repo, _, fix, unrelated = history
+    commit = fix if pin == "fix" else unrelated
+    suite = _one_case_suite(tmp_path, commit, fix, "bug.py", certified_in=_VERIFY_RECORD)
+    problems = check_commits(load_suite(suite), repo)
+    assert (
+        f"seed: pins {commit[:12]}, which is not before the fix {fix[:12]}; "
+        "a judged tree's pin must precede it"
+    ) in problems
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "record", ["", "see the PR", "https://github.com/o/r/issues/1#issuecomment-1"]
+)
+def test_a_certified_head_must_cite_a_pr_comment(
+    tmp_path: Path, history: tuple[Path, str, str, str], record: str
+) -> None:
+    _, bug, fix, _ = history
+    with pytest.raises(DefinitionError, match="certified_in"):
+        load_suite(_one_case_suite(tmp_path, bug, fix, "bug.py", certified_in=record))
+
+
+@pytest.mark.unit
+def test_a_case_file_carries_its_escape_class_to_the_loaded_case(
+    tmp_path: Path, history: tuple[Path, str, str, str]
+) -> None:
+    _, bug, fix, _ = history
+    suite = _one_case_suite(tmp_path, bug, fix, "bug.py", escape_class="deny path untested")
+    (case,) = load_suite(suite).cases
+    assert case.escape_class == "deny path untested"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("label", ["", "flaky", "Deny path untested"])
+def test_an_unknown_escape_class_is_refused(
+    tmp_path: Path, history: tuple[Path, str, str, str], label: str
+) -> None:
+    _, bug, fix, _ = history
+    with pytest.raises(DefinitionError, match="escape_class"):
+        load_suite(_one_case_suite(tmp_path, bug, fix, "bug.py", escape_class=label))
+
+
+@pytest.mark.unit
+def test_the_escape_class_does_not_change_a_score(
+    tmp_path: Path, history: tuple[Path, str, str, str]
+) -> None:
+    _, bug, fix, _ = history
+    labelled = load_suite(
+        _one_case_suite(tmp_path / "a", bug, fix, "bug.py", escape_class="deny path untested")
+    ).cases[0]
+    plain = load_suite(_one_case_suite(tmp_path / "b", bug, fix, "bug.py")).cases[0]
+    report = "## BLOCKING\n\n1. **File:** bug.py\n   **Defect:** broken\n"
+    for verdict in ("blocked", "certified"):
+        assert score_case(labelled, verdict, report) == score_case(plain, verdict, report)
 
 
 @pytest.mark.unit
@@ -528,8 +659,8 @@ def test_check_passes_a_pin_before_the_first_commit_of_a_fix_series(
     ids=lambda c: c.id,
 )
 def test_every_committed_defect_pins_its_fixs_first_parent(case: DefectCase) -> None:
-    if case.reclassified_from:
-        # A reclassified control keeps the pin both verifiers reviewed, before the fix.
+    if case.judged_tree:
+        # A judged tree keeps the pin a verifier reviewed, before the fix.
         assert eval_suite._git_ok(ROOT, "merge-base", "--is-ancestor", case.commit, case.fix_start)
         assert case.commit != case.fix_start
     else:
