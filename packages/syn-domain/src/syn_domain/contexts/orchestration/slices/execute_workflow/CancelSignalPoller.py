@@ -18,12 +18,12 @@ import contextlib
 import logging
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from syn_shared.control import ControlSignalType
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, AsyncIterator
+    from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
 
     from syn_adapters.control import ExecutionController
 
@@ -39,6 +39,19 @@ class PollResult:
 
     should_interrupt: bool
     reason: str | None = None
+
+
+@dataclass(frozen=True)
+class StreamRead:
+    """How a stream read ended: drained, or interrupted after ``line_count`` lines."""
+
+    line_count: int
+    interrupt_requested: bool = False
+    interrupt_reason: str | None = None
+
+
+class _Interruptible(Protocol):
+    async def interrupt(self) -> bool: ...
 
 
 class CancelSignalPoller:
@@ -123,3 +136,30 @@ async def with_idle_ticks(
             pending.cancel()
             with contextlib.suppress(asyncio.CancelledError, StopAsyncIteration):
                 await pending
+
+
+async def read_until_interrupted(
+    stream: AsyncIterator[str],
+    poller: CancelSignalPoller,
+    workspace: _Interruptible,
+    step: Callable[[str, int], Awaitable[PollResult]],
+) -> StreamRead:
+    """Feed each line to ``step`` until it, or a CANCEL seen in silence, stops the read.
+
+    ``step`` gets the line and its 1-based number and answers whether to stop.
+    A quiet stream is still polled every ``poller.poll_seconds`` (#918), and
+    closing the ticks on the way out cancels the read still waiting.
+    """
+    line_count = 0
+    async with contextlib.aclosing(with_idle_ticks(stream, poller.poll_seconds)) as lines:
+        async for line in lines:
+            if line is None:
+                outcome = await poller.poll(line_count)
+                if outcome.should_interrupt:
+                    await workspace.interrupt()
+            else:
+                line_count += 1
+                outcome = await step(line, line_count)
+            if outcome.should_interrupt:
+                return StreamRead(line_count, True, outcome.reason)
+    return StreamRead(line_count)

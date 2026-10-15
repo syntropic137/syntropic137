@@ -50,7 +50,6 @@ which assumed ``item.item.id``): ``item`` fields live directly under the
 
 from __future__ import annotations
 
-import contextlib
 import json
 import logging
 import time
@@ -63,7 +62,8 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.announced_model i
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.CancelSignalPoller import (
     CancelSignalPoller,
-    with_idle_ticks,
+    PollResult,
+    read_until_interrupted,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.codex_faults import (
     codex_fault_reason,
@@ -432,15 +432,6 @@ class CodexStreamProcessor:
         finally:
             await self._held_rows.flush(self._announced_model, raise_errors=False)
 
-    async def _poll_while_quiet(
-        self, line_count: int, workspace: InterruptibleWorkspace
-    ) -> tuple[bool, str | None]:
-        """No output for a while: ask about CANCEL anyway (#918)."""
-        poll = await self._cancel_poller.poll(line_count)
-        if poll.should_interrupt:
-            await workspace.interrupt()
-        return poll.should_interrupt, poll.reason
-
     async def _step(
         self, line: str, line_count: int, workspace: InterruptibleWorkspace
     ) -> tuple[bool, str | None]:
@@ -473,27 +464,14 @@ class CodexStreamProcessor:
         """Process the JSONL event stream from ``codex exec --json``."""
         started_at = time.monotonic()
         conversation_lines: list[str] = []
-        line_count = 0
-        interrupt_requested = False
-        interrupt_reason: str | None = None
 
-        # Silence wakes the loop too, so a quiet agent is still cancellable (#918).
-        ticks = with_idle_ticks(stream, self._cancel_poller.poll_seconds)
-        async with contextlib.aclosing(ticks) as lines:
-            async for line in lines:
-                if line is None:
-                    interrupt_requested, interrupt_reason = await self._poll_while_quiet(
-                        line_count, workspace
-                    )
-                else:
-                    line_count += 1
-                    if line.strip():
-                        conversation_lines.append(line)
-                    interrupt_requested, interrupt_reason = await self._step(
-                        line, line_count, workspace
-                    )
-                if interrupt_requested:
-                    break
+        async def step(line: str, line_count: int) -> PollResult:
+            if line.strip():
+                conversation_lines.append(line)
+            stop, reason = await self._step(line, line_count, workspace)
+            return PollResult(should_interrupt=stop, reason=reason)
+
+        read = await read_until_interrupted(stream, self._cancel_poller, workspace, step)
 
         if not self._totals.saw_terminal_turn:
             # THE single place `_error_reason` is decided. Nothing mid-stream
@@ -542,7 +520,7 @@ class CodexStreamProcessor:
 
         logger.info(
             "Codex runner streaming complete: %d lines, %d turns, cost=$%s (%d in, %d out)",
-            line_count,
+            read.line_count,
             self._totals.turns,
             total_cost_usd,
             self._totals.input_tokens,
@@ -550,9 +528,9 @@ class CodexStreamProcessor:
         )
 
         return StreamResult(
-            line_count=line_count,
-            interrupt_requested=interrupt_requested,
-            interrupt_reason=interrupt_reason,
+            line_count=read.line_count,
+            interrupt_requested=read.interrupt_requested,
+            interrupt_reason=read.interrupt_reason,
             # The same reader as the claude path, and now the same TIMING
             # too: TASK_RESULT is this platform's contract with its agents,
             # not a harness format, so a codex phase that reports failure is
