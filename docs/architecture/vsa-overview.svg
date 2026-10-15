@@ -21,27 +21,28 @@
   <text x="580" y="64" font-size="24" font-weight="bold" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="middle">🏗️ Architecture and Ecosystem</text>
   <line x1="40" y1="74" x2="1080" y2="74" stroke="#d0d0d0" stroke-width="2"/>
   <text x="40" y="104" font-size="16" font-weight="bold" font-family="Arial, Helvetica, sans-serif" fill="#666666" text-anchor="start">Domain Contexts (Bounded Contexts)</text>
-  <rect x="40" y="114" width="330" height="405" fill="#d6c9ff" stroke="#a0a0a0" stroke-width="1.5" rx="8" opacity="1" filter="url(#shadow)"/>
+  <rect x="40" y="114" width="330" height="423" fill="#d6c9ff" stroke="#a0a0a0" stroke-width="1.5" rx="8" opacity="1" filter="url(#shadow)"/>
   <text x="55" y="139" font-size="14" font-weight="bold" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">artifacts</text>
   <text x="55" y="164" font-size="12" font-weight="600" font-family="Arial, Helvetica, sans-serif" fill="#666666" text-anchor="start">Aggregates:</text>
   <text x="60" y="184" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• Artifact</text>
   <text x="55" y="207" font-size="12" font-weight="600" font-family="Arial, Helvetica, sans-serif" fill="#666666" text-anchor="start">📋 Features</text>
   <text x="60" y="227" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• create_artifact</text>
-  <text x="60" y="245" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• list_artifacts</text>
-  <text x="60" y="263" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• manage_artifact</text>
-  <text x="60" y="281" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• upload_artifact</text>
-  <text x="55" y="299" font-size="12" font-weight="600" font-family="Arial, Helvetica, sans-serif" fill="#666666" text-anchor="start">⚡ Commands</text>
-  <text x="60" y="319" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• CreateArtifact</text>
-  <text x="60" y="337" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• DeleteArtifact</text>
-  <text x="60" y="355" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• RecoverArtifactCreationTime</text>
-  <text x="60" y="373" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• UpdateArtifact</text>
-  <text x="60" y="391" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• UploadArtifact</text>
-  <text x="55" y="409" font-size="12" font-weight="600" font-family="Arial, Helvetica, sans-serif" fill="#666666" text-anchor="start">📨 Events</text>
-  <text x="60" y="429" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• ArtifactCreated</text>
-  <text x="60" y="447" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• ArtifactCreationTimeRecovered</text>
-  <text x="60" y="465" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• ArtifactDeleted</text>
-  <text x="60" y="483" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• ArtifactUpdated</text>
-  <text x="60" y="501" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• ArtifactUploaded</text>
+  <text x="60" y="245" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• get_artifact</text>
+  <text x="60" y="263" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• list_artifacts</text>
+  <text x="60" y="281" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• manage_artifact</text>
+  <text x="60" y="299" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• upload_artifact</text>
+  <text x="55" y="317" font-size="12" font-weight="600" font-family="Arial, Helvetica, sans-serif" fill="#666666" text-anchor="start">⚡ Commands</text>
+  <text x="60" y="337" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• CreateArtifact</text>
+  <text x="60" y="355" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• DeleteArtifact</text>
+  <text x="60" y="373" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• RecoverArtifactCreationTime</text>
+  <text x="60" y="391" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• UpdateArtifact</text>
+  <text x="60" y="409" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• UploadArtifact</text>
+  <text x="55" y="427" font-size="12" font-weight="600" font-family="Arial, Helvetica, sans-serif" fill="#666666" text-anchor="start">📨 Events</text>
+  <text x="60" y="447" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• ArtifactCreated</text>
+  <text x="60" y="465" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• ArtifactCreationTimeRecovered</text>
+  <text x="60" y="483" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• ArtifactDeleted</text>
+  <text x="60" y="501" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• ArtifactUpdated</text>
+  <text x="60" y="519" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• ArtifactUploaded</text>
   <rect x="385" y="114" width="330" height="747" fill="#c9d9ff" stroke="#a0a0a0" stroke-width="1.5" rx="8" opacity="1" filter="url(#shadow)"/>
   <text x="400" y="139" font-size="14" font-weight="bold" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">github</text>
   <text x="400" y="164" font-size="12" font-weight="600" font-family="Arial, Helvetica, sans-serif" fill="#666666" text-anchor="start">Aggregates:</text>
