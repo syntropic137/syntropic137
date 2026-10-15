@@ -18,9 +18,7 @@ from typing import TYPE_CHECKING, assert_never
 
 from agentic_isolation import WorkspaceRuntime as AwRuntime
 
-from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
-    IsolationRuntime,
-)
+from syn_domain.contexts.orchestration import IsolationRuntime
 from syn_shared.settings.workspace import WorkspaceRuntime
 
 if TYPE_CHECKING:
