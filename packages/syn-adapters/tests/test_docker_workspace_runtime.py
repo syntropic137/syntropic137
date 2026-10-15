@@ -2,8 +2,13 @@
 
 Real ``WorkspaceDockerProvider``, real container. Run with:
 
-    SYN_CONTRACT_TEST_IMAGE=busybox:1.36 \
-      uv run pytest -m integration packages/syn-adapters/tests/test_docker_workspace_runtime.py
+    uv run pytest -m integration packages/syn-adapters/tests/test_docker_workspace_runtime.py
+
+The tests pull a digest-pinned busybox themselves, so a clean host with a
+Docker daemon needs nothing else; ``SYN_CONTRACT_TEST_IMAGE`` overrides the
+image with any other that has ``sh``. With no daemon, or an image that cannot
+be pulled, they fail with the reason. They never skip: a skipped run is
+indistinguishable from evidence nobody collected (PC-193).
 
 The unit tests prove the setting reaches ``SecurityConfig.runtime`` and that
 ``Workspace.metadata`` is read back. This proves the last hop neither can see:
@@ -34,19 +39,37 @@ from syn_shared.settings.workspace import WorkspaceRuntime
 if TYPE_CHECKING:
     from pathlib import Path
 
-IMAGE = os.environ.get("SYN_CONTRACT_TEST_IMAGE")
+# busybox:1.36.1, multi-arch index digest: the bytes cannot move under the tag.
+_PINNED_IMAGE = "busybox@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662"
+IMAGE = os.environ.get("SYN_CONTRACT_TEST_IMAGE") or _PINNED_IMAGE
 
-pytestmark = [
-    pytest.mark.integration,
-    pytest.mark.skipif(not IMAGE, reason="Set SYN_CONTRACT_TEST_IMAGE to any image with sh"),
-]
+pytestmark = pytest.mark.integration
+
+
+def _docker(*args: str) -> subprocess.CompletedProcess[str]:
+    try:
+        return subprocess.run(["docker", *args], capture_output=True, text=True, check=False)
+    except FileNotFoundError as e:
+        pytest.fail(f"docker CLI not found on PATH; these tests need a Docker host: {e}")
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _image_present() -> None:
+    """Provision IMAGE on this host, or fail saying why it could not."""
+    info = _docker("info", "--format", "{{.ServerVersion}}")
+    if info.returncode != 0:
+        pytest.fail(f"Docker daemon unreachable (docker info): {info.stderr.strip()}")
+    if _docker("image", "inspect", IMAGE).returncode == 0:
+        return
+    pull = _docker("pull", IMAGE)
+    if pull.returncode != 0:
+        pytest.fail(f"Could not pull {IMAGE}: {pull.stderr.strip()}")
 
 
 async def _recorded_and_enforced(
     tmp_path: Path, requested: WorkspaceRuntime | None
 ) -> tuple[IsolationRuntime | None, str, str]:
     """Create one container; return syn's record, its alias, and Docker's HostConfig.Runtime."""
-    assert IMAGE is not None
     provider = WorkspaceDockerProvider(
         default_image=IMAGE,
         default_network="none",
