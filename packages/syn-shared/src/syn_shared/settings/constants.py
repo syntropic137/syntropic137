@@ -65,3 +65,6 @@ ENV_CLAUDE_CODE_OAUTH_TOKEN = "CLAUDE_CODE_OAUTH_TOKEN"
 
 ENV_CODEX_AUTH_JSON = "CODEX_AUTH_JSON"
 """Env var carrying the contents of ~/.codex/auth.json for codex-runner phases."""
+
+ENV_OPENAI_API_KEY = "OPENAI_API_KEY"
+"""Env var for the OpenAI API key codex phases fall back to without CODEX_AUTH_JSON."""

@@ -9241,7 +9241,8 @@
           "ok",
           "expiring",
           "expired",
-          "unreadable"
+          "unreadable",
+          "api_key"
         ],
         "title": "CodexAuthState",
         "description": "Freshness of the configured codex credential."

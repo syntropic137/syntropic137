@@ -59,10 +59,14 @@ def describe_codex_auth_health() -> CodexAuthStatus | None:
     """
     try:
         from syn_shared.codex_auth_status import describe_codex_auth
-        from syn_shared.settings import get_settings
+        from syn_shared.codex_credentials import resolve_configured_codex_credential
 
-        secret = get_settings().codex_auth_json
-        return describe_codex_auth(secret.get_secret_value() if secret else None)
+        # The same precedence a codex phase gets (#1971): CODEX_AUTH_JSON, then
+        # OPENAI_API_KEY. Only a state and a detail leave this function.
+        resolved = resolve_configured_codex_credential()
+        if resolved is None:
+            return describe_codex_auth(None)
+        return describe_codex_auth(resolved.auth_json, source=resolved.source)
     except Exception:
         logger.debug("codex auth freshness probe failed", exc_info=True)
         return None
