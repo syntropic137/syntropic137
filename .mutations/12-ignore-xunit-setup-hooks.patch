@@ -1,0 +1,13 @@
+diff --git a/scripts/check_integration_skips.py b/scripts/check_integration_skips.py
+index 7176f2866..03d543d0c 100644
+--- a/scripts/check_integration_skips.py
++++ b/scripts/check_integration_skips.py
+@@ -188,7 +188,7 @@ def _hooks(body: Sequence[ast.stmt], names: frozenset[str]) -> list[_Fn]:
+     return [
+         stmt
+         for stmt in body
+-        if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)) and stmt.name in names
++        if False
+     ]
+ 
+ 

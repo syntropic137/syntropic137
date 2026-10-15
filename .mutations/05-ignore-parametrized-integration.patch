@@ -1,12 +1,12 @@
 diff --git a/scripts/check_integration_skips.py b/scripts/check_integration_skips.py
-index c421c366f..e4a011f42 100644
+index 7176f2866..18c42d5a1 100644
 --- a/scripts/check_integration_skips.py
 +++ b/scripts/check_integration_skips.py
-@@ -401,7 +401,7 @@ def scan(root: Path, files: Iterable[Path], import_roots: Sequence[Path] = ()) -
+@@ -540,7 +540,7 @@ def scan(root: Path, files: Iterable[Path], import_roots: Sequence[Path] = ()) -
              declared, problems = _marker_problems(marks)
              findings.extend(Finding(rel, fn.lineno, name, p) for p in problems)
              integration = any(_mark_name(m) == "integration" for m in marks)
--            if declared or not (integration or scanner.parametrized_integration(mod, fn)):
+-            if declared or not (integration or scanner.parametrized_integration(mod, fn, cls)):
 +            if declared or not integration:
                  continue
              if module_wide is None:

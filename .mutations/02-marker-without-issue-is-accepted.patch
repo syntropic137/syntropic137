@@ -1,8 +1,8 @@
 diff --git a/scripts/check_integration_skips.py b/scripts/check_integration_skips.py
-index eab7f259e..f854f3ce7 100644
+index 7176f2866..7c90178a3 100644
 --- a/scripts/check_integration_skips.py
 +++ b/scripts/check_integration_skips.py
-@@ -385,7 +385,7 @@ def _marker_problems(marks: Iterable[ast.expr]) -> tuple[bool, list[Problem]]:
+@@ -504,7 +504,7 @@ def _marker_problems(marks: Iterable[ast.expr]) -> tuple[bool, list[Problem]]:
              and isinstance(issue.value, str)
              and _ISSUE.match(issue.value)
          ):

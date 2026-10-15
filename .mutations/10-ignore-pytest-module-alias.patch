@@ -1,0 +1,13 @@
+diff --git a/scripts/check_integration_skips.py b/scripts/check_integration_skips.py
+index 7176f2866..1dcfd918d 100644
+--- a/scripts/check_integration_skips.py
++++ b/scripts/check_integration_skips.py
+@@ -373,7 +373,7 @@ class Scanner:
+             if not isinstance(node, ast.Call):
+                 continue
+             head, _, attr = _dotted(node.func).rpartition(".")
+-            if head in mod.pytest_names and attr in _SKIP_CALLS:
++            if head == "pytest" and attr in _SKIP_CALLS:
+                 return ["<skip>"]
+             if not head and attr in mod.pytest_skip_names:
+                 return ["<skip>"]

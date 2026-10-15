@@ -1,0 +1,13 @@
+diff --git a/scripts/check_integration_skips.py b/scripts/check_integration_skips.py
+index 7176f2866..361e45df8 100644
+--- a/scripts/check_integration_skips.py
++++ b/scripts/check_integration_skips.py
+@@ -363,7 +363,7 @@ class Scanner:
+         return any(
+             isinstance(node, ast.expr) and _mark_name(node) in _SKIP_MARKS
+             for mark in marks
+-            for node in ast.walk(mark)
++            for node in (mark,)
+         )
+ 
+     def _calls_skip(self, mod: _Module, nodes: Iterable[ast.AST]) -> list[str]:

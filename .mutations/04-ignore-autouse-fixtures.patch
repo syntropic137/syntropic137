@@ -1,8 +1,8 @@
 diff --git a/scripts/check_integration_skips.py b/scripts/check_integration_skips.py
-index c421c366f..b16a94413 100644
+index 7176f2866..3e51bc117 100644
 --- a/scripts/check_integration_skips.py
 +++ b/scripts/check_integration_skips.py
-@@ -350,6 +350,7 @@ class Scanner:
+@@ -458,6 +458,7 @@ class Scanner:
          return False
  
      def autouse_skips(self, mod: _Module) -> bool:

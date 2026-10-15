@@ -1,12 +1,12 @@
 diff --git a/scripts/check_integration_skips.py b/scripts/check_integration_skips.py
-index c421c366f..c78da50a0 100644
+index 7176f2866..fad0bf5d3 100644
 --- a/scripts/check_integration_skips.py
 +++ b/scripts/check_integration_skips.py
-@@ -323,6 +323,7 @@ class Scanner:
-         return False
- 
-     def requests_skipping_fixture(self, mod: _Module, names: Iterable[str]) -> bool:
+@@ -424,6 +424,7 @@ class Scanner:
+     def requests_skipping_fixture(
+         self, mod: _Module, names: Iterable[str], cls: ast.ClassDef | None = None
+     ) -> bool:
 +        return False
          for name in names:
-             found = self._fixture(mod, name)
-             if found is not None and self.can_skip(*found, as_fixture=True):
+             found = self._fixture(mod, name, cls)
+             if found is None:
