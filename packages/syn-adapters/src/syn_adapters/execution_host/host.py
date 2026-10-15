@@ -3,11 +3,18 @@
 Each loop turn:
 
 1. heartbeat, which also reads whether the host is draining (D4, D10);
-2. ``sweep_opening``, resolving starts stranded between their two writes (D2);
-3. reconciliation of every expired claim this host can fence (D5 A);
-4. unless draining, claim until the host's own budget row is full, and drain
-   each claimed run in a tracked task whose Lease is renewed every TTL/3;
+2. start the opening sweep if none is running, resolving starts stranded
+   between their two writes (D2);
+3. unless draining, fence what this host can and start reconciliation tasks
+   without waiting for them, at most ``reconcile_concurrency`` at once (D5 A);
+4. unless draining, claim until the host's own budget row is full or the turn
+   budget is spent, and drain each claimed run in a tracked task whose Lease
+   is renewed every TTL/3;
 5. sleep for the loop interval.
+
+The turn never awaits a reap or the sweep, so the time between two heartbeats
+is at most the loop interval plus the turn budget plus one store call (D4): a
+stale heartbeat means the loop stopped, not that it was busy.
 
 A run whose Lease is lost is cancelled, so it takes the shutdown interruption
 path (#1381) and its later appends meet the reconciler's at the stream version
@@ -20,16 +27,19 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import time
 from datetime import timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Self
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from syn_adapters.execution_host.lease import LeaseKeeper
 from syn_adapters.execution_host.reconciler import Reconciler
 from syn_domain.contexts.orchestration.ports import RunLeaseLost
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
     from syn_adapters.execution_host.ports import ClaimedRunDrainer, DeadHostReaper, RunInterrupter
     from syn_domain.contexts.orchestration.ports import (
         ClaimedRun,
@@ -48,6 +58,21 @@ class HostTiming(BaseModel):
     loop_interval: timedelta = Field(default=timedelta(seconds=5), gt=timedelta(0))
     lease_ttl: timedelta = Field(default=timedelta(seconds=90), gt=timedelta(0))
     opening_older_than: timedelta = Field(default=timedelta(minutes=2), gt=timedelta(0))
+    # Provisional, not measured (#1944); one settings group with the queue's
+    # TTL and staleness window is the follow-up before the flag is enabled.
+    turn_budget: timedelta = Field(default=timedelta(seconds=15), gt=timedelta(0))
+    reconcile_concurrency: int = Field(default=4, ge=1)
+
+    @model_validator(mode="after")
+    def _a_busy_turn_never_reads_stale(self) -> Self:
+        # The staleness window defaults to the TTL; three heartbeats fit in it.
+        if self.loop_interval + self.turn_budget > self.lease_ttl / 3:
+            raise ValueError(
+                f"loop_interval ({self.loop_interval}) + turn_budget ({self.turn_budget}) "
+                f"must not exceed lease_ttl/3 ({self.lease_ttl / 3}): a busy turn would "
+                "make a live host read stale (ADR-072 D4)"
+            )
+        return self
 
     @property
     def renew_every(self) -> float:
@@ -68,6 +93,8 @@ class ExecutionHost:
         interrupter: RunInterrupter,
         streams: ExecutionStreamProbe,
         timing: HostTiming | None = None,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._queue = queue
         self._host = host
@@ -75,8 +102,19 @@ class ExecutionHost:
         self._drainer = drainer
         self._streams = streams
         self._timing = timing or HostTiming()
-        self._reconciler = Reconciler(queue, host.host_id, reaper, interrupter)
+        self._sleep = sleep
+        self._clock = clock
+        self._reconciler = Reconciler(
+            queue,
+            host.host_id,
+            reaper,
+            interrupter,
+            concurrency=self._timing.reconcile_concurrency,
+            lease_ttl=self._timing.lease_ttl.total_seconds(),
+            clock=clock,
+        )
         self._runs: dict[str, asyncio.Task[None]] = {}
+        self._sweep: asyncio.Task[None] | None = None
         self._draining = False
         self._joined = False
 
@@ -94,7 +132,7 @@ class ExecutionHost:
             self._joined = True
 
     def drain(self) -> None:
-        """Stop claiming; ``run_until_drained`` returns once the runs it holds have ended."""
+        """Stop claiming and acquiring; returns once held runs and started tasks have ended."""
         self._draining = True
 
     async def run_until_drained(self) -> None:
@@ -102,18 +140,22 @@ class ExecutionHost:
 
         Cancelling it is a shutdown: every held run is cancelled, takes the
         interruption path and is awaited; its row is left for its Lease to
-        expire and a live executor to reconcile, never re-run (D5 C). The host
-        leaves either way, so a restart never inherits its ``draining`` flag.
+        expire and a live executor to reconcile, never re-run (D5 C).
+        Reconciliation and sweep tasks are cancelled too; their rows are taken
+        over once this host has left. The host leaves either way, so a restart
+        never inherits its ``draining`` flag.
         """
         await self.join()
         try:
-            while not (await self._turn() and not self._runs):
-                await asyncio.sleep(self._timing.loop_interval.total_seconds())
+            while not (await self._turn() and self._idle()):
+                await self._sleep(self._timing.loop_interval.total_seconds())
         except asyncio.CancelledError:
             runs = list(self._runs.values())
+            if self._sweep is not None:
+                runs.append(self._sweep)
             for run in runs:
                 run.cancel()
-            await asyncio.gather(*runs, return_exceptions=True)
+            await asyncio.gather(*runs, self._reconciler.aclose(), return_exceptions=True)
             raise
         finally:
             await self.leave()
@@ -128,14 +170,23 @@ class ExecutionHost:
         except Exception:
             logger.exception("ExecutionHost %s could not deregister", self._host.host_id)
 
+    def _idle(self) -> bool:
+        return not self._runs and self._reconciler.idle and self._sweep is None
+
     async def _turn(self) -> bool:
         """One loop turn; returns whether the host is draining."""
+        started = self._clock()
+        budget = self._timing.turn_budget.total_seconds()
         draining = self._draining
         try:
             draining = await self._queue.heartbeat(self._host.host_id) or draining
-            await self._queue.sweep_opening(self._timing.opening_older_than, self._streams)
-            await self._reconciler.turn()
-            while not draining and (claimed := await self._queue.claim(self._host.host_id)):
+            self._tend_sweep(start=not draining)
+            await self._reconciler.turn(acquire=not draining)
+            while (
+                not draining
+                and self._clock() - started < budget
+                and (claimed := await self._queue.claim(self._host.host_id))
+            ):
                 self._spawn(claimed)
         except Exception:
             # The store is the only thing a turn talks to. While it is down no
@@ -144,15 +195,31 @@ class ExecutionHost:
             logger.exception("ExecutionHost %s: loop turn failed", self._host.host_id)
         return draining
 
+    def _tend_sweep(self, *, start: bool) -> None:
+        """Collect a finished opening sweep and start the next; at most one runs (D2)."""
+        if self._sweep is not None and self._sweep.done():
+            if not self._sweep.cancelled() and (error := self._sweep.exception()) is not None:
+                logger.error(
+                    "ExecutionHost %s: opening sweep failed",
+                    self._host.host_id,
+                    exc_info=error,
+                )
+            self._sweep = None
+        if self._sweep is None and start:
+            self._sweep = asyncio.create_task(self._sweep_opening(), name="sweep-opening")
+
+    async def _sweep_opening(self) -> None:
+        await self._queue.sweep_opening(self._timing.opening_older_than, self._streams)
+
     def _spawn(self, claimed: ClaimedRun) -> None:
         task = asyncio.create_task(self._drive(claimed), name=f"run:{claimed.execution_id}")
         self._runs[claimed.execution_id] = task
         task.add_done_callback(lambda _: self._runs.pop(claimed.execution_id, None))
 
     async def _drive(self, claimed: ClaimedRun) -> None:
-        lease = LeaseKeeper(self._queue, claimed, self._timing.renew_every)
+        lease = LeaseKeeper(self._queue, claimed, self._timing.renew_every, sleep=self._sleep)
         drain: asyncio.Task[object] = asyncio.create_task(self._drainer.run_claimed(claimed))
-        keeper = asyncio.create_task(lease.hold(drain))
+        keeper = asyncio.create_task(lease.hold(drain), name=f"lease:{claimed.execution_id}")
         try:
             await drain
         except asyncio.CancelledError:

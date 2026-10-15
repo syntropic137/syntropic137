@@ -31,6 +31,7 @@ _FAST = HostTiming(
     loop_interval=timedelta(milliseconds=5),
     lease_ttl=timedelta(milliseconds=30),
     opening_older_than=timedelta(minutes=2),
+    turn_budget=timedelta(milliseconds=4),
 )
 
 
@@ -157,6 +158,16 @@ def _host(queue: _Queue, drainer: _Drainer, reaper: _Reaper | None = None) -> Ex
     )
 
 
+async def _turn(reconciler: Reconciler) -> None:
+    """One acquiring turn, then yield until the tasks it started have finished."""
+    await reconciler.turn(acquire=True)
+    for _ in range(100):
+        if reconciler.idle:
+            return
+        await asyncio.sleep(0)
+    raise AssertionError("reconciliation tasks did not settle")
+
+
 async def _until(predicate: object, budget: float = 2.0) -> None:
     async with asyncio.timeout(budget):
         while not predicate():  # type: ignore[operator]
@@ -216,10 +227,10 @@ async def test_an_incomplete_reap_keeps_the_run_fencing_until_a_later_turn_compl
     queue.fenced = [fenced]
     reaper, interrupter = _Reaper(complete=False), _Interrupter()
     reconciler = Reconciler(queue, _HOST.host_id, reaper, interrupter)  # type: ignore[arg-type]
-    await reconciler.turn()
+    await _turn(reconciler)
     assert (queue.reaped, interrupter.calls, queue.interrupted) == ([], [], [])
     reaper.complete = True
-    await reconciler.turn()
+    await _turn(reconciler)
     assert reaper.calls == [("dead", "e9"), ("dead", "e9")]
     assert queue.reaped == ["e9"]
     assert interrupter.calls == ["e9"]
@@ -236,12 +247,12 @@ async def test_a_failed_reconciliation_write_is_resumed_from_the_row(write: str,
     queue.fail = {write: when}
     reaper, interrupter = _Reaper(complete=True), _Interrupter()
     reconciler = Reconciler(queue, _HOST.host_id, reaper, interrupter)  # type: ignore[arg-type]
-    await reconciler.turn()
-    await reconciler.turn()
+    await _turn(reconciler)
+    await _turn(reconciler)
     assert queue.interrupted == ["e9"]
     assert queue.reaped == ["e9"]
     assert queue.rows == {}
-    await reconciler.turn()
+    await _turn(reconciler)
     assert queue.interrupted == ["e9"]
 
 
@@ -253,7 +264,7 @@ async def test_a_fresh_reconciler_finishes_a_row_its_predecessor_left_reaped() -
         )
     }
     reaper, interrupter = _Reaper(complete=True), _Interrupter()
-    await Reconciler(queue, _HOST.host_id, reaper, interrupter).turn()  # type: ignore[arg-type]
+    await _turn(Reconciler(queue, _HOST.host_id, reaper, interrupter))  # type: ignore[arg-type]
     assert reaper.calls == []  # already reaped: the row says so
     assert interrupter.calls == ["e9"]
     assert queue.interrupted == ["e9"]
