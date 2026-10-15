@@ -138,6 +138,33 @@ class WorkspaceDirReclaimer:
 
     async def run_once(self) -> ReclaimPass:
         """Judge every directory; reclaim the ones that lose nothing. Never raises."""
+        observed = await self._observe_pass()
+        if isinstance(observed, ReclaimPass):
+            return observed
+        containers, listings = observed
+
+        from syn_adapters.workspace_backends.stale_dirs import is_being_deleted
+
+        deadline = self.monotonic() + self.pass_budget_seconds
+        tally = _PassTally(dry_run=self.dry_run)
+        # Unfinished deletes first: they are already proven, and finishing them
+        # is what frees space soonest.
+        for listing in sorted(listings, key=lambda x: not is_being_deleted(x.host_dir)):
+            if self.monotonic() >= deadline:
+                tally.out_of_time = True
+                break
+            # Maintenance set mid-pass stops it before the next directory, so
+            # an operator holding maintenance knows no new delete will start.
+            tally.paused = await self._paused_now()
+            if tally.paused is not None:
+                break
+            tally.add(listing, await self._reclaim(listing, containers, deadline))
+        return tally.result()
+
+    async def _observe_pass(
+        self,
+    ) -> ReclaimPass | tuple[list[ContainerMounts], list[WorkspaceDirListing]]:
+        """What the pass will look at, or why it will not look at all."""
         try:
             paused = await self.paused()
             if paused is not None:
@@ -152,62 +179,7 @@ class WorkspaceDirReclaimer:
         except Exception as exc:
             logger.warning("Skipping workspace reclaim pass: %s", exc, exc_info=True)
             return ReclaimPass(skipped=f"{type(exc).__name__}: {exc}")
-
-        from syn_adapters.workspace_backends.stale_dirs import is_being_deleted
-
-        deadline = self.monotonic() + self.pass_budget_seconds
-        reclaimed: list[str] = []
-        retained: list[RetainedDir] = []
-        would: list[str] = []
-        deleting: list[str] = []
-        reclaimed_bytes = 0
-        paused = None
-        out_of_time = False
-        # Unfinished deletes first: they are already proven, and finishing them
-        # is what frees space soonest.
-        for listing in sorted(listings, key=lambda x: not is_being_deleted(x.host_dir)):
-            if self.monotonic() >= deadline:
-                out_of_time = True
-                break
-            # Maintenance set mid-pass stops it before the next directory, so
-            # an operator holding maintenance knows no new delete will start.
-            paused = await self._paused_now()
-            if paused is not None:
-                break
-            outcome = await self._reclaim(listing, containers, deadline)
-            if isinstance(outcome, Retained):
-                retained.append(
-                    RetainedDir(
-                        listing.workspace_id, outcome.reason, outcome.detail, listing.size_bytes
-                    )
-                )
-            elif isinstance(outcome, _Deferred):
-                deleting.append(listing.workspace_id)
-            elif self.dry_run:
-                would.append(listing.workspace_id)
-            else:
-                reclaimed.append(listing.workspace_id)
-                reclaimed_bytes += listing.size_bytes
-        result = ReclaimPass(
-            reclaimed=tuple(reclaimed),
-            reclaimed_bytes=reclaimed_bytes,
-            retained=tuple(retained),
-            would_reclaim=tuple(would),
-            deleting=tuple(deleting),
-            out_of_time=out_of_time or bool(deleting),
-            paused=paused,
-        )
-        logger.info(
-            "Workspace reclaim pass: reclaimed %d (%d bytes), retained %d, "
-            "deleting %d, dry-run %d, out of time %s",
-            len(reclaimed),
-            reclaimed_bytes,
-            len(retained),
-            len(deleting),
-            len(would),
-            result.out_of_time,
-        )
-        return result
+        return containers, listings
 
     async def _paused_now(self) -> str | None:
         try:
@@ -219,17 +191,14 @@ class WorkspaceDirReclaimer:
         self, listing: WorkspaceDirListing, containers: list[ContainerMounts]
     ) -> StaleWorkspaceDir | Retained:
         """Every clause that does not read the directory's repositories."""
+        on_disk = _judge_on_disk(listing, containers)
+        if on_disk is not None:
+            return on_disk
+        return await self._judge_owner(listing)
+
+    async def _judge_owner(self, listing: WorkspaceDirListing) -> StaleWorkspaceDir | Retained:
         from syn_domain.contexts.orchestration import judge_owner
 
-        if listing.unreadable is not None:
-            return Retained(RetainedReason.UNREADABLE, listing.unreadable)
-        if listing.session_store:
-            return Retained(
-                RetainedReason.CAPTURE_UNKNOWN, "a session store is inside the directory"
-            )
-        binding = [c.container_id[:12] for c in containers if c.mounts(listing.workspace_id)]
-        if binding:
-            return Retained(RetainedReason.MOUNTED, f"bound by container(s) {binding}")
         try:
             owners = await self.workspace_owners(listing.workspace_id)
         except Exception as exc:
@@ -409,6 +378,71 @@ class WorkspaceDirReclaimer:
 @dataclass(frozen=True)
 class _Deferred:
     """A proven directory whose delete continues next pass."""
+
+
+def _judge_on_disk(
+    listing: WorkspaceDirListing, containers: list[ContainerMounts]
+) -> Retained | None:
+    """The clauses the listing and docker answer: readable, no capture, unbound."""
+    if listing.unreadable is not None:
+        return Retained(RetainedReason.UNREADABLE, listing.unreadable)
+    if listing.session_store:
+        return Retained(RetainedReason.CAPTURE_UNKNOWN, "a session store is inside the directory")
+    binding = [c.container_id[:12] for c in containers if c.mounts(listing.workspace_id)]
+    if binding:
+        return Retained(RetainedReason.MOUNTED, f"bound by container(s) {binding}")
+    return None
+
+
+@dataclass
+class _PassTally:
+    """What a pass did so far, directory by directory."""
+
+    dry_run: bool
+    reclaimed: list[str] = field(default_factory=list)
+    reclaimed_bytes: int = 0
+    retained: list[RetainedDir] = field(default_factory=list)
+    would: list[str] = field(default_factory=list)
+    deleting: list[str] = field(default_factory=list)
+    paused: str | None = None
+    out_of_time: bool = False
+
+    def add(self, listing: WorkspaceDirListing, outcome: object) -> None:
+        if isinstance(outcome, Retained):
+            self.retained.append(
+                RetainedDir(
+                    listing.workspace_id, outcome.reason, outcome.detail, listing.size_bytes
+                )
+            )
+        elif isinstance(outcome, _Deferred):
+            self.deleting.append(listing.workspace_id)
+        elif self.dry_run:
+            self.would.append(listing.workspace_id)
+        else:
+            self.reclaimed.append(listing.workspace_id)
+            self.reclaimed_bytes += listing.size_bytes
+
+    def result(self) -> ReclaimPass:
+        result = ReclaimPass(
+            reclaimed=tuple(self.reclaimed),
+            reclaimed_bytes=self.reclaimed_bytes,
+            retained=tuple(self.retained),
+            would_reclaim=tuple(self.would),
+            deleting=tuple(self.deleting),
+            out_of_time=self.out_of_time or bool(self.deleting),
+            paused=self.paused,
+        )
+        logger.info(
+            "Workspace reclaim pass: reclaimed %d (%d bytes), retained %d, "
+            "deleting %d, dry-run %d, out of time %s",
+            len(self.reclaimed),
+            self.reclaimed_bytes,
+            len(self.retained),
+            len(self.deleting),
+            len(self.would),
+            result.out_of_time,
+        )
+        return result
 
 
 def _log_outcome(

@@ -229,21 +229,31 @@ def delete_tree_until(path: str, deadline: float, clock: Callable[[], float]) ->
     # os.unlink / os.rmdir rather than Path methods: the deletion fitness gate
     # (test_deletion_primitives_are_confined) sees these spellings.
     for dirpath, dirnames, filenames in os.walk(root, topdown=False, onerror=_raise):
-        here = Path(dirpath)
-        for name in filenames:
-            os.unlink(here / name)  # noqa: PTH108
-            if clock() >= deadline:
-                return False
-        for name in dirnames:
-            entry = here / name
-            if entry.is_symlink():
-                os.unlink(entry)  # noqa: PTH108
-            else:
-                os.rmdir(entry)  # noqa: PTH106
-        if clock() >= deadline:
+        if not _delete_level(Path(dirpath), dirnames, filenames, deadline, clock):
             return False
     os.rmdir(root)  # noqa: PTH106
     return True
+
+
+def _delete_level(
+    here: Path,
+    dirnames: list[str],
+    filenames: list[str],
+    deadline: float,
+    clock: Callable[[], float],
+) -> bool:
+    """One directory's files and (already emptied) subdirectories; False when out of time."""
+    for name in filenames:
+        os.unlink(here / name)  # noqa: PTH108
+        if clock() >= deadline:
+            return False
+    for name in dirnames:
+        entry = here / name
+        if entry.is_symlink():
+            os.unlink(entry)  # noqa: PTH108
+        else:
+            os.rmdir(entry)  # noqa: PTH106
+    return clock() < deadline
 
 
 def claim_workspace_dir(host_dir: str) -> str:
