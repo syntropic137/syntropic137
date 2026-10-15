@@ -14,12 +14,29 @@ This file holds what `suite.yaml` cannot: how a case is chosen.
 
 A defect case is mined from a merged fix. The pin is the first fix commit's
 first parent, so the bug is present and nothing of the fix is; `check` refuses
-any other pin, with one exception. A defect found in a retired clean control
+any other pin, with two exceptions. Both keep a tree a verifier reviewed, and
+both require the pin to be a strict ancestor of the first fix commit.
+
+A PR that merges main between the head verification judged and the fix has a
+merge as the fix's first parent: a tree no verifier saw. Such a case pins the
+judged head and cites the verify record naming it in `certified_in` (a PR
+comment URL). The record is what makes the pin the judged head; `check` can
+only confirm it comes before the fix, so read the cited comment when you add one.
+
+A defect found in a retired clean control
 keeps that control's pin, so the tree reviewed is the one both verifiers
 blocked: the case names the control in `reclassified_from`, and `check`
 requires the pin to equal the control's commit and to be a strict ancestor of
 the first fix commit. `redis-retry-non-idempotent` is the only such case. The expected files are ones the fix changed, and a defect that
-only shows at runtime is not a case.
+only shows at runtime is not a case. `fence-bound-fails-on-real-postgres` is
+the nearest: it escaped because only a real-store run showed it, but its cause
+(an `IN (... FOR UPDATE SKIP LOCKED LIMIT n)` subquery a nested loop may
+rescan) is in the SQL a reviewer reads.
+
+`escape_class` is an optional label naming the kind of miss a case is, one of
+`EscapeClass` in `scripts/eval_suite.py`. Nothing that loads, launches or
+scores a case reads it; it is there so escapes can be counted by kind. Cases
+that fit none of the classes carry no label.
 
 ## Judging a blocked defect run
 

@@ -287,9 +287,9 @@ class DefectCase(_CaseBase):
     certified_in: str | None = Field(
         default=None, pattern=r"^https://github\.com/[^/\s]+/[^/\s]+/pull/\d+#\S+$"
     )
-    """The verify record (a PR comment URL) that judged `commit` as the PR's head
-    and missed the defect. The pin is then that head: on a PR that merges main
-    before its fix, the fix's first parent is the merge, a tree no verifier saw."""
+    """The verify record (a PR comment URL) naming `commit` as the head verification
+    judged. The pin is then that head: on a PR that merges main before its fix,
+    the fix's first parent is the merge, a tree no verifier saw."""
 
     @property
     def fix_start(self) -> str:
