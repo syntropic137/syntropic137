@@ -1,11 +1,14 @@
 """Real Docker: a CANCEL stops an agent that ignores SIGINT and SIGTERM (#918).
 
 The agent in #918 ran every phase to completion after the cancel was
-delivered. This workload is that agent: it ignores both signals and prints a
-stream-json line every 100ms forever. The cancel goes through the production
-chain - ``EventStreamProcessor`` polling a controller, ``ManagedWorkspace``,
-``AgenticEventStreamAdapter``, ``WorkspaceDockerProvider`` - and the stream is
-held open, so nothing but ``interrupt()`` can have stopped it.
+delivered. This workload is that agent: it ignores both signals, prints one
+stream-json line and then sleeps forever. The workspace comes from the
+production ``WorkspaceService.create_workspace`` over the Docker adapters, the
+cancel goes through ``EventStreamProcessor`` polling a controller,
+``ManagedWorkspace``, ``AgenticEventStreamAdapter`` and
+``WorkspaceDockerProvider``, and the container is removed by the service's own
+cleanup - nothing but ``interrupt()`` can have stopped the agent, and nothing
+but production cleanup can have removed the container.
 
     uv run pytest -m integration packages/syn-adapters/tests/test_918_cancel_stops_a_signal_ignoring_agent.py
 """
@@ -17,23 +20,19 @@ import os
 import shutil
 import subprocess
 import time
+import uuid
 from typing import TYPE_CHECKING
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
-from agentic_isolation import (
-    SecurityConfig,
-    WorkspaceConfig,
-    WorkspaceDockerProvider,
-    WorkspaceRuntime,
-)
+from agentic_isolation import SecurityConfig
 
 from syn_adapters.control.commands import ControlSignal, ControlSignalType
-from syn_adapters.workspace_backends.agentic.credentials import WorkspaceCredentials
+from syn_adapters.workspace_backends.agentic.adapter import AgenticIsolationAdapter
 from syn_adapters.workspace_backends.agentic.stream_adapter import AgenticEventStreamAdapter
-from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
-from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
-    IsolationHandle,
+from syn_adapters.workspace_backends.service.workspace_service import (
+    WorkspaceService,
+    WorkspaceServiceConfig,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
     EventStreamProcessor,
@@ -49,7 +48,7 @@ from syn_shared.settings.session_store import SessionStoreSettings
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from agentic_isolation.providers.base import Workspace
+    from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
 
 IMAGE = os.environ.get("SYN_CONTRACT_TEST_IMAGE", "busybox:1.36")
 _MARKER = "syn-918-ignores-signals"
@@ -68,25 +67,16 @@ _WORKLOAD = [
     _MARKER,
 ]
 
+#: Opens what the container identity made under /workspace to the host, so a
+#: root image on a non-root runner cannot make teardown report the directory
+#: retained (see test_pc126_skill_install_retry_docker.py). Best effort: the
+#: escalated cancel may already have stopped the container.
+_HAND_BACK_TO_HOST = 'find /workspace -user "$(id -u)" -type d -exec chmod a+rwx {} +'
+
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.skipif(shutil.which("docker") is None, reason="requires Docker"),
 ]
-
-
-class _Host:
-    def __init__(
-        self,
-        provider: WorkspaceDockerProvider,
-        workspace: Workspace,
-        credentials: WorkspaceCredentials,
-    ) -> None:
-        self.operations = provider
-        self.credentials = credentials
-        self._workspace = workspace
-
-    def workspace(self, isolation_id: str) -> Workspace | None:
-        return self._workspace
 
 
 class _UserCancelsLater:
@@ -104,75 +94,112 @@ class _UserCancelsLater:
         return ControlSignal(signal_type=ControlSignalType.CANCEL, execution_id=execution_id)
 
 
-def _container_exists(container: str) -> bool:
-    inspected = subprocess.run(["docker", "inspect", container], capture_output=True, check=False)
-    return inspected.returncode == 0
+def _containers_of(execution_id: str) -> list[str]:
+    """Every container, running or not, the adapter labelled with this execution."""
+    listed = subprocess.run(
+        ["docker", "ps", "-aq", "--filter", f"label=syn.execution_id={execution_id}"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return listed.stdout.split()
 
 
-async def test_a_cancel_stops_an_agent_that_ignores_its_signals(tmp_path: Path) -> None:
+def _docker_service(tmp_path: Path) -> WorkspaceService:
+    """The Docker wiring of ``WorkspaceService._create_docker_impl``, minus the proxy.
+
+    The sidecar and token injection are never reached: the workspace is
+    created ``with_sidecar=False`` and ``inject_tokens=False``.
+    """
+    isolation = AgenticIsolationAdapter(
+        default_image=IMAGE,
+        security=SecurityConfig.development(),
+        workspace_container_dir=str(tmp_path / "workspaces"),
+        session_store=SessionStoreSettings(_env_file=None),
+    )
+    return WorkspaceService(
+        isolation=isolation,  # type: ignore[arg-type]
+        sidecar=MagicMock(),
+        token_injection=MagicMock(),
+        event_stream=AgenticEventStreamAdapter(isolation),
+        config=WorkspaceServiceConfig(image=IMAGE),
+    )
+
+
+async def _passthrough(image_ref: str) -> str:
+    return image_ref
+
+
+async def test_a_cancel_stops_an_agent_that_ignores_its_signals(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     if subprocess.run(["docker", "image", "inspect", IMAGE], capture_output=True).returncode:
         subprocess.run(["docker", "pull", IMAGE], capture_output=True, check=True)
-    credentials = WorkspaceCredentials(SessionStoreSettings(_env_file=None))
-    provider = WorkspaceDockerProvider(
-        default_image=IMAGE,
-        default_network="none",
-        workspace_base_dir=tmp_path / "workspaces",
-        security=SecurityConfig(runtime=WorkspaceRuntime.RUNC),
-        credentials=credentials,
-    )
-    workspace = await provider.create(
-        WorkspaceConfig(provider="docker", image=IMAGE, labels={"syn.test": "cancel-918"})
-    )
-    container = str(workspace.metadata.get("container_id", workspace.id))
-    torn_down = False
+    # The default agent-net only exists inside a deployment.
+    monkeypatch.setenv("SYN_AGENT_NETWORK", "none")
+    service = _docker_service(tmp_path)
+    execution_id = f"exec-918-{uuid.uuid4().hex[:12]}"
     try:
-        handle = IsolationHandle(isolation_id=workspace.id, isolation_type="docker")
-        service = MagicMock()
-        service._event_stream = AgenticEventStreamAdapter(_Host(provider, workspace, credentials))  # type: ignore[arg-type]
-        managed = ManagedWorkspace(
-            workspace_id=workspace.id,
-            execution_id="exec-918",
-            aggregate=MagicMock(),
-            isolation_handle=handle,
-            sidecar_handle=None,
-            _service=service,
-        )
-        controller = _UserCancelsLater()
-        processor = EventStreamProcessor(
-            tokens=TokenAccumulator(),
-            subagents=SubagentTracker(),
-            observability=None,
-            controller=controller,  # type: ignore[arg-type]
-            execution_id="exec-918",
-            phase_id="phase-1",
-            session_id="s-918",
-            workspace_id=workspace.id,
-            agent_model=None,
-        )
-        stream = managed.stream(_WORKLOAD, timeout_seconds=600)
-        try:
-            task = asyncio.create_task(processor.process_stream(stream, managed))
-            # Let it start, speak, and go quiet before the user cancels.
-            await asyncio.sleep(_QUIET_SECONDS)
-            assert not task.done(), "the workload ended before it was cancelled"
-            controller.cancel()
-            started = time.monotonic()
-            # The timeout only fails the test; the stop must come from cancel.
-            async with asyncio.timeout(_BOUND_SECONDS * 2):
-                result = await task
-            elapsed = time.monotonic() - started
+        # The supply-chain gate refuses an unpinned public image; it is not what
+        # is under test here (tests/workspace_backends/test_image_verification.py).
+        with patch(
+            "syn_adapters.workspace_backends.agentic.adapter.verify_image_async",
+            side_effect=_passthrough,
+        ):
+            async with service.create_workspace(
+                execution_id=execution_id,
+                phase_id="phase-1",
+                with_sidecar=False,
+                # Nothing for the root image to write under /workspace.
+                extra_environment={"TMPDIR": "/tmp"},
+            ) as managed:
+                assert _containers_of(execution_id), "the service created no container"
+                await _cancel_the_running_agent(managed, execution_id)
+                await managed.execute(["sh", "-c", _HAND_BACK_TO_HOST], timeout_seconds=30)
 
-            assert result.interrupt_requested
-            assert result.interrupt_reason is None
-            assert elapsed < _BOUND_SECONDS, f"cancel took {elapsed:.1f}s"
-            ps = await provider.execute(workspace, "ps -o args", timeout=30)
-            assert _MARKER not in ps.stdout, f"the agent outlived its cancel:\n{ps.stdout}"
-        finally:
-            await stream.aclose()  # type: ignore[attr-defined]
-
-        await provider.teardown(target=workspace)
-        torn_down = True
-        assert not _container_exists(container), "a cancelled workspace left its container behind"
+        # Production cleanup alone, before the fallback below can hide a leak.
+        left = _containers_of(execution_id)
+        assert not left, (
+            f"a cancelled workspace left its container behind: {left} "
+            f"(teardown_failure={managed.teardown_failure})"
+        )
     finally:
-        if not torn_down:
-            await provider.teardown(target=workspace)
+        # Only for a failed run: the assertion above has already checked cleanup.
+        for container in _containers_of(execution_id):
+            subprocess.run(["docker", "rm", "-f", container], capture_output=True, check=False)
+
+
+async def _cancel_the_running_agent(managed: ManagedWorkspace, execution_id: str) -> None:
+    """Cancel the trapped workload mid-stream; it must stop within the bound."""
+    controller = _UserCancelsLater()
+    processor = EventStreamProcessor(
+        tokens=TokenAccumulator(),
+        subagents=SubagentTracker(),
+        observability=None,
+        controller=controller,  # type: ignore[arg-type]
+        execution_id=execution_id,
+        phase_id="phase-1",
+        session_id="s-918",
+        workspace_id=managed.workspace_id,
+        agent_model=None,
+    )
+    stream = managed.stream(_WORKLOAD, timeout_seconds=600)
+    try:
+        task = asyncio.create_task(processor.process_stream(stream, managed))
+        # Let it start, speak, and go quiet before the user cancels.
+        await asyncio.sleep(_QUIET_SECONDS)
+        assert not task.done(), "the workload ended before it was cancelled"
+        controller.cancel()
+        started = time.monotonic()
+        # The timeout only fails the test; the stop must come from cancel.
+        async with asyncio.timeout(_BOUND_SECONDS * 2):
+            result = await task
+        elapsed = time.monotonic() - started
+
+        assert result.interrupt_requested
+        assert result.interrupt_reason is None
+        assert elapsed < _BOUND_SECONDS, f"cancel took {elapsed:.1f}s"
+        ps = await managed.execute(["ps", "-o", "args"], timeout_seconds=30)
+        assert _MARKER not in ps.stdout, f"the agent outlived its cancel:\n{ps.stdout}"
+    finally:
+        await stream.aclose()  # type: ignore[attr-defined]

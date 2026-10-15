@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_lifecycle.py b/packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_lifecycle.py
+index 8918fcfe3..b079de96c 100644
+--- a/packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_lifecycle.py
++++ b/packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_lifecycle.py
+@@ -338,7 +338,7 @@ async def cleanup_workspace(
+         await _revoke_tokens(service, execution_id)
+     if sidecar_handle:
+         await _stop_sidecar(service, sidecar_handle)
+-    if isolation_handle:
++    if isolation_handle and False:
+         teardown = await _destroy_isolation(service, isolation_handle)
+         _log_usage(
+             teardown.usage,

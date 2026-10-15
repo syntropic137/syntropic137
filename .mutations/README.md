@@ -6,7 +6,7 @@ Run with Docker, so the integration test runs too (docker=true, the default):
 just mutation-evidence 1974 "packages/syn-adapters/tests/workspace_backends/agentic/test_918_cancel_stops_the_agent.py packages/syn-adapters/tests/test_918_cancel_stops_a_signal_ignoring_agent.py::test_a_cancel_stops_an_agent_that_ignores_its_signals"
 ```
 
-The integration test now cancels a workload that speaks once, goes silent and traps INT/TERM, with a reasonless CANCEL (verify B1).
+The integration test now cancels a workload that speaks once, goes silent and traps INT/TERM, with a reasonless CANCEL (verify B1). Its workspace is created and removed by the production `WorkspaceService.create_workspace`, and it asserts no container labelled with the execution survives that cleanup before any fallback removal runs (reverify B2).
 
 ```
 # node ids (docker=true)
@@ -23,6 +23,7 @@ packages/syn-adapters/tests/test_918_cancel_stops_a_signal_ignoring_agent.py::te
 | `04-finished-stream-stays-registered.patch` | a finished stream stays registered, so a later cancel targets a dead operation | `test_918_cancel_stops_the_agent.py::test_a_finished_stream_leaves_nothing_to_cancel` |
 | `05-silence-never-polls.patch` | silence never wakes the stream reader, so a quiet agent's CANCEL is never polled (verify B1) | `test_918_cancel_a_quiet_agent_mid_workflow.py::test_a_cancel_stops_a_quiet_agent_and_no_later_phase_runs`, `test_918_cancel_stops_the_agent.py::test_a_cancel_stops_an_agent_that_has_gone_quiet`, `test_918_cancel_stops_a_signal_ignoring_agent.py::test_a_cancel_stops_an_agent_that_ignores_its_signals` |
 | `06-failed-cancel-read-as-stopped.patch` | AW's `failed` answer to an unconfirmed cancel is read as a confirmed stop (verify B3) | `test_918_cancel_stops_the_agent.py::test_interrupt_reports_a_stop_the_provider_could_not_confirm[failed]` |
+| `07-cleanup-leaves-the-container.patch` | `WorkspaceService` cleanup skips destroying the isolation, so a cancelled workspace's container is left behind (reverify B2) | `test_918_cancel_stops_a_signal_ignoring_agent.py::test_a_cancel_stops_an_agent_that_ignores_its_signals`; locally (no Docker) also `test_workspace_service.py::TestWorkspaceServiceDocker::test_docker_workspace_lifecycle` |
 
 Checked locally without Docker: each patch fails the unit test named for it.
 Delete `.mutations/` before merge.
