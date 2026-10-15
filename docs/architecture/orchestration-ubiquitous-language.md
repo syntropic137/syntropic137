@@ -1199,27 +1199,51 @@ Unmeasured is unknown, never "not OOM-killed". Read from
 
 ## Stale Workspace Directory
 
-A workspace directory on the host that nothing will come back for
-(`StaleWorkspaceDir`, PC-130): no running container mounts it, the Execution
-that owns it (when anything still names one) is not running, and nothing in it
-has changed for the reclaim grace period. Its container is already gone, so
-unlike an **Orphaned Workspace** (`OrphanedWorkspace`, #1560) it cannot be
+A workspace directory on the host whose one owning Execution is terminal
+(`completed`, `failed` or `cancelled`) and has been for the settle period
+(`StaleWorkspaceDir`, PC-130, #1983). Terminal is read from the execution read
+model's terminal event, never from file times. Its container is already gone,
+so unlike an **Orphaned Workspace** (`OrphanedWorkspace`, #1560) it cannot be
 guarded from inside.
 
 **Reclaiming** one means deleting it, and only through a `ReclaimableDir`,
-which only a guard can produce. The host-side guard
-(`guard_stale_workspace_dir`) keeps the directory if any commit is not on a
-remote, and archives an uncommitted change as a patch artifact under the
-Execution before the delete. Each deletion is logged as `WorkspaceReclaimed`
-with its size. It is housekeeping, not domain state: no event, no aggregate.
+which only a guard can produce. A directory is reclaimed only when deleting
+it loses nothing, every clause proven: fully readable, no session capture
+inside, no container of any name or state binding it, a settled terminal
+owner whose captures all went to spool volumes, clean, unstashed, nothing
+unversioned outside proven caches, and every commit shown by `git ls-remote`
+on a repository the Execution names. Nothing is archived first. Each deletion
+is logged as `WorkspaceReclaimed` with its size. It is housekeeping, not
+domain state: no event, no aggregate.
+
+**Retained** (`Retained`, `RetainedReason`) is the outcome of a directory a
+reclaim pass kept, with the one proof that failed: `unowned`, `not_terminal`,
+`mounted`, `unreadable`, `dirty`, `unversioned`, `stash`, `unpushed_unproven`,
+`capture_unknown`, `identity_changed` or `delete_failed`. Retained is not a
+failure; /health counts each reason.
+
+**Claim** is the rename of a directory to `.reclaiming-<workspace id>` before
+it is judged the second time, so nothing can reach it at its workspace path.
+A claimed directory whose second look fails, or whose `(st_dev, st_ino)`
+changed, is put back. One that passes is renamed again to
+`.deleting-<workspace id>`, the commit point: it is deleted within each
+pass's time budget, and a pass or a restart that finds one only finishes the
+delete, never judges it again or puts it back.
+
+Reclaiming touches only scratch: a direct child of the workspace base
+directory. Run history (events, Postgres, artifacts, transcripts, telemetry)
+is kept for every run, failed runs included, which get no longer hold than
+successful ones.
+
+**Unclear:** **Clearance** (AW's verdict that a directory holds nothing it
+still needs) is the slice 2 contract, not yet a term in this code (#1983).
 
 **Workspace ownership** is the durable association from a
 `WorkspaceProvisionedForPhase` event's Workspace to its Execution. The
 `workspace_ownership` projection retains this association after a container
-is removed and rebuilds it during replay. Conflicting owners protect the
-directory. Authored work with no known owner is retained, so its archive
-cannot disappear into an unattributed storage prefix. Only a directory with
-an explicit `CACHEDIR.TAG` is treated as disposable cache data; an installed
+is removed and rebuilds it during replay. A directory with no owner, or with
+conflicting owners, is retained (`unowned`). Only a directory with an
+explicit `CACHEDIR.TAG` is treated as disposable cache data; an installed
 dependency directory can still contain authored changes.
 
 ## Scripted Agent

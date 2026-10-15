@@ -533,3 +533,24 @@ allowed_prefixes = [
 "WorkspaceSettings.docker_network" = { issue = "#1805" }
 "WorkspaceSettings.docker_runtime" = { issue = "#1805" }
 "WorkspaceSettings.isolation_backend" = { issue = "#1805" }
+
+[deletion_primitives]
+# Every module that deletes from the host or removes docker objects (#1983).
+# See ci/fitness/code_quality/test_deletion_primitives_are_confined.py.
+# A module not listed here fails the gate; a listed module that no longer
+# deletes fails it too, so this table only shrinks.
+# "<path>" = { reason = "..." }
+"apps/syn-api/src/syn_api/services/reconciliation.py" = { reason = "Startup reap: force-removes agentic-ws containers after the unpushed-work guard ran inside them (#1560)." }
+"apps/syn-api/src/syn_api/services/unlabelled_containers.py" = { reason = "Force-removes unlabelled agentic-ws containers after the guard (#1560)." }
+"packages/syn-adapters/src/syn_adapters/session_inventory/capture_outboxes.py" = { reason = "Removes an outbox entry the platform itself wrote, after delivery." }
+"packages/syn-adapters/src/syn_adapters/session_inventory/docker_recovery.py" = { reason = "Removes its own recovery helper container, and a capture volume only once spool_release proved it drained and unreferenced." }
+"packages/syn-adapters/src/syn_adapters/workspace_backends/dependency_seed.py" = { reason = "Platform-owned dependency seed store: prunes seeds it published, and scratch copies it made." }
+"packages/syn-adapters/src/syn_adapters/workspace_backends/docker/docker_container_ops.py" = { reason = "Workspace provider teardown of the container it created." }
+"packages/syn-adapters/src/syn_adapters/workspace_backends/stale_dirs.py" = { reason = "delete_tree_until: deletes only a .deleting- directory, a name only mark_for_deletion gives after the reclaimer proved it lossless (#1983)." }
+"packages/syn-adapters/src/syn_adapters/workspace_backends/orphaned.py" = { reason = "ShutilWorkspaceDirRemover: deletes only a ReclaimableDir, which only a guard produces (#1560, #1983)." }
+
+[os_walk_without_onerror]
+# os.walk calls under workspace_backends with no onerror (#1983). Budgets are
+# exact current counts and may only decrease.
+# "<path>" = { max = N, issue = "#NNN" }
+"packages/syn-adapters/src/syn_adapters/workspace_backends/dependency_seed.py" = { max = 5, issue = "#1983" }

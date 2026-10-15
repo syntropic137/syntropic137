@@ -63,6 +63,9 @@ class _Inspected:
     labels: dict[str, str]
     workspace_source: str | None
     running: bool = False
+    #: Every mount's source, bind or volume, whatever its destination (#1983);
+    #: None when the document carries no mount list, which is not "no mounts".
+    mount_sources: tuple[str, ...] | None = ()
 
 
 async def find_orphaned_workspaces(container_ids: list[str]) -> list[OrphanedWorkspace]:
@@ -150,7 +153,10 @@ def parse_inspect(raw: str) -> _Inspected | None:
     state = document.get("State")
     running = isinstance(state, dict) and state.get("Running") is True
     return _Inspected(
-        labels=_labels(document), workspace_source=_workspace_source(document), running=running
+        labels=_labels(document),
+        workspace_source=_workspace_source(document),
+        running=running,
+        mount_sources=_mount_sources(document),
     )
 
 
@@ -158,6 +164,15 @@ def _labels(document: dict[object, object]) -> dict[str, str]:
     config = document.get("Config")
     raw = config.get("Labels") if isinstance(config, dict) else None
     return {str(k): str(v) for k, v in raw.items()} if isinstance(raw, dict) else {}
+
+
+def _mount_sources(document: dict[object, object]) -> tuple[str, ...] | None:
+    mounts = document.get("Mounts")
+    if not isinstance(mounts, list):
+        return None
+    return tuple(
+        str(mount["Source"]) for mount in mounts if isinstance(mount, dict) and mount.get("Source")
+    )
 
 
 def _workspace_source(document: dict[object, object]) -> str | None:

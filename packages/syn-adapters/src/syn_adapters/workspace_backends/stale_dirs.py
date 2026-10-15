@@ -1,8 +1,14 @@
 """The host side of reclaiming workspace directories whose container is gone (PC-130).
 
-Three things the domain guard (`guard_stale_workspace_dir`) cannot do itself:
-see which directories exist and which containers still mount them, read their
-repositories with git from the host, and archive a dirty tree to MinIO.
+What the domain guard (`guard_stale_workspace_dir`) cannot do itself: see
+which directories exist and which containers still mount them, read their
+repositories with git from the host, and ask a remote what it holds
+(`GitLsRemote`).
+
+EVERY WALK FAILS CLOSED (#1983). A directory this process cannot list is not
+an empty directory: it may hold the only copy of an agent's work, written as
+another user. So every ``os.walk`` here passes ``onerror=_raise``, a failed
+``lstat`` raises too, and the directory is kept as ``unreadable``.
 
 RUNNING GIT ON A REPOSITORY AN AGENT WROTE. The repository's own config and
 layout are the agent's to write, and git runs commands named in the config
@@ -21,29 +27,33 @@ and runs it.
 WHAT A REPOSITORY DOES NOT HOLD. A workspace keeps work outside its working
 trees too - `artifacts/output`, session spools, a bare clone, a stash, a file
 the repository ignores. Bare repositories are guarded like any other; every
-other file git cannot reproduce is archived as one tarball, and only proven
-caches (`_is_proven_cache`) are left out of it.
+other file git cannot reproduce keeps the directory, and only proven caches
+(`_is_proven_cache`) are left out of that.
 """
 
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import io
 import os
-import tarfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NoReturn
 
 from syn_adapters.workspace_backends.orphaned import docker_inspect_raw, parse_inspect
 
 if TYPE_CHECKING:
-    from syn_domain.contexts.orchestration import StaleWorkspaceDir
+    from collections.abc import Callable
 
-#: A patch larger than this is not archived, so its directory is kept: a
-#: tree that big is not "a few uncommitted edits", and an operator decides.
-MAX_PATCH_BYTES = 100 * 1024 * 1024
+#: Where AW keeps session capture when it is written into the workspace
+#: rather than to the `/spool` volume. Its presence anywhere keeps the
+#: directory: capture there is the only copy (#1983, design 1.3).
+SESSION_STORE_DIRNAME = ".agentic-session-store"
+
+
+def _raise(error: OSError) -> NoReturn:
+    """``os.walk``'s ``onerror``: a directory that cannot be listed stops the walk."""
+    raise error
+
 
 #: The only repository config keys host git is run under, as (section,
 #: whether it has a subsection) -> names, or None for any name. They are what
@@ -137,22 +147,103 @@ class WorkspaceDirListing:
     workspace_id: str
     host_dir: str
     size_bytes: int
-    #: Newest mtime of anything inside, epoch seconds: the grace clock.
-    last_modified: float
+    #: ``(st_dev, st_ino)`` of the directory itself: a rename keeps it, a
+    #: replacement does not.
+    identity: tuple[int, int] = (0, 0)
+    #: Why some of it could not be read, or None when the walk saw all of it.
+    unreadable: str | None = None
+    #: Whether a session-store directory exists anywhere inside.
+    session_store: bool = False
 
 
 @dataclass(frozen=True)
-class WorkspaceContainer:
-    """A workspace container in any state, by the directory it mounts."""
+class ContainerMounts:
+    """One container in any state, of any name, and every mount source it holds."""
 
-    workspace_id: str
-    execution_id: str | None
-    running: bool
+    container_id: str
+    sources: tuple[str, ...]
+    running: bool = False
+
+    def mounts(self, workspace_id: str) -> bool:
+        """Whether any source is the workspace directory, its claim, or inside either.
+
+        Matched by path component, not by host prefix: the API sees the base
+        at another path than docker reports, and an over-match only keeps a
+        directory. A bind of the base itself (the API's own) names no
+        workspace and does not count.
+        """
+        names = {workspace_id, CLAIM_PREFIX + workspace_id, DELETE_PREFIX + workspace_id}
+        return any(not names.isdisjoint(Path(source).parts) for source in self.sources)
 
 
 #: A directory claimed for deletion is renamed to this prefix plus its
 #: workspace id, so no owner can reach it at its workspace path any more.
 CLAIM_PREFIX = ".reclaiming-"
+
+
+#: A directory proven lossless and being deleted is renamed to this prefix.
+#: Nothing judges it again: a pass that finds one (its own, out of time, or
+#: one a restart interrupted) only finishes the delete (#1983).
+DELETE_PREFIX = ".deleting-"
+
+
+def workspace_id_of(name: str) -> str:
+    """The workspace id a base-directory entry stands for, claimed or being deleted."""
+    return name.removeprefix(CLAIM_PREFIX).removeprefix(DELETE_PREFIX)
+
+
+def is_being_deleted(host_dir: str) -> bool:
+    return Path(host_dir).name.startswith(DELETE_PREFIX)
+
+
+def mark_for_deletion(claimed: str, identity: tuple[int, int]) -> str:
+    """Rename a claimed, re-judged directory to its deleting name; return it.
+
+    Refuses (``OSError``) unless it is still the directory that was judged:
+    same ``(st_dev, st_ino)``, not a symlink. The rename is the commit point:
+    from here a restart finishes the delete instead of putting it back.
+    """
+    path = Path(claimed)
+    if not path.name.startswith(CLAIM_PREFIX):
+        raise FileNotFoundError(f"{claimed} is not claimed")
+    stat = path.lstat()
+    if path.is_symlink() or (stat.st_dev, stat.st_ino) != identity:
+        raise FileExistsError(f"{claimed} is not the directory that was judged")
+    deleting = path.with_name(DELETE_PREFIX + path.name.removeprefix(CLAIM_PREFIX))
+    if os.path.lexists(deleting):
+        raise FileExistsError(f"{deleting} already exists")
+    path.rename(deleting)
+    return str(deleting)
+
+
+def delete_tree_until(path: str, deadline: float, clock: Callable[[], float]) -> bool:
+    """Delete a ``.deleting-`` tree bottom-up until ``clock() >= deadline``.
+
+    True when it is gone; False when time ran out, leaving the rest under the
+    same name for the next pass. Blocking: run it off the event loop. Never
+    follows a symlink, and raises ``OSError`` for anything it cannot delete.
+    """
+    root = Path(path)
+    if root.is_symlink() or not root.name.startswith(DELETE_PREFIX):
+        raise ValueError(f"refusing to delete {path}: not a directory marked for deletion")
+    # os.unlink / os.rmdir rather than Path methods: the deletion fitness gate
+    # (test_deletion_primitives_are_confined) sees these spellings.
+    for dirpath, dirnames, filenames in os.walk(root, topdown=False, onerror=_raise):
+        here = Path(dirpath)
+        for name in filenames:
+            os.unlink(here / name)  # noqa: PTH108
+            if clock() >= deadline:
+                return False
+        for name in dirnames:
+            entry = here / name
+            if entry.is_symlink():
+                os.unlink(entry)  # noqa: PTH108
+            else:
+                os.rmdir(entry)  # noqa: PTH106
+        if clock() >= deadline:
+            return False
+    os.rmdir(root)  # noqa: PTH106
+    return True
 
 
 def claim_workspace_dir(host_dir: str) -> str:
@@ -199,72 +290,61 @@ def scan_workspace_dirs(base: str) -> list[WorkspaceDirListing]:
     listings: list[WorkspaceDirListing] = []
     for entry in sorted(root.iterdir()):
         if entry.is_dir() and not entry.is_symlink():
-            size, newest = _measure(entry)
-            listings.append(
-                WorkspaceDirListing(
-                    workspace_id=entry.name.removeprefix(CLAIM_PREFIX),
-                    host_dir=str(entry),
-                    size_bytes=size,
-                    last_modified=newest,
-                )
-            )
+            listings.append(measure_workspace_dir(entry))
     return listings
 
 
-def _measure(directory: Path) -> tuple[int, float]:
+def measure_workspace_dir(directory: Path) -> WorkspaceDirListing:
+    """One directory, sized in a single walk that fails closed. Blocking."""
+    stat = directory.lstat()
     size = 0
-    newest = directory.lstat().st_mtime
-    for dirpath, dirnames, filenames in os.walk(directory):
-        here = Path(dirpath)
-        # Git's own bookkeeping is not work: reading a repository refreshes
-        # its index, and that must not read as "changed during archival".
-        # Git state is compared separately (`WorkspaceDirReclaimer._git_state`).
-        bookkeeping = ".git" in here.relative_to(directory).parts
-        for name, is_file in (*((d, False) for d in dirnames), *((f, True) for f in filenames)):
-            try:
-                stat = (here / name).lstat()
-            except OSError:
-                continue
-            if not bookkeeping and name != ".git":
-                newest = max(newest, stat.st_mtime)
-            if is_file:
-                size += stat.st_size
-    return size, newest
+    session_store = False
+    unreadable: str | None = None
+    try:
+        for dirpath, dirnames, filenames in os.walk(directory, onerror=_raise):
+            here = Path(dirpath)
+            if SESSION_STORE_DIRNAME in dirnames or SESSION_STORE_DIRNAME in filenames:
+                session_store = True
+            for name in filenames:
+                size += (here / name).lstat().st_size
+    except OSError as exc:
+        unreadable = f"{type(exc).__name__}: {exc}"
+    return WorkspaceDirListing(
+        workspace_id=workspace_id_of(directory.name),
+        host_dir=str(directory),
+        size_bytes=size,
+        identity=(stat.st_dev, stat.st_ino),
+        unreadable=unreadable,
+        session_store=session_store,
+    )
 
 
-async def list_workspace_containers() -> list[WorkspaceContainer]:
-    """Every ``agentic-ws-`` container, stopped ones included.
+async def list_containers() -> list[ContainerMounts]:
+    """Every container on the host, any name, any state, with its mount sources.
 
-    Raises when any of them cannot be read: a container whose state is unknown
-    may be running, and its directory must then be left alone.
+    Raises when any of them cannot be read: a container whose mounts are
+    unknown may bind any directory, which must then be left alone.
     """
     proc = await asyncio.create_subprocess_exec(
         "docker",
         "ps",
         "-a",
         "-q",
-        "--filter",
-        "name=agentic-ws-",
+        "--no-trunc",
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.DEVNULL,
     )
     stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
     if proc.returncode != 0:
         raise RuntimeError(f"docker ps -a exited {proc.returncode}")
-    containers: list[WorkspaceContainer] = []
+    containers: list[ContainerMounts] = []
     for container_id in stdout.decode().split():
         raw = await docker_inspect_raw(container_id)
         inspected = parse_inspect(raw) if raw is not None else None
-        if inspected is None:
-            raise RuntimeError(f"could not inspect workspace container {container_id}")
-        if inspected.workspace_source is None:
-            continue
+        if inspected is None or inspected.mount_sources is None:
+            raise RuntimeError(f"could not inspect container {container_id}")
         containers.append(
-            WorkspaceContainer(
-                workspace_id=Path(inspected.workspace_source).name,
-                execution_id=inspected.labels.get("syn.execution_id") or None,
-                running=inspected.running,
-            )
+            ContainerMounts(container_id, inspected.mount_sources, running=inspected.running)
         )
     return containers
 
@@ -284,17 +364,15 @@ class SubprocessHostWorkspaceGit:
             await self._refuse_unsafe_config(repo)
         return repos
 
-    async def unpushed_commits(self, repo: str) -> int:
+    async def has_stash(self, repo: str) -> bool:
         await self._refuse_unsafe_config(repo)
-        # Every ref (branches, tags, stash) and HEAD: an agent on a detached
-        # HEAD commits too, and a stash is work no branch reaches.
-        out = await _git(repo, "rev-list", "--count", "--all", "HEAD", "--not", "--remotes")
-        return int(out.strip() or b"0")
+        out = await _git(repo, "for-each-ref", "--format=%(objectname)", "refs/stash")
+        return bool(out.strip())
 
-    async def uncommitted_patch(self, repo: str) -> bytes:
+    async def is_dirty(self, repo: str) -> bool:
         await self._refuse_unsafe_config(repo)
         if _is_bare(repo):
-            return b""
+            return False
         index_entries = await _git(repo, "ls-files", "-v", "-z")
         if any(
             entry[:1] == b"S" or entry[:1].islower()
@@ -305,29 +383,53 @@ class SubprocessHostWorkspaceGit:
         # Each submodule is read as its own repository; `dirty` keeps git
         # from running inside it to ask.
         no_drivers = ("--no-ext-diff", "--no-textconv", "--ignore-submodules=dirty")
-        diff_args = ("--binary", *no_drivers, "--no-color")
-        # A HEAD-to-tree patch holds one state. When the index differs from
-        # both HEAD and the tree, the staged state would be lost: keep it.
-        staged = await _git(
+        if await _git(
             repo, "diff", *no_drivers, "--cached", "--quiet", ok_codes=(0, 1), status=True
-        )
-        unstaged = await _git(repo, "diff", *no_drivers, "--quiet", ok_codes=(0, 1), status=True)
-        if staged and unstaged:
-            raise HostGitError(f"{repo} has staged changes the working tree no longer matches")
-        patch = await _git(repo, "diff", *diff_args, "HEAD")
+        ):
+            return True
+        if await _git(repo, "diff", *no_drivers, "--quiet", ok_codes=(0, 1), status=True):
+            return True
         untracked = await _git(repo, "ls-files", "--others", "--exclude-standard", "-z")
-        for name in filter(None, untracked.decode(errors="surrogateescape").split("\0")):
-            # Exit 1 is "they differ", which for /dev/null is always.
-            patch += await _git(
-                repo, "diff", "--no-index", *diff_args, "--", "/dev/null", name, ok_codes=(0, 1)
-            )
-            if len(patch) > MAX_PATCH_BYTES:
-                raise HostGitError(f"uncommitted changes in {repo} exceed {MAX_PATCH_BYTES} bytes")
-        if len(patch) > MAX_PATCH_BYTES:
-            raise HostGitError(f"uncommitted changes in {repo} exceed {MAX_PATCH_BYTES} bytes")
-        return patch
+        return bool(untracked.strip(b"\0"))
 
-    async def unversioned_files(self, host_dir: str, repos: list[str]) -> bytes:
+    async def unproven_commits(self, repo: str, advertised: frozenset[str]) -> int:
+        await self._refuse_unsafe_config(repo)
+        tips = await self._local_tips(repo)
+        if not tips:
+            return 0
+        # Only an advertised object this repository holds can bound the walk;
+        # one it lacks proves nothing about what is local.
+        held = await self._held_commits(repo, advertised)
+        stdin = "".join(f"{tip}\n" for tip in tips) + "".join(f"^{oid}\n" for oid in held)
+        out = await _git(repo, "rev-list", "--count", "--stdin", stdin=stdin.encode())
+        return int(out.strip() or b"0")
+
+    async def _local_tips(self, repo: str) -> list[str]:
+        """HEAD and every ref outside ``refs/remotes/``: what the agent could have made."""
+        refs = await _git(repo, "for-each-ref", "--format=%(objectname) %(refname)")
+        tips: set[str] = set()
+        for line in refs.decode(errors="surrogateescape").splitlines():
+            oid, _, name = line.partition(" ")
+            if oid and not name.startswith("refs/remotes/"):
+                tips.add(oid)
+        head = await _git(repo, "rev-parse", "--verify", "-q", "HEAD", ok_codes=(0, 1))
+        if head.strip():
+            tips.add(head.decode().strip())
+        return sorted(tips)
+
+    async def _held_commits(self, repo: str, advertised: frozenset[str]) -> list[str]:
+        if not advertised:
+            return []
+        query = "".join(f"{oid}\n" for oid in sorted(advertised)).encode()
+        out = await _git(repo, "cat-file", "--batch-check", stdin=query)
+        held: list[str] = []
+        for line in out.decode(errors="replace").splitlines():
+            oid, _, kind = line.partition(" ")
+            if kind.split(" ", 1)[0] in {"commit", "tag"}:
+                held.append(oid)
+        return held
+
+    async def unversioned_paths(self, host_dir: str, repos: list[str]) -> list[str]:
         ignored: list[str] = []
         for repo in repos:
             if _is_bare(repo):
@@ -341,7 +443,7 @@ class SubprocessHostWorkspaceGit:
                 for name in out.decode(errors="surrogateescape").split("\0")
                 if name
             )
-        return await asyncio.to_thread(_tar_unversioned, host_dir, repos, ignored)
+        return await asyncio.to_thread(_list_unversioned, host_dir, repos, ignored)
 
     async def _refuse_unsafe_config(self, repo: str) -> None:
         # Under the trust later calls use, but without our command-disabling
@@ -385,7 +487,7 @@ def _is_allowed_config(key: str) -> bool:
 def _find_repositories(host_dir: str) -> list[str]:
     root = Path(host_dir).resolve()
     repos: list[str] = []
-    for dirpath, dirnames, filenames in os.walk(host_dir):
+    for dirpath, dirnames, filenames in os.walk(host_dir, onerror=_raise):
         if _looks_bare(dirpath, dirnames, filenames):
             # A bare clone holds refs no working tree shows; guard it, and do
             # not walk into its object store.
@@ -479,11 +581,11 @@ def _is_bare(repo: str) -> bool:
     return not (Path(repo) / ".git").exists()
 
 
-def _tar_unversioned(host_dir: str, repos: list[str], ignored: list[str]) -> bytes:
-    """A gzipped tar of what git cannot reproduce, or b"" when there is none.
+def _list_unversioned(host_dir: str, repos: list[str], ignored: list[str]) -> list[str]:
+    """Every file git cannot reproduce, relative to ``host_dir``, sorted.
 
     Everything outside every repository, plus each repository's ignored files,
-    less proven caches. Raises `HostGitError` past `MAX_PATCH_BYTES`.
+    less proven caches. Raises ``OSError`` when any part cannot be listed.
     """
     root = Path(host_dir)
     repo_roots = {Path(r) for r in repos}
@@ -495,9 +597,7 @@ def _tar_unversioned(host_dir: str, repos: list[str], ignored: list[str]) -> byt
             _is_proven_cache(root.joinpath(*relative[: i + 1])) for i in range(len(relative))
         ):
             members.extend(_unversioned_under(path, repo_roots))
-    if not members:
-        return b""
-    return _write_tar(root, sorted(set(members)))
+    return sorted({str(member.relative_to(root)) for member in members})
 
 
 def _unversioned_under(path: Path, repo_roots: set[Path]) -> list[Path]:
@@ -505,7 +605,7 @@ def _unversioned_under(path: Path, repo_roots: set[Path]) -> list[Path]:
     if path.is_symlink() or path.is_file():
         return [path]
     members: list[Path] = []
-    for dirpath, dirnames, filenames in os.walk(path):
+    for dirpath, dirnames, filenames in os.walk(path, onerror=_raise):
         here = Path(dirpath)
         dirnames[:] = [
             d for d in dirnames if here / d not in repo_roots and not _is_proven_cache(here / d)
@@ -515,27 +615,8 @@ def _unversioned_under(path: Path, repo_roots: set[Path]) -> list[Path]:
     return members
 
 
-def _write_tar(root: Path, members: list[Path]) -> bytes:
-    total = 0
-    buffer = io.BytesIO()
-    with tarfile.open(fileobj=buffer, mode="w:gz") as tar:
-        for member in members:
-            total += member.lstat().st_size
-            if total > MAX_PATCH_BYTES:
-                raise HostGitError(f"unversioned files in {root} exceed {MAX_PATCH_BYTES} bytes")
-            tar.add(member, arcname=str(member.relative_to(root)), recursive=False)
-    return buffer.getvalue()
-
-
-async def _git(
-    repo: str,
-    *args: str,
-    ok_codes: tuple[int, ...] = (0,),
-    overrides: tuple[str, ...] = _GIT_GUARD_ARGS,
-    status: bool = False,
-) -> bytes:
-    """Stdout, or with ``status`` b"1" when git exited non-zero and b"" when zero."""
-    env = {
+def _git_env(repo: str) -> dict[str, str]:
+    return {
         "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
         "HOME": "/nonexistent",
         "GIT_CONFIG_NOSYSTEM": "1",
@@ -546,6 +627,17 @@ async def _git(
         # another one, which may be outside the workspace.
         "GIT_CEILING_DIRECTORIES": str(Path(repo).resolve().parent),
     }
+
+
+async def _git(
+    repo: str,
+    *args: str,
+    ok_codes: tuple[int, ...] = (0,),
+    overrides: tuple[str, ...] = _GIT_GUARD_ARGS,
+    status: bool = False,
+    stdin: bytes | None = None,
+) -> bytes:
+    """Stdout, or with ``status`` b"1" when git exited non-zero and b"" when zero."""
     proc = await asyncio.create_subprocess_exec(
         "git",
         *overrides,
@@ -554,11 +646,13 @@ async def _git(
         *args,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
-        stdin=asyncio.subprocess.DEVNULL,
-        env=env,
+        stdin=asyncio.subprocess.DEVNULL if stdin is None else asyncio.subprocess.PIPE,
+        env=_git_env(repo),
     )
     try:
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=_GIT_TIMEOUT_SECONDS)
+        stdout, stderr = await asyncio.wait_for(
+            proc.communicate(stdin), timeout=_GIT_TIMEOUT_SECONDS
+        )
     except TimeoutError:
         proc.kill()
         await proc.wait()
@@ -571,45 +665,3 @@ async def _git(
     if status:
         return b"1" if proc.returncode else b""
     return stdout
-
-
-def archive_key(stale: StaleWorkspaceDir, path: str) -> str:
-    """A key unique per (workspace, path): readable slug plus a hash of the exact path.
-
-    The slug alone is not injective (``a_b`` and ``a/b`` meet), and an object
-    store overwrites on a repeated key.
-    """
-    relative = str(Path(path).relative_to(stale.host_dir))
-    slug = relative.replace(os.sep, "_").strip("._") or "root"
-    digest = hashlib.sha256(relative.encode(errors="surrogateescape")).hexdigest()[:16]
-    return f"reclaimed-{stale.workspace_id}-{slug}-{digest}"
-
-
-class ArtifactStoragePatchArchive:
-    """`PatchArchive` over the artifact bucket, keyed under the execution."""
-
-    async def save(self, stale: StaleWorkspaceDir, repo: str, patch: bytes) -> str:
-        from syn_adapters.storage.artifact_storage.factory import get_artifact_storage
-
-        storage = await get_artifact_storage()
-        result = await storage.upload(
-            archive_key(stale, repo),
-            patch,
-            execution_id=stale.execution_id,
-            content_type="text/x-diff",
-            metadata={"reclaimed_from": stale.host_dir, "repository": repo},
-        )
-        return result.storage_uri
-
-    async def save_files(self, stale: StaleWorkspaceDir, tarball: bytes) -> str:
-        from syn_adapters.storage.artifact_storage.factory import get_artifact_storage
-
-        storage = await get_artifact_storage()
-        result = await storage.upload(
-            f"{archive_key(stale, stale.host_dir)}-files",
-            tarball,
-            execution_id=stale.execution_id,
-            content_type="application/gzip",
-            metadata={"reclaimed_from": stale.host_dir},
-        )
-        return result.storage_uri

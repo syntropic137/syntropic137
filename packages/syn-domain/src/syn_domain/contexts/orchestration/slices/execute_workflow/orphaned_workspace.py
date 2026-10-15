@@ -29,15 +29,19 @@ container, and a startup reap only sees running ones. A container that was
 OOM-killed, removed by a reap that then reported a failure, or swapped out by
 force leaves a directory nobody guards: twelve of them, 45 GB, filled the VPS
 on 2026-10-08. `guard_stale_workspace_dir` is the host-side guard for those.
-It never pushes - the container's credential died with it - so its rules are
-the owner's: any commit not on a remote keeps the directory, and an
-uncommitted change is archived as a patch before the directory may go.
+It never pushes - the container's credential died with it - and it archives
+nothing (#1983 slice 1): a directory may go only when deleting it loses
+NOTHING. Every repository is clean, nothing is stashed, nothing lies outside
+a repository's history but proven caches, and every commit is shown on the
+real remote by `git ls-remote` against the repository the Execution names.
+Any doubt is a `Retained` with its `RetainedReason`, never a deletion.
 """
 
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import TYPE_CHECKING, Protocol
 
 from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_guard import (
@@ -131,145 +135,238 @@ async def guard_orphaned_workspace(orphan: OrphanedWorkspace) -> ReclaimableDir 
     return ReclaimableDir(host_dir=orphan.host_dir, workspace_id=orphan.workspace_id)
 
 
+class RetainedReason(StrEnum):
+    """Why a stale workspace directory was kept (#1983). Kept is not failed.
+
+    Each names the one proof that could not be made. /health counts them, so
+    an operator sees what the disk is holding and why, not one opaque number.
+    """
+
+    #: No owner, or more than one: nothing says whose work it is.
+    UNOWNED = "unowned"
+    #: The owning Execution is not terminal, has no record, or ended under
+    #: the settle period ago.
+    NOT_TERMINAL = "not_terminal"
+    #: A container in any state, of any name, binds the directory or below it.
+    MOUNTED = "mounted"
+    #: Some part of the directory, or of a repository in it, could not be read.
+    UNREADABLE = "unreadable"
+    #: A repository has a change its HEAD does not hold.
+    DIRTY = "dirty"
+    #: A file no repository can reproduce, outside every proven cache.
+    UNVERSIONED = "unversioned"
+    #: A repository holds a stash.
+    STASH = "stash"
+    #: A commit could not be shown on the remote the Execution names.
+    UNPUSHED_UNPROVEN = "unpushed_unproven"
+    #: Session capture may still be inside the directory.
+    CAPTURE_UNKNOWN = "capture_unknown"
+    #: The directory was replaced or moved between the check and the delete.
+    IDENTITY_CHANGED = "identity_changed"
+    #: Every proof held, and the delete itself failed.
+    DELETE_FAILED = "delete_failed"
+
+
+@dataclass(frozen=True)
+class Retained:
+    """A stale directory that stays, and the first proof that failed."""
+
+    reason: RetainedReason
+    detail: str
+
+
+#: The Execution statuses after which nothing will write a workspace again.
+TERMINAL_EXECUTION_STATUSES = frozenset({"completed", "failed", "cancelled"})
+
+
+@dataclass(frozen=True)
+class OwnerExecution:
+    """What the execution read model says about a directory's owner."""
+
+    execution_id: str
+    status: str
+    #: Epoch seconds of the terminal event, or None when not terminal or unknown.
+    terminal_at: float | None
+    #: Remote URLs of the repositories the Execution cloned (ADR-058).
+    repositories: tuple[str, ...] = ()
+
+
+def judge_owner(
+    owners: set[str],
+    record: OwnerExecution | None,
+    *,
+    now: float,
+    settle_seconds: float,
+) -> Retained | None:
+    """Whether the directory's one owner is finished and settled; None when it is.
+
+    Eligibility comes from the Execution's terminal event, never from file
+    mtimes: an mtime is the agent's to set, the terminal event is not.
+    """
+    if len(owners) != 1:
+        what = "no execution" if not owners else f"{len(owners)} executions"
+        return Retained(RetainedReason.UNOWNED, f"{what} own it")
+    (owner,) = owners
+    if record is None or record.execution_id != owner:
+        return Retained(RetainedReason.NOT_TERMINAL, f"{owner} has no execution record")
+    if record.status not in TERMINAL_EXECUTION_STATUSES or record.terminal_at is None:
+        return Retained(RetainedReason.NOT_TERMINAL, f"{owner} is {record.status}")
+    settled_for = now - record.terminal_at
+    if settled_for < settle_seconds:
+        return Retained(
+            RetainedReason.NOT_TERMINAL,
+            f"{owner} ended {settled_for:.0f}s ago; settles after {settle_seconds:.0f}s",
+        )
+    return None
+
+
 @dataclass(frozen=True)
 class StaleWorkspaceDir:
-    """A workspace directory with no container left and no running execution.
+    """A workspace directory whose one owner is terminal and settled.
 
     ``execution_id`` is None when neither the durable provisioning index nor
-    any container label names its owner. Unidentified authored work is kept.
+    any container label names its owner; the guard keeps such a directory.
+    ``remote_urls`` are the repositories the owning Execution names: the only
+    remotes a commit may be proven on. The repository's own config is the
+    agent's to write, so it never names one.
     """
 
     host_dir: str
     workspace_id: str
     execution_id: str | None
     size_bytes: int
-    #: Newest mtime inside when it was found stale; a later one means it changed.
-    last_modified: float = 0.0
+    remote_urls: tuple[str, ...] = ()
 
 
 class HostWorkspaceGit(Protocol):
     """Reads a workspace's repositories from the host, without running them.
 
     Every method raises when it cannot give a definite answer; the guard reads
-    any raise as "at risk" and keeps the directory.
+    any raise as a reason to keep the directory.
     """
 
     async def repositories(self, host_dir: str) -> list[str]:
         """Every git repository under ``host_dir``, bare ones and submodules included."""
         ...
 
-    async def unpushed_commits(self, repo: str) -> int:
-        """Commits reachable from any ref or HEAD that no remote-tracking ref has."""
+    async def has_stash(self, repo: str) -> bool:
+        """Whether ``refs/stash`` exists."""
         ...
 
-    async def uncommitted_patch(self, repo: str) -> bytes:
-        """The working tree's changes against HEAD, untracked files included.
+    async def is_dirty(self, repo: str) -> bool:
+        """Whether the index or working tree differs from HEAD, untracked files included.
 
-        Empty when the tree is clean, or the repository is bare. Raises when
-        one patch cannot hold it (an index that differs from HEAD and tree).
+        False for a bare repository.
         """
         ...
 
-    async def unversioned_files(self, host_dir: str, repos: list[str]) -> bytes:
-        """An archive of every file under ``host_dir`` no repository can reproduce.
+    async def unversioned_paths(self, host_dir: str, repos: list[str]) -> list[str]:
+        """Every file under ``host_dir`` no repository can reproduce, less proven caches.
 
-        Files outside ``repos`` and files they ignore, less proven caches.
-        Empty when there are none.
+        Files outside ``repos`` and files they ignore. Empty when there are none.
+        """
+        ...
+
+    async def unproven_commits(self, repo: str, advertised: frozenset[str]) -> int:
+        """Commits reachable from HEAD or a local ref that no ``advertised`` object reaches.
+
+        Remote-tracking refs (``refs/remotes/*``) are not tips and not proof:
+        they are local files the agent could write. An advertised object
+        missing locally proves nothing.
         """
         ...
 
 
-class PatchArchive(Protocol):
-    """Durable storage for a reclaimed workspace's uncommitted changes."""
+class RemoteRefs(Protocol):
+    """What a remote advertises, read from the remote itself (``git ls-remote``)."""
 
-    async def save(self, stale: StaleWorkspaceDir, repo: str, patch: bytes) -> str:
-        """Store ``patch`` linked to the stale dir's execution; return where. Raises on failure."""
-        ...
-
-    async def save_files(self, stale: StaleWorkspaceDir, tarball: bytes) -> str:
-        """Store the unversioned-files archive the same way; return where. Raises on failure."""
+    async def advertised(self, url: str) -> frozenset[str]:
+        """Every object id ``url`` advertises. Raises when it cannot be read."""
         ...
 
 
 async def guard_stale_workspace_dir(
-    stale: StaleWorkspaceDir, git: HostWorkspaceGit, archive: PatchArchive
-) -> ReclaimableDir | None:
+    stale: StaleWorkspaceDir, git: HostWorkspaceGit, remotes: RemoteRefs
+) -> ReclaimableDir | Retained:
     """Return the directory as reclaimable only if deleting it loses nothing.
 
-    A commit not on any remote keeps it: there is no credential left to push
-    with, so the directory is that commit's only copy. Uncommitted changes, and
-    every file outside a repository's history, are archived first, and a failed
-    archive keeps it. Never raises.
+    Read-only: nothing is pushed, archived or moved. Never raises; every
+    failure is a `Retained` naming the proof that could not be made.
     """
+    if stale.execution_id is None:
+        return _keep(stale, Retained(RetainedReason.UNOWNED, "no execution owns it"))
     try:
         repos = await git.repositories(stale.host_dir)
         for repo in repos:
-            unpushed = await git.unpushed_commits(repo)
-            if unpushed:
-                return _keep(stale, f"{unpushed} unpushed commit(s) in {repo}")
-        pending = await _unpreserved_work(stale.host_dir, git, repos)
-        if pending and stale.execution_id is None:
-            return _keep(stale, "its authored work has no known execution owner")
-        saved = [await work.save(stale, archive) for work in pending]
+            if await git.has_stash(repo):
+                return _keep(stale, Retained(RetainedReason.STASH, f"{repo} holds a stash"))
+        for repo in repos:
+            if await git.is_dirty(repo):
+                return _keep(
+                    stale, Retained(RetainedReason.DIRTY, f"{repo} has uncommitted changes")
+                )
+        unversioned = await git.unversioned_paths(stale.host_dir, repos)
     except Exception as exc:
-        return _keep(stale, f"its work could not be shown safe ({type(exc).__name__}: {exc})")
-    for uri in saved:
-        logger.warning(
-            "Stale workspace %s (execution %s) had unpreserved work; saved as %s "
-            "before its directory was reclaimed",
-            stale.workspace_id,
-            stale.execution_id or "unknown",
-            uri,
+        return _keep(stale, Retained(RetainedReason.UNREADABLE, _described(exc)))
+    if unversioned:
+        return _keep(
+            stale,
+            Retained(
+                RetainedReason.UNVERSIONED,
+                f"{len(unversioned)} file(s) no repository holds, e.g. {unversioned[0]}",
+            ),
         )
+    unproven = await _unproven(stale, git, remotes, repos)
+    if unproven is not None:
+        return _keep(stale, unproven)
     return ReclaimableDir(
         host_dir=stale.host_dir, workspace_id=stale.workspace_id, size_bytes=stale.size_bytes
     )
 
 
-@dataclass(frozen=True)
-class _UncommittedPatch:
-    repo: str
-    patch: bytes
-
-    async def save(self, stale: StaleWorkspaceDir, archive: PatchArchive) -> str:
-        return await archive.save(stale, self.repo, self.patch)
-
-
-@dataclass(frozen=True)
-class _UnversionedFiles:
-    tarball: bytes
-
-    async def save(self, stale: StaleWorkspaceDir, archive: PatchArchive) -> str:
-        return await archive.save_files(stale, self.tarball)
-
-
-async def _unpreserved_work(
-    host_dir: str, git: HostWorkspaceGit, repos: list[str]
-) -> list[_UncommittedPatch | _UnversionedFiles]:
-    """Everything deleting ``host_dir`` would lose that no remote holds, unsaved yet.
-
-    Read in full before anything is saved, so the guard can refuse an
-    unidentified owner once for all of it rather than once per kind.
-    """
-    pending: list[_UncommittedPatch | _UnversionedFiles] = []
-    for repo in repos:
-        patch = await git.uncommitted_patch(repo)
-        if patch:
-            pending.append(_UncommittedPatch(repo, patch))
-    files = await git.unversioned_files(host_dir, repos)
-    if files:
-        pending.append(_UnversionedFiles(files))
-    return pending
+async def _unproven(
+    stale: StaleWorkspaceDir, git: HostWorkspaceGit, remotes: RemoteRefs, repos: list[str]
+) -> Retained | None:
+    """None when every commit in every repository is shown on a named remote."""
+    if not repos:
+        return None
+    if not stale.remote_urls:
+        return Retained(
+            RetainedReason.UNPUSHED_UNPROVEN, f"{stale.execution_id} names no repository"
+        )
+    advertised: set[str] = set()
+    try:
+        for url in stale.remote_urls:
+            advertised |= await remotes.advertised(url)
+    except Exception as exc:
+        return Retained(RetainedReason.UNPUSHED_UNPROVEN, f"ls-remote: {_described(exc)}")
+    try:
+        for repo in repos:
+            unproven = await git.unproven_commits(repo, frozenset(advertised))
+            if unproven:
+                return Retained(
+                    RetainedReason.UNPUSHED_UNPROVEN,
+                    f"{unproven} commit(s) in {repo} are on no named remote",
+                )
+    except Exception as exc:
+        return Retained(RetainedReason.UNPUSHED_UNPROVEN, _described(exc))
+    return None
 
 
-def _keep(stale: StaleWorkspaceDir, why: str) -> None:
-    logger.error(
-        "Keeping stale workspace directory %s (execution %s, %d bytes): %s",
+def _described(exc: Exception) -> str:
+    return f"{type(exc).__name__}: {exc}"
+
+
+def _keep(stale: StaleWorkspaceDir, retained: Retained) -> Retained:
+    logger.warning(
+        "Keeping stale workspace directory %s (execution %s, %d bytes): %s: %s",
         stale.host_dir,
         stale.execution_id or "unknown",
         stale.size_bytes,
-        why,
+        retained.reason.value,
+        retained.detail,
     )
+    return retained
 
 
 def remove_reclaimed_dir(

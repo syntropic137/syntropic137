@@ -3575,7 +3575,7 @@ export interface components {
          *     StrEnum so values serialize directly to JSON in health responses.
          * @enum {string}
          */
-        DegradedReason: "artifact_storage" | "claude_plugin_storage" | "skill_storage" | "conversation_storage" | "ui_feedback" | "subscription_coordinator" | "projection_catchup" | "projection_stalled" | "projection_dropped_event" | "projection_held" | "subscription_halted" | "event_poller" | "check_run_poller" | "anthropic_api_key" | "github_app" | "disk_space";
+        DegradedReason: "artifact_storage" | "claude_plugin_storage" | "skill_storage" | "conversation_storage" | "ui_feedback" | "subscription_coordinator" | "projection_catchup" | "projection_stalled" | "projection_dropped_event" | "projection_held" | "subscription_halted" | "event_poller" | "check_run_poller" | "anthropic_api_key" | "github_app" | "disk_space" | "workspace_reclaim";
         /**
          * DelegationAttempt
          * @description One delegate the phase's agent launched, as the platform observed it.
@@ -3684,6 +3684,8 @@ export interface components {
              * @description One line for an operator: free space, the floors and where they came from.
              */
             detail: string;
+            /** @description The workspace directory reclaimer's last pass (#1983); null when its state could not be read. */
+            reclaim?: components["schemas"]["WorkspaceReclaimHealth"] | null;
         };
         /**
          * EvalArchivedResponse
@@ -7621,6 +7623,33 @@ export interface components {
             resume_phase_id: string;
         };
         /**
+         * RetainedReason
+         * @description Why a stale workspace directory was kept (#1983). Kept is not failed.
+         *
+         *     Each names the one proof that could not be made. /health counts them, so
+         *     an operator sees what the disk is holding and why, not one opaque number.
+         * @enum {string}
+         */
+        RetainedReason: "unowned" | "not_terminal" | "mounted" | "unreadable" | "dirty" | "unversioned" | "stash" | "unpushed_unproven" | "capture_unknown" | "identity_changed" | "delete_failed";
+        /**
+         * RetainedWorkspaceDirs
+         * @description Workspace directories the reclaimer kept for one reason, at its last pass (#1983).
+         */
+        RetainedWorkspaceDirs: {
+            /** @description The proof that could not be made. */
+            reason: components["schemas"]["RetainedReason"];
+            /**
+             * Count
+             * @description Directories kept for this reason.
+             */
+            count: number;
+            /**
+             * Size Bytes
+             * @description Bytes those directories hold, as measured.
+             */
+            size_bytes: number;
+        };
+        /**
          * ReviewVerdict
          * @description What a reviewing phase concluded about the change in front of it (PC-63).
          *
@@ -10091,6 +10120,57 @@ export interface components {
             page: number;
             /** Page Size */
             page_size: number;
+        };
+        /**
+         * WorkspaceReclaimHealth
+         * @description What the workspace directory reclaimer last did (#1983).
+         */
+        WorkspaceReclaimHealth: {
+            /**
+             * Last Pass At
+             * @description When its last pass ended, UTC; null before the first.
+             */
+            last_pass_at: string | null;
+            /**
+             * Paused
+             * @description Why the last pass stopped before deleting anything, e.g. 'maintenance'.
+             */
+            paused: string | null;
+            /**
+             * Last Pass Skipped
+             * @description Why the last pass did not look at all (docker or a read model unreadable).
+             */
+            last_pass_skipped: string | null;
+            /**
+             * Reclaimed Bytes 24H
+             * @description Bytes this process reclaimed in the last 24 hours (resets on restart).
+             */
+            reclaimed_bytes_24h: number;
+            /**
+             * Dry Run Reclaimable
+             * @description Directories the last pass found reclaimable and left, in dry-run mode.
+             */
+            dry_run_reclaimable: number;
+            /**
+             * Deletes In Progress
+             * @description Proven directories whose delete ran out of the last pass's time budget; the next pass, or the first after a restart, finishes them.
+             */
+            deletes_in_progress: number;
+            /**
+             * Out Of Time
+             * @description Whether the last pass stopped at SYN_DISK_RECLAIM_PASS_BUDGET_MINUTES.
+             */
+            out_of_time: boolean;
+            /**
+             * Retained
+             * @description Directories kept at the last pass, per reason.
+             */
+            retained: components["schemas"]["RetainedWorkspaceDirs"][];
+            /**
+             * Delete Failed Passes
+             * @description Consecutive passes with a failed delete; 2 or more degrades /health.
+             */
+            delete_failed_passes: number;
         };
         /**
          * CostSummaryResponse
