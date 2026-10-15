@@ -371,6 +371,89 @@ executions from a durable Postgres **run queue** and holds each under a
 - resuming is still the fork of section 7, started only by a person. A host
   dying does not resume anything automatically.
 
+### 10. Platform-run evidence between phases (2026-10-15)
+
+Plan: `docs/plans/20261015_platform-dispatched-evidence.md` (§A.1-§A.7,
+§A.13). Contracts: `packages/syn-domain/src/syn_domain/contexts/orchestration/_shared/evidence_contract.py`,
+schemas in `schemas/evidence/`. Vocabulary: `docs/architecture/orchestration-ubiquitous-language.md`
+(Evidence Gate and the entries after it).
+
+**The problem.** Mutation and Docker-backed integration evidence cannot run
+inside an agent workspace. Today an orchestrator dispatches the evidence
+workflow by hand, waits for it, reads the report and relays it to the next
+phase. That person is the loop's bottleneck, and nothing in the event stream
+records that evidence was asked for or what it found.
+
+**Decision.** The platform runs the evidence itself, at a gate between phases.
+
+1. **What a gate is.** An **evidence gate** sits on the transition from phase P
+   to the phase the aggregate already decided runs next. A gate opens when P
+   declared evidence requests in its TASK_RESULT, or when the platform observed
+   `.mutations/` on a head this execution pushed. The aggregate records
+   `EvidenceRequested` carrying the decided `NextPhase` instead of emitting
+   `NextPhaseReady`, then settles each planned step. **The gate opens on any
+   outcome**: when every step has settled, `passed`, `failed`, `void` or
+   `unavailable`, `NextPhaseReady` follows with the held next phase. Evidence
+   is input to the next phase, not a verdict on the execution. This is the
+   same split as section 8: P's `success` is P's deliverable, and the gate's
+   outcomes are a separate fact that the next phase reads, never one that
+   rewrites P's status.
+2. **The first host-side GitHub writes made on a phase's behalf.** Until now
+   every write to GitHub during an execution was made by an agent, from its
+   workspace, with that workspace's token. A gate makes three writes from the
+   host: it dispatches the target repository's `<kind>-evidence.yml`
+   workflow, it may commit the removal of `.mutations/` to the PR branch (the
+   **patch removal** S -> S', only in front of the final phase and only after
+   a certified review), and that commit implicitly triggers CI. Each is made
+   with an App token scoped to what it needs (`actions: write` for the
+   dispatch), and each is idempotent: dispatches by a recorded attempt
+   identity, the patch removal by compare-and-swap on the head. **Trust:** an
+   evidence workflow running with Docker runs code from the PR under test, so
+   that code could forge `evidence.json`. A report is evidence for a reader,
+   not authority to merge: ready is not merged and merge review still applies,
+   and a `passed` report from a run whose job concluded `failure` settles
+   `void`.
+3. **A gate holds its executor slot.** While a gate waits on GitHub the
+   execution stays claimed by its executor (section 9) and counts against
+   that executor's capacity. Parking the slot is a follow-up that would amend
+   ADR-072, not this section.
+4. **Interruption follows sections 7 and 9.** An executor lost during a gate
+   interrupts the execution; the GitHub run finishes unwatched, and that is
+   accepted. Nothing resumes automatically. When a person resumes, the fork
+   inherits the open gate: it starts at the held next phase, adopts the
+   parent's dispatched run by attempt identity where it can, and runs only
+   the steps that had not settled. **A gate's effects need no
+   acknowledgement** (`acknowledge_external_effects`): they are idempotent by
+   attempt identity and compare-and-swap, so resuming in front of an unstarted
+   held phase cannot repeat one. This is a deliberate exception, not an
+   oversight.
+5. **Two documents cross the gate, each with a schema.**
+   - `evidence.json` (schema 1, `EvidenceReport`): what one evidence workflow
+     run found on one head. `schema`, `kind`, `pr`, `head_sha`,
+     `dispatch_id`, `verdict` (`passed | failed | void`), `requested[]`
+     (`{id, outcome: passed | failed | skipped | xfail | not_collected}`),
+     `suite` (`{collected, passed, failed, skipped}`), `summary`,
+     `report_md`. A `passed` verdict over a requested test that did not pass
+     does not parse.
+   - `manifest.json` (schema 1, `EvidenceManifest`): every planned step of
+     one gate with its outcome, reason, run URL, head SHA and reuse pointer,
+     the patch-removal provenance (`before_sha`, `after_sha`, author), and
+     `complete: true`. The platform writes it from its own events, never from
+     `evidence.json`, so a step with no report still appears with its
+     recorded outcome. A `void` or `unavailable` step without a reason does
+     not parse. `finalize_pr` trusts S -> S' only from this manifest.
+
+   Both are generated as JSON Schema from the Pydantic models and checked in;
+   a unit test fails when they drift. The request a phase writes
+   (`EvidenceRequest`) is defined alongside them.
+
+**Consequences.** Evidence is recorded in the execution's own stream and
+reaches the next phase as artifacts of P under
+`artifacts/input/<P>/platform-evidence/<gate-id>/`. A repository without the
+workflow settles `unavailable` and falls back to today's human handoff. The
+App needs `Actions: Read and write`; that change and its security note live in
+`docs/deployment/github-app-security.md`, not here.
+
 ## Consequences
 
 ### Positive
