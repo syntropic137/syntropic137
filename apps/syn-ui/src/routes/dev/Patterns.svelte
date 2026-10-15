@@ -601,6 +601,13 @@
     font-size: var(--ds-text-sm);
     color: var(--ds-color-text-muted);
   }
+  /* The token mono face, never the UA's generic monospace: headless Linux
+     Chromium re-resolves that one after the first full-page capture (6.5px
+     to 7.8px a glyph, 2px a line), so /dev/patterns grew 3px between the
+     two screenshots toHaveScreenshot compares. */
+  .dev-patterns__note code {
+    font-family: var(--ds-font-mono);
+  }
   .dev-patterns__sheet {
     display: flex;
     flex-direction: column;

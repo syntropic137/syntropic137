@@ -8,7 +8,7 @@
   import type { Snippet } from 'svelte'
   import type { Crumb, LiveState } from '@syn137/skyline-core/patterns'
   import BreadcrumbTrail from './BreadcrumbTrail.svelte'
-  import { FEEDBACK_LOCAL_ONLY, feedbackUi } from './feedback.svelte'
+  import { feedbackUi } from './feedback.svelte'
   import { overlays } from './overlays.svelte'
   import PhoneDock from './PhoneDock.svelte'
   import PhoneTop from './PhoneTop.svelte'
@@ -41,12 +41,10 @@
   <div class="sky-shell__phone-nav"><PhoneDock {active} {onsearch} /></div>
 </div>
 
-{#if FEEDBACK_LOCAL_ONLY}
-  <!-- Lazy, developer machines only: the bubble and its dialog never join a production build's first load. -->
-  {#await import('./FeedbackBubble.svelte') then { default: FeedbackBubble }}<FeedbackBubble />{/await}
-  {#if feedbackUi.mounted}
-    {#await import('./FeedbackDialog.svelte') then { default: FeedbackDialog }}<FeedbackDialog />{/await}
-  {/if}
+<!-- Lazy: the bubble asks GET /features and renders only when the server says ui_feedback is on; neither chunk joins the first load. -->
+{#await import('./FeedbackBubble.svelte') then { default: FeedbackBubble }}<FeedbackBubble />{/await}
+{#if feedbackUi.mounted}
+  {#await import('./FeedbackDialog.svelte') then { default: FeedbackDialog }}<FeedbackDialog />{/await}
 {/if}
 
 {#if overlays.paletteMounted || overlays.shortcutsMounted}

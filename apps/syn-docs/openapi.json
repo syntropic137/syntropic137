@@ -3,7 +3,7 @@
   "info": {
     "title": "Syntropic137 API",
     "description": "API for Syntropic137. Provides real-time observability for workflow execution, agent sessions, and artifacts.",
-    "version": "1.0.0"
+    "version": "1.0.2"
   },
   "paths": {
     "/workflows": {
@@ -4527,6 +4527,58 @@
         }
       }
     },
+    "/observability/upstream-retries": {
+      "get": {
+        "tags": [
+          "observability"
+        ],
+        "summary": "Get Upstream Retries",
+        "description": "How often a busy upstream made a phase retry in place, per provider and model (#1882).\n\nRead from the ``upstream_retry`` observations (Lane 2). A store that cannot\nbe read is a 503, never an empty list: zero retries would tell an operator\nthere is no quota pressure when nobody looked.",
+        "operationId": "get_upstream_retries_observability_upstream_retries_get",
+        "parameters": [
+          {
+            "name": "window",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "1h",
+                "24h",
+                "7d",
+                "30d"
+              ],
+              "type": "string",
+              "description": "How far back to look",
+              "default": "24h",
+              "title": "Window"
+            },
+            "description": "How far back to look"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpstreamRetriesResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/costs/sessions": {
       "get": {
         "tags": [
@@ -8223,6 +8275,16 @@
         "title": "AddTagsRequest",
         "description": "Tags to add to an execution or a workflow. Adds only: never replaces the set."
       },
+      "AgentLaunch": {
+        "type": "string",
+        "enum": [
+          "unknown",
+          "launched",
+          "not_launched"
+        ],
+        "title": "AgentLaunch",
+        "description": "What is known about whether a session's agent process ever started.\n\nThree states rather than a boolean, because \"we have no evidence either\nway\" and \"we have evidence it did not happen\" justify very different\nstatements to a user, and only the second one justifies telling them the\nsession never ran (#1047, #1065).\n\nA boolean has no room for the first state, so every source that cannot\nspeak - a session whose event stream predates this field, a write that\nnever landed, a storage read that failed - is forced to answer \"no\", and\nthe read path cannot tell that answer apart from a real one. Absence of\nevidence is not evidence of absence, and the type is what enforces it."
+      },
       "AliasResolutionBasis": {
         "type": "string",
         "enum": [
@@ -10476,15 +10538,44 @@
             "title": "Free Bytes",
             "description": "Bytes available; null when unmeasurable."
           },
+          "degraded_below_bytes": {
+            "type": "integer",
+            "title": "Degraded Below Bytes",
+            "description": "Degraded below this many bytes free: SYN_DISK_DEGRADED_BELOW_GIB, or twice the admission floor when unset."
+          },
+          "refuse_admission_below_bytes": {
+            "type": "integer",
+            "title": "Refuse Admission Below Bytes",
+            "description": "New executions refused below this many bytes free: SYN_DISK_REFUSE_ADMISSION_BELOW_GIB, or SYN_DISK_RUN_RESERVE_GIB x SYN_EXECUTION_MAX_CONCURRENT when unset."
+          },
           "degraded_below_percent": {
-            "type": "number",
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Degraded Below Percent",
-            "description": "SYN_DISK_DEGRADED_BELOW_PERCENT."
+            "description": "SYN_DISK_DEGRADED_BELOW_PERCENT; null when unset (GiB floor only)."
           },
           "refuse_admission_below_percent": {
-            "type": "number",
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Refuse Admission Below Percent",
-            "description": "SYN_DISK_REFUSE_ADMISSION_BELOW_PERCENT."
+            "description": "SYN_DISK_REFUSE_ADMISSION_BELOW_PERCENT; null when unset (GiB floor only)."
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "One line for an operator: free space, the floors and where they came from."
           }
         },
         "additionalProperties": false,
@@ -10494,8 +10585,9 @@
           "state",
           "free_percent",
           "free_bytes",
-          "degraded_below_percent",
-          "refuse_admission_below_percent"
+          "degraded_below_bytes",
+          "refuse_admission_below_bytes",
+          "detail"
         ],
         "title": "DiskSpaceHealth",
         "description": "Free space on the workspace volume, as /health reports it (#1560)."
@@ -12481,6 +12573,60 @@
               }
             ]
           },
+          "resumed_from": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResumedFromInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "resumed_as": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resumed As"
+          },
+          "latest_resumed_as": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Resumed As"
+          },
+          "resumed_from_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resumed From Display"
+          },
+          "resumed_as_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resumed As Display"
+          },
           "resume_start": {
             "anyOf": [
               {
@@ -13292,6 +13438,27 @@
             },
             "type": "array",
             "title": "Tags"
+          },
+          "resumed_from": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResumedFromInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "resumed_as": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resumed As"
           },
           "repos_display": {
             "anyOf": [
@@ -19035,6 +19202,26 @@
         "title": "ResumeStartInfo",
         "description": "How starting the child of this execution's resume is going (#1480).\n\nA resume is admitted with a 200 and its child is started afterwards, in a\nbackground task. When that start fails, this is the only place an operator\ncan see it: the child execution never appears, so there is nothing else to\nlook at."
       },
+      "ResumedFromInfo": {
+        "properties": {
+          "parent_execution_id": {
+            "type": "string",
+            "title": "Parent Execution Id"
+          },
+          "resume_phase_id": {
+            "type": "string",
+            "title": "Resume Phase Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "parent_execution_id",
+          "resume_phase_id"
+        ],
+        "title": "ResumedFromInfo",
+        "description": "The execution a resumed run continues, and the phase it picked up at (#1881)."
+      },
       "ReviewVerdict": {
         "type": "string",
         "enum": [
@@ -20209,6 +20396,10 @@
           "status": {
             "type": "string",
             "title": "Status"
+          },
+          "agent_launch": {
+            "$ref": "#/components/schemas/AgentLaunch",
+            "default": "unknown"
           },
           "workspace_path": {
             "anyOf": [
@@ -23413,6 +23604,96 @@
           "status"
         ],
         "title": "UploadArtifactResponse"
+      },
+      "UpstreamRetriesResponse": {
+        "properties": {
+          "window": {
+            "type": "string",
+            "enum": [
+              "1h",
+              "24h",
+              "7d",
+              "30d"
+            ],
+            "title": "Window"
+          },
+          "since": {
+            "type": "string",
+            "title": "Since"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "counts": {
+            "items": {
+              "$ref": "#/components/schemas/UpstreamRetryCountResponse"
+            },
+            "type": "array",
+            "title": "Counts"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "window",
+          "since",
+          "total",
+          "counts"
+        ],
+        "title": "UpstreamRetriesResponse",
+        "description": "In-phase upstream retries per provider and model, most first (Lane 2, #1882).\n\nCounts retries, not failures: a phase that retried twice and then\nsucceeded counts 2 here. Quota, auth and anything unrecognised are never\nretried, so they never appear."
+      },
+      "UpstreamRetryCountResponse": {
+        "properties": {
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "requested_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested Model"
+          },
+          "upstream_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Upstream Kind"
+          },
+          "retries": {
+            "type": "integer",
+            "title": "Retries"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "provider",
+          "requested_model",
+          "upstream_kind",
+          "retries"
+        ],
+        "title": "UpstreamRetryCountResponse",
+        "description": "In-phase retries one provider, model and upstream kind took in the window (#1882)."
       },
       "ValidateYamlRequest": {
         "properties": {

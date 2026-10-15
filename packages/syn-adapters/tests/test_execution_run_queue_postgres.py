@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import timedelta
+from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
@@ -15,8 +16,11 @@ import pytest
 
 from syn_adapters.execution_runs import PostgresExecutionRunQueue
 from syn_domain.contexts.orchestration.ports import (
+    Capability,
     ClaimedRun,
     ExecutorHost,
+    ExecutorPool,
+    PoolDefinitionConflict,
     RunLeaseLost,
     StreamPresence,
 )
@@ -415,3 +419,400 @@ async def test_defer_that_waits_on_the_budget_lock_keeps_its_full_backoff(
             FROM execution_runs WHERE execution_id='work'"""
         )
     assert remaining > 0.1
+
+
+@pytest.mark.parametrize("left_at", ["fencing", "reaped"])
+async def test_a_reconcilers_rows_are_taken_over_only_after_it_leaves(
+    pools: list[asyncpg.Pool], left_at: str
+) -> None:
+    """D5: a reconciler's rows are durable. Its successor finds them in the queue,
+    never in memory, and adopts them only once the old owner's host row is gone."""
+    short = PostgresExecutionRunQueue(pools[0], lease_ttl=timedelta(milliseconds=200))
+    first = PostgresExecutionRunQueue(pools[1])
+    successor = PostgresExecutionRunQueue(pools[2])
+    await _online(short, "dying", capacity=1)
+    await _online(first, "rec-1", capacity=1)
+    await _online(successor, "rec-2", capacity=1)
+    await _admit(short, "exec-adopt")
+    assert await short.claim("dying") is not None
+    await asyncio.sleep(0.5)
+    (fenced,) = await first.fence_expired("rec-1")
+    if left_at == "reaped":
+        await first.mark_reaped(fenced)
+
+    # A fresh reconciler object for the same host rediscovers its own row.
+    (mine,) = await PostgresExecutionRunQueue(pools[3]).reconciling("rec-1")
+    assert (mine.token, mine.reaped) == (fenced.token, left_at == "reaped")
+    # rec-1 is still registered, however stale: no takeover.
+    assert await successor.reconciling("rec-2") == []
+
+    await first.deregister("rec-1")
+    (adopted,) = await successor.reconciling("rec-2")
+    assert (adopted.reconciler, adopted.executor_id) == ("rec-2", "dying")
+    assert adopted.token > fenced.token
+    assert adopted.reaped == (left_at == "reaped")
+    # The old owner's writes are fenced by the new token.
+    with pytest.raises(RunLeaseLost):
+        await (
+            first.close_interrupted(fenced) if left_at == "reaped" else first.mark_reaped(fenced)
+        )
+
+    if not adopted.reaped:
+        await successor.mark_reaped(adopted)
+    await successor.close_interrupted(adopted)
+    assert await successor.reconciling("rec-2") == []
+    counts = await successor.in_use()
+    assert (counts.interrupted, counts.fencing, counts.reaped) == (1, 0, 0)
+    async with pools[0].acquire() as conn:
+        assert (
+            await conn.fetchval("SELECT in_use FROM execution_budget WHERE executor_id='dying'")
+            == 0
+        )
+
+
+async def test_a_restart_in_the_same_container_retires_the_predecessor_not_its_work(
+    pools: list[asyncpg.Pool],
+) -> None:
+    """D5 Restart: the new process gets a new host_id, deletes the old one's host
+    row, and fences the old one's expired run as the OLD host's (so the reap
+    selects the predecessor's containers, never the successor's)."""
+    old = PostgresExecutionRunQueue(pools[0], lease_ttl=timedelta(milliseconds=200))
+    new = PostgresExecutionRunQueue(pools[1])
+    box = "container-1"
+    await old.register(
+        ExecutorHost(host_id="box.aaa", container_id=box, generation="g", epoch=1), 1
+    )
+    await old.heartbeat("box.aaa")
+    await _admit(old, "exec-before-restart")
+    assert await old.claim("box.aaa") is not None
+    await asyncio.sleep(0.5)
+
+    await new.register(
+        ExecutorHost(host_id="box.bbb", container_id=box, generation="g", epoch=1), 1
+    )
+    await new.heartbeat("box.bbb")
+    async with pools[0].acquire() as conn:
+        hosts = await conn.fetch("SELECT host_id FROM executor_hosts")
+        assert [row["host_id"] for row in hosts] == ["box.bbb"]
+    with pytest.raises(LookupError):
+        await old.heartbeat("box.aaa")
+
+    (fenced,) = await new.fence_expired("box.bbb")
+    assert (fenced.executor_id, fenced.reconciler) == ("box.aaa", "box.bbb")
+
+
+async def _machine(pools: list[asyncpg.Pool], box: str) -> tuple[int, dict[str, tuple[int, int]]]:
+    async with pools[0].acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT executor_id,capacity,in_use FROM execution_budget WHERE container_id=$1",
+            box,
+        )
+    budgets = {row["executor_id"]: (row["capacity"], row["in_use"]) for row in rows}
+    return sum(capacity for capacity, _ in budgets.values()), budgets
+
+
+async def test_a_restart_transfers_the_machine_budget_and_never_doubles_it(
+    pools: list[asyncpg.Pool],
+) -> None:
+    """D3 Restart (R1): a capacity-one machine whose old process still holds an
+    unexpired run cannot claim a second one after a restart. The slot moves to
+    the successor when the old run is closed, exactly once."""
+    old = PostgresExecutionRunQueue(pools[0], lease_ttl=timedelta(milliseconds=300))
+    new = PostgresExecutionRunQueue(pools[1], lease_ttl=timedelta(milliseconds=300))
+    box = "container-r1"
+    await old.register(ExecutorHost(host_id="r1.aaa", container_id=box, generation="g", epoch=1), 1)
+    await old.heartbeat("r1.aaa")
+    await _admit(old, "exec-held", "exec-waiting")
+    held = await old.claim("r1.aaa")
+    assert held is not None
+
+    await new.register(ExecutorHost(host_id="r1.bbb", container_id=box, generation="g", epoch=1), 1)
+    await new.heartbeat("r1.bbb")
+    assert await _machine(pools, box) == (1, {"r1.aaa": (1, 1), "r1.bbb": (0, 0)})
+    assert await new.claim("r1.bbb") is None
+
+    await asyncio.sleep(0.5)
+    (fenced,) = await new.fence_expired("r1.bbb")
+    await new.mark_reaped(fenced)
+    await new.close_interrupted(fenced)
+    assert await _machine(pools, box) == (1, {"r1.aaa": (0, 0), "r1.bbb": (1, 0)})
+    # Neither a duplicate close nor the stale owner's terminal commit moves a slot.
+    with pytest.raises(RunLeaseLost):
+        await new.close_interrupted(fenced)
+    with pytest.raises(RunLeaseLost):
+        await old.close(held)
+    assert await _machine(pools, box) == (1, {"r1.aaa": (0, 0), "r1.bbb": (1, 0)})
+
+    claimed = await new.claim("r1.bbb")
+    assert claimed is not None and claimed.execution_id == "exec-waiting"
+    assert await new.claim("r1.bbb") is None
+    await new.close(claimed)
+    assert await _machine(pools, box) == (1, {"r1.aaa": (0, 0), "r1.bbb": (1, 0)})
+
+
+# --- Executor Pools (ADR-072 D13, placement plan PR 1) ---------------------------
+
+_P1 = ExecutorPool(pool_id="p1", priority=1, provider="docker", region="eu-west")
+
+
+def _in_pool(host_id: str, pool: ExecutorPool, *, container_id: str | None = None) -> ExecutorHost:
+    return ExecutorHost(
+        host_id=host_id,
+        container_id=container_id or f"c-{host_id}",
+        generation="g1",
+        epoch=1,
+        pool=pool,
+    )
+
+
+async def _pool_row(conn: asyncpg.Connection, pool_id: str) -> tuple[object, ...]:
+    row = await conn.fetchrow(
+        """SELECT priority,provider,region,isolation,capabilities,overflow_delay_s
+        FROM executor_pools WHERE pool_id=$1""",
+        pool_id,
+    )
+    assert row is not None
+    return tuple(row)
+
+
+async def test_a_second_member_declaring_a_different_pool_definition_is_refused_and_writes_nothing(
+    pools: list[asyncpg.Pool],
+) -> None:
+    queue = PostgresExecutionRunQueue(pools[0])
+    # A has registered and not yet beaten: it is a member all the same.
+    await queue.register(_in_pool("a", _P1), 2)
+    # B starts in X's container, so a committed B would have retired X.
+    await _online(queue, "x", 3)
+    redefined = _P1.model_copy(update={"priority": 5, "capabilities": frozenset(Capability)})
+
+    with pytest.raises(PoolDefinitionConflict, match="'p1'"):
+        await queue.register(_in_pool("b", redefined, container_id="c-x"), 2)
+
+    async with pools[0].acquire() as conn:
+        assert await conn.fetchval("SELECT count(*) FROM executor_hosts WHERE host_id='b'") == 0
+        assert (
+            await conn.fetchval("SELECT count(*) FROM execution_budget WHERE executor_id='b'") == 0
+        )
+        assert await conn.fetchval("SELECT count(*) FROM executor_hosts WHERE host_id='x'") == 1
+        assert (
+            await conn.fetchval("SELECT capacity FROM execution_budget WHERE executor_id='x'") == 3
+        )
+        assert await _pool_row(conn, "p1") == (1, "docker", "eu-west", 10, [], 60)
+
+
+async def test_a_sole_member_restarting_in_its_container_may_redefine_its_pool(
+    pools: list[asyncpg.Pool],
+) -> None:
+    queue = PostgresExecutionRunQueue(pools[0])
+    await queue.register(_in_pool("a.1", _P1, container_id="box"), 2)
+    await queue.heartbeat("a.1")
+    redefined = ExecutorPool(
+        pool_id="p1",
+        priority=3,
+        provider="docker",
+        capabilities=frozenset({Capability.NESTED_DOCKER}),
+        overflow_delay=timedelta(seconds=15),
+    )
+
+    await queue.register(_in_pool("a.2", redefined, container_id="box"), 2)
+
+    async with pools[0].acquire() as conn:
+        assert await _pool_row(conn, "p1") == (3, "docker", None, 10, ["nested_docker"], 15)
+        assert (
+            await conn.fetchval("SELECT pool_id FROM execution_budget WHERE executor_id='a.2'")
+            == "p1"
+        )
+    # The stored definition now equals the declaration: re-registering is a no-op.
+    await queue.register(_in_pool("a.2", redefined, container_id="box"), 2)
+
+
+async def test_a_member_may_redefine_its_pool_once_every_other_member_is_draining(
+    pools: list[asyncpg.Pool],
+) -> None:
+    queue = PostgresExecutionRunQueue(pools[0])
+    for host_id in ("a", "b"):
+        await queue.register(_in_pool(host_id, _P1), 1)
+        await queue.heartbeat(host_id)
+    redefined = _P1.model_copy(update={"region": None})
+
+    async with pools[0].acquire() as conn:
+        await conn.execute("UPDATE executor_hosts SET draining=TRUE WHERE host_id='a'")
+    with pytest.raises(PoolDefinitionConflict):
+        await queue.register(_in_pool("c", redefined), 1)
+
+    async with pools[0].acquire() as conn:
+        await conn.execute("UPDATE executor_hosts SET draining=TRUE WHERE host_id='b'")
+    await queue.register(_in_pool("c", redefined), 1)
+    async with pools[0].acquire() as conn:
+        assert (await _pool_row(conn, "p1"))[2] is None
+
+
+async def test_a_member_that_is_no_longer_live_does_not_hold_its_pools_definition(
+    pools: list[asyncpg.Pool],
+) -> None:
+    """A crashed member keeps its host row until reconciled; it must not pin the pool."""
+    queue = PostgresExecutionRunQueue(pools[0], heartbeat_stale=timedelta(seconds=30))
+    await queue.register(_in_pool("a", _P1), 1)
+    await queue.heartbeat("a")
+    async with pools[0].acquire() as conn:
+        await conn.execute(
+            "UPDATE executor_hosts SET registered_at=now()-interval '1 minute' WHERE host_id='a'"
+        )
+        await conn.execute(
+            "UPDATE execution_budget SET heartbeat_at=now()-interval '1 minute' WHERE executor_id='a'"
+        )
+
+    await queue.register(_in_pool("b", _P1.model_copy(update={"priority": 7})), 1)
+    async with pools[0].acquire() as conn:
+        assert (await _pool_row(conn, "p1"))[0] == 7
+
+
+async def test_a_registration_that_waits_on_the_pool_lock_is_live_when_it_commits(
+    pools: list[asyncpg.Pool],
+) -> None:
+    """Until its first heartbeat a member's registration is its liveness.
+
+    now() is the transaction's start, so a registration that waited out the
+    staleness window on a lock must not commit already stale.
+    """
+    queue = PostgresExecutionRunQueue(pools[0], heartbeat_stale=timedelta(seconds=1))
+    joining: asyncio.Task[None] | None = None
+    try:
+        async with pools[1].acquire() as blocker, blocker.transaction():
+            await blocker.execute("SELECT 1 FROM executor_pools WHERE pool_id='default' FOR UPDATE")
+            joining = asyncio.create_task(queue.register(_host("fresh-after-wait"), 1))
+            await _blocked_until_waiting(pools[2], "FROM executor_pools")
+            await asyncio.sleep(1.2)
+        await joining
+
+        competing = ExecutorPool(pool_id="default", priority=1, provider="docker")
+        with pytest.raises(PoolDefinitionConflict):
+            await queue.register(_in_pool("conflicting-after-wait", competing), 1)
+    finally:
+        if joining is not None:
+            if not joining.done():
+                joining.cancel()
+            await asyncio.gather(joining, return_exceptions=True)
+
+
+async def test_a_restart_that_waits_on_its_predecessors_budget_lock_is_live_when_it_commits(
+    pools: list[asyncpg.Pool],
+) -> None:
+    """The same rule for the budget lock D3 Restart takes on the predecessor's row."""
+    queue = PostgresExecutionRunQueue(pools[0], heartbeat_stale=timedelta(seconds=1))
+    await queue.register(_in_pool("a.1", _P1, container_id="box"), 1)
+    joining: asyncio.Task[None] | None = None
+    try:
+        async with pools[1].acquire() as blocker, blocker.transaction():
+            await blocker.execute(
+                "SELECT 1 FROM execution_budget WHERE executor_id='a.1' FOR UPDATE"
+            )
+            joining = asyncio.create_task(
+                queue.register(_in_pool("a.2", _P1, container_id="box"), 1)
+            )
+            await _blocked_until_waiting(pools[2], "FROM execution_budget")
+            await asyncio.sleep(1.2)
+        await joining
+
+        with pytest.raises(PoolDefinitionConflict):
+            await queue.register(_in_pool("b", _P1.model_copy(update={"priority": 7})), 1)
+    finally:
+        if joining is not None:
+            if not joining.done():
+                joining.cancel()
+            await asyncio.gather(joining, return_exceptions=True)
+
+
+async def test_a_restart_that_changes_pool_moves_the_machines_free_capacity_to_the_new_row(
+    pools: list[asyncpg.Pool],
+) -> None:
+    queue = PostgresExecutionRunQueue(pools[0])
+    box = "container-move"
+    await queue.register(ExecutorHost(host_id="m.1", container_id=box, generation="g", epoch=1), 3)
+    await queue.heartbeat("m.1")
+    await _admit(queue, "exec-held")
+    assert await queue.claim("m.1") is not None
+
+    await queue.register(_in_pool("m.2", _P1, container_id=box), 3)
+
+    assert await _machine(pools, box) == (3, {"m.1": (1, 1), "m.2": (2, 0)})
+    async with pools[0].acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT executor_id,pool_id FROM execution_budget WHERE container_id=$1", box
+        )
+    assert {row["executor_id"]: row["pool_id"] for row in rows} == {"m.1": "default", "m.2": "p1"}
+
+
+_PRE_POOL_SCHEMA = Path(__file__).parent / "fixtures" / "execution_runs" / "schema_pre_pool.sql"
+
+
+@pytest.fixture
+async def pre_pool(test_infrastructure: TestInfrastructure) -> AsyncIterator[asyncpg.Pool]:
+    """One pool on a fresh schema holding the frozen pre-pool Run Queue tables."""
+    schema = f"run_queue_pre_pool_{uuid4().hex}"
+    admin = await asyncpg.connect(test_infrastructure.timescaledb_url)
+    await admin.execute(f"CREATE SCHEMA {schema}")
+    pool = await asyncpg.create_pool(
+        test_infrastructure.timescaledb_url, server_settings={"search_path": schema}
+    )
+    assert pool is not None
+    try:
+        async with pool.acquire() as conn:
+            await conn.execute(_PRE_POOL_SCHEMA.read_text())
+        yield pool
+    finally:
+        await pool.close()
+        await admin.execute(f"DROP SCHEMA {schema} CASCADE")
+        await admin.close()
+
+
+async def test_upgrading_a_pre_pool_schema_keeps_rows_assigns_default_and_drops_backend(
+    pre_pool: asyncpg.Pool,
+) -> None:
+    async with pre_pool.acquire() as conn:
+        # The previous generation's writes, in its own statements' shape.
+        await conn.execute(
+            """INSERT INTO executor_hosts (host_id,container_id,generation,epoch)
+            VALUES ('old','c-old','g0',1)"""
+        )
+        await conn.execute(
+            """INSERT INTO execution_budget (executor_id,container_id,capacity,in_use,heartbeat_at)
+            VALUES ('old','c-old',2,1,now())"""
+        )
+        await conn.execute(
+            """INSERT INTO execution_runs (execution_id,state,is_resume,writer_epoch,
+                executor_id,lease_token,leased_until,admitted_at)
+            VALUES ('exec-held','claimed',FALSE,1,'old',1,now()+interval '1 hour',now())"""
+        )
+
+    queue = PostgresExecutionRunQueue(pre_pool)
+    await queue.ensure_ready()
+    await queue.ensure_ready()
+
+    async with pre_pool.acquire() as conn:
+        assert (
+            await conn.fetchval("SELECT pool_id FROM execution_budget WHERE executor_id='old'")
+            == "default"
+        )
+        assert await _pool_row(conn, "default") == (0, "docker", None, 10, [], 60)
+        assert not await conn.fetchval(
+            """SELECT EXISTS (SELECT 1 FROM information_schema.columns
+            WHERE table_schema=current_schema() AND table_name='execution_budget'
+            AND column_name='backend')"""
+        )
+        assert (
+            await conn.fetchval(
+                """SELECT count(*) FROM pg_constraint
+            WHERE conrelid='execution_budget'::regclass AND contype='f'"""
+            )
+            == 1
+        )
+    await queue.close(
+        ClaimedRun(execution_id="exec-held", executor_id="old", token=1, is_resume=False)
+    )
+    async with pre_pool.acquire() as conn:
+        assert (
+            await conn.fetchval("SELECT in_use FROM execution_budget WHERE executor_id='old'") == 0
+        )
+    # An executor that names no pool joins the seeded one.
+    await queue.register(_host("new"), 1)

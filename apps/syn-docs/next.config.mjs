@@ -12,6 +12,12 @@ const config = {
         destination: '/docs/guide/getting-started',
         permanent: false,
       },
+      {
+        // The Claude Code plugin page became the agent skills page.
+        source: '/docs/guide/claude-code-plugin',
+        destination: '/docs/guide/agent-skills',
+        permanent: true,
+      },
     ];
   },
   async rewrites() {

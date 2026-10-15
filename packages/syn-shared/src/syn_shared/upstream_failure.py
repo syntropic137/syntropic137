@@ -109,6 +109,26 @@ class QuotaExhaustion:
         return f"{self.provider} quota exhausted until {until}"
 
 
+@dataclass(frozen=True)
+class UpstreamRetryObservation:
+    """The payload of one ``upstream_retry`` observation (Lane 2, #1882).
+
+    One type for the writer (the phase that retried) and the reader (the
+    count the API serves), so a field renamed on one side cannot leave the
+    other grouping by a key nobody writes any more.
+    """
+
+    provider: str
+    #: The model the phase ASKED for, possibly an alias (ADR-067 D9): the
+    #: retry happens before the harness reports which model served it. None
+    #: when the phase left the model to the provider's default.
+    requested_model: str | None
+    #: The transient `UpstreamFailureKind` value that earned the retry.
+    upstream_kind: str
+    #: The attempt the retry is about to start, 1-based: the first retry is 2.
+    attempt: int
+
+
 class UpstreamFailureError(Exception):
     """A failure an upstream service reported, carrying its kind (#1593).
 

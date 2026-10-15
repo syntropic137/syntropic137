@@ -1,0 +1,35 @@
+id: execute-stderr-merged-into-stdout
+polarity: defect
+source_pr: 47
+# Escaped on 2026-10-13: the platform verify certified AW#47 at this head; a
+# second verifier blocked it (its B1). The pin is the first parent of the fix
+# 0fa8c36. Evidence at the pin: `WorkspaceDockerProvider.execute` starts an
+# operation and returns `stdout=output.decode(...)` from `drain_operation`,
+# with `stderr=""` on success or failure, and its docstring says "Output is
+# the combined stdout and stderr"; `DockerOperations` spawns the exec client
+# with `stderr=asyncio.subprocess.STDOUT`. The fix reads the two pipes apart
+# (`separate_channels=True`, `channels(ref)`).
+commit: 681aa5c47a5a74bffe0220252341e57d72c6acb0
+fix_commit: 0fa8c360aa7db062c1e4e1a9c6dade311d1ffe0d
+task: >
+  The change under review moves the Docker provider's command execution onto
+  the new operations contract: `execute` starts an operation and drains it,
+  instead of running the command directly. Review it against the contract
+  plan, including what existing callers of `execute` get back.
+expected:
+  # The root cause, for the LLM judge only; never part of `task`.
+  defect: >
+    WorkspaceDockerProvider.execute now routes through operations start and
+    drain, and the docker exec client's stderr is merged into stdout
+    (stderr=asyncio.subprocess.STDOUT), so ExecuteResult.stdout carries both
+    channels and ExecuteResult.stderr is always empty for a command that ran.
+    That breaks every caller that reads stderr, against the plan's rule
+    (section 5.1) that callers keep their API.
+  files:
+    - lib/python/agentic_isolation/agentic_isolation/providers/docker.py
+    - lib/python/agentic_isolation/agentic_isolation/providers/docker_operations.py
+  keywords:
+    - [stderr, standard error, error stream]
+    - [merge, merged, combined, combine, interleav, mixed, folded, into stdout, subprocess.stdout,
+       redirect, always empty, empty, lost, dropped, discard, missing, no longer]
+split: train

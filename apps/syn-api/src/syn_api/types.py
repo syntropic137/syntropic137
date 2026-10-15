@@ -35,6 +35,7 @@ from pydantic import (
 # allowed to define it (#1380).
 from syn_adapters.subscriptions.read_model_lag import ProjectionLag  # noqa: TC001
 from syn_adapters.subscriptions.unapplied_starts import UnappliedStart  # noqa: TC001
+from syn_api.inventory_types import AgentLaunch as AgentLaunch
 from syn_api.inventory_types import CaptureRevisionHashes as CaptureRevisionHashes
 from syn_api.inventory_types import LocalTranscriptResponse as LocalTranscriptResponse
 from syn_api.inventory_types import (
@@ -716,6 +717,15 @@ class PlannedPhaseInfo(BaseModel):
         )
 
 
+class ResumedFromInfo(BaseModel):
+    """The execution a resumed run continues, and the phase it picked up at (#1881)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    parent_execution_id: str
+    resume_phase_id: str
+
+
 class ExecutionSummary(BaseModel):
     """Summary of a workflow execution run."""
 
@@ -789,6 +799,10 @@ class ExecutionSummary(BaseModel):
     """Full GitHub URLs of repositories cloned for this execution (ADR-058)."""
     tags: list[str] = Field(default_factory=list)
     """The execution's current tags, normalised and sorted (#967)."""
+    resumed_from: ResumedFromInfo | None = None
+    """The execution this run resumed, or None for a fresh run (#1881)."""
+    resumed_as: str | None = None
+    """The execution that resumed this one, or None. At most one (#1881)."""
 
 
 class ExecutionDetail(BaseModel):
@@ -2365,6 +2379,10 @@ class ExecutionDetailFull(BaseModel):
     Enough to re-dispatch the run: a caller retrying one that died on the
     platform posts these back rather than reconstructing them from its own
     notes (#1307)."""
+    resumed_from: ResumedFromInfo | None = None
+    """The execution this run resumed, or None for a fresh run (#1881)."""
+    resumed_as: str | None = None
+    """The execution that resumed this one, or None. At most one (#1881)."""
 
 
 class ControlResult(BaseModel):
@@ -2430,6 +2448,13 @@ class SessionDetail(BaseModel):
     root_session_id: str | None = None
     agent_type: str = ""
     status: str = ""
+    agent_launch: AgentLaunch = AgentLaunch.UNKNOWN
+    """Whether the agent process for this session has demonstrably started.
+
+    ``status`` is ``running`` from ``SessionStarted``, which is written before
+    the workspace is provisioned; this is ``launched`` only once
+    ``AgentLaunched`` is recorded (#1065, #1717).
+    """
     workspace_path: str | None = None
     repos: list[str] = Field(default_factory=list)
     input_tokens: int = 0
@@ -3046,9 +3071,25 @@ class DiskSpaceHealth(BaseModel):
     )
     free_percent: float | None = Field(description="Percent free; null when unmeasurable.")
     free_bytes: int | None = Field(description="Bytes available; null when unmeasurable.")
-    degraded_below_percent: float = Field(description="SYN_DISK_DEGRADED_BELOW_PERCENT.")
-    refuse_admission_below_percent: float = Field(
-        description="SYN_DISK_REFUSE_ADMISSION_BELOW_PERCENT."
+    degraded_below_bytes: int = Field(
+        description="Degraded below this many bytes free: SYN_DISK_DEGRADED_BELOW_GIB, "
+        "or twice the admission floor when unset."
+    )
+    refuse_admission_below_bytes: int = Field(
+        description="New executions refused below this many bytes free: "
+        "SYN_DISK_REFUSE_ADMISSION_BELOW_GIB, or SYN_DISK_RUN_RESERVE_GIB x "
+        "SYN_EXECUTION_MAX_CONCURRENT when unset."
+    )
+    degraded_below_percent: float | None = Field(
+        default=None,
+        description="SYN_DISK_DEGRADED_BELOW_PERCENT; null when unset (GiB floor only).",
+    )
+    refuse_admission_below_percent: float | None = Field(
+        default=None,
+        description="SYN_DISK_REFUSE_ADMISSION_BELOW_PERCENT; null when unset (GiB floor only).",
+    )
+    detail: str = Field(
+        description="One line for an operator: free space, the floors and where they came from."
     )
 
 
@@ -4496,6 +4537,38 @@ class LatencyRecorderStatusResponse(BaseModel):
     cleanup_failures: int
     """Written batches whose connection could not be released in time (terminated)."""
     buffered: int
+
+
+class UpstreamRetryCountResponse(BaseModel):
+    """In-phase retries one provider, model and upstream kind took in the window (#1882)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    provider: str | None
+    """The agent provider retried, e.g. ``codex``. None if the row did not say."""
+    requested_model: str | None
+    """The model the phase asked for, possibly an alias (ADR-067 D9). None when the phase left it to the provider."""
+    upstream_kind: str | None
+    """The transient kind that earned the retry: ``capacity`` or ``rate_limited``."""
+    retries: int
+
+
+class UpstreamRetriesResponse(BaseModel):
+    """In-phase upstream retries per provider and model, most first (Lane 2, #1882).
+
+    Counts retries, not failures: a phase that retried twice and then
+    succeeded counts 2 here. Quota, auth and anything unrecognised are never
+    retried, so they never appear.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    window: LatencyWindow
+    since: str
+    """ISO 8601 UTC start of the window."""
+    total: int
+    """Every retry in the window, summed over ``counts``."""
+    counts: list[UpstreamRetryCountResponse]
 
 
 class RequestLatencyResponse(BaseModel):

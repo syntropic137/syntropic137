@@ -152,3 +152,31 @@ async def test_an_unconfigured_host_is_named_by_its_hostname(
     labels = await labels_of()
     assert labels["syn.host_id"] == socket.gethostname()
     assert labels["syn.host_generation"] == UNKNOWN_GENERATION
+
+
+def test_with_the_run_queue_on_each_process_is_a_new_executor_on_every_container(
+    monkeypatch: pytest.MonkeyPatch, stamped_host: None
+) -> None:
+    """ADR-072 D5: a restarted process never reuses its predecessor's host_id."""
+    from syn_adapters.workspace_backends import host_labels as labels
+
+    monkeypatch.setenv("SYN_EXECUTION_RUN_QUEUE_ENABLED", "true")
+    reset_settings()
+    labels._process_suffix.cache_clear()
+    first = labels.executor_host_id()
+    assert first.startswith(f"{HOST_ID}.")
+    assert labels.host_labels()[labels.LABEL_HOST_ID] == first  # same id on every container
+    labels._process_suffix.cache_clear()  # the process restarts in the same container
+    second = labels.executor_host_id()
+    assert second.startswith(f"{HOST_ID}.")
+    assert second != first
+
+
+def test_with_the_run_queue_off_the_host_id_is_mains(
+    monkeypatch: pytest.MonkeyPatch, stamped_host: None
+) -> None:
+    from syn_adapters.workspace_backends import host_labels as labels
+
+    monkeypatch.delenv("SYN_EXECUTION_RUN_QUEUE_ENABLED", raising=False)
+    reset_settings()
+    assert labels.executor_host_id() == HOST_ID

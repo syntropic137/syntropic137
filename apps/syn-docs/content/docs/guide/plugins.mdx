@@ -20,7 +20,7 @@ syn workflow search "research"
 syn workflow install research-toolkit
 
 # Run it
-syn workflow run deep-research --task "Analyze our authentication architecture"
+syn workflow run deep-research -R owner/repo --task "Analyze our authentication architecture"
 ```
 
 ## Two Plugin Boundaries
@@ -41,15 +41,15 @@ plans that agents follow inside isolated Docker workspaces.
 - Content: `workflow.yaml` + phase `.md` files
 - Install: `syn workflow install <name>`
 
-### Claude Code Plugin
+### Agent Skills (Claude Code and Codex)
 
-A separate project ([`syntropic137-claude-plugin`](https://github.com/syntropic137/syntropic137-claude-plugin))
-that gives Claude Code the context to **operate** Syntropic137. It provides slash commands
-(`/syn-status`, `/syn-workflow`, etc.) and domain skills that teach Claude Code how to
-create workflows, kick off executions, query metrics, and manage the platform.
+A separate project ([`syntropic137-skills`](https://github.com/syntropic137/syntropic137-skills))
+that gives Claude Code and Codex the context to **operate** Syntropic137: skills that teach
+your agent how to create workflows, kick off and follow executions, query costs and
+sessions, and manage the platform. `npx @syntropic137/setup` installs them.
 
-The Claude Code plugin is *not* a Syntropic137 plugin: it's a Claude Code plugin *for*
-using Syntropic137. See [Claude Code Integration](/docs/guide/claude-code-plugin) for details.
+The agent skills are *not* a Syntropic137 plugin: they are skills *for* using
+Syntropic137 from your own agent. See [Agent Skills](/docs/guide/agent-skills) for details.
 
 ## Phase Prompt Format
 
@@ -75,7 +75,7 @@ Use {{discovery}} to reference output from a previous phase.
 |-----------------|-------------|
 | `model` | Model id for the phase's harness (`sonnet`, `opus`, `haiku` on claude, `gpt-sol` or a concrete id such as `gpt-6.1-sol` on codex). Defaults to `opus` on claude and `gpt-sol` on codex |
 | `argument-hint` | Shown to users when prompted for input |
-| `allowed-tools` | Comma-separated list of permitted tools. Validated at authoring time, then inert: it restricts nothing on either harness today. See [Choosing an Agent Harness](/docs/guide/workflows#allowed_tools-and-the-two-harnesses) |
+| `allowed-tools` | Comma-separated list of the tools a claude phase may use, passed as `claude --tools`. Used only when `workflow.yaml` omits `allowed_tools`. Refused on codex phases. See [`allowed_tools` and the two harnesses](/docs/guide/workflows#allowed_tools-and-the-two-harnesses) |
 | `max-tokens` | Maximum output tokens for the phase |
 | `timeout-seconds` | Phase execution timeout |
 
@@ -208,4 +208,4 @@ for the full guide on:
 
 - [Workflow Packages](/docs/guide/workflows): detailed package creation, distribution, and marketplace setup
 - [CLI Reference](/docs/cli): all `syn workflow` and `syn marketplace` commands
-- [Claude Code Integration](/docs/guide/claude-code-plugin): the Claude Code plugin for operating Syntropic137 (slash commands and domain skills)
+- [Agent Skills](/docs/guide/agent-skills): the skills Claude Code and Codex use to operate Syntropic137

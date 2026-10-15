@@ -1,58 +1,37 @@
-# Agent: Investigate a CI failure (smoke test, release gate, release pipeline)
+# Agent: diagnose a red check
 
 ## Purpose
 
-Diagnose which workflow failed, separate flake from real bug, and decide whether to re-run or escalate. Matches SKILL.md "When to invoke" triggers: "What's blocking the release?", "CI failed on the release PR", "smoke test broke".
+Find which workflow and step failed, separate flake from defect, and either
+rerun once or fix. Covers PR CI, `main` push runs, the release gate and the
+release pipeline.
 
 ## Workflow
 
-1. Get the full check rollup for the PR.
+1. Get the rollup and the failing run.
    ```
-   gh pr view <N> --json statusCheckRollup
+   gh pr view N --json statusCheckRollup --jq '.statusCheckRollup[]|select(.conclusion=="FAILURE")|{name,detailsUrl}'
+   gh run view <run-id> --log-failed | tail -100
    ```
-2. Identify which workflow failed and read its YAML before guessing at causes.
-   - `.github/workflows/ci.yml` - standard PR/main CI (lint, format, typecheck, unit, fitness, codegen drift)
-   - `.github/workflows/smoke-test.yml` - selfhost compose stack health (single-arch, AMD64)
-   - `.github/workflows/release-gate.yml` + `.github/workflows/_check-*.yml` - release PR gate (version, codegen, multi-arch dry-run, OSV, pip-audit)
-   - `.github/workflows/release-create.yml` - post-merge publish pipeline (release tag, GHCR, npm)
-3. Pull the failed job logs.
-   ```
-   gh run view <run-id> --log-failed
-   ```
-4. Match against known flake classes. If it's one of these, re-run once before investigating:
-   - `apt-get` DNS failures during base-image build
-   - `corepack` pnpm fetch transient failures
-   - `undici.UND_ERR_SOCKET` from npm/registry
-   - Transient GHCR / docker registry 5xx
-   ```
-   gh run rerun <run-id> --failed
-   ```
-5. If it fails twice in a row on the same step, treat as a real bug. Common root causes from past incidents:
-   - Envoy / sidecar base-image apt rot (the v0.25.3 -> v0.25.4 lesson; rebuild locally to confirm)
-   - Codegen drift (`just docs-sync` not run; CLI types or OpenAPI spec stale)
-   - Missing `GH_TOKEN` / OIDC permission intersection in a release workflow
-   - `vsa manifest` not run in fresh worktree (manifest missing)
-6. Check `docs/retrospectives/` for prior incidents matching the symptom before opening a fresh investigation.
-7. Escalate to the operator with: failed workflow name, failed step, error excerpt, prior occurrences, and recommended fix.
-
-## References
-
-- `.github/workflows/release-create.yml`, `release-gate.yml`, `_check-*.yml`, `smoke-test.yml`, `ci.yml`
-- `docs/release-process.md` "Failure recovery" section
-- `docs/retrospectives/` - prior incident write-ups (e.g. envoy base-image rot)
-- Memory: `project_release_pipeline_lessons` - workflow_call / OIDC pitfalls (operator-local; ask if needed)
-
-## Hard rules to honor
-
-- Re-run once for known flake classes; do not spam reruns (`feedback_no_polling_loops`).
-- Never approve a release deployment gate to "unblock" CI; human only.
-- Never `--no-verify` locally to "match" a failing CI step.
-- No em dashes; pre-push hook blocks them.
+2. Read the workflow YAML for that job before guessing. Map:
+   - `ci.yml`: `python-qa`, `architectural-fitness`, `python-unit-tests`, `python-integration-tests`, `dashboard-ui`, `docs-site`, `cli-node`, `submodule-check`, `default-workspace-image`, `osv-scan`, `pip-audit`, `dependency-review`, `ci-success`.
+   - `docs-lint.yml`, `syn-ui.yml`, `syn-landing.yml` on PRs; `smoke-test.yml`, `docs-drift.yml` on `main` pushes only; `e2e-container.yml` on PRs and `main` pushes touching workspace paths (image build probe), with the real agent run only on manual dispatch (`run_full_e2e=true`).
+   - `release-gate.yml` (+ `_check-*.yml`) on PRs into `release`; `release-create.yml` -> `release-containers.yaml`, `release-cli.yaml` after merge; `release-beta.yaml` on prereleases.
+3. Reproduce locally with the mirror target. `scripts/check_ci_parity.py` maps each PR-gating job to a `just` target; `just qa-ci` runs them all. Not local: osv-scan, pip-audit, dependency-review, e2e-container, release-only gates.
+4. Known flake classes, rerun once: apt or DNS failures in image builds, corepack/pnpm fetch, `UND_ERR_SOCKET`, registry 5xx. `gh run rerun <run-id> --failed`. Twice on the same step is a defect.
+5. Known defect classes:
+   - Release notes check red: `_check-changelog.yml` reads `github.event.pull_request.body`, the frozen payload. Editing the body and re-running replays the old body and never clears it; push a commit or close/reopen to get a fresh event.
+   - Codegen or OpenAPI drift: run `just codegen`, commit the rewrites.
+   - Event-store pin: the ESP gitlink names a version whose `event-store` image is unpublished; ESP must release first (`just check-event-store-pin`).
+   - `check-pinned-image-channels`: the `lib/agentic-workspace` gitlink must equal the commit `PINNED_DIGESTS` was built from; the gate reads `git ls-tree HEAD`, so commit before re-running.
+   - Fitness ratchet: a value went up; fix the code, never raise the budget.
+   - Reusable-workflow permissions: a callee cannot widen the caller's grants; declare the union on the caller.
+   - Base-image rot (2026-05-01 envoy retro): rebuild locally to confirm.
+   - `Mutation Patches Not Merged` red: not a defect. The PR still tracks `.mutations/`; delete it before merge, the evidence is in the mutation-evidence PR comment. To gather that evidence (dispatch-only, never on a PR event) read `agent_mutation_evidence.md`.
+   - Green in CI, red locally: CI may never collect that test. Check its marker against the job's selection (`-m unit` over testpaths; `ci/fitness -m architecture`) before calling it flaky (#1935).
+6. A red `main` blocks every PR. Fix it first, via `agent_hotfix.md` if trivial.
+7. Search `docs/retrospectives/` for the symptom. Report: workflow, job, step, excerpt, flake or defect, prior occurrences, fix.
 
 ## Health check
 
-If this file is out of date with the repository (workflow names changed, file paths moved, hard rules contradicted by current behavior), STOP and:
-1. Note the drift in the response to the user.
-2. Either fix this file inline (preferred for small drift) or escalate to the user with a one-line summary of what needs updating.
-
-Keeping these skill files healthy is a higher priority than completing the immediate task with a stale recipe.
+Depends on: the job ids listed in step 2 (`grep -nE '^  [a-z][a-z0-9-]*:$' .github/workflows/ci.yml`); `_check-changelog.yml` taking `pr_body` from the event payload; `just check-event-store-pin`, `check-pinned-image-channels`, `scripts/check_ci_parity.py` existing. If a workflow was added, renamed or re-triggered, update step 2 in the same session.

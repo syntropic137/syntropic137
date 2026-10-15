@@ -17,14 +17,18 @@ Running without a command shows an interactive menu.
 
 | Command | Purpose |
 |---------|---------|
-| `init` | Full setup wizard: Docker check, secrets, API key, GitHub App, plugin, pull images, start stack |
-| `status` | Show running services (`docker compose ps`) |
+| `init` | Full setup wizard: Docker check, secrets, Claude credential, GitHub App, agent skills, `syn` CLI, pull images, start stack |
+| `status` | Show running services (`docker compose ps`) and the agent skills state |
 | `start` | Start the stack |
 | `stop` | Stop the stack |
 | `logs` | Tail service logs (`docker compose logs -f`) |
 | `update` | Pull latest container images and restart |
-| `plugin` | Install or update the Claude Code plugin |
-| `github-app` | Create or reconfigure the GitHub App |
+| `cli` | Install or update the `syn` CLI |
+| `skills` | Install, update (`skills update`) or check (`skills status`) the [agent skills](/docs/guide/agent-skills) for Claude Code and Codex. `plugin` is a deprecated alias |
+| `reset` | Factory reset; a dry run until you add `--yes` ([details](#reset)) |
+| `github-app` | Open the GitHub App's settings and installation pages in your browser. Creating an App happens during `init` |
+| `tunnel` | Set up remote access and webhook delivery through a Cloudflare tunnel ([details](/docs/guide/tunnels)) |
+| `credentials` | View, rotate, or roll back service credentials (`show`, `rotate`, `rollback`) |
 
 ## `init` Options
 
@@ -37,6 +41,9 @@ npx @syntropic137/setup init [options]
 --skip-github        Skip GitHub App creation
 --skip-docker        Generate config files only, don't pull images or start services
 --webhook-url <url>  Set webhook URL for the GitHub App
+--install-cli        Install the syn CLI without asking (--no-install-cli skips it)
+-y, --yes            Answer yes instead of asking (the agent skills and the syn CLI
+                     in a non-interactive init)
 ```
 
 ## What `init` Creates
@@ -49,13 +56,38 @@ npx @syntropic137/setup init [options]
 ├── .env                               # Your configuration (chmod 600)
 ├── init-db/
 │   └── 01-create-databases.sql        # Database initialization
-├── secrets/                           # All chmod 600
+├── secrets/                           # Readable only by you
 │   ├── db-password.secret
 │   ├── redis-password.secret
 │   ├── minio-password.secret
 │   └── github-app-private-key.pem     # If GitHub App configured
 └── workspaces/                        # Agent workspace mount
 ```
+
+## Reset
+
+`reset` returns the machine to a fresh state so the next `init` starts from nothing. It
+is a dry run by default: it lists exactly what it would remove and removes nothing.
+
+```bash
+npx @syntropic137/setup reset               # dry run
+npx @syntropic137/setup reset --yes         # do it
+npx @syntropic137/setup reset --all --yes   # also images, the syn CLI and the agent skills
+```
+
+| Target | Selected by | What happens |
+|--------|-------------|--------------|
+| Install directory | always | moved first to `<dir>.backup-YYYYMMDD-HHMMSS` (chmod 700, it holds your secrets); `--no-backup` deletes it instead |
+| Selfhost stack | always | containers, networks and volumes of the `syntropic137_selfhost` compose project |
+| `ghcr.io/syntropic137/*` images | `--images` | removed |
+| `syn` CLI | `--cli` | `npm uninstall -g @syntropic137/cli` |
+| Agent skills | `--skills` | the Syntropic137 skills only |
+
+Reset refuses anything it cannot prove is a Syntropic137 install (your home directory,
+a symlink, a directory without the selfhost compose file or `.env`), and refuses to run
+with `--yes` while Docker is stopped. It never touches the GitHub App on github.com: it
+prints the app's settings URL so you can delete it, or reuse it with the private key kept
+in the backup.
 
 ## Reconfiguring
 

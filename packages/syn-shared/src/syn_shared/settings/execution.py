@@ -91,3 +91,77 @@ class ExecutionSettings(BaseSettings):
             "timeout, or Docker kills the process first (#1381)."
         ),
     )
+
+    run_queue_enabled: bool = Field(
+        default=False,
+        description=(
+            "Admit executions into the Postgres run queue instead of running them "
+            "in the admitting process (ADR-072, #1310 1.3). Off by default. With it "
+            "on, this process registers an ExecutionHost (#1310 1.5) that claims "
+            "admitted runs within SYN_EXECUTION_MAX_CONCURRENT, in the Executor Pool "
+            "named by SYN_EXECUTOR_POOL_ID. Requires SYN_OBSERVABILITY_DB_URL; the API "
+            "refuses to start an execution without it rather than queue in memory."
+        ),
+    )
+
+
+#: The slug every Executor Pool, provider and region name must match (ADR-072 D13).
+POOL_SLUG_PATTERN = r"^[a-z][a-z0-9-]{0,62}$"
+
+
+class ExecutorPoolSettings(BaseSettings):
+    """The Executor Pool this process's ExecutionHost joins (ADR-072 D13).
+
+    Only the operator facts nothing can derive. The provider and isolation level
+    come from the workspace backend, never from here, so a declaration cannot
+    disagree with what actually runs the workspaces. Read only with
+    SYN_EXECUTION_RUN_QUEUE_ENABLED on.
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix="SYN_EXECUTOR_POOL_",
+        env_file=".env",
+        extra="ignore",
+        # .env.example writes unset values as empty; empty means the default.
+        env_ignore_empty=True,
+    )
+
+    id: str = Field(
+        default="default",
+        pattern=POOL_SLUG_PATTERN,
+        description=(
+            "The Executor Pool this executor joins. Every executor naming one pool "
+            "must declare the same priority, region, capabilities and overflow delay: "
+            "a differing declaration is refused at startup while another member is "
+            "live and not draining. To redefine a pool, drain its other members first."
+        ),
+    )
+    priority: int = Field(
+        default=0,
+        ge=0,
+        le=32767,
+        description=(
+            "The pool's priority; 0 is tried first. Placement does not read it yet: "
+            "every executor still claims the oldest admitted run (ADR-072 D13)."
+        ),
+    )
+    region: str | None = Field(
+        default=None,
+        pattern=POOL_SLUG_PATTERN,
+        description="Where the pool's executors run, as a slug. Unset: no region stated.",
+    )
+    capabilities: tuple[str, ...] = Field(
+        default=(),
+        description=(
+            'Features of this pool\'s hosts, as a JSON list, e.g. ["nested_docker"]. '
+            "An unknown capability refuses startup."
+        ),
+    )
+    overflow_delay_s: int = Field(
+        default=60,
+        ge=0,
+        description=(
+            "Seconds this pool's executors wait on a full higher-priority pool before "
+            "overflowing to it. Recorded with the pool; placement does not use it yet."
+        ),
+    )

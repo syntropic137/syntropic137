@@ -1008,6 +1008,14 @@ check-untyped-dicts:
 check-test-markers:
     @uv run python scripts/check_test_markers.py
 
+# Release gate (ADR-072 D9, #1310 V9): build the previous release's syn-domain
+# from its tag into an isolated venv and check it reads what this tree writes,
+# and this tree reads what it writes back. A payload the release cannot read
+# passes only if ORCHESTRATION_EVENT_EPOCH was bumped above the release's.
+# Fixtures: scripts/event_compat/fixtures.json. Exit 2 = the check could not run.
+check-event-compat *ARGS:
+    uv run python scripts/check_event_compat.py {{ARGS}}
+
 # Run type checker (strict mode)
 typecheck:
     uv run pyright
@@ -1195,6 +1203,62 @@ check-agent-docs:
     fi
     echo "✅ CLAUDE.md matches AGENTS.md"
 
+# Mirrors ci.yml `mutations-not-merged`. Deliberately NOT in preflight: the
+# pre-push hook would block pushing the very patches mutation-evidence.yml
+# reads. Delete the dir before merge; the PR comment is the record. See
+# .claude/skills/devops/agent_mutation_evidence.md.
+# Fail if `.mutations/` is tracked (PR-scoped evidence, never main).
+check-no-mutations:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ -n "$(git ls-files -- .mutations)" ]; then
+        echo "❌ delete .mutations/ before merge; evidence is in the mutation-evidence comment"
+        git ls-files -- .mutations
+        exit 1
+    fi
+    echo "✅ no .mutations/ tracked"
+
+#   just mutation-evidence 1929 "scripts/tests/test_x.py::test_y"
+#   just mutation-evidence 1929 "<ids>" false   # sandbox: no Docker, stronger isolation
+# The patches are `*.patch` files committed under mutations_dir on the PR head.
+# docker=true (default) runs PR code on the runner host with Docker, like ci.yml.
+# Exits non-zero when a mutation survived, a patch failed to apply, or the
+# baseline was red. The table is printed and posted as one PR comment.
+# Dispatch mutation-evidence.yml for a PR, wait, print the verdict table.
+mutation-evidence $pr $tests $docker="true" $mutations_dir=".mutations/":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # A nonce in the run name identifies THIS dispatch, even when two run for
+    # the same PR at once.
+    nonce="$(uuidgen | tr '[:upper:]' '[:lower:]')"
+    dispatched="$(gh workflow run mutation-evidence.yml --ref main -f pr="$pr" -f tests="$tests" \
+        -f docker="$docker" -f mutations_dir="$mutations_dir" -f dispatch_id="$nonce")"
+    # Recent gh prints the run URL; older gh does not, so fall back to the nonce.
+    run_id="$(grep -oE '/actions/runs/[0-9]+' <<<"$dispatched" | grep -oE '[0-9]+$' || true)"
+    for _ in $(seq 1 20); do
+        [ -n "$run_id" ] && break
+        run_id="$(gh run list --workflow mutation-evidence.yml --event workflow_dispatch \
+            --limit 20 --json databaseId,displayTitle \
+            --jq "[.[] | select(.displayTitle == \"Mutation evidence for PR #$pr $nonce\")][0].databaseId // empty")"
+        [ -n "$run_id" ] && break
+        sleep 3
+    done
+    if [ -z "$run_id" ]; then
+        echo "❌ dispatched, but no run appeared; check: gh run list --workflow mutation-evidence.yml"
+        exit 1
+    fi
+    echo "run: $(gh run view "$run_id" --json url --jq .url)"
+    status=0
+    gh run watch "$run_id" --interval 30 --exit-status >/dev/null || status=$?
+    out="$(mktemp -d)"
+    if gh run download "$run_id" -n mutation-evidence -D "$out" 2>/dev/null; then
+        cat "$out/mutation-evidence.md"
+    else
+        echo "(no report artifact; read the run log)"
+    fi
+    rm -rf "$out"
+    exit "$status"
+
 # Fail when a ci.yml job has no local equivalent, so `just qa-ci` cannot
 # quietly stop meaning "CI will pass". Runs inside preflight, which CI runs.
 check-ci-parity:
@@ -1231,7 +1295,7 @@ check-test-debt:
 # Mirrors ci.yml python-unit-tests, including -x (stop on first failure) and
 # the coverage flags, so a locally-green run is the run CI performs.
 test-unit-ci:
-    TERM=dumb NO_COLOR=1 COLUMNS=200 uv run pytest -m unit \
+    TERM=dumb NO_COLOR=1 COLUMNS=200 uv run pytest -m unit -n auto \
         --cov=apps/syn-api/src \
         --cov=packages/syn-domain/src \
         --cov=packages/syn-adapters/src \

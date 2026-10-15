@@ -269,9 +269,8 @@ Shortcuts:
 The bubble shows only when both hold (`src/shell/feedback.svelte.ts`):
 
 - `GET /features` answers `ui_feedback: true`, which the API does when `SYN_UI_FEEDBACK_ENABLED=true` and it is built with the `feedback` extra. Off by default for open-source installs.
-- The app runs on a developer machine: the Vite dev server (`import.meta.env.DEV`) or a fixtures build (`VITE_SYN_FIXTURES=1`). A deployed production build never shows it, whatever the flag says.
 
-To enable locally: `just skyline-dev-fixtures` (the fixture answers `ui_feedback: true` and accepts create, list, stats and media), or `just skyline-dev` against an API started with `SYN_UI_FEEDBACK_ENABLED=true`. AppShell mounts the bubble and the dialog as lazy chunks behind `FEEDBACK_LOCAL_ONLY`, so neither joins the first load.
+To enable locally: `just skyline-dev-fixtures` (the fixture answers `ui_feedback: true` and accepts create, list, stats and media), or `just skyline-dev` against an API started with `SYN_UI_FEEDBACK_ENABLED=true`. AppShell mounts the bubble and the dialog as lazy chunks in every build; the bubble renders only after `GET /features` says `ui_feedback: true`, so neither joins the first load and open-source installs (flag off) never see it.
 
 ### Size budget
 

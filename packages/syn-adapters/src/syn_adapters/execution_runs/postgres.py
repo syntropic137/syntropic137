@@ -14,8 +14,10 @@ from typing import TYPE_CHECKING
 from syn_domain.contexts.orchestration.ports import (
     ClaimedRun,
     ExecutorHost,
+    ExecutorPool,
     FencedRun,
     OpeningSweep,
+    PoolDefinitionConflict,
     RunCounts,
     RunLeaseLost,
     StreamPresence,
@@ -50,19 +52,26 @@ class PostgresExecutionRunQueue:
         if capacity < 0:
             raise ValueError("executor capacity must be nonnegative")
         async with self._pool.acquire() as conn, conn.transaction():
+            # D5 Restart: a process starting in a container that already has a
+            # host row is the proof that row's process stopped; it has left.
             await conn.execute(
-                """INSERT INTO executor_hosts (host_id,container_id,generation,epoch)
-                VALUES ($1,$2,$3,$4) ON CONFLICT (host_id) DO NOTHING""",
+                "DELETE FROM executor_hosts WHERE container_id=$1 AND host_id<>$2",
+                host.container_id,
+                host.host_id,
+            )
+            await self._join_pool(conn, host)
+            await self._register_budget(conn, host, capacity)
+            # Last, after every lock wait above: registered_at is this member's
+            # liveness until its first heartbeat, and now() is the transaction's
+            # start, so a long wait would commit a member already stale.
+            await conn.execute(
+                """INSERT INTO executor_hosts
+                (host_id,container_id,generation,epoch,registered_at)
+                VALUES ($1,$2,$3,$4,clock_timestamp()) ON CONFLICT (host_id) DO NOTHING""",
                 host.host_id,
                 host.container_id,
                 host.generation,
                 host.epoch,
-            )
-            await conn.execute(
-                """INSERT INTO execution_budget (executor_id,capacity)
-                VALUES ($1,$2) ON CONFLICT (executor_id) DO NOTHING""",
-                host.host_id,
-                capacity,
             )
 
     async def deregister(self, host_id: str) -> None:
@@ -87,6 +96,17 @@ class PostgresExecutionRunQueue:
                 "SELECT draining::text FROM executor_hosts WHERE host_id=$1", host_id
             )
         return draining == "true"
+
+    async def others_live(self, host_id: str) -> bool:
+        async with self._pool.acquire() as conn:
+            live = await conn.fetchval(
+                """SELECT EXISTS (SELECT 1 FROM executor_hosts h
+                JOIN execution_budget b ON b.executor_id=h.host_id WHERE h.host_id<>$1
+                AND b.heartbeat_at>clock_timestamp()-$2::double precision*interval '1 second')""",
+                host_id,
+                self._stale_seconds,
+            )
+        return bool(live)
 
     async def reserve(self, execution_id: str, writer_epoch: int, *, is_resume: bool) -> bool:
         async with self._pool.acquire() as conn:
@@ -195,6 +215,28 @@ class PostgresExecutionRunQueue:
             )
         return [FencedRun.model_validate_json(row["run"]) for row in rows]
 
+    async def reconciling(self, reconciler: str) -> list[FencedRun]:
+        async with self._pool.acquire() as conn, conn.transaction():
+            # Take over rows whose reconciler has left. The row lock serialises two
+            # adopters; the second re-reads the predicate and finds a live owner.
+            await conn.execute(
+                """UPDATE execution_runs r SET reconciler=me.host_id,lease_token=r.lease_token+1
+                FROM executor_hosts me
+                WHERE me.host_id=$1 AND r.state IN ('fencing','reaped')
+                AND r.reconciler IS DISTINCT FROM me.host_id AND r.writer_epoch<=me.epoch
+                AND NOT EXISTS (SELECT 1 FROM executor_hosts h WHERE h.host_id=r.reconciler)""",
+                reconciler,
+            )
+            rows = await conn.fetch(
+                """SELECT jsonb_build_object('execution_id',execution_id,
+                    'executor_id',executor_id,'reconciler',reconciler,
+                    'token',lease_token,'reaped',state='reaped')::text AS run
+                FROM execution_runs WHERE reconciler=$1 AND state IN ('fencing','reaped')
+                ORDER BY execution_id""",
+                reconciler,
+            )
+        return [FencedRun.model_validate_json(row["run"]) for row in rows]
+
     async def mark_reaped(self, run: FencedRun) -> None:
         async with self._pool.acquire() as conn:
             reaped = await conn.fetchval(
@@ -249,6 +291,98 @@ class PostgresExecutionRunQueue:
             )
         return RunCounts.model_validate_json(raw or "{}")
 
+    async def _join_pool(self, conn: Connection, host: ExecutorHost) -> None:
+        """D13: define ``host.pool`` if new; redefine it only when no other member is live.
+
+        The row lock serialises two members registering into one pool. A member
+        is live while its host row is not draining and it heartbeat, or
+        registered, within the staleness window: a crashed member never blocks
+        a redefinition, and one that has not yet beaten still does.
+        """
+        declared = host.pool
+        values = (
+            declared.pool_id,
+            declared.priority,
+            declared.provider,
+            declared.region,
+            int(declared.isolation),
+            sorted(declared.capabilities),
+            int(declared.overflow_delay.total_seconds()),
+        )
+        await conn.execute(
+            """INSERT INTO executor_pools
+            (pool_id,priority,provider,region,isolation,capabilities,overflow_delay_s)
+            VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (pool_id) DO NOTHING""",
+            *values,
+        )
+        raw = await conn.fetchval(
+            """SELECT jsonb_build_object('pool_id',pool_id,'priority',priority,
+                'provider',provider,'region',region,'isolation',isolation,
+                'capabilities',capabilities,'overflow_delay',overflow_delay_s)::text
+            FROM executor_pools WHERE pool_id=$1 FOR UPDATE""",
+            declared.pool_id,
+        )
+        held = ExecutorPool.model_validate_json(raw or "")
+        if held == declared:
+            return
+        others = await conn.fetchval(
+            """SELECT EXISTS (SELECT 1 FROM executor_hosts h
+            JOIN execution_budget b ON b.executor_id=h.host_id
+            WHERE b.pool_id=$1 AND h.host_id<>$2 AND NOT h.draining
+            AND GREATEST(b.heartbeat_at,h.registered_at)
+                >clock_timestamp()-$3::double precision*interval '1 second')::text""",
+            declared.pool_id,
+            host.host_id,
+            self._stale_seconds,
+        )
+        if others == "true":
+            raise PoolDefinitionConflict(
+                f"executor {host.host_id!r} declares Executor Pool {declared!r}, "
+                f"but live members hold {held!r}; drain them or declare the same definition"
+            )
+        await conn.execute(
+            """UPDATE executor_pools SET priority=$2,provider=$3,region=$4,isolation=$5,
+            capabilities=$6,overflow_delay_s=$7,defined_at=now() WHERE pool_id=$1""",
+            *values,
+        )
+
+    @staticmethod
+    async def _register_budget(conn: Connection, host: ExecutorHost, capacity: int) -> None:
+        """D3 Restart: the machine's budget is not doubled by a new process in it.
+
+        A predecessor in the same container keeps exactly the slots its runs
+        still hold; the rest move to the successor now, and each later release
+        moves one more. The machine's summed capacity never changes. Capacity
+        belongs to the machine; the pool belongs to the new row (D13).
+        """
+        held = await conn.fetch(
+            """SELECT executor_id FROM execution_budget
+            WHERE container_id=$1 AND executor_id<>$2 FOR UPDATE""",
+            host.container_id,
+            host.host_id,
+        )
+        free = await conn.fetchval(
+            """SELECT COALESCE(SUM(capacity-in_use),0)::text FROM execution_budget
+            WHERE container_id=$1 AND executor_id<>$2""",
+            host.container_id,
+            host.host_id,
+        )
+        inserted = await conn.fetchval(
+            """INSERT INTO execution_budget (executor_id,container_id,capacity,pool_id)
+            VALUES ($1,$2,$3,$4) ON CONFLICT (executor_id) DO NOTHING RETURNING executor_id""",
+            host.host_id,
+            host.container_id,
+            int(free or 0) if held else capacity,
+            host.pool.pool_id,
+        )
+        if inserted is not None and held:
+            await conn.execute(
+                """UPDATE execution_budget SET capacity=in_use,successor_id=$2
+                WHERE container_id=$1 AND executor_id<>$2""",
+                host.container_id,
+                host.host_id,
+            )
+
     @staticmethod
     async def _promote(conn: Connection, execution_id: str) -> bool:
         """``opening``/``abandoned`` -> ``admitted``; whichever writes second does nothing (D2)."""
@@ -290,8 +424,15 @@ class PostgresExecutionRunQueue:
             )
             if charged is None:
                 raise RunLeaseLost(f"{execution_id} is no longer {held} under token {token}")
+            # A retired predecessor's slot goes back to the machine, which is now
+            # its successor's: capacity moves with the release, never sooner (D3).
             await conn.execute(
-                "UPDATE execution_budget SET in_use=in_use-1 WHERE executor_id=$1", charged
+                """WITH b AS (UPDATE execution_budget SET in_use=in_use-1,
+                    capacity=capacity-(successor_id IS NOT NULL)::int
+                    WHERE executor_id=$1 RETURNING successor_id)
+                UPDATE execution_budget s SET capacity=s.capacity+1
+                FROM b WHERE s.executor_id=b.successor_id""",
+                charged,
             )
             if retry_seconds > 0:
                 # now() is the transaction's start, so the lock waits above would

@@ -163,24 +163,24 @@ class TestAHooklessCreationAfterAQuietPushClaimsNothing:
         assert OWN_UNVERIFIED_PUSH not in _told(pins)
 
 
-class TestAnUpdateOfAForkClaimsNothingOnOrigin:
-    async def test_a_hookless_fork_update_after_a_quiet_origin_push_is_not_recorded(
+class TestAnUpdateOfAnotherOwnersCopyClaimsNothingOnOrigin:
+    async def test_a_hookless_copy_update_after_a_quiet_origin_push_is_not_recorded(
         self, tmp_path: Path
     ) -> None:
-        """The fork's repository is also `widgets`: only its URL tells it from origin."""
+        """The other owner's copy is also named `widgets`: only its URL tells it from origin."""
         clone = _Clone(tmp_path)
-        fork = tmp_path / "fork" / "widgets.git"
-        fork.parent.mkdir()
-        subprocess.run(["git", "init", "-q", "--bare", str(fork)], check=True)
+        other_copy = tmp_path / "other-owner" / "widgets.git"
+        other_copy.parent.mkdir()
+        subprocess.run(["git", "init", "-q", "--bare", str(other_copy)], check=True)
         clone.shell(
-            f"git remote add fork {fork} && git checkout -q -b {BRANCH} && "
-            f"git push -q --no-verify fork HEAD:refs/heads/{BRANCH}"
+            f"git remote add other {other_copy} && git checkout -q -b {BRANCH} && "
+            f"git push -q --no-verify other HEAD:refs/heads/{BRANCH}"
         )
         foreign = clone.commit("foreign")
 
         tool_result = clone.shell(
             "git push -q origin HEAD:refs/heads/unrelated; "
-            f"git push --no-verify fork HEAD:refs/heads/{BRANCH}"
+            f"git push --no-verify other HEAD:refs/heads/{BRANCH}"
         )
         assert f"..{foreign[:7]}  HEAD -> {BRANCH}" in tool_result
 

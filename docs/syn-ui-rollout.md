@@ -11,7 +11,7 @@ normal `main -> release` merge; nothing here needs a special deploy path.
 | Both UIs | one `syn-gateway` image (`infra/docker/images/gateway/Dockerfile`): syn-ui built with `SYN_UI_BASE=/` to `/` (default); React plus a `/next/` syn-ui build kept for `SYN_GATEWAY_UI=legacy` | `release-containers.yaml` builds, signs and pushes the image; the release attaches a digest-pinned compose |
 | Self-host install | `syntropic137-setup` (`npx @syntropic137/setup`): `templates/docker-compose.syntropic137.yaml` pins `ghcr.io/syntropic137/syn-gateway@sha256:...` | `template-sync.yml` in that repo pulls the next release's digests; owner merges the bot PR (human gate) |
 | Owner VPS | same compose, deployed by pit stop | `just pit-stop` with the release digests |
-| Feature flags | `SYN_UI_FEEDBACK_ENABLED` (setup template exposes it, default false); `/features` reports it; syn-ui additionally requires a dev or fixtures build for the feedback widget | env on the API |
+| Feature flags | `SYN_UI_FEEDBACK_ENABLED` (setup template exposes it, default false); `/features` reports it and syn-ui shows the feedback widget wherever it is true (any build) | env on the API |
 | Versions | API `GET /build-info` (version, sha, built_at); CLI `syn version`; syn-ui shows API and UI version in the shell | lockstep: `just bump-version` writes every manifest, `apps/syn-ui` and `packages/syn-ui/*` included |
 
 Consequence: a self-host user gets syn-ui at `/` the moment they install a
