@@ -1,0 +1,61 @@
+{
+  "$defs": {
+    "EvidenceKind": {
+      "description": "What a phase can ask for. Each maps to `<kind>-evidence.yml` in the target repository.",
+      "enum": [
+        "mutation",
+        "integration"
+      ],
+      "title": "EvidenceKind",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "One entry of a phase's `TASK_RESULT` `evidence` list.",
+  "properties": {
+    "branch": {
+      "minLength": 1,
+      "title": "Branch",
+      "type": "string"
+    },
+    "head_sha": {
+      "pattern": "^[0-9a-f]{40}$",
+      "title": "Head Sha",
+      "type": "string"
+    },
+    "kind": {
+      "$ref": "#/$defs/EvidenceKind"
+    },
+    "pr": {
+      "maximum": 9999999,
+      "minimum": 1,
+      "title": "Pr",
+      "type": "integer"
+    },
+    "repository": {
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9_.-]+$",
+      "title": "Repository",
+      "type": "string"
+    },
+    "tests": {
+      "items": {
+        "pattern": "^[A-Za-z0-9_][A-Za-z0-9_./-]*\\.py(::[A-Za-z_][A-Za-z0-9_]*)*(::[A-Za-z_][A-Za-z0-9_]*\\[[A-Za-z0-9_.,=+-]*\\])?$",
+        "type": "string"
+      },
+      "maxItems": 50,
+      "minItems": 1,
+      "title": "Tests",
+      "type": "array"
+    }
+  },
+  "required": [
+    "kind",
+    "repository",
+    "branch",
+    "pr",
+    "head_sha",
+    "tests"
+  ],
+  "title": "EvidenceRequest",
+  "type": "object"
+}
