@@ -20,6 +20,10 @@ No token material is returned, logged, or rendered. The claims are NOT verified,
 because this is a local freshness hint and not an authentication decision;
 treating an unverifiable claim as advisory is the point. A caller must never
 gate access on this.
+
+API KEYS (#1971). An OpenAI API key, from ``OPENAI_API_KEY`` or an API-key-mode
+auth.json, has no token expiry, so it reports its own ``API_KEY`` state instead
+of looking ``UNREADABLE``. Only its mode is inspected; the key is never returned.
 """
 
 from __future__ import annotations
@@ -30,9 +34,14 @@ import json
 import time
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from syn_shared.codex_credentials import CODEX_API_KEY_AUTH_MODE, CodexCredentialSource
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 #: Below this, the credential is close enough that a re-mint should be scheduled.
 #: 48h is deliberately generous: re-minting needs a human at a browser, and a
@@ -60,6 +69,11 @@ class CodexAuthState(StrEnum):
     UNREADABLE = "unreadable"
     """Present but its expiry could not be determined. Not an error on its own:
     an access-token credential carries no JWT to decode."""
+
+    API_KEY = "api_key"
+    """An OpenAI API key, from ``OPENAI_API_KEY`` or an API-key-mode
+    ``CODEX_AUTH_JSON`` (#1971). It has no token expiry to report, so there is
+    nothing to re-mint on a schedule."""
 
 
 class CodexAuthStatus(BaseModel):
@@ -109,6 +123,44 @@ def _unreadable(detail: str) -> CodexAuthStatus:
     return CodexAuthStatus(state=CodexAuthState.UNREADABLE, detail=detail)
 
 
+#: Fields whose presence makes codex resolve a mode-less auth.json to something
+#: other than an API key (``AuthDotJson::resolved_mode``,
+#: ``login/src/auth/manager.rs`` at rust-v0.160.1).
+_NON_API_KEY_FIELDS: Final = ("personal_access_token", "bedrock_api_key", "bedrock_access_keys")
+
+
+def _is_api_key_auth(parsed: Mapping[object, object]) -> bool:
+    """Whether codex would read this auth.json as API-key auth.
+
+    Mirrors codex's ``resolved_mode``: an explicit ``auth_mode`` decides; without
+    one, a non-empty ``OPENAI_API_KEY`` means API key unless a field codex checks
+    first is present. An older ChatGPT auth.json carries ``"OPENAI_API_KEY":
+    null``, which is not a string and so stays a ChatGPT login here.
+    """
+    mode = parsed.get("auth_mode")
+    if mode is not None:
+        return mode == CODEX_API_KEY_AUTH_MODE
+    if any(parsed.get(name) is not None for name in _NON_API_KEY_FIELDS):
+        return False
+    key = parsed.get("OPENAI_API_KEY")
+    return isinstance(key, str) and bool(key)
+
+
+def _api_key_status(source: CodexCredentialSource) -> CodexAuthStatus:
+    origin = (
+        "OPENAI_API_KEY"
+        if source is CodexCredentialSource.OPENAI_API_KEY
+        else "an API-key CODEX_AUTH_JSON"
+    )
+    return CodexAuthStatus(
+        state=CodexAuthState.API_KEY,
+        detail=(
+            f"Codex authenticates with an OpenAI API key from {origin}. "
+            "API keys carry no token expiry, so there is nothing to re-mint."
+        ),
+    )
+
+
 def _extract_expiry(raw: str) -> float | CodexAuthStatus:
     """The access token's ``exp``, or the status explaining why there isn't one.
 
@@ -122,6 +174,8 @@ def _extract_expiry(raw: str) -> float | CodexAuthStatus:
         return _unreadable("CODEX_AUTH_JSON is not valid JSON.")
     if not isinstance(parsed, dict):
         return _unreadable("CODEX_AUTH_JSON is not a JSON object.")
+    if _is_api_key_auth(parsed):
+        return _api_key_status(CodexCredentialSource.CODEX_AUTH_JSON)
 
     tokens = parsed.get("tokens")
     access_token = tokens.get("access_token") if isinstance(tokens, dict) else None
@@ -134,18 +188,30 @@ def _extract_expiry(raw: str) -> float | CodexAuthStatus:
     return exp
 
 
-def describe_codex_auth(raw: str | None) -> CodexAuthStatus:
+def describe_codex_auth(
+    raw: str | None,
+    *,
+    source: CodexCredentialSource = CodexCredentialSource.CODEX_AUTH_JSON,
+) -> CodexAuthStatus:
     """Describe the credential's freshness from its raw JSON.
 
-    Accepts the raw ``CODEX_AUTH_JSON`` value. Every failure mode resolves to a
-    state rather than an exception: this is called from a health endpoint, and a
-    freshness probe that can take the endpoint down is worse than no probe.
+    Accepts the auth.json text a codex phase would be given: the raw
+    ``CODEX_AUTH_JSON`` value, or the file synthesised from ``OPENAI_API_KEY``
+    (pass ``source`` so the detail names the right setting). Every failure mode
+    resolves to a state rather than an exception: this is called from a health
+    endpoint, and a freshness probe that can take the endpoint down is worse
+    than no probe.
     """
     if not raw or not raw.strip():
         return CodexAuthStatus(
             state=CodexAuthState.ABSENT,
-            detail="No CODEX_AUTH_JSON configured; codex phases cannot authenticate.",
+            detail=(
+                "Neither CODEX_AUTH_JSON nor OPENAI_API_KEY is configured; "
+                "codex phases cannot authenticate."
+            ),
         )
+    if source is CodexCredentialSource.OPENAI_API_KEY:
+        return _api_key_status(source)
 
     found = _extract_expiry(raw)
     if isinstance(found, CodexAuthStatus):

@@ -207,11 +207,29 @@ def _resolve_claude_credentials() -> tuple[str | None, str | None]:
 
 
 def _resolve_codex_credentials() -> str | None:
-    """Resolve the Codex auth file contents from settings."""
+    """Resolve the Codex auth file contents from settings.
+
+    ``CODEX_AUTH_JSON`` wins; ``OPENAI_API_KEY`` is the fallback and is turned
+    into codex's API-key auth.json (#1971), so it reaches the workspace by the
+    same file-only path and never through the agent environment.
+    """
+    from syn_shared.codex_credentials import resolve_codex_credential
     from syn_shared.settings import get_settings
 
-    codex_auth_json = get_settings().codex_auth_json
-    return codex_auth_json.get_secret_value() if codex_auth_json else None
+    settings = get_settings()
+    resolved = resolve_codex_credential(
+        codex_auth_json=(
+            settings.codex_auth_json.get_secret_value() if settings.codex_auth_json else None
+        ),
+        openai_api_key=(
+            settings.openai_api_key.get_secret_value() if settings.openai_api_key else None
+        ),
+    )
+    if resolved is None:
+        return None
+    if resolved.both_configured:
+        logger.warning("Both CODEX_AUTH_JSON and OPENAI_API_KEY are set. Using CODEX_AUTH_JSON.")
+    return resolved.auth_json
 
 
 class GitHubAppNotConfiguredError(Exception):
@@ -505,7 +523,8 @@ class SetupPhaseSecrets:
         repositories: Full repo URLs to clone during setup phase
         claude_code_oauth_token: Claude Code OAuth token (takes priority over API key)
         anthropic_api_key: Claude API key (fallback when OAuth token not set)
-        codex_auth_json: Full contents of the Codex auth.json file
+        codex_auth_json: Full contents of the Codex auth.json file: CODEX_AUTH_JSON
+            verbatim, or the API-key file synthesised from OPENAI_API_KEY (#1971)
         git_author_name: Git commit author name (from GitHub App bot)
         git_author_email: Git commit author email (from GitHub App bot)
     """

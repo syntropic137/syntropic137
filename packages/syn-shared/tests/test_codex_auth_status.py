@@ -19,6 +19,7 @@ from syn_shared.codex_auth_status import (
     CodexAuthState,
     describe_codex_auth,
 )
+from syn_shared.codex_credentials import CodexCredentialSource
 
 _SECRET = "sk-super-secret-refresh-token-value"
 
@@ -78,8 +79,12 @@ class TestNeedsAttention:
         assert not describe_codex_auth(_auth(_jwt(240))).needs_attention
 
     def test_unreadable_does_not(self) -> None:
-        """An access-token credential has no JWT and is legitimately unreadable."""
-        raw = json.dumps({"auth_mode": "apikey", "OPENAI_API_KEY": "sk-x", "tokens": None})
+        """An access-token credential has no JWT and is legitimately unreadable.
+
+        This used an API-key file until #1971, which now has its own state
+        (TestApiKey); an opaque, non-JWT access token is the unreadable case.
+        """
+        raw = _auth("opaque-access-token-not-a-jwt")
         s = describe_codex_auth(raw)
         assert s.state is CodexAuthState.UNREADABLE
         assert not s.needs_attention
@@ -153,3 +158,60 @@ class TestDetail:
         d = describe_codex_auth(_auth(_jwt(-2))).detail
         assert "EXPIRED" in d
         assert "just codex-reauth" in d
+
+
+_API_KEY = "sk-proj-fake-key-for-status-tests"
+
+
+@pytest.mark.unit
+class TestApiKey:
+    """An API key has no expiry: its own state, never UNREADABLE (#1971)."""
+
+    def test_apikey_auth_json_is_api_key_state(self) -> None:
+        raw = json.dumps({"auth_mode": "apikey", "OPENAI_API_KEY": _API_KEY})
+        s = describe_codex_auth(raw)
+        assert s.state is CodexAuthState.API_KEY
+        assert s.expires_at is None
+        assert s.expires_in_hours is None
+
+    def test_key_from_openai_api_key_names_that_setting(self) -> None:
+        raw = json.dumps({"auth_mode": "apikey", "OPENAI_API_KEY": _API_KEY})
+        s = describe_codex_auth(raw, source=CodexCredentialSource.OPENAI_API_KEY)
+        assert s.state is CodexAuthState.API_KEY
+        assert "from OPENAI_API_KEY" in s.detail
+
+    def test_mode_less_file_with_a_key_is_api_key(self) -> None:
+        """codex's resolved_mode: no auth_mode plus a key string means API key."""
+        s = describe_codex_auth(json.dumps({"OPENAI_API_KEY": _API_KEY}))
+        assert s.state is CodexAuthState.API_KEY
+
+    def test_null_key_in_a_chatgpt_file_is_not_api_key(self) -> None:
+        """Older ChatGPT auth.json files carry "OPENAI_API_KEY": null."""
+        raw = json.dumps(
+            {"OPENAI_API_KEY": None, "tokens": {"access_token": _jwt(240), "refresh_token": "r"}}
+        )
+        assert describe_codex_auth(raw).state is CodexAuthState.OK
+
+    def test_explicit_chatgpt_mode_wins_over_a_stray_key(self) -> None:
+        raw = json.dumps(
+            {
+                "auth_mode": "chatgpt",
+                "OPENAI_API_KEY": _API_KEY,
+                "tokens": {"access_token": _jwt(240), "refresh_token": "r"},
+            }
+        )
+        assert describe_codex_auth(raw).state is CodexAuthState.OK
+
+    def test_api_key_does_not_need_attention(self) -> None:
+        raw = json.dumps({"auth_mode": "apikey", "OPENAI_API_KEY": _API_KEY})
+        assert not describe_codex_auth(raw).needs_attention
+
+    @pytest.mark.parametrize("source", list(CodexCredentialSource))
+    def test_key_never_in_any_field(self, source: CodexCredentialSource) -> None:
+        raw = json.dumps({"auth_mode": "apikey", "OPENAI_API_KEY": _API_KEY})
+        assert _API_KEY not in describe_codex_auth(raw, source=source).model_dump_json()
+
+    def test_absent_detail_names_both_settings(self) -> None:
+        d = describe_codex_auth(None).detail
+        assert "CODEX_AUTH_JSON" in d
+        assert "OPENAI_API_KEY" in d

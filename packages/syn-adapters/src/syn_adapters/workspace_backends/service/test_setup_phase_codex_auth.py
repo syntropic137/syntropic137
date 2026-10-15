@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+import logging
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -13,10 +16,16 @@ from syn_adapters.workspace_backends.service.setup_phase import (
     clear_secrets,
     run_setup_phase,
 )
-from syn_adapters.workspace_backends.service.setup_phase_secrets import SetupPhaseSecrets
+from syn_adapters.workspace_backends.service.setup_phase_secrets import (
+    SetupPhaseSecrets,
+    _resolve_codex_credentials,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
     ExecutionResult,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterator
 
 
 def _workspace() -> MagicMock:
@@ -212,3 +221,129 @@ async def test_codex_auth_survives_clear_secrets() -> None:
     assert "/workspace/.setup" in cleanup_script
     assert "~/.codex" not in cleanup_script
     assert "auth.json" not in cleanup_script
+
+
+# ---------------------------------------------------------------------------
+# OPENAI_API_KEY fallback (#1971)
+# ---------------------------------------------------------------------------
+
+_FAKE_KEY = "sk-proj-fake-openai-key-1971"
+_CHATGPT_AUTH = '{"auth_mode":"chatgpt","tokens":{"access_token":"a","refresh_token":"r"}}'
+
+
+@pytest.fixture
+def codex_settings(monkeypatch: pytest.MonkeyPatch) -> Iterator[Callable[[str, str], None]]:
+    """Set CODEX_AUTH_JSON and OPENAI_API_KEY ("" = unset) and reload settings."""
+    from syn_shared.env_constants import ENV_CODEX_AUTH_JSON, ENV_OPENAI_API_KEY
+    from syn_shared.settings import reset_settings
+
+    def apply(codex_auth_json: str, openai_api_key: str) -> None:
+        monkeypatch.setenv(ENV_CODEX_AUTH_JSON, codex_auth_json)
+        monkeypatch.setenv(ENV_OPENAI_API_KEY, openai_api_key)
+        reset_settings()
+
+    yield apply
+    reset_settings()
+
+
+@pytest.mark.unit
+def test_auth_json_only_is_staged_verbatim(codex_settings: Callable[[str, str], None]) -> None:
+    codex_settings(_CHATGPT_AUTH, "")
+    assert _resolve_codex_credentials() == _CHATGPT_AUTH
+
+
+@pytest.mark.unit
+def test_key_only_is_staged_as_codex_api_key_auth_json(
+    codex_settings: Callable[[str, str], None],
+) -> None:
+    codex_settings("", _FAKE_KEY)
+    resolved = _resolve_codex_credentials()
+    assert resolved is not None
+    assert json.loads(resolved) == {"auth_mode": "apikey", "OPENAI_API_KEY": _FAKE_KEY}
+
+
+@pytest.mark.unit
+def test_both_set_auth_json_wins_with_a_warning(
+    codex_settings: Callable[[str, str], None], caplog: pytest.LogCaptureFixture
+) -> None:
+    codex_settings(_CHATGPT_AUTH, _FAKE_KEY)
+    with caplog.at_level(logging.WARNING):
+        resolved = _resolve_codex_credentials()
+    assert resolved == _CHATGPT_AUTH
+    assert any(
+        "CODEX_AUTH_JSON" in r.getMessage() and "OPENAI_API_KEY" in r.getMessage()
+        for r in caplog.records
+    )
+    # Hazard: the warning names the settings, never the value.
+    assert all(_FAKE_KEY not in r.getMessage() for r in caplog.records)
+
+
+@pytest.mark.unit
+def test_neither_set_stages_nothing(codex_settings: Callable[[str, str], None]) -> None:
+    codex_settings("", "")
+    assert _resolve_codex_credentials() is None
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+async def test_key_never_reaches_script_env_or_logs(
+    codex_settings: Callable[[str, str], None], caplog: pytest.LogCaptureFixture
+) -> None:
+    """The hazard itself: a real key-only config, run through the real setup path.
+
+    The key must arrive ONLY as the bytes of the staged auth file, never in the
+    setup script text, the setup env, or any log line.
+    """
+    codex_settings("", _FAKE_KEY)
+    secrets = await SetupPhaseSecrets.create(
+        ledger=IssuanceLedger(), require_github=False, include_codex_auth=True
+    )
+    workspace = _workspace()
+    workspace.execute = AsyncMock(side_effect=_execute_side_effect(0))
+
+    with (
+        caplog.at_level(logging.DEBUG),
+        patch(
+            "syn_adapters.workspace_backends.service.setup_phase.clear_secrets",
+            new=AsyncMock(),
+        ),
+    ):
+        await run_setup_phase(workspace, secrets)
+
+    script = secrets.build_setup_script()
+    assert _FAKE_KEY not in script
+    assert "install -m 600 /workspace/.setup/codex-auth.json ~/.codex/auth.json" in script
+    assert all(_FAKE_KEY not in value for value in _build_setup_env(secrets).values())
+    assert all(_FAKE_KEY not in r.getMessage() for r in caplog.records)
+
+    staged = [
+        files
+        for call in workspace.inject_files.await_args_list
+        for files in call.args
+        if any(path == ".setup/codex-auth.json" for path, _ in files)
+    ]
+    assert staged, "the key-only credential was never staged as the codex auth file"
+    for files in staged:
+        for path, contents in files:
+            if path == ".setup/codex-auth.json":
+                assert json.loads(contents) == {"auth_mode": "apikey", "OPENAI_API_KEY": _FAKE_KEY}
+            else:
+                assert _FAKE_KEY.encode() not in contents
+    # Every exec argv the setup ran: the key is never on a command line.
+    for call in workspace.execute.await_args_list:
+        assert all(_FAKE_KEY not in str(arg) for arg in call.args[0])
+        environment = call.kwargs.get("environment") or {}
+        assert all(_FAKE_KEY not in value for value in environment.values())
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+async def test_key_only_is_scoped_to_codex_phases(
+    codex_settings: Callable[[str, str], None],
+) -> None:
+    codex_settings("", _FAKE_KEY)
+    claude_secrets = await SetupPhaseSecrets.create(
+        ledger=IssuanceLedger(), require_github=False, include_codex_auth=False
+    )
+    assert claude_secrets.codex_auth_json is None
+    assert _FAKE_KEY not in claude_secrets.build_setup_script()
