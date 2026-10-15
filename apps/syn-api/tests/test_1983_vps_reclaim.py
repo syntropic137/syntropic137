@@ -53,20 +53,26 @@ def base(tmp_path: Path) -> Path:
 
 
 @pytest.mark.parametrize(
-    ("change", "why"),
+    ("state", "why"),
     [
-        ({"maintenance": False}, "maintenance is not on"),
-        ({"running_executions": 1}, "RUNNING"),
-        ({"live_workspace_containers": ("abc123",)}, "running or paused"),
-        ({"reclaimer_paused": None}, "not paused for maintenance"),
-        ({"reclaimer_last_pass_at": _SINCE - timedelta(minutes=1)}, "has not finished a pass"),
-        ({"reclaimer_last_pass_at": None}, "has not finished a pass"),
-        ({"maintenance_since": None}, "has not finished a pass"),
-        ({"degraded_reasons": ("projection_catchup",)}, "read models may be incomplete"),
+        (replace(_QUIET, maintenance=False), "maintenance is not on"),
+        (replace(_QUIET, running_executions=1), "RUNNING"),
+        (replace(_QUIET, live_workspace_containers=("abc123",)), "running or paused"),
+        (replace(_QUIET, reclaimer_paused=None), "not paused for maintenance"),
+        (
+            replace(_QUIET, reclaimer_last_pass_at=_SINCE - timedelta(minutes=1)),
+            "has not finished a pass",
+        ),
+        (replace(_QUIET, reclaimer_last_pass_at=None), "has not finished a pass"),
+        (replace(_QUIET, maintenance_since=None), "has not finished a pass"),
+        (
+            replace(_QUIET, degraded_reasons=("projection_catchup",)),
+            "read models may be incomplete",
+        ),
     ],
 )
-def test_each_missing_condition_refuses(change: dict[str, object], why: str) -> None:
-    refused = quiescence_lost(replace(_QUIET, **change))  # type: ignore[arg-type]
+def test_each_missing_condition_refuses(state: QuiescenceState, why: str) -> None:
+    refused = quiescence_lost(state)
     assert refused is not None
     assert why in refused
 
