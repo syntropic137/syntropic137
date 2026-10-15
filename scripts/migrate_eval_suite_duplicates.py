@@ -56,6 +56,7 @@ from eval_suite import (
     LoadedSuite,
     _basic_auth,  # pyright: ignore[reportPrivateUsage]
     _case_evals,  # pyright: ignore[reportPrivateUsage]
+    _Created,  # pyright: ignore[reportPrivateUsage]
     _detail,  # pyright: ignore[reportPrivateUsage]
     _Eval,  # pyright: ignore[reportPrivateUsage]
     _EvalList,  # pyright: ignore[reportPrivateUsage]
@@ -230,7 +231,18 @@ def migrate(
             continue
         if not stable:
             if not dry_run:
-                _check(create_stable_eval(loaded, case, client), f"{case.id}: create")
+                response = create_stable_eval(loaded, case, client)
+                _check(response, f"{case.id}: create")
+                # The key may already name an eval the tag lookup cannot see
+                # (retagged, re-pinned): the create then answers with it as it is now.
+                created = _Created.model_validate(response.json())
+                created_pin = [(b.repository, b.commit_sha) for b in created.baseline_repos]
+                if created_pin != [(s.repository, case.commit)]:
+                    out.append(
+                        f"{case.id}: SKIP, stable eval {keep} pins {created_pin}, "
+                        f"the case pins {case.commit[:12]}"
+                    )
+                    continue
             out.append(f"{case.id}: {verb}create stable eval {keep} @ {case.commit[:12]}")
         for dup in duplicates:
             pinned = [(b.repository, b.commit_sha) for b in dup.baseline_repos]

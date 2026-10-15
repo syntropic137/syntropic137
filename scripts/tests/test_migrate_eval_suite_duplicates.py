@@ -157,6 +157,22 @@ def test_a_stable_eval_pinned_elsewhere_is_never_folded_into(tmp_path: Path) -> 
 
 
 @pytest.mark.unit
+def test_a_keyed_eval_hidden_from_the_tags_and_pinned_elsewhere_is_never_folded_into(
+    tmp_path: Path,
+) -> None:
+    """The keyed eval exists but was retagged and re-pinned, so only the create finds it."""
+    api = _Api()
+    api.evals[_KEYED] = _eval(_KEYED, [], "e" * 40)
+    api.members[_KEYED] = []
+
+    lines = migrate(_LOADED, api.client(), dry_run=False, journal=tmp_path / "journal.jsonl")
+
+    assert any(line.startswith(f"{_CASE.id}: SKIP, stable eval {_KEYED} pins") for line in lines)
+    assert api.writes == [("POST", "/evals")]
+    assert api.members == {"dup-a": ["run-1"], "dup-b": ["run-2"], _KEYED: []}
+
+
+@pytest.mark.unit
 def test_recovery_never_attaches_into_a_target_whose_baseline_moved(tmp_path: Path) -> None:
     """Cut after the detach, then the new stable eval is re-pinned before the rerun."""
     api = _Api()
