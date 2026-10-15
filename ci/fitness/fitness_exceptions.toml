@@ -533,3 +533,12 @@ allowed_prefixes = [
 "WorkspaceSettings.docker_network" = { issue = "#1805" }
 "WorkspaceSettings.docker_runtime" = { issue = "#1805" }
 "WorkspaceSettings.isolation_backend" = { issue = "#1805" }
+
+[integration_skips]
+# Integration tests that can skip (skip/skipif marks, pytest.skip,
+# importorskip, or a fixture that does) without declaring it with
+# @pytest.mark.may_skip(reason="...", issue="#N"). A skipped integration test
+# passes CI having checked nothing (PC-192/PC-193). Exact count, may only go
+# down: test_integration_skips_are_declared fails above it AND below it.
+# List them: python3 scripts/check_integration_skips.py
+max_undeclared = 118
