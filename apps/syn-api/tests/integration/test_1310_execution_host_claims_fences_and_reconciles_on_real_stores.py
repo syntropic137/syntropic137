@@ -183,7 +183,7 @@ async def test_v12_an_expired_claim_is_fenced_and_interrupted_once_and_its_stale
     await infra.queue.register(live, capacity=1)
     await infra.queue.heartbeat(live.host_id)
     assert await infra.queue.claim(live.host_id) is None
-    assert await infra.queue.fence_expired(live.host_id) == []
+    assert await infra.queue.fence_expired(live.host_id, limit=10) == []
 
     await asyncio.sleep(1.5)
 

@@ -215,16 +215,29 @@ class ExecutionRunQueue(Protocol):
         """``claimed`` -> ``done``; releases the slot (D3)."""
         ...
 
-    async def fence_expired(self, reconciler: str) -> list[FencedRun]:
-        """Every expired ``claimed`` run this host can read -> ``fencing``, owned by ``reconciler``."""
+    async def fence_expired(self, reconciler: str, *, limit: int) -> list[FencedRun]:
+        """At most ``limit`` expired ``claimed`` runs this host can read -> ``fencing``.
+
+        Oldest ``leased_until`` first, owned by ``reconciler``. Two fencers never
+        take the same row; the rest stay ``claimed`` for a later turn or another
+        live host (D5).
+        """
+        ...
+
+    async def take_over(self, reconciler: str, *, limit: int) -> list[FencedRun]:
+        """At most ``limit`` ``fencing``/``reaped`` rows whose reconciler has **left**.
+
+        Each is taken under a new token, oldest ``leased_until`` first. Leaving
+        means its ``executor_hosts`` row is gone: a stale heartbeat alone is not
+        leaving, so a stalled reconciler is never taken over while registered.
+        """
         ...
 
     async def reconciling(self, reconciler: str) -> list[FencedRun]:
         """Every ``fencing``/``reaped`` row ``reconciler`` owns, read from the row (D5).
 
-        First takes over, under a new token, each such row whose reconciler has
-        **left** (its ``executor_hosts`` row is gone). A stale heartbeat alone is
-        not leaving, so a stalled reconciler is never taken over while registered.
+        Read-only: it acquires nothing. Acquisition is ``fence_expired`` and
+        ``take_over``, each bounded by the caller.
         """
         ...
 

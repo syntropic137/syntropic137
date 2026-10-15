@@ -821,9 +821,11 @@ and holds the slot.
 ## Heartbeat
 
 An Executor's write of `heartbeat_at` to its own `execution_budget` row, made
-by the claim loop itself as the first step of every turn, on the Lease's 30 s
-cadence and including while idle with no Claim. Never a side task or separate
-timer: a wedged claim loop stops writing it, so it stops looking alive. It is
+by the claim loop itself as the first step of every turn, once per loop
+interval (5 s), and including while idle with no Claim. A turn is bounded: it
+never waits for a reap or the opening sweep, and it stops claiming once its turn
+budget is spent, so the Heartbeat stops only when the loop does. Never a side
+task or separate timer: a wedged claim loop stops writing it, so it stops looking alive. It is
 evidence that the Executor's claim loop turned recently, used by the claim
 (a stale Executor does not claim), the global capacity report, the reap-window
 alert and before reaping an unlabelled container. It decides nothing else, and
