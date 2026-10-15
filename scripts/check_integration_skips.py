@@ -113,7 +113,9 @@ def _is_fixture(fn: _Fn) -> tuple[bool, bool]:
     for dec in fn.decorator_list:
         if _dotted(dec).split(".")[-1] in _FIXTURE_DECORATORS:
             autouse = isinstance(dec, ast.Call) and any(
-                kw.arg == "autouse" and isinstance(kw.value, ast.Constant) and kw.value.value is True
+                kw.arg == "autouse"
+                and isinstance(kw.value, ast.Constant)
+                and kw.value.value is True
                 for kw in dec.keywords
             )
             return True, autouse
@@ -122,7 +124,11 @@ def _is_fixture(fn: _Fn) -> tuple[bool, bool]:
 
 def _params(fn: _Fn) -> list[str]:
     args = fn.args
-    return [a.arg for a in (*args.posonlyargs, *args.args, *args.kwonlyargs) if a.arg not in {"self", "cls"}]
+    return [
+        a.arg
+        for a in (*args.posonlyargs, *args.args, *args.kwonlyargs)
+        if a.arg not in {"self", "cls"}
+    ]
 
 
 def _usefixtures(marks: Iterable[ast.expr]) -> list[str]:
@@ -245,7 +251,9 @@ class Scanner:
             target_path = self._import_target(target_module)
             target = self.module(target_path) if target_path else None
             if target is not None:
-                found = (target.fixtures if table == "fixtures" else target.functions).get(target_name)
+                found = (target.fixtures if table == "fixtures" else target.functions).get(
+                    target_name
+                )
                 if found is not None:
                     return target, found
         return None
@@ -366,9 +374,17 @@ def _marker_problems(marks: Iterable[ast.expr]) -> tuple[bool, list[Problem]]:
         declared = True
         keywords = {kw.arg: kw.value for kw in mark.keywords} if isinstance(mark, ast.Call) else {}
         reason, issue = keywords.get("reason"), keywords.get("issue")
-        if not (isinstance(reason, ast.Constant) and isinstance(reason.value, str) and reason.value.strip()):
+        if not (
+            isinstance(reason, ast.Constant)
+            and isinstance(reason.value, str)
+            and reason.value.strip()
+        ):
             problems.append(Problem.NO_REASON)
-        if not (isinstance(issue, ast.Constant) and isinstance(issue.value, str) and _ISSUE.match(issue.value)):
+        if not (
+            isinstance(issue, ast.Constant)
+            and isinstance(issue.value, str)
+            and _ISSUE.match(issue.value)
+        ):
             problems.append(Problem.NO_ISSUE)
     return declared, problems
 
@@ -376,12 +392,16 @@ def _marker_problems(marks: Iterable[ast.expr]) -> tuple[bool, list[Problem]]:
 def _tests(tree: ast.Module) -> Iterator[tuple[str, _Fn, list[ast.expr]]]:
     """(qualified name, function, class-level marks) for each collected test."""
     for stmt in tree.body:
-        if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)) and stmt.name.startswith("test"):
+        if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)) and stmt.name.startswith(
+            "test"
+        ):
             yield stmt.name, stmt, []
         elif isinstance(stmt, ast.ClassDef) and stmt.name.startswith("Test"):
             class_marks = [*stmt.decorator_list, *_pytestmark(stmt.body)]
             for item in stmt.body:
-                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)) and item.name.startswith("test"):
+                if isinstance(
+                    item, (ast.FunctionDef, ast.AsyncFunctionDef)
+                ) and item.name.startswith("test"):
                     yield f"{stmt.name}::{item.name}", item, class_marks
 
 

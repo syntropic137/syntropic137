@@ -46,8 +46,9 @@ def test_integration_skips_are_declared() -> None:
     undeclared = [f for f in findings if f.problem is Problem.UNDECLARED]
     budget = int(load_exceptions()[_SECTION]["max_undeclared"])
 
-    assert not malformed, "Malformed may_skip markers (need reason=... and issue='#N'):\n" + "\n".join(
-        str(f) for f in malformed
+    assert not malformed, (
+        "Malformed may_skip markers (need reason=... and issue='#N'):\n"
+        + "\n".join(str(f) for f in malformed)
     )
     assert len(undeclared) <= budget, (
         f"{len(undeclared)} integration tests can skip undeclared, budget {budget}. "
