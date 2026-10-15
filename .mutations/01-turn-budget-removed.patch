@@ -1,9 +1,9 @@
 diff --git a/packages/syn-adapters/src/syn_adapters/execution_host/host.py b/packages/syn-adapters/src/syn_adapters/execution_host/host.py
-index 37d441306..7e87b1229 100644
+index 1cbd9377a..193eb2d54 100644
 --- a/packages/syn-adapters/src/syn_adapters/execution_host/host.py
 +++ b/packages/syn-adapters/src/syn_adapters/execution_host/host.py
-@@ -184,7 +184,6 @@ class ExecutionHost:
-             await self._reconciler.turn(acquire=not draining)
+@@ -190,7 +190,6 @@ class ExecutionHost:
+             await self._reconciler.turn(acquire=not draining, deadline=started + budget)
              while (
                  not draining
 -                and self._clock() - started < budget

@@ -285,18 +285,21 @@ is wedged must stop looking alive, and a timer beside it would keep advertising
 a host that can no longer claim, reconcile or drain.
 
 **A loop turn is bounded, so a stale heartbeat means only that the loop
-stopped.** A turn awaits the heartbeat, a fixed number of reconciliation store
-calls, and claims until the turn budget is spent; it never awaits a reap or the
-opening sweep. Reconciliation (D5) runs in tasks the loop starts and tracks, at
+stopped.** A turn awaits the heartbeat, then reconciliation store calls and
+claims, and starts none of them once the turn budget is spent; it never awaits
+a reap or the opening sweep. A budget counts elapsed time, not calls: several
+calls that each return can still add up past the staleness window, so the
+budget is checked before every one. Reconciliation (D5) runs in tasks the loop starts and tracks, at
 most the reconciliation concurrency at once and least recently attempted first,
 as it holds claimed runs; the opening sweep (D2) runs as one such task. A turn
 checks on them and starts more; it does not wait for them. So the time between
 two heartbeats is at most the loop interval plus the turn budget plus one store
 call, however many rows exist and however slowly Docker answers. Only a store
 call that does not return can push it past the staleness window, and a loop
-stuck in one cannot claim, so it is right that it reads stale. A reap that
-hangs leaves its row unfinished and is logged once it has run longer than the
-TTL; the reap-window alert (D5) reports the rows. It does not make a loop that
+stuck in one cannot claim, so it is right that it reads stale. A reap or sweep
+that hangs leaves its rows unfinished and is logged once, when it has run
+longer than the TTL; it is neither cancelled nor started again beside itself.
+The reap-window alert (D5) reports the rows. It does not make a loop that
 can still claim look dead.
 
 Per-run lease renewal is a different write with a
@@ -320,7 +323,11 @@ D13's claim signals.)
 
 **An expired lease is never claimed to run.** The only way out of an expired
 `claimed` row is reconciliation. Any live executor may **fence** an expired
-row on any loop turn; from then on the row has exactly one **reconciler**, and
+row on any loop turn, though no more rows per turn than it has free
+reconciliation slots (D4). The same limit applies to takeover, so a dead or
+departed host's rows are shared among live executors, not taken by whichever
+turns first. Each owned row gets a new attempt in least-recently-attempted
+order, so a row whose reap keeps failing never holds up the others. From then on the row has exactly one **reconciler**, and
 only that host takes turns on it:
 
 | Step | Action | Guard |
@@ -437,7 +444,9 @@ expiring to the first **successful** reap. Detection is bounded by the TTL
 and a reap that fails (Docker unreachable, a container that will not stop)
 leaves the row in `fencing` to retry, exactly as `reconciliation.py` treats an
 incomplete cleanup today. Because the window has no bound, it is watched
-instead: a row in `fencing` for longer than one TTL, or with no executor
+instead: a row whose lease expired more than one TTL ago and that is not yet
+`interrupted` (with bounded acquisition it may still be waiting in `claimed`),
+or with no executor
 heartbeat able to reap it, raises an operator alert naming the execution and
 the dead host. Removing that host's containers by hand ends the window.
 
