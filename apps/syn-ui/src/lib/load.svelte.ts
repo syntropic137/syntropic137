@@ -20,7 +20,8 @@
  *   A failed refresh keeps `data` (the last good value) AND sets `error`, so a
  *   screen can show both; the next success clears `error` (ADR-074).
  * - `live` refetches (throttled, at most once per `liveIntervalMs`) when an
- *   activity-stream event passes the filter.
+ *   activity-stream event passes the filter, and when the stream reconnects
+ *   (events sent while it was down are lost, #1924).
  * - Reads go through the data package's query cache (ADR-074): fresh data is
  *   served without a request, time-stale data is served at once and refreshed
  *   in the background, and an invalidation of any key the fetcher read (live
@@ -144,15 +145,13 @@ function throttledActivity(filter: (eventType: string) => boolean, gap: number, 
     last = Date.now()
     fire()
   }
-  const unsubscribe = subscribeActivity({
-    filter,
-    onFrames: () => {
-      if (timer) return
-      const wait = last + gap - Date.now()
-      if (wait <= 0) run()
-      else timer = setTimeout(run, wait)
-    },
-  })
+  const onFrames = () => {
+    if (timer) return
+    const wait = last + gap - Date.now()
+    if (wait <= 0) run()
+    else timer = setTimeout(run, wait)
+  }
+  const unsubscribe = subscribeActivity({ filter, onFrames, onReconnect: onFrames })
   return () => {
     clearTimeout(timer)
     unsubscribe()
