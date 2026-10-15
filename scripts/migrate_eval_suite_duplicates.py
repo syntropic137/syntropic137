@@ -3,12 +3,16 @@
 
 Before evals v2, every ``eval_suite.py launch`` created a fresh eval per case,
 tagged with the version tag (``verifier-seed-v1:v1``, ``verifier-seed-v1:v2:<wf>``).
-Now each case has ONE eval, tagged ``suite:<eval_suite>`` + ``case:<id>``. For
-each case this script:
+Now each case has ONE eval, tagged ``suite:<eval_suite>`` + ``case:<id>``, whose
+id is derived from those two tags (``eval_suite.stable_key``, #1920). Before
+#1920 a launch created it under a random id, and two concurrent launches could
+each create one. For each case this script:
 
-1. finds the stable eval, or creates it pinned to the case's commit,
-2. finds the duplicates: evals tagged ``case:<id>`` and any version tag of the
-   suite (current or ``history``) that are not the stable eval,
+1. creates the keyed stable eval pinned to the case's commit, unless it exists
+   (the create is idempotent, so a concurrent launch cannot split it again),
+2. finds the duplicates: every other active eval tagged with the suite and the
+   case (a pre-#1920 stable eval, or one of a raced pair), and evals tagged
+   ``case:<id>`` and any version tag of the suite (current or ``history``),
 3. moves each duplicate's runs into the stable eval (detach, then attach;
    attach never copies a baseline, so a duplicate that pins another commit
    is skipped and reported, never folded, and so is a case whose stable eval
@@ -56,8 +60,12 @@ from eval_suite import (
     _Eval,  # pyright: ignore[reportPrivateUsage]
     _EvalList,  # pyright: ignore[reportPrivateUsage]
     _member_runs,  # pyright: ignore[reportPrivateUsage]
+    create_stable_eval,
     load_suite,
+    stable_key,
 )
+
+from syn_domain.contexts.orchestration.domain.aggregate_eval.value_objects import EvalId
 
 from syn_shared.settings.dev_tooling import get_dev_api_url
 
@@ -197,39 +205,25 @@ def migrate(
     verb = "would " if dry_run else ""
     out: list[str] = recover(client, journal, dry_run=dry_run) if journal is not None else []
     for case in loaded.cases:
-        stable = _case_evals(client, loaded, case)
-        if len(stable) > 1:
-            out.append(f"{case.id}: SKIP, {len(stable)} evals carry {s.suite_tag} {case.tag}")
-            continue
+        keep = str(EvalId.for_key(stable_key(loaded, case)))
+        tagged = _case_evals(client, loaded, case)
+        stable = [ev for ev in tagged if ev.eval_id == keep]
         if stable:
             stable_pin = [(b.repository, b.commit_sha) for b in stable[0].baseline_repos]
             if stable_pin != [(s.repository, case.commit)]:
                 out.append(
-                    f"{case.id}: SKIP, stable eval {stable[0].eval_id} pins {stable_pin}, "
+                    f"{case.id}: SKIP, stable eval {keep} pins {stable_pin}, "
                     f"the case pins {case.commit[:12]}"
                 )
                 continue
-        keep = stable[0].eval_id if stable else None
-        duplicates = _duplicates(client, loaded, case, keep)
-        if keep is None and not duplicates:
+        found = {ev.eval_id: ev for ev in tagged if ev.eval_id != keep}
+        found.update({ev.eval_id: ev for ev in _duplicates(client, loaded, case, keep)})
+        duplicates = [found[k] for k in sorted(found)]
+        if not stable and not duplicates:
             continue
-        if keep is None:
-            if dry_run:
-                keep = "<new>"
-            else:
-                response = client.post(
-                    "/evals",
-                    json={
-                        "name": f"{s.eval_suite or s.id}: {case.id}",
-                        "goal": s.goal,
-                        "baseline_repos": [
-                            {"repository": s.repository, "requested_ref": case.commit}
-                        ],
-                        "tags": [s.suite_tag, case.tag],
-                    },
-                )
-                _check(response, f"{case.id}: create")
-                keep = _Eval.model_validate(response.json()).eval_id
+        if not stable:
+            if not dry_run:
+                _check(create_stable_eval(loaded, case, client), f"{case.id}: create")
             out.append(f"{case.id}: {verb}create stable eval {keep} @ {case.commit[:12]}")
         for dup in duplicates:
             pinned = [(b.repository, b.commit_sha) for b in dup.baseline_repos]
