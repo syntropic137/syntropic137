@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/stream_adapter.py b/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/stream_adapter.py
+index b04baa2a2..ea115aea5 100644
+--- a/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/stream_adapter.py
++++ b/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/stream_adapter.py
+@@ -268,7 +268,7 @@ class AgenticEventStreamAdapter:
+             credentials.release(parked)
+         logger.debug("Started stream operation %s (cmd=%s)", ref.operation_id, command)
+ 
+-        self._running[handle.isolation_id] = (provider, ref)
++        pass
+         try:
+             async for line in self._observe(provider, ref):
+                 yield line
