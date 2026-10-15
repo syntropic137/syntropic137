@@ -819,20 +819,31 @@ async def test_upgrading_a_pre_pool_schema_keeps_rows_assigns_default_and_drops_
     await queue.register(_host("new"), 1)
 
 
+async def _expire_claims(pool: asyncpg.Pool, executor_id: str, *, expected: int) -> None:
+    """Move one executor's leases into the past, keeping their order, without waiting."""
+    async with pool.acquire() as conn:
+        status = await conn.execute(
+            """UPDATE execution_runs SET leased_until=leased_until-interval '1 day'
+            WHERE executor_id=$1 AND state='claimed'""",
+            executor_id,
+        )
+    assert status == f"UPDATE {expected}"
+
+
 async def test_fencing_is_bounded_and_concurrent_fencers_never_share_a_row(
     pools: list[asyncpg.Pool],
 ) -> None:
     """D5: a reconciler acquires no more than its free slots, so expired rows are shared."""
-    short = PostgresExecutionRunQueue(pools[0], lease_ttl=timedelta(milliseconds=200))
+    dying = PostgresExecutionRunQueue(pools[0])
     first = PostgresExecutionRunQueue(pools[1])
     second = PostgresExecutionRunQueue(pools[2])
-    await _online(short, "dying", capacity=6)
+    await _online(dying, "dying", capacity=6)
     await _online(first, "rec-1", capacity=1)
     await _online(second, "rec-2", capacity=1)
     for n in range(6):
-        await _admit(short, f"exec-{n}")
-        assert await short.claim("dying") is not None
-    await asyncio.sleep(0.5)
+        await _admit(dying, f"exec-{n}")
+        assert await dying.claim("dying") is not None
+    await _expire_claims(pools[0], "dying", expected=6)
 
     a, b = await asyncio.gather(
         first.fence_expired("rec-1", limit=2), second.fence_expired("rec-2", limit=2)
@@ -846,18 +857,18 @@ async def test_fencing_is_bounded_and_concurrent_fencers_never_share_a_row(
 async def test_takeover_is_bounded_and_concurrent_adopters_never_share_a_row(
     pools: list[asyncpg.Pool],
 ) -> None:
-    short = PostgresExecutionRunQueue(pools[0], lease_ttl=timedelta(milliseconds=200))
+    dying = PostgresExecutionRunQueue(pools[0])
     gone = PostgresExecutionRunQueue(pools[1])
     first = PostgresExecutionRunQueue(pools[2])
     second = PostgresExecutionRunQueue(pools[3])
-    await _online(short, "dying", capacity=5)
+    await _online(dying, "dying", capacity=5)
     await _online(gone, "gone", capacity=1)
     await _online(first, "rec-1", capacity=1)
     await _online(second, "rec-2", capacity=1)
     for n in range(5):
-        await _admit(short, f"exec-{n}")
-        assert await short.claim("dying") is not None
-    await asyncio.sleep(0.5)
+        await _admit(dying, f"exec-{n}")
+        assert await dying.claim("dying") is not None
+    await _expire_claims(pools[0], "dying", expected=5)
     assert len(await gone.fence_expired("gone", limit=10)) == 5
     assert await first.take_over("rec-1", limit=10) == []  # still registered
     await gone.deregister("gone")
