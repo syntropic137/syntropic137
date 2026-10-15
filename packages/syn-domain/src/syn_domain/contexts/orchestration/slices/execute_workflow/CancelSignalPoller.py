@@ -58,7 +58,7 @@ class CancelSignalPoller:
         signal = await self._controller.check_signal(self._execution_id)
         if signal and signal.signal_type == ControlSignalType.CANCEL:
             logger.info(
-                "CANCEL signal received for execution %s at line %d — sending SIGINT",
+                "CANCEL signal received for execution %s at line %d — stopping the agent",
                 self._execution_id,
                 line_count,
             )
