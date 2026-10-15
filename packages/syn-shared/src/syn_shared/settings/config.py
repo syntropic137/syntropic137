@@ -30,7 +30,7 @@ if TYPE_CHECKING:
     from syn_shared.settings.dependency_seed import DependencySeedSettings
     from syn_shared.settings.dev_tooling import DevToolingSettings
     from syn_shared.settings.disk import DiskSettings
-    from syn_shared.settings.execution import ExecutionSettings
+    from syn_shared.settings.execution import ExecutionSettings, ExecutorPoolSettings
     from syn_shared.settings.github import GitHubAppSettings
     from syn_shared.settings.image_verification import ImageVerificationSettings
     from syn_shared.settings.platform_access import PlatformAccessSettings
@@ -885,6 +885,13 @@ class Settings(BaseSettings):
         from syn_shared.settings.execution import ExecutionSettings
 
         return ExecutionSettings()
+
+    @property
+    def executor_pool(self) -> ExecutorPoolSettings:
+        """The Executor Pool this process's ExecutionHost joins (ADR-072 D13)."""
+        from syn_shared.settings.execution import ExecutorPoolSettings
+
+        return ExecutorPoolSettings()
 
     # =========================================================================
     # DISK (#1560) - free space on the workspace volume
