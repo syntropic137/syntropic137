@@ -57,6 +57,7 @@ def _refuse_blocking_session_lock(sql: str) -> None:
         msg = f"the startup lock must never block: {sql!r}"
         raise AssertionError(msg)
 
+
 # CI runs `pytest -m unit`; an unmarked module collects zero tests and the
 # gate goes green having run none of them (#1065).
 pytestmark = pytest.mark.unit
