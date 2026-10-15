@@ -251,18 +251,21 @@ class PostgresExecutionRunQueue:
             return []
         async with self._pool.acquire() as conn:
             # SKIP LOCKED keeps two fencers from blocking on, or sharing, a row;
-            # the outer predicate is re-checked once the row is locked.
+            # the outer predicate is re-checked once the row is locked. The
+            # pick is a MATERIALIZED CTE because an IN (... LIMIT) subquery may
+            # be rescanned once per outer row, each rescan locking LIMIT more.
             rows = await conn.fetch(
-                """UPDATE execution_runs r SET state='fencing',lease_token=r.lease_token+1,
-                    reconciler=h.host_id, reader_epoch=LEAST(r.reader_epoch,h.epoch)
-                FROM executor_hosts h
-                WHERE h.host_id=$1 AND r.state='claimed' AND r.leased_until<now()
-                AND r.writer_epoch<=h.epoch
-                AND r.execution_id IN (SELECT c.execution_id FROM execution_runs c
+                """WITH picked AS MATERIALIZED (
+                    SELECT c.execution_id FROM execution_runs c
                     WHERE c.state='claimed' AND c.leased_until<now()
                     AND c.writer_epoch<=(SELECT epoch FROM executor_hosts WHERE host_id=$1)
                     ORDER BY c.leased_until, c.execution_id
-                    FOR UPDATE OF c SKIP LOCKED LIMIT $2)
+                    FOR UPDATE OF c SKIP LOCKED LIMIT $2
+                ) UPDATE execution_runs r SET state='fencing',lease_token=r.lease_token+1,
+                    reconciler=h.host_id, reader_epoch=LEAST(r.reader_epoch,h.epoch)
+                FROM executor_hosts h, picked p
+                WHERE h.host_id=$1 AND r.execution_id=p.execution_id
+                AND r.state='claimed' AND r.leased_until<now() AND r.writer_epoch<=h.epoch
                 RETURNING jsonb_build_object('execution_id',r.execution_id,
                     'executor_id',r.executor_id,'reconciler',r.reconciler,
                     'token',r.lease_token)::text AS run""",
@@ -277,19 +280,22 @@ class PostgresExecutionRunQueue:
         async with self._pool.acquire() as conn:
             # Take over rows whose reconciler has left. SKIP LOCKED keeps two
             # adopters apart; the outer predicate is re-checked after the lock,
-            # so a second adopter finds a live owner and takes nothing.
+            # so a second adopter finds a live owner and takes nothing. The pick
+            # is a MATERIALIZED CTE for the same reason as fence_expired's.
             rows = await conn.fetch(
-                """UPDATE execution_runs r SET reconciler=me.host_id,lease_token=r.lease_token+1
-                FROM executor_hosts me
-                WHERE me.host_id=$1 AND r.state IN ('fencing','reaped')
-                AND r.reconciler IS DISTINCT FROM me.host_id AND r.writer_epoch<=me.epoch
-                AND NOT EXISTS (SELECT 1 FROM executor_hosts h WHERE h.host_id=r.reconciler)
-                AND r.execution_id IN (SELECT o.execution_id FROM execution_runs o
+                """WITH picked AS MATERIALIZED (
+                    SELECT o.execution_id FROM execution_runs o
                     WHERE o.state IN ('fencing','reaped') AND o.reconciler IS DISTINCT FROM $1
                     AND o.writer_epoch<=(SELECT epoch FROM executor_hosts WHERE host_id=$1)
                     AND NOT EXISTS (SELECT 1 FROM executor_hosts h WHERE h.host_id=o.reconciler)
                     ORDER BY o.leased_until, o.execution_id
-                    FOR UPDATE OF o SKIP LOCKED LIMIT $2)
+                    FOR UPDATE OF o SKIP LOCKED LIMIT $2
+                ) UPDATE execution_runs r SET reconciler=me.host_id,lease_token=r.lease_token+1
+                FROM executor_hosts me, picked p
+                WHERE me.host_id=$1 AND r.execution_id=p.execution_id
+                AND r.state IN ('fencing','reaped')
+                AND r.reconciler IS DISTINCT FROM me.host_id AND r.writer_epoch<=me.epoch
+                AND NOT EXISTS (SELECT 1 FROM executor_hosts h WHERE h.host_id=r.reconciler)
                 RETURNING jsonb_build_object('execution_id',r.execution_id,
                     'executor_id',r.executor_id,'reconciler',r.reconciler,
                     'token',r.lease_token,'reaped',r.state='reaped')::text AS run""",

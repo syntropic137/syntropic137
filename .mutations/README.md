@@ -27,7 +27,7 @@ the unpatched baseline passes.
 
 | Patch | Bug re-introduced | Killed by |
 |---|---|---|
-| `store/10-store-acquisition-unbounded.patch` | `fence_expired` and `take_over` select up to 1000 rows whatever `limit` says, so the first concurrent acquirer takes every row | `packages/syn-adapters/tests/test_execution_run_queue_postgres.py::test_fencing_is_bounded_and_concurrent_fencers_never_share_a_row`, `packages/syn-adapters/tests/test_execution_run_queue_postgres.py::test_takeover_is_bounded_and_concurrent_adopters_never_share_a_row` |
+| `store/10-store-acquisition-unbounded.patch` | `fence_expired` and `take_over` select up to 1000 rows whatever `limit` says, so the first concurrent acquirer takes every row | `packages/syn-adapters/tests/test_execution_run_queue_postgres.py::test_a_lone_fencer_takes_no_more_than_its_limit`, `packages/syn-adapters/tests/test_execution_run_queue_postgres.py::test_fencing_is_bounded_and_concurrent_fencers_never_share_a_row`, `packages/syn-adapters/tests/test_execution_run_queue_postgres.py::test_takeover_is_bounded_and_concurrent_adopters_never_share_a_row` |
 
 These tests need Postgres, so this patch was not run in the agent workspace
 (no Docker); the expected failure is the `(len(a), len(b)) == (2, 2)` count

@@ -1,22 +1,21 @@
 diff --git a/packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py b/packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py
-index 055717359..90d568be4 100644
 --- a/packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py
 +++ b/packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py
-@@ -262,7 +262,7 @@ class PostgresExecutionRunQueue:
+@@ -260,7 +260,7 @@
                      WHERE c.state='claimed' AND c.leased_until<now()
                      AND c.writer_epoch<=(SELECT epoch FROM executor_hosts WHERE host_id=$1)
                      ORDER BY c.leased_until, c.execution_id
--                    FOR UPDATE OF c SKIP LOCKED LIMIT $2)
-+                    FOR UPDATE OF c SKIP LOCKED LIMIT GREATEST($2, 1000))
-                 RETURNING jsonb_build_object('execution_id',r.execution_id,
-                     'executor_id',r.executor_id,'reconciler',r.reconciler,
-                     'token',r.lease_token)::text AS run""",
-@@ -289,7 +289,7 @@ class PostgresExecutionRunQueue:
+-                    FOR UPDATE OF c SKIP LOCKED LIMIT $2
++                    FOR UPDATE OF c SKIP LOCKED LIMIT GREATEST($2, 1000)
+                 ) UPDATE execution_runs r SET state='fencing',lease_token=r.lease_token+1,
+                     reconciler=h.host_id, reader_epoch=LEAST(r.reader_epoch,h.epoch)
+                 FROM executor_hosts h, picked p
+@@ -289,7 +289,7 @@
                      AND o.writer_epoch<=(SELECT epoch FROM executor_hosts WHERE host_id=$1)
                      AND NOT EXISTS (SELECT 1 FROM executor_hosts h WHERE h.host_id=o.reconciler)
                      ORDER BY o.leased_until, o.execution_id
--                    FOR UPDATE OF o SKIP LOCKED LIMIT $2)
-+                    FOR UPDATE OF o SKIP LOCKED LIMIT GREATEST($2, 1000))
-                 RETURNING jsonb_build_object('execution_id',r.execution_id,
-                     'executor_id',r.executor_id,'reconciler',r.reconciler,
-                     'token',r.lease_token,'reaped',r.state='reaped')::text AS run""",
+-                    FOR UPDATE OF o SKIP LOCKED LIMIT $2
++                    FOR UPDATE OF o SKIP LOCKED LIMIT GREATEST($2, 1000)
+                 ) UPDATE execution_runs r SET reconciler=me.host_id,lease_token=r.lease_token+1
+                 FROM executor_hosts me, picked p
+                 WHERE me.host_id=$1 AND r.execution_id=p.execution_id

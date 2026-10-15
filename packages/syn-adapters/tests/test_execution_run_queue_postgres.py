@@ -854,6 +854,21 @@ async def test_fencing_is_bounded_and_concurrent_fencers_never_share_a_row(
     assert await first.reconciling("rec-1") == sorted(a, key=lambda r: r.execution_id)
 
 
+async def test_a_lone_fencer_takes_no_more_than_its_limit(pools: list[asyncpg.Pool]) -> None:
+    """The bound is per statement, not a race: an IN (... LIMIT) pick was rescanned per row."""
+    dying = PostgresExecutionRunQueue(pools[0])
+    lone = PostgresExecutionRunQueue(pools[1])
+    await _online(dying, "dying", capacity=6)
+    await _online(lone, "rec-1", capacity=1)
+    for n in range(6):
+        await _admit(dying, f"exec-{n}")
+        assert await dying.claim("dying") is not None
+    await _expire_claims(pools[0], "dying", expected=6)
+
+    assert len(await lone.fence_expired("rec-1", limit=2)) == 2
+    assert len(await lone.reconciling("rec-1")) == 2
+
+
 async def test_takeover_is_bounded_and_concurrent_adopters_never_share_a_row(
     pools: list[asyncpg.Pool],
 ) -> None:
