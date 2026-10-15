@@ -524,12 +524,11 @@ allowed_prefixes = [
 # same change. "Class.field" = { issue = "#NNN" }. EXACT: a field that gains a
 # consumer, or is deleted, fails as stale.
 # TODO(#1805): the cloud backend fields describe a backend nothing provisions;
-# docker_runtime/docker_network are not passed to the provider (the network
-# comes from agentic_isolation's SecurityConfig); isolation_backend is not read
+# docker_network is not passed to the provider (the network comes from
+# agentic_isolation's SecurityConfig); isolation_backend is not read
 # by WorkspaceService, which picks the backend from WorkspaceServiceConfig.
 "WorkspaceSettings.cloud_api_key" = { issue = "#1805" }
 "WorkspaceSettings.cloud_provider" = { issue = "#1805" }
 "WorkspaceSettings.cloud_template" = { issue = "#1805" }
 "WorkspaceSettings.docker_network" = { issue = "#1805" }
-"WorkspaceSettings.docker_runtime" = { issue = "#1805" }
 "WorkspaceSettings.isolation_backend" = { issue = "#1805" }

@@ -76,6 +76,7 @@ from syn_shared.settings.storage import (
 from syn_shared.settings.workspace import (
     CloudProvider,
     IsolationBackend,
+    WorkspaceRuntime,
     WorkspaceSettings,
     get_default_isolation_backend,
 )
@@ -111,6 +112,7 @@ __all__ = [
     "StorageProvider",
     "StorageSettings",
     "WorkspaceImageProvider",
+    "WorkspaceRuntime",
     "WorkspaceSettings",
     "get_default_isolation_backend",
     "get_github_settings",
