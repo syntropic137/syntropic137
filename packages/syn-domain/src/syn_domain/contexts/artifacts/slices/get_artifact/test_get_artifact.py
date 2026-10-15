@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
 from syn_domain.contexts.artifacts._shared.value_objects import ArtifactType, ContentType
 from syn_domain.contexts.artifacts.domain.aggregate_artifact.ArtifactAggregate import (
     ArtifactAggregate,
@@ -35,19 +36,6 @@ ARTIFACT_ID = "art-1570"
 #: The key MinIO writes for an execution-scoped upload. The artifact id alone
 #: builds ``artifacts/art-1570.md``, which is not where the bytes are (#1652).
 STORAGE_URI = "s3://syn-artifacts/artifacts/wf-1570/exec-1570/art-1570.md"
-
-
-class _Store:
-    """A projection store, keyed the way every real one is."""
-
-    def __init__(self) -> None:
-        self.rows: dict[tuple[str, str], dict[str, object]] = {}
-
-    async def save(self, namespace: str, key: str, data: dict[str, object]) -> None:
-        self.rows[(namespace, key)] = data
-
-    async def get(self, namespace: str, key: str) -> dict[str, object] | None:
-        return self.rows.get((namespace, key))
 
 
 class _Repo:
@@ -98,7 +86,7 @@ async def _created(repo: _Repo) -> ArtifactAggregate:
 
 @pytest.fixture
 def projection() -> ArtifactListProjection:
-    return ArtifactListProjection(_Store())
+    return ArtifactListProjection(InMemoryProjectionStore())
 
 
 async def test_an_artifact_the_projection_has_not_seen_is_found_with_its_storage_key(
