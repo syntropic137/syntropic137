@@ -55,12 +55,18 @@ input shape production produces.
 Usage:
 
     mutation_evidence.py validate                      # inputs from env
-    mutation_evidence.py run --root PR --report FILE (--image IMAGE | --host)
+    mutation_evidence.py run --root PR --report FILE [--evidence FILE] (--image IMAGE | --host)
+
+`--evidence` also writes `evidence.json` (schema 1, ADR-014 §10), the
+machine-readable verdict an evidence gate reads. It is written only when the
+run reached a verdict: an input or setup failure writes none, because no
+report could name what it proved, and a missing report reads as "no evidence".
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import shutil
@@ -68,7 +74,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from enum import StrEnum
 from pathlib import Path, PurePosixPath
 from typing import Final
@@ -199,6 +205,69 @@ class Evidence:
         if self.baseline is None or self.baseline_detail:
             return False
         return bool(self.results) and all(r.outcome is Outcome.KILLED for r in self.results)
+
+
+# --------------------------------------------------------------------------
+# evidence.json
+# --------------------------------------------------------------------------
+
+#: `evidence.json` is `EvidenceReport` in syn_domain's evidence_contract. This
+#: script runs stdlib-only on the host (see the workflow), so it cannot import
+#: the model; scripts/tests validate every report these types write through it.
+#: `scripts/integration_evidence.py` writes the same document with them.
+EVIDENCE_SCHEMA: Final = 1
+
+
+class Verdict(StrEnum):
+    PASSED = "passed"
+    FAILED = "failed"
+    VOID = "void"
+
+
+class TestOutcome(StrEnum):
+    __test__ = False  # a vocabulary, not a pytest class
+
+    PASSED = "passed"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+    XFAIL = "xfail"
+    NOT_COLLECTED = "not_collected"
+
+
+@dataclass(frozen=True)
+class RequestedResult:
+    id: str
+    outcome: TestOutcome
+
+
+@dataclass(frozen=True)
+class SuiteCounts:
+    collected: int
+    passed: int
+    failed: int
+    skipped: int
+
+
+@dataclass(frozen=True)
+class EvidenceReport:
+    kind: str
+    pr: int
+    head_sha: str
+    dispatch_id: str
+    verdict: Verdict
+    requested: tuple[RequestedResult, ...]
+    suite: SuiteCounts
+    summary: str
+    report_md: str
+
+    def to_json(self) -> str:
+        return json.dumps({"schema": EVIDENCE_SCHEMA, **asdict(self)}, indent=2) + "\n"
+
+
+def covers(selector: str, node_id: str) -> bool:
+    """Whether two node ids name overlapping tests: equal, or one inside the other."""
+    shorter, longer = sorted((selector, node_id), key=len)
+    return longer == shorter or longer.startswith((f"{shorter}::", f"{shorter}["))
 
 
 # --------------------------------------------------------------------------
@@ -714,6 +783,64 @@ def render_error(pr: int, sha: str, run_url: str, message: str) -> str:
     )
 
 
+def requested_outcome(baseline: PytestRun, node_id: str) -> TestOutcome:
+    """What the unmutated baseline did to one requested id.
+
+    The baseline reports failing ids but only COUNTS for everything else, so a
+    skip or xfail among several requested ids is charged to each of them. That
+    is the honest direction: such a baseline is void, and an id is reported
+    `passed` only when the baseline proves it.
+    """
+    if any(covers(node_id, failing) for failing in baseline.failing):
+        return TestOutcome.FAILED
+    if baseline.skipped:
+        return TestOutcome.SKIPPED
+    if baseline.xfail:
+        return TestOutcome.XFAIL
+    if baseline.exit_code in {0, 4, 5} and baseline.passed == 0:
+        # 5: nothing collected; 4: a node id pytest could not find.
+        return TestOutcome.NOT_COLLECTED
+    if baseline.exit_code != 0:
+        return TestOutcome.FAILED
+    return TestOutcome.PASSED
+
+
+def evidence_report(evidence: Evidence, dispatch_id: str, report_md: str) -> EvidenceReport:
+    """`evidence.json` for a run that reached a verdict (`execute` returned)."""
+    base = evidence.baseline
+    if base is None:
+        raise RuntimeError("no baseline ran, so there is no evidence to report")
+    if evidence.baseline_detail:
+        verdict, summary = Verdict.VOID, evidence.baseline_detail
+    elif evidence.ok:
+        verdict, summary = Verdict.PASSED, f"every mutation killed ({len(evidence.results)})"
+    else:
+        missed = [r for r in evidence.results if r.outcome is not Outcome.KILLED]
+        named = ", ".join(f"{r.patch} {r.outcome.value}" for r in missed)
+        verdict = Verdict.FAILED
+        summary = f"{len(missed)} of {len(evidence.results)} mutations not killed: {named}"
+    return EvidenceReport(
+        kind="mutation",
+        pr=evidence.pr,
+        head_sha=evidence.sha,
+        dispatch_id=dispatch_id,
+        verdict=verdict,
+        # The contract refuses a repeated id; a selection may repeat one.
+        requested=tuple(
+            RequestedResult(node_id, requested_outcome(base, node_id))
+            for node_id in dict.fromkeys(evidence.tests)
+        ),
+        suite=SuiteCounts(
+            collected=base.passed + len(base.failing) + base.skipped + base.xfail,
+            passed=base.passed,
+            failed=len(base.failing),
+            skipped=base.skipped + base.xfail,
+        ),
+        summary=summary,
+        report_md=report_md,
+    )
+
+
 def _run_url() -> str:
     server = os.environ.get("GITHUB_SERVER_URL", "https://github.com")
     repo = os.environ.get("GITHUB_REPOSITORY", "")
@@ -728,6 +855,7 @@ def main(argv: list[str] | None = None) -> int:
     run = sub.add_parser("run", help="baseline + every patch against a PR checkout")
     run.add_argument("--root", type=Path, required=True, help="the PR checkout")
     run.add_argument("--report", type=Path, required=True)
+    run.add_argument("--evidence", type=Path, help="also write evidence.json here")
     mode = run.add_mutually_exclusive_group(required=True)
     mode.add_argument("--image", help="run PR code in this container image (sandbox)")
     mode.add_argument(
@@ -761,8 +889,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"::error::{exc}")
         report.write_text(render_error(inputs.pr, sha, _run_url(), str(exc)))
         return 1
-    report.write_text(render(evidence, _run_url()))
-    print(report.read_text())
+    markdown = render(evidence, _run_url())
+    report.write_text(markdown)
+    if args.evidence is not None:
+        dispatch_id = env.get(ENV_DISPATCH_ID, "")  # validated by inputs_from_env
+        args.evidence.write_text(evidence_report(evidence, dispatch_id, markdown).to_json())
+    print(markdown)
     return 0 if evidence.ok else 1
 
 
