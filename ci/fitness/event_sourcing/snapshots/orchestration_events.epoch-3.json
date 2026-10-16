@@ -1208,6 +1208,9 @@
       },
       "additionalProperties": false,
       "properties": {
+        "after_phase_id": {
+          "type": "string"
+        },
         "execution_id": {
           "type": "string"
         },
@@ -1229,6 +1232,17 @@
           "anyOf": [
             {
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "next_step": {
+          "anyOf": [
+            {
+              "type": "integer"
             },
             {
               "type": "null"
@@ -1296,6 +1310,7 @@
       "required": [
         "execution_id",
         "gate_id",
+        "after_phase_id",
         "step",
         "outcome"
       ],

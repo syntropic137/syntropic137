@@ -191,7 +191,9 @@ def record_removal(
     settled = EvidenceStepSettledEvent(
         execution_id=command.aggregate_id,
         gate_id=gate.gate_id,
+        after_phase_id=gate.after_phase_id,
         step=step.index,
+        next_step=_next_index(gate, step),
         outcome=StepOutcome.PASSED,
         head_sha_evidenced=command.after_sha,
     )
@@ -225,7 +227,9 @@ def settle(
     return EvidenceStepSettledEvent(
         execution_id=command.aggregate_id,
         gate_id=gate.gate_id,
+        after_phase_id=gate.after_phase_id,
         step=step.index,
+        next_step=_next_index(gate, step),
         outcome=command.outcome,
         reason=command.reason,
         run_id=command.run_id,
@@ -264,3 +268,9 @@ def _earlier_mutation_tests(
             if request is not None and request.kind is EvidenceKind.MUTATION:
                 found[request.repository] = request.tests
     return found
+
+
+def _next_index(gate: EvidenceGate, step: EvidencePlanStep) -> int | None:
+    """The step after ``step``, or None when it is the last. Steps settle in order."""
+    following = step.index + 1
+    return following if following < len(gate.plan) else None

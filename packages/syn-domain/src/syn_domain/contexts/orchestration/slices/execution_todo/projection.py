@@ -58,6 +58,12 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins imp
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     INHERITED_PHASE_OWNERS,
 )
+from syn_domain.contexts.orchestration.domain.events.EvidenceRequestedEvent import (
+    EvidenceRequestedEvent,
+)
+from syn_domain.contexts.orchestration.domain.events.EvidenceStepSettledEvent import (
+    EvidenceStepSettledEvent,
+)
 from syn_domain.contexts.orchestration.domain.events.PhaseRetryScheduledEvent import (
     PhaseRetryScheduledEvent,
 )
@@ -74,6 +80,8 @@ def _item_to_dict(item: TodoItem) -> dict:
         "phase_id": item.phase_id,
         "workspace_id": item.workspace_id,
         "session_id": item.session_id,
+        "evidence_gate_id": item.evidence_gate_id,
+        "evidence_step": item.evidence_step,
     }
 
 
@@ -84,6 +92,8 @@ def _item_from_dict(data: dict) -> TodoItem:
         phase_id=data.get("phase_id"),
         workspace_id=data.get("workspace_id"),
         session_id=data.get("session_id"),
+        evidence_gate_id=data.get("evidence_gate_id"),
+        evidence_step=data.get("evidence_step"),
     )
 
 
@@ -395,6 +405,62 @@ class ExecutionTodoProjection(AutoDispatchProjection):
                     {next_phase_id: _ACTION_RANK[TodoAction.PROVISION_WORKSPACE]},
                 )
             await self._save_state(execution_id, current, progress)
+
+    async def on_evidence_requested(self, event_data: EvidenceRequestedEvent) -> None:
+        """A gate held the transition after a phase → run its first step (plan §A.5).
+
+        Appends, like `on_next_phase_ready`: it arrives in the same save as
+        ArtifactsCollectedForPhase, whose COMPLETE_PHASE must survive.
+        """
+        event = EvidenceRequestedEvent.model_validate(event_data)
+        if not event.execution_id or not event.steps:
+            return
+        await self._replace_evidence_step(
+            event.execution_id, event.after_phase_id, event.gate_id, None, 0
+        )
+
+    async def on_evidence_step_settled(self, event_data: EvidenceStepSettledEvent) -> None:
+        """A step settled → drop its to-do and add the next one the aggregate named.
+
+        None next means the gate opened; its `NextPhaseReady` adds the phase.
+        """
+        event = EvidenceStepSettledEvent.model_validate(event_data)
+        if not event.execution_id:
+            return
+        await self._replace_evidence_step(
+            event.execution_id, event.after_phase_id, event.gate_id, event.step, event.next_step
+        )
+
+    async def _replace_evidence_step(
+        self,
+        execution_id: str,
+        phase_id: str,
+        gate_id: str,
+        settled: int | None,
+        following: int | None,
+    ) -> None:
+        async with self._lock_for(execution_id):
+            current, progress = await self._read_state(execution_id)
+            remaining = [
+                t
+                for t in current
+                if not (
+                    t.action == TodoAction.RUN_EVIDENCE_STEP
+                    and t.evidence_gate_id == gate_id
+                    and t.evidence_step == settled
+                )
+            ]
+            if following is not None:
+                remaining.append(
+                    TodoItem(
+                        execution_id=execution_id,
+                        action=TodoAction.RUN_EVIDENCE_STEP,
+                        phase_id=phase_id,
+                        evidence_gate_id=gate_id,
+                        evidence_step=following,
+                    )
+                )
+            await self._save_state(execution_id, remaining, progress)
 
     async def on_workflow_completed(self, event_data: dict) -> None:
         """Workflow completed → clear all todos."""

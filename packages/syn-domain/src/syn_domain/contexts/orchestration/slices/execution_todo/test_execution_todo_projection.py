@@ -490,3 +490,90 @@ class TestRestartResilience:
         assert len(todos_after) == 1
         assert todos_after[0].action == todos_before[0].action
         assert todos_after[0].phase_id == todos_before[0].phase_id
+
+
+@pytest.mark.unit
+class TestEvidenceGateSteps:
+    """RUN_EVIDENCE_STEP items follow the aggregate's events (plan §A.5, PR 5b).
+
+    Fed the events' own serialized payloads, which is what the coordinator
+    delivers, so a field the event drops fails here.
+    """
+
+    @staticmethod
+    def _requested() -> dict:
+        from datetime import UTC, datetime
+
+        from syn_domain.contexts.orchestration._shared.evidence_contract import EvidenceStepKind
+        from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+            EvidencePlanStep,
+        )
+        from syn_domain.contexts.orchestration.domain.events.EvidenceRequestedEvent import (
+            EvidenceRequestedEvent,
+        )
+
+        return EvidenceRequestedEvent(
+            workflow_id="wf-1",
+            execution_id="exec-1",
+            gate_id="gate-1",
+            after_phase_id="p-1",
+            next_phase_id="p-2",
+            next_phase_order=2,
+            steps=[
+                EvidencePlanStep(index=0, kind=EvidenceStepKind.MUTATION),
+                EvidencePlanStep(index=1, kind=EvidenceStepKind.INTEGRATION),
+            ],
+            requested_at=datetime(2026, 10, 16, tzinfo=UTC),
+        ).model_dump(mode="json")
+
+    @staticmethod
+    def _settled(step: int, next_step: int | None) -> dict:
+        from syn_domain.contexts.orchestration._shared.evidence_contract import StepOutcome
+        from syn_domain.contexts.orchestration.domain.events.EvidenceStepSettledEvent import (
+            EvidenceStepSettledEvent,
+        )
+
+        return EvidenceStepSettledEvent(
+            execution_id="exec-1",
+            gate_id="gate-1",
+            after_phase_id="p-1",
+            step=step,
+            next_step=next_step,
+            outcome=StepOutcome.PASSED,
+        ).model_dump(mode="json")
+
+    async def _evidence_items(
+        self, proj: ExecutionTodoProjection
+    ) -> list[tuple[str | None, int | None]]:
+        return [
+            (t.evidence_gate_id, t.evidence_step)
+            for t in await proj.get_pending("exec-1")
+            if t.action == TodoAction.RUN_EVIDENCE_STEP
+        ]
+
+    @pytest.mark.anyio
+    async def test_a_request_queues_step_zero_beside_complete_phase(self) -> None:
+        proj = ExecutionTodoProjection(store=InMemoryProjectionStore())
+        await proj.on_workflow_execution_started(TWO_PHASE_STARTED_EVENT)
+        await proj.on_artifacts_collected_for_phase(
+            {"execution_id": "exec-1", "phase_id": "p-1", "artifact_ids": []}
+        )
+        await proj.on_evidence_requested(self._requested())  # type: ignore[arg-type]
+
+        actions = [t.action for t in await proj.get_pending("exec-1")]
+        assert actions == [TodoAction.COMPLETE_PHASE, TodoAction.RUN_EVIDENCE_STEP]
+        assert await self._evidence_items(proj) == [("gate-1", 0)]
+
+    @pytest.mark.anyio
+    async def test_steps_survive_the_phase_completing_and_advance_as_settled(self) -> None:
+        proj = ExecutionTodoProjection(store=InMemoryProjectionStore())
+        await proj.on_workflow_execution_started(TWO_PHASE_STARTED_EVENT)
+        await proj.on_evidence_requested(self._requested())  # type: ignore[arg-type]
+        await proj.on_phase_completed({"execution_id": "exec-1", "phase_id": "p-1"})
+        assert await self._evidence_items(proj) == [("gate-1", 0)]
+
+        await proj.on_evidence_step_settled(self._settled(0, 1))  # type: ignore[arg-type]
+        assert await self._evidence_items(proj) == [("gate-1", 1)]
+
+        await proj.on_evidence_step_settled(self._settled(1, None))  # type: ignore[arg-type]
+        assert await self._evidence_items(proj) == []

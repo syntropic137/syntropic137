@@ -22,7 +22,12 @@ class EvidenceStepSettledEvent(DomainEvent):
 
     execution_id: str
     gate_id: str
+    #: The phase the gate follows; the to-do item for the next step names it.
+    after_phase_id: str
     step: int
+    #: The step that runs next, decided by the aggregate; None when this
+    #: settle opened the gate (a `NextPhaseReady` follows in the same save).
+    next_step: int | None = None
     outcome: StepOutcome
     reason: str | None = None
     run_id: int | None = None
