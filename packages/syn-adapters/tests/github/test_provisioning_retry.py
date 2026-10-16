@@ -50,6 +50,8 @@ pytestmark = pytest.mark.unit
 _REPO = "https://github.com/org/repo-a"
 _LOOKUP = "/repos/org/repo-a/installation"
 _MINT = "/app/installations/7/access_tokens"
+#: What an agent token's permission map is derived from (A.10: `actions` capped).
+_GRANT = "/app/installations/7"
 _DROPPED = httpx.RemoteProtocolError("Server disconnected without sending a response.")
 
 
@@ -118,6 +120,8 @@ class _Network:
             return self._fail(scripted.pop(0))
         if path == _LOOKUP:
             return httpx.Response(200, json={"id": 7})
+        if path == _GRANT:
+            return httpx.Response(200, json={"id": 7, "permissions": {"contents": "write"}})
         assert path == _MINT
         self.minted.append("ghs_minted")
         lost = self.lost_responses.get(path)
