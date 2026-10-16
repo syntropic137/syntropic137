@@ -188,8 +188,25 @@ def _declaration_error(mark: ast.expr) -> str | None:
     return None
 
 
+@dataclass(frozen=True)
+class _Mark:
+    """A mark with its name resolved in the module that WROTE it.
+
+    A fixture's ``params`` reach tests in other modules, which may spell
+    pytest differently, so a mark is named where it is defined, never where
+    it is used.
+    """
+
+    name: str | None
+    node: ast.expr
+
+    @classmethod
+    def read(cls, node: ast.expr, names: _PytestNames) -> _Mark:
+        return cls(names.mark_name(node), node)
+
+
 #: One parameter leg: the marks ``pytest.param(..., marks=...)`` gives it.
-_Leg = tuple[ast.expr, ...]
+_Leg = tuple[_Mark, ...]
 
 
 def _legs(values: ast.expr | None, names: _PytestNames) -> list[_Leg]:
@@ -206,7 +223,7 @@ def _legs(values: ast.expr | None, names: _PytestNames) -> list[_Leg]:
         if isinstance(value, ast.Call) and names.refers_to(value.func, _PARAM):
             for kw in value.keywords:
                 if kw.arg == "marks":
-                    marks = tuple(_listed(kw.value))
+                    marks = tuple(_Mark.read(m, names) for m in _listed(kw.value))
         legs.append(marks)
     return legs or [()]
 
@@ -298,7 +315,8 @@ class _Module:
 
     Module functions resolve bare calls; a class's methods (and those of its
     same-module bases) resolve ``self.``/``cls.`` calls made inside that class;
-    a class's fixtures are visible only to that class's tests.
+    a class's fixtures (its own, then its same-module bases') are visible only to
+    that class's tests.
     """
 
     rel: str
@@ -329,8 +347,20 @@ class _Module:
         return module
 
     def class_fixtures(self, owner: ast.ClassDef) -> dict[str, _Fixture]:
+        """``owner``'s fixtures and those it inherits from same-module bases.
+
+        An inherited fixture is an attribute of the subclass, so a subclass
+        definition of the same name replaces it, and the first base wins.
+        """
         if id(owner) not in self._class_fixtures:
-            self._class_fixtures[id(owner)] = _fixtures(_functions(owner.body), self)
+            self._class_fixtures[id(owner)] = {}  # recursion guard
+            merged: dict[str, _Fixture] = {}
+            for base in reversed(owner.bases):
+                parent = self.classes.get(base.id) if isinstance(base, ast.Name) else None
+                if parent is not None and parent is not owner:
+                    merged.update(self.class_fixtures(parent))
+            merged.update(_fixtures(_functions(owner.body), self))
+            self._class_fixtures[id(owner)] = merged
         return self._class_fixtures[id(owner)]
 
     def _methods(self, owner: ast.ClassDef, name: str) -> list[_Function]:
@@ -540,13 +570,14 @@ class _Census:
         module_marks: list[ast.expr],
     ) -> list[Finding]:
         names = module.names
-        static = [*test.node.decorator_list, *test.owner_marks, *module_marks]
+        static_nodes = [*test.node.decorator_list, *test.owner_marks, *module_marks]
+        static = [_Mark.read(m, names) for m in static_nodes]
         requests = [
             (name, 0)
-            for name in [*_params(test.node), *_usefixtures(static, names), *scope.autouse()]
+            for name in [*_params(test.node), *_usefixtures(static_nodes, names), *scope.autouse()]
         ]
         sources = [
-            *_parametrize_legs(static, names),
+            *_parametrize_legs(static_nodes, names),
             *(f.legs for f in scope.closure(requests) if f.legs is not None),
         ]
         legs = [tuple(m for leg in combo for m in leg) for combo in product(*sources)]
@@ -554,14 +585,14 @@ class _Census:
         findings: list[Finding] = []
         reported: set[int] = set()
         for mark in [*static, *(m for leg in legs for m in leg)]:
-            if names.mark_name(mark) == OPT_OUT_MARKER and id(mark) not in reported:
-                reported.add(id(mark))
-                if error := _declaration_error(mark):
+            if mark.name == OPT_OUT_MARKER and id(mark.node) not in reported:
+                reported.add(id(mark.node))
+                if error := _declaration_error(mark.node):
                     findings.append(Finding(rel, test.node_id, "malformed", error))
 
         reachable: str | None = None
         for index, leg in enumerate(legs):
-            marked = {names.mark_name(m) for m in [*static, *leg]}
+            marked = {m.name for m in [*static, *leg]}
             if INTEGRATION_MARKER not in marked or OPT_OUT_MARKER in marked:
                 continue
             skip_marks = sorted(n for n in marked if n in _SKIP_MARKERS)

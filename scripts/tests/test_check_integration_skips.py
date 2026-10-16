@@ -345,6 +345,73 @@ def test_another_classes_autouse_fixture_is_not_in_scope(tmp_path: Path) -> None
     assert find_integration_skips(tmp_path) == []
 
 
+def test_an_inherited_fixture_that_skips_counts(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "test_x.py",
+        """
+        import pytest
+
+        class Base:
+            @pytest.fixture
+            def backend(self):
+                pytest.skip("base backend missing")
+
+        @pytest.mark.integration
+        class TestDerived(Base):
+            def test_store(self, backend):
+                pass
+        """,
+    )
+    assert _census(tmp_path) == [("TestDerived::test_store", "undeclared")]
+
+
+def test_an_inherited_autouse_fixture_counts(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "test_x.py",
+        """
+        import pytest
+
+        class Base:
+            @pytest.fixture(autouse=True)
+            def _env(self):
+                pytest.skip("no env")
+
+        @pytest.mark.integration
+        class TestDerived(Base):
+            def test_store(self):
+                pass
+        """,
+    )
+    assert _census(tmp_path) == [("TestDerived::test_store", "undeclared")]
+
+
+def test_a_subclass_override_replaces_the_inherited_fixture(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "test_x.py",
+        """
+        import pytest
+
+        class Base:
+            @pytest.fixture
+            def backend(self):
+                pytest.skip("base backend missing")
+
+        @pytest.mark.integration
+        class TestDerived(Base):
+            @pytest.fixture
+            def backend(self):
+                return 1
+
+            def test_store(self, backend):
+                pass
+        """,
+    )
+    assert find_integration_skips(tmp_path) == []
+
+
 def test_self_calls_resolve_in_the_tests_own_class(tmp_path: Path) -> None:
     _write(
         tmp_path,
@@ -516,6 +583,40 @@ def test_a_declared_leg_passes_and_a_malformed_one_is_reported(tmp_path: Path) -
         """,
     )
     assert _census(tmp_path) == [("test_bad", "malformed")]
+
+
+_ALIASED_CONFTEST = """
+import pytest as pt
+
+@pt.fixture(params=[pt.param("pg", marks=[pt.mark.integration{declaration}])])
+def backend(request):
+    pt.skip("pg missing")
+"""
+
+
+@pytest.mark.parametrize(
+    ("declaration", "expected"),
+    [
+        ("", [("test_store", "undeclared")]),
+        (', pt.mark.may_skip(reason="no pg", issue="#1")', []),
+        (', pt.mark.may_skip(reason="no pg")', [("test_store", "malformed")]),
+    ],
+    ids=["undeclared", "declared", "malformed"],
+)
+def test_a_conftest_parameters_marks_are_read_with_the_conftests_imports(
+    tmp_path: Path, declaration: str, expected: list[tuple[str, str]]
+) -> None:
+    # The test module imports nothing: ``pt`` exists only in the conftest.
+    _write(tmp_path, "conftest.py", _ALIASED_CONFTEST.format(declaration=declaration))
+    _write(
+        tmp_path,
+        "test_store.py",
+        """
+        def test_store(backend):
+            pass
+        """,
+    )
+    assert _census(tmp_path) == expected
 
 
 def test_a_helper_the_test_calls_is_followed(tmp_path: Path) -> None:
