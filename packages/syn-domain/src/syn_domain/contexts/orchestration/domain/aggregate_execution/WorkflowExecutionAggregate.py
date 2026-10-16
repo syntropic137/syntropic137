@@ -18,7 +18,6 @@ from event_sourcing import (
     event_sourcing_handler,
 )
 
-from syn_domain.contexts.orchestration.domain.aggregate_execution import evidence_steps
 from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continuation import (
     LeftBranches,
     PushedCommit,
@@ -724,18 +723,7 @@ class WorkflowExecutionAggregate(
             self._phase_order_map.get(command.phase_id),
             self._reviews.of(command.phase_id),
         )
-        held = evidence_steps.request_if_needed(
-            policy=command.evidence_gate,
-            decided=decided,
-            phase_id=command.phase_id,
-            definitions=self._phase_definitions,
-            verdict=self._reviews.of(command.phase_id),
-            evidence=self._evidence,
-            gates=self._gates,
-            observed=command.observed_heads,
-            workflow_id=self._workflow_id or "",
-            execution_id=command.aggregate_id,
-        )
+        held = self._hold_for_evidence(command, decided)
         if held is not None:
             self._apply(held)
         elif decided is not None:

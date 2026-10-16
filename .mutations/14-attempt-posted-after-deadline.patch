@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/EvidenceStepHandler.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/EvidenceStepHandler.py
+index 8bd756ac9..343bde11b 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/EvidenceStepHandler.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/EvidenceStepHandler.py
+@@ -192,7 +192,7 @@ class _StepRun:
+     async def _attempt(self) -> EvidenceAttempt | None:
+         """Record an attempt, THEN post it. None when the forge refused and the step settled."""
+         attempt = await self._start()
+-        if self.h.clock() >= attempt.not_after:
++        if False:
+             # The save can outlast the deadline (§A.5 4): nothing is posted after it.
+             await self._settle(StepOutcome.UNAVAILABLE, "timeout")
+             return None

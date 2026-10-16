@@ -1,0 +1,25 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execution_todo/projection.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execution_todo/projection.py
+index 96ab7efcc..9f9e28420 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execution_todo/projection.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execution_todo/projection.py
+@@ -120,7 +120,7 @@ def _is_current_evidence_step(item: TodoItem, gates: dict[str, int]) -> bool:
+     if item.action != TodoAction.RUN_EVIDENCE_STEP or item.evidence_gate_id is None:
+         return True
+     cursor = gates.get(item.evidence_gate_id)
+-    return cursor is None or item.evidence_step == cursor
++    return True
+ 
+ 
+ def _merge_progress(existing: dict[str, int], updates: dict[str, int]) -> dict[str, int]:
+@@ -466,9 +466,9 @@ class ExecutionTodoProjection(AutoDispatchProjection):
+         async with self._lock_for(execution_id):
+             current, progress, gates = await self._read_state(execution_id)
+             cursor = gates.get(gate_id)
+-            if settled is None and cursor is not None:
++            if False:
+                 return  # The request was already applied.
+-            if settled is not None and cursor is not None and settled < cursor:
++            if False:
+                 return  # The step already settled; the gate has moved on.
+             gates[gate_id] = _GATE_CLOSED if following is None else following
+             remaining = [

@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from event_sourcing import DomainEvent
 
     from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
+        ArtifactsCollectedCommand,
         RecordEvidenceRunAdoptedCommand,
         RecordMutationPatchesRemovedCommand,
         SettleEvidenceStepCommand,
@@ -35,7 +36,11 @@ if TYPE_CHECKING:
         EvidenceGateRecord,
         SettledStep,
     )
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.evidence_record import (
+        EvidenceRecord,
+    )
     from syn_domain.contexts.orchestration.domain.aggregate_execution.review_rounds import (
+        NextPhase,
         ReviewRecord,
     )
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
@@ -64,12 +69,30 @@ class EvidenceGateHandlers:
     if TYPE_CHECKING:
         # Owned and initialised by `WorkflowExecutionAggregate`.
         _gates: EvidenceGateRecord
+        _evidence: EvidenceRecord
         _status: ExecutionStatus
         _phase_definitions: list[PhaseDefinition]
         _workflow_id: str | None
         _reviews: ReviewRecord
 
         def _apply(self, event: DomainEvent) -> None: ...
+
+    def _hold_for_evidence(
+        self, command: ArtifactsCollectedCommand, decided: NextPhase | None
+    ) -> EvidenceRequestedEvent | None:
+        """The gate to hold this transition with, or None: off unless the command carries a policy."""
+        return evidence_steps.request_if_needed(
+            policy=command.evidence_gate,
+            decided=decided,
+            phase_id=command.phase_id,
+            definitions=self._phase_definitions,
+            verdict=self._reviews.of(command.phase_id),
+            evidence=self._evidence,
+            gates=self._gates,
+            observed=command.observed_heads,
+            workflow_id=self._workflow_id or "",
+            execution_id=command.aggregate_id,
+        )
 
     def evidence_gate(self, gate_id: str) -> EvidenceGate | None:
         """An evidence gate as its events left it, for the handler that drives it."""
