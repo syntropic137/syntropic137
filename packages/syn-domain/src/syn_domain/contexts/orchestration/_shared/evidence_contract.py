@@ -27,18 +27,32 @@ from typing import Annotated, Final, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
-#: A path segment that `scripts/mutation_evidence.py` `_safe_relative` cannot
-#: refuse: never empty (`//`), never `.`, `..` or `.git`, never `-option`.
-#: Barring every leading dot is stricter than the workflow (it would take
-#: `.hidden/test_x.py`), which pytest does not collect by default anyway.
-_PATH_SEGMENT: Final = r"[A-Za-z0-9_][A-Za-z0-9_.-]*"
+_SEGMENT_CHAR: Final = r"[A-Za-z0-9_.-]"
+#: A segment that starts with neither `.` nor `-`. `_NODE_ID_RE` demands this of
+#: the first segment, and the contract demands it of the file name.
+_PLAIN_SEGMENT: Final = rf"[A-Za-z0-9_]{_SEGMENT_CHAR}*"
+#: A dot-led directory `_safe_relative` takes: `.` + any tail except `.` (`..`)
+#: and `git` (`.git`). Pydantic's regex engine has no lookahead, so the tail is
+#: spelled out: one non-dot character, or 2+ characters not starting `g`, or a
+#: `g...` tail that leaves `git` before it ends or carries on past it.
+_DOT_SEGMENT: Final = (
+    r"\.(?:[A-Za-z0-9_-]"
+    rf"|[A-Za-fh-z0-9_.-]{_SEGMENT_CHAR}+"
+    rf"|g[A-Za-hj-z0-9_.-]{_SEGMENT_CHAR}*"
+    r"|gi"
+    rf"|gi[A-Za-su-z0-9_.-]{_SEGMENT_CHAR}*"
+    rf"|git{_SEGMENT_CHAR}+)"
+)
 #: The grammar `scripts/mutation_evidence.py` enforces on its `tests` input:
 #: `_NODE_ID_RE`, with `_safe_relative`'s path rules folded into the path part,
-#: so the checked-in schema carries them too. `path/to/test_x.py` then zero or
-#: more `::Name`, the last may carry a parametrize id. A request this accepts
-#: is one the workflow accepts (`scripts/tests/test_evidence_contract_parity.py`).
+#: so the checked-in schema carries them too: never an empty segment (`//`),
+#: `.`, `..`, `.git` or `-option`. An explicit selector such as
+#: `tests/.hidden/test_x.py` is collected by pytest, so a nested dot-led
+#: directory is accepted. `path/to/test_x.py` then zero or more `::Name`, the
+#: last may carry a parametrize id. A request this accepts is one the workflow
+#: accepts (`scripts/tests/test_evidence_contract_parity.py`).
 NODE_ID_PATTERN: Final = (
-    rf"^(?:{_PATH_SEGMENT}/)*{_PATH_SEGMENT}\.py"
+    rf"^(?:{_PLAIN_SEGMENT}/(?:(?:{_PLAIN_SEGMENT}|{_DOT_SEGMENT})/)*)?{_PLAIN_SEGMENT}\.py"
     r"(::[A-Za-z_][A-Za-z0-9_]*)*(::[A-Za-z_][A-Za-z0-9_]*\[[A-Za-z0-9_.,=+-]*\])?$"
 )
 #: The same limit `scripts/mutation_evidence.py` puts on one dispatch.

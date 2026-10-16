@@ -154,6 +154,41 @@ class TestInvalidRequests:
             EvidenceRequest.model_validate_json(_request(**{field: value}))
 
 
+# An explicit selector pytest collects, and `parse_tests` takes, although its
+# directory starts with a dot. Default discovery skips it; a named id does not.
+_DOT_DIR_TEST = "tests/.hidden/test_selected.py::test_ok"
+
+
+@pytest.mark.unit
+class TestDotLedDirectories:
+    @pytest.mark.parametrize(
+        "tests",
+        [
+            pytest.param([_DOT_DIR_TEST], id="only"),
+            pytest.param([_TEST, _DOT_DIR_TEST], id="second"),
+            pytest.param(["tests/..x/.gitignored/.g/test_x.py::test_ok"], id="near-misses"),
+        ],
+    )
+    def test_request_accepts(self, tests: list[str]) -> None:
+        assert EvidenceRequest.model_validate_json(_request(tests=tests)).tests == tuple(tests)
+
+    def test_report_accepts_a_result(self) -> None:
+        requested = [{"id": _TEST, "outcome": "passed"}, {"id": _DOT_DIR_TEST, "outcome": "passed"}]
+        report = EvidenceReport.model_validate_json(_report(requested=requested))
+        assert report.requested[1].id == _DOT_DIR_TEST
+
+    @pytest.mark.parametrize(
+        "node_id",
+        [
+            pytest.param(".hidden/test_x.py::test_ok", id="first-segment"),
+            pytest.param("tests/.test_x.py::test_ok", id="file-name"),
+        ],
+    )
+    def test_refused_where_the_workflow_or_the_contract_bars_it(self, node_id: str) -> None:
+        with pytest.raises(ValidationError):
+            EvidenceRequest.model_validate_json(_request(tests=[node_id]))
+
+
 @pytest.mark.unit
 class TestInvalidReports:
     @pytest.mark.parametrize(

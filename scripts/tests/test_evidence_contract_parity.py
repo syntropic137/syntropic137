@@ -9,6 +9,8 @@ model may be stricter; it may never be looser.
 
 from __future__ import annotations
 
+import itertools
+
 import pytest
 from pydantic import ValidationError
 from scripts import mutation_evidence as me
@@ -81,6 +83,29 @@ def test_the_corpus_exercises_both_sides() -> None:
     accepted = [s for s in _NODE_IDS if _model_accepts((s,))]
     assert len(accepted) >= 5
     assert len(accepted) < len(_NODE_IDS)
+
+
+# Every nested directory name up to four characters over the letters that
+# spell `.`, `..` and `.git` and their near misses (`.gi`, `..g`, `.gitx`).
+_NESTED_SEGMENTS = [
+    "".join(chars)
+    for length in range(1, 5)
+    for chars in itertools.product(".git-_x", repeat=length)
+]
+
+
+def test_nested_directories_are_the_workflows_exactly() -> None:
+    # One-way parity skips every id the model refuses, so a model that bars
+    # a directory the workflow and pytest both take would pass it. Here the
+    # two must agree both ways. The one deliberate gap: `PurePosixPath` folds
+    # a `.` segment away, so the workflow takes `tests/./x`; the contract never.
+    disagree = [
+        seg
+        for seg in _NESTED_SEGMENTS
+        if _model_accepts((f"tests/{seg}/test_x.py::test_ok",))
+        != _workflow_accepts((f"tests/{seg}/test_x.py::test_ok",))
+    ]
+    assert disagree == ["."]
 
 
 def test_the_limit_is_the_same() -> None:

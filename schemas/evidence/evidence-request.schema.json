@@ -39,7 +39,7 @@
     },
     "tests": {
       "items": {
-        "pattern": "^(?:[A-Za-z0-9_][A-Za-z0-9_.-]*/)*[A-Za-z0-9_][A-Za-z0-9_.-]*\\.py(::[A-Za-z_][A-Za-z0-9_]*)*(::[A-Za-z_][A-Za-z0-9_]*\\[[A-Za-z0-9_.,=+-]*\\])?$",
+        "pattern": "^(?:[A-Za-z0-9_][A-Za-z0-9_.-]*/(?:(?:[A-Za-z0-9_][A-Za-z0-9_.-]*|\\.(?:[A-Za-z0-9_-]|[A-Za-fh-z0-9_.-][A-Za-z0-9_.-]+|g[A-Za-hj-z0-9_.-][A-Za-z0-9_.-]*|gi|gi[A-Za-su-z0-9_.-][A-Za-z0-9_.-]*|git[A-Za-z0-9_.-]+))/)*)?[A-Za-z0-9_][A-Za-z0-9_.-]*\\.py(::[A-Za-z_][A-Za-z0-9_]*)*(::[A-Za-z_][A-Za-z0-9_]*\\[[A-Za-z0-9_.,=+-]*\\])?$",
         "type": "string"
       },
       "maxItems": 50,
