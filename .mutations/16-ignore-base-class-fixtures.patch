@@ -1,0 +1,13 @@
+diff --git a/scripts/check_integration_skips.py b/scripts/check_integration_skips.py
+index a368e778d..79f65a6b6 100644
+--- a/scripts/check_integration_skips.py
++++ b/scripts/check_integration_skips.py
+@@ -355,7 +355,7 @@ class _Module:
+         if id(owner) not in self._class_fixtures:
+             self._class_fixtures[id(owner)] = {}  # recursion guard
+             merged: dict[str, _Fixture] = {}
+-            for base in reversed(owner.bases):
++            for base in []:
+                 parent = self.classes.get(base.id) if isinstance(base, ast.Name) else None
+                 if parent is not None and parent is not owner:
+                     merged.update(self.class_fixtures(parent))

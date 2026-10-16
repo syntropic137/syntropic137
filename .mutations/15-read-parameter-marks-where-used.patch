@@ -1,0 +1,21 @@
+diff --git a/scripts/check_integration_skips.py b/scripts/check_integration_skips.py
+index a368e778d..f7c81d8cd 100644
+--- a/scripts/check_integration_skips.py
++++ b/scripts/check_integration_skips.py
+@@ -585,14 +585,14 @@ class _Census:
+         findings: list[Finding] = []
+         reported: set[int] = set()
+         for mark in [*static, *(m for leg in legs for m in leg)]:
+-            if mark.name == OPT_OUT_MARKER and id(mark.node) not in reported:
++            if names.mark_name(mark.node) == OPT_OUT_MARKER and id(mark.node) not in reported:
+                 reported.add(id(mark.node))
+                 if error := _declaration_error(mark.node):
+                     findings.append(Finding(rel, test.node_id, "malformed", error))
+ 
+         reachable: str | None = None
+         for index, leg in enumerate(legs):
+-            marked = {m.name for m in [*static, *leg]}
++            marked = {names.mark_name(m.node) for m in [*static, *leg]}
+             if INTEGRATION_MARKER not in marked or OPT_OUT_MARKER in marked:
+                 continue
+             skip_marks = sorted(n for n in marked if n in _SKIP_MARKERS)

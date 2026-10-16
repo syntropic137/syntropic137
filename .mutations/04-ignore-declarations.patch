@@ -1,11 +1,11 @@
 diff --git a/scripts/check_integration_skips.py b/scripts/check_integration_skips.py
-index 0d7e17e72..ea5cdd0d0 100644
+index a368e778d..75a05eda1 100644
 --- a/scripts/check_integration_skips.py
 +++ b/scripts/check_integration_skips.py
-@@ -562,7 +562,7 @@ class _Census:
+@@ -593,7 +593,7 @@ class _Census:
          reachable: str | None = None
          for index, leg in enumerate(legs):
-             marked = {names.mark_name(m) for m in [*static, *leg]}
+             marked = {m.name for m in [*static, *leg]}
 -            if INTEGRATION_MARKER not in marked or OPT_OUT_MARKER in marked:
 +            if INTEGRATION_MARKER not in marked:
                  continue
