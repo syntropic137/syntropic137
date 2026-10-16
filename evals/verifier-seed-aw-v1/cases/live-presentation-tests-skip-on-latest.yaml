@@ -1,0 +1,34 @@
+id: live-presentation-tests-skip-on-latest
+polarity: defect
+source_pr: 66
+escape_class: evidence that cannot run on CI
+# Escaped on 2026-10-14: reverify round 1 judged AW#66 at 32c0a18 and found no
+# new code defect; it left only the live evidence open (fix round 2's record,
+# cited in `certified_in`). At the pin the live presentation tests default to
+# agentic-workspace-claude-cli:latest, an image no CI runner holds, and skip
+# the whole module when it is absent, so their "evidence" is a skip. A merge of
+# main (602d799) sits between the head and the fix 21d1dcd, which pulls the
+# release-pinned image and fails instead of skipping; the pin is the judged
+# head.
+commit: 32c0a183da190fc767e10581eafdbc1bf226422e
+certified_in: https://github.com/AgentParadise/agentic-workspace/pull/66#issuecomment-6177807756
+fix_commit: 21d1dcd96c6746aeae148bde9fa071d98ff75011
+task: >
+  The change under review adds harness credential presentation for the
+  claude-cli and codex harnesses, with live integration tests that run the
+  pinned CLI in its workspace image. Review whether those tests produce
+  evidence in CI on a clean runner, and against which image.
+expected:
+  # The root cause, for the LLM judge only; never part of `task`.
+  defect: >
+    test_harness_credential_presentation.py defaults IMAGE to
+    agentic-workspace-claude-cli:latest and skips the whole module when
+    docker image inspect does not find it. A clean CI runner never holds a
+    locally built :latest, so the live tests skip there, and when they do
+    run they test whatever :latest is rather than the release-pinned image.
+  files:
+    - lib/python/agentic_isolation/tests/integration/test_harness_credential_presentation.py
+  keywords:
+    - [skip, skips, skipped, skipif]
+    - [latest, ":latest", image, pinned, digest, release pin]
+split: train
