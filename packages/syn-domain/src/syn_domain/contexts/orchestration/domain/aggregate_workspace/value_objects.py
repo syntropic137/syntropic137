@@ -282,6 +282,10 @@ class WorkspaceDeleteFallback(StrEnum):
     DELETED = "deleted"
     FAILED = "failed"
     REFUSED = "refused"
+    #: Not a provider outcome: syn records this when the provider reported a
+    #: value outside the three above (a contract mismatch), so the row stays
+    #: distinct from None, which means only "not attempted / not reported".
+    UNRECOGNIZED = "unrecognized"
 
 
 @dataclass(frozen=True)

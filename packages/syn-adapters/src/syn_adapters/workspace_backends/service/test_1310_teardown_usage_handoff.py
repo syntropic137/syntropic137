@@ -11,6 +11,7 @@ from __future__ import annotations
 import dataclasses
 import logging
 import os
+import typing
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from unittest.mock import patch
@@ -24,7 +25,7 @@ from agentic_isolation.contract import (
     WorkspaceRef,
 )
 from agentic_isolation.providers.operation_spool import OperationFailure
-from agentic_isolation.providers.teardown_report import TeardownUsage
+from agentic_isolation.providers.teardown_report import DeleteFallback, TeardownUsage
 
 from syn_adapters.workspace_backends.agentic.adapter import AgenticIsolationAdapter
 from syn_adapters.workspace_backends.agentic.teardown_usage import (
@@ -199,7 +200,10 @@ async def test_an_oom_kill_seen_only_by_docker_reaches_the_domain() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("outcome", list(WorkspaceDeleteFallback))
+@pytest.mark.parametrize(
+    "outcome",
+    [o for o in WorkspaceDeleteFallback if o is not WorkspaceDeleteFallback.UNRECOGNIZED],
+)
 async def test_the_fallback_delete_outcome_reaches_the_domain(
     outcome: WorkspaceDeleteFallback,
 ) -> None:
@@ -229,16 +233,36 @@ class _UnknownFallbackReport:
     delete_failures: tuple[str, ...] | None = None
     net_rx_bytes: int | None = None
     net_tx_bytes: int | None = None
-    delete_fallback: str | None = "vaporised"
+    delete_fallback: object = "vaporised"
 
 
-def test_an_unknown_fallback_outcome_is_logged_and_recorded_as_unknown(
-    caplog: pytest.LogCaptureFixture,
+@pytest.mark.parametrize("raw", ["vaporised", "unrecognized", "DELETED", 1])
+def test_an_unknown_fallback_outcome_is_logged_and_recorded_as_unrecognized(
+    caplog: pytest.LogCaptureFixture, raw: object
 ) -> None:
+    # A contract mismatch must stay distinct from None ("not attempted / not
+    # reported") in the row, and must never fail teardown. "unrecognized" is
+    # syn's own marker, so a provider sending it is a mismatch too.
     with caplog.at_level(logging.WARNING):
-        usage = usage_from_report(_UnknownFallbackReport())
-    assert usage == WorkspaceUsage(memory_peak_bytes=1, delete_fallback=None)
-    assert any("vaporised" in r.getMessage() for r in caplog.records)
+        usage = usage_from_report(_UnknownFallbackReport(delete_fallback=raw))
+    assert usage == WorkspaceUsage(
+        memory_peak_bytes=1, delete_fallback=WorkspaceDeleteFallback.UNRECOGNIZED
+    )
+    assert any(repr(raw) in r.getMessage() for r in caplog.records)
+
+
+def test_every_fallback_outcome_the_real_provider_sends_is_known() -> None:
+    # Pinned against agentic-workspace's own `DeleteFallback`: an outcome the
+    # provider adds and syn does not know would be recorded as UNRECOGNIZED.
+    provider = set(typing.get_args(DeleteFallback))
+    known = {o.value for o in WorkspaceDeleteFallback} - {WorkspaceDeleteFallback.UNRECOGNIZED}
+    assert provider == known
+
+
+def test_no_fallback_reported_stays_none() -> None:
+    usage = usage_from_report(_UnknownFallbackReport(delete_fallback=None))
+    assert usage is not None
+    assert usage.delete_fallback is None
 
 
 _RETAINED = FinalizationOutcome(

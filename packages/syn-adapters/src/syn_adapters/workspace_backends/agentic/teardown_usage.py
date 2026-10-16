@@ -24,6 +24,12 @@ from syn_domain.contexts.orchestration import WorkspaceDeleteFallback, Workspace
 
 logger = logging.getLogger(__name__)
 
+#: The outcomes a provider reports. `UNRECOGNIZED` is syn's own marker for a
+#: value outside these, never one a provider may send.
+_PROVIDER_FALLBACKS: tuple[WorkspaceDeleteFallback, ...] = tuple(
+    o for o in WorkspaceDeleteFallback if o is not WorkspaceDeleteFallback.UNRECOGNIZED
+)
+
 #: The one list of field names. The Protocol below must expose exactly these;
 #: a unit test pins the two together.
 USAGE_FIELDS: tuple[str, ...] = tuple(f.name for f in dataclasses.fields(WorkspaceUsage))
@@ -88,18 +94,21 @@ def usage_from_report(report: object) -> WorkspaceUsage | None:
     return usage
 
 
-def _delete_fallback(report: object, value: object) -> WorkspaceDeleteFallback | None:
-    """The provider's fallback-delete outcome, or None when it is not one we know.
+def _delete_fallback(report: object, value: object) -> WorkspaceDeleteFallback:
+    """The provider's fallback-delete outcome, typed.
 
-    An unknown value is a contract mismatch, logged like a missing field and
-    recorded as unknown rather than passed through as a string.
+    A value the provider may not send (anything outside `deleted`, `failed`,
+    `refused`) is a contract mismatch: logged with the raw value and recorded
+    as `UNRECOGNIZED`, so the telemetry row keeps it distinct from None ("not
+    attempted / not reported"). Never raised: this is Lane 2 and teardown must
+    not fail on it.
     """
-    try:
-        return WorkspaceDeleteFallback(value)
-    except ValueError:
-        logger.warning(
-            "Provider teardown report %s has unknown delete_fallback %r; recorded as unknown",
-            type(report).__qualname__,
-            value,
-        )
-        return None
+    for outcome in _PROVIDER_FALLBACKS:
+        if value == outcome.value:
+            return outcome
+    logger.warning(
+        "Provider teardown report %s has unknown delete_fallback %r; recorded as unrecognized",
+        type(report).__qualname__,
+        value,
+    )
+    return WorkspaceDeleteFallback.UNRECOGNIZED
