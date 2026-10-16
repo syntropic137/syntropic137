@@ -1286,6 +1286,25 @@ Phase cannot aim the platform's token elsewhere. A malformed entry is not
 dropped: it becomes a request that Settles `void`, because a dropped request
 would read as "no proof needed".
 
+## Declared Evidence
+
+One Evidence Request as a Phase's latest agent run declared it, or, when the
+entry was malformed, the reason it could not be one. In code:
+`DeclaredEvidence`, carried on `AgentExecutionCompleted.reported_evidence` and
+kept per Phase by the aggregate (`EvidenceRecord`). A retry overwrites its
+Phase's declarations, as it does a Review Verdict. Recorded only: no decision
+reads it until the Evidence Gate exists.
+
+## Observed Head
+
+Where the forge had one branch while a Phase's output was collected: the
+repository, the branch, whether it could be read, its head commit, the PR open
+from it, and whether `.mutations/` was present at that head (unknown when not
+asked, never "absent"). In code: `ObservedHead`, read host-side by
+`EvidenceHeadObserver` for every branch the Execution pushed, inherited as a
+Continued Branch, or declared, and recorded on `ArtifactsCollectedForPhase`.
+The aggregate does no I/O, so this is how the forge's state reaches it.
+
 ## Evidence Report
 
 `evidence.json`, schema 1 (`EvidenceReport`): what one run of a repository's

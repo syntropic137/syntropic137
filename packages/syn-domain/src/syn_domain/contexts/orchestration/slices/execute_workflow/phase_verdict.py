@@ -218,6 +218,9 @@ from typing import Final
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
+from syn_domain.contexts.orchestration.domain.aggregate_execution.evidence_record import (
+    DeclaredEvidence,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     FailureClassification,
     ReportedFailureReason,
@@ -317,6 +320,10 @@ class AgentVerdict:
     #: `refuses_completion`: a review that BLOCKS is a review that finished,
     #: and the aggregate - not this reader - decides what a block means.
     reported_review_verdict: ReviewVerdict | None = None
+    #: What the phase asked the platform to prove (plan §A.1/§A.2). Never read
+    #: by `refuses_completion`: an unreadable entry is carried as one, so a
+    #: malformed declaration costs that declaration, never the verdict.
+    reported_evidence: tuple[DeclaredEvidence, ...] = ()
 
     @classmethod
     def not_reported(cls) -> AgentVerdict:
@@ -369,6 +376,7 @@ class AgentVerdict:
             reported_failure_reason=ReportedFailureReason.from_reported(reported.failure_reason),
             reported_side_effects=SideEffectStatus.from_reported(reported.side_effects),
             reported_review_verdict=ReviewVerdict.from_reported(reported.review_verdict),
+            reported_evidence=DeclaredEvidence.from_reported(reported.evidence),
         )
 
     @classmethod
@@ -415,6 +423,7 @@ class AgentVerdict:
             reported_failure_reason=ReportedFailureReason.from_reported(aliased.failure_reason),
             reported_side_effects=SideEffectStatus.from_reported(aliased.side_effects),
             reported_review_verdict=ReviewVerdict.from_reported(aliased.review_verdict),
+            reported_evidence=DeclaredEvidence.from_reported(aliased.evidence),
         )
 
     @property
@@ -648,6 +657,9 @@ class _ReportedResult(BaseModel):
     side_effects: object | None = None
     #: `object` for the same reason, and a misspelling costs only the word.
     review_verdict: object | None = None
+    #: `object` for the same reason: `DeclaredEvidence.from_reported` keeps a
+    #: malformed entry as an unreadable declaration, never fails the block.
+    evidence: object | None = None
 
     @property
     def said(self) -> str:
@@ -706,6 +718,7 @@ class _StatusAliasResult(BaseModel):
     failure_reason: object | None = None
     side_effects: object | None = None
     review_verdict: object | None = None
+    evidence: object | None = None
 
     @model_validator(mode="before")
     @classmethod

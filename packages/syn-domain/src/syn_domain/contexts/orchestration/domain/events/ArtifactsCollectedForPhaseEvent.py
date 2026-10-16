@@ -5,6 +5,11 @@ from __future__ import annotations
 from datetime import datetime  # noqa: TC003 - needed at runtime for Pydantic
 
 from event_sourcing import DomainEvent, event
+from pydantic import Field
+
+from syn_domain.contexts.orchestration.domain.aggregate_execution.evidence_record import (
+    ObservedHead,  # noqa: TC001 - needed at runtime for Pydantic
+)
 
 
 @event("ArtifactsCollectedForPhase", "v1")
@@ -33,3 +38,7 @@ class ArtifactsCollectedForPhaseEvent(DomainEvent):
     #: in the salvage input itself; the fix is the same one, in the same
     #: place, for the same reason.
     deliverable_recovered: bool = False
+
+    #: The forge's heads for every branch this execution pushed, inherited or
+    #: declared, read host-side during collection (plan §A.2). Recorded only.
+    observed_heads: list[ObservedHead] = Field(default_factory=list)

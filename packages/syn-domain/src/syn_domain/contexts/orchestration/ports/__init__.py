@@ -76,6 +76,7 @@ from syn_domain.contexts.orchestration.ports.RemoteBranchPort import (
     RemoteBranchPort,
     RemoteBranchReading,
 )
+from syn_domain.contexts.orchestration.ports.RemoteTreePort import RemoteTreePort
 from syn_domain.contexts.orchestration.ports.SessionRepositoryPort import (
     SessionRepositoryPort,
 )
@@ -118,6 +119,7 @@ __all__ = [
     "PoolDefinitionConflict",
     "RemoteBranchPort",
     "RemoteBranchReading",
+    "RemoteTreePort",
     "RunCounts",
     "RunLeaseLost",
     "SessionRepositoryPort",
