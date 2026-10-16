@@ -39,6 +39,9 @@ class RunScript:
     found: RunRef | None = None
     conclusion: RunConclusion = RunConclusion.SUCCESS
     report: EvidenceReport | None = None
+    #: The nonce the report carries. None echoes the dispatch the run answers,
+    #: as the producers do; set it to play a report from another attempt.
+    report_dispatch_id: str | None = None
 
 
 class InMemoryEvidenceRunner(InMemoryAdapter):
@@ -51,6 +54,7 @@ class InMemoryEvidenceRunner(InMemoryAdapter):
         self._scripts = list(scripts)
         self._by_dispatch: dict[str, RunScript] = {}
         self._by_run: dict[int, RunScript] = {}
+        self._run_dispatch: dict[int, str] = {}
         self._check = check
         self.dispatched: list[EvidenceAttemptRef] = []
         self.checked: list[tuple[str, str, str]] = []
@@ -65,6 +69,7 @@ class InMemoryEvidenceRunner(InMemoryAdapter):
         ):
             if run is not None:
                 self._by_run[run.run_id] = script
+                self._run_dispatch[run.run_id] = attempt.dispatch_id
         return script.dispatch
 
     async def find_run(self, attempt: EvidenceAttemptRef) -> RunRef | None:
@@ -83,7 +88,11 @@ class InMemoryEvidenceRunner(InMemoryAdapter):
         return self._check
 
     async def fetch_report(self, run: RunRef) -> EvidenceReport | None:
-        return self._by_run[run.run_id].report
+        script = self._by_run[run.run_id]
+        if script.report is None:
+            return None
+        nonce = script.report_dispatch_id or self._run_dispatch[run.run_id]
+        return script.report.model_copy(update={"dispatch_id": nonce})
 
 
 class InMemoryRemoteBranchWriter(InMemoryAdapter):

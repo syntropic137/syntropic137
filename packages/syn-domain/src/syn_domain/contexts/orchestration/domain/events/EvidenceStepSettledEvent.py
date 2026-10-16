@@ -5,7 +5,7 @@ from __future__ import annotations
 from event_sourcing import DomainEvent, event
 from pydantic import Field
 
-from syn_domain.contexts.orchestration._shared.evidence_contract import (
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     StepOutcome,  # noqa: TC001 - needed at runtime for Pydantic
     StepRef,  # noqa: TC001 - needed at runtime for Pydantic
 )

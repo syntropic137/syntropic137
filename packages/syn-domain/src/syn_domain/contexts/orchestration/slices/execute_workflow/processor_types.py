@@ -117,6 +117,18 @@ class ExecutionRepository(Protocol):
 type SessionRepository = Repository[AgentSessionAggregate]
 
 
+class EvidenceStepDriver(Protocol):
+    """Drives one RUN_EVIDENCE_STEP to-do (`EvidenceStepHandler`, plan §A.5)."""
+
+    async def handle(
+        self,
+        todo: TodoItem,
+        aggregate: WorkflowExecutionAggregate,
+        save: Callable[[WorkflowExecutionAggregate], Awaitable[None]],
+        outputs: PhaseOutputCache,
+    ) -> None: ...
+
+
 class ArtifactRepository(Protocol):
     """Repository for Artifact aggregates."""
 

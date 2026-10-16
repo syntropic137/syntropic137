@@ -27,6 +27,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.evidence_gate 
     gate_opens,
     plan_steps,
 )
+from syn_domain.contexts.orchestration.domain.aggregate_execution.review_rounds import NextPhase
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ReviewVerdict,
 )
@@ -60,9 +61,6 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.orchestration.domain.aggregate_execution.evidence_record import (
         EvidenceRecord,
-    )
-    from syn_domain.contexts.orchestration.domain.aggregate_execution.review_rounds import (
-        NextPhase,
     )
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
         EvidenceGatePolicy,
@@ -98,7 +96,9 @@ def request_if_needed(
         next_is_final=bool(definitions) and decided.phase.phase_id == definitions[-1].phase_id,
         certified=verdict is ReviewVerdict.CERTIFIED,
         passed=gates.passed(),
-        earlier_mutation_tests=_earlier_mutation_tests(definitions, phase_id, evidence),
+        earlier_mutation_tests=_earlier_mutation_tests(
+            definitions, phase_id, evidence, frozenset(policy.repositories)
+        ),
     )
     if not gate_opens(enabled=True, has_next_phase=True, inputs=inputs):
         return None
@@ -112,6 +112,15 @@ def request_if_needed(
         skipped_phase_ids=[p.phase_id for p in decided.skipped],
         steps=list(plan_steps(inputs)),
         requested_at=datetime.now(UTC),
+    )
+
+
+def released(gate: EvidenceGate, definitions: Sequence[PhaseDefinition]) -> NextPhase:
+    """The transition ``gate`` held, exactly as `EvidenceRequested` decided it."""
+    by_id = {p.phase_id: p for p in definitions}
+    return NextPhase(
+        phase=by_id[gate.next_phase_id],
+        skipped=tuple(by_id[i] for i in gate.skipped_phase_ids if i in by_id),
     )
 
 
@@ -256,16 +265,27 @@ def _current(
 
 
 def _earlier_mutation_tests(
-    definitions: Sequence[PhaseDefinition], phase_id: str, evidence: EvidenceRecord
+    definitions: Sequence[PhaseDefinition],
+    phase_id: str,
+    evidence: EvidenceRecord,
+    repositories: frozenset[str],
 ) -> dict[str, tuple[str, ...]]:
-    """Per repository, the latest mutation tests declared by a phase before ``phase_id``."""
+    """Per repository, the latest mutation tests declared by a phase before ``phase_id``.
+
+    Only the execution's repositories: a declaration refused as foreign never
+    supplies a selection for a later step (§A.1).
+    """
     found: dict[str, tuple[str, ...]] = {}
     for definition in definitions:
         if definition.phase_id == phase_id:
             break
         for declared in evidence.declared(definition.phase_id):
             request = declared.request
-            if request is not None and request.kind is EvidenceKind.MUTATION:
+            if (
+                request is not None
+                and request.kind is EvidenceKind.MUTATION
+                and request.repository in repositories
+            ):
                 found[request.repository] = request.tests
     return found
 

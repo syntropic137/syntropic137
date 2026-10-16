@@ -39,7 +39,10 @@ from syn_domain.contexts.orchestration._shared.evidence_contract import (
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
-    from syn_domain.contexts.orchestration._shared.evidence_contract import EvidenceRequest
+    from syn_domain.contexts.orchestration._shared.evidence_contract import (
+        EvidenceReport,
+        EvidenceRequest,
+    )
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
         DeclaredEvidence,
         ObservedHead,
@@ -59,11 +62,13 @@ NO_TESTS_DECLARED: Final = "patches present, no tests declared"
 TOO_MANY_TESTS: Final = f"more than {MAX_TESTS} tests requested for one head"
 MUTATION_NOT_PASSED: Final = "mutation evidence for this head did not pass"
 PATCHES_NOT_REMOVED: Final = "mutation patches were not removed"
+REPORT_NOT_REQUESTED: Final = "report does not answer this request"
 
 _KIND_TO_STEP: Final = {
     EvidenceKind.MUTATION: EvidenceStepKind.MUTATION,
     EvidenceKind.INTEGRATION: EvidenceStepKind.INTEGRATION,
 }
+_STEP_TO_KIND: Final = {step: kind for kind, step in _KIND_TO_STEP.items()}
 
 
 @dataclass(frozen=True)
@@ -104,7 +109,7 @@ def gate_opens(*, enabled: bool, has_next_phase: bool, inputs: GateInputs) -> bo
         return False
     if inputs.declared:
         return True
-    patched = _patched_heads(inputs.observed)
+    patched = _patched_heads(inputs)
     if any(not _mutation_passed_for(inputs.passed, h.repository, sha) for h, sha in patched):
         return True
     return inputs.next_is_final and inputs.certified and bool(patched)
@@ -112,68 +117,81 @@ def gate_opens(*, enabled: bool, has_next_phase: bool, inputs: GateInputs) -> bo
 
 def plan_steps(inputs: GateInputs) -> tuple[EvidencePlanStep, ...]:
     """The ordered plan: mutation, removal, integration, required check (§A.3)."""
-    mutation: dict[tuple[str, str], _MutationGroup] = {}
-    integration: list[EvidencePlanStep] = []
-    unplannable: list[EvidencePlanStep] = []
-    for declared in inputs.declared:
-        refused = _refusal(declared, inputs)
-        if refused is not None:
-            unplannable.append(refused)
-            continue
-        request = declared.request
-        assert request is not None  # `_refusal` returned None, so it is a request
-        if request.kind is EvidenceKind.MUTATION:
-            key = (request.repository, request.head_sha)
-            mutation.setdefault(key, _MutationGroup(request)).tests.update(request.tests)
-        else:
-            integration.append(_step_for(request, EvidenceStepKind.INTEGRATION, request.tests))
-
-    undeclared = [
-        (head, sha)
-        for head, sha in _patched_heads(inputs.observed)
-        if (head.repository, sha) not in mutation
+    declared = _DeclaredPlan.of(inputs)
+    steps: list[EvidencePlanStep] = [group.step() for group in declared.mutation.values()]
+    steps += [
+        _undeclared_mutation(head, sha, inputs)
+        for head, sha in _patched_heads(inputs)
+        if (head.repository, sha) not in declared.mutation
         and not _mutation_passed_for(inputs.passed, head.repository, sha)
     ]
-    steps: list[EvidencePlanStep] = [group.step() for group in mutation.values()]
-    steps += [_undeclared_mutation(head, sha, inputs) for head, sha in undeclared]
-    steps += unplannable
-
-    cleanup = _cleanup_head(inputs)
-    if cleanup is not None:
-        head, sha = cleanup
-        steps.append(
-            EvidencePlanStep(
-                index=0,
-                kind=EvidenceStepKind.REMOVE_MUTATION_PATCHES,
-                repository=head.repository,
-                branch=head.branch,
-                pr=head.open_pr_number,
-                head_sha=sha,
-            )
-        )
-    for step in integration:
-        moves = cleanup is not None and (step.repository, step.head_sha) == (
-            cleanup[0].repository,
-            cleanup[1],
-        )
-        steps.append(
-            step.model_copy(update={"head_sha": None, "on_cleaned_head": True}) if moves else step
-        )
-    if cleanup is not None:
-        head, _ = cleanup
-        steps.append(
-            EvidencePlanStep(
-                index=0,
-                kind=EvidenceStepKind.REQUIRED_CHECK,
-                repository=head.repository,
-                branch=head.branch,
-                pr=head.open_pr_number,
-                on_cleaned_head=True,
-            )
-        )
+    steps += declared.unplannable
+    steps += _around_cleanup(_cleanup_head(inputs), declared.integration)
     return tuple(
         _reuse(s.model_copy(update={"index": i}), inputs.passed) for i, s in enumerate(steps)
     )
+
+
+@dataclass
+class _DeclaredPlan:
+    """What P's declarations plan, before undeclared patches and cleanup are added."""
+
+    mutation: dict[tuple[str, str], _MutationGroup] = field(default_factory=dict)
+    integration: list[EvidencePlanStep] = field(default_factory=list)
+    unplannable: list[EvidencePlanStep] = field(default_factory=list)
+
+    @classmethod
+    def of(cls, inputs: GateInputs) -> _DeclaredPlan:
+        plan = cls()
+        for declared in inputs.declared:
+            refused = _refusal(declared, inputs)
+            if refused is not None:
+                plan.unplannable.append(refused)
+                continue
+            request = declared.request
+            assert request is not None  # `_refusal` returned None, so it is a request
+            if request.kind is EvidenceKind.MUTATION:
+                key = (request.repository, request.head_sha)
+                plan.mutation.setdefault(key, _MutationGroup(request)).tests.update(request.tests)
+            else:
+                plan.integration.append(
+                    _step_for(request, EvidenceStepKind.INTEGRATION, request.tests)
+                )
+        return plan
+
+
+def _around_cleanup(
+    cleanup: tuple[ObservedHead, str] | None, integration: Sequence[EvidencePlanStep]
+) -> list[EvidencePlanStep]:
+    """Removal, integration (moved onto S' when it targets S), then the required check."""
+    if cleanup is None:
+        return list(integration)
+    head, sha = cleanup
+    removal = EvidencePlanStep(
+        index=0,
+        kind=EvidenceStepKind.REMOVE_MUTATION_PATCHES,
+        repository=head.repository,
+        branch=head.branch,
+        pr=head.open_pr_number,
+        head_sha=sha,
+    )
+    steps = [removal]
+    steps += [
+        step.model_copy(update={"head_sha": None, "on_cleaned_head": True})
+        if (step.repository, step.head_sha) == (head.repository, sha)
+        else step
+        for step in integration
+    ]
+    steps.append(
+        removal.model_copy(
+            update={
+                "kind": EvidenceStepKind.REQUIRED_CHECK,
+                "head_sha": None,
+                "on_cleaned_head": True,
+            }
+        )
+    )
+    return steps
 
 
 # --- Decisions taken when a step is reached -------------------------------------
@@ -203,6 +221,27 @@ def removal_blocked(
             and outcomes.get(step.index) is not StepOutcome.PASSED
         ):
             return MUTATION_NOT_PASSED
+    return None
+
+
+def report_mismatch(
+    step: EvidencePlanStep, head: str | None, dispatch_id: str, report: EvidenceReport
+) -> str | None:
+    """Why ``report`` cannot settle ``step``'s attempt ``dispatch_id``, or None (§A.5).
+
+    A report proves only what was asked: this step's kind, PR and exact test
+    selection on its head, produced by this attempt. Anything else voids the
+    step, because a pass is reused later as proof of the PLANNED tests.
+    """
+    if report.head_sha != head:
+        return HEAD_MOVED
+    if (
+        report.kind is not _STEP_TO_KIND.get(step.kind)
+        or report.pr != step.pr
+        or report.dispatch_id != dispatch_id
+        or {r.id for r in report.requested} != set(step.tests)
+    ):
+        return REPORT_NOT_REQUESTED
     return None
 
 
@@ -328,7 +367,7 @@ def _cleanup_head(inputs: GateInputs) -> tuple[ObservedHead, str] | None:
     """The head whose patches the gate removes: only in front of the final phase, certified."""
     if not (inputs.next_is_final and inputs.certified):
         return None
-    patched = _patched_heads(inputs.observed)
+    patched = _patched_heads(inputs)
     return patched[0] if patched else None
 
 
@@ -350,11 +389,19 @@ def _reuse(step: EvidencePlanStep, passed: Sequence[PassedEvidence]) -> Evidence
     return step
 
 
-def _patched_heads(observed: Iterable[ObservedHead]) -> list[tuple[ObservedHead, str]]:
+def _patched_heads(inputs: GateInputs) -> list[tuple[ObservedHead, str]]:
+    """Readable heads carrying patches, in the execution's repositories only (§A.1).
+
+    The observer also reports branches a phase declared in other repositories;
+    those were refused as declarations and must not come back as steps.
+    """
     return [
         (head, head.head_sha)
-        for head in observed
-        if head.readable and head.mutation_patches_present and head.head_sha is not None
+        for head in inputs.observed
+        if head.readable
+        and head.mutation_patches_present
+        and head.head_sha is not None
+        and head.repository in inputs.repositories
     ]
 
 

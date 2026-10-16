@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Final
 
-from syn_domain.contexts.artifacts._shared.value_objects import PhaseOutputFile
+from syn_domain.contexts.artifacts import PhaseOutputFile
 from syn_domain.contexts.orchestration._shared.evidence_contract import (
     EvidenceStepKind,
     EvidenceVerdict,
@@ -33,8 +33,8 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.commands impor
 from syn_domain.contexts.orchestration.domain.aggregate_execution.evidence_gate import (
     HEAD_MOVED,
     MAX_ATTEMPTS,
-    SettledStep,
     build_manifest,
+    report_mismatch,
 )
 from syn_domain.contexts.orchestration.ports.EvidenceFilingPort import EvidenceFile
 from syn_domain.contexts.orchestration.ports.EvidenceRunnerPort import (
@@ -211,8 +211,11 @@ class _StepRun:
         if report is None:
             return "superseded" if conclusion is RunConclusion.CANCELLED else "runner"
         outcome, reason = _VERDICT_OUTCOME[report.verdict], None
-        if report.head_sha != self.gate.head_for(self.step):
-            outcome, reason = StepOutcome.VOID, HEAD_MOVED
+        mismatch = report_mismatch(
+            self.step, self.gate.head_for(self.step), attempt.dispatch_id, report
+        )
+        if mismatch is not None:
+            outcome, reason = StepOutcome.VOID, mismatch
         elif outcome is StepOutcome.PASSED and conclusion is RunConclusion.FAILURE:
             outcome, reason = StepOutcome.VOID, REPORT_DISAGREES
         elif outcome is StepOutcome.VOID:
@@ -228,6 +231,10 @@ class _StepRun:
     async def _retry(self, why: str) -> EvidenceAttempt | None:
         """Attempt n+1 if one is left; otherwise settle `unavailable: why` and return None."""
         attempt = self.gate.attempts.get(self.step.index)
+        if attempt is not None and self.h.clock() >= attempt.not_after:
+            # Retries share the step's deadline (§A.5 4): nothing is posted after it.
+            await self._settle(StepOutcome.UNAVAILABLE, "timeout")
+            return None
         if attempt is not None and attempt.attempt >= MAX_ATTEMPTS:
             await self._settle(StepOutcome.UNAVAILABLE, why)
             return None
@@ -263,8 +270,11 @@ class _StepRun:
         return self.gate.attempts[self.step.index]
 
     async def _find(self, attempt: EvidenceAttempt) -> RunRef | None:
-        """Look for the attempt's run until it should have become visible (§A.5 2)."""
-        deadline = attempt.started_at + self.h.timings.dispatch_visibility
+        """Look for the attempt's run until it should have become visible (§A.5 2).
+
+        Never past the step's own deadline, which may be the sooner of the two.
+        """
+        deadline = min(attempt.started_at + self.h.timings.dispatch_visibility, attempt.not_after)
         while True:
             run = await self.h.runner.find_run(self._ref(attempt))
             if run is not None or self.h.clock() >= deadline:
@@ -292,9 +302,25 @@ class _StepRun:
     ) -> None:
         step, gate = self.step, self.gate
         files = list(files or [])
+
+        def command(report_ids: list[str], manifest_id: str | None) -> SettleEvidenceStepCommand:
+            return SettleEvidenceStepCommand(
+                self.execution_id,
+                gate.gate_id,
+                step.index,
+                outcome,
+                reason=reason,
+                run_id=run.run_id if run else None,
+                run_url=run.run_url if run else None,
+                head_sha_evidenced=head_sha,
+                report_artifact_ids=report_ids,
+                manifest_artifact_id=manifest_id,
+            )
+
         if step.index == len(gate.plan) - 1:
-            # From the events, with this settle added, BEFORE it is recorded (§A.6).
-            this = SettledStep(step.index, outcome, reason, run.run_url if run else None, head_sha)
+            # The settlement the aggregate WILL record, by its own rule, added to
+            # the events BEFORE it is recorded (§A.6): one rule, not a second copy.
+            this = self.aggregate.preview_evidence_settlement(command([], None))
             settled = [*gate.settled.values(), this]
             manifest = build_manifest(gate.gate_id, gate.plan, settled, gate.removed)
             files.append(("manifest.json", manifest.model_dump_json(by_alias=True, indent=2)))
@@ -310,18 +336,10 @@ class _StepRun:
             [PhaseOutputFile(source_path=f.source_path, content=f.content) for f in filed],
         )
         self.aggregate.settle_evidence_step(
-            SettleEvidenceStepCommand(
-                self.execution_id,
-                gate.gate_id,
-                step.index,
-                outcome,
-                reason=reason,
-                run_id=run.run_id if run else None,
-                run_url=run.run_url if run else None,
-                head_sha_evidenced=head_sha,
-                report_artifact_ids=[i for n, i in by_name.items() if n != "manifest.json"],
+            command(
+                [i for n, i in by_name.items() if n != "manifest.json"],
                 # Absent when it could not be stored: prompts read that as "not proven".
-                manifest_artifact_id=by_name.get("manifest.json"),
+                by_name.get("manifest.json"),
             )
         )
         await self.save(self.aggregate)

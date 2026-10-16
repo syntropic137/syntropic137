@@ -135,9 +135,6 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
         ObservabilityRecorder,
     )
-    from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.EvidenceStepHandler import (
-        EvidenceStepHandler,
-    )
     from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
         ClaudePluginMaterializerProtocol,
         SkillMaterializerProtocol,
@@ -149,6 +146,7 @@ if TYPE_CHECKING:
         AgentHandlerProtocol,
         ArtifactRepository,
         CommandBuilder,
+        EvidenceStepDriver,
         ExecutionRepository,
         PhaseOutputCache,
         PromptBuilder,
@@ -231,7 +229,7 @@ class WorkflowExecutionProcessor:
         shipped_ledger: ShippedLedger | None = None,
         execution_events: ExecutionEventStream | None = None,
         todo_projection_type: TodoProjectionType | None = None,
-        evidence_steps: EvidenceStepHandler | None = None,
+        evidence_steps: EvidenceStepDriver | None = None,
     ) -> None:
         #: Where an admitted run waits for an Executor (ADR-072, #1310 1.3).
         #: None is today's path: `run` starts AND drains in this call. Set,
@@ -712,9 +710,7 @@ class WorkflowExecutionProcessor:
             )
         elif todo.action == TodoAction.RUN_EVIDENCE_STEP:
             if self._evidence_steps is None:
-                msg = (
-                    f"RUN_EVIDENCE_STEP for {todo.execution_id} but no EvidenceStepHandler is wired"
-                )
+                msg = f"RUN_EVIDENCE_STEP for {todo.execution_id}: no EvidenceStepHandler wired"
                 raise RuntimeError(msg)
             await self._evidence_steps.handle(todo, aggregate, journal.append, phase_outputs)
         elif todo.action == TodoAction.COMPLETE_PHASE:
