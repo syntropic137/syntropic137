@@ -127,6 +127,15 @@ class SuiteCounts(_Contract):
     failed: Count
     skipped: Count
 
+    def assert_proves_a_pass(self) -> None:
+        """Refuse a suite that cannot back an integration verdict of `passed`."""
+        if self.failed:
+            raise ValueError("an integration verdict of passed needs a suite with no failures")
+        # The requested ids passed, so the suite ran and passed something. The
+        # counters cannot say how many: one selector may name many cases.
+        if not (self.collected and self.passed):
+            raise ValueError("an integration verdict of passed needs a suite that ran tests")
+
 
 class EvidenceReport(_Contract):
     """`evidence.json`, schema 1: what one evidence workflow run found on one head."""
@@ -158,14 +167,8 @@ class EvidenceReport(_Contract):
         unproven = [r.id for r in self.requested if r.outcome is not TestOutcome.PASSED]
         if unproven:
             raise ValueError(f"verdict is passed but requested tests did not pass: {unproven}")
-        if self.kind is EvidenceKind.INTEGRATION and self.suite.failed:
-            raise ValueError("an integration verdict of passed needs a suite with no failures")
-        # The requested ids passed, so the suite ran and passed something. The
-        # counters cannot say how many: one selector may name many cases.
-        if self.kind is EvidenceKind.INTEGRATION and not (
-            self.suite.collected and self.suite.passed
-        ):
-            raise ValueError("an integration verdict of passed needs a suite that ran tests")
+        if self.kind is EvidenceKind.INTEGRATION:
+            self.suite.assert_proves_a_pass()
         return self
 
 
