@@ -70,6 +70,44 @@ _MAX_RUNNING = 500
 
 
 @dataclass(frozen=True)
+class SubscriptionProof:
+    """The read path as /health's ``subscription`` block states it.
+
+    Every field is what the API said, or None when it did not say. Only an
+    affirmative answer on all of them proves the read models complete.
+    """
+
+    status: str | None = None
+    running: bool | None = None
+    is_catching_up: bool | None = None
+    lag: int | None = None
+    halted_at: int | None = None
+    held: int | None = None
+    lagging: int | None = None
+    rebuilding: int | None = None
+
+
+def subscription_unproven(proof: SubscriptionProof | None) -> str | None:
+    """None only for a healthy, running, caught-up read path at lag 0. Fail closed."""
+    if proof is None:
+        return "/health has no subscription block; read-model completeness is unproven"
+    checks = (
+        (proof.status == "healthy", f"subscription status is {proof.status}"),
+        (proof.running is True, f"subscription running is {proof.running}"),
+        (proof.is_catching_up is False, f"is_catching_up is {proof.is_catching_up}"),
+        (proof.lag == 0, f"subscription lag is {proof.lag}"),
+        (proof.halted_at is None, f"subscription halted at {proof.halted_at}"),
+        (not proof.held, f"{proof.held} projection(s) held"),
+        (not proof.lagging, f"{proof.lagging} projection(s) lagging"),
+        (not proof.rebuilding, f"{proof.rebuilding} read model(s) rebuilding"),
+    )
+    failed = [why for ok, why in checks if not ok]
+    if failed:
+        return "read-model completeness is unproven: " + "; ".join(failed)
+    return None
+
+
+@dataclass(frozen=True)
 class QuiescenceState:
     """Everything the run must see before each delete."""
 
@@ -80,6 +118,8 @@ class QuiescenceState:
     reclaimer_paused: str | None
     reclaimer_last_pass_at: datetime | None
     degraded_reasons: tuple[str, ...] = ()
+    #: None when /health carried no subscription block.
+    subscription: SubscriptionProof | None = None
 
 
 def parse_quiescence(
@@ -103,7 +143,12 @@ def parse_quiescence(
     from pydantic import TypeAdapter
 
     from syn_api.services.degraded_reasons import DegradedReason
-    from syn_api.types import DiskSpaceHealth, HealthResponse, MaintenanceModeResponse
+    from syn_api.types import (
+        DiskSpaceHealth,
+        HealthResponse,
+        MaintenanceModeResponse,
+        SubscriptionHealth,
+    )
 
     maintenance = MaintenanceModeResponse.model_validate_json(maintenance_json)
     document = TypeAdapter(dict[str, JsonValue]).validate_json(health_json)
@@ -116,6 +161,22 @@ def parse_quiescence(
         document.get("degraded_reasons")
     )
     reclaim = None if disk is None else disk.reclaim
+    block = document.get("subscription")
+    subscription = None
+    if block is not None:
+        read = SubscriptionHealth.model_validate(block)
+        subscription = SubscriptionProof(
+            status=read.status,
+            running=read.running,
+            is_catching_up=read.is_catching_up,
+            lag=read.lag,
+            halted_at=read.halted_at,
+            held=None if read.held_projections is None else len(read.held_projections),
+            lagging=None if read.lagging_projections is None else len(read.lagging_projections),
+            rebuilding=(
+                None if read.rebuilding_read_models is None else len(read.rebuilding_read_models)
+            ),
+        )
     return QuiescenceState(
         maintenance=maintenance.active,
         maintenance_since=maintenance.since,
@@ -124,6 +185,7 @@ def parse_quiescence(
         reclaimer_paused=None if reclaim is None else reclaim.paused,
         reclaimer_last_pass_at=None if reclaim is None else reclaim.last_pass_at,
         degraded_reasons=tuple(str(r) for r in reasons or ()),
+        subscription=subscription,
     )
 
 
@@ -158,6 +220,18 @@ class QuiescenceGate:
     def is_live(self) -> bool:
         return self.quiet
 
+    async def completeness(self) -> str | None:
+        """The reclaimer's read-model completeness hook: None only when proven, read fresh.
+
+        Asked in dry runs too: a verdict over incomplete read models is wrong
+        either way, so an unproven read path skips the pass.
+        """
+        try:
+            state = await self.quiescence.read()
+        except Exception as exc:
+            return f"completeness unreadable ({type(exc).__name__}: {exc})"
+        return subscription_unproven(state.subscription)
+
 
 def quiescence_lost(state: QuiescenceState) -> str | None:
     """Why it is NOT safe to delete now, or None. Pure, so every case is a test."""
@@ -178,7 +252,7 @@ def quiescence_lost(state: QuiescenceState) -> str | None:
     rebuilding = sorted(_READ_MODEL_REASONS & set(state.degraded_reasons))
     if rebuilding:
         return f"read models may be incomplete: {rebuilding}"
-    return None
+    return subscription_unproven(state.subscription)
 
 
 @dataclass(frozen=True)
@@ -342,9 +416,6 @@ def production_reclaimer(gate: QuiescenceGate, options: RunOptions) -> Workspace
         WorkflowExecutionListProjection(store), spools, SessionListProjection(store)
     )
 
-    async def whole() -> str | None:
-        return None
-
     return WorkspaceDirReclaimer(
         base_dir=workspace_base_dir(),
         settle_seconds=settings.disk.reclaim_settle_minutes * 60,
@@ -359,8 +430,8 @@ def production_reclaimer(gate: QuiescenceGate, options: RunOptions) -> Workspace
         is_live=gate.is_live,
         host_base_dir=workspace_host_dir(),
         own_container=own_container_id(),
-        # Read-model health is part of quiescence (/health degraded reasons).
-        read_models_rebuilding=whole,
+        # Completeness is proven from the subscription block, or the pass is skipped.
+        read_models_rebuilding=gate.completeness,
         pass_budget_seconds=options.budget_seconds,
         dry_run=not options.apply,
     )

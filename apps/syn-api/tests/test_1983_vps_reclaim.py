@@ -26,6 +26,7 @@ from syn_api.vps_reclaim import (
     QuiescenceGate,
     QuiescenceState,
     RunOptions,
+    SubscriptionProof,
     parse_args,
     parse_quiescence,
     quiescence_lost,
@@ -48,6 +49,16 @@ _QUIET = QuiescenceState(
     live_workspace_containers=(),
     reclaimer_paused="maintenance",
     reclaimer_last_pass_at=_SINCE + timedelta(minutes=30),
+    subscription=SubscriptionProof(
+        status="healthy",
+        running=True,
+        is_catching_up=False,
+        lag=0,
+        halted_at=None,
+        held=0,
+        lagging=0,
+        rebuilding=0,
+    ),
 )
 
 
@@ -122,6 +133,7 @@ def _builder(
         reclaimer = _reclaimer(base)
         reclaimer.paused = gate.stop_reason
         reclaimer.is_live = gate.is_live
+        reclaimer.read_models_rebuilding = gate.completeness
         reclaimer.dry_run = not options.apply
         reclaimer.pass_budget_seconds = options.budget_seconds
         built.append(reclaimer)
@@ -172,9 +184,10 @@ async def test_maintenance_lifted_mid_run_stops_before_the_next_delete(
 ) -> None:
     first = _workspace(base, "ws-a", tmp_path)
     second = _workspace(base, "ws-b", tmp_path)
-    # Reads: two up front, one as the pass starts, then before ws-a and before
-    # each of its claim, mark and delete; the next one, before ws-b, is lifted.
-    port = _Port(*[_QUIET] * 7, replace(_QUIET, maintenance=False))
+    # Reads: two up front; as the pass starts, maintenance then completeness;
+    # before ws-a and each of its claim, mark and delete; the next, before ws-b,
+    # is lifted.
+    port = _Port(*[_QUIET] * 8, replace(_QUIET, maintenance=False))
     lines: list[str] = []
     code = await run(_APPLY, port, _builder(base, []), lines.append)
     assert code == 2
@@ -365,3 +378,111 @@ async def test_a_field_the_api_does_not_publish_is_drift_not_quiet(
             running_executions=0,
             live_containers=(),
         )
+
+
+# --- Codex round 2: completeness must be affirmatively proven ---
+
+_PROVEN = _QUIET.subscription
+assert _PROVEN is not None
+
+
+@pytest.mark.parametrize(
+    ("proof", "why"),
+    [
+        (None, "no subscription block"),
+        (replace(_PROVEN, status="catching_up"), "status is catching_up"),
+        (replace(_PROVEN, status="unknown"), "status is unknown"),
+        (replace(_PROVEN, status=None), "status is None"),
+        (replace(_PROVEN, running=None), "running is None"),
+        (replace(_PROVEN, running=False), "running is False"),
+        (replace(_PROVEN, is_catching_up=None), "is_catching_up is None"),
+        (replace(_PROVEN, is_catching_up=True), "is_catching_up is True"),
+        (replace(_PROVEN, lag=None), "lag is None"),
+        (replace(_PROVEN, lag=3), "lag is 3"),
+        (replace(_PROVEN, halted_at=41), "halted at 41"),
+        (replace(_PROVEN, held=1), "1 projection(s) held"),
+        (replace(_PROVEN, lagging=2), "2 projection(s) lagging"),
+        (replace(_PROVEN, rebuilding=1), "1 read model(s) rebuilding"),
+    ],
+)
+def test_anything_short_of_a_healthy_caught_up_read_path_refuses(
+    proof: SubscriptionProof | None, why: str
+) -> None:
+    refused = quiescence_lost(replace(_QUIET, subscription=proof))
+    assert refused is not None
+    assert why in refused
+
+
+async def test_apply_refuses_without_a_subscription_block(base: Path, tmp_path: Path) -> None:
+    ws = _workspace(base, "ws-no-subscription", tmp_path)
+    lines: list[str] = []
+    port = _Port(replace(_QUIET, subscription=None))
+    code = await run(_APPLY, port, _builder(base, []), lines.append)
+    assert code == 2
+    assert "completeness is unproven" in lines[0]
+    assert ws.exists()
+
+
+async def test_the_completeness_hook_skips_even_a_dry_run_until_proven(
+    base: Path, tmp_path: Path
+) -> None:
+    ws = _workspace(base, "ws-dry-unproven", tmp_path)
+    lines: list[str] = []
+    dry = RunOptions(apply=False, budget_seconds=600.0, lift_maintenance=False)
+    port = _Port(replace(_QUIET, subscription=replace(_PROVEN, lag=7)))
+    code = await run(dry, port, _builder(base, []), lines.append)
+    assert code == 2
+    assert any("lag is 7" in line for line in lines)
+    assert ws.exists()
+
+
+async def test_the_completeness_hook_answers_none_only_when_proven() -> None:
+    gate = QuiescenceGate(_Port(_QUIET, replace(_QUIET, subscription=None)), apply=False)
+    assert await gate.completeness() is None
+    assert await gate.completeness() is not None
+    assert await QuiescenceGate(_Broken(_QUIET), apply=False).completeness() is not None
+
+
+async def test_a_real_subscription_block_is_read_through_its_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import json
+
+    from syn_api.types import MaintenanceModeResponse, SubscriptionHealth
+
+    health = json.loads(await _health_json(monkeypatch))
+    block = SubscriptionHealth(
+        status="healthy", running=True, is_catching_up=False, lag=0, head_position=9
+    )
+    health["subscription"] = json.loads(block.model_dump_json(exclude_none=True))
+    state = parse_quiescence(
+        MaintenanceModeResponse(active=True).model_dump_json().encode(),
+        json.dumps(health).encode(),
+        running_executions=0,
+        live_containers=(),
+    )
+    assert state.subscription == replace(_PROVEN, held=None, lagging=None, rebuilding=None)
+    health["subscription"]["surprise"] = 1
+    with pytest.raises(ValueError):
+        parse_quiescence(
+            MaintenanceModeResponse(active=True).model_dump_json().encode(),
+            json.dumps(health).encode(),
+            running_executions=0,
+            live_containers=(),
+        )
+
+
+def test_the_production_reclaimer_is_wired_to_the_gate(
+    base: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Completeness, pause and liveness all ask the gate; nothing defaults to "fine"."""
+    from syn_api import vps_reclaim
+
+    monkeypatch.setattr("syn_api._wiring_db.get_shared_db_pool", lambda: object())
+    monkeypatch.setattr(vps_reclaim, "_source_instance_id", lambda _root: "src-test")
+    gate = QuiescenceGate(_Port(_QUIET), apply=True)
+    reclaimer = vps_reclaim.production_reclaimer(gate, _APPLY)
+    assert reclaimer.read_models_rebuilding == gate.completeness
+    assert reclaimer.paused == gate.stop_reason
+    assert reclaimer.is_live == gate.is_live
+    assert reclaimer.dry_run is False
