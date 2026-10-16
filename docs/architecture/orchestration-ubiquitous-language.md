@@ -1308,8 +1308,27 @@ never a verdict on the Execution, and never changes P's `success`.
 
 Not the [Event Compatibility Gate](#event-compatibility-gate), which is a CI
 check on releases. The contracts are in
-`_shared/evidence_contract.py`; the gate's behaviour is not built yet (plan PRs
-5b and 5c).
+`_shared/evidence_contract.py`; the rules are `evidence_gate.py` and the
+aggregate's decisions `evidence_steps.py`, both in `aggregate_execution/`
+(plan PR 5b). A gate opens only when collection carries an Evidence Gate
+Policy, and nothing attaches one until the adapters are wired (plan PR 6), so
+it is off by default.
+
+## Evidence Gate Policy
+
+What the host tells collection about Evidence Gates: that they are on, and over
+which repositories (`EvidenceGatePolicy` on `ArtifactsCollectedCommand`).
+Absent is off. The aggregate reads no settings, so this is how the flag
+`SYN_EVIDENCE_GATE_ENABLED` reaches it.
+
+## Predetermined Step
+
+An Evidence Step whose outcome the aggregate already knows without any I/O: a
+step planned `void` or `unavailable` (an unreadable request, a foreign
+repository, a moved head, a PR mismatch), a step Settled `passed` by reuse, a
+Patch Removal whose mutation evidence did not pass, or a `required_check` when
+nothing was removed. `EvidenceGate.predetermined`. The handler can only Settle
+it exactly as decided; the aggregate refuses anything else.
 
 ## Evidence Request
 
@@ -1327,8 +1346,8 @@ One Evidence Request as a Phase's latest agent run declared it, or, when the
 entry was malformed, the reason it could not be one. In code:
 `DeclaredEvidence`, carried on `AgentExecutionCompleted.reported_evidence` and
 kept per Phase by the aggregate (`EvidenceRecord`). A retry overwrites its
-Phase's declarations, as it does a Review Verdict. Recorded only: no decision
-reads it until the Evidence Gate exists.
+Phase's declarations, as it does a Review Verdict. The Evidence Gate plans
+from it when the Phase is collected.
 
 ## Observed Head
 
@@ -1375,9 +1394,10 @@ knows which run to look for. A step gets at most two. Retries share the step's
 Not [Attempt Work](#attempt-work), which is what a failed Phase attempt did to
 its workspace, and not a [Retry](#words-we-do-not-use) of a Phase. Taking up a
 dispatched GitHub run is recorded as `EvidenceRunAdopted` in the plan. That is
-not the reserved **Adopt** (an Executor taking over a running Phase).
-**Unclear:** whether the event keeps that name. Settle it before plan PR 5b
-introduces the event.
+not the reserved **Adopt** (an Executor taking over a running Phase). PR 5b
+kept the name `EvidenceRunAdopted`: the event and its command
+(`RecordEvidenceRunAdoptedCommand`) always say **Evidence Run**, which no
+Executor term uses, so the two cannot be read for each other.
 
 ## Settled
 
