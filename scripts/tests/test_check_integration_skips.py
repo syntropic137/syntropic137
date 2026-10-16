@@ -199,36 +199,15 @@ def test_a_fixture_in_a_parent_conftest_behind_another_fixture(tmp_path: Path) -
     assert "pkg/tests/conftest.py" in finding.detail
 
 
-def test_a_renamed_autouse_or_usefixtures_fixture_counts(tmp_path: Path) -> None:
+def test_a_fixture_requested_by_its_name_override_counts(tmp_path: Path) -> None:
     _write(
         tmp_path,
         "test_x.py",
         """
         import pytest
-        from pytest import importorskip as need
 
         @pytest.fixture(name="minio")
         def _minio():
-            need("boto3")
-
-        @pytest.fixture(autouse=True)
-        def _env():
-            pytest.skip("unset")
-
-        @pytest.mark.integration
-        @pytest.mark.usefixtures("minio")
-        def test_upload():
-            pass
-        """,
-    )
-    _write(
-        tmp_path,
-        "other/test_y.py",
-        """
-        import pytest
-
-        @pytest.fixture
-        def minio():
             pytest.skip("no minio")
 
         @pytest.mark.integration
@@ -237,7 +216,306 @@ def test_a_renamed_autouse_or_usefixtures_fixture_counts(tmp_path: Path) -> None
             pass
         """,
     )
-    assert _census(tmp_path) == [("test_upload", "undeclared"), ("test_upload", "undeclared")]
+    assert _census(tmp_path) == [("test_upload", "undeclared")]
+
+
+def test_an_autouse_fixture_counts(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "test_x.py",
+        """
+        import pytest
+
+        @pytest.fixture(autouse=True)
+        def _env():
+            pytest.skip("unset")
+
+        @pytest.mark.integration
+        def test_upload():
+            pass
+        """,
+    )
+    assert _census(tmp_path) == [("test_upload", "undeclared")]
+
+
+def test_a_renamed_importorskip_counts(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "test_x.py",
+        """
+        import pytest
+        from pytest import importorskip as need
+
+        @pytest.mark.integration
+        def test_upload():
+            need("boto3")
+        """,
+    )
+    assert _census(tmp_path) == [("test_upload", "undeclared")]
+
+
+def test_an_aliased_pytest_module_skips_and_marks(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "test_x.py",
+        """
+        import pytest as pt
+
+        @pt.mark.integration
+        def test_store():
+            pt.skip("no store")
+
+        @pt.mark.integration
+        @pt.mark.may_skip(reason="no store", issue="#1")
+        def test_declared():
+            pt.skip("no store")
+        """,
+    )
+    assert _census(tmp_path) == [("test_store", "undeclared")]
+
+
+def test_a_directly_imported_mark_is_a_marker(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "test_x.py",
+        """
+        import pytest
+        from pytest import mark
+
+        @mark.integration
+        def test_store():
+            pytest.skip("no store")
+
+        @mark.integration
+        @mark.may_skip(reason="no store", issue="#1")
+        def test_declared():
+            pytest.skip("no store")
+        """,
+    )
+    assert _census(tmp_path) == [("test_store", "undeclared")]
+
+
+# ---------------------------------------------------------------- scope
+
+
+def test_a_class_fixture_does_not_hide_the_module_fixture(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "test_x.py",
+        """
+        import pytest
+
+        @pytest.fixture
+        def store():
+            pytest.skip("no store")
+
+        class TestOther:
+            @pytest.fixture
+            def store(self):
+                return 1
+
+        @pytest.mark.integration
+        def test_x(store):
+            pass
+        """,
+    )
+    assert _census(tmp_path) == [("test_x", "undeclared")]
+
+
+def test_another_classes_autouse_fixture_is_not_in_scope(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "test_x.py",
+        """
+        import pytest
+
+        class TestUnit:
+            @pytest.fixture(autouse=True)
+            def _env(self):
+                pytest.skip("unit only")
+
+            def test_u(self):
+                pass
+
+        @pytest.mark.integration
+        def test_x():
+            pass
+        """,
+    )
+    assert find_integration_skips(tmp_path) == []
+
+
+def test_self_calls_resolve_in_the_tests_own_class(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "test_x.py",
+        """
+        import pytest
+
+        class TestUnit:
+            def backend(self):
+                pytest.skip("unit only")
+
+            def test_u(self):
+                self.backend()
+
+        @pytest.mark.integration
+        class TestIntegration:
+            def backend(self):
+                return 1
+
+            def test_i(self):
+                self.backend()
+
+        @pytest.mark.integration
+        class TestSkipping(TestUnit):
+            def test_inherited(self):
+                self.backend()
+        """,
+    )
+    assert _census(tmp_path) == [("TestSkipping::test_inherited", "undeclared")]
+
+
+# ---------------------------------------------------------------- parameter legs
+
+
+def test_an_integration_leg_of_a_fixture_parameter_counts(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "test_x.py",
+        """
+        import pytest
+
+        @pytest.fixture(
+            params=[
+                pytest.param("memory", marks=pytest.mark.unit),
+                pytest.param("minio", marks=pytest.mark.integration),
+            ]
+        )
+        def storage(request):
+            if request.param == "minio":
+                pytest.skip("no minio")
+            return request.param
+
+        @pytest.fixture
+        def wrapped(storage):
+            return storage
+
+        def test_x(wrapped):
+            pass
+        """,
+    )
+    assert _census(tmp_path) == [("test_x", "undeclared")]
+
+
+def test_an_integration_leg_of_a_parametrize_counts(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "test_x.py",
+        """
+        import pytest
+
+        @pytest.mark.parametrize(
+            "backend", [pytest.param("memory"), pytest.param("pg", marks=[pytest.mark.integration])]
+        )
+        def test_x(backend):
+            pytest.skip("no pg")
+        """,
+    )
+    assert _census(tmp_path) == [("test_x", "undeclared")]
+
+
+def test_a_unit_only_parameter_leg_is_not_this_gates_business(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "test_x.py",
+        """
+        import pytest
+
+        @pytest.mark.parametrize("backend", [pytest.param("memory", marks=pytest.mark.unit)])
+        def test_x(backend):
+            pytest.skip("unit")
+        """,
+    )
+    assert find_integration_skips(tmp_path) == []
+
+
+def test_a_parameter_skipif_on_an_integration_test_counts(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "test_x.py",
+        """
+        import pytest
+
+        @pytest.mark.integration
+        @pytest.mark.parametrize(
+            "backend",
+            ["memory", pytest.param("pg", marks=pytest.mark.skipif(True, reason="no pg"))],
+        )
+        def test_x(backend):
+            pass
+        """,
+    )
+    [finding] = find_integration_skips(tmp_path)
+    assert (finding.test, finding.kind) == ("test_x", "undeclared")
+    assert "marked skipif" in finding.detail
+
+
+def test_an_opt_out_on_one_leg_does_not_cover_another(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "test_x.py",
+        """
+        import pytest
+
+        @pytest.fixture(
+            params=[
+                pytest.param("redis", marks=[pytest.mark.integration, pytest.mark.may_skip(reason="no redis", issue="#1")]),
+                pytest.param("pg", marks=pytest.mark.integration),
+            ]
+        )
+        def store(request):
+            pytest.skip("no backend")
+
+        def test_x(store):
+            pass
+        """,
+    )
+    [finding] = find_integration_skips(tmp_path)
+    assert (finding.test, finding.kind) == ("test_x", "undeclared")
+    assert "parameter set 1" in finding.detail
+
+
+def test_a_declared_leg_passes_and_a_malformed_one_is_reported(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "test_x.py",
+        """
+        import pytest
+
+        @pytest.fixture(
+            params=[
+                pytest.param("memory", marks=pytest.mark.unit),
+                pytest.param("pg", marks=[pytest.mark.integration, pytest.mark.may_skip(reason="no pg", issue="#1")]),
+            ]
+        )
+        def good(request):
+            pytest.skip("no backend")
+
+        @pytest.fixture(
+            params=[pytest.param("pg", marks=[pytest.mark.integration, pytest.mark.may_skip(reason="no pg")])]
+        )
+        def bad(request):
+            pytest.skip("no backend")
+
+        def test_good(good):
+            pass
+
+        def test_bad(bad):
+            pass
+        """,
+    )
+    assert _census(tmp_path) == [("test_bad", "malformed")]
 
 
 def test_a_helper_the_test_calls_is_followed(tmp_path: Path) -> None:
@@ -329,6 +607,17 @@ def test_an_integration_test_with_no_path_to_a_skip_is_clean(tmp_path: Path) -> 
 def test_a_sibling_conftest_fixture_is_not_in_scope(tmp_path: Path) -> None:
     _write(
         tmp_path,
+        "conftest.py",
+        """
+        import pytest
+
+        @pytest.fixture
+        def store():
+            return 1
+        """,
+    )
+    _write(
+        tmp_path,
         "a/conftest.py",
         """
         import pytest
@@ -336,6 +625,10 @@ def test_a_sibling_conftest_fixture_is_not_in_scope(tmp_path: Path) -> None:
         @pytest.fixture
         def store():
             pytest.skip("no store")
+
+        @pytest.fixture(autouse=True)
+        def _trap():
+            pytest.skip("sibling autouse")
         """,
     )
     _write(
@@ -343,10 +636,6 @@ def test_a_sibling_conftest_fixture_is_not_in_scope(tmp_path: Path) -> None:
         "b/test_x.py",
         """
         import pytest
-
-        @pytest.fixture
-        def store():
-            return 1
 
         @pytest.mark.integration
         def test_x(store):
