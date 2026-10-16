@@ -16,23 +16,25 @@ from typing import TYPE_CHECKING
 import pytest
 from test_pc130_workspace_dir_reclaim import _reclaimer, _workspace
 
-from syn_adapters.workspace_backends.stale_dirs import (
-    CLAIM_PREFIX,
-    claim_workspace_dir,
-    mark_for_deletion,
+from syn_adapters.workspace_backends.reclaim_delete import (
+    ReclaimIdentityError,
+    authorize_and_mark,
 )
+from syn_adapters.workspace_backends.stale_dirs import CLAIM_PREFIX, claim_workspace_dir
 from syn_api.vps_reclaim import (
     ApiQuiescence,
+    QuiescenceGate,
     QuiescenceState,
     RunOptions,
     parse_args,
+    parse_quiescence,
     quiescence_lost,
     run,
 )
 from syn_domain.contexts.orchestration import RetainedReason
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
+    from collections.abc import Callable
 
     from syn_api.services.workspace_dir_reclaim import WorkspaceDirReclaimer
 
@@ -115,12 +117,11 @@ class _Port(ApiQuiescence):
 
 def _builder(
     base: Path, built: list[WorkspaceDirReclaimer]
-) -> Callable[[Callable[[], Awaitable[str | None]], RunOptions], WorkspaceDirReclaimer]:
-    def build(
-        stop: Callable[[], Awaitable[str | None]], options: RunOptions
-    ) -> WorkspaceDirReclaimer:
+) -> Callable[[QuiescenceGate, RunOptions], WorkspaceDirReclaimer]:
+    def build(gate: QuiescenceGate, options: RunOptions) -> WorkspaceDirReclaimer:
         reclaimer = _reclaimer(base)
-        reclaimer.paused = stop
+        reclaimer.paused = gate.stop_reason
+        reclaimer.is_live = gate.is_live
         reclaimer.dry_run = not options.apply
         reclaimer.pass_budget_seconds = options.budget_seconds
         built.append(reclaimer)
@@ -171,8 +172,9 @@ async def test_maintenance_lifted_mid_run_stops_before_the_next_delete(
 ) -> None:
     first = _workspace(base, "ws-a", tmp_path)
     second = _workspace(base, "ws-b", tmp_path)
-    # Reads: two up front, one as the pass starts, then one before each directory.
-    port = _Port(_QUIET, _QUIET, _QUIET, _QUIET, replace(_QUIET, maintenance=False))
+    # Reads: two up front, one as the pass starts, then before ws-a and before
+    # each of its claim, mark and delete; the next one, before ws-b, is lifted.
+    port = _Port(*[_QUIET] * 7, replace(_QUIET, maintenance=False))
     lines: list[str] = []
     code = await run(_APPLY, port, _builder(base, []), lines.append)
     assert code == 2
@@ -216,8 +218,8 @@ def test_an_inode_swapped_under_the_claim_is_refused(base: Path) -> None:
     claimed = Path(claim_workspace_dir(str(ws)))
     claimed.rename(base / "elsewhere")
     claimed.mkdir()
-    with pytest.raises(FileExistsError, match="not the directory that was judged"):
-        mark_for_deletion(str(claimed), (stat.st_dev, stat.st_ino))
+    with pytest.raises(ReclaimIdentityError, match="not the directory that was judged"):
+        authorize_and_mark(str(claimed), "ws-swap", (stat.st_dev, stat.st_ino), now=1.0)
     assert claimed.is_dir()
 
 
@@ -229,8 +231,8 @@ def test_a_symlink_swapped_in_under_the_claim_is_refused(base: Path, tmp_path: P
     target = tmp_path / "precious"
     claimed.rename(target)
     claimed.symlink_to(target, target_is_directory=True)
-    with pytest.raises(FileExistsError):
-        mark_for_deletion(str(claimed), (stat.st_dev, stat.st_ino))
+    with pytest.raises(ReclaimIdentityError):
+        authorize_and_mark(str(claimed), "ws-link", (stat.st_dev, stat.st_ino), now=1.0)
     assert target.is_dir()
 
 
@@ -241,10 +243,10 @@ async def test_the_reclaimer_puts_back_a_dir_swapped_before_the_mark(
     reclaimer = _reclaimer(base)
     real_mark = reclaimer.mark_deleting
 
-    def swap_then_mark(claimed: str, identity: tuple[int, int]) -> str:
+    def swap_then_mark(claimed: str, workspace_id: str, identity: tuple[int, int]) -> str:
         Path(claimed).rename(tmp_path / "moved")
         os.mkdir(claimed)  # noqa: PTH102
-        return real_mark(claimed, identity)
+        return real_mark(claimed, workspace_id, identity)
 
     reclaimer.mark_deleting = swap_then_mark
     result = await reclaimer.run_once()
@@ -260,3 +262,106 @@ def test_arguments_default_to_a_dry_run_with_a_budget() -> None:
     assert parse_args(["--apply", "--budget-minutes", "2"]).budget_seconds == 120.0
     with pytest.raises(SystemExit):
         parse_args(["--budget-minutes", "0"])
+
+
+# --- Codex r1 finding 7: quiescence lost while the directory is being judged ---
+
+
+async def test_quiescence_lost_during_the_second_guard_deletes_nothing(
+    base: Path, tmp_path: Path
+) -> None:
+    """A run starting while the claimed directory is judged again: the mark never happens."""
+    ws = _workspace(base, "ws-mid-validation", tmp_path)
+    port = _Port(_QUIET)
+
+    def build(gate: QuiescenceGate, options: RunOptions) -> WorkspaceDirReclaimer:
+        reclaimer = _builder(base, [])(gate, options)
+        claim = reclaimer.claim
+
+        def claim_then_a_run_starts(host_dir: str) -> str:
+            claimed = claim(host_dir)
+            port.states = [replace(_QUIET, running_executions=1)]
+            return claimed
+
+        reclaimer.claim = claim_then_a_run_starts
+        return reclaimer
+
+    lines: list[str] = []
+    code = await run(_APPLY, port, build, lines.append)
+    assert code == 2
+    assert any("RUNNING" in line for line in lines)
+    assert sorted(p.name for p in base.iterdir()) == ["ws-mid-validation"]
+    assert ws.exists()
+
+
+async def test_the_gate_feeds_is_live_with_its_last_answer() -> None:
+    port = _Port(_QUIET, replace(_QUIET, maintenance=False))
+    gate = QuiescenceGate(port, apply=True)
+    assert await gate.stop_reason() is None
+    assert gate.is_live() is True
+    assert await gate.stop_reason() == "maintenance is not on"
+    assert gate.is_live() is False
+
+
+class _Broken(_Port):
+    async def read(self) -> QuiescenceState:
+        raise ValueError("health did not parse")
+
+
+async def test_an_unreadable_answer_refuses(base: Path, tmp_path: Path) -> None:
+    ws = _workspace(base, "ws-unreadable-health", tmp_path)
+    lines: list[str] = []
+    code = await run(_APPLY, _Broken(_QUIET), _builder(base, []), lines.append)
+    assert code == 2
+    assert lines[0].startswith("REFUSED:")
+    assert ws.exists()
+
+
+# --- Codex r1 finding 9: the API's answers are read through its frozen, closed models ---
+
+
+async def _health_json(monkeypatch: pytest.MonkeyPatch) -> bytes:
+    from syn_api.services import lifecycle
+    from syn_api.types import Ok
+
+    result = await lifecycle.health_check()
+    assert isinstance(result, Ok)
+    return result.value.model_dump_json().encode()
+
+
+async def test_the_published_answers_parse(monkeypatch: pytest.MonkeyPatch) -> None:
+    from syn_api.types import MaintenanceModeResponse
+
+    maintenance = MaintenanceModeResponse(active=True, since=_SINCE).model_dump_json().encode()
+    state = parse_quiescence(
+        maintenance, await _health_json(monkeypatch), running_executions=0, live_containers=()
+    )
+    assert state.maintenance is True
+    assert state.maintenance_since == _SINCE
+
+
+async def test_a_field_the_api_does_not_publish_is_drift_not_quiet(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import json
+
+    from pydantic import ValidationError
+
+    from syn_api.types import MaintenanceModeResponse
+
+    maintenance = json.loads(MaintenanceModeResponse(active=True).model_dump_json())
+    health = json.loads(await _health_json(monkeypatch))
+    with pytest.raises(ValidationError):
+        parse_quiescence(
+            json.dumps({**maintenance, "drained": True}).encode(),
+            json.dumps(health).encode(),
+            running_executions=0,
+            live_containers=(),
+        )
+    with pytest.raises(ValueError, match="does not know"):
+        parse_quiescence(
+            json.dumps(maintenance).encode(),
+            json.dumps({**health, "quiet": True}).encode(),
+            running_executions=0,
+            live_containers=(),
+        )

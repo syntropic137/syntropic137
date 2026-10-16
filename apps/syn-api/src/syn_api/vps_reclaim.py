@@ -34,16 +34,15 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import json
 import os
 import sys
 import time
 import urllib.request
 from dataclasses import dataclass
-from datetime import datetime  # noqa: TC003 - Pydantic resolves it at runtime
+from datetime import datetime  # noqa: TC003 - read by the dataclass annotations
 from typing import TYPE_CHECKING, cast
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import JsonValue
 
 from syn_shared.env_constants import ENV_SYN_API_PORT
 from syn_shared.settings.constants import API_CONTAINER_PORT
@@ -70,29 +69,6 @@ _READ_MODEL_REASONS = frozenset(
 _MAX_RUNNING = 500
 
 
-class _Maintenance(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    active: bool
-    since: datetime | None = None
-
-
-class _Reclaim(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    last_pass_at: datetime | None = None
-    paused: str | None = None
-
-
-class _Disk(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    reclaim: _Reclaim | None = None
-
-
-class _Health(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    degraded_reasons: list[str] | None = None
-    disk: _Disk | None = None
-
-
 @dataclass(frozen=True)
 class QuiescenceState:
     """Everything the run must see before each delete."""
@@ -104,6 +80,79 @@ class QuiescenceState:
     reclaimer_paused: str | None
     reclaimer_last_pass_at: datetime | None
     degraded_reasons: tuple[str, ...] = ()
+
+
+def parse_quiescence(
+    maintenance_json: bytes,
+    health_json: bytes,
+    *,
+    running_executions: int,
+    live_containers: tuple[str, ...],
+) -> QuiescenceState:
+    """Read the API's answers through its own published models: frozen, extra forbidden.
+
+    A field the API does not publish, or one it no longer does, is contract
+    drift, and drift raises here instead of reading as "quiet".
+
+    /health is read block by block: its serialized form carries computed
+    display fields (``build.started_at_display``) that its own input model
+    forbids, so the whole document cannot round-trip. Its top-level keys must
+    all be declared fields, and the two blocks this tool decides on - ``disk``
+    and ``degraded_reasons`` - are validated through their published models.
+    """
+    from pydantic import TypeAdapter
+
+    from syn_api.services.degraded_reasons import DegradedReason
+    from syn_api.types import DiskSpaceHealth, HealthResponse, MaintenanceModeResponse
+
+    maintenance = MaintenanceModeResponse.model_validate_json(maintenance_json)
+    document = TypeAdapter(dict[str, JsonValue]).validate_json(health_json)
+    unknown = sorted(set(document) - set(HealthResponse.model_fields))
+    if unknown:
+        raise ValueError(f"/health publishes fields this tool does not know: {unknown}")
+    disk_block = document.get("disk")
+    disk = None if disk_block is None else DiskSpaceHealth.model_validate(disk_block)
+    reasons = TypeAdapter(list[DegradedReason] | None).validate_python(
+        document.get("degraded_reasons")
+    )
+    reclaim = None if disk is None else disk.reclaim
+    return QuiescenceState(
+        maintenance=maintenance.active,
+        maintenance_since=maintenance.since,
+        running_executions=running_executions,
+        live_workspace_containers=live_containers,
+        reclaimer_paused=None if reclaim is None else reclaim.paused,
+        reclaimer_last_pass_at=None if reclaim is None else reclaim.last_pass_at,
+        degraded_reasons=tuple(str(r) for r in reasons or ()),
+    )
+
+
+class QuiescenceGate:
+    """The one answer to "may the next destructive step run", read fresh each time.
+
+    The reclaimer asks it (``paused``) right before the claim, the mark and
+    the delete, and its ``is_live`` reads the answer that check just got, so
+    a lost quiescence stops the next step whichever hook asks first. An
+    unreadable answer is not quiet.
+    """
+
+    def __init__(self, quiescence: ApiQuiescence, *, apply: bool) -> None:
+        self._quiescence = quiescence
+        self._apply = apply
+        self.quiet = not apply
+
+    async def stop_reason(self) -> str | None:
+        if not self._apply:
+            return None
+        try:
+            reason = quiescence_lost(await self._quiescence.read())
+        except Exception as exc:
+            reason = f"quiescence unreadable ({type(exc).__name__}: {exc})"
+        self.quiet = reason is None
+        return reason
+
+    def is_live(self) -> bool:
+        return self.quiet
 
 
 def quiescence_lost(state: QuiescenceState) -> str | None:
@@ -138,28 +187,24 @@ class RunOptions:
 async def run(
     options: RunOptions,
     quiescence: ApiQuiescence,
-    build_reclaimer: Callable[
-        [Callable[[], Awaitable[str | None]], RunOptions], WorkspaceDirReclaimer
-    ],
+    build_reclaimer: Callable[[QuiescenceGate, RunOptions], WorkspaceDirReclaimer],
     out: Callable[[str], None] = print,
 ) -> int:
     """The tool. Exit code 0 when it ran (or dry-ran) to completion, 2 when it refused."""
+    gate = QuiescenceGate(quiescence, apply=options.apply)
     if options.apply:
-        state = await quiescence.read()
-        if not state.maintenance:
-            await quiescence.set_maintenance(True, "vps-reclaim: workspace backlog (#1983)")
-        state = await quiescence.read()
-        refused = quiescence_lost(state)
+        try:
+            if not (await quiescence.read()).maintenance:
+                await quiescence.set_maintenance(True, "vps-reclaim: workspace backlog (#1983)")
+        except Exception as exc:
+            out(f"REFUSED: could not set maintenance ({type(exc).__name__}: {exc})")
+            return 2
+        refused = await gate.stop_reason()
         if refused is not None:
             out(f"REFUSED: {refused}")
             return 2
 
-    async def stop_reason() -> str | None:
-        if not options.apply:
-            return None
-        return quiescence_lost(await quiescence.read())
-
-    reclaimer = build_reclaimer(stop_reason, options)
+    reclaimer = build_reclaimer(gate, options)
     result = await reclaimer.run_once()
     _report(result, out, apply=options.apply)
     if options.lift_maintenance and options.apply:
@@ -199,22 +244,18 @@ class ApiQuiescence:
         self._running = running
 
     async def read(self) -> QuiescenceState:
-        maintenance = _Maintenance.model_validate_json(await _http(f"{self._api}/maintenance"))
-        health = _Health.model_validate_json(await _http(f"{self._api}/health"))
-        reclaim = health.disk.reclaim if health.disk is not None else None
-        return QuiescenceState(
-            maintenance=maintenance.active,
-            maintenance_since=maintenance.since,
+        return parse_quiescence(
+            await _http(f"{self._api}/maintenance"),
+            await _http(f"{self._api}/health"),
             running_executions=await self._running(),
-            live_workspace_containers=await live_workspace_containers(),
-            reclaimer_paused=None if reclaim is None else reclaim.paused,
-            reclaimer_last_pass_at=None if reclaim is None else reclaim.last_pass_at,
-            degraded_reasons=tuple(health.degraded_reasons or ()),
+            live_containers=await live_workspace_containers(),
         )
 
     async def set_maintenance(self, active: bool, reason: str) -> None:
-        body = json.dumps({"active": active, "reason": reason, "actor": "vps-reclaim"})
-        await _http(f"{self._api}/maintenance", method="PUT", body=body.encode())
+        from syn_api.types import SetMaintenanceModeRequest
+
+        body = SetMaintenanceModeRequest(active=active, reason=reason, actor="vps-reclaim")
+        await _http(f"{self._api}/maintenance", method="PUT", body=body.model_dump_json().encode())
 
 
 async def _http(url: str, *, method: str = "GET", body: bytes | None = None) -> bytes:
@@ -256,17 +297,16 @@ def _source_instance_id(archive_dir: Path) -> str:
     return (archive_dir / ".source-instance-id").read_text().strip()
 
 
-def production_reclaimer(
-    stop_reason: Callable[[], Awaitable[str | None]], options: RunOptions
-) -> WorkspaceDirReclaimer:
+def production_reclaimer(gate: QuiescenceGate, options: RunOptions) -> WorkspaceDirReclaimer:
     """The automatic reclaimer's predicate over standalone read models, as root."""
     from syn_adapters.projection_stores import get_projection_store
     from syn_adapters.session_inventory.postgres_spools import PostgresCaptureSpools
-    from syn_adapters.workspace_backends.orphaned import workspace_base_dir
+    from syn_adapters.workspace_backends.orphaned import workspace_base_dir, workspace_host_dir
     from syn_adapters.workspace_backends.remote_refs import GitLsRemote, github_app_credential
     from syn_adapters.workspace_backends.stale_dirs import (
         SubprocessHostWorkspaceGit,
         list_containers,
+        own_container_id,
         scan_workspace_dirs,
     )
     from syn_api._wiring_db import get_shared_db_pool
@@ -311,7 +351,10 @@ def production_reclaimer(
         scan_dirs=scan_workspace_dirs,
         git=SubprocessHostWorkspaceGit(),
         remotes=GitLsRemote(github_app_credential),
-        paused=stop_reason,
+        paused=gate.stop_reason,
+        is_live=gate.is_live,
+        host_base_dir=workspace_host_dir(),
+        own_container=own_container_id(),
         # Read-model health is part of quiescence (/health degraded reasons).
         read_models_rebuilding=whole,
         pass_budget_seconds=options.budget_seconds,
