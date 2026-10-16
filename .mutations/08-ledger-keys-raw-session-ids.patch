@@ -1,0 +1,10 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/import_ledger/memory_ledger.py b/packages/syn-adapters/src/syn_adapters/import_ledger/memory_ledger.py
+index c04f77180..cca460c0f 100644
+--- a/packages/syn-adapters/src/syn_adapters/import_ledger/memory_ledger.py
++++ b/packages/syn-adapters/src/syn_adapters/import_ledger/memory_ledger.py
+@@ -71,4 +71,4 @@ def _key(execution_id: str, harness_session_id: str) -> tuple[str, str]:
+     and its stored spelling as two sessions, which production never does
+     (#1675).
+     """
+-    return pg_safe(execution_id), pg_safe(harness_session_id)
++    return execution_id, harness_session_id

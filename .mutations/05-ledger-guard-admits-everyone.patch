@@ -1,11 +1,14 @@
 diff --git a/packages/syn-adapters/src/syn_adapters/import_ledger/memory_ledger.py b/packages/syn-adapters/src/syn_adapters/import_ledger/memory_ledger.py
-index bc462b65a..86dbabf73 100644
+index c04f77180..213841ba0 100644
 --- a/packages/syn-adapters/src/syn_adapters/import_ledger/memory_ledger.py
 +++ b/packages/syn-adapters/src/syn_adapters/import_ledger/memory_ledger.py
-@@ -58,5 +58,4 @@ class InMemoryImportLedger(InMemoryAdapter):
+@@ -59,8 +59,7 @@ class InMemoryImportLedger(InMemoryAdapter):
          `asyncio.Lock` is loop-affine, which is fine here: an in-process ledger
          is only correct within one process anyway, and the API runs one loop.
          """
--        async with self._locks[(execution_id, harness_session_id)]:
+-        async with self._locks[_key(execution_id, harness_session_id)]:
 -            yield
 +        yield
+ 
+ 
+ def _key(execution_id: str, harness_session_id: str) -> tuple[str, str]:

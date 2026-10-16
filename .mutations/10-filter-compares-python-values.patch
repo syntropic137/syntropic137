@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/projection_stores/memory_store_helpers.py b/packages/syn-adapters/src/syn_adapters/projection_stores/memory_store_helpers.py
+index d17209416..fd42928f6 100644
+--- a/packages/syn-adapters/src/syn_adapters/projection_stores/memory_store_helpers.py
++++ b/packages/syn-adapters/src/syn_adapters/projection_stores/memory_store_helpers.py
+@@ -47,7 +47,7 @@ def filter_values(wanted: object) -> frozenset[str]:
+ 
+ def matches(record: dict[str, Any], accepted: list[tuple[str, frozenset[str]]]) -> bool:
+     """Whether every field's ``->>`` text is one its filter accepts."""
+-    return all(stored_text(record.get(k)) in values for k, values in accepted)
++    return all(record.get(k) in values for k, values in accepted)
+ 
+ 
+ def apply_filters(
