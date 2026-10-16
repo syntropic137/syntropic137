@@ -410,3 +410,43 @@ def test_an_inherited_xpass_cannot_pass_a_file_through_its_passing_sibling(
     assert _outcomes(report) == [TestOutcome.XFAIL]
     assert report.verdict is EvidenceVerdict.VOID
     assert (report.suite.passed, report.suite.skipped) == (1, 1)
+
+
+_REPEATING_CONFTEST = "def pytest_collection_modifyitems(items):\n    items.append(items[-1])\n"
+
+
+@pytest.mark.parametrize("non_pass", ["skip", "xfail"])
+@pytest.mark.parametrize("non_pass_first", [True, False])
+def test_a_repeated_record_never_turns_a_skip_or_xfail_into_a_pass(
+    tmp_path: Path, non_pass: str, non_pass_first: bool
+) -> None:
+    # A hook that runs an item twice gives pytest two JUnit records for one
+    # node id. Whichever runs first, the non-pass must survive the merge.
+    (tmp_path / "conftest.py").write_text(_REPEATING_CONFTEST)
+    first, second = (
+        (f"pytest.{non_pass}('once')", "pass")
+        if non_pass_first
+        else ("pass", f"pytest.{non_pass}('once')")
+    )
+    (tmp_path / "test_repeat.py").write_text(
+        "import pytest\n"
+        "runs = []\n"
+        "def test_first(): pass\n"
+        "def test_repeated():\n"
+        "    runs.append(1)\n"
+        f"    if len(runs) == 1:\n        {first}\n"
+        f"    else:\n        {second}\n"
+    )
+    run, junit = _real_pytest(tmp_path, "test_repeat.py")
+    repeated = "test_repeat.py::test_repeated"
+
+    report = _report(
+        junit, run.exit_code, "test_repeat.py::test_first", repeated, "test_repeat.py",
+        output=run.output,
+    )  # fmt: skip
+
+    assert junit.count('name="test_repeated"') == 2, junit
+    expected = TestOutcome.SKIPPED if non_pass == "skip" else TestOutcome.XFAIL
+    assert _outcomes(report) == [TestOutcome.PASSED, expected, expected]
+    assert report.verdict is EvidenceVerdict.VOID
+    assert (report.suite.collected, report.suite.passed, report.suite.skipped) == (2, 1, 1)

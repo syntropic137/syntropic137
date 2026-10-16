@@ -180,7 +180,9 @@ def _case_outcome(case: ET.Element) -> TestOutcome:
 
 def parse_junit(xml_text: str, output: str) -> list[Case]:
     """Every testcase in a pytest JUnit report, corrected by pytest's terminal
-    `output`. A teardown error repeats a testcase; the worse outcome is kept."""
+    `output`. A teardown error, or a hook that runs an item twice, repeats a
+    testcase; the worst outcome any record had is kept, so a later pass can
+    never erase an earlier failure, skip or xfail."""
     xpass_lines = [line for line in output.splitlines() if line.startswith(_XPASS_PREFIX)]
     cases: dict[str, Case] = {}
     for element in ET.fromstring(xml_text).iter("testcase"):
@@ -194,13 +196,18 @@ def parse_junit(xml_text: str, output: str) -> list[Case]:
             outcome = TestOutcome.XFAIL
         key = node_id or address
         previous = cases.get(key)
-        if previous is None or previous.outcome is not TestOutcome.FAILED:
-            cases[key] = Case(node_id, address, outcome)
+        if previous is not None:
+            outcome = _worst((previous.outcome, outcome))
+        cases[key] = Case(node_id, address, outcome)
     return list(cases.values())
 
 
-#: When a selector names several cases, the first of these any case had wins.
+#: When several records or cases bear on one test, the first of these any had wins.
 _PRECEDENCE: Final = (TestOutcome.FAILED, TestOutcome.SKIPPED, TestOutcome.XFAIL)
+
+
+def _worst(outcomes: tuple[TestOutcome, ...] | set[TestOutcome]) -> TestOutcome:
+    return next((o for o in _PRECEDENCE if o in outcomes), TestOutcome.PASSED)
 
 
 def requested_outcome(node_id: str, cases: list[Case]) -> TestOutcome:
@@ -211,7 +218,7 @@ def requested_outcome(node_id: str, cases: list[Case]) -> TestOutcome:
     # make the selector worse, never pass it.
     address = mangle(node_id)
     seen |= {c.outcome for c in cases if not c.node_id and _addresses_overlap(address, c.address)}
-    return next((o for o in _PRECEDENCE if o in seen), TestOutcome.PASSED)
+    return _worst(seen)
 
 
 def suite_counts(cases: list[Case]) -> SuiteCounts:
