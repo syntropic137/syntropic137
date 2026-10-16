@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Final, Protocol
 
+from syn_adapters.workspace_backends.service.git_identity import git_identity_lines
 from syn_adapters.workspace_backends.service.issued_tokens import IssuedToken
 from syn_adapters.workspace_backends.service.pinned_checkout import append_pinned_checkout
 from syn_shared.upstream_failure import UpstreamFailureError
@@ -729,8 +730,10 @@ class SetupPhaseSecrets:
                 rather than one repo being silently skipped.
             ValueError: A pinned commit is not a full commit id (#1458).
         """
-        lines: list[str] = [DEFAULT_SETUP_SCRIPT.rstrip()]
-        self._append_git_identity(lines)
+        lines = [
+            DEFAULT_SETUP_SCRIPT.rstrip(),
+            *git_identity_lines(self.git_author_name, self.git_author_email),
+        ]
         self._append_codex_auth(lines)
 
         self._append_git_credentials(lines)
@@ -738,13 +741,6 @@ class SetupPhaseSecrets:
             self._append_repo_clones(lines)
 
         return "\n".join(lines) + "\n"
-
-    def _append_git_identity(self, lines: list[str]) -> None:
-        # In the script, never the setup env: AW refuses to redact `<app>[bot]`.
-        if self.git_author_name:
-            email = shlex.quote(self.git_author_email or "agent@agentic.local")
-            lines.append(f"\ngit config --global user.name {shlex.quote(self.git_author_name)}")
-            lines.append(f"git config --global user.email {email}")
 
     def _append_codex_auth(self, lines: list[str]) -> None:
         """Relocate the staged codex auth file to ~/.codex/auth.json (0600).
