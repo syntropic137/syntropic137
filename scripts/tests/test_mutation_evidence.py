@@ -728,7 +728,18 @@ def test_run_writes_evidence_json_from_the_cli(
     monkeypatch.setattr(me, "make_runner", lambda _sandbox: _runner_sensitive_to_mod)
     md, evidence_file = tmp_path / "r.md", tmp_path / "evidence.json"
 
-    code = me.main(["run", "--root", str(repo), "--report", str(md), "--evidence", str(evidence_file), "--host"])
+    code = me.main(
+        [
+            "run",
+            "--root",
+            str(repo),
+            "--report",
+            str(md),
+            "--evidence",
+            str(evidence_file),
+            "--host",
+        ]
+    )
 
     report = _contract(evidence_file.read_text())
     assert code == 1
@@ -744,7 +755,18 @@ def test_run_writes_no_evidence_json_when_no_verdict_was_reached(
     monkeypatch.setenv(me.ENV_DIR, ".mutations/missing")
     md, evidence_file = tmp_path / "r.md", tmp_path / "evidence.json"
 
-    code = me.main(["run", "--root", str(repo), "--report", str(md), "--evidence", str(evidence_file), "--host"])
+    code = me.main(
+        [
+            "run",
+            "--root",
+            str(repo),
+            "--report",
+            str(md),
+            "--evidence",
+            str(evidence_file),
+            "--host",
+        ]
+    )
 
     assert code == 1
     assert "does not exist" in md.read_text()

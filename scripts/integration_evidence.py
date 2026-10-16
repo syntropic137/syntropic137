@@ -44,7 +44,7 @@ from typing import Final
 # checkout the script itself was read from, never the PR's.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from mutation_evidence import (  # noqa: E402
+from mutation_evidence import (
     EvidenceReport,
     InputError,
     RequestedResult,
@@ -179,7 +179,9 @@ def decide(
         # 5 is "nothing collected", which voids below. Anything else (an
         # interrupt, an internal or usage error) is a run that did not finish.
         return Verdict.VOID, f"pytest exit {exit_code} with no failure on record, evidence void"
-    unproven = [f"{r.id} {r.outcome.value}" for r in requested if r.outcome is not TestOutcome.PASSED]
+    unproven = [
+        f"{r.id} {r.outcome.value}" for r in requested if r.outcome is not TestOutcome.PASSED
+    ]
     if unproven:
         return Verdict.VOID, f"requested test(s) did not run and pass: {', '.join(unproven)}"
     return Verdict.PASSED, (

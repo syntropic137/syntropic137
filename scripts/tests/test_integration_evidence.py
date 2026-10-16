@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from scripts import integration_evidence as ie
@@ -24,6 +24,9 @@ from syn_domain.contexts.orchestration._shared.evidence_contract import (
     EvidenceVerdict,
     TestOutcome,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 pytestmark = pytest.mark.unit
 
@@ -78,7 +81,9 @@ def test_green_suite_with_the_requested_test_passed_is_passed() -> None:
 
 
 def test_an_unrelated_skip_is_counted_and_does_not_void() -> None:
-    report = _report(_junit(PASS_WANTED, _case("tests.integration.test_other", "test_unrelated", SKIP)))
+    report = _report(
+        _junit(PASS_WANTED, _case("tests.integration.test_other", "test_unrelated", SKIP))
+    )
 
     assert report.verdict is EvidenceVerdict.PASSED
     assert report.suite.skipped == 1
@@ -89,7 +94,9 @@ def test_an_unrelated_skip_is_counted_and_does_not_void() -> None:
     [(SKIP, TestOutcome.SKIPPED), (XFAIL, TestOutcome.XFAIL)],
 )
 def test_a_requested_test_that_did_not_run_and_pass_voids(body: str, outcome: TestOutcome) -> None:
-    report = _report(_junit(_case("tests.integration.test_store.TestStore", "test_append[pg]", body), PASS_OTHER))
+    report = _report(
+        _junit(_case("tests.integration.test_store.TestStore", "test_append[pg]", body), PASS_OTHER)
+    )
 
     assert report.verdict is EvidenceVerdict.VOID
     assert _outcomes(report) == [outcome]
@@ -130,7 +137,9 @@ def test_a_near_miss_name_is_not_the_requested_test() -> None:
 
 @pytest.mark.parametrize("body", [FAIL, ERROR])
 def test_any_failure_in_the_suite_fails_even_an_unrequested_one(body: str) -> None:
-    report = _report(_junit(PASS_WANTED, _case("tests.integration.test_other", "test_unrelated", body)), 1)
+    report = _report(
+        _junit(PASS_WANTED, _case("tests.integration.test_other", "test_unrelated", body)), 1
+    )
 
     assert report.verdict is EvidenceVerdict.FAILED
     assert report.suite.failed == 1
@@ -178,7 +187,12 @@ def test_mangle_matches_pytest_junit_addresses(node_id: str, address: str) -> No
 
 
 def test_inputs_are_validated_and_deduplicated() -> None:
-    env = {ie.ENV_PR: "12", ie.ENV_TESTS: f"{WANTED} {WANTED}", ie.ENV_SHA: SHA, ie.ENV_DISPATCH_ID: "d-9"}
+    env = {
+        ie.ENV_PR: "12",
+        ie.ENV_TESTS: f"{WANTED} {WANTED}",
+        ie.ENV_SHA: SHA,
+        ie.ENV_DISPATCH_ID: "d-9",
+    }
 
     assert inputs_from_env(env).tests == (WANTED,)
     with pytest.raises(ie.InputError):
@@ -203,7 +217,9 @@ def _cli_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(ie.ENV_DISPATCH_ID, "d-9")
 
 
-def test_run_writes_the_report_and_evidence_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_run_writes_the_report_and_evidence_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     _cli_env(monkeypatch)
 
     def fake_suite(_root: Path, junit: Path) -> SuiteRun:
@@ -213,7 +229,9 @@ def test_run_writes_the_report_and_evidence_json(tmp_path: Path, monkeypatch: py
     monkeypatch.setattr(ie, "run_suite", fake_suite)
     md, evidence = tmp_path / "r.md", tmp_path / "evidence.json"
 
-    code = ie.main(["run", "--root", str(tmp_path), "--report", str(md), "--evidence", str(evidence)])
+    code = ie.main(
+        ["run", "--root", str(tmp_path), "--report", str(md), "--evidence", str(evidence)]
+    )
 
     report = EvidenceReport.model_validate_json(evidence.read_text())
     assert code == 0
@@ -228,7 +246,9 @@ def test_run_writes_no_evidence_json_without_a_junit_report(
     monkeypatch.setattr(ie, "run_suite", lambda _root, _junit: SuiteRun(3, ""))
     md, evidence = tmp_path / "r.md", tmp_path / "evidence.json"
 
-    code = ie.main(["run", "--root", str(tmp_path), "--report", str(md), "--evidence", str(evidence)])
+    code = ie.main(
+        ["run", "--root", str(tmp_path), "--report", str(md), "--evidence", str(evidence)]
+    )
 
     assert code == 1
     assert not evidence.exists()
