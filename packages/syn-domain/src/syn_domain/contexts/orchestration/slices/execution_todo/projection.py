@@ -123,6 +123,25 @@ def _is_current_evidence_step(item: TodoItem, gates: dict[str, int]) -> bool:
     return cursor is None or item.evidence_step == cursor
 
 
+def _moves_cursor(cursor: int | None, settled: int | None) -> bool:
+    """Whether a request (``settled`` None) or a settlement advances a gate's cursor.
+
+    A request applies only to a gate not yet on record; a settlement only at or
+    past the cursor. Anything else was already applied.
+    """
+    if cursor is None:
+        return True
+    return settled is not None and settled >= cursor
+
+
+def _is_step(item: TodoItem, gate_id: str, step: int | None) -> bool:
+    return (
+        item.action == TodoAction.RUN_EVIDENCE_STEP
+        and item.evidence_gate_id == gate_id
+        and item.evidence_step == step
+    )
+
+
 def _merge_progress(existing: dict[str, int], updates: dict[str, int]) -> dict[str, int]:
     """Merge two phase-progress maps, keeping the max rank per phase.
 
@@ -465,26 +484,12 @@ class ExecutionTodoProjection(AutoDispatchProjection):
         """
         async with self._lock_for(execution_id):
             current, progress, gates = await self._read_state(execution_id)
-            cursor = gates.get(gate_id)
-            if settled is None and cursor is not None:
-                return  # The request was already applied.
-            if settled is not None and cursor is not None and settled < cursor:
-                return  # The step already settled; the gate has moved on.
+            if not _moves_cursor(gates.get(gate_id), settled):
+                return  # A duplicate or a late delivery: the gate has moved on.
             gates[gate_id] = _GATE_CLOSED if following is None else following
-            remaining = [
-                t
-                for t in current
-                if not (
-                    t.action == TodoAction.RUN_EVIDENCE_STEP
-                    and t.evidence_gate_id == gate_id
-                    and t.evidence_step == settled
-                )
-            ]
+            remaining = [t for t in current if not _is_step(t, gate_id, settled)]
             if following is not None and not any(
-                t.action == TodoAction.RUN_EVIDENCE_STEP
-                and t.evidence_gate_id == gate_id
-                and t.evidence_step == following
-                for t in remaining
+                _is_step(t, gate_id, following) for t in remaining
             ):
                 remaining.append(
                     TodoItem(
