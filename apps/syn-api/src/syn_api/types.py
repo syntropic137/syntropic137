@@ -93,6 +93,7 @@ from syn_domain.contexts.orchestration import (
     PlannedPhase,
     QuarantinedRef,
     ReportedFailureReason,
+    RetainedReason,
     ReviewVerdict,
     SideEffectStatus,
     TagSet,
@@ -3115,6 +3116,51 @@ class SubscriptionHealth(_OmitsAbsentFields):
     )
 
 
+class RetainedWorkspaceDirs(BaseModel):
+    """Workspace directories the reclaimer kept for one reason, at its last pass (#1983)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    reason: RetainedReason = Field(description="The proof that could not be made.")
+    count: int = Field(description="Directories kept for this reason.")
+    size_bytes: int = Field(description="Bytes those directories hold, as measured.")
+
+
+class WorkspaceReclaimHealth(BaseModel):
+    """What the workspace directory reclaimer last did (#1983)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    last_pass_at: datetime | None = Field(
+        description="When its last pass ended, UTC; null before the first."
+    )
+    paused: str | None = Field(
+        description="Why the last pass stopped before deleting anything, e.g. 'maintenance'."
+    )
+    last_pass_skipped: str | None = Field(
+        description="Why the last pass did not look at all (docker or a read model unreadable)."
+    )
+    reclaimed_bytes_24h: int = Field(
+        description="Bytes this process reclaimed in the last 24 hours (resets on restart)."
+    )
+    dry_run_reclaimable: int = Field(
+        description="Directories the last pass found reclaimable and left, in dry-run mode."
+    )
+    deletes_in_progress: int = Field(
+        description="Proven directories whose delete ran out of the last pass's time "
+        "budget; the next pass, or the first after a restart, finishes them."
+    )
+    out_of_time: bool = Field(
+        description="Whether the last pass stopped at SYN_DISK_RECLAIM_PASS_BUDGET_MINUTES."
+    )
+    retained: list[RetainedWorkspaceDirs] = Field(
+        description="Directories kept at the last pass, per reason."
+    )
+    delete_failed_passes: int = Field(
+        description="Consecutive passes with a failed delete; 2 or more degrades /health."
+    )
+
+
 class DiskSpaceHealth(BaseModel):
     """Free space on the workspace volume, as /health reports it (#1560)."""
 
@@ -3145,6 +3191,11 @@ class DiskSpaceHealth(BaseModel):
     )
     detail: str = Field(
         description="One line for an operator: free space, the floors and where they came from."
+    )
+    reclaim: WorkspaceReclaimHealth | None = Field(
+        default=None,
+        description="The workspace directory reclaimer's last pass (#1983); null when its "
+        "state could not be read.",
     )
 
 

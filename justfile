@@ -2550,6 +2550,17 @@ changelog-check *args:
 # (imported at the top of this file), so they can be owner-reviewed without
 # putting every other recipe behind CODEOWNERS.
 
+# Dry run by default. --apply sets maintenance and refuses unless quiescent
+# (no running execution or workspace container, the automatic reclaimer
+# paused); quiescence is re-checked before every directory.
+#   just vps-reclaim                                 (what would go, and why the rest stays)
+#   just vps-reclaim --apply --budget-minutes 10     (delete; rerun to continue)
+#   just vps-reclaim --apply --lift-maintenance      (and reopen admission after)
+# Reclaim the workspace backlog on the selfhost VPS, as root (#1983)
+[positional-arguments]
+vps-reclaim *flags:
+    uv run python infra/scripts/vps_reclaim.py "$@"
+
 # Pit stop: put a beta on the selfhost VPS fast - stage early, swap late.
 # Codifies docs/deployment/test-deploy.md (direct path). Not a release.
 #   just pit-stop 0.29.1-beta.5                 # everything, waiting for the drain
