@@ -37,8 +37,14 @@ def base(tmp_path: Path) -> Path:
     return path
 
 
-def _inspect_doc(mount: dict[str, object]) -> str:
-    """One ``docker inspect`` document, as docker writes it for node-exporter."""
+def _inspect_doc(rw: bool | str | None) -> str:
+    """One ``docker inspect`` document for node-exporter's bind of ``/``.
+
+    ``rw`` is docker's ``RW`` field; None leaves it (and ``Mode``) out.
+    """
+    mount = {"Type": "bind", "Source": "/", "Destination": "/host", "Propagation": "rslave"}
+    if rw is not None:
+        mount |= {"RW": rw, "Mode": "ro" if rw is False else "rw"}
     return json.dumps(
         [
             {
@@ -74,22 +80,12 @@ def _docker_with(monkeypatch: pytest.MonkeyPatch, document: str) -> None:
     monkeypatch.setattr(stale_dirs, "docker_inspect_raw", inspect)
 
 
-_ROOT_RO = {
-    "Type": "bind",
-    "Source": "/",
-    "Destination": "/host",
-    "Mode": "ro",
-    "RW": False,
-    "Propagation": "rslave",
-}
-
-
 async def test_a_read_only_bind_of_the_root_no_longer_blocks(
     base: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The live VPS case: node-exporter's ``/:/host:ro`` held every workspace."""
     ws = _workspace(base, "ws-under-node-exporter", tmp_path)
-    _docker_with(monkeypatch, _inspect_doc(_ROOT_RO))
+    _docker_with(monkeypatch, _inspect_doc(False))
     reclaimer = _reclaimer(base)
     reclaimer.list_containers = stale_dirs.list_containers
     result = await reclaimer.run_once()
@@ -97,19 +93,12 @@ async def test_a_read_only_bind_of_the_root_no_longer_blocks(
     assert not ws.exists()
 
 
-@pytest.mark.parametrize(
-    "mount",
-    [
-        {**_ROOT_RO, "Mode": "rw", "RW": True},
-        {k: v for k, v in _ROOT_RO.items() if k not in {"RW", "Mode"}},
-    ],
-    ids=["read-write", "rw-unknown"],
-)
+@pytest.mark.parametrize("rw", [True, None], ids=["read-write", "rw-unknown"])
 async def test_a_writable_or_unknown_root_bind_still_blocks_and_names_the_container(
-    base: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mount: dict[str, object]
+    base: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, rw: bool | None
 ) -> None:
     ws = _workspace(base, "ws-under-writable-root", tmp_path)
-    _docker_with(monkeypatch, _inspect_doc(mount))
+    _docker_with(monkeypatch, _inspect_doc(rw))
     reclaimer = _reclaimer(base)
     reclaimer.list_containers = stale_dirs.list_containers
     result = await reclaimer.run_once()
@@ -139,11 +128,11 @@ def test_read_only_ancestors_are_skipped_and_writable_ones_are_not(ancestor: str
 
 
 def test_inspect_reads_rw_and_the_name() -> None:
-    inspected = parse_inspect(_inspect_doc(_ROOT_RO))
+    inspected = parse_inspect(_inspect_doc(False))
     assert inspected is not None
     assert inspected.name == _NODE_EXPORTER
     assert inspected.read_only_sources == frozenset({"/"})
-    unknown = parse_inspect(_inspect_doc({k: v for k, v in _ROOT_RO.items() if k != "RW"}))
+    unknown = parse_inspect(_inspect_doc(None))
     assert unknown is not None
     assert unknown.read_only_sources == frozenset()
-    assert parse_inspect(_inspect_doc({**_ROOT_RO, "RW": "maybe"})) is None
+    assert parse_inspect(_inspect_doc("maybe")) is None
