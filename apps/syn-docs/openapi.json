@@ -169,6 +169,65 @@
         }
       }
     },
+    "/workflows/trends": {
+      "get": {
+        "tags": [
+          "workflows"
+        ],
+        "summary": "List Workflow Trends Endpoint",
+        "description": "Several workflows' latest runs as trend points in one request; unknown ids are left out (#1872).",
+        "operationId": "list_workflow_trends_endpoint_workflows_trends_get",
+        "parameters": [
+          {
+            "name": "ids",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Comma-separated exact workflow ids, at most 200",
+              "title": "Ids"
+            },
+            "description": "Comma-separated exact workflow ids, at most 200"
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "description": "Latest runs per workflow",
+              "default": 50,
+              "title": "Page Size"
+            },
+            "description": "Latest runs per workflow"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowTrendsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/workflows/{workflow_id}": {
       "get": {
         "tags": [
@@ -10606,6 +10665,53 @@
         ],
         "title": "DiskSpaceHealth",
         "description": "Free space on the workspace volume, as /health reports it (#1560)."
+      },
+      "DurationTrendSummaryResponse": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "none",
+              "few",
+              "faster",
+              "slower",
+              "steady"
+            ],
+            "title": "Kind"
+          },
+          "pct": {
+            "type": "integer",
+            "title": "Pct"
+          },
+          "runs": {
+            "type": "integer",
+            "title": "Runs"
+          },
+          "word_display": {
+            "type": "string",
+            "title": "Word Display"
+          },
+          "sub_display": {
+            "type": "string",
+            "title": "Sub Display"
+          },
+          "label_display": {
+            "type": "string",
+            "title": "Label Display"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "kind",
+          "pct",
+          "runs",
+          "word_display",
+          "sub_display",
+          "label_display"
+        ],
+        "title": "DurationTrendSummaryResponse",
+        "description": "A workflow card's duration trend label, formatted here so the UI only renders it (#1872).\n\nFitted over the latest ``runs`` measured durations (at most 12): a change\nunder 5% is steady, fewer than 3 measured runs is too few to tell."
       },
       "EvalArchivedResponse": {
         "properties": {
@@ -23946,6 +24052,80 @@
         "title": "Verdict",
         "description": "What a scorer concluded about one run of an eval.\n\n``ERROR`` is the scorer's own failure to reach a conclusion (the run left\nnothing to judge, or the scorer broke), never a judgement that the run\nfailed. It counts as scored, and not as passed."
       },
+      "WorkflowCardTrendResponse": {
+        "properties": {
+          "definition_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Definition Version"
+          },
+          "definition_changed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Definition Changed At"
+          },
+          "definition_changes": {
+            "items": {
+              "$ref": "#/components/schemas/DefinitionChangeResponse"
+            },
+            "type": "array",
+            "title": "Definition Changes"
+          },
+          "workflow_id": {
+            "type": "string",
+            "title": "Workflow Id"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/WorkflowTrendPointResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "page_size": {
+            "type": "integer",
+            "title": "Page Size"
+          },
+          "duration_trend": {
+            "$ref": "#/components/schemas/DurationTrendSummaryResponse"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "definition_version",
+          "definition_changed_at",
+          "definition_changes",
+          "workflow_id",
+          "items",
+          "total",
+          "page",
+          "page_size",
+          "duration_trend"
+        ],
+        "title": "WorkflowCardTrendResponse",
+        "description": "A workflow's trend points plus the card's formatted duration trend (#1872)."
+      },
       "WorkflowDefaultEvalResponse": {
         "properties": {
           "workflow_id": {
@@ -24419,6 +24599,24 @@
         ],
         "title": "WorkflowTrendResponse",
         "description": "One page of a workflow's executions as trend points, newest first (#1788)."
+      },
+      "WorkflowTrendsResponse": {
+        "properties": {
+          "trends": {
+            "items": {
+              "$ref": "#/components/schemas/WorkflowCardTrendResponse"
+            },
+            "type": "array",
+            "title": "Trends"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "trends"
+        ],
+        "title": "WorkflowTrendsResponse",
+        "description": "The latest runs of several workflows as trend points, in one response (#1872).\n\nThe Workflows page reads every card on screen from this, so the page costs\none request however many workflows it shows. Each entry is what\n``GET /workflows/{id}/trend`` answers for page 1 at the same page size."
       },
       "syn_api__routes__costs__CostSummaryResponse": {
         "properties": {
