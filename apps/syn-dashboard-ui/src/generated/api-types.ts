@@ -25,6 +25,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/workflows/trends": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Workflow Trends Endpoint
+         * @description The latest runs of several workflows as trend points, in one request (#1872).
+         *
+         *     Each entry is page 1 of ``GET /workflows/{id}/trend`` at the same page
+         *     size. Ids that name no workflow are left out rather than failing the batch.
+         */
+        get: operations["list_workflow_trends_endpoint_workflows_trends_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/workflows/{workflow_id}": {
         parameters: {
             query?: never;
@@ -10093,6 +10116,18 @@ export interface components {
             page_size: number;
         };
         /**
+         * WorkflowTrendsResponse
+         * @description The latest runs of several workflows as trend points, in one response (#1872).
+         *
+         *     The Workflows page reads every card on screen from this, so the page costs
+         *     one request however many workflows it shows. Each entry is what
+         *     ``GET /workflows/{id}/trend`` answers for page 1 at the same page size.
+         */
+        WorkflowTrendsResponse: {
+            /** Trends */
+            trends: components["schemas"]["WorkflowTrendResponse"][];
+        };
+        /**
          * CostSummaryResponse
          * @description Summary of all costs across sessions/executions.
          */
@@ -10233,6 +10268,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CreateWorkflowResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_workflow_trends_endpoint_workflows_trends_get: {
+        parameters: {
+            query: {
+                /** @description Comma-separated workflow ids, at most 200. Exact ids, not prefixes */
+                ids: string;
+                /** @description Latest runs per workflow */
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowTrendsResponse"];
                 };
             };
             /** @description Validation Error */

@@ -169,6 +169,65 @@
         }
       }
     },
+    "/workflows/trends": {
+      "get": {
+        "tags": [
+          "workflows"
+        ],
+        "summary": "List Workflow Trends Endpoint",
+        "description": "The latest runs of several workflows as trend points, in one request (#1872).\n\nEach entry is page 1 of ``GET /workflows/{id}/trend`` at the same page\nsize. Ids that name no workflow are left out rather than failing the batch.",
+        "operationId": "list_workflow_trends_endpoint_workflows_trends_get",
+        "parameters": [
+          {
+            "name": "ids",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Comma-separated workflow ids, at most 200. Exact ids, not prefixes",
+              "title": "Ids"
+            },
+            "description": "Comma-separated workflow ids, at most 200. Exact ids, not prefixes"
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "description": "Latest runs per workflow",
+              "default": 50,
+              "title": "Page Size"
+            },
+            "description": "Latest runs per workflow"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowTrendsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/workflows/{workflow_id}": {
       "get": {
         "tags": [
@@ -24419,6 +24478,24 @@
         ],
         "title": "WorkflowTrendResponse",
         "description": "One page of a workflow's executions as trend points, newest first (#1788)."
+      },
+      "WorkflowTrendsResponse": {
+        "properties": {
+          "trends": {
+            "items": {
+              "$ref": "#/components/schemas/WorkflowTrendResponse"
+            },
+            "type": "array",
+            "title": "Trends"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "trends"
+        ],
+        "title": "WorkflowTrendsResponse",
+        "description": "The latest runs of several workflows as trend points, in one response (#1872).\n\nThe Workflows page reads every card on screen from this, so the page costs\none request however many workflows it shows. Each entry is what\n``GET /workflows/{id}/trend`` answers for page 1 at the same page size."
       },
       "syn_api__routes__costs__CostSummaryResponse": {
         "properties": {
