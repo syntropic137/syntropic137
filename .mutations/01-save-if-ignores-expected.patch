@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/projection_stores/memory_store.py b/packages/syn-adapters/src/syn_adapters/projection_stores/memory_store.py
+index bf2e57f4d..126547398 100644
+--- a/packages/syn-adapters/src/syn_adapters/projection_stores/memory_store.py
++++ b/packages/syn-adapters/src/syn_adapters/projection_stores/memory_store.py
+@@ -84,7 +84,7 @@ class InMemoryProjectionStore:
+         if expected is None:
+             if stored is not None:
+                 return False
+-        elif stored is None or not holds(stored, expected):
++        elif stored is None:
+             return False
+         await self.save(projection, key, record.model_dump(mode="json"))
+         return True
