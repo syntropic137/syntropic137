@@ -313,10 +313,10 @@ def _fixtures(functions: Iterable[_Function], module: _Module) -> dict[str, _Fix
 class _Module:
     """One parsed file, with every name kept at the scope that defines it.
 
-    Module functions resolve bare calls; a class's methods (and those of its
-    same-module bases) resolve ``self.``/``cls.`` calls made inside that class;
-    a class's fixtures (its own, then its same-module bases') are visible only to
-    that class's tests.
+    Module functions resolve bare calls; a class's methods resolve
+    ``self.``/``cls.`` calls made inside that class, and a class's fixtures are
+    visible only to that class's tests. Both are looked up along the class's
+    MRO, restricted to its same-module bases, as Python's attribute lookup does.
     """
 
     rel: str
@@ -326,6 +326,7 @@ class _Module:
     classes: dict[str, ast.ClassDef] = field(default_factory=dict)
     fixtures: dict[str, _Fixture] = field(default_factory=dict)
     _owner: dict[int, ast.ClassDef] = field(default_factory=dict)
+    _mro: dict[int, list[ast.ClassDef]] = field(default_factory=dict)
     _class_fixtures: dict[int, dict[str, _Fixture]] = field(default_factory=dict)
     _reach: dict[int, str | None] = field(default_factory=dict)
 
@@ -346,35 +347,50 @@ class _Module:
         module.fixtures = _fixtures(_functions(tree.body), module)
         return module
 
-    def class_fixtures(self, owner: ast.ClassDef) -> dict[str, _Fixture]:
-        """``owner``'s fixtures and those it inherits from same-module bases.
+    def mro(self, owner: ast.ClassDef) -> list[ast.ClassDef]:
+        """``owner`` and its same-module bases, in Python's C3 method resolution order.
 
-        An inherited fixture is an attribute of the subclass, so a subclass
-        definition of the same name replaces it, and the first base wins.
+        Bases defined elsewhere (imports, ``object``) are dropped: nothing here
+        can see their fixtures or methods anyway.
         """
+        if id(owner) in self._mro:
+            return self._mro[id(owner)]
+        self._mro[id(owner)] = [owner]  # recursion guard: a rebound name can loop
+        parents = [
+            parent
+            for base in owner.bases
+            if isinstance(base, ast.Name)
+            and (parent := self.classes.get(base.id)) is not None
+            and parent is not owner
+        ]
+        pending = [list(self.mro(parent)) for parent in parents] + [parents]
+        order = [owner]
+        while pending := [seq for seq in pending if seq]:
+            tails = {id(c) for seq in pending for c in seq[1:]}
+            # A head no tail still waits on comes next. Python refuses a class
+            # with none (TypeError at import, so pytest never runs its tests);
+            # taking the first head keeps the census going on such a file.
+            head = next((seq[0] for seq in pending if id(seq[0]) not in tails), pending[0][0])
+            order.append(head)
+            for seq in pending:
+                if seq[0] is head:
+                    del seq[0]
+        self._mro[id(owner)] = order
+        return order
+
+    def class_fixtures(self, owner: ast.ClassDef) -> dict[str, _Fixture]:
+        """The fixtures ``owner``'s tests see: each name from the first class in its MRO."""
         if id(owner) not in self._class_fixtures:
-            self._class_fixtures[id(owner)] = {}  # recursion guard
             merged: dict[str, _Fixture] = {}
-            for base in reversed(owner.bases):
-                parent = self.classes.get(base.id) if isinstance(base, ast.Name) else None
-                if parent is not None and parent is not owner:
-                    merged.update(self.class_fixtures(parent))
-            merged.update(_fixtures(_functions(owner.body), self))
+            for cls in reversed(self.mro(owner)):
+                merged.update(_fixtures(_functions(cls.body), self))
             self._class_fixtures[id(owner)] = merged
         return self._class_fixtures[id(owner)]
 
     def _methods(self, owner: ast.ClassDef, name: str) -> list[_Function]:
-        """``name`` as ``self.name`` sees it from ``owner``: its own, then its bases'."""
-        own = [f for f in _functions(owner.body) if f.name == name]
-        if own:
-            return own
-        for base in owner.bases:
-            parent = self.classes.get(base.id) if isinstance(base, ast.Name) else None
-            if (
-                parent is not None
-                and parent is not owner
-                and (found := self._methods(parent, name))
-            ):
+        """``name`` as ``self.name`` sees it from ``owner``: the first class in its MRO."""
+        for cls in self.mro(owner):
+            if found := [f for f in _functions(cls.body) if f.name == name]:
                 return found
         return []
 

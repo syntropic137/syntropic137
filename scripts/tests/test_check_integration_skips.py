@@ -412,6 +412,112 @@ def test_a_subclass_override_replaces_the_inherited_fixture(tmp_path: Path) -> N
     assert find_integration_skips(tmp_path) == []
 
 
+def test_a_diamond_takes_the_fixture_its_mro_reaches_first(tmp_path: Path) -> None:
+    # MRO is TestDerived, Left, Right, Root: Right's override hides Root's,
+    # even though Left (searched first) inherits Root's.
+    _write(
+        tmp_path,
+        "test_x.py",
+        """
+        import pytest
+
+        class Root:
+            @pytest.fixture
+            def backend(self):
+                return 1
+
+        class Left(Root):
+            pass
+
+        class Right(Root):
+            @pytest.fixture
+            def backend(self):
+                pytest.skip("right backend missing")
+
+        @pytest.mark.integration
+        class TestDerived(Left, Right):
+            def test_store(self, backend):
+                pass
+        """,
+    )
+    assert _census(tmp_path) == [("TestDerived::test_store", "undeclared")]
+
+
+def test_a_diamond_resolves_self_calls_in_mro_order(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "test_x.py",
+        """
+        import pytest
+
+        class Root:
+            def setup_backend(self):
+                return 1
+
+        class Left(Root):
+            pass
+
+        class Right(Root):
+            def setup_backend(self):
+                pytest.skip("right backend missing")
+
+        @pytest.mark.integration
+        class TestDerived(Left, Right):
+            def test_store(self):
+                self.setup_backend()
+        """,
+    )
+    assert _census(tmp_path) == [("TestDerived::test_store", "undeclared")]
+
+
+def test_class_hierarchies_python_rejects_do_not_stop_the_census(tmp_path: Path) -> None:
+    # TestOrder's bases have no C3 order (TypeError at import); TestLoop's
+    # rebound names make each class its own ancestor here. Neither may hang or
+    # crash the census, and the clean file beside them is still read.
+    _write(
+        tmp_path,
+        "test_bad.py",
+        """
+        import pytest
+
+        class X:
+            pass
+
+        class Y(X):
+            pass
+
+        class TestOrder(X, Y):
+            def test_o(self):
+                pass
+
+        class A:
+            pass
+
+        class B(A):
+            pass
+
+        class A(B):
+            pass
+
+        class TestLoop(A):
+            def test_l(self):
+                self.missing()
+        """,
+    )
+    _write(
+        tmp_path,
+        "test_good.py",
+        """
+        import pytest
+
+        @pytest.mark.integration
+        def test_i():
+            pytest.skip("no backend")
+        """,
+    )
+    assert _census(tmp_path) == [("test_i", "undeclared")]
+
+
 def test_self_calls_resolve_in_the_tests_own_class(tmp_path: Path) -> None:
     _write(
         tmp_path,
