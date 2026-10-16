@@ -183,6 +183,8 @@ _JANITOR_MODULES = (
     "packages/syn-adapters/src/syn_adapters/workspace_backends/stale_dirs.py",
     "packages/syn-adapters/src/syn_adapters/workspace_backends/remote_refs.py",
     "packages/syn-adapters/src/syn_adapters/workspace_backends/reclaim_delete.py",
+    "apps/syn-api/src/syn_api/vps_reclaim.py",
+    "infra/scripts/vps_reclaim.py",
 )
 
 #: Where run history lives: the event store, Postgres, MinIO artifacts,
@@ -191,7 +193,6 @@ _HISTORY_IMPORTS = (
     "event_sourcing",
     "syn_adapters.storage",
     "syn_adapters.event_store",
-    "syn_adapters.session_inventory",
     "syn_adapters.observability",
     "asyncpg",
     "minio",
@@ -209,6 +210,13 @@ _HISTORY_WRITES = {
     "append_events",
     "purge",
     "truncate",
+    # The capture spool index is read (session_ids) and never advanced here.
+    "project",
+    "advance",
+    "mark_drained",
+    "settle",
+    "settle_run",
+    "execute",
 }
 
 

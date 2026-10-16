@@ -82,9 +82,8 @@ class _ExecutionList:
         return self.row
 
 
-@dataclass(frozen=True)
-class _ProjectionManager:
-    workflow_execution_list: _ExecutionList
+class _Unused:
+    """Capture reads; the execution record never asks for them."""
 
 
 @pytest.mark.parametrize(
@@ -100,22 +99,64 @@ class _ProjectionManager:
     ],
 )
 async def test_the_execution_record_carries_the_terminal_time_and_repositories(
-    monkeypatch: pytest.MonkeyPatch, row: _Row, terminal_at: float | None
+    row: _Row, terminal_at: float | None
 ) -> None:
-    monkeypatch.setattr(
-        "syn_api._wiring.get_projection_mgr", lambda: _ProjectionManager(_ExecutionList(row))
-    )
-    record = await workspace_dir_reclaim._execution_record("e")
+    models = workspace_dir_reclaim.ReclaimReadModels(_ExecutionList(row), _Unused(), _Unused())  # type: ignore[arg-type]
+    record = await models.execution_record("e")
     assert record is not None
     assert record.terminal_at == terminal_at
     assert record.repositories == row.repos
 
 
-async def test_no_execution_row_is_no_record(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        "syn_api._wiring.get_projection_mgr", lambda: _ProjectionManager(_ExecutionList(None))
+async def test_no_execution_row_is_no_record() -> None:
+    models = workspace_dir_reclaim.ReclaimReadModels(_ExecutionList(None), _Unused(), _Unused())  # type: ignore[arg-type]
+    assert await models.execution_record("e") is None
+
+
+@dataclass(frozen=True)
+class _Session:
+    id: str
+    parent_session_id: str | None = None
+
+
+@dataclass(frozen=True)
+class _Sessions:
+    rows: list[_Session]
+
+    async def page(self, *, execution_id: str | None = None, limit: int | None = None) -> object:
+        @dataclass(frozen=True)
+        class _Page:
+            rows: list[_Session]
+
+        return _Page(self.rows)
+
+
+@dataclass(frozen=True)
+class _Spools:
+    ids: set[str]
+
+    async def session_ids(self, execution_id: str) -> set[str]:
+        return self.ids
+
+
+@pytest.mark.parametrize(
+    ("sessions", "spooled", "unproven"),
+    [
+        ([_Session("s1"), _Session("child", parent_session_id="s1")], {"s1"}, None),
+        ([_Session("s1"), _Session("s2")], {"s1"}, "1 session(s) have no spool capture record"),
+        ([], set(), "no session of the execution is recorded"),
+    ],
+)
+async def test_capture_is_proven_absent_only_by_a_spool_record_per_top_level_session(
+    sessions: list[_Session], spooled: set[str], unproven: str | None
+) -> None:
+    models = workspace_dir_reclaim.ReclaimReadModels(
+        _ExecutionList(None),  # type: ignore[arg-type]
+        _Spools(spooled),
+        _Sessions(sessions),  # type: ignore[arg-type]
     )
-    assert await workspace_dir_reclaim._execution_record("e") is None
+    found = await models.capture_unproven("e")
+    assert (found is None) if unproven is None else (found is not None and unproven in found)
 
 
 # -- 1c: the scan never lists a symlink, whatever rmtree would do with it --
