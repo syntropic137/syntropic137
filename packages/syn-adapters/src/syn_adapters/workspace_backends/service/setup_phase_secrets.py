@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Final, Protocol
 
 from syn_adapters.workspace_backends.service.issued_tokens import IssuedToken
 from syn_adapters.workspace_backends.service.pinned_checkout import append_pinned_checkout
+from syn_adapters.workspace_backends.service.setup_script_header import setup_script_header
 from syn_shared.upstream_failure import UpstreamFailureError
 
 if TYPE_CHECKING:
@@ -729,7 +730,7 @@ class SetupPhaseSecrets:
                 rather than one repo being silently skipped.
             ValueError: A pinned commit is not a full commit id (#1458).
         """
-        lines: list[str] = [DEFAULT_SETUP_SCRIPT.rstrip()]
+        lines = setup_script_header(self.git_author_name, self.git_author_email)
         self._append_codex_auth(lines)
 
         self._append_git_credentials(lines)
@@ -943,28 +944,3 @@ class SetupPhaseSecrets:
                 " submodule update --init --recursive"
                 f" || printf '%s\\n' {shlex.quote(warning)} >&2"
             )
-
-
-# Minimal setup script for credentials that require secure injection.
-#
-# NOTE: Most configuration is now handled by the container's entrypoint.sh
-# (see: agentic-workspace/workspace/entrypoint.sh)
-#
-# This script only handles:
-# 1. Git identity (in case container started without env vars)
-#
-# Credential helper and repo cloning are now handled by build_setup_script()
-# when repositories are provided (ADR-058). For executions without repos,
-# this script is used as-is (backward compat).
-#
-# The entrypoint already handles: ~/.claude/settings.json, workspace dirs, hooks
-DEFAULT_SETUP_SCRIPT = """#!/bin/bash
-set -e
-
-# Configure Git identity if not already set by entrypoint
-# (entrypoint sets from initial env vars, this ensures setup-phase vars are used)
-if [ -n "${GIT_AUTHOR_NAME}" ]; then
-    git config --global user.name "${GIT_AUTHOR_NAME}"
-    git config --global user.email "${GIT_AUTHOR_EMAIL:-agent@agentic.local}"
-fi
-"""
