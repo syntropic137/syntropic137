@@ -70,6 +70,11 @@ class _Inspected:
     #: Every mount's source, bind or volume, whatever its destination (#1983);
     #: None when the document carries no mount list, which is not "no mounts".
     mount_sources: tuple[str, ...] | None = ()
+    #: Sources docker reports as read-only (``RW: false``). A mount whose
+    #: ``RW`` is missing is not here: unknown is writable.
+    read_only_sources: frozenset[str] = frozenset()
+    #: The container's name without docker's leading slash; "" when unnamed.
+    name: str = ""
 
 
 async def find_orphaned_workspaces(container_ids: list[str]) -> list[OrphanedWorkspace]:
@@ -164,6 +169,8 @@ class _DockerMount(BaseModel):
     type: str = Field(default="bind", alias="Type")
     source: str = Field(alias="Source")
     destination: str = Field(alias="Destination")
+    #: ``RW`` as docker reports it; None when absent, which is never read-only.
+    rw: bool | None = Field(default=None, alias="RW")
 
     @model_validator(mode="after")
     def _source_is_known(self) -> _DockerMount:
@@ -190,6 +197,7 @@ class _DockerContainer(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="ignore")
 
+    name: str = Field(default="", alias="Name")
     state: _DockerState = Field(default_factory=_DockerState, alias="State")
     config: _DockerConfig = Field(default_factory=_DockerConfig, alias="Config")
     #: Absent is "unknown", never "mounts nothing".
@@ -221,4 +229,6 @@ def parse_inspect(raw: str) -> _Inspected | None:
         workspace_source=workspace,
         running=document.state.running or document.state.paused,
         mount_sources=None if mounts is None else tuple(m.source for m in mounts if m.source),
+        read_only_sources=frozenset(m.source for m in mounts or () if m.rw is False and m.source),
+        name=document.name.removeprefix("/"),
     )

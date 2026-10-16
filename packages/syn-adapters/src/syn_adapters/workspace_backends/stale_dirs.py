@@ -172,6 +172,15 @@ class ContainerMounts:
     container_id: str
     sources: tuple[str, ...]
     running: bool = False
+    #: Sources docker reports read-only (``RW: false``); anything else is writable.
+    read_only_sources: frozenset[str] = frozenset()
+    #: Docker's name for it, for the operator reading /health; "" when unknown.
+    name: str = ""
+
+    @property
+    def label(self) -> str:
+        """``name (id12)``: what /health names a container that keeps a directory."""
+        return f"{self.name or 'unnamed'} ({self.container_id[:12]})"
 
     def blocks(self, workspace_id: str, host_base: str) -> bool:
         """Whether any source can reach the workspace directory under any of its names.
@@ -181,13 +190,21 @@ class ContainerMounts:
         ANCESTOR of it - the base, its parent, ``/`` - reaches it. Only the
         caller's own container is exempt, and the caller decides that
         (`own_container_id`), not this method.
+
+        A READ-ONLY ancestor bind does not block: a container that can only
+        read the tree (node-exporter's ``/:/host:ro``) cannot have written
+        work into it, so deleting under it loses nothing. A read-only bind of
+        the directory itself or inside it still blocks - it may be a live
+        reader of in-flight state - and a mount whose ``RW`` is unknown is
+        writable.
         """
         base = PurePosixPath(posixpath.normpath(host_base))
         names = (workspace_id, CLAIM_PREFIX + workspace_id, DELETE_PREFIX + workspace_id)
         dirs = [base / name for name in names]
         for raw in self.sources:
             source = PurePosixPath(posixpath.normpath(raw))
-            if base == source or base.is_relative_to(source):
+            ancestor = base == source or base.is_relative_to(source)
+            if ancestor and raw not in self.read_only_sources:
                 return True
             if any(source == d or source.is_relative_to(d) for d in dirs):
                 return True
@@ -310,7 +327,13 @@ async def list_containers() -> list[ContainerMounts]:
         if inspected is None or inspected.mount_sources is None:
             raise RuntimeError(f"could not inspect container {container_id}")
         containers.append(
-            ContainerMounts(container_id, inspected.mount_sources, running=inspected.running)
+            ContainerMounts(
+                container_id,
+                inspected.mount_sources,
+                running=inspected.running,
+                read_only_sources=inspected.read_only_sources,
+                name=inspected.name,
+            )
         )
     return containers
 

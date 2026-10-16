@@ -228,7 +228,7 @@ class WorkspaceDirReclaimer:
             )
         own = self.own_container
         binding = [
-            c.container_id[:12]
+            c.label
             for c in containers
             if not (own is not None and c.container_id.startswith(own))
             and c.blocks(workspace_id, self.host_base_dir)
