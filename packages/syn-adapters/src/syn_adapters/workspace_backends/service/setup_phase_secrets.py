@@ -740,20 +740,11 @@ class SetupPhaseSecrets:
         return "\n".join(lines) + "\n"
 
     def _append_git_identity(self, lines: list[str]) -> None:
-        """Configure the GitHub App's git identity, in the script text.
-
-        Not through the setup environment: every value there is registered for
-        redaction, and agentic-workspace refuses a value holding `[` or `]`,
-        which ``<app>[bot]`` always does. The identity is public, so the script
-        is the right place for it. The email falls back as it always has.
-        """
-        if not self.git_author_name:
-            return
-        email = self.git_author_email or "agent@agentic.local"
-        lines.append("")
-        lines.append("# Git identity (GitHub App bot)")
-        lines.append(f"git config --global user.name {shlex.quote(self.git_author_name)}")
-        lines.append(f"git config --global user.email {shlex.quote(email)}")
+        # In the script, never the setup env: AW refuses to redact `<app>[bot]`.
+        if self.git_author_name:
+            email = shlex.quote(self.git_author_email or "agent@agentic.local")
+            lines.append(f"\ngit config --global user.name {shlex.quote(self.git_author_name)}")
+            lines.append(f"git config --global user.email {email}")
 
     def _append_codex_auth(self, lines: list[str]) -> None:
         """Relocate the staged codex auth file to ~/.codex/auth.json (0600).
@@ -964,13 +955,6 @@ class SetupPhaseSecrets:
 
 # Minimal setup script for credentials that require secure injection.
 #
-# NOTE: Most configuration is now handled by the container's entrypoint.sh
-# (see: agentic-workspace/workspace/entrypoint.sh)
-#
-# This is only the header. Git identity, credentials and repo cloning are
-# appended by build_setup_script() (ADR-058).
-#
-# The entrypoint already handles: ~/.claude/settings.json, workspace dirs, hooks
-DEFAULT_SETUP_SCRIPT = """#!/bin/bash
-set -e
-"""
+# The header only: build_setup_script() appends git identity, credentials and
+# clones (ADR-058). The container's entrypoint.sh handles the rest.
+DEFAULT_SETUP_SCRIPT = "#!/bin/bash\nset -e\n"
