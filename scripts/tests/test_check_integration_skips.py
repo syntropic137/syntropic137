@@ -869,3 +869,104 @@ def test_submodules_and_worktrees_are_not_scanned(tmp_path: Path) -> None:
 def test_render_names_the_node_and_the_route(tmp_path: Path) -> None:
     finding = Finding(path="a/test_x.py", test="test_x", kind="undeclared", detail="can skip: y")
     assert finding.render() == "a/test_x.py::test_x: can skip: y"
+
+
+def test_an_inherited_helper_dispatches_self_calls_from_the_tests_class(tmp_path: Path) -> None:
+    # Root.prepare() is inherited; its self.setup_backend() is TestDerived's
+    # lookup, which reaches Right's skipping override before Root's.
+    _write(
+        tmp_path,
+        "test_x.py",
+        """
+        import pytest
+
+        class Root:
+            def setup_backend(self):
+                return 1
+
+            def prepare(self):
+                self.setup_backend()
+
+        class Left(Root):
+            pass
+
+        class Right(Root):
+            def setup_backend(self):
+                pytest.skip("right backend missing")
+
+        @pytest.mark.integration
+        class TestDerived(Left, Right):
+            def test_store(self):
+                self.prepare()
+        """,
+    )
+    assert _census(tmp_path) == [("TestDerived::test_store", "undeclared")]
+
+
+def test_an_inherited_fixture_dispatches_self_calls_from_the_tests_class(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "test_x.py",
+        """
+        import pytest
+
+        class Root:
+            def setup_backend(self):
+                return 1
+
+            @pytest.fixture
+            def backend(self):
+                return self.setup_backend()
+
+        class Left(Root):
+            pass
+
+        class Right(Root):
+            def setup_backend(self):
+                pytest.skip("right backend missing")
+
+        @pytest.mark.integration
+        class TestDerived(Left, Right):
+            def test_store(self, backend):
+                pass
+        """,
+    )
+    assert _census(tmp_path) == [("TestDerived::test_store", "undeclared")]
+
+
+_CLEAN = """
+@pytest.mark.integration
+class TestClean(Root):
+    def test_store(self):
+        self.prepare()
+"""
+
+_SKIPPING = """
+@pytest.mark.integration
+class TestSkipping(Root):
+    def setup_backend(self):
+        pytest.skip("subclass backend missing")
+
+    def test_store(self):
+        self.prepare()
+"""
+
+
+@pytest.mark.parametrize("order", [(_CLEAN, _SKIPPING), (_SKIPPING, _CLEAN)], ids=["clean-first", "skipping-first"])
+def test_a_shared_inherited_helper_is_answered_per_receiver(
+    tmp_path: Path, order: tuple[str, str]
+) -> None:
+    # Both classes inherit Root.prepare(); only TestSkipping's override skips.
+    # Whichever class is read first must not answer for the other.
+    root = """
+import pytest
+
+class Root:
+    def setup_backend(self):
+        return 1
+
+    def prepare(self):
+        self.setup_backend()
+"""
+    _write(tmp_path, "test_x.py", root + "".join(order))
+    assert _census(tmp_path) == [("TestSkipping::test_store", "undeclared")]

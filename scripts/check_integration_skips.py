@@ -328,7 +328,7 @@ class _Module:
     _owner: dict[int, ast.ClassDef] = field(default_factory=dict)
     _mro: dict[int, list[ast.ClassDef]] = field(default_factory=dict)
     _class_fixtures: dict[int, dict[str, _Fixture]] = field(default_factory=dict)
-    _reach: dict[int, str | None] = field(default_factory=dict)
+    _reach: dict[tuple[int, int], str | None] = field(default_factory=dict)
 
     @classmethod
     def parse(cls, path: Path, rel: str) -> _Module | None:
@@ -394,23 +394,38 @@ class _Module:
                 return found
         return []
 
-    def _callees(self, func: _Function, call: ast.Call) -> list[_Function]:
+    def _receiver(self, func: _Function, receiver: ast.ClassDef | None) -> ast.ClassDef | None:
+        """The class ``self`` is inside ``func``: the test's class when ``func`` is
+        inherited by it, else the class that defines ``func``, else none."""
+        owner = self._owner.get(id(func))
+        if owner is None:
+            return None
+        if receiver is not None and any(cls is owner for cls in self.mro(receiver)):
+            return receiver
+        return owner
+
+    def _callees(self, receiver: ast.ClassDef | None, call: ast.Call) -> list[_Function]:
         target = call.func
         if isinstance(target, ast.Name):
             return self.functions.get(target.id, [])
-        owner = self._owner.get(id(func))
         if (
-            owner is not None
+            receiver is not None
             and isinstance(target, ast.Attribute)
             and isinstance(target.value, ast.Name)
             and target.value.id in {"self", "cls"}
         ):
-            return self._methods(owner, target.attr)
+            return self._methods(receiver, target.attr)
         return []
 
-    def body_skips(self, func: _Function) -> str | None:
-        """Where ``func`` reaches a skip through its own body and same-module calls."""
-        key = id(func)
+    def body_skips(self, func: _Function, receiver: ast.ClassDef | None = None) -> str | None:
+        """Where ``func`` reaches a skip through its own body and same-module calls.
+
+        ``receiver`` is the test's class. An inherited body's ``self.`` calls
+        resolve along its MRO, not the defining class's, so the answer is
+        cached per receiver: one subclass's override must not answer for another.
+        """
+        receiver = self._receiver(func, receiver)
+        key = (id(func), id(receiver))
         if key in self._reach:
             return self._reach[key]
         self._reach[key] = None  # recursion guard: a cycle adds no new skip
@@ -419,8 +434,8 @@ class _Module:
             if self.names.is_skip_call(call):
                 found = f"skips at {self.rel}:{call.lineno}"
                 break
-            for target in self._callees(func, call):
-                if target is not func and (via := self.body_skips(target)):
+            for target in self._callees(receiver, call):
+                if target is not func and (via := self.body_skips(target, receiver)):
                     found = f"calls {target.name}(), which {via}"
                     break
             if found:
@@ -443,8 +458,9 @@ class _Scope:
     conftests', nearest first. A fixture that requests its own name reaches the
     next level out, as pytest's overrides do."""
 
-    def __init__(self, levels: list[dict[str, _Fixture]]) -> None:
+    def __init__(self, levels: list[dict[str, _Fixture]], receiver: ast.ClassDef | None) -> None:
         self._levels = levels  # nearest first
+        self._receiver = receiver  # the test's class: ``self`` inside a class fixture
 
     def _lookup(self, name: str, start: int = 0) -> tuple[int, _Fixture] | None:
         for level in range(start, len(self._levels)):
@@ -473,7 +489,7 @@ class _Scope:
             if found is None:
                 continue
             level, fixture = found
-            if via := fixture.module.body_skips(fixture.node):
+            if via := fixture.module.body_skips(fixture.node, self._receiver):
                 return f"fixture '{name}' {via}"
             if via := self.fixture_skips(self._requests(fixture, level), seen):
                 return f"fixture '{name}' requests {via}"
@@ -573,7 +589,7 @@ class _Census:
         findings: list[Finding] = []
         for test in _tests(module.tree):
             own = [module.class_fixtures(test.owner)] if test.owner else []
-            scope = _Scope([*own, module.fixtures, *conftests])
+            scope = _Scope([*own, module.fixtures, *conftests], test.owner)
             findings.extend(self._test_findings(rel, module, scope, test, module_marks))
         return findings
 
@@ -615,7 +631,7 @@ class _Census:
             if not skip_marks and reachable is None:
                 reachable = (
                     module.module_level_skip()
-                    or module.body_skips(test.node)
+                    or module.body_skips(test.node, test.owner)
                     or scope.fixture_skips(requests)
                     or ""
                 )

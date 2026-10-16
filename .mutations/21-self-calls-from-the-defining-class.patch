@@ -1,0 +1,13 @@
+diff --git a/scripts/check_integration_skips.py b/scripts/check_integration_skips.py
+index b9436cf0a..7f451abca 100644
+--- a/scripts/check_integration_skips.py
++++ b/scripts/check_integration_skips.py
+@@ -400,8 +400,6 @@ class _Module:
+         owner = self._owner.get(id(func))
+         if owner is None:
+             return None
+-        if receiver is not None and any(cls is owner for cls in self.mro(receiver)):
+-            return receiver
+         return owner
+ 
+     def _callees(self, receiver: ast.ClassDef | None, call: ast.Call) -> list[_Function]:

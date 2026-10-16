@@ -1,0 +1,13 @@
+diff --git a/scripts/check_integration_skips.py b/scripts/check_integration_skips.py
+index b9436cf0a..67408e65c 100644
+--- a/scripts/check_integration_skips.py
++++ b/scripts/check_integration_skips.py
+@@ -425,7 +425,7 @@ class _Module:
+         cached per receiver: one subclass's override must not answer for another.
+         """
+         receiver = self._receiver(func, receiver)
+-        key = (id(func), id(receiver))
++        key = (id(func), 0)
+         if key in self._reach:
+             return self._reach[key]
+         self._reach[key] = None  # recursion guard: a cycle adds no new skip
