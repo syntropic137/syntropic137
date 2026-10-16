@@ -14,6 +14,7 @@ workflow's create, reinstall and phase edits (``WorkflowDefinitionHistory``).
 
 from __future__ import annotations
 
+import math
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -21,10 +22,12 @@ from syn_api.routes.eval_runs import RunReads, duration_display, eval_run_facts
 from syn_api.routes.executions.queries import phase_duration
 from syn_api.types import (
     DefinitionChangeResponse,
+    DurationTrendSummaryResponse,
     EvalTrendPointResponse,
     EvalTrendResponse,
     PhaseDurationResponse,
     TrendDefinition,
+    WorkflowCardTrendResponse,
     WorkflowTrendPointResponse,
     WorkflowTrendResponse,
 )
@@ -198,7 +201,7 @@ async def workflow_trend(
 
 async def workflow_trends(
     manager: ProjectionManager, workflow_ids: Sequence[str], *, page_size: int
-) -> list[WorkflowTrendResponse]:
+) -> list[WorkflowCardTrendResponse]:
     """Each workflow's latest ``page_size`` runs as trend points, in the order given (#1872).
 
     Ids that name no workflow are left out. The cost and duration reads for
@@ -214,10 +217,99 @@ async def workflow_trends(
     reads = await RunReads.load(
         manager, [row.workflow_execution_id for _, rows in pages for row in rows.rows]
     )
-    return [
+    trends = [
         await _workflow_trend(manager, reads, workflow_id, rows, page=1, page_size=page_size)
         for workflow_id, rows in pages
     ]
+    return [
+        WorkflowCardTrendResponse(
+            **trend.model_dump(), duration_trend=duration_trend(trend.items, trend.total)
+        )
+        for trend in trends
+    ]
+
+
+TREND_WINDOW = 12
+"""Measured runs a card's duration trend looks back over."""
+TREND_MIN_RUNS = 3
+"""Fewer measured runs than this read "Too few runs"."""
+STEADY_PCT = 5
+"""A fitted change smaller than this, in percent, reads "Steady"."""
+_TREND_WORD = {"faster": "Faster", "slower": "Slower", "steady": "Steady"}
+_TREND_SIGN = {"faster": "\u2212", "slower": "+", "steady": "\u00b1"}
+
+
+def recent_durations(points: Sequence[WorkflowTrendPointResponse]) -> list[float]:
+    """Measured durations of dated runs, oldest first, the last ``TREND_WINDOW`` of them.
+
+    A lower-bound duration is a floor, not a measurement, so it is left out.
+    """
+    measured = [
+        (p.date, p.duration_seconds)
+        for p in points
+        if p.date and not p.duration_is_lower_bound and p.duration_seconds is not None
+    ]
+    measured.sort(key=lambda pair: pair[0])
+    return [d for _, d in measured[-TREND_WINDOW:]]
+
+
+def duration_change_pct(durations: Sequence[float]) -> int:
+    """Least-squares fitted change from the first run to the last, percent (negative is faster)."""
+    n = len(durations)
+    if n < 2:
+        return 0
+    mean = sum(durations) / n
+    mx = (n - 1) / 2
+    sxx = sum((x - mx) ** 2 for x in range(n))
+    slope = sum((x - mx) * (y - mean) for x, y in enumerate(durations)) / sxx
+    start, end = mean - slope * mx, mean + slope * mx
+    if start <= 0:
+        return 0
+    return math.floor((end - start) / start * 100 + 0.5)
+
+
+def duration_trend(
+    points: Sequence[WorkflowTrendPointResponse], runs_count: int
+) -> DurationTrendSummaryResponse:
+    """The card's Faster / Slower / Steady label for a workflow's latest trend points.
+
+    ``runs_count`` is every run of the workflow: when it has runs, the empty
+    state never reads "No runs yet".
+    """
+    ds = recent_durations(points)
+    n = len(ds)
+    if n == 0:
+        if points:
+            word = "No finished runs" if runs_count else "No runs yet"
+            label = "No finished runs yet"
+        else:
+            word = "No trend" if runs_count else "No runs yet"
+            label = "Duration trend not available" if runs_count else "No runs yet"
+        return DurationTrendSummaryResponse(
+            kind="none", pct=0, runs=0, word_display=word, sub_display="\u2014", label_display=label
+        )
+    if n < TREND_MIN_RUNS:
+        runs = f"{n} {'run' if n == 1 else 'runs'}"
+        return DurationTrendSummaryResponse(
+            kind="few",
+            pct=0,
+            runs=n,
+            word_display="Too few runs",
+            sub_display=runs,
+            label_display=f"Duration trend: too few runs to tell ({runs})",
+        )
+    pct = duration_change_pct(ds)
+    size = abs(pct)
+    kind = "steady" if size < STEADY_PCT else "faster" if pct < 0 else "slower"
+    how = "steady" if kind == "steady" else f"{size}% {kind}"
+    return DurationTrendSummaryResponse(
+        kind=kind,
+        pct=pct,
+        runs=n,
+        word_display=_TREND_WORD[kind],
+        sub_display=f"{_TREND_SIGN[kind]}{size}% time, last {n}",
+        label_display=f"Duration trend: {how} over the last {n} runs",
+    )
 
 
 async def _workflow_trend(

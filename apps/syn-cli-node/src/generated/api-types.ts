@@ -3706,6 +3706,30 @@ export interface components {
             detail: string;
         };
         /**
+         * DurationTrendSummaryResponse
+         * @description A workflow card's duration trend label, formatted here so the UI only renders it (#1872).
+         *
+         *     Fitted over the latest ``runs`` measured durations (at most 12): a change
+         *     under 5% is steady, fewer than 3 measured runs is too few to tell.
+         */
+        DurationTrendSummaryResponse: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "none" | "few" | "faster" | "slower" | "steady";
+            /** Pct */
+            pct: number;
+            /** Runs */
+            runs: number;
+            /** Word Display */
+            word_display: string;
+            /** Sub Display */
+            sub_display: string;
+            /** Label Display */
+            label_display: string;
+        };
+        /**
          * EvalArchivedResponse
          * @description The receipt for an archive, read from the Eval aggregate (#967).
          */
@@ -9972,6 +9996,29 @@ export interface components {
          */
         Verdict: "PASS" | "FAIL" | "ERROR";
         /**
+         * WorkflowCardTrendResponse
+         * @description A workflow's trend points plus the card's formatted duration trend (#1872).
+         */
+        WorkflowCardTrendResponse: {
+            /** Definition Version */
+            definition_version: string | null;
+            /** Definition Changed At */
+            definition_changed_at: string | null;
+            /** Definition Changes */
+            definition_changes: components["schemas"]["DefinitionChangeResponse"][];
+            /** Workflow Id */
+            workflow_id: string;
+            /** Items */
+            items: components["schemas"]["WorkflowTrendPointResponse"][];
+            /** Total */
+            total: number;
+            /** Page */
+            page: number;
+            /** Page Size */
+            page_size: number;
+            duration_trend: components["schemas"]["DurationTrendSummaryResponse"];
+        };
+        /**
          * WorkflowDefaultEvalResponse
          * @description A workflow's default eval after an edit, read from the aggregate (#967).
          */
@@ -10150,7 +10197,7 @@ export interface components {
          */
         WorkflowTrendsResponse: {
             /** Trends */
-            trends: components["schemas"]["WorkflowTrendResponse"][];
+            trends: components["schemas"]["WorkflowCardTrendResponse"][];
         };
         /**
          * CostSummaryResponse

@@ -35,6 +35,8 @@ from syn_domain.contexts.orchestration.slices.execution_cost.query_service impor
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Iterator, Sequence
 
+    from syn_api.types import WorkflowTrendPointResponse
+
 pytestmark = [pytest.mark.unit, pytest.mark.anyio]
 
 OPUS = "claude-opus-5-5"
@@ -183,17 +185,31 @@ async def test_one_request_returns_every_workflows_trend_points(
     ]
     assert sorted(i["duration_seconds"] for i in by_id["wf-a"]["items"]) == [7.0, 14.0, 21.0]
     assert by_id["wf-c"]["items"] == [] and by_id["wf-c"]["total"] == 0
-    # Every field a card renders, display strings from the backend included.
-    point = by_id["wf-a"]["items"][0]
-    for field in (
-        "date",
-        "status",
-        "duration_seconds",
-        "duration_is_lower_bound",
-        "duration_display",
-        "cost_display",
-    ):
-        assert point[field] is not None, field
+    # Every point of every workflow carries the display strings, formatted from its own run.
+    for trend in trends:
+        for point in trend["items"]:
+            assert point["execution_id"].startswith(f"{trend['workflow_id']}-exec-")
+            assert point["date"] and point["status"] == "completed"
+            assert point["duration_display"] == f"{int(point['duration_seconds'])}s", point
+            assert point["cost_display"] == "$0.50", point
+    # The card's trend label, formatted here: the UI renders it and computes no words.
+    assert by_id["wf-b"]["duration_trend"] == {
+        "kind": "slower",
+        "pct": 400,
+        "runs": 5,
+        "word_display": "Slower",
+        "sub_display": "+400% time, last 5",
+        "label_display": "Duration trend: 400% slower over the last 5 runs",
+    }
+    assert by_id["wf-a"]["duration_trend"]["sub_display"] == "+200% time, last 3"
+    assert by_id["wf-c"]["duration_trend"] == {
+        "kind": "none",
+        "pct": 0,
+        "runs": 0,
+        "word_display": "No runs yet",
+        "sub_display": "\u2014",
+        "label_display": "No runs yet",
+    }
     # Two Lane 2 reads for the whole batch, never two per workflow.
     assert lane2.calls <= 2, f"{lane2.calls} Lane 2 round trips for one batch"
 
@@ -204,11 +220,14 @@ async def test_each_entry_matches_the_single_workflow_trend(client: AsyncClient)
     batch = (
         await client.get("/workflows/trends", params={"ids": "wf-a,wf-b", "page_size": 2})
     ).json()
+    assert [e["workflow_id"] for e in batch["trends"]] == ["wf-a", "wf-b"]
     for entry in batch["trends"]:
         single = await client.get(
             f"/workflows/{entry['workflow_id']}/trend", params={"page_size": 2}
         )
-        assert entry == single.json()
+        assert len(entry["items"]) == 2
+        # The batch adds the card's label; everything else is the single endpoint's answer.
+        assert {k: v for k, v in entry.items() if k != "duration_trend"} == single.json()
 
 
 async def test_unknown_ids_are_left_out_not_fatal(client: AsyncClient) -> None:
@@ -228,3 +247,54 @@ async def test_more_ids_than_a_page_is_refused(client: AsyncClient) -> None:
     response = await client.get("/workflows/trends", params={"ids": ids})
 
     assert response.status_code == 422
+
+
+def _point(day: int, seconds: float | None, *, lower_bound: bool = False) -> WorkflowTrendPointResponse:
+    from syn_api.types import WorkflowTrendPointResponse
+
+    return WorkflowTrendPointResponse(
+        execution_id=f"x-{day}",
+        date=f"2026-10-{day:02d}T00:00:00Z",
+        status="completed",
+        workflow_version=None,
+        cost_usd=None,
+        cost_is_lower_bound=False,
+        cost_display="$0.00",
+        duration_seconds=seconds,
+        duration_is_lower_bound=lower_bound,
+        duration_display="",
+        tokens=0,
+        phase_durations=[],
+    )
+
+
+@pytest.mark.parametrize(
+    ("durations", "runs_count", "expected"),
+    [
+        # Newest first, as the API sends them; the fit reads them oldest first.
+        ([100, 120, 144], 3, ("faster", "Faster", "\u221231% time, last 3")),
+        ([100, 102, 101], 3, ("steady", "Steady", "\u00b11% time, last 3")),
+        ([100, 50], 2, ("few", "Too few runs", "2 runs")),
+        ([], 4, ("none", "No trend", "\u2014")),
+    ],
+)
+def test_the_card_label_is_classified_here(
+    durations: list[float], runs_count: int, expected: tuple[str, str, str]
+) -> None:
+    from syn_api.routes.trends import duration_trend
+
+    points = [_point(len(durations) - i, d) for i, d in enumerate(durations)]
+
+    summary = duration_trend(points, runs_count)
+
+    assert (summary.kind, summary.word_display, summary.sub_display) == expected
+
+
+def test_a_lower_bound_duration_is_not_measured() -> None:
+    from syn_api.routes.trends import duration_trend
+
+    points = [_point(3, 999, lower_bound=True), _point(2, 50), _point(1, 50)]
+
+    summary = duration_trend(points, 3)
+
+    assert (summary.kind, summary.runs, summary.sub_display) == ("few", 2, "2 runs")

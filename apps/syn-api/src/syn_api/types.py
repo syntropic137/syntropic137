@@ -1416,6 +1416,37 @@ class WorkflowTrendResponse(TrendDefinition):
     page_size: int
 
 
+DurationTrendKind = Literal["none", "few", "faster", "slower", "steady"]
+
+
+class DurationTrendSummaryResponse(BaseModel):
+    """A workflow card's duration trend label, formatted here so the UI only renders it (#1872).
+
+    Fitted over the latest ``runs`` measured durations (at most 12): a change
+    under 5% is steady, fewer than 3 measured runs is too few to tell.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    kind: DurationTrendKind
+    pct: int
+    """Signed fitted change in duration over the window, percent; 0 when not classified."""
+    runs: int
+    """Measured runs in the window."""
+    word_display: str
+    """The card's headline word: Faster, Slower, Steady, Too few runs, ..."""
+    sub_display: str
+    """The line under it, e.g. ``+44% time, last 3``."""
+    label_display: str
+    """The accessible label for the whole trend."""
+
+
+class WorkflowCardTrendResponse(WorkflowTrendResponse):
+    """A workflow's trend points plus the card's formatted duration trend (#1872)."""
+
+    duration_trend: DurationTrendSummaryResponse
+
+
 class WorkflowTrendsResponse(BaseModel):
     """The latest runs of several workflows as trend points, in one response (#1872).
 
@@ -1426,7 +1457,7 @@ class WorkflowTrendsResponse(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    trends: list[WorkflowTrendResponse]
+    trends: list[WorkflowCardTrendResponse]
     """One per requested workflow that exists, in the order asked. Unknown ids are left out."""
 
 
