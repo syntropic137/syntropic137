@@ -176,7 +176,7 @@ class _Tree:
 
 
 def _aggregate(
-    *, declared: list[dict[str, object]], continued: str | None = None
+    *, declared: list[object], continued: str | None = None
 ) -> WorkflowExecutionAggregate:
     aggregate = WorkflowExecutionAggregate()
     aggregate.start_execution(
