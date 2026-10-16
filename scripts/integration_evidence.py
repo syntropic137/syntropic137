@@ -152,6 +152,19 @@ def _xpassed(node_id: str, xpass_lines: list[str]) -> bool:
     return any(x == line or x.startswith(f"{line} - ") for x in xpass_lines)
 
 
+def _xpassed_address(address: str, xpass_lines: list[str]) -> bool:
+    """Whether an XPASS line could name the case at JUnit `address`.
+
+    For a case with no node id. A ` - ` may sit in the parameters or before
+    the reason, so every cut is tried; lossy, so it only ever widens to xfail.
+    """
+    for line in xpass_lines:
+        parts = line.removeprefix(_XPASS_PREFIX).split(" - ")
+        if any(mangle(" - ".join(parts[:n])) == address for n in range(1, len(parts) + 1)):
+            return True
+    return False
+
+
 def _case_outcome(case: ET.Element) -> TestOutcome:
     if case.find("failure") is not None or case.find("error") is not None:
         return TestOutcome.FAILED
@@ -175,7 +188,9 @@ def parse_junit(xml_text: str, output: str) -> list[Case]:
         address = f"{classname}.{name}" if classname else name
         node_id = node_id_of(element.get("file", ""), classname, name)
         outcome = _case_outcome(element)
-        if outcome is TestOutcome.PASSED and node_id and _xpassed(node_id, xpass_lines):
+        if outcome is TestOutcome.PASSED and (
+            _xpassed(node_id, xpass_lines) if node_id else _xpassed_address(address, xpass_lines)
+        ):
             outcome = TestOutcome.XFAIL
         key = node_id or address
         previous = cases.get(key)

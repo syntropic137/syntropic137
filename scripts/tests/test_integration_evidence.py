@@ -380,3 +380,33 @@ def test_a_case_whose_file_does_not_fit_can_still_make_a_selector_worse() -> Non
 
     assert _outcomes(report) == [TestOutcome.SKIPPED]
     assert report.verdict is EvidenceVerdict.VOID
+
+
+@pytest.mark.parametrize("param", ["normal", "has space", "has::colon"])
+def test_an_inherited_xpass_cannot_pass_a_file_through_its_passing_sibling(
+    tmp_path: Path, param: str
+) -> None:
+    # The inherited case's `file` is base.py, so it has no node id: only its
+    # dotted address can carry the XPASS, and JUnit itself calls it a pass.
+    (tmp_path / "base.py").write_text(
+        "import pytest\n"
+        "class Base:\n"
+        f"    @pytest.mark.parametrize('value', [{param!r}])\n"
+        "    @pytest.mark.xfail(reason='known')\n"
+        "    def test_inherited(self, value): pass\n"
+    )
+    (tmp_path / "test_child.py").write_text(
+        "import pytest\n"
+        "pytestmark = pytest.mark.integration\n"
+        "from base import Base\n"
+        "class TestChild(Base): pass\n"
+        "def test_ordinary(): pass\n"
+    )
+    run, junit = _real_pytest(tmp_path, "-m", "integration", "test_child.py")
+
+    report = _report(junit, run.exit_code, "test_child.py", output=run.output)
+
+    assert run.exit_code == 0, run.output
+    assert _outcomes(report) == [TestOutcome.XFAIL]
+    assert report.verdict is EvidenceVerdict.VOID
+    assert (report.suite.passed, report.suite.skipped) == (1, 1)
