@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/EvidenceStepHandler.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/EvidenceStepHandler.py
+index 03cb14a20..29dda275f 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/EvidenceStepHandler.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/EvidenceStepHandler.py
+@@ -274,7 +274,7 @@ class _StepRun:
+ 
+         Never past the step's own deadline, which may be the sooner of the two.
+         """
+-        deadline = min(attempt.started_at + self.h.timings.dispatch_visibility, attempt.not_after)
++        deadline = attempt.started_at + self.h.timings.dispatch_visibility
+         while True:
+             run = await self.h.runner.find_run(self._ref(attempt))
+             if run is not None or self.h.clock() >= deadline:

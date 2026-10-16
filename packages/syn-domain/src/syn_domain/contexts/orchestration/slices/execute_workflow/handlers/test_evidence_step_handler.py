@@ -7,7 +7,7 @@ handler's own state: the handler is meant to have none.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
 import pytest
@@ -20,30 +20,47 @@ from syn_adapters.evidence.memory import (
 )
 from syn_domain.contexts.orchestration._shared.evidence_contract import (
     EvidenceKind,
+    EvidenceManifest,
     EvidenceReport,
     EvidenceVerdict,
     RequestedTestResult,
     StepOutcome,
+    StepRef,
     SuiteCounts,
     TestOutcome,
 )
 from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoAction, TodoItem
+from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
+    RecordEvidenceRunAdoptedCommand,
+)
+from syn_domain.contexts.orchestration.domain.aggregate_execution.evidence_gate import (
+    FOREIGN_REPOSITORY,
+    REPORT_NOT_REQUESTED,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.test_evidence_gate_aggregate import (
     EXECUTION,
+    HEAD,
+    NOW,
+    REPO,
     S_PRIME,
     S,
+    _attempt,
     _collect,
     _declared,
     _gate_id,
+    _send,
     _started,
     _Store,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    DeclaredEvidence,
     ReviewVerdict,
 )
 from syn_domain.contexts.orchestration.ports.EvidenceRunnerPort import (
     Accepted,
     Ambiguous,
+    DispatchResult,
+    EvidenceAttemptRef,
     RefusalReason,
     Refused,
     RunConclusion,
@@ -67,7 +84,6 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.unit
 
 RUN = RunRef(run_id=7, run_url="https://github.com/o/r/actions/runs/7")
-NOW = datetime(2026, 10, 16, 20, 0, tzinfo=UTC)
 
 
 def _report(verdict: EvidenceVerdict = EvidenceVerdict.PASSED, head: str = S) -> EvidenceReport:
@@ -290,3 +306,202 @@ async def test_a_moved_head_settles_the_removal_void_and_skips_the_check() -> No
     assert gate.settled[1].reason == "head moved"
     assert gate.settled[2].outcome is StepOutcome.VOID
     assert h.runner.checked == []
+
+
+# --- Verify round 1 (PR #2001): scope, report binding, manifest, deadline, durability ---
+
+FOREIGN = "other-owner/other-repository"
+
+
+def _foreign_declared() -> DeclaredEvidence:
+    request = _declared().request
+    assert request is not None
+    return DeclaredEvidence(request=request.model_copy(update={"repository": FOREIGN}))
+
+
+@pytest.mark.asyncio
+async def test_a_refused_foreign_declaration_never_authorizes_a_later_dispatch() -> None:
+    """Phase 1 declares a foreign mutation (refused); phase 2 leaves that foreign head patched."""
+    # The observer reports every declared branch, foreign ones included.
+    foreign_head = HEAD.model_copy(update={"repository": FOREIGN})
+    store = _started()
+    first = _gate_id(
+        _collect(store, "implement", declared=(_foreign_declared(),), head=foreign_head)
+    )
+    h = _Harness(store, first, InMemoryEvidenceRunner([]))
+    await h.step(0)
+    gate = h.gate()
+    assert [s.index for s in gate.plan] == [0]
+    assert gate.settled[0].reason == FOREIGN_REPOSITORY
+
+    events = _collect(store, "review", head=foreign_head)
+    assert "EvidenceRequestedEvent" not in [type(e).__name__ for e in events]
+    assert "NextPhaseReadyEvent" in [type(e).__name__ for e in events]
+    assert h.runner.dispatched == []
+    for gate_events in [
+        e for e in store.events if type(e.event).__name__ == "EvidenceRequestedEvent"
+    ]:
+        steps = gate_events.event.steps  # pyright: ignore[reportAttributeAccessIssue]
+        assert all(s.preset is not None or s.repository == REPO for s in steps)
+
+
+def _wrong(**update: object) -> EvidenceReport:
+    return _report().model_copy(update=update)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "script",
+    [
+        RunScript(Accepted(RUN), report=_wrong(kind=EvidenceKind.INTEGRATION)),
+        RunScript(Accepted(RUN), report=_wrong(pr=43)),
+        RunScript(
+            Accepted(RUN),
+            report=_wrong(
+                requested=(
+                    RequestedTestResult(
+                        id="tests/test_y.py::test_other", outcome=TestOutcome.PASSED
+                    ),
+                )
+            ),
+        ),
+        RunScript(Accepted(RUN), report=_report(), report_dispatch_id="another-attempt"),
+    ],
+    ids=["kind", "pr", "tests", "nonce"],
+)
+async def test_a_report_for_another_request_cannot_prove_this_step(script: RunScript) -> None:
+    h = _one_step(InMemoryEvidenceRunner([script]))
+    await h.step(0)
+    settled = h.gate().settled[0]
+    assert (settled.outcome, settled.reason) == (StepOutcome.VOID, REPORT_NOT_REQUESTED)
+    assert h.store.load()._gates.passed() == ()  # pyright: ignore[reportPrivateUsage]
+
+
+@pytest.mark.asyncio
+async def test_a_matching_report_carrying_the_attempt_nonce_passes() -> None:
+    runner = InMemoryEvidenceRunner([RunScript(Accepted(RUN), report=_report())])
+    h = _one_step(runner)
+    await h.step(0)
+    assert h.gate().settled[0].outcome is StepOutcome.PASSED
+    (proven,) = h.store.load()._gates.passed()  # pyright: ignore[reportPrivateUsage]
+    assert proven.tests == frozenset({"tests/test_x.py::test_kills"})
+
+
+@pytest.mark.asyncio
+async def test_the_filed_manifest_is_the_gate_manifest_including_reuse() -> None:
+    store = _started()
+    first = _gate_id(_collect(store, "implement", declared=(_declared(),)))
+    runner = InMemoryEvidenceRunner([RunScript(Accepted(RUN), report=_report())])
+    h = _Harness(store, first, runner)
+    await h.step(0)
+
+    second = _gate_id(_collect(store, "review", declared=(_declared(),)))
+    h.gate_id = second
+    await h.step(0)
+    assert len(runner.dispatched) == 1  # the second gate reused, it did not run
+
+    gate = h.gate()
+    assert gate.settled[0].reused_from == StepRef(gate_id=first, step=0)
+    (filed,) = [f for _, f in h.filing.filed if f.source_path.endswith(f"{second}/manifest.json")]
+    assert EvidenceManifest.model_validate_json(filed.content) == gate.manifest()
+
+
+def _deadline_harness(step_deadline: timedelta, scripts: list[RunScript]) -> _Harness:
+    h = _one_step(InMemoryEvidenceRunner(scripts))
+    h.handler.timings = EvidenceTimings(step_deadline=step_deadline)
+    return h
+
+
+@pytest.mark.asyncio
+async def test_a_short_deadline_bounds_the_lookup_and_posts_no_retry() -> None:
+    h = _deadline_harness(timedelta(seconds=5), [RunScript(Ambiguous("504"))])
+    await h.step(0)
+    gate = h.gate()
+    assert len(h.runner.dispatched) == 1
+    assert (gate.settled[0].outcome, gate.settled[0].reason) == (StepOutcome.UNAVAILABLE, "timeout")
+    # The lookup stopped at the persisted deadline, not the 120s visibility window.
+    assert h.clock.now <= gate.attempts[0].not_after + EvidenceTimings().poll_interval
+
+
+@pytest.mark.asyncio
+async def test_reentry_near_a_persisted_deadline_dispatches_nothing() -> None:
+    store = _started()
+    gate_id = _gate_id(_collect(store, "implement", declared=(_declared(),)))
+    _send(store, _attempt(gate_id, 0, "d-1", not_after=NOW + timedelta(seconds=5)))
+    h = _Harness(store, gate_id, InMemoryEvidenceRunner([RunScript(Ambiguous("504"))]))
+    h.clock.now = NOW + timedelta(seconds=4)
+    await h.step(0)
+    gate = h.gate()
+    assert h.runner.dispatched == []
+    assert gate.attempts[0].not_after == NOW + timedelta(seconds=5)
+    assert (gate.settled[0].outcome, gate.settled[0].reason) == (StepOutcome.UNAVAILABLE, "timeout")
+
+
+class _DurabilityCheckingRunner(InMemoryEvidenceRunner):
+    """At the moment of the POST, reloads the STREAM and records what it already holds."""
+
+    def __init__(self, store: _Store, scripts: list[RunScript]) -> None:
+        super().__init__(scripts)
+        self.store, self.gate_id = store, ""
+        self.persisted_at_post: list[tuple[str, int, datetime] | None] = []
+
+    async def dispatch(self, attempt: EvidenceAttemptRef) -> DispatchResult:
+        gate = self.store.load().evidence_gate(self.gate_id)
+        held = gate.attempts.get(0) if gate is not None else None
+        self.persisted_at_post.append(
+            None if held is None else (held.dispatch_id, held.attempt, held.not_after)
+        )
+        return await super().dispatch(attempt)
+
+
+@pytest.mark.asyncio
+async def test_the_attempt_is_durable_at_the_moment_its_dispatch_is_posted() -> None:
+    store = _started()
+    gate_id = _gate_id(_collect(store, "implement", declared=(_declared(),)))
+    runner = _DurabilityCheckingRunner(store, [RunScript(Accepted(RUN), report=_report())])
+    runner.gate_id = gate_id
+    h = _Harness(store, gate_id, runner)
+    await h.step(0)
+    (posted,) = runner.dispatched
+    assert runner.persisted_at_post == [(posted.dispatch_id, 1, NOW + timedelta(hours=1))]
+
+
+class _ForgeAfterCrash(InMemoryEvidenceRunner):
+    """A fresh process's view of a forge that already holds the run for ``dispatch_id``."""
+
+    def __init__(self, dispatch_id: str) -> None:
+        super().__init__([])
+        self._known = dispatch_id
+
+    async def find_run(self, attempt: EvidenceAttemptRef) -> RunRef | None:
+        return RUN if attempt.dispatch_id == self._known else None
+
+    async def await_run(self, run: RunRef, not_after: datetime) -> RunConclusion:
+        del run, not_after
+        return RunConclusion.SUCCESS
+
+    async def fetch_report(self, run: RunRef) -> EvidenceReport | None:
+        del run
+        return _report().model_copy(update={"dispatch_id": self._known})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("adopted", [False, True], ids=["started-unadopted", "adopted"])
+async def test_a_fresh_process_resumes_a_persisted_attempt_without_dispatching(
+    adopted: bool,
+) -> None:
+    store = _started()
+    gate_id = _gate_id(_collect(store, "implement", declared=(_declared(),)))
+    _send(store, _attempt(gate_id, 0, "d-1", not_after=NOW + timedelta(hours=1)))
+    if adopted:
+        _send(
+            store,
+            RecordEvidenceRunAdoptedCommand(EXECUTION, gate_id, 0, 1, RUN.run_id, RUN.run_url),
+        )
+    runner = _ForgeAfterCrash("d-1")
+    h = _Harness(store, gate_id, runner)
+    await h.step(0)
+    gate = h.gate()
+    assert runner.dispatched == []
+    assert (gate.attempts[0].attempt, gate.attempts[0].run_id) == (1, RUN.run_id)
+    assert gate.settled[0].outcome is StepOutcome.PASSED

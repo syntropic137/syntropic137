@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/EvidenceStepHandler.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/EvidenceStepHandler.py
+index 03cb14a20..01e59b762 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/EvidenceStepHandler.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/EvidenceStepHandler.py
+@@ -320,7 +320,7 @@ class _StepRun:
+         if step.index == len(gate.plan) - 1:
+             # The settlement the aggregate WILL record, by its own rule, added to
+             # the events BEFORE it is recorded (§A.6): one rule, not a second copy.
+-            this = self.aggregate.preview_evidence_settlement(command([], None))
++            this = __import__("dataclasses").replace(self.aggregate.preview_evidence_settlement(command([], None)), reused_from=None)
+             settled = [*gate.settled.values(), this]
+             manifest = build_manifest(gate.gate_id, gate.plan, settled, gate.removed)
+             files.append(("manifest.json", manifest.model_dump_json(by_alias=True, indent=2)))

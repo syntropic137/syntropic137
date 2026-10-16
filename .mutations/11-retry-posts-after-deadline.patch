@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/EvidenceStepHandler.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/EvidenceStepHandler.py
+index 03cb14a20..e301bc409 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/EvidenceStepHandler.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/EvidenceStepHandler.py
+@@ -231,7 +231,7 @@ class _StepRun:
+     async def _retry(self, why: str) -> EvidenceAttempt | None:
+         """Attempt n+1 if one is left; otherwise settle `unavailable: why` and return None."""
+         attempt = self.gate.attempts.get(self.step.index)
+-        if attempt is not None and self.h.clock() >= attempt.not_after:
++        if False:
+             # Retries share the step's deadline (§A.5 4): nothing is posted after it.
+             await self._settle(StepOutcome.UNAVAILABLE, "timeout")
+             return None

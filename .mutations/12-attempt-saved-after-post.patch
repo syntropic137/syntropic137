@@ -1,0 +1,34 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/EvidenceStepHandler.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/EvidenceStepHandler.py
+index 03cb14a20..048b1a6cc 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/EvidenceStepHandler.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/EvidenceStepHandler.py
+@@ -191,8 +191,9 @@ class _StepRun:
+ 
+     async def _attempt(self) -> EvidenceAttempt | None:
+         """Record an attempt, THEN post it. None when the forge refused and the step settled."""
+-        attempt = await self._start()
++        attempt = await self._start(save=False)
+         result = await self.h.runner.dispatch(self._ref(attempt))
++        await self.save(self.aggregate)
+         if isinstance(result, Refused):
+             await self._settle(StepOutcome.UNAVAILABLE, result.reason.value)
+             return None
+@@ -240,7 +241,7 @@ class _StepRun:
+             return None
+         return await self._attempt()
+ 
+-    async def _start(self) -> EvidenceAttempt:
++    async def _start(self, *, save: bool = True) -> EvidenceAttempt:
+         now = self.h.clock()
+         self.aggregate.start_evidence_attempt(
+             StartEvidenceAttemptCommand(
+@@ -252,7 +253,8 @@ class _StepRun:
+                 now + self.h.timings.step_deadline,
+             )
+         )
+-        await self.save(self.aggregate)  # recorded BEFORE the POST (B3)
++        if save:
++            await self.save(self.aggregate)  # recorded BEFORE the POST (B3)
+         return self.gate.attempts[self.step.index]
+ 
+     async def _adopt(self, attempt: EvidenceAttempt, run: RunRef) -> EvidenceAttempt:
