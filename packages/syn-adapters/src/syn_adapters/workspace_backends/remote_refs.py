@@ -117,6 +117,7 @@ def _ls_remote_env() -> dict[str, str]:
         "GIT_CONFIG_NOSYSTEM": "1",
         "GIT_CONFIG_GLOBAL": "/dev/null",
         "GIT_TERMINAL_PROMPT": "0",
+        "GIT_NO_REPLACE_OBJECTS": "1",
         "GIT_ASKPASS": "/bin/false",
         "SSH_ASKPASS": "/bin/false",
     }

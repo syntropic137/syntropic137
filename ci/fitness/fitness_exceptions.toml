@@ -546,7 +546,7 @@ allowed_prefixes = [
 "packages/syn-adapters/src/syn_adapters/session_inventory/docker_recovery.py" = { reason = "Removes its own recovery helper container, and a capture volume only once spool_release proved it drained and unreferenced." }
 "packages/syn-adapters/src/syn_adapters/workspace_backends/dependency_seed.py" = { reason = "Platform-owned dependency seed store: prunes seeds it published, and scratch copies it made." }
 "packages/syn-adapters/src/syn_adapters/workspace_backends/docker/docker_container_ops.py" = { reason = "Workspace provider teardown of the container it created." }
-"packages/syn-adapters/src/syn_adapters/workspace_backends/stale_dirs.py" = { reason = "delete_tree_until: deletes only a .deleting- directory, a name only mark_for_deletion gives after the reclaimer proved it lossless (#1983)." }
+"packages/syn-adapters/src/syn_adapters/workspace_backends/reclaim_delete.py" = { reason = "delete_tree_until: descriptor-relative delete of a .deleting- directory whose identity-bound authorization the reclaimer wrote after proving it lossless (#1983)." }
 "packages/syn-adapters/src/syn_adapters/workspace_backends/orphaned.py" = { reason = "ShutilWorkspaceDirRemover: deletes only a ReclaimableDir, which only a guard produces (#1560, #1983)." }
 
 [os_walk_without_onerror]

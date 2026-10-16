@@ -19,10 +19,12 @@ import pytest
 
 from syn_adapters.workspace_backends import stale_dirs
 from syn_adapters.workspace_backends.orphaned import parse_inspect
+from syn_adapters.workspace_backends.reclaim_delete import AUTH_DIRNAME, authorize_and_mark
 from syn_adapters.workspace_backends.remote_refs import GitLsRemote
 from syn_adapters.workspace_backends.stale_dirs import (
     ContainerMounts,
     SubprocessHostWorkspaceGit,
+    claim_workspace_dir,
     scan_workspace_dirs,
 )
 from syn_api.services.workspace_dir_reclaim import (
@@ -114,7 +116,13 @@ def _reclaimer(
         scan_dirs=scan_workspace_dirs,
         git=SubprocessHostWorkspaceGit(),
         remotes=GitLsRemote(),
+        host_base_dir=HOST_BASE,
+        own_container="api0000000001",
     )
+
+
+#: Where docker names the workspace base on the host, in every test.
+HOST_BASE = "/srv/workspaces"
 
 
 def _reason(result: ReclaimPass, workspace_id: str) -> RetainedReason:
@@ -273,12 +281,34 @@ async def test_any_container_binding_the_dir_or_below_keeps_it(
     assert ws.exists()
 
 
-async def test_a_bind_of_the_base_itself_names_no_workspace(base: Path, tmp_path: Path) -> None:
-    """The API binds the whole base; that must not hold every directory forever."""
+async def test_only_this_process_own_bind_of_the_base_is_exempt(base: Path, tmp_path: Path) -> None:
+    """The API binds the whole base; its own container, and only it, may."""
     _workspace(base, "ws-base-bound", tmp_path)
-    api = ContainerMounts("api01", ("/srv/workspaces", "/var/run/docker.sock"), running=True)
-    result = await _reclaimer(base, containers=[api]).run_once()
+    own = ContainerMounts("api0000000001ffff", ("/srv/workspaces", "/var/run/docker.sock"))
+    result = await _reclaimer(base, containers=[own]).run_once()
     assert result.reclaimed == ("ws-base-bound",)
+
+
+@pytest.mark.parametrize("source", ["/srv/workspaces", "/srv/workspaces/", "/srv", "/"])
+async def test_another_container_binding_the_base_or_an_ancestor_keeps_every_dir(
+    base: Path, tmp_path: Path, source: str
+) -> None:
+    """Codex r1 finding 5: through an ancestor bind a container reaches every workspace,
+    under any name, so it blocks deletion like a direct bind."""
+    ws = _workspace(base, "ws-ancestor", tmp_path)
+    other = ContainerMounts("tool0000000002", (source,), running=True)
+    result = await _reclaimer(base, containers=[other]).run_once()
+    assert _reason(result, "ws-ancestor") is RetainedReason.MOUNTED
+    assert ws.exists()
+
+
+async def test_an_unknown_host_base_keeps_every_dir(base: Path, tmp_path: Path) -> None:
+    ws = _workspace(base, "ws-no-host-base", tmp_path)
+    reclaimer = _reclaimer(base)
+    reclaimer.host_base_dir = None
+    result = await reclaimer.run_once()
+    assert _reason(result, "ws-no-host-base") is RetainedReason.MOUNTED
+    assert ws.exists()
 
 
 def test_inspect_reads_whether_the_container_is_running_and_every_mount() -> None:
@@ -633,14 +663,14 @@ async def test_a_failed_delete_is_reported(base: Path, tmp_path: Path) -> None:
     _workspace(base, "ws-root-owned", tmp_path)
     reclaimer = _reclaimer(base)
 
-    def refuses(path: str, deadline: float) -> bool:
+    def refuses(path: str, identity: tuple[int, int], deadline: float) -> bool:
         raise PermissionError(13, "Permission denied", path)
 
     reclaimer.delete_tree = refuses
     result = await reclaimer.run_once()
     assert _reason(result, "ws-root-owned") is RetainedReason.DELETE_FAILED
     # Proven before the delete began, so it is not put back: the next pass retries.
-    assert sorted(p.name for p in base.iterdir()) == [".deleting-ws-root-owned"]
+    assert sorted(p.name for p in base.iterdir()) == [".deleting-ws-root-owned", AUTH_DIRNAME]
 
 
 # --- maintenance pauses every pass ---
@@ -666,7 +696,8 @@ async def test_maintenance_set_mid_pass_stops_before_the_next_directory(
     first = _workspace(base, "ws-a", tmp_path)
     second = _workspace(base, "ws-b", tmp_path)
     reclaimer = _reclaimer(base)
-    answers = iter([None, None, "maintenance"])
+    # The pass start, then before ws-a and before each of its claim, mark and delete.
+    answers = iter([None, None, None, None, None, "maintenance"])
 
     async def maintenance() -> str | None:
         return next(answers, "maintenance")
@@ -1094,6 +1125,8 @@ async def test_every_host_git_call_runs_guarded(
         assert env["GIT_CONFIG_NOSYSTEM"] == "1", argv
         assert env["GIT_CONFIG_GLOBAL"] == "/dev/null", argv
         assert env["HOME"] == "/nonexistent", argv
+        # Codex r1 finding 2: replacement refs never rewrite what an id means.
+        assert env["GIT_NO_REPLACE_OBJECTS"] == "1", argv
 
 
 # --- the delete path: off the loop, budgeted, resumable (#1983 field data) ---
@@ -1132,17 +1165,17 @@ async def test_a_delete_out_of_time_resumes_after_a_restart_without_a_second_jud
     first.monotonic = ticks
     first.pass_budget_seconds = 30.0
 
-    from syn_adapters.workspace_backends.stale_dirs import delete_tree_until
+    from syn_adapters.workspace_backends.reclaim_delete import delete_tree_until
 
-    def budgeted(path: str, deadline: float) -> bool:
-        return delete_tree_until(path, deadline, ticks)
+    def budgeted(path: str, identity: tuple[int, int], deadline: float) -> bool:
+        return delete_tree_until(path, identity, deadline, ticks)
 
     first.delete_tree = budgeted
     result = await first.run_once()
     assert result.deleting == ("ws-big",)
     assert result.out_of_time
     assert result.reclaimed == ()
-    [left] = list(base.iterdir())
+    [left] = [p for p in base.iterdir() if p.name != AUTH_DIRNAME]
     assert left.name == ".deleting-ws-big"  # never put back: it was proven
     assert any(left.rglob("*"))  # part of the tree is still there
 
@@ -1156,8 +1189,11 @@ async def test_a_delete_out_of_time_resumes_after_a_restart_without_a_second_jud
 
 async def test_a_half_deleted_dir_a_container_binds_is_left(base: Path, tmp_path: Path) -> None:
     ws = _workspace(base, "ws-half", tmp_path)
-    deleting = ws.with_name(".deleting-ws-half")
-    ws.rename(deleting)
+    stat = ws.lstat()
+    claimed = claim_workspace_dir(str(ws))
+    deleting = Path(
+        authorize_and_mark(claimed, "ws-half", (stat.st_dev, stat.st_ino), now=time.time())
+    )
     bound = ContainerMounts("odd01", ("/srv/workspaces/.deleting-ws-half",))
     result = await _reclaimer(base, containers=[bound]).run_once()
     assert _reason(result, "ws-half") is RetainedReason.MOUNTED
@@ -1181,13 +1217,13 @@ async def test_the_delete_runs_off_the_event_loop(base: Path, tmp_path: Path) ->
     loop_thread: list[bool] = []
     real = reclaimer.delete_tree
 
-    def recording(path: str, deadline: float) -> bool:
+    def recording(path: str, identity: tuple[int, int], deadline: float) -> bool:
         try:
             asyncio.get_running_loop()
             loop_thread.append(True)
         except RuntimeError:
             loop_thread.append(False)
-        return real(path, deadline)
+        return real(path, identity, deadline)
 
     reclaimer.delete_tree = recording
     result = await reclaimer.run_once()
@@ -1198,12 +1234,12 @@ async def test_the_delete_runs_off_the_event_loop(base: Path, tmp_path: Path) ->
 def test_delete_tree_until_refuses_anything_not_marked_and_never_follows_links(
     tmp_path: Path,
 ) -> None:
-    from syn_adapters.workspace_backends.stale_dirs import delete_tree_until
+    from syn_adapters.workspace_backends.reclaim_delete import delete_tree_until
 
     plain = tmp_path / "ws-plain"
     plain.mkdir()
     with pytest.raises(ValueError, match="not a directory marked"):
-        delete_tree_until(str(plain), float("inf"), time.monotonic)
+        delete_tree_until(str(plain), (0, 0), float("inf"), time.monotonic)
     outside = tmp_path / "outside"
     outside.mkdir()
     (outside / "keep.txt").write_text("not ours\n")
@@ -1211,7 +1247,9 @@ def test_delete_tree_until_refuses_anything_not_marked_and_never_follows_links(
     (marked / "sub").mkdir(parents=True)
     (marked / "sub" / "link").symlink_to(outside, target_is_directory=True)
     (marked / "sub" / "f.txt").write_text("x\n")
-    assert delete_tree_until(str(marked), float("inf"), time.monotonic) is True
+    found = marked.lstat()
+    identity = (found.st_dev, found.st_ino)
+    assert delete_tree_until(str(marked), identity, float("inf"), time.monotonic) is True
     assert not marked.exists()
     assert (outside / "keep.txt").read_text() == "not ours\n"
 
@@ -1238,7 +1276,9 @@ async def test_nothing_outside_the_workspace_base_is_ever_deleted(
     (history / ".deleting-ws-escape").mkdir(parents=True)
     (history / ".deleting-ws-escape" / "events.log").write_text("every run, kept\n")
     reclaimer = _reclaimer(base)
-    reclaimer.mark_deleting = lambda _claimed, _identity: str(history / ".deleting-ws-escape")
+    reclaimer.mark_deleting = lambda _claimed, _workspace_id, _identity: str(
+        history / ".deleting-ws-escape"
+    )
     result = await reclaimer.run_once()
     assert _reason(result, "ws-escape") is RetainedReason.DELETE_FAILED
     assert (history / ".deleting-ws-escape" / "events.log").read_text() == "every run, kept\n"

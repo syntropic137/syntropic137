@@ -77,6 +77,8 @@ async def test_production_reclaimer_reads_the_registered_ownership_store(
     reclaimer = default_reclaimer(lambda: True)
     infrastructure = _reclaimer(base)
     reclaimer.base_dir = str(base)
+    reclaimer.host_base_dir = infrastructure.host_base_dir
+    reclaimer.own_container = infrastructure.own_container
     reclaimer.list_containers = infrastructure.list_containers
     reclaimer.capture_unproven = infrastructure.capture_unproven
     reclaimer.read_models_rebuilding = infrastructure.read_models_rebuilding

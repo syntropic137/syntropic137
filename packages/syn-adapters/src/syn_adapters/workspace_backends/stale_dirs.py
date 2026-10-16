@@ -35,14 +35,23 @@ from __future__ import annotations
 
 import asyncio
 import os
+import posixpath
+import re
+import socket
 from dataclasses import dataclass
-from pathlib import Path
-from typing import TYPE_CHECKING, NoReturn
+from pathlib import Path, PurePosixPath
+from typing import NoReturn
 
 from syn_adapters.workspace_backends.orphaned import docker_inspect_raw, parse_inspect
+from syn_adapters.workspace_backends.reclaim_delete import (
+    AUTH_DIRNAME,
+    CLAIM_PREFIX,
+    DELETE_PREFIX,
+    is_being_deleted,
+)
 
-if TYPE_CHECKING:
-    from collections.abc import Callable
+__all__ = ["CLAIM_PREFIX", "DELETE_PREFIX", "is_being_deleted"]
+
 
 #: Where AW keeps session capture when it is written into the workspace
 #: rather than to the `/spool` volume. Its presence anywhere keeps the
@@ -164,96 +173,41 @@ class ContainerMounts:
     sources: tuple[str, ...]
     running: bool = False
 
-    def mounts(self, workspace_id: str) -> bool:
-        """Whether any source is the workspace directory, its claim, or inside either.
+    def blocks(self, workspace_id: str, host_base: str) -> bool:
+        """Whether any source can reach the workspace directory under any of its names.
 
-        Matched by path component, not by host prefix: the API sees the base
-        at another path than docker reports, and an over-match only keeps a
-        directory. A bind of the base itself (the API's own) names no
-        workspace and does not count.
+        Compared as canonical host paths: a source that is the directory (as
+        itself, claimed or being deleted), anything inside it, or any
+        ANCESTOR of it - the base, its parent, ``/`` - reaches it. Only the
+        caller's own container is exempt, and the caller decides that
+        (`own_container_id`), not this method.
         """
-        names = {workspace_id, CLAIM_PREFIX + workspace_id, DELETE_PREFIX + workspace_id}
-        return any(not names.isdisjoint(Path(source).parts) for source in self.sources)
+        base = PurePosixPath(posixpath.normpath(host_base))
+        names = (workspace_id, CLAIM_PREFIX + workspace_id, DELETE_PREFIX + workspace_id)
+        dirs = [base / name for name in names]
+        for raw in self.sources:
+            source = PurePosixPath(posixpath.normpath(raw))
+            if base == source or base.is_relative_to(source):
+                return True
+            if any(source == d or source.is_relative_to(d) for d in dirs):
+                return True
+        return False
 
 
-#: A directory claimed for deletion is renamed to this prefix plus its
-#: workspace id, so no owner can reach it at its workspace path any more.
-CLAIM_PREFIX = ".reclaiming-"
+def own_container_id() -> str | None:
+    """This process's container id prefix, as docker names it in the hostname, or None.
 
-
-#: A directory proven lossless and being deleted is renamed to this prefix.
-#: Nothing judges it again: a pass that finds one (its own, out of time, or
-#: one a restart interrupted) only finishes the delete (#1983).
-DELETE_PREFIX = ".deleting-"
+    Docker sets a container's hostname to the first 12 hex digits of its id
+    unless compose overrides it (ours does not). Anything else is not a
+    container we can name, so nothing is exempt.
+    """
+    name = socket.gethostname()
+    return name if re.fullmatch(r"[0-9a-f]{12}", name) else None
 
 
 def workspace_id_of(name: str) -> str:
     """The workspace id a base-directory entry stands for, claimed or being deleted."""
     return name.removeprefix(CLAIM_PREFIX).removeprefix(DELETE_PREFIX)
-
-
-def is_being_deleted(host_dir: str) -> bool:
-    return Path(host_dir).name.startswith(DELETE_PREFIX)
-
-
-def mark_for_deletion(claimed: str, identity: tuple[int, int]) -> str:
-    """Rename a claimed, re-judged directory to its deleting name; return it.
-
-    Refuses (``OSError``) unless it is still the directory that was judged:
-    same ``(st_dev, st_ino)``, not a symlink. The rename is the commit point:
-    from here a restart finishes the delete instead of putting it back.
-    """
-    path = Path(claimed)
-    if not path.name.startswith(CLAIM_PREFIX):
-        raise FileNotFoundError(f"{claimed} is not claimed")
-    stat = path.lstat()
-    if path.is_symlink() or (stat.st_dev, stat.st_ino) != identity:
-        raise FileExistsError(f"{claimed} is not the directory that was judged")
-    deleting = path.with_name(DELETE_PREFIX + path.name.removeprefix(CLAIM_PREFIX))
-    if os.path.lexists(deleting):
-        raise FileExistsError(f"{deleting} already exists")
-    path.rename(deleting)
-    return str(deleting)
-
-
-def delete_tree_until(path: str, deadline: float, clock: Callable[[], float]) -> bool:
-    """Delete a ``.deleting-`` tree bottom-up until ``clock() >= deadline``.
-
-    True when it is gone; False when time ran out, leaving the rest under the
-    same name for the next pass. Blocking: run it off the event loop. Never
-    follows a symlink, and raises ``OSError`` for anything it cannot delete.
-    """
-    root = Path(path)
-    if root.is_symlink() or not root.name.startswith(DELETE_PREFIX):
-        raise ValueError(f"refusing to delete {path}: not a directory marked for deletion")
-    # os.unlink / os.rmdir rather than Path methods: the deletion fitness gate
-    # (test_deletion_primitives_are_confined) sees these spellings.
-    for dirpath, dirnames, filenames in os.walk(root, topdown=False, onerror=_raise):
-        if not _delete_level(Path(dirpath), dirnames, filenames, deadline, clock):
-            return False
-    os.rmdir(root)  # noqa: PTH106
-    return True
-
-
-def _delete_level(
-    here: Path,
-    dirnames: list[str],
-    filenames: list[str],
-    deadline: float,
-    clock: Callable[[], float],
-) -> bool:
-    """One directory's files and (already emptied) subdirectories; False when out of time."""
-    for name in filenames:
-        os.unlink(here / name)  # noqa: PTH108
-        if clock() >= deadline:
-            return False
-    for name in dirnames:
-        entry = here / name
-        if entry.is_symlink():
-            os.unlink(entry)  # noqa: PTH108
-        else:
-            os.rmdir(entry)  # noqa: PTH106
-    return clock() < deadline
 
 
 def claim_workspace_dir(host_dir: str) -> str:
@@ -299,6 +253,8 @@ def scan_workspace_dirs(base: str) -> list[WorkspaceDirListing]:
         return []
     listings: list[WorkspaceDirListing] = []
     for entry in sorted(root.iterdir()):
+        if entry.name == AUTH_DIRNAME:
+            continue  # the reclaimer's own records, never a workspace
         if entry.is_dir() and not entry.is_symlink():
             listings.append(measure_workspace_dir(entry))
     return listings
@@ -403,16 +359,35 @@ class SubprocessHostWorkspaceGit:
         return bool(untracked.strip(b"\0"))
 
     async def unproven_commits(self, repo: str, advertised: frozenset[str]) -> int:
+        """Authored commits no advertised object reaches. Reflogs and dangling commits count.
+
+        A commit reset, amended or rebased away is still the agent's work while
+        a reflog or the object store holds it, so every reflog entry
+        (``--reflog``) and every unreachable commit (``fsck``) is a tip too.
+        Replacement refs are off on every call (``GIT_NO_REPLACE_OBJECTS``),
+        and a repository with grafts is refused: both rewrite ancestry, which
+        is the very thing this proves. A shallow boundary only removes
+        parents, so it can make a walk count more, never less.
+        """
         await self._refuse_unsafe_config(repo)
-        tips = await self._local_tips(repo)
-        if not tips:
-            return 0
+        _refuse_grafts(repo)
+        tips = [*await self._local_tips(repo), *await self._unreachable_commits(repo)]
         # Only an advertised object this repository holds can bound the walk;
         # one it lacks proves nothing about what is local.
         held = await self._held_commits(repo, advertised)
         stdin = "".join(f"{tip}\n" for tip in tips) + "".join(f"^{oid}\n" for oid in held)
-        out = await _git(repo, "rev-list", "--count", "--stdin", stdin=stdin.encode())
+        out = await _git(repo, "rev-list", "--count", "--reflog", "--stdin", stdin=stdin.encode())
         return int(out.strip() or b"0")
+
+    async def _unreachable_commits(self, repo: str) -> list[str]:
+        """Commits no ref or reflog reaches: a deleted branch, an expired reflog."""
+        out = await _git(repo, "fsck", "--connectivity-only", "--unreachable", "--no-progress")
+        found: list[str] = []
+        for line in out.decode(errors="replace").splitlines():
+            parts = line.split()
+            if len(parts) == 3 and parts[0] == "unreachable" and parts[1] in {"commit", "tag"}:
+                found.append(parts[2])
+        return found
 
     async def _local_tips(self, repo: str) -> list[str]:
         """HEAD and every ref outside ``refs/remotes/``: what the agent could have made."""
@@ -587,6 +562,53 @@ def _looks_bare(dirpath: str, dirnames: list[str], filenames: list[str]) -> bool
     )
 
 
+def _refuse_grafts(repo: str) -> None:
+    git_dir = Path(repo) if _is_bare(repo) else _git_dir(Path(repo))
+    if (git_dir / "info" / "grafts").exists():
+        raise UnsafeRepositoryError(f"{repo} has grafts, which rewrite ancestry; not proven")
+
+
+#: What git itself keeps in a git directory. Anything else there - a
+#: ``recovery.patch`` in a bare clone, notes in ``.git`` - is no repository's
+#: content and keeps the directory. In-progress operations (``MERGE_HEAD``,
+#: ``rebase-merge``, ``sequencer``) and LFS objects are deliberately absent:
+#: they are unfinished or unpushed work.
+_GIT_METADATA = frozenset(
+    {
+        "HEAD",
+        "ORIG_HEAD",
+        "FETCH_HEAD",
+        "COMMIT_EDITMSG",
+        "config",
+        "description",
+        "hooks",
+        "info",
+        "objects",
+        "refs",
+        "packed-refs",
+        "logs",
+        "index",
+        "branches",
+        "modules",
+        "worktrees",
+        "shallow",
+        "commondir",
+        "gitdir",
+    }
+)
+
+
+def _unrecognized_git_metadata(git_dir: Path, root: Path) -> list[Path]:
+    """Entries of a git directory git does not put there; hooks other than samples."""
+    if not git_dir.is_dir() or not git_dir.resolve().is_relative_to(root.resolve()):
+        return []
+    found = [entry for entry in git_dir.iterdir() if entry.name not in _GIT_METADATA]
+    hooks = git_dir / "hooks"
+    if hooks.is_dir() and not hooks.is_symlink():
+        found.extend(h for h in hooks.iterdir() if not h.name.endswith(".sample"))
+    return found
+
+
 def _is_bare(repo: str) -> bool:
     return not (Path(repo) / ".git").exists()
 
@@ -600,6 +622,9 @@ def _list_unversioned(host_dir: str, repos: list[str], ignored: list[str]) -> li
     root = Path(host_dir)
     repo_roots = {Path(r) for r in repos}
     members = _unversioned_under(root, repo_roots)
+    for repo in repos:
+        git_dir = Path(repo) if _is_bare(repo) else _git_dir(Path(repo))
+        members.extend(_unrecognized_git_metadata(git_dir, root))
     for name in ignored:
         path = Path(name)
         relative = path.relative_to(root).parts
@@ -633,6 +658,8 @@ def _git_env(repo: str) -> dict[str, str]:
         "GIT_CONFIG_GLOBAL": "/dev/null",
         "GIT_TERMINAL_PROMPT": "0",
         "GIT_OPTIONAL_LOCKS": "0",
+        # Replacement refs rewrite what an object id means; never honour them.
+        "GIT_NO_REPLACE_OBJECTS": "1",
         # `repo` was found as a repository; never let git search above it for
         # another one, which may be outside the workspace.
         "GIT_CEILING_DIRECTORIES": str(Path(repo).resolve().parent),

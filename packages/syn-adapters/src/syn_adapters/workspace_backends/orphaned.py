@@ -10,15 +10,19 @@ workspace directory as this process sees it, and a remover for that directory.
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 import shutil
 import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, model_validator
+
 from syn_domain.contexts.orchestration import ExecutionResult, OrphanedWorkspace
-from syn_shared.env_constants import ENV_SYN_WORKSPACE_CONTAINER_DIR
+from syn_shared.env_constants import (
+    ENV_SYN_WORKSPACE_CONTAINER_DIR,
+    ENV_SYN_WORKSPACE_HOST_DIR,
+)
 
 #: Mount point of the workspace directory inside every workspace container.
 _WORKSPACE_MOUNT = "/workspace"
@@ -106,6 +110,11 @@ def workspace_base_dir() -> str:
     return os.environ.get(ENV_SYN_WORKSPACE_CONTAINER_DIR, "/workspaces")
 
 
+def workspace_host_dir() -> str | None:
+    """The workspace base as docker names it on the host, or None when unset."""
+    return os.environ.get(ENV_SYN_WORKSPACE_HOST_DIR) or None
+
+
 def _local_path(workspace_id: str) -> str:
     """Where this process sees the directory docker mounted from the host.
 
@@ -141,45 +150,75 @@ async def docker_inspect_raw(container_id: str) -> str | None:
     return stdout.decode(errors="replace")
 
 
+class _DockerMount(BaseModel):
+    """One entry of ``Mounts`` in ``docker inspect``.
+
+    Docker's documents carry many fields this code has no business with, so
+    unknown keys are ignored (an external format, not our contract); what is
+    read is typed and validated. A mount whose source is missing, or empty
+    for anything but a tmpfs, is not "no mount": it rejects the document.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    type: str = Field(default="bind", alias="Type")
+    source: str = Field(alias="Source")
+    destination: str = Field(alias="Destination")
+
+    @model_validator(mode="after")
+    def _source_is_known(self) -> _DockerMount:
+        if not self.source and self.type != "tmpfs":
+            raise ValueError(f"a {self.type} mount at {self.destination} names no source")
+        return self
+
+
+class _DockerState(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    running: bool = Field(default=False, alias="Running")
+    paused: bool = Field(default=False, alias="Paused")
+
+
+class _DockerConfig(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    labels: dict[str, str] | None = Field(default=None, alias="Labels")
+
+
+class _DockerContainer(BaseModel):
+    """The parts of one ``docker inspect`` document this module reads."""
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    state: _DockerState = Field(default_factory=_DockerState, alias="State")
+    config: _DockerConfig = Field(default_factory=_DockerConfig, alias="Config")
+    #: Absent is "unknown", never "mounts nothing".
+    mounts: tuple[_DockerMount, ...] | None = Field(default=None, alias="Mounts")
+
+
+_INSPECT = TypeAdapter(list[_DockerContainer])
+
+
 def parse_inspect(raw: str) -> _Inspected | None:
-    """The labels and the ``/workspace`` mount source out of ``docker inspect`` JSON."""
+    """The labels and mounts out of ``docker inspect`` JSON; None when it is not readable.
+
+    Validated as a whole: one malformed mount makes the document unreadable,
+    and every caller keeps what it cannot read.
+    """
     try:
-        documents: object = json.loads(raw)
-    except ValueError:
+        documents = _INSPECT.validate_json(raw)
+    except ValidationError:
         return None
-    if not isinstance(documents, list) or not documents or not isinstance(documents[0], dict):
+    if not documents:
         return None
-    document: dict[object, object] = documents[0]
-    state = document.get("State")
-    running = isinstance(state, dict) and state.get("Running") is True
+    document = documents[0]
+    mounts = document.mounts
+    workspace = next(
+        (m.source for m in mounts or () if m.destination == _WORKSPACE_MOUNT and m.source), None
+    )
     return _Inspected(
-        labels=_labels(document),
-        workspace_source=_workspace_source(document),
-        running=running,
-        mount_sources=_mount_sources(document),
+        labels=dict(document.config.labels or {}),
+        workspace_source=workspace,
+        running=document.state.running or document.state.paused,
+        mount_sources=None if mounts is None else tuple(m.source for m in mounts if m.source),
     )
-
-
-def _labels(document: dict[object, object]) -> dict[str, str]:
-    config = document.get("Config")
-    raw = config.get("Labels") if isinstance(config, dict) else None
-    return {str(k): str(v) for k, v in raw.items()} if isinstance(raw, dict) else {}
-
-
-def _mount_sources(document: dict[object, object]) -> tuple[str, ...] | None:
-    mounts = document.get("Mounts")
-    if not isinstance(mounts, list):
-        return None
-    return tuple(
-        str(mount["Source"]) for mount in mounts if isinstance(mount, dict) and mount.get("Source")
-    )
-
-
-def _workspace_source(document: dict[object, object]) -> str | None:
-    mounts = document.get("Mounts")
-    if not isinstance(mounts, list):
-        return None
-    for mount in mounts:
-        if isinstance(mount, dict) and mount.get("Destination") == _WORKSPACE_MOUNT:
-            return str(mount.get("Source") or "") or None
-    return None
