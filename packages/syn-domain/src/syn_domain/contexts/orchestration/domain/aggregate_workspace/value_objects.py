@@ -270,6 +270,24 @@ class IsolationHandle:
     host_workspace_path: str | None = None  # Path on host mounted into container
 
 
+class WorkspaceDeleteFallback(StrEnum):
+    """How the provider's fallback delete of the workspace directory went.
+
+    Run only when the host process could not delete the directory alone
+    (Docker: files the container wrote under another uid, #1983). `REFUSED`
+    means the fallback was not run, because the directory is not one the
+    provider created under its base directory.
+    """
+
+    DELETED = "deleted"
+    FAILED = "failed"
+    REFUSED = "refused"
+    #: Not a provider outcome: syn records this when the provider reported a
+    #: value outside the three above (a contract mismatch), so the row stays
+    #: distinct from None, which means only "not attempted / not reported".
+    UNRECOGNIZED = "unrecognized"
+
+
 @dataclass(frozen=True)
 class WorkspaceUsage:
     """What one workspace consumed, read once as the isolation was destroyed.
@@ -300,6 +318,9 @@ class WorkspaceUsage:
     delete_failures: tuple[str, ...] | None = None
     net_rx_bytes: int | None = None
     net_tx_bytes: int | None = None
+    #: The fallback delete's outcome. None when the host deleted the directory
+    #: alone, or the delete was not observed.
+    delete_fallback: WorkspaceDeleteFallback | None = None
 
 
 @dataclass(frozen=True)
