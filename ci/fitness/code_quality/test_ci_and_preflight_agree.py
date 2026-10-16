@@ -50,6 +50,9 @@ _ALLOWED_OUTSIDE: dict[str, str] = {
     # Mutation evidence (#1941). The workflows name these in comments only.
     "mutation-evidence": "dispatches mutation-evidence.yml; a GitHub run, not a local gate",
     "check-no-mutations": "red BY DESIGN while a PR carries .mutations/; see _NOT_A_GATE",
+    # Integration evidence (plan 20261015_platform-dispatched-evidence PR 3).
+    # integration-evidence.yml names it in a comment only.
+    "test-integration-ci": "the full integration suite against real services; not a pre-push gate",
 }
 
 _NOT_A_GATE: dict[str, str] = {
