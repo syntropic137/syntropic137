@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -19,9 +20,6 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continu
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.evidence_record import (
     ObservedHead,
-)
-from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
-    WorkflowExecutionAggregate,
 )
 from syn_domain.contexts.orchestration.domain.events.AgentExecutionCompletedEvent import (
     AgentExecutionCompletedEvent,
@@ -32,6 +30,11 @@ from syn_domain.contexts.orchestration.domain.events.ArtifactsCollectedForPhaseE
 from syn_domain.testing.fake_agent_handler import A_DELIVERABLE, FakeAgentExecutionHandler
 
 from .test_processor_smoke import FakeExecutionRepository, _make_processor, _one_phase_workflow
+
+if TYPE_CHECKING:
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
+        WorkflowExecutionAggregate,
+    )
 
 pytestmark = pytest.mark.unit
 
