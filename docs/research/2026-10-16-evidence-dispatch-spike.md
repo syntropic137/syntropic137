@@ -12,11 +12,11 @@ protocol depends on:
    (`find_run`) adopts an attempt's run by listing `workflow_dispatch` runs
    with `created >= started_at - 2 min`.
 
-Question 2 was answered live against this repository's
-`mutation-evidence.yml` (workflow id `384882928`). Question 1 is answered
-from GitHub's published REST description. **It has not been observed live**,
-because no credential available to a workspace agent can dispatch (see
-"Prerequisite for the live dispatch" below).
+Both were answered live against this repository's `mutation-evidence.yml`
+(workflow id `384882928`). Question 1 is answered from GitHub's published
+REST description and was then **observed live by the orchestrator** with an
+owner-level credential (see "Observed live" below); no workspace agent
+credential can dispatch, so the workspace did not perform that dispatch.
 
 ## 1. Dispatch returns its run only when asked
 
@@ -56,27 +56,34 @@ print(json.dumps(op['responses'], indent=1)); \
 print(json.dumps(d['components']['schemas']['workflow-dispatch-response'], indent=1))"
 ```
 
-### Prerequisite for the live dispatch
+### Observed live
 
-The workspace installation token used for this spike reports
+The orchestrator dispatched once on 2026-10-16 (05:3xZ) with an owner-level
+`gh` credential and recorded it on PR #1987
+(<https://github.com/syntropic137/syntropic137/pull/1987#issuecomment-6208781813>).
+Verbatim:
+
+```
+gh api -X POST repos/syntropic137/syntropic137/actions/workflows/mutation-evidence.yml/dispatches -f ref=main -F return_run_details=true -f 'inputs[pr]=1985' -f 'inputs[tests]=scripts/tests/test_check_integration_skips.py' -f 'inputs[dispatch_id]=spike-1'
+-> HTTP/2.0 200 OK
+{"workflow_run_id":38855959302,"run_url":"https://api.github.com/repos/syntropic137/syntropic137/actions/runs/38855959302","html_url":"https://github.com/syntropic137/syntropic137/actions/runs/38855959302"}
+gh api repos/syntropic137/syntropic137/actions/runs/38855959302 --jq .display_title
+-> Mutation evidence for PR #1985 spike-1
+```
+
+Dispatch returns the run id when `return_run_details` is `true`, and the
+run's display title carries the `dispatch_id`. The `HTTP/2.0 200 OK` is the
+orchestrator's attributed observation; a later read-only
+`GET /repos/syntropic137/syntropic137/actions/runs/38855959302` independently
+confirms `event=workflow_dispatch` and that display title, but cannot prove
+the POST's response after the fact.
+
+Why the workspace did not dispatch itself: its installation token reports
 `{"admin":false,"maintain":false,"pull":false,"push":false,"triage":false}`
 on `GET /repos/syntropic137/syntropic137` and has no `actions: write`. The
 plan only grants `Actions: Read and write` to the App in PR 7 (DevOps lane),
-after PR 4. A real dispatch also starts a real, billed CI run. So the live
-check belongs to a credential that may dispatch (an owner's `gh`, or the App
-after PR 7), and it is part of PR 6's adapter acceptance:
-
-```bash
-gh api -X POST repos/syntropic137/syntropic137/actions/workflows/mutation-evidence.yml/dispatches \
-  -f ref=main -F return_run_details=true \
-  -f 'inputs[pr]=<n>' -f 'inputs[tests]=<node id>' -f 'inputs[dispatch_id]=spike-1'
-# expect HTTP 200 and workflow_run_id; then
-gh api repos/syntropic137/syntropic137/actions/runs/<workflow_run_id> --jq .display_title
-# expect "Mutation evidence for PR #<n> spike-1"
-```
-
-Until that runs, "dispatch returns its run id" is GitHub's documented
-contract, not an observation.
+after PR 4, and a real dispatch starts a real, billed CI run. PR 6's adapter
+acceptance still repeats this check with the App's own credential.
 
 ## 2. The `created` filter, observed
 
