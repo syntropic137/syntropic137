@@ -147,7 +147,6 @@ def parse_quiescence(
         DiskSpaceHealth,
         HealthResponse,
         MaintenanceModeResponse,
-        SubscriptionHealth,
     )
 
     maintenance = MaintenanceModeResponse.model_validate_json(maintenance_json)
@@ -161,22 +160,7 @@ def parse_quiescence(
         document.get("degraded_reasons")
     )
     reclaim = None if disk is None else disk.reclaim
-    block = document.get("subscription")
-    subscription = None
-    if block is not None:
-        read = SubscriptionHealth.model_validate(block)
-        subscription = SubscriptionProof(
-            status=read.status,
-            running=read.running,
-            is_catching_up=read.is_catching_up,
-            lag=read.lag,
-            halted_at=read.halted_at,
-            held=None if read.held_projections is None else len(read.held_projections),
-            lagging=None if read.lagging_projections is None else len(read.lagging_projections),
-            rebuilding=(
-                None if read.rebuilding_read_models is None else len(read.rebuilding_read_models)
-            ),
-        )
+    subscription = _subscription_proof(document.get("subscription"))
     return QuiescenceState(
         maintenance=maintenance.active,
         maintenance_since=maintenance.since,
@@ -186,6 +170,29 @@ def parse_quiescence(
         reclaimer_last_pass_at=None if reclaim is None else reclaim.last_pass_at,
         degraded_reasons=tuple(str(r) for r in reasons or ()),
         subscription=subscription,
+    )
+
+
+def _count(items: Sequence[object] | None) -> int | None:
+    return None if items is None else len(items)
+
+
+def _subscription_proof(block: JsonValue) -> SubscriptionProof | None:
+    """The /health subscription block through ``SubscriptionHealth``; None when absent."""
+    from syn_api.types import SubscriptionHealth
+
+    if block is None:
+        return None
+    read = SubscriptionHealth.model_validate(block)
+    return SubscriptionProof(
+        status=read.status,
+        running=read.running,
+        is_catching_up=read.is_catching_up,
+        lag=read.lag,
+        halted_at=read.halted_at,
+        held=_count(read.held_projections),
+        lagging=_count(read.lagging_projections),
+        rebuilding=_count(read.rebuilding_read_models),
     )
 
 
