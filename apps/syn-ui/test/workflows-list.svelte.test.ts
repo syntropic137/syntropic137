@@ -128,7 +128,7 @@ async function open(count: number) {
 }
 
 /** Each card's trend text, by workflow id. */
-const cardTrends = (target: HTMLElement) =>
+const cardTrends = (target: HTMLElement): Record<string, string> =>
   Object.fromEntries([...target.querySelectorAll('[data-sky-row]')].map((card) => [card.querySelector('.sky-wfs__slug')?.textContent, card.querySelector('.sky-wfs__trend')?.textContent ?? '']))
 
 describe('Workflows page requests (#1872)', () => {
