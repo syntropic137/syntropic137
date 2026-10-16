@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/github/agent_token.py b/packages/syn-adapters/src/syn_adapters/github/agent_token.py
+index 395d326e2..b444346fc 100644
+--- a/packages/syn-adapters/src/syn_adapters/github/agent_token.py
++++ b/packages/syn-adapters/src/syn_adapters/github/agent_token.py
+@@ -63,7 +63,7 @@ def _phase_permissions(granted: dict[str, str]) -> dict[str, str]:
+     it, because GitHub refuses a token that asks for more than the grant.
+     """
+     return {
+-        name: (CAPPED_LEVEL if name == CAPPED_PERMISSION else level)
++        name: (CAPPED_LEVEL if name == CAPPED_PERMISSION or level == "write" else level)
+         for name, level in granted.items()
+     }
+ 
