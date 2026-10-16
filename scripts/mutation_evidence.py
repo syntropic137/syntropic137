@@ -797,11 +797,12 @@ def requested_outcome(baseline: PytestRun, node_id: str) -> TestOutcome:
         return TestOutcome.SKIPPED
     if baseline.xfail:
         return TestOutcome.XFAIL
-    if baseline.exit_code in {0, 4, 5} and baseline.passed == 0:
-        # 5: nothing collected; 4: a node id pytest could not find.
-        return TestOutcome.NOT_COLLECTED
-    if baseline.exit_code != 0:
+    if baseline.exit_code not in {0, 4, 5} and not baseline.failing:
+        # Red with nothing on record: an interrupt or a timeout. (5 is nothing
+        # collected; 4 is a node id pytest could not find.)
         return TestOutcome.FAILED
+    if baseline.passed == 0:
+        return TestOutcome.NOT_COLLECTED
     return TestOutcome.PASSED
 
 

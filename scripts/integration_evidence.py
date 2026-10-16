@@ -1,0 +1,284 @@
+"""Integration evidence: run the whole integration suite and say what it proved.
+
+Run by `.github/workflows/integration-evidence.yml` (plan
+docs/plans/20261015_platform-dispatched-evidence.md, PR 3), or locally with
+`just test-integration-ci`. CI's integration job runs `pytest -m integration
+-x -q`, which stops at the first failure and names no test; this runner runs
+the FULL suite with JUnit XML, so every outcome is on record.
+
+The verdict, schema 1 of `evidence.json` (ADR-014 §10, plan §A.1):
+
+- `failed`: any integration test failed or errored.
+- `void`: a REQUESTED test was not collected, or was skipped, xfailed or
+  xpassed, or pytest stopped without recording a failure. None of those is a
+  pass, and each would read as one.
+- `passed`: otherwise. The whole suite was green on that head AND every test
+  the phase named ran and passed. Unrelated skips are counted in
+  `suite.skipped` and do not void.
+
+Like `mutation_evidence.py` this script is trusted and stdlib-only, run with
+`python -I` on the host; it shares that script's input grammar and the
+`evidence.json` types rather than restating them. The integration suite runs on
+the host, as in ci.yml: the suite drives Docker and real services.
+
+Usage:
+
+    integration_evidence.py validate                         # inputs from env
+    integration_evidence.py run --root PR --report FILE --evidence FILE
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import subprocess
+import sys
+import tempfile
+import xml.etree.ElementTree as ET
+from dataclasses import dataclass, replace
+from pathlib import Path
+from typing import Final
+
+# `python -I` puts no script directory on sys.path. This one is the trusted
+# checkout the script itself was read from, never the PR's.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from mutation_evidence import (  # noqa: E402
+    EvidenceReport,
+    InputError,
+    RequestedResult,
+    SuiteCounts,
+    TestOutcome,
+    Verdict,
+    parse_dispatch_id,
+    parse_pr,
+    parse_tests,
+)
+
+MARKER: Final = "<!-- integration-evidence -->"
+
+ENV_PR: Final = "INTEGRATION_PR"
+ENV_TESTS: Final = "INTEGRATION_TESTS"
+ENV_SHA: Final = "INTEGRATION_SHA"
+ENV_DISPATCH_ID: Final = "INTEGRATION_DISPATCH_ID"
+
+PYTEST_TIMEOUT_SECONDS: Final = 45 * 60
+#: pytest writes a non-strict XPASS as a `skipped` element with this message.
+_XPASS_MESSAGE: Final = "xfail-marked test passes unexpectedly"
+
+
+@dataclass(frozen=True)
+class Inputs:
+    pr: int
+    tests: tuple[str, ...]
+    sha: str
+    dispatch_id: str
+
+
+@dataclass(frozen=True)
+class Case:
+    """One JUnit `testcase`: pytest's mangled address and what happened."""
+
+    address: str
+    outcome: TestOutcome
+
+
+def inputs_from_env(env: dict[str, str]) -> Inputs:
+    sha = env.get(ENV_SHA, "")
+    if len(sha) != 40 or any(c not in "0123456789abcdef" for c in sha):
+        raise InputError(f"{ENV_SHA} {sha!r} is not a commit sha")
+    return Inputs(
+        pr=parse_pr(env.get(ENV_PR, "")),
+        tests=tuple(dict.fromkeys(parse_tests(env.get(ENV_TESTS, "")))),
+        sha=sha,
+        dispatch_id=parse_dispatch_id(env.get(ENV_DISPATCH_ID, "")),
+    )
+
+
+def mangle(node_id: str) -> str:
+    """A node id in pytest junitxml's address space (`mangle_test_address`).
+
+    JUnit names a test by `classname` + `name`, where `classname` is the node
+    id's path with `/` -> `.` and `.py` dropped, then its `::` parts. Mapping
+    the requested ids the same way compares like with like, with no guess at
+    which dot was a slash.
+    """
+    path, _, rest = node_id.partition("::")
+    dotted = path.removesuffix(".py").replace("/", ".")
+    return f"{dotted}.{rest.replace('::', '.')}" if rest else dotted
+
+
+def _addresses_overlap(selector: str, address: str) -> bool:
+    return address == selector or address.startswith((f"{selector}.", f"{selector}["))
+
+
+def _case_outcome(case: ET.Element) -> TestOutcome:
+    if case.find("failure") is not None or case.find("error") is not None:
+        return TestOutcome.FAILED
+    skipped = case.find("skipped")
+    if skipped is None:
+        return TestOutcome.PASSED
+    if skipped.get("type") == "pytest.xfail" or skipped.get("message") == _XPASS_MESSAGE:
+        return TestOutcome.XFAIL
+    return TestOutcome.SKIPPED
+
+
+def parse_junit(xml_text: str) -> list[Case]:
+    """Every testcase in a pytest JUnit report. A teardown error repeats a
+    testcase; the worse outcome is kept."""
+    cases: dict[str, TestOutcome] = {}
+    for element in ET.fromstring(xml_text).iter("testcase"):
+        classname, name = element.get("classname", ""), element.get("name", "")
+        address = f"{classname}.{name}" if classname else name
+        outcome = _case_outcome(element)
+        if cases.get(address) is not TestOutcome.FAILED:
+            cases[address] = outcome
+    return [Case(address, outcome) for address, outcome in cases.items()]
+
+
+#: When a selector names several cases, the first of these any case had wins.
+_PRECEDENCE: Final = (TestOutcome.FAILED, TestOutcome.SKIPPED, TestOutcome.XFAIL)
+
+
+def requested_outcome(node_id: str, cases: list[Case]) -> TestOutcome:
+    selector = mangle(node_id)
+    seen = {c.outcome for c in cases if _addresses_overlap(selector, c.address)}
+    if not seen:
+        return TestOutcome.NOT_COLLECTED
+    return next((o for o in _PRECEDENCE if o in seen), TestOutcome.PASSED)
+
+
+def suite_counts(cases: list[Case]) -> SuiteCounts:
+    def count(*outcomes: TestOutcome) -> int:
+        return sum(1 for c in cases if c.outcome in outcomes)
+
+    return SuiteCounts(
+        collected=len(cases),
+        passed=count(TestOutcome.PASSED),
+        failed=count(TestOutcome.FAILED),
+        skipped=count(TestOutcome.SKIPPED, TestOutcome.XFAIL),
+    )
+
+
+def decide(
+    exit_code: int, suite: SuiteCounts, requested: tuple[RequestedResult, ...]
+) -> tuple[Verdict, str]:
+    """The §A.1 verdict and a one-line reason."""
+    if suite.failed:
+        return Verdict.FAILED, f"{suite.failed} integration test(s) failed or errored"
+    if exit_code not in {0, 5}:
+        # 5 is "nothing collected", which voids below. Anything else (an
+        # interrupt, an internal or usage error) is a run that did not finish.
+        return Verdict.VOID, f"pytest exit {exit_code} with no failure on record, evidence void"
+    unproven = [f"{r.id} {r.outcome.value}" for r in requested if r.outcome is not TestOutcome.PASSED]
+    if unproven:
+        return Verdict.VOID, f"requested test(s) did not run and pass: {', '.join(unproven)}"
+    return Verdict.PASSED, (
+        f"integration suite green ({suite.passed} passed, {suite.skipped} skipped); "
+        "every requested test passed"
+    )
+
+
+def render(report: EvidenceReport, run_url: str) -> str:
+    lines = [
+        MARKER,
+        "## Integration evidence",
+        "",
+        f"**{report.verdict.value.upper()}** | PR #{report.pr} | head `{report.head_sha}` | "
+        f"[run]({run_url})",
+        "",
+        report.summary,
+        "",
+        "| Requested test | Outcome |",
+        "|---|---|",
+        *(f"| `{r.id}` | {r.outcome.value} |" for r in report.requested),
+        "",
+        f"Suite: {report.suite.collected} collected, {report.suite.passed} passed, "
+        f"{report.suite.failed} failed, {report.suite.skipped} skipped.",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def build_report(inputs: Inputs, exit_code: int, junit_xml: str, run_url: str) -> EvidenceReport:
+    cases = parse_junit(junit_xml)
+    requested = tuple(RequestedResult(t, requested_outcome(t, cases)) for t in inputs.tests)
+    suite = suite_counts(cases)
+    verdict, summary = decide(exit_code, suite, requested)
+    report = EvidenceReport(
+        kind="integration",
+        pr=inputs.pr,
+        head_sha=inputs.sha,
+        dispatch_id=inputs.dispatch_id,
+        verdict=verdict,
+        requested=requested,
+        suite=suite,
+        summary=summary,
+        report_md="",
+    )
+    return replace(report, report_md=render(report, run_url))
+
+
+def pytest_args(junit: Path) -> list[str]:
+    # No `-x`: a run that stops at the first failure reports nothing after it.
+    return [
+        "uv", "run", "--frozen", "pytest", "-m", "integration", "-p", "no:cacheprovider",
+        "--color=no", "-q", "-rfEsxX", f"--junitxml={junit}",
+    ]  # fmt: skip
+
+
+def run_suite(root: Path, junit: Path) -> int:
+    env = {k: v for k, v in os.environ.items() if k != "VIRTUAL_ENV"}
+    try:
+        proc = subprocess.run(
+            pytest_args(junit), cwd=root, env=env, check=False, timeout=PYTEST_TIMEOUT_SECONDS
+        )
+    except subprocess.TimeoutExpired:
+        return -1
+    return proc.returncode
+
+
+def _run_url() -> str:
+    server = os.environ.get("GITHUB_SERVER_URL", "https://github.com")
+    repo = os.environ.get("GITHUB_REPOSITORY", "")
+    run_id = os.environ.get("GITHUB_RUN_ID", "")
+    return f"{server}/{repo}/actions/runs/{run_id}"
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    sub = parser.add_subparsers(dest="command", required=True)
+    sub.add_parser("validate", help="validate the inputs in the environment")
+    run = sub.add_parser("run", help="the full integration suite against a PR checkout")
+    run.add_argument("--root", type=Path, required=True, help="the PR checkout")
+    run.add_argument("--report", type=Path, required=True)
+    run.add_argument("--evidence", type=Path, required=True, help="evidence.json")
+    args = parser.parse_args(argv)
+
+    try:
+        inputs = inputs_from_env(dict(os.environ))
+    except InputError as exc:
+        print(f"::error::{exc}")
+        return 1
+    if args.command == "validate":
+        print(f"inputs ok: pr={inputs.pr} tests={len(inputs.tests)}")
+        return 0
+
+    with tempfile.TemporaryDirectory() as scratch:
+        junit = Path(scratch) / "junit.xml"
+        exit_code = run_suite(args.root.resolve(), junit)
+        try:
+            junit_xml = junit.read_text()
+            report = build_report(inputs, exit_code, junit_xml, _run_url())
+        except (OSError, ET.ParseError) as exc:
+            # No JUnit, no record of what ran: write no evidence.json, so the
+            # gate reads "no evidence" rather than a verdict nothing backs.
+            print(f"::error::pytest exit {exit_code} left no readable JUnit report: {exc}")
+            return 1
+    args.report.write_text(report.report_md)
+    args.evidence.write_text(report.to_json())
+    print(report.report_md)
+    return 0 if report.verdict is Verdict.PASSED else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

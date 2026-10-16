@@ -40,6 +40,19 @@ from scripts.mutation_evidence import (
     restore,
 )
 
+from syn_domain.contexts.orchestration._shared.evidence_contract import (
+    EvidenceKind as ContractKind,
+)
+from syn_domain.contexts.orchestration._shared.evidence_contract import (
+    EvidenceReport as EvidenceContract,
+)
+from syn_domain.contexts.orchestration._shared.evidence_contract import (
+    EvidenceVerdict as ContractVerdict,
+)
+from syn_domain.contexts.orchestration._shared.evidence_contract import (
+    TestOutcome as ContractOutcome,
+)
+
 pytestmark = pytest.mark.unit
 
 SHA = "a" * 40
@@ -612,3 +625,127 @@ def test_patch_inside_a_submodule_is_refused(repo: Path, tmp_path: Path) -> None
     assert result.outcome is Outcome.REFUSED
     assert "submodule" in result.detail
     assert (repo / "lib" / "sub" / "x.py").read_text() == "X = 1\n"
+
+
+# --------------------------------------------------------------------------
+# evidence.json: every report the runner writes must parse as PR 1's contract
+# --------------------------------------------------------------------------
+
+
+def _contract(text: str) -> EvidenceContract:
+    return EvidenceContract.model_validate_json(text)
+
+
+def _evidence_json(repo: Path, runner: me.Runner, *tests: str) -> EvidenceContract:
+    evidence = execute(repo, _inputs(*tests), SHA, runner)
+    return _contract(me.evidence_report(evidence, "d-1", render(evidence, "u")).to_json())
+
+
+def _only_the_killer(repo: Path) -> None:
+    for name in ("02-survive.patch", "03-test.patch", "04-stale.patch"):
+        _git(repo, "rm", "-q", f".mutations/{name}")
+    _git(repo, "commit", "-q", "-m", "only the killer")
+
+
+def test_evidence_json_for_every_kill_is_a_passed_contract(repo: Path) -> None:
+    _only_the_killer(repo)
+
+    report = _evidence_json(repo, _runner_sensitive_to_mod)
+
+    assert report.kind is ContractKind.MUTATION
+    assert report.verdict is ContractVerdict.PASSED
+    assert (report.pr, report.head_sha, report.dispatch_id) == (7, SHA, "d-1")
+    assert [(r.id, r.outcome) for r in report.requested] == [(TEST_ID, ContractOutcome.PASSED)]
+    assert report.suite.passed == 1
+    assert "PASS: every mutation killed" in report.report_md
+
+
+def test_evidence_json_for_a_survivor_is_failed_and_names_it(repo: Path) -> None:
+    report = _evidence_json(repo, _runner_sensitive_to_mod)
+
+    assert report.verdict is ContractVerdict.FAILED
+    assert "02-survive.patch SURVIVED" in report.summary
+    assert "01-kill.patch" not in report.summary
+    # The baseline was green: the requested test passed, the mutants did not die.
+    assert [r.outcome for r in report.requested] == [ContractOutcome.PASSED]
+
+
+@pytest.mark.parametrize(
+    ("baseline", "outcome", "detail"),
+    [
+        (PytestRun(1, (TEST_ID,), 0, 0.0), ContractOutcome.FAILED, "baseline red"),
+        (PytestRun(5, (), 0, 0.0), ContractOutcome.NOT_COLLECTED, "baseline red"),
+        (PytestRun(0, (), 0, 0.0), ContractOutcome.NOT_COLLECTED, "zero tests"),
+        (PytestRun(0, (), 1, 0.0, skipped=1), ContractOutcome.SKIPPED, "skipped 1"),
+        (PytestRun(0, (), 1, 0.0, xfail=1), ContractOutcome.XFAIL, "xfailed"),
+        (PytestRun(-1, (), 0, 0.0), ContractOutcome.FAILED, "baseline red"),
+    ],
+)
+def test_evidence_json_for_a_void_baseline_never_claims_a_pass(
+    repo: Path, baseline: PytestRun, outcome: ContractOutcome, detail: str
+) -> None:
+    report = _evidence_json(repo, lambda _root, _tests: baseline)
+
+    assert report.verdict is ContractVerdict.VOID
+    assert detail in report.summary
+    assert [r.outcome for r in report.requested] == [outcome]
+
+
+def test_evidence_json_charges_a_failure_only_to_the_id_that_failed(repo: Path) -> None:
+    other = "checks/spec.py::test_guard"
+    collection_error = PytestRun(2, ("pkg/tests/test_mod.py",), 1, 0.0)
+
+    report = _evidence_json(repo, lambda _root, _tests: collection_error, TEST_ID, other)
+
+    assert report.verdict is ContractVerdict.VOID
+    assert [(r.id, r.outcome) for r in report.requested] == [
+        (TEST_ID, ContractOutcome.FAILED),
+        (other, ContractOutcome.PASSED),
+    ]
+
+
+def test_evidence_json_reports_a_repeated_id_once(repo: Path) -> None:
+    _only_the_killer(repo)
+
+    report = _evidence_json(repo, _runner_sensitive_to_mod, TEST_ID, TEST_ID)
+
+    assert [r.id for r in report.requested] == [TEST_ID]
+
+
+def _cli_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(me.ENV_PR, "7")
+    monkeypatch.setenv(me.ENV_TESTS, TEST_ID)
+    monkeypatch.setenv(me.ENV_DIR, ".mutations/")
+    monkeypatch.setenv(me.ENV_SHA, SHA)
+    monkeypatch.setenv(me.ENV_DISPATCH_ID, "nonce-42")
+    monkeypatch.setattr(me, "sync_dependencies", lambda _root, _sandbox: None)
+
+
+def test_run_writes_evidence_json_from_the_cli(
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _cli_env(monkeypatch)
+    monkeypatch.setattr(me, "make_runner", lambda _sandbox: _runner_sensitive_to_mod)
+    md, evidence_file = tmp_path / "r.md", tmp_path / "evidence.json"
+
+    code = me.main(["run", "--root", str(repo), "--report", str(md), "--evidence", str(evidence_file), "--host"])
+
+    report = _contract(evidence_file.read_text())
+    assert code == 1
+    assert report.verdict is ContractVerdict.FAILED
+    assert report.dispatch_id == "nonce-42"
+    assert report.report_md == md.read_text()
+
+
+def test_run_writes_no_evidence_json_when_no_verdict_was_reached(
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _cli_env(monkeypatch)
+    monkeypatch.setenv(me.ENV_DIR, ".mutations/missing")
+    md, evidence_file = tmp_path / "r.md", tmp_path / "evidence.json"
+
+    code = me.main(["run", "--root", str(repo), "--report", str(md), "--evidence", str(evidence_file), "--host"])
+
+    assert code == 1
+    assert "does not exist" in md.read_text()
+    assert not evidence_file.exists()
