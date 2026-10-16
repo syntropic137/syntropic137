@@ -67,9 +67,7 @@ class TestA429IsARateLimit:
         before = datetime.now(UTC)
 
         error = _rate_limited(
-            _response(
-                429, {"Retry-After": "30", "X-RateLimit-Reset": str(int(hourly.timestamp()))}
-            )
+            _response(429, {"Retry-After": "30", "X-RateLimit-Reset": str(int(hourly.timestamp()))})
         )
 
         assert error.reset_at is not None
@@ -94,9 +92,7 @@ class TestA403RateLimitAlsoReadsRetryAfter:
         before = datetime.now(UTC)
 
         error = _rate_limited(
-            _response(
-                403, {"Retry-After": "60"}, text="You have exceeded a secondary rate limit."
-            )
+            _response(403, {"Retry-After": "60"}, text="You have exceeded a secondary rate limit.")
         )
 
         assert error.reset_at is not None
