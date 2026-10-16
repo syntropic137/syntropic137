@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/workspace_backends/service/setup_phase_secrets.py b/packages/syn-adapters/src/syn_adapters/workspace_backends/service/setup_phase_secrets.py
+index 592b1ad58..f37f5a42b 100644
+--- a/packages/syn-adapters/src/syn_adapters/workspace_backends/service/setup_phase_secrets.py
++++ b/packages/syn-adapters/src/syn_adapters/workspace_backends/service/setup_phase_secrets.py
+@@ -730,7 +730,7 @@ class SetupPhaseSecrets:
+             ValueError: A pinned commit is not a full commit id (#1458).
+         """
+         lines: list[str] = [DEFAULT_SETUP_SCRIPT.rstrip()]
+-        self._append_git_identity(lines)
++
+         self._append_codex_auth(lines)
+ 
+         self._append_git_credentials(lines)
