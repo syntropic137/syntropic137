@@ -6,38 +6,10 @@ Extracted from postgres_helpers.py to reduce module cognitive complexity.
 import re
 from typing import Any
 
-from syn_adapters.postgres_text import pg_safe
+from syn_adapters.projection_stores.json_text import filter_text
 
-
-def _serialize_filter_value(value: object) -> str:
-    """Render ``value`` the way the stored document renders the same thing.
-
-    A filter is compared against ``data->>'key'``, and ``data`` was written
-    through :func:`pg_json`, so this function's whole job is to land on the
-    text the writer produced. Two things it did not previously do that for:
-
-    JSONB ``->>`` extracts booleans as 'true'/'false' (lowercase JSON
-    literals), but Python's ``str(False)`` produces 'False'.
-
-    And the writer strips the codepoints Postgres cannot hold, so a filter
-    value carrying one asks for text that was never stored under that name -
-    the row is there, spelled without it, and the query returns nothing and
-    says nothing (#1241). Every filter value gets the sanitiser, not just the
-    ones on identity fields: the write applied it to the whole document, so
-    any field a caller filters on is stored in its sanitised form.
-
-    ``object`` rather than a union of the types a filter "should" carry. The
-    union this replaced (`str | int | bool | float`) never described the
-    callers: `_condition` takes ``object`` and passed it straight through, and
-    the members of a collection filter are ``object`` too, which is the
-    pyright error the collection support introduced. It did not even describe
-    the tests, one of which pins ``None``. A name that has to be worked around
-    at every call site is not documenting a restriction, only asserting one -
-    and the body imposes none, because every object has a ``str()``.
-    """
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    return pg_safe(str(value))
+#: The comparison both stores share; see :mod:`.json_text`.
+_serialize_filter_value = filter_text
 
 
 def _condition(key: str, value: object, idx: int) -> tuple[str, object]:
