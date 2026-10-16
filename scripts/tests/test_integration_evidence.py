@@ -331,6 +331,27 @@ def test_a_real_pytest_junit_report_maps_back_to_node_ids(tmp_path: Path) -> Non
     assert report.suite.collected == 3
 
 
+@pytest.mark.parametrize(
+    ("call", "outcome"),
+    [("pytest.skip", TestOutcome.SKIPPED), ("pytest.xfail", TestOutcome.XFAIL)],
+)
+def test_a_reason_worded_like_an_unexpected_pass_keeps_its_own_outcome(
+    tmp_path: Path, call: str, outcome: TestOutcome
+) -> None:
+    # The reason is free text; real pytest types the record, and the type wins.
+    (tmp_path / "test_reason.py").write_text(
+        "import pytest\n"
+        f"def test_wanted():\n    {call}('xfail-marked test passes unexpectedly')\n"
+    )
+    run, junit = _real_pytest(tmp_path, "test_reason.py")
+
+    report = _report(junit, run.exit_code, "test_reason.py::test_wanted", output=run.output)
+
+    assert run.exit_code == 0, run.output
+    assert _outcomes(report) == [outcome]
+    assert report.verdict is EvidenceVerdict.VOID
+
+
 @pytest.mark.parametrize("param", ["normal", "has space", "has::colon", "a - b"])
 def test_a_file_selector_never_certifies_an_xpass_whatever_its_parameter(
     tmp_path: Path, param: str

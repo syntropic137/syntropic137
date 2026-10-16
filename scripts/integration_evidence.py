@@ -171,10 +171,14 @@ def _case_outcome(case: ET.Element) -> TestOutcome:
     skipped = case.find("skipped")
     if skipped is None:
         return TestOutcome.PASSED
-    if skipped.get("message") == _STRICT_XPASS_MESSAGE:
-        return TestOutcome.FAILED
-    if skipped.get("type") == "pytest.xfail":
+    # The type decides, never the wording: a skip or xfail reason is the
+    # test author's free text, and may read exactly like the untyped record
+    # pytest writes for an unexpected pass.
+    kind = skipped.get("type")
+    if kind == "pytest.xfail":
         return TestOutcome.XFAIL
+    if kind is None and skipped.get("message") == _STRICT_XPASS_MESSAGE:
+        return TestOutcome.FAILED
     return TestOutcome.SKIPPED
 
 
