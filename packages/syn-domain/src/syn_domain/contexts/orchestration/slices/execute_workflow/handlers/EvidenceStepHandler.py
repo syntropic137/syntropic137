@@ -192,6 +192,10 @@ class _StepRun:
     async def _attempt(self) -> EvidenceAttempt | None:
         """Record an attempt, THEN post it. None when the forge refused and the step settled."""
         attempt = await self._start()
+        if self.h.clock() >= attempt.not_after:
+            # The save can outlast the deadline (§A.5 4): nothing is posted after it.
+            await self._settle(StepOutcome.UNAVAILABLE, "timeout")
+            return None
         result = await self.h.runner.dispatch(self._ref(attempt))
         if isinstance(result, Refused):
             await self._settle(StepOutcome.UNAVAILABLE, result.reason.value)

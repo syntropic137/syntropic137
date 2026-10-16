@@ -505,3 +505,41 @@ async def test_a_fresh_process_resumes_a_persisted_attempt_without_dispatching(
     assert runner.dispatched == []
     assert (gate.attempts[0].attempt, gate.attempts[0].run_id) == (1, RUN.run_id)
     assert gate.settled[0].outcome is StepOutcome.PASSED
+
+
+def _slow_attempt_save(h: _Harness, on_attempt: int, by: timedelta) -> None:
+    """The save recording attempt `on_attempt` takes `by` of wall-clock time."""
+    save, seen = h._save, [0]
+
+    async def slow(aggregate: object) -> None:
+        await save(aggregate)
+        if h.saves[-1].count("EvidenceAttemptStartedEvent"):
+            seen[0] += 1
+            if seen[0] == on_attempt:
+                h.clock.now += by
+
+    h._save = slow  # type: ignore[method-assign]
+
+
+@pytest.mark.asyncio
+async def test_a_save_that_outlasts_the_deadline_posts_nothing() -> None:
+    h = _deadline_harness(timedelta(seconds=5), [RunScript(Accepted(RUN), report=_report())])
+    _slow_attempt_save(h, on_attempt=1, by=timedelta(seconds=6))
+    await h.step(0)
+    gate = h.gate()
+    assert h.runner.dispatched == []
+    assert 0 in gate.attempts  # still saved before any POST could happen
+    assert (gate.settled[0].outcome, gate.settled[0].reason) == (StepOutcome.UNAVAILABLE, "timeout")
+
+
+@pytest.mark.asyncio
+async def test_a_retry_save_that_outlasts_the_deadline_posts_nothing() -> None:
+    h = _deadline_harness(
+        timedelta(seconds=200), [RunScript(Ambiguous("504")), RunScript(Accepted(RUN))]
+    )
+    _slow_attempt_save(h, on_attempt=2, by=timedelta(seconds=400))
+    await h.step(0)
+    gate = h.gate()
+    assert len(h.runner.dispatched) == 1  # the first attempt only
+    assert gate.attempts[0].attempt == 2  # the retry was recorded, then not posted
+    assert (gate.settled[0].outcome, gate.settled[0].reason) == (StepOutcome.UNAVAILABLE, "timeout")
