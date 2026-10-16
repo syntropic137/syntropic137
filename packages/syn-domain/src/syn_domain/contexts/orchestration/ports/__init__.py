@@ -50,6 +50,9 @@ from syn_domain.contexts.orchestration.ports.DelegationEvidencePort import (
     DelegationEvidenceUnavailableError,
     DelegationOutcome,
 )
+from syn_domain.contexts.orchestration.ports.EvidenceRunnerPort import (
+    EvidenceRunnerPort,
+)
 from syn_domain.contexts.orchestration.ports.ExecutionRunQueuePort import (
     DEFAULT_EXECUTOR_POOL,
     Capability,
@@ -75,6 +78,9 @@ from syn_domain.contexts.orchestration.ports.ObservabilityServicePort import (
 from syn_domain.contexts.orchestration.ports.RemoteBranchPort import (
     RemoteBranchPort,
     RemoteBranchReading,
+)
+from syn_domain.contexts.orchestration.ports.RemoteBranchWriterPort import (
+    RemoteBranchWriterPort,
 )
 from syn_domain.contexts.orchestration.ports.RemoteTreePort import RemoteTreePort
 from syn_domain.contexts.orchestration.ports.SessionRepositoryPort import (
@@ -107,6 +113,7 @@ __all__ = [
     "DelegationEvidencePort",
     "DelegationEvidenceUnavailableError",
     "DelegationOutcome",
+    "EvidenceRunnerPort",
     "ExecutionRunQueue",
     "ExecutionStreamProbe",
     "ExecutorHost",
@@ -119,6 +126,7 @@ __all__ = [
     "PoolDefinitionConflict",
     "RemoteBranchPort",
     "RemoteBranchReading",
+    "RemoteBranchWriterPort",
     "RemoteTreePort",
     "RunCounts",
     "RunLeaseLost",
