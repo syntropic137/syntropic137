@@ -437,6 +437,7 @@ def production_reclaimer(gate: QuiescenceGate, options: RunOptions) -> Workspace
         is_live=gate.is_live,
         host_base_dir=workspace_host_dir(),
         own_container=own_container_id(),
+        observer_containers=settings.disk.observer_container_names(),
         # Completeness is proven from the subscription block, or the pass is skipped.
         read_models_rebuilding=gate.completeness,
         pass_budget_seconds=options.budget_seconds,

@@ -141,6 +141,19 @@ class DiskSettings(BaseSettings):
         ),
     )
 
+    reclaim_observer_containers: str = Field(
+        default="",
+        description=(
+            "Comma-separated container names the workspace reclaimer may treat as pure "
+            "observers of the host tree (for example a node-exporter binding / read-only). "
+            "Listing a container asserts it never consumes workspace contents. It is "
+            "exempt from blocking reclaim only while its inspect shows every mount "
+            "read-only, not privileged and no SYS_ADMIN, private bind propagation, and "
+            "no writable or uncarried submounts; otherwise it blocks and /health says "
+            "which condition failed. Empty (the default): no container is exempt (#1983)."
+        ),
+    )
+
     reclaim_dry_run: bool = Field(
         default=False,
         description=(
@@ -157,6 +170,12 @@ class DiskSettings(BaseSettings):
             "Empty disables paging."
         ),
     )
+
+    def observer_container_names(self) -> frozenset[str]:
+        """SYN_DISK_RECLAIM_OBSERVER_CONTAINERS as names; blanks dropped."""
+        return frozenset(
+            name.strip() for name in self.reclaim_observer_containers.split(",") if name.strip()
+        )
 
     def admission_floor_gib(self, max_concurrent: int) -> float:
         """GiB free below which admission is refused.

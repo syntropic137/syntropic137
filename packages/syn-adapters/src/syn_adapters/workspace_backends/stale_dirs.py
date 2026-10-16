@@ -172,10 +172,12 @@ class ContainerMounts:
     container_id: str
     sources: tuple[str, ...]
     running: bool = False
-    #: Sources docker reports read-only (``RW: false``); anything else is writable.
-    read_only_sources: frozenset[str] = frozenset()
     #: Docker's name for it, for the operator reading /health; "" when unknown.
     name: str = ""
+    #: Why it is not a pure observer of the host tree (`observer_unsafe`), or
+    #: None when every observer condition held at inspect. A container built
+    #: without an inspect is never one.
+    observer_unsafe: str | None = "not inspected"
 
     @property
     def label(self) -> str:
@@ -191,20 +193,17 @@ class ContainerMounts:
         caller's own container is exempt, and the caller decides that
         (`own_container_id`), not this method.
 
-        A READ-ONLY ancestor bind does not block: a container that can only
-        read the tree (node-exporter's ``/:/host:ro``) cannot have written
-        work into it, so deleting under it loses nothing. A read-only bind of
-        the directory itself or inside it still blocks - it may be a live
-        reader of in-flight state - and a mount whose ``RW`` is unknown is
-        writable.
+        Read-only binds block like any other: read-only does not mean unused,
+        and ``RW: false`` alone does not keep submounts read-only. The one
+        other exemption is an operator-listed observer that passes every
+        observer condition, and the reclaimer decides that (`_bound`).
         """
         base = PurePosixPath(posixpath.normpath(host_base))
         names = (workspace_id, CLAIM_PREFIX + workspace_id, DELETE_PREFIX + workspace_id)
         dirs = [base / name for name in names]
         for raw in self.sources:
             source = PurePosixPath(posixpath.normpath(raw))
-            ancestor = base == source or base.is_relative_to(source)
-            if ancestor and raw not in self.read_only_sources:
+            if base == source or base.is_relative_to(source):
                 return True
             if any(source == d or source.is_relative_to(d) for d in dirs):
                 return True
@@ -331,8 +330,8 @@ async def list_containers() -> list[ContainerMounts]:
                 container_id,
                 inspected.mount_sources,
                 running=inspected.running,
-                read_only_sources=inspected.read_only_sources,
                 name=inspected.name,
+                observer_unsafe=inspected.observer_unsafe,
             )
         )
     return containers

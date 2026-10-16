@@ -16,7 +16,15 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    TypeAdapter,
+    ValidationError,
+    model_validator,
+)
 
 from syn_domain.contexts.orchestration import ExecutionResult, OrphanedWorkspace
 from syn_shared.env_constants import (
@@ -70,11 +78,11 @@ class _Inspected:
     #: Every mount's source, bind or volume, whatever its destination (#1983);
     #: None when the document carries no mount list, which is not "no mounts".
     mount_sources: tuple[str, ...] | None = ()
-    #: Sources docker reports as read-only (``RW: false``). A mount whose
-    #: ``RW`` is missing is not here: unknown is writable.
-    read_only_sources: frozenset[str] = frozenset()
     #: The container's name without docker's leading slash; "" when unnamed.
     name: str = ""
+    #: Why this container could NOT be a pure observer of the host tree, or
+    #: None when every observer condition holds (`observer_unsafe`).
+    observer_unsafe: str | None = "not inspected"
 
 
 async def find_orphaned_workspaces(container_ids: list[str]) -> list[OrphanedWorkspace]:
@@ -169,8 +177,11 @@ class _DockerMount(BaseModel):
     type: str = Field(default="bind", alias="Type")
     source: str = Field(alias="Source")
     destination: str = Field(alias="Destination")
-    #: ``RW`` as docker reports it; None when absent, which is never read-only.
-    rw: bool | None = Field(default=None, alias="RW")
+    #: ``RW`` exactly as docker reports it. Strict: ``"false"`` or ``0`` is
+    #: not a boolean and rejects the document; absent is None, never read-only.
+    rw: StrictBool | None = Field(default=None, alias="RW")
+    #: Bind propagation (``rprivate``, ``rslave``...); "" or absent for volumes.
+    propagation: str | None = Field(default=None, alias="Propagation")
 
     @model_validator(mode="after")
     def _source_is_known(self) -> _DockerMount:
@@ -192,11 +203,38 @@ class _DockerConfig(BaseModel):
     labels: dict[str, str] | None = Field(default=None, alias="Labels")
 
 
+class _BindOptions(BaseModel):
+    """``HostConfig.Mounts[].BindOptions``: only ``--mount`` binds carry it."""
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    #: ``bind-recursive=writable``: submounts stay writable under a read-only bind.
+    read_only_non_recursive: StrictBool | None = Field(default=None, alias="ReadOnlyNonRecursive")
+    #: ``bind-recursive=disabled``: submounts are not carried at all.
+    non_recursive: StrictBool | None = Field(default=None, alias="NonRecursive")
+
+
+class _HostMount(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    target: str = Field(default="", alias="Target")
+    bind_options: _BindOptions | None = Field(default=None, alias="BindOptions")
+
+
+class _HostConfig(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    privileged: StrictBool | None = Field(default=None, alias="Privileged")
+    cap_add: tuple[str, ...] | None = Field(default=None, alias="CapAdd")
+    mounts: tuple[_HostMount, ...] | None = Field(default=None, alias="Mounts")
+
+
 class _DockerContainer(BaseModel):
     """The parts of one ``docker inspect`` document this module reads."""
 
     model_config = ConfigDict(frozen=True, extra="ignore")
 
+    host_config: _HostConfig | None = Field(default=None, alias="HostConfig")
     name: str = Field(default="", alias="Name")
     state: _DockerState = Field(default_factory=_DockerState, alias="State")
     config: _DockerConfig = Field(default_factory=_DockerConfig, alias="Config")
@@ -205,6 +243,61 @@ class _DockerContainer(BaseModel):
 
 
 _INSPECT = TypeAdapter(list[_DockerContainer])
+
+#: Propagation modes that import nothing from the host after start. Docker's
+#: documented default for binds is ``rprivate`` ("Bind propagation defaults to
+#: rprivate", https://docs.docker.com/engine/storage/bind-mounts/#configure-bind-propagation),
+#: and Engine 29.8.0 reports it explicitly on a ``-v src:dst:ro`` bind, so an
+#: absent value is read as that default.
+_PRIVATE_PROPAGATION = frozenset({"rprivate", "private"})
+
+#: Capabilities that let a container remount what it was given read-only.
+_REMOUNT_CAPS = frozenset({"SYS_ADMIN", "CAP_SYS_ADMIN", "ALL"})
+
+
+def observer_unsafe(document: _DockerContainer) -> str | None:
+    """Why the container could write through, or later see, the host tree; None when it cannot.
+
+    The conditions an operator-listed observer (``SYN_DISK_RECLAIM_OBSERVER_CONTAINERS``)
+    must meet, from the container's own inspect, on every pass:
+
+    * every mount, each record on its own, is ``RW: false`` (a strict boolean);
+    * not privileged, and no capability that can remount (``SYS_ADMIN``);
+    * every bind's propagation is ``rprivate`` or ``private``: ``rslave`` or
+      ``rshared`` imports host mounts made after the container started;
+    * no ``--mount`` bind leaves submounts writable or uncarried
+      (``bind-recursive=writable`` / ``disabled``), which ``RW`` does not show.
+    """
+    host = document.host_config
+    mounts = document.mounts
+    checks = (
+        (mounts is not None, "its mounts are unknown"),
+        (host is not None, "its HostConfig is unknown"),
+        (host is not None and host.privileged is False, "it is privileged or may be"),
+        (
+            host is not None and not _adds_remount_cap(host.cap_add),
+            "it adds a capability that can remount (SYS_ADMIN)",
+        ),
+    )
+    for ok, why in checks:
+        if not ok:
+            return why
+    for mount in mounts or ():
+        if mount.rw is not False:
+            return f"its mount at {mount.destination} is not read-only (RW {mount.rw})"
+        if mount.type == "bind" and (mount.propagation or "rprivate") not in _PRIVATE_PROPAGATION:
+            return f"its bind at {mount.destination} has {mount.propagation} propagation"
+    for host_mount in host.mounts or () if host is not None else ():
+        options = host_mount.bind_options
+        if options is not None and (
+            options.read_only_non_recursive is True or options.non_recursive is True
+        ):
+            return f"its bind at {host_mount.target} does not carry submounts read-only"
+    return None
+
+
+def _adds_remount_cap(caps: tuple[str, ...] | None) -> bool:
+    return any(cap.upper() in _REMOUNT_CAPS for cap in caps or ())
 
 
 def parse_inspect(raw: str) -> _Inspected | None:
@@ -229,6 +322,6 @@ def parse_inspect(raw: str) -> _Inspected | None:
         workspace_source=workspace,
         running=document.state.running or document.state.paused,
         mount_sources=None if mounts is None else tuple(m.source for m in mounts if m.source),
-        read_only_sources=frozenset(m.source for m in mounts or () if m.rw is False and m.source),
         name=document.name.removeprefix("/"),
+        observer_unsafe=observer_unsafe(document),
     )

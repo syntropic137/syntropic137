@@ -141,6 +141,10 @@ class WorkspaceDirReclaimer:
     host_base_dir: str | None = None
     #: This process's own container id (prefix): the one bind of the base exempt.
     own_container: str | None = None
+    #: Container names the operator declares pure observers of the host tree
+    #: (``SYN_DISK_RECLAIM_OBSERVER_CONTAINERS``). Exempt only while their
+    #: inspect passes every observer condition, read on every pass.
+    observer_containers: frozenset[str] = frozenset()
     #: Whether side effects may run now; read again just before each deletion.
     is_live: Callable[[], bool] = field(default=lambda: True)
     #: Why passes are paused now (maintenance), or None.
@@ -227,12 +231,18 @@ class WorkspaceDirReclaimer:
                 "so a bind of it or an ancestor cannot be ruled out",
             )
         own = self.own_container
-        binding = [
-            c.label
-            for c in containers
-            if not (own is not None and c.container_id.startswith(own))
-            and c.blocks(workspace_id, self.host_base_dir)
-        ]
+        binding: list[str] = []
+        for c in containers:
+            if own is not None and c.container_id.startswith(own):
+                continue
+            if not c.blocks(workspace_id, self.host_base_dir):
+                continue
+            if c.name in self.observer_containers:
+                if c.observer_unsafe is None:
+                    continue  # a listed observer that holds every condition
+                binding.append(f"{c.label}, a listed observer, but {c.observer_unsafe}")
+            else:
+                binding.append(c.label)
         if binding:
             return Retained(RetainedReason.MOUNTED, f"reachable from container(s) {binding}")
         return None
@@ -739,6 +749,7 @@ def default_reclaimer(is_live: Callable[[], bool]) -> WorkspaceDirReclaimer:
         base_dir=workspace_base_dir(),
         host_base_dir=workspace_host_dir(),
         own_container=own_container_id(),
+        observer_containers=disk.observer_container_names(),
         settle_seconds=disk.reclaim_settle_minutes * 60,
         list_containers=list_containers,
         workspace_owners=WorkspaceOwnershipProjection(get_projection_store()).owners,
