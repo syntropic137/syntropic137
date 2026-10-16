@@ -78,7 +78,10 @@ if TYPE_CHECKING:
     )
     from syn_tests.fixtures.infrastructure import TestInfrastructure
 
-pytestmark = pytest.mark.integration
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.may_skip(reason="skips when no MinIO answers and Docker is absent", issue="#1984"),
+]
 
 #: The size of the artifact that went missing, so the body is not trivially short.
 FINDINGS = "# Findings\n\n" + "x" * 34_609
