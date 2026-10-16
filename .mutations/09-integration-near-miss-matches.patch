@@ -1,13 +1,13 @@
 diff --git a/scripts/integration_evidence.py b/scripts/integration_evidence.py
-index 6a564acd4..b22b70274 100644
+index 95749c144..c73bc0ab7 100644
 --- a/scripts/integration_evidence.py
 +++ b/scripts/integration_evidence.py
-@@ -113,7 +113,7 @@ def mangle(node_id: str) -> str:
+@@ -140,7 +140,7 @@ def node_id_of(file: str, classname: str, name: str) -> str | None:
+ 
+ 
+ def _selects(selector: str, node_id: str) -> bool:
+-    return node_id == selector or node_id.startswith((f"{selector}::", f"{selector}["))
++    return node_id == selector or node_id.startswith(selector)
  
  
  def _addresses_overlap(selector: str, address: str) -> bool:
--    return address == selector or address.startswith((f"{selector}.", f"{selector}["))
-+    return address == selector or address.startswith(selector)
- 
- 
- def _case_outcome(case: ET.Element) -> TestOutcome:

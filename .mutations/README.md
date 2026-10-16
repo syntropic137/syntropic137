@@ -17,5 +17,11 @@ just mutation-evidence <pr> "scripts/tests/test_mutation_evidence.py scripts/tes
 | 07-integration-stops-at-first-failure | the full suite runs, never `-x` | `scripts/tests/test_integration_evidence.py::test_pytest_runs_the_full_suite_without_stopping_early` |
 | 08-integration-red-exit-ignored | a run that stopped with nothing on record is void | `scripts/tests/test_integration_evidence.py::test_a_run_that_stopped_with_nothing_on_record_is_void` |
 | 09-integration-near-miss-matches | `test_append` does not match `test_append_more` | `scripts/tests/test_integration_evidence.py::test_a_near_miss_name_is_not_the_requested_test` |
+| 10-integration-xpass-id-truncated | an XPASS line is matched on the whole node id, spaces included | `scripts/tests/test_integration_evidence.py::test_a_file_selector_never_certifies_an_xpass_whatever_its_parameter` |
+| 11-integration-xpass-without-reason-missed | an XPASS line with a ` - reason` still marks the case | `scripts/tests/test_integration_evidence.py::test_a_requested_non_strict_xpass_voids_though_junit_calls_it_a_pass` |
+| 12-integration-dotted-selector-match | selectors match exact node ids, not dotted JUnit addresses | `scripts/tests/test_integration_evidence.py::test_a_deselected_file_cannot_borrow_a_pass_from_a_same_named_directory` |
+| 13-integration-mangle-rewrites-params | `mangle` leaves `[params]` verbatim, as pytest does | `scripts/tests/test_integration_evidence.py::test_mangle_matches_pytest_junit_addresses` |
+| 14-integration-junit-loses-file | pytest writes xunit1 JUnit, which keeps each testcase's `file` | `scripts/tests/test_integration_evidence.py::test_a_class_function_and_parameter_selector_still_select` |
+| 15-integration-unidentified-case-ignored | a case with no recoverable node id can still make a selector worse | `scripts/tests/test_integration_evidence.py::test_a_case_whose_file_does_not_fit_can_still_make_a_selector_worse` |
 
 Each was applied locally and killed by the named test (applied one at a time, both test modules run).

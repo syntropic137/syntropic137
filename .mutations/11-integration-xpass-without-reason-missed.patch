@@ -1,0 +1,13 @@
+diff --git a/scripts/integration_evidence.py b/scripts/integration_evidence.py
+index 95749c144..9712054a8 100644
+--- a/scripts/integration_evidence.py
++++ b/scripts/integration_evidence.py
+@@ -149,7 +149,7 @@ def _addresses_overlap(selector: str, address: str) -> bool:
+ 
+ def _xpassed(node_id: str, xpass_lines: list[str]) -> bool:
+     line = f"{_XPASS_PREFIX}{node_id}"
+-    return any(x == line or x.startswith(f"{line} - ") for x in xpass_lines)
++    return any(x == line for x in xpass_lines)
+ 
+ 
+ def _case_outcome(case: ET.Element) -> TestOutcome:

@@ -1,0 +1,16 @@
+diff --git a/scripts/integration_evidence.py b/scripts/integration_evidence.py
+index 95749c144..6dc462912 100644
+--- a/scripts/integration_evidence.py
++++ b/scripts/integration_evidence.py
+@@ -120,8 +120,9 @@ def mangle(node_id: str) -> str:
+     `.` and `.py` dropped, then its `::` parts, then any `[params]` verbatim.
+     Lossy (a dot may have been a slash), so it only ever widens a failure.
+     """
+-    path, bracket, params = node_id.partition("[")
+-    names = path.split("::")
++    path, bracket, params = node_id.replace("::", "\x00").partition("[")
++    params = params.replace("\x00", ".")
++    names = path.split("\x00")
+     names[0] = _dotted(names[0])
+     return ".".join(names) + bracket + params
+ 
