@@ -260,9 +260,7 @@ def test_run_writes_the_report_and_evidence_json(
 UNREPORTABLE = ["tests/./test_x.py::test_ok", "tests/.test_x.py::test_ok"]
 
 
-@pytest.mark.parametrize(
-    "tests", [*UNREPORTABLE, *(f"{WANTED} {bad}" for bad in UNREPORTABLE)]
-)
+@pytest.mark.parametrize("tests", [*UNREPORTABLE, *(f"{WANTED} {bad}" for bad in UNREPORTABLE)])
 def test_an_id_the_report_refuses_is_refused_before_the_suite_runs(
     tests: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -340,8 +338,7 @@ def test_a_reason_worded_like_an_unexpected_pass_keeps_its_own_outcome(
 ) -> None:
     # The reason is free text; real pytest types the record, and the type wins.
     (tmp_path / "test_reason.py").write_text(
-        "import pytest\n"
-        f"def test_wanted():\n    {call}('xfail-marked test passes unexpectedly')\n"
+        f"import pytest\ndef test_wanted():\n    {call}('xfail-marked test passes unexpectedly')\n"
     )
     run, junit = _real_pytest(tmp_path, "test_reason.py")
 

@@ -754,9 +754,7 @@ def test_run_writes_evidence_json_from_the_cli(
 UNREPORTABLE = ["tests/./test_x.py::test_ok", "tests/.test_x.py::test_ok"]
 
 
-@pytest.mark.parametrize(
-    "tests", [*UNREPORTABLE, *(f"{TEST_ID} {bad}" for bad in UNREPORTABLE)]
-)
+@pytest.mark.parametrize("tests", [*UNREPORTABLE, *(f"{TEST_ID} {bad}" for bad in UNREPORTABLE)])
 def test_an_id_the_report_refuses_is_refused_before_anything_runs(
     tests: str, repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
