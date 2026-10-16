@@ -554,3 +554,14 @@ allowed_prefixes = [
 # exact current counts and may only decrease.
 # "<path>" = { max = N, issue = "#NNN" }
 "packages/syn-adapters/src/syn_adapters/workspace_backends/dependency_seed.py" = { max = 5, issue = "#1983" }
+
+[integration_skips]
+# ci/fitness/code_quality/test_integration_skips_declared.py (PC-192, PC-193).
+# Tests marked `integration` that can skip and do not carry
+# @pytest.mark.may_skip(reason=..., issue="#N"). A skip reports neither pass nor
+# fail, so a store that was not provisioned turns a test into a green no-op.
+# EXACT: the count may only go down, and a lower count fails until this value
+# is lowered to match. Fix one by failing instead of skipping when the
+# dependency is missing, or by declaring the skip with a reason and an issue.
+undeclared = 104
+issue = "#1984"

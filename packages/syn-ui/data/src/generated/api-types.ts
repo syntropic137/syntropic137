@@ -25,6 +25,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/workflows/trends": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Workflow Trends Endpoint
+         * @description Several workflows' latest runs as trend points in one request; unknown ids are left out (#1872).
+         */
+        get: operations["list_workflow_trends_endpoint_workflows_trends_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/workflows/{workflow_id}": {
         parameters: {
             query?: never;
@@ -720,7 +740,11 @@ export interface paths {
         put?: never;
         /**
          * Create Eval Endpoint
-         * @description Create an eval, pinning each baseline ref to a commit SHA. The id is minted here.
+         * @description Create an eval, pinning each baseline ref to a commit SHA.
+         *
+         *     The id is minted here, or derived from `stable_key`. A derived id is one
+         *     stream however many creators race for it: the store admits the first and
+         *     the rest answer with that eval (#1920).
          */
         post: operations["create_eval_endpoint_evals_post"];
         delete?: never;
@@ -3338,9 +3362,14 @@ export interface components {
         };
         /**
          * CreateEvalRequest
-         * @description A new eval (#967). The server mints its id; see `EvalCreatedResponse`.
+         * @description A new eval (#967). The server mints its id unless `stable_key` names one.
          */
         CreateEvalRequest: {
+            /**
+             * Stable Key
+             * @description Makes the create idempotent (#1920): the eval id is derived from this key, so every create with the same key, concurrent ones included, answers with the one eval. A create that differs from the one that made it is refused.
+             */
+            stable_key?: string | null;
             /** Name */
             name: string;
             /**
@@ -3675,6 +3704,30 @@ export interface components {
              * @description One line for an operator: free space, the floors and where they came from.
              */
             detail: string;
+        };
+        /**
+         * DurationTrendSummaryResponse
+         * @description A workflow card's duration trend label, formatted here so the UI only renders it (#1872).
+         *
+         *     Fitted over the latest ``runs`` measured durations (at most 12): a change
+         *     under 5% is steady, fewer than 3 measured runs is too few to tell.
+         */
+        DurationTrendSummaryResponse: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "none" | "few" | "faster" | "slower" | "steady";
+            /** Pct */
+            pct: number;
+            /** Runs */
+            runs: number;
+            /** Word Display */
+            word_display: string;
+            /** Sub Display */
+            sub_display: string;
+            /** Label Display */
+            label_display: string;
         };
         /**
          * EvalArchivedResponse
@@ -6089,6 +6142,42 @@ export interface components {
             cost_usd: string;
         };
         /**
+         * OomKilledPhaseResponse
+         * @description One phase whose workspace was OOM-killed, as the provider measured it.
+         *
+         *     Set from the provider's ``oom_killed`` (cgroup ``oom_kill`` count or
+         *     Docker's ``State.OOMKilled``), never inferred from an exit code: an exit
+         *     137 is any SIGKILL.
+         */
+        OomKilledPhaseResponse: {
+            /** Execution Id */
+            execution_id: string;
+            /**
+             * Oom Killed
+             * @constant
+             */
+            oom_killed: true;
+            /** Memory Peak Bytes */
+            memory_peak_bytes: number | null;
+            /** Oom Kills */
+            oom_kills: number | null;
+        };
+        /**
+         * OomKillsResponse
+         * @description Every phase of this type in exactly one bucket.
+         *
+         *     ``unknown`` is a phase nothing measured: no usage row, or a row with no
+         *     OOM signal. It is never folded into ``not_killed``.
+         */
+        OomKillsResponse: {
+            /** Killed */
+            killed: number;
+            /** Not Killed */
+            not_killed: number;
+            /** Unknown */
+            unknown: number;
+        };
+        /**
          * OperationInfo
          * @description Information about a session operation.
          */
@@ -6591,10 +6680,15 @@ export interface components {
         PhaseResourceProfileResponse: {
             /** Phase Id */
             phase_id: string;
+            cpu_usage_seconds: components["schemas"]["ResourcePercentilesResponse"];
+            wall_seconds: components["schemas"]["ResourcePercentilesResponse"];
             cpu_seconds_per_wall_second: components["schemas"]["ResourcePercentilesResponse"];
             cpu_throttled_seconds: components["schemas"]["ResourcePercentilesResponse"];
             memory_peak_bytes: components["schemas"]["ResourcePercentilesResponse"];
             disk_bytes_at_teardown: components["schemas"]["ResourcePercentilesResponse"];
+            oom: components["schemas"]["OomKillsResponse"];
+            /** Oom Killed Phases */
+            oom_killed_phases: components["schemas"]["OomKilledPhaseResponse"][];
             coverage: components["schemas"]["ResourceCoverageResponse"];
         };
         /**
@@ -7470,17 +7564,21 @@ export interface components {
         };
         /**
          * ResourcePercentilesResponse
-         * @description p50/p95 of one measure over ``n`` measured phases; null below ten.
+         * @description p50/p90/p95 of one measure over ``n`` measured phases; null below ten.
          */
         ResourcePercentilesResponse: {
             /** N */
             n: number;
             /** P50 */
             p50: number | null;
+            /** P90 */
+            p90: number | null;
             /** P95 */
             p95: number | null;
             /** P50 Display */
             p50_display: string;
+            /** P90 Display */
+            p90_display: string;
             /** P95 Display */
             p95_display: string;
         };
@@ -9870,6 +9968,29 @@ export interface components {
          */
         Verdict: "PASS" | "FAIL" | "ERROR";
         /**
+         * WorkflowCardTrendResponse
+         * @description A workflow's trend points plus the card's formatted duration trend (#1872).
+         */
+        WorkflowCardTrendResponse: {
+            /** Definition Version */
+            definition_version: string | null;
+            /** Definition Changed At */
+            definition_changed_at: string | null;
+            /** Definition Changes */
+            definition_changes: components["schemas"]["DefinitionChangeResponse"][];
+            /** Workflow Id */
+            workflow_id: string;
+            /** Items */
+            items: components["schemas"]["WorkflowTrendPointResponse"][];
+            /** Total */
+            total: number;
+            /** Page */
+            page: number;
+            /** Page Size */
+            page_size: number;
+            duration_trend: components["schemas"]["DurationTrendSummaryResponse"];
+        };
+        /**
          * WorkflowDefaultEvalResponse
          * @description A workflow's default eval after an edit, read from the aggregate (#967).
          */
@@ -10039,6 +10160,18 @@ export interface components {
             page_size: number;
         };
         /**
+         * WorkflowTrendsResponse
+         * @description The latest runs of several workflows as trend points, in one response (#1872).
+         *
+         *     The Workflows page reads every card on screen from this, so the page costs
+         *     one request however many workflows it shows. Each entry is what
+         *     ``GET /workflows/{id}/trend`` answers for page 1 at the same page size.
+         */
+        WorkflowTrendsResponse: {
+            /** Trends */
+            trends: components["schemas"]["WorkflowCardTrendResponse"][];
+        };
+        /**
          * CostSummaryResponse
          * @description Summary of all costs across sessions/executions.
          */
@@ -10179,6 +10312,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CreateWorkflowResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_workflow_trends_endpoint_workflows_trends_get: {
+        parameters: {
+            query: {
+                /** @description Comma-separated exact workflow ids, at most 200 */
+                ids: string;
+                /** @description Latest runs per workflow */
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowTrendsResponse"];
                 };
             };
             /** @description Validation Error */

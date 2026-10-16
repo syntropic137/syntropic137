@@ -50,8 +50,20 @@ def _require(url: str) -> None:
 @pytest.fixture(
     params=[
         pytest.param("memory", marks=pytest.mark.unit),
-        pytest.param("redis", marks=pytest.mark.integration),
-        pytest.param("postgres", marks=pytest.mark.integration),
+        pytest.param(
+            "redis",
+            marks=[
+                pytest.mark.integration,
+                pytest.mark.may_skip(reason="skips when no Redis answers", issue="#1984"),
+            ],
+        ),
+        pytest.param(
+            "postgres",
+            marks=[
+                pytest.mark.integration,
+                pytest.mark.may_skip(reason="skips when no Postgres answers", issue="#1984"),
+            ],
+        ),
     ]
 )
 async def dedup(request: pytest.FixtureRequest) -> AsyncIterator[DedupAdapter]:
