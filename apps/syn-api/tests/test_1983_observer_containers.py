@@ -61,6 +61,10 @@ class _Mount:
 _OMIT = object()
 
 
+#: ``BindOptions`` for ``bind-recursive=readonly,bind-propagation=rprivate``.
+_FORCED = ("/host", '{"Propagation": "rprivate", "ReadOnlyForceRecursive": true}')
+
+
 @dataclass(frozen=True)
 class _Container:
     """One ``docker inspect`` document; defaults are the VPS node-exporter shape."""
@@ -70,7 +74,10 @@ class _Container:
     privileged: object = False
     cap_add: tuple[str, ...] | None = None
     #: ``HostConfig.Mounts``, for ``--mount`` binds: (target, BindOptions JSON).
-    host_mounts: tuple[tuple[str, str], ...] = ()
+    #: The default is what Engine 29.8.0 reports for the required observer line
+    #: ``--mount type=bind,source=/,target=/host,readonly,bind-recursive=readonly,
+    #: bind-propagation=rprivate``.
+    host_mounts: tuple[tuple[str, str], ...] = (_FORCED,)
     host_config: bool = True
     extra: tuple[tuple[str, object], ...] = field(default=())
 
@@ -149,13 +156,13 @@ _LISTED = frozenset({_NODE_EXPORTER})
 
 @pytest.mark.parametrize(
     "propagation",
-    ["rprivate", "private", None],
-    ids=["rprivate", "private", "absent-means-documented-default"],
+    ["rprivate", None],
+    ids=["rprivate", "absent-means-documented-default"],
 )
 async def test_a_listed_observer_meeting_every_condition_is_exempt(
     base: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, propagation: str | None
 ) -> None:
-    """The VPS node-exporter shape: ``/`` bound read-only at /host, private propagation."""
+    """The required observer line: ``/`` at /host, read-only, forced recursive, rprivate."""
     container = _Container(mounts=(_Mount(propagation=propagation),))
     result = await _pass(base, tmp_path, monkeypatch, container, listed=_LISTED)
     assert result.reclaimed == ("ws-observed",)
@@ -197,6 +204,7 @@ async def test_an_active_read_only_reader_of_the_base_that_is_not_listed_blocks(
         (_Container(host_config=False), "HostConfig is unknown"),
         (_Container(mounts=(_Mount(propagation="rslave"),)), "rslave propagation"),
         (_Container(mounts=(_Mount(propagation="rshared"),)), "rshared propagation"),
+        (_Container(mounts=(_Mount(propagation="private"),)), "private propagation"),
         (_Container(mounts=(_Mount(rw=_OMIT),)), "not read-only (RW None)"),
         (
             _Container(mounts=(_Mount(), _Mount(destination="/rw", rw=True))),
@@ -212,13 +220,22 @@ async def test_an_active_read_only_reader_of_the_base_that_is_not_listed_blocks(
             ),
             "is not read-only",
         ),
+        (_Container(host_mounts=()), "not forced recursively read-only"),
         (
-            _Container(host_mounts=(("/host", '{"ReadOnlyNonRecursive": true}'),)),
-            "does not carry submounts read-only",
+            _Container(host_mounts=(("/host", '{"ReadOnlyForceRecursive": false}'),)),
+            "not forced recursively read-only",
         ),
         (
-            _Container(host_mounts=(("/host", '{"NonRecursive": true}'),)),
-            "does not carry submounts read-only",
+            _Container(host_mounts=(("/host", '{"Propagation": "rprivate"}'),)),
+            "not forced recursively read-only",
+        ),
+        (
+            _Container(host_mounts=(("/host", '{"ReadOnlyNonRecursive": true}'),)),
+            "not forced recursively read-only",
+        ),
+        (
+            _Container(host_mounts=(("/elsewhere", _FORCED[1]),)),
+            "not forced recursively read-only",
         ),
     ],
     ids=[
@@ -229,12 +246,16 @@ async def test_an_active_read_only_reader_of_the_base_that_is_not_listed_blocks(
         "no-hostconfig",
         "rslave",
         "rshared",
+        "private-is-not-recursive",
         "rw-missing",
         "rw-duplicate-after",
         "rw-duplicate-before",
         "writable-volume",
+        "dash-v-form-cannot-say-recursive",
+        "force-recursive-false",
+        "force-recursive-missing",
         "bind-recursive-writable",
-        "bind-recursive-disabled",
+        "force-recursive-on-another-target",
     ],
 )
 async def test_a_listed_observer_failing_any_condition_blocks_and_says_which(
@@ -291,3 +312,15 @@ def test_the_production_reclaimer_reads_the_observer_setting(
     # Read fresh from the environment, as the deployed API reads it.
     monkeypatch.setenv("SYN_DISK_RECLAIM_OBSERVER_CONTAINERS", _NODE_EXPORTER)
     assert default_reclaimer(lambda: True).observer_containers == _LISTED
+
+
+@pytest.mark.parametrize("value", ['"true"', "1"])
+async def test_a_coercible_force_recursive_value_skips_the_pass(
+    base: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    """StrictBool again: ``"true"`` or ``1`` is not the proof; the document is unreadable."""
+    container = _Container(host_mounts=(("/host", f'{{"ReadOnlyForceRecursive": {value}}}'),))
+    assert parse_inspect(container.inspect()) is None
+    result = await _pass(base, tmp_path, monkeypatch, container, listed=_LISTED)
+    assert result.skipped is not None
+    assert (base / "ws-observed").exists()

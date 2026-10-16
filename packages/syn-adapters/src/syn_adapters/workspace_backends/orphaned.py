@@ -208,10 +208,13 @@ class _BindOptions(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="ignore")
 
-    #: ``bind-recursive=writable``: submounts stay writable under a read-only bind.
-    read_only_non_recursive: StrictBool | None = Field(default=None, alias="ReadOnlyNonRecursive")
-    #: ``bind-recursive=disabled``: submounts are not carried at all.
-    non_recursive: StrictBool | None = Field(default=None, alias="NonRecursive")
+    #: ``bind-recursive=readonly``: every submount read-only too, or the
+    #: container fails to start. A plain ``ro`` bind falls back to writable
+    #: submounts where the kernel cannot do recursive read-only, and inspect
+    #: does not show the fallback; this flag is the only proof.
+    read_only_force_recursive: StrictBool | None = Field(
+        default=None, alias="ReadOnlyForceRecursive"
+    )
 
 
 class _HostMount(BaseModel):
@@ -244,12 +247,14 @@ class _DockerContainer(BaseModel):
 
 _INSPECT = TypeAdapter(list[_DockerContainer])
 
-#: Propagation modes that import nothing from the host after start. Docker's
-#: documented default for binds is ``rprivate`` ("Bind propagation defaults to
-#: rprivate", https://docs.docker.com/engine/storage/bind-mounts/#configure-bind-propagation),
-#: and Engine 29.8.0 reports it explicitly on a ``-v src:dst:ro`` bind, so an
-#: absent value is read as that default.
-_PRIVATE_PROPAGATION = frozenset({"rprivate", "private"})
+#: The one propagation mode accepted: ``rprivate`` isolates the bind and every
+#: existing descendant mount from later host mount events. ``private`` does
+#: not reach existing descendants, and ``rslave``/``rshared`` import new host
+#: mounts. Docker's documented default for binds is ``rprivate`` ("Bind
+#: propagation defaults to rprivate",
+#: https://docs.docker.com/engine/storage/bind-mounts/#configure-bind-propagation),
+#: and Engine 29.8.0 reports it explicitly, so an absent value is that default.
+_ISOLATED_PROPAGATION = "rprivate"
 
 #: Capabilities that let a container remount what it was given read-only.
 _REMOUNT_CAPS = frozenset({"SYS_ADMIN", "CAP_SYS_ADMIN", "ALL"})
@@ -263,20 +268,23 @@ def observer_unsafe(document: _DockerContainer) -> str | None:
 
     * every mount, each record on its own, is ``RW: false`` (a strict boolean);
     * not privileged, and no capability that can remount (``SYS_ADMIN``);
-    * every bind's propagation is ``rprivate`` or ``private``: ``rslave`` or
-      ``rshared`` imports host mounts made after the container started;
-    * no ``--mount`` bind leaves submounts writable or uncarried
-      (``bind-recursive=writable`` / ``disabled``), which ``RW`` does not show.
+    * every bind's propagation is ``rprivate``, explicitly or as the default;
+    * every bind is FORCED recursively read-only: a ``--mount`` with
+      ``bind-recursive=readonly``, which inspect reports as
+      ``BindOptions.ReadOnlyForceRecursive: true``. A ``-v`` bind cannot say it.
     """
     host = document.host_config
     if document.mounts is None:
         return "its mounts are unknown"
     if host is None:
         return "its HostConfig is unknown"
-    return (
-        _host_unsafe(host)
-        or next(filter(None, map(_mount_unsafe, document.mounts)), None)
-        or next(filter(None, map(_submounts_unsafe, host.mounts or ())), None)
+    forced = {
+        m.target
+        for m in host.mounts or ()
+        if m.bind_options is not None and m.bind_options.read_only_force_recursive is True
+    }
+    return _host_unsafe(host) or next(
+        filter(None, (_mount_unsafe(m, forced) for m in document.mounts)), None
     )
 
 
@@ -288,21 +296,19 @@ def _host_unsafe(host: _HostConfig) -> str | None:
     return None
 
 
-def _mount_unsafe(mount: _DockerMount) -> str | None:
+def _mount_unsafe(mount: _DockerMount, forced: set[str]) -> str | None:
     """One mount record on its own: a writable duplicate is not hidden by a read-only one."""
     if mount.rw is not False:
         return f"its mount at {mount.destination} is not read-only (RW {mount.rw})"
-    if mount.type == "bind" and (mount.propagation or "rprivate") not in _PRIVATE_PROPAGATION:
-        return f"its bind at {mount.destination} has {mount.propagation} propagation"
-    return None
-
-
-def _submounts_unsafe(host_mount: _HostMount) -> str | None:
-    options = host_mount.bind_options
-    if options is not None and (
-        options.read_only_non_recursive is True or options.non_recursive is True
-    ):
-        return f"its bind at {host_mount.target} does not carry submounts read-only"
+    if mount.type != "bind":
+        return None
+    if (mount.propagation or _ISOLATED_PROPAGATION) != _ISOLATED_PROPAGATION:
+        return f"its bind at {mount.destination} has {mount.propagation} propagation, not rprivate"
+    if mount.destination not in forced:
+        return (
+            f"its bind at {mount.destination} is not forced recursively read-only "
+            "(--mount ...,bind-recursive=readonly)"
+        )
     return None
 
 

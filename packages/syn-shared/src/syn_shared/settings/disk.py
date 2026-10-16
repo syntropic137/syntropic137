@@ -148,9 +148,11 @@ class DiskSettings(BaseSettings):
             "observers of the host tree (for example a node-exporter binding / read-only). "
             "Listing a container asserts it never consumes workspace contents. It is "
             "exempt from blocking reclaim only while its inspect shows every mount "
-            "read-only, not privileged and no SYS_ADMIN, private bind propagation, and "
-            "no writable or uncarried submounts; otherwise it blocks and /health says "
-            "which condition failed. Empty (the default): no container is exempt (#1983)."
+            "read-only, not privileged and no SYS_ADMIN, and every bind rprivate and "
+            "forced recursively read-only, i.e. mounted as --mount type=bind,source=/,"
+            "target=/host,readonly,bind-recursive=readonly,bind-propagation=rprivate "
+            "(a -v bind cannot say this); otherwise it blocks and /health says which "
+            "condition failed. Empty (the default): no container is exempt (#1983)."
         ),
     )
 
