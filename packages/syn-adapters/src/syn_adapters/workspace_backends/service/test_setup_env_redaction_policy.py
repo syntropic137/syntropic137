@@ -81,9 +81,8 @@ def _register(environment: dict[str, str]) -> OperationSpool:
 
 
 def _stored(spool: OperationSpool, output: bytes) -> bytes:
-    spool.append(output)
-    spool.finish()
-    return bytes(spool._retained)  # noqa: SLF001 - the bytes an observer would page
+    """What the spool releases for `output` on one channel, held tail included."""
+    return spool.append(output) + spool.finish().get(0, b"")
 
 
 @pytest.mark.anyio
