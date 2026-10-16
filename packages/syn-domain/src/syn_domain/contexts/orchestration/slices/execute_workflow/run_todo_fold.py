@@ -54,7 +54,18 @@ if TYPE_CHECKING:
 # one. Dicts exist only at that boundary: what the store holds is `_TodoRecord`.
 type _Record = dict[str, Any]
 
-_ITEM_FIELDS = frozenset({"execution_id", "action", "phase_id", "workspace_id", "session_id"})
+_ITEM_FIELDS = frozenset(
+    {
+        "execution_id",
+        "action",
+        "phase_id",
+        "workspace_id",
+        "session_id",
+        "evidence_gate_id",
+        "evidence_step",
+    }
+)
+_EVIDENCE_FIELDS = frozenset({"evidence_gate_id", "evidence_step"})
 _RECORD_FIELDS = frozenset({"execution_id", "items", "phase_progress"})
 
 
@@ -80,6 +91,12 @@ def _optional_str(value: object, name: str) -> str | None:
     if value is None or isinstance(value, str):
         return value
     raise ValueError(f"to-do item field {name} must be a string or null, not {value!r}")
+
+
+def _optional_int(value: object, name: str) -> int | None:
+    if value is None or (isinstance(value, int) and not isinstance(value, bool)):
+        return value
+    raise ValueError(f"to-do item field {name} must be an integer or null, not {value!r}")
 
 
 def _exact_fields(data: _Record, expected: frozenset[str], what: str) -> None:
@@ -122,7 +139,9 @@ class _TodoRecord:
         if not isinstance(data, dict):
             raise ValueError(f"to-do item must be a mapping, not {data!r}")
         item: _Record = data  # pyright: ignore[reportUnknownVariableType]
-        _exact_fields(item, _ITEM_FIELDS, "to-do item")
+        # A record written before the evidence gate (PR 5b) has no evidence keys.
+        expected = _ITEM_FIELDS if "evidence_step" in item else _ITEM_FIELDS - _EVIDENCE_FIELDS
+        _exact_fields(item, expected, "to-do item")
         execution_id = item["execution_id"]
         if not isinstance(execution_id, str):
             raise ValueError(f"to-do item execution_id must be a string, not {execution_id!r}")
@@ -132,6 +151,8 @@ class _TodoRecord:
             phase_id=_optional_str(item["phase_id"], "phase_id"),
             workspace_id=_optional_str(item["workspace_id"], "workspace_id"),
             session_id=_optional_str(item["session_id"], "session_id"),
+            evidence_gate_id=_optional_str(item.get("evidence_gate_id"), "evidence_gate_id"),
+            evidence_step=_optional_int(item.get("evidence_step"), "evidence_step"),
         )
 
     @staticmethod
@@ -150,6 +171,8 @@ class _TodoRecord:
                     "phase_id": item.phase_id,
                     "workspace_id": item.workspace_id,
                     "session_id": item.session_id,
+                    "evidence_gate_id": item.evidence_gate_id,
+                    "evidence_step": item.evidence_step,
                 }
                 for item in self.items
             ],

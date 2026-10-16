@@ -679,3 +679,48 @@ async def test_the_event_store_reader_reads_past_one_page(tag_pairs: int) -> Non
     assert [t.action for t in await fold.projection.get_pending(execution_id)] == [
         TodoAction.RUN_AGENT
     ]
+
+
+@pytest.mark.unit
+class TestEvidenceStepItemsRoundTrip:
+    """RUN_EVIDENCE_STEP items keep their gate and step through the fold (PR 5b)."""
+
+    def test_an_evidence_item_survives_to_record_and_back(self) -> None:
+        from syn_domain.contexts.orchestration.slices.execute_workflow.run_todo_fold import (
+            _TodoRecord,
+        )
+        from syn_domain.contexts.orchestration.slices.execution_todo.value_objects import (
+            TodoAction,
+            TodoItem,
+        )
+
+        item = TodoItem(
+            execution_id="e",
+            action=TodoAction.RUN_EVIDENCE_STEP,
+            phase_id="p",
+            evidence_gate_id="gate-1",
+            evidence_step=3,
+        )
+        record = _TodoRecord(execution_id="e", items=(item,), phase_progress=())
+        assert _TodoRecord.from_record(record.to_record()).items == (item,)
+
+    def test_a_record_written_before_the_gate_still_reads(self) -> None:
+        from syn_domain.contexts.orchestration.slices.execute_workflow.run_todo_fold import (
+            _TodoRecord,
+        )
+
+        old = {
+            "execution_id": "e",
+            "items": [
+                {
+                    "execution_id": "e",
+                    "action": "run_agent",
+                    "phase_id": "p",
+                    "workspace_id": "w",
+                    "session_id": None,
+                }
+            ],
+            "phase_progress": {},
+        }
+        (item,) = _TodoRecord.from_record(old).items
+        assert (item.evidence_gate_id, item.evidence_step) == (None, None)
