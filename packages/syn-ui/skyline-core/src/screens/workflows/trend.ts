@@ -101,3 +101,29 @@ export function durationTrend(rows: readonly WorkflowTrendRowLike[], runsCount?:
 
 /** What a card shows while its trend is loading. */
 export const DURATION_TREND_PENDING: DurationTrend = { kind: 'none', pct: 0, runs: 0, word: 'Loading', sub: '', label: 'Loading the duration trend', spark: sparkPath([]) }
+
+/** The card label GET /workflows/trends formats (#1872). Structural: the API type satisfies it. */
+export interface DurationTrendSummaryLike {
+  kind: DurationTrendKind
+  pct: number
+  runs: number
+  word_display: string
+  sub_display: string
+  label_display: string
+}
+
+/** A card's trend from the API's own label: its words are rendered as sent, only the sparkline is drawn here. */
+export function cardDurationTrend(summary: DurationTrendSummaryLike, rows: readonly WorkflowTrendRowLike[]): DurationTrend {
+  return {
+    kind: summary.kind,
+    pct: summary.pct,
+    runs: summary.runs,
+    word: summary.word_display,
+    sub: summary.sub_display,
+    label: summary.label_display,
+    spark: sparkPath(recentDurations(rows)),
+  }
+}
+
+/** What a card shows when its trend could not be loaded. */
+export const DURATION_TREND_FAILED: DurationTrend = { kind: 'none', pct: 0, runs: 0, word: 'Unavailable', sub: '—', label: 'The duration trend could not be loaded', spark: sparkPath([]) }
