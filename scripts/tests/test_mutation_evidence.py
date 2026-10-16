@@ -749,6 +749,41 @@ def test_run_writes_evidence_json_from_the_cli(
     assert report.report_md == md.read_text()
 
 
+# Ids pytest would run but the report contract refuses: a `.` segment that
+# `PurePosixPath` folds away, and a dot-led file name. Alone, and behind a good id.
+UNREPORTABLE = ["tests/./test_x.py::test_ok", "tests/.test_x.py::test_ok"]
+
+
+@pytest.mark.parametrize(
+    "tests", [*UNREPORTABLE, *(f"{TEST_ID} {bad}" for bad in UNREPORTABLE)]
+)
+def test_an_id_the_report_refuses_is_refused_before_anything_runs(
+    tests: str, repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _cli_env(monkeypatch)
+    monkeypatch.setenv(me.ENV_TESTS, tests)
+    ran: list[object] = []
+    monkeypatch.setattr(me, "make_runner", lambda sandbox: ran.append(sandbox))
+    md, evidence_file = tmp_path / "r.md", tmp_path / "evidence.json"
+
+    code = me.main(
+        [
+            "run",
+            "--root",
+            str(repo),
+            "--report",
+            str(md),
+            "--evidence",
+            str(evidence_file),
+            "--host",
+        ]
+    )
+
+    assert code == 1
+    assert ran == []
+    assert not evidence_file.exists()
+
+
 def test_run_writes_no_evidence_json_when_no_verdict_was_reached(
     repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

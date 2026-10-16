@@ -114,9 +114,12 @@ _PR_RE: Final = re.compile(r"^[1-9][0-9]{0,6}$")
 _SHA_RE: Final = re.compile(r"^[0-9a-f]{40}$")
 _DISPATCH_ID_RE: Final = re.compile(r"^[A-Za-z0-9-]{0,64}$")
 #: `path/to/test_x.py` then zero or more `::Name`, the last may carry a
-#: parametrize id in brackets.
+#: parametrize id in brackets. The first segment and the file name start with
+#: neither `.` nor `-`, as the report contract demands of every id it carries
+#: (`evidence_contract.NODE_ID_PATTERN`): a selector the report refuses is
+#: refused here, before anything runs.
 _NODE_ID_RE: Final = re.compile(
-    r"^(?P<path>[A-Za-z0-9_][A-Za-z0-9_./-]*\.py)"
+    r"^(?P<path>(?:[A-Za-z0-9_][A-Za-z0-9_.-]*/(?:[A-Za-z0-9_.-]*/)*)?[A-Za-z0-9_][A-Za-z0-9_.-]*\.py)"
     r"(?P<rest>(::[A-Za-z_][A-Za-z0-9_]*)*(::[A-Za-z_][A-Za-z0-9_]*\[[A-Za-z0-9_.,=+-]*\])?)$"
 )
 _DIR_RE: Final = re.compile(r"^[A-Za-z0-9_.][A-Za-z0-9_./-]*$")
@@ -292,13 +295,14 @@ def _safe_relative(path: str, what: str) -> PurePosixPath:
     """A relative path with no `..`, no absolute root and no option-like segment."""
     if not path or path.startswith("/") or "\\" in path or "//" in path:
         raise InputError(f"{what} {path!r} must be a plain relative path")
-    pure = PurePosixPath(path)
-    for part in pure.parts:
+    # The raw segments, not `PurePosixPath.parts`: that folds a `.` away, and
+    # the string checked would no longer be the string reported.
+    for part in path.split("/"):
         if part in {"..", "."} or part == ".git":
             raise InputError(f"{what} {path!r} may not contain '.', '..' or '.git' segments")
         if part.startswith("-"):
             raise InputError(f"{what} {path!r} has a segment starting with '-'")
-    return pure
+    return PurePosixPath(path)
 
 
 def parse_pr(raw: str) -> int:
