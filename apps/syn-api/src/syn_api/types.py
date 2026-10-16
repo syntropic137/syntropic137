@@ -1416,6 +1416,20 @@ class WorkflowTrendResponse(TrendDefinition):
     page_size: int
 
 
+class WorkflowTrendsResponse(BaseModel):
+    """The latest runs of several workflows as trend points, in one response (#1872).
+
+    The Workflows page reads every card on screen from this, so the page costs
+    one request however many workflows it shows. Each entry is what
+    ``GET /workflows/{id}/trend`` answers for page 1 at the same page size.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    trends: list[WorkflowTrendResponse]
+    """One per requested workflow that exists, in the order asked. Unknown ids are left out."""
+
+
 class ExecutionEvalRunResponse(BaseModel):
     """The eval an execution is a run of, and that run's current verdict (Evals v2).
 

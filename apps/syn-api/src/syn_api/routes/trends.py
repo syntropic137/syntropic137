@@ -46,6 +46,7 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_summary import (
         WorkflowExecutionSummary,
     )
+    from syn_domain.pagination import Page
 
 
 def utc_iso(value: datetime | str | None) -> str | None:
@@ -192,6 +193,40 @@ async def workflow_trend(
         workflow_id=workflow_id, offset=(page - 1) * page_size, limit=page_size
     )
     reads = await RunReads.load(manager, [row.workflow_execution_id for row in rows.rows])
+    return await _workflow_trend(manager, reads, workflow_id, rows, page=page, page_size=page_size)
+
+
+async def workflow_trends(
+    manager: ProjectionManager, workflow_ids: Sequence[str], *, page_size: int
+) -> list[WorkflowTrendResponse]:
+    """Each workflow's latest ``page_size`` runs as trend points (#1872).
+
+    The cost and duration reads for every run of every workflow are one batched
+    ``RunReads``, so the Lane 2 round trips do not grow with the number of ids.
+    """
+    reads_by_id = ExecutionListReads(manager.store)
+    pages = [
+        (workflow_id, await reads_by_id.page(workflow_id=workflow_id, offset=0, limit=page_size))
+        for workflow_id in workflow_ids
+    ]
+    reads = await RunReads.load(
+        manager, [row.workflow_execution_id for _, rows in pages for row in rows.rows]
+    )
+    return [
+        await _workflow_trend(manager, reads, workflow_id, rows, page=1, page_size=page_size)
+        for workflow_id, rows in pages
+    ]
+
+
+async def _workflow_trend(
+    manager: ProjectionManager,
+    reads: RunReads,
+    workflow_id: str,
+    rows: Page[WorkflowExecutionSummary],
+    *,
+    page: int,
+    page_size: int,
+) -> WorkflowTrendResponse:
     changes = workflow_changes(await manager.workflow_detail.definition_history(workflow_id))
     return WorkflowTrendResponse(
         **_definition(changes).model_dump(),
