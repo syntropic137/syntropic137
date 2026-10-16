@@ -73,6 +73,18 @@ class PhaseOutputCache:
         if files:
             self.files[phase_id] = files
 
+    def append(self, phase_id: str, files: list[PhaseOutputFile]) -> None:
+        """Add files a phase OWNS but did not write: an evidence gate's reports
+        (plan §A.6). ``record`` replaces, and the cache wins over the
+        projection, so a gate that recorded would hide the phase's own output
+        live. A file at a path already held replaces that file only. Never
+        touches ``primary``: a report must not become the phase's alias."""
+        if not files:
+            return
+        added = {f.source_path for f in files}
+        kept = [f for f in self.files.get(phase_id, []) if f.source_path not in added]
+        self.files[phase_id] = kept + files
+
 
 PromptBuilder = Callable[
     [ExecutablePhase, str, str, str | None, dict[str, str], dict[str, Any]],
