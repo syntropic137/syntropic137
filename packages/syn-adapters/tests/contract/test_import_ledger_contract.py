@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import os
 import socket
+from dataclasses import fields
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 from uuid import uuid4
@@ -25,6 +26,7 @@ import pytest
 
 from syn_adapters.import_ledger import InMemoryImportLedger, PostgresImportLedger
 from syn_domain.contexts.agent_sessions import BilledUsage
+from syn_domain.storable_text import pg_safe
 from syn_shared.testing import ENV_TEST_DATABASE_URL, get_test_timescaledb_url
 
 if TYPE_CHECKING:
@@ -81,26 +83,21 @@ async def test_a_recorded_mark_is_read_back_in_all_four_buckets(ledger: ImportLe
     assert await ledger.already_billed(execution, "session") == billed
 
 
-async def test_the_mark_only_rises_per_bucket(ledger: ImportLedger) -> None:
-    """A stale import carrying older cumulative figures cannot lower the mark."""
+@pytest.mark.parametrize("bucket", [f.name for f in fields(BilledUsage)])
+async def test_the_mark_only_rises_per_bucket(ledger: ImportLedger, bucket: str) -> None:
+    """A stale import carrying older cumulative figures cannot lower the mark.
+
+    Every bucket, on its own, through a rise, a fall, zero and a replay; the
+    other buckets stay at nothing throughout.
+    """
     execution = _execution()
-    await ledger.record_billed(
-        execution,
-        "session",
-        BilledUsage(
-            uncached_input_tokens=50, cache_read_tokens=5, cache_creation_tokens=50, output_tokens=5
-        ),
-    )
-    await ledger.record_billed(
-        execution,
-        "session",
-        BilledUsage(
-            uncached_input_tokens=40, cache_read_tokens=9, cache_creation_tokens=10, output_tokens=6
-        ),
-    )
-    assert await ledger.already_billed(execution, "session") == BilledUsage(
-        uncached_input_tokens=50, cache_read_tokens=9, cache_creation_tokens=50, output_tokens=6
-    )
+    highest = 0
+    for value in (5, 9, 4, 0, 9, 10, 10):
+        await ledger.record_billed(execution, "session", BilledUsage(**{bucket: value}))
+        highest = max(highest, value)
+        assert await ledger.already_billed(execution, "session") == BilledUsage(
+            **{bucket: highest}
+        ), (bucket, value)
 
 
 async def test_marks_are_kept_per_execution_and_session(ledger: ImportLedger) -> None:
@@ -113,11 +110,28 @@ async def test_marks_are_kept_per_execution_and_session(ledger: ImportLedger) ->
     assert (await ledger.already_billed(second, "a")).output_tokens == 3
 
 
-async def test_a_session_id_with_an_unstorable_codepoint_reads_back(ledger: ImportLedger) -> None:
-    """The session id comes from the harness transcript: untrusted text (#1241)."""
+async def test_a_raw_session_id_and_its_stored_spelling_are_one_session(
+    ledger: ImportLedger,
+) -> None:
+    """The session id comes from the harness transcript: untrusted text (#1241).
+
+    Postgres keys, reads and locks it as ``pg_safe(raw)``, so the raw id and
+    that spelling name one row and one lock. A double that kept them apart
+    would bill the same session twice where production bills it once.
+    """
     execution = _execution()
-    await ledger.record_billed(execution, "sess\x00ion", BilledUsage(output_tokens=7))
-    assert (await ledger.already_billed(execution, "sess\x00ion")).output_tokens == 7
+    raw = "sess\x00ion"
+    stored = pg_safe(raw)
+    assert stored != raw
+    await ledger.record_billed(execution, raw, BilledUsage(output_tokens=7))
+    assert await ledger.already_billed(execution, stored) == BilledUsage(output_tokens=7)
+    await ledger.record_billed(execution, stored, BilledUsage(output_tokens=9))
+    assert await ledger.already_billed(execution, raw) == BilledUsage(output_tokens=9)
+    async with ledger.guard(execution, raw):
+        contender = asyncio.create_task(_enter_and_leave(ledger, execution, stored))
+        await asyncio.sleep(0.3)
+        assert not contender.done()
+    await asyncio.wait_for(contender, timeout=5)
 
 
 async def test_reads_and_writes_work_inside_the_guard(ledger: ImportLedger) -> None:

@@ -7,13 +7,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from syn_adapters.postgres_text import pg_safe
+from syn_adapters.projection_stores.json_text import filter_text, stored_text
 
 if TYPE_CHECKING:
     from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
 
 
-def filter_values(wanted: object) -> tuple[object, ...]:
+def filter_values(wanted: object) -> frozenset[str]:
     """The values a filter accepts: one, or several meaning ANY of them.
 
     THE STORES MUST AGREE ON THIS, and for a while they did not (#1253). The
@@ -33,21 +33,21 @@ def filter_values(wanted: object) -> tuple[object, ...]:
     reaches production wherever ADR-060 permits in-memory stores for real
     (offline mode), not just tests.
 
-    Returned as a tuple, not matched here, because the two callers compare a
-    single value differently and for a documented reason: ``query`` compares
-    by Python equality, ``count`` by ``str()`` because Postgres compares the
-    text that ``->>`` extracts. Cardinality is the decision they share; the
-    comparison is not.
-
-    Sanitised for the same agree-with-Postgres reason. Both stores hold a
-    record in its ``pg_safe`` form, so both must compare against a filter
-    value in that form; a raw one asks for text neither store ever wrote and
-    gets the silent empty answer this function was named to make visible
-    (#1241).
+    Returned as the text Postgres compares (:func:`filter_text`), which is
+    also sanitised: both stores hold a record in its ``pg_safe`` form, so a
+    raw value asks for text neither store ever wrote and gets the silent
+    empty answer this function was named to make visible (#1241). ``query``
+    and ``count`` once compared a single value two different ways, and
+    neither the way Postgres does (#1675); see :mod:`.json_text`.
     """
     if isinstance(wanted, (list, tuple, set, frozenset)):
-        return tuple(pg_safe(v) for v in wanted)
-    return (pg_safe(wanted),)
+        return frozenset(filter_text(v) for v in wanted)
+    return frozenset((filter_text(wanted),))
+
+
+def matches(record: dict[str, Any], accepted: list[tuple[str, frozenset[str]]]) -> bool:
+    """Whether every field's ``->>`` text is one its filter accepts."""
+    return all(stored_text(record.get(k)) in values for k, values in accepted)
 
 
 def apply_filters(
@@ -63,7 +63,7 @@ def apply_filters(
     # Sanitised once per query, not once per row: a filter of N ids over M
     # rows was N x M ``pg_safe`` calls (#1811).
     accepted = [(k, filter_values(v)) for k, v in filters.items()]
-    return [r for r in results if all(r.get(k) in values for k, values in accepted)]
+    return [r for r in results if matches(r, accepted)]
 
 
 def apply_sorting(results: list[dict[str, Any]], order_by: str | None) -> list[dict[str, Any]]:

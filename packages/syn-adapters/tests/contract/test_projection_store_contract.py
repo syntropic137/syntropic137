@@ -25,6 +25,7 @@ import pytest
 from pydantic import BaseModel, ConfigDict
 
 from syn_adapters.projection_stores import InMemoryProjectionStore, PostgresProjectionStore
+from syn_domain.storable_text import pg_safe
 from syn_shared.testing import ENV_TEST_DATABASE_URL, get_test_timescaledb_url
 
 if TYPE_CHECKING:
@@ -170,12 +171,49 @@ async def test_save_if_refuses_an_expected_row_that_is_not_there(
     assert await store.get(projection, "a") is None
 
 
-async def test_a_key_with_an_unstorable_codepoint_reads_back_as_written(
+async def test_a_raw_key_and_its_stored_spelling_address_one_record(
     store: ProjectionStore, projection: str
 ) -> None:
-    """Postgres TEXT cannot hold NUL; both stores sanitise the key on write AND read (#1241)."""
-    key = "session\x00id"
-    await store.save(projection, key, {"status": "running"})
-    assert await store.get(projection, key) == {"status": "running"}
-    await store.delete(projection, key)
-    assert await store.get(projection, key) is None
+    """Postgres TEXT cannot hold NUL; both stores key a record by ``pg_safe`` (#1241).
+
+    So the raw key and that spelling are one record for every operation: a
+    read, a bulk read, a replacing write and a delete.
+    """
+    raw = "session\x00id"
+    stored = pg_safe(raw)
+    assert stored != raw
+    await store.save(projection, raw, {"status": "running"})
+    assert await store.get(projection, stored) == {"status": "running"}
+    assert await store.get_many(projection, [raw, stored]) == {stored: {"status": "running"}}
+    await store.save(projection, stored, {"status": "done"})
+    assert await store.get(projection, raw) == {"status": "done"}
+    assert await store.count(projection) == 1
+    await store.delete(projection, raw)
+    assert await store.get(projection, stored) is None
+    assert await store.count(projection) == 0
+
+
+@pytest.mark.parametrize(
+    ("stored", "wanted", "other"),
+    [
+        ("running", "running", "done"),
+        (1, "1", 2),
+        (1, 1, 2),
+        (True, "true", False),
+        (False, False, True),
+    ],
+    ids=["string", "integer-as-text", "integer", "boolean-as-text", "boolean"],
+)
+async def test_query_and_count_compare_the_json_text_of_a_field(
+    store: ProjectionStore, projection: str, stored: object, wanted: object, other: object
+) -> None:
+    """Postgres compares ``data->>'value'`` with the filter's text; so must the double.
+
+    Exactly the matching record comes back, and count agrees with it.
+    """
+    await store.save(projection, "hit", {"value": stored})
+    await store.save(projection, "miss", {"value": other})
+    await store.save(projection, "null", {"value": None})
+    await store.save(projection, "absent", {})
+    assert await store.query(projection, filters={"value": wanted}) == [{"value": stored}]
+    assert await store.count(projection, {"value": wanted}) == 1
