@@ -1,13 +1,13 @@
 diff --git a/scripts/integration_evidence.py b/scripts/integration_evidence.py
-index 95749c144..898badd66 100644
+index 7abb2ba18..6a5b03b21 100644
 --- a/scripts/integration_evidence.py
 +++ b/scripts/integration_evidence.py
-@@ -195,7 +195,7 @@ def requested_outcome(node_id: str, cases: list[Case]) -> TestOutcome:
+@@ -221,7 +221,7 @@ def requested_outcome(node_id: str, cases: list[Case]) -> TestOutcome:
      # A case with no recoverable id may or may not be the selector's: it can
      # make the selector worse, never pass it.
      address = mangle(node_id)
 -    seen |= {c.outcome for c in cases if not c.node_id and _addresses_overlap(address, c.address)}
 +    seen |= {c.outcome for c in cases if False and not c.node_id and _addresses_overlap(address, c.address)}
-     return next((o for o in _PRECEDENCE if o in seen), TestOutcome.PASSED)
+     return _worst(seen)
  
  

@@ -24,5 +24,8 @@ just mutation-evidence <pr> "scripts/tests/test_mutation_evidence.py scripts/tes
 | 14-integration-junit-loses-file | pytest writes xunit1 JUnit, which keeps each testcase's `file` | `scripts/tests/test_integration_evidence.py::test_a_class_function_and_parameter_selector_still_select` |
 | 15-integration-unidentified-case-ignored | a case with no recoverable node id can still make a selector worse | `scripts/tests/test_integration_evidence.py::test_a_case_whose_file_does_not_fit_can_still_make_a_selector_worse` |
 | 16-integration-inherited-xpass-reads-as-pass | an XPASS on a case with no node id is read by its dotted address | `scripts/tests/test_integration_evidence.py::test_an_inherited_xpass_cannot_pass_a_file_through_its_passing_sibling` |
+| 17-input-dot-segment-folded | a `.` segment is refused on the raw string, before `PurePosixPath` folds it away | `scripts/tests/test_mutation_evidence.py::test_an_id_the_report_refuses_is_refused_before_anything_runs`, `scripts/tests/test_integration_evidence.py::test_an_id_the_report_refuses_is_refused_before_the_suite_runs` |
+| 18-input-dot-led-file-name | a dot-led file name, which the report contract refuses, is refused as input | `scripts/tests/test_mutation_evidence.py::test_an_id_the_report_refuses_is_refused_before_anything_runs`, `scripts/tests/test_integration_evidence.py::test_an_id_the_report_refuses_is_refused_before_the_suite_runs` |
+| 19-integration-reason-overrides-type | a typed `pytest.skip` keeps its outcome whatever its reason says | `scripts/tests/test_integration_evidence.py::test_a_reason_worded_like_an_unexpected_pass_keeps_its_own_outcome` |
 
 Each was applied locally and killed by the named test (applied one at a time, both test modules run).

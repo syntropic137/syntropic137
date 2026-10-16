@@ -1,0 +1,13 @@
+diff --git a/scripts/integration_evidence.py b/scripts/integration_evidence.py
+index 7abb2ba18..44c63fd1a 100644
+--- a/scripts/integration_evidence.py
++++ b/scripts/integration_evidence.py
+@@ -177,7 +177,7 @@ def _case_outcome(case: ET.Element) -> TestOutcome:
+     kind = skipped.get("type")
+     if kind == "pytest.xfail":
+         return TestOutcome.XFAIL
+-    if kind is None and skipped.get("message") == _STRICT_XPASS_MESSAGE:
++    if skipped.get("message") == _STRICT_XPASS_MESSAGE:
+         return TestOutcome.FAILED
+     return TestOutcome.SKIPPED
+ 

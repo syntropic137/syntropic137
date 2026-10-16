@@ -1,0 +1,13 @@
+diff --git a/scripts/mutation_evidence.py b/scripts/mutation_evidence.py
+index 586f479d3..4e2037d3f 100644
+--- a/scripts/mutation_evidence.py
++++ b/scripts/mutation_evidence.py
+@@ -297,7 +297,7 @@ def _safe_relative(path: str, what: str) -> PurePosixPath:
+         raise InputError(f"{what} {path!r} must be a plain relative path")
+     # The raw segments, not `PurePosixPath.parts`: that folds a `.` away, and
+     # the string checked would no longer be the string reported.
+-    for part in path.split("/"):
++    for part in PurePosixPath(path).parts:
+         if part in {"..", "."} or part == ".git":
+             raise InputError(f"{what} {path!r} may not contain '.', '..' or '.git' segments")
+         if part.startswith("-"):

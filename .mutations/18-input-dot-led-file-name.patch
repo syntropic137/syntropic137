@@ -1,0 +1,13 @@
+diff --git a/scripts/mutation_evidence.py b/scripts/mutation_evidence.py
+index 586f479d3..7fcd8de46 100644
+--- a/scripts/mutation_evidence.py
++++ b/scripts/mutation_evidence.py
+@@ -119,7 +119,7 @@ _DISPATCH_ID_RE: Final = re.compile(r"^[A-Za-z0-9-]{0,64}$")
+ #: (`evidence_contract.NODE_ID_PATTERN`): a selector the report refuses is
+ #: refused here, before anything runs.
+ _NODE_ID_RE: Final = re.compile(
+-    r"^(?P<path>(?:[A-Za-z0-9_][A-Za-z0-9_.-]*/(?:[A-Za-z0-9_.-]*/)*)?[A-Za-z0-9_][A-Za-z0-9_.-]*\.py)"
++    r"^(?P<path>(?:[A-Za-z0-9_][A-Za-z0-9_.-]*/(?:[A-Za-z0-9_.-]*/)*)?[A-Za-z0-9_.][A-Za-z0-9_.-]*\.py)"
+     r"(?P<rest>(::[A-Za-z_][A-Za-z0-9_]*)*(::[A-Za-z_][A-Za-z0-9_]*\[[A-Za-z0-9_.,=+-]*\])?)$"
+ )
+ _DIR_RE: Final = re.compile(r"^[A-Za-z0-9_.][A-Za-z0-9_./-]*$")
