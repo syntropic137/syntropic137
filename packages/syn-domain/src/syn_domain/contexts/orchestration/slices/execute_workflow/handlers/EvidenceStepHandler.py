@@ -169,42 +169,47 @@ class _StepRun:
         await self._settle(outcome, reason, head_sha=head)
 
     async def _run(self) -> None:
-        while True:
-            attempt = self.gate.attempts.get(self.step.index)
-            if attempt is not None and self.h.clock() >= attempt.not_after:
+        index = self.step.index
+        attempt = self.gate.attempts.get(index)
+        if attempt is None:
+            attempt = await self._attempt()
+        while attempt is not None:
+            if self.h.clock() >= attempt.not_after:
                 await self._settle(StepOutcome.UNAVAILABLE, "timeout")
                 return
-            if attempt is None:
-                attempt = await self._start()
-                result = await self.h.runner.dispatch(self._ref(attempt))
-                if isinstance(result, Refused):
-                    await self._settle(StepOutcome.UNAVAILABLE, result.reason.value)
-                    return
-                if isinstance(result, Accepted) and result.run is not None:
-                    attempt = await self._adopt(attempt, result.run)
-                # Ambiguous, or accepted with no run named: look for it, never re-POST.
             if attempt.run_id is None or attempt.run_url is None:
                 run = await self._find(attempt)
                 if run is None:
-                    if not await self._retry("dispatch_lost"):
-                        return
+                    attempt = await self._retry("dispatch_lost")
                     continue
                 attempt = await self._adopt(attempt, run)
-            if await self._conclude(
-                RunRef(run_id=attempt.run_id or 0, run_url=attempt.run_url or ""), attempt
-            ):
+            run = RunRef(run_id=attempt.run_id or 0, run_url=attempt.run_url or "")
+            why = await self._conclude(run, attempt)
+            if why is None:
                 return
+            attempt = await self._retry(why)
 
-    async def _conclude(self, run: RunRef, attempt: EvidenceAttempt) -> bool:
-        """Settle from the adopted run; False when a new attempt was started instead."""
+    async def _attempt(self) -> EvidenceAttempt | None:
+        """Record an attempt, THEN post it. None when the forge refused and the step settled."""
+        attempt = await self._start()
+        result = await self.h.runner.dispatch(self._ref(attempt))
+        if isinstance(result, Refused):
+            await self._settle(StepOutcome.UNAVAILABLE, result.reason.value)
+            return None
+        if isinstance(result, Accepted) and result.run is not None:
+            return await self._adopt(attempt, result.run)
+        # Ambiguous, or accepted with no run named: look for it, never re-POST.
+        return attempt
+
+    async def _conclude(self, run: RunRef, attempt: EvidenceAttempt) -> str | None:
+        """Settle from the adopted run; or why it needs another attempt."""
         conclusion = await self.h.runner.await_run(run, attempt.not_after)
         if conclusion is RunConclusion.TIMED_OUT:
             await self._settle(StepOutcome.UNAVAILABLE, "timeout", run)
-            return True
+            return None
         report = await self.h.runner.fetch_report(run)
         if report is None:
-            why = "superseded" if conclusion is RunConclusion.CANCELLED else "runner"
-            return not await self._retry(why)
+            return "superseded" if conclusion is RunConclusion.CANCELLED else "runner"
         outcome, reason = _VERDICT_OUTCOME[report.verdict], None
         if report.head_sha != self.gate.head_for(self.step):
             outcome, reason = StepOutcome.VOID, HEAD_MOVED
@@ -218,17 +223,15 @@ class _StepRun:
             (f"{stem}.md", report.report_md),
         ]
         await self._settle(outcome, reason, run, report.head_sha, files)
-        return True
+        return None
 
-    async def _retry(self, why: str) -> bool:
-        """Start attempt n+1 if one is left; otherwise settle `unavailable: why`. True if retried."""
+    async def _retry(self, why: str) -> EvidenceAttempt | None:
+        """Attempt n+1 if one is left; otherwise settle `unavailable: why` and return None."""
         attempt = self.gate.attempts.get(self.step.index)
         if attempt is not None and attempt.attempt >= MAX_ATTEMPTS:
             await self._settle(StepOutcome.UNAVAILABLE, why)
-            return False
-        started = await self._start()
-        await self.h.runner.dispatch(self._ref(started))
-        return True
+            return None
+        return await self._attempt()
 
     async def _start(self) -> EvidenceAttempt:
         now = self.h.clock()
