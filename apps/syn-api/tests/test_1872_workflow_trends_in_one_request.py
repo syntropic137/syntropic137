@@ -249,7 +249,9 @@ async def test_more_ids_than_a_page_is_refused(client: AsyncClient) -> None:
     assert response.status_code == 422
 
 
-def _point(day: int, seconds: float | None, *, lower_bound: bool = False) -> WorkflowTrendPointResponse:
+def _point(
+    day: int, seconds: float | None, *, lower_bound: bool = False
+) -> WorkflowTrendPointResponse:
     from syn_api.types import WorkflowTrendPointResponse
 
     return WorkflowTrendPointResponse(
