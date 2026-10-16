@@ -11,6 +11,7 @@ from __future__ import annotations
 import dataclasses
 import logging
 import os
+import typing
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from unittest.mock import patch
@@ -24,7 +25,7 @@ from agentic_isolation.contract import (
     WorkspaceRef,
 )
 from agentic_isolation.providers.operation_spool import OperationFailure
-from agentic_isolation.providers.teardown_report import TeardownUsage
+from agentic_isolation.providers.teardown_report import DeleteFallback, TeardownUsage
 
 from syn_adapters.workspace_backends.agentic.adapter import AgenticIsolationAdapter
 from syn_adapters.workspace_backends.agentic.teardown_usage import (
@@ -36,6 +37,7 @@ from syn_adapters.workspace_backends.errors import TeardownFailure, WorkspaceTea
 from syn_adapters.workspace_backends.service import WorkspaceBackend, WorkspaceService
 from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
     IsolationHandle,
+    WorkspaceDeleteFallback,
     WorkspaceUsage,
 )
 
@@ -197,6 +199,72 @@ async def test_an_oom_kill_seen_only_by_docker_reaches_the_domain() -> None:
     assert usage.memory_peak_bytes == 268_435_456
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "outcome",
+    [o for o in WorkspaceDeleteFallback if o is not WorkspaceDeleteFallback.UNRECOGNIZED],
+)
+async def test_the_fallback_delete_outcome_reaches_the_domain(
+    outcome: WorkspaceDeleteFallback,
+) -> None:
+    # #1983: the host could not delete files the container wrote under another
+    # uid. How the provider's fallback went is the one signal that the leak
+    # was closed, so it must arrive typed, not dropped or left a bare string.
+    report = TeardownReport(
+        finalization=_COMPLETED,
+        usage=dataclasses.replace(_USAGE, delete_fallback=outcome.value),
+    )
+    adapter, _ = _adapter(report)
+    usage = await adapter.destroy(_HANDLE)
+    assert usage is not None
+    assert usage.delete_fallback is outcome
+    assert type(usage.delete_fallback) is WorkspaceDeleteFallback
+
+
+@dataclass(frozen=True)
+class _UnknownFallbackReport:
+    cpu_usage_seconds: float | None = None
+    cpu_throttled_seconds: float | None = None
+    nr_throttled: int | None = None
+    memory_peak_bytes: int | None = 1
+    oom_kills: int | None = None
+    oom_killed: bool | None = None
+    disk_bytes_at_teardown: int | None = None
+    delete_failures: tuple[str, ...] | None = None
+    net_rx_bytes: int | None = None
+    net_tx_bytes: int | None = None
+    delete_fallback: object = "vaporised"
+
+
+@pytest.mark.parametrize("raw", ["vaporised", "unrecognized", "DELETED", 1])
+def test_an_unknown_fallback_outcome_is_logged_and_recorded_as_unrecognized(
+    caplog: pytest.LogCaptureFixture, raw: object
+) -> None:
+    # A contract mismatch must stay distinct from None ("not attempted / not
+    # reported") in the row, and must never fail teardown. "unrecognized" is
+    # syn's own marker, so a provider sending it is a mismatch too.
+    with caplog.at_level(logging.WARNING):
+        usage = usage_from_report(_UnknownFallbackReport(delete_fallback=raw))
+    assert usage == WorkspaceUsage(
+        memory_peak_bytes=1, delete_fallback=WorkspaceDeleteFallback.UNRECOGNIZED
+    )
+    assert any(repr(raw) in r.getMessage() for r in caplog.records)
+
+
+def test_every_fallback_outcome_the_real_provider_sends_is_known() -> None:
+    # Pinned against agentic-workspace's own `DeleteFallback`: an outcome the
+    # provider adds and syn does not know would be recorded as UNRECOGNIZED.
+    provider = set(typing.get_args(DeleteFallback))
+    known = {o.value for o in WorkspaceDeleteFallback} - {WorkspaceDeleteFallback.UNRECOGNIZED}
+    assert provider == known
+
+
+def test_no_fallback_reported_stays_none() -> None:
+    usage = usage_from_report(_UnknownFallbackReport(delete_fallback=None))
+    assert usage is not None
+    assert usage.delete_fallback is None
+
+
 _RETAINED = FinalizationOutcome(
     schema=MISSING,
     state="retained",
@@ -337,7 +405,7 @@ def test_an_absent_report_is_not_a_mismatch(caplog: pytest.LogCaptureFixture) ->
 
 def test_the_protocol_names_exactly_the_usage_fields() -> None:
     # The Protocol and `WorkspaceUsage` are two hand-written lists of the same
-    # nine names; this pins them so neither can drift alone.
+    # names; this pins them so neither can drift alone.
     members = {
         name for name, value in vars(TeardownReportLike).items() if isinstance(value, property)
     }
