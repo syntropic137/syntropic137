@@ -23,5 +23,6 @@ just mutation-evidence <pr> "scripts/tests/test_mutation_evidence.py scripts/tes
 | 13-integration-mangle-rewrites-params | `mangle` leaves `[params]` verbatim, as pytest does | `scripts/tests/test_integration_evidence.py::test_mangle_matches_pytest_junit_addresses` |
 | 14-integration-junit-loses-file | pytest writes xunit1 JUnit, which keeps each testcase's `file` | `scripts/tests/test_integration_evidence.py::test_a_class_function_and_parameter_selector_still_select` |
 | 15-integration-unidentified-case-ignored | a case with no recoverable node id can still make a selector worse | `scripts/tests/test_integration_evidence.py::test_a_case_whose_file_does_not_fit_can_still_make_a_selector_worse` |
+| 16-integration-inherited-xpass-reads-as-pass | an XPASS on a case with no node id is read by its dotted address | `scripts/tests/test_integration_evidence.py::test_an_inherited_xpass_cannot_pass_a_file_through_its_passing_sibling` |
 
 Each was applied locally and killed by the named test (applied one at a time, both test modules run).

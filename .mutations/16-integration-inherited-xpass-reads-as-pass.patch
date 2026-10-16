@@ -1,0 +1,13 @@
+diff --git a/scripts/integration_evidence.py b/scripts/integration_evidence.py
+index 5dfcc14c0..07d1c73e8 100644
+--- a/scripts/integration_evidence.py
++++ b/scripts/integration_evidence.py
+@@ -189,7 +189,7 @@ def parse_junit(xml_text: str, output: str) -> list[Case]:
+         node_id = node_id_of(element.get("file", ""), classname, name)
+         outcome = _case_outcome(element)
+         if outcome is TestOutcome.PASSED and (
+-            _xpassed(node_id, xpass_lines) if node_id else _xpassed_address(address, xpass_lines)
++            _xpassed(node_id, xpass_lines) if node_id else False
+         ):
+             outcome = TestOutcome.XFAIL
+         key = node_id or address

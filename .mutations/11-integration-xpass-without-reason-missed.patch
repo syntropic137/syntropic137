@@ -1,5 +1,5 @@
 diff --git a/scripts/integration_evidence.py b/scripts/integration_evidence.py
-index 95749c144..9712054a8 100644
+index 5dfcc14c0..9a3ca1c51 100644
 --- a/scripts/integration_evidence.py
 +++ b/scripts/integration_evidence.py
 @@ -149,7 +149,7 @@ def _addresses_overlap(selector: str, address: str) -> bool:
@@ -10,4 +10,4 @@ index 95749c144..9712054a8 100644
 +    return any(x == line for x in xpass_lines)
  
  
- def _case_outcome(case: ET.Element) -> TestOutcome:
+ def _xpassed_address(address: str, xpass_lines: list[str]) -> bool:
