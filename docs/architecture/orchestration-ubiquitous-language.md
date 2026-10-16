@@ -79,9 +79,11 @@ money.
 
 What a Phase of one type usually uses, read over every Phase of a Workflow in a
 window (#1716): per model, p50/p90 input, output, cache-write and cache-read
-tokens and cost; per Phase, p50/p95 CPU-seconds per wall-second, throttled
-seconds, memory peak and disk at teardown, each with the `n` it stands on and
-coverage counts for Phases that recorded no usage. A "phase type" is a Phase id:
+tokens and cost; per Phase, p50/p90/p95 CPU-seconds, wall-seconds, CPU-seconds
+per wall-second, throttled seconds, memory peak and disk at teardown, each with
+the `n` it stands on and coverage counts for Phases that recorded no usage; and
+how many Phases were [OOM-killed](#oom-killed), were not, or are unknown, with
+every OOM-killed Phase named by Execution and its memory peak. A "phase type" is a Phase id:
 every Execution of a Workflow runs the same Phase definitions. Lane 2 only:
 read from observations, never from an aggregate. Below ten Phases a percentile
 reads `insufficient`. Sizes the capacity model and the
@@ -819,9 +821,11 @@ and holds the slot.
 ## Heartbeat
 
 An Executor's write of `heartbeat_at` to its own `execution_budget` row, made
-by the claim loop itself as the first step of every turn, on the Lease's 30 s
-cadence and including while idle with no Claim. Never a side task or separate
-timer: a wedged claim loop stops writing it, so it stops looking alive. It is
+by the claim loop itself as the first step of every turn, once per loop
+interval (5 s), and including while idle with no Claim. A turn is bounded: it
+never waits for a reap or the opening sweep, and it stops claiming once its turn
+budget is spent, so the Heartbeat stops only when the loop does. Never a side
+task or separate timer: a wedged claim loop stops writing it, so it stops looking alive. It is
 evidence that the Executor's claim loop turned recently, used by the claim
 (a stale Executor does not claim), the global capacity report, the reap-window
 alert and before reaping an unlabelled container. It decides nothing else, and
@@ -931,9 +935,17 @@ it loses nothing.
 
 An experiment: a Goal, measured by runs that all start from the same Repository
 Baseline. Recorded as its own event stream, the Eval aggregate, identified by an
-Eval id (`eval-` plus a uuid when the caller supplies none). Its name and tags
+Eval id (`eval-` plus a uuid when the caller supplies none, or derived from a
+Stable Key). Its name and tags
 describe it and stay editable for its whole life. Its Goal and Baseline are what
 it measures, and Freezing fixes them.
+
+A **Stable Key** names one Eval to every caller that holds it: the Eval id is
+derived from it (`EvalId.for_key`), so every create with the same key writes the
+same stream, and the event store admits only the first. A later or concurrent
+create with the key gets that Eval back, or is refused if it asks for a
+different one. `eval_suite` keys each case's Eval by its suite and case tags, so
+overlapping launches cannot split a case across two Evals. (#1920)
 
 An Eval does not list its runs. An Execution records which Eval it belongs to,
 so attaching a run is one write to the Execution and the Eval's stream does not
@@ -1174,6 +1186,16 @@ failed measurement or write never fails a Phase. Each field is independently
 unknown rather than zero when its read failed. A Phase retried after a failed
 attempt held one workspace per attempt, so it has one usage per attempt. It
 exists to size the platform against `docs/north-star.md`.
+
+## OOM-killed
+
+A Phase whose workspace the kernel killed for memory, as the provider measured
+it (`WorkspaceUsage.oom_killed`): the cgroup's `oom_kill` count above zero, or
+Docker's `State.OOMKilled` when the count could not be read. Never inferred
+from an exit code: an exit 137 is any SIGKILL, including a stop or a timeout.
+Unmeasured is unknown, never "not OOM-killed". Read from
+[Workspace Resource Usage](#workspace-resource-usage) through the
+[Phase Profile](#phase-profile).
 
 ## Stale Workspace Directory
 

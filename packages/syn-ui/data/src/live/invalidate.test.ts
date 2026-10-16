@@ -173,3 +173,16 @@ describe('connectExecutionInvalidation (feedback 18ec6964)', () => {
     spy.mockRestore()
   })
 })
+
+describe('connectLiveInvalidation after a reconnect (#1924)', () => {
+  it('resyncs: frames missed while disconnected are unknowable, so cached reads go stale', () => {
+    let reconnect: (() => void) | undefined
+    const resync = vi.fn()
+    const apply = vi.fn()
+    const stop = connectLiveInvalidation({ apply, resync, subscribe: (_onFrames, onReconnect) => ((reconnect = onReconnect), () => {}) })
+    expect(resync).not.toHaveBeenCalled()
+    reconnect!()
+    expect(resync).toHaveBeenCalledOnce()
+    stop()
+  })
+})

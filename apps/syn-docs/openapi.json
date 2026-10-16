@@ -3,7 +3,7 @@
   "info": {
     "title": "Syntropic137 API",
     "description": "API for Syntropic137. Provides real-time observability for workflow execution, agent sessions, and artifacts.",
-    "version": "1.0.2"
+    "version": "1.0.3"
   },
   "paths": {
     "/workflows": {
@@ -2435,7 +2435,7 @@
           "evals"
         ],
         "summary": "Create Eval Endpoint",
-        "description": "Create an eval, pinning each baseline ref to a commit SHA. The id is minted here.",
+        "description": "Create an eval, pinning each baseline ref to a commit SHA.\n\nThe id is minted here, or derived from `stable_key`. A derived id is one\nstream however many creators race for it: the store admits the first and\nthe rest answer with that eval (#1920).",
         "operationId": "create_eval_endpoint_evals_post",
         "requestBody": {
           "required": true,
@@ -9241,7 +9241,8 @@
           "ok",
           "expiring",
           "expired",
-          "unreadable"
+          "unreadable",
+          "api_key"
         ],
         "title": "CodexAuthState",
         "description": "Freshness of the configured codex credential."
@@ -9887,6 +9888,20 @@
       },
       "CreateEvalRequest": {
         "properties": {
+          "stable_key": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 1000,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stable Key",
+            "description": "Makes the create idempotent (#1920): the eval id is derived from this key, so every create with the same key, concurrent ones included, answers with the one eval. A create that differs from the one that made it is refused."
+          },
           "name": {
             "type": "string",
             "maxLength": 200,
@@ -9934,7 +9949,7 @@
           "goal"
         ],
         "title": "CreateEvalRequest",
-        "description": "A new eval (#967). The server mints its id; see `EvalCreatedResponse`."
+        "description": "A new eval (#967). The server mints its id unless `stable_key` names one."
       },
       "CreateOrganizationRequest": {
         "properties": {
@@ -16357,6 +16372,76 @@
         "title": "ModelCostEntry",
         "description": "One model's share of a cost total."
       },
+      "OomKilledPhaseResponse": {
+        "properties": {
+          "execution_id": {
+            "type": "string",
+            "title": "Execution Id"
+          },
+          "oom_killed": {
+            "type": "boolean",
+            "const": true,
+            "title": "Oom Killed"
+          },
+          "memory_peak_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory Peak Bytes"
+          },
+          "oom_kills": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Oom Kills"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "execution_id",
+          "oom_killed",
+          "memory_peak_bytes",
+          "oom_kills"
+        ],
+        "title": "OomKilledPhaseResponse",
+        "description": "One phase whose workspace was OOM-killed, as the provider measured it.\n\nSet from the provider's ``oom_killed`` (cgroup ``oom_kill`` count or\nDocker's ``State.OOMKilled``), never inferred from an exit code: an exit\n137 is any SIGKILL."
+      },
+      "OomKillsResponse": {
+        "properties": {
+          "killed": {
+            "type": "integer",
+            "title": "Killed"
+          },
+          "not_killed": {
+            "type": "integer",
+            "title": "Not Killed"
+          },
+          "unknown": {
+            "type": "integer",
+            "title": "Unknown"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "killed",
+          "not_killed",
+          "unknown"
+        ],
+        "title": "OomKillsResponse",
+        "description": "Every phase of this type in exactly one bucket.\n\n``unknown`` is a phase nothing measured: no usage row, or a row with no\nOOM signal. It is never folded into ``not_killed``."
+      },
       "OperationInfo": {
         "properties": {
           "operation_id": {
@@ -17634,6 +17719,12 @@
             "type": "string",
             "title": "Phase Id"
           },
+          "cpu_usage_seconds": {
+            "$ref": "#/components/schemas/ResourcePercentilesResponse"
+          },
+          "wall_seconds": {
+            "$ref": "#/components/schemas/ResourcePercentilesResponse"
+          },
           "cpu_seconds_per_wall_second": {
             "$ref": "#/components/schemas/ResourcePercentilesResponse"
           },
@@ -17646,6 +17737,16 @@
           "disk_bytes_at_teardown": {
             "$ref": "#/components/schemas/ResourcePercentilesResponse"
           },
+          "oom": {
+            "$ref": "#/components/schemas/OomKillsResponse"
+          },
+          "oom_killed_phases": {
+            "items": {
+              "$ref": "#/components/schemas/OomKilledPhaseResponse"
+            },
+            "type": "array",
+            "title": "Oom Killed Phases"
+          },
           "coverage": {
             "$ref": "#/components/schemas/ResourceCoverageResponse"
           }
@@ -17654,10 +17755,14 @@
         "type": "object",
         "required": [
           "phase_id",
+          "cpu_usage_seconds",
+          "wall_seconds",
           "cpu_seconds_per_wall_second",
           "cpu_throttled_seconds",
           "memory_peak_bytes",
           "disk_bytes_at_teardown",
+          "oom",
+          "oom_killed_phases",
           "coverage"
         ],
         "title": "PhaseResourceProfileResponse",
@@ -19036,6 +19141,17 @@
             ],
             "title": "P50"
           },
+          "p90": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P90"
+          },
           "p95": {
             "anyOf": [
               {
@@ -19051,6 +19167,10 @@
             "type": "string",
             "title": "P50 Display"
           },
+          "p90_display": {
+            "type": "string",
+            "title": "P90 Display"
+          },
           "p95_display": {
             "type": "string",
             "title": "P95 Display"
@@ -19061,12 +19181,14 @@
         "required": [
           "n",
           "p50",
+          "p90",
           "p95",
           "p50_display",
+          "p90_display",
           "p95_display"
         ],
         "title": "ResourcePercentilesResponse",
-        "description": "p50/p95 of one measure over ``n`` measured phases; null below ten."
+        "description": "p50/p90/p95 of one measure over ``n`` measured phases; null below ten."
       },
       "ResumeRequest": {
         "properties": {

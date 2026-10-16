@@ -264,6 +264,8 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.ports.WorkspaceServicePort import (
         WorkspaceServicePort,
     )
+    from syn_shared.codex_auth_file import CodexAuthFileFormat
+    from syn_shared.codex_credential_port import CodexCredentialFileFormat
 
     def _event_sourced_repositories() -> None:
         """What each repository factory hands out satisfies its port.
@@ -407,6 +409,10 @@ if TYPE_CHECKING:
     def _disk_space(statvfs: StatvfsDiskSpace) -> None:
         """The workspace-volume probe /health and admission both judge (#1560)."""
         _statvfs: DiskSpacePort = statvfs
+
+    def _codex_credential_file(codex: CodexAuthFileFormat) -> None:
+        """codex's auth.json format, until it moves to agentic-workspace (#1973)."""
+        _codex: CodexCredentialFileFormat = codex
 
     def _session_inventory(
         evidence: PostgresSessionEvidence,

@@ -11,10 +11,26 @@ Releases before 0.33.1 are described in [GitHub releases](https://github.com/syn
 
 ## [Unreleased]
 
-## [1.0.2] - 2026-10-14
+## [1.0.3] - 2026-10-15
 
 ### Added
 
+- feat(codex): accept OPENAI_API_KEY as a fallback to CODEX_AUTH_JSON (#1971) (#1972)
+- feat(broker): S2 spike - git and gh through the broker (#1735) (#1929)
+
+### Fixed
+
+- The Run Queue schema is now applied under a Postgres advisory lock, so the api and executor processes can start together safely. (#1967)
+- fix(ui): live stream reopens after the browser gives up, and resyncs on reconnect (#1924) (#1951)
+
+## [1.0.2] - 2026-10-15
+
+### Added
+
+- feat(ci): mutation evidence mutates harness source; Docker by default (#1962)
+- New `SYN_EXECUTOR_POOL_*` settings (id, priority, region, capabilities, overflow delay) name the Executor Pool an executor joins. They are read only when `SYN_EXECUTION_RUN_QUEUE_ENABLED` is on. **Placement does not use them yet**, and runs are still claimed oldest-first. (#1931)
+- No user-facing change. (#1921)
+- New experimental workflow `sdlc-implement-v4-precheck`, an A/B arm of `sdlc-implement-v3`. Before it spends a repair round, verification now classifies evidence a workspace cannot produce: flaky or unrelated CI failures, Docker or database checks, CI coverage that needs a workflow change, and a wrong PR base. It hands these to the orchestrator on the PR instead of sending them to a fix phase that cannot close them. While any handoff is open, the PR stays a draft. `sdlc-implement-v3` is unchanged. The new workflow is not installed by default. (#1910)
 - Workspaces can start with a warm uv and pnpm cache, built and served by the platform and keyed by lockfile hash. Set `SYN_DEPENDENCY_SEED_DIR` (on the workspace volume) to enable it, and `SYN_DEPENDENCY_SEED_MAX_BYTES` to cap it. Off by default. (#1802)
 - feat(workspaces): adopt agentic-workspace provider operation contract (#1908)
 - feat(execution-host): ExecutionHost claim loop, renewal, reconciliation (#1310 1.5) (#1894)
@@ -26,6 +42,8 @@ Releases before 0.33.1 are described in [GitHub releases](https://github.com/syn
 
 ### Changed
 
+- Version bump to v1.0.2 (no code change). (#1963)
+- chore(brand): organise brand kit by style and purpose (2.4.0) (#1892)
 - docs: make Run Your First Workflow work on a fresh install (#1957)
 - test(1310): V7b waits for a post-reap heartbeat instead of racing B's next turn (#1945)
 - ci: mutation-evidence workflow (dispatch-only) replaces local Docker verifier runs (#1942)
@@ -272,7 +290,8 @@ Releases before 0.33.1 are described in [GitHub releases](https://github.com/syn
 
 - fix(#1519): pin the event-store INDEX digest, not a child manifest (#1522)
 
-[unreleased]: https://github.com/syntropic137/syntropic137/compare/v1.0.2...HEAD
+[unreleased]: https://github.com/syntropic137/syntropic137/compare/v1.0.3...HEAD
+[1.0.3]: https://github.com/syntropic137/syntropic137/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/syntropic137/syntropic137/compare/v1.0.0...v1.0.2
 [1.0.0]: https://github.com/syntropic137/syntropic137/compare/v0.33.1...v1.0.0
 [0.33.1]: https://github.com/syntropic137/syntropic137/compare/v0.33.0...v0.33.1
