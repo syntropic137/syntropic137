@@ -72,6 +72,17 @@ Artifacts it did not produce, so the inheriting side must ask the Execution
 that actually produced each one rather than its own id - the defect behind
 #1462.
 
+## Read by Id
+
+Finding one Artifact by its full id (`GetArtifactHandler`, #1570). The
+`artifact_summaries` read model answers first; when it has no row, the
+Artifact aggregate does, because a read model that has not caught up is not
+evidence that the Artifact is missing. The aggregate's `storage_uri` is what
+locates the bytes, since the object key includes the workflow and execution
+ids and the artifact id alone does not find it (#1652). A deleted Artifact is
+not found either way. Listing and search are not reads by id and stay on the
+read model.
+
 ## Creation Time Recovery
 
 `ArtifactCreationTimeRecovered` exists because some Artifacts were stored

@@ -26,6 +26,8 @@ describe('invalidationsFor (real API event names)', () => {
         'listWorkflowRuns:wf',
         'getWorkflowHistory:wf',
         'getWorkflowTrend:wf',
+        // The batch key is every id it asked for, so a run stales every batch (#1872).
+        'getWorkflowTrends',
         'listExecutionCosts',
         'getCostSummary',
         'getShippedMetrics',
