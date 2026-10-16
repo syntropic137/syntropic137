@@ -867,27 +867,20 @@ async def list_workflows_endpoint(
 @router.get("/trends", response_model=WorkflowTrendsResponse)
 async def list_workflow_trends_endpoint(
     ids: str = Query(
-        ...,
-        description=f"Comma-separated workflow ids, at most {MAX_PAGE_SIZE}. Exact ids, not prefixes",
+        ..., description=f"Comma-separated exact workflow ids, at most {MAX_PAGE_SIZE}"
     ),
     page_size: int = Query(50, ge=1, le=MAX_PAGE_SIZE, description="Latest runs per workflow"),
 ) -> WorkflowTrendsResponse:
-    """The latest runs of several workflows as trend points, in one request (#1872).
-
-    Each entry is page 1 of ``GET /workflows/{id}/trend`` at the same page
-    size. Ids that name no workflow are left out rather than failing the batch.
-    """
+    """Several workflows' latest runs as trend points in one request; unknown ids are left out (#1872)."""
     from syn_api.routes.trends import workflow_trends
 
     wanted = list(dict.fromkeys(i.strip() for i in ids.split(",") if i.strip()))
     if len(wanted) > MAX_PAGE_SIZE:
-        raise HTTPException(
-            status_code=422, detail=f"At most {MAX_PAGE_SIZE} workflow ids per request"
-        )
+        raise HTTPException(status_code=422, detail=f"At most {MAX_PAGE_SIZE} ids per request")
     await ensure_connected()
-    mgr = get_projection_mgr()
-    known = [i for i in wanted if await mgr.workflow_detail.get_by_id(i) is not None]
-    return WorkflowTrendsResponse(trends=await workflow_trends(mgr, known, page_size=page_size))
+    return WorkflowTrendsResponse(
+        trends=await workflow_trends(get_projection_mgr(), wanted, page_size=page_size)
+    )
 
 
 @router.get("/{workflow_id}", response_model=WorkflowResponse)

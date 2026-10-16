@@ -199,15 +199,17 @@ async def workflow_trend(
 async def workflow_trends(
     manager: ProjectionManager, workflow_ids: Sequence[str], *, page_size: int
 ) -> list[WorkflowTrendResponse]:
-    """Each workflow's latest ``page_size`` runs as trend points (#1872).
+    """Each workflow's latest ``page_size`` runs as trend points, in the order given (#1872).
 
-    The cost and duration reads for every run of every workflow are one batched
-    ``RunReads``, so the Lane 2 round trips do not grow with the number of ids.
+    Ids that name no workflow are left out. The cost and duration reads for
+    every run of every workflow are one batched ``RunReads``, so the Lane 2
+    round trips do not grow with the number of ids.
     """
-    reads_by_id = ExecutionListReads(manager.store)
+    executions = ExecutionListReads(manager.store)
     pages = [
-        (workflow_id, await reads_by_id.page(workflow_id=workflow_id, offset=0, limit=page_size))
+        (workflow_id, await executions.page(workflow_id=workflow_id, offset=0, limit=page_size))
         for workflow_id in workflow_ids
+        if await manager.workflow_detail.get_by_id(workflow_id) is not None
     ]
     reads = await RunReads.load(
         manager, [row.workflow_execution_id for _, rows in pages for row in rows.rows]
