@@ -31,7 +31,6 @@ from __future__ import annotations
 
 import argparse
 import os
-import re
 import subprocess
 import sys
 import tempfile
@@ -67,8 +66,13 @@ PYTEST_TIMEOUT_SECONDS: Final = 45 * 60
 #: pytest writes a STRICT xpass, which fails the run, as a `skipped` element
 #: with this message.
 _STRICT_XPASS_MESSAGE: Final = "xfail-marked test passes unexpectedly"
-#: A non-strict xpass is a plain pass in JUnit; only the `-rX` summary says so.
-_XPASS_LINE_RE: Final = re.compile(r"^XPASS (\S+)", re.MULTILINE)
+#: A non-strict xpass is a plain pass in JUnit; only the `-rX` summary says so,
+#: as `XPASS <node id>` or `XPASS <node id> - <reason>`.
+_XPASS_PREFIX: Final = "XPASS "
+#: JUnit flags the parse depends on. xunit1 keeps each testcase's `file`: its
+#: `classname` alone cannot tell `tests/a.py` from a `tests/a/` directory.
+PYTEST_REPORT_ARGS: Final = ("-p", "no:cacheprovider", "--color=no", "-q", "-rfEsxX",
+                             "-o", "junit_family=xunit1")  # fmt: skip
 
 
 @dataclass(frozen=True)
@@ -81,8 +85,14 @@ class Inputs:
 
 @dataclass(frozen=True)
 class Case:
-    """One JUnit `testcase`: pytest's mangled address and what happened."""
+    """One JUnit `testcase`: its pytest node id and what happened.
 
+    `node_id` is None when the testcase's `file` does not prefix its
+    `classname` (a test inherited from another module): then only the lossy
+    dotted `address` is known, and it can never certify a selector.
+    """
+
+    node_id: str | None
     address: str
     outcome: TestOutcome
 
@@ -99,21 +109,47 @@ def inputs_from_env(env: dict[str, str]) -> Inputs:
     )
 
 
+def _dotted(path: str) -> str:
+    return path.removesuffix(".py").replace("/", ".")
+
+
 def mangle(node_id: str) -> str:
     """A node id in pytest junitxml's address space (`mangle_test_address`).
 
-    JUnit names a test by `classname` + `name`, where `classname` is the node
-    id's path with `/` -> `.` and `.py` dropped, then its `::` parts. Mapping
-    the requested ids the same way compares like with like, with no guess at
-    which dot was a slash.
+    JUnit names a test by `classname` + `name`: the node id's path with `/` ->
+    `.` and `.py` dropped, then its `::` parts, then any `[params]` verbatim.
+    Lossy (a dot may have been a slash), so it only ever widens a failure.
     """
-    path, _, rest = node_id.partition("::")
-    dotted = path.removesuffix(".py").replace("/", ".")
-    return f"{dotted}.{rest.replace('::', '.')}" if rest else dotted
+    path, bracket, params = node_id.partition("[")
+    names = path.split("::")
+    names[0] = _dotted(names[0])
+    return ".".join(names) + bracket + params
+
+
+def node_id_of(file: str, classname: str, name: str) -> str | None:
+    """Undo `mangle` using the testcase's `file`; None if it does not fit."""
+    if not file:
+        return None
+    module = _dotted(file)
+    if classname == module:
+        return f"{file}::{name}"
+    if classname.startswith(f"{module}."):
+        # Class names are identifiers, so the remaining dots are all `::`.
+        return "::".join((file, *classname[len(module) + 1 :].split("."), name))
+    return None
+
+
+def _selects(selector: str, node_id: str) -> bool:
+    return node_id == selector or node_id.startswith((f"{selector}::", f"{selector}["))
 
 
 def _addresses_overlap(selector: str, address: str) -> bool:
     return address == selector or address.startswith((f"{selector}.", f"{selector}["))
+
+
+def _xpassed(node_id: str, xpass_lines: list[str]) -> bool:
+    line = f"{_XPASS_PREFIX}{node_id}"
+    return any(x == line or x.startswith(f"{line} - ") for x in xpass_lines)
 
 
 def _case_outcome(case: ET.Element) -> TestOutcome:
@@ -132,17 +168,20 @@ def _case_outcome(case: ET.Element) -> TestOutcome:
 def parse_junit(xml_text: str, output: str) -> list[Case]:
     """Every testcase in a pytest JUnit report, corrected by pytest's terminal
     `output`. A teardown error repeats a testcase; the worse outcome is kept."""
-    xpassed = {mangle(node_id) for node_id in _XPASS_LINE_RE.findall(output)}
-    cases: dict[str, TestOutcome] = {}
+    xpass_lines = [line for line in output.splitlines() if line.startswith(_XPASS_PREFIX)]
+    cases: dict[str, Case] = {}
     for element in ET.fromstring(xml_text).iter("testcase"):
         classname, name = element.get("classname", ""), element.get("name", "")
         address = f"{classname}.{name}" if classname else name
+        node_id = node_id_of(element.get("file", ""), classname, name)
         outcome = _case_outcome(element)
-        if outcome is TestOutcome.PASSED and address in xpassed:
+        if outcome is TestOutcome.PASSED and node_id and _xpassed(node_id, xpass_lines):
             outcome = TestOutcome.XFAIL
-        if cases.get(address) is not TestOutcome.FAILED:
-            cases[address] = outcome
-    return [Case(address, outcome) for address, outcome in cases.items()]
+        key = node_id or address
+        previous = cases.get(key)
+        if previous is None or previous.outcome is not TestOutcome.FAILED:
+            cases[key] = Case(node_id, address, outcome)
+    return list(cases.values())
 
 
 #: When a selector names several cases, the first of these any case had wins.
@@ -150,10 +189,13 @@ _PRECEDENCE: Final = (TestOutcome.FAILED, TestOutcome.SKIPPED, TestOutcome.XFAIL
 
 
 def requested_outcome(node_id: str, cases: list[Case]) -> TestOutcome:
-    selector = mangle(node_id)
-    seen = {c.outcome for c in cases if _addresses_overlap(selector, c.address)}
+    seen = {c.outcome for c in cases if c.node_id and _selects(node_id, c.node_id)}
     if not seen:
         return TestOutcome.NOT_COLLECTED
+    # A case with no recoverable id may or may not be the selector's: it can
+    # make the selector worse, never pass it.
+    address = mangle(node_id)
+    seen |= {c.outcome for c in cases if not c.node_id and _addresses_overlap(address, c.address)}
     return next((o for o in _PRECEDENCE if o in seen), TestOutcome.PASSED)
 
 
@@ -238,8 +280,8 @@ def build_report(inputs: Inputs, run: SuiteRun, junit_xml: str, run_url: str) ->
 def pytest_args(junit: Path) -> list[str]:
     # No `-x`: a run that stops at the first failure reports nothing after it.
     return [
-        "uv", "run", "--frozen", "pytest", "-m", "integration", "-p", "no:cacheprovider",
-        "--color=no", "-q", "-rfEsxX", f"--junitxml={junit}",
+        "uv", "run", "--frozen", "pytest", "-m", "integration", *PYTEST_REPORT_ARGS,
+        f"--junitxml={junit}",
     ]  # fmt: skip
 
 

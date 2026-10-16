@@ -35,12 +35,19 @@ WANTED = "tests/integration/test_store.py::TestStore::test_append[pg]"
 OTHER = "tests/integration/test_other.py::test_unrelated"
 
 
-def _case(classname: str, name: str, body: str = "") -> str:
-    return f'<testcase classname="{classname}" name="{name}" time="0.1">{body}</testcase>'
+STORE = "tests/integration/test_store.py"
+OTHER_FILE = "tests/integration/test_other.py"
 
 
-PASS_WANTED = _case("tests.integration.test_store.TestStore", "test_append[pg]")
-PASS_OTHER = _case("tests.integration.test_other", "test_unrelated")
+def _case(file: str, classname: str, name: str, body: str = "") -> str:
+    return (
+        f'<testcase file="{file}" classname="{classname}" name="{name}" time="0.1">'
+        f"{body}</testcase>"
+    )
+
+
+PASS_WANTED = _case(STORE, "tests.integration.test_store.TestStore", "test_append[pg]")
+PASS_OTHER = _case(OTHER_FILE, "tests.integration.test_other", "test_unrelated")
 SKIP = '<skipped type="pytest.skip" message="no docker">skip</skipped>'
 XFAIL = '<skipped type="pytest.xfail" message="known"/>'
 STRICT_XPASS = '<skipped message="xfail-marked test passes unexpectedly"/>'
@@ -82,7 +89,9 @@ def test_green_suite_with_the_requested_test_passed_is_passed() -> None:
 
 def test_an_unrelated_skip_is_counted_and_does_not_void() -> None:
     report = _report(
-        _junit(PASS_WANTED, _case("tests.integration.test_other", "test_unrelated", SKIP))
+        _junit(
+            PASS_WANTED, _case(OTHER_FILE, "tests.integration.test_other", "test_unrelated", SKIP)
+        )
     )
 
     assert report.verdict is EvidenceVerdict.PASSED
@@ -95,7 +104,10 @@ def test_an_unrelated_skip_is_counted_and_does_not_void() -> None:
 )
 def test_a_requested_test_that_did_not_run_and_pass_voids(body: str, outcome: TestOutcome) -> None:
     report = _report(
-        _junit(_case("tests.integration.test_store.TestStore", "test_append[pg]", body), PASS_OTHER)
+        _junit(
+            _case(STORE, "tests.integration.test_store.TestStore", "test_append[pg]", body),
+            PASS_OTHER,
+        )
     )
 
     assert report.verdict is EvidenceVerdict.VOID
@@ -111,7 +123,7 @@ def test_a_requested_non_strict_xpass_voids_though_junit_calls_it_a_pass() -> No
 
 
 def test_a_strict_xpass_is_a_failure() -> None:
-    strict = _case("tests.integration.test_other", "test_unrelated", STRICT_XPASS)
+    strict = _case(OTHER_FILE, "tests.integration.test_other", "test_unrelated", STRICT_XPASS)
 
     report = _report(_junit(PASS_WANTED, strict), 1)
 
@@ -126,7 +138,7 @@ def test_a_requested_test_that_was_never_collected_voids() -> None:
 
 
 def test_a_near_miss_name_is_not_the_requested_test() -> None:
-    lookalike = _case("tests.integration.test_store.TestStore", "test_append_more")
+    lookalike = _case(STORE, "tests.integration.test_store.TestStore", "test_append_more")
 
     selector = "tests/integration/test_store.py::TestStore::test_append"
 
@@ -138,7 +150,10 @@ def test_a_near_miss_name_is_not_the_requested_test() -> None:
 @pytest.mark.parametrize("body", [FAIL, ERROR])
 def test_any_failure_in_the_suite_fails_even_an_unrequested_one(body: str) -> None:
     report = _report(
-        _junit(PASS_WANTED, _case("tests.integration.test_other", "test_unrelated", body)), 1
+        _junit(
+            PASS_WANTED, _case(OTHER_FILE, "tests.integration.test_other", "test_unrelated", body)
+        ),
+        1,
     )
 
     assert report.verdict is EvidenceVerdict.FAILED
@@ -147,7 +162,7 @@ def test_any_failure_in_the_suite_fails_even_an_unrequested_one(body: str) -> No
 
 
 def test_a_teardown_error_after_a_pass_is_a_failure() -> None:
-    teardown = _case("tests.integration.test_store.TestStore", "test_append[pg]", ERROR)
+    teardown = _case(STORE, "tests.integration.test_store.TestStore", "test_append[pg]", ERROR)
 
     report = _report(_junit(PASS_WANTED, teardown, PASS_OTHER), 1)
 
@@ -166,7 +181,7 @@ def test_a_run_that_stopped_with_nothing_on_record_is_void(exit_code: int) -> No
 
 def test_a_file_selector_covers_every_case_in_it_and_takes_the_worst() -> None:
     selector = "tests/integration/test_store.py"
-    skipped_sibling = _case("tests.integration.test_store.TestStore", "test_read", SKIP)
+    skipped_sibling = _case(STORE, "tests.integration.test_store.TestStore", "test_read", SKIP)
 
     report = _report(_junit(PASS_WANTED, skipped_sibling), 0, selector)
 
@@ -180,6 +195,7 @@ def test_a_file_selector_covers_every_case_in_it_and_takes_the_worst() -> None:
         ("tests/test_x.py", "tests.test_x"),
         ("tests/test_x.py::test_y", "tests.test_x.test_y"),
         ("a/b/test_x.py::TestC::test_y[p-1]", "a.b.test_x.TestC.test_y[p-1]"),
+        ("tests/test_x.py::test_y[a::b c/d.py]", "tests.test_x.test_y[a::b c/d.py]"),
     ],
 )
 def test_mangle_matches_pytest_junit_addresses(node_id: str, address: str) -> None:
@@ -254,6 +270,17 @@ def test_run_writes_no_evidence_json_without_a_junit_report(
     assert not evidence.exists()
 
 
+def _real_pytest(root: Path, *argv: str) -> tuple[SuiteRun, str]:
+    """Real pytest with the runner's own report flags: its JUnit and output."""
+    junit = root / "j.xml"
+    proc = subprocess.run(
+        [sys.executable, "-m", "pytest", "-o", "addopts=", "--rootdir", str(root),
+         *ie.PYTEST_REPORT_ARGS, f"--junitxml={junit}", *argv],
+        cwd=root, capture_output=True, text=True, check=False,
+    )  # fmt: skip
+    return SuiteRun(proc.returncode, proc.stdout + proc.stderr), junit.read_text()
+
+
 def test_a_real_pytest_junit_report_maps_back_to_node_ids(tmp_path: Path) -> None:
     # The JUnit shape is pytest's, not ours: drive real pytest once so a change
     # in its address mangling or XPASS encoding fails here, not in the gate.
@@ -268,17 +295,88 @@ def test_a_real_pytest_junit_report_maps_back_to_node_ids(tmp_path: Path) -> Non
         "def test_xpass():\n    pass\n"
         "def test_skip():\n    pytest.skip('no docker')\n"
     )
-    junit = tmp_path / "j.xml"
-    proc = subprocess.run(
-        [sys.executable, "-m", "pytest", "-p", "no:cacheprovider", "-o", "addopts=",
-         "--rootdir", str(tmp_path), "-q", "-rfEsxX", f"--junitxml={junit}", "tests"],
-        cwd=tmp_path, capture_output=True, text=True, check=False,
-    )  # fmt: skip
+    run, junit = _real_pytest(tmp_path, "tests")
     xpass = "tests/integration/test_store.py::test_xpass"
     skip = "tests/integration/test_store.py::test_skip"
 
-    output = proc.stdout + proc.stderr
-    report = _report(junit.read_text(), proc.returncode, WANTED, xpass, skip, output=output)
+    report = _report(junit, run.exit_code, WANTED, xpass, skip, output=run.output)
 
     assert _outcomes(report) == [TestOutcome.PASSED, TestOutcome.XFAIL, TestOutcome.SKIPPED]
     assert report.suite.collected == 3
+
+
+@pytest.mark.parametrize("param", ["normal", "has space", "has::colon", "a - b"])
+def test_a_file_selector_never_certifies_an_xpass_whatever_its_parameter(
+    tmp_path: Path, param: str
+) -> None:
+    # A file selector reaches parameter ids the request grammar never sees.
+    (tmp_path / "test_shapes.py").write_text(
+        "import pytest\n"
+        "def test_first_passes(): pass\n"
+        f"@pytest.mark.parametrize('value', [{param!r}])\n"
+        "@pytest.mark.xfail(reason='known')\n"
+        "def test_second_xpasses(value): pass\n"
+    )
+    run, junit = _real_pytest(tmp_path, "test_shapes.py")
+    function = "test_shapes.py::test_second_xpasses"
+
+    report = _report(junit, run.exit_code, "test_shapes.py", function, output=run.output)
+
+    assert run.exit_code == 0, run.output
+    assert _outcomes(report) == [TestOutcome.XFAIL, TestOutcome.XFAIL]
+    assert report.verdict is EvidenceVerdict.VOID
+    assert (report.suite.passed, report.suite.skipped) == (1, 1)
+
+
+def test_a_deselected_file_cannot_borrow_a_pass_from_a_same_named_directory(
+    tmp_path: Path,
+) -> None:
+    # `tests/test_shapes.py` and `tests/test_shapes/` share a dotted address.
+    nested = tmp_path / "tests" / "test_shapes"
+    nested.mkdir(parents=True)
+    (tmp_path / "tests" / "test_shapes.py").write_text("def test_not_integration(): pass\n")
+    (nested / "test_other.py").write_text(
+        "import pytest\n@pytest.mark.integration\ndef test_pass(): pass\n"
+    )
+    run, junit = _real_pytest(tmp_path, "-m", "integration", "tests")
+    other = "tests/test_shapes/test_other.py"
+
+    report = _report(junit, run.exit_code, "tests/test_shapes.py", other, output=run.output)
+
+    assert run.exit_code == 0, run.output
+    assert _outcomes(report) == [TestOutcome.NOT_COLLECTED, TestOutcome.PASSED]
+    assert report.verdict is EvidenceVerdict.VOID
+
+
+def test_a_class_function_and_parameter_selector_still_select(tmp_path: Path) -> None:
+    (tmp_path / "test_c.py").write_text(
+        "import pytest\n"
+        "class TestC:\n"
+        "    @pytest.mark.parametrize('v', ['x-1', 'p::q'])\n"
+        "    def test_f(self, v): pass\n"
+    )
+    run, junit = _real_pytest(tmp_path, "test_c.py")
+    selectors = ("test_c.py::TestC", "test_c.py::TestC::test_f", "test_c.py::TestC::test_f[x-1]")
+
+    report = _report(junit, run.exit_code, *selectors, output=run.output)
+
+    assert _outcomes(report) == [TestOutcome.PASSED] * 3
+    assert report.verdict is EvidenceVerdict.PASSED
+
+
+def test_a_case_whose_file_does_not_fit_cannot_certify_a_selector() -> None:
+    # An inherited test reports the file it was DEFINED in, not collected from.
+    inherited = _case("tests/base.py", "tests.integration.test_store.TestStore", "test_append[pg]")
+
+    report = _report(_junit(inherited, PASS_OTHER))
+
+    assert _outcomes(report) == [TestOutcome.NOT_COLLECTED]
+
+
+def test_a_case_whose_file_does_not_fit_can_still_make_a_selector_worse() -> None:
+    inherited = _case("tests/base.py", "tests.integration.test_store.TestStore", "test_read", SKIP)
+
+    report = _report(_junit(PASS_WANTED, inherited), 0, STORE)
+
+    assert _outcomes(report) == [TestOutcome.SKIPPED]
+    assert report.verdict is EvidenceVerdict.VOID
