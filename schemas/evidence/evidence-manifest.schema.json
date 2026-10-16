@@ -1,0 +1,195 @@
+{
+  "$defs": {
+    "EvidenceStepKind": {
+      "description": "A step of a gate's plan. The last two are platform-internal: no phase can declare them.",
+      "enum": [
+        "mutation",
+        "integration",
+        "remove_mutation_patches",
+        "required_check"
+      ],
+      "title": "EvidenceStepKind",
+      "type": "string"
+    },
+    "ManifestStep": {
+      "additionalProperties": false,
+      "description": "One planned step of a gate, as the events recorded it.",
+      "properties": {
+        "head_sha": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{40}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Head Sha"
+        },
+        "index": {
+          "minimum": 0,
+          "title": "Index",
+          "type": "integer"
+        },
+        "kind": {
+          "$ref": "#/$defs/EvidenceStepKind"
+        },
+        "outcome": {
+          "$ref": "#/$defs/StepOutcome"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason"
+        },
+        "reused_from": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StepRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "run_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Url"
+        }
+      },
+      "required": [
+        "index",
+        "kind",
+        "outcome"
+      ],
+      "title": "ManifestStep",
+      "type": "object"
+    },
+    "PatchRemoval": {
+      "additionalProperties": false,
+      "description": "The provenance of the platform's S -> S' commit, which keeps evidence about S valid at S'.",
+      "properties": {
+        "after_sha": {
+          "pattern": "^[0-9a-f]{40}$",
+          "title": "After Sha",
+          "type": "string"
+        },
+        "author": {
+          "minLength": 1,
+          "title": "Author",
+          "type": "string"
+        },
+        "before_sha": {
+          "pattern": "^[0-9a-f]{40}$",
+          "title": "Before Sha",
+          "type": "string"
+        }
+      },
+      "required": [
+        "before_sha",
+        "after_sha",
+        "author"
+      ],
+      "title": "PatchRemoval",
+      "type": "object"
+    },
+    "StepOutcome": {
+      "description": "How a step settled. `unavailable` means no evidence exists, not that evidence failed.",
+      "enum": [
+        "passed",
+        "failed",
+        "void",
+        "unavailable"
+      ],
+      "title": "StepOutcome",
+      "type": "string"
+    },
+    "StepRef": {
+      "additionalProperties": false,
+      "description": "Where a reused result was first settled.",
+      "properties": {
+        "gate_id": {
+          "minLength": 1,
+          "title": "Gate Id",
+          "type": "string"
+        },
+        "step": {
+          "minimum": 0,
+          "title": "Step",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "gate_id",
+        "step"
+      ],
+      "title": "StepRef",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "`manifest.json`: every planned step of one gate, written from events once all settled.",
+  "properties": {
+    "complete": {
+      "const": true,
+      "title": "Complete",
+      "type": "boolean"
+    },
+    "gate_id": {
+      "minLength": 1,
+      "title": "Gate Id",
+      "type": "string"
+    },
+    "patch_removal": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PatchRemoval"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "schema": {
+      "const": 1,
+      "title": "Schema",
+      "type": "integer"
+    },
+    "steps": {
+      "items": {
+        "$ref": "#/$defs/ManifestStep"
+      },
+      "minItems": 1,
+      "title": "Steps",
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema",
+    "gate_id",
+    "steps",
+    "complete"
+  ],
+  "title": "EvidenceManifest",
+  "type": "object"
+}
