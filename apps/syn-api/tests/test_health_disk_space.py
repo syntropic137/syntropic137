@@ -59,7 +59,10 @@ async def test_low_disk_degrades_health_and_says_how_much_is_free(
 
     assert health.mode == "degraded"
     assert DegradedReason.DISK_SPACE in (health.degraded_reasons or [])
-    assert health.disk == DiskSpaceHealth(
+    assert health.disk is not None
+    # #1983: the reclaimer's block rides along; its own tests pin its content.
+    assert health.disk.reclaim is not None
+    assert health.disk.model_copy(update={"reclaim": None}) == DiskSpaceHealth(
         path="/workspaces",
         state="low",
         free_percent=7.0,

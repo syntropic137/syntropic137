@@ -13,7 +13,7 @@ from test_pc130_workspace_dir_reclaim import _git, _reclaimer, _workspace
 
 from syn_adapters.subscriptions.read_model_lag import ProjectionLag, ReadModelLag
 from syn_adapters.workspace_backends import stale_dirs
-from syn_adapters.workspace_backends.stale_dirs import CLAIM_PREFIX, WorkspaceContainer
+from syn_adapters.workspace_backends.stale_dirs import CLAIM_PREFIX, ContainerMounts
 from syn_api.services import lifecycle, workspace_dir_reclaim
 from syn_api.services.read_model_status import read_models_rebuilding
 
@@ -56,27 +56,30 @@ async def test_an_uninspectable_container_skips_the_pass_and_keeps_the_dir(
     monkeypatch.setattr(stale_dirs.asyncio, "create_subprocess_exec", _docker_ps)
     monkeypatch.setattr(stale_dirs, "docker_inspect_raw", _uninspectable)
     reclaimer = _reclaimer(base)
-    reclaimer.list_containers = stale_dirs.list_workspace_containers
+    reclaimer.list_containers = stale_dirs.list_containers
     result = await reclaimer.run_once()
     assert result.skipped is not None
-    assert "could not inspect workspace container cafe01" in result.skipped
+    assert "could not inspect container cafe01" in result.skipped
     assert ws.exists()
 
 
-# -- 1b: a truncated running-execution list is no list at all --
+# -- 1b: the execution record, read from the list projection by key (#1983) --
 
 
 @dataclass(frozen=True)
 class _Row:
     workflow_execution_id: str
+    status: str
+    completed_at: str | None
+    repos: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
 class _ExecutionList:
-    rows: list[_Row]
+    row: _Row | None
 
-    async def get_all(self, **_kwargs: object) -> list[_Row]:
-        return self.rows
+    async def get_by_id(self, execution_id: str) -> _Row | None:
+        return self.row
 
 
 @dataclass(frozen=True)
@@ -84,35 +87,35 @@ class _ProjectionManager:
     workflow_execution_list: _ExecutionList
 
 
-def _execution_list(count: int, monkeypatch: pytest.MonkeyPatch) -> None:
-    rows = [_Row(f"exec-{i}") for i in range(count)]
-    manager = _ProjectionManager(_ExecutionList(rows))
-    monkeypatch.setattr("syn_api._wiring.get_projection_mgr", lambda: manager)
-
-
-async def test_a_full_page_of_running_executions_skips_the_pass(
-    base: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    ("row", "terminal_at"),
+    [
+        (
+            _Row("e", "completed", "2026-10-15T10:00:00+00:00", ("https://github.com/o/r",)),
+            1792058400.0,
+        ),
+        (_Row("e", "failed", "2026-10-15T10:00:00", ()), 1792058400.0),
+        (_Row("e", "cancelled", None, ()), None),
+        (_Row("e", "running", None, ()), None),
+    ],
+)
+async def test_the_execution_record_carries_the_terminal_time_and_repositories(
+    monkeypatch: pytest.MonkeyPatch, row: _Row, terminal_at: float | None
 ) -> None:
-    ws = _workspace(base, "ws-truncated", tmp_path)
-    # The page is full, and its owner is the execution the page left out.
-    _execution_list(workspace_dir_reclaim._MAX_RUNNING_EXECUTIONS, monkeypatch)
-    reclaimer = _reclaimer(base)
-    reclaimer.running_execution_ids = workspace_dir_reclaim._running_execution_ids
-
-    async def owned_by_one_more(workspace_id: str) -> set[str]:
-        return {"exec-not-on-the-page"}
-
-    reclaimer.workspace_owners = owned_by_one_more
-    result = await reclaimer.run_once()
-    assert result.skipped is not None
-    assert "may be truncated" in result.skipped
-    assert ws.exists()
+    monkeypatch.setattr(
+        "syn_api._wiring.get_projection_mgr", lambda: _ProjectionManager(_ExecutionList(row))
+    )
+    record = await workspace_dir_reclaim._execution_record("e")
+    assert record is not None
+    assert record.terminal_at == terminal_at
+    assert record.repositories == row.repos
 
 
-async def test_one_short_of_a_full_page_is_read_whole(monkeypatch: pytest.MonkeyPatch) -> None:
-    _execution_list(workspace_dir_reclaim._MAX_RUNNING_EXECUTIONS - 1, monkeypatch)
-    running = await workspace_dir_reclaim._running_execution_ids()
-    assert len(running) == workspace_dir_reclaim._MAX_RUNNING_EXECUTIONS - 1
+async def test_no_execution_row_is_no_record(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "syn_api._wiring.get_projection_mgr", lambda: _ProjectionManager(_ExecutionList(None))
+    )
+    assert await workspace_dir_reclaim._execution_record("e") is None
 
 
 # -- 1c: the scan never lists a symlink, whatever rmtree would do with it --
@@ -162,13 +165,15 @@ async def test_a_left_claim_git_cannot_read_is_put_back(base: Path, tmp_path: Pa
 async def test_a_left_claim_kept_at_the_last_look_is_put_back(base: Path, tmp_path: Path) -> None:
     ws = _workspace(base, "ws-left-late", tmp_path)
     _claimed_by_a_dead_pass(ws)
-    containers: list[WorkspaceContainer] = []
+    containers: list[ContainerMounts] = []
     reclaimer = _reclaimer(base, containers=containers)
     claim = reclaimer.claim
 
     def claim_then_mount(host_dir: str) -> str:
         claimed = claim(host_dir)
-        containers.append(WorkspaceContainer("ws-left-late", "exec-late", running=True))
+        containers.append(
+            ContainerMounts("late01", ("/srv/workspaces/ws-left-late",), running=True)
+        )
         return claimed
 
     reclaimer.claim = claim_then_mount
@@ -216,7 +221,7 @@ async def test_reclaim_follows_the_coordinator_a_recovery_re_init_installs(
     monkeypatch.setattr(lifecycle, "get_subscription_coordinator", lambda **_kw: next(coordinators))
     monkeypatch.setattr(lifecycle, "announce_admission_if_open", AsyncMock())
     monkeypatch.setattr(lifecycle, "start_disk_recovery_watch", lambda: None)
-    monkeypatch.setattr(lifecycle, "start_disk_pager", pager_fails_first_time)
+    monkeypatch.setattr(lifecycle, "start_disk_pressure_monitor", pager_fails_first_time)
     monkeypatch.setattr(workspace_dir_reclaim, "default_reclaimer", lambda _is_live: None)
     monkeypatch.setattr(workspace_dir_reclaim, "reclaim_on_a_clock", clock)
     monkeypatch.setattr("syn_api._wiring_inventory.get_inventory_runtime", AsyncMock)
@@ -305,7 +310,7 @@ async def test_a_rebuild_skips_the_pass(base: Path, tmp_path: Path) -> None:
     assert ws.exists()
 
 
-async def test_a_rebuild_beginning_during_archival_keeps_the_dir(
+async def test_a_rebuild_beginning_under_the_claim_keeps_the_dir(
     base: Path, tmp_path: Path
 ) -> None:
     _workspace(base, "ws-rebuild-late", tmp_path)

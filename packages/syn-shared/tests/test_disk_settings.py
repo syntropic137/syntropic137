@@ -16,7 +16,8 @@ _DISK_ENV = (
     "SYN_DISK_DEGRADED_BELOW_GIB",
     "SYN_DISK_REFUSE_ADMISSION_BELOW_GIB",
     "SYN_DISK_RUN_RESERVE_GIB",
-    "SYN_DISK_RECLAIM_GRACE_HOURS",
+    "SYN_DISK_RECLAIM_SETTLE_MINUTES",
+    "SYN_DISK_RECLAIM_DRY_RUN",
 )
 
 
@@ -27,7 +28,7 @@ def clean_env(monkeypatch: pytest.MonkeyPatch) -> pytest.MonkeyPatch:
     return monkeypatch
 
 
-def test_defaults_judge_on_gib_alone_and_reclaim_after_six_hours(
+def test_defaults_judge_on_gib_alone_and_reclaim_ten_minutes_after_terminal(
     clean_env: pytest.MonkeyPatch,
 ) -> None:
     settings = DiskSettings(_env_file=None)
@@ -35,7 +36,8 @@ def test_defaults_judge_on_gib_alone_and_reclaim_after_six_hours(
     assert settings.degraded_below_percent is None
     assert settings.refuse_admission_below_percent is None
     assert settings.run_reserve_gib == 3.0
-    assert settings.reclaim_grace_hours == 6.0
+    assert settings.reclaim_settle_minutes == 10.0
+    assert settings.reclaim_dry_run is False
 
 
 @pytest.mark.parametrize(
