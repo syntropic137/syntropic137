@@ -165,7 +165,13 @@ class InMemoryPollerCursorStore(InMemoryAdapter):
         return self._cursors.get(source_key)
 
     async def save(self, source_key: str, cursor: CursorData) -> None:
-        self._cursors[source_key] = cursor
+        # Keep what the Postgres table keeps - the ETag and last_event_id, with
+        # "" for a missing id - and nothing else, so a poller tested here
+        # cannot rely on cursor state a restart would drop (#1675).
+        last_event_id = (cursor.metadata or {}).get("last_event_id", "")
+        self._cursors[source_key] = CursorData(
+            value=cursor.value, metadata={"last_event_id": last_event_id}
+        )
 
     async def load_all(self) -> dict[str, CursorData]:
         return dict(self._cursors)
