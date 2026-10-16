@@ -1,0 +1,151 @@
+{
+  "$defs": {
+    "EvidenceKind": {
+      "description": "What a phase can ask for. Each maps to `<kind>-evidence.yml` in the target repository.",
+      "enum": [
+        "mutation",
+        "integration"
+      ],
+      "title": "EvidenceKind",
+      "type": "string"
+    },
+    "EvidenceVerdict": {
+      "description": "What one evidence run concluded, in `evidence.json`.",
+      "enum": [
+        "passed",
+        "failed",
+        "void"
+      ],
+      "title": "EvidenceVerdict",
+      "type": "string"
+    },
+    "RequestedTestResult": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^(?:[A-Za-z0-9_][A-Za-z0-9_.-]*/(?:(?:[A-Za-z0-9_][A-Za-z0-9_.-]*|\\.(?:[A-Za-z0-9_-]|[A-Za-fh-z0-9_.-][A-Za-z0-9_.-]+|g[A-Za-hj-z0-9_.-][A-Za-z0-9_.-]*|gi|gi[A-Za-su-z0-9_.-][A-Za-z0-9_.-]*|git[A-Za-z0-9_.-]+))/)*)?[A-Za-z0-9_][A-Za-z0-9_.-]*\\.py(::[A-Za-z_][A-Za-z0-9_]*)*(::[A-Za-z_][A-Za-z0-9_]*\\[[A-Za-z0-9_.,=+-]*\\])?$",
+          "title": "Id",
+          "type": "string"
+        },
+        "outcome": {
+          "$ref": "#/$defs/TestOutcome"
+        }
+      },
+      "required": [
+        "id",
+        "outcome"
+      ],
+      "title": "RequestedTestResult",
+      "type": "object"
+    },
+    "SuiteCounts": {
+      "additionalProperties": false,
+      "properties": {
+        "collected": {
+          "minimum": 0,
+          "title": "Collected",
+          "type": "integer"
+        },
+        "failed": {
+          "minimum": 0,
+          "title": "Failed",
+          "type": "integer"
+        },
+        "passed": {
+          "minimum": 0,
+          "title": "Passed",
+          "type": "integer"
+        },
+        "skipped": {
+          "minimum": 0,
+          "title": "Skipped",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "collected",
+        "passed",
+        "failed",
+        "skipped"
+      ],
+      "title": "SuiteCounts",
+      "type": "object"
+    },
+    "TestOutcome": {
+      "description": "What happened to one requested node id in an evidence run.",
+      "enum": [
+        "passed",
+        "failed",
+        "skipped",
+        "xfail",
+        "not_collected"
+      ],
+      "title": "TestOutcome",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "`evidence.json`, schema 1: what one evidence workflow run found on one head.",
+  "properties": {
+    "dispatch_id": {
+      "pattern": "^[A-Za-z0-9-]{0,64}$",
+      "title": "Dispatch Id",
+      "type": "string"
+    },
+    "head_sha": {
+      "pattern": "^[0-9a-f]{40}$",
+      "title": "Head Sha",
+      "type": "string"
+    },
+    "kind": {
+      "$ref": "#/$defs/EvidenceKind"
+    },
+    "pr": {
+      "maximum": 9999999,
+      "minimum": 1,
+      "title": "Pr",
+      "type": "integer"
+    },
+    "report_md": {
+      "title": "Report Md",
+      "type": "string"
+    },
+    "requested": {
+      "items": {
+        "$ref": "#/$defs/RequestedTestResult"
+      },
+      "minItems": 1,
+      "title": "Requested",
+      "type": "array"
+    },
+    "schema": {
+      "const": 1,
+      "title": "Schema",
+      "type": "integer"
+    },
+    "suite": {
+      "$ref": "#/$defs/SuiteCounts"
+    },
+    "summary": {
+      "title": "Summary",
+      "type": "string"
+    },
+    "verdict": {
+      "$ref": "#/$defs/EvidenceVerdict"
+    }
+  },
+  "required": [
+    "schema",
+    "kind",
+    "pr",
+    "head_sha",
+    "dispatch_id",
+    "verdict",
+    "requested",
+    "suite",
+    "summary",
+    "report_md"
+  ],
+  "title": "EvidenceReport",
+  "type": "object"
+}
