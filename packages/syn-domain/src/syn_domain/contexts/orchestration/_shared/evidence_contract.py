@@ -27,12 +27,18 @@ from typing import Annotated, Final, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
-#: The grammar `scripts/mutation_evidence.py` enforces on its `tests` input
-#: (`_NODE_ID_RE`): `path/to/test_x.py` then zero or more `::Name`, the last may
-#: carry a parametrize id. One grammar, so a request this accepts is one the
-#: workflow accepts.
+#: A path segment that `scripts/mutation_evidence.py` `_safe_relative` cannot
+#: refuse: never empty (`//`), never `.`, `..` or `.git`, never `-option`.
+#: Barring every leading dot is stricter than the workflow (it would take
+#: `.hidden/test_x.py`), which pytest does not collect by default anyway.
+_PATH_SEGMENT: Final = r"[A-Za-z0-9_][A-Za-z0-9_.-]*"
+#: The grammar `scripts/mutation_evidence.py` enforces on its `tests` input:
+#: `_NODE_ID_RE`, with `_safe_relative`'s path rules folded into the path part,
+#: so the checked-in schema carries them too. `path/to/test_x.py` then zero or
+#: more `::Name`, the last may carry a parametrize id. A request this accepts
+#: is one the workflow accepts (`scripts/tests/test_evidence_contract_parity.py`).
 NODE_ID_PATTERN: Final = (
-    r"^[A-Za-z0-9_][A-Za-z0-9_./-]*\.py"
+    rf"^(?:{_PATH_SEGMENT}/)*{_PATH_SEGMENT}\.py"
     r"(::[A-Za-z_][A-Za-z0-9_]*)*(::[A-Za-z_][A-Za-z0-9_]*\[[A-Za-z0-9_.,=+-]*\])?$"
 )
 #: The same limit `scripts/mutation_evidence.py` puts on one dispatch.
@@ -154,6 +160,12 @@ class EvidenceReport(_Contract):
             raise ValueError(f"verdict is passed but requested tests did not pass: {unproven}")
         if self.kind is EvidenceKind.INTEGRATION and self.suite.failed:
             raise ValueError("an integration verdict of passed needs a suite with no failures")
+        # The requested ids passed, so the suite ran and passed something. The
+        # counters cannot say how many: one selector may name many cases.
+        if self.kind is EvidenceKind.INTEGRATION and not (
+            self.suite.collected and self.suite.passed
+        ):
+            raise ValueError("an integration verdict of passed needs a suite that ran tests")
         return self
 
 

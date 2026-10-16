@@ -133,6 +133,14 @@ class TestInvalidRequests:
             pytest.param("tests", ["test_y.py; rm -rf /"], id="malformed-node-id"),
             pytest.param("tests", ["packages/x/test_y"], id="node-id-without-py"),
             pytest.param("tests", [_TEST] * 51, id="over-the-limit"),
+            # `_safe_relative` in scripts/mutation_evidence.py refuses each of
+            # these paths, so the contract must too, in any position.
+            pytest.param("tests", ["tests/../test_x.py::test_ok"], id="dot-dot-segment"),
+            pytest.param("tests", ["tests//test_x.py::test_ok"], id="empty-segment"),
+            pytest.param("tests", ["tests/.git/test_x.py::test_ok"], id="dot-git-segment"),
+            pytest.param("tests", ["tests/-x/test_x.py::test_ok"], id="option-like-segment"),
+            pytest.param("tests", ["tests/./test_x.py::test_ok"], id="dot-segment"),
+            pytest.param("tests", [_TEST, "tests/../test_x.py::test_ok"], id="bad-second-entry"),
             pytest.param("kind", "docker", id="unknown-kind"),
             pytest.param("head_sha", "A" * 40, id="uppercase-sha"),
             pytest.param("head_sha", _SHA[:39], id="short-sha"),
@@ -177,6 +185,24 @@ class TestInvalidReports:
         suite = {"collected": 10, "passed": 9, "failed": 1, "skipped": 0}
         with pytest.raises(ValidationError, match="no failures"):
             EvidenceReport.model_validate_json(_report(suite=suite))
+
+    @pytest.mark.parametrize(
+        "suite",
+        [
+            pytest.param({"collected": 0, "passed": 0, "failed": 0, "skipped": 0}, id="empty"),
+            pytest.param(
+                {"collected": 3, "passed": 0, "failed": 0, "skipped": 3}, id="all-skipped"
+            ),
+        ],
+    )
+    def test_integration_passed_with_a_suite_that_ran_nothing(self, suite: object) -> None:
+        with pytest.raises(ValidationError, match="ran tests"):
+            EvidenceReport.model_validate_json(_report(suite=suite))
+
+    def test_integration_passed_with_unrelated_skips_is_a_report(self) -> None:
+        suite = {"collected": 3, "passed": 1, "failed": 0, "skipped": 2}
+        report = EvidenceReport.model_validate_json(_report(suite=suite))
+        assert report.suite.passed == 1
 
     def test_failed_with_a_failing_suite_is_a_report(self) -> None:
         suite = {"collected": 10, "passed": 9, "failed": 1, "skipped": 0}
