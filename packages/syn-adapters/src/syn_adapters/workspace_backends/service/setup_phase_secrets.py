@@ -730,6 +730,7 @@ class SetupPhaseSecrets:
             ValueError: A pinned commit is not a full commit id (#1458).
         """
         lines: list[str] = [DEFAULT_SETUP_SCRIPT.rstrip()]
+        self._append_git_identity(lines)
         self._append_codex_auth(lines)
 
         self._append_git_credentials(lines)
@@ -737,6 +738,22 @@ class SetupPhaseSecrets:
             self._append_repo_clones(lines)
 
         return "\n".join(lines) + "\n"
+
+    def _append_git_identity(self, lines: list[str]) -> None:
+        """Configure the GitHub App's git identity, in the script text.
+
+        Not through the setup environment: every value there is registered for
+        redaction, and agentic-workspace refuses a value holding `[` or `]`,
+        which ``<app>[bot]`` always does. The identity is public, so the script
+        is the right place for it. The email falls back as it always has.
+        """
+        if not self.git_author_name:
+            return
+        email = self.git_author_email or "agent@agentic.local"
+        lines.append("")
+        lines.append("# Git identity (GitHub App bot)")
+        lines.append(f"git config --global user.name {shlex.quote(self.git_author_name)}")
+        lines.append(f"git config --global user.email {shlex.quote(email)}")
 
     def _append_codex_auth(self, lines: list[str]) -> None:
         """Relocate the staged codex auth file to ~/.codex/auth.json (0600).
@@ -950,21 +967,10 @@ class SetupPhaseSecrets:
 # NOTE: Most configuration is now handled by the container's entrypoint.sh
 # (see: agentic-workspace/workspace/entrypoint.sh)
 #
-# This script only handles:
-# 1. Git identity (in case container started without env vars)
-#
-# Credential helper and repo cloning are now handled by build_setup_script()
-# when repositories are provided (ADR-058). For executions without repos,
-# this script is used as-is (backward compat).
+# This is only the header. Git identity, credentials and repo cloning are
+# appended by build_setup_script() (ADR-058).
 #
 # The entrypoint already handles: ~/.claude/settings.json, workspace dirs, hooks
 DEFAULT_SETUP_SCRIPT = """#!/bin/bash
 set -e
-
-# Configure Git identity if not already set by entrypoint
-# (entrypoint sets from initial env vars, this ensures setup-phase vars are used)
-if [ -n "${GIT_AUTHOR_NAME}" ]; then
-    git config --global user.name "${GIT_AUTHOR_NAME}"
-    git config --global user.email "${GIT_AUTHOR_EMAIL:-agent@agentic.local}"
-fi
 """
