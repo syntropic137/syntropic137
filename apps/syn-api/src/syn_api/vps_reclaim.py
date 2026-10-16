@@ -127,6 +127,7 @@ def parse_quiescence(
     )
 
 
+@dataclass
 class QuiescenceGate:
     """The one answer to "may the next destructive step run", read fresh each time.
 
@@ -136,16 +137,19 @@ class QuiescenceGate:
     unreadable answer is not quiet.
     """
 
-    def __init__(self, quiescence: ApiQuiescence, *, apply: bool) -> None:
-        self._quiescence = quiescence
-        self._apply = apply
-        self.quiet = not apply
+    quiescence: ApiQuiescence
+    apply: bool
+    #: The last answer: True only while the last read found the host quiescent.
+    quiet: bool = False
+
+    def __post_init__(self) -> None:
+        self.quiet = not self.apply
 
     async def stop_reason(self) -> str | None:
-        if not self._apply:
+        if not self.apply:
             return None
         try:
-            reason = quiescence_lost(await self._quiescence.read())
+            reason = quiescence_lost(await self.quiescence.read())
         except Exception as exc:
             reason = f"quiescence unreadable ({type(exc).__name__}: {exc})"
         self.quiet = reason is None
