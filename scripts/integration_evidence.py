@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -63,8 +64,11 @@ ENV_SHA: Final = "INTEGRATION_SHA"
 ENV_DISPATCH_ID: Final = "INTEGRATION_DISPATCH_ID"
 
 PYTEST_TIMEOUT_SECONDS: Final = 45 * 60
-#: pytest writes a non-strict XPASS as a `skipped` element with this message.
-_XPASS_MESSAGE: Final = "xfail-marked test passes unexpectedly"
+#: pytest writes a STRICT xpass, which fails the run, as a `skipped` element
+#: with this message.
+_STRICT_XPASS_MESSAGE: Final = "xfail-marked test passes unexpectedly"
+#: A non-strict xpass is a plain pass in JUnit; only the `-rX` summary says so.
+_XPASS_LINE_RE: Final = re.compile(r"^XPASS (\S+)", re.MULTILINE)
 
 
 @dataclass(frozen=True)
@@ -118,19 +122,24 @@ def _case_outcome(case: ET.Element) -> TestOutcome:
     skipped = case.find("skipped")
     if skipped is None:
         return TestOutcome.PASSED
-    if skipped.get("type") == "pytest.xfail" or skipped.get("message") == _XPASS_MESSAGE:
+    if skipped.get("message") == _STRICT_XPASS_MESSAGE:
+        return TestOutcome.FAILED
+    if skipped.get("type") == "pytest.xfail":
         return TestOutcome.XFAIL
     return TestOutcome.SKIPPED
 
 
-def parse_junit(xml_text: str) -> list[Case]:
-    """Every testcase in a pytest JUnit report. A teardown error repeats a
-    testcase; the worse outcome is kept."""
+def parse_junit(xml_text: str, output: str) -> list[Case]:
+    """Every testcase in a pytest JUnit report, corrected by pytest's terminal
+    `output`. A teardown error repeats a testcase; the worse outcome is kept."""
+    xpassed = {mangle(node_id) for node_id in _XPASS_LINE_RE.findall(output)}
     cases: dict[str, TestOutcome] = {}
     for element in ET.fromstring(xml_text).iter("testcase"):
         classname, name = element.get("classname", ""), element.get("name", "")
         address = f"{classname}.{name}" if classname else name
         outcome = _case_outcome(element)
+        if outcome is TestOutcome.PASSED and address in xpassed:
+            outcome = TestOutcome.XFAIL
         if cases.get(address) is not TestOutcome.FAILED:
             cases[address] = outcome
     return [Case(address, outcome) for address, outcome in cases.items()]
@@ -199,11 +208,17 @@ def render(report: EvidenceReport, run_url: str) -> str:
     return "\n".join(lines) + "\n"
 
 
-def build_report(inputs: Inputs, exit_code: int, junit_xml: str, run_url: str) -> EvidenceReport:
-    cases = parse_junit(junit_xml)
+@dataclass(frozen=True)
+class SuiteRun:
+    exit_code: int
+    output: str
+
+
+def build_report(inputs: Inputs, run: SuiteRun, junit_xml: str, run_url: str) -> EvidenceReport:
+    cases = parse_junit(junit_xml, run.output)
     requested = tuple(RequestedResult(t, requested_outcome(t, cases)) for t in inputs.tests)
     suite = suite_counts(cases)
-    verdict, summary = decide(exit_code, suite, requested)
+    verdict, summary = decide(run.exit_code, suite, requested)
     report = EvidenceReport(
         kind="integration",
         pr=inputs.pr,
@@ -226,15 +241,18 @@ def pytest_args(junit: Path) -> list[str]:
     ]  # fmt: skip
 
 
-def run_suite(root: Path, junit: Path) -> int:
+def run_suite(root: Path, junit: Path) -> SuiteRun:
     env = {k: v for k, v in os.environ.items() if k != "VIRTUAL_ENV"}
     try:
         proc = subprocess.run(
-            pytest_args(junit), cwd=root, env=env, check=False, timeout=PYTEST_TIMEOUT_SECONDS
-        )
+            pytest_args(junit), cwd=root, env=env, capture_output=True, text=True,
+            check=False, timeout=PYTEST_TIMEOUT_SECONDS,
+        )  # fmt: skip
     except subprocess.TimeoutExpired:
-        return -1
-    return proc.returncode
+        return SuiteRun(-1, "")
+    output = proc.stdout + proc.stderr
+    print(output[-20000:], flush=True)
+    return SuiteRun(proc.returncode, output)
 
 
 def _run_url() -> str:
@@ -265,14 +283,13 @@ def main(argv: list[str] | None = None) -> int:
 
     with tempfile.TemporaryDirectory() as scratch:
         junit = Path(scratch) / "junit.xml"
-        exit_code = run_suite(args.root.resolve(), junit)
+        run = run_suite(args.root.resolve(), junit)
         try:
-            junit_xml = junit.read_text()
-            report = build_report(inputs, exit_code, junit_xml, _run_url())
+            report = build_report(inputs, run, junit.read_text(), _run_url())
         except (OSError, ET.ParseError) as exc:
             # No JUnit, no record of what ran: write no evidence.json, so the
             # gate reads "no evidence" rather than a verdict nothing backs.
-            print(f"::error::pytest exit {exit_code} left no readable JUnit report: {exc}")
+            print(f"::error::pytest exit {run.exit_code} left no readable JUnit report: {exc}")
             return 1
     args.report.write_text(report.report_md)
     args.evidence.write_text(report.to_json())
