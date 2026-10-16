@@ -1,0 +1,12 @@
+diff --git a/scripts/check_integration_skips.py b/scripts/check_integration_skips.py
+index 216fbcbce..9f0aeb2e6 100644
+--- a/scripts/check_integration_skips.py
++++ b/scripts/check_integration_skips.py
+@@ -355,7 +355,6 @@ class _Module:
+         """
+         if id(owner) in self._mro:
+             return self._mro[id(owner)]
+-        self._mro[id(owner)] = [owner]  # recursion guard: a rebound name can loop
+         parents = [
+             parent
+             for base in owner.bases

@@ -1,0 +1,13 @@
+diff --git a/scripts/check_integration_skips.py b/scripts/check_integration_skips.py
+index 216fbcbce..7ec47f311 100644
+--- a/scripts/check_integration_skips.py
++++ b/scripts/check_integration_skips.py
+@@ -370,7 +370,7 @@ class _Module:
+             # A head no tail still waits on comes next. Python refuses a class
+             # with none (TypeError at import, so pytest never runs its tests);
+             # taking the first head keeps the census going on such a file.
+-            head = next((seq[0] for seq in pending if id(seq[0]) not in tails), pending[0][0])
++            head = next((seq[0] for seq in pending if id(seq[0]) not in tails))
+             order.append(head)
+             for seq in pending:
+                 if seq[0] is head:
