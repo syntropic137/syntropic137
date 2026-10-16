@@ -182,6 +182,7 @@ _JANITOR_MODULES = (
     "apps/syn-api/src/syn_api/services/disk_pressure.py",
     "packages/syn-adapters/src/syn_adapters/workspace_backends/stale_dirs.py",
     "packages/syn-adapters/src/syn_adapters/workspace_backends/remote_refs.py",
+    "packages/syn-adapters/src/syn_adapters/workspace_backends/reclaim_delete.py",
 )
 
 #: Where run history lives: the event store, Postgres, MinIO artifacts,

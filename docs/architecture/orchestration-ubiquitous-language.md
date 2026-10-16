@@ -1228,7 +1228,11 @@ A claimed directory whose second look fails, or whose `(st_dev, st_ino)`
 changed, is put back. One that passes is renamed again to
 `.deleting-<workspace id>`, the commit point: it is deleted within each
 pass's time budget, and a pass or a restart that finds one only finishes the
-delete, never judges it again or puts it back.
+delete, never judges it again or puts it back. The name alone authorizes
+nothing: a **Deletion Authorization** (`DeletionAuthorization`), written
+before the rename under `<base>/.syn-reclaim-auth`, outside every workspace,
+binds it to the directory's `(st_dev, st_ino)`; a `.deleting-` directory
+without a matching one is retained (`identity_changed`).
 
 Reclaiming touches only scratch: a direct child of the workspace base
 directory. Run history (events, Postgres, artifacts, transcripts, telemetry)

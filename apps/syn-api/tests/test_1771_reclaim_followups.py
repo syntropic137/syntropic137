@@ -171,7 +171,9 @@ async def test_a_left_claim_kept_at_the_last_look_is_put_back(base: Path, tmp_pa
 
     def claim_then_mount(host_dir: str) -> str:
         claimed = claim(host_dir)
-        containers.append(ContainerMounts("late01", ("/srv/ws/ws-left-late",), running=True))
+        containers.append(
+            ContainerMounts("late01", ("/srv/workspaces/ws-left-late",), running=True)
+        )
         return claimed
 
     reclaimer.claim = claim_then_mount
