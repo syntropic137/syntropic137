@@ -704,6 +704,16 @@ class TestEvidenceStepItemsRoundTrip:
         record = _TodoRecord(execution_id="e", items=(item,), phase_progress=())
         assert _TodoRecord.from_record(record.to_record()).items == (item,)
 
+    def test_gate_cursors_round_trip(self) -> None:
+        from syn_domain.contexts.orchestration.slices.execute_workflow.run_todo_fold import (
+            _TodoRecord,
+        )
+
+        record = _TodoRecord(
+            execution_id="e", items=(), phase_progress=(), evidence_progress=(("gate-1", 2),)
+        )
+        assert _TodoRecord.from_record(record.to_record()) == record
+
     def test_a_record_written_before_the_gate_still_reads(self) -> None:
         from syn_domain.contexts.orchestration.slices.execute_workflow.run_todo_fold import (
             _TodoRecord,

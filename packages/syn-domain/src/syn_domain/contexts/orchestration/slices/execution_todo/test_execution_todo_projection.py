@@ -577,3 +577,115 @@ class TestEvidenceGateSteps:
 
         await proj.on_evidence_step_settled(self._settled(1, None))  # type: ignore[arg-type]
         assert await self._evidence_items(proj) == []
+
+
+@pytest.mark.unit
+class TestEvidenceGateReplay:
+    """A gate's cursor only moves forward, whichever writer delivers (verify #2001 item 1).
+
+    The processor's in-process sync and the coordinator subscription share one
+    store, so each event can arrive twice and late. The events here come from
+    the aggregate itself, through the JSON the store boundary carries.
+    """
+
+    @staticmethod
+    def _producer_events() -> tuple[str, dict, list[dict]]:
+        import json
+
+        from syn_domain.contexts.orchestration._shared.evidence_contract import EvidenceKind
+        from syn_domain.contexts.orchestration.domain.aggregate_execution.test_evidence_gate_aggregate import (
+            _collect,
+            _declared,
+            _gate_id,
+            _send,
+            _settle,
+            _started,
+        )
+
+        store = _started()
+        events = _collect(
+            store, "implement", declared=(_declared(), _declared(EvidenceKind.INTEGRATION))
+        )
+        gate_id = _gate_id(events)
+        request = next(e for e in events if e.event_type == "EvidenceRequested")
+        settlements = [
+            next(
+                e
+                for e in _send(store, _settle(gate_id, i))
+                if e.event_type == "EvidenceStepSettled"
+            )
+            for i in range(2)
+        ]
+        return (
+            gate_id,
+            json.loads(request.model_dump_json()),
+            [json.loads(e.model_dump_json()) for e in settlements],
+        )
+
+    @staticmethod
+    async def _steps(
+        proj: ExecutionTodoProjection, execution_id: str
+    ) -> list[tuple[str | None, int | None]]:
+        return [
+            (t.evidence_gate_id, t.evidence_step)
+            for t in await proj.get_pending(execution_id)
+            if t.action == TodoAction.RUN_EVIDENCE_STEP
+        ]
+
+    @pytest.mark.anyio
+    async def test_a_repeated_request_queues_one_step(self) -> None:
+        gate_id, request, _ = self._producer_events()
+        store = InMemoryProjectionStore()
+        live, subscription = ExecutionTodoProjection(store), ExecutionTodoProjection(store)
+        await live.on_evidence_requested(request)  # type: ignore[arg-type]
+        await subscription.on_evidence_requested(request)  # type: ignore[arg-type]
+        assert await self._steps(live, request["execution_id"]) == [(gate_id, 0)]
+
+    @pytest.mark.anyio
+    async def test_a_repeated_settlement_does_not_skip_or_duplicate(self) -> None:
+        gate_id, request, (first, _second) = self._producer_events()
+        store = InMemoryProjectionStore()
+        live, subscription = ExecutionTodoProjection(store), ExecutionTodoProjection(store)
+        await live.on_evidence_requested(request)  # type: ignore[arg-type]
+        await live.on_evidence_step_settled(first)  # type: ignore[arg-type]
+        await subscription.on_evidence_requested(request)  # type: ignore[arg-type]
+        await subscription.on_evidence_step_settled(first)  # type: ignore[arg-type]
+        assert await self._steps(live, request["execution_id"]) == [(gate_id, 1)]
+
+    @pytest.mark.anyio
+    async def test_late_events_after_closure_do_not_resurrect_the_gate(self) -> None:
+        _gate_id, request, settlements = self._producer_events()
+        store = InMemoryProjectionStore()
+        live, subscription = ExecutionTodoProjection(store), ExecutionTodoProjection(store)
+        await live.on_evidence_requested(request)  # type: ignore[arg-type]
+        for settlement in settlements:
+            await live.on_evidence_step_settled(settlement)  # type: ignore[arg-type]
+        await subscription.on_evidence_requested(request)  # type: ignore[arg-type]
+        await subscription.on_evidence_step_settled(settlements[0])  # type: ignore[arg-type]
+        assert await self._steps(live, request["execution_id"]) == []
+
+    @pytest.mark.anyio
+    async def test_a_stale_step_on_record_is_never_served(self) -> None:
+        """A writer that bypassed the cursor cannot make the drain loop spin on it."""
+        store = InMemoryProjectionStore()
+        await store.save(
+            ExecutionTodoProjection.PROJECTION_NAME,
+            "exec-1",
+            {
+                "execution_id": "exec-1",
+                "items": [
+                    {
+                        "execution_id": "exec-1",
+                        "action": TodoAction.RUN_EVIDENCE_STEP.value,
+                        "phase_id": "p-1",
+                        "workspace_id": None,
+                        "session_id": None,
+                        "evidence_gate_id": "gate-1",
+                        "evidence_step": 0,
+                    }
+                ],
+                "phase_progress": {},
+                "evidence_progress": {"gate-1": 1},
+            },
+        )
+        assert await self._steps(ExecutionTodoProjection(store), "exec-1") == []
