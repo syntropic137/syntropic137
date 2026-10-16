@@ -78,7 +78,7 @@ if TYPE_CHECKING:
     )
     from syn_tests.fixtures.infrastructure import TestInfrastructure
 
-pytestmark = [pytest.mark.integration, pytest.mark.anyio]
+pytestmark = pytest.mark.integration
 
 #: The size of the artifact that went missing, so the body is not trivially short.
 FINDINGS = "# Findings\n\n" + "x" * 34_609
