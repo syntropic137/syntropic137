@@ -952,7 +952,9 @@ class TestSkipping(Root):
 """
 
 
-@pytest.mark.parametrize("order", [(_CLEAN, _SKIPPING), (_SKIPPING, _CLEAN)], ids=["clean-first", "skipping-first"])
+@pytest.mark.parametrize(
+    "order", [(_CLEAN, _SKIPPING), (_SKIPPING, _CLEAN)], ids=["clean-first", "skipping-first"]
+)
 def test_a_shared_inherited_helper_is_answered_per_receiver(
     tmp_path: Path, order: tuple[str, str]
 ) -> None:
