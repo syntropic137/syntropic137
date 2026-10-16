@@ -26,9 +26,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.evidence_gate 
     PR_MISMATCH,
     TOO_MANY_TESTS,
     UNREADABLE,
+    EvidencePlanStep,
     GateInputs,
     PassedEvidence,
-    PlannedStep,
     SettledStep,
     build_manifest,
     gate_opens,
@@ -147,7 +147,7 @@ class TestGateOpens:
 
 
 class TestIdentityAndRefusals:
-    def _only(self, inputs: GateInputs) -> PlannedStep:
+    def _only(self, inputs: GateInputs) -> EvidencePlanStep:
         (step,) = plan_steps(inputs)
         return step
 
@@ -239,7 +239,7 @@ class TestReuse:
 
 
 class TestCleanupPlanning:
-    def _final(self, *, certified: bool) -> tuple[PlannedStep, ...]:
+    def _final(self, *, certified: bool) -> tuple[EvidencePlanStep, ...]:
         declared = (
             _request(),
             _request(EvidenceKind.INTEGRATION, ("tests/integration/test_i.py::t",)),
@@ -274,7 +274,7 @@ class TestCleanupPlanning:
 
 
 class TestWhenAStepIsReached:
-    def _plan(self) -> tuple[PlannedStep, ...]:
+    def _plan(self) -> tuple[EvidencePlanStep, ...]:
         return plan_steps(
             _inputs((_request(),), (_head(patches=True),), final=True, certified=True)
         )

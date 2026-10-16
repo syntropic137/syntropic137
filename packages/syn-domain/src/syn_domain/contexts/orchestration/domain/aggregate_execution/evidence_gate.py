@@ -19,8 +19,11 @@ step for its head passed) and anything planned on the cleaned head S'.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
+from datetime import datetime
 from typing import TYPE_CHECKING, Final
+
+from pydantic import TypeAdapter
 
 from syn_domain.contexts.orchestration._shared.evidence_contract import (
     MAX_TESTS,
@@ -42,6 +45,11 @@ if TYPE_CHECKING:
         ObservedHead,
     )
 
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    EvidencePlanStep,
+    EvidencePreset,
+)
+
 UNREADABLE: Final = "unreadable evidence request"
 FOREIGN_REPOSITORY: Final = "repository not in this execution"
 FORGE_UNREADABLE: Final = "forge_unreadable"
@@ -56,34 +64,6 @@ _KIND_TO_STEP: Final = {
     EvidenceKind.MUTATION: EvidenceStepKind.MUTATION,
     EvidenceKind.INTEGRATION: EvidenceStepKind.INTEGRATION,
 }
-
-
-@dataclass(frozen=True)
-class Preset:
-    """A step that settles when it is reached, without dispatching anything."""
-
-    outcome: StepOutcome
-    reason: str | None = None
-    reused_from: StepRef | None = None
-
-
-@dataclass(frozen=True)
-class PlannedStep:
-    """One step of a gate's plan, as `EvidenceRequested` records it.
-
-    ``head_sha`` None with ``on_cleaned_head`` True means "the head the
-    removal step produced", which does not exist when the plan is made.
-    """
-
-    index: int
-    kind: EvidenceStepKind
-    repository: str | None = None
-    branch: str | None = None
-    pr: int | None = None
-    head_sha: str | None = None
-    tests: tuple[str, ...] = ()
-    on_cleaned_head: bool = False
-    preset: Preset | None = None
 
 
 @dataclass(frozen=True)
@@ -130,11 +110,11 @@ def gate_opens(*, enabled: bool, has_next_phase: bool, inputs: GateInputs) -> bo
     return inputs.next_is_final and inputs.certified and bool(patched)
 
 
-def plan_steps(inputs: GateInputs) -> tuple[PlannedStep, ...]:
+def plan_steps(inputs: GateInputs) -> tuple[EvidencePlanStep, ...]:
     """The ordered plan: mutation, removal, integration, required check (§A.3)."""
     mutation: dict[tuple[str, str], _MutationGroup] = {}
-    integration: list[PlannedStep] = []
-    unplannable: list[PlannedStep] = []
+    integration: list[EvidencePlanStep] = []
+    unplannable: list[EvidencePlanStep] = []
     for declared in inputs.declared:
         refused = _refusal(declared, inputs)
         if refused is not None:
@@ -154,7 +134,7 @@ def plan_steps(inputs: GateInputs) -> tuple[PlannedStep, ...]:
         if (head.repository, sha) not in mutation
         and not _mutation_passed_for(inputs.passed, head.repository, sha)
     ]
-    steps: list[PlannedStep] = [group.step() for group in mutation.values()]
+    steps: list[EvidencePlanStep] = [group.step() for group in mutation.values()]
     steps += [_undeclared_mutation(head, sha, inputs) for head, sha in undeclared]
     steps += unplannable
 
@@ -162,7 +142,7 @@ def plan_steps(inputs: GateInputs) -> tuple[PlannedStep, ...]:
     if cleanup is not None:
         head, sha = cleanup
         steps.append(
-            PlannedStep(
+            EvidencePlanStep(
                 index=0,
                 kind=EvidenceStepKind.REMOVE_MUTATION_PATCHES,
                 repository=head.repository,
@@ -176,11 +156,13 @@ def plan_steps(inputs: GateInputs) -> tuple[PlannedStep, ...]:
             cleanup[0].repository,
             cleanup[1],
         )
-        steps.append(replace(step, head_sha=None, on_cleaned_head=True) if moves else step)
+        steps.append(
+            step.model_copy(update={"head_sha": None, "on_cleaned_head": True}) if moves else step
+        )
     if cleanup is not None:
         head, _ = cleanup
         steps.append(
-            PlannedStep(
+            EvidencePlanStep(
                 index=0,
                 kind=EvidenceStepKind.REQUIRED_CHECK,
                 repository=head.repository,
@@ -189,7 +171,9 @@ def plan_steps(inputs: GateInputs) -> tuple[PlannedStep, ...]:
                 on_cleaned_head=True,
             )
         )
-    return tuple(_reuse(replace(s, index=i), inputs.passed) for i, s in enumerate(steps))
+    return tuple(
+        _reuse(s.model_copy(update={"index": i}), inputs.passed) for i, s in enumerate(steps)
+    )
 
 
 # --- Decisions taken when a step is reached -------------------------------------
@@ -208,7 +192,7 @@ class SettledStep:
 
 
 def removal_blocked(
-    plan: Sequence[PlannedStep], settled: Iterable[SettledStep], removal: PlannedStep
+    plan: Sequence[EvidencePlanStep], settled: Iterable[SettledStep], removal: EvidencePlanStep
 ) -> str | None:
     """Why the removal step must not write, or None: every mutation step for its head passed."""
     outcomes = {s.index: s.outcome for s in settled}
@@ -223,7 +207,7 @@ def removal_blocked(
 
 
 def target_head(
-    step: PlannedStep, removal_before: str | None, removed: PatchRemoval | None
+    step: EvidencePlanStep, removal_before: str | None, removed: PatchRemoval | None
 ) -> str | None:
     """The SHA a step runs against. A step planned on S' runs on S when nothing was removed.
 
@@ -236,7 +220,7 @@ def target_head(
 
 def build_manifest(
     gate_id: str,
-    plan: Sequence[PlannedStep],
+    plan: Sequence[EvidencePlanStep],
     settled: Iterable[SettledStep],
     removed: PatchRemoval | None,
 ) -> EvidenceManifest:
@@ -275,17 +259,17 @@ class _MutationGroup:
     first: EvidenceRequest
     tests: set[str] = field(default_factory=set)
 
-    def step(self) -> PlannedStep:
+    def step(self) -> EvidencePlanStep:
         planned = _step_for(self.first, EvidenceStepKind.MUTATION, tuple(sorted(self.tests)))
         if len(self.tests) > MAX_TESTS:
-            return replace(planned, preset=Preset(StepOutcome.VOID, TOO_MANY_TESTS))
+            return planned.model_copy(update={"preset": _preset(StepOutcome.VOID, TOO_MANY_TESTS)})
         return planned
 
 
 def _step_for(
     request: EvidenceRequest, kind: EvidenceStepKind, tests: Iterable[str]
-) -> PlannedStep:
-    return PlannedStep(
+) -> EvidencePlanStep:
+    return EvidencePlanStep(
         index=0,
         kind=kind,
         repository=request.repository,
@@ -296,17 +280,17 @@ def _step_for(
     )
 
 
-def _refusal(declared: DeclaredEvidence, inputs: GateInputs) -> PlannedStep | None:
+def _refusal(declared: DeclaredEvidence, inputs: GateInputs) -> EvidencePlanStep | None:
     """A step that settles at plan time for a declaration the platform cannot act on."""
     request = declared.request
     if request is None:
         # `EvidenceStepKind` has no member for an entry whose kind could not be
         # read; it is planned as the stricter kind so the manifest shows a
         # void mutation step rather than nothing.
-        return PlannedStep(
+        return EvidencePlanStep(
             index=0,
             kind=EvidenceStepKind.MUTATION,
-            preset=Preset(StepOutcome.VOID, f"{UNREADABLE}: {declared.unreadable}"),
+            preset=_preset(StepOutcome.VOID, f"{UNREADABLE}: {declared.unreadable}"),
         )
     kind = _KIND_TO_STEP[request.kind]
     if request.repository not in inputs.repositories:
@@ -321,12 +305,14 @@ def _refusal(declared: DeclaredEvidence, inputs: GateInputs) -> PlannedStep | No
             reason, outcome = PR_MISMATCH, StepOutcome.VOID
         else:
             return None
-    return replace(_step_for(request, kind, request.tests), preset=Preset(outcome, reason))
+    return _step_for(request, kind, request.tests).model_copy(
+        update={"preset": _preset(outcome, reason)}
+    )
 
 
-def _undeclared_mutation(head: ObservedHead, sha: str, inputs: GateInputs) -> PlannedStep:
+def _undeclared_mutation(head: ObservedHead, sha: str, inputs: GateInputs) -> EvidencePlanStep:
     tests = inputs.earlier_mutation_tests.get(head.repository, ())
-    return PlannedStep(
+    return EvidencePlanStep(
         index=0,
         kind=EvidenceStepKind.MUTATION,
         repository=head.repository,
@@ -334,7 +320,7 @@ def _undeclared_mutation(head: ObservedHead, sha: str, inputs: GateInputs) -> Pl
         pr=head.open_pr_number,
         head_sha=sha,
         tests=tests,
-        preset=None if tests else Preset(StepOutcome.VOID, NO_TESTS_DECLARED),
+        preset=None if tests else _preset(StepOutcome.VOID, NO_TESTS_DECLARED),
     )
 
 
@@ -346,7 +332,7 @@ def _cleanup_head(inputs: GateInputs) -> tuple[ObservedHead, str] | None:
     return patched[0] if patched else None
 
 
-def _reuse(step: PlannedStep, passed: Sequence[PassedEvidence]) -> PlannedStep:
+def _reuse(step: EvidencePlanStep, passed: Sequence[PassedEvidence]) -> EvidencePlanStep:
     if step.preset is not None or step.head_sha is None or not step.tests:
         return step
     for earlier in passed:
@@ -356,7 +342,11 @@ def _reuse(step: PlannedStep, passed: Sequence[PassedEvidence]) -> PlannedStep:
             and earlier.head_sha == step.head_sha
             and set(step.tests) <= earlier.tests
         ):
-            return replace(step, preset=Preset(StepOutcome.PASSED, reused_from=earlier.ref))
+            return step.model_copy(
+                update={
+                    "preset": EvidencePreset(outcome=StepOutcome.PASSED, reused_from=earlier.ref)
+                }
+            )
     return step
 
 
@@ -379,3 +369,129 @@ def _observed(
     observed: Iterable[ObservedHead], repository: str, branch: str
 ) -> ObservedHead | None:
     return next((h for h in observed if (h.repository, h.branch) == (repository, branch)), None)
+
+
+def _preset(outcome: StepOutcome, reason: str) -> EvidencePreset:
+    return EvidencePreset(outcome=outcome, reason=reason)
+
+
+# --- Replayed state -------------------------------------------------------------
+
+#: Attempts per step before it settles `unavailable` (§A.5).
+MAX_ATTEMPTS: Final = 2
+
+
+@dataclass(frozen=True)
+class EvidenceAttempt:
+    """The latest attempt at one step, as its events recorded it."""
+
+    attempt: int
+    dispatch_id: str
+    started_at: datetime
+    not_after: datetime
+    run_id: int | None = None
+    run_url: str | None = None
+
+
+@dataclass
+class EvidenceGate:
+    """One gate, rebuilt from its events."""
+
+    gate_id: str
+    after_phase_id: str
+    next_phase_id: str
+    next_phase_order: int
+    skipped_phase_ids: tuple[str, ...]
+    plan: tuple[EvidencePlanStep, ...]
+    attempts: dict[int, EvidenceAttempt] = field(default_factory=dict)
+    settled: dict[int, SettledStep] = field(default_factory=dict)
+    removed: PatchRemoval | None = None
+
+    @property
+    def current(self) -> EvidencePlanStep | None:
+        """The first unsettled step, or None once the gate has opened. Steps settle in order."""
+        return next((s for s in self.plan if s.index not in self.settled), None)
+
+    def predetermined(self, step: EvidencePlanStep) -> EvidencePreset | None:
+        """How ``step`` settles without any I/O, or None when it must be run.
+
+        Planned presets, a removal whose mutation evidence did not pass, and a
+        step on S' when nothing was removed. The aggregate holds every settle
+        to this, so the handler can only report what was already decided.
+        """
+        if step.preset is not None:
+            return step.preset
+        if step.kind is EvidenceStepKind.REMOVE_MUTATION_PATCHES:
+            blocked = removal_blocked(self.plan, self.settled.values(), step)
+            return None if blocked is None else _preset(StepOutcome.VOID, blocked)
+        if step.kind is EvidenceStepKind.REQUIRED_CHECK and self.removed is None:
+            return _preset(StepOutcome.VOID, PATCHES_NOT_REMOVED)
+        return None
+
+    def head_for(self, step: EvidencePlanStep) -> str | None:
+        """The SHA ``step`` runs against, S' once the removal is recorded."""
+        removal = next(
+            (s for s in self.plan if s.kind is EvidenceStepKind.REMOVE_MUTATION_PATCHES), None
+        )
+        return target_head(step, removal.head_sha if removal else None, self.removed)
+
+    def manifest(self) -> EvidenceManifest:
+        return build_manifest(self.gate_id, self.plan, self.settled.values(), self.removed)
+
+
+@dataclass
+class EvidenceGateRecord:
+    """Every gate an execution's stream holds - replayed state, like `ReviewRecord`."""
+
+    _gates: dict[str, EvidenceGate] = field(default_factory=dict)
+
+    def request(self, gate: EvidenceGate) -> None:
+        self._gates[gate.gate_id] = gate
+
+    def get(self, gate_id: str) -> EvidenceGate | None:
+        return self._gates.get(gate_id)
+
+    def open_gate(self) -> EvidenceGate | None:
+        """The gate still holding a transition, if any. At most one can be open."""
+        return next((g for g in self._gates.values() if g.current is not None), None)
+
+    def passed(self) -> tuple[PassedEvidence, ...]:
+        """Every dispatched step that settled `passed`, for reuse (§A.3). Reuses are not re-counted."""
+        found: list[PassedEvidence] = []
+        for gate in self._gates.values():
+            for step in gate.plan:
+                settled = gate.settled.get(step.index)
+                if (
+                    settled is None
+                    or settled.outcome is not StepOutcome.PASSED
+                    or settled.reused_from is not None
+                    or step.kind not in (EvidenceStepKind.MUTATION, EvidenceStepKind.INTEGRATION)
+                ):
+                    continue
+                head = settled.head_sha_evidenced or gate.head_for(step)
+                if step.repository is None or head is None:
+                    continue
+                found.append(
+                    PassedEvidence(
+                        ref=StepRef(gate_id=gate.gate_id, step=step.index),
+                        kind=step.kind,
+                        repository=step.repository,
+                        head_sha=head,
+                        tests=frozenset(step.tests),
+                    )
+                )
+        return tuple(found)
+
+
+_PLAN: Final = TypeAdapter(tuple[EvidencePlanStep, ...])
+_DATETIME: Final = TypeAdapter(datetime)
+
+
+def read_plan_steps(raw: object) -> tuple[EvidencePlanStep, ...]:
+    """The plan on a replayed `EvidenceRequested`, models or stored JSON alike."""
+    return _PLAN.validate_python(raw or ())
+
+
+def read_datetime(raw: object) -> datetime:
+    """A timestamp on a replayed evidence event, a `datetime` or its stored ISO string."""
+    return _DATETIME.validate_python(raw)

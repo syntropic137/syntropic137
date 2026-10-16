@@ -7,6 +7,7 @@ Location: orchestration/domain/aggregate_execution/ (per ADR-020)
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from datetime import UTC, datetime
 from functools import partial
 from typing import TYPE_CHECKING, Final
@@ -18,6 +19,12 @@ from event_sourcing import (
     event_sourcing_handler,
 )
 
+from syn_domain.contexts.orchestration._shared.evidence_contract import (
+    PatchRemoval,
+    StepOutcome,
+    StepRef,
+)
+from syn_domain.contexts.orchestration.domain.aggregate_execution import evidence_steps
 from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continuation import (
     LeftBranches,
     PushedCommit,
@@ -32,15 +39,27 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.commands impor
     InterruptExecutionCommand,
     ProvisionWorkspaceCompletedCommand,
     RecordCancelledWorkCommand,
+    RecordEvidenceRunAdoptedCommand,
+    RecordMutationPatchesRemovedCommand,
     RecordPhasePushCommand,
     ResumeExecutionCommand,
     RetryPhaseCommand,
+    SettleEvidenceStepCommand,
+    StartEvidenceAttemptCommand,
     StartExecutionCommand,
     StartPhaseCommand,
     StartResumeCommand,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.eval_membership import (
     EvalMembership,
+)
+from syn_domain.contexts.orchestration.domain.aggregate_execution.evidence_gate import (
+    EvidenceAttempt,
+    EvidenceGate,
+    EvidenceGateRecord,
+    SettledStep,
+    read_datetime,
+    read_plan_steps,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.evidence_record import (
     EvidenceRecord,
@@ -83,6 +102,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.resume_start i
     resume_started_event,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.review_rounds import (
+    NextPhase,
     ReviewRecord,
     next_phase,
 )
@@ -138,6 +158,18 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.events.CancelledWorkQuarantinedEvent import (
         CancelledWorkQuarantinedEvent,
     )
+    from syn_domain.contexts.orchestration.domain.events.EvidenceAttemptStartedEvent import (
+        EvidenceAttemptStartedEvent,
+    )
+    from syn_domain.contexts.orchestration.domain.events.EvidenceRequestedEvent import (
+        EvidenceRequestedEvent,
+    )
+    from syn_domain.contexts.orchestration.domain.events.EvidenceRunAdoptedEvent import (
+        EvidenceRunAdoptedEvent,
+    )
+    from syn_domain.contexts.orchestration.domain.events.EvidenceStepSettledEvent import (
+        EvidenceStepSettledEvent,
+    )
     from syn_domain.contexts.orchestration.domain.events.ExecutionAttachedToEvalEvent import (
         ExecutionAttachedToEvalEvent,
     )
@@ -155,6 +187,9 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.orchestration.domain.events.ExecutionTagsRemovedEvent import (
         ExecutionTagsRemovedEvent,
+    )
+    from syn_domain.contexts.orchestration.domain.events.MutationPatchesRemovedEvent import (
+        MutationPatchesRemovedEvent,
     )
     from syn_domain.contexts.orchestration.domain.events.NextPhaseReadyEvent import (
         NextPhaseReadyEvent,
@@ -284,6 +319,9 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         #: What each phase declared it needs proven and what the forge showed
         #: at its collection (plan §A.2). Recorded only: nothing decides on it.
         self._evidence = EvidenceRecord()
+        #: Evidence gates (plan §A.3-§A.5): each holds one transition until
+        #: every planned step has settled.
+        self._gates = EvidenceGateRecord()
         #: Phases that completed, and what each one's collection stored. The
         #: inputs to a resume's inherited prefix (ADR-014 s7), which is decided
         #: here from the stream and never from the artifact projection: a
@@ -712,7 +750,21 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             self._phase_order_map.get(command.phase_id),
             self._reviews.of(command.phase_id),
         )
-        if decided is not None:
+        held = evidence_steps.request_if_needed(
+            policy=command.evidence_gate,
+            decided=decided,
+            phase_id=command.phase_id,
+            definitions=self._phase_definitions,
+            verdict=self._reviews.of(command.phase_id),
+            evidence=self._evidence,
+            gates=self._gates,
+            observed=command.observed_heads,
+            workflow_id=self._workflow_id or "",
+            execution_id=command.aggregate_id,
+        )
+        if held is not None:
+            self._apply(held)
+        elif decided is not None:
             self._apply(
                 decided.event(
                     workflow_id=self._workflow_id or "",
@@ -720,6 +772,63 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
                     completed_phase_id=command.phase_id,
                 )
             )
+
+    def evidence_gate(self, gate_id: str) -> EvidenceGate | None:
+        """An evidence gate as its events left it, for the handler that drives it."""
+        return self._gates.get(gate_id)
+
+    @command_handler("StartEvidenceAttemptCommand")
+    def start_evidence_attempt(self, command: StartEvidenceAttemptCommand) -> None:
+        """Record an attempt before its dispatch is posted (plan §A.5, B3)."""
+        if self._status != ExecutionStatus.RUNNING:
+            msg = f"Cannot start an evidence attempt in status {self._status}"
+            raise ValueError(msg)
+        self._apply(evidence_steps.start_attempt(self._gates, command))
+
+    @command_handler("RecordEvidenceRunAdoptedCommand")
+    def record_evidence_run_adopted(self, command: RecordEvidenceRunAdoptedCommand) -> None:
+        """Record the forge run that answers a step's current attempt."""
+        if self._status != ExecutionStatus.RUNNING:
+            msg = f"Cannot adopt an evidence run in status {self._status}"
+            raise ValueError(msg)
+        self._apply(evidence_steps.adopt_run(self._gates, command))
+
+    @command_handler("RecordMutationPatchesRemovedCommand")
+    def record_mutation_patches_removed(self, command: RecordMutationPatchesRemovedCommand) -> None:
+        """Record the platform's S -> S' commit and settle the removal step."""
+        if self._status != ExecutionStatus.RUNNING:
+            msg = f"Cannot record a patch removal in status {self._status}"
+            raise ValueError(msg)
+        removed, settled = evidence_steps.record_removal(self._gates, command)
+        self._apply(removed)
+        self._settle(settled)
+
+    @command_handler("SettleEvidenceStepCommand")
+    def settle_evidence_step(self, command: SettleEvidenceStepCommand) -> None:
+        """Settle a gate's current step; the last settle releases the held phase."""
+        if self._status != ExecutionStatus.RUNNING:
+            msg = f"Cannot settle an evidence step in status {self._status}"
+            raise ValueError(msg)
+        self._settle(evidence_steps.settle(self._gates, command))
+
+    def _settle(self, settled: EvidenceStepSettledEvent) -> None:
+        self._apply(settled)
+        gate = self._gates.get(settled.gate_id)
+        if gate is None or gate.current is not None:
+            return
+        # The gate opens: the decision `EvidenceRequested` held, unchanged.
+        by_id = {p.phase_id: p for p in self._phase_definitions}
+        held = NextPhase(
+            phase=by_id[gate.next_phase_id],
+            skipped=tuple(by_id[i] for i in gate.skipped_phase_ids if i in by_id),
+        )
+        self._apply(
+            held.event(
+                workflow_id=self._workflow_id or "",
+                execution_id=settled.execution_id,
+                completed_phase_id=gate.after_phase_id,
+            )
+        )
 
     @command_handler("CancelExecutionCommand")
     def cancel_execution(self, command: CancelExecutionCommand) -> None:
@@ -994,6 +1103,71 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
     def on_next_phase_ready(self, event: NextPhaseReadyEvent) -> None:
         """Apply NextPhaseReadyEvent: the to-do list reacts; this keeps only its skips."""
         self._reviews.skipped.update(evt(event, "skipped_phase_ids") or [])
+
+    @event_sourcing_handler("EvidenceRequested")
+    def on_evidence_requested(self, event: EvidenceRequestedEvent) -> None:
+        """Apply EvidenceRequested: the plan, and the held skips (they are decided, §A.3)."""
+        skipped = tuple(evt(event, "skipped_phase_ids") or [])
+        self._reviews.skipped.update(skipped)
+        self._gates.request(
+            EvidenceGate(
+                gate_id=evt(event, "gate_id"),
+                after_phase_id=evt(event, "after_phase_id"),
+                next_phase_id=evt(event, "next_phase_id"),
+                next_phase_order=evt(event, "next_phase_order"),
+                skipped_phase_ids=skipped,
+                plan=read_plan_steps(evt(event, "steps")),
+            )
+        )
+
+    @event_sourcing_handler("EvidenceAttemptStarted")
+    def on_evidence_attempt_started(self, event: EvidenceAttemptStartedEvent) -> None:
+        """Apply EvidenceAttemptStarted: this attempt is now the step's current one."""
+        gate = self._gates.get(evt(event, "gate_id"))
+        if gate is not None:
+            gate.attempts[evt(event, "step")] = EvidenceAttempt(
+                attempt=evt(event, "attempt"),
+                dispatch_id=evt(event, "dispatch_id"),
+                started_at=read_datetime(evt(event, "started_at")),
+                not_after=read_datetime(evt(event, "not_after")),
+            )
+
+    @event_sourcing_handler("EvidenceRunAdopted")
+    def on_evidence_run_adopted(self, event: EvidenceRunAdoptedEvent) -> None:
+        """Apply EvidenceRunAdopted."""
+        gate = self._gates.get(evt(event, "gate_id"))
+        attempt = gate.attempts.get(evt(event, "step")) if gate is not None else None
+        if gate is not None and attempt is not None:
+            gate.attempts[evt(event, "step")] = replace(
+                attempt, run_id=evt(event, "run_id"), run_url=evt(event, "run_url")
+            )
+
+    @event_sourcing_handler("MutationPatchesRemoved")
+    def on_mutation_patches_removed(self, event: MutationPatchesRemovedEvent) -> None:
+        """Apply MutationPatchesRemoved: S' is where later steps run."""
+        gate = self._gates.get(evt(event, "gate_id"))
+        if gate is not None:
+            gate.removed = PatchRemoval(
+                before_sha=evt(event, "before_sha"),
+                after_sha=evt(event, "after_sha"),
+                author=evt(event, "author"),
+            )
+
+    @event_sourcing_handler("EvidenceStepSettled")
+    def on_evidence_step_settled(self, event: EvidenceStepSettledEvent) -> None:
+        """Apply EvidenceStepSettled."""
+        gate = self._gates.get(evt(event, "gate_id"))
+        if gate is None:
+            return
+        reused = evt(event, "reused_from")
+        gate.settled[evt(event, "step")] = SettledStep(
+            index=evt(event, "step"),
+            outcome=StepOutcome(evt(event, "outcome")),
+            reason=evt(event, "reason"),
+            run_url=evt(event, "run_url"),
+            head_sha_evidenced=evt(event, "head_sha_evidenced"),
+            reused_from=None if reused is None else StepRef.model_validate(reused),
+        )
 
     @event_sourcing_handler("ExecutionCancelled")
     def on_execution_cancelled(self, event: ExecutionCancelledEvent) -> None:
