@@ -1,13 +1,13 @@
 diff --git a/scripts/check_integration_skips.py b/scripts/check_integration_skips.py
-index 2382da4d9..1488754b1 100644
+index 0d7e17e72..ea5cdd0d0 100644
 --- a/scripts/check_integration_skips.py
 +++ b/scripts/check_integration_skips.py
-@@ -358,7 +358,7 @@ class _Census:
-             for declaration in declarations:
-                 if error := _declaration_error(declaration):
-                     findings.append(Finding(rel, test.name, "malformed", error))
--            if INTEGRATION_MARKER not in names or declarations:
-+            if INTEGRATION_MARKER not in names:
+@@ -562,7 +562,7 @@ class _Census:
+         reachable: str | None = None
+         for index, leg in enumerate(legs):
+             marked = {names.mark_name(m) for m in [*static, *leg]}
+-            if INTEGRATION_MARKER not in marked or OPT_OUT_MARKER in marked:
++            if INTEGRATION_MARKER not in marked:
                  continue
-             skip_marks = sorted(n for n in names if n in _SKIP_MARKERS)
-             via = (
+             skip_marks = sorted(n for n in marked if n in _SKIP_MARKERS)
+             if not skip_marks and reachable is None:

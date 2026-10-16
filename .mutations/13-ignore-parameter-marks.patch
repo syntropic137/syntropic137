@@ -1,0 +1,13 @@
+diff --git a/scripts/check_integration_skips.py b/scripts/check_integration_skips.py
+index 0d7e17e72..813ac84d2 100644
+--- a/scripts/check_integration_skips.py
++++ b/scripts/check_integration_skips.py
+@@ -198,7 +198,7 @@ def _legs(values: ast.expr | None, names: _PytestNames) -> list[_Leg]:
+     A value that is not a literal list has no marks pytest can see statically,
+     so it is one unmarked leg.
+     """
+-    if not isinstance(values, ast.List | ast.Tuple):
++    if True:
+         return [()]
+     legs: list[_Leg] = []
+     for value in values.elts:

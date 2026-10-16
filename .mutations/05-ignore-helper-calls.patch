@@ -1,13 +1,13 @@
 diff --git a/scripts/check_integration_skips.py b/scripts/check_integration_skips.py
-index 2382da4d9..0d8a2e553 100644
+index 0d7e17e72..ca87563d6 100644
 --- a/scripts/check_integration_skips.py
 +++ b/scripts/check_integration_skips.py
-@@ -252,7 +252,7 @@ class _Module:
-             if _is_skip_call(call, self.skip_aliases):
+@@ -373,7 +373,7 @@ class _Module:
+             if self.names.is_skip_call(call):
                  found = f"skips at {self.rel}:{call.lineno}"
                  break
--            callee = _called_name(call)
-+            callee = None
-             for target in self.functions.get(callee or "", []):
+-            for target in self._callees(func, call):
++            for target in []:
                  if target is not func and (via := self.body_skips(target)):
-                     found = f"calls {callee}(), which {via}"
+                     found = f"calls {target.name}(), which {via}"
+                     break

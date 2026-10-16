@@ -1,0 +1,13 @@
+diff --git a/scripts/check_integration_skips.py b/scripts/check_integration_skips.py
+index 0d7e17e72..2b6c47201 100644
+--- a/scripts/check_integration_skips.py
++++ b/scripts/check_integration_skips.py
+@@ -526,7 +526,7 @@ class _Census:
+         module_marks = _pytestmark_marks(module.tree.body)
+         findings: list[Finding] = []
+         for test in _tests(module.tree):
+-            own = [module.class_fixtures(test.owner)] if test.owner else []
++            own = [module.class_fixtures(c) for c in module.classes.values()]
+             scope = _Scope([*own, module.fixtures, *conftests])
+             findings.extend(self._test_findings(rel, module, scope, test, module_marks))
+         return findings

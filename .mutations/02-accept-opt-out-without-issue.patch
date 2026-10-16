@@ -1,8 +1,8 @@
 diff --git a/scripts/check_integration_skips.py b/scripts/check_integration_skips.py
-index 2382da4d9..4de3bd362 100644
+index 0d7e17e72..56b9fa5c4 100644
 --- a/scripts/check_integration_skips.py
 +++ b/scripts/check_integration_skips.py
-@@ -130,7 +130,7 @@ def _declaration_error(mark: ast.expr) -> str | None:
+@@ -183,7 +183,7 @@ def _declaration_error(mark: ast.expr) -> str | None:
      }
      if not texts.get("reason"):
          return "may_skip needs reason='<why it may skip>' as a non-empty string"

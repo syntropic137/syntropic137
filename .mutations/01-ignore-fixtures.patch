@@ -1,13 +1,13 @@
 diff --git a/scripts/check_integration_skips.py b/scripts/check_integration_skips.py
-index 2382da4d9..5172ad6a4 100644
+index 0d7e17e72..f2228f6be 100644
 --- a/scripts/check_integration_skips.py
 +++ b/scripts/check_integration_skips.py
-@@ -293,7 +293,7 @@ class _Scope:
-             if name in seen:
+@@ -423,7 +423,7 @@ class _Scope:
+             if (name, start) in seen:
                  continue
-             seen.add(name)
--            fixture = self.lookup(name)
-+            fixture = None
-             if fixture is None:
+             seen.add((name, start))
+-            found = self._lookup(name, start)
++            found = None
+             if found is None:
                  continue
-             if via := fixture.module.body_skips(fixture.node):
+             level, fixture = found

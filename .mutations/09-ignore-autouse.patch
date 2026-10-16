@@ -1,0 +1,13 @@
+diff --git a/scripts/check_integration_skips.py b/scripts/check_integration_skips.py
+index 0d7e17e72..cedf13155 100644
+--- a/scripts/check_integration_skips.py
++++ b/scripts/check_integration_skips.py
+@@ -286,7 +286,7 @@ def _fixtures(functions: Iterable[_Function], module: _Module) -> dict[str, _Fix
+                 else node.name
+             )
+             autouse_node = kw.get("autouse")
+-            autouse = isinstance(autouse_node, ast.Constant) and bool(autouse_node.value)
++            autouse = False
+             legs = _legs(kw["params"], module.names) if "params" in kw else None
+             found[name] = _Fixture(name, node, module, autouse, legs)
+     return found
