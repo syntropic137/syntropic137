@@ -7,18 +7,25 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime  # noqa: TC003 - needed at runtime for dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any, Final
+from typing import TYPE_CHECKING, Annotated, Any, Final, Self
 
 from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
     SerializerFunctionWrapHandler,
+    StringConstraints,
     model_serializer,
+    model_validator,
 )
 
 # Runtime import: a pydantic field type of DelegationAttempt.
 from syn_domain.contexts.agent_sessions import DelegationOutcome  # noqa: TC001
+from syn_domain.contexts.orchestration._shared.evidence_contract import (
+    EvidenceRequest,  # noqa: TC001 - needed at runtime for Pydantic
+    PullRequestNumber,  # noqa: TC001 - needed at runtime for Pydantic
+    Reason,  # noqa: TC001 - needed at runtime for Pydantic
+)
 from syn_domain.contexts.orchestration._shared.resolved_claude_plugin import (
     ResolvedClaudePlugin,  # noqa: TC001 - needed at runtime for dataclass field default
 )
@@ -1284,3 +1291,56 @@ class DelegationFailure(BaseModel):
         as `None` rather than raising.
         """
         return None if value is None else cls.model_validate(value)
+
+
+# --- Evidence (docs/plans/20261015_platform-dispatched-evidence.md §A.2, PR 5a) ---
+#
+# The two payloads `AgentExecutionCompleted` and `ArtifactsCollectedForPhase`
+# carry. They live here, not beside `EvidenceRecord`, because an event may
+# import value objects and nothing else: the parse, the replay readers and the
+# per-phase state are in `evidence_record`.
+
+
+class DeclaredEvidence(BaseModel):
+    """One `evidence` entry: a readable `EvidenceRequest`, or why it is not one.
+
+    Exactly one of the two is set. PR 1's `EvidenceRequest` is strict, so an
+    entry it refuses cannot be one; it is carried here instead, and settles
+    `void: unreadable evidence request` once a gate exists (§A.1). Reading a
+    reported entry into one is `evidence_record.declared_evidence_from_reported`.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    request: EvidenceRequest | None = None
+    unreadable: Reason | None = None
+
+    @model_validator(mode="after")
+    def _exactly_one(self) -> Self:
+        if (self.request is None) == (self.unreadable is None):
+            raise ValueError("a declaration is either a request or unreadable, never both or none")
+        return self
+
+    @classmethod
+    def refused(cls, reason: str) -> DeclaredEvidence:
+        return cls(unreadable=reason)
+
+
+class ObservedHead(BaseModel):
+    """One branch as the forge had it while a phase's output was collected.
+
+    ``readable`` False means nobody could ask, never that the branch is gone.
+    ``mutation_patches_present`` is None when it was not asked or could not be
+    answered: unknown is not absent.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    #: `owner/name`.
+    repository: Annotated[str, StringConstraints(min_length=1)]
+    branch: Annotated[str, StringConstraints(min_length=1)]
+    readable: bool
+    #: Where the branch is; None when it does not exist or was not readable.
+    head_sha: str | None = None
+    mutation_patches_present: bool | None = None
+    open_pr_number: PullRequestNumber | None = None

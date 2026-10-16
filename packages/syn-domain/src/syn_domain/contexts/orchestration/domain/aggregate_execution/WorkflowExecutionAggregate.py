@@ -42,6 +42,11 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.commands impor
 from syn_domain.contexts.orchestration.domain.aggregate_execution.eval_membership import (
     EvalMembership,
 )
+from syn_domain.contexts.orchestration.domain.aggregate_execution.evidence_record import (
+    EvidenceRecord,
+    read_declared_evidence,
+    read_observed_heads,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.execution_tags import (
     ExecutionTags,
 )
@@ -107,6 +112,10 @@ from syn_shared.control import ControlSignalType
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.aggregate_execution.aggregate_edits import (
         AggregateEdit,
+    )
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+        DeclaredEvidence,
+        ObservedHead,
     )
     from syn_domain.contexts.orchestration.domain.commands.AddExecutionTagsCommand import (
         AddExecutionTagsCommand,
@@ -272,6 +281,9 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         self._reported_side_effects: dict[str, SideEffectStatus | None] = {}
         #: Review verdicts, which choose the next phase (PC-63).
         self._reviews = ReviewRecord()
+        #: What each phase declared it needs proven and what the forge showed
+        #: at its collection (plan §A.2). Recorded only: nothing decides on it.
+        self._evidence = EvidenceRecord()
         #: Phases that completed, and what each one's collection stored. The
         #: inputs to a resume's inherited prefix (ADR-014 s7), which is decided
         #: here from the stream and never from the artifact projection: a
@@ -406,6 +418,19 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
     def status(self) -> ExecutionStatus:
         """Get execution status."""
         return self._status
+
+    def declared_evidence_for(self, phase_id: str) -> tuple[DeclaredEvidence, ...]:
+        """What this phase's latest agent run asked the platform to prove."""
+        return self._evidence.declared(phase_id)
+
+    def observed_heads_for(self, phase_id: str) -> tuple[ObservedHead, ...]:
+        """What the forge showed while this phase's output was collected."""
+        return self._evidence.observed(phase_id)
+
+    @property
+    def pushed_commits(self) -> tuple[PushedCommit, ...]:
+        """Every push this execution's own phases made, as `PhaseCommitPushed` recorded them."""
+        return tuple(self._pushed)
 
     @property
     def review_verdict(self) -> ReviewVerdict | None:
@@ -932,6 +957,9 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             self._reviews.report(
                 reported_for, ReviewVerdict.from_stored(evt(event, "reported_review_verdict"))
             )
+            self._evidence.report(
+                reported_for, read_declared_evidence(evt(event, "reported_evidence"))
+            )
         said = evt(event, "last_agent_message")
         if not said:
             return
@@ -960,6 +988,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         # output is safely stored.
         self._finished_agent_runs.pop(phase_id, None)
         self._reviews.collect(phase_id)
+        self._evidence.observe(phase_id, read_observed_heads(evt(event, "observed_heads")))
 
     @event_sourcing_handler("NextPhaseReady")
     def on_next_phase_ready(self, event: NextPhaseReadyEvent) -> None:

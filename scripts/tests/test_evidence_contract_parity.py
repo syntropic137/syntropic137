@@ -35,6 +35,8 @@ _NODE_IDS = [
     "tests/.git/test_x.py::test_ok",
     "tests/-x/test_x.py::test_ok",
     "tests/.hidden/test_x.py::test_ok",
+    "tests/.test_x.py::test_ok",
+    "tests/..py::test_ok",
     "./tests/test_x.py::test_ok",
     "/tests/test_x.py::test_ok",
     "tests/test_x.py/::test_ok",
@@ -97,15 +99,27 @@ _NESTED_SEGMENTS = [
 def test_nested_directories_are_the_workflows_exactly() -> None:
     # One-way parity skips every id the model refuses, so a model that bars
     # a directory the workflow and pytest both take would pass it. Here the
-    # two must agree both ways. The one deliberate gap: `PurePosixPath` folds
-    # a `.` segment away, so the workflow takes `tests/./x`; the contract never.
+    # two must agree both ways: the workflow copies the id it takes into the
+    # report, so one the contract refuses would be a report nothing can read.
     disagree = [
         seg
         for seg in _NESTED_SEGMENTS
         if _model_accepts((f"tests/{seg}/test_x.py::test_ok",))
         != _workflow_accepts((f"tests/{seg}/test_x.py::test_ok",))
     ]
-    assert disagree == ["."]
+    assert disagree == []
+
+
+@pytest.mark.parametrize("directory", ["", "tests/", "tests/./", "tests/.hidden/", "tests/a.b/"])
+def test_file_names_are_the_workflows_exactly(directory: str) -> None:
+    # The same both-ways rule for the file name, over the same letters.
+    disagree = [
+        name
+        for name in _NESTED_SEGMENTS
+        if _model_accepts((f"{directory}{name}.py::test_ok",))
+        != _workflow_accepts((f"{directory}{name}.py::test_ok",))
+    ]
+    assert disagree == []
 
 
 def test_the_limit_is_the_same() -> None:

@@ -18,6 +18,9 @@ DEV_API_HOST_PORT = 9137
 SELFHOST_GATEWAY_PORT = 8137
 """Host port for the selfhost nginx gateway."""
 
+API_CONTAINER_PORT = 8000
+"""Port uvicorn listens on inside the API container (``SYN_API_PORT``)."""
+
 # ---------------------------------------------------------------------------
 # Derived URLs
 # ---------------------------------------------------------------------------

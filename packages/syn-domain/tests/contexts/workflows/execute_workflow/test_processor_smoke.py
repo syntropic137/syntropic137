@@ -45,6 +45,8 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
         WorkflowTemplateAggregate,
     )
+    from syn_domain.contexts.orchestration.ports.RemoteBranchPort import RemoteBranchPort
+    from syn_domain.contexts.orchestration.ports.RemoteTreePort import RemoteTreePort
     from syn_domain.contexts.orchestration.slices.execute_workflow.busy_upstream import (
         UpstreamRetryPolicy,
     )
@@ -128,6 +130,8 @@ def _make_processor(
     artifact_repository: object | None = None,
     retry_policy: UpstreamRetryPolicy | None = None,
     execution_repository: FakeExecutionRepository | None = None,
+    remote_branches: RemoteBranchPort | None = None,
+    remote_tree: RemoteTreePort | None = None,
 ) -> WorkflowExecutionProcessor:
     """Wire a WorkflowExecutionProcessor with all in-memory/fake dependencies.
 
@@ -159,6 +163,8 @@ def _make_processor(
         agent_handler=agent_handler,
         session_capture=session_capture,  # type: ignore[arg-type]
         retry_policy=retry_policy,
+        remote_branches=remote_branches,
+        remote_tree=remote_tree,
     )
 
 

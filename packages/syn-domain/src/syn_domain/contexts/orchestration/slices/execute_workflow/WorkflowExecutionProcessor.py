@@ -41,6 +41,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.cancel_teardown i
 from syn_domain.contexts.orchestration.slices.execute_workflow.cancelled_work_record import (
     CancelledWorkLedger,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.evidence_heads import (
+    EvidenceHeadObserver,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.execution_journal import (
     ExecutionJournal,
 )
@@ -128,6 +131,7 @@ if TYPE_CHECKING:
         ExecutionRunQueue,
     )
     from syn_domain.contexts.orchestration.ports.RemoteBranchPort import RemoteBranchPort
+    from syn_domain.contexts.orchestration.ports.RemoteTreePort import RemoteTreePort
     from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
         ObservabilityRecorder,
     )
@@ -216,6 +220,7 @@ class WorkflowExecutionProcessor:
         import_ledger: ImportLedgerPort | None = None,
         retry_policy: UpstreamRetryPolicy | None = None,
         remote_branches: RemoteBranchPort | None = None,
+        remote_tree: RemoteTreePort | None = None,
         owed_cancelled_work: ProjectionStore | None = None,
         delegation_evidence: DelegationEvidencePort | None = None,
         interrupt_budget_seconds: float = 60.0,
@@ -253,6 +258,13 @@ class WorkflowExecutionProcessor:
         #: Asked, as a phase fails, which PR is open from each branch it left,
         #: so a resume continues that PR and no other (#1513).
         self._remote_branches = remote_branches
+        #: Each phase's collection records the forge's heads with these (plan
+        #: §A.2). None without a forge; the tree port is optional until PR 6.
+        self._evidence_heads = (
+            EvidenceHeadObserver(remote_branches, remote_tree)
+            if remote_branches is not None
+            else None
+        )
         self._workspace_service = workspace_service
         self._artifact_repo = artifact_repository
         self._artifact_content_storage = artifact_content_storage
@@ -319,6 +331,7 @@ class WorkflowExecutionProcessor:
             runtime=self._runtimes.of(execution_id),
             journal=journal or self._journal,
             inputs=inputs,
+            evidence_heads=self._evidence_heads,
         )
 
     def _journal_of(self, dispatch_ctx: _DispatchContext) -> ExecutionJournal:
