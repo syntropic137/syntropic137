@@ -1,0 +1,13 @@
+diff --git a/scripts/integration_evidence.py b/scripts/integration_evidence.py
+index 6a564acd4..b22b70274 100644
+--- a/scripts/integration_evidence.py
++++ b/scripts/integration_evidence.py
+@@ -113,7 +113,7 @@ def mangle(node_id: str) -> str:
+ 
+ 
+ def _addresses_overlap(selector: str, address: str) -> bool:
+-    return address == selector or address.startswith((f"{selector}.", f"{selector}["))
++    return address == selector or address.startswith(selector)
+ 
+ 
+ def _case_outcome(case: ET.Element) -> TestOutcome:

@@ -121,7 +121,9 @@ def test_a_requested_test_that_was_never_collected_voids() -> None:
 def test_a_near_miss_name_is_not_the_requested_test() -> None:
     lookalike = _case("tests.integration.test_store.TestStore", "test_append_more")
 
-    report = _report(_junit(lookalike, PASS_OTHER))
+    selector = "tests/integration/test_store.py::TestStore::test_append"
+
+    report = _report(_junit(lookalike, PASS_OTHER), 0, selector)
 
     assert _outcomes(report) == [TestOutcome.NOT_COLLECTED]
 

@@ -1,0 +1,13 @@
+diff --git a/scripts/integration_evidence.py b/scripts/integration_evidence.py
+index 6a564acd4..73be917a9 100644
+--- a/scripts/integration_evidence.py
++++ b/scripts/integration_evidence.py
+@@ -153,7 +153,7 @@ def requested_outcome(node_id: str, cases: list[Case]) -> TestOutcome:
+     selector = mangle(node_id)
+     seen = {c.outcome for c in cases if _addresses_overlap(selector, c.address)}
+     if not seen:
+-        return TestOutcome.NOT_COLLECTED
++        return TestOutcome.PASSED
+     return next((o for o in _PRECEDENCE if o in seen), TestOutcome.PASSED)
+ 
+ 

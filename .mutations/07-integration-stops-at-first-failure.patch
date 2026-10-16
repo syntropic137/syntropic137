@@ -1,0 +1,13 @@
+diff --git a/scripts/integration_evidence.py b/scripts/integration_evidence.py
+index 6a564acd4..7b61ab8e5 100644
+--- a/scripts/integration_evidence.py
++++ b/scripts/integration_evidence.py
+@@ -236,7 +236,7 @@ def build_report(inputs: Inputs, run: SuiteRun, junit_xml: str, run_url: str) ->
+ def pytest_args(junit: Path) -> list[str]:
+     # No `-x`: a run that stops at the first failure reports nothing after it.
+     return [
+-        "uv", "run", "--frozen", "pytest", "-m", "integration", "-p", "no:cacheprovider",
++        "uv", "run", "--frozen", "pytest", "-x", "-m", "integration", "-p", "no:cacheprovider",
+         "--color=no", "-q", "-rfEsxX", f"--junitxml={junit}",
+     ]  # fmt: skip
+ 

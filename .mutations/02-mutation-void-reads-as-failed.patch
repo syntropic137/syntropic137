@@ -1,0 +1,13 @@
+diff --git a/scripts/mutation_evidence.py b/scripts/mutation_evidence.py
+index 4f52761fa..3737d7bd1 100644
+--- a/scripts/mutation_evidence.py
++++ b/scripts/mutation_evidence.py
+@@ -812,7 +812,7 @@ def evidence_report(evidence: Evidence, dispatch_id: str, report_md: str) -> Evi
+     if base is None:
+         raise RuntimeError("no baseline ran, so there is no evidence to report")
+     if evidence.baseline_detail:
+-        verdict, summary = Verdict.VOID, evidence.baseline_detail
++        verdict, summary = Verdict.FAILED, evidence.baseline_detail
+     elif evidence.ok:
+         verdict, summary = Verdict.PASSED, f"every mutation killed ({len(evidence.results)})"
+     else:

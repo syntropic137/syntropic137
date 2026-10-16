@@ -768,6 +768,18 @@ test-integration:
     @echo "   (Uses test-stack if running, otherwise testcontainers)"
     uv run pytest -m integration --tb=short
 
+# The full integration suite as an evidence run: no -x, JUnit XML, and an
+# evidence.json saying whether every named test ran and passed. What
+# integration-evidence.yml runs (docs/plans/20261015_platform-dispatched-evidence.md):
+#   just test-integration-ci <pr> "<node ids>"
+test-integration-ci $pr $tests $out="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    out="${out:-$(mktemp -d)}"; mkdir -p "$out"
+    INTEGRATION_PR="$pr" INTEGRATION_TESTS="$tests" INTEGRATION_SHA="$(git rev-parse HEAD)" \
+        python3 -I scripts/integration_evidence.py run --root . \
+        --report "$out/integration-evidence.md" --evidence "$out/evidence.json"
+
 # Run integration tests with test-stack lifecycle (start → test → cleanup)
 test-integration-full: test-stack
     @echo "🧪 Running integration tests against test stack..."

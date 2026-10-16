@@ -1,0 +1,13 @@
+diff --git a/scripts/mutation_evidence.py b/scripts/mutation_evidence.py
+index 4f52761fa..2fdf8a622 100644
+--- a/scripts/mutation_evidence.py
++++ b/scripts/mutation_evidence.py
+@@ -791,7 +791,7 @@ def requested_outcome(baseline: PytestRun, node_id: str) -> TestOutcome:
+     is the honest direction: such a baseline is void, and an id is reported
+     `passed` only when the baseline proves it.
+     """
+-    if any(covers(node_id, failing) for failing in baseline.failing):
++    if baseline.failing:
+         return TestOutcome.FAILED
+     if baseline.skipped:
+         return TestOutcome.SKIPPED
