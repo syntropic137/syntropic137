@@ -34,6 +34,7 @@ from syn_shared.agents import (
     resolve_phase_model,
 )
 from syn_shared.delegation import DELEGATION_TARGET_BY_PRIMARY, DelegationTarget
+from syn_shared.platform_access import PlatformScope
 
 # Re-exported for the WorkflowFailed event, which may import value objects and
 # nothing else: the kind lives in the shared kernel so the GitHub adapter can
@@ -1094,6 +1095,11 @@ class ExecutablePhase:
     # which of the two its working tree can possibly hold.
     delivers_repo_changes: bool = True
 
+    # The scope of the platform token this phase's workspace is given (ADR-072,
+    # #1744). Like clone_repos it decides what the WORKSPACE holds, so it rides
+    # here and not on agent_config. Forgetting it falls back to READ: the
+    # failure mode is a phase with less access than declared, never more.
+    platform_access: PlatformScope = PlatformScope.READ
     # Whether this phase must report a `review_verdict` (PC-116). A review
     # phase that says nothing about what it found would otherwise advance by
     # order exactly as if it had found something, so the run fails instead.

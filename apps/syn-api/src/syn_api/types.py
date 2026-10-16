@@ -107,6 +107,7 @@ from syn_shared.codex_auth_status import CodexAuthStatus  # noqa: TC001
 from syn_shared.display import format_utc_timestamp
 from syn_shared.display.formatters import EM_DASH, format_cost, format_tokens
 from syn_shared.observed_model import format_observed_model
+from syn_shared.platform_access import PlatformScope
 from syn_shared.pricing import (  # noqa: TC001 - pydantic resolves at runtime
     CostSplitBasis,
     TokenTypeCost,
@@ -604,6 +605,9 @@ class PhaseDefinitionResponse(BaseModel):
     fallback_agent: FallbackAgentResponse | None = None
     clone_repos: bool = True
     delivers_repo_changes: bool = True
+    platform_access: PlatformScope = PlatformScope.READ
+    """What this phase's workspace may do against the API (ADR-072). ``eval``
+    can launch runs into a named eval and score them."""
     # PC-116: the phase fails when it reports no review_verdict.
     requires_verdict: bool = False
     sandbox: str = DEFAULT_PHASE_SANDBOX
