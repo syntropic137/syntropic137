@@ -1177,7 +1177,12 @@ association was made after the fact.
 
 What one Phase's workspace consumed, measured once as it is torn down: CPU
 time, CPU throttling, memory peak, OOM kills, the workspace's disk size, network
-bytes, and the paths its delete could not remove (`WorkspaceUsage`). The
+bytes, the paths its delete could not remove, and how the provider's fallback
+delete went when the host could not delete the directory alone
+(`WorkspaceDeleteFallback`: `deleted`, `failed`, or `refused` when the
+directory is not one the provider created; `unrecognized` when the provider
+reported any other value, a contract mismatch kept distinct from "not
+attempted") (`WorkspaceUsage`). The
 workspace provider measures it; the Phase that held the workspace records it,
 as one `workspace_resource_usage` observation under that Phase's session.
 
@@ -1286,6 +1291,116 @@ contract lives in `syn_perf.loadtest.scripted_agent_profile`:
 
 The workspace image that carries a Scripted Agent is still called the stub
 image in agentic-workspace; that names the image, not these models.
+
+## Evidence Gate
+
+A hold on the transition from a Phase P to the Phase the aggregate already
+decided runs next, while the platform gathers evidence about P's work (ADR-014
+section 10). It opens because P declared Evidence Requests, or because the
+platform observed `.mutations/` on a head this Execution pushed. It never sits
+after the final Phase. Identified by a `gate_id`, recorded by
+`EvidenceRequested`, which carries the held next Phase instead of
+`NextPhaseReady`.
+
+A gate **opens on any outcome**: once every Evidence Step is Settled, whatever
+the outcomes, `NextPhaseReady` follows. Evidence is input to the next Phase,
+never a verdict on the Execution, and never changes P's `success`.
+
+Not the [Event Compatibility Gate](#event-compatibility-gate), which is a CI
+check on releases. The contracts are in
+`_shared/evidence_contract.py`; the gate's behaviour is not built yet (plan PRs
+5b and 5c).
+
+## Evidence Request
+
+What a Phase asks the platform to prove, as one entry of the `evidence` list in
+its TASK_RESULT: `kind` (`mutation` or `integration`), `repository`, `branch`,
+`pr`, `head_sha` and a non-empty `tests` list of pytest node ids. In code:
+`EvidenceRequest`. The `repository` must be one of the Execution's own, so a
+Phase cannot aim the platform's token elsewhere. A malformed entry is not
+dropped: it becomes a request that Settles `void`, because a dropped request
+would read as "no proof needed".
+
+## Evidence Report
+
+`evidence.json`, schema 1 (`EvidenceReport`): what one run of a repository's
+`<kind>-evidence.yml` workflow found on one head. It carries an **evidence
+verdict**, `passed`, `failed` or `void`, and, for each requested node id, what
+happened to it (`passed`, `failed`, `skipped`, `xfail`, `not_collected`).
+Written by code in the PR under test, so it is evidence for a reader, never
+authority: a `passed` verdict over a requested test that did not pass does not
+parse.
+
+The evidence verdict is not an Eval [Verdict](#verdict) and not a [Review
+Verdict](#review-verdict). Its `suite` field counts the pytest run's tests
+(`collected`, `passed`, `failed`, `skipped`); it is not an Eval
+[Suite](#suite).
+
+## Evidence Step
+
+One planned unit of an Evidence Gate, ordered and indexed from 0: a
+`mutation` or `integration` run, or one of the two steps no Phase can declare,
+`remove_mutation_patches` (the Patch Removal) and `required_check` (waiting for
+CI on the new head). Planned once, when the gate opens. A step whose kind, head
+and tests already Settled `passed` earlier in the Execution is not run again: it
+Settles `passed` and points at the earlier step (`reused_from`).
+
+## Evidence Attempt
+
+One dispatch of an Evidence Step's workflow, identified by a fresh
+`dispatch_id` and bounded by the step's `not_after` deadline. Recorded by
+`EvidenceAttemptStarted` BEFORE the dispatch is sent, so any later process
+knows which run to look for. A step gets at most two. Retries share the step's
+`not_after`.
+
+Not [Attempt Work](#attempt-work), which is what a failed Phase attempt did to
+its workspace, and not a [Retry](#words-we-do-not-use) of a Phase. Taking up a
+dispatched GitHub run is recorded as `EvidenceRunAdopted` in the plan. That is
+not the reserved **Adopt** (an Executor taking over a running Phase).
+**Unclear:** whether the event keeps that name. Settle it before plan PR 5b
+introduces the event.
+
+## Settled
+
+An Evidence Step that has a final outcome, recorded once by
+`EvidenceStepSettled`: `passed`, `failed`, `void` or `unavailable`, with a
+reason, the run, and the head it evidences. A step Settles at most once. The
+gate opens when the last step Settles.
+
+## Void
+
+An Evidence Step or Evidence Report that proves nothing either way. The run
+happened, or was asked for, but its result cannot be read as a pass or a
+fail: a requested test was not collected, was skipped, or xfailed; the head
+moved; the report disagrees with its run's conclusion; the request was
+unreadable. A void step MUST carry a reason. It is not `failed`, which is
+evidence against the change.
+
+## Unavailable
+
+An Evidence Step for which no evidence exists, because the platform could not
+get any: `permission`, `workflow_absent`, `dispatch_lost`, `runner`,
+`superseded` or `timeout`. An unavailable step MUST carry a reason. It falls
+back to today's handoff to a person. It says nothing about the change.
+
+## Patch Removal
+
+The platform's own commit S -> S' that deletes `.mutations/` from a PR branch,
+made by compare-and-swap on the head, and only at the gate in front of the
+final Phase after a `certified` review with every mutation step `passed`. Its
+provenance (`before_sha`, `after_sha`, author; `MutationPatchesRemoved`) is
+what keeps evidence about S valid at S'. A moved head refuses it and the step
+Settles `void`. In code: the `remove_mutation_patches` Evidence Step and
+`PatchRemoval`.
+
+## Evidence Manifest
+
+`manifest.json`, schema 1 (`EvidenceManifest`): the authoritative record of one
+Evidence Gate, written by the platform from its events, never from an Evidence
+Report. It lists every planned Evidence Step with its outcome, reason, run URL,
+head SHA and reuse pointer, the Patch Removal provenance if there was one, and
+`complete: true`. A step with no report still appears, so a missing report
+cannot read as "all passed". `finalize_pr` trusts S -> S' only from here.
 
 ## Words we do not use
 

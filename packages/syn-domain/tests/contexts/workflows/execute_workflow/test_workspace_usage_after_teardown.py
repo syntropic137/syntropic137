@@ -18,6 +18,7 @@ import pytest
 
 from syn_domain.contexts.agent_sessions import ObservationType
 from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
+    WorkspaceDeleteFallback,
     WorkspaceUsage,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_delegate_import import (
@@ -45,6 +46,7 @@ USAGE = WorkspaceUsage(
     delete_failures=("/ws/.git/objects/pack/locked.pack",),
     net_rx_bytes=1_048_576,
     net_tx_bytes=65_536,
+    delete_fallback=WorkspaceDeleteFallback.DELETED,
 )
 
 
@@ -149,6 +151,7 @@ def _assert_one_row(writer: _Writer) -> None:
                 "delete_failures": ("/ws/.git/objects/pack/locked.pack",),
                 "net_rx_bytes": 1_048_576,
                 "net_tx_bytes": 65_536,
+                "delete_fallback": "deleted",
                 "workspace_lifetime_seconds": LIFETIME_SECONDS,
             },
             execution_id="e-usage",

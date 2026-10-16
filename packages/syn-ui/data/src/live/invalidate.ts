@@ -37,6 +37,7 @@ const RULES: ReadonlyArray<readonly [(t: string) => boolean, (ids: FrameIds) => 
       { name: 'listWorkflowRuns', id: workflowId },
       { name: 'getWorkflowHistory', id: workflowId },
       { name: 'getWorkflowTrend', id: workflowId },
+      { name: 'getWorkflowTrends' },
       { name: 'listExecutionCosts' },
       { name: 'getCostSummary' },
       { name: 'getShippedMetrics' },

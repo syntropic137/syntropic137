@@ -25,6 +25,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/workflows/trends": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Workflow Trends Endpoint
+         * @description Several workflows' latest runs as trend points in one request; unknown ids are left out (#1872).
+         */
+        get: operations["list_workflow_trends_endpoint_workflows_trends_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/workflows/{workflow_id}": {
         parameters: {
             query?: never;
@@ -3686,6 +3706,30 @@ export interface components {
             detail: string;
             /** @description The workspace directory reclaimer's last pass (#1983); null when its state could not be read. */
             reclaim?: components["schemas"]["WorkspaceReclaimHealth"] | null;
+        };
+        /**
+         * DurationTrendSummaryResponse
+         * @description A workflow card's duration trend label, formatted here so the UI only renders it (#1872).
+         *
+         *     Fitted over the latest ``runs`` measured durations (at most 12): a change
+         *     under 5% is steady, fewer than 3 measured runs is too few to tell.
+         */
+        DurationTrendSummaryResponse: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "none" | "few" | "faster" | "slower" | "steady";
+            /** Pct */
+            pct: number;
+            /** Runs */
+            runs: number;
+            /** Word Display */
+            word_display: string;
+            /** Sub Display */
+            sub_display: string;
+            /** Label Display */
+            label_display: string;
         };
         /**
          * EvalArchivedResponse
@@ -9981,6 +10025,29 @@ export interface components {
          */
         Verdict: "PASS" | "FAIL" | "ERROR";
         /**
+         * WorkflowCardTrendResponse
+         * @description A workflow's trend points plus the card's formatted duration trend (#1872).
+         */
+        WorkflowCardTrendResponse: {
+            /** Definition Version */
+            definition_version: string | null;
+            /** Definition Changed At */
+            definition_changed_at: string | null;
+            /** Definition Changes */
+            definition_changes: components["schemas"]["DefinitionChangeResponse"][];
+            /** Workflow Id */
+            workflow_id: string;
+            /** Items */
+            items: components["schemas"]["WorkflowTrendPointResponse"][];
+            /** Total */
+            total: number;
+            /** Page */
+            page: number;
+            /** Page Size */
+            page_size: number;
+            duration_trend: components["schemas"]["DurationTrendSummaryResponse"];
+        };
+        /**
          * WorkflowDefaultEvalResponse
          * @description A workflow's default eval after an edit, read from the aggregate (#967).
          */
@@ -10148,6 +10215,18 @@ export interface components {
             page: number;
             /** Page Size */
             page_size: number;
+        };
+        /**
+         * WorkflowTrendsResponse
+         * @description The latest runs of several workflows as trend points, in one response (#1872).
+         *
+         *     The Workflows page reads every card on screen from this, so the page costs
+         *     one request however many workflows it shows. Each entry is what
+         *     ``GET /workflows/{id}/trend`` answers for page 1 at the same page size.
+         */
+        WorkflowTrendsResponse: {
+            /** Trends */
+            trends: components["schemas"]["WorkflowCardTrendResponse"][];
         };
         /**
          * WorkspaceReclaimHealth
@@ -10341,6 +10420,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CreateWorkflowResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_workflow_trends_endpoint_workflows_trends_get: {
+        parameters: {
+            query: {
+                /** @description Comma-separated exact workflow ids, at most 200 */
+                ids: string;
+                /** @description Latest runs per workflow */
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowTrendsResponse"];
                 };
             };
             /** @description Validation Error */

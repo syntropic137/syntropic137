@@ -1,4 +1,5 @@
 import type {
+  DeclaredSkill,
   ExecutionHistoryResponse,
   PhaseDefinition,
   PhaseMetrics,
@@ -21,7 +22,16 @@ const findWorkflow = (id: string) => ALL_WORKFLOWS.find((w) => w.id === id)
 const createdAt = (w: CatalogWorkflow) => new Date(FIXTURE_NOW - (ALL_WORKFLOWS.indexOf(w) + 8) * 7 * 86_400_000).toISOString()
 
 export function workflowSummary(w: CatalogWorkflow): WorkflowSummary {
-  return { id: w.id, name: w.name, workflow_type: w.type, phase_count: w.phases.length, created_at: createdAt(w), runs_count: runsOf(w.id).length }
+  // Distinct by name across phases, first-declared first, each with the phases declaring it, as the API's list builds them.
+  const skills = new Map<string, DeclaredSkill>()
+  w.phases.forEach((p, i) => {
+    for (const s of phaseDefinition(w, i).skills ?? []) {
+      const key = s.name ?? ''
+      const seen = skills.get(key)
+      skills.set(key, seen ? { ...seen, phase_ids: [...(seen.phase_ids ?? []), p.id] } : { ...s, phase_ids: [p.id], workflow_scope: false })
+    }
+  })
+  return { id: w.id, name: w.name, workflow_type: w.type, phase_count: w.phases.length, created_at: createdAt(w), runs_count: runsOf(w.id).length, skills: [...skills.values()] }
 }
 
 function phaseDefinition(w: CatalogWorkflow, index: number): PhaseDefinition {

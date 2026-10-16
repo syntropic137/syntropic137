@@ -78,15 +78,45 @@ FITNESS_SELECTED_MARKER = "architecture"
 FITNESS_UNSELECTED_SELECTOR = f"not {FITNESS_SELECTED_MARKER}"
 
 
-def is_excluded(path: Path | str) -> bool:
+#: The repository this gate guards, for reading its ``.gitmodules``.
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+_GITMODULES_PATH = re.compile(r"^[ \t]*path[ \t]*=[ \t]*(\S.*?)[ \t]*$", re.MULTILINE)
+
+
+def submodule_paths(root: Path) -> tuple[str, ...]:
+    """Every submodule path ``root/.gitmodules`` declares, as posix strings.
+
+    Submodules are other repositories, governed by their own CI and their own
+    budgets. Derived from ``.gitmodules`` rather than listed, so a new
+    submodule is excluded without anyone remembering to add it: the AW pin to
+    be32a683 brought one xfail from AW's own conformance tests and failed this
+    gate over a test in another repo (#1992). No file means no submodules.
+    """
+    gitmodules = root / ".gitmodules"
+    if not gitmodules.is_file():
+        return ()
+    text = gitmodules.read_text(errors="ignore")
+    return tuple(m.strip("/") for m in _GITMODULES_PATH.findall(text))
+
+
+#: This repository's submodules, the default for ``is_excluded``.
+SUBMODULE_PATHS: tuple[str, ...] = submodule_paths(_REPO_ROOT)
+
+
+def is_excluded(path: Path | str, submodules: tuple[str, ...] = SUBMODULE_PATHS) -> bool:
     """True when a path lies under a directory that is not first-party source.
 
     Matches whole DIRECTORY components, never substrings and never the file
     name: a substring test excluded ``scripts/test_node_modules_policy.py``,
     so a first-party test escaped every guard that shares this function.
     Uses ``as_posix`` so the check behaves identically on Windows separators.
+
+    ``submodules`` are matched as a prefix of a repo-relative ``path`` only:
+    ``lib/agentic-workspace`` is a submodule at the root, while a directory
+    of that name elsewhere is first-party and still counted.
     """
-    directories = Path(path).as_posix().split("/")[:-1]
+    parts = Path(path).as_posix().split("/")
+    directories = parts[:-1]
     for fragment in EXCLUDED_PATH_FRAGMENTS:
         wanted = fragment.split("/")
         width = len(wanted)
@@ -95,12 +125,19 @@ def is_excluded(path: Path | str) -> bool:
             for start in range(len(directories) - width + 1)
         ):
             return True
+    for submodule in submodules:
+        wanted = submodule.split("/")
+        if directories[: len(wanted)] == wanted:
+            return True
     return False
 
 
 def iter_test_files(root: Path) -> list[Path]:
-    """Every first-party ``test_*.py`` under ``root``, worktrees excluded."""
-    return sorted(p for p in root.rglob("test_*.py") if not is_excluded(p))
+    """Every first-party ``test_*.py`` under ``root``; worktrees and submodules excluded."""
+    submodules = submodule_paths(root)
+    return sorted(
+        p for p in root.rglob("test_*.py") if not is_excluded(p.relative_to(root), submodules)
+    )
 
 
 def count_xfail_markers(root: Path) -> int:

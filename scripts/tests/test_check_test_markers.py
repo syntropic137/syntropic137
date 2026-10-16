@@ -28,6 +28,7 @@ from check_test_markers import (
     FITNESS_DIR,
     FITNESS_SELECTED_MARKER,
     FITNESS_UNSELECTED_SELECTOR,
+    SUBMODULE_PATHS,
     UNMARKED_SELECTOR,
     Budget,
     collect_census,
@@ -37,7 +38,68 @@ from check_test_markers import (
     is_excluded,
     iter_test_files,
     parse_collected,
+    submodule_paths,
 )
+
+_XFAIL_BODY = "import pytest\n\n\n@pytest.mark.xfail(reason='x')\ndef test_a():\n    pass\n"
+_GITMODULES = (
+    '[submodule "lib/other-repo"]\n'
+    "\tpath = lib/other-repo\n"
+    "\turl = https://example.invalid/other-repo.git\n"
+    "\tbranch = release\n"
+)
+
+
+@pytest.mark.unit
+class TestSubmodulesAreExcluded:
+    """The AW pin to be32a683 failed this gate with a test in another repo (#1992).
+
+    agentic-workspace added an xfail to its own conformance tests, and the
+    rglob counted it against this repo's budget: "xfail: 3 (budget 2)". A
+    submodule is governed by its own CI, so it is excluded, derived from
+    ``.gitmodules`` so a new submodule needs no edit here.
+    """
+
+    def _tree(self, root: Path) -> None:
+        (root / ".gitmodules").write_text(_GITMODULES)
+        theirs = root / "lib" / "other-repo" / "tests"
+        theirs.mkdir(parents=True)
+        (theirs / "test_theirs.py").write_text(_XFAIL_BODY)
+        ours = root / "packages" / "tests"
+        ours.mkdir(parents=True)
+        (ours / "test_ours.py").write_text(_XFAIL_BODY)
+
+    def test_an_xfail_under_a_submodule_is_not_counted(self, tmp_path: Path) -> None:
+        self._tree(tmp_path)
+        assert count_xfail_markers(tmp_path) == 1, "the submodule's xfail was counted"
+
+    def test_an_xfail_in_first_party_code_still_is(self, tmp_path: Path) -> None:
+        self._tree(tmp_path)
+        found = [p.relative_to(tmp_path).as_posix() for p in iter_test_files(tmp_path)]
+        assert found == ["packages/tests/test_ours.py"]
+
+    def test_without_gitmodules_nothing_is_a_submodule(self, tmp_path: Path) -> None:
+        self._tree(tmp_path)
+        (tmp_path / ".gitmodules").unlink()
+        assert count_xfail_markers(tmp_path) == 2
+
+    def test_paths_come_from_gitmodules(self, tmp_path: Path) -> None:
+        self._tree(tmp_path)
+        assert submodule_paths(tmp_path) == ("lib/other-repo",)
+
+    def test_a_submodule_is_matched_only_at_the_repo_root(self) -> None:
+        subs = ("lib/other-repo",)
+        assert is_excluded("lib/other-repo/tests/test_x.py", subs)
+        assert not is_excluded("packages/lib/other-repo/tests/test_x.py", subs)
+        assert not is_excluded("lib/other-repo-tools/tests/test_x.py", subs)
+        assert not is_excluded("lib/ui-feedback/tests/test_x.py", subs)
+
+    def test_this_repos_submodules_are_read(self) -> None:
+        # The live wiring, not a double: the default must be this repo's.
+        assert "lib/agentic-workspace" in SUBMODULE_PATHS
+        assert "lib/event-sourcing-platform" in SUBMODULE_PATHS
+        assert is_excluded("lib/agentic-workspace/lib/python/x/tests/test_y.py")
+        assert not is_excluded("lib/ui-feedback/tests/test_y.py")
 
 
 @pytest.mark.unit
