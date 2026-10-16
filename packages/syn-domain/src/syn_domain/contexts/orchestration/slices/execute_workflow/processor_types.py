@@ -129,6 +129,26 @@ class EvidenceStepDriver(Protocol):
     ) -> None: ...
 
 
+@dataclass(frozen=True)
+class UnwiredEvidenceSteps:
+    """The default until the adapters are wired (A.15 PR 6): a gate cannot open
+    before then, so a RUN_EVIDENCE_STEP reaching this is a wiring fault."""
+
+    async def handle(
+        self,
+        todo: TodoItem,
+        aggregate: WorkflowExecutionAggregate,
+        save: Callable[[WorkflowExecutionAggregate], Awaitable[None]],
+        outputs: PhaseOutputCache,
+    ) -> None:
+        del aggregate, save, outputs
+        msg = f"RUN_EVIDENCE_STEP for {todo.execution_id}: no EvidenceStepHandler wired"
+        raise RuntimeError(msg)
+
+
+UNWIRED_EVIDENCE_STEPS: EvidenceStepDriver = UnwiredEvidenceSteps()
+
+
 class ArtifactRepository(Protocol):
     """Repository for Artifact aggregates."""
 

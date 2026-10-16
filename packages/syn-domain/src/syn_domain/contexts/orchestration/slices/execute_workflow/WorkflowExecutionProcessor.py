@@ -80,6 +80,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.phase_workspace i
     PhaseWorkspace,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
+    UNWIRED_EVIDENCE_STEPS,
     # Imported at RUNTIME on purpose, not annotation-only: this module re-exports
     # it, and `slices/execute_workflow/__init__.py` plus a dozen tests do
     # `from ...WorkflowExecutionProcessor import WorkflowExecutionResult`. Moving
@@ -229,13 +230,13 @@ class WorkflowExecutionProcessor:
         shipped_ledger: ShippedLedger | None = None,
         execution_events: ExecutionEventStream | None = None,
         todo_projection_type: TodoProjectionType | None = None,
-        evidence_steps: EvidenceStepDriver | None = None,
+        evidence_steps: EvidenceStepDriver = UNWIRED_EVIDENCE_STEPS,
     ) -> None:
         #: Where an admitted run waits for an Executor (ADR-072, #1310 1.3).
         #: None is today's path: `run` starts AND drains in this call. Set,
         #: `run` and `run_resume` only admit, and `run_claimed` drains.
         self._run_queue = run_queue
-        #: Drives RUN_EVIDENCE_STEP (plan §A.5). None until the adapters are
+        #: Drives RUN_EVIDENCE_STEP (plan §A.5). Unwired until the adapters are
         #: wired (A.15 PR 6); no gate opens before then, because nothing yet
         #: attaches an `EvidenceGatePolicy` to collection.
         self._evidence_steps = evidence_steps
@@ -709,9 +710,6 @@ class WorkflowExecutionProcessor:
                 phase_outputs,
             )
         elif todo.action == TodoAction.RUN_EVIDENCE_STEP:
-            if self._evidence_steps is None:
-                msg = f"RUN_EVIDENCE_STEP for {todo.execution_id}: no EvidenceStepHandler wired"
-                raise RuntimeError(msg)
             await self._evidence_steps.handle(todo, aggregate, journal.append, phase_outputs)
         elif todo.action == TodoAction.COMPLETE_PHASE:
             await self._handle_complete_phase(
