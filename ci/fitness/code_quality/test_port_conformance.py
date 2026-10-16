@@ -54,6 +54,13 @@ _UNIMPLEMENTED: dict[str, str] = {
         "and no call site asks for it. Kept here rather than deleted because "
         "removing a published port is a separate decision from #1305."
     ),
+    "RemoteTreePort": (
+        "The forge adapter lands in PR 6 of "
+        "docs/plans/20261015_platform-dispatched-evidence.md (A.15). Until then "
+        "it is optional and unwired, so patch presence is recorded unknown. "
+        "Exercised against a double in packages/syn-domain/src/syn_domain/"
+        "contexts/orchestration/slices/execute_workflow/test_evidence_transport.py."
+    ),
 }
 
 

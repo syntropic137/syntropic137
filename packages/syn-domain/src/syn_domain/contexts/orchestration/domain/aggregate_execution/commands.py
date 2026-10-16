@@ -28,9 +28,11 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
         BranchObservation,
+        DeclaredEvidence,
         DelegationFailure,
         ExecutablePhase,
         FailureClassification,
+        ObservedHead,
         PhaseDefinition,
         QuarantinedRef,
         ReportedFailureReason,
@@ -431,6 +433,7 @@ class AgentExecutionCompletedCommand:
         reported_review_verdict: ReviewVerdict | None = None,
         agent_provider: str | None = None,
         agent_model: str | None = None,
+        reported_evidence: Sequence[DeclaredEvidence] = (),
     ) -> None:
         self.aggregate_id = execution_id
         self.phase_id = phase_id
@@ -446,6 +449,7 @@ class AgentExecutionCompletedCommand:
         self.last_agent_message = last_agent_message
         self.reported_side_effects = reported_side_effects
         self.reported_review_verdict = reported_review_verdict
+        self.reported_evidence = tuple(reported_evidence)
 
     def produced_by(self, *, provider: str, model: str | None) -> None:
         """Name the agent that produced this result (PC-83).
@@ -469,6 +473,7 @@ class ArtifactsCollectedCommand:
         first_content_preview: str | None = None,
         session_id: str | None = None,
         deliverable_recovered: bool = False,
+        observed_heads: Sequence[ObservedHead] = (),
     ) -> None:
         self.aggregate_id = execution_id
         self.phase_id = phase_id
@@ -480,6 +485,13 @@ class ArtifactsCollectedCommand:
         #: not complete until a later to-do item, so the fact has to be told
         #: to the aggregate here or be lost (#1195, #1300).
         self.deliverable_recovered = deliverable_recovered
+        #: The forge's heads, read host-side before the aggregate is told
+        #: (plan §A.2): the aggregate does no I/O, so the fact arrives here.
+        self.observed_heads = tuple(observed_heads)
+
+    def observed(self, heads: Sequence[ObservedHead]) -> None:
+        """Attach what the forge showed; set by the one frame that asked."""
+        self.observed_heads = tuple(heads)
 
 
 class ResumeExecutionCommand:
