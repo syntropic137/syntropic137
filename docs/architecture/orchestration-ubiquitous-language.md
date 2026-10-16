@@ -1177,7 +1177,12 @@ association was made after the fact.
 
 What one Phase's workspace consumed, measured once as it is torn down: CPU
 time, CPU throttling, memory peak, OOM kills, the workspace's disk size, network
-bytes, and the paths its delete could not remove (`WorkspaceUsage`). The
+bytes, the paths its delete could not remove, and how the provider's fallback
+delete went when the host could not delete the directory alone
+(`WorkspaceDeleteFallback`: `deleted`, `failed`, or `refused` when the
+directory is not one the provider created; `unrecognized` when the provider
+reported any other value, a contract mismatch kept distinct from "not
+attempted") (`WorkspaceUsage`). The
 workspace provider measures it; the Phase that held the workspace records it,
 as one `workspace_resource_usage` observation under that Phase's session.
 
