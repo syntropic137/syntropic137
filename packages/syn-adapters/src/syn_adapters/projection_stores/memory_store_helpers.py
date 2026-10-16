@@ -11,6 +11,7 @@ from syn_adapters.projection_stores.json_text import filter_text, stored_text
 
 if TYPE_CHECKING:
     from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
+    from syn_domain.pagination import ProjectionRecord
 
 
 def filter_values(wanted: object) -> frozenset[str]:
@@ -45,7 +46,7 @@ def filter_values(wanted: object) -> frozenset[str]:
     return frozenset((filter_text(wanted),))
 
 
-def matches(record: dict[str, Any], accepted: list[tuple[str, frozenset[str]]]) -> bool:
+def matches(record: ProjectionRecord, accepted: list[tuple[str, frozenset[str]]]) -> bool:
     """Whether every field's ``->>`` text is one its filter accepts."""
     return all(stored_text(record.get(k)) in values for k, values in accepted)
 
