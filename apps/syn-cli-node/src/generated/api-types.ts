@@ -34,10 +34,7 @@ export interface paths {
         };
         /**
          * List Workflow Trends Endpoint
-         * @description The latest runs of several workflows as trend points, in one request (#1872).
-         *
-         *     Each entry is page 1 of ``GET /workflows/{id}/trend`` at the same page
-         *     size. Ids that name no workflow are left out rather than failing the batch.
+         * @description Several workflows' latest runs as trend points in one request; unknown ids are left out (#1872).
          */
         get: operations["list_workflow_trends_endpoint_workflows_trends_get"];
         put?: never;
@@ -10312,7 +10309,7 @@ export interface operations {
     list_workflow_trends_endpoint_workflows_trends_get: {
         parameters: {
             query: {
-                /** @description Comma-separated workflow ids, at most 200. Exact ids, not prefixes */
+                /** @description Comma-separated exact workflow ids, at most 200 */
                 ids: string;
                 /** @description Latest runs per workflow */
                 page_size?: number;

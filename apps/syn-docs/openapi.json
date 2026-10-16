@@ -175,7 +175,7 @@
           "workflows"
         ],
         "summary": "List Workflow Trends Endpoint",
-        "description": "The latest runs of several workflows as trend points, in one request (#1872).\n\nEach entry is page 1 of ``GET /workflows/{id}/trend`` at the same page\nsize. Ids that name no workflow are left out rather than failing the batch.",
+        "description": "Several workflows' latest runs as trend points in one request; unknown ids are left out (#1872).",
         "operationId": "list_workflow_trends_endpoint_workflows_trends_get",
         "parameters": [
           {
@@ -184,10 +184,10 @@
             "required": true,
             "schema": {
               "type": "string",
-              "description": "Comma-separated workflow ids, at most 200. Exact ids, not prefixes",
+              "description": "Comma-separated exact workflow ids, at most 200",
               "title": "Ids"
             },
-            "description": "Comma-separated workflow ids, at most 200. Exact ids, not prefixes"
+            "description": "Comma-separated exact workflow ids, at most 200"
           },
           {
             "name": "page_size",

@@ -77,14 +77,8 @@ _openapi:
       - content: Create a new workflow template.
         heading: create-workflow-endpoint
       - content: >-
-          The latest runs of several workflows as trend points, in one request
-          (#1872).
-
-
-          Each entry is page 1 of ``GET /workflows/{id}/trend`` at the same page
-
-          size. Ids that name no workflow are left out rather than failing the
-          batch.
+          Several workflows' latest runs as trend points in one request; unknown
+          ids are left out (#1872).
         heading: list-workflow-trends-endpoint
       - content: Get workflow details by ID (supports partial ID prefix matching).
         heading: get-workflow-endpoint
