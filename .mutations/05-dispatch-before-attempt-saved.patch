@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/EvidenceStepHandler.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/EvidenceStepHandler.py
+index 30f27d6eb..945426e11 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/EvidenceStepHandler.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/EvidenceStepHandler.py
+@@ -245,7 +245,7 @@ class _StepRun:
+                 now + self.h.timings.step_deadline,
+             )
+         )
+-        await self.save(self.aggregate)  # recorded BEFORE the POST (B3)
++        pass  # recorded BEFORE the POST (B3)
+         return self.gate.attempts[self.step.index]
+ 
+     async def _adopt(self, attempt: EvidenceAttempt, run: RunRef) -> EvidenceAttempt:
