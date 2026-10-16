@@ -376,7 +376,8 @@ executions from a durable Postgres **run queue** and holds each under a
 Plan: `docs/plans/20261015_platform-dispatched-evidence.md` (§A.1-§A.7,
 §A.13). Contracts: `packages/syn-domain/src/syn_domain/contexts/orchestration/_shared/evidence_contract.py`,
 schemas in `schemas/evidence/`. Vocabulary: `docs/architecture/orchestration-ubiquitous-language.md`
-(Evidence Gate and the entries after it).
+(Evidence Gate and the entries after it). Dispatch and run look-up spike:
+`docs/research/2026-10-16-evidence-dispatch-spike.md`.
 
 **The problem.** Mutation and Docker-backed integration evidence cannot run
 inside an agent workspace. Today an orchestrator dispatches the evidence
