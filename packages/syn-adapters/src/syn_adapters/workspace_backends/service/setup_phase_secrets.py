@@ -20,9 +20,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Final, Protocol
 
-from syn_adapters.workspace_backends.service.git_identity import git_identity_lines
 from syn_adapters.workspace_backends.service.issued_tokens import IssuedToken
 from syn_adapters.workspace_backends.service.pinned_checkout import append_pinned_checkout
+from syn_adapters.workspace_backends.service.setup_script_header import setup_script_header
 from syn_shared.upstream_failure import UpstreamFailureError
 
 if TYPE_CHECKING:
@@ -730,10 +730,7 @@ class SetupPhaseSecrets:
                 rather than one repo being silently skipped.
             ValueError: A pinned commit is not a full commit id (#1458).
         """
-        lines = [
-            DEFAULT_SETUP_SCRIPT.rstrip(),
-            *git_identity_lines(self.git_author_name, self.git_author_email),
-        ]
+        lines = setup_script_header(self.git_author_name, self.git_author_email)
         self._append_codex_auth(lines)
 
         self._append_git_credentials(lines)
@@ -947,10 +944,3 @@ class SetupPhaseSecrets:
                 " submodule update --init --recursive"
                 f" || printf '%s\\n' {shlex.quote(warning)} >&2"
             )
-
-
-# Minimal setup script for credentials that require secure injection.
-#
-# The header only: build_setup_script() appends git identity, credentials and
-# clones (ADR-058). The container's entrypoint.sh handles the rest.
-DEFAULT_SETUP_SCRIPT = "#!/bin/bash\nset -e\n"
