@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/phase_step_events.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/phase_step_events.py
+index 48d953212..255d6f9df 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/phase_step_events.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/phase_step_events.py
+@@ -67,7 +67,7 @@ def agent_completed_event(
+         last_agent_message=command.last_agent_message,
+         reported_side_effects=command.reported_side_effects,
+         reported_review_verdict=command.reported_review_verdict,
+-        reported_evidence=list(command.reported_evidence),
++        reported_evidence=[],
+         agent_provider=command.agent_provider,
+         agent_model=command.agent_model,
+     )

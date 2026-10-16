@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/evidence_record.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/evidence_record.py
+index 0998027be..826450b73 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/evidence_record.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/evidence_record.py
+@@ -74,7 +74,7 @@ class DeclaredEvidence(BaseModel):
+             return ()
+         if not isinstance(value, list):
+             return (cls.refused(f"evidence is not a list: {_excerpt(value)}"),)
+-        return tuple(cls._read_entry(entry) for entry in value)
++        return tuple(d for d in (cls._read_entry(entry) for entry in value) if d.request)
+ 
+     @classmethod
+     def refused(cls, reason: str) -> DeclaredEvidence:

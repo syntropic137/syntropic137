@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/evidence_heads.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/evidence_heads.py
+index ff2672e6b..7a29142a8 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/evidence_heads.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/evidence_heads.py
+@@ -91,7 +91,7 @@ def _branches(aggregate: WorkflowExecutionAggregate, phase_id: str) -> list[tupl
+         seen[(slug, pushed.branch)] = None
+     # A resume does not replay its parent's pushes; what it inherited is here.
+     for continued in pins.continued_branches:
+-        seen[(continued.repository, continued.branch)] = None
++        pass
+     for declared in aggregate.declared_evidence_for(phase_id):
+         if declared.request is not None:
+             seen[(declared.request.repository, declared.request.branch)] = None

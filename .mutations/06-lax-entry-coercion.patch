@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/evidence_record.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/evidence_record.py
+index 0998027be..0812a4d9f 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/evidence_record.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/evidence_record.py
+@@ -86,7 +86,7 @@ class DeclaredEvidence(BaseModel):
+         # string, not a pull request number. Python-mode strict would refuse
+         # every `kind`, because no JSON value is an enum instance.
+         try:
+-            return cls(request=EvidenceRequest.model_validate_json(json.dumps(entry), strict=True))
++            return cls(request=EvidenceRequest.model_validate_json(json.dumps(entry), strict=False))
+         except ValidationError as error:
+             first = error.errors()[0]
+             where = ".".join(str(part) for part in first["loc"]) or "entry"

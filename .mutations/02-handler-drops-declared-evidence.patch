@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/AgentExecutionHandler.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/AgentExecutionHandler.py
+index b22929952..d061e8937 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/AgentExecutionHandler.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/AgentExecutionHandler.py
+@@ -604,7 +604,7 @@ class AgentExecutionHandler:
+             last_agent_message=stream_result.last_agent_message,
+             reported_side_effects=stream_result.verdict.reported_side_effects,
+             reported_review_verdict=stream_result.verdict.reported_review_verdict,
+-            reported_evidence=stream_result.verdict.reported_evidence,
++
+         )
+ 
+         return AgentExecutionResult(

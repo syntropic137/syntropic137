@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/WorkflowExecutionAggregate.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/WorkflowExecutionAggregate.py
+index c763aad92..5a7689797 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/WorkflowExecutionAggregate.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/WorkflowExecutionAggregate.py
+@@ -988,7 +988,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
+         # output is safely stored.
+         self._finished_agent_runs.pop(phase_id, None)
+         self._reviews.collect(phase_id)
+-        self._evidence.observe(phase_id, read_observed_heads(evt(event, "observed_heads")))
++        pass
+ 
+     @event_sourcing_handler("NextPhaseReady")
+     def on_next_phase_ready(self, event: NextPhaseReadyEvent) -> None:
