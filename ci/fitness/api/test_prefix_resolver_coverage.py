@@ -60,6 +60,10 @@ _ALTERNATIVE_RESOLVERS: set[str] = {
     # GET /executions/{id}/state: a full id is answered by the event store, a
     # prefix by resolve_or_raise inside it (#1555).
     "_resolve_execution_id",
+    # GET /artifacts/{id}, /content, /raw: prefix matching against the
+    # projection, but a miss goes on to the domain lookup, which falls back to
+    # the Artifact aggregate while the projection lags (#1570).
+    "resolve_prefix_or_keep",
 }
 
 
