@@ -5,14 +5,16 @@
 
   Two requests whatever the catalogue size (#1872): GET /workflows carries
   each workflow's skills, and GET /workflows/trends carries the duration
-  graph and Faster / Slower / Steady label for every card on screen.
+  graph and the API-formatted Faster / Slower / Steady label for every card
+  on screen.
 -->
 <script lang="ts">
   import {
     CATEGORY_ICON,
+    DURATION_TREND_FAILED,
     DURATION_TREND_PENDING,
     TREND_WINDOW,
-    durationTrend,
+    cardDurationTrend,
     WORKFLOW_FILTERS,
     filterWorkflows,
     parseWorkflowFilter,
@@ -25,8 +27,7 @@
   } from '@syn137/skyline-core/screens/workflows'
   import { Button, Callout, EmptyState, Input, Pagination, Select, Skeleton, ToggleGroup } from '@syn137/skyline-svelte-v5'
   import { ObjectIcon, TrendSpark } from '@syn137/skyline-svelte-v5/patterns'
-  import { ApiError, getWorkflowTrends, isAbortError, listWorkflows, type WorkflowSummary, type WorkflowTrendRow, MAX_PAGE_SIZE } from '@syn137/syn-ui-data'
-  import { untrack } from 'svelte'
+  import { ApiError, getWorkflowTrends, listWorkflows, type WorkflowSummary, type WorkflowTrendsResponse, MAX_PAGE_SIZE } from '@syn137/syn-ui-data'
   import { isRunEvent } from '@syn137/syn-ui-data/live'
   import { resource } from '../../lib/load.svelte'
   import { setPage } from '../../lib/page.svelte'
@@ -59,29 +60,23 @@
   const pageCount = $derived(Math.max(1, Math.ceil(matched.length / PAGE_SIZE)))
   const rows = $derived(matched.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE))
 
-  let trends = $state<Record<string, WorkflowTrendRow[]>>({})
-  // Keyed on the ids on screen, so a list refresh that rebuilds `rows` does not abort this.
-  const trendIds = $derived(rows.filter((w) => w.runs_count > 0).map((w) => w.id).join(' '))
-  $effect(() => {
-    const need = trendIds.split(' ').filter((id) => id && untrack(() => !(id in trends)))
-    if (!need.length) return
-    const controller = new AbortController()
-    getWorkflowTrends(need, { page_size: TREND_WINDOW }, controller.signal).then(
-      (res) => {
-        const got = Object.fromEntries(res.trends.map((t) => [t.workflow_id, t.items]))
-        // An id the API left out (gone since the list loaded) reads as no runs, not Loading forever.
-        trends = { ...trends, ...Object.fromEntries(need.map((id) => [id, got[id] ?? []])) }
-      },
-      (e) => {
-        if (!isAbortError(e)) trends = { ...trends, ...Object.fromEntries(need.map((id) => [id, []])) }
-      },
-    )
-    return () => controller.abort()
-  })
+  // One batch for the cards on screen, through the binding: it refetches on a run event or a live
+  // invalidation, aborts when the page changes, and keeps the last good batch beside an error.
+  // Keyed on the ids, so a list refresh that rebuilds `rows` does not refetch.
+  const trendIds = $derived(rows.map((w) => w.id).join(' '))
+  const trendBatch = resource(
+    (signal) => {
+      const ids = trendIds.split(' ').filter(Boolean)
+      return ids.length ? getWorkflowTrends(ids, { page_size: TREND_WINDOW }, signal) : Promise.resolve<WorkflowTrendsResponse>({ trends: [] })
+    },
+    { live: isRunEvent },
+  )
+  const trendById = $derived(new Map((trendBatch.data?.trends ?? []).map((t) => [t.workflow_id, t])))
+  // The words are the API's (`*_display`); only the sparkline is drawn here.
   const trendOf = (w: WorkflowSummary) => {
-    if (w.runs_count === 0) return durationTrend([], 0)
-    const t = trends[w.id]
-    return t ? durationTrend(t, w.runs_count) : DURATION_TREND_PENDING
+    const t = trendById.get(w.id)
+    if (t) return cardDurationTrend(t.duration_trend, t.items)
+    return trendBatch.loading && !trendBatch.error ? DURATION_TREND_PENDING : DURATION_TREND_FAILED
   }
   const filtered = $derived(filter !== 'all' || q !== '')
 
@@ -164,6 +159,12 @@
   {:else}
     {#if list.error}
       <Callout tone="warning" title="Not updating.">Showing the last list that loaded. {errorText(list.error)}</Callout>
+    {/if}
+    {#if trendBatch.error}
+      <Callout tone="warning" title="Duration trends did not load.">
+        {errorText(trendBatch.error)}
+        <Button onclick={() => trendBatch.refresh()}>Retry</Button>
+      </Callout>
     {/if}
     <ul class="sky-wfs__grid" aria-label="Workflow list" aria-busy={list.loading}>
       {#each rows as w (w.id)}

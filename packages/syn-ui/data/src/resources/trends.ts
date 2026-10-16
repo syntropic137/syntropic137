@@ -10,6 +10,7 @@
  * This file is the only adapter between the API and the screens.
  */
 import { MAX_PAGE_SIZE, request, seg } from '../client'
+import type { components } from '../generated/api-types'
 import type { EvalVerdict } from './evals'
 import { cached } from '../keys'
 
@@ -90,9 +91,17 @@ export interface WorkflowTrendResponse extends TrendPage<WorkflowTrendRow> {
   workflow_id: string
 }
 
+/** A card's Faster / Slower / Steady label, formatted by the API (#1872): render the `*_display` strings. */
+export type DurationTrendSummary = components['schemas']['DurationTrendSummaryResponse']
+
+/** One workflow's trend plus its card label. */
+export interface WorkflowCardTrend extends WorkflowTrendResponse {
+  duration_trend: DurationTrendSummary
+}
+
 /** GET /workflows/trends: page 1 of each workflow's trend, unknown ids left out. */
 export interface WorkflowTrendsResponse {
-  trends: WorkflowTrendResponse[]
+  trends: WorkflowCardTrend[]
 }
 
 export function getEvalTrend(evalId: string, signal?: AbortSignal): Promise<EvalTrendResponse> {
