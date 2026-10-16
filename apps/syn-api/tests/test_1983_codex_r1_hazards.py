@@ -93,7 +93,7 @@ async def test_a_deleted_branch_with_its_reflog_expired_is_kept(base: Path, tmp_
     _git(app, "reflog", "expire", "--expire=now", "--all")
     assert lost not in _out(app, "log", "--all", "--reflog", "--format=%H")
     result = await _reclaimer(base).run_once()
-    assert _reason(result, "ws-orphan-commit") is RetainedReason.UNPUSHED_UNPROVEN
+    assert _reason(result, "ws-orphan-commit") is RetainedReason.UNREACHABLE_OBJECTS
     assert _out(app, "cat-file", "-t", lost) == "commit"
 
 
@@ -385,3 +385,48 @@ def test_os_supports_the_descriptor_relative_delete() -> None:
     assert os.unlink in os.supports_dir_fd
     assert os.rmdir in os.supports_dir_fd
     assert os.scandir in os.supports_fd
+
+
+# --- Codex round 2 ---
+
+
+async def test_content_staged_then_reset_away_is_kept_as_a_dangling_blob(
+    base: Path, tmp_path: Path
+) -> None:
+    """`git add` wrote the only copy into the object store; the reset left it unreachable."""
+    ws = _workspace(base, "ws-dangling-blob", tmp_path)
+    app = ws / "repos" / "app"
+    (app / "draft.txt").write_text("staged once, never committed\n")
+    _git(app, "add", "draft.txt")
+    blob = _out(app, "rev-parse", ":draft.txt")
+    _git(app, "reset", "--hard", "origin/main")
+    assert not (app / "draft.txt").exists()
+    assert _out(app, "status", "--porcelain") == ""
+    result = await _reclaimer(base).run_once()
+    assert _reason(result, "ws-dangling-blob") is RetainedReason.UNREACHABLE_OBJECTS
+    assert _out(app, "cat-file", "-p", blob) == "staged once, never committed"
+
+
+async def test_a_deinitialized_submodule_store_is_kept(base: Path, tmp_path: Path) -> None:
+    """`submodule deinit` removes the checkout; its objects stay only in .git/modules."""
+    from test_pc130_workspace_dir_reclaim import _workspace_with_submodule
+
+    app = _workspace_with_submodule(base, "ws-deinit", tmp_path)
+    lib_store = app / ".git" / "modules" / "lib"
+    _git(app / "lib", "commit", "--allow-empty", "-m", "unpushed submodule work")
+    _git(app, "submodule", "deinit", "-f", "lib")
+    assert lib_store.is_dir()
+    assert not any((app / "lib").iterdir())
+    result = await _reclaimer(base).run_once()
+    assert _reason(result, "ws-deinit") is RetainedReason.SUBMODULE_STORE_UNPROVEN
+    assert lib_store.is_dir()
+
+
+async def test_a_bare_clone_with_a_submodule_store_is_kept(base: Path, tmp_path: Path) -> None:
+    ws = _workspace(base, "ws-bare-modules", tmp_path)
+    mirror = ws / "repos" / "mirror.git"
+    _git(ws / "repos", "clone", "--bare", str(ws / "repos" / "app"), "mirror.git")
+    (mirror / "modules").mkdir()
+    _git(mirror / "modules", "init", "--bare", "lib")
+    result = await _reclaimer(base).run_once()
+    assert _reason(result, "ws-bare-modules") is RetainedReason.SUBMODULE_STORE_UNPROVEN

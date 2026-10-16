@@ -159,6 +159,13 @@ class RetainedReason(StrEnum):
     STASH = "stash"
     #: A commit could not be shown on the remote the Execution names.
     UNPUSHED_UNPROVEN = "unpushed_unproven"
+    #: A repository's git directory holds submodule stores (``modules/``),
+    #: which nothing here proves pushed: a deinitialized submodule's objects
+    #: live there and nowhere else.
+    SUBMODULE_STORE_UNPROVEN = "submodule_store_unproven"
+    #: The object store holds an object no ref reaches: a blob staged and reset
+    #: away, a dropped commit. Its content may exist nowhere else.
+    UNREACHABLE_OBJECTS = "unreachable_objects"
     #: Session capture may still be inside the directory.
     CAPTURE_UNKNOWN = "capture_unknown"
     #: The directory was replaced or moved between the check and the delete.
@@ -267,6 +274,14 @@ class HostWorkspaceGit(Protocol):
         """
         ...
 
+    async def has_submodule_store(self, repo: str) -> bool:
+        """Whether the repository's git directory has a non-empty ``modules/``."""
+        ...
+
+    async def unreachable_objects(self, repo: str) -> int:
+        """Objects of any type (commit, tree, blob, tag) no ref or reflog reaches."""
+        ...
+
     async def unproven_commits(self, repo: str, advertised: frozenset[str]) -> int:
         """Commits reachable from HEAD or a local ref that no ``advertised`` object reaches.
 
@@ -306,6 +321,7 @@ async def guard_stale_workspace_dir(
                     stale, Retained(RetainedReason.DIRTY, f"{repo} has uncommitted changes")
                 )
         unversioned = await git.unversioned_paths(stale.host_dir, repos)
+        store = await _store_risk(git, repos)
     except Exception as exc:
         return _keep(stale, Retained(RetainedReason.UNREADABLE, _described(exc)))
     if unversioned:
@@ -316,12 +332,30 @@ async def guard_stale_workspace_dir(
                 f"{len(unversioned)} file(s) no repository holds, e.g. {unversioned[0]}",
             ),
         )
+    if store is not None:
+        return _keep(stale, store)
     unproven = await _unproven(stale, git, remotes, repos)
     if unproven is not None:
         return _keep(stale, unproven)
     return ReclaimableDir(
         host_dir=stale.host_dir, workspace_id=stale.workspace_id, size_bytes=stale.size_bytes
     )
+
+
+async def _store_risk(git: HostWorkspaceGit, repos: list[str]) -> Retained | None:
+    """What an object store may hold that no proof below covers. Fail closed, unproven."""
+    for repo in repos:
+        if await git.has_submodule_store(repo):
+            return Retained(
+                RetainedReason.SUBMODULE_STORE_UNPROVEN, f"{repo} holds submodule stores"
+            )
+        unreachable = await git.unreachable_objects(repo)
+        if unreachable:
+            return Retained(
+                RetainedReason.UNREACHABLE_OBJECTS,
+                f"{repo} holds {unreachable} object(s) no ref reaches",
+            )
+    return None
 
 
 async def _unproven(

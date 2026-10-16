@@ -1219,6 +1219,8 @@ domain state: no event, no aggregate.
 **Retained** (`Retained`, `RetainedReason`) is the outcome of a directory a
 reclaim pass kept, with the one proof that failed: `unowned`, `not_terminal`,
 `mounted`, `unreadable`, `dirty`, `unversioned`, `stash`, `unpushed_unproven`,
+`submodule_store_unproven` (any `.git/modules`, never proven), `unreachable_objects`
+(any object no ref or reflog reaches: a staged-then-reset blob, a dropped commit),
 `capture_unknown`, `identity_changed` or `delete_failed`. Retained is not a
 failure; /health counts each reason.
 

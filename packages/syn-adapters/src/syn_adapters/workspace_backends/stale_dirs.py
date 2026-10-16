@@ -363,7 +363,8 @@ class SubprocessHostWorkspaceGit:
 
         A commit reset, amended or rebased away is still the agent's work while
         a reflog or the object store holds it, so every reflog entry
-        (``--reflog``) and every unreachable commit (``fsck``) is a tip too.
+        (``--reflog``) is a tip too; anything unreachable altogether keeps the
+        directory on its own (`unreachable_objects`).
         Replacement refs are off on every call (``GIT_NO_REPLACE_OBJECTS``),
         and a repository with grafts is refused: both rewrite ancestry, which
         is the very thing this proves. A shallow boundary only removes
@@ -371,7 +372,7 @@ class SubprocessHostWorkspaceGit:
         """
         await self._refuse_unsafe_config(repo)
         _refuse_grafts(repo)
-        tips = [*await self._local_tips(repo), *await self._unreachable_commits(repo)]
+        tips = await self._local_tips(repo)
         # Only an advertised object this repository holds can bound the walk;
         # one it lacks proves nothing about what is local.
         held = await self._held_commits(repo, advertised)
@@ -379,15 +380,24 @@ class SubprocessHostWorkspaceGit:
         out = await _git(repo, "rev-list", "--count", "--reflog", "--stdin", stdin=stdin.encode())
         return int(out.strip() or b"0")
 
-    async def _unreachable_commits(self, repo: str) -> list[str]:
-        """Commits no ref or reflog reaches: a deleted branch, an expired reflog."""
-        out = await _git(repo, "fsck", "--connectivity-only", "--unreachable", "--no-progress")
-        found: list[str] = []
-        for line in out.decode(errors="replace").splitlines():
-            parts = line.split()
-            if len(parts) == 3 and parts[0] == "unreachable" and parts[1] in {"commit", "tag"}:
-                found.append(parts[2])
-        return found
+    async def unreachable_objects(self, repo: str) -> int:
+        """Every object of any type no ref or reflog reaches (``git fsck --unreachable``).
+
+        A deleted branch, an expired reflog, a blob ``git add`` wrote and a
+        reset dropped: none is proven anywhere, so any one of them counts.
+        """
+        await self._refuse_unsafe_config(repo)
+        out = await _git(repo, "fsck", "--unreachable", "--no-progress")
+        return sum(
+            1
+            for line in out.decode(errors="replace").splitlines()
+            if line.startswith("unreachable ")
+        )
+
+    async def has_submodule_store(self, repo: str) -> bool:
+        git_dir = Path(repo) if _is_bare(repo) else _git_dir(Path(repo))
+        modules = git_dir / "modules"
+        return modules.is_dir() and any(modules.iterdir())
 
     async def _local_tips(self, repo: str) -> list[str]:
         """HEAD and every ref outside ``refs/remotes/``: what the agent could have made."""

@@ -7630,7 +7630,7 @@ export interface components {
          *     an operator sees what the disk is holding and why, not one opaque number.
          * @enum {string}
          */
-        RetainedReason: "unowned" | "not_terminal" | "mounted" | "unreadable" | "dirty" | "unversioned" | "stash" | "unpushed_unproven" | "capture_unknown" | "identity_changed" | "delete_failed";
+        RetainedReason: "unowned" | "not_terminal" | "mounted" | "unreadable" | "dirty" | "unversioned" | "stash" | "unpushed_unproven" | "submodule_store_unproven" | "unreachable_objects" | "capture_unknown" | "identity_changed" | "delete_failed";
         /**
          * RetainedWorkspaceDirs
          * @description Workspace directories the reclaimer kept for one reason, at its last pass (#1983).
