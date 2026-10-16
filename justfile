@@ -1782,6 +1782,23 @@ selfhost-seed:
       python /app/scripts/seed_triggers.py
     echo "✅ Seeding complete"
 
+# Back up the whole syn database into $BACKUP_DIR, verified before it reports ok
+# (logic: infra/scripts/selfhost_backup.py; the backup: docker/db-backup/)
+selfhost-backup:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    source infra/scripts/selfhost-env.sh
+    exec uv run python infra/scripts/selfhost_backup.py --compose "{{compose_selfhost}}" backup
+
+# Replace the syn database with a verified backup; the old one is kept aside (--force for a populated DB)
+# (logic: infra/scripts/selfhost_backup.py; arguments reach it as argv, never as recipe text)
+[positional-arguments]
+selfhost-restore file *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    source infra/scripts/selfhost-env.sh
+    exec uv run python infra/scripts/selfhost_backup.py --compose "{{compose_selfhost}}" restore -- "$@"
+
 # Pull latest code, rebuild, and restart self-host (auto-detects tunnel)
 selfhost-update *args:
     #!/usr/bin/env bash
