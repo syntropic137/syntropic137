@@ -20,7 +20,7 @@ import dataclasses
 import logging
 from typing import Protocol, runtime_checkable
 
-from syn_domain.contexts.orchestration import WorkspaceUsage
+from syn_domain.contexts.orchestration import WorkspaceDeleteFallback, WorkspaceUsage
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +53,8 @@ class TeardownReportLike(Protocol):
     def net_rx_bytes(self) -> int | None: ...
     @property
     def net_tx_bytes(self) -> int | None: ...
+    @property
+    def delete_fallback(self) -> str | None: ...
 
 
 def usage_from_report(report: object) -> WorkspaceUsage | None:
@@ -79,4 +81,25 @@ def usage_from_report(report: object) -> WorkspaceUsage | None:
     usage = WorkspaceUsage(**{name: getattr(report, name, None) for name in USAGE_FIELDS})
     if usage.delete_failures is not None:
         usage = dataclasses.replace(usage, delete_failures=tuple(usage.delete_failures))
+    if usage.delete_fallback is not None:
+        usage = dataclasses.replace(
+            usage, delete_fallback=_delete_fallback(report, usage.delete_fallback)
+        )
     return usage
+
+
+def _delete_fallback(report: object, value: object) -> WorkspaceDeleteFallback | None:
+    """The provider's fallback-delete outcome, or None when it is not one we know.
+
+    An unknown value is a contract mismatch, logged like a missing field and
+    recorded as unknown rather than passed through as a string.
+    """
+    try:
+        return WorkspaceDeleteFallback(value)
+    except ValueError:
+        logger.warning(
+            "Provider teardown report %s has unknown delete_fallback %r; recorded as unknown",
+            type(report).__qualname__,
+            value,
+        )
+        return None

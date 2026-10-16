@@ -36,6 +36,7 @@ from syn_adapters.workspace_backends.errors import TeardownFailure, WorkspaceTea
 from syn_adapters.workspace_backends.service import WorkspaceBackend, WorkspaceService
 from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
     IsolationHandle,
+    WorkspaceDeleteFallback,
     WorkspaceUsage,
 )
 
@@ -197,6 +198,49 @@ async def test_an_oom_kill_seen_only_by_docker_reaches_the_domain() -> None:
     assert usage.memory_peak_bytes == 268_435_456
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", list(WorkspaceDeleteFallback))
+async def test_the_fallback_delete_outcome_reaches_the_domain(
+    outcome: WorkspaceDeleteFallback,
+) -> None:
+    # #1983: the host could not delete files the container wrote under another
+    # uid. How the provider's fallback went is the one signal that the leak
+    # was closed, so it must arrive typed, not dropped or left a bare string.
+    report = TeardownReport(
+        finalization=_COMPLETED,
+        usage=dataclasses.replace(_USAGE, delete_fallback=outcome.value),
+    )
+    adapter, _ = _adapter(report)
+    usage = await adapter.destroy(_HANDLE)
+    assert usage is not None
+    assert usage.delete_fallback is outcome
+    assert type(usage.delete_fallback) is WorkspaceDeleteFallback
+
+
+@dataclass(frozen=True)
+class _UnknownFallbackReport:
+    cpu_usage_seconds: float | None = None
+    cpu_throttled_seconds: float | None = None
+    nr_throttled: int | None = None
+    memory_peak_bytes: int | None = 1
+    oom_kills: int | None = None
+    oom_killed: bool | None = None
+    disk_bytes_at_teardown: int | None = None
+    delete_failures: tuple[str, ...] | None = None
+    net_rx_bytes: int | None = None
+    net_tx_bytes: int | None = None
+    delete_fallback: str | None = "vaporised"
+
+
+def test_an_unknown_fallback_outcome_is_logged_and_recorded_as_unknown(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with caplog.at_level(logging.WARNING):
+        usage = usage_from_report(_UnknownFallbackReport())
+    assert usage == WorkspaceUsage(memory_peak_bytes=1, delete_fallback=None)
+    assert any("vaporised" in r.getMessage() for r in caplog.records)
+
+
 _RETAINED = FinalizationOutcome(
     schema=MISSING,
     state="retained",
@@ -337,7 +381,7 @@ def test_an_absent_report_is_not_a_mismatch(caplog: pytest.LogCaptureFixture) ->
 
 def test_the_protocol_names_exactly_the_usage_fields() -> None:
     # The Protocol and `WorkspaceUsage` are two hand-written lists of the same
-    # nine names; this pins them so neither can drift alone.
+    # names; this pins them so neither can drift alone.
     members = {
         name for name, value in vars(TeardownReportLike).items() if isinstance(value, property)
     }
