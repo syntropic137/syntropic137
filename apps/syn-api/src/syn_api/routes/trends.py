@@ -277,28 +277,39 @@ def duration_trend(
     state never reads "No runs yet".
     """
     ds = recent_durations(points)
-    n = len(ds)
-    if n == 0:
-        if points:
-            word = "No finished runs" if runs_count else "No runs yet"
-            label = "No finished runs yet"
-        else:
-            word = "No trend" if runs_count else "No runs yet"
-            label = "Duration trend not available" if runs_count else "No runs yet"
-        return DurationTrendSummaryResponse(
-            kind="none", pct=0, runs=0, word_display=word, sub_display="\u2014", label_display=label
-        )
-    if n < TREND_MIN_RUNS:
-        runs = f"{n} {'run' if n == 1 else 'runs'}"
-        return DurationTrendSummaryResponse(
-            kind="few",
-            pct=0,
-            runs=n,
-            word_display="Too few runs",
-            sub_display=runs,
-            label_display=f"Duration trend: too few runs to tell ({runs})",
-        )
-    pct = duration_change_pct(ds)
+    if not ds:
+        return _empty_trend(has_points=bool(points), has_runs=runs_count > 0)
+    if len(ds) < TREND_MIN_RUNS:
+        return _few_trend(len(ds))
+    return _classified_trend(duration_change_pct(ds), len(ds))
+
+
+def _empty_trend(*, has_points: bool, has_runs: bool) -> DurationTrendSummaryResponse:
+    """No measured duration: says why, and never "No runs yet" when the workflow has runs."""
+    if has_points:
+        word, label = ("No finished runs" if has_runs else "No runs yet"), "No finished runs yet"
+    elif has_runs:
+        word, label = "No trend", "Duration trend not available"
+    else:
+        word, label = "No runs yet", "No runs yet"
+    return DurationTrendSummaryResponse(
+        kind="none", pct=0, runs=0, word_display=word, sub_display="\u2014", label_display=label
+    )
+
+
+def _few_trend(n: int) -> DurationTrendSummaryResponse:
+    runs = f"{n} {'run' if n == 1 else 'runs'}"
+    return DurationTrendSummaryResponse(
+        kind="few",
+        pct=0,
+        runs=n,
+        word_display="Too few runs",
+        sub_display=runs,
+        label_display=f"Duration trend: too few runs to tell ({runs})",
+    )
+
+
+def _classified_trend(pct: int, n: int) -> DurationTrendSummaryResponse:
     size = abs(pct)
     kind = "steady" if size < STEADY_PCT else "faster" if pct < 0 else "slower"
     how = "steady" if kind == "steady" else f"{size}% {kind}"

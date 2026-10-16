@@ -161,27 +161,36 @@ function durationSummary(rows: readonly WorkflowTrendRow[], runsCount: number): 
     .sort((a, b) => (a.date ?? '').localeCompare(b.date ?? ''))
     .slice(-12)
     .map((r) => r.duration_seconds as number)
+  if (ds.length === 0) return emptySummary(rows.length > 0, runsCount > 0)
+  if (ds.length < 3) {
+    const runs = `${ds.length} ${ds.length === 1 ? 'run' : 'runs'}`
+    return { kind: 'few', pct: 0, runs: ds.length, word_display: 'Too few runs', sub_display: runs, label_display: `Duration trend: too few runs to tell (${runs})` }
+  }
+  return classifiedSummary(fittedPct(ds), ds.length)
+}
+
+function emptySummary(hasRows: boolean, hasRuns: boolean): DurationTrendSummary {
+  const [word, label] = hasRows ? [hasRuns ? 'No finished runs' : 'No runs yet', 'No finished runs yet'] : hasRuns ? ['No trend', 'Duration trend not available'] : ['No runs yet', 'No runs yet']
+  return { kind: 'none', pct: 0, runs: 0, word_display: word, sub_display: '—', label_display: label }
+}
+
+function fittedPct(ds: readonly number[]): number {
   const n = ds.length
-  if (n === 0) {
-    const word = rows.length ? (runsCount ? 'No finished runs' : 'No runs yet') : runsCount ? 'No trend' : 'No runs yet'
-    const label = rows.length ? 'No finished runs yet' : runsCount ? 'Duration trend not available' : 'No runs yet'
-    return { kind: 'none', pct: 0, runs: 0, word_display: word, sub_display: '—', label_display: label }
-  }
-  if (n < 3) {
-    const runs = `${n} ${n === 1 ? 'run' : 'runs'}`
-    return { kind: 'few', pct: 0, runs: n, word_display: 'Too few runs', sub_display: runs, label_display: `Duration trend: too few runs to tell (${runs})` }
-  }
   const mean = ds.reduce((a, d) => a + d, 0) / n
   const mx = (n - 1) / 2
   const slope = ds.reduce((a, d, x) => a + (x - mx) * (d - mean), 0) / ds.reduce((a, _, x) => a + (x - mx) ** 2, 0)
   const start = mean - slope * mx
-  const pct = start > 0 ? Math.round(((mean + slope * mx - start) / start) * 100) : 0
+  return start > 0 ? Math.round(((mean + slope * mx - start) / start) * 100) : 0
+}
+
+const SUMMARY_WORD = { faster: 'Faster', slower: 'Slower', steady: 'Steady' } as const
+const SUMMARY_SIGN = { faster: '−', slower: '+', steady: '±' } as const
+
+function classifiedSummary(pct: number, n: number): DurationTrendSummary {
   const size = Math.abs(pct)
   const kind = size < 5 ? 'steady' : pct < 0 ? 'faster' : 'slower'
-  const word = { faster: 'Faster', slower: 'Slower', steady: 'Steady' }[kind]
-  const sign = { faster: '−', slower: '+', steady: '±' }[kind]
   const how = kind === 'steady' ? 'steady' : `${size}% ${kind}`
-  return { kind, pct, runs: n, word_display: word, sub_display: `${sign}${size}% time, last ${n}`, label_display: `Duration trend: ${how} over the last ${n} runs` }
+  return { kind, pct, runs: n, word_display: SUMMARY_WORD[kind], sub_display: `${SUMMARY_SIGN[kind]}${size}% time, last ${n}`, label_display: `Duration trend: ${how} over the last ${n} runs` }
 }
 
 export const trendRoutes: FixtureRoute[] = [
