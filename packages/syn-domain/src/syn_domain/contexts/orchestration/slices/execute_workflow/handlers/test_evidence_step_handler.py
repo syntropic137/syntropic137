@@ -8,6 +8,7 @@ handler's own state: the handler is meant to have none.
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -29,8 +30,8 @@ from syn_domain.contexts.orchestration._shared.evidence_contract import (
 from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoAction, TodoItem
 from syn_domain.contexts.orchestration.domain.aggregate_execution.test_evidence_gate_aggregate import (
     EXECUTION,
-    S,
     S_PRIME,
+    S,
     _collect,
     _declared,
     _gate_id,
@@ -43,8 +44,8 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 from syn_domain.contexts.orchestration.ports.EvidenceRunnerPort import (
     Accepted,
     Ambiguous,
-    Refused,
     RefusalReason,
+    Refused,
     RunConclusion,
     RunRef,
 )
@@ -57,6 +58,11 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.Evidence
 from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
     PhaseOutputCache,
 )
+
+if TYPE_CHECKING:
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.evidence_gate import (
+        EvidenceGate,
+    )
 
 pytestmark = pytest.mark.unit
 
@@ -124,7 +130,7 @@ class _Harness:
         )
         await self.handler.handle(todo, self.store.load(), self._save, self.outputs)
 
-    def gate(self):  # noqa: ANN201 - the aggregate's EvidenceGate
+    def gate(self) -> EvidenceGate:
         gate = self.store.load().evidence_gate(self.gate_id)
         assert gate is not None
         return gate
