@@ -19367,6 +19367,8 @@
           "unversioned",
           "stash",
           "unpushed_unproven",
+          "submodule_store_unproven",
+          "unreachable_objects",
           "capture_unknown",
           "identity_changed",
           "delete_failed"

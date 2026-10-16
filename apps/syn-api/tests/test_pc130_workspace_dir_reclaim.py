@@ -1080,37 +1080,41 @@ async def test_alternates_git_would_read_differently_are_refused_and_kept(
 
 
 @pytest.mark.parametrize("library_named", [False, True])
-async def test_a_submodule_commit_is_proven_only_on_a_remote_the_record_names(
+async def test_a_workspace_with_a_submodule_store_is_kept_unproven(
     base: Path, tmp_path: Path, library_named: bool
 ) -> None:
-    """A submodule's `.git` file and `core.worktree` stay inside; its commits need their remote."""
+    """Codex r2: `.git/modules` is never proven, even with the submodule's remote named."""
     app = _workspace_with_submodule(base, "ws-sub", tmp_path)
     assert (app / "lib" / ".git").is_file()
     library = str(tmp_path / "ws-sub-library.git")
     extra = (library,) if library_named else ()
     result = await _reclaimer(base, extra_remotes=extra).run_once()
-    if library_named:
-        assert result.reclaimed == ("ws-sub",)
-    else:
-        assert _reason(result, "ws-sub") is RetainedReason.UNPUSHED_UNPROVEN
+    assert _reason(result, "ws-sub") is RetainedReason.SUBMODULE_STORE_UNPROVEN
 
 
 async def test_every_host_git_call_runs_guarded(
     base: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Hooks, fsmonitor, system and global config are off on every call, not on most."""
-    _workspace_with_submodule(base, "ws-calls", tmp_path)
+    _workspace(base, "ws-calls", tmp_path)
     bare = _workspace(base, "ws-calls-bare", tmp_path)
     _git(bare / "repos", "clone", "--bare", str(bare / "repos" / "app"), "mirror.git")
     calls = _record_git_calls(monkeypatch)
-    library = str(tmp_path / "ws-calls-library.git")
-    result = await _reclaimer(base, extra_remotes=(library,)).run_once()
+    result = await _reclaimer(base).run_once()
     assert result.reclaimed == ("ws-calls", "ws-calls-bare")
     in_repo = [
         (argv, env) for argv, env in calls if "-C" in argv and argv[argv.index("-C") + 1] != "/"
     ]
     subcommands = {argv[argv.index("-C") + 2] for argv, _ in in_repo}
-    assert {"config", "for-each-ref", "diff", "ls-files", "rev-list", "cat-file"} <= subcommands
+    assert {
+        "config",
+        "for-each-ref",
+        "diff",
+        "ls-files",
+        "rev-list",
+        "cat-file",
+        "fsck",
+    } <= subcommands
     for argv, env in in_repo:
         assert argv[0] == "git"
         overrides = argv[1 : argv.index("-C")]
