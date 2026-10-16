@@ -1,7 +1,8 @@
 /**
  * Run history for the trend charts: GET /evals/{id}/trend and
- * GET /workflows/{id}/trend (#1788, backend in PR #1800). Items come newest
- * first; the chart models sort by date themselves.
+ * GET /workflows/{id}/trend (#1788, backend in PR #1800), and
+ * GET /workflows/trends for many workflows in one request (#1872). Items come
+ * newest first; the chart models sort by date themselves.
  *
  * TODO(#1788): hand-written to the PR #1800 response models
  * (EvalTrendResponse, WorkflowTrendResponse in syn_api/types.py) until they
@@ -89,6 +90,11 @@ export interface WorkflowTrendResponse extends TrendPage<WorkflowTrendRow> {
   workflow_id: string
 }
 
+/** GET /workflows/trends: page 1 of each workflow's trend, unknown ids left out. */
+export interface WorkflowTrendsResponse {
+  trends: WorkflowTrendResponse[]
+}
+
 export function getEvalTrend(evalId: string, signal?: AbortSignal): Promise<EvalTrendResponse> {
   return cached('getEvalTrend', [evalId], (s) => request(`/evals/${seg(evalId)}/trend`, { query: { page_size: TREND_PAGE_SIZE }, signal: s }), { signal, staleAfter: 'list' })
 }
@@ -97,4 +103,11 @@ export function getWorkflowTrend(workflowId: string, params: { page_size?: numbe
   const pageSize = params.page_size ?? TREND_PAGE_SIZE
   return cached('getWorkflowTrend', [workflowId, pageSize], (s) =>
     request(`/workflows/${seg(workflowId)}/trend`, { query: { page_size: pageSize }, signal: s }), { signal, staleAfter: 'list' })
+}
+
+/** Several workflows' latest runs in one request, so a page of cards costs one call, not one per card (#1872). */
+export function getWorkflowTrends(workflowIds: readonly string[], params: { page_size?: number } = {}, signal?: AbortSignal): Promise<WorkflowTrendsResponse> {
+  const pageSize = params.page_size ?? TREND_PAGE_SIZE
+  return cached('getWorkflowTrends', [workflowIds.join(','), pageSize], (s) =>
+    request('/workflows/trends', { query: { ids: workflowIds, page_size: pageSize }, signal: s }), { signal, staleAfter: 'list' })
 }

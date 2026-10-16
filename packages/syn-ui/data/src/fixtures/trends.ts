@@ -1,5 +1,6 @@
 /**
- * Trend rows for GET /evals/{id}/trend and GET /workflows/{id}/trend.
+ * Trend rows for GET /evals/{id}/trend, GET /workflows/{id}/trend and
+ * GET /workflows/trends.
  *
  * Eval rows are the Eval board's renderVals() sample (RAW): 28 runs over 30
  * days by four verifiers, judged by claude-opus-5-5, with the verify prompt
@@ -8,7 +9,7 @@
  * Steady by the same rule the board used.
  */
 import type { EvalVerdict } from '../resources/evals'
-import type { DefinitionChange, EvalTrendResponse, EvalTrendRow, WorkflowTrendResponse, WorkflowTrendRow } from '../resources/trends'
+import type { DefinitionChange, EvalTrendResponse, EvalTrendRow, WorkflowTrendResponse, WorkflowTrendRow, WorkflowTrendsResponse } from '../resources/trends'
 import { RUNS, WORKFLOWS, type CatalogRun, type CatalogWorkflow } from './catalog'
 import { type FixtureRoute, notFound, route } from './define'
 import { costDisplay, durationDisplay, paginate } from './seed'
@@ -148,15 +149,25 @@ const definition = (changes: DefinitionChange[]) => ({
   definition_changes: changes,
 })
 
+function workflowTrend(w: CatalogWorkflow, query: URLSearchParams): WorkflowTrendResponse {
+  const page = paginate(workflowRows(w), query, 50)
+  return { workflow_id: w.id, items: page.rows, total: page.total, page: page.page, page_size: page.page_size, ...definition(workflowChanges(w)) }
+}
+
 export const trendRoutes: FixtureRoute[] = [
   route('GET', '/evals/:evalId/trend', ({ params, query }): EvalTrendResponse => {
     const e = EVALS.find((x) => x.summary.eval_id === params.evalId) ?? notFound('Eval')
     const page = paginate(EVAL_TREND_ROWS, query, 50)
     return { eval_id: e.summary.eval_id, items: page.rows, total: page.total, page: page.page, page_size: page.page_size, ...definition(EVAL_CHANGES) }
   }),
-  route('GET', '/workflows/:workflowId/trend', ({ params, query }): WorkflowTrendResponse => {
-    const w = [...WORKFLOWS, ...EXTRA_WORKFLOWS].find((x) => x.id === params.workflowId) ?? notFound('Workflow')
-    const page = paginate(workflowRows(w), query, 50)
-    return { workflow_id: w.id, items: page.rows, total: page.total, page: page.page, page_size: page.page_size, ...definition(workflowChanges(w)) }
+  // Before '/workflows/:workflowId', as the API declares it, so "trends" is never read as an id.
+  route('GET', '/workflows/trends', ({ query }): WorkflowTrendsResponse => {
+    const ids = [...new Set((query.get('ids') ?? '').split(',').filter(Boolean))]
+    const page = new URLSearchParams({ page: '1', page_size: query.get('page_size') ?? '50' })
+    const all = [...WORKFLOWS, ...EXTRA_WORKFLOWS]
+    return { trends: ids.flatMap((id) => all.filter((w) => w.id === id).map((w) => workflowTrend(w, page))) }
   }),
+  route('GET', '/workflows/:workflowId/trend', ({ params, query }): WorkflowTrendResponse =>
+    workflowTrend([...WORKFLOWS, ...EXTRA_WORKFLOWS].find((x) => x.id === params.workflowId) ?? notFound('Workflow'), query),
+  ),
 ]

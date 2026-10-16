@@ -3,13 +3,9 @@
   styles are the phone board; the hero turns into a row and the grid widens
   from 48rem. Filter, sort, search and page live in the URL.
 
-  Each card's duration graph and Faster / Slower / Steady label come from
-  GET /workflows/{id}/trend for the cards on screen, four at a time (API gap:
-  the list should carry each workflow's recent durations).
-
-  The list endpoint has no skills, so the skill chips and "Has skills"
-  come from each workflow's detail, fetched four at a time after the list
-  renders (API gap: add declared skill names to WorkflowSummary).
+  Two requests whatever the catalogue size (#1872): GET /workflows carries
+  each workflow's skills, and GET /workflows/trends carries the duration
+  graph and Faster / Slower / Steady label for every card on screen.
 -->
 <script lang="ts">
   import {
@@ -29,7 +25,7 @@
   } from '@syn137/skyline-core/screens/workflows'
   import { Button, Callout, EmptyState, Input, Pagination, Select, Skeleton, ToggleGroup } from '@syn137/skyline-svelte-v5'
   import { ObjectIcon, TrendSpark } from '@syn137/skyline-svelte-v5/patterns'
-  import { ApiError, getWorkflow, getWorkflowTrend, isAbortError, listWorkflows, mapLimit, type WorkflowSummary, type WorkflowTrendRow, MAX_PAGE_SIZE } from '@syn137/syn-ui-data'
+  import { ApiError, getWorkflowTrends, isAbortError, listWorkflows, type WorkflowSummary, type WorkflowTrendRow, MAX_PAGE_SIZE } from '@syn137/syn-ui-data'
   import { untrack } from 'svelte'
   import { isRunEvent } from '@syn137/syn-ui-data/live'
   import { resource } from '../../lib/load.svelte'
@@ -57,42 +53,29 @@
   // Whole catalogue at once: filtering by skills and sorting by runs are client side.
   const list = resource((signal) => listWorkflows({ page_size: MAX_PAGE_SIZE }, signal), { live: isRunEvent })
 
-  let skills = $state<Record<string, string[]>>({})
-  $effect(() => {
-    const rows = list.data?.workflows ?? []
-    if (!rows.length) return
-    const controller = new AbortController()
-    void mapLimit(rows, 4, async (w) => {
-      try {
-        const d = await getWorkflow(w.id, controller.signal)
-        skills = { ...skills, [w.id]: workflowSkillNames(d.phases) }
-      } catch (e) {
-        if (!isAbortError(e)) skills = { ...skills, [w.id]: [] }
-      }
-    })
-    return () => controller.abort()
-  })
-
   const all = $derived(list.data?.workflows ?? [])
-  const matched = $derived(filterWorkflows(all, { filter, sort, search: q, skillsOf: (id) => skills[id] }))
+  const skills = $derived(new Map(all.map((w) => [w.id, workflowSkillNames([w])])))
+  const matched = $derived(filterWorkflows(all, { filter, sort, search: q, skillsOf: (id) => skills.get(id) }))
   const pageCount = $derived(Math.max(1, Math.ceil(matched.length / PAGE_SIZE)))
   const rows = $derived(matched.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE))
 
   let trends = $state<Record<string, WorkflowTrendRow[]>>({})
-  // Keyed on the ids on screen, so a skills update that rebuilds `rows` does not abort these.
+  // Keyed on the ids on screen, so a list refresh that rebuilds `rows` does not abort this.
   const trendIds = $derived(rows.filter((w) => w.runs_count > 0).map((w) => w.id).join(' '))
   $effect(() => {
     const need = trendIds.split(' ').filter((id) => id && untrack(() => !(id in trends)))
     if (!need.length) return
     const controller = new AbortController()
-    void mapLimit(need, 4, async (id) => {
-      try {
-        const res = await getWorkflowTrend(id, { page_size: TREND_WINDOW }, controller.signal)
-        trends = { ...trends, [id]: res.items }
-      } catch (e) {
-        if (!isAbortError(e)) trends = { ...trends, [id]: [] }
-      }
-    })
+    getWorkflowTrends(need, { page_size: TREND_WINDOW }, controller.signal).then(
+      (res) => {
+        const got = Object.fromEntries(res.trends.map((t) => [t.workflow_id, t.items]))
+        // An id the API left out (gone since the list loaded) reads as no runs, not Loading forever.
+        trends = { ...trends, ...Object.fromEntries(need.map((id) => [id, got[id] ?? []])) }
+      },
+      (e) => {
+        if (!isAbortError(e)) trends = { ...trends, ...Object.fromEntries(need.map((id) => [id, []])) }
+      },
+    )
     return () => controller.abort()
   })
   const trendOf = (w: WorkflowSummary) => {
@@ -101,7 +84,6 @@
     return t ? durationTrend(t, w.runs_count) : DURATION_TREND_PENDING
   }
   const filtered = $derived(filter !== 'all' || q !== '')
-  const skillsPending = $derived(filter === 'skills' && all.some((w) => !(w.id in skills)))
 
   const chips = $derived(WORKFLOW_FILTERS.map((f) => (f.value === 'all' ? { value: f.value, label: f.label, count: all.length } : { value: f.value, label: f.label })))
 
@@ -164,7 +146,7 @@
       {errorText(list.error)}
       {#snippet action()}<Button size="sm" onclick={() => list.refresh()}>Retry</Button>{/snippet}
     </Callout>
-  {:else if !list.data || (skillsPending && rows.length === 0)}
+  {:else if !list.data}
     <section class="sky-wfs__grid" aria-label="Workflow list" aria-busy="true">
       <Skeleton label="Loading workflows" variant="block" height="13rem" />
       <Skeleton variant="block" height="13rem" />
@@ -186,7 +168,7 @@
     <ul class="sky-wfs__grid" aria-label="Workflow list" aria-busy={list.loading}>
       {#each rows as w (w.id)}
         {@const cat = workflowCategory(w.workflow_type)}
-        {@const names = skills[w.id] ?? []}
+        {@const names = skills.get(w.id) ?? []}
         {@const trend = trendOf(w)}
         <li class="sky-wfs__card" data-sky-row>
           <div class="sky-wfs__top">
