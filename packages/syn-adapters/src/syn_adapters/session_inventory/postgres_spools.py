@@ -142,6 +142,21 @@ class PostgresCaptureSpools:
                 run.execution_id,
             )
 
+    async def session_ids(self, execution_id: str) -> set[str]:
+        """Every session of ``execution_id`` whose capture went to a spool volume.
+
+        The workspace reclaimer reads it as proof that a session's capture is
+        not in its workspace directory (#1983); a session missing here is not.
+        """
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                """SELECT session_id FROM session_capture_spools
+                WHERE source_instance_id=$1 AND payload->'run'->>'execution_id'=$2""",
+                self._source,
+                execution_id,
+            )
+        return {str(row["session_id"]) for row in rows}
+
     async def mark_drained(self, lease: CaptureSpoolLease) -> None:
         """Stamp the traversal start, not its end: bytes written after the claim
         are not proven archived by this traversal."""

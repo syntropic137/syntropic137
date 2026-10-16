@@ -768,6 +768,18 @@ test-integration:
     @echo "   (Uses test-stack if running, otherwise testcontainers)"
     uv run pytest -m integration --tb=short
 
+# The full integration suite as an evidence run: no -x, JUnit XML, and an
+# evidence.json saying whether every named test ran and passed. What
+# integration-evidence.yml runs (docs/plans/20261015_platform-dispatched-evidence.md):
+#   just test-integration-ci <pr> "<node ids>"
+test-integration-ci $pr $tests $out="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    out="${out:-$(mktemp -d)}"; mkdir -p "$out"
+    INTEGRATION_PR="$pr" INTEGRATION_TESTS="$tests" INTEGRATION_SHA="$(git rev-parse HEAD)" \
+        python3 -I scripts/integration_evidence.py run --root . \
+        --report "$out/integration-evidence.md" --evidence "$out/evidence.json"
+
 # Run integration tests with test-stack lifecycle (start → test → cleanup)
 test-integration-full: test-stack
     @echo "🧪 Running integration tests against test stack..."
@@ -2537,6 +2549,17 @@ changelog-check *args:
 # Image build, push, retag and release-asset recipes live in just/release.just
 # (imported at the top of this file), so they can be owner-reviewed without
 # putting every other recipe behind CODEOWNERS.
+
+# Dry run by default. --apply sets maintenance and refuses unless quiescent
+# (no running execution or workspace container, the automatic reclaimer
+# paused); quiescence is re-checked before every directory.
+#   just vps-reclaim                                 (what would go, and why the rest stays)
+#   just vps-reclaim --apply --budget-minutes 10     (delete; rerun to continue)
+#   just vps-reclaim --apply --lift-maintenance      (and reopen admission after)
+# Reclaim the workspace backlog on the selfhost VPS, as root (#1983)
+[positional-arguments]
+vps-reclaim *flags:
+    uv run python infra/scripts/vps_reclaim.py "$@"
 
 # Pit stop: put a beta on the selfhost VPS fast - stage early, swap late.
 # Codifies docs/deployment/test-deploy.md (direct path). Not a release.
