@@ -1,8 +1,8 @@
 diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/evidence_record.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/evidence_record.py
-index 0998027be..17b7e94ee 100644
+index d10a0b1ff..88d956e8d 100644
 --- a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/evidence_record.py
 +++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/evidence_record.py
-@@ -154,7 +154,8 @@ class EvidenceRecord:
+@@ -109,7 +109,8 @@ class EvidenceRecord:
      _observed: dict[str, tuple[ObservedHead, ...]] = field(default_factory=dict)
  
      def report(self, phase_id: str, declared: tuple[DeclaredEvidence, ...]) -> None:
