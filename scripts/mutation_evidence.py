@@ -45,7 +45,9 @@ and a separate comment job. The limit: a PR written to forge its own verdict
 could. Host-mode evidence is for honest PR code, not a security boundary.
 
 A named test that SKIPS, XFAILS or XPASSES voids the baseline: none of those
-is a pass, and each would read as one under every mutant.
+is a pass, and each would read as one under every mutant. So does a named
+selector with no PASSED test of its own on record (`-rp`): a file that collects
+nothing beside one that passes would otherwise share its pass.
 
 What a survival means, and what it does not: these are the NAMED tests only. A
 narrow selection can prove a kill, never that the wider suite misses the
@@ -142,6 +144,9 @@ _FORBIDDEN_PREFIXES: Final = (".github/", "ci/")
 _SKIP_WALK: Final = frozenset({".git", ".venv", "node_modules"})
 
 _SUMMARY_LINE_RE: Final = re.compile(r"^(FAILED|ERROR) (\S+)")
+#: `-rp` lists each passing test as `PASSED <node id>`, with no reason, so the
+#: rest of the line is the id (parameters may hold spaces).
+_PASSED_LINE_RE: Final = re.compile(r"^PASSED (.+)$")
 _PASSED_RE: Final = re.compile(r"\b(\d+) passed\b")
 _SKIPPED_RE: Final = re.compile(r"\b(\d+) skipped\b")
 _XFAIL_RE: Final = re.compile(r"\b(\d+) x(?:failed|passed)\b")
@@ -179,6 +184,9 @@ class PytestRun:
     seconds: float
     skipped: int = 0
     xfail: int = 0
+    #: Node ids pytest reported PASSED. A requested id is proven only by these:
+    #: the counts cannot say WHICH selector supplied a pass.
+    passing: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -262,6 +270,11 @@ class EvidenceReport:
 
     def to_json(self) -> str:
         return json.dumps({"schema": EVIDENCE_SCHEMA, **asdict(self)}, indent=2) + "\n"
+
+
+def selects(selector: str, node_id: str) -> bool:
+    """Whether `node_id` is the test `selector` names, or one inside it."""
+    return node_id == selector or node_id.startswith((f"{selector}::", f"{selector}["))
 
 
 def covers(selector: str, node_id: str) -> bool:
@@ -538,12 +551,19 @@ def parse_pytest_output(output: str) -> tuple[tuple[str, ...], int, int, int]:
     return failing, passed, skipped, xfail
 
 
+def parse_passing_ids(output: str) -> tuple[str, ...]:
+    """Node ids from the `-rp` short summary's PASSED lines."""
+    return tuple(
+        dict.fromkeys(m.group(1) for ln in output.splitlines() if (m := _PASSED_LINE_RE.match(ln)))
+    )
+
+
 def pytest_args(tests: tuple[str, ...]) -> list[str]:
     # `-m ""` clears the repo's `-m "not integration"` addopt: a named
     # integration test must run, not be deselected into a vacuous pass.
     return [
         "uv", "run", "--frozen", "pytest", "-m", "", "-p", "no:cacheprovider",
-        "--color=no", "-rfEsxX", "--", *tests,
+        "--color=no", "-rfEsxXp", "--", *tests,
     ]  # fmt: skip
 
 
@@ -613,7 +633,9 @@ def make_runner(sandbox: Sandbox | None) -> Runner:
         print(output[-20000:], flush=True)
         failing, passed, skipped, xfail = parse_pytest_output(output)
         elapsed = time.monotonic() - started
-        return PytestRun(proc.returncode, failing, passed, elapsed, skipped, xfail)
+        return PytestRun(
+            proc.returncode, failing, passed, elapsed, skipped, xfail, parse_passing_ids(output)
+        )
 
     return run
 
@@ -675,6 +697,10 @@ def evaluate_patch(root: Path, patch: Path, inputs: Inputs, runner: Runner) -> P
     return PatchResult(name, outcome, files, run.failing, run.seconds, detail)
 
 
+def _baseline_passed(baseline: PytestRun, selector: str) -> bool:
+    return any(selects(selector, node_id) for node_id in baseline.passing)
+
+
 def execute(root: Path, inputs: Inputs, sha: str, runner: Runner) -> Evidence:
     evidence = Evidence(pr=inputs.pr, sha=sha, tests=inputs.tests)
     for test_file in sorted(inputs.test_files):
@@ -709,6 +735,12 @@ def execute(root: Path, inputs: Inputs, sha: str, runner: Runner) -> Evidence:
         # executes, and a non-strict xpass is green whether or not it works.
         evidence.baseline_detail = (
             f"baseline has {evidence.baseline.xfail} xfailed/xpassed test(s), evidence void"
+        )
+    elif unproven := [t for t in inputs.tests if not _baseline_passed(evidence.baseline, t)]:
+        # The pass count is the suite's, not each selector's: a requested file
+        # that collected nothing sits silently beside one that passed.
+        evidence.baseline_detail = (
+            f"baseline ran no passing test for {', '.join(dict.fromkeys(unproven))}, evidence void"
         )
     if evidence.baseline_detail:
         return evidence
@@ -789,7 +821,7 @@ def requested_outcome(baseline: PytestRun, node_id: str) -> TestOutcome:
     The baseline reports failing ids but only COUNTS for everything else, so a
     skip or xfail among several requested ids is charged to each of them. That
     is the honest direction: such a baseline is void, and an id is reported
-    `passed` only when the baseline proves it.
+    `passed` only when the baseline reported a PASSED test it selects.
     """
     if any(covers(node_id, failing) for failing in baseline.failing):
         return TestOutcome.FAILED
@@ -801,7 +833,7 @@ def requested_outcome(baseline: PytestRun, node_id: str) -> TestOutcome:
         # Red with nothing on record: an interrupt or a timeout. (5 is nothing
         # collected; 4 is a node id pytest could not find.)
         return TestOutcome.FAILED
-    if baseline.passed == 0:
+    if not _baseline_passed(baseline, node_id):
         return TestOutcome.NOT_COLLECTED
     return TestOutcome.PASSED
 

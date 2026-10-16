@@ -12,6 +12,7 @@ runner that fails exactly when the source file differs from HEAD.
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path, PurePosixPath
 
 import pytest
@@ -347,7 +348,7 @@ def repo(tmp_path: Path) -> Path:
 
 def _runner_sensitive_to_mod(root: Path, tests: tuple[str, ...]) -> PytestRun:
     if (root / "pkg" / "mod.py").read_text() == ORIGINAL:
-        return PytestRun(0, (), len(tests), 0.01)
+        return PytestRun(0, (), len(tests), 0.01, passing=tests)
     return PytestRun(1, tests, 0, 0.02)
 
 
@@ -498,7 +499,7 @@ def test_patch_through_a_symlink_is_refused(repo: Path) -> None:
 def test_interrupt_is_an_error_not_a_kill(repo: Path) -> None:
     def interrupted(root: Path, tests: tuple[str, ...]) -> PytestRun:
         if (root / "pkg" / "mod.py").read_text() == ORIGINAL:
-            return PytestRun(0, (), 1, 0.0)
+            return PytestRun(0, (), 1, 0.0, passing=tests)
         return PytestRun(2, (), 0, 0.0)
 
     evidence = execute(repo, _inputs(), SHA, interrupted)
@@ -693,7 +694,7 @@ def test_evidence_json_for_a_void_baseline_never_claims_a_pass(
 
 def test_evidence_json_charges_a_failure_only_to_the_id_that_failed(repo: Path) -> None:
     other = "checks/spec.py::test_guard"
-    collection_error = PytestRun(2, ("pkg/tests/test_mod.py",), 1, 0.0)
+    collection_error = PytestRun(2, ("pkg/tests/test_mod.py",), 1, 0.0, passing=(other,))
 
     report = _evidence_json(repo, lambda _root, _tests: collection_error, TEST_ID, other)
 
@@ -771,3 +772,56 @@ def test_run_writes_no_evidence_json_when_no_verdict_was_reached(
     assert code == 1
     assert "does not exist" in md.read_text()
     assert not evidence_file.exists()
+
+
+def _real_pytest_runner(monkeypatch: pytest.MonkeyPatch) -> me.Runner:
+    """The production runner with only `uv run --frozen` swapped for this
+    interpreter: real pytest output, parsed by the real parsers."""
+    prefix = ["uv", "run", "--frozen", "pytest"]
+
+    def host(args: list[str]) -> tuple[list[str], dict[str, str]]:
+        assert args[: len(prefix)] == prefix
+        return [sys.executable, "-m", "pytest", *args[len(prefix) :]], {
+            "PYTHONDONTWRITEBYTECODE": "1"
+        }
+
+    monkeypatch.setattr(me, "_host_command", host)
+    return me.make_runner(None)
+
+
+def test_evidence_json_never_lends_a_pass_to_a_requested_file_that_collected_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # One requested file has a real killing test; the other collects nothing.
+    # The suite's pass count is 1 either way: only per-id identity tells them apart.
+    root = tmp_path / "repo"
+    (root / "tests").mkdir(parents=True)
+    (root / "pytest.ini").write_text("[pytest]\npythonpath = .\n")
+    (root / "mod.py").write_text("VALUE = 1\n")
+    (root / "tests" / "test_real.py").write_text(
+        "import mod\ndef test_value():\n    assert mod.VALUE == 1\n"
+    )
+    (root / "tests" / "test_empty.py").write_text("")
+    _git(root, "init", "-q")
+    _git(root, "config", "user.email", "t@example.invalid")
+    _git(root, "config", "user.name", "t")
+    _git(root, "add", ".")
+    _git(root, "commit", "-q", "-m", "source")
+    (root / ".mutations").mkdir()
+    _commit_patch(root, "01-value.patch", _diff_patch(root, "mod.py", "VALUE = 2\n"))
+    runner = _real_pytest_runner(monkeypatch)
+    real, empty = "tests/test_real.py", "tests/test_empty.py"
+
+    killed = _evidence_json(root, runner, real)
+    report = _evidence_json(root, runner, real, empty)
+
+    # The killing test alone certifies: the regression is in the empty file only.
+    assert killed.verdict is ContractVerdict.PASSED, killed.report_md
+    assert [r.outcome for r in killed.requested] == [ContractOutcome.PASSED]
+    assert report.verdict is ContractVerdict.VOID, report.report_md
+    assert [(r.id, r.outcome) for r in report.requested] == [
+        (real, ContractOutcome.PASSED),
+        (empty, ContractOutcome.NOT_COLLECTED),
+    ]
+    assert f"no passing test for {empty}" in report.summary
+    assert report.suite.passed == 1
