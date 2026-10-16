@@ -269,35 +269,41 @@ def observer_unsafe(document: _DockerContainer) -> str | None:
       (``bind-recursive=writable`` / ``disabled``), which ``RW`` does not show.
     """
     host = document.host_config
-    mounts = document.mounts
-    checks = (
-        (mounts is not None, "its mounts are unknown"),
-        (host is not None, "its HostConfig is unknown"),
-        (host is not None and host.privileged is False, "it is privileged or may be"),
-        (
-            host is not None and not _adds_remount_cap(host.cap_add),
-            "it adds a capability that can remount (SYS_ADMIN)",
-        ),
+    if document.mounts is None:
+        return "its mounts are unknown"
+    if host is None:
+        return "its HostConfig is unknown"
+    return (
+        _host_unsafe(host)
+        or next(filter(None, map(_mount_unsafe, document.mounts)), None)
+        or next(filter(None, map(_submounts_unsafe, host.mounts or ())), None)
     )
-    for ok, why in checks:
-        if not ok:
-            return why
-    for mount in mounts or ():
-        if mount.rw is not False:
-            return f"its mount at {mount.destination} is not read-only (RW {mount.rw})"
-        if mount.type == "bind" and (mount.propagation or "rprivate") not in _PRIVATE_PROPAGATION:
-            return f"its bind at {mount.destination} has {mount.propagation} propagation"
-    for host_mount in host.mounts or () if host is not None else ():
-        options = host_mount.bind_options
-        if options is not None and (
-            options.read_only_non_recursive is True or options.non_recursive is True
-        ):
-            return f"its bind at {host_mount.target} does not carry submounts read-only"
+
+
+def _host_unsafe(host: _HostConfig) -> str | None:
+    if host.privileged is not False:
+        return "it is privileged or may be"
+    if any(cap.upper() in _REMOUNT_CAPS for cap in host.cap_add or ()):
+        return "it adds a capability that can remount (SYS_ADMIN)"
     return None
 
 
-def _adds_remount_cap(caps: tuple[str, ...] | None) -> bool:
-    return any(cap.upper() in _REMOUNT_CAPS for cap in caps or ())
+def _mount_unsafe(mount: _DockerMount) -> str | None:
+    """One mount record on its own: a writable duplicate is not hidden by a read-only one."""
+    if mount.rw is not False:
+        return f"its mount at {mount.destination} is not read-only (RW {mount.rw})"
+    if mount.type == "bind" and (mount.propagation or "rprivate") not in _PRIVATE_PROPAGATION:
+        return f"its bind at {mount.destination} has {mount.propagation} propagation"
+    return None
+
+
+def _submounts_unsafe(host_mount: _HostMount) -> str | None:
+    options = host_mount.bind_options
+    if options is not None and (
+        options.read_only_non_recursive is True or options.non_recursive is True
+    ):
+        return f"its bind at {host_mount.target} does not carry submounts read-only"
+    return None
 
 
 def parse_inspect(raw: str) -> _Inspected | None:
