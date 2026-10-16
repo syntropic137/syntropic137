@@ -148,6 +148,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects 
     IsolationConfig,
     SecurityPolicy,
     SidecarConfig,
+    WorkspaceDeleteFallback,
     WorkspaceUsage,
 )
 from syn_domain.contexts.orchestration.domain.commands import (
@@ -531,6 +532,7 @@ __all__ = [
     "WorkflowTemplateVersionAlreadyInstalledError",
     "WorkflowType",
     "WorkspaceAggregate",
+    "WorkspaceDeleteFallback",
     "WorkspaceDirRemover",
     "WorkspaceUsage",
     "announce_as",
