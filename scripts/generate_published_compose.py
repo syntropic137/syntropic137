@@ -40,6 +40,7 @@ SERVICE_IMAGES: dict[str, str] = {
     "event-store": "ghcr.io/syntropic137/event-store",
     "collector": "ghcr.io/syntropic137/syn-collector",
     "api": "ghcr.io/syntropic137/syn-api",
+    "docker-create-guard": "ghcr.io/syntropic137/syn-api",
     "gateway": "ghcr.io/syntropic137/syn-gateway",
     "envoy-proxy": "ghcr.io/syntropic137/sidecar-proxy",
     "token-injector": "ghcr.io/syntropic137/token-injector",
@@ -51,6 +52,7 @@ SERVICE_ORDER = [
     "event-store",
     "collector",
     "docker-socket-proxy",
+    "docker-create-guard",
     "api",
     "gateway",
     "cloudflared",
@@ -388,6 +390,25 @@ def _rewrite_secrets(secrets: dict) -> dict:
     return result
 
 
+def _inline_configs(configs: dict, compose_dir: Path) -> dict:
+    """Inline file-based configs as `content`, so the published file stays standalone.
+
+    A self-hoster downloads the published compose alone (plus the release
+    assets), so a `file:` reference into the repo cannot survive. Compose
+    interpolates `content`, so every `$` is escaped as `$$`: the file reaches
+    the container byte for byte, and any `${VAR}` in it stays for the image to
+    render. Only `file:` configs are supported; anything else is refused rather
+    than published unreviewed.
+    """
+    result: dict[str, dict] = {}
+    for name, defn in configs.items():
+        if not isinstance(defn, dict) or set(defn) != {"file"}:
+            raise ValueError(f"config {name}: only `{{file: ...}}` configs can be published")
+        text = (compose_dir / defn["file"]).read_text()
+        result[name] = {"content": text.replace("$", "$$")}
+    return result
+
+
 # =============================================================================
 # Generation
 # =============================================================================
@@ -453,12 +474,18 @@ def generate() -> dict:
     # Named volumes inherit from the base just like service mounts.
     volumes = {**(base.get("volumes", {}) or {}), **(selfhost.get("volumes", {}) or {})}
 
+    configs = _inline_configs(
+        {**(base.get("configs", {}) or {}), **(selfhost.get("configs", {}) or {})},
+        BASE_COMPOSE.parent,
+    )
+
     return {
         "name": "syntropic137_selfhost",
         "services": ordered_svcs,
         "secrets": merged_secrets,
         "volumes": volumes,
         "networks": merged_nets,
+        "configs": configs,
     }
 
 

@@ -711,6 +711,11 @@ check-event-store-pin:
 check-compose-images-public:
     @uv run python scripts/check_compose_images_public.py
 
+# The generated docker-socket-proxy template (#1806) must still match the pinned
+# image's own template and pass `haproxy -c` inside that image. Needs docker.
+check-docker-proxy-haproxy:
+    @uv run python scripts/docker_socket_proxy_config.py --validate
+
 check-default-workspace-image:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1080,7 +1085,7 @@ fitness-invariants-agent:
 #
 # Add a gate here, never to CI alone. `test_ci_and_preflight_agree.py` fails
 # if a `just` target CI runs is not in this closure.
-preflight: preflight-portable check-submodules vsa-validate fitness codegen-check check-architecture-docs check-compose-overlays check-default-workspace-image check-pinned-image-channels check-event-store-pin check-compose-images-public
+preflight: preflight-portable check-submodules vsa-validate fitness codegen-check check-architecture-docs check-compose-overlays check-default-workspace-image check-pinned-image-channels check-event-store-pin check-compose-images-public check-docker-proxy-haproxy
     @echo "✅ preflight: every STATIC CI gate passed locally"
     @echo "   Not covered here: unit tests, dashboard build, CLI checks and"
     @echo "   the docs build. Run 'just qa-ci' for all of those."
@@ -1122,6 +1127,8 @@ preflight-portable: check-agent-docs lint format-check typecheck validate-domain
 #   check-default-workspace-image      exit 127  no docker CLI
 #   check-pinned-image-channels        exit 1    no registry credentials
 #   check-event-store-pin              (added 2026-10-04, not measured in the
+#                                      image; needs the docker CLI, absent)
+#   check-docker-proxy-haproxy         (added 2026-10-14, not measured in the
 #                                      image; needs the docker CLI, absent)
 #
 # Re-measure before moving a recipe across the line. "It should work" is how
@@ -1169,7 +1176,8 @@ preflight-agent: preflight-portable fitness-agent fitness-invariants-agent
     @echo "   Not run here (no toolchain in the image): vsa-validate,"
     @echo "   codegen-check, check-submodules, check-compose-overlays,"
     @echo "   check-default-workspace-image, check-pinned-image-channels,"
-    @echo "   check-event-store-pin, check-compose-images-public."
+    @echo "   check-event-store-pin, check-compose-images-public,"
+    @echo "   check-docker-proxy-haproxy."
     @echo "   CI runs all of those. Run 'just preflight' on a dev machine."
 
 # Regenerate CLAUDE.md from AGENTS.md.
@@ -2069,6 +2077,7 @@ codex-auth-clip *flags:
 # setting -- which is the #1101 gap with an extra step.
 gen-compose:
     uv run python scripts/settings_forwarding.py
+    uv run python scripts/docker_socket_proxy_config.py
     uv run python scripts/generate_published_compose.py
 
 # Check both compose artifacts are up to date (CI mode -- fails if stale).
@@ -2077,6 +2086,7 @@ gen-compose:
 # passthrough (#1101).
 check-compose:
     uv run python scripts/settings_forwarding.py --check
+    uv run python scripts/docker_socket_proxy_config.py --check
     uv run python scripts/generate_published_compose.py --check
 
 # Plugin JSON schemas must match the Pydantic models. These are what third-party
