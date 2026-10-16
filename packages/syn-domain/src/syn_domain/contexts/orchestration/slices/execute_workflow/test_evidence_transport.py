@@ -26,11 +26,11 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.commands impor
     StartPhaseCommand,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.evidence_record import (
-    DeclaredEvidence,
-    ObservedHead,
+    declared_evidence_from_reported,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins import StartPins
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    ObservedHead,
     PhaseDefinition,
     SourceCommit,
 )
@@ -97,7 +97,7 @@ class TestTheParse:
 
     def test_a_string_pr_number_is_not_coerced(self) -> None:
         """Strict: `"7"` is a string, not a pull request number."""
-        [declared] = DeclaredEvidence.from_reported([{**ENTRY, "pr": "7"}])
+        [declared] = declared_evidence_from_reported([{**ENTRY, "pr": "7"}])
 
         assert declared.request is None
 
@@ -115,7 +115,7 @@ class TestTheParse:
 
 @pytest.mark.anyio
 async def test_the_handler_copies_the_declaration_onto_its_command() -> None:
-    declared = DeclaredEvidence.from_reported([ENTRY])
+    declared = declared_evidence_from_reported([ENTRY])
     workspace = MagicMock()
     workspace.last_stream_exit_code = 0
     workspace.collect_files = AsyncMock(return_value=[])
@@ -219,7 +219,7 @@ def _aggregate(
             execution_id="exec-ev",
             phase_id="implement",
             session_id="s",
-            reported_evidence=DeclaredEvidence.from_reported(declared),
+            reported_evidence=declared_evidence_from_reported(declared),
         )
     )
     return aggregate

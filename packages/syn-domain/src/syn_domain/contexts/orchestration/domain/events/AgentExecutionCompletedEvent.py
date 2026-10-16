@@ -9,10 +9,8 @@ from event_sourcing import DomainEvent, event
 from pydantic import Field, field_validator
 
 # Runtime import needed for the Pydantic field type (noqa: TC001)
-from syn_domain.contexts.orchestration.domain.aggregate_execution.evidence_record import (
-    DeclaredEvidence,  # noqa: TC001 - needed at runtime for Pydantic
-)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    DeclaredEvidence,  # noqa: TC001 - needed at runtime for Pydantic
     ReviewVerdict,  # noqa: TC001 - needed at runtime for Pydantic
     SideEffectStatus,  # noqa: TC001 - needed at runtime for Pydantic
 )

@@ -15,11 +15,11 @@ from syn_domain.contexts.orchestration._shared.evidence_contract import (
     EvidenceRequest,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.evidence_record import (
-    DeclaredEvidence,
-    ObservedHead,
     read_declared_evidence,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    DeclaredEvidence,
+    ObservedHead,
     PhaseDefinition,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (

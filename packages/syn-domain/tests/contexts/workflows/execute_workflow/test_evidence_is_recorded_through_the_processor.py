@@ -18,7 +18,7 @@ import pytest
 from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continuation import (
     RemoteBranchReading,
 )
-from syn_domain.contexts.orchestration.domain.aggregate_execution.evidence_record import (
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ObservedHead,
 )
 from syn_domain.contexts.orchestration.domain.events.AgentExecutionCompletedEvent import (

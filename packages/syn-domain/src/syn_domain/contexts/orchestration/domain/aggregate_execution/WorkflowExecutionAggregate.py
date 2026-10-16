@@ -113,7 +113,7 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.aggregate_execution.aggregate_edits import (
         AggregateEdit,
     )
-    from syn_domain.contexts.orchestration.domain.aggregate_execution.evidence_record import (
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
         DeclaredEvidence,
         ObservedHead,
     )

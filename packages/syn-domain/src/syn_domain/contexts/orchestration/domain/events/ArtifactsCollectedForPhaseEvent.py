@@ -7,7 +7,7 @@ from datetime import datetime  # noqa: TC003 - needed at runtime for Pydantic
 from event_sourcing import DomainEvent, event
 from pydantic import Field
 
-from syn_domain.contexts.orchestration.domain.aggregate_execution.evidence_record import (
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ObservedHead,  # noqa: TC001 - needed at runtime for Pydantic
 )
 

@@ -22,19 +22,17 @@ if TYPE_CHECKING:
         ContinuedBranch,
         RemoteBranchReading,
     )
-    from syn_domain.contexts.orchestration.domain.aggregate_execution.evidence_record import (
-        DeclaredEvidence,
-        ObservedHead,
-    )
     from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins import (
         ResumeOrigin,
         SourceCommit,
     )
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
         BranchObservation,
+        DeclaredEvidence,
         DelegationFailure,
         ExecutablePhase,
         FailureClassification,
+        ObservedHead,
         PhaseDefinition,
         QuarantinedRef,
         ReportedFailureReason,

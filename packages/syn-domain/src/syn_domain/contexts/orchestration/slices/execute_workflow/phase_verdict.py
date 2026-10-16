@@ -219,9 +219,10 @@ from typing import Final
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.evidence_record import (
-    DeclaredEvidence,
+    declared_evidence_from_reported,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    DeclaredEvidence,
     FailureClassification,
     ReportedFailureReason,
     ReviewVerdict,
@@ -376,7 +377,7 @@ class AgentVerdict:
             reported_failure_reason=ReportedFailureReason.from_reported(reported.failure_reason),
             reported_side_effects=SideEffectStatus.from_reported(reported.side_effects),
             reported_review_verdict=ReviewVerdict.from_reported(reported.review_verdict),
-            reported_evidence=DeclaredEvidence.from_reported(reported.evidence),
+            reported_evidence=declared_evidence_from_reported(reported.evidence),
         )
 
     @classmethod
@@ -423,7 +424,7 @@ class AgentVerdict:
             reported_failure_reason=ReportedFailureReason.from_reported(aliased.failure_reason),
             reported_side_effects=SideEffectStatus.from_reported(aliased.side_effects),
             reported_review_verdict=ReviewVerdict.from_reported(aliased.review_verdict),
-            reported_evidence=DeclaredEvidence.from_reported(aliased.evidence),
+            reported_evidence=declared_evidence_from_reported(aliased.evidence),
         )
 
     @property
@@ -657,7 +658,7 @@ class _ReportedResult(BaseModel):
     side_effects: object | None = None
     #: `object` for the same reason, and a misspelling costs only the word.
     review_verdict: object | None = None
-    #: `object` for the same reason: `DeclaredEvidence.from_reported` keeps a
+    #: `object` for the same reason: `declared_evidence_from_reported` keeps a
     #: malformed entry as an unreadable declaration, never fails the block.
     evidence: object | None = None
 
