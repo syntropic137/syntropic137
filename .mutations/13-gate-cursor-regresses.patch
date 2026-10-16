@@ -1,17 +1,17 @@
 diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execution_todo/projection.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execution_todo/projection.py
-index 7656d6a94..46e4c8547 100644
+index 8e382a7dd..b68a8e281 100644
 --- a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execution_todo/projection.py
 +++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execution_todo/projection.py
-@@ -120,7 +120,7 @@ def _is_current_evidence_step(item: TodoItem, gates: dict[str, int]) -> bool:
+@@ -128,7 +128,7 @@ def _is_current_evidence_step(item: TodoItem, gates: _GateCursors) -> bool:
      if item.action != TodoAction.RUN_EVIDENCE_STEP or item.evidence_gate_id is None:
          return True
-     cursor = gates.get(item.evidence_gate_id)
+     cursor = gates.by_gate.get(item.evidence_gate_id)
 -    return cursor is None or item.evidence_step == cursor
 +    return True
  
  
  def _moves_cursor(cursor: int | None, settled: int | None) -> bool:
-@@ -131,7 +131,7 @@ def _moves_cursor(cursor: int | None, settled: int | None) -> bool:
+@@ -139,7 +139,7 @@ def _moves_cursor(cursor: int | None, settled: int | None) -> bool:
      """
      if cursor is None:
          return True

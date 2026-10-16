@@ -101,19 +101,25 @@ class EvidenceGateHandlers:
     @command_handler("StartEvidenceAttemptCommand")
     def start_evidence_attempt(self, command: StartEvidenceAttemptCommand) -> None:
         """Record an attempt before its dispatch is posted (plan §A.5, B3)."""
-        self._require_running("start an evidence attempt")
+        if self._status != ExecutionStatus.RUNNING:
+            msg = f"Cannot start an evidence attempt in status {self._status}"
+            raise ValueError(msg)
         self._apply(evidence_steps.start_attempt(self._gates, command))
 
     @command_handler("RecordEvidenceRunAdoptedCommand")
     def record_evidence_run_adopted(self, command: RecordEvidenceRunAdoptedCommand) -> None:
         """Record the forge run that answers a step's current attempt."""
-        self._require_running("adopt an evidence run")
+        if self._status != ExecutionStatus.RUNNING:
+            msg = f"Cannot adopt an evidence run in status {self._status}"
+            raise ValueError(msg)
         self._apply(evidence_steps.adopt_run(self._gates, command))
 
     @command_handler("RecordMutationPatchesRemovedCommand")
     def record_mutation_patches_removed(self, command: RecordMutationPatchesRemovedCommand) -> None:
         """Record the platform's S -> S' commit and settle the removal step."""
-        self._require_running("record a patch removal")
+        if self._status != ExecutionStatus.RUNNING:
+            msg = f"Cannot record a patch removal in status {self._status}"
+            raise ValueError(msg)
         removed, settled = evidence_steps.record_removal(self._gates, command)
         self._apply(removed)
         self._settle(settled)
@@ -121,17 +127,14 @@ class EvidenceGateHandlers:
     @command_handler("SettleEvidenceStepCommand")
     def settle_evidence_step(self, command: SettleEvidenceStepCommand) -> None:
         """Settle a gate's current step; the last settle releases the held phase."""
-        self._require_running("settle an evidence step")
+        if self._status != ExecutionStatus.RUNNING:
+            msg = f"Cannot settle an evidence step in status {self._status}"
+            raise ValueError(msg)
         self._settle(evidence_steps.settle(self._gates, command))
 
     def preview_evidence_settlement(self, command: SettleEvidenceStepCommand) -> SettledStep:
         """What ``command`` would record, by the same rule, without recording it (§A.6)."""
         return evidence_replay.settled_step(evidence_steps.settle(self._gates, command))
-
-    def _require_running(self, action: str) -> None:
-        if self._status != ExecutionStatus.RUNNING:
-            msg = f"Cannot {action} in status {self._status}"
-            raise ValueError(msg)
 
     def _settle(self, settled: EvidenceStepSettledEvent) -> None:
         self._apply(settled)

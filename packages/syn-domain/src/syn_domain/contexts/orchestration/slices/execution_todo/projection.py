@@ -41,6 +41,7 @@ highwater mark, so a resurrected stale todo is never served.
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar
 
 from event_sourcing import AutoDispatchProjection
@@ -115,11 +116,18 @@ _RANK_PHASE_DONE = 99
 _GATE_CLOSED = 1_000_000
 
 
-def _is_current_evidence_step(item: TodoItem, gates: dict[str, int]) -> bool:
+@dataclass
+class _GateCursors:
+    """Each evidence gate's cursor: its lowest unsettled step, or `_GATE_CLOSED`."""
+
+    by_gate: dict[str, int] = field(default_factory=dict)
+
+
+def _is_current_evidence_step(item: TodoItem, gates: _GateCursors) -> bool:
     """An evidence to-do is served only at its gate's cursor; others are stale."""
     if item.action != TodoAction.RUN_EVIDENCE_STEP or item.evidence_gate_id is None:
         return True
-    cursor = gates.get(item.evidence_gate_id)
+    cursor = gates.by_gate.get(item.evidence_gate_id)
     return cursor is None or item.evidence_step == cursor
 
 
@@ -229,7 +237,7 @@ class ExecutionTodoProjection(AutoDispatchProjection):
         raw_progress = data.get("phase_progress")
         progress: dict[str, int] = raw_progress if isinstance(raw_progress, dict) else {}
         raw_gates = data.get("evidence_progress")
-        gates: dict[str, int] = raw_gates if isinstance(raw_gates, dict) else {}
+        gates = _GateCursors(dict(raw_gates) if isinstance(raw_gates, dict) else {})
         return [
             item
             for item in items
@@ -484,9 +492,9 @@ class ExecutionTodoProjection(AutoDispatchProjection):
         """
         async with self._lock_for(execution_id):
             current, progress, gates = await self._read_state(execution_id)
-            if not _moves_cursor(gates.get(gate_id), settled):
+            if not _moves_cursor(gates.by_gate.get(gate_id), settled):
                 return  # A duplicate or a late delivery: the gate has moved on.
-            gates[gate_id] = _GATE_CLOSED if following is None else following
+            gates.by_gate[gate_id] = _GATE_CLOSED if following is None else following
             remaining = [t for t in current if not _is_step(t, gate_id, settled)]
             if following is not None and not any(
                 _is_step(t, gate_id, following) for t in remaining
@@ -524,18 +532,18 @@ class ExecutionTodoProjection(AutoDispatchProjection):
 
     async def _read_state(
         self, execution_id: str
-    ) -> tuple[list[TodoItem], dict[str, int], dict[str, int]]:
+    ) -> tuple[list[TodoItem], dict[str, int], _GateCursors]:
         """Read (items, phase_progress, evidence_progress). Empty when absent."""
         data = await self._store.get(self.PROJECTION_NAME, execution_id)
         if not data:
-            return [], {}, {}
+            return [], {}, _GateCursors()
         items = [_item_from_dict(d) for d in data.get("items", [])]
         progress = data.get("phase_progress")
         gates = data.get("evidence_progress")
         return (
             items,
             dict(progress) if isinstance(progress, dict) else {},
-            dict(gates) if isinstance(gates, dict) else {},
+            _GateCursors(dict(gates) if isinstance(gates, dict) else {}),
         )
 
     async def _save_state(
@@ -543,7 +551,7 @@ class ExecutionTodoProjection(AutoDispatchProjection):
         execution_id: str,
         items: list[TodoItem],
         progress: dict[str, int],
-        gates: dict[str, int],
+        gates: _GateCursors,
     ) -> None:
         """Persist (items, phase_progress, evidence_progress) for an execution."""
         await self._store.save(
@@ -553,7 +561,7 @@ class ExecutionTodoProjection(AutoDispatchProjection):
                 "execution_id": execution_id,
                 "items": [_item_to_dict(t) for t in items],
                 "phase_progress": progress,
-                "evidence_progress": gates,
+                "evidence_progress": dict(gates.by_gate),
             },
         )
 
