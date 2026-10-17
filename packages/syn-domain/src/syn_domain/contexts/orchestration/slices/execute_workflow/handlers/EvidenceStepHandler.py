@@ -177,7 +177,7 @@ class _StepRun:
                 await self._settle(StepOutcome.UNAVAILABLE, "timeout")
                 return
             if attempt.run_id is None or attempt.run_url is None:
-                run = self._parents_run() or await self._find(attempt)
+                run = await self._find(attempt)
                 if run is None:
                     attempt = await self._retry("dispatch_lost")
                     continue
@@ -303,7 +303,11 @@ class _StepRun:
         """Look for the attempt's run until it should have become visible (§A.5 2).
 
         Never past the step's own deadline, which may be the sooner of the two.
+        No look-up at all when the attempt is the parent's and it named its run.
         """
+        known = self._parents_run()
+        if known is not None:
+            return known
         deadline = min(attempt.started_at + self.h.timings.dispatch_visibility, attempt.not_after)
         while True:
             run = await self.h.runner.find_run(self._ref(attempt))
