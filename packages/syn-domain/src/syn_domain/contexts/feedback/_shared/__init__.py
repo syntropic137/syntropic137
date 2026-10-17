@@ -9,9 +9,12 @@ from syn_domain.contexts.feedback._shared.value_objects import (
     PullRequestState,
     ResolutionRule,
     Screening,
+    SourceKey,
+    SourceStatus,
     TicketStatus,
     TicketType,
     derive_status,
+    rotate_keys,
 )
 
 __all__ = [
@@ -23,7 +26,10 @@ __all__ = [
     "PullRequestState",
     "ResolutionRule",
     "Screening",
+    "SourceKey",
+    "SourceStatus",
     "TicketStatus",
     "TicketType",
     "derive_status",
+    "rotate_keys",
 ]
